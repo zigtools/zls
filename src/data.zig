@@ -7,7 +7,7 @@
 
 // var name = p.slice(0, p.indexOf("("));
 // var body = p.slice(p.indexOf("(") + 1, -1);
-// if (body.len === 0) return `${name}()`;
+// if (body.trim().length === 0) return `${name}()`;
 // var nb = "";
 // let depth = 0;
 // let vi = 2;
@@ -49,7 +49,7 @@ pub const builtins = [_][]const u8{
     "@bitOffsetOf(${1:comptime T: type}, ${2:comptime field_name: []const u8})",
     "@boolToInt(${1:value: bool})",
     "@bitSizeOf(${1:comptime T: type})",
-    "@breakpoint(${1:)",
+    "@breakpoint()",
     "@mulAdd(${1:comptime T: type}, ${2:a: T}, ${3:b: T}, ${4:c: T})",
     "@byteSwap(${1:comptime T: type}, ${2:operand: T})",
     "@bitReverse(${1:comptime T: type}, ${2:integer: T})",
@@ -71,7 +71,7 @@ pub const builtins = [_][]const u8{
     "@embedFile(${1:comptime path: []const u8})",
     "@enumToInt(${1:enum_or_tagged_union: var})",
     "@errorName(${1:err: anyerror})",
-    "@errorReturnTrace(${1:)",
+    "@errorReturnTrace()",
     "@errorToInt(${1:err: var) std.meta.IntType(false}, ${2:@sizeOf(anyerror})",
     "@errSetCast(${1:comptime T: DestType}, ${2:value: var})",
     "@export(${1:target: var}, ${2:comptime options: std.builtin.ExportOptions})",
@@ -80,10 +80,10 @@ pub const builtins = [_][]const u8{
     "@fieldParentPtr(${1:comptime ParentType: type}, ${2:comptime field_name: []const u8}, ${3:\n    field_ptr: *T})",
     "@floatCast(${1:comptime DestType: type}, ${2:value: var})",
     "@floatToInt(${1:comptime DestType: type}, ${2:float: var})",
-    "@frame(${1:)",
+    "@frame()",
     "@Frame(${1:func: var})",
-    "@frameAddress(${1:)",
-    "@frameSize(${1:)",
+    "@frameAddress()",
+    "@frameSize()",
     "@hasDecl(${1:comptime Container: type}, ${2:comptime name: []const u8})",
     "@hasField(${1:comptime Container: type}, ${2:comptime name: []const u8})",
     "@import(${1:comptime path: []u8})",
@@ -96,13 +96,13 @@ pub const builtins = [_][]const u8{
     "@memset(${1:dest: [*]u8}, ${2:c: u8}, ${3:byte_count: usize})",
     "@mod(${1:numerator: T}, ${2:denominator: T})",
     "@mulWithOverflow(${1:comptime T: type}, ${2:a: T}, ${3:b: T}, ${4:result: *T})",
-    "@OpaqueType(${1:)",
+    "@OpaqueType()",
     "@panic(${1:message: []const u8})",
     "@popCount(${1:comptime T: type}, ${2:integer: T})",
     "@ptrCast(${1:comptime DestType: type}, ${2:value: var})",
     "@ptrToInt(${1:value: var})",
     "@rem(${1:numerator: T}, ${2:denominator: T})",
-    "@returnAddress(${1:)",
+    "@returnAddress()",
     "@setAlignStack(${1:comptime alignment: u29})",
     "@setCold(${1:is_cold: bool})",
     "@setEvalBranchQuota(${1:new_quota: usize})",
@@ -130,7 +130,7 @@ pub const builtins = [_][]const u8{
     "@subWithOverflow(${1:comptime T: type}, ${2:a: T}, ${3:b: T}, ${4:result: *T})",
     "@tagName(${1:value: var})",
     "@TagType(${1:T: type})",
-    "@This(${1:)",
+    "@This()",
     "@truncate(${1:comptime T: type}, ${2:integer: var})",
     "@Type(${1:comptime info: @import(\"builtin\").TypeInfo})",
     "@typeInfo(${1:comptime T: type})",

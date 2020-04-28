@@ -264,13 +264,7 @@ pub fn processJsonRpc(json: []const u8) !void {
                     builtin_completions[i] = types.CompletionItem{
                         .label = builtin[0..cutoff],
                         .kind = types.CompletionItemKind.Function,
-                        // .textEdit = types.TextEdit{
-                        //     .range = types.Range{
-                        //         .start = pos,
-                        //         .end = pos,
-                        //     },
-                        //     .newText = builtin,
-                        // },
+                        
                         .filterText = builtin[1..cutoff],
                         .insertText = builtin[1..],
                         .insertTextFormat = types.InsertTextFormat.Snippet
