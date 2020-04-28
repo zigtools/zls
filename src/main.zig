@@ -260,16 +260,20 @@ pub fn processJsonRpc(json: []const u8) !void {
                 var builtin_completions: [data.builtins.len]types.CompletionItem = undefined;
 
                 for (data.builtins) |builtin, i| {
+                    var cutoff = std.mem.indexOf(u8, builtin, "(") orelse builtin.len;
                     builtin_completions[i] = types.CompletionItem{
-                        .label = builtin,
+                        .label = builtin[0..cutoff],
                         .kind = types.CompletionItemKind.Function,
-                        .textEdit = types.TextEdit{
-                            .range = types.Range{
-                                .start = pos,
-                                .end = pos,
-                            },
-                            .newText = builtin,
-                        },
+                        // .textEdit = types.TextEdit{
+                        //     .range = types.Range{
+                        //         .start = pos,
+                        //         .end = pos,
+                        //     },
+                        //     .newText = builtin,
+                        // },
+                        .filterText = builtin[1..cutoff],
+                        .insertText = builtin[1..],
+                        .insertTextFormat = types.InsertTextFormat.Snippet
                     };
                 }
 

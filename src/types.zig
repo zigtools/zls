@@ -220,10 +220,26 @@ pub const CompletionItemKind = enum(Integer) {
     }
 };
 
+pub const InsertTextFormat = enum(Integer) {
+    PlainText = 1,
+    Snippet = 2,
+
+    pub fn jsonStringify(
+        value: InsertTextFormat,
+        options: json.StringifyOptions,
+        out_stream: var,
+    ) !void {
+        try json.stringify(@enumToInt(value), options, out_stream);
+    }
+};
+
 pub const CompletionItem = struct {
     label: String,
     kind: CompletionItemKind,
     textEdit: ?TextEdit = null,
+    filterText: ?String = null,
+    insertText: ?String = null,
+    insertTextFormat: ?InsertTextFormat = InsertTextFormat.PlainText
     // filterText: String = .NotDefined,
 };
 
