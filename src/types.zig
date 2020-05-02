@@ -161,6 +161,28 @@ pub const TextEdit = struct {
     newText: String,
 };
 
+pub const MarkupKind = enum(u1) {
+    PlainText = 0, // plaintext
+    Markdown = 1,  // markdown
+
+    pub fn jsonStringify(
+        value: MarkupKind,
+        options: json.StringifyOptions,
+        out_stream: var,
+    ) !void {
+        if (@enumToInt(value) == 0) {
+            try json.stringify("plaintext", options, out_stream);
+        } else {
+            try json.stringify("markdown", options, out_stream);
+        }
+    }
+};
+
+pub const MarkupContent = struct {
+    kind: MarkupKind = MarkupKind.Markdown,
+    value: String
+};
+
 // pub const TextDocumentIdentifier = struct {
 //     uri: DocumentUri,
 // };
@@ -239,7 +261,10 @@ pub const CompletionItem = struct {
     textEdit: ?TextEdit = null,
     filterText: ?String = null,
     insertText: ?String = null,
-    insertTextFormat: ?InsertTextFormat = InsertTextFormat.PlainText
+    insertTextFormat: ?InsertTextFormat = InsertTextFormat.PlainText,
+
+    detail: ?String = null,
+    documentation: ?MarkupContent = null
     // filterText: String = .NotDefined,
 };
 

@@ -1,7 +1,7 @@
+const std = @import("std");
 const builtin = @import("builtin");
-const Builder = @import("std").build.Builder;
 
-pub fn build(b: *Builder) void {
+pub fn build(b: *std.build.Builder) void {
     // Standard target options allows the person running `zig build` to choose
     // what target to build for. Here we do not override the defaults, which
     // means any target is allowed, and the default is native. Other options
@@ -13,6 +13,8 @@ pub fn build(b: *Builder) void {
     const mode = b.standardReleaseOptions();
 
     const exe = b.addExecutable("zls", "src/main.zig");
+
+    exe.addPackagePath("data", "src/data/0.6.0.zig");
 
     exe.setTarget(target);
     exe.setBuildMode(mode);

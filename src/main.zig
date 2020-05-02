@@ -1,6 +1,6 @@
 const std = @import("std");
 const Uri = @import("uri.zig");
-const data = @import("data.zig");
+const data = @import("data");
 const types = @import("types.zig");
 const analysis = @import("analysis.zig");
 
@@ -267,7 +267,12 @@ pub fn processJsonRpc(json: []const u8) !void {
                         
                         .filterText = builtin[1..cutoff],
                         .insertText = builtin[1..],
-                        .insertTextFormat = types.InsertTextFormat.Snippet
+                        .insertTextFormat = types.InsertTextFormat.Snippet,
+                        .detail = data.builtin_details[i],
+                        .documentation = types.MarkupContent{
+                            .kind = types.MarkupKind.Markdown,
+                            .value = data.builtin_docs[i]
+                        }
                     };
                 }
 
@@ -289,18 +294,18 @@ pub fn processJsonRpc(json: []const u8) !void {
             try respondGeneric(id, no_completions_response);
         }
     } else if (std.mem.eql(u8, method, "textDocument/signatureHelp")) {
-        // try respondGeneric(id, 
-        // \\,"result":{"signatures":[{
-        // \\"label": "nameOfFunction(aNumber: u8)",
-        // \\"documentation": {"kind": "markdown", "value": "Description of the function in **Markdown**!"},
-        // \\"parameters": [
-        // \\{"label": [15, 27], "documentation": {"kind": "markdown", "value": "An argument"}}
-        // \\]
-        // \\}]}}
-        // );
         try respondGeneric(id, 
-        \\,"result":{"signatures":[]}}
+        \\,"result":{"signatures":[{
+        \\"label": "nameOfFunction(aNumber: u8)",
+        \\"documentation": {"kind": "markdown", "value": "Description of the function in **Markdown**!"},
+        \\"parameters": [
+        \\{"label": [15, 27], "documentation": {"kind": "markdown", "value": "An argument"}}
+        \\]
+        \\}]}}
         );
+        // try respondGeneric(id, 
+        // \\,"result":{"signatures":[]}}
+        // );
     } else if (root.Object.getValue("id")) |_| {
         try log("Method with return value not implemented: {}", .{method});
         try respondGeneric(id, not_implemented_response);
