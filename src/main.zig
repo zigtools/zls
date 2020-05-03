@@ -126,7 +126,7 @@ pub fn publishDiagnostics(document: types.TextDocument) !void {
 
 pub fn completeGlobal(id: i64, document: types.TextDocument) !void {
     const tree = try std.zig.parse(allocator, document.text);
-    defer tree.deinit();
+    // defer tree.deinit();
 
     if (tree.errors.len > 0) return try respondGeneric(id, no_completions_response);
 
@@ -140,10 +140,20 @@ pub fn completeGlobal(id: i64, document: types.TextDocument) !void {
         switch (decl.id) {
             .FnProto => {
                 const func = decl.cast(std.zig.ast.Node.FnProto).?;
+                var doc_comments = try analysis.getFunctionDocComments(allocator, tree, func);
+                defer if (doc_comments) |dc| allocator.free(dc);
+                // var abc = "abc";
+                // try log("{}", .{abc});
                 // if (std.mem.eql(u8, tree.tokenSlice(func.name_token.?), name)) return func;
+                var doc = types.MarkupContent{
+                    .kind = types.MarkupKind.Markdown,
+                    .value = doc_comments orelse ""
+                };
                 try completions.append(types.CompletionItem{
                     .label = tree.tokenSlice(func.name_token.?),
                     .kind = types.CompletionItemKind.Function,
+                    .documentation = doc,
+                    .detail = analysis.getFunctionDefinition(tree, func)
                 });
             },
             .VarDecl => {

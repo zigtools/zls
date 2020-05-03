@@ -2,10 +2,8 @@ const std = @import("std");
 
 /// REALLY BAD CODE, PLEASE DON'T USE THIS!!!!!!! (only for testing)
 pub fn getFunctionByName(tree: *std.zig.ast.Tree, name: []const u8) ?*std.zig.ast.Node.FnProto {
-    
     var decls = tree.root_node.decls.iterator(0);
     while (decls.next()) |decl_ptr| {
-
         var decl = decl_ptr.*;
         switch (decl.id) {
             .FnProto => {
@@ -14,11 +12,9 @@ pub fn getFunctionByName(tree: *std.zig.ast.Tree, name: []const u8) ?*std.zig.as
             },
             else => {}
         }
-
     }
 
     return null;
-
 }
 
 /// Gets a function's doc comments, caller must free memory when a value is returned
@@ -28,7 +24,6 @@ pub fn getFunctionByName(tree: *std.zig.ast.Tree, name: []const u8) ?*std.zig.as
 ///defer if (comments) |comments_pointer| allocator.free(comments_pointer);
 ///```
 pub fn getFunctionDocComments(allocator: *std.mem.Allocator, tree: *std.zig.ast.Tree, func: *std.zig.ast.Node.FnProto) !?[]const u8 {
-
     if (func.doc_comments) |doc_comments| {
         var doc_it = doc_comments.lines.iterator(0);
         var lines = std.ArrayList([]const u8).init(allocator);
@@ -41,5 +36,15 @@ pub fn getFunctionDocComments(allocator: *std.mem.Allocator, tree: *std.zig.ast.
     } else {
         return null;
     }
+}
 
+/// Gets a function definition (keywords, name, return value)
+pub fn getFunctionDefinition(tree: *std.zig.ast.Tree, func: *std.zig.ast.Node.FnProto) []const u8 {
+    var start = tree.tokens.at(func.firstToken()).start;
+    var end = 
+        if (func.body_node) |body| tree.tokens.at(body.firstToken()).start
+        else tree.tokens.at(switch (func.return_type) {
+            .Explicit, .InferErrorSet => |node| node.lastToken()
+        }).end;
+    return tree.source[start..end];
 }
