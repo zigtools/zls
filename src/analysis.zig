@@ -38,8 +38,8 @@ pub fn getFunctionDocComments(allocator: *std.mem.Allocator, tree: *std.zig.ast.
     }
 }
 
-/// Gets a function definition (keywords, name, return value)
-pub fn getFunctionDefinition(tree: *std.zig.ast.Tree, func: *std.zig.ast.Node.FnProto) []const u8 {
+/// Gets a function signature (keywords, name, return value)
+pub fn getFunctionSignature(tree: *std.zig.ast.Tree, func: *std.zig.ast.Node.FnProto) []const u8 {
     var start = tree.tokens.at(func.firstToken()).start;
     var end = 
         if (func.body_node) |body| tree.tokens.at(body.firstToken()).start

@@ -141,7 +141,7 @@ pub fn completeGlobal(id: i64, document: types.TextDocument) !void {
             .FnProto => {
                 const func = decl.cast(std.zig.ast.Node.FnProto).?;
                 var doc_comments = try analysis.getFunctionDocComments(allocator, tree, func);
-                defer if (doc_comments) |dc| allocator.free(dc);
+                // defer if (doc_comments) |dc| allocator.free(dc);
                 // var abc = "abc";
                 // try log("{}", .{abc});
                 // if (std.mem.eql(u8, tree.tokenSlice(func.name_token.?), name)) return func;
@@ -153,7 +153,7 @@ pub fn completeGlobal(id: i64, document: types.TextDocument) !void {
                     .label = tree.tokenSlice(func.name_token.?),
                     .kind = types.CompletionItemKind.Function,
                     .documentation = doc,
-                    .detail = analysis.getFunctionDefinition(tree, func)
+                    .detail = analysis.getFunctionSignature(tree, func)
                 });
             },
             .VarDecl => {
