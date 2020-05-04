@@ -23,28 +23,65 @@ pub fn getFunctionByName(tree: *std.zig.ast.Tree, name: []const u8) ?*std.zig.as
 ///var comments = getFunctionDocComments(allocator, tree, func);
 ///defer if (comments) |comments_pointer| allocator.free(comments_pointer);
 ///```
-pub fn getFunctionDocComments(allocator: *std.mem.Allocator, tree: *std.zig.ast.Tree, func: *std.zig.ast.Node.FnProto) !?[]const u8 {
-    if (func.doc_comments) |doc_comments| {
-        var doc_it = doc_comments.lines.iterator(0);
-        var lines = std.ArrayList([]const u8).init(allocator);
+pub fn getDocComments(allocator: *std.mem.Allocator, tree: *std.zig.ast.Tree, node: *std.zig.ast.Node) !?[]const u8 {
+    switch (node.id) {
+        .FnProto => {
+            const func = node.cast(std.zig.ast.Node.FnProto).?;
+            if (func.doc_comments) |doc_comments| {
+                var doc_it = doc_comments.lines.iterator(0);
+                var lines = std.ArrayList([]const u8).init(allocator);
 
-        while (doc_it.next()) |doc_comment| {
-            _ = try lines.append(std.fmt.trim(tree.tokenSlice(doc_comment.*)[3..]));
-        }
+                while (doc_it.next()) |doc_comment| {
+                    _ = try lines.append(std.fmt.trim(tree.tokenSlice(doc_comment.*)[3..]));
+                }
 
-        return try std.mem.join(allocator, "\n", lines.toOwnedSlice());
-    } else {
-        return null;
+                return try std.mem.join(allocator, "\n", lines.toOwnedSlice());
+            } else {
+                return null;
+            }
+        },
+        .VarDecl => {
+            const var_decl = node.cast(std.zig.ast.Node.VarDecl).?;
+            if (var_decl.doc_comments) |doc_comments| {
+                var doc_it = doc_comments.lines.iterator(0);
+                var lines = std.ArrayList([]const u8).init(allocator);
+
+                while (doc_it.next()) |doc_comment| {
+                    _ = try lines.append(std.fmt.trim(tree.tokenSlice(doc_comment.*)[3..]));
+                }
+
+                return try std.mem.join(allocator, "\n", lines.toOwnedSlice());
+            } else {
+                return null;
+            }
+        },
+        else => return null
     }
 }
 
 /// Gets a function signature (keywords, name, return value)
 pub fn getFunctionSignature(tree: *std.zig.ast.Tree, func: *std.zig.ast.Node.FnProto) []const u8 {
-    var start = tree.tokens.at(func.firstToken()).start;
-    var end = 
+    const start = tree.tokens.at(func.firstToken()).start;
+    const end = 
         if (func.body_node) |body| tree.tokens.at(body.firstToken()).start
         else tree.tokens.at(switch (func.return_type) {
             .Explicit, .InferErrorSet => |node| node.lastToken()
         }).end;
     return tree.source[start..end];
+}
+
+/// Gets a function signature (keywords, name, return value)
+pub fn getVariableSignature(tree: *std.zig.ast.Tree, var_decl: *std.zig.ast.Node.VarDecl) []const u8 {
+    const start = tree.tokens.at(var_decl.firstToken()).start;
+    const end = tree.tokens.at(var_decl.semicolon_token).start;
+    // var end = 
+        // if (var_decl.init_n) |body| tree.tokens.at(body.firstToken()).start
+        // else tree.tokens.at(var_decl.name_token).end;
+    return tree.source[start..end];
+}
+
+// STYLE
+
+pub fn isCamelCase(name: []const u8) bool {
+    return !std.ascii.isUpper(name[0]) and std.mem.indexOf(u8, name, "_") == null;
 }

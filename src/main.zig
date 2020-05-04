@@ -111,6 +111,38 @@ pub fn publishDiagnostics(document: types.TextDocument) !void {
                 // .relatedInformation = undefined
             });
         }
+    } else {
+        var decls = tree.root_node.decls.iterator(0);
+        while (decls.next()) |decl_ptr| {
+            var decl = decl_ptr.*;
+            switch (decl.id) {
+                .FnProto => {
+                    const func = decl.cast(std.zig.ast.Node.FnProto).?;
+                    if (func.name_token) |name_token| {
+                        const loc = tree.tokenLocation(0, name_token);
+                        if (func.extern_export_inline_token == null and !analysis.isCamelCase(tree.tokenSlice(name_token))) {
+                            try diagnostics.append(types.Diagnostic{
+                                .range = types.Range{
+                                    .start = types.Position{
+                                        .line = @intCast(i64, loc.line),
+                                        .character = @intCast(i64, loc.column)
+                                    },
+                                    .end = types.Position{
+                                        .line = @intCast(i64, loc.line),
+                                        .character = @intCast(i64, loc.column)
+                                    }
+                                },
+                                .severity = types.DiagnosticSeverity.Information,
+                                .code = "BadStyle",
+                                .source = "zls",
+                                .message = "Callables should be camelCase"
+                            });
+                        }
+                    }
+                },
+                else => {}
+            }
+        }
     }
 
     try send(types.Notification{
@@ -140,11 +172,7 @@ pub fn completeGlobal(id: i64, document: types.TextDocument) !void {
         switch (decl.id) {
             .FnProto => {
                 const func = decl.cast(std.zig.ast.Node.FnProto).?;
-                var doc_comments = try analysis.getFunctionDocComments(allocator, tree, func);
-                // defer if (doc_comments) |dc| allocator.free(dc);
-                // var abc = "abc";
-                // try log("{}", .{abc});
-                // if (std.mem.eql(u8, tree.tokenSlice(func.name_token.?), name)) return func;
+                var doc_comments = try analysis.getDocComments(allocator, tree, decl);
                 var doc = types.MarkupContent{
                     .kind = types.MarkupKind.Markdown,
                     .value = doc_comments orelse ""
@@ -157,11 +185,17 @@ pub fn completeGlobal(id: i64, document: types.TextDocument) !void {
                 });
             },
             .VarDecl => {
-                const vari = decl.cast(std.zig.ast.Node.VarDecl).?;
-                // if (std.mem.eql(u8, tree.tokenSlice(func.name_token.?), name)) return func;
+                const var_decl = decl.cast(std.zig.ast.Node.VarDecl).?;
+                var doc_comments = try analysis.getDocComments(allocator, tree, decl);
+                var doc = types.MarkupContent{
+                    .kind = types.MarkupKind.Markdown,
+                    .value = doc_comments orelse ""
+                };
                 try completions.append(types.CompletionItem{
-                    .label = tree.tokenSlice(vari.name_token),
+                    .label = tree.tokenSlice(var_decl.name_token),
                     .kind = types.CompletionItemKind.Variable,
+                    .documentation = doc,
+                    .detail = analysis.getVariableSignature(tree, var_decl)
                 });
             },
             else => {}
