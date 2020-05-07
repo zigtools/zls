@@ -1,7 +1,8 @@
 const std = @import("std");
 const builtin = @import("builtin");
+// const build_options = @import("build_options");
 
-pub fn build(b: *std.build.Builder) void {
+pub fn build(b: *std.build.Builder) !void {
     // Standard target options allows the person running `zig build` to choose
     // what target to build for. Here we do not override the defaults, which
     // means any target is allowed, and the default is native. Other options
@@ -14,7 +15,13 @@ pub fn build(b: *std.build.Builder) void {
 
     const exe = b.addExecutable("zls", "src/main.zig");
 
-    exe.addPackagePath("data", "src/data/0.6.0.zig");
+    const data_version = try std.mem.concat(b.allocator, u8, &[3][]const u8{"\"", b.option([]const u8, "data_version", "The data version - either 0.6.0 or master.") orelse "0.6.0", "\""});
+    defer b.allocator.free(data_version);
+    exe.addBuildOption(
+        []const u8,
+        "data_version",
+        data_version,
+    );
 
     exe.addBuildOption(
         bool,
