@@ -45,12 +45,12 @@ pub fn log(comptime fmt: []const u8, args: var) !void {
 
     try send(types.Notification{
         .method = "window/logMessage",
-        .params = types.NotificationParams{
-            .LogMessageParams = types.LogMessageParams{
-                .@"type" = types.MessageType.Log,
-                .message = message
+        .params = .{
+            .LogMessageParams = .{
+                .@"type" = .Log,
+                .message = message,
             }
-        }
+        },
     });
 }
 
@@ -71,9 +71,9 @@ pub fn respondGeneric(id: i64, response: []const u8) !void {
 
 pub fn openDocument(uri: []const u8, text: []const u8) !void {
     const du = try std.mem.dupe(allocator, u8, uri);
-    _ = try documents.put(du, types.TextDocument{
+    _ = try documents.put(du, .{
         .uri = du,
-        .text = try std.mem.dupe(allocator, u8, text)
+        .text = try std.mem.dupe(allocator, u8, text),
     });
 }
 
@@ -97,18 +97,18 @@ pub fn publishDiagnostics(document: types.TextDocument) !void {
             var fbs = std.io.fixedBufferStream(&mem_buffer);
             _ = try tree.renderError(err, fbs.outStream());
 
-            try diagnostics.append(types.Diagnostic{
-                .range = types.Range{
-                    .start = types.Position{
+            try diagnostics.append(.{
+                .range = .{
+                    .start = .{
                         .line = @intCast(i64, loc.line),
-                        .character = @intCast(i64, loc.column)
+                        .character = @intCast(i64, loc.column),
                     },
-                    .end = types.Position{
+                    .end = .{
                         .line = @intCast(i64, loc.line),
-                        .character = @intCast(i64, loc.column)
-                    }
+                        .character = @intCast(i64, loc.column),
+                    },
                 },
-                .severity = types.DiagnosticSeverity.Error,
+                .severity = .Error,
                 .code = @tagName(err.*),
                 .source = "zls",
                 // We dupe the string from the stack to our arena
@@ -126,18 +126,18 @@ pub fn publishDiagnostics(document: types.TextDocument) !void {
                     if (func.name_token) |name_token| {
                         const loc = tree.tokenLocation(0, name_token);
                         if (func.extern_export_inline_token == null and !analysis.isCamelCase(tree.tokenSlice(name_token))) {
-                            try diagnostics.append(types.Diagnostic{
-                                .range = types.Range{
-                                    .start = types.Position{
+                            try diagnostics.append(.{
+                                .range = .{
+                                    .start = .{
                                         .line = @intCast(i64, loc.line),
-                                        .character = @intCast(i64, loc.column)
+                                        .character = @intCast(i64, loc.column),
                                     },
-                                    .end = types.Position{
+                                    .end = .{
                                         .line = @intCast(i64, loc.line),
-                                        .character = @intCast(i64, loc.column)
-                                    }
+                                        .character = @intCast(i64, loc.column),
+                                    },
                                 },
-                                .severity = types.DiagnosticSeverity.Information,
+                                .severity = .Information,
                                 .code = "BadStyle",
                                 .source = "zls",
                                 .message = "Callables should be camelCase"
@@ -152,12 +152,12 @@ pub fn publishDiagnostics(document: types.TextDocument) !void {
 
     try send(types.Notification{
         .method = "textDocument/publishDiagnostics",
-        .params = types.NotificationParams{
-            .PublishDiagnosticsParams = types.PublishDiagnosticsParams{
+        .params = .{
+            .PublishDiagnosticsParams = .{
                 .uri = document.uri,
                 .diagnostics = diagnostics.items,
-            }
-        }
+            },
+        },
     });
 }
 
@@ -184,28 +184,28 @@ pub fn completeGlobal(id: i64, document: types.TextDocument) !void {
                 const func = decl.cast(std.zig.ast.Node.FnProto).?;
                 var doc_comments = try analysis.getDocComments(&arena.allocator, tree, decl);
                 var doc = types.MarkupContent{
-                    .kind = types.MarkupKind.Markdown,
-                    .value = doc_comments orelse ""
+                    .kind = .Markdown,
+                    .value = doc_comments orelse "",
                 };
-                try completions.append(types.CompletionItem{
+                try completions.append(.{
                     .label = tree.tokenSlice(func.name_token.?),
-                    .kind = types.CompletionItemKind.Function,
+                    .kind = .Function,
                     .documentation = doc,
-                    .detail = analysis.getFunctionSignature(tree, func)
+                    .detail = analysis.getFunctionSignature(tree, func),
                 });
             },
             .VarDecl => {
                 const var_decl = decl.cast(std.zig.ast.Node.VarDecl).?;
                 var doc_comments = try analysis.getDocComments(&arena.allocator, tree, decl);
                 var doc = types.MarkupContent{
-                    .kind = types.MarkupKind.Markdown,
-                    .value = doc_comments orelse ""
+                    .kind = .Markdown,
+                    .value = doc_comments orelse "",
                 };
-                try completions.append(types.CompletionItem{
+                try completions.append(.{
                     .label = tree.tokenSlice(var_decl.name_token),
-                    .kind = types.CompletionItemKind.Variable,
+                    .kind = .Variable,
                     .documentation = doc,
-                    .detail = analysis.getVariableSignature(tree, var_decl)
+                    .detail = analysis.getVariableSignature(tree, var_decl),
                 });
             },
             else => {}
@@ -215,12 +215,12 @@ pub fn completeGlobal(id: i64, document: types.TextDocument) !void {
 
     try send(types.Response{
         .id = .{.Integer = id},
-        .result = types.ResponseParams{
-            .CompletionList = types.CompletionList{
+        .result = .{
+            .CompletionList = .{
                 .isIncomplete = false,
                 .items = completions.items,
-            }
-        }
+            },
+        },
     });
 }
 
@@ -232,18 +232,18 @@ const builtin_completions = block: {
 
     for (data.builtins) |builtin, i| {
         var cutoff = std.mem.indexOf(u8, builtin, "(") orelse builtin.len;
-        temp[i] = types.CompletionItem{
+        temp[i] = .{
             .label = builtin[0..cutoff],
-            .kind = types.CompletionItemKind.Function,
+            .kind = .Function,
 
             .filterText = builtin[1..cutoff],
             .insertText = builtin[1..],
-            .insertTextFormat = types.InsertTextFormat.Snippet,
+            .insertTextFormat = .Snippet,
             .detail = data.builtin_details[i],
-            .documentation = types.MarkupContent{
-                .kind = types.MarkupKind.Markdown,
-                .value = data.builtin_docs[i]
-            }
+            .documentation = .{
+                .kind = .Markdown,
+                .value = data.builtin_docs[i],
+            },
         };
     }
 
@@ -343,12 +343,12 @@ pub fn processJsonRpc(json: []const u8) !void {
             if (char == '@') {
                 try send(types.Response{
                     .id = .{.Integer = id},
-                    .result = types.ResponseParams{
-                        .CompletionList = types.CompletionList{
+                    .result = .{
+                        .CompletionList = .{
                             .isIncomplete = false,
-                            .items = builtin_completions[0..]
-                        }
-                    }
+                            .items = builtin_completions[0..],
+                        },
+                    },
                 });
             } else if (char != '.') {
                 try completeGlobal(id, document);
