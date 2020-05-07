@@ -223,11 +223,39 @@ pub fn completeGlobal(id: i64, document: types.TextDocument) !void {
     });
 }
 
+
+// Compute builtin completions at comptime.
+const builtin_completions = block: {
+    @setEvalBranchQuota(3_500);
+    var temp: [data.builtins.len]types.CompletionItem = undefined;
+
+    for (data.builtins) |builtin, i| {
+        var cutoff = std.mem.indexOf(u8, builtin, "(") orelse builtin.len;
+        temp[i] = types.CompletionItem{
+            .label = builtin[0..cutoff],
+            .kind = types.CompletionItemKind.Function,
+
+            .filterText = builtin[1..cutoff],
+            .insertText = builtin[1..],
+            .insertTextFormat = types.InsertTextFormat.Snippet,
+            .detail = data.builtin_details[i],
+            .documentation = types.MarkupContent{
+                .kind = types.MarkupKind.Markdown,
+                .value = data.builtin_docs[i]
+            }
+        };
+    }
+
+    break :block temp;
+};
+
 // pub fn signature
 
 pub fn processJsonRpc(json: []const u8) !void {
 
     var parser = std.json.Parser.init(allocator, false);
+    defer parser.deinit();
+
     var tree = try parser.parse(json);
     defer tree.deinit();
 
@@ -310,25 +338,6 @@ pub fn processJsonRpc(json: []const u8) !void {
             const char = document.text[pos_index];
             
             if (char == '@') {
-                var builtin_completions: [data.builtins.len]types.CompletionItem = undefined;
-
-                for (data.builtins) |builtin, i| {
-                    var cutoff = std.mem.indexOf(u8, builtin, "(") orelse builtin.len;
-                    builtin_completions[i] = types.CompletionItem{
-                        .label = builtin[0..cutoff],
-                        .kind = types.CompletionItemKind.Function,
-                        
-                        .filterText = builtin[1..cutoff],
-                        .insertText = builtin[1..],
-                        .insertTextFormat = types.InsertTextFormat.Snippet,
-                        .detail = data.builtin_details[i],
-                        .documentation = types.MarkupContent{
-                            .kind = types.MarkupKind.Markdown,
-                            .value = data.builtin_docs[i]
-                        }
-                    };
-                }
-
                 try send(types.Response{
                     .id = .{.Integer = id},
                     .result = types.ResponseParams{
