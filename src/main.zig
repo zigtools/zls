@@ -85,6 +85,9 @@ pub fn openDocument(uri: []const u8, text: []const u8) !void {
         try log("Opened already open file: {}", .{uri});
         allocator.free(existing_entry.key);
         allocator.free(existing_entry.value.mem);
+        if (existing_entry.value.sane_text) |str| {
+            allocator.free(str);
+        }
     }
 }
 
