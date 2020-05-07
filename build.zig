@@ -25,6 +25,12 @@ pub fn build(b: *std.build.Builder) !void {
 
     exe.addBuildOption(
         bool,
+        "no_snippets",
+        b.option(bool, "no_snippets", "Use regular completion without snippets. Useful for compatibility.") orelse false,
+    );
+
+    exe.addBuildOption(
+        bool,
         "leak_detection",
         b.option(bool, "leak_detection", "Use testing.LeakCountAllocator to track leaks.") orelse false,
     );

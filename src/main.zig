@@ -261,19 +261,34 @@ const builtin_completions = block: {
 
     for (data.builtins) |builtin, i| {
         var cutoff = std.mem.indexOf(u8, builtin, "(") orelse builtin.len;
-        temp[i] = .{
-            .label = builtin[0..cutoff],
-            .kind = .Function,
+        if (build_options.no_snippets) {
+            temp[i] = .{
+                .label = builtin[0..cutoff],
+                .kind = .Function,
 
-            .filterText = builtin[1..cutoff],
-            .insertText = builtin[1..],
-            .insertTextFormat = .Snippet,
-            .detail = data.builtin_details[i],
-            .documentation = .{
-                .kind = .Markdown,
-                .value = data.builtin_docs[i],
-            },
-        };
+                .filterText = builtin[1..cutoff],
+                .insertText = builtin[1..cutoff],
+                .detail = data.builtin_details[i],
+                .documentation = .{
+                    .kind = .Markdown,
+                    .value = data.builtin_docs[i],
+                },
+            };
+        } else {
+            temp[i] = .{
+                .label = builtin[0..cutoff],
+                .kind = .Function,
+
+                .filterText = builtin[1..cutoff],
+                .insertText = builtin[1..],
+                .insertTextFormat = .Snippet,
+                .detail = data.builtin_details[i],
+                .documentation = .{
+                    .kind = .Markdown,
+                    .value = data.builtin_docs[i],
+                },
+            };
+        }
     }
 
     break :block temp;
