@@ -82,6 +82,7 @@ pub fn publishDiagnostics(document: types.TextDocument) !void {
     defer tree.deinit();
 
     var diagnostics = std.ArrayList(types.Diagnostic).init(allocator);
+    defer diagnostics.deinit();
 
     if (tree.errors.len > 0) {
         var index: usize = 0;
@@ -107,6 +108,9 @@ pub fn publishDiagnostics(document: types.TextDocument) !void {
                 .severity = types.DiagnosticSeverity.Error,
                 .code = @tagName(err.*),
                 .source = "zls",
+                // TODO: This is wrong, reference to mem_buffer escapes
+                // We should probably dupe this (as well as the messages from the other branch)
+                // And free them in the defer along with the whole array list memory.
                 .message = fbs.getWritten(),
                 // .relatedInformation = undefined
             });
@@ -150,7 +154,7 @@ pub fn publishDiagnostics(document: types.TextDocument) !void {
         .params = types.NotificationParams{
             .PublishDiagnosticsParams = types.PublishDiagnosticsParams{
                 .uri = document.uri,
-                .diagnostics = diagnostics.toOwnedSlice()
+                .diagnostics = diagnostics.items,
             }
         }
     });
@@ -158,11 +162,27 @@ pub fn publishDiagnostics(document: types.TextDocument) !void {
 
 pub fn completeGlobal(id: i64, document: types.TextDocument) !void {
     const tree = try std.zig.parse(allocator, document.text);
-    // defer tree.deinit();
+    defer tree.deinit();
 
     if (tree.errors.len > 0) return try respondGeneric(id, no_completions_response);
 
     var completions = std.ArrayList(types.CompletionItem).init(allocator);
+
+    defer {
+        // Free the completion data.
+        // @TODO: Check what the tree functions (e.g. tokenSlice) return.
+        //        We may need to dupe them to free the tree
+        // TODO: Maybe split off into a function or add a method to MarkupContent/CompletionItem?
+        for (completions.items) |comp| {
+            if (comp.documentation) |doc| {
+                if (doc.value.len > 0) {
+                    allocator.free(doc.value);
+                }
+            }
+        }
+
+        completions.deinit();
+    }
 
     // try log("{}", .{&tree.root_node.decls});
     var decls = tree.root_node.decls.iterator(0);
@@ -208,7 +228,7 @@ pub fn completeGlobal(id: i64, document: types.TextDocument) !void {
         .result = types.ResponseParams{
             .CompletionList = types.CompletionList{
                 .isIncomplete = false,
-                .items = completions.toOwnedSlice()
+                .items = completions.items,
             }
         }
     });
