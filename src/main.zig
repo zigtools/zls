@@ -164,7 +164,8 @@ pub fn completeGlobal(id: i64, document: types.TextDocument) !void {
 
     var completions = std.ArrayList(types.CompletionItem).init(allocator);
 
-    // try log("{}", .{&tree.root_node.decls});
+    // @TODO
+    try log("{}", .{&tree.root_node.decls});
     var decls = tree.root_node.decls.iterator(0);
     while (decls.next()) |decl_ptr| {
 
@@ -356,8 +357,13 @@ pub fn processJsonRpc(json: []const u8) !void {
     } else {
         try log("Method without return value not implemented: {}", .{method});
     }
-
 }
+
+const use_leak_count_alloc = @import("build_options").leak_detection;
+
+var leak_alloc_global: std.testing.LeakCountAllocator = undefined;
+// We can now use if(leak_count_alloc) |alloc| {     ... } as a comptime check.
+const leak_count_alloc: ?*std.testing.LeakCountAllocator = if (use_leak_count_alloc) &leak_alloc_global else null;
 
 pub fn main() anyerror!void {
 
@@ -366,6 +372,12 @@ pub fn main() anyerror!void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     allocator = &arena.allocator;
+
+    if (use_leak_count_alloc) {
+        // Initialize the leak counting allocator.
+        leak_alloc_global = std.testing.LeakCountAllocator.init(allocator);
+        allocator = &leak_alloc_global.allocator;
+    }
 
     // Init buffer for stdin read
 
@@ -391,7 +403,7 @@ pub fn main() anyerror!void {
 
         // var bytes = stdin.read(buffer.items[0..6]) catch return;
 
-        if (offset >= 16 and std.mem.eql(u8, "Content-Length: ", buffer.items[0..16])) {
+        if (offset >= 16 and std.mem.startsWith(u8, buffer.items, "Content-Length: ")) {
 
             index = 16;
             while (index <= offset + 10) : (index += 1) {
@@ -430,7 +442,7 @@ pub fn main() anyerror!void {
             }
 
         } else if (offset >= 16) {
-            try log("Offset is greater than 16!", .{});
+            try log("OffseOt is greater than 16!", .{});
             return;
         }
 
@@ -460,5 +472,8 @@ pub fn main() anyerror!void {
 
         offset += bytes_read;
 
+        if (leak_count_alloc) |leaks| {
+            try log("Allocations alive after message: {}", .{leaks.count});
+        }
     }
 }
