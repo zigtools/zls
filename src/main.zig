@@ -387,11 +387,10 @@ const leak_count_alloc: ?*std.testing.LeakCountAllocator = if (use_leak_count_al
 
 pub fn main() anyerror!void {
 
-    // Init memory
-
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-    allocator = &arena.allocator;
+    // TODO: Use a better purpose general allocator once std has one.
+    // Probably after the generic composable allocators PR?
+    // This is not too bad for now since most allocations happen in local areans.
+    allocator = std.heap.page_allocator;
 
     if (use_leak_count_alloc) {
         // Initialize the leak counting allocator.
