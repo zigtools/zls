@@ -1,4 +1,4 @@
-/// THIS FILE CONTAINS DATA FROM THE 0.6.0 DOCUMENTATION
+/// data from 0.6.0 documentation
 
 /// Builtin functions
 pub const builtins = [_][]const u8{

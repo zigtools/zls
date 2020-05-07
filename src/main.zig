@@ -1,6 +1,8 @@
 const std = @import("std");
+const build_options = @import("build_options");
+
 const Uri = @import("uri.zig");
-const data = @import("data");
+const data = @import("data/" ++ build_options.data_version ++ ".zig");
 const types = @import("types.zig");
 const analysis = @import("analysis.zig");
 
@@ -86,7 +88,14 @@ pub fn openDocument(uri: []const u8, text: []const u8) !void {
     }
 }
 
-pub fn publishDiagnostics(document: types.TextDocument) !void {
+pub fn cacheSane(document: *types.TextDocument) !void {
+    if (document.sane_text) |old_sane| {
+        allocator.free(old_sane);
+    }
+    document.sane_text = try std.mem.dupe(allocator, u8, document.text);
+}
+
+pub fn publishDiagnostics(document: *types.TextDocument) !void {
     const tree = try std.zig.parse(allocator, document.text);
     defer tree.deinit();
 
@@ -126,6 +135,7 @@ pub fn publishDiagnostics(document: types.TextDocument) !void {
             });
         }
     } else {
+        try cacheSane(document);
         var decls = tree.root_node.decls.iterator(0);
         while (decls.next()) |decl_ptr| {
             var decl = decl_ptr.*;
@@ -170,12 +180,19 @@ pub fn publishDiagnostics(document: types.TextDocument) !void {
     });
 }
 
-pub fn completeGlobal(id: i64, document: types.TextDocument) !void {
+pub fn completeGlobal(id: i64, document: *types.TextDocument) !void {
     // The tree uses its own arena, so we just pass our main allocator.
-    const tree = try std.zig.parse(allocator, document.text);
-    defer tree.deinit();
+    var tree = try std.zig.parse(allocator, document.text);
 
-    if (tree.errors.len > 0) return try respondGeneric(id, no_completions_response);
+    if (tree.errors.len > 0) {
+        if (document.sane_text) |sane_text| {
+            tree.deinit();
+            tree = try std.zig.parse(allocator, sane_text);
+        } else return try respondGeneric(id, no_completions_response);
+    }
+    else {try cacheSane(document);}
+
+    defer tree.deinit();
 
     // We use a local arena allocator to deallocate all temporary data without iterating
     var arena = std.heap.ArenaAllocator.init(allocator);
@@ -293,14 +310,13 @@ pub fn processJsonRpc(json: []const u8) !void {
         const text = document.getValue("text").?.String;
 
         try openDocument(uri, text);
-        try publishDiagnostics(documents.getValue(uri).?);
+        try publishDiagnostics(&(documents.get(uri).?.value));
     } else if (std.mem.eql(u8, method, "textDocument/didChange")) {
         const text_document = params.getValue("textDocument").?.Object;
         const uri = text_document.getValue("uri").?.String;
 
         var document = &(documents.get(uri).?.value);
         const content_changes = params.getValue("contentChanges").?.Array;
-        // const text = content_changes.items[0].Object.getValue("text").?.String
 
         for (content_changes.items) |change| {
             if (change.Object.getValue("range")) |range| {
@@ -352,7 +368,7 @@ pub fn processJsonRpc(json: []const u8) !void {
             }
         }
 
-        try publishDiagnostics(document.*);
+        try publishDiagnostics(document);
     } else if (std.mem.eql(u8, method, "textDocument/didSave")) {
         // noop
     } else if (std.mem.eql(u8, method, "textDocument/didClose")) {
@@ -367,7 +383,7 @@ pub fn processJsonRpc(json: []const u8) !void {
         const uri = text_document.getValue("uri").?.String;
         const position = params.getValue("position").?.Object;
 
-        const document = documents.getValue(uri).?;
+        var document = &(documents.get(uri).?.value);
         const pos = types.Position{
             .line = position.getValue("line").?.Integer,
             .character = position.getValue("character").?.Integer - 1,
@@ -415,7 +431,7 @@ pub fn processJsonRpc(json: []const u8) !void {
     }
 }
 
-const use_leak_count_alloc = @import("build_options").leak_detection;
+const use_leak_count_alloc = build_options.leak_detection;
 
 var leak_alloc_global: std.testing.LeakCountAllocator = undefined;
 // We can now use if(leak_count_alloc) |alloc| { ... } as a comptime check.
@@ -430,6 +446,7 @@ pub fn main() anyerror!void {
 
     if (use_leak_count_alloc) {
         // Initialize the leak counting allocator.
+        std.debug.warn("Counting memory leaks...\n", .{});
         leak_alloc_global = std.testing.LeakCountAllocator.init(allocator);
         allocator = &leak_alloc_global.allocator;
     }
