@@ -30,12 +30,13 @@ pub fn getDocComments(allocator: *std.mem.Allocator, tree: *std.zig.ast.Tree, no
             if (func.doc_comments) |doc_comments| {
                 var doc_it = doc_comments.lines.iterator(0);
                 var lines = std.ArrayList([]const u8).init(allocator);
+                defer lines.deinit();
 
                 while (doc_it.next()) |doc_comment| {
                     _ = try lines.append(std.fmt.trim(tree.tokenSlice(doc_comment.*)[3..]));
                 }
 
-                return try std.mem.join(allocator, "\n", lines.toOwnedSlice());
+                return try std.mem.join(allocator, "\n", lines.items);
             } else {
                 return null;
             }
@@ -45,12 +46,13 @@ pub fn getDocComments(allocator: *std.mem.Allocator, tree: *std.zig.ast.Tree, no
             if (var_decl.doc_comments) |doc_comments| {
                 var doc_it = doc_comments.lines.iterator(0);
                 var lines = std.ArrayList([]const u8).init(allocator);
+                defer lines.deinit();
 
                 while (doc_it.next()) |doc_comment| {
                     _ = try lines.append(std.fmt.trim(tree.tokenSlice(doc_comment.*)[3..]));
                 }
 
-                return try std.mem.join(allocator, "\n", lines.toOwnedSlice());
+                return try std.mem.join(allocator, "\n", lines.items);
             } else {
                 return null;
             }

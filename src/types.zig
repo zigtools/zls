@@ -203,7 +203,7 @@ pub const MarkupContent = struct {
 
 pub const CompletionList = struct {
     isIncomplete: Bool,
-    items: []CompletionItem,
+    items: []const CompletionItem,
 };
 
 pub const CompletionItemKind = enum(Integer) {

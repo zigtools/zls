@@ -81,7 +81,11 @@ pub fn publishDiagnostics(document: types.TextDocument) !void {
     const tree = try std.zig.parse(allocator, document.text);
     defer tree.deinit();
 
-    var diagnostics = std.ArrayList(types.Diagnostic).init(allocator);
+    // Use an arena for our local memory allocations.
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+
+    var diagnostics = std.ArrayList(types.Diagnostic).init(&arena.allocator);
 
     if (tree.errors.len > 0) {
         var index: usize = 0;
@@ -107,7 +111,8 @@ pub fn publishDiagnostics(document: types.TextDocument) !void {
                 .severity = .Error,
                 .code = @tagName(err.*),
                 .source = "zls",
-                .message = fbs.getWritten(),
+                // We dupe the string from the stack to our arena
+                .message = try std.mem.dupe(&arena.allocator, u8, fbs.getWritten()),
                 // .relatedInformation = undefined
             });
         }
@@ -150,19 +155,24 @@ pub fn publishDiagnostics(document: types.TextDocument) !void {
         .params = .{
             .PublishDiagnosticsParams = .{
                 .uri = document.uri,
-                .diagnostics = diagnostics.toOwnedSlice(),
+                .diagnostics = diagnostics.items,
             },
-        }
+        },
     });
 }
 
 pub fn completeGlobal(id: i64, document: types.TextDocument) !void {
+    // The tree uses its own arena, so we just pass our main allocator.
     const tree = try std.zig.parse(allocator, document.text);
-    // defer tree.deinit();
+    defer tree.deinit();
 
     if (tree.errors.len > 0) return try respondGeneric(id, no_completions_response);
 
-    var completions = std.ArrayList(types.CompletionItem).init(allocator);
+    // We use a local arena allocator to deallocate all temporary data without iterating
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    var completions = std.ArrayList(types.CompletionItem).init(&arena.allocator);
+    // Deallocate all temporary data.
+    defer arena.deinit();
 
     // try log("{}", .{&tree.root_node.decls});
     var decls = tree.root_node.decls.iterator(0);
@@ -172,7 +182,7 @@ pub fn completeGlobal(id: i64, document: types.TextDocument) !void {
         switch (decl.id) {
             .FnProto => {
                 const func = decl.cast(std.zig.ast.Node.FnProto).?;
-                var doc_comments = try analysis.getDocComments(allocator, tree, decl);
+                var doc_comments = try analysis.getDocComments(&arena.allocator, tree, decl);
                 var doc = types.MarkupContent{
                     .kind = .Markdown,
                     .value = doc_comments orelse "",
@@ -186,7 +196,7 @@ pub fn completeGlobal(id: i64, document: types.TextDocument) !void {
             },
             .VarDecl => {
                 const var_decl = decl.cast(std.zig.ast.Node.VarDecl).?;
-                var doc_comments = try analysis.getDocComments(allocator, tree, decl);
+                var doc_comments = try analysis.getDocComments(&arena.allocator, tree, decl);
                 var doc = types.MarkupContent{
                     .kind = .Markdown,
                     .value = doc_comments orelse "",
@@ -208,17 +218,45 @@ pub fn completeGlobal(id: i64, document: types.TextDocument) !void {
         .result = .{
             .CompletionList = .{
                 .isIncomplete = false,
-                .items = completions.toOwnedSlice(),
+                .items = completions.items,
             },
         },
     });
 }
+
+
+// Compute builtin completions at comptime.
+const builtin_completions = block: {
+    @setEvalBranchQuota(3_500);
+    var temp: [data.builtins.len]types.CompletionItem = undefined;
+
+    for (data.builtins) |builtin, i| {
+        var cutoff = std.mem.indexOf(u8, builtin, "(") orelse builtin.len;
+        temp[i] = .{
+            .label = builtin[0..cutoff],
+            .kind = .Function,
+
+            .filterText = builtin[1..cutoff],
+            .insertText = builtin[1..],
+            .insertTextFormat = .Snippet,
+            .detail = data.builtin_details[i],
+            .documentation = .{
+                .kind = .Markdown,
+                .value = data.builtin_docs[i],
+            },
+        };
+    }
+
+    break :block temp;
+};
 
 // pub fn signature
 
 pub fn processJsonRpc(json: []const u8) !void {
 
     var parser = std.json.Parser.init(allocator, false);
+    defer parser.deinit();
+
     var tree = try parser.parse(json);
     defer tree.deinit();
 
@@ -266,13 +304,15 @@ pub fn processJsonRpc(json: []const u8) !void {
                     .character = range.Object.getValue("end").?.Object.getValue("character").?.Integer
                 };
 
-                const before = document.text[0..try document.positionToIndex(start_pos)];
-                const after = document.text[try document.positionToIndex(end_pos)..document.text.len];
-                allocator.free(document.text);
+                const old_text = document.text;
+                const before = old_text[0..try document.positionToIndex(start_pos)];
+                const after = old_text[try document.positionToIndex(end_pos)..document.text.len];
                 document.text = try std.mem.concat(allocator, u8, &[3][]const u8{ before, change.Object.getValue("text").?.String, after });
+                allocator.free(old_text);
             } else {
-                allocator.free(document.text);
+                const old_text = document.text;
                 document.text = try std.mem.dupe(allocator, u8, change.Object.getValue("text").?.String);
+                allocator.free(old_text);
             }
         }
 
@@ -301,25 +341,6 @@ pub fn processJsonRpc(json: []const u8) !void {
             const char = document.text[pos_index];
             
             if (char == '@') {
-                var builtin_completions: [data.builtins.len]types.CompletionItem = undefined;
-
-                for (data.builtins) |builtin, i| {
-                    var cutoff = std.mem.indexOf(u8, builtin, "(") orelse builtin.len;
-                    builtin_completions[i] = .{
-                        .label = builtin[0..cutoff],
-                        .kind = .Function,
-                        
-                        .filterText = builtin[1..cutoff],
-                        .insertText = builtin[1..],
-                        .insertTextFormat = .Snippet,
-                        .detail = data.builtin_details[i],
-                        .documentation = .{
-                            .kind = .Markdown,
-                            .value = data.builtin_docs[i],
-                        },
-                    };
-                }
-
                 try send(types.Response{
                     .id = .{.Integer = id},
                     .result = .{
@@ -356,16 +377,26 @@ pub fn processJsonRpc(json: []const u8) !void {
     } else {
         try log("Method without return value not implemented: {}", .{method});
     }
-
 }
+
+const use_leak_count_alloc = @import("build_options").leak_detection;
+
+var leak_alloc_global: std.testing.LeakCountAllocator = undefined;
+// We can now use if(leak_count_alloc) |alloc| { ... } as a comptime check.
+const leak_count_alloc: ?*std.testing.LeakCountAllocator = if (use_leak_count_alloc) &leak_alloc_global else null;
 
 pub fn main() anyerror!void {
 
-    // Init memory
+    // TODO: Use a better purpose general allocator once std has one.
+    // Probably after the generic composable allocators PR?
+    // This is not too bad for now since most allocations happen in local areans.
+    allocator = std.heap.page_allocator;
 
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-    allocator = &arena.allocator;
+    if (use_leak_count_alloc) {
+        // Initialize the leak counting allocator.
+        leak_alloc_global = std.testing.LeakCountAllocator.init(allocator);
+        allocator = &leak_alloc_global.allocator;
+    }
 
     // Init buffer for stdin read
 
@@ -391,7 +422,7 @@ pub fn main() anyerror!void {
 
         // var bytes = stdin.read(buffer.items[0..6]) catch return;
 
-        if (offset >= 16 and std.mem.eql(u8, "Content-Length: ", buffer.items[0..16])) {
+        if (offset >= 16 and std.mem.startsWith(u8, buffer.items, "Content-Length: ")) {
 
             index = 16;
             while (index <= offset + 10) : (index += 1) {
@@ -460,5 +491,8 @@ pub fn main() anyerror!void {
 
         offset += bytes_read;
 
+        if (leak_count_alloc) |leaks| {
+            try log("Allocations alive after message: {}", .{leaks.count});
+        }
     }
 }

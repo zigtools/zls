@@ -16,6 +16,12 @@ pub fn build(b: *std.build.Builder) void {
 
     exe.addPackagePath("data", "src/data/0.6.0.zig");
 
+    exe.addBuildOption(
+        bool,
+        "leak_detection",
+        b.option(bool, "leak_detection", "Use testing.LeakCountAllocator to track leaks.") orelse false,
+    );
+
     exe.setTarget(target);
     exe.setBuildMode(mode);
     exe.install();
