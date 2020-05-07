@@ -164,8 +164,7 @@ pub fn completeGlobal(id: i64, document: types.TextDocument) !void {
 
     var completions = std.ArrayList(types.CompletionItem).init(allocator);
 
-    // @TODO
-    try log("{}", .{&tree.root_node.decls});
+    // try log("{}", .{&tree.root_node.decls});
     var decls = tree.root_node.decls.iterator(0);
     while (decls.next()) |decl_ptr| {
 
@@ -362,7 +361,7 @@ pub fn processJsonRpc(json: []const u8) !void {
 const use_leak_count_alloc = @import("build_options").leak_detection;
 
 var leak_alloc_global: std.testing.LeakCountAllocator = undefined;
-// We can now use if(leak_count_alloc) |alloc| {     ... } as a comptime check.
+// We can now use if(leak_count_alloc) |alloc| { ... } as a comptime check.
 const leak_count_alloc: ?*std.testing.LeakCountAllocator = if (use_leak_count_alloc) &leak_alloc_global else null;
 
 pub fn main() anyerror!void {
@@ -442,7 +441,7 @@ pub fn main() anyerror!void {
             }
 
         } else if (offset >= 16) {
-            try log("OffseOt is greater than 16!", .{});
+            try log("Offset is greater than 16!", .{});
             return;
         }
 
