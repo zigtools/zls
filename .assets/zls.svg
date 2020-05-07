@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   xmlns:dc="http://purl.org/dc/elements/1.1/"
+   xmlns:cc="http://creativecommons.org/ns#"
+   xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+   xmlns:svg="http://www.w3.org/2000/svg"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   sodipodi:docname="zls.svg"
+   inkscape:version="1.0 (4035a4fb49, 2020-05-01)"
+   id="svg8"
+   version="1.1"
+   viewBox="0 0 140.22915 82.020839"
+   height="310"
+   width="530">
+  <defs
+     id="defs2" />
+  <sodipodi:namedview
+     units="px"
+     inkscape:window-maximized="1"
+     inkscape:window-y="-6"
+     inkscape:window-x="1700"
+     inkscape:window-height="898"
+     inkscape:window-width="1707"
+     showgrid="false"
+     inkscape:document-rotation="0"
+     inkscape:current-layer="layer1"
+     inkscape:document-units="mm"
+     inkscape:cy="334.80457"
+     inkscape:cx="588.82098"
+     inkscape:zoom="0.49497475"
+     inkscape:pageshadow="2"
+     inkscape:pageopacity="0.0"
+     borderopacity="1.0"
+     bordercolor="#666666"
+     pagecolor="#ffffff"
+     id="base" />
+  <metadata
+     id="metadata5">
+    <rdf:RDF>
+      <cc:Work
+         rdf:about="">
+        <dc:format>image/svg+xml</dc:format>
+        <dc:type
+           rdf:resource="http://purl.org/dc/dcmitype/StillImage" />
+        <dc:title></dc:title>
+      </cc:Work>
+    </rdf:RDF>
+  </metadata>
+  <g
+     id="layer1"
+     inkscape:groupmode="layer"
+     inkscape:label="Layer 1">
+    <text
+       id="text967"
+       y="26.192413"
+       x="8.5526314"
+       style="font-style:normal;font-weight:normal;font-size:25.4px;line-height:0.9;font-family:sans-serif;letter-spacing:-2.64583px;word-spacing:0px;fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.264583"
+       xml:space="preserve"><tspan
+         sodipodi:role="line"
+         style="font-style:normal;font-variant:normal;font-weight:bold;font-stretch:normal;font-size:25.4px;font-family:Inter;-inkscape-font-specification:'Inter Bold';letter-spacing:0px;fill:#000000;fill-opacity:1;stroke-width:0.264583"
+         y="26.192413"
+         x="8.5526314"
+         id="tspan965"><tspan
+           id="tspan971"
+           style="font-style:normal;font-variant:normal;font-weight:bold;font-stretch:normal;font-family:Inter;-inkscape-font-specification:'Inter Bold';fill:#f7a41d;fill-opacity:1">Zig</tspan></tspan><tspan
+         id="tspan977"
+         sodipodi:role="line"
+         style="font-style:normal;font-variant:normal;font-weight:bold;font-stretch:normal;font-size:25.4px;font-family:Inter;-inkscape-font-specification:'Inter Bold';letter-spacing:0px;fill:#000000;fill-opacity:1;stroke-width:0.264583"
+         y="49.386147"
+         x="8.5526314">Language</tspan><tspan
+         id="tspan984"
+         sodipodi:role="line"
+         style="font-style:normal;font-variant:normal;font-weight:bold;font-stretch:normal;font-size:25.4px;font-family:Inter;-inkscape-font-specification:'Inter Bold';letter-spacing:0px;fill:#000000;fill-opacity:1;stroke-width:0.264583"
+         y="72.57988"
+         x="8.5526314">Server</tspan></text>
+  </g>
+</svg>
