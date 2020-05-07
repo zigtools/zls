@@ -136,7 +136,10 @@ pub const PublishDiagnosticsParams = struct {
 
 pub const TextDocument = struct {
     uri: DocumentUri,
+    // This is a substring of mem starting at 0
     text: String,
+    // This holds the memory that we have actually allocated.
+    mem: []u8,
     sane_text: ?String = null,
 
     pub fn positionToIndex(self: *const TextDocument, position: Position) !usize {

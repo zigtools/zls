@@ -72,11 +72,23 @@ pub fn respondGeneric(id: i64, response: []const u8) !void {
 }
 
 pub fn openDocument(uri: []const u8, text: []const u8) !void {
-    const du = try std.mem.dupe(allocator, u8, uri);
-    _ = try documents.put(du, .{
-        .uri = du,
-        .text = try std.mem.dupe(allocator, u8, text),
+    const duped_uri = try std.mem.dupe(allocator, u8, uri);
+    const duped_text = try std.mem.dupe(allocator, u8, text);
+
+    const res = try documents.put(duped_uri, .{
+        .uri = duped_uri,
+        .text = duped_text,
+        .mem = duped_text,
     });
+
+    if (res) |existing_entry| {
+        try log("Opened already open file: {}", .{uri});
+        allocator.free(existing_entry.key);
+        allocator.free(existing_entry.value.mem);
+        if (existing_entry.value.sane_text) |str| {
+            allocator.free(str);
+        }
+    }
 }
 
 pub fn cacheSane(document: *types.TextDocument) !void {
@@ -320,15 +332,42 @@ pub fn processJsonRpc(json: []const u8) !void {
                     .character = range.Object.getValue("end").?.Object.getValue("character").?.Integer
                 };
 
-                const old_text = document.text;
-                const before = old_text[0..try document.positionToIndex(start_pos)];
-                const after = old_text[try document.positionToIndex(end_pos)..document.text.len];
-                document.text = try std.mem.concat(allocator, u8, &[3][]const u8{ before, change.Object.getValue("text").?.String, after });
-                allocator.free(old_text);
+                const change_text = change.Object.getValue("text").?.String;
+                const start_index = try document.positionToIndex(start_pos);
+                const end_index = try document.positionToIndex(end_pos);
+
+                const old_len = document.text.len;
+                const new_len = old_len + change_text.len;
+                if (new_len > document.mem.len) {
+                    // We need to reallocate memory.
+                    // We reallocate twice the current filesize or the new length, if it's more than that
+                    // so that we can reduce the amount of realloc calls.
+                    // We can tune this to find a better size if needed.
+                    const realloc_len = std.math.max(2 * old_len, new_len);
+                    document.mem = try allocator.realloc(document.mem, realloc_len);
+                }
+
+                // The first part of the string, [0 .. start_index] need not be changed.
+                // We then copy the last part of the string, [end_index ..] to its
+                //    new position, [start_index + change_len .. ]
+                std.mem.copy(u8, document.mem[start_index + change_text.len..][0 .. old_len - end_index], document.mem[end_index .. old_len]);
+                // Finally, we copy the changes over.
+                std.mem.copy(u8, document.mem[start_index..][0 .. change_text.len], change_text);
+
+                // Reset the text substring.
+                document.text = document.mem[0 .. new_len];
             } else {
-                const old_text = document.text;
-                document.text = try std.mem.dupe(allocator, u8, change.Object.getValue("text").?.String);
-                allocator.free(old_text);
+                const change_text = change.Object.getValue("text").?.String;
+                const old_len = document.text.len;
+
+                if (change_text.len > document.mem.len) {
+                    // Like above.
+                    const realloc_len = std.math.max(2 * old_len, change_text.len);
+                    document.mem = try allocator.realloc(document.mem, realloc_len);
+                }
+
+                std.mem.copy(u8, document.mem[0 .. change_text.len], change_text);
+                document.text = document.mem[0 .. change_text.len];
             }
         }
 
