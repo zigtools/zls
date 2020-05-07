@@ -81,8 +81,11 @@ pub fn publishDiagnostics(document: types.TextDocument) !void {
     const tree = try std.zig.parse(allocator, document.text);
     defer tree.deinit();
 
-    var diagnostics = std.ArrayList(types.Diagnostic).init(allocator);
-    defer diagnostics.deinit();
+    // Use an arena for our local memory allocations.
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+
+    var diagnostics = std.ArrayList(types.Diagnostic).init(&arena.allocator);
 
     if (tree.errors.len > 0) {
         var index: usize = 0;
@@ -108,10 +111,8 @@ pub fn publishDiagnostics(document: types.TextDocument) !void {
                 .severity = types.DiagnosticSeverity.Error,
                 .code = @tagName(err.*),
                 .source = "zls",
-                // TODO: This is wrong, reference to mem_buffer escapes
-                // We should probably dupe this (as well as the messages from the other branch)
-                // And free them in the defer along with the whole array list memory.
-                .message = fbs.getWritten(),
+                // We dupe the string from the stack to our arena
+                .message = try std.mem.dupe(&arena.allocator, u8, fbs.getWritten()),
                 // .relatedInformation = undefined
             });
         }
