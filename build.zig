@@ -31,8 +31,8 @@ pub fn build(b: *std.build.Builder) !void {
 
     exe.addBuildOption(
         bool,
-        "leak_detection",
-        b.option(bool, "leak_detection", "Use testing.LeakCountAllocator to track leaks.") orelse false,
+        "allocation_info",
+        b.option(bool, "allocation_info", "Enable use of debugging allocator and info logging.") orelse false,
     );
 
     exe.setTarget(target);
