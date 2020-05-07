@@ -137,7 +137,7 @@ pub const PublishDiagnosticsParams = struct {
 pub const TextDocument = struct {
     uri: DocumentUri,
     text: String,
-    sane_text: ?String = "",
+    sane_text: ?String = null,
 
     pub fn positionToIndex(self: *const TextDocument, position: Position) !usize {
         var split_iterator = std.mem.split(self.text, "\n");
