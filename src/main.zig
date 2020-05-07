@@ -304,13 +304,15 @@ pub fn processJsonRpc(json: []const u8) !void {
                     .character = range.Object.getValue("end").?.Object.getValue("character").?.Integer
                 };
 
-                const before = document.text[0..try document.positionToIndex(start_pos)];
-                const after = document.text[try document.positionToIndex(end_pos)..document.text.len];
-                allocator.free(document.text);
+                const old_text = document.text;
+                const before = old_text[0..try document.positionToIndex(start_pos)];
+                const after = old_text[try document.positionToIndex(end_pos)..document.text.len];
                 document.text = try std.mem.concat(allocator, u8, &[3][]const u8{ before, change.Object.getValue("text").?.String, after });
+                allocator.free(old_text);
             } else {
-                allocator.free(document.text);
+                const old_text = document.text;
                 document.text = try std.mem.dupe(allocator, u8, change.Object.getValue("text").?.String);
+                allocator.free(old_text);
             }
         }
 
