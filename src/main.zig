@@ -161,28 +161,17 @@ pub fn publishDiagnostics(document: types.TextDocument) !void {
 }
 
 pub fn completeGlobal(id: i64, document: types.TextDocument) !void {
+    // The tree uses its own arena, so we just pass our main allocator.
     const tree = try std.zig.parse(allocator, document.text);
     defer tree.deinit();
 
     if (tree.errors.len > 0) return try respondGeneric(id, no_completions_response);
 
-    var completions = std.ArrayList(types.CompletionItem).init(allocator);
-
-    defer {
-        // Free the completion data.
-        // @TODO: Check what the tree functions (e.g. tokenSlice) return.
-        //        We may need to dupe them to free the tree
-        // TODO: Maybe split off into a function or add a method to MarkupContent/CompletionItem?
-        for (completions.items) |comp| {
-            if (comp.documentation) |doc| {
-                if (doc.value.len > 0) {
-                    allocator.free(doc.value);
-                }
-            }
-        }
-
-        completions.deinit();
-    }
+    // We use a local arena allocator to deallocate all temporary data without iterating
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    var completions = std.ArrayList(types.CompletionItem).init(&arena.allocator);
+    // Deallocate all temporary data.
+    defer arena.deinit();
 
     // try log("{}", .{&tree.root_node.decls});
     var decls = tree.root_node.decls.iterator(0);
@@ -192,7 +181,7 @@ pub fn completeGlobal(id: i64, document: types.TextDocument) !void {
         switch (decl.id) {
             .FnProto => {
                 const func = decl.cast(std.zig.ast.Node.FnProto).?;
-                var doc_comments = try analysis.getDocComments(allocator, tree, decl);
+                var doc_comments = try analysis.getDocComments(&arena.allocator, tree, decl);
                 var doc = types.MarkupContent{
                     .kind = types.MarkupKind.Markdown,
                     .value = doc_comments orelse ""
@@ -206,7 +195,7 @@ pub fn completeGlobal(id: i64, document: types.TextDocument) !void {
             },
             .VarDecl => {
                 const var_decl = decl.cast(std.zig.ast.Node.VarDecl).?;
-                var doc_comments = try analysis.getDocComments(allocator, tree, decl);
+                var doc_comments = try analysis.getDocComments(&arena.allocator, tree, decl);
                 var doc = types.MarkupContent{
                     .kind = types.MarkupKind.Markdown,
                     .value = doc_comments orelse ""
