@@ -37,11 +37,14 @@ pub fn send(reqOrRes: var) !void {
     var mem_buffer: [1024 * 128]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&mem_buffer);
     try std.json.stringify(reqOrRes, std.json.StringifyOptions{}, fbs.outStream());
-    _ = try stdout.print("Content-Length: {}\r\n\r\n", .{fbs.pos});
-    _ = try stdout.write(fbs.getWritten());
+    try stdout.print("Content-Length: {}\r\n\r\n", .{fbs.pos});
+    try stdout.writeAll(fbs.getWritten());
 }
 
 pub fn log(comptime fmt: []const u8, args: var) !void {
+    // Disable logs on Release modes.
+    if (std.builtin.mode != .Debug) return;
+
     var message = try std.fmt.allocPrint(allocator, fmt, args);
     defer allocator.free(message);
 
@@ -67,8 +70,19 @@ pub fn respondGeneric(id: i64, response: []const u8) !void {
         break :blk digits;
     };
 
-    _ = try stdout.print("Content-Length: {}\r\n\r\n{}\"jsonrpc\":\"2.0\",\"id\":{}", .{response.len + id_digits + 22, "{", id});
-    _ = try stdout.write(response);
+    // Numbers of character that will be printed from this string: len - 3 brackets
+    // 1 from the beginning (escaped) and the 2 from the arg {}
+    const json_fmt = "{{\"jsonrpc\":\"2.0\",\"id\":{}";
+    try stdout.print("Content-Length: {}\r\n\r\n" ++ json_fmt, .{ response.len + id_digits + json_fmt.len - 3, id });
+    try stdout.writeAll(response);
+}
+
+pub fn freeDocument(document: types.TextDocument) void {
+    allocator.free(document.uri);
+    allocator.free(document.mem);
+    if (document.sane_text) |str| {
+        allocator.free(str);
+    }
 }
 
 pub fn openDocument(uri: []const u8, text: []const u8) !void {
@@ -81,17 +95,24 @@ pub fn openDocument(uri: []const u8, text: []const u8) !void {
         .mem = duped_text,
     });
 
-    if (res) |existing_entry| {
-        try log("Opened already open file: {}", .{uri});
-        allocator.free(existing_entry.key);
-        allocator.free(existing_entry.value.mem);
-        if (existing_entry.value.sane_text) |str| {
-            allocator.free(str);
-        }
+    if (res) |entry| {
+        try log("Document already open: {}, closing old.", .{uri});
+        freeDocument(entry.value);
+    } else {
+        try log("Opened document: {}", .{uri});
+    }
+}
+
+pub fn closeDocument(uri: []const u8) !void {
+    if (documents.remove(uri)) |entry| {
+        try log("Closing document: {}", .{uri});
+        freeDocument(entry.value);
     }
 }
 
 pub fn cacheSane(document: *types.TextDocument) !void {
+    try log("Caching sane text for document: {}", .{document.uri});
+
     if (document.sane_text) |old_sane| {
         allocator.free(old_sane);
     }
@@ -116,7 +137,7 @@ pub fn publishDiagnostics(document: *types.TextDocument) !void {
 
             var mem_buffer: [256]u8 = undefined;
             var fbs = std.io.fixedBufferStream(&mem_buffer);
-            _ = try tree.renderError(err, fbs.outStream());
+            try tree.renderError(err, fbs.outStream());
 
             try diagnostics.append(.{
                 .range = .{
@@ -132,7 +153,6 @@ pub fn publishDiagnostics(document: *types.TextDocument) !void {
                 .severity = .Error,
                 .code = @tagName(err.*),
                 .source = "zls",
-                // We dupe the string from the stack to our arena
                 .message = try std.mem.dupe(&arena.allocator, u8, fbs.getWritten()),
                 // .relatedInformation = undefined
             });
@@ -261,34 +281,21 @@ const builtin_completions = block: {
 
     for (data.builtins) |builtin, i| {
         var cutoff = std.mem.indexOf(u8, builtin, "(") orelse builtin.len;
-        if (build_options.no_snippets) {
-            temp[i] = .{
-                .label = builtin[0..cutoff],
-                .kind = .Function,
+        temp[i] = .{
+            .label = builtin[0..cutoff],
+            .kind = .Function,
 
-                .filterText = builtin[1..cutoff],
-                .insertText = builtin[1..cutoff],
-                .detail = data.builtin_details[i],
-                .documentation = .{
-                    .kind = .Markdown,
-                    .value = data.builtin_docs[i],
-                },
-            };
-        } else {
-            temp[i] = .{
-                .label = builtin[0..cutoff],
-                .kind = .Function,
+            .filterText = builtin[1..cutoff],
+            .insertText = builtin[1..],
+            .detail = data.builtin_details[i],
+            .documentation = .{
+                .kind = .Markdown,
+                .value = data.builtin_docs[i],
+            },
+        };
 
-                .filterText = builtin[1..cutoff],
-                .insertText = builtin[1..],
-                .insertTextFormat = .Snippet,
-                .detail = data.builtin_details[i],
-                .documentation = .{
-                    .kind = .Markdown,
-                    .value = data.builtin_docs[i],
-                },
-            };
-        }
+        if (!build_options.no_snippets)
+            temp[i].insertTextFormat = .Snippet;
     }
 
     break :block temp;
@@ -296,17 +303,13 @@ const builtin_completions = block: {
 
 // pub fn signature
 
-pub fn processJsonRpc(json: []const u8) !void {
-
-    var parser = std.json.Parser.init(allocator, false);
-    defer parser.deinit();
-
+pub fn processJsonRpc(parser: *std.json.Parser, json: []const u8) !void {
     var tree = try parser.parse(json);
     defer tree.deinit();
 
     const root = tree.root;
 
-    // if (root.Object.getValue("method") == null) {return;}
+    std.debug.assert(root.Object.getValue("method") != null);
 
     const method = root.Object.getValue("method").?.String;
     const id = if (root.Object.getValue("id")) |id| id.Integer else 0;
@@ -393,7 +396,7 @@ pub fn processJsonRpc(json: []const u8) !void {
         const document = params.getValue("textDocument").?.Object;
         const uri = document.getValue("uri").?.String;
 
-        _ = documents.remove(uri);
+        try closeDocument(uri);
     }
     // Autocomplete / Signatures
     else if (std.mem.eql(u8, method, "textDocument/completion")) {
@@ -449,11 +452,9 @@ pub fn processJsonRpc(json: []const u8) !void {
     }
 }
 
-const use_leak_count_alloc = build_options.leak_detection;
-
-var leak_alloc_global: std.testing.LeakCountAllocator = undefined;
+var debug_alloc_state: std.testing.LeakCountAllocator = undefined;
 // We can now use if(leak_count_alloc) |alloc| { ... } as a comptime check.
-const leak_count_alloc: ?*std.testing.LeakCountAllocator = if (use_leak_count_alloc) &leak_alloc_global else null;
+const debug_alloc: ?*std.testing.LeakCountAllocator = if (build_options.allocation_info) &debug_alloc_state else null;
 
 pub fn main() anyerror!void {
 
@@ -462,11 +463,11 @@ pub fn main() anyerror!void {
     // This is not too bad for now since most allocations happen in local areans.
     allocator = std.heap.page_allocator;
 
-    if (use_leak_count_alloc) {
+    if (build_options.allocation_info) {
+        // TODO: Use a better debugging allocator, track size in bytes, memory reserved etc..
         // Initialize the leak counting allocator.
-        std.debug.warn("Counting memory leaks...\n", .{});
-        leak_alloc_global = std.testing.LeakCountAllocator.init(allocator);
-        allocator = &leak_alloc_global.allocator;
+        debug_alloc_state = std.testing.LeakCountAllocator.init(allocator);
+        allocator = &debug_alloc_state.allocator;
     }
 
     // Init buffer for stdin read
@@ -489,10 +490,11 @@ pub fn main() anyerror!void {
     var index: usize = 0;
     var content_len: usize = 0;
 
+    // This JSON parser is passed to processJsonRpc and reset.
+    var parser = std.json.Parser.init(allocator, false);
+    defer parser.deinit();
+
     stdin_poll: while (true) {
-
-        // var bytes = stdin.read(buffer.items[0..6]) catch return;
-
         if (offset >= 16 and std.mem.startsWith(u8, buffer.items, "Content-Length: ")) {
 
             index = 16;
@@ -506,7 +508,6 @@ pub fn main() anyerror!void {
                 }
             }
 
-            // buffer.items[offset] = try stdin.readByte();=
             if (buffer.items[index] == '\r') {
                 index += 2;
                 if (buffer.items.len < index + content_len) {
@@ -514,16 +515,17 @@ pub fn main() anyerror!void {
                 }
 
                 body_poll: while (offset < content_len + index) {
-                    bytes_read = stdin.read(buffer.items[offset .. index + content_len]) catch return;
+                    bytes_read = try stdin.readAll(buffer.items[offset .. index + content_len]);
                     if (bytes_read == 0) {
-                        try log("0 bytes written; exiting!", .{});
+                        try log("0 bytes read; exiting!", .{});
                         return;
                     }
 
                     offset += bytes_read;
                 }
-                
-                try processJsonRpc(buffer.items[index .. index + content_len]);
+
+                try processJsonRpc(&parser, buffer.items[index .. index + content_len]);
+                parser.reset();
 
                 offset = 0;
                 content_len = 0;
@@ -537,33 +539,27 @@ pub fn main() anyerror!void {
         }
 
         if (offset < 16) {
-            bytes_read = stdin.read(buffer.items[offset..25]) catch return;
+            bytes_read = try stdin.readAll(buffer.items[offset..25]);
         } else {
             if (offset == buffer.items.len) {
                 try buffer.resize(buffer.items.len * 2);
             }
             if (index + content_len > buffer.items.len) {
-                bytes_read = stdin.read(buffer.items[offset..buffer.items.len]) catch {
-                    try log("Error reading!", .{});
-                    return;
-                };
+                bytes_read = try stdin.readAll(buffer.items[offset..buffer.items.len]);
             } else {
-                bytes_read = stdin.read(buffer.items[offset .. index + content_len]) catch {
-                    try log("Error reading!", .{});
-                    return;
-                };
+                bytes_read = try stdin.readAll(buffer.items[offset .. index + content_len]);
             }
         }
 
         if (bytes_read == 0) {
-            try log("0 bytes written; exiting!", .{});
+            try log("0 bytes read; exiting!", .{});
             return;
         }
 
         offset += bytes_read;
 
-        if (leak_count_alloc) |leaks| {
-            try log("Allocations alive after message: {}", .{leaks.count});
+        if (debug_alloc) |dbg| {
+            try log("Allocations alive: {}", .{dbg.count});
         }
     }
 }
