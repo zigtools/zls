@@ -177,7 +177,7 @@ fn publishDiagnostics(document: *types.TextDocument) !void {
                     if (func.name_token) |name_token| {
                         const loc = tree.tokenLocation(0, name_token);
 
-                        var is_type_function = switch (func.return_type) {
+                        const is_type_function = switch (func.return_type) {
                             .Explicit => |node| if (node.cast(std.zig.ast.Node.Identifier)) |ident|
                                 std.mem.eql(u8, tree.tokenSlice(ident.token), "type")
                             else
