@@ -301,6 +301,109 @@ const builtin_completions = block: {
     break :block temp;
 };
 
+const Context = enum {
+    builtin,
+    comment,
+    string_literal,
+    field_access,
+    var_access,
+    other,
+};
+
+fn documentContext(doc: types.TextDocument, pos_index: usize) Context {
+    // First extract the whole current line up to the cursor.
+    var curr_position = pos_index;
+    while (curr_position > 0) : (curr_position -= 1) {
+        if (doc.text[curr_position - 1] == '\n') break;
+    }
+
+    var line = doc.text[curr_position .. pos_index + 1];
+    // Strip any leading whitespace.
+    curr_position = 0;
+    while (line[curr_position] == ' ' or line[curr_position] == '\t') : (curr_position += 1) {}
+    line = line[curr_position .. ];
+
+    // Quick exit for whole-comment lines.
+    if (line.len > 2 and line[0] == '/' and line[1] == '/')
+        return .comment;
+
+    // TODO: This does not detect if we are in a string literal over multiple lines.
+    // Find out what context we are in.
+    // Go over the current line character by character
+    // and determine the context.
+    curr_position = 0;
+    var new_token = true;
+    var context: Context = .other;
+    var string_pop_ctx: Context = .other;
+    while (curr_position < line.len) : (curr_position += 1) {
+        const c = line[curr_position];
+        const next_char = if (curr_position < line.len - 1) line[curr_position + 1] else null;
+
+        if (context != .string_literal and c == '"') {
+            context = .string_literal;
+            continue;
+        }
+
+        if (context == .string_literal) {
+            // Skip over escaped quotes
+            if (c == '\\' and next_char != null and next_char.? == '"') {
+                curr_position += 1;
+            } else if (c == '"') {
+                context = string_pop_ctx;
+                string_pop_ctx = .other;
+                new_token = true;
+            }
+
+            continue;
+        }
+
+        if (c == '/' and next_char != null and next_char.? == '/') {
+            context = .comment;
+            break;
+        }
+
+        if (c == ' ' or c == '\t') {
+            new_token = true;
+            context = .other;
+            continue;
+        }
+
+        if (c == '.' and context != .builtin) {
+            new_token = true;
+            context = .field_access;
+            continue;
+        }
+
+        if (new_token) {
+            const access_ctx: Context = if (context == .field_access) .field_access else .var_access;
+            new_token = false;
+
+            if (c == '_' or std.ascii.isAlpha(c)) {
+                context = access_ctx;
+            } else if (c == '@') {
+                // This checks for @"..." identifiers by controlling
+                // the context the string will set after it is over.
+                if (next_char != null and next_char.? == '"') {
+                    string_pop_ctx = access_ctx;
+                }
+                context = .builtin;
+            }
+            continue;
+        }
+
+        if (context == .field_access or context == .var_access or context == .builtin) {
+            if (c != '_' and !std.ascii.isAlNum(c)) {
+                context = .other;
+            }
+            continue;
+        }
+
+        context = .other;
+    }
+
+    return context;
+}
+
 fn processJsonRpc(parser: *std.json.Parser, json: []const u8) !void {
     var tree = try parser.parse(json);
     defer tree.deinit();
@@ -409,17 +512,9 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8) !void {
         };
         if (pos.character >= 0) {
             const pos_index = try document.positionToIndex(pos);
-            const char = document.text[pos_index];
+            const context = documentContext(document.*, pos_index);
 
-            var check_for_builtin_pos = pos_index;            
-            var is_builtin = false;
-
-            while (check_for_builtin_pos > 0) : (check_for_builtin_pos -= 1) {
-                if (document.text[check_for_builtin_pos] == '@') {is_builtin = true; break;}
-                if (!std.ascii.isAlpha(document.text[check_for_builtin_pos])) break;
-            }
-
-            if (is_builtin) {
+            if (context == .builtin) {
                 try send(types.Response{
                     .id = .{.Integer = id},
                     .result = .{
@@ -429,7 +524,7 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8) !void {
                         },
                     },
                 });
-            } else if (char != '.') {
+            } else if (context == .var_access) {
                 try completeGlobal(id, document);
             } else {
                 try respondGeneric(id, no_completions_response);

@@ -142,7 +142,7 @@ pub const TextDocument = struct {
     mem: []u8,
     sane_text: ?String = null,
 
-    pub fn positionToIndex(self: *const TextDocument, position: Position) !usize {
+    pub fn positionToIndex(self: TextDocument, position: Position) !usize {
         var split_iterator = std.mem.split(self.text, "\n");
 
         var line: i64 = 0;
