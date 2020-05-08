@@ -87,3 +87,7 @@ pub fn getVariableSignature(tree: *std.zig.ast.Tree, var_decl: *std.zig.ast.Node
 pub fn isCamelCase(name: []const u8) bool {
     return !std.ascii.isUpper(name[0]) and std.mem.indexOf(u8, name, "_") == null;
 }
+
+pub fn isPascalCase(name: []const u8) bool {
+    return std.ascii.isUpper(name[0]) and std.mem.indexOf(u8, name, "_") == null;
+}

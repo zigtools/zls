@@ -119,6 +119,20 @@ fn cacheSane(document: *types.TextDocument) !void {
     document.sane_text = try std.mem.dupe(allocator, u8, document.text);
 }
 
+// TODO: Is this correct or can we get a better end? 
+fn astLocationToRange(loc: std.zig.ast.Tree.Location) types.Range {
+    return .{
+        .start = .{
+            .line = @intCast(i64, loc.line),
+            .character = @intCast(i64, loc.column),
+        },
+        .end = .{
+            .line = @intCast(i64, loc.line),
+            .character = @intCast(i64, loc.column),
+        },
+    };
+}
+
 fn publishDiagnostics(document: *types.TextDocument) !void {
     const tree = try std.zig.parse(allocator, document.text);
     defer tree.deinit();
@@ -140,16 +154,7 @@ fn publishDiagnostics(document: *types.TextDocument) !void {
             try tree.renderError(err, fbs.outStream());
 
             try diagnostics.append(.{
-                .range = .{
-                    .start = .{
-                        .line = @intCast(i64, loc.line),
-                        .character = @intCast(i64, loc.column),
-                    },
-                    .end = .{
-                        .line = @intCast(i64, loc.line),
-                        .character = @intCast(i64, loc.column),
-                    },
-                },
+                .range = astLocationToRange(loc),
                 .severity = .Error,
                 .code = @tagName(err.*),
                 .source = "zls",
@@ -165,24 +170,37 @@ fn publishDiagnostics(document: *types.TextDocument) !void {
             switch (decl.id) {
                 .FnProto => {
                     const func = decl.cast(std.zig.ast.Node.FnProto).?;
+                    const is_extern = func.extern_export_inline_token != null;
+                    if (is_extern)
+                        break;
+
                     if (func.name_token) |name_token| {
                         const loc = tree.tokenLocation(0, name_token);
-                        if (func.extern_export_inline_token == null and !analysis.isCamelCase(tree.tokenSlice(name_token))) {
+
+                        var is_type_function = switch (func.return_type) {
+                            .Explicit => |node| if (node.cast(std.zig.ast.Node.Identifier)) |ident|
+                                std.mem.eql(u8, tree.tokenSlice(ident.token), "type")
+                            else
+                                false,
+                            .InferErrorSet => false,
+                        };
+
+                        const func_name = tree.tokenSlice(name_token);
+                        if (!is_type_function and !analysis.isCamelCase(func_name)) {
                             try diagnostics.append(.{
-                                .range = .{
-                                    .start = .{
-                                        .line = @intCast(i64, loc.line),
-                                        .character = @intCast(i64, loc.column),
-                                    },
-                                    .end = .{
-                                        .line = @intCast(i64, loc.line),
-                                        .character = @intCast(i64, loc.column),
-                                    },
-                                },
+                                .range = astLocationToRange(loc),
                                 .severity = .Information,
                                 .code = "BadStyle",
                                 .source = "zls",
-                                .message = "Callables should be camelCase"
+                                .message = "Functions should be camelCase"
+                            });
+                        } else if (is_type_function and !analysis.isPascalCase(func_name)) {
+                            try diagnostics.append(.{
+                                .range = astLocationToRange(loc),
+                                .severity = .Information,
+                                .code = "BadStyle",
+                                .source = "zls",
+                                .message = "Type functions should be PascalCase"
                             });
                         }
                     }
