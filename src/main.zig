@@ -308,6 +308,7 @@ const PositionContext = enum {
     field_access,
     var_access,
     other,
+    empty
 };
 
 fn documentContext(doc: types.TextDocument, pos_index: usize) PositionContext {
@@ -320,7 +321,8 @@ fn documentContext(doc: types.TextDocument, pos_index: usize) PositionContext {
     var line = doc.text[curr_position .. pos_index + 1];
     // Strip any leading whitespace.
     curr_position = 0;
-    while (line[curr_position] == ' ' or line[curr_position] == '\t') : (curr_position += 1) {}
+    while (curr_position < line.len and (line[curr_position] == ' ' or line[curr_position] == '\t')) : (curr_position += 1) {}
+    if (curr_position >= line.len) return .empty;
     line = line[curr_position .. ];
 
     // Quick exit for whole-comment lines.
@@ -526,7 +528,7 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8) !void {
                         },
                     },
                 });
-            } else if (pos_context == .var_access) {
+            } else if (pos_context == .var_access or pos_context == .empty) {
                 try completeGlobal(id, document);
             } else {
                 try respondGeneric(id, no_completions_response);
