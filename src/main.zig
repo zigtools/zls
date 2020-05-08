@@ -328,7 +328,7 @@ fn documentPositionContext(doc: types.TextDocument, pos_index: usize) PositionCo
     // Quick exit for comment lines and multi line string literals.
     if (line.len >= 2 and line[0] == '/' and line[1] == '/')
         return .comment;
-    if (line.len >= 2 and line[0] == '\\' and line [1] == '\\')
+    if (line.len >= 2 and line[0] == '\\' and line[1] == '\\')
         return .string_literal;
 
     // TODO: This does not detect if we are in a string literal over multiple lines.
