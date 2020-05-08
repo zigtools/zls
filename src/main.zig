@@ -387,6 +387,8 @@ fn documentContext(doc: types.TextDocument, pos_index: usize) PositionContext {
                     string_pop_ctx = access_ctx;
                 }
                 context = .builtin;
+            } else {
+                context = .other;
             }
             continue;
         }
