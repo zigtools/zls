@@ -368,7 +368,7 @@ fn documentContext(doc: types.TextDocument, pos_index: usize) PositionContext {
             continue;
         }
 
-        if (c == '.' and context != .builtin) {
+        if (c == '.' and (!new_token or context == .string_literal)) {
             new_token = true;
             context = .field_access;
             continue;
