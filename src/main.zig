@@ -410,8 +410,16 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8) !void {
         if (pos.character >= 0) {
             const pos_index = try document.positionToIndex(pos);
             const char = document.text[pos_index];
-            
-            if (char == '@') {
+
+            var check_for_builtin_pos = pos_index;            
+            var is_builtin = false;
+
+            while (check_for_builtin_pos > 0) : (check_for_builtin_pos -= 1) {
+                if (document.text[check_for_builtin_pos] == '@') {is_builtin = true; break;}
+                if (!std.ascii.isAlpha(document.text[check_for_builtin_pos])) break;
+            }
+
+            if (is_builtin) {
                 try send(types.Response{
                     .id = .{.Integer = id},
                     .result = .{
