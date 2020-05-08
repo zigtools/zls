@@ -311,7 +311,7 @@ const PositionContext = enum {
     empty
 };
 
-fn documentContext(doc: types.TextDocument, pos_index: usize) PositionContext {
+fn documentPositionContext(doc: types.TextDocument, pos_index: usize) PositionContext {
     // First extract the whole current line up to the cursor.
     var curr_position = pos_index;
     while (curr_position > 0) : (curr_position -= 1) {
@@ -325,9 +325,11 @@ fn documentContext(doc: types.TextDocument, pos_index: usize) PositionContext {
     if (curr_position >= line.len) return .empty;
     line = line[curr_position .. ];
 
-    // Quick exit for whole-comment lines.
-    if (line.len > 2 and line[0] == '/' and line[1] == '/')
+    // Quick exit for comment lines and multi line string literals.
+    if (line.len >= 2 and line[0] == '/' and line[1] == '/')
         return .comment;
+    if (line.len >= 2 and line[0] == '\\' and line[1] == '\\')
+        return .string_literal;
 
     // TODO: This does not detect if we are in a string literal over multiple lines.
     // Find out what context we are in.
@@ -516,7 +518,7 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8) !void {
         };
         if (pos.character >= 0) {
             const pos_index = try document.positionToIndex(pos);
-            const pos_context = documentContext(document.*, pos_index);
+            const pos_context = documentPositionContext(document.*, pos_index);
 
             if (pos_context == .builtin) {
                 try send(types.Response{
