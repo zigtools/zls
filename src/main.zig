@@ -168,11 +168,11 @@ fn publishDiagnostics(document: *types.TextDocument) !void {
         while (decls.next()) |decl_ptr| {
             var decl = decl_ptr.*;
             switch (decl.id) {
-                .FnProto => {
+                .FnProto => blk: {
                     const func = decl.cast(std.zig.ast.Node.FnProto).?;
                     const is_extern = func.extern_export_inline_token != null;
                     if (is_extern)
-                        break;
+                        break :blk;
 
                     if (func.name_token) |name_token| {
                         const loc = tree.tokenLocation(0, name_token);
@@ -249,17 +249,19 @@ fn completeGlobal(id: i64, document: *types.TextDocument) !void {
         switch (decl.id) {
             .FnProto => {
                 const func = decl.cast(std.zig.ast.Node.FnProto).?;
-                var doc_comments = try analysis.getDocComments(&arena.allocator, tree, decl);
-                var doc = types.MarkupContent{
-                    .kind = .Markdown,
-                    .value = doc_comments orelse "",
-                };
-                try completions.append(.{
-                    .label = tree.tokenSlice(func.name_token.?),
-                    .kind = .Function,
-                    .documentation = doc,
-                    .detail = analysis.getFunctionSignature(tree, func),
-                });
+                if (func.name_token) |name_token| {
+                    var doc_comments = try analysis.getDocComments(&arena.allocator, tree, decl);
+                    var doc = types.MarkupContent{
+                        .kind = .Markdown,
+                        .value = doc_comments orelse "",
+                    };
+                    try completions.append(.{
+                        .label = tree.tokenSlice(name_token),
+                        .kind = .Function,
+                        .documentation = doc,
+                        .detail = analysis.getFunctionSignature(tree, func),
+                    });
+                }
             },
             .VarDecl => {
                 const var_decl = decl.cast(std.zig.ast.Node.VarDecl).?;
