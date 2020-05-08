@@ -301,7 +301,7 @@ const builtin_completions = block: {
     break :block temp;
 };
 
-const Context = enum {
+const PositionContext = enum {
     builtin,
     comment,
     string_literal,
@@ -310,7 +310,7 @@ const Context = enum {
     other,
 };
 
-fn documentContext(doc: types.TextDocument, pos_index: usize) Context {
+fn documentContext(doc: types.TextDocument, pos_index: usize) PositionContext {
     // First extract the whole current line up to the cursor.
     var curr_position = pos_index;
     while (curr_position > 0) : (curr_position -= 1) {
@@ -333,8 +333,8 @@ fn documentContext(doc: types.TextDocument, pos_index: usize) Context {
     // and determine the context.
     curr_position = 0;
     var new_token = true;
-    var context: Context = .other;
-    var string_pop_ctx: Context = .other;
+    var context: PositionContext = .other;
+    var string_pop_ctx: PositionContext = .other;
     while (curr_position < line.len) : (curr_position += 1) {
         const c = line[curr_position];
         const next_char = if (curr_position < line.len - 1) line[curr_position + 1] else null;
@@ -375,7 +375,7 @@ fn documentContext(doc: types.TextDocument, pos_index: usize) Context {
         }
 
         if (new_token) {
-            const access_ctx: Context = if (context == .field_access) .field_access else .var_access;
+            const access_ctx: PositionContext = if (context == .field_access) .field_access else .var_access;
             new_token = false;
 
             if (c == '_' or std.ascii.isAlpha(c)) {
@@ -512,9 +512,9 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8) !void {
         };
         if (pos.character >= 0) {
             const pos_index = try document.positionToIndex(pos);
-            const context = documentContext(document.*, pos_index);
+            const pos_context = documentContext(document.*, pos_index);
 
-            if (context == .builtin) {
+            if (pos_context == .builtin) {
                 try send(types.Response{
                     .id = .{.Integer = id},
                     .result = .{
@@ -524,7 +524,7 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8) !void {
                         },
                     },
                 });
-            } else if (context == .var_access) {
+            } else if (pos_context == .var_access) {
                 try completeGlobal(id, document);
             } else {
                 try respondGeneric(id, no_completions_response);
