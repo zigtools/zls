@@ -32,7 +32,7 @@ const no_completions_response = \\,"result":{"isIncomplete":false,"items":[]}}
 ;
 
 /// Sends a request or response
-pub fn send(reqOrRes: var) !void {
+fn send(reqOrRes: var) !void {
     // The most memory we'll probably need
     var mem_buffer: [1024 * 128]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&mem_buffer);
@@ -41,7 +41,7 @@ pub fn send(reqOrRes: var) !void {
     try stdout.writeAll(fbs.getWritten());
 }
 
-pub fn log(comptime fmt: []const u8, args: var) !void {
+fn log(comptime fmt: []const u8, args: var) !void {
     // Disable logs on Release modes.
     if (std.builtin.mode != .Debug) return;
 
@@ -59,7 +59,7 @@ pub fn log(comptime fmt: []const u8, args: var) !void {
     });
 }
 
-pub fn respondGeneric(id: i64, response: []const u8) !void {
+fn respondGeneric(id: i64, response: []const u8) !void {
     const id_digits = blk: {
         if (id == 0) break :blk 1;
         var digits: usize = 1;
@@ -77,7 +77,7 @@ pub fn respondGeneric(id: i64, response: []const u8) !void {
     try stdout.writeAll(response);
 }
 
-pub fn freeDocument(document: types.TextDocument) void {
+fn freeDocument(document: types.TextDocument) void {
     allocator.free(document.uri);
     allocator.free(document.mem);
     if (document.sane_text) |str| {
@@ -85,7 +85,7 @@ pub fn freeDocument(document: types.TextDocument) void {
     }
 }
 
-pub fn openDocument(uri: []const u8, text: []const u8) !void {
+fn openDocument(uri: []const u8, text: []const u8) !void {
     const duped_uri = try std.mem.dupe(allocator, u8, uri);
     const duped_text = try std.mem.dupe(allocator, u8, text);
 
@@ -103,14 +103,14 @@ pub fn openDocument(uri: []const u8, text: []const u8) !void {
     }
 }
 
-pub fn closeDocument(uri: []const u8) !void {
+fn closeDocument(uri: []const u8) !void {
     if (documents.remove(uri)) |entry| {
         try log("Closing document: {}", .{uri});
         freeDocument(entry.value);
     }
 }
 
-pub fn cacheSane(document: *types.TextDocument) !void {
+fn cacheSane(document: *types.TextDocument) !void {
     try log("Caching sane text for document: {}", .{document.uri});
 
     if (document.sane_text) |old_sane| {
@@ -119,7 +119,7 @@ pub fn cacheSane(document: *types.TextDocument) !void {
     document.sane_text = try std.mem.dupe(allocator, u8, document.text);
 }
 
-pub fn publishDiagnostics(document: *types.TextDocument) !void {
+fn publishDiagnostics(document: *types.TextDocument) !void {
     const tree = try std.zig.parse(allocator, document.text);
     defer tree.deinit();
 
@@ -203,7 +203,7 @@ pub fn publishDiagnostics(document: *types.TextDocument) !void {
     });
 }
 
-pub fn completeGlobal(id: i64, document: *types.TextDocument) !void {
+fn completeGlobal(id: i64, document: *types.TextDocument) !void {
     // The tree uses its own arena, so we just pass our main allocator.
     var tree = try std.zig.parse(allocator, document.text);
 
@@ -301,9 +301,7 @@ const builtin_completions = block: {
     break :block temp;
 };
 
-// pub fn signature
-
-pub fn processJsonRpc(parser: *std.json.Parser, json: []const u8) !void {
+fn processJsonRpc(parser: *std.json.Parser, json: []const u8) !void {
     var tree = try parser.parse(json);
     defer tree.deinit();
 
