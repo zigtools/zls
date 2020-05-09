@@ -143,26 +143,25 @@ fn publishDiagnostics(document: *types.TextDocument) !void {
 
     var diagnostics = std.ArrayList(types.Diagnostic).init(&arena.allocator);
 
-    if (tree.errors.len > 0) {
-        var index: usize = 0;
-        while (index < tree.errors.len) : (index += 1) {
-            const err = tree.errors.at(index);
-            const loc = tree.tokenLocation(0, err.loc());
+    var error_it = tree.errors.iterator(0);
+    while (error_it.next()) |err| {
+        const loc = tree.tokenLocation(0, err.loc());
 
-            var mem_buffer: [256]u8 = undefined;
-            var fbs = std.io.fixedBufferStream(&mem_buffer);
-            try tree.renderError(err, fbs.outStream());
+        var mem_buffer: [256]u8 = undefined;
+        var fbs = std.io.fixedBufferStream(&mem_buffer);
+        try tree.renderError(err, fbs.outStream());
 
-            try diagnostics.append(.{
-                .range = astLocationToRange(loc),
-                .severity = .Error,
-                .code = @tagName(err.*),
-                .source = "zls",
-                .message = try std.mem.dupe(&arena.allocator, u8, fbs.getWritten()),
-                // .relatedInformation = undefined
-            });
-        }
-    } else {
+        try diagnostics.append(.{
+            .range = astLocationToRange(loc),
+            .severity = .Error,
+            .code = @tagName(err.*),
+            .source = "zls",
+            .message = try std.mem.dupe(&arena.allocator, u8, fbs.getWritten()),
+            // .relatedInformation = undefined
+        });
+    }
+
+    if (tree.errors.len == 0) {
         try cacheSane(document);
         var decls = tree.root_node.decls.iterator(0);
         while (decls.next()) |decl_ptr| {
