@@ -1,13 +1,15 @@
 const std = @import("std");
 
+const ast = std.zig.ast;
+
 /// REALLY BAD CODE, PLEASE DON'T USE THIS!!!!!!! (only for testing)
-pub fn getFunctionByName(tree: *std.zig.ast.Tree, name: []const u8) ?*std.zig.ast.Node.FnProto {
+pub fn getFunctionByName(tree: *ast.Tree, name: []const u8) ?*ast.Node.FnProto {
     var decls = tree.root_node.decls.iterator(0);
     while (decls.next()) |decl_ptr| {
         var decl = decl_ptr.*;
         switch (decl.id) {
             .FnProto => {
-                const func = decl.cast(std.zig.ast.Node.FnProto).?;
+                const func = decl.cast(ast.Node.FnProto).?;
                 if (std.mem.eql(u8, tree.tokenSlice(func.name_token.?), name)) return func;
             },
             else => {}
@@ -23,10 +25,10 @@ pub fn getFunctionByName(tree: *std.zig.ast.Tree, name: []const u8) ?*std.zig.as
 ///var comments = getFunctionDocComments(allocator, tree, func);
 ///defer if (comments) |comments_pointer| allocator.free(comments_pointer);
 ///```
-pub fn getDocComments(allocator: *std.mem.Allocator, tree: *std.zig.ast.Tree, node: *std.zig.ast.Node) !?[]const u8 {
+pub fn getDocComments(allocator: *std.mem.Allocator, tree: *ast.Tree, node: *ast.Node) !?[]const u8 {
     switch (node.id) {
         .FnProto => {
-            const func = node.cast(std.zig.ast.Node.FnProto).?;
+            const func = node.cast(ast.Node.FnProto).?;
             if (func.doc_comments) |doc_comments| {
                 var doc_it = doc_comments.lines.iterator(0);
                 var lines = std.ArrayList([]const u8).init(allocator);
@@ -42,7 +44,7 @@ pub fn getDocComments(allocator: *std.mem.Allocator, tree: *std.zig.ast.Tree, no
             }
         },
         .VarDecl => {
-            const var_decl = node.cast(std.zig.ast.Node.VarDecl).?;
+            const var_decl = node.cast(ast.Node.VarDecl).?;
             if (var_decl.doc_comments) |doc_comments| {
                 var doc_it = doc_comments.lines.iterator(0);
                 var lines = std.ArrayList([]const u8).init(allocator);
@@ -62,18 +64,54 @@ pub fn getDocComments(allocator: *std.mem.Allocator, tree: *std.zig.ast.Tree, no
 }
 
 /// Gets a function signature (keywords, name, return value)
-pub fn getFunctionSignature(tree: *std.zig.ast.Tree, func: *std.zig.ast.Node.FnProto) []const u8 {
+pub fn getFunctionSignature(tree: *ast.Tree, func: *ast.Node.FnProto) []const u8 {
     const start = tree.tokens.at(func.firstToken()).start;
-    const end = 
-        if (func.body_node) |body| tree.tokens.at(body.firstToken()).start
-        else tree.tokens.at(switch (func.return_type) {
-            .Explicit, .InferErrorSet => |node| node.lastToken()
-        }).end;
+    const end = tree.tokens.at(switch (func.return_type) {
+        .Explicit, .InferErrorSet => |node| node.lastToken()
+    }).end;
     return tree.source[start..end];
 }
 
+/// Gets a function snippet insert text
+pub fn getFunctionSnippet(allocator: *std.mem.Allocator, tree: *ast.Tree, func: *ast.Node.FnProto) ![]const u8 {
+    const name_tok = func.name_token orelse unreachable;
+
+    var buffer = std.ArrayList(u8).init(allocator);
+    try buffer.ensureCapacity(128);
+
+    try buffer.appendSlice(tree.tokenSlice(name_tok));
+    try buffer.append('(');
+
+    var buf_stream = buffer.outStream();
+
+    var param_num = @as(usize, 1);
+    var param_it = func.params.iterator(0);
+    while (param_it.next()) |param_ptr| : (param_num += 1) {
+        const param = param_ptr.*;
+
+        if (param_num != 1) try buffer.appendSlice(", ${")
+        else try buffer.appendSlice("${");
+
+        try buf_stream.print("{}:", .{param_num});
+        var curr_tok = param.firstToken();
+        const end_tok = param.lastToken();
+
+        var first_tok = true;
+        while (curr_tok <= end_tok) : (curr_tok += 1) {
+            try buffer.appendSlice(tree.tokenSlice(curr_tok));
+            if (!first_tok and curr_tok != end_tok) try buffer.append(' ')
+            else first_tok = false;
+        }
+
+        try buffer.append('}');
+    }
+    try buffer.append(')');
+
+    return buffer.toOwnedSlice();
+}
+
 /// Gets a function signature (keywords, name, return value)
-pub fn getVariableSignature(tree: *std.zig.ast.Tree, var_decl: *std.zig.ast.Node.VarDecl) []const u8 {
+pub fn getVariableSignature(tree: *ast.Tree, var_decl: *ast.Node.VarDecl) []const u8 {
     const start = tree.tokens.at(var_decl.firstToken()).start;
     const end = tree.tokens.at(var_decl.semicolon_token).start;
     // var end = 
