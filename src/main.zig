@@ -144,26 +144,25 @@ fn publishDiagnostics(document: *types.TextDocument, config: Config) !void {
 
     var diagnostics = std.ArrayList(types.Diagnostic).init(&arena.allocator);
 
-    if (tree.errors.len > 0) {
-        var index: usize = 0;
-        while (index < tree.errors.len) : (index += 1) {
-            const err = tree.errors.at(index);
-            const loc = tree.tokenLocation(0, err.loc());
+    var error_it = tree.errors.iterator(0);
+    while (error_it.next()) |err| {
+        const loc = tree.tokenLocation(0, err.loc());
 
-            var mem_buffer: [256]u8 = undefined;
-            var fbs = std.io.fixedBufferStream(&mem_buffer);
-            try tree.renderError(err, fbs.outStream());
+        var mem_buffer: [256]u8 = undefined;
+        var fbs = std.io.fixedBufferStream(&mem_buffer);
+        try tree.renderError(err, fbs.outStream());
 
-            try diagnostics.append(.{
-                .range = astLocationToRange(loc),
-                .severity = .Error,
-                .code = @tagName(err.*),
-                .source = "zls",
-                .message = try std.mem.dupe(&arena.allocator, u8, fbs.getWritten()),
-                // .relatedInformation = undefined
-            });
-        }
-    } else {
+        try diagnostics.append(.{
+            .range = astLocationToRange(loc),
+            .severity = .Error,
+            .code = @tagName(err.*),
+            .source = "zls",
+            .message = try std.mem.dupe(&arena.allocator, u8, fbs.getWritten()),
+            // .relatedInformation = undefined
+        });
+    }
+
+    if (tree.errors.len == 0) {
         try cacheSane(document);
         var decls = tree.root_node.decls.iterator(0);
         while (decls.next()) |decl_ptr| {
@@ -232,7 +231,7 @@ fn completeGlobal(id: i64, document: *types.TextDocument, config: Config) !void 
             tree = try std.zig.parse(allocator, sane_text);
         } else return try respondGeneric(id, no_completions_response);
     }
-    else {try cacheSane(document);}
+    else try cacheSane(document);
 
     defer tree.deinit();
 
@@ -242,15 +241,18 @@ fn completeGlobal(id: i64, document: *types.TextDocument, config: Config) !void 
     // Deallocate all temporary data.
     defer arena.deinit();
 
-    // try log("{}", .{&tree.root_node.decls});
     var decls = tree.root_node.decls.iterator(0);
     while (decls.next()) |decl_ptr| {
-
         var decl = decl_ptr.*;
         switch (decl.id) {
             .FnProto => {
                 const func = decl.cast(std.zig.ast.Node.FnProto).?;
                 if (func.name_token) |name_token| {
+                    const insert_text = if (build_options.no_snippets)
+                        null
+                    else
+                        try analysis.getFunctionSnippet(&arena.allocator, tree, func);
+
                     var doc_comments = try analysis.getDocComments(&arena.allocator, tree, decl);
                     var doc = types.MarkupContent{
                         .kind = .Markdown,
@@ -261,6 +263,8 @@ fn completeGlobal(id: i64, document: *types.TextDocument, config: Config) !void 
                         .kind = .Function,
                         .documentation = doc,
                         .detail = analysis.getFunctionSignature(tree, func),
+                        .insertText = insert_text,
+                        .insertTextFormat = if(build_options.no_snippets) .PlainText else .Snippet,
                     });
                 }
             },
