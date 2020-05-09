@@ -248,10 +248,10 @@ fn completeGlobal(id: i64, document: *types.TextDocument, config: Config) !void 
             .FnProto => {
                 const func = decl.cast(std.zig.ast.Node.FnProto).?;
                 if (func.name_token) |name_token| {
-                    const insert_text = if (build_options.no_snippets)
-                        null
+                    const insert_text = if(config.enable_snippets)
+                        try analysis.getFunctionSnippet(&arena.allocator, tree, func)
                     else
-                        try analysis.getFunctionSnippet(&arena.allocator, tree, func);
+                        null;
 
                     var doc_comments = try analysis.getDocComments(&arena.allocator, tree, decl);
                     var doc = types.MarkupContent{
@@ -264,7 +264,7 @@ fn completeGlobal(id: i64, document: *types.TextDocument, config: Config) !void 
                         .documentation = doc,
                         .detail = analysis.getFunctionSignature(tree, func),
                         .insertText = insert_text,
-                        .insertTextFormat = if(build_options.no_snippets) .PlainText else .Snippet,
+                        .insertTextFormat = if(config.enable_snippets) .Snippet else .PlainText,
                     });
                 }
             },
