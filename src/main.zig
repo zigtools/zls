@@ -230,7 +230,7 @@ fn completeGlobal(id: i64, document: *types.TextDocument) !void {
             tree = try std.zig.parse(allocator, sane_text);
         } else return try respondGeneric(id, no_completions_response);
     }
-    else {try cacheSane(document);}
+    else try cacheSane(document);
 
     defer tree.deinit();
 
@@ -240,15 +240,18 @@ fn completeGlobal(id: i64, document: *types.TextDocument) !void {
     // Deallocate all temporary data.
     defer arena.deinit();
 
-    // try log("{}", .{&tree.root_node.decls});
     var decls = tree.root_node.decls.iterator(0);
     while (decls.next()) |decl_ptr| {
-
         var decl = decl_ptr.*;
         switch (decl.id) {
             .FnProto => {
                 const func = decl.cast(std.zig.ast.Node.FnProto).?;
                 if (func.name_token) |name_token| {
+                    const insert_text = if (build_options.no_snippets)
+                        null
+                    else
+                        try analysis.getFunctionSnippet(&arena.allocator, tree, func);
+
                     var doc_comments = try analysis.getDocComments(&arena.allocator, tree, decl);
                     var doc = types.MarkupContent{
                         .kind = .Markdown,
@@ -259,6 +262,8 @@ fn completeGlobal(id: i64, document: *types.TextDocument) !void {
                         .kind = .Function,
                         .documentation = doc,
                         .detail = analysis.getFunctionSignature(tree, func),
+                        .insertText = insert_text,
+                        .insertTextFormat = if(build_options.no_snippets) .PlainText else .Snippet,
                     });
                 }
             },
@@ -300,12 +305,14 @@ const builtin_completions = block: {
 
     for (data.builtins) |builtin, i| {
         var cutoff = std.mem.indexOf(u8, builtin, "(") orelse builtin.len;
+        const insert_text = if(build_options.no_snippets) builtin[1..cutoff] else builtin[1..];
+
         temp[i] = .{
             .label = builtin[0..cutoff],
             .kind = .Function,
 
             .filterText = builtin[1..cutoff],
-            .insertText = builtin[1..],
+            .insertText = insert_text,
             .detail = data.builtin_details[i],
             .documentation = .{
                 .kind = .Markdown,
