@@ -72,12 +72,8 @@ pub fn getFunctionSignature(tree: *ast.Tree, func: *ast.Node.FnProto) []const u8
     return tree.source[start..end];
 }
 
-
-// "@cmpxchgStrong(${1:comptime T: type}, ${2:ptr: *T}, ${3:expected_value: T}, ${4:new_value: T}, ${5:success_order: AtomicOrder}, ${6:fail_order: AtomicOrder})"
-// fooer(${1:arg: var }, ${2:b: usize })
 /// Gets a function snippet insert text
 pub fn getFunctionSnippet(allocator: *std.mem.Allocator, tree: *ast.Tree, func: *ast.Node.FnProto) ![]const u8 {
-    // return "cmpxchgStrong(${1:comptime T: type}, ${2:ptr: *T}, ${3:expected_value: T}, ${4:new_value: T}, ${5:success_order: AtomicOrder}, ${6:fail_order: AtomicOrder})";
     const name_tok = func.name_token orelse unreachable;
 
     var buffer = std.ArrayList(u8).init(allocator);
