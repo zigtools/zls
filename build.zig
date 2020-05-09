@@ -25,12 +25,6 @@ pub fn build(b: *std.build.Builder) !void {
 
     exe.addBuildOption(
         bool,
-        "no_snippets",
-        b.option(bool, "no_snippets", "Use regular completion without snippets. Useful for compatibility.") orelse false,
-    );
-
-    exe.addBuildOption(
-        bool,
         "allocation_info",
         b.option(bool, "allocation_info", "Enable use of debugging allocator and info logging.") orelse false,
     );

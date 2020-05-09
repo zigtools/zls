@@ -1,6 +1,7 @@
 const std = @import("std");
 const build_options = @import("build_options");
 
+const Config = @import("config.zig");
 const Uri = @import("uri.zig");
 const data = @import("data/" ++ build_options.data_version ++ ".zig");
 const types = @import("types.zig");
@@ -133,7 +134,7 @@ fn astLocationToRange(loc: std.zig.ast.Tree.Location) types.Range {
     };
 }
 
-fn publishDiagnostics(document: *types.TextDocument) !void {
+fn publishDiagnostics(document: *types.TextDocument, config: Config) !void {
     const tree = try std.zig.parse(allocator, document.text);
     defer tree.deinit();
 
@@ -220,7 +221,7 @@ fn publishDiagnostics(document: *types.TextDocument) !void {
     });
 }
 
-fn completeGlobal(id: i64, document: *types.TextDocument) !void {
+fn completeGlobal(id: i64, document: *types.TextDocument, config: Config) !void {
     // The tree uses its own arena, so we just pass our main allocator.
     var tree = try std.zig.parse(allocator, document.text);
 
@@ -247,10 +248,10 @@ fn completeGlobal(id: i64, document: *types.TextDocument) !void {
             .FnProto => {
                 const func = decl.cast(std.zig.ast.Node.FnProto).?;
                 if (func.name_token) |name_token| {
-                    const insert_text = if (build_options.no_snippets)
-                        null
+                    const insert_text = if(config.enable_snippets)
+                        try analysis.getFunctionSnippet(&arena.allocator, tree, func)
                     else
-                        try analysis.getFunctionSnippet(&arena.allocator, tree, func);
+                        null;
 
                     var doc_comments = try analysis.getDocComments(&arena.allocator, tree, decl);
                     var doc = types.MarkupContent{
@@ -263,7 +264,7 @@ fn completeGlobal(id: i64, document: *types.TextDocument) !void {
                         .documentation = doc,
                         .detail = analysis.getFunctionSignature(tree, func),
                         .insertText = insert_text,
-                        .insertTextFormat = if(build_options.no_snippets) .PlainText else .Snippet,
+                        .insertTextFormat = if(config.enable_snippets) .Snippet else .PlainText,
                     });
                 }
             },
@@ -301,18 +302,18 @@ fn completeGlobal(id: i64, document: *types.TextDocument) !void {
 // Compute builtin completions at comptime.
 const builtin_completions = block: {
     @setEvalBranchQuota(3_500);
-    var temp: [data.builtins.len]types.CompletionItem = undefined;
+    const CompletionList = [data.builtins.len]types.CompletionItem;
+    var with_snippets: CompletionList = undefined;
+    var without_snippets: CompletionList = undefined;
 
     for (data.builtins) |builtin, i| {
-        var cutoff = std.mem.indexOf(u8, builtin, "(") orelse builtin.len;
-        const insert_text = if(build_options.no_snippets) builtin[1..cutoff] else builtin[1..];
+        const cutoff = std.mem.indexOf(u8, builtin, "(") orelse builtin.len;
 
-        temp[i] = .{
+        const base_completion = types.CompletionItem{
             .label = builtin[0..cutoff],
             .kind = .Function,
 
             .filterText = builtin[1..cutoff],
-            .insertText = insert_text,
             .detail = data.builtin_details[i],
             .documentation = .{
                 .kind = .Markdown,
@@ -320,11 +321,17 @@ const builtin_completions = block: {
             },
         };
 
-        if (!build_options.no_snippets)
-            temp[i].insertTextFormat = .Snippet;
+        with_snippets[i] = base_completion;
+        with_snippets[i].insertText = builtin[1..];
+        with_snippets[i].insertTextFormat = .Snippet;
+
+        without_snippets[i] = base_completion;
+        without_snippets[i].insertText = builtin[1..cutoff];
     }
 
-    break :block temp;
+    break :block [2]CompletionList {
+        without_snippets, with_snippets
+    };
 };
 
 const PositionContext = enum {
@@ -436,7 +443,7 @@ fn documentPositionContext(doc: types.TextDocument, pos_index: usize) PositionCo
     return context;
 }
 
-fn processJsonRpc(parser: *std.json.Parser, json: []const u8) !void {
+fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !void {
     var tree = try parser.parse(json);
     defer tree.deinit();
 
@@ -464,7 +471,7 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8) !void {
         const text = document.getValue("text").?.String;
 
         try openDocument(uri, text);
-        try publishDiagnostics(&(documents.get(uri).?.value));
+        try publishDiagnostics(&(documents.get(uri).?.value), config);
     } else if (std.mem.eql(u8, method, "textDocument/didChange")) {
         const text_document = params.getValue("textDocument").?.Object;
         const uri = text_document.getValue("uri").?.String;
@@ -522,7 +529,7 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8) !void {
             }
         }
 
-        try publishDiagnostics(document);
+        try publishDiagnostics(document, config);
     } else if (std.mem.eql(u8, method, "textDocument/didSave")) {
         // noop
     } else if (std.mem.eql(u8, method, "textDocument/didClose")) {
@@ -552,12 +559,12 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8) !void {
                     .result = .{
                         .CompletionList = .{
                             .isIncomplete = false,
-                            .items = builtin_completions[0..],
+                            .items = builtin_completions[@boolToInt(config.enable_snippets)][0..],
                         },
                     },
                 });
             } else if (pos_context == .var_access or pos_context == .empty) {
-                try completeGlobal(id, document);
+                try completeGlobal(id, document, config);
             } else {
                 try respondGeneric(id, no_completions_response);
             }
@@ -590,7 +597,6 @@ var debug_alloc_state: std.testing.LeakCountAllocator = undefined;
 const debug_alloc: ?*std.testing.LeakCountAllocator = if (build_options.allocation_info) &debug_alloc_state else null;
 
 pub fn main() anyerror!void {
-
     // TODO: Use a better purpose general allocator once std has one.
     // Probably after the generic composable allocators PR?
     // This is not too bad for now since most allocations happen in local areans.
@@ -615,17 +621,50 @@ pub fn main() anyerror!void {
     const stdin = std.io.getStdIn().inStream();
     stdout = std.io.getStdOut().outStream();
 
+
     documents = std.StringHashMap(types.TextDocument).init(allocator);
+
+    // Read he configuration, if any.
+    var config = Config{};
+
+    // TODO: Investigate using std.fs.Watch to detect writes to the config and reload it.
+    config_read: {
+        var exec_dir_bytes: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+        const exec_dir_path = std.fs.selfExeDirPath(&exec_dir_bytes) catch break :config_read;
+    
+        var exec_dir = std.fs.cwd().openDir(exec_dir_path, .{}) catch break :config_read;
+        defer exec_dir.close();
+
+        var conf_file = exec_dir.openFile("zls.json", .{}) catch break :config_read;
+        defer conf_file.close();
+
+        const conf_file_stat = conf_file.stat() catch break :config_read;
+
+        // Allocate enough memory for the whole file.
+        var file_buf = try allocator.alloc(u8, conf_file_stat.size);
+        defer allocator.free(file_buf);
+
+        const bytes_read = conf_file.readAll(file_buf) catch break :config_read;
+        if (bytes_read != conf_file_stat.size) break :config_read;
+
+        // TODO: Better errors? Doesnt seem like std.json can provide us positions or context.
+        // Note that we don't need to pass an allocator to parse since we are not using pointer or slice fields.
+        // Thus, we don't need to even call parseFree.
+        config = std.json.parse(Config, &std.json.TokenStream.init(file_buf), std.json.ParseOptions{}) catch |err| {
+            std.debug.warn("Error while parsing configuration file: {}\nUsing default config.\n", .{err});
+            break :config_read;
+        };
+    }
+
+    // This JSON parser is passed to processJsonRpc and reset.
+    var json_parser = std.json.Parser.init(allocator, false);
+    defer json_parser.deinit();
 
     var offset: usize = 0;
     var bytes_read: usize = 0;
 
     var index: usize = 0;
     var content_len: usize = 0;
-
-    // This JSON parser is passed to processJsonRpc and reset.
-    var parser = std.json.Parser.init(allocator, false);
-    defer parser.deinit();
 
     stdin_poll: while (true) {
         if (offset >= 16 and std.mem.startsWith(u8, buffer.items, "Content-Length: ")) {
@@ -657,8 +696,8 @@ pub fn main() anyerror!void {
                     offset += bytes_read;
                 }
 
-                try processJsonRpc(&parser, buffer.items[index .. index + content_len]);
-                parser.reset();
+                try processJsonRpc(&json_parser, buffer.items[index .. index + content_len], config);
+                json_parser.reset();
 
                 offset = 0;
                 content_len = 0;

@@ -16,10 +16,18 @@ zig build
 
 | Option | Type | What it Does |
 | --- | --- | --- |
-| `-Dno_snippets` | `bool` | Enables "no snippets" mode for compatibility with language clients that do not support snippets (such as ale). |
 | `-Ddata_version` | `string` | The data file version. Any files in the `src/data` file that correspond with the Zig version you want the language server to build for (0.6.0, master).
 
 Then, you can use the `zls` executable in an editor of your choice that has a Zig language server client!
+
+### Configuration options
+
+You can configure zls by providing a zls.json file in the same directory as the executable.  
+The following options are currently available.  
+
+| Option | Type | Default value | What it Does |
+| --- | --- | --- | --- |
+| `enable_snippets` | `bool` | `true` | Enables snippet completion, set to false for compatibility with language clients that do not support snippets (such as ale). |
 
 ## Usage
 
