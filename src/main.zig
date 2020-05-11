@@ -298,6 +298,38 @@ fn completeGlobal(id: i64, document: *types.TextDocument, config: Config) !void 
     });
 }
 
+fn completeFieldAccess(id: i64, document: *types.TextDocument, index: usize, config: Config) !void {
+    // The tree uses its own arena, so we just pass our main allocator.
+    var tree = try std.zig.parse(allocator, document.text);
+
+    if (tree.errors.len > 0) {
+        if (document.sane_text) |sane_text| {
+            tree.deinit();
+            tree = try std.zig.parse(allocator, sane_text);
+        } else return try respondGeneric(id, no_completions_response);
+    }
+    else try cacheSane(document);
+
+    defer tree.deinit();
+
+    // We use a local arena allocator to deallocate all temporary data without iterating
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    var completions = std.ArrayList(types.CompletionItem).init(&arena.allocator);
+    // Deallocate all temporary data.
+    defer arena.deinit();
+
+    try log("{}", .{});
+
+    try send(types.Response{
+        .id = .{.Integer = id},
+        .result = .{
+            .CompletionList = .{
+                .isIncomplete = false,
+                .items = completions.items,
+            },
+        },
+    });
+}
 
 // Compute builtin completions at comptime.
 const builtin_completions = block: {
@@ -565,6 +597,8 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
                 });
             } else if (pos_context == .var_access or pos_context == .empty) {
                 try completeGlobal(id, document, config);
+            } else if (pos_context == .field_access) {
+                try completeFieldAccess(id, document, pos_index, config);
             } else {
                 try respondGeneric(id, no_completions_response);
             }

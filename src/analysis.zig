@@ -129,3 +129,137 @@ pub fn isCamelCase(name: []const u8) bool {
 pub fn isPascalCase(name: []const u8) bool {
     return std.ascii.isUpper(name[0]) and std.mem.indexOf(u8, name, "_") == null;
 }
+
+// ANALYSIS ENGINE
+// Very WIP, only works on global values at the moment
+
+// TODO Major rework needed. This works in a sandbox, but not in the actual editor as completion
+// stubs (e.g. "completeThis", "completeThis.", etc.) causes errors in the Zig parser.
+
+pub fn getDecl(tree: *std.zig.ast.Tree, name: []const u8) ?*std.zig.ast.Node {
+    var decls = tree.root_node.decls.iterator(0);
+    while (decls.next()) |decl_ptr| {
+        var decl = decl_ptr.*;
+        switch (decl.id) {
+            .VarDecl => {
+                const vari = decl.cast(std.zig.ast.Node.VarDecl).?;
+                if (std.mem.eql(u8, tree.tokenSlice(vari.name_token), name)) return decl;
+            },
+            .FnProto => {
+                const func = decl.cast(std.zig.ast.Node.FnProto).?;
+                if (func.name_token != null and std.mem.eql(u8, tree.tokenSlice(func.name_token.?), name)) return decl;
+            },
+            else => {}
+        }
+    }
+    return null;
+}
+
+pub fn getContainerField(tree: *std.zig.ast.Tree, container: *std.zig.ast.ContainerDecl, name: []const u8) ?*std.zig.ast.Node {
+    var decls = container.decls.iterator(0);
+    while (decls.next()) |decl_ptr| {
+        var decl = decl_ptr.*;
+        switch (decl.id) {
+            .VarDecl => {
+                const vari = decl.cast(std.zig.ast.Node.VarDecl).?;
+                if (std.mem.eql(u8, tree.tokenSlice(vari.name_token), name)) return decl;
+            },
+            .FnProto => {
+                const func = decl.cast(std.zig.ast.Node.FnProto).?;
+                if (func.name_token != null and std.mem.eql(u8, tree.tokenSlice(func.name_token.?), name)) return decl;
+            },
+            else => {}
+        }
+    }
+    return null;
+}
+
+pub fn resolveNode(tree: *std.zig.ast.Tree, node: *std.zig.ast.Node) ?*std.zig.ast.Node {
+    switch (node.id) {
+        .Identifier => {
+            var id = node.cast(std.zig.ast.Node.Identifier).?;
+            var maybe_decl = getDecl(tree, tree.tokenSlice(id.token));
+            if (maybe_decl) |decl| {
+                return decl;
+            }
+        },
+        else => {}
+    }
+    
+    return null;
+}
+
+pub fn getCompletionsForValue(allocator: *std.mem.Allocator, tree: *std.zig.ast.Tree, node: *std.zig.ast.Node) ![]*std.zig.ast.Node {
+    var nodes = std.ArrayList(*std.zig.ast.Node).init(allocator);
+
+    switch (node.id) {
+        .ContainerDecl => {
+            var cont = node.cast(std.zig.ast.Node.ContainerDecl).?;
+            var decl_it = cont.fields_and_decls.iterator(0);
+
+            while (decl_it.next()) |decl| {
+                try nodes.append(decl.*);
+            }
+        },
+        .ContainerField => {
+            var field = node.cast(std.zig.ast.Node.ContainerField).?;
+            
+        },
+        .VarDecl => {
+            var vari = node.cast(std.zig.ast.Node.VarDecl).?;
+            // if (vari.type_node) |type_node| return getCompletionsForValue(allocator, tree, type_node);
+            // if (vari.init_node) |init_node| return getCompletionsForValue(allocator, tree, init_node);
+            return getCompletionsForValue(allocator, tree, vari.type_node orelse vari.init_node.?);
+        },
+        .Identifier => {
+            var id = node.cast(std.zig.ast.Node.Identifier).?;
+            var maybe_decl = getDecl(tree, tree.tokenSlice(id.token));
+            if (maybe_decl) |decl| return getCompletionsForValue(allocator, tree, decl);
+        },
+        .FnProto => {
+            var func = node.cast(std.zig.ast.Node.FnProto).?;
+            // std.debug.warn("{}", .{func.return_type});
+            switch (func.return_type) {
+                .Explicit, .InferErrorSet => |return_node| {
+                    if (resolveNode(tree, return_node)) |resolved_node| {
+                        return getCompletionsForValue(allocator, tree, resolved_node);
+                    }
+                }
+            }
+        },
+        .InfixOp => {
+            var infix = node.cast(std.zig.ast.Node.InfixOp).?;
+
+            // std.debug.warn("{}", .{infix});
+            // switch (infix.op) {
+            //     .Period => {
+            //         std.debug.warn("\n{}.{}\n", .{
+            //             getCompletionsForValue(allocator, tree, infix.lhs),
+            //             infix.rhs
+            //         });
+            //         return getCompletionsForValue(allocator, tree, infix.lhs);
+            //     },
+            //     else => {}
+            // }
+        },
+        .SuffixOp => {
+            var suffix = node.cast(std.zig.ast.Node.SuffixOp).?;
+
+            // std.debug.warn("{}", .{suffix});
+
+            switch (suffix.op) {
+                .Call => {
+                    if (resolveNode(tree, suffix.lhs.node)) |rnode| {
+                        return getCompletionsForValue(allocator, tree, rnode);
+                    }
+                },
+                else => {}
+            }
+        },
+        else => {
+            std.debug.warn("{}\n\n", .{node.id});
+        }
+    }
+
+    return nodes.toOwnedSlice();
+}
