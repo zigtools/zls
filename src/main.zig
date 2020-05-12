@@ -253,6 +253,8 @@ fn completeGlobal(id: i64, document: *types.TextDocument, config: Config) !void 
                     else
                         null;
 
+                    if (insert_text != null) try log("SNIP: {}", .{insert_text});
+
                     var doc_comments = try analysis.getDocComments(&arena.allocator, tree, decl);
                     var doc = types.MarkupContent{
                         .kind = .Markdown,
