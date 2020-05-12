@@ -88,22 +88,41 @@ pub fn getFunctionSnippet(allocator: *std.mem.Allocator, tree: *ast.Tree, func: 
     var param_it = func.params.iterator(0);
     while (param_it.next()) |param_ptr| : (param_num += 1) {
         const param = param_ptr.*;
+        const param_decl = param.cast(ast.Node.ParamDecl).?;
 
         if (param_num != 1) try buffer.appendSlice(", ${")
         else try buffer.appendSlice("${");
 
         try buf_stream.print("{}:", .{param_num});
-        var curr_tok = param.firstToken();
-        const end_tok = param.lastToken();
 
-        var first_tok = true;
+        if (param_decl.comptime_token) |_| {
+            try buffer.appendSlice("comptime ");
+        }
+
+        if (param_decl.noalias_token) |_| {
+            try buffer.appendSlice("noalias ");
+        }
+
+        if (param_decl.name_token) |name_token| {
+            try buffer.appendSlice(tree.tokenSlice(name_token));
+            try buffer.appendSlice(": ");
+        }
+
+        if (param_decl.var_args_token) |_| {
+            try buffer.appendSlice("...");
+        }
+
+        var curr_tok = param_decl.type_node.firstToken();
+        var end_tok = param_decl.type_node.lastToken();
         while (curr_tok <= end_tok) : (curr_tok += 1) {
             try buffer.appendSlice(tree.tokenSlice(curr_tok));
-            if (!first_tok and curr_tok != end_tok) try buffer.append(' ')
-            else first_tok = false;
+            if (tree.tokens.at(curr_tok).id == .Comma) try buffer.append(' ');
         }
 
         try buffer.append('}');
+        if (param_it.peek() != null) {
+            try buffer.appendSlice(", ");
+        }
     }
     try buffer.append(')');
 
