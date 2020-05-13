@@ -158,6 +158,18 @@ pub const TextDocument = struct {
 
         return @intCast(usize, index);
     }
+
+    pub fn getLine(self: TextDocument, target_line: usize) ![]const u8 {
+        var split_iterator = std.mem.split(self.text, "\n");
+
+        var line: i64 = 0;
+        while (line < target_line) : (line += 1) {
+            _ = split_iterator.next() orelse return error.InvalidParams;
+        }
+        if (split_iterator.next()) |next| {
+            return next;
+        } else return error.InvalidParams;
+    }
 };
 
 pub const TextEdit = struct {
