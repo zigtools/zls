@@ -222,11 +222,10 @@ fn publishDiagnostics(document: *types.TextDocument, config: Config) !void {
 }
 
 fn nodeToCompletion(alloc: *std.mem.Allocator, tree: *std.zig.ast.Tree, decl: *std.zig.ast.Node, config: Config) !?types.CompletionItem {
-    var doc_comments = try analysis.getDocComments(alloc, tree, decl);
-    var doc = types.MarkupContent{
+    var doc = if (try analysis.getDocComments(alloc, tree, decl)) |doc_comments| types.MarkupContent{
         .kind = .Markdown,
-        .value = doc_comments orelse "",
-    };
+        .value = doc_comments,
+    } else null;
 
     switch (decl.id) {
         .FnProto => {
