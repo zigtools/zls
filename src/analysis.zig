@@ -120,9 +120,6 @@ pub fn getFunctionSnippet(allocator: *std.mem.Allocator, tree: *ast.Tree, func: 
         }
 
         try buffer.append('}');
-        if (param_it.peek() != null) {
-            try buffer.appendSlice(", ");
-        }
     }
     try buffer.append(')');
 
@@ -214,7 +211,9 @@ pub fn resolveTypeOfNode(tree: *std.zig.ast.Tree, node: *std.zig.ast.Node) ?*std
             switch (infix_op.op) {
                 .Period => {
                     var left = resolveTypeOfNode(tree, infix_op.lhs).?;
-                    return getChild(tree, left, nodeToString(tree, infix_op.rhs));
+                    if (nodeToString(tree, infix_op.rhs)) |string| {
+                        return getChild(tree, left, string);
+                    } else return null;
                 },
                 else => {}
             }
@@ -280,7 +279,7 @@ pub fn getCompletionsFromNode(allocator: *std.mem.Allocator, tree: *std.zig.ast.
     return nodes.items;
 }
 
-pub fn nodeToString(tree: *std.zig.ast.Tree, node: *std.zig.ast.Node) []const u8 {
+pub fn nodeToString(tree: *std.zig.ast.Tree, node: *std.zig.ast.Node) ?[]const u8 {
     switch (node.id) {
         .ContainerField => {
             const field = node.cast(std.zig.ast.Node.ContainerField).?;
@@ -290,12 +289,18 @@ pub fn nodeToString(tree: *std.zig.ast.Tree, node: *std.zig.ast.Node) []const u8
             const field = node.cast(std.zig.ast.Node.Identifier).?;
             return tree.tokenSlice(field.token);
         },
+        .FnProto => {
+            const func = node.cast(std.zig.ast.Node.FnProto).?;
+            if (func.name_token) |name_token| {
+                return tree.tokenSlice(name_token);
+            }
+        },
         else => {
             std.debug.warn("INVALID: {}\n", .{node.id});
         }
     }
     
-    return "";
+    return null;
 }
 
 pub fn nodesToString(tree: *std.zig.ast.Tree, maybe_nodes: ?[]*std.zig.ast.Node) void {

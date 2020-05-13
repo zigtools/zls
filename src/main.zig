@@ -315,10 +315,12 @@ fn completeFieldAccess(id: i64, document: *types.TextDocument, position: types.P
         if (analysis.getNodeFromTokens(tree, &tree.root_node.base, &tokenizer)) |node| {
             var index: usize = 0;
             while (node.iterate(index)) |child_node| {
-                try completions.append(.{
-                    .label = analysis.nodeToString(tree, child_node),
-                    .kind = .Variable, 
-                });
+                if (analysis.nodeToString(tree, child_node)) |string| {
+                    try completions.append(.{
+                        .label = string,
+                        .kind = .Variable, 
+                    });
+                }
     
                 index += 1;
             }
