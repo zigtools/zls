@@ -310,7 +310,6 @@ fn completeFieldAccess(id: i64, document: *types.TextDocument, position: types.P
         defer arena.deinit();
 
         var line = try document.getLine(@intCast(usize, position.line));
-        try log("{}", .{line});
         var tokenizer = std.zig.Tokenizer.init(line);
 
         if (analysis.getNodeFromTokens(tree, &tree.root_node.base, &tokenizer)) |node| {
