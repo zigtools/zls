@@ -248,7 +248,7 @@ fn completeGlobal(id: i64, document: *types.TextDocument, config: Config) !void 
             .FnProto => {
                 const func = decl.cast(std.zig.ast.Node.FnProto).?;
                 if (func.name_token) |name_token| {
-                    const insert_text = if(config.enable_snippets)
+                    const insert_text = if (config.enable_snippets)
                         try analysis.getFunctionSnippet(&arena.allocator, tree, func)
                     else
                         null;
@@ -264,7 +264,7 @@ fn completeGlobal(id: i64, document: *types.TextDocument, config: Config) !void 
                         .documentation = doc,
                         .detail = analysis.getFunctionSignature(tree, func),
                         .insertText = insert_text,
-                        .insertTextFormat = if(config.enable_snippets) .Snippet else .PlainText,
+                        .insertTextFormat = if (config.enable_snippets) .Snippet else .PlainText,
                     });
                 }
             },
@@ -316,10 +316,37 @@ fn completeFieldAccess(id: i64, document: *types.TextDocument, position: types.P
             var index: usize = 0;
             while (node.iterate(index)) |child_node| {
                 if (analysis.nodeToString(tree, child_node)) |string| {
-                    try completions.append(.{
-                        .label = string,
-                        .kind = .Variable, 
-                    });
+                    var doc_comments = try analysis.getDocComments(&arena.allocator, tree, child_node);
+                    var doc = types.MarkupContent{
+                        .kind = .Markdown,
+                        .value = doc_comments orelse "",
+                    };
+                    switch (child_node.id) {
+                        .FnProto => {
+                            const func = child_node.cast(std.zig.ast.Node.FnProto).?; 
+
+                            const insert_text = if (config.enable_snippets)
+                                try analysis.getFunctionSnippet(&arena.allocator, tree, func)
+                            else
+                                null;
+
+                            try completions.append(.{
+                                .label = string,
+                                .kind = .Function,
+                                .documentation = doc,
+                                .detail = analysis.getFunctionSignature(tree, func),
+                                .insertText = insert_text,
+                                .insertTextFormat = if (config.enable_snippets) .Snippet else .PlainText,
+                            });
+                        },
+                        else => {
+                            try completions.append(.{
+                                .label = string,
+                                .kind = .Field,
+                                .documentation = doc
+                            });
+                        }
+                    }
                 }
     
                 index += 1;
