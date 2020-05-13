@@ -223,6 +223,15 @@ pub fn resolveTypeOfNode(tree: *std.zig.ast.Tree, node: *std.zig.ast.Node) ?*std
                 else => {}
             }
         },
+        .PrefixOp => {
+            const prefix_op = node.cast(std.zig.ast.Node.PrefixOp).?;
+            switch (prefix_op.op) {
+                .PtrType => {
+                    return resolveTypeOfNode(tree, prefix_op.rhs);
+                },
+                else => {}
+            }
+        },
         else => {
             std.debug.warn("Type resolution case not implemented; {}\n", .{node.id});
         }
@@ -247,7 +256,7 @@ pub fn getNodeFromTokens(tree: *std.zig.ast.Tree, node: *std.zig.ast.Node, token
                         if (resolveTypeOfNode(tree, child)) |child_type| {
                             current_node = child_type;
                         } else return null;
-                    }
+                    } else return null;
                 } else return null;
             },
             .Period => {
