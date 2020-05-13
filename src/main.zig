@@ -628,18 +628,18 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
             try respondGeneric(id, no_completions_response);
         }
     } else if (std.mem.eql(u8, method, "textDocument/signatureHelp")) {
-        try respondGeneric(id, 
-        \\,"result":{"signatures":[{
-        \\"label": "nameOfFunction(aNumber: u8)",
-        \\"documentation": {"kind": "markdown", "value": "Description of the function in **Markdown**!"},
-        \\"parameters": [
-        \\{"label": [15, 27], "documentation": {"kind": "markdown", "value": "An argument"}}
-        \\]
-        \\}]}}
-        );
         // try respondGeneric(id, 
-        // \\,"result":{"signatures":[]}}
+        // \\,"result":{"signatures":[{
+        // \\"label": "nameOfFunction(aNumber: u8)",
+        // \\"documentation": {"kind": "markdown", "value": "Description of the function in **Markdown**!"},
+        // \\"parameters": [
+        // \\{"label": [15, 27], "documentation": {"kind": "markdown", "value": "An argument"}}
+        // \\]
+        // \\}]}}
         // );
+        try respondGeneric(id, 
+        \\,"result":{"signatures":[]}}
+        );
     } else if (root.Object.getValue("id")) |_| {
         try log("Method with return value not implemented: {}", .{method});
         try respondGeneric(id, not_implemented_response);
