@@ -298,6 +298,54 @@ fn completeGlobal(id: i64, document: *types.TextDocument, config: Config) !void 
     });
 }
 
+fn completeFieldAccess(id: i64, document: *types.TextDocument, position: types.Position, config: Config) !void {
+    if (document.sane_text) |sane_text| {
+        var tree = try std.zig.parse(allocator, sane_text);
+        defer tree.deinit();
+
+        // We use a local arena allocator to deallocate all temporary data without iterating
+        var arena = std.heap.ArenaAllocator.init(allocator);
+        var completions = std.ArrayList(types.CompletionItem).init(&arena.allocator);
+        // Deallocate all temporary data.
+        defer arena.deinit();
+
+        var line = try document.getLine(@intCast(usize, position.line));
+        try log("{}", .{line});
+        var tokenizer = std.zig.Tokenizer.init(line);
+
+        if (analysis.getNodeFromTokens(tree, &tree.root_node.base, &tokenizer)) |node| {
+            var index: usize = 0;
+            while (node.iterate(index)) |child_node| {
+                try completions.append(.{
+                    .label = analysis.nodeToString(tree, child_node),
+                    .kind = .Variable, 
+                });
+    
+                index += 1;
+            }
+        }
+
+        try send(types.Response{
+            .id = .{.Integer = id},
+            .result = .{
+                .CompletionList = .{
+                    .isIncomplete = false,
+                    .items = completions.items,
+                },
+            },
+        });
+    } else {
+        return try send(types.Response{
+            .id = .{.Integer = id},
+            .result = .{
+                .CompletionList = .{
+                    .isIncomplete = false,
+                    .items = &[_]types.CompletionItem{},
+                },
+            },
+        });
+    }
+}
 
 // Compute builtin completions at comptime.
 const builtin_completions = block: {
@@ -565,6 +613,8 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
                 });
             } else if (pos_context == .var_access or pos_context == .empty) {
                 try completeGlobal(id, document, config);
+            } else if (pos_context == .field_access) {
+                try completeFieldAccess(id, document, pos, config);
             } else {
                 try respondGeneric(id, no_completions_response);
             }
