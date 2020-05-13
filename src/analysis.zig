@@ -115,8 +115,13 @@ pub fn getFunctionSnippet(allocator: *std.mem.Allocator, tree: *ast.Tree, func: 
         var curr_tok = param_decl.type_node.firstToken();
         var end_tok = param_decl.type_node.lastToken();
         while (curr_tok <= end_tok) : (curr_tok += 1) {
+            const id = tree.tokens.at(curr_tok).id;
+            const is_comma = tree.tokens.at(curr_tok).id == .Comma;
+
+            if (curr_tok == end_tok and is_comma) continue;
+
             try buffer.appendSlice(tree.tokenSlice(curr_tok));
-            if (tree.tokens.at(curr_tok).id == .Comma) try buffer.append(' ');
+            if (is_comma or id == .Keyword_const) try buffer.append(' ');
         }
 
         try buffer.append('}');

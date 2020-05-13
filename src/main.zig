@@ -221,6 +221,53 @@ fn publishDiagnostics(document: *types.TextDocument, config: Config) !void {
     });
 }
 
+fn nodeToCompletion(alloc: *std.mem.Allocator, tree: *std.zig.ast.Tree, decl: *std.zig.ast.Node, config: Config) !?types.CompletionItem {
+    var doc_comments = try analysis.getDocComments(alloc, tree, decl);
+    var doc = types.MarkupContent{
+        .kind = .Markdown,
+        .value = doc_comments orelse "",
+    };
+
+    switch (decl.id) {
+        .FnProto => {
+            const func = decl.cast(std.zig.ast.Node.FnProto).?;
+            if (func.name_token) |name_token| {
+                const insert_text = if (config.enable_snippets)
+                    try analysis.getFunctionSnippet(alloc, tree, func)
+                else
+                    null;
+
+                return types.CompletionItem{
+                    .label = tree.tokenSlice(name_token),
+                    .kind = .Function,
+                    .documentation = doc,
+                    .detail = analysis.getFunctionSignature(tree, func),
+                    .insertText = insert_text,
+                    .insertTextFormat = if (config.enable_snippets) .Snippet else .PlainText,
+                };
+            }
+        },
+        .VarDecl => {
+            const var_decl = decl.cast(std.zig.ast.Node.VarDecl).?;
+            return types.CompletionItem{
+                .label = tree.tokenSlice(var_decl.name_token),
+                .kind = .Variable,
+                .documentation = doc,
+                .detail = analysis.getVariableSignature(tree, var_decl),
+            };
+        },
+        else => if (analysis.nodeToString(tree, decl)) |string| {
+            return types.CompletionItem{
+                .label = string,
+                .kind = .Field,
+                .documentation = doc,
+            };
+        }
+    }
+
+    return null;
+}
+
 fn completeGlobal(id: i64, document: *types.TextDocument, config: Config) !void {
     // The tree uses its own arena, so we just pass our main allocator.
     var tree = try std.zig.parse(allocator, document.text);
@@ -244,47 +291,9 @@ fn completeGlobal(id: i64, document: *types.TextDocument, config: Config) !void 
     var decls = tree.root_node.decls.iterator(0);
     while (decls.next()) |decl_ptr| {
         var decl = decl_ptr.*;
-        switch (decl.id) {
-            .FnProto => {
-                const func = decl.cast(std.zig.ast.Node.FnProto).?;
-                if (func.name_token) |name_token| {
-                    const insert_text = if (config.enable_snippets)
-                        try analysis.getFunctionSnippet(&arena.allocator, tree, func)
-                    else
-                        null;
-
-                    var doc_comments = try analysis.getDocComments(&arena.allocator, tree, decl);
-                    var doc = types.MarkupContent{
-                        .kind = .Markdown,
-                        .value = doc_comments orelse "",
-                    };
-                    try completions.append(.{
-                        .label = tree.tokenSlice(name_token),
-                        .kind = .Function,
-                        .documentation = doc,
-                        .detail = analysis.getFunctionSignature(tree, func),
-                        .insertText = insert_text,
-                        .insertTextFormat = if (config.enable_snippets) .Snippet else .PlainText,
-                    });
-                }
-            },
-            .VarDecl => {
-                const var_decl = decl.cast(std.zig.ast.Node.VarDecl).?;
-                var doc_comments = try analysis.getDocComments(&arena.allocator, tree, decl);
-                var doc = types.MarkupContent{
-                    .kind = .Markdown,
-                    .value = doc_comments orelse "",
-                };
-                try completions.append(.{
-                    .label = tree.tokenSlice(var_decl.name_token),
-                    .kind = .Variable,
-                    .documentation = doc,
-                    .detail = analysis.getVariableSignature(tree, var_decl),
-                });
-            },
-            else => {}
+        if (try nodeToCompletion(&arena.allocator, tree, decl, config)) |completion| {
+            try completions.append(completion);
         }
-
     }
 
     try send(types.Response{
@@ -315,40 +324,9 @@ fn completeFieldAccess(id: i64, document: *types.TextDocument, position: types.P
         if (analysis.getNodeFromTokens(tree, &tree.root_node.base, &tokenizer)) |node| {
             var index: usize = 0;
             while (node.iterate(index)) |child_node| {
-                if (analysis.nodeToString(tree, child_node)) |string| {
-                    var doc_comments = try analysis.getDocComments(&arena.allocator, tree, child_node);
-                    var doc = types.MarkupContent{
-                        .kind = .Markdown,
-                        .value = doc_comments orelse "",
-                    };
-                    switch (child_node.id) {
-                        .FnProto => {
-                            const func = child_node.cast(std.zig.ast.Node.FnProto).?; 
-
-                            const insert_text = if (config.enable_snippets)
-                                try analysis.getFunctionSnippet(&arena.allocator, tree, func)
-                            else
-                                null;
-
-                            try completions.append(.{
-                                .label = string,
-                                .kind = .Function,
-                                .documentation = doc,
-                                .detail = analysis.getFunctionSignature(tree, func),
-                                .insertText = insert_text,
-                                .insertTextFormat = if (config.enable_snippets) .Snippet else .PlainText,
-                            });
-                        },
-                        else => {
-                            try completions.append(.{
-                                .label = string,
-                                .kind = .Field,
-                                .documentation = doc
-                            });
-                        }
-                    }
+                if (try nodeToCompletion(&arena.allocator, tree, child_node, config)) |completion| {
+                    try completions.append(completion);
                 }
-    
                 index += 1;
             }
         }
