@@ -299,17 +299,7 @@ fn completeGlobal(id: i64, document: *types.TextDocument, config: Config) !void 
 }
 
 fn completeFieldAccess(id: i64, document: *types.TextDocument, index: usize, config: Config) !void {
-    // The tree uses its own arena, so we just pass our main allocator.
-    var tree = try std.zig.parse(allocator, document.text);
-
-    if (tree.errors.len > 0) {
-        if (document.sane_text) |sane_text| {
-            tree.deinit();
-            tree = try std.zig.parse(allocator, sane_text);
-        } else return try respondGeneric(id, no_completions_response);
-    }
-    else try cacheSane(document);
-
+    var tree = try std.zig.parse(allocator, sane_text);
     defer tree.deinit();
 
     // We use a local arena allocator to deallocate all temporary data without iterating

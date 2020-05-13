@@ -131,135 +131,155 @@ pub fn isPascalCase(name: []const u8) bool {
 }
 
 // ANALYSIS ENGINE
-// Very WIP, only works on global values at the moment
 
-// TODO Major rework needed. This works in a sandbox, but not in the actual editor as completion
-// stubs (e.g. "completeThis", "completeThis.", etc.) causes errors in the Zig parser.
-
-pub fn getDecl(tree: *std.zig.ast.Tree, name: []const u8) ?*std.zig.ast.Node {
-    var decls = tree.root_node.decls.iterator(0);
-    while (decls.next()) |decl_ptr| {
-        var decl = decl_ptr.*;
-        switch (decl.id) {
+/// Gets the child of node
+pub fn getChild(tree: *std.zig.ast.Tree, node: *std.zig.ast.Node, name: []const u8) ?*std.zig.ast.Node {
+    var index: usize = 0;
+    while (node.iterate(index)) |child| {
+        switch (child.id) {
             .VarDecl => {
-                const vari = decl.cast(std.zig.ast.Node.VarDecl).?;
-                if (std.mem.eql(u8, tree.tokenSlice(vari.name_token), name)) return decl;
+                const vari = child.cast(std.zig.ast.Node.VarDecl).?;
+                if (std.mem.eql(u8, tree.tokenSlice(vari.name_token), name)) return child;
             },
             .FnProto => {
-                const func = decl.cast(std.zig.ast.Node.FnProto).?;
-                if (func.name_token != null and std.mem.eql(u8, tree.tokenSlice(func.name_token.?), name)) return decl;
+                const func = child.cast(std.zig.ast.Node.FnProto).?;
+                if (func.name_token != null and std.mem.eql(u8, tree.tokenSlice(func.name_token.?), name)) return child;
+            },
+            .ContainerField => {
+                const field = child.cast(std.zig.ast.Node.ContainerField).?;
+                if (std.mem.eql(u8, tree.tokenSlice(field.name_token), name)) return child;
             },
             else => {}
         }
+        index += 1;
     }
     return null;
 }
 
-pub fn getContainerField(tree: *std.zig.ast.Tree, container: *std.zig.ast.ContainerDecl, name: []const u8) ?*std.zig.ast.Node {
-    var decls = container.decls.iterator(0);
-    while (decls.next()) |decl_ptr| {
-        var decl = decl_ptr.*;
-        switch (decl.id) {
-            .VarDecl => {
-                const vari = decl.cast(std.zig.ast.Node.VarDecl).?;
-                if (std.mem.eql(u8, tree.tokenSlice(vari.name_token), name)) return decl;
-            },
-            .FnProto => {
-                const func = decl.cast(std.zig.ast.Node.FnProto).?;
-                if (func.name_token != null and std.mem.eql(u8, tree.tokenSlice(func.name_token.?), name)) return decl;
-            },
-            else => {}
-        }
-    }
-    return null;
-}
-
-pub fn resolveNode(tree: *std.zig.ast.Tree, node: *std.zig.ast.Node) ?*std.zig.ast.Node {
+/// Resolves the type of a node
+pub fn resolveTypeOfNode(tree: *std.zig.ast.Tree, node: *std.zig.ast.Node) ?*std.zig.ast.Node {
     switch (node.id) {
-        .Identifier => {
-            var id = node.cast(std.zig.ast.Node.Identifier).?;
-            var maybe_decl = getDecl(tree, tree.tokenSlice(id.token));
-            if (maybe_decl) |decl| {
-                return decl;
-            }
-        },
-        else => {}
-    }
-    
-    return null;
-}
-
-pub fn getCompletionsForValue(allocator: *std.mem.Allocator, tree: *std.zig.ast.Tree, node: *std.zig.ast.Node) ![]*std.zig.ast.Node {
-    var nodes = std.ArrayList(*std.zig.ast.Node).init(allocator);
-
-    switch (node.id) {
-        .ContainerDecl => {
-            var cont = node.cast(std.zig.ast.Node.ContainerDecl).?;
-            var decl_it = cont.fields_and_decls.iterator(0);
-
-            while (decl_it.next()) |decl| {
-                try nodes.append(decl.*);
-            }
-        },
-        .ContainerField => {
-            var field = node.cast(std.zig.ast.Node.ContainerField).?;
-            
-        },
         .VarDecl => {
-            var vari = node.cast(std.zig.ast.Node.VarDecl).?;
-            // if (vari.type_node) |type_node| return getCompletionsForValue(allocator, tree, type_node);
-            // if (vari.init_node) |init_node| return getCompletionsForValue(allocator, tree, init_node);
-            return getCompletionsForValue(allocator, tree, vari.type_node orelse vari.init_node.?);
-        },
-        .Identifier => {
-            var id = node.cast(std.zig.ast.Node.Identifier).?;
-            var maybe_decl = getDecl(tree, tree.tokenSlice(id.token));
-            if (maybe_decl) |decl| return getCompletionsForValue(allocator, tree, decl);
+            const vari = node.cast(std.zig.ast.Node.VarDecl).?;
+            return resolveTypeOfNode(tree, vari.type_node orelse vari.init_node.?) orelse null;
         },
         .FnProto => {
-            var func = node.cast(std.zig.ast.Node.FnProto).?;
-            // std.debug.warn("{}", .{func.return_type});
+            const func = node.cast(std.zig.ast.Node.FnProto).?;
             switch (func.return_type) {
-                .Explicit, .InferErrorSet => |return_node| {
-                    if (resolveNode(tree, return_node)) |resolved_node| {
-                        return getCompletionsForValue(allocator, tree, resolved_node);
-                    }
-                }
+                .Explicit, .InferErrorSet => |return_type| {return resolveTypeOfNode(tree, return_type);}
+            }
+        },
+        .Identifier => {
+            if (getChild(tree, &tree.root_node.base, tree.getNodeSource(node))) |child| {
+                return resolveTypeOfNode(tree, child);
+            } else return null;
+        },
+        .ContainerDecl => {
+            return node;
+        },
+        .ContainerField => {
+            const field = node.cast(std.zig.ast.Node.ContainerField).?;
+            return resolveTypeOfNode(tree, field.type_expr.?);
+        },
+        .SuffixOp => {
+            const suffix_op = node.cast(std.zig.ast.Node.SuffixOp).?;
+            switch (suffix_op.op) {
+                .Call => {
+                    return resolveTypeOfNode(tree, suffix_op.lhs.node);
+                },
+                else => {}
             }
         },
         .InfixOp => {
-            var infix = node.cast(std.zig.ast.Node.InfixOp).?;
-
-            // std.debug.warn("{}", .{infix});
-            // switch (infix.op) {
-            //     .Period => {
-            //         std.debug.warn("\n{}.{}\n", .{
-            //             getCompletionsForValue(allocator, tree, infix.lhs),
-            //             infix.rhs
-            //         });
-            //         return getCompletionsForValue(allocator, tree, infix.lhs);
-            //     },
-            //     else => {}
-            // }
-        },
-        .SuffixOp => {
-            var suffix = node.cast(std.zig.ast.Node.SuffixOp).?;
-
-            // std.debug.warn("{}", .{suffix});
-
-            switch (suffix.op) {
-                .Call => {
-                    if (resolveNode(tree, suffix.lhs.node)) |rnode| {
-                        return getCompletionsForValue(allocator, tree, rnode);
-                    }
+            const infix_op = node.cast(std.zig.ast.Node.InfixOp).?;
+            switch (infix_op.op) {
+                .Period => {
+                    var left = resolveTypeOfNode(tree, infix_op.lhs).?;
+                    return getChild(tree, left, nodeToString(tree, infix_op.rhs));
                 },
                 else => {}
             }
         },
         else => {
-            std.debug.warn("{}\n\n", .{node.id});
+            std.debug.warn("Type resolution case not implemented; {}\n", .{node.id});
+        }
+    }
+    return null;
+}
+
+pub fn getNodeFromTokens(tree: *std.zig.ast.Tree, node: *std.zig.ast.Node, tokenizer: *std.zig.Tokenizer) ?*std.zig.ast.Node {
+    var current_node = node;
+
+    while (true) {
+        var next = tokenizer.next();
+        switch (next.id) {
+            .Eof => {
+                return current_node;
+            },
+            .Identifier => {
+                // var root = current_node.cast(std.zig.ast.Node.Root).?;
+                // current_node.
+                if (getChild(tree, current_node, tokenizer.buffer[next.start..next.end])) |child| {
+                    if (resolveTypeOfNode(tree, child)) |node_type| {
+                        current_node = resolveTypeOfNode(tree, child).?;
+                    }
+                } else return null;
+            },
+            .Period => {
+                var after_period = tokenizer.next();
+                if (after_period.id == .Eof) {
+                    return current_node;
+                } else if (after_period.id == .Identifier) {
+                    if (getChild(tree, current_node, tokenizer.buffer[after_period.start..after_period.end])) |child| {
+                        // std.debug.warn("{}", .{child});
+                        current_node = resolveTypeOfNode(tree, child).?;
+                    } else return null;
+                }
+            },
+            else => {
+                std.debug.warn("Not implemented; {}\n", .{next.id});
+            }
         }
     }
 
-    return nodes.toOwnedSlice();
+    return current_node;
+}
+
+pub fn getCompletionsFromNode(allocator: *std.mem.Allocator, tree: *std.zig.ast.Tree, node: *std.zig.ast.Node) ![]*std.zig.ast.Node {
+    var nodes = std.ArrayList(*std.zig.ast.Node).init(allocator);
+
+    var index: usize = 0;
+    while (node.iterate(index)) |child_node| {
+        try nodes.append(child_node);
+    
+        index += 1;
+    }
+
+    return nodes.items;
+}
+
+pub fn nodeToString(tree: *std.zig.ast.Tree, node: *std.zig.ast.Node) []const u8 {
+    switch (node.id) {
+        .ContainerField => {
+            const field = node.cast(std.zig.ast.Node.ContainerField).?;
+            return tree.tokenSlice(field.name_token);
+        },
+        .Identifier => {
+            const field = node.cast(std.zig.ast.Node.Identifier).?;
+            return tree.tokenSlice(field.token);
+        },
+        else => {
+            std.debug.warn("INVALID: {}\n", .{node.id});
+        }
+    }
+    
+    return "";
+}
+
+pub fn nodesToString(tree: *std.zig.ast.Tree, maybe_nodes: ?[]*std.zig.ast.Node) void {
+    if (maybe_nodes) |nodes| {
+        for (nodes) |node| {
+            std.debug.warn("- {}\n", .{nodeToString(tree, node)});
+        }
+    } else std.debug.warn("No nodes\n", .{});
 }
