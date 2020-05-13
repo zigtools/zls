@@ -221,7 +221,9 @@ pub fn getNodeFromTokens(tree: *std.zig.ast.Tree, node: *std.zig.ast.Node, token
                 // current_node.
                 if (getChild(tree, current_node, tokenizer.buffer[next.start..next.end])) |child| {
                     if (resolveTypeOfNode(tree, child)) |node_type| {
-                        current_node = resolveTypeOfNode(tree, child).?;
+                        if (resolveTypeOfNode(tree, child)) |child_type| {
+                            current_node = child_type;
+                        } else return null;
                     }
                 } else return null;
             },
@@ -231,8 +233,9 @@ pub fn getNodeFromTokens(tree: *std.zig.ast.Tree, node: *std.zig.ast.Node, token
                     return current_node;
                 } else if (after_period.id == .Identifier) {
                     if (getChild(tree, current_node, tokenizer.buffer[after_period.start..after_period.end])) |child| {
-                        // std.debug.warn("{}", .{child});
-                        current_node = resolveTypeOfNode(tree, child).?;
+                        if (resolveTypeOfNode(tree, child)) |child_type| {
+                            current_node = child_type;
+                        } else return null;
                     } else return null;
                 }
             },
