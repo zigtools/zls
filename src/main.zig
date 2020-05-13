@@ -225,7 +225,7 @@ fn nodeToCompletion(alloc: *std.mem.Allocator, tree: *std.zig.ast.Tree, decl: *s
     var doc_comments = try analysis.getDocComments(alloc, tree, decl);
     var doc = types.MarkupContent{
         .kind = .Markdown,
-        .value = doc_comments orelse "",
+        .value = doc_comments,
     };
 
     switch (decl.id) {
