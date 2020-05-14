@@ -14,21 +14,28 @@ var allocator: *std.mem.Allocator = undefined;
 
 var document_store: DocumentStore = undefined;
 
-const initialize_response = \\,"result":{"capabilities":{"signatureHelpProvider":{"triggerCharacters":["(",","]},"textDocumentSync":1,"completionProvider":{"resolveProvider":false,"triggerCharacters":[".",":","@"]},"documentHighlightProvider":false,"codeActionProvider":false,"workspace":{"workspaceFolders":{"supported":true}}}}}
+const initialize_response =
+    \\,"result":{"capabilities":{"signatureHelpProvider":{"triggerCharacters":["(",","]},"textDocumentSync":1,"completionProvider":{"resolveProvider":false,"triggerCharacters":[".",":","@"]},"documentHighlightProvider":false,"codeActionProvider":false,"workspace":{"workspaceFolders":{"supported":true}}}}}
 ;
 
-const not_implemented_response = \\,"error":{"code":-32601,"message":"NotImplemented"}}
+const not_implemented_response =
+    \\,"error":{"code":-32601,"message":"NotImplemented"}}
 ;
 
-const null_result_response = \\,"result":null}
+const null_result_response =
+    \\,"result":null}
 ;
-const empty_result_response = \\,"result":{}}
+const empty_result_response =
+    \\,"result":{}}
 ;
-const empty_array_response = \\,"result":[]}
+const empty_array_response =
+    \\,"result":[]}
 ;
-const edit_not_applied_response = \\,"result":{"applied":false,"failureReason":"feature not implemented"}}
+const edit_not_applied_response =
+    \\,"result":{"applied":false,"failureReason":"feature not implemented"}}
 ;
-const no_completions_response = \\,"result":{"isIncomplete":false,"items":[]}}
+const no_completions_response =
+    \\,"result":{"isIncomplete":false,"items":[]}}
 ;
 
 /// Sends a request or response
@@ -54,7 +61,7 @@ fn log(comptime fmt: []const u8, args: var) !void {
             .LogMessageParams = .{
                 .@"type" = .Log,
                 .message = message,
-            }
+            },
         },
     });
 }
@@ -77,7 +84,7 @@ fn respondGeneric(id: i64, response: []const u8) !void {
     try stdout.writeAll(response);
 }
 
-// TODO: Is this correct or can we get a better end? 
+// TODO: Is this correct or can we get a better end?
 fn astLocationToRange(loc: std.zig.ast.Tree.Location) types.Range {
     return .{
         .start = .{
@@ -148,7 +155,7 @@ fn publishDiagnostics(handle: DocumentStore.Handle, config: Config) !void {
                                 .severity = .Information,
                                 .code = "BadStyle",
                                 .source = "zls",
-                                .message = "Functions should be camelCase"
+                                .message = "Functions should be camelCase",
                             });
                         } else if (is_type_function and !analysis.isPascalCase(func_name)) {
                             try diagnostics.append(.{
@@ -156,12 +163,12 @@ fn publishDiagnostics(handle: DocumentStore.Handle, config: Config) !void {
                                 .severity = .Information,
                                 .code = "BadStyle",
                                 .source = "zls",
-                                .message = "Type functions should be PascalCase"
+                                .message = "Type functions should be PascalCase",
                             });
                         }
                     }
                 },
-                else => {}
+                else => {},
             }
         }
     }
@@ -178,10 +185,13 @@ fn publishDiagnostics(handle: DocumentStore.Handle, config: Config) !void {
 }
 
 fn nodeToCompletion(alloc: *std.mem.Allocator, tree: *std.zig.ast.Tree, decl: *std.zig.ast.Node, config: Config) !?types.CompletionItem {
-    var doc = if (try analysis.getDocComments(alloc, tree, decl)) |doc_comments| types.MarkupContent{
-        .kind = .Markdown,
-        .value = doc_comments,
-    } else null;
+    var doc = if (try analysis.getDocComments(alloc, tree, decl)) |doc_comments|
+        types.MarkupContent{
+            .kind = .Markdown,
+            .value = doc_comments,
+        }
+    else
+        null;
 
     switch (decl.id) {
         .FnProto => {
@@ -217,7 +227,7 @@ fn nodeToCompletion(alloc: *std.mem.Allocator, tree: *std.zig.ast.Tree, decl: *s
                 .kind = .Field,
                 .documentation = doc,
             };
-        }
+        },
     }
 
     return null;
@@ -242,7 +252,7 @@ fn completeGlobal(id: i64, handle: DocumentStore.Handle, config: Config) !void {
     }
 
     try send(types.Response{
-        .id = .{.Integer = id},
+        .id = .{ .Integer = id },
         .result = .{
             .CompletionList = .{
                 .isIncomplete = false,
@@ -252,13 +262,13 @@ fn completeGlobal(id: i64, handle: DocumentStore.Handle, config: Config) !void {
     });
 }
 
-fn completeFieldAccess(id: i64, handle: *DocumentStore.Handle, position: types.Position, config: Config) !void {
+fn completeFieldAccess(id: i64, handle: *DocumentStore.Handle, position: types.Position, line_start_idx: usize, config: Config) !void {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
     var analysis_ctx = (try document_store.analysisContext(handle, &arena)) orelse {
         return send(types.Response{
-            .id = .{.Integer = id},
+            .id = .{ .Integer = id },
             .result = .{
                 .CompletionList = .{
                     .isIncomplete = false,
@@ -272,7 +282,7 @@ fn completeFieldAccess(id: i64, handle: *DocumentStore.Handle, position: types.P
     var completions = std.ArrayList(types.CompletionItem).init(&arena.allocator);
 
     var line = try handle.document.getLine(@intCast(usize, position.line));
-    var tokenizer = std.zig.Tokenizer.init(line);
+    var tokenizer = std.zig.Tokenizer.init(line[line_start_idx..]);
 
     if (analysis.getFieldAccessTypeNode(&analysis_ctx, &tokenizer)) |node| {
         var index: usize = 0;
@@ -287,7 +297,7 @@ fn completeFieldAccess(id: i64, handle: *DocumentStore.Handle, position: types.P
     }
 
     try send(types.Response{
-        .id = .{.Integer = id},
+        .id = .{ .Integer = id },
         .result = .{
             .CompletionList = .{
                 .isIncomplete = false,
@@ -327,19 +337,26 @@ const builtin_completions = block: {
         without_snippets[i].insertText = builtin[1..cutoff];
     }
 
-    break :block [2]CompletionList {
-        without_snippets, with_snippets
+    break :block [2]CompletionList{
+        without_snippets, with_snippets,
     };
 };
 
-const PositionContext = enum {
+const PositionContext = union(enum) {
     builtin,
     comment,
     string_literal,
-    field_access,
+    field_access: usize,
     var_access,
     other,
-    empty
+    empty,
+};
+
+const token_separators = [_]u8{
+    ' ', '\t', '(', ')', '[', ']',
+    '{', '}',  '|', '=', '!', ';',
+    ',', '?',  ':', '%', '+', '*',
+    '>', '<',  '~', '-', '/', '&',
 };
 
 fn documentPositionContext(doc: types.TextDocument, pos_index: usize) PositionContext {
@@ -351,10 +368,10 @@ fn documentPositionContext(doc: types.TextDocument, pos_index: usize) PositionCo
 
     var line = doc.text[curr_position .. pos_index + 1];
     // Strip any leading whitespace.
-    curr_position = 0;
-    while (curr_position < line.len and (line[curr_position] == ' ' or line[curr_position] == '\t')) : (curr_position += 1) {}
-    if (curr_position >= line.len) return .empty;
-    line = line[curr_position .. ];
+    var skipped_ws: usize = 0;
+    while (skipped_ws < line.len and (line[skipped_ws] == ' ' or line[skipped_ws] == '\t')) : (skipped_ws += 1) {}
+    if (skipped_ws >= line.len) return .empty;
+    line = line[skipped_ws..];
 
     // Quick exit for comment lines and multi line string literals.
     if (line.len >= 2 and line[0] == '/' and line[1] == '/')
@@ -367,6 +384,8 @@ fn documentPositionContext(doc: types.TextDocument, pos_index: usize) PositionCo
     // Go over the current line character by character
     // and determine the context.
     curr_position = 0;
+    var expr_start: usize = skipped_ws;
+
     var new_token = true;
     var context: PositionContext = .other;
     var string_pop_ctx: PositionContext = .other;
@@ -375,6 +394,7 @@ fn documentPositionContext(doc: types.TextDocument, pos_index: usize) PositionCo
         const next_char = if (curr_position < line.len - 1) line[curr_position + 1] else null;
 
         if (context != .string_literal and c == '"') {
+            expr_start = curr_position + skipped_ws;
             context = .string_literal;
             continue;
         }
@@ -397,7 +417,8 @@ fn documentPositionContext(doc: types.TextDocument, pos_index: usize) PositionCo
             break;
         }
 
-        if (c == ' ' or c == '\t') {
+        if (std.mem.indexOfScalar(u8, &token_separators, c) != null) {
+            expr_start = curr_position + skipped_ws + 1;
             new_token = true;
             context = .other;
             continue;
@@ -405,12 +426,17 @@ fn documentPositionContext(doc: types.TextDocument, pos_index: usize) PositionCo
 
         if (c == '.' and (!new_token or context == .string_literal)) {
             new_token = true;
-            context = .field_access;
+            if (next_char != null and next_char.? == '.') continue;
+            context = .{ .field_access = expr_start };
             continue;
         }
 
         if (new_token) {
-            const access_ctx: PositionContext = if (context == .field_access) .field_access else .var_access;
+            const access_ctx: PositionContext = if (context == .field_access)
+                .{ .field_access = expr_start }
+            else
+                .var_access;
+
             new_token = false;
 
             if (c == '_' or std.ascii.isAlpha(c)) {
@@ -451,9 +477,9 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
 
     const method = root.Object.getValue("method").?.String;
     const id = if (root.Object.getValue("id")) |id| id.Integer else 0;
-    
+
     const params = root.Object.getValue("params").?.Object;
-    
+
     // Core
     if (std.mem.eql(u8, method, "initialize")) {
         try respondGeneric(id, initialize_response);
@@ -509,28 +535,26 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
             const pos_index = try handle.document.positionToIndex(pos);
             const pos_context = documentPositionContext(handle.document, pos_index);
 
-            if (pos_context == .builtin) {
-                try send(types.Response{
-                    .id = .{.Integer = id},
+            switch (pos_context) {
+                .builtin => try send(types.Response{
+                    .id = .{ .Integer = id },
                     .result = .{
                         .CompletionList = .{
                             .isIncomplete = false,
                             .items = builtin_completions[@boolToInt(config.enable_snippets)][0..],
                         },
                     },
-                });
-            } else if (pos_context == .var_access or pos_context == .empty) {
-                try completeGlobal(id, handle.*, config);
-            } else if (pos_context == .field_access) {
-                try completeFieldAccess(id, handle, pos, config);
-            } else {
-                try respondGeneric(id, no_completions_response);
+                }),
+                .var_access, .empty => try completeGlobal(id, handle.*, config),
+                .field_access => |start_idx| try completeFieldAccess(id, handle, pos, start_idx, config),
+                    // std.debug.warn("FIELD ACCESS: {}\n", .{handle.document.text[start_idx..pos_index + 1]});
+                else => try respondGeneric(id, no_completions_response),
             }
         } else {
             try respondGeneric(id, no_completions_response);
         }
     } else if (std.mem.eql(u8, method, "textDocument/signatureHelp")) {
-        // try respondGeneric(id, 
+        // try respondGeneric(id,
         // \\,"result":{"signatures":[{
         // \\"label": "nameOfFunction(aNumber: u8)",
         // \\"documentation": {"kind": "markdown", "value": "Description of the function in **Markdown**!"},
@@ -539,8 +563,8 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
         // \\]
         // \\}]}}
         // );
-        try respondGeneric(id, 
-        \\,"result":{"signatures":[]}}
+        try respondGeneric(id,
+            \\,"result":{"signatures":[]}}
         );
     } else if (root.Object.getValue("id")) |_| {
         try log("Method with return value not implemented: {}", .{method});
@@ -581,13 +605,13 @@ pub fn main() anyerror!void {
 
     // Read he configuration, if any.
     var config = Config{};
-    const config_parse_options = std.json.ParseOptions{ .allocator=allocator };
+    const config_parse_options = std.json.ParseOptions{ .allocator = allocator };
 
     // TODO: Investigate using std.fs.Watch to detect writes to the config and reload it.
     config_read: {
         var exec_dir_bytes: [std.fs.MAX_PATH_BYTES]u8 = undefined;
         const exec_dir_path = std.fs.selfExeDirPath(&exec_dir_bytes) catch break :config_read;
-    
+
         var exec_dir = std.fs.cwd().openDir(exec_dir_path, .{}) catch break :config_read;
         defer exec_dir.close();
 
@@ -627,13 +651,13 @@ pub fn main() anyerror!void {
 
     stdin_poll: while (true) {
         if (offset >= 16 and std.mem.startsWith(u8, buffer.items, "Content-Length: ")) {
-
             index = 16;
             while (index <= offset + 10) : (index += 1) {
                 const c = buffer.items[index];
                 if (c >= '0' and c <= '9') {
                     content_len = content_len * 10 + (c - '0');
-                } if (c == '\r' and buffer.items[index + 1] == '\n') {
+                }
+                if (c == '\r' and buffer.items[index + 1] == '\n') {
                     index += 2;
                     break;
                 }
@@ -663,7 +687,6 @@ pub fn main() anyerror!void {
             } else {
                 try log("\\r not found", .{});
             }
-
         } else if (offset >= 16) {
             try log("Offset is greater than 16!", .{});
             return;
