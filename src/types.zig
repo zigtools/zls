@@ -79,7 +79,7 @@ pub const Notification = struct {
 /// JSONRPC response
 pub const Response = struct {
     jsonrpc: String = "2.0",
-    @"error": ?Error = null,
+    // @"error": ?Error = null,
     id: RequestId,
     result: ResponseParams,
 };
