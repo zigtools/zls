@@ -214,6 +214,9 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
             const field = node.cast(ast.Node.ContainerField).?;
             return resolveTypeOfNode(analysis_ctx, field.type_expr orelse return null);
         },
+        .ErrorSetDecl => {
+            return node;
+        },
         .SuffixOp => {
             const suffix_op = node.cast(ast.Node.SuffixOp).?;
             switch (suffix_op.op) {
@@ -370,6 +373,10 @@ pub fn nodeToString(tree: *ast.Tree, node: *ast.Node) ?[]const u8 {
         .ContainerField => {
             const field = node.cast(ast.Node.ContainerField).?;
             return tree.tokenSlice(field.name_token);
+        },
+        .ErrorTag => {
+            const tag = node.cast(ast.Node.ErrorTag).?;
+            return tree.tokenSlice(tag.name_token);
         },
         .Identifier => {
             const field = node.cast(ast.Node.Identifier).?;
