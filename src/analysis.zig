@@ -366,20 +366,6 @@ pub fn isPublic(tree: *ast.Tree, node: *ast.Node) bool {
     return false;
 }
 
-pub fn getCompletionsFromNode(allocator: *std.mem.Allocator, tree: *ast.Tree, node: *ast.Node) ![]*ast.Node {
-    var nodes = std.ArrayList(*ast.Node).init(allocator);
-
-    var index: usize = 0;
-    while (node.iterate(index)) |child_node| {
-        if (isPublic(tree, node))
-            try nodes.append(child_node);
-    
-        index += 1;
-    }
-
-    return nodes.items;
-}
-
 pub fn nodeToString(tree: *ast.Tree, node: *ast.Node) ?[]const u8 {
     switch (node.id) {
         .ContainerField => {
