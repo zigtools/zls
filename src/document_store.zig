@@ -60,7 +60,6 @@ pub fn init(self: *DocumentStore, allocator: *std.mem.Allocator, zig_lib_path: ?
     }
 }
 
-// TODO: Normalize URIs somehow, probably just lowercase
 pub fn openDocument(self: *DocumentStore, uri: []const u8, text: []const u8) !*Handle {
     if (self.handles.get(uri)) |entry| {
         std.debug.warn("Document already open: {}, incrementing count\n", .{uri});
@@ -93,11 +92,10 @@ pub fn openDocument(self: *DocumentStore, uri: []const u8, text: []const u8) !*H
 fn decrementCount(self: *DocumentStore, uri: []const u8) void {
     if (self.handles.get(uri)) |entry| {
         entry.value.count -= 1;
-        if (entry.value.count == 0) {
-            std.debug.warn("Freeing document: {}\n", .{uri});
-        }
+        if (entry.value.count > 0)
+            return;
 
-        self.allocator.free(entry.value.document.uri);
+        std.debug.warn("Freeing document: {}\n", .{uri});
         self.allocator.free(entry.value.document.mem);
         if (entry.value.document.sane_text) |sane| {
             self.allocator.free(sane);
@@ -204,6 +202,9 @@ pub fn applyChanges(self: *DocumentStore, handle: *Handle, content_changes: std.
 // Perhaps on new sane text we can go through imports
 // and remove those that are in the import_uris table
 // but not in the file anymore.
+// @TODO: Make this hold a single tree, remove tree param
+// from analysis functions that take an import_context.
+// (can we reset-reuse it or do we need to deinit-init a new one?)
 pub const ImportContext = struct {
     store: *DocumentStore,
     handle: *Handle,
@@ -239,11 +240,11 @@ pub const ImportContext = struct {
         };
 
         std.debug.warn("Import final URI: {}\n", .{final_uri});
+        var consumed_final_uri = false;
+        defer if (!consumed_final_uri) allocator.free(final_uri);
 
         // @TODO Clean up code, lots of repetition
         {
-            errdefer allocator.free(final_uri);
-
             // Check if we already imported this.
             for (self.handle.import_uris.items) |uri| {
                 // If we did, set our new handle and return the parsed tree root node.
@@ -259,9 +260,6 @@ pub const ImportContext = struct {
         }
 
         // New import.
-        // Add to import table of current handle.
-        try self.handle.import_uris.append(final_uri);
-    
         // Check if the import is already opened by others.
         if (self.store.getHandle(final_uri)) |new_handle| {
             // If it is, increment the count, set our new handle and return the parsed tree root node.
@@ -279,7 +277,7 @@ pub const ImportContext = struct {
         defer allocator.free(file_path);
 
         var file = std.fs.cwd().openFile(file_path, .{}) catch {
-            std.debug.warn("Cannot open import file {}", .{file_path});
+            std.debug.warn("Cannot open import file {}\n", .{file_path});
             return null;
         };
 
@@ -291,11 +289,16 @@ pub const ImportContext = struct {
         defer allocator.free(file_contents);
 
         file.inStream().readNoEof(file_contents) catch {
-            std.debug.warn("Could not read from file {}", .{file_path});
+            std.debug.warn("Could not read from file {}\n", .{file_path});
             return null;
         };
 
+        // Add to import table of current handle.
+        try self.handle.import_uris.append(final_uri);
+        consumed_final_uri = true;
+        // Swap handles and get new tree.
         self.handle = try openDocument(self.store, final_uri, file_contents);
+
         if (try self.handle.saneTree(allocator)) |tree| {
             try self.trees.append(tree);
             return &tree.root_node.base;
