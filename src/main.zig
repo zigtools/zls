@@ -254,7 +254,10 @@ fn completeGlobal(id: i64, handle: DocumentStore.Handle, config: Config) !void {
 }
 
 fn completeFieldAccess(id: i64, handle: *DocumentStore.Handle, position: types.Position, config: Config) !void {
-    var import_ctx = (try document_store.importContext(handle)) orelse {
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+
+    var analysis_ctx = (try document_store.analysisContext(handle, &arena)) orelse {
         return send(types.Response{
             .id = .{.Integer = id},
             .result = .{
@@ -265,21 +268,17 @@ fn completeFieldAccess(id: i64, handle: *DocumentStore.Handle, position: types.P
             },
         });
     };
-    defer import_ctx.deinit();
+    defer analysis_ctx.deinit();
 
-    // We use a local arena allocator to deallocate all temporary data without iterating
-    var arena = std.heap.ArenaAllocator.init(allocator);
     var completions = std.ArrayList(types.CompletionItem).init(&arena.allocator);
-    // Deallocate all temporary data.
-    defer arena.deinit();
 
     var line = try handle.document.getLine(@intCast(usize, position.line));
     var tokenizer = std.zig.Tokenizer.init(line);
 
-    if (analysis.getFieldAccessTypeNode(&import_ctx, &tokenizer)) |node| {
+    if (analysis.getFieldAccessTypeNode(&analysis_ctx, &tokenizer)) |node| {
         var index: usize = 0;
         while (node.iterate(index)) |child_node| {
-            if (try nodeToCompletion(&arena.allocator, import_ctx.tree, child_node, config)) |completion| {
+            if (try nodeToCompletion(&arena.allocator, analysis_ctx.tree, child_node, config)) |completion| {
                 try completions.append(completion);
             }
             index += 1;

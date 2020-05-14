@@ -1,5 +1,5 @@
 const std = @import("std");
-const ImportContext = @import("document_store.zig").ImportContext;
+const AnalysisContext = @import("document_store.zig").AnalysisContext;
 const ast = std.zig.ast;
 
 /// REALLY BAD CODE, PLEASE DON'T USE THIS!!!!!!! (only for testing)
@@ -178,21 +178,21 @@ pub fn getChild(tree: *ast.Tree, node: *ast.Node, name: []const u8) ?*ast.Node {
 }
 
 /// Resolves the type of a node
-pub fn resolveTypeOfNode(import_ctx: *ImportContext, node: *ast.Node) ?*ast.Node {
+pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.Node {
     switch (node.id) {
         .VarDecl => {
             const vari = node.cast(ast.Node.VarDecl).?;
-            return resolveTypeOfNode(import_ctx, vari.type_node orelse vari.init_node.?) orelse null;
+            return resolveTypeOfNode(analysis_ctx, vari.type_node orelse vari.init_node.?) orelse null;
         },
         .FnProto => {
             const func = node.cast(ast.Node.FnProto).?;
             switch (func.return_type) {
-                .Explicit, .InferErrorSet => |return_type| return resolveTypeOfNode(import_ctx, return_type),
+                .Explicit, .InferErrorSet => |return_type| return resolveTypeOfNode(analysis_ctx, return_type),
             }
         },
         .Identifier => {
-            if (getChild(import_ctx.tree, &import_ctx.tree.root_node.base, import_ctx.tree.getNodeSource(node))) |child| {
-                return resolveTypeOfNode(import_ctx, child);
+            if (getChild(analysis_ctx.tree, &analysis_ctx.tree.root_node.base, analysis_ctx.tree.getNodeSource(node))) |child| {
+                return resolveTypeOfNode(analysis_ctx, child);
             } else return null;
         },
         .ContainerDecl => {
@@ -200,13 +200,13 @@ pub fn resolveTypeOfNode(import_ctx: *ImportContext, node: *ast.Node) ?*ast.Node
         },
         .ContainerField => {
             const field = node.cast(ast.Node.ContainerField).?;
-            return resolveTypeOfNode(import_ctx, field.type_expr.?);
+            return resolveTypeOfNode(analysis_ctx, field.type_expr.?);
         },
         .SuffixOp => {
             const suffix_op = node.cast(ast.Node.SuffixOp).?;
             switch (suffix_op.op) {
                 .Call => {
-                    return resolveTypeOfNode(import_ctx, suffix_op.lhs.node);
+                    return resolveTypeOfNode(analysis_ctx, suffix_op.lhs.node);
                 },
                 else => {}
             }
@@ -217,12 +217,11 @@ pub fn resolveTypeOfNode(import_ctx: *ImportContext, node: *ast.Node) ?*ast.Node
                 .Period => {
                     // Save the child string from this tree since the tree may switch when processing
                     // an import lhs.
-                    var rhs_str = nodeToString(import_ctx.tree, infix_op.rhs) orelse return null;
-                    // @TODO: This is hackish, pass an explicit allocator or smth
-                    rhs_str = std.mem.dupe(import_ctx.store.allocator, u8, rhs_str) catch return null;
-                    defer import_ctx.store.allocator.free(rhs_str);
-                    const left = resolveTypeOfNode(import_ctx, infix_op.lhs) orelse return null;
-                    return getChild(import_ctx.tree, left, rhs_str);
+                    var rhs_str = nodeToString(analysis_ctx.tree, infix_op.rhs) orelse return null;
+                    // Use the analysis context temporary arena to store the rhs string.
+                    rhs_str = std.mem.dupe(&analysis_ctx.arena.allocator, u8, rhs_str) catch return null;
+                    const left = resolveTypeOfNode(analysis_ctx, infix_op.lhs) orelse return null;
+                    return getChild(analysis_ctx.tree, left, rhs_str);
                 },
                 else => {}
             }
@@ -231,21 +230,21 @@ pub fn resolveTypeOfNode(import_ctx: *ImportContext, node: *ast.Node) ?*ast.Node
             const prefix_op = node.cast(ast.Node.PrefixOp).?;
             switch (prefix_op.op) {
                 .PtrType => {
-                    return resolveTypeOfNode(import_ctx, prefix_op.rhs);
+                    return resolveTypeOfNode(analysis_ctx, prefix_op.rhs);
                 },
                 else => {}
             }
         },
         .BuiltinCall => {
             const builtin_call = node.cast(ast.Node.BuiltinCall).?;
-            if (!std.mem.eql(u8, import_ctx.tree.tokenSlice(builtin_call.builtin_token), "@import")) return null;
+            if (!std.mem.eql(u8, analysis_ctx.tree.tokenSlice(builtin_call.builtin_token), "@import")) return null;
             if (builtin_call.params.len > 1) return null;
 
             const import_param = builtin_call.params.at(0).*;
             if (import_param.id != .StringLiteral) return null;
 
-            const import_str = import_ctx.tree.tokenSlice(import_param.cast(ast.Node.StringLiteral).?.token);
-            return import_ctx.onImport(import_str[1 .. import_str.len - 1]) catch |err| block: {
+            const import_str = analysis_ctx.tree.tokenSlice(import_param.cast(ast.Node.StringLiteral).?.token);
+            return analysis_ctx.onImport(import_str[1 .. import_str.len - 1]) catch |err| block: {
                 std.debug.warn("Error {} while proessing import {}\n", .{err, import_str});
                 break :block null;
             };
@@ -257,8 +256,8 @@ pub fn resolveTypeOfNode(import_ctx: *ImportContext, node: *ast.Node) ?*ast.Node
     return null;
 }
 
-pub fn getFieldAccessTypeNode(import_ctx: *ImportContext, tokenizer: *std.zig.Tokenizer) ?*ast.Node {
-    var current_node = &import_ctx.tree.root_node.base;
+pub fn getFieldAccessTypeNode(analysis_ctx: *AnalysisContext, tokenizer: *std.zig.Tokenizer) ?*ast.Node {
+    var current_node = &analysis_ctx.tree.root_node.base;
 
     while (true) {
         var next = tokenizer.next();
@@ -269,8 +268,8 @@ pub fn getFieldAccessTypeNode(import_ctx: *ImportContext, tokenizer: *std.zig.To
             .Identifier => {
                 // var root = current_node.cast(ast.Node.Root).?;
                 // current_node.
-                if (getChild(import_ctx.tree, current_node, tokenizer.buffer[next.start..next.end])) |child| {
-                    if (resolveTypeOfNode(import_ctx, child)) |node_type| {
+                if (getChild(analysis_ctx.tree, current_node, tokenizer.buffer[next.start..next.end])) |child| {
+                    if (resolveTypeOfNode(analysis_ctx, child)) |node_type| {
                         current_node = node_type;
                     } else return null;
                 } else return null;
@@ -280,8 +279,8 @@ pub fn getFieldAccessTypeNode(import_ctx: *ImportContext, tokenizer: *std.zig.To
                 if (after_period.id == .Eof) {
                     return current_node;
                 } else if (after_period.id == .Identifier) {
-                    if (getChild(import_ctx.tree, current_node, tokenizer.buffer[after_period.start..after_period.end])) |child| {
-                        if (resolveTypeOfNode(import_ctx, child)) |child_type| {
+                    if (getChild(analysis_ctx.tree, current_node, tokenizer.buffer[after_period.start..after_period.end])) |child| {
+                        if (resolveTypeOfNode(analysis_ctx, child)) |child_type| {
                             current_node = child_type;
                         } else return null;
                     } else return null;

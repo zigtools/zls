@@ -217,18 +217,15 @@ pub fn applyChanges(self: *DocumentStore, handle: *Handle, content_changes: std.
 // @TODO: Make this hold a single tree, remove tree param
 // from analysis functions that take an import_context.
 // (can we reset-reuse it or do we need to deinit-init a new one?)
-pub const ImportContext = struct {
+pub const AnalysisContext = struct {
     store: *DocumentStore,
     handle: *Handle,
+    // This arena is used for temporary allocations while analyzing,
+    // not for the tree allocations.
+    arena: *std.heap.ArenaAllocator,
     tree: *std.zig.ast.Tree,
 
-    // @TODO RemoveMe
-    // pub fn lastTree(self: *ImportContext) ?*std.zig.ast.Tree {
-    //     if (self.trees.items.len == 0) return null;
-    //     return self.trees.items[self.trees.items.len - 1];
-    // }
-
-    pub fn onImport(self: *ImportContext, import_str: []const u8) !?*std.zig.ast.Node {
+    pub fn onImport(self: *AnalysisContext, import_str: []const u8) !?*std.zig.ast.Node {
         const allocator = self.store.allocator;
         
         const final_uri = if (std.mem.eql(u8, import_str, "std"))
@@ -326,17 +323,18 @@ pub const ImportContext = struct {
         return null;
     }
 
-    pub fn deinit(self: *ImportContext) void {
+    pub fn deinit(self: *AnalysisContext) void {
         self.tree.deinit();
     }
 };
 
-pub fn importContext(self: *DocumentStore, handle: *Handle) !?ImportContext {
+pub fn analysisContext(self: *DocumentStore, handle: *Handle, arena: *std.heap.ArenaAllocator) !?AnalysisContext {
     const tree = (try handle.saneTree(self.allocator)) orelse return null;
 
-    return ImportContext{
+    return AnalysisContext{
         .store = self,
         .handle = handle,
+        .arena = arena,
         .tree = tree,
     };
 }
