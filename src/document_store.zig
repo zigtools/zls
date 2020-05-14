@@ -14,23 +14,9 @@ pub const Handle = struct {
         return handle.document.uri;
     }
 
-    /// Returns the zig AST resulting from parsing the document's text, even
-    /// if it contains errors.
-    pub fn dirtyTree(handle: Handle, allocator: *std.mem.Allocator) !*std.zig.ast.Tree {
+    /// Returns a zig AST, with all its errors.
+    pub fn tree(handle: Handle, allocator: *std.mem.Allocator) !*std.zig.ast.Tree {
         return try std.zig.parse(allocator, handle.document.text);
-    }
-
-    /// Returns a zig AST with no errors, either from the current text or
-    /// the stored sane text, null if no such ast exists.
-    pub fn saneTree(handle: Handle, allocator: *std.mem.Allocator) !?*std.zig.ast.Tree {
-        var tree = try std.zig.parse(allocator, handle.document.text);
-        if (tree.errors.len == 0) return tree;
-
-        tree.deinit();
-        if (handle.document.sane_text) |sane| {
-            return try std.zig.parse(allocator, sane);
-        }
-        return null;
     }
 };
 
@@ -61,7 +47,7 @@ pub fn init(self: *DocumentStore, allocator: *std.mem.Allocator, zig_lib_path: ?
     }
 }
 
-/// This function assersts the document is not open yet and takes owneship
+/// This function asserts the document is not open yet and takes ownership
 /// of the uri and text passed in.
 fn newDocument(self: *DocumentStore, uri: []const u8, text: []u8) !*Handle {
     std.debug.warn("Opened document: {}\n", .{uri});
@@ -78,7 +64,6 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: []u8) !*Handle {
             .uri = uri,
             .text = text,
             .mem = text,
-            .sane_text = null,
         },
     };
     try self.checkSanity(&handle);
@@ -110,9 +95,6 @@ fn decrementCount(self: *DocumentStore, uri: []const u8) void {
 
         std.debug.warn("Freeing document: {}\n", .{uri});
         self.allocator.free(entry.value.document.mem);
-        if (entry.value.document.sane_text) |sane| {
-            self.allocator.free(sane);
-        }
 
         for (entry.value.import_uris.items) |import_uri| {
             self.decrementCount(import_uri);
@@ -141,18 +123,10 @@ pub fn getHandle(self: *DocumentStore, uri: []const u8) ?*Handle {
 
 // Check if the document text is now sane, move it to sane_text if so.
 fn checkSanity(self: *DocumentStore, handle: *Handle) !void {
-    const dirty_tree = try handle.dirtyTree(self.allocator);
-    defer dirty_tree.deinit();
+    const tree = try handle.tree(self.allocator);
+    defer tree.deinit();
 
-    if (dirty_tree.errors.len > 0) return;
-
-    std.debug.warn("New sane text for document {}\n", .{handle.uri()});
-    if (handle.document.sane_text) |sane| {
-        self.allocator.free(sane);
-    }
-
-    handle.document.sane_text = try std.mem.dupe(self.allocator, u8, handle.document.text);
-
+    std.debug.warn("New text for document {}\n", .{handle.uri()});
     // TODO: Better algorithm or data structure?
     // Removing the imports is costly since they live in an array list
     // Perhaps we should use an AutoHashMap([]const u8, {}) ?
@@ -160,7 +134,7 @@ fn checkSanity(self: *DocumentStore, handle: *Handle) !void {
     // Try to detect removed imports and decrement their counts.
     if (handle.import_uris.items.len == 0) return;
 
-    const import_strs = try analysis.collectImports(self.allocator, dirty_tree);
+    const import_strs = try analysis.collectImports(self.allocator, tree);
     defer self.allocator.free(import_strs);
 
     const still_exist = try self.allocator.alloc(bool, handle.import_uris.items.len);
@@ -302,11 +276,8 @@ pub const AnalysisContext = struct {
                 self.handle = self.store.getHandle(final_uri) orelse return null;
 
                 self.tree.deinit();
-                if (try self.handle.saneTree(allocator)) |tree| {
-                    self.tree = tree;
-                    return &self.tree.root_node.base;
-                }
-                return null;
+                self.tree = try self.handle.tree(allocator);
+                return &self.tree.root_node.base;
             }
         }
 
@@ -318,11 +289,8 @@ pub const AnalysisContext = struct {
             self.handle = new_handle;
 
             self.tree.deinit();
-            if (try self.handle.saneTree(allocator)) |tree| {
-                self.tree = tree;
-                return &self.tree.root_node.base;
-            }
-            return null;
+            self.tree = try self.handle.tree(allocator);
+            return &self.tree.root_node.base;
         }
 
         // New document, read the file then call into openDocument.
@@ -358,11 +326,8 @@ pub const AnalysisContext = struct {
         // Free old tree, add new one if it exists.
         // If we return null, no one should access the tree.
         self.tree.deinit();
-        if (try self.handle.saneTree(allocator)) |tree| {
-            self.tree = tree;
-            return &self.tree.root_node.base;
-        }
-        return null;
+        self.tree = try self.handle.tree(allocator);
+        return &self.tree.root_node.base;
     }
 
     pub fn deinit(self: *AnalysisContext) void {
@@ -370,14 +335,12 @@ pub const AnalysisContext = struct {
     }
 };
 
-pub fn analysisContext(self: *DocumentStore, handle: *Handle, arena: *std.heap.ArenaAllocator) !?AnalysisContext {
-    const tree = (try handle.saneTree(self.allocator)) orelse return null;
-
+pub fn analysisContext(self: *DocumentStore, handle: *Handle, arena: *std.heap.ArenaAllocator) !AnalysisContext {
     return AnalysisContext{
         .store = self,
         .handle = handle,
         .arena = arena,
-        .tree = tree,
+        .tree = try handle.tree(self.allocator),
     };
 }
 
@@ -385,9 +348,6 @@ pub fn deinit(self: *DocumentStore) void {
     var entry_iterator = self.handles.iterator();
     while (entry_iterator.next()) |entry| {
         self.allocator.free(entry.value.document.mem);
-        if (entry.value.document.sane_text) |sane| {
-            self.allocator.free(sane);
-        }
 
         for (entry.value.import_uris.items) |uri| {
             self.allocator.free(uri);

@@ -99,7 +99,7 @@ fn astLocationToRange(loc: std.zig.ast.Tree.Location) types.Range {
 }
 
 fn publishDiagnostics(handle: DocumentStore.Handle, config: Config) !void {
-    const tree = try handle.dirtyTree(allocator);
+    const tree = try handle.tree(allocator);
     defer tree.deinit();
 
     // Use an arena for our local memory allocations.
@@ -145,7 +145,7 @@ fn publishDiagnostics(handle: DocumentStore.Handle, config: Config) !void {
                                 std.mem.eql(u8, tree.tokenSlice(ident.token), "type")
                             else
                                 false,
-                            .InferErrorSet => false,
+                            .InferErrorSet, .Invalid => false,
                         };
 
                         const func_name = tree.tokenSlice(name_token);
@@ -234,7 +234,7 @@ fn nodeToCompletion(alloc: *std.mem.Allocator, tree: *std.zig.ast.Tree, decl: *s
 }
 
 fn completeGlobal(id: i64, handle: DocumentStore.Handle, config: Config) !void {
-    var tree = (try handle.saneTree(allocator)) orelse return respondGeneric(id, no_completions_response);
+    var tree = try handle.tree(allocator);
     defer tree.deinit();
 
     // We use a local arena allocator to deallocate all temporary data without iterating
@@ -266,17 +266,7 @@ fn completeFieldAccess(id: i64, handle: *DocumentStore.Handle, position: types.P
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
-    var analysis_ctx = (try document_store.analysisContext(handle, &arena)) orelse {
-        return send(types.Response{
-            .id = .{ .Integer = id },
-            .result = .{
-                .CompletionList = .{
-                    .isIncomplete = false,
-                    .items = &[_]types.CompletionItem{},
-                },
-            },
-        });
-    };
+    var analysis_ctx = try document_store.analysisContext(handle, &arena);
     defer analysis_ctx.deinit();
 
     var completions = std.ArrayList(types.CompletionItem).init(&arena.allocator);
@@ -580,7 +570,7 @@ const debug_alloc: ?*std.testing.LeakCountAllocator = if (build_options.allocati
 pub fn main() anyerror!void {
     // TODO: Use a better purpose general allocator once std has one.
     // Probably after the generic composable allocators PR?
-    // This is not too bad for now since most allocations happen in local areans.
+    // This is not too bad for now since most allocations happen in local arenas.
     allocator = std.heap.page_allocator;
 
     if (build_options.allocation_info) {
@@ -626,7 +616,7 @@ pub fn main() anyerror!void {
         const bytes_read = conf_file.readAll(file_buf) catch break :config_read;
         if (bytes_read != conf_file_stat.size) break :config_read;
 
-        // TODO: Better errors? Doesnt seem like std.json can provide us positions or context.
+        // TODO: Better errors? Doesn't seem like std.json can provide us positions or context.
         config = std.json.parse(Config, &std.json.TokenStream.init(file_buf), config_parse_options) catch |err| {
             std.debug.warn("Error while parsing configuration file: {}\nUsing default config.\n", .{err});
             break :config_read;
@@ -655,8 +645,7 @@ pub fn main() anyerror!void {
                 const c = buffer.items[index];
                 if (c >= '0' and c <= '9') {
                     content_len = content_len * 10 + (c - '0');
-                }
-                if (c == '\r' and buffer.items[index + 1] == '\n') {
+                } else if (c == '\r' and buffer.items[index + 1] == '\n') {
                     index += 2;
                     break;
                 }
