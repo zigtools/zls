@@ -1,5 +1,12 @@
 name: CI
-on: [push, pull_request]
+on:
+  push:
+    paths:
+    - '**.zig'
+  pull_request:
+    paths:
+    - '**.zig'
+
 jobs:
   build:
     runs-on: ubuntu-latest
