@@ -277,8 +277,10 @@ fn completeFieldAccess(id: i64, handle: *DocumentStore.Handle, position: types.P
     if (analysis.getFieldAccessTypeNode(&analysis_ctx, &tokenizer)) |node| {
         var index: usize = 0;
         while (node.iterate(index)) |child_node| {
-            if (try nodeToCompletion(&arena.allocator, analysis_ctx.tree, child_node, config)) |completion| {
-                try completions.append(completion);
+            if (analysis.isPublic(analysis_ctx.tree, child_node)) {
+                if (try nodeToCompletion(&arena.allocator, analysis_ctx.tree, child_node, config)) |completion| {
+                    try completions.append(completion);
+                }
             }
             index += 1;
         }

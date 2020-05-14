@@ -341,12 +341,38 @@ pub fn getFieldAccessTypeNode(analysis_ctx: *AnalysisContext, tokenizer: *std.zi
     return current_node;
 }
 
+pub fn isPublic(tree: *ast.Tree, node: *ast.Node) bool {
+    switch (node.id) {
+        .VarDecl => {
+            const var_decl = node.cast(ast.Node.VarDecl).?;
+            if (var_decl.visib_token) |visib_token| {
+                return std.mem.eql(u8, tree.tokenSlice(visib_token), "pub");
+            } else return false;
+        },
+        .FnProto => {
+            const func = node.cast(ast.Node.FnProto).?;
+            if (func.visib_token) |visib_token| {
+                return std.mem.eql(u8, tree.tokenSlice(visib_token), "pub");
+            } else return false;
+        },
+        .ContainerField => {
+            return true;
+        },
+        else => {
+            return false;
+        }
+    }
+
+    return false;
+}
+
 pub fn getCompletionsFromNode(allocator: *std.mem.Allocator, tree: *ast.Tree, node: *ast.Node) ![]*ast.Node {
     var nodes = std.ArrayList(*ast.Node).init(allocator);
 
     var index: usize = 0;
     while (node.iterate(index)) |child_node| {
-        try nodes.append(child_node);
+        if (isPublic(tree, node))
+            try nodes.append(child_node);
     
         index += 1;
     }
