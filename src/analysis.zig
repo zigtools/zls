@@ -1,5 +1,5 @@
 const std = @import("std");
-const types = @import("types.zig");
+const ImportContext = @import("document_store.zig").ImportContext;
 const ast = std.zig.ast;
 
 /// REALLY BAD CODE, PLEASE DON'T USE THIS!!!!!!! (only for testing)
@@ -178,7 +178,7 @@ pub fn getChild(tree: *ast.Tree, node: *ast.Node, name: []const u8) ?*ast.Node {
 }
 
 /// Resolves the type of a node
-pub fn resolveTypeOfNode(tree: *ast.Tree, node: *ast.Node, import_ctx: *types.ImportCtx) ?*ast.Node {
+pub fn resolveTypeOfNode(tree: *ast.Tree, node: *ast.Node, import_ctx: *ImportContext) ?*ast.Node {
     switch (node.id) {
         .VarDecl => {
             const vari = node.cast(ast.Node.VarDecl).?;
@@ -240,10 +240,9 @@ pub fn resolveTypeOfNode(tree: *ast.Tree, node: *ast.Node, import_ctx: *types.Im
             const import_param = builtin_call.params.at(0).*;
             if (import_param.id != .StringLiteral) return null;
 
-            var import_str = tree.tokenSlice(import_param.cast(ast.Node.StringLiteral).?.token);
-            import_str = import_str[1 .. import_str.len - 1];
-
-            return resolveImport(import_str);
+            const import_str = tree.tokenSlice(import_param.cast(ast.Node.StringLiteral).?.token);
+            // @TODO: Handle error better.
+            return (import_ctx.onImport(import_str[1 .. import_str.len - 1]) catch unreachable);
         },
         else => {
             std.debug.warn("Type resolution case not implemented; {}\n", .{node.id});
@@ -252,13 +251,7 @@ pub fn resolveTypeOfNode(tree: *ast.Tree, node: *ast.Node, import_ctx: *types.Im
     return null;
 }
 
-fn resolveImport(import: []const u8) ?*ast.Node {
-    // @TODO: Write this
-    std.debug.warn("Resolving import {}\n", .{import});
-    return null;
-}
-
-pub fn getFieldAccessTypeNode(tree: *ast.Tree, tokenizer: *std.zig.Tokenizer, import_ctx: *types.ImportCtx) ?*ast.Node {
+pub fn getFieldAccessTypeNode(tree: *ast.Tree, tokenizer: *std.zig.Tokenizer, import_ctx: *ImportContext) ?*ast.Node {
     var current_node = &tree.root_node.base;
 
     while (true) {

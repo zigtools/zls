@@ -1,7 +1,37 @@
 const std = @import("std");
 
-// Original code: https://github.com/andersfr/zig-lsp/blob/master/uri.zig
+const reserved_chars = &[_]u8 {
+    '!', '#', '$', '%', '&', '\'',
+    '(', ')', '*', '+', ',', ':',
+    ';', '=', '?', '@', '[', ']',
+};
 
+/// Returns a URI from a path, caller owns the memory allocated with `allocator`
+pub fn fromPath(allocator: *std.mem.Allocator, path: []const u8) ![]const u8 {
+    if (path.len == 0) return "";
+    const prefix = if (std.builtin.os.tag == .windows) "file:///" else "file://";
+
+    var buf = std.ArrayList(u8).init(allocator);
+    try buf.appendSlice(prefix);
+
+    var out_stream = buf.outStream();
+
+    for (path) |char| {
+        if (char == std.fs.path.sep) {
+            try buf.append('/');
+        } else if (std.mem.indexOfScalar(u8, reserved_chars, char) != null) {
+            // Write '%' + hex with uppercase
+            try buf.append('%');
+            try std.fmt.format(out_stream, "{X}", .{char});
+        } else {
+            try buf.append(std.ascii.toLower(char));
+        }
+    }
+
+    return buf.toOwnedSlice();
+}
+
+// Original code: https://github.com/andersfr/zig-lsp/blob/master/uri.zig
 fn parseHex(c: u8) !u8 {
     return switch(c) {
         '0'...'9' => c - '0',

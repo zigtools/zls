@@ -1,12 +1,13 @@
 const std = @import("std");
 const types = @import("types.zig");
+const URI = @import("uri.zig");
 
 const DocumentStore = @This();
 
 pub const Handle = struct {
     document: types.TextDocument,
     count: usize,
-    import_uris: [][]const u8,
+    import_uris: std.ArrayList([]const u8),
 
     pub fn uri(handle: Handle) []const u8 {
         return handle.document.uri;
@@ -34,32 +35,37 @@ pub const Handle = struct {
 
 allocator: *std.mem.Allocator,
 handles: std.StringHashMap(Handle),
-std_path: ?[]const u8,
+std_uri: ?[]const u8,
 
-pub fn init(self: *DocumentStore, allocator: *std.mem.Allocator, zig_path: ?[]const u8) void {
+pub fn init(self: *DocumentStore, allocator: *std.mem.Allocator, zig_lib_path: ?[]const u8) !void {
     self.allocator = allocator;
     self.handles = std.StringHashMap(Handle).init(allocator);
     errdefer self.handles.deinit();
 
-    if (zig_path) |zpath| {
-        // pub fn resolve(allocator: *Allocator, paths: []const []const u8) ![]u8
-        self.std_path = std.fs.path.resolve(allocator, &[_][]const u8 {
-            zpath, "lib/zig/std"
+    if (zig_lib_path) |zpath| {
+        const std_path = std.fs.path.resolve(allocator, &[_][]const u8 {
+            zpath, "./std/std.zig"
         }) catch |err| block: {
             std.debug.warn("Failed to resolve zig std library path, error: {}\n", .{err});
-            break :block null;
+            self.std_uri = null;
+            return;
         };
+
+        defer allocator.free(std_path);
+        // Get the std_path as a URI, so we can just append to it!
+        self.std_uri = try URI.fromPath(allocator, std_path);
+        std.debug.warn("Standard library base uri: {}\n", .{self.std_uri});
     } else {
-        self.std_path = null;
+        self.std_uri = null;
     }
 }
 
+// TODO: Normalize URIs somehow, probably just lowercase
 pub fn openDocument(self: *DocumentStore, uri: []const u8, text: []const u8) !*Handle {
     if (self.handles.get(uri)) |entry| {
         std.debug.warn("Document already open: {}, incrementing count\n", .{uri});
         entry.value.count += 1;
         std.debug.warn("New count: {}\n", .{entry.value.count});
-        self.allocator.free(uri);
         return &entry.value;
     }
 
@@ -71,7 +77,7 @@ pub fn openDocument(self: *DocumentStore, uri: []const u8, text: []const u8) !*H
 
     var handle = Handle{
         .count = 1,
-        .import_uris = &[_][]const u8 {},
+        .import_uris = std.ArrayList([]const u8).init(self.allocator),
         .document = .{
             .uri = duped_uri,
             .text = duped_text,
@@ -97,14 +103,12 @@ fn decrementCount(self: *DocumentStore, uri: []const u8) void {
             self.allocator.free(sane);
         }
 
-        for (entry.value.import_uris) |import_uri| {
+        for (entry.value.import_uris.items) |import_uri| {
             self.decrementCount(import_uri);
             self.allocator.free(import_uri);
         }
 
-        if (entry.value.import_uris.len > 0) {
-            self.allocator.free(entry.value.import_uris);
-        }
+        entry.value.import_uris.deinit();
 
         const uri_key = entry.key;
         self.handles.removeAssertDiscard(uri);
@@ -129,14 +133,14 @@ fn checkSanity(self: *DocumentStore, handle: *Handle) !void {
     const dirty_tree = try handle.dirtyTree(self.allocator);
     defer dirty_tree.deinit();
 
-    if (dirty_tree.errors.len == 0) {
-        std.debug.warn("New sane text for document {}\n", .{handle.uri()});
-        if (handle.document.sane_text) |sane| {
-            self.allocator.free(sane);
-        }
+    if (dirty_tree.errors.len > 0) return;
 
-        handle.document.sane_text = try std.mem.dupe(self.allocator, u8, handle.document.text);
+    std.debug.warn("New sane text for document {}\n", .{handle.uri()});
+    if (handle.document.sane_text) |sane| {
+        self.allocator.free(sane);
     }
+
+    handle.document.sane_text = try std.mem.dupe(self.allocator, u8, handle.document.text);
 }
 
 pub fn applyChanges(self: *DocumentStore, handle: *Handle, content_changes: std.json.Array) !void {
@@ -193,6 +197,118 @@ pub fn applyChanges(self: *DocumentStore, handle: *Handle, content_changes: std.
     }
 
     try self.checkSanity(handle);
+}
+
+// @TODO: We only reduce the count upon closing,
+// find a way to reduce it when removing imports.
+// Perhaps on new sane text we can go through imports
+// and remove those that are in the import_uris table
+// but not in the file anymore.
+pub const ImportContext = struct {
+    store: *DocumentStore,
+    handle: *Handle,
+    trees: std.ArrayList(*std.zig.ast.Tree),
+
+    pub fn onImport(self: *ImportContext, import_str: []const u8) !?*std.zig.ast.Node {
+        const allocator = self.store.allocator;
+        
+        const final_uri = if (std.mem.eql(u8, import_str, "std"))
+            if (self.store.std_uri) |std_root_uri| try std.mem.dupe(allocator, u8, std_root_uri)
+            else {
+                std.debug.warn("Cannot resolve std library import, path is null.\n", .{});
+                return null;
+            }
+        else b: {
+            // Find relative uri
+            const path = try URI.parse(allocator, self.handle.uri());
+            defer allocator.free(path);
+
+            const dir_path = std.fs.path.dirname(path) orelse "";
+            const import_path = try std.fs.path.resolve(allocator, &[_][]const u8 {
+                dir_path, import_str
+            });
+
+            break :b import_path;
+        };
+
+        // @TODO Clean up code, lots of repetition
+        {
+            errdefer allocator.free(final_uri);
+
+            // Check if we already imported this.
+            for (self.handle.import_uris.items) |uri| {
+                // If we did, set our new handle and return the parsed tree root node.
+                if (std.mem.eql(u8, uri, final_uri)) {
+                    self.handle = self.store.getHandle(final_uri) orelse return null;
+                    if (try self.handle.saneTree(allocator)) |tree| {
+                        try self.trees.append(tree);
+                        return &tree.root_node.base;
+                    }
+                    return null;
+                }
+            }
+        }
+
+        // New import.
+        // Add to import table of current handle.
+        try self.handle.import_uris.append(final_uri);
+    
+        // Check if the import is already opened by others.
+        if (self.store.getHandle(final_uri)) |new_handle| {
+            // If it is, increment the count, set our new handle and return the parsed tree root node.
+            new_handle.count += 1;
+            self.handle = new_handle;
+            if (try self.handle.saneTree(allocator)) |tree| {
+                try self.trees.append(tree);
+                return &tree.root_node.base;
+            }
+            return null;
+        }
+
+        // New document, read the file then call into openDocument.
+        const file_path = try URI.parse(allocator, final_uri);
+        defer allocator.free(file_path);
+
+        var file = std.fs.cwd().openFile(file_path, .{}) catch {
+            std.debug.warn("Cannot open import file {}", .{file_path});
+            return null;
+        };
+
+        defer file.close();
+        const size = std.math.cast(usize, try file.getEndPos()) catch std.math.maxInt(usize);
+
+        // TODO: This is wasteful, we know we don't need to copy the text on this openDocument call
+        const file_contents = try allocator.alloc(u8, size);
+        defer allocator.free(file_contents);
+
+        file.inStream().readNoEof(file_contents) catch {
+            std.debug.warn("Could not read from file {}", .{file_path});
+            return null;
+        };
+
+        self.handle = try openDocument(self.store, final_uri, file_contents);
+        if (try self.handle.saneTree(allocator)) |tree| {
+            try self.trees.append(tree);
+            return &tree.root_node.base;
+        }
+        return null;
+    }
+
+    pub fn deinit(self: *ImportContext) void {
+        for (self.trees.items) |tree| {
+            tree.deinit();
+        }
+
+        self.trees.deinit();
+    }
+};
+
+pub fn importContext(self: *DocumentStore, handle: *Handle) ImportContext {
+    return .{
+        .store = self,
+        .handle = handle,
+        .trees = std.ArrayList(*std.zig.ast.Tree).init(self.allocator),
+    };
 }
 
 pub fn deinit(self: *DocumentStore) void {

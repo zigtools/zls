@@ -253,7 +253,7 @@ fn completeGlobal(id: i64, handle: DocumentStore.Handle, config: Config) !void {
     });
 }
 
-fn completeFieldAccess(id: i64, handle: DocumentStore.Handle, position: types.Position, config: Config) !void {
+fn completeFieldAccess(id: i64, handle: *DocumentStore.Handle, position: types.Position, config: Config) !void {
     const tree = (try handle.saneTree(allocator)) orelse {
         return try send(types.Response{
             .id = .{.Integer = id},
@@ -277,7 +277,9 @@ fn completeFieldAccess(id: i64, handle: DocumentStore.Handle, position: types.Po
     var tokenizer = std.zig.Tokenizer.init(line);
 
     // @TODO Pass import ctx.
-    if (analysis.getFieldAccessTypeNode(tree, &tokenizer, {})) |node| {
+    var import_ctx = document_store.importContext(handle);
+    defer import_ctx.deinit();
+    if (analysis.getFieldAccessTypeNode(tree, &tokenizer, &import_ctx)) |node| {
         var index: usize = 0;
         while (node.iterate(index)) |child_node| {
             if (try nodeToCompletion(&arena.allocator, tree, child_node, config)) |completion| {
@@ -523,7 +525,7 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
             } else if (pos_context == .var_access or pos_context == .empty) {
                 try completeGlobal(id, handle.*, config);
             } else if (pos_context == .field_access) {
-                try completeFieldAccess(id, handle.*, pos, config);
+                try completeFieldAccess(id, handle, pos, config);
             } else {
                 try respondGeneric(id, no_completions_response);
             }
@@ -612,7 +614,8 @@ pub fn main() anyerror!void {
     }
     defer std.json.parseFree(Config, config, config_parse_options);
 
-    document_store.init(allocator, config.zig_path);
+    // @TODO Check is_absolute
+    try document_store.init(allocator, config.zig_lib_path);
     defer document_store.deinit();
 
     // This JSON parser is passed to processJsonRpc and reset.

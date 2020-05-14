@@ -3,9 +3,6 @@
 const std = @import("std");
 const json = std.json;
 
-// @TODO
-pub const ImportCtx = void;
-
 // JSON Types
 
 pub const String = []const u8;
@@ -138,7 +135,7 @@ pub const PublishDiagnosticsParams = struct {
 };
 
 pub const TextDocument = struct {
-    uri: String,
+    uri: DocumentUri,
     // This is a substring of mem starting at 0
     text: String,
     // This holds the memory that we have actually allocated.
