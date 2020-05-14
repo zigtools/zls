@@ -282,7 +282,7 @@ fn completeFieldAccess(id: i64, handle: *DocumentStore.Handle, position: types.P
     if (analysis.getFieldAccessTypeNode(tree, &tokenizer, &import_ctx)) |node| {
         var index: usize = 0;
         while (node.iterate(index)) |child_node| {
-            if (try nodeToCompletion(&arena.allocator, import_ctx.lastTree(), child_node, config)) |completion| {
+            if (try nodeToCompletion(&arena.allocator, import_ctx.lastTree() orelse tree, child_node, config)) |completion| {
                 try completions.append(completion);
             }
             index += 1;

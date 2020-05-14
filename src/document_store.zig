@@ -209,8 +209,8 @@ pub const ImportContext = struct {
     handle: *Handle,
     trees: std.ArrayList(*std.zig.ast.Tree),
 
-    pub fn lastTree(self: *ImportContext) *std.zig.ast.Tree {
-        std.debug.assert(self.trees.items.len > 0);
+    pub fn lastTree(self: *ImportContext) ?*std.zig.ast.Tree {
+        if (self.trees.items.len == 0) return null;
         return self.trees.items[self.trees.items.len - 1];
     }
 
@@ -233,8 +233,12 @@ pub const ImportContext = struct {
                 dir_path, import_str
             });
 
-            break :b import_path;
+            defer allocator.free(import_path);
+
+            break :b (try URI.fromPath(allocator, import_path));
         };
+
+        std.debug.warn("Import final URI: {}\n", .{final_uri});
 
         // @TODO Clean up code, lots of repetition
         {
