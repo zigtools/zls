@@ -60,6 +60,31 @@ pub fn init(self: *DocumentStore, allocator: *std.mem.Allocator, zig_lib_path: ?
     }
 }
 
+/// This function assersts the document is not open yet and takes owneship
+/// of the uri and text passed in.
+fn newDocument(self: *DocumentStore, uri: []const u8, text: []u8) !*Handle {
+    std.debug.warn("Opened document: {}\n", .{uri});
+
+    errdefer {
+        self.allocator.free(uri);
+        self.allocator.free(text);
+    }
+
+    var handle = Handle{
+        .count = 1,
+        .import_uris = std.ArrayList([]const u8).init(self.allocator),
+        .document = .{
+            .uri = uri,
+            .text = text,
+            .mem = text,
+            .sane_text = null,
+        },
+    };
+    try self.checkSanity(&handle);
+    try self.handles.putNoClobber(uri, handle);
+    return &(self.handles.get(uri) orelse unreachable).value;
+}
+
 pub fn openDocument(self: *DocumentStore, uri: []const u8, text: []const u8) !*Handle {
     if (self.handles.get(uri)) |entry| {
         std.debug.warn("Document already open: {}, incrementing count\n", .{uri});
@@ -68,25 +93,12 @@ pub fn openDocument(self: *DocumentStore, uri: []const u8, text: []const u8) !*H
         return &entry.value;
     }
 
-    std.debug.warn("Opened document: {}\n", .{uri});
     const duped_text = try std.mem.dupe(self.allocator, u8, text);
     errdefer self.allocator.free(duped_text);
     const duped_uri = try std.mem.dupe(self.allocator, u8, uri);
     errdefer self.allocator.free(duped_uri);
 
-    var handle = Handle{
-        .count = 1,
-        .import_uris = std.ArrayList([]const u8).init(self.allocator),
-        .document = .{
-            .uri = duped_uri,
-            .text = duped_text,
-            .mem = duped_text,
-            .sane_text = null,
-        },
-    };
-    try self.checkSanity(&handle);
-    try self.handles.putNoClobber(duped_uri, handle);
-    return &(self.handles.get(duped_uri) orelse unreachable).value;
+    return self.newDocument(duped_uri, duped_text);
 }
 
 fn decrementCount(self: *DocumentStore, uri: []const u8) void {
@@ -243,19 +255,16 @@ pub const ImportContext = struct {
         var consumed_final_uri = false;
         defer if (!consumed_final_uri) allocator.free(final_uri);
 
-        // @TODO Clean up code, lots of repetition
-        {
-            // Check if we already imported this.
-            for (self.handle.import_uris.items) |uri| {
-                // If we did, set our new handle and return the parsed tree root node.
-                if (std.mem.eql(u8, uri, final_uri)) {
-                    self.handle = self.store.getHandle(final_uri) orelse return null;
-                    if (try self.handle.saneTree(allocator)) |tree| {
-                        try self.trees.append(tree);
-                        return &tree.root_node.base;
-                    }
-                    return null;
+        // Check if we already imported this.
+        for (self.handle.import_uris.items) |uri| {
+            // If we did, set our new handle and return the parsed tree root node.
+            if (std.mem.eql(u8, uri, final_uri)) {
+                self.handle = self.store.getHandle(final_uri) orelse return null;
+                if (try self.handle.saneTree(allocator)) |tree| {
+                    try self.trees.append(tree);
+                    return &tree.root_node.base;
                 }
+                return null;
             }
         }
 
@@ -284,20 +293,23 @@ pub const ImportContext = struct {
         defer file.close();
         const size = std.math.cast(usize, try file.getEndPos()) catch std.math.maxInt(usize);
 
-        // TODO: This is wasteful, we know we don't need to copy the text on this openDocument call
-        const file_contents = try allocator.alloc(u8, size);
-        defer allocator.free(file_contents);
+        {
+            const file_contents = try allocator.alloc(u8, size);
+            errdefer allocator.free(file_contents);
 
-        file.inStream().readNoEof(file_contents) catch {
-            std.debug.warn("Could not read from file {}\n", .{file_path});
-            return null;
-        };
+            file.inStream().readNoEof(file_contents) catch {
+                std.debug.warn("Could not read from file {}\n", .{file_path});
+                return null;
+            };
 
-        // Add to import table of current handle.
-        try self.handle.import_uris.append(final_uri);
-        consumed_final_uri = true;
-        // Swap handles and get new tree.
-        self.handle = try openDocument(self.store, final_uri, file_contents);
+            // Add to import table of current handle.
+            try self.handle.import_uris.append(final_uri);
+            consumed_final_uri = true;
+
+            // Swap handles and get new tree.
+            // This takes ownership of the passed uri and text.
+            self.handle = try newDocument(self.store, try std.mem.dupe(allocator, u8, final_uri), file_contents);
+        }
 
         if (try self.handle.saneTree(allocator)) |tree| {
             try self.trees.append(tree);
