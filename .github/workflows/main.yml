@@ -15,5 +15,13 @@ jobs:
     - name: build
       run: |
         export PATH=./zig:$PATH
-        ./ci/linux.sh
+        zig build
+
+        FILE=zig-cache/bin/zls
+
+        if test -f "$FILE"; then
+          exit 0
+        else
+          exit 1
+        fi
         
