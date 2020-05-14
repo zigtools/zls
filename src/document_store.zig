@@ -220,12 +220,13 @@ pub fn applyChanges(self: *DocumentStore, handle: *Handle, content_changes: std.
 pub const ImportContext = struct {
     store: *DocumentStore,
     handle: *Handle,
-    trees: std.ArrayList(*std.zig.ast.Tree),
+    tree: *std.zig.ast.Tree,
 
-    pub fn lastTree(self: *ImportContext) ?*std.zig.ast.Tree {
-        if (self.trees.items.len == 0) return null;
-        return self.trees.items[self.trees.items.len - 1];
-    }
+    // @TODO RemoveMe
+    // pub fn lastTree(self: *ImportContext) ?*std.zig.ast.Tree {
+    //     if (self.trees.items.len == 0) return null;
+    //     return self.trees.items[self.trees.items.len - 1];
+    // }
 
     pub fn onImport(self: *ImportContext, import_str: []const u8) !?*std.zig.ast.Node {
         const allocator = self.store.allocator;
@@ -260,9 +261,11 @@ pub const ImportContext = struct {
             // If we did, set our new handle and return the parsed tree root node.
             if (std.mem.eql(u8, uri, final_uri)) {
                 self.handle = self.store.getHandle(final_uri) orelse return null;
+
+                self.tree.deinit();
                 if (try self.handle.saneTree(allocator)) |tree| {
-                    try self.trees.append(tree);
-                    return &tree.root_node.base;
+                    self.tree = tree;
+                    return &self.tree.root_node.base;
                 }
                 return null;
             }
@@ -274,9 +277,11 @@ pub const ImportContext = struct {
             // If it is, increment the count, set our new handle and return the parsed tree root node.
             new_handle.count += 1;
             self.handle = new_handle;
+
+            self.tree.deinit();
             if (try self.handle.saneTree(allocator)) |tree| {
-                try self.trees.append(tree);
-                return &tree.root_node.base;
+                self.tree = tree;
+                return &self.tree.root_node.base;
             }
             return null;
         }
@@ -311,27 +316,28 @@ pub const ImportContext = struct {
             self.handle = try newDocument(self.store, try std.mem.dupe(allocator, u8, final_uri), file_contents);
         }
 
+        // Free old tree, add new one if it exists.
+        // If we return null, no one should access the tree.
+        self.tree.deinit();
         if (try self.handle.saneTree(allocator)) |tree| {
-            try self.trees.append(tree);
-            return &tree.root_node.base;
+            self.tree = tree;
+            return &self.tree.root_node.base;
         }
         return null;
     }
 
     pub fn deinit(self: *ImportContext) void {
-        for (self.trees.items) |tree| {
-            tree.deinit();
-        }
-
-        self.trees.deinit();
+        self.tree.deinit();
     }
 };
 
-pub fn importContext(self: *DocumentStore, handle: *Handle) ImportContext {
-    return .{
+pub fn importContext(self: *DocumentStore, handle: *Handle) !?ImportContext {
+    const tree = (try handle.saneTree(self.allocator)) orelse return null;
+
+    return ImportContext{
         .store = self,
         .handle = handle,
-        .trees = std.ArrayList(*std.zig.ast.Tree).init(self.allocator),
+        .tree = tree,
     };
 }
 
