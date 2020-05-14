@@ -209,6 +209,11 @@ pub const ImportContext = struct {
     handle: *Handle,
     trees: std.ArrayList(*std.zig.ast.Tree),
 
+    pub fn lastTree(self: *ImportContext) *std.zig.ast.Tree {
+        std.debug.assert(self.trees.items.len > 0);
+        return self.trees.items[self.trees.items.len - 1];
+    }
+
     pub fn onImport(self: *ImportContext, import_str: []const u8) !?*std.zig.ast.Node {
         const allocator = self.store.allocator;
         
