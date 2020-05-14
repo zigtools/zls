@@ -1,2 +1,2 @@
-# Zig magic stuff
-/zig-cache
+/test-results/
+/zig-cache/
