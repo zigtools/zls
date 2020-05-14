@@ -35,7 +35,7 @@ The following options are currently available.
 
 ### VSCode
 
-Install the `zig-lsc` extension from [here](https://github.com/SuperAuguste/zig-lsc).
+Install the `zig-lsc` extension from [here](https://github.com/zigtools/zig-lsc/releases).
 
 
 ## Related Projects
