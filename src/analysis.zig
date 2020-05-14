@@ -30,37 +30,48 @@ pub fn getDocComments(allocator: *std.mem.Allocator, tree: *ast.Tree, node: *ast
         .FnProto => {
             const func = node.cast(ast.Node.FnProto).?;
             if (func.doc_comments) |doc_comments| {
-                var doc_it = doc_comments.lines.iterator(0);
-                var lines = std.ArrayList([]const u8).init(allocator);
-                defer lines.deinit();
-
-                while (doc_it.next()) |doc_comment| {
-                    _ = try lines.append(std.fmt.trim(tree.tokenSlice(doc_comment.*)[3..]));
-                }
-
-                return try std.mem.join(allocator, "\n", lines.items);
-            } else {
-                return null;
+                return try collectDocComments(allocator, tree, doc_comments);
             }
         },
         .VarDecl => {
             const var_decl = node.cast(ast.Node.VarDecl).?;
             if (var_decl.doc_comments) |doc_comments| {
-                var doc_it = doc_comments.lines.iterator(0);
-                var lines = std.ArrayList([]const u8).init(allocator);
-                defer lines.deinit();
-
-                while (doc_it.next()) |doc_comment| {
-                    _ = try lines.append(std.fmt.trim(tree.tokenSlice(doc_comment.*)[3..]));
-                }
-
-                return try std.mem.join(allocator, "\n", lines.items);
-            } else {
-                return null;
+                return try collectDocComments(allocator, tree, doc_comments);
             }
         },
-        else => return null
+        .ContainerField => {
+            const field = node.cast(ast.Node.ContainerField).?;
+            if (field.doc_comments) |doc_comments| {
+                return try collectDocComments(allocator, tree, doc_comments);
+            }
+        },
+        .ErrorTag => {
+            const tag = node.cast(ast.Node.ErrorTag).?;
+            if (tag.doc_comments) |doc_comments| {
+                return try collectDocComments(allocator, tree, doc_comments);
+            }
+        },
+        .ParamDecl => {
+            const param = node.cast(ast.Node.ParamDecl).?;
+            if (param.doc_comments) |doc_comments| {
+                return try collectDocComments(allocator, tree, doc_comments);
+            }            
+        },
+        else => {}
     }
+    return null;
+}
+
+fn collectDocComments(allocator: *std.mem.Allocator, tree: *ast.Tree, doc_comments: *ast.Node.DocComment) ![]const u8 {
+    var doc_it = doc_comments.lines.iterator(0);
+    var lines = std.ArrayList([]const u8).init(allocator);
+    defer lines.deinit();
+
+    while (doc_it.next()) |doc_comment| {
+        _ = try lines.append(std.fmt.trim(tree.tokenSlice(doc_comment.*)[3..]));
+    }
+
+    return try std.mem.join(allocator, "\n", lines.items);
 }
 
 /// Gets a function signature (keywords, name, return value)
