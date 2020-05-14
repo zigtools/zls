@@ -257,6 +257,51 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
     return null;
 }
 
+fn maybeCollectImport(tree: *ast.Tree, builtin_call: *ast.Node.BuiltinCall, arr: *std.ArrayList([]const u8)) !void {
+    if (!std.mem.eql(u8, tree.tokenSlice(builtin_call.builtin_token), "@import")) return;
+    if (builtin_call.params.len > 1) return;
+
+    const import_param = builtin_call.params.at(0).*;
+    if (import_param.id != .StringLiteral) return;
+
+    const import_str = tree.tokenSlice(import_param.cast(ast.Node.StringLiteral).?.token);
+    try arr.append(import_str[1 .. import_str.len - 1]);
+}
+
+/// Collects all imports we can find into a slice of import paths (without quotes).
+/// The import paths are valid as long as the tree is.
+pub fn collectImports(allocator: *std.mem.Allocator, tree: *ast.Tree) ![][]const u8 {
+    // TODO: Currently only detects `const smth = @import("string literal")<.SometThing>;`
+    var arr = std.ArrayList([]const u8).init(allocator);
+
+    var idx: usize = 0;
+    while (tree.root_node.iterate(idx)) |decl| : (idx += 1) {
+        if (decl.id != .VarDecl) continue;
+        const var_decl = decl.cast(ast.Node.VarDecl).?;
+        if (var_decl.init_node == null) continue;
+    
+        switch(var_decl.init_node.?.id) {
+            .BuiltinCall => {
+                const builtin_call = var_decl.init_node.?.cast(ast.Node.BuiltinCall).?;
+                try maybeCollectImport(tree, builtin_call, &arr);
+            },
+            .InfixOp => {
+                const infix_op = var_decl.init_node.?.cast(ast.Node.InfixOp).?;
+                
+                switch(infix_op.op) {
+                    .Period => {},
+                    else => continue,
+                }
+                if (infix_op.lhs.id != .BuiltinCall) continue;
+                try maybeCollectImport(tree, infix_op.lhs.cast(ast.Node.BuiltinCall).?, &arr);
+            },
+            else => {},
+        }
+    }
+
+    return arr.toOwnedSlice();
+}
+
 pub fn getFieldAccessTypeNode(analysis_ctx: *AnalysisContext, tokenizer: *std.zig.Tokenizer) ?*ast.Node {
     var current_node = &analysis_ctx.tree.root_node.base;
 

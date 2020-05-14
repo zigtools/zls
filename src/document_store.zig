@@ -1,6 +1,7 @@
 const std = @import("std");
 const types = @import("types.zig");
 const URI = @import("uri.zig");
+const analysis = @import("analysis.zig");
 
 const DocumentStore = @This();
 
@@ -151,6 +152,52 @@ fn checkSanity(self: *DocumentStore, handle: *Handle) !void {
     }
 
     handle.document.sane_text = try std.mem.dupe(self.allocator, u8, handle.document.text);
+
+    // TODO: Better algorithm or data structure?
+    // Removing the imports is costly since they live in an array list
+    // Perhaps we should use an AutoHashMap([]const u8, {}) ?
+
+    // Try to detect removed imports and decrement their counts.
+    if (handle.import_uris.items.len == 0) return;
+
+    const import_strs = try analysis.collectImports(self.allocator, dirty_tree);
+    defer self.allocator.free(import_strs);
+
+    const still_exist = try self.allocator.alloc(bool, handle.import_uris.items.len);
+    defer self.allocator.free(still_exist);
+
+    for (still_exist) |*ex| {
+        ex.* = false;
+    }
+
+    for (import_strs) |str| {
+        const uri = (try uriFromImportStr(self, handle, str)) orelse continue;
+        defer self.allocator.free(uri);
+
+        var idx: usize = 0;
+        exists_loop: while (idx < still_exist.len) : (idx += 1) {
+            if (still_exist[idx]) continue;
+
+            if (std.mem.eql(u8, handle.import_uris.items[idx], uri)) {
+                still_exist[idx] = true;
+                break :exists_loop;
+            }
+        }
+    }
+
+    // Go through still_exist, remove the items that are false and decrement their handle counts.
+    var offset: usize = 0;
+    var idx: usize = 0;
+    while (idx < still_exist.len) : (idx += 1) {
+        if (still_exist[idx]) continue;
+
+        std.debug.warn("Import removed: {}\n", .{handle.import_uris.items[idx - offset]});
+        const uri = handle.import_uris.orderedRemove(idx - offset);
+        offset += 1;
+
+        self.closeDocument(uri);
+        self.allocator.free(uri);
+    }
 }
 
 pub fn applyChanges(self: *DocumentStore, handle: *Handle, content_changes: std.json.Array) !void {
@@ -209,11 +256,29 @@ pub fn applyChanges(self: *DocumentStore, handle: *Handle, content_changes: std.
     try self.checkSanity(handle);
 }
 
-// @TODO: We only reduce the count upon closing,
-// find a way to reduce it when removing imports.
-// Perhaps on new sane text we can go through imports
-// and remove those that are in the import_uris table
-// but not in the file anymore.
+fn uriFromImportStr(store: *DocumentStore, handle: *Handle, import_str: []const u8) !?[]const u8 {
+    return if (std.mem.eql(u8, import_str, "std"))
+        if (store.std_uri) |std_root_uri| try std.mem.dupe(store.allocator, u8, std_root_uri)
+        else {
+            std.debug.warn("Cannot resolve std library import, path is null.\n", .{});
+            return null;
+        }
+    else b: {
+        // Find relative uri
+        const path = try URI.parse(store.allocator, handle.uri());
+        defer store.allocator.free(path);
+
+        const dir_path = std.fs.path.dirname(path) orelse "";
+        const import_path = try std.fs.path.resolve(store.allocator, &[_][]const u8 {
+            dir_path, import_str
+        });
+
+        defer store.allocator.free(import_path);
+
+        break :b (try URI.fromPath(store.allocator, import_path));
+    };
+}
+
 pub const AnalysisContext = struct {
     store: *DocumentStore,
     handle: *Handle,
@@ -224,27 +289,7 @@ pub const AnalysisContext = struct {
 
     pub fn onImport(self: *AnalysisContext, import_str: []const u8) !?*std.zig.ast.Node {
         const allocator = self.store.allocator;
-
-        const final_uri = if (std.mem.eql(u8, import_str, "std"))
-            if (self.store.std_uri) |std_root_uri| try std.mem.dupe(allocator, u8, std_root_uri)
-            else {
-                std.debug.warn("Cannot resolve std library import, path is null.\n", .{});
-                return null;
-            }
-        else b: {
-            // Find relative uri
-            const path = try URI.parse(allocator, self.handle.uri());
-            defer allocator.free(path);
-
-            const dir_path = std.fs.path.dirname(path) orelse "";
-            const import_path = try std.fs.path.resolve(allocator, &[_][]const u8 {
-                dir_path, import_str
-            });
-
-            defer allocator.free(import_path);
-
-            break :b (try URI.fromPath(allocator, import_path));
-        };
+        const final_uri = (try uriFromImportStr(self.store, self.handle, import_str)) orelse return null;
 
         std.debug.warn("Import final URI: {}\n", .{final_uri});
         var consumed_final_uri = false;
