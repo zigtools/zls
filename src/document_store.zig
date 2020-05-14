@@ -382,7 +382,23 @@ pub fn analysisContext(self: *DocumentStore, handle: *Handle, arena: *std.heap.A
 }
 
 pub fn deinit(self: *DocumentStore) void {
-    // @TODO: Deinit everything!
+    var entry_iterator = self.handles.iterator();
+    while (entry_iterator.next()) |entry| {
+        self.allocator.free(entry.value.document.mem);
+        if (entry.value.document.sane_text) |sane| {
+            self.allocator.free(sane);
+        }
+
+        for (entry.value.import_uris.items) |uri| {
+            self.allocator.free(uri);
+        }
+
+        entry.value.import_uris.deinit();
+        self.allocator.free(entry.key);
+    }
 
     self.handles.deinit();
+    if (self.std_uri) |uri| {
+        self.allocator.free(uri);
+    }
 }
