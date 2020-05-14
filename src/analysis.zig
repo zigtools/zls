@@ -341,7 +341,7 @@ pub fn getFieldAccessTypeNode(analysis_ctx: *AnalysisContext, tokenizer: *std.zi
     return current_node;
 }
 
-pub fn isPublic(tree: *ast.Tree, node: *ast.Node) bool {
+pub fn isNodePublic(tree: *ast.Tree, node: *ast.Node) bool {
     switch (node.id) {
         .VarDecl => {
             const var_decl = node.cast(ast.Node.VarDecl).?;
@@ -388,12 +388,4 @@ pub fn nodeToString(tree: *ast.Tree, node: *ast.Node) ?[]const u8 {
     }
     
     return null;
-}
-
-pub fn nodesToString(tree: *ast.Tree, maybe_nodes: ?[]*ast.Node) void {
-    if (maybe_nodes) |nodes| {
-        for (nodes) |node| {
-            std.debug.warn("- {}\n", .{nodeToString(tree, node)});
-        }
-    } else std.debug.warn("No nodes\n", .{});
 }
