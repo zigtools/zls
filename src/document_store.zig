@@ -214,9 +214,6 @@ pub fn applyChanges(self: *DocumentStore, handle: *Handle, content_changes: std.
 // Perhaps on new sane text we can go through imports
 // and remove those that are in the import_uris table
 // but not in the file anymore.
-// @TODO: Make this hold a single tree, remove tree param
-// from analysis functions that take an import_context.
-// (can we reset-reuse it or do we need to deinit-init a new one?)
 pub const AnalysisContext = struct {
     store: *DocumentStore,
     handle: *Handle,
@@ -227,7 +224,7 @@ pub const AnalysisContext = struct {
 
     pub fn onImport(self: *AnalysisContext, import_str: []const u8) !?*std.zig.ast.Node {
         const allocator = self.store.allocator;
-        
+
         const final_uri = if (std.mem.eql(u8, import_str, "std"))
             if (self.store.std_uri) |std_root_uri| try std.mem.dupe(allocator, u8, std_root_uri)
             else {

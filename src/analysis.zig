@@ -110,6 +110,7 @@ pub fn getFunctionSnippet(allocator: *std.mem.Allocator, tree: *ast.Tree, func: 
 
         if (param_decl.var_args_token) |_| {
             try buffer.appendSlice("...");
+            continue;
         }
 
         var curr_tok = param_decl.type_node.firstToken();
