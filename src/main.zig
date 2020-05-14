@@ -2,7 +2,7 @@ const std = @import("std");
 const build_options = @import("build_options");
 
 const Config = @import("config.zig");
-const Uri = @import("uri.zig");
+const DocumentStore = @import("document_store.zig");
 const data = @import("data/" ++ build_options.data_version ++ ".zig");
 const types = @import("types.zig");
 const analysis = @import("analysis.zig");
@@ -12,8 +12,7 @@ const analysis = @import("analysis.zig");
 var stdout: std.fs.File.OutStream = undefined;
 var allocator: *std.mem.Allocator = undefined;
 
-/// Documents hashmap, types.DocumentUri:types.TextDocument
-var documents: std.StringHashMap(types.TextDocument) = undefined;
+var document_store: DocumentStore = undefined;
 
 const initialize_response = \\,"result":{"capabilities":{"signatureHelpProvider":{"triggerCharacters":["(",","]},"textDocumentSync":1,"completionProvider":{"resolveProvider":false,"triggerCharacters":[".",":","@"]},"documentHighlightProvider":false,"codeActionProvider":false,"workspace":{"workspaceFolders":{"supported":true}}}}}
 ;
@@ -78,48 +77,6 @@ fn respondGeneric(id: i64, response: []const u8) !void {
     try stdout.writeAll(response);
 }
 
-fn freeDocument(document: types.TextDocument) void {
-    allocator.free(document.uri);
-    allocator.free(document.mem);
-    if (document.sane_text) |str| {
-        allocator.free(str);
-    }
-}
-
-fn openDocument(uri: []const u8, text: []const u8) !void {
-    const duped_uri = try std.mem.dupe(allocator, u8, uri);
-    const duped_text = try std.mem.dupe(allocator, u8, text);
-
-    const res = try documents.put(duped_uri, .{
-        .uri = duped_uri,
-        .text = duped_text,
-        .mem = duped_text,
-    });
-
-    if (res) |entry| {
-        try log("Document already open: {}, closing old.", .{uri});
-        freeDocument(entry.value);
-    } else {
-        try log("Opened document: {}", .{uri});
-    }
-}
-
-fn closeDocument(uri: []const u8) !void {
-    if (documents.remove(uri)) |entry| {
-        try log("Closing document: {}", .{uri});
-        freeDocument(entry.value);
-    }
-}
-
-fn cacheSane(document: *types.TextDocument) !void {
-    try log("Caching sane text for document: {}", .{document.uri});
-
-    if (document.sane_text) |old_sane| {
-        allocator.free(old_sane);
-    }
-    document.sane_text = try std.mem.dupe(allocator, u8, document.text);
-}
-
 // TODO: Is this correct or can we get a better end? 
 fn astLocationToRange(loc: std.zig.ast.Tree.Location) types.Range {
     return .{
@@ -134,8 +91,8 @@ fn astLocationToRange(loc: std.zig.ast.Tree.Location) types.Range {
     };
 }
 
-fn publishDiagnostics(document: *types.TextDocument, config: Config) !void {
-    const tree = try std.zig.parse(allocator, document.text);
+fn publishDiagnostics(handle: DocumentStore.Handle, config: Config) !void {
+    const tree = try handle.dirtyTree(allocator);
     defer tree.deinit();
 
     // Use an arena for our local memory allocations.
@@ -163,7 +120,6 @@ fn publishDiagnostics(document: *types.TextDocument, config: Config) !void {
     }
 
     if (tree.errors.len == 0) {
-        try cacheSane(document);
         var decls = tree.root_node.decls.iterator(0);
         while (decls.next()) |decl_ptr| {
             var decl = decl_ptr.*;
@@ -214,7 +170,7 @@ fn publishDiagnostics(document: *types.TextDocument, config: Config) !void {
         .method = "textDocument/publishDiagnostics",
         .params = .{
             .PublishDiagnosticsParams = .{
-                .uri = document.uri,
+                .uri = handle.uri(),
                 .diagnostics = diagnostics.items,
             },
         },
@@ -267,18 +223,8 @@ fn nodeToCompletion(alloc: *std.mem.Allocator, tree: *std.zig.ast.Tree, decl: *s
     return null;
 }
 
-fn completeGlobal(id: i64, document: *types.TextDocument, config: Config) !void {
-    // The tree uses its own arena, so we just pass our main allocator.
-    var tree = try std.zig.parse(allocator, document.text);
-
-    if (tree.errors.len > 0) {
-        if (document.sane_text) |sane_text| {
-            tree.deinit();
-            tree = try std.zig.parse(allocator, sane_text);
-        } else return try respondGeneric(id, no_completions_response);
-    }
-    else try cacheSane(document);
-
+fn completeGlobal(id: i64, handle: DocumentStore.Handle, config: Config) !void {
+    var tree = (try handle.saneTree(allocator)) orelse return respondGeneric(id, no_completions_response);
     defer tree.deinit();
 
     // We use a local arena allocator to deallocate all temporary data without iterating
@@ -306,41 +252,12 @@ fn completeGlobal(id: i64, document: *types.TextDocument, config: Config) !void 
     });
 }
 
-fn completeFieldAccess(id: i64, document: *types.TextDocument, position: types.Position, config: Config) !void {
-    if (document.sane_text) |sane_text| {
-        var tree = try std.zig.parse(allocator, sane_text);
-        defer tree.deinit();
+fn completeFieldAccess(id: i64, handle: *DocumentStore.Handle, position: types.Position, config: Config) !void {
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
 
-        // We use a local arena allocator to deallocate all temporary data without iterating
-        var arena = std.heap.ArenaAllocator.init(allocator);
-        var completions = std.ArrayList(types.CompletionItem).init(&arena.allocator);
-        // Deallocate all temporary data.
-        defer arena.deinit();
-
-        var line = try document.getLine(@intCast(usize, position.line));
-        var tokenizer = std.zig.Tokenizer.init(line);
-
-        if (analysis.getNodeFromTokens(tree, &tree.root_node.base, &tokenizer)) |node| {
-            var index: usize = 0;
-            while (node.iterate(index)) |child_node| {
-                if (try nodeToCompletion(&arena.allocator, tree, child_node, config)) |completion| {
-                    try completions.append(completion);
-                }
-                index += 1;
-            }
-        }
-
-        try send(types.Response{
-            .id = .{.Integer = id},
-            .result = .{
-                .CompletionList = .{
-                    .isIncomplete = false,
-                    .items = completions.items,
-                },
-            },
-        });
-    } else {
-        return try send(types.Response{
+    var analysis_ctx = (try document_store.analysisContext(handle, &arena)) orelse {
+        return send(types.Response{
             .id = .{.Integer = id},
             .result = .{
                 .CompletionList = .{
@@ -349,7 +266,33 @@ fn completeFieldAccess(id: i64, document: *types.TextDocument, position: types.P
                 },
             },
         });
+    };
+    defer analysis_ctx.deinit();
+
+    var completions = std.ArrayList(types.CompletionItem).init(&arena.allocator);
+
+    var line = try handle.document.getLine(@intCast(usize, position.line));
+    var tokenizer = std.zig.Tokenizer.init(line);
+
+    if (analysis.getFieldAccessTypeNode(&analysis_ctx, &tokenizer)) |node| {
+        var index: usize = 0;
+        while (node.iterate(index)) |child_node| {
+            if (try nodeToCompletion(&arena.allocator, analysis_ctx.tree, child_node, config)) |completion| {
+                try completions.append(completion);
+            }
+            index += 1;
+        }
     }
+
+    try send(types.Response{
+        .id = .{.Integer = id},
+        .result = .{
+            .CompletionList = .{
+                .isIncomplete = false,
+                .items = completions.items,
+            },
+        },
+    });
 }
 
 // Compute builtin completions at comptime.
@@ -523,73 +466,27 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
         const uri = document.getValue("uri").?.String;
         const text = document.getValue("text").?.String;
 
-        try openDocument(uri, text);
-        try publishDiagnostics(&(documents.get(uri).?.value), config);
+        const handle = try document_store.openDocument(uri, text);
+        try publishDiagnostics(handle.*, config);
     } else if (std.mem.eql(u8, method, "textDocument/didChange")) {
         const text_document = params.getValue("textDocument").?.Object;
         const uri = text_document.getValue("uri").?.String;
-
-        var document = &(documents.get(uri).?.value);
         const content_changes = params.getValue("contentChanges").?.Array;
 
-        for (content_changes.items) |change| {
-            if (change.Object.getValue("range")) |range| {
-                const start_pos = types.Position{
-                    .line = range.Object.getValue("start").?.Object.getValue("line").?.Integer,
-                    .character = range.Object.getValue("start").?.Object.getValue("character").?.Integer
-                };
-                const end_pos = types.Position{
-                    .line = range.Object.getValue("end").?.Object.getValue("line").?.Integer,
-                    .character = range.Object.getValue("end").?.Object.getValue("character").?.Integer
-                };
+        const handle = document_store.getHandle(uri) orelse {
+            try log("Trying to change non existent document {}", .{uri});
+            return;
+        };
 
-                const change_text = change.Object.getValue("text").?.String;
-                const start_index = try document.positionToIndex(start_pos);
-                const end_index = try document.positionToIndex(end_pos);
-
-                const old_len = document.text.len;
-                const new_len = old_len + change_text.len;
-                if (new_len > document.mem.len) {
-                    // We need to reallocate memory.
-                    // We reallocate twice the current filesize or the new length, if it's more than that
-                    // so that we can reduce the amount of realloc calls.
-                    // We can tune this to find a better size if needed.
-                    const realloc_len = std.math.max(2 * old_len, new_len);
-                    document.mem = try allocator.realloc(document.mem, realloc_len);
-                }
-
-                // The first part of the string, [0 .. start_index] need not be changed.
-                // We then copy the last part of the string, [end_index ..] to its
-                //    new position, [start_index + change_len .. ]
-                std.mem.copy(u8, document.mem[start_index + change_text.len..][0 .. old_len - end_index], document.mem[end_index .. old_len]);
-                // Finally, we copy the changes over.
-                std.mem.copy(u8, document.mem[start_index..][0 .. change_text.len], change_text);
-
-                // Reset the text substring.
-                document.text = document.mem[0 .. new_len];
-            } else {
-                const change_text = change.Object.getValue("text").?.String;
-                const old_len = document.text.len;
-
-                if (change_text.len > document.mem.len) {
-                    // Like above.
-                    const realloc_len = std.math.max(2 * old_len, change_text.len);
-                    document.mem = try allocator.realloc(document.mem, realloc_len);
-                }
-
-                std.mem.copy(u8, document.mem[0 .. change_text.len], change_text);
-                document.text = document.mem[0 .. change_text.len];
-            }
-        }
-
-        try publishDiagnostics(document, config);
+        try document_store.applyChanges(handle, content_changes);
+        try publishDiagnostics(handle.*, config);
     } else if (std.mem.eql(u8, method, "textDocument/didSave")) {
         // noop
     } else if (std.mem.eql(u8, method, "textDocument/didClose")) {
         const document = params.getValue("textDocument").?.Object;
         const uri = document.getValue("uri").?.String;
 
-        try closeDocument(uri);
+        document_store.closeDocument(uri);
     }
     // Autocomplete / Signatures
     else if (std.mem.eql(u8, method, "textDocument/completion")) {
@@ -597,14 +494,18 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
         const uri = text_document.getValue("uri").?.String;
         const position = params.getValue("position").?.Object;
 
-        var document = &(documents.get(uri).?.value);
+        const handle = document_store.getHandle(uri) orelse {
+            try log("Trying to complete in non existent document {}", .{uri});
+            return;
+        };
+
         const pos = types.Position{
             .line = position.getValue("line").?.Integer,
             .character = position.getValue("character").?.Integer - 1,
         };
         if (pos.character >= 0) {
-            const pos_index = try document.positionToIndex(pos);
-            const pos_context = documentPositionContext(document.*, pos_index);
+            const pos_index = try handle.document.positionToIndex(pos);
+            const pos_context = documentPositionContext(handle.document, pos_index);
 
             if (pos_context == .builtin) {
                 try send(types.Response{
@@ -617,9 +518,9 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
                     },
                 });
             } else if (pos_context == .var_access or pos_context == .empty) {
-                try completeGlobal(id, document, config);
+                try completeGlobal(id, handle.*, config);
             } else if (pos_context == .field_access) {
-                try completeFieldAccess(id, document, pos, config);
+                try completeFieldAccess(id, handle, pos, config);
             } else {
                 try respondGeneric(id, no_completions_response);
             }
@@ -676,11 +577,9 @@ pub fn main() anyerror!void {
     const stdin = std.io.getStdIn().inStream();
     stdout = std.io.getStdOut().outStream();
 
-
-    documents = std.StringHashMap(types.TextDocument).init(allocator);
-
     // Read he configuration, if any.
     var config = Config{};
+    const config_parse_options = std.json.ParseOptions{ .allocator=allocator };
 
     // TODO: Investigate using std.fs.Watch to detect writes to the config and reload it.
     config_read: {
@@ -703,13 +602,16 @@ pub fn main() anyerror!void {
         if (bytes_read != conf_file_stat.size) break :config_read;
 
         // TODO: Better errors? Doesnt seem like std.json can provide us positions or context.
-        // Note that we don't need to pass an allocator to parse since we are not using pointer or slice fields.
-        // Thus, we don't need to even call parseFree.
-        config = std.json.parse(Config, &std.json.TokenStream.init(file_buf), std.json.ParseOptions{}) catch |err| {
+        config = std.json.parse(Config, &std.json.TokenStream.init(file_buf), config_parse_options) catch |err| {
             std.debug.warn("Error while parsing configuration file: {}\nUsing default config.\n", .{err});
             break :config_read;
         };
     }
+    defer std.json.parseFree(Config, config, config_parse_options);
+
+    // @TODO Check is_absolute
+    try document_store.init(allocator, config.zig_lib_path);
+    defer document_store.deinit();
 
     // This JSON parser is passed to processJsonRpc and reset.
     var json_parser = std.json.Parser.init(allocator, false);
