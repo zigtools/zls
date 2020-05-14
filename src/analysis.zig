@@ -201,7 +201,7 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
         },
         .ContainerField => {
             const field = node.cast(ast.Node.ContainerField).?;
-            return resolveTypeOfNode(analysis_ctx, field.type_expr.?);
+            return resolveTypeOfNode(analysis_ctx, field.type_expr orelse return null);
         },
         .SuffixOp => {
             const suffix_op = node.cast(ast.Node.SuffixOp).?;
