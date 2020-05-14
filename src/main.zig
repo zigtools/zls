@@ -547,7 +547,6 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
                 }),
                 .var_access, .empty => try completeGlobal(id, handle.*, config),
                 .field_access => |start_idx| try completeFieldAccess(id, handle, pos, start_idx, config),
-                    // std.debug.warn("FIELD ACCESS: {}\n", .{handle.document.text[start_idx..pos_index + 1]});
                 else => try respondGeneric(id, no_completions_response),
             }
         } else {
