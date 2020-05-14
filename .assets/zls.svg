@@ -11,32 +11,36 @@
    inkscape:version="1.0 (4035a4fb49, 2020-05-01)"
    id="svg8"
    version="1.1"
-   viewBox="0 0 64.822908 37.83542"
-   height="143"
-   width="245">
+   viewBox="0 0 73.944016 37.80486"
+   height="142.88449"
+   width="279.47348">
   <defs
      id="defs2" />
   <sodipodi:namedview
      showguides="false"
      units="px"
      inkscape:window-maximized="1"
-     inkscape:window-y="-6"
-     inkscape:window-x="1700"
-     inkscape:window-height="898"
-     inkscape:window-width="1707"
+     inkscape:window-y="15"
+     inkscape:window-x="5132"
+     inkscape:window-height="2067"
+     inkscape:window-width="1887"
      showgrid="false"
      inkscape:document-rotation="0"
      inkscape:current-layer="layer1"
      inkscape:document-units="mm"
-     inkscape:cy="185.27203"
-     inkscape:cx="233.86931"
+     inkscape:cy="185.27101"
+     inkscape:cx="233.87099"
      inkscape:zoom="1.4"
      inkscape:pageshadow="2"
      inkscape:pageopacity="0.0"
      borderopacity="1.0"
      bordercolor="#666666"
      pagecolor="#ffffff"
-     id="base" />
+     id="base"
+     fit-margin-top="2.558"
+     fit-margin-bottom="2.558"
+     fit-margin-left="2.509"
+     fit-margin-right="2.509" />
   <metadata
      id="metadata5">
     <rdf:RDF>
@@ -52,7 +56,8 @@
   <g
      id="layer1"
      inkscape:groupmode="layer"
-     inkscape:label="Layer 1">
+     inkscape:label="Layer 1"
+     transform="translate(4.4419096e-4,-2.7117153e-4)">
     <text
        id="text967"
        y="12.207294"
@@ -60,19 +65,19 @@
        style="font-style:normal;font-weight:normal;font-size:12.7px;line-height:0.9;font-family:sans-serif;letter-spacing:-2.64583px;word-spacing:0px;fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.264583"
        xml:space="preserve"><tspan
          sodipodi:role="line"
-         style="font-style:normal;font-variant:normal;font-weight:bold;font-stretch:normal;font-size:12.7px;font-family:Inter,sans-serif;-inkscape-font-specification:'Inter Bold';letter-spacing:0px;fill:#f7a41d;fill-opacity:1;stroke-width:0.264583"
+         style="font-style:normal;font-variant:normal;font-weight:bold;font-stretch:normal;font-size:12.7px;font-family:Inter, sans-serif;-inkscape-font-specification:'Inter Bold';letter-spacing:0px;fill:#f7a41d;fill-opacity:1;stroke-width:0.264583"
          y="12.207294"
          x="1.938048"
          id="tspan965">Zig</tspan><tspan
          id="tspan977"
          sodipodi:role="line"
-         style="font-style:normal;font-variant:normal;font-weight:bold;font-stretch:normal;font-size:12.7px;font-family:Inter,sans-serif;-inkscape-font-specification:'Inter Bold';letter-spacing:0px;fill:#000000;fill-opacity:1;stroke-width:0.264583"
-         y="23.804161"
+         style="font-style:normal;font-variant:normal;font-weight:bold;font-stretch:normal;font-size:12.7px;font-family:Inter, sans-serif;-inkscape-font-specification:'Inter Bold';letter-spacing:0px;fill:#000000;fill-opacity:1;stroke-width:0.264583"
+         y="23.637295"
          x="1.938048">Language</tspan><tspan
          id="tspan984"
          sodipodi:role="line"
-         style="font-style:normal;font-variant:normal;font-weight:bold;font-stretch:normal;font-size:12.7px;font-family:Inter,sans-serif;-inkscape-font-specification:'Inter Bold';letter-spacing:0px;fill:#000000;fill-opacity:1;stroke-width:0.264583"
-         y="35.401028"
+         style="font-style:normal;font-variant:normal;font-weight:bold;font-stretch:normal;font-size:12.7px;font-family:Inter, sans-serif;-inkscape-font-specification:'Inter Bold';letter-spacing:0px;fill:#000000;fill-opacity:1;stroke-width:0.264583"
+         y="35.067295"
          x="1.938048">Server</tspan></text>
   </g>
 </svg>
