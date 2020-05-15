@@ -634,7 +634,12 @@ pub fn main() anyerror!void {
     }
     defer std.json.parseFree(Config, config, config_parse_options);
 
-    // @TODO Check is_absolute
+    if (config.zig_lib_path != null and !std.fs.path.isAbsolute(config.zig_lib_path.?)) {
+        std.debug.warn("zig library path is not absolute, defaulting to null.\n", .{});
+        allocator.free(config.zig_lib_path.?);
+        config.zig_lib_path = null;
+    }
+
     try document_store.init(allocator, config.zig_lib_path);
     defer document_store.deinit();
 
