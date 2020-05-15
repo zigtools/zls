@@ -1,6 +1,6 @@
 const std = @import("std");
 
-const reserved_chars = &[_]u8 {
+const reserved_chars = &[_]u8{
     '!', '#', '$', '%', '&', '\'',
     '(', ')', '*', '+', ',', ':',
     ';', '=', '?', '@', '[', ']',
@@ -24,7 +24,17 @@ pub fn fromPath(allocator: *std.mem.Allocator, path: []const u8) ![]const u8 {
             try buf.append('%');
             try std.fmt.format(out_stream, "{X}", .{char});
         } else {
-            try buf.append(std.ascii.toLower(char));
+            try buf.append(char);
+        }
+    }
+
+    // On windows, we need to lowercase the drive name.
+    if (std.builtin.os.tag == .windows) {
+        if (buf.items.len > prefix.len + 1 and
+            std.ascii.isAlpha(buf.items[prefix.len]) and
+            std.mem.startsWith(u8, buf.items[prefix.len + 1 ..], "%3A"))
+        {
+            buf.items[prefix.len] = std.ascii.toLower(buf.items[prefix.len]);
         }
     }
 
@@ -33,7 +43,7 @@ pub fn fromPath(allocator: *std.mem.Allocator, path: []const u8) ![]const u8 {
 
 // Original code: https://github.com/andersfr/zig-lsp/blob/master/uri.zig
 fn parseHex(c: u8) !u8 {
-    return switch(c) {
+    return switch (c) {
         '0'...'9' => c - '0',
         'a'...'f' => c - 'a' + 10,
         'A'...'F' => c - 'A' + 10,
@@ -65,7 +75,7 @@ pub fn parse(allocator: *std.mem.Allocator, str: []const u8) ![]u8 {
             j += 1;
         }
     }
-    
+
     // Remove trailing separator
     if (i > 0 and uri[i - 1] == std.fs.path.sep) {
         i -= 1;
