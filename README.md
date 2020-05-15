@@ -44,6 +44,7 @@ The following options are currently available.
 | --- | --- | --- | --- |
 | `enable_snippets` | `bool` | `true` | Enables snippet completion, set to false for compatibility with language clients that do not support snippets (such as ale). |
 | `zig_lib_path` | `?[]const u8` | `null` | zig library path, used to analyze std library imports. |
+| `warn_style` | `bool` | `false` | Enables warnings for style *guideline* mismatches |
 
 ## Usage
 
