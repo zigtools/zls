@@ -78,7 +78,8 @@ fn collectDocComments(allocator: *std.mem.Allocator, tree: *ast.Tree, doc_commen
 pub fn getFunctionSignature(tree: *ast.Tree, func: *ast.Node.FnProto) []const u8 {
     const start = tree.tokens.at(func.firstToken()).start;
     const end = tree.tokens.at(switch (func.return_type) {
-        .Explicit, .InferErrorSet => |node| node.lastToken()
+        .Explicit, .InferErrorSet => |node| node.lastToken(),
+        .Invalid => |r_paren| r_paren,
     }).end;
     return tree.source[start..end];
 }
@@ -200,6 +201,7 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
             const func = node.cast(ast.Node.FnProto).?;
             switch (func.return_type) {
                 .Explicit, .InferErrorSet => |return_type| return resolveTypeOfNode(analysis_ctx, return_type),
+                .Invalid => {},
             }
         },
         .Identifier => {
@@ -260,7 +262,7 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
 
             const import_str = analysis_ctx.tree.tokenSlice(import_param.cast(ast.Node.StringLiteral).?.token);
             return analysis_ctx.onImport(import_str[1 .. import_str.len - 1]) catch |err| block: {
-                std.debug.warn("Error {} while proessing import {}\n", .{err, import_str});
+                std.debug.warn("Error {} while processing import {}\n", .{err, import_str});
                 break :block null;
             };
         },
@@ -359,17 +361,13 @@ pub fn isNodePublic(tree: *ast.Tree, node: *ast.Node) bool {
     switch (node.id) {
         .VarDecl => {
             const var_decl = node.cast(ast.Node.VarDecl).?;
-            if (var_decl.visib_token) |visib_token| {
-                return std.mem.eql(u8, tree.tokenSlice(visib_token), "pub");
-            } else return false;
+            return var_decl.visib_token != null;
         },
         .FnProto => {
             const func = node.cast(ast.Node.FnProto).?;
-            if (func.visib_token) |visib_token| {
-                return std.mem.eql(u8, tree.tokenSlice(visib_token), "pub");
-            } else return false;
+            return func.visib_token != null;
         },
-        .ContainerField => {
+        .ContainerField, .ErrorTag => {
             return true;
         },
         else => {
