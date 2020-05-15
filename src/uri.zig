@@ -71,7 +71,5 @@ pub fn parse(allocator: *std.mem.Allocator, str: []const u8) ![]u8 {
         i -= 1;
     }
 
-    std.debug.warn("parsed uri {} into {}\n", .{ str, uri });
-
     return allocator.shrink(uri, i);
 }
