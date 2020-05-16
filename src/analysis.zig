@@ -125,7 +125,7 @@ pub fn getFunctionSnippet(allocator: *std.mem.Allocator, tree: *ast.Tree, func: 
             .var_type => try buffer.appendSlice("var"),
             .type_expr => |type_expr| {
                 var curr_tok = type_expr.firstToken();
-                var end_tok =type_expr.lastToken();
+                var end_tok = type_expr.lastToken();
                 while (curr_tok <= end_tok) : (curr_tok += 1) {
                     const id = tree.tokens.at(curr_tok).id;
                     const is_comma = tree.tokens.at(curr_tok).id == .Comma;
