@@ -323,7 +323,16 @@ pub fn getFieldAccessTypeNode(analysis_ctx: *AnalysisContext, start_node: *ast.N
         .InfixOp => {
             const infix_op = start_node.cast(ast.Node.InfixOp).?;
             if (infix_op.op == .Period) {
-                return resolveTypeOfNode(analysis_ctx, infix_op.lhs);
+                std.debug.assert(infix_op.rhs.id == .Identifier);
+                var rhs_name = nodeToString(analysis_ctx.tree, infix_op.rhs).?;
+                rhs_name = std.mem.dupe(&analysis_ctx.arena.allocator, u8, rhs_name) catch return null;
+
+                if (resolveTypeOfNode(analysis_ctx, infix_op.lhs)) |lhs_type| {
+                    if (getChild(analysis_ctx.tree, lhs_type, rhs_name)) |child| {
+                        return resolveTypeOfNode(analysis_ctx, child);
+                    }
+                }
+                return null;
             } else {
                 return resolveTypeOfNode(analysis_ctx, start_node);
             }
