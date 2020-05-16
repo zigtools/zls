@@ -375,6 +375,7 @@ pub const CompletionContext = struct {
         enum_literal,
         container_field,
         empty,
+        other,
         none,
     };
 
@@ -424,7 +425,7 @@ fn visitNodesAndFindCompletionContext(tree: *ast.Tree, node: *ast.Node, source_i
     return switch (node.id) {
         .Block, .Root => .{ .id = .empty },
         .ContainerField => .{ .id = .container_field },
-        else => CompletionContext.none,
+        else => .{ .id = .other, .node = node },
     };
 }
 
