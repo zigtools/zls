@@ -238,7 +238,7 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
                     // Use the analysis context temporary arena to store the rhs string.
                     rhs_str = std.mem.dupe(&analysis_ctx.arena.allocator, u8, rhs_str) catch return null;
                     const left = resolveTypeOfNode(analysis_ctx, infix_op.lhs) orelse return null;
-                    return getChild(analysis_ctx.tree, left, rhs_str);
+                    return resolveTypeOfNode(analysis_ctx, getChild(analysis_ctx.tree, left, rhs_str) orelse return null);
                 },
                 else => {},
             }
@@ -316,31 +316,6 @@ pub fn collectImports(allocator: *std.mem.Allocator, tree: *ast.Tree) ![][]const
     }
 
     return arr.toOwnedSlice();
-}
-
-pub fn getFieldAccessTypeNode(analysis_ctx: *AnalysisContext, start_node: *ast.Node) ?*ast.Node {
-    switch (start_node.id) {
-        .InfixOp => {
-            const infix_op = start_node.cast(ast.Node.InfixOp).?;
-            if (infix_op.op == .Period) {
-                std.debug.assert(infix_op.rhs.id == .Identifier);
-                var rhs_name = nodeToString(analysis_ctx.tree, infix_op.rhs).?;
-                rhs_name = std.mem.dupe(&analysis_ctx.arena.allocator, u8, rhs_name) catch return null;
-
-                if (resolveTypeOfNode(analysis_ctx, infix_op.lhs)) |lhs_type| {
-                    if (getChild(analysis_ctx.tree, lhs_type, rhs_name)) |child| {
-                        return resolveTypeOfNode(analysis_ctx, child);
-                    }
-                }
-                return null;
-            } else {
-                return resolveTypeOfNode(analysis_ctx, start_node);
-            }
-        },
-        else => {
-            return resolveTypeOfNode(analysis_ctx, start_node);
-        },
-    }
 }
 
 pub fn isNodePublic(tree: *ast.Tree, node: *ast.Node) bool {

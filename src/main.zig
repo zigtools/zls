@@ -280,7 +280,7 @@ fn completeFieldAccess(
     var analysis_ctx = try document_store.analysisContext(handle, &arena, tree);
     defer analysis_ctx.deinit();
 
-    if (analysis.getFieldAccessTypeNode(&analysis_ctx, completion_context.node.?)) |node| {
+    if (analysis.resolveTypeOfNode(&analysis_ctx, completion_context.node.?)) |node| {
         var index: usize = 0;
         while (node.iterate(index)) |child_node| {
             if (analysis.isNodePublic(analysis_ctx.tree, child_node)) {
