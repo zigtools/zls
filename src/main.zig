@@ -137,34 +137,36 @@ fn publishDiagnostics(handle: DocumentStore.Handle, config: Config) !void {
                     if (is_extern)
                         break :blk;
 
-                    if (func.name_token) |name_token| {
-                        const loc = tree.tokenLocation(0, name_token);
+                    if (config.warn_style) {
+                        if (func.name_token) |name_token| {
+                            const loc = tree.tokenLocation(0, name_token);
 
-                        const is_type_function = switch (func.return_type) {
-                            .Explicit => |node| if (node.cast(std.zig.ast.Node.Identifier)) |ident|
-                                std.mem.eql(u8, tree.tokenSlice(ident.token), "type")
-                            else
-                                false,
-                            .InferErrorSet, .Invalid => false,
-                        };
+                            const is_type_function = switch (func.return_type) {
+                                .Explicit => |node| if (node.cast(std.zig.ast.Node.Identifier)) |ident|
+                                    std.mem.eql(u8, tree.tokenSlice(ident.token), "type")
+                                else
+                                    false,
+                                .InferErrorSet, .Invalid => false,
+                            };
 
-                        const func_name = tree.tokenSlice(name_token);
-                        if (!is_type_function and !analysis.isCamelCase(func_name)) {
-                            try diagnostics.append(.{
-                                .range = astLocationToRange(loc),
-                                .severity = .Information,
-                                .code = "BadStyle",
-                                .source = "zls",
-                                .message = "Functions should be camelCase",
-                            });
-                        } else if (is_type_function and !analysis.isPascalCase(func_name)) {
-                            try diagnostics.append(.{
-                                .range = astLocationToRange(loc),
-                                .severity = .Information,
-                                .code = "BadStyle",
-                                .source = "zls",
-                                .message = "Type functions should be PascalCase",
-                            });
+                            const func_name = tree.tokenSlice(name_token);
+                            if (!is_type_function and !analysis.isCamelCase(func_name)) {
+                                try diagnostics.append(.{
+                                    .range = astLocationToRange(loc),
+                                    .severity = .Information,
+                                    .code = "BadStyle",
+                                    .source = "zls",
+                                    .message = "Functions should be camelCase",
+                                });
+                            } else if (is_type_function and !analysis.isPascalCase(func_name)) {
+                                try diagnostics.append(.{
+                                    .range = astLocationToRange(loc),
+                                    .severity = .Information,
+                                    .code = "BadStyle",
+                                    .source = "zls",
+                                    .message = "Type functions should be PascalCase",
+                                });
+                            }
                         }
                     }
                 },
