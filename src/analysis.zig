@@ -408,7 +408,7 @@ fn nodeContainsSourceIndex(tree: *ast.Tree, node: *ast.Node, source_index: usize
     return source_index >= first_token.start and source_index <= last_token.end;
 }
 
-fn visitNodesAndFindCompletion(tree: *ast.Tree, node: *ast.Node, source_index: usize) CompletionContext {
+fn visitNodesAndFindCompletionContext(tree: *ast.Tree, node: *ast.Node, source_index: usize) CompletionContext {
     switch (node.id) {
         .Identifier => {
             var cc = CompletionContext{ .id = .var_access, .node = node };
@@ -432,7 +432,7 @@ fn visitNodesAndFindCompletion(tree: *ast.Tree, node: *ast.Node, source_index: u
     var node_idx: usize = 0;
     while (node.iterate(node_idx)) |child| : (node_idx += 1) {
         if (!nodeContainsSourceIndex(tree, child, source_index)) continue;
-        return visitNodesAndFindCompletion(tree, child, source_index);
+        return visitNodesAndFindCompletionContext(tree, child, source_index);
     }
 
     return switch (node.id) {
@@ -444,11 +444,11 @@ fn visitNodesAndFindCompletion(tree: *ast.Tree, node: *ast.Node, source_index: u
 
 pub fn completionContext(tree: *ast.Tree, source_index: usize) CompletionContext {
     if (source_index == 0) return .{ .id = .empty };
-    const completion_context = visitNodesAndFindCompletion(tree, &tree.root_node.base, source_index);
+    const completion_context = visitNodesAndFindCompletionContext(tree, &tree.root_node.base, source_index);
 
     // TODO: Can we do this better?
     // Text like `someExpr().` will not get parsed to InfixOp.
-    // As a workaround, we check if there if the position corresponds exactly to a
+    // As a workaround, we check if the position corresponds exactly to a
     // period token and adjust the context.
     var token_idx: ast.TokenIndex = 0;
     while (tree.tokens.at(token_idx).end <= source_index and token_idx < tree.tokens.len) : (token_idx += 1) {}

@@ -302,33 +302,6 @@ fn completeFieldAccess(
         },
     });
 }
-// fn completeFieldAccess(id: i64, handle: *DocumentStore.Handle, position: types.Position, line_start_idx: usize, config: Config) !void {
-//     var arena = std.heap.ArenaAllocator.init(allocator);
-//     defer arena.deinit();
-    // var completions = std.ArrayList(types.CompletionItem).init(&arena.allocator);
-//     var line = try handle.document.getLine(@intCast(usize, position.line));
-//     var tokenizer = std.zig.Tokenizer.init(line[line_start_idx..]);
-    // if (analysis.getFieldAccessTypeNode(&analysis_ctx, &tokenizer)) |node| {
-    //     var index: usize = 0;
-    //     while (node.iterate(index)) |child_node| {
-    //         if (analysis.isNodePublic(analysis_ctx.tree, child_node)) {
-    //             if (try nodeToCompletion(&arena.allocator, analysis_ctx.tree, child_node, config)) |completion| {
-    //                 try completions.append(completion);
-    //             }
-    //         }
-    //         index += 1;
-    //     }
-    // }
-//     try send(types.Response{
-//         .id = .{ .Integer = id },
-//         .result = .{
-//             .CompletionList = .{
-//                 .isIncomplete = false,
-//                 .items = completions.items,
-//             },
-//         },
-//     });
-// }
 
 // Compute builtin completions at comptime.
 const builtin_completions = block: {
