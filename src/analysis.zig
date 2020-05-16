@@ -120,21 +120,22 @@ pub fn getFunctionSnippet(allocator: *std.mem.Allocator, tree: *ast.Tree, func: 
             try buffer.appendSlice(": ");
         }
 
-        if (param_decl.var_args_token) |_| {
-            try buffer.appendSlice("...");
-            continue;
-        }
+        switch (param_decl.param_type) {
+            .var_args => try buffer.appendSlice("..."),
+            .var_type => try buffer.appendSlice("var"),
+            .type_expr => |type_expr| {
+                var curr_tok = type_expr.firstToken();
+                var end_tok =type_expr.lastToken();
+                while (curr_tok <= end_tok) : (curr_tok += 1) {
+                    const id = tree.tokens.at(curr_tok).id;
+                    const is_comma = tree.tokens.at(curr_tok).id == .Comma;
 
-        var curr_tok = param_decl.type_node.firstToken();
-        var end_tok = param_decl.type_node.lastToken();
-        while (curr_tok <= end_tok) : (curr_tok += 1) {
-            const id = tree.tokens.at(curr_tok).id;
-            const is_comma = tree.tokens.at(curr_tok).id == .Comma;
+                    if (curr_tok == end_tok and is_comma) continue;
 
-            if (curr_tok == end_tok and is_comma) continue;
-
-            try buffer.appendSlice(tree.tokenSlice(curr_tok));
-            if (is_comma or id == .Keyword_const) try buffer.append(' ');
+                    try buffer.appendSlice(tree.tokenSlice(curr_tok));
+                    if (is_comma or id == .Keyword_const) try buffer.append(' ');
+                }
+            }
         }
 
         try buffer.append('}');
