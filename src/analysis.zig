@@ -384,6 +384,8 @@ pub const CompletionContext = struct {
     fn toId(self: CompletionContext, id: Id) CompletionContext {
         return .{ .id = id, .node = self.node };
     }
+
+    const none = CompletionContext{ .id = .none };
 };
 
 fn nodeContainsSourceIndex(tree: *ast.Tree, node: *ast.Node, source_index: usize) bool {
@@ -422,7 +424,7 @@ fn visitNodesAndFindCompletionContext(tree: *ast.Tree, node: *ast.Node, source_i
     return switch (node.id) {
         .Block, .Root => .{ .id = .empty },
         .ContainerField => .{ .id = .container_field },
-        else => .{ .id = .none, .node = node },
+        else => CompletionContext.none,
     };
 }
 
@@ -438,10 +440,18 @@ pub fn completionContext(tree: *ast.Tree, source_index: usize) CompletionContext
     while (tree.tokens.at(token_idx).end <= source_index and token_idx < tree.tokens.len) : (token_idx += 1) {}
     const tok_before_cursor = tree.tokens.at(token_idx);
 
-    const is_dot = tok_before_cursor.id == .Period and tok_before_cursor.end - 1 == source_index;
+    switch (tok_before_cursor.id) {
+        .DocComment,
+        .LineComment,
+        .ContainerDocComment,
+        .MultilineStringLiteralLine,
+        => return CompletionContext.none,
+        else => {},
+    }
 
+    const is_dot = tok_before_cursor.id == .Period and tok_before_cursor.end - 1 == source_index;
     return if (is_dot) switch (completion_context.id) {
-        .container_field => completion_context,
+        .container_field, .none => completion_context,
         .empty => completion_context.toId(.enum_literal),
         else => completion_context.toId(.field_access),
     } else

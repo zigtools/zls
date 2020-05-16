@@ -264,7 +264,6 @@ fn completeGlobal(id: i64, handle: DocumentStore.Handle, config: Config) !void {
     });
 }
 
-// .field_access => try completeFieldAccess(id, handle, completion_context, config),
 fn completeFieldAccess(
     id: i64,
     handle: *DocumentStore.Handle,
@@ -421,7 +420,11 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
                         },
                     },
                 }),
-                .var_access, .empty => try completeGlobal(id, handle.*, config),
+                // TODO: Make .empty trigger global completions.
+                // Currently this is disabled since nodes with parsing errors will disappear
+                // and leave the parent block which will trigger an empty completion, leading to funny
+                // scenarios like foo[..<cursor>] (latest parent node will be the parent block)
+                .var_access => try completeGlobal(id, handle.*, config),
                 .field_access => {
                     try completeFieldAccess(id, handle, completion_context, doc_tree, config);
                     deinit_tree = false;
