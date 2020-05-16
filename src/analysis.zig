@@ -405,6 +405,16 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
                 else => decl,
             };
         },
+        .ErrorSetDecl => {
+            const set = node.cast(ast.Node.ErrorSetDecl).?;
+            var i: usize = 0;
+            while (set.iterate(i)) |decl| : (i+=1)  {
+                const tag = decl.cast(ast.Node.ErrorTag).?;
+                // TODO handle errors better?
+                analysis_ctx.error_completions.add(analysis_ctx.tree(), tag) catch {};
+            }
+            return node;
+        },
         .SuffixOp => {
             const suffix_op = node.cast(ast.Node.SuffixOp).?;
             switch (suffix_op.op) {
@@ -499,7 +509,7 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
             analysis_ctx.onContainer(node.cast(ast.Node.ContainerDecl).?) catch return null;
             return node;
         },
-        .MultilineStringLiteral, .StringLiteral, .ErrorSetDecl, .FnProto => return node,
+        .MultilineStringLiteral, .StringLiteral, .FnProto => return node,
         else => std.debug.warn("Type resolution case not implemented; {}\n", .{node.id}),
     }
     return null;
@@ -916,6 +926,7 @@ pub const PositionContext = union(enum) {
     string_literal: SourceRange,
     field_access: SourceRange,
     var_access: SourceRange,
+    global_error_set,
     enum_literal,
     other,
     empty,
@@ -930,6 +941,7 @@ pub const PositionContext = union(enum) {
             .enum_literal => null,
             .other => null,
             .empty => null,
+            .global_error_set => null,
         };
     }
 };
@@ -1002,6 +1014,7 @@ pub fn documentPositionContext(allocator: *std.mem.Allocator, document: types.Te
                 .enum_literal => curr_ctx.ctx = .empty,
                 .field_access => {},
                 .other => {},
+                .global_error_set => {},
                 else => curr_ctx.ctx = .{
                     .field_access = tokenRangeAppend(curr_ctx.ctx.range().?, tok),
                 },
@@ -1024,6 +1037,7 @@ pub fn documentPositionContext(allocator: *std.mem.Allocator, document: types.Te
                     (try peek(&stack)).ctx = .empty;
                 }
             },
+            .Keyword_error => curr_ctx.ctx = .global_error_set,
             else => curr_ctx.ctx = .empty,
         }
 

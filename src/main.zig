@@ -760,6 +760,15 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
                 }),
                 .var_access, .empty => try completeGlobal(id, pos_index, handle, this_config),
                 .field_access => |range| try completeFieldAccess(id, handle, pos, range, this_config),
+                .global_error_set =>  try send(types.Response{
+                    .id = .{ .Integer = id },
+                    .result = .{
+                        .CompletionList = .{
+                            .isIncomplete = false,
+                            .items = document_store.error_completions.completions.items,
+                        },
+                    },
+                }),
                 else => try respondGeneric(id, no_completions_response),
             }
         } else {
