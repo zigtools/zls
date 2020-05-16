@@ -288,7 +288,24 @@ fn completeFieldAccess(id: i64, handle: *DocumentStore.Handle, position: types.P
         var index: usize = 0;
         while (node.iterate(index)) |child_node| {
             if (analysis.isNodePublic(analysis_ctx.tree, child_node)) {
-                if (try nodeToCompletion(&arena.allocator, analysis_ctx.tree, child_node, config)) |completion| {
+
+                // TODO: Not great to allocate it again and again inside a loop
+                var node_analysis_ctx = (try document_store.analysisContext(handle, &arena)) orelse {
+                    return send(types.Response{
+                        .id = .{ .Integer = id },
+                        .result = .{
+                            .CompletionList = .{
+                                .isIncomplete = true,
+                                .items = completions.items,
+                            },
+                        },
+                    });
+                };
+                defer node_analysis_ctx.deinit();
+
+                const resolved_node = analysis.resolveTypeOfNode(&node_analysis_ctx, child_node) orelse child_node;
+
+                if (try nodeToCompletion(&arena.allocator, node_analysis_ctx.tree, resolved_node, config)) |completion| {
                     try completions.append(completion);
                 }
             }
