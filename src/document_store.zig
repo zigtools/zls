@@ -260,6 +260,7 @@ pub const AnalysisContext = struct {
     // not for the tree allocations.
     arena: *std.heap.ArenaAllocator,
     tree: *std.zig.ast.Tree,
+    scope_nodes: []*std.zig.ast.Node,
 
     pub fn onImport(self: *AnalysisContext, import_str: []const u8) !?*std.zig.ast.Node {
         const allocator = self.store.allocator;
@@ -335,12 +336,14 @@ pub const AnalysisContext = struct {
     }
 };
 
-pub fn analysisContext(self: *DocumentStore, handle: *Handle, arena: *std.heap.ArenaAllocator) !AnalysisContext {
+pub fn analysisContext(self: *DocumentStore, handle: *Handle, arena: *std.heap.ArenaAllocator, position: types.Position) !AnalysisContext {
+    const tree = try handle.tree(self.allocator);
     return AnalysisContext{
         .store = self,
         .handle = handle,
         .arena = arena,
-        .tree = try handle.tree(self.allocator),
+        .tree = tree,
+        .scope_nodes = try analysis.declsFromIndex(&arena.allocator, tree, try handle.document.positionToIndex(position))
     };
 }
 

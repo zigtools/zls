@@ -223,6 +223,16 @@ fn nodeToCompletion(alloc: *std.mem.Allocator, tree: *std.zig.ast.Tree, decl: *s
                 .detail = analysis.getVariableSignature(tree, var_decl),
             };
         },
+        .ParamDecl => {
+            const param = decl.cast(std.zig.ast.Node.ParamDecl).?;
+            if (param.name_token) |name_token|
+                return types.CompletionItem{
+                    .label = tree.tokenSlice(name_token),
+                    .kind = .Variable,
+                    .documentation = doc,
+                    .detail = analysis.getParamSignature(tree, param),
+                };
+        },
         else => if (analysis.nodeToString(tree, decl)) |string| {
             return types.CompletionItem{
                 .label = string,
@@ -235,7 +245,7 @@ fn nodeToCompletion(alloc: *std.mem.Allocator, tree: *std.zig.ast.Tree, decl: *s
     return null;
 }
 
-fn completeGlobal(id: i64, handle: DocumentStore.Handle, config: Config) !void {
+fn completeGlobal(id: i64, pos_index: usize, handle: DocumentStore.Handle, config: Config) !void {
     var tree = try handle.tree(allocator);
     defer tree.deinit();
 
@@ -245,10 +255,11 @@ fn completeGlobal(id: i64, handle: DocumentStore.Handle, config: Config) !void {
     // Deallocate all temporary data.
     defer arena.deinit();
 
-    var decls = tree.root_node.decls.iterator(0);
-    while (decls.next()) |decl_ptr| {
+    // var decls = tree.root_node.decls.iterator(0);
+    var decls = try analysis.declsFromIndex(&arena.allocator, tree, pos_index);
+    for (decls) |decl_ptr| {
         var decl = decl_ptr.*;
-        if (try nodeToCompletion(&arena.allocator, tree, decl, config)) |completion| {
+        if (try nodeToCompletion(&arena.allocator, tree, decl_ptr, config)) |completion| {
             try completions.append(completion);
         }
     }
@@ -268,7 +279,7 @@ fn completeFieldAccess(id: i64, handle: *DocumentStore.Handle, position: types.P
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
-    var analysis_ctx = try document_store.analysisContext(handle, &arena);
+    var analysis_ctx = try document_store.analysisContext(handle, &arena, position);
     defer analysis_ctx.deinit();
 
     var completions = std.ArrayList(types.CompletionItem).init(&arena.allocator);
@@ -276,6 +287,7 @@ fn completeFieldAccess(id: i64, handle: *DocumentStore.Handle, position: types.P
     var line = try handle.document.getLine(@intCast(usize, position.line));
     var tokenizer = std.zig.Tokenizer.init(line[line_start_idx..]);
 
+    // var decls = try analysis.declsFromIndex(&arena.allocator, analysis_ctx.tree, try handle.document.positionToIndex(position));
     if (analysis.getFieldAccessTypeNode(&analysis_ctx, &tokenizer)) |node| {
         var index: usize = 0;
         while (node.iterate(index)) |child_node| {
@@ -537,7 +549,7 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
                         },
                     },
                 }),
-                .var_access, .empty => try completeGlobal(id, handle.*, config),
+                .var_access, .empty => try completeGlobal(id, pos_index, handle.*, config),
                 .field_access => |start_idx| try completeFieldAccess(id, handle, pos, start_idx, config),
                 else => try respondGeneric(id, no_completions_response),
             }

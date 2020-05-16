@@ -149,9 +149,13 @@ pub fn getFunctionSnippet(allocator: *std.mem.Allocator, tree: *ast.Tree, func: 
 pub fn getVariableSignature(tree: *ast.Tree, var_decl: *ast.Node.VarDecl) []const u8 {
     const start = tree.tokens.at(var_decl.firstToken()).start;
     const end = tree.tokens.at(var_decl.semicolon_token).start;
-    // var end = 
-        // if (var_decl.init_n) |body| tree.tokens.at(body.firstToken()).start
-        // else tree.tokens.at(var_decl.name_token).end;
+    return tree.source[start..end];
+}
+
+/// Gets a param signature
+pub fn getParamSignature(tree: *ast.Tree, param: *ast.Node.ParamDecl) []const u8 {
+    const start = tree.tokens.at(param.firstToken()).start;
+    const end = tree.tokens.at(param.lastToken()).end;
     return tree.source[start..end];
 }
 
@@ -191,12 +195,50 @@ pub fn getChild(tree: *ast.Tree, node: *ast.Node, name: []const u8) ?*ast.Node {
     return null;
 }
 
+/// Gets the child of slice
+pub fn getChildOfSlice(tree: *ast.Tree, nodes: []*ast.Node, name: []const u8) ?*ast.Node {
+    // var index: usize = 0;
+    for (nodes) |child| {
+        switch (child.id) {
+            .VarDecl => {
+                const vari = child.cast(ast.Node.VarDecl).?;
+                if (std.mem.eql(u8, tree.tokenSlice(vari.name_token), name)) return child;
+            },
+            .ParamDecl => {
+                const decl = child.cast(ast.Node.ParamDecl).?;
+                if (decl.name_token != null and std.mem.eql(u8, tree.tokenSlice(decl.name_token.?), name)) return child;
+            },
+            .FnProto => {
+                const func = child.cast(ast.Node.FnProto).?;
+                if (func.name_token != null and std.mem.eql(u8, tree.tokenSlice(func.name_token.?), name)) return child;
+            },
+            .ContainerField => {
+                const field = child.cast(ast.Node.ContainerField).?;
+                if (std.mem.eql(u8, tree.tokenSlice(field.name_token), name)) return child;
+            },
+            else => {}
+        }
+        // index += 1;
+    }
+    return null;
+}
+
 /// Resolves the type of a node
 pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.Node {
+    std.debug.warn("NODE {}\n", .{node});
     switch (node.id) {
         .VarDecl => {
             const vari = node.cast(ast.Node.VarDecl).?;
             return resolveTypeOfNode(analysis_ctx, vari.type_node orelse vari.init_node.?) orelse null;
+        },
+        .ParamDecl => {
+            const decl = node.cast(ast.Node.ParamDecl).?;
+            switch (decl.param_type) {
+                .var_type, .type_expr => |var_type| {
+                    return resolveTypeOfNode(analysis_ctx, var_type) orelse null;
+                },
+                else => {}
+            }
         },
         .FnProto => {
             const func = node.cast(ast.Node.FnProto).?;
@@ -206,7 +248,9 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
             }
         },
         .Identifier => {
-            if (getChild(analysis_ctx.tree, &analysis_ctx.tree.root_node.base, analysis_ctx.tree.getNodeSource(node))) |child| {
+            // std.debug.warn("IDENTIFIER {}\n", .{analysis_ctx.tree.getNodeSource(node)});
+            if (getChildOfSlice(analysis_ctx.tree, analysis_ctx.scope_nodes, analysis_ctx.tree.getNodeSource(node))) |child| {
+                // std.debug.warn("CHILD {}\n", .{child});
                 return resolveTypeOfNode(analysis_ctx, child);
             } else return null;
         },
@@ -331,7 +375,7 @@ pub fn getFieldAccessTypeNode(analysis_ctx: *AnalysisContext, tokenizer: *std.zi
             .Identifier => {
                 // var root = current_node.cast(ast.Node.Root).?;
                 // current_node.
-                if (getChild(analysis_ctx.tree, current_node, tokenizer.buffer[next.start..next.end])) |child| {
+                if (getChildOfSlice(analysis_ctx.tree, analysis_ctx.scope_nodes, tokenizer.buffer[next.start..next.end])) |child| {
                     if (resolveTypeOfNode(analysis_ctx, child)) |node_type| {
                         current_node = node_type;
                     } else return null;
@@ -405,4 +449,72 @@ pub fn nodeToString(tree: *ast.Tree, node: *ast.Node) ?[]const u8 {
     }
     
     return null;
+}
+
+pub fn declsFromIndexInternal(allocator: *std.mem.Allocator, tree: *ast.Tree, node: *ast.Node, nodes: *std.ArrayList(*ast.Node)) anyerror!void {
+    switch (node.id) {
+        .FnProto => {
+            const func = node.cast(ast.Node.FnProto).?;
+
+            var param_index: usize = 0;
+            while (param_index < func.params.len) : (param_index += 1)
+                try declsFromIndexInternal(allocator, tree, func.params.at(param_index).*, nodes);
+
+            if (func.body_node) |body_node|
+                try declsFromIndexInternal(allocator, tree, body_node, nodes);            
+        },
+        .Block => {
+            var index: usize = 0;
+
+            while (node.iterate(index)) |inode| {
+                try declsFromIndexInternal(allocator, tree, inode, nodes);
+                index += 1;
+            }
+        },
+        .VarDecl => {
+            try nodes.append(node);
+        },
+        .ParamDecl => {
+            try nodes.append(node);
+        },
+        else => {
+            try nodes.appendSlice(try getCompletionsFromNode(allocator, tree, node));
+        }
+    }
+}
+
+pub fn getCompletionsFromNode(allocator: *std.mem.Allocator, tree: *ast.Tree, node: *ast.Node) ![]*ast.Node {
+    var nodes = std.ArrayList(*ast.Node).init(allocator);
+
+    var index: usize = 0;
+    while (node.iterate(index)) |child_node| {
+        try nodes.append(child_node);
+    
+        index += 1;
+    }
+
+    return nodes.items;
+}
+
+pub fn declsFromIndex(allocator: *std.mem.Allocator, tree: *ast.Tree, index: usize) ![]*ast.Node {
+    var iindex: usize = 0;
+
+    var node = &tree.root_node.base;
+    var nodes = std.ArrayList(*ast.Node).init(allocator);
+
+    try nodes.appendSlice(try getCompletionsFromNode(allocator, tree, node));
+
+    while (node.iterate(iindex)) |inode| {
+        if (tree.tokens.at(inode.firstToken()).start < index and index < tree.tokens.at(inode.lastToken()).start) {
+            try declsFromIndexInternal(allocator, tree, inode, &nodes);
+        }
+
+        iindex += 1;
+    }
+
+    if (tree.tokens.at(node.firstToken()).start < index and index < tree.tokens.at(node.lastToken()).start) {
+        return nodes.items;
+    }
+
+    return nodes.items;
 }
