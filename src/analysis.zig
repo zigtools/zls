@@ -12,7 +12,7 @@ pub fn getFunctionByName(tree: *ast.Tree, name: []const u8) ?*ast.Node.FnProto {
                 const func = decl.cast(ast.Node.FnProto).?;
                 if (std.mem.eql(u8, tree.tokenSlice(func.name_token.?), name)) return func;
             },
-            else => {}
+            else => {},
         }
     }
 
@@ -55,9 +55,9 @@ pub fn getDocComments(allocator: *std.mem.Allocator, tree: *ast.Tree, node: *ast
             const param = node.cast(ast.Node.ParamDecl).?;
             if (param.doc_comments) |doc_comments| {
                 return try collectDocComments(allocator, tree, doc_comments);
-            }            
+            }
         },
-        else => {}
+        else => {},
     }
     return null;
 }
@@ -102,8 +102,7 @@ pub fn getFunctionSnippet(allocator: *std.mem.Allocator, tree: *ast.Tree, func: 
         const param = param_ptr.*;
         const param_decl = param.cast(ast.Node.ParamDecl).?;
 
-        if (param_num != 1) try buffer.appendSlice(", ${")
-        else try buffer.appendSlice("${");
+        if (param_num != 1) try buffer.appendSlice(", ${") else try buffer.appendSlice("${");
 
         try buf_stream.print("{}:", .{param_num});
 
@@ -135,7 +134,7 @@ pub fn getFunctionSnippet(allocator: *std.mem.Allocator, tree: *ast.Tree, func: 
                     try buffer.appendSlice(tree.tokenSlice(curr_tok));
                     if (is_comma or id == .Keyword_const) try buffer.append(' ');
                 }
-            }
+            },
         }
 
         try buffer.append('}');
@@ -149,9 +148,9 @@ pub fn getFunctionSnippet(allocator: *std.mem.Allocator, tree: *ast.Tree, func: 
 pub fn getVariableSignature(tree: *ast.Tree, var_decl: *ast.Node.VarDecl) []const u8 {
     const start = tree.tokens.at(var_decl.firstToken()).start;
     const end = tree.tokens.at(var_decl.semicolon_token).start;
-    // var end = 
-        // if (var_decl.init_n) |body| tree.tokens.at(body.firstToken()).start
-        // else tree.tokens.at(var_decl.name_token).end;
+    // var end =
+    // if (var_decl.init_n) |body| tree.tokens.at(body.firstToken()).start
+    // else tree.tokens.at(var_decl.name_token).end;
     return tree.source[start..end];
 }
 
@@ -184,7 +183,7 @@ pub fn getChild(tree: *ast.Tree, node: *ast.Node, name: []const u8) ?*ast.Node {
                 const field = child.cast(ast.Node.ContainerField).?;
                 if (std.mem.eql(u8, tree.tokenSlice(field.name_token), name)) return child;
             },
-            else => {}
+            else => {},
         }
         index += 1;
     }
@@ -226,7 +225,7 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
                 .Call => {
                     return resolveTypeOfNode(analysis_ctx, suffix_op.lhs.node);
                 },
-                else => {}
+                else => {},
             }
         },
         .InfixOp => {
@@ -241,7 +240,7 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
                     const left = resolveTypeOfNode(analysis_ctx, infix_op.lhs) orelse return null;
                     return getChild(analysis_ctx.tree, left, rhs_str);
                 },
-                else => {}
+                else => {},
             }
         },
         .PrefixOp => {
@@ -250,7 +249,7 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
                 .PtrType => {
                     return resolveTypeOfNode(analysis_ctx, prefix_op.rhs);
                 },
-                else => {}
+                else => {},
             }
         },
         .BuiltinCall => {
@@ -263,13 +262,13 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
 
             const import_str = analysis_ctx.tree.tokenSlice(import_param.cast(ast.Node.StringLiteral).?.token);
             return analysis_ctx.onImport(import_str[1 .. import_str.len - 1]) catch |err| block: {
-                std.debug.warn("Error {} while processing import {}\n", .{err, import_str});
+                std.debug.warn("Error {} while processing import {}\n", .{ err, import_str });
                 break :block null;
             };
         },
         else => {
             std.debug.warn("Type resolution case not implemented; {}\n", .{node.id});
-        }
+        },
     }
     return null;
 }
@@ -296,16 +295,16 @@ pub fn collectImports(allocator: *std.mem.Allocator, tree: *ast.Tree) ![][]const
         if (decl.id != .VarDecl) continue;
         const var_decl = decl.cast(ast.Node.VarDecl).?;
         if (var_decl.init_node == null) continue;
-    
-        switch(var_decl.init_node.?.id) {
+
+        switch (var_decl.init_node.?.id) {
             .BuiltinCall => {
                 const builtin_call = var_decl.init_node.?.cast(ast.Node.BuiltinCall).?;
                 try maybeCollectImport(tree, builtin_call, &arr);
             },
             .InfixOp => {
                 const infix_op = var_decl.init_node.?.cast(ast.Node.InfixOp).?;
-                
-                switch(infix_op.op) {
+
+                switch (infix_op.op) {
                     .Period => {},
                     else => continue,
                 }
@@ -319,43 +318,20 @@ pub fn collectImports(allocator: *std.mem.Allocator, tree: *ast.Tree) ![][]const
     return arr.toOwnedSlice();
 }
 
-pub fn getFieldAccessTypeNode(analysis_ctx: *AnalysisContext, tokenizer: *std.zig.Tokenizer) ?*ast.Node {
-    var current_node = &analysis_ctx.tree.root_node.base;
-
-    while (true) {
-        var next = tokenizer.next();
-        switch (next.id) {
-            .Eof => {
-                return current_node;
-            },
-            .Identifier => {
-                // var root = current_node.cast(ast.Node.Root).?;
-                // current_node.
-                if (getChild(analysis_ctx.tree, current_node, tokenizer.buffer[next.start..next.end])) |child| {
-                    if (resolveTypeOfNode(analysis_ctx, child)) |node_type| {
-                        current_node = node_type;
-                    } else return null;
-                } else return null;
-            },
-            .Period => {
-                var after_period = tokenizer.next();
-                if (after_period.id == .Eof) {
-                    return current_node;
-                } else if (after_period.id == .Identifier) {
-                    if (getChild(analysis_ctx.tree, current_node, tokenizer.buffer[after_period.start..after_period.end])) |child| {
-                        if (resolveTypeOfNode(analysis_ctx, child)) |child_type| {
-                            current_node = child_type;
-                        } else return null;
-                    } else return null;
-                }
-            },
-            else => {
-                std.debug.warn("Not implemented; {}\n", .{next.id});
+pub fn getFieldAccessTypeNode(analysis_ctx: *AnalysisContext, start_node: *ast.Node) ?*ast.Node {
+    switch (start_node.id) {
+        .InfixOp => {
+            const infix_op = start_node.cast(ast.Node.InfixOp).?;
+            if (infix_op.op == .Period) {
+                return resolveTypeOfNode(analysis_ctx, infix_op.lhs);
+            } else {
+                return resolveTypeOfNode(analysis_ctx, start_node);
             }
-        }
+        },
+        else => {
+            return resolveTypeOfNode(analysis_ctx, start_node);
+        },
     }
-
-    return current_node;
 }
 
 pub fn isNodePublic(tree: *ast.Tree, node: *ast.Node) bool {
@@ -373,7 +349,7 @@ pub fn isNodePublic(tree: *ast.Tree, node: *ast.Node) bool {
         },
         else => {
             return false;
-        }
+        },
     }
 
     return false;
@@ -401,8 +377,89 @@ pub fn nodeToString(tree: *ast.Tree, node: *ast.Node) ?[]const u8 {
         },
         else => {
             std.debug.warn("INVALID: {}\n", .{node.id});
-        }
+        },
     }
-    
+
     return null;
+}
+
+pub const CompletionContext = struct {
+    pub const Id = enum {
+        builtin,
+        var_access,
+        field_access,
+        enum_literal,
+        container_field,
+        empty,
+        none,
+    };
+
+    id: Id,
+    node: ?*ast.Node = null,
+
+    fn toId(self: CompletionContext, id: Id) CompletionContext {
+        return .{ .id = id, .node = self.node };
+    }
+};
+
+fn nodeContainsSourceIndex(tree: *ast.Tree, node: *ast.Node, source_index: usize) bool {
+    const first_token = tree.tokens.at(node.firstToken());
+    const last_token = tree.tokens.at(node.lastToken());
+    return source_index >= first_token.start and source_index <= last_token.end;
+}
+
+fn visitNodesAndFindCompletion(tree: *ast.Tree, node: *ast.Node, source_index: usize) CompletionContext {
+    switch (node.id) {
+        .Identifier => {
+            var cc = CompletionContext{ .id = .var_access, .node = node };
+
+            if (nodeToString(tree, node).?[0] == '@') {
+                cc.id = .builtin;
+            }
+            return cc;
+        },
+        .InfixOp => {
+            const infix_op = node.cast(ast.Node.InfixOp).?;
+            if (infix_op.op == .Period and nodeContainsSourceIndex(tree, infix_op.rhs, source_index)) {
+                return .{ .id = .field_access, .node = node };
+            }
+        },
+        .BuiltinCall => return .{ .id = .builtin, .node = node },
+        .EnumLiteral => return .{ .id = .enum_literal, .node = node },
+        else => {},
+    }
+
+    var node_idx: usize = 0;
+    while (node.iterate(node_idx)) |child| : (node_idx += 1) {
+        if (!nodeContainsSourceIndex(tree, child, source_index)) continue;
+        return visitNodesAndFindCompletion(tree, child, source_index);
+    }
+
+    return switch (node.id) {
+        .Block, .Root => .{ .id = .empty },
+        .ContainerField => .{ .id = .container_field },
+        else => .{ .id = .none, .node = node },
+    };
+}
+
+pub fn completionContext(tree: *ast.Tree, source_index: usize) CompletionContext {
+    if (source_index == 0) return .{ .id = .empty };
+    const completion_context = visitNodesAndFindCompletion(tree, &tree.root_node.base, source_index);
+
+    // TODO: Can we do this better?
+    // Text like `someExpr().` will not get parsed to InfixOp.
+    // As a workaround, we check if there if the position corresponds exactly to a
+    // period token and adjust the context.
+    var token_idx: ast.TokenIndex = 0;
+    while (tree.tokens.at(token_idx).end <= source_index and token_idx < tree.tokens.len) : (token_idx += 1) {}
+    const tok_before_cursor = tree.tokens.at(token_idx);
+
+    const is_dot = tok_before_cursor.id == .Period and tok_before_cursor.end - 1 == source_index;
+
+    return if (is_dot) switch (completion_context.id) {
+        .container_field => completion_context,
+        .empty => completion_context.toId(.enum_literal),
+        else => completion_context.toId(.field_access),
+    } else
+        completion_context;
 }

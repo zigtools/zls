@@ -264,19 +264,23 @@ fn completeGlobal(id: i64, handle: DocumentStore.Handle, config: Config) !void {
     });
 }
 
-fn completeFieldAccess(id: i64, handle: *DocumentStore.Handle, position: types.Position, line_start_idx: usize, config: Config) !void {
+// .field_access => try completeFieldAccess(id, handle, completion_context, config),
+fn completeFieldAccess(
+    id: i64,
+    handle: *DocumentStore.Handle,
+    completion_context: analysis.CompletionContext,
+    tree: *std.zig.ast.Tree,
+    config: Config,
+) !void {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
-    var analysis_ctx = try document_store.analysisContext(handle, &arena);
+    var completions = std.ArrayList(types.CompletionItem).init(&arena.allocator);
+    // Takes ownership of tree.
+    var analysis_ctx = try document_store.analysisContext(handle, &arena, tree);
     defer analysis_ctx.deinit();
 
-    var completions = std.ArrayList(types.CompletionItem).init(&arena.allocator);
-
-    var line = try handle.document.getLine(@intCast(usize, position.line));
-    var tokenizer = std.zig.Tokenizer.init(line[line_start_idx..]);
-
-    if (analysis.getFieldAccessTypeNode(&analysis_ctx, &tokenizer)) |node| {
+    if (analysis.getFieldAccessTypeNode(&analysis_ctx, completion_context.node.?)) |node| {
         var index: usize = 0;
         while (node.iterate(index)) |child_node| {
             if (analysis.isNodePublic(analysis_ctx.tree, child_node)) {
@@ -298,6 +302,33 @@ fn completeFieldAccess(id: i64, handle: *DocumentStore.Handle, position: types.P
         },
     });
 }
+// fn completeFieldAccess(id: i64, handle: *DocumentStore.Handle, position: types.Position, line_start_idx: usize, config: Config) !void {
+//     var arena = std.heap.ArenaAllocator.init(allocator);
+//     defer arena.deinit();
+    // var completions = std.ArrayList(types.CompletionItem).init(&arena.allocator);
+//     var line = try handle.document.getLine(@intCast(usize, position.line));
+//     var tokenizer = std.zig.Tokenizer.init(line[line_start_idx..]);
+    // if (analysis.getFieldAccessTypeNode(&analysis_ctx, &tokenizer)) |node| {
+    //     var index: usize = 0;
+    //     while (node.iterate(index)) |child_node| {
+    //         if (analysis.isNodePublic(analysis_ctx.tree, child_node)) {
+    //             if (try nodeToCompletion(&arena.allocator, analysis_ctx.tree, child_node, config)) |completion| {
+    //                 try completions.append(completion);
+    //             }
+    //         }
+    //         index += 1;
+    //     }
+    // }
+//     try send(types.Response{
+//         .id = .{ .Integer = id },
+//         .result = .{
+//             .CompletionList = .{
+//                 .isIncomplete = false,
+//                 .items = completions.items,
+//             },
+//         },
+//     });
+// }
 
 // Compute builtin completions at comptime.
 const builtin_completions = block: {
@@ -333,131 +364,6 @@ const builtin_completions = block: {
         without_snippets, with_snippets,
     };
 };
-
-const PositionContext = union(enum) {
-    builtin,
-    comment,
-    string_literal,
-    field_access: usize,
-    var_access,
-    other,
-    empty,
-};
-
-const token_separators = [_]u8{
-    ' ', '\t', '(', ')', '[', ']',
-    '{', '}',  '|', '=', '!', ';',
-    ',', '?',  ':', '%', '+', '*',
-    '>', '<',  '~', '-', '/', '&',
-};
-
-fn documentPositionContext(doc: types.TextDocument, pos_index: usize) PositionContext {
-    // First extract the whole current line up to the cursor.
-    var curr_position = pos_index;
-    while (curr_position > 0) : (curr_position -= 1) {
-        if (doc.text[curr_position - 1] == '\n') break;
-    }
-
-    var line = doc.text[curr_position .. pos_index + 1];
-    // Strip any leading whitespace.
-    var skipped_ws: usize = 0;
-    while (skipped_ws < line.len and (line[skipped_ws] == ' ' or line[skipped_ws] == '\t')) : (skipped_ws += 1) {}
-    if (skipped_ws >= line.len) return .empty;
-    line = line[skipped_ws..];
-
-    // Quick exit for comment lines and multi line string literals.
-    if (line.len >= 2 and line[0] == '/' and line[1] == '/')
-        return .comment;
-    if (line.len >= 2 and line[0] == '\\' and line[1] == '\\')
-        return .string_literal;
-
-    // TODO: This does not detect if we are in a string literal over multiple lines.
-    // Find out what context we are in.
-    // Go over the current line character by character
-    // and determine the context.
-    curr_position = 0;
-    var expr_start: usize = skipped_ws;
-
-    var new_token = true;
-    var context: PositionContext = .other;
-    var string_pop_ctx: PositionContext = .other;
-    while (curr_position < line.len) : (curr_position += 1) {
-        const c = line[curr_position];
-        const next_char = if (curr_position < line.len - 1) line[curr_position + 1] else null;
-
-        if (context != .string_literal and c == '"') {
-            expr_start = curr_position + skipped_ws;
-            context = .string_literal;
-            continue;
-        }
-
-        if (context == .string_literal) {
-            // Skip over escaped quotes
-            if (c == '\\' and next_char != null and next_char.? == '"') {
-                curr_position += 1;
-            } else if (c == '"') {
-                context = string_pop_ctx;
-                string_pop_ctx = .other;
-                new_token = true;
-            }
-
-            continue;
-        }
-
-        if (c == '/' and next_char != null and next_char.? == '/') {
-            context = .comment;
-            break;
-        }
-
-        if (std.mem.indexOfScalar(u8, &token_separators, c) != null) {
-            expr_start = curr_position + skipped_ws + 1;
-            new_token = true;
-            context = .other;
-            continue;
-        }
-
-        if (c == '.' and (!new_token or context == .string_literal)) {
-            new_token = true;
-            if (next_char != null and next_char.? == '.') continue;
-            context = .{ .field_access = expr_start };
-            continue;
-        }
-
-        if (new_token) {
-            const access_ctx: PositionContext = if (context == .field_access)
-                .{ .field_access = expr_start }
-            else
-                .var_access;
-
-            new_token = false;
-
-            if (c == '_' or std.ascii.isAlpha(c)) {
-                context = access_ctx;
-            } else if (c == '@') {
-                // This checks for @"..." identifiers by controlling
-                // the context the string will set after it is over.
-                if (next_char != null and next_char.? == '"') {
-                    string_pop_ctx = access_ctx;
-                }
-                context = .builtin;
-            } else {
-                context = .other;
-            }
-            continue;
-        }
-
-        if (context == .field_access or context == .var_access or context == .builtin) {
-            if (c != '_' and !std.ascii.isAlNum(c)) {
-                context = .other;
-            }
-            continue;
-        }
-
-        context = .other;
-    }
-
-    return context;
-}
 
 fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !void {
     var tree = try parser.parse(json);
@@ -525,9 +431,14 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
         };
         if (pos.character >= 0) {
             const pos_index = try handle.document.positionToIndex(pos);
-            const pos_context = documentPositionContext(handle.document, pos_index);
 
-            switch (pos_context) {
+            const doc_tree = try handle.tree(allocator);
+            var deinit_tree = true;
+            defer if(deinit_tree) doc_tree.deinit();
+
+            const completion_context = analysis.completionContext(doc_tree, pos_index);
+
+            switch (completion_context.id) {
                 .builtin => try send(types.Response{
                     .id = .{ .Integer = id },
                     .result = .{
@@ -538,7 +449,10 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
                     },
                 }),
                 .var_access, .empty => try completeGlobal(id, handle.*, config),
-                .field_access => |start_idx| try completeFieldAccess(id, handle, pos, start_idx, config),
+                .field_access => {
+                    try completeFieldAccess(id, handle, completion_context, doc_tree, config);
+                    deinit_tree = false;
+                },
                 else => try respondGeneric(id, no_completions_response),
             }
         } else {
