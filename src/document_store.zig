@@ -44,8 +44,8 @@ pub fn init(self: *DocumentStore, allocator: *std.mem.Allocator, zig_lib_path: ?
     errdefer self.handles.deinit();
 
     if (zig_lib_path) |zpath| {
-        const std_path = std.fs.path.resolve(allocator, &[_][]const u8 {
-            zpath, "./std/std.zig"
+        const std_path = std.fs.path.resolve(allocator, &[_][]const u8{
+            zpath, "./std/std.zig",
         }) catch |err| block: {
             std.debug.warn("Failed to resolve zig std library path, error: {}\n", .{err});
             self.std_uri = null;
@@ -207,11 +207,11 @@ pub fn applyChanges(self: *DocumentStore, handle: *Handle, content_changes: std.
         if (change.Object.getValue("range")) |range| {
             const start_pos = types.Position{
                 .line = range.Object.getValue("start").?.Object.getValue("line").?.Integer,
-                .character = range.Object.getValue("start").?.Object.getValue("character").?.Integer
+                .character = range.Object.getValue("start").?.Object.getValue("character").?.Integer,
             };
             const end_pos = types.Position{
                 .line = range.Object.getValue("end").?.Object.getValue("line").?.Integer,
-                .character = range.Object.getValue("end").?.Object.getValue("character").?.Integer
+                .character = range.Object.getValue("end").?.Object.getValue("character").?.Integer,
             };
 
             const change_text = change.Object.getValue("text").?.String;
@@ -232,12 +232,12 @@ pub fn applyChanges(self: *DocumentStore, handle: *Handle, content_changes: std.
             // The first part of the string, [0 .. start_index] need not be changed.
             // We then copy the last part of the string, [end_index ..] to its
             //    new position, [start_index + change_len .. ]
-            std.mem.copy(u8, document.mem[start_index + change_text.len..][0 .. old_len - end_index], document.mem[end_index .. old_len]);
+            std.mem.copy(u8, document.mem[start_index + change_text.len ..][0 .. old_len - end_index], document.mem[end_index..old_len]);
             // Finally, we copy the changes over.
-            std.mem.copy(u8, document.mem[start_index..][0 .. change_text.len], change_text);
+            std.mem.copy(u8, document.mem[start_index..][0..change_text.len], change_text);
 
             // Reset the text substring.
-            document.text = document.mem[0 .. new_len];
+            document.text = document.mem[0..new_len];
         } else {
             const change_text = change.Object.getValue("text").?.String;
             const old_len = document.text.len;
@@ -248,8 +248,8 @@ pub fn applyChanges(self: *DocumentStore, handle: *Handle, content_changes: std.
                 document.mem = try self.allocator.realloc(document.mem, realloc_len);
             }
 
-            std.mem.copy(u8, document.mem[0 .. change_text.len], change_text);
-            document.text = document.mem[0 .. change_text.len];
+            std.mem.copy(u8, document.mem[0..change_text.len], change_text);
+            document.text = document.mem[0..change_text.len];
         }
     }
 
@@ -258,8 +258,7 @@ pub fn applyChanges(self: *DocumentStore, handle: *Handle, content_changes: std.
 
 fn uriFromImportStr(store: *DocumentStore, handle: *Handle, import_str: []const u8) !?[]const u8 {
     return if (std.mem.eql(u8, import_str, "std"))
-        if (store.std_uri) |std_root_uri| try std.mem.dupe(store.allocator, u8, std_root_uri)
-        else {
+        if (store.std_uri) |std_root_uri| try std.mem.dupe(store.allocator, u8, std_root_uri) else {
             std.debug.warn("Cannot resolve std library import, path is null.\n", .{});
             return null;
         }
@@ -269,8 +268,8 @@ fn uriFromImportStr(store: *DocumentStore, handle: *Handle, import_str: []const 
         defer store.allocator.free(path);
 
         const dir_path = std.fs.path.dirname(path) orelse "";
-        const import_path = try std.fs.path.resolve(store.allocator, &[_][]const u8 {
-            dir_path, import_str
+        const import_path = try std.fs.path.resolve(store.allocator, &[_][]const u8{
+            dir_path, import_str,
         });
 
         defer store.allocator.free(import_path);

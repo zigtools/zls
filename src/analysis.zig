@@ -190,25 +190,14 @@ pub fn getChild(tree: *ast.Tree, node: *ast.Node, name: []const u8) ?*ast.Node {
 
 /// Resolves the type of a node
 pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.Node {
-    std.debug.warn("Resolving node of type {}\n{}\n", .{ node.id, analysis_ctx.tree.getNodeSource(node) });
+    std.debug.warn("Resolving node of type {}\n", .{node.id});
     switch (node.id) {
         .VarDecl => {
             const vari = node.cast(ast.Node.VarDecl).?;
-            if (vari.lib_name) |lib_name_node| {
-                if (nodeToString(analysis_ctx.tree, lib_name_node)) |lib_name_str| {
-                    // if (std.mem.eql(u8, lib_name_str, "ArrayList")) {
-                    std.debug.warn("Evaluating var decl. {}\n", .{lib_name_str});
-                    // }
-                }
-            }
-
             return resolveTypeOfNode(analysis_ctx, vari.type_node orelse vari.init_node.?) orelse null;
         },
         .FnProto => {
-            const func = node.cast(ast.Node.FnProto).?;
-            switch (func.return_type) {
-                .Explicit, .InferErrorSet => |return_type| return resolveTypeOfNode(analysis_ctx, return_type),
-            }
+            return node;
         },
         .Identifier => {
             if (getChild(analysis_ctx.tree, &analysis_ctx.tree.root_node.base, analysis_ctx.tree.getNodeSource(node))) |child| {
@@ -229,7 +218,15 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
             const suffix_op = node.cast(ast.Node.SuffixOp).?;
             switch (suffix_op.op) {
                 .Call => {
-                    return resolveTypeOfNode(analysis_ctx, suffix_op.lhs.node);
+                    const func_decl = resolveTypeOfNode(analysis_ctx, suffix_op.lhs.node) orelse return null;
+
+                    if (func_decl.id == .FnProto) {
+                        const func = node.cast(ast.Node.FnProto).?;
+                        switch (func.return_type) {
+                            .Explicit, .InferErrorSet => |return_type| return resolveTypeOfNode(analysis_ctx, return_type),
+                        }
+                    }
+                    return null;
                 },
                 else => {},
             }
@@ -239,12 +236,14 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
             switch (infix_op.op) {
                 .Period => {
                     std.debug.warn("\n\n\nPeriod\n\n\n", .{});
+                    std.debug.warn("InfixOp file = {}\n{}\n", .{ analysis_ctx.handle.document.uri, analysis_ctx.tree.getNodeSource(&analysis_ctx.tree.root_node.base) });
+                    std.debug.warn("InfixOp full = {}\n", .{analysis_ctx.tree.getNodeSource(node)});
                     // Save the child string from this tree since the tree may switch when processing
                     // an import lhs.
                     var rhs_str = nodeToString(analysis_ctx.tree, infix_op.rhs) orelse return null;
+                    std.debug.warn("InfixOp rhs_str = {}\n", .{rhs_str});
                     // Use the analysis context temporary arena to store the rhs string.
                     rhs_str = std.mem.dupe(&analysis_ctx.arena.allocator, u8, rhs_str) catch return null;
-                    std.debug.warn("InfixOp rhs_str = {}\n", .{rhs_str});
                     const left = resolveTypeOfNode(analysis_ctx, infix_op.lhs) orelse return null;
                     std.debug.warn("InfixOp left = {}\n", .{left});
                     const child = getChild(analysis_ctx.tree, left, rhs_str) orelse return null;
@@ -272,6 +271,7 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
             const builtin_call = node.cast(ast.Node.BuiltinCall).?;
             if (!std.mem.eql(u8, analysis_ctx.tree.tokenSlice(builtin_call.builtin_token), "@import")) return null;
             if (builtin_call.params.len > 1) return null;
+            std.debug.warn("Importing {}\n", .{analysis_ctx.tree.getNodeSource(node)});
 
             const import_param = builtin_call.params.at(0).*;
             if (import_param.id != .StringLiteral) return null;

@@ -285,12 +285,17 @@ fn completeFieldAccess(id: i64, handle: *DocumentStore.Handle, position: types.P
     var tokenizer = std.zig.Tokenizer.init(line[line_start_idx..]);
 
     if (analysis.getFieldAccessTypeNode(&analysis_ctx, &tokenizer)) |node| {
+        const initial_document = try std.mem.dupe(&arena.allocator, u8, analysis_ctx.handle.document.uri);
         var index: usize = 0;
         while (node.iterate(index)) |child_node| {
-            if (analysis.isNodePublic(analysis_ctx.tree, child_node)) {
+            std.debug.warn("Document uri = {}\nInitial uri = {}\n", .{ analysis_ctx.handle.document.uri, initial_document });
+            std.debug.assert(std.mem.eql(u8, initial_document, analysis_ctx.handle.document.uri));
 
+            if (analysis.isNodePublic(analysis_ctx.tree, child_node)) {
                 // TODO: Not great to allocate it again and again inside a loop
-                var node_analysis_ctx = (try document_store.analysisContext(handle, &arena)) orelse {
+                // Creating a new context, so that we don't destroy the tree that is iterated above when resolving imports
+                std.debug.warn("\ncompleteFieldAccess calling resolveTypeOfNode for {}\nIn document {}\n", .{ analysis_ctx.tree.getNodeSource(child_node), analysis_ctx.handle.document.uri });
+                var node_analysis_ctx = (try document_store.analysisContext(analysis_ctx.handle, &arena)) orelse {
                     return send(types.Response{
                         .id = .{ .Integer = id },
                         .result = .{
@@ -303,9 +308,22 @@ fn completeFieldAccess(id: i64, handle: *DocumentStore.Handle, position: types.P
                 };
                 defer node_analysis_ctx.deinit();
 
-                const resolved_node = analysis.resolveTypeOfNode(&node_analysis_ctx, child_node) orelse child_node;
+                const resolved_node = analysis.resolveTypeOfNode(&node_analysis_ctx, child_node);
+                if (resolved_node) |n| {
+                    std.debug.warn("completeFieldAccess resolveTypeOfNode result = {}\n", .{resolved_node});
+                }
 
-                if (try nodeToCompletion(&arena.allocator, node_analysis_ctx.tree, resolved_node, config)) |completion| {
+                const completion_node: struct { node: *std.zig.ast.Node, context: *DocumentStore.AnalysisContext } = blk: {
+                    if (resolved_node) |n| {
+                        break :blk .{ .node = n, .context = &node_analysis_ctx };
+                    }
+
+                    break :blk .{ .node = child_node, .context = &analysis_ctx };
+                };
+
+                std.debug.warn("completeFieldAccess resolved_node = {}\n", .{completion_node.context.tree.getNodeSource(completion_node.node)});
+
+                if (try nodeToCompletion(&arena.allocator, completion_node.context.tree, completion_node.node, config)) |completion| {
                     try completions.append(completion);
                 }
             }
