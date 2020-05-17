@@ -239,7 +239,7 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
                     // Use the analysis context temporary arena to store the rhs string.
                     rhs_str = std.mem.dupe(&analysis_ctx.arena.allocator, u8, rhs_str) catch return null;
                     const left = resolveTypeOfNode(analysis_ctx, infix_op.lhs) orelse return null;
-                    return getChild(analysis_ctx.tree, left, rhs_str);
+                    return resolveTypeOfNode(analysis_ctx, getChild(analysis_ctx.tree, left, rhs_str) orelse return null);
                 },
                 else => {}
             }
