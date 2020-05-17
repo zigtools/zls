@@ -12,7 +12,7 @@ pub fn getFunctionByName(tree: *ast.Tree, name: []const u8) ?*ast.Node.FnProto {
                 const func = decl.cast(ast.Node.FnProto).?;
                 if (std.mem.eql(u8, tree.tokenSlice(func.name_token.?), name)) return func;
             },
-            else => {}
+            else => {},
         }
     }
 
@@ -55,9 +55,9 @@ pub fn getDocComments(allocator: *std.mem.Allocator, tree: *ast.Tree, node: *ast
             const param = node.cast(ast.Node.ParamDecl).?;
             if (param.doc_comments) |doc_comments| {
                 return try collectDocComments(allocator, tree, doc_comments);
-            }            
+            }
         },
-        else => {}
+        else => {},
     }
     return null;
 }
@@ -102,8 +102,7 @@ pub fn getFunctionSnippet(allocator: *std.mem.Allocator, tree: *ast.Tree, func: 
         const param = param_ptr.*;
         const param_decl = param.cast(ast.Node.ParamDecl).?;
 
-        if (param_num != 1) try buffer.appendSlice(", ${")
-        else try buffer.appendSlice("${");
+        if (param_num != 1) try buffer.appendSlice(", ${") else try buffer.appendSlice("${");
 
         try buf_stream.print("{}:", .{param_num});
 
@@ -135,7 +134,7 @@ pub fn getFunctionSnippet(allocator: *std.mem.Allocator, tree: *ast.Tree, func: 
                     try buffer.appendSlice(tree.tokenSlice(curr_tok));
                     if (is_comma or id == .Keyword_const) try buffer.append(' ');
                 }
-            }
+            },
         }
 
         try buffer.append('}');
@@ -157,6 +156,16 @@ pub fn getParamSignature(tree: *ast.Tree, param: *ast.Node.ParamDecl) []const u8
     const start = tree.tokens.at(param.firstToken()).start;
     const end = tree.tokens.at(param.lastToken()).end;
     return tree.source[start..end];
+}
+
+pub fn isTypeFunction(tree: *ast.Tree, func: *ast.Node.FnProto) bool {
+    switch (func.return_type) {
+        .Explicit => |node| return if (node.cast(std.zig.ast.Node.Identifier)) |ident|
+            std.mem.eql(u8, tree.tokenSlice(ident.token), "type")
+        else
+            false,
+        .InferErrorSet, .Invalid => return false,
+    }
 }
 
 // STYLE
@@ -188,7 +197,7 @@ pub fn getChild(tree: *ast.Tree, node: *ast.Node, name: []const u8) ?*ast.Node {
                 const field = child.cast(ast.Node.ContainerField).?;
                 if (std.mem.eql(u8, tree.tokenSlice(field.name_token), name)) return child;
             },
-            else => {}
+            else => {},
         }
         index += 1;
     }
@@ -216,7 +225,7 @@ pub fn getChildOfSlice(tree: *ast.Tree, nodes: []*ast.Node, name: []const u8) ?*
                 const field = child.cast(ast.Node.ContainerField).?;
                 if (std.mem.eql(u8, tree.tokenSlice(field.name_token), name)) return child;
             },
-            else => {}
+            else => {},
         }
         // index += 1;
     }
@@ -237,7 +246,7 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
                 .var_type, .type_expr => |var_type| {
                     return resolveTypeOfNode(analysis_ctx, var_type) orelse null;
                 },
-                else => {}
+                else => {},
             }
         },
         .FnProto => {
@@ -270,7 +279,7 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
                 .Call, .StructInitializer => {
                     return resolveTypeOfNode(analysis_ctx, suffix_op.lhs.node);
                 },
-                else => {}
+                else => {},
             }
         },
         .InfixOp => {
@@ -285,16 +294,22 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
                     const left = resolveTypeOfNode(analysis_ctx, infix_op.lhs) orelse return null;
                     return resolveTypeOfNode(analysis_ctx, getChild(analysis_ctx.tree, left, rhs_str) orelse return null);
                 },
-                else => {}
+                else => {},
             }
         },
         .PrefixOp => {
             const prefix_op = node.cast(ast.Node.PrefixOp).?;
             switch (prefix_op.op) {
+                .SliceType, .ArrayType => return node,
                 .PtrType => {
-                    return resolveTypeOfNode(analysis_ctx, prefix_op.rhs);
+                    const op_token = analysis_ctx.tree.tokens.at(prefix_op.op_token);
+                    switch (op_token.id) {
+                        .Asterisk => return resolveTypeOfNode(analysis_ctx, prefix_op.rhs),
+                        .LBracket, .AsteriskAsterisk => return null,
+                        else => unreachable,
+                    }
                 },
-                else => {}
+                else => {},
             }
         },
         .BuiltinCall => {
@@ -307,13 +322,16 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
 
             const import_str = analysis_ctx.tree.tokenSlice(import_param.cast(ast.Node.StringLiteral).?.token);
             return analysis_ctx.onImport(import_str[1 .. import_str.len - 1]) catch |err| block: {
-                std.debug.warn("Error {} while processing import {}\n", .{err, import_str});
+                std.debug.warn("Error {} while processing import {}\n", .{ err, import_str });
                 break :block null;
             };
         },
+        .MultilineStringLiteral, .StringLiteral => {
+            return node;
+        },
         else => {
             std.debug.warn("Type resolution case not implemented; {}\n", .{node.id});
-        }
+        },
     }
     return null;
 }
@@ -340,16 +358,16 @@ pub fn collectImports(allocator: *std.mem.Allocator, tree: *ast.Tree) ![][]const
         if (decl.id != .VarDecl) continue;
         const var_decl = decl.cast(ast.Node.VarDecl).?;
         if (var_decl.init_node == null) continue;
-    
-        switch(var_decl.init_node.?.id) {
+
+        switch (var_decl.init_node.?.id) {
             .BuiltinCall => {
                 const builtin_call = var_decl.init_node.?.cast(ast.Node.BuiltinCall).?;
                 try maybeCollectImport(tree, builtin_call, &arr);
             },
             .InfixOp => {
                 const infix_op = var_decl.init_node.?.cast(ast.Node.InfixOp).?;
-                
-                switch(infix_op.op) {
+
+                switch (infix_op.op) {
                     .Period => {},
                     else => continue,
                 }
@@ -395,7 +413,7 @@ pub fn getFieldAccessTypeNode(analysis_ctx: *AnalysisContext, tokenizer: *std.zi
             },
             else => {
                 std.debug.warn("Not implemented; {}\n", .{next.id});
-            }
+            },
         }
     }
 
@@ -412,15 +430,8 @@ pub fn isNodePublic(tree: *ast.Tree, node: *ast.Node) bool {
             const func = node.cast(ast.Node.FnProto).?;
             return func.visib_token != null;
         },
-        .ContainerField, .ErrorTag => {
-            return true;
-        },
-        else => {
-            return false;
-        }
+        else => return true,
     }
-
-    return false;
 }
 
 pub fn nodeToString(tree: *ast.Tree, node: *ast.Node) ?[]const u8 {
@@ -445,9 +456,9 @@ pub fn nodeToString(tree: *ast.Tree, node: *ast.Node) ?[]const u8 {
         },
         else => {
             std.debug.warn("INVALID: {}\n", .{node.id});
-        }
+        },
     }
-    
+
     return null;
 }
 
@@ -461,7 +472,7 @@ pub fn declsFromIndexInternal(allocator: *std.mem.Allocator, tree: *ast.Tree, no
                 try declsFromIndexInternal(allocator, tree, func.params.at(param_index).*, nodes);
 
             if (func.body_node) |body_node|
-                try declsFromIndexInternal(allocator, tree, body_node, nodes);            
+                try declsFromIndexInternal(allocator, tree, body_node, nodes);
         },
         .Block => {
             var index: usize = 0;
@@ -479,7 +490,7 @@ pub fn declsFromIndexInternal(allocator: *std.mem.Allocator, tree: *ast.Tree, no
         },
         else => {
             try nodes.appendSlice(try getCompletionsFromNode(allocator, tree, node));
-        }
+        },
     }
 }
 
@@ -489,7 +500,7 @@ pub fn getCompletionsFromNode(allocator: *std.mem.Allocator, tree: *ast.Tree, no
     var index: usize = 0;
     while (node.iterate(index)) |child_node| {
         try nodes.append(child_node);
-    
+
         index += 1;
     }
 

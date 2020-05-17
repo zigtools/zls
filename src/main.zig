@@ -142,13 +142,7 @@ fn publishDiagnostics(handle: DocumentStore.Handle, config: Config) !void {
                         if (func.name_token) |name_token| {
                             const loc = tree.tokenLocation(0, name_token);
 
-                            const is_type_function = switch (func.return_type) {
-                                .Explicit => |node| if (node.cast(std.zig.ast.Node.Identifier)) |ident|
-                                    std.mem.eql(u8, tree.tokenSlice(ident.token), "type")
-                                else
-                                    false,
-                                .InferErrorSet, .Invalid => false,
-                            };
+                            const is_type_function = analysis.isTypeFunction(tree, func);
 
                             const func_name = tree.tokenSlice(name_token);
                             if (!is_type_function and !analysis.isCamelCase(func_name)) {
@@ -187,8 +181,17 @@ fn publishDiagnostics(handle: DocumentStore.Handle, config: Config) !void {
     });
 }
 
-fn nodeToCompletion(alloc: *std.mem.Allocator, tree: *std.zig.ast.Tree, decl: *std.zig.ast.Node, config: Config) !?types.CompletionItem {
-    var doc = if (try analysis.getDocComments(alloc, tree, decl)) |doc_comments|
+fn containerToCompletion(list: *std.ArrayList(types.CompletionItem), tree: *std.zig.ast.Tree, container: *std.zig.ast.Node, config: Config) !void {
+    var index: usize = 0;
+    while (container.iterate(index)) |child_node| : (index+=1) {
+        if (analysis.isNodePublic(tree, child_node)) {
+            try nodeToCompletion(list, tree, child_node, config);
+        }
+    }
+}
+
+fn nodeToCompletion(list: *std.ArrayList(types.CompletionItem), tree: *std.zig.ast.Tree, node: *std.zig.ast.Node, config: Config) error{OutOfMemory}!void {
+    var doc = if (try analysis.getDocComments(list.allocator, tree, node)) |doc_comments|
         types.MarkupContent{
             .kind = .Markdown,
             .value = doc_comments,
@@ -196,54 +199,74 @@ fn nodeToCompletion(alloc: *std.mem.Allocator, tree: *std.zig.ast.Tree, decl: *s
     else
         null;
 
-    switch (decl.id) {
+    switch (node.id) {
+        .ErrorSetDecl, .Root, .ContainerDecl => {
+            try containerToCompletion(list, tree, node, config);
+        },
         .FnProto => {
-            const func = decl.cast(std.zig.ast.Node.FnProto).?;
+            const func = node.cast(std.zig.ast.Node.FnProto).?;
             if (func.name_token) |name_token| {
                 const insert_text = if (config.enable_snippets)
-                    try analysis.getFunctionSnippet(alloc, tree, func)
+                    try analysis.getFunctionSnippet(list.allocator, tree, func)
                 else
                     null;
 
-                return types.CompletionItem{
+                const is_type_function = analysis.isTypeFunction(tree, func);
+
+                try list.append(.{
                     .label = tree.tokenSlice(name_token),
-                    .kind = .Function,
+                    .kind = if (is_type_function) .Struct else .Function,
                     .documentation = doc,
                     .detail = analysis.getFunctionSignature(tree, func),
                     .insertText = insert_text,
                     .insertTextFormat = if (config.enable_snippets) .Snippet else .PlainText,
-                };
+                });
             }
         },
         .VarDecl => {
-            const var_decl = decl.cast(std.zig.ast.Node.VarDecl).?;
-            return types.CompletionItem{
+            const var_decl = node.cast(std.zig.ast.Node.VarDecl).?;
+            const is_const = tree.tokens.at(var_decl.mut_token).id == .Keyword_const;
+            try list.append(.{
                 .label = tree.tokenSlice(var_decl.name_token),
-                .kind = .Variable,
+                .kind = if (is_const) .Constant else .Variable,
                 .documentation = doc,
                 .detail = analysis.getVariableSignature(tree, var_decl),
-            };
+            });
         },
         .ParamDecl => {
-            const param = decl.cast(std.zig.ast.Node.ParamDecl).?;
+            const param = node.cast(std.zig.ast.Node.ParamDecl).?;
             if (param.name_token) |name_token|
-                return types.CompletionItem{
+                try list.append(.{
                     .label = tree.tokenSlice(name_token),
-                    .kind = .Variable,
+                    .kind = .Constant,
                     .documentation = doc,
                     .detail = analysis.getParamSignature(tree, param),
-                };
+                });
         },
-        else => if (analysis.nodeToString(tree, decl)) |string| {
-            return types.CompletionItem{
+        .PrefixOp => {
+            try list.append(.{
+                .label = "len",
+                .kind = .Field,
+            });
+            try list.append(.{
+                .label = "ptr",
+                .kind = .Field,
+            });
+        },
+        .StringLiteral => {
+            try list.append(.{
+                .label = "len",
+                .kind = .Field,
+            });
+        },
+        else => if (analysis.nodeToString(tree, node)) |string| {
+            try list.append(.{
                 .label = string,
                 .kind = .Field,
                 .documentation = doc,
-            };
+            });
         },
     }
-
-    return null;
 }
 
 fn completeGlobal(id: i64, pos_index: usize, handle: DocumentStore.Handle, config: Config) !void {
@@ -260,9 +283,7 @@ fn completeGlobal(id: i64, pos_index: usize, handle: DocumentStore.Handle, confi
     var decls = try analysis.declsFromIndex(&arena.allocator, tree, pos_index);
     for (decls) |decl_ptr| {
         var decl = decl_ptr.*;
-        if (try nodeToCompletion(&arena.allocator, tree, decl_ptr, config)) |completion| {
-            try completions.append(completion);
-        }
+        try nodeToCompletion(&completions, tree, decl_ptr, config);
     }
 
     try send(types.Response{
@@ -290,15 +311,7 @@ fn completeFieldAccess(id: i64, handle: *DocumentStore.Handle, position: types.P
 
     // var decls = try analysis.declsFromIndex(&arena.allocator, analysis_ctx.tree, try handle.document.positionToIndex(position));
     if (analysis.getFieldAccessTypeNode(&analysis_ctx, &tokenizer)) |node| {
-        var index: usize = 0;
-        while (node.iterate(index)) |child_node| {
-            if (analysis.isNodePublic(analysis_ctx.tree, child_node)) {
-                if (try nodeToCompletion(&arena.allocator, analysis_ctx.tree, child_node, config)) |completion| {
-                    try completions.append(completion);
-                }
-            }
-            index += 1;
-        }
+        try nodeToCompletion(&completions, analysis_ctx.tree, node, config);
     }
 
     try send(types.Response{
