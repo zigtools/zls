@@ -11,7 +11,7 @@ const analysis = @import("analysis.zig");
 
 // Code is largely based off of https://github.com/andersfr/zig-lsp/blob/master/server.zig
 
-var stdout: std.fs.File.OutStream = undefined;
+var stdout: std.io.BufferedOutStream(4096, std.fs.File.OutStream) = undefined;
 var allocator: *std.mem.Allocator = undefined;
 
 var document_store: DocumentStore = undefined;
@@ -46,8 +46,11 @@ fn send(reqOrRes: var) !void {
     var mem_buffer: [1024 * 128]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&mem_buffer);
     try std.json.stringify(reqOrRes, std.json.StringifyOptions{}, fbs.outStream());
-    try stdout.print("Content-Length: {}\r\n\r\n", .{fbs.pos});
-    try stdout.writeAll(fbs.getWritten());
+
+    const stdout_stream = stdout.outStream();
+    try stdout_stream.print("Content-Length: {}\r\n\r\n", .{fbs.pos});
+    try stdout_stream.writeAll(fbs.getWritten());
+    try stdout.flush();
 }
 
 fn log(comptime fmt: []const u8, args: var) !void {
@@ -82,8 +85,11 @@ fn respondGeneric(id: i64, response: []const u8) !void {
     // Numbers of character that will be printed from this string: len - 3 brackets
     // 1 from the beginning (escaped) and the 2 from the arg {}
     const json_fmt = "{{\"jsonrpc\":\"2.0\",\"id\":{}";
-    try stdout.print("Content-Length: {}\r\n\r\n" ++ json_fmt, .{ response.len + id_digits + json_fmt.len - 3, id });
-    try stdout.writeAll(response);
+
+    const stdout_stream = stdout.outStream();
+    try stdout_stream.print("Content-Length: {}\r\n\r\n" ++ json_fmt, .{ response.len + id_digits + json_fmt.len - 3, id });
+    try stdout_stream.writeAll(response);
+    try stdout.flush();
 }
 
 // TODO: Is this correct or can we get a better end?
@@ -609,17 +615,9 @@ pub fn main() anyerror!void {
         allocator = &debug_alloc_state.allocator;
     }
 
-    // Init buffer for stdin read
-
-    var buffer = std.ArrayList(u8).init(allocator);
-    defer buffer.deinit();
-
-    try buffer.resize(4096);
-
     // Init global vars
-
     const stdin = std.io.getStdIn().inStream();
-    stdout = std.io.getStdOut().outStream();
+    stdout = std.io.bufferedOutStream(std.io.getStdOut().outStream());
 
     // Read the configuration, if any.
     const config_parse_options = std.json.ParseOptions{ .allocator = allocator };
