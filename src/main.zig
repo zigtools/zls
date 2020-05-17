@@ -282,20 +282,20 @@ fn completeFieldAccess(id: i64, handle: *DocumentStore.Handle, position: types.P
     var completions = std.ArrayList(types.CompletionItem).init(&arena.allocator);
 
     var line = try handle.document.getLine(@intCast(usize, position.line));
-    var tokenizer = std.zig.Tokenizer.init(line[line_start_idx..]);
+    // handle pointer could change from underneath us, so let's copy the line
+    var line_copy = try std.mem.dupe(&arena.allocator, u8, line[line_start_idx..]);
+    var tokenizer = std.zig.Tokenizer.init(line_copy);
 
     if (analysis.getFieldAccessTypeNode(&analysis_ctx, &tokenizer)) |node| {
         const initial_document = try std.mem.dupe(&arena.allocator, u8, analysis_ctx.handle.document.uri);
         var index: usize = 0;
         while (node.iterate(index)) |child_node| {
-            std.debug.warn("Document uri = {}\nInitial uri = {}\n", .{ analysis_ctx.handle.document.uri, initial_document });
-            std.debug.assert(std.mem.eql(u8, initial_document, analysis_ctx.handle.document.uri));
-
             if (analysis.isNodePublic(analysis_ctx.tree, child_node)) {
                 // TODO: Not great to allocate it again and again inside a loop
                 // Creating a new context, so that we don't destroy the tree that is iterated above when resolving imports
-                std.debug.warn("\ncompleteFieldAccess calling resolveTypeOfNode for {}\nIn document {}\n", .{ analysis_ctx.tree.getNodeSource(child_node), analysis_ctx.handle.document.uri });
-                var node_analysis_ctx = (try document_store.analysisContext(analysis_ctx.handle, &arena)) orelse {
+                const initial_handle = document_store.getHandle(initial_document) orelse continue;
+                std.debug.warn("\ncompleteFieldAccess calling resolveTypeOfNode for {}\n", .{analysis_ctx.tree.getNodeSource(child_node)});
+                var node_analysis_ctx = (try document_store.analysisContext(initial_handle, &arena)) orelse {
                     return send(types.Response{
                         .id = .{ .Integer = id },
                         .result = .{
