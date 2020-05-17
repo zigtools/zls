@@ -185,11 +185,11 @@ pub const MarkupKind = enum(u1) {
         options: json.StringifyOptions,
         out_stream: var,
     ) !void {
-        if (@enumToInt(value) == 0) {
-            try json.stringify("plaintext", options, out_stream);
-        } else {
-            try json.stringify("markdown", options, out_stream);
-        }
+        const str = switch (value) {
+            .PlainText => "plaintext",
+            .Markdown => "markdown",
+        };
+        try json.stringify(str, options, out_stream);
     }
 };
 

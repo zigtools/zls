@@ -285,7 +285,7 @@ fn completeFieldAccess(id: i64, handle: *DocumentStore.Handle, position: types.P
 
     var completions = std.ArrayList(types.CompletionItem).init(&arena.allocator);
 
-    var line = try handle.document.getLine(@intCast(usize, position.line));
+    const line = try handle.document.getLine(@intCast(usize, position.line));
     var tokenizer = std.zig.Tokenizer.init(line[line_start_idx..]);
 
     // var decls = try analysis.declsFromIndex(&arena.allocator, analysis_ctx.tree, try handle.document.positionToIndex(position));
@@ -607,9 +607,10 @@ pub fn main() anyerror!void {
     const stdin = std.io.getStdIn().inStream();
     stdout = std.io.getStdOut().outStream();
 
-    // Read he configuration, if any.
-    var config = Config{};
+    // Read the configuration, if any.
     const config_parse_options = std.json.ParseOptions{ .allocator = allocator };
+    var config = Config{};
+    defer std.json.parseFree(Config, config, config_parse_options);
 
     // TODO: Investigate using std.fs.Watch to detect writes to the config and reload it.
     config_read: {
@@ -619,17 +620,12 @@ pub fn main() anyerror!void {
         var exec_dir = std.fs.cwd().openDir(exec_dir_path, .{}) catch break :config_read;
         defer exec_dir.close();
 
-        var conf_file = exec_dir.openFile("zls.json", .{}) catch break :config_read;
+        const conf_file = exec_dir.openFile("zls.json", .{}) catch break :config_read;
         defer conf_file.close();
 
-        const conf_file_stat = conf_file.stat() catch break :config_read;
-
-        // Allocate enough memory for the whole file.
-        var file_buf = try allocator.alloc(u8, conf_file_stat.size);
+        // Max 1MB
+        const file_buf = conf_file.inStream().readAllAlloc(allocator, 0x1000000) catch break :config_read;
         defer allocator.free(file_buf);
-
-        const bytes_read = conf_file.readAll(file_buf) catch break :config_read;
-        if (bytes_read != conf_file_stat.size) break :config_read;
 
         // TODO: Better errors? Doesn't seem like std.json can provide us positions or context.
         config = std.json.parse(Config, &std.json.TokenStream.init(file_buf), config_parse_options) catch |err| {
@@ -637,12 +633,13 @@ pub fn main() anyerror!void {
             break :config_read;
         };
     }
-    defer std.json.parseFree(Config, config, config_parse_options);
 
-    if (config.zig_lib_path != null and !std.fs.path.isAbsolute(config.zig_lib_path.?)) {
-        std.debug.warn("zig library path is not absolute, defaulting to null.\n", .{});
-        allocator.free(config.zig_lib_path.?);
-        config.zig_lib_path = null;
+    if (config.zig_lib_path) |zig_lib_path| {
+        if (!std.fs.path.isAbsolute(zig_lib_path)) {
+            std.debug.warn("zig library path is not absolute, defaulting to null.\n", .{});
+            allocator.free(zig_lib_path);
+            config.zig_lib_path = null;
+        }
     }
 
     try document_store.init(allocator, config.zig_lib_path);
