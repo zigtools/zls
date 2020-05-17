@@ -316,7 +316,9 @@ pub const AnalysisContext = struct {
 
             // Swap handles and get new tree.
             // This takes ownership of the passed uri and text.
-            self.handle = try newDocument(self.store, try std.mem.dupe(allocator, u8, final_uri), file_contents);
+            const duped_final_uri = try std.mem.dupe(allocator, u8, final_uri);
+            errdefer allocator.free(duped_final_uri);
+            self.handle = try newDocument(self.store, duped_final_uri, file_contents);
         }
 
         // Free old tree, add new one if it exists.
