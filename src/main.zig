@@ -3,6 +3,7 @@ const build_options = @import("build_options");
 
 const Config = @import("config.zig");
 const DocumentStore = @import("document_store.zig");
+const DebugAllocator = @import("debug_allocator.zig");
 const data = @import("data/" ++ build_options.data_version ++ ".zig");
 const types = @import("types.zig");
 const analysis = @import("analysis.zig");
@@ -577,9 +578,9 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
     }
 }
 
-var debug_alloc_state: std.testing.LeakCountAllocator = undefined;
+var debug_alloc_state: DebugAllocator = undefined;
 // We can now use if(leak_count_alloc) |alloc| { ... } as a comptime check.
-const debug_alloc: ?*std.testing.LeakCountAllocator = if (build_options.allocation_info) &debug_alloc_state else null;
+const debug_alloc: ?*DebugAllocator = if (build_options.allocation_info) &debug_alloc_state else null;
 
 pub fn main() anyerror!void {
     // TODO: Use a better purpose general allocator once std has one.
@@ -590,7 +591,7 @@ pub fn main() anyerror!void {
     if (build_options.allocation_info) {
         // TODO: Use a better debugging allocator, track size in bytes, memory reserved etc..
         // Initialize the leak counting allocator.
-        debug_alloc_state = std.testing.LeakCountAllocator.init(allocator);
+        debug_alloc_state = DebugAllocator.init(allocator);
         allocator = &debug_alloc_state.allocator;
     }
 
@@ -720,7 +721,7 @@ pub fn main() anyerror!void {
         offset += bytes_read;
 
         if (debug_alloc) |dbg| {
-            try log("Allocations alive: {}", .{dbg.count});
+            try log("{}", .{dbg.info});
         }
     }
 }
