@@ -4,6 +4,7 @@ const build_options = @import("build_options");
 const Config = @import("config.zig");
 const DocumentStore = @import("document_store.zig");
 const DebugAllocator = @import("debug_allocator.zig");
+const readRequestHeader = @import("header.zig").readRequestHeader;
 const data = @import("data/" ++ build_options.data_version ++ ".zig");
 const types = @import("types.zig");
 const analysis = @import("analysis.zig");
@@ -649,73 +650,17 @@ pub fn main() anyerror!void {
     var json_parser = std.json.Parser.init(allocator, false);
     defer json_parser.deinit();
 
-    var offset: usize = 0;
-    var bytes_read: usize = 0;
-
-    var index: usize = 0;
-    var content_len: usize = 0;
-
-    stdin_poll: while (true) {
-        if (offset >= 16 and std.mem.startsWith(u8, buffer.items, "Content-Length: ")) {
-            index = 16;
-            while (index <= offset + 10) : (index += 1) {
-                const c = buffer.items[index];
-                if (c >= '0' and c <= '9') {
-                    content_len = content_len * 10 + (c - '0');
-                } else if (c == '\r' and buffer.items[index + 1] == '\n') {
-                    index += 2;
-                    break;
-                }
-            }
-
-            if (buffer.items[index] == '\r') {
-                index += 2;
-                if (buffer.items.len < index + content_len) {
-                    try buffer.resize(index + content_len);
-                }
-
-                body_poll: while (offset < content_len + index) {
-                    bytes_read = try stdin.readAll(buffer.items[offset .. index + content_len]);
-                    if (bytes_read == 0) {
-                        try log("0 bytes read; exiting!", .{});
-                        return;
-                    }
-
-                    offset += bytes_read;
-                }
-
-                try processJsonRpc(&json_parser, buffer.items[index .. index + content_len], config);
-                json_parser.reset();
-
-                offset = 0;
-                content_len = 0;
-            } else {
-                try log("\\r not found", .{});
-            }
-        } else if (offset >= 16) {
-            try log("Offset is greater than 16!", .{});
+    while (true) {
+        const headers = readRequestHeader(allocator, stdin) catch |err| {
+            try log("{}; exiting!", .{@errorName(err)});
             return;
-        }
-
-        if (offset < 16) {
-            bytes_read = try stdin.readAll(buffer.items[offset..25]);
-        } else {
-            if (offset == buffer.items.len) {
-                try buffer.resize(buffer.items.len * 2);
-            }
-            if (index + content_len > buffer.items.len) {
-                bytes_read = try stdin.readAll(buffer.items[offset..buffer.items.len]);
-            } else {
-                bytes_read = try stdin.readAll(buffer.items[offset .. index + content_len]);
-            }
-        }
-
-        if (bytes_read == 0) {
-            try log("0 bytes read; exiting!", .{});
-            return;
-        }
-
-        offset += bytes_read;
+        };
+        defer headers.deinit(allocator);
+        const buf = try allocator.alloc(u8, headers.content_length);
+        defer allocator.free(buf);
+        try stdin.readNoEof(buf);
+        try processJsonRpc(&json_parser, buf, config);
+        json_parser.reset();
 
         if (debug_alloc) |dbg| {
             try log("{}", .{dbg.info});
