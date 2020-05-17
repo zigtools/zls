@@ -14,7 +14,7 @@ pub fn fromPath(allocator: *std.mem.Allocator, path: []const u8) ![]const u8 {
     var buf = std.ArrayList(u8).init(allocator);
     try buf.appendSlice(prefix);
 
-    var out_stream = buf.outStream();
+    const out_stream = buf.outStream();
 
     for (path) |char| {
         if (char == std.fs.path.sep) {
@@ -55,17 +55,16 @@ fn parseHex(c: u8) !u8 {
 pub fn parse(allocator: *std.mem.Allocator, str: []const u8) ![]u8 {
     if (str.len < 7 or !std.mem.eql(u8, "file://", str[0..7])) return error.UriBadScheme;
 
-    var uri = try allocator.alloc(u8, str.len - (if (std.fs.path.sep == '\\') 8 else 7));
+    const uri = try allocator.alloc(u8, str.len - (if (std.fs.path.sep == '\\') 8 else 7));
     errdefer allocator.free(uri);
 
     const path = if (std.fs.path.sep == '\\') str[8..] else str[7..];
 
     var i: usize = 0;
     var j: usize = 0;
-    var e: usize = path.len;
-    while (j < e) : (i += 1) {
+    while (j < path.len) : (i += 1) {
         if (path[j] == '%') {
-            if (j + 2 >= e) return error.UriBadEscape;
+            if (j + 2 >= path.len) return error.UriBadEscape;
             const upper = try parseHex(path[j + 1]);
             const lower = try parseHex(path[j + 2]);
             uri[i] = (upper << 4) + lower;

@@ -4,6 +4,7 @@ const build_options = @import("build_options");
 const Config = @import("config.zig");
 const DocumentStore = @import("document_store.zig");
 const DebugAllocator = @import("debug_allocator.zig");
+const readRequestHeader = @import("header.zig").readRequestHeader;
 const data = @import("data/" ++ build_options.data_version ++ ".zig");
 const types = @import("types.zig");
 const analysis = @import("analysis.zig");
@@ -306,7 +307,7 @@ fn completeFieldAccess(id: i64, handle: *DocumentStore.Handle, position: types.P
 
     var completions = std.ArrayList(types.CompletionItem).init(&arena.allocator);
 
-    var line = try handle.document.getLine(@intCast(usize, position.line));
+    const line = try handle.document.getLine(@intCast(usize, position.line));
     var tokenizer = std.zig.Tokenizer.init(line[line_start_idx..]);
 
     // var decls = try analysis.declsFromIndex(&arena.allocator, analysis_ctx.tree, try handle.document.positionToIndex(position));
@@ -620,9 +621,10 @@ pub fn main() anyerror!void {
     const stdin = std.io.getStdIn().inStream();
     stdout = std.io.getStdOut().outStream();
 
-    // Read he configuration, if any.
-    var config = Config{};
+    // Read the configuration, if any.
     const config_parse_options = std.json.ParseOptions{ .allocator = allocator };
+    var config = Config{};
+    defer std.json.parseFree(Config, config, config_parse_options);
 
     // TODO: Investigate using std.fs.Watch to detect writes to the config and reload it.
     config_read: {
@@ -632,17 +634,12 @@ pub fn main() anyerror!void {
         var exec_dir = std.fs.cwd().openDir(exec_dir_path, .{}) catch break :config_read;
         defer exec_dir.close();
 
-        var conf_file = exec_dir.openFile("zls.json", .{}) catch break :config_read;
+        const conf_file = exec_dir.openFile("zls.json", .{}) catch break :config_read;
         defer conf_file.close();
 
-        const conf_file_stat = conf_file.stat() catch break :config_read;
-
-        // Allocate enough memory for the whole file.
-        var file_buf = try allocator.alloc(u8, conf_file_stat.size);
+        // Max 1MB
+        const file_buf = conf_file.inStream().readAllAlloc(allocator, 0x1000000) catch break :config_read;
         defer allocator.free(file_buf);
-
-        const bytes_read = conf_file.readAll(file_buf) catch break :config_read;
-        if (bytes_read != conf_file_stat.size) break :config_read;
 
         // TODO: Better errors? Doesn't seem like std.json can provide us positions or context.
         config = std.json.parse(Config, &std.json.TokenStream.init(file_buf), config_parse_options) catch |err| {
@@ -650,12 +647,13 @@ pub fn main() anyerror!void {
             break :config_read;
         };
     }
-    defer std.json.parseFree(Config, config, config_parse_options);
 
-    if (config.zig_lib_path != null and !std.fs.path.isAbsolute(config.zig_lib_path.?)) {
-        std.debug.warn("zig library path is not absolute, defaulting to null.\n", .{});
-        allocator.free(config.zig_lib_path.?);
-        config.zig_lib_path = null;
+    if (config.zig_lib_path) |zig_lib_path| {
+        if (!std.fs.path.isAbsolute(zig_lib_path)) {
+            std.debug.warn("zig library path is not absolute, defaulting to null.\n", .{});
+            allocator.free(zig_lib_path);
+            config.zig_lib_path = null;
+        }
     }
 
     try document_store.init(allocator, config.zig_lib_path);
@@ -665,73 +663,17 @@ pub fn main() anyerror!void {
     var json_parser = std.json.Parser.init(allocator, false);
     defer json_parser.deinit();
 
-    var offset: usize = 0;
-    var bytes_read: usize = 0;
-
-    var index: usize = 0;
-    var content_len: usize = 0;
-
-    stdin_poll: while (true) {
-        if (offset >= 16 and std.mem.startsWith(u8, buffer.items, "Content-Length: ")) {
-            index = 16;
-            while (index <= offset + 10) : (index += 1) {
-                const c = buffer.items[index];
-                if (c >= '0' and c <= '9') {
-                    content_len = content_len * 10 + (c - '0');
-                } else if (c == '\r' and buffer.items[index + 1] == '\n') {
-                    index += 2;
-                    break;
-                }
-            }
-
-            if (buffer.items[index] == '\r') {
-                index += 2;
-                if (buffer.items.len < index + content_len) {
-                    try buffer.resize(index + content_len);
-                }
-
-                body_poll: while (offset < content_len + index) {
-                    bytes_read = try stdin.readAll(buffer.items[offset .. index + content_len]);
-                    if (bytes_read == 0) {
-                        try log("0 bytes read; exiting!", .{});
-                        return;
-                    }
-
-                    offset += bytes_read;
-                }
-
-                try processJsonRpc(&json_parser, buffer.items[index .. index + content_len], config);
-                json_parser.reset();
-
-                offset = 0;
-                content_len = 0;
-            } else {
-                try log("\\r not found", .{});
-            }
-        } else if (offset >= 16) {
-            try log("Offset is greater than 16!", .{});
+    while (true) {
+        const headers = readRequestHeader(allocator, stdin) catch |err| {
+            try log("{}; exiting!", .{@errorName(err)});
             return;
-        }
-
-        if (offset < 16) {
-            bytes_read = try stdin.readAll(buffer.items[offset..25]);
-        } else {
-            if (offset == buffer.items.len) {
-                try buffer.resize(buffer.items.len * 2);
-            }
-            if (index + content_len > buffer.items.len) {
-                bytes_read = try stdin.readAll(buffer.items[offset..buffer.items.len]);
-            } else {
-                bytes_read = try stdin.readAll(buffer.items[offset .. index + content_len]);
-            }
-        }
-
-        if (bytes_read == 0) {
-            try log("0 bytes read; exiting!", .{});
-            return;
-        }
-
-        offset += bytes_read;
+        };
+        defer headers.deinit(allocator);
+        const buf = try allocator.alloc(u8, headers.content_length);
+        defer allocator.free(buf);
+        try stdin.readNoEof(buf);
+        try processJsonRpc(&json_parser, buf, config);
+        json_parser.reset();
 
         if (debug_alloc) |dbg| {
             try log("{}", .{dbg.info});

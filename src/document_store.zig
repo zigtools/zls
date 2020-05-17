@@ -52,11 +52,6 @@ pub fn init(self: *DocumentStore, allocator: *std.mem.Allocator, zig_lib_path: ?
 fn newDocument(self: *DocumentStore, uri: []const u8, text: []u8) !*Handle {
     std.debug.warn("Opened document: {}\n", .{uri});
 
-    errdefer {
-        self.allocator.free(uri);
-        self.allocator.free(text);
-    }
-
     var handle = Handle{
         .count = 1,
         .import_uris = std.ArrayList([]const u8).init(self.allocator),
@@ -67,8 +62,8 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: []u8) !*Handle {
         },
     };
     try self.checkSanity(&handle);
-    try self.handles.putNoClobber(uri, handle);
-    return &(self.handles.get(uri) orelse unreachable).value;
+    const kv = try self.handles.getOrPutValue(uri, handle);
+    return &kv.value;
 }
 
 pub fn openDocument(self: *DocumentStore, uri: []const u8, text: []const u8) !*Handle {
@@ -84,7 +79,7 @@ pub fn openDocument(self: *DocumentStore, uri: []const u8, text: []const u8) !*H
     const duped_uri = try std.mem.dupe(self.allocator, u8, uri);
     errdefer self.allocator.free(duped_uri);
 
-    return self.newDocument(duped_uri, duped_text);
+    return try self.newDocument(duped_uri, duped_text);
 }
 
 fn decrementCount(self: *DocumentStore, uri: []const u8) void {
@@ -145,7 +140,7 @@ fn checkSanity(self: *DocumentStore, handle: *Handle) !void {
     }
 
     for (import_strs) |str| {
-        const uri = (try uriFromImportStr(self, handle, str)) orelse continue;
+        const uri = (try uriFromImportStr(self, handle.*, str)) orelse continue;
         defer self.allocator.free(uri);
 
         var idx: usize = 0;
@@ -175,7 +170,7 @@ fn checkSanity(self: *DocumentStore, handle: *Handle) !void {
 }
 
 pub fn applyChanges(self: *DocumentStore, handle: *Handle, content_changes: std.json.Array) !void {
-    var document = &handle.document;
+    const document = &handle.document;
 
     for (content_changes.items) |change| {
         if (change.Object.getValue("range")) |range| {
@@ -230,7 +225,7 @@ pub fn applyChanges(self: *DocumentStore, handle: *Handle, content_changes: std.
     try self.checkSanity(handle);
 }
 
-fn uriFromImportStr(store: *DocumentStore, handle: *Handle, import_str: []const u8) !?[]const u8 {
+fn uriFromImportStr(store: *DocumentStore, handle: Handle, import_str: []const u8) !?[]const u8 {
     return if (std.mem.eql(u8, import_str, "std"))
         if (store.std_uri) |std_root_uri| try std.mem.dupe(store.allocator, u8, std_root_uri)
         else {
@@ -264,7 +259,7 @@ pub const AnalysisContext = struct {
 
     pub fn onImport(self: *AnalysisContext, import_str: []const u8) !?*std.zig.ast.Node {
         const allocator = self.store.allocator;
-        const final_uri = (try uriFromImportStr(self.store, self.handle, import_str)) orelse return null;
+        const final_uri = (try uriFromImportStr(self.store, self.handle.*, import_str)) orelse return null;
 
         std.debug.warn("Import final URI: {}\n", .{final_uri});
         var consumed_final_uri = false;
