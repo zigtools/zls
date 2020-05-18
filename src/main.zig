@@ -615,7 +615,9 @@ pub fn main() anyerror!void {
     }
 
     // Init global vars
-    const stdin = std.io.getStdIn().inStream();
+    var buffered_stdin = std.io.bufferedInStream(std.io.getStdIn().inStream());
+    const in_stream = buffered_stdin.inStream();
+    
     stdout = std.io.bufferedOutStream(std.io.getStdOut().outStream());
 
     // Read the configuration, if any.
@@ -661,14 +663,14 @@ pub fn main() anyerror!void {
     defer json_parser.deinit();
 
     while (true) {
-        const headers = readRequestHeader(allocator, stdin) catch |err| {
+        const headers = readRequestHeader(allocator, in_stream) catch |err| {
             try log("{}; exiting!", .{@errorName(err)});
             return;
         };
         defer headers.deinit(allocator);
         const buf = try allocator.alloc(u8, headers.content_length);
         defer allocator.free(buf);
-        try stdin.readNoEof(buf);
+        try in_stream.readNoEof(buf);
         try processJsonRpc(&json_parser, buf, config);
         json_parser.reset();
 
