@@ -254,9 +254,7 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
             }
         },
         .Identifier => {
-            const identifier = std.mem.dupe(&analysis_ctx.arena.allocator, u8, analysis_ctx.tree.getNodeSource(node)) catch return null;
-
-            if (getChildOfSlice(analysis_ctx.tree, analysis_ctx.scope_nodes, identifier)) |child| {
+            if (getChildOfSlice(analysis_ctx.tree, analysis_ctx.scope_nodes, analysis_ctx.tree.getNodeSource(node))) |child| {
                 return resolveTypeOfNode(analysis_ctx, child);
             } else return null;
         },
@@ -386,8 +384,7 @@ pub fn getFieldAccessTypeNode(analysis_ctx: *AnalysisContext, tokenizer: *std.zi
         switch (next.id) {
             .Eof => return current_node,
             .Identifier => {
-                const identifier = std.mem.dupe(&analysis_ctx.arena.allocator, u8, tokenizer.buffer[next.start..next.end]) catch return null;
-                if (getChildOfSlice(analysis_ctx.tree, analysis_ctx.scope_nodes, identifier)) |child| {
+                if (getChildOfSlice(analysis_ctx.tree, analysis_ctx.scope_nodes, tokenizer.buffer[next.start..next.end])) |child| {
                     if (resolveTypeOfNode(analysis_ctx, child)) |node_type| {
                         current_node = node_type;
                     } else return null;
