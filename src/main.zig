@@ -616,9 +616,7 @@ pub fn main() anyerror!void {
     }
 
     // Init global vars
-    var buffered_stdin = std.io.bufferedInStream(std.io.getStdIn().inStream());
-    const in_stream = buffered_stdin.inStream();
-    
+    const in_stream = std.io.getStdIn().inStream();
     stdout = std.io.bufferedOutStream(std.io.getStdOut().outStream());
 
     // Read the configuration, if any.
