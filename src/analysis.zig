@@ -234,7 +234,6 @@ pub fn getChildOfSlice(tree: *ast.Tree, nodes: []*ast.Node, name: []const u8) ?*
 
 /// Resolves the type of a node
 pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.Node {
-    std.debug.warn("NODE {}\n", .{node});
     switch (node.id) {
         .VarDecl => {
             const vari = node.cast(ast.Node.VarDecl).?;
@@ -257,9 +256,9 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
             }
         },
         .Identifier => {
-            // std.debug.warn("IDENTIFIER {}\n", .{analysis_ctx.tree.getNodeSource(node)});
-            if (getChildOfSlice(analysis_ctx.tree, analysis_ctx.scope_nodes, analysis_ctx.tree.getNodeSource(node))) |child| {
-                // std.debug.warn("CHILD {}\n", .{child});
+            const identifier = std.mem.dupe(&analysis_ctx.arena.allocator, u8, analysis_ctx.tree.getNodeSource(node)) catch return null;
+
+            if (getChildOfSlice(analysis_ctx.tree, analysis_ctx.scope_nodes, identifier)) |child| {
                 return resolveTypeOfNode(analysis_ctx, child);
             } else return null;
         },
@@ -391,9 +390,8 @@ pub fn getFieldAccessTypeNode(analysis_ctx: *AnalysisContext, tokenizer: *std.zi
                 return current_node;
             },
             .Identifier => {
-                // var root = current_node.cast(ast.Node.Root).?;
-                // current_node.
-                if (getChildOfSlice(analysis_ctx.tree, analysis_ctx.scope_nodes, tokenizer.buffer[next.start..next.end])) |child| {
+                const identifier = std.mem.dupe(&analysis_ctx.arena.allocator, u8, tokenizer.buffer[next.start..next.end]) catch return null;
+                if (getChildOfSlice(analysis_ctx.tree, analysis_ctx.scope_nodes, identifier)) |child| {
                     if (resolveTypeOfNode(analysis_ctx, child)) |node_type| {
                         current_node = node_type;
                     } else return null;
@@ -462,70 +460,46 @@ pub fn nodeToString(tree: *ast.Tree, node: *ast.Node) ?[]const u8 {
     return null;
 }
 
-pub fn declsFromIndexInternal(allocator: *std.mem.Allocator, tree: *ast.Tree, node: *ast.Node, nodes: *std.ArrayList(*ast.Node)) anyerror!void {
+pub fn declsFromIndexInternal(decls: *std.ArrayList(*ast.Node), tree: *ast.Tree, node: *ast.Node) anyerror!void {
     switch (node.id) {
         .FnProto => {
             const func = node.cast(ast.Node.FnProto).?;
 
             var param_index: usize = 0;
             while (param_index < func.params.len) : (param_index += 1)
-                try declsFromIndexInternal(allocator, tree, func.params.at(param_index).*, nodes);
+                try declsFromIndexInternal(decls, tree, func.params.at(param_index).*);
 
             if (func.body_node) |body_node|
-                try declsFromIndexInternal(allocator, tree, body_node, nodes);
+                try declsFromIndexInternal(decls, tree, body_node);
         },
         .Block => {
             var index: usize = 0;
 
             while (node.iterate(index)) |inode| {
-                try declsFromIndexInternal(allocator, tree, inode, nodes);
+                try declsFromIndexInternal(decls, tree, inode);
                 index += 1;
             }
         },
-        .VarDecl => {
-            try nodes.append(node);
-        },
-        .ParamDecl => {
-            try nodes.append(node);
-        },
-        else => {
-            try nodes.appendSlice(try getCompletionsFromNode(allocator, tree, node));
-        },
+        .VarDecl, .ParamDecl => try decls.append(node),
+        else => try getCompletionsFromNode(decls, tree, node),
     }
 }
 
-pub fn getCompletionsFromNode(allocator: *std.mem.Allocator, tree: *ast.Tree, node: *ast.Node) ![]*ast.Node {
-    var nodes = std.ArrayList(*ast.Node).init(allocator);
-
+pub fn getCompletionsFromNode(decls: *std.ArrayList(*ast.Node), tree: *ast.Tree, node: *ast.Node) !void {
     var index: usize = 0;
-    while (node.iterate(index)) |child_node| {
-        try nodes.append(child_node);
-
-        index += 1;
+    while (node.iterate(index)) |child_node| : (index += 1) {
+        try decls.append(child_node);
     }
-
-    return nodes.items;
 }
 
-pub fn declsFromIndex(allocator: *std.mem.Allocator, tree: *ast.Tree, index: usize) ![]*ast.Node {
-    var iindex: usize = 0;
-
+pub fn declsFromIndex(decls: *std.ArrayList(*ast.Node), tree: *ast.Tree, index: usize) !void {
     var node = &tree.root_node.base;
-    var nodes = std.ArrayList(*ast.Node).init(allocator);
 
-    try nodes.appendSlice(try getCompletionsFromNode(allocator, tree, node));
-
-    while (node.iterate(iindex)) |inode| {
-        if (tree.tokens.at(inode.firstToken()).start < index and index < tree.tokens.at(inode.lastToken()).start) {
-            try declsFromIndexInternal(allocator, tree, inode, &nodes);
+    try getCompletionsFromNode(decls, tree, node);
+    var node_index: usize = 0;
+    while (node.iterate(node_index)) |inode| : (node_index += 1) {
+        if (tree.tokens.at(inode.firstToken()).start < index and index < tree.tokens.at(inode.lastToken()).end) {
+            try declsFromIndexInternal(decls, tree, inode);
         }
-
-        iindex += 1;
     }
-
-    if (tree.tokens.at(node.firstToken()).start < index and index < tree.tokens.at(node.lastToken()).start) {
-        return nodes.items;
-    }
-
-    return nodes.items;
 }

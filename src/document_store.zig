@@ -257,6 +257,12 @@ pub const AnalysisContext = struct {
     tree: *std.zig.ast.Tree,
     scope_nodes: []*std.zig.ast.Node,
 
+    fn refreshScopeNodes(self: *AnalysisContext) !void {
+        var scope_nodes = std.ArrayList(*std.zig.ast.Node).init(&self.arena.allocator);
+        try analysis.getCompletionsFromNode(&scope_nodes, self.tree, &self.tree.root_node.base);
+        self.scope_nodes = scope_nodes.items;
+    }
+
     pub fn onImport(self: *AnalysisContext, import_str: []const u8) !?*std.zig.ast.Node {
         const allocator = self.store.allocator;
         const final_uri = (try uriFromImportStr(self.store, self.handle.*, import_str)) orelse return null;
@@ -273,6 +279,7 @@ pub const AnalysisContext = struct {
 
                 self.tree.deinit();
                 self.tree = try self.handle.tree(allocator);
+                try self.refreshScopeNodes();
                 return &self.tree.root_node.base;
             }
         }
@@ -286,6 +293,7 @@ pub const AnalysisContext = struct {
 
             self.tree.deinit();
             self.tree = try self.handle.tree(allocator);
+            try self.refreshScopeNodes();
             return &self.tree.root_node.base;
         }
 
@@ -325,6 +333,7 @@ pub const AnalysisContext = struct {
         // If we return null, no one should access the tree.
         self.tree.deinit();
         self.tree = try self.handle.tree(allocator);
+        try self.refreshScopeNodes();
         return &self.tree.root_node.base;
     }
 
@@ -335,12 +344,16 @@ pub const AnalysisContext = struct {
 
 pub fn analysisContext(self: *DocumentStore, handle: *Handle, arena: *std.heap.ArenaAllocator, position: types.Position) !AnalysisContext {
     const tree = try handle.tree(self.allocator);
+
+    var scope_nodes = std.ArrayList(*std.zig.ast.Node).init(&arena.allocator);
+    try analysis.declsFromIndex(&scope_nodes, tree, try handle.document.positionToIndex(position));
+
     return AnalysisContext{
         .store = self,
         .handle = handle,
         .arena = arena,
         .tree = tree,
-        .scope_nodes = try analysis.declsFromIndex(&arena.allocator, tree, try handle.document.positionToIndex(position))
+        .scope_nodes = scope_nodes.items,
     };
 }
 
