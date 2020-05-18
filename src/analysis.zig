@@ -258,15 +258,9 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
                 return resolveTypeOfNode(analysis_ctx, child);
             } else return null;
         },
-        .ContainerDecl => {
-            return node;
-        },
         .ContainerField => {
             const field = node.cast(ast.Node.ContainerField).?;
             return resolveTypeOfNode(analysis_ctx, field.type_expr orelse return null);
-        },
-        .ErrorSetDecl => {
-            return node;
         },
         .SuffixOp => {
             const suffix_op = node.cast(ast.Node.SuffixOp).?;
@@ -321,12 +315,8 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
                 break :block null;
             };
         },
-        .MultilineStringLiteral, .StringLiteral => {
-            return node;
-        },
-        else => {
-            std.debug.warn("Type resolution case not implemented; {}\n", .{node.id});
-        },
+        .MultilineStringLiteral, .StringLiteral, .ContainerDecl, .ErrorSetDecl => return node,
+        else => std.debug.warn("Type resolution case not implemented; {}\n", .{node.id}),
     }
     return null;
 }
@@ -345,7 +335,7 @@ fn maybeCollectImport(tree: *ast.Tree, builtin_call: *ast.Node.BuiltinCall, arr:
 /// Collects all imports we can find into a slice of import paths (without quotes).
 /// The import paths are valid as long as the tree is.
 pub fn collectImports(import_arr: *std.ArrayList([]const u8), tree: *ast.Tree) !void {
-    // TODO: Currently only detects `const smth = @import("string literal")<.SometThing>;`
+    // TODO: Currently only detects `const smth = @import("string literal")<.SomeThing>;`
     var idx: usize = 0;
     while (tree.root_node.iterate(idx)) |decl| : (idx += 1) {
         if (decl.id != .VarDecl) continue;
@@ -461,10 +451,8 @@ pub fn declsFromIndexInternal(decls: *std.ArrayList(*ast.Node), tree: *ast.Tree,
         },
         .Block => {
             var index: usize = 0;
-
-            while (node.iterate(index)) |inode| {
+            while (node.iterate(index)) |inode| : (index += 1) {
                 try declsFromIndexInternal(decls, tree, inode);
-                index += 1;
             }
         },
         .VarDecl, .ParamDecl => try decls.append(node),
