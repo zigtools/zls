@@ -280,9 +280,9 @@ fn completeGlobal(id: i64, pos_index: usize, handle: DocumentStore.Handle, confi
     // Deallocate all temporary data.
     defer arena.deinit();
 
-    // var decls = tree.root_node.decls.iterator(0);
-    var decls = try analysis.declsFromIndex(&arena.allocator, tree, pos_index);
-    for (decls) |decl_ptr| {
+    var decl_nodes = std.ArrayList(*std.zig.ast.Node).init(&arena.allocator);
+    try analysis.declsFromIndex(&decl_nodes, tree, pos_index);
+    for (decl_nodes.items) |decl_ptr| {
         var decl = decl_ptr.*;
         try nodeToCompletion(&completions, tree, decl_ptr, config);
     }
@@ -310,7 +310,6 @@ fn completeFieldAccess(id: i64, handle: *DocumentStore.Handle, position: types.P
     const line = try handle.document.getLine(@intCast(usize, position.line));
     var tokenizer = std.zig.Tokenizer.init(line[line_start_idx..]);
 
-    // var decls = try analysis.declsFromIndex(&arena.allocator, analysis_ctx.tree, try handle.document.positionToIndex(position));
     if (analysis.getFieldAccessTypeNode(&analysis_ctx, &tokenizer)) |node| {
         try nodeToCompletion(&completions, analysis_ctx.tree, node, config);
     }

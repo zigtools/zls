@@ -61,7 +61,6 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: []u8) !*Handle {
             .mem = text,
         },
     };
-    try self.checkSanity(&handle);
     const kv = try self.handles.getOrPutValue(uri, handle);
     return &kv.value;
 }
@@ -117,10 +116,7 @@ pub fn getHandle(self: *DocumentStore, uri: []const u8) ?*Handle {
 }
 
 // Check if the document text is now sane, move it to sane_text if so.
-fn checkSanity(self: *DocumentStore, handle: *Handle) !void {
-    const tree = try handle.tree(self.allocator);
-    defer tree.deinit();
-
+fn removeOldImports(self: *DocumentStore, handle: *Handle) !void {
     std.debug.warn("New text for document {}\n", .{handle.uri()});
     // TODO: Better algorithm or data structure?
     // Removing the imports is costly since they live in an array list
@@ -129,19 +125,22 @@ fn checkSanity(self: *DocumentStore, handle: *Handle) !void {
     // Try to detect removed imports and decrement their counts.
     if (handle.import_uris.items.len == 0) return;
 
-    const import_strs = try analysis.collectImports(self.allocator, tree);
-    defer self.allocator.free(import_strs);
+    const tree = try handle.tree(self.allocator);
+    defer tree.deinit();
 
-    const still_exist = try self.allocator.alloc(bool, handle.import_uris.items.len);
-    defer self.allocator.free(still_exist);
+    var arena = std.heap.ArenaAllocator.init(self.allocator);
+    defer arena.deinit();
 
+    var import_strs = std.ArrayList([]const u8).init(&arena.allocator);
+    try analysis.collectImports(&import_strs, tree);
+
+    const still_exist = try arena.allocator.alloc(bool, handle.import_uris.items.len);
     for (still_exist) |*ex| {
         ex.* = false;
     }
 
-    for (import_strs) |str| {
-        const uri = (try uriFromImportStr(self, handle.*, str)) orelse continue;
-        defer self.allocator.free(uri);
+    for (import_strs.items) |str| {
+        const uri = (try uriFromImportStr(self, &arena.allocator, handle.*, str)) orelse continue;
 
         var idx: usize = 0;
         exists_loop: while (idx < still_exist.len) : (idx += 1) {
@@ -222,29 +221,29 @@ pub fn applyChanges(self: *DocumentStore, handle: *Handle, content_changes: std.
         }
     }
 
-    try self.checkSanity(handle);
+    try self.removeOldImports(handle);
 }
 
-fn uriFromImportStr(store: *DocumentStore, handle: Handle, import_str: []const u8) !?[]const u8 {
+fn uriFromImportStr(store: *DocumentStore, allocator: *std.mem.Allocator, handle: Handle, import_str: []const u8) !?[]const u8 {
     return if (std.mem.eql(u8, import_str, "std"))
-        if (store.std_uri) |std_root_uri| try std.mem.dupe(store.allocator, u8, std_root_uri)
+        if (store.std_uri) |std_root_uri| try std.mem.dupe(allocator, u8, std_root_uri)
         else {
             std.debug.warn("Cannot resolve std library import, path is null.\n", .{});
             return null;
         }
     else b: {
         // Find relative uri
-        const path = try URI.parse(store.allocator, handle.uri());
-        defer store.allocator.free(path);
+        const path = try URI.parse(allocator, handle.uri());
+        defer allocator.free(path);
 
         const dir_path = std.fs.path.dirname(path) orelse "";
-        const import_path = try std.fs.path.resolve(store.allocator, &[_][]const u8 {
+        const import_path = try std.fs.path.resolve(allocator, &[_][]const u8 {
             dir_path, import_str
         });
 
-        defer store.allocator.free(import_path);
+        defer allocator.free(import_path);
 
-        break :b (try URI.fromPath(store.allocator, import_path));
+        break :b (try URI.fromPath(allocator, import_path));
     };
 }
 
@@ -257,9 +256,15 @@ pub const AnalysisContext = struct {
     tree: *std.zig.ast.Tree,
     scope_nodes: []*std.zig.ast.Node,
 
+    fn refreshScopeNodes(self: *AnalysisContext) !void {
+        var scope_nodes = std.ArrayList(*std.zig.ast.Node).init(&self.arena.allocator);
+        try analysis.addChildrenNodes(&scope_nodes, self.tree, &self.tree.root_node.base);
+        self.scope_nodes = scope_nodes.items;
+    }
+
     pub fn onImport(self: *AnalysisContext, import_str: []const u8) !?*std.zig.ast.Node {
         const allocator = self.store.allocator;
-        const final_uri = (try uriFromImportStr(self.store, self.handle.*, import_str)) orelse return null;
+        const final_uri = (try uriFromImportStr(self.store, self.store.allocator, self.handle.*, import_str)) orelse return null;
 
         std.debug.warn("Import final URI: {}\n", .{final_uri});
         var consumed_final_uri = false;
@@ -273,6 +278,7 @@ pub const AnalysisContext = struct {
 
                 self.tree.deinit();
                 self.tree = try self.handle.tree(allocator);
+                try self.refreshScopeNodes();
                 return &self.tree.root_node.base;
             }
         }
@@ -286,6 +292,7 @@ pub const AnalysisContext = struct {
 
             self.tree.deinit();
             self.tree = try self.handle.tree(allocator);
+            try self.refreshScopeNodes();
             return &self.tree.root_node.base;
         }
 
@@ -325,6 +332,7 @@ pub const AnalysisContext = struct {
         // If we return null, no one should access the tree.
         self.tree.deinit();
         self.tree = try self.handle.tree(allocator);
+        try self.refreshScopeNodes();
         return &self.tree.root_node.base;
     }
 
@@ -335,12 +343,16 @@ pub const AnalysisContext = struct {
 
 pub fn analysisContext(self: *DocumentStore, handle: *Handle, arena: *std.heap.ArenaAllocator, position: types.Position) !AnalysisContext {
     const tree = try handle.tree(self.allocator);
+
+    var scope_nodes = std.ArrayList(*std.zig.ast.Node).init(&arena.allocator);
+    try analysis.declsFromIndex(&scope_nodes, tree, try handle.document.positionToIndex(position));
+
     return AnalysisContext{
         .store = self,
         .handle = handle,
         .arena = arena,
         .tree = tree,
-        .scope_nodes = try analysis.declsFromIndex(&arena.allocator, tree, try handle.document.positionToIndex(position))
+        .scope_nodes = scope_nodes.items,
     };
 }
 

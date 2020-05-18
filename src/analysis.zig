@@ -206,7 +206,6 @@ pub fn getChild(tree: *ast.Tree, node: *ast.Node, name: []const u8) ?*ast.Node {
 
 /// Gets the child of slice
 pub fn getChildOfSlice(tree: *ast.Tree, nodes: []*ast.Node, name: []const u8) ?*ast.Node {
-    // var index: usize = 0;
     for (nodes) |child| {
         switch (child.id) {
             .VarDecl => {
@@ -227,14 +226,12 @@ pub fn getChildOfSlice(tree: *ast.Tree, nodes: []*ast.Node, name: []const u8) ?*
             },
             else => {},
         }
-        // index += 1;
     }
     return null;
 }
 
 /// Resolves the type of a node
 pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.Node {
-    std.debug.warn("NODE {}\n", .{node});
     switch (node.id) {
         .VarDecl => {
             const vari = node.cast(ast.Node.VarDecl).?;
@@ -257,21 +254,13 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
             }
         },
         .Identifier => {
-            // std.debug.warn("IDENTIFIER {}\n", .{analysis_ctx.tree.getNodeSource(node)});
             if (getChildOfSlice(analysis_ctx.tree, analysis_ctx.scope_nodes, analysis_ctx.tree.getNodeSource(node))) |child| {
-                // std.debug.warn("CHILD {}\n", .{child});
                 return resolveTypeOfNode(analysis_ctx, child);
             } else return null;
-        },
-        .ContainerDecl => {
-            return node;
         },
         .ContainerField => {
             const field = node.cast(ast.Node.ContainerField).?;
             return resolveTypeOfNode(analysis_ctx, field.type_expr orelse return null);
-        },
-        .ErrorSetDecl => {
-            return node;
         },
         .SuffixOp => {
             const suffix_op = node.cast(ast.Node.SuffixOp).?;
@@ -326,12 +315,8 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
                 break :block null;
             };
         },
-        .MultilineStringLiteral, .StringLiteral => {
-            return node;
-        },
-        else => {
-            std.debug.warn("Type resolution case not implemented; {}\n", .{node.id});
-        },
+        .MultilineStringLiteral, .StringLiteral, .ContainerDecl, .ErrorSetDecl => return node,
+        else => std.debug.warn("Type resolution case not implemented; {}\n", .{node.id}),
     }
     return null;
 }
@@ -349,10 +334,8 @@ fn maybeCollectImport(tree: *ast.Tree, builtin_call: *ast.Node.BuiltinCall, arr:
 
 /// Collects all imports we can find into a slice of import paths (without quotes).
 /// The import paths are valid as long as the tree is.
-pub fn collectImports(allocator: *std.mem.Allocator, tree: *ast.Tree) ![][]const u8 {
-    // TODO: Currently only detects `const smth = @import("string literal")<.SometThing>;`
-    var arr = std.ArrayList([]const u8).init(allocator);
-
+pub fn collectImports(import_arr: *std.ArrayList([]const u8), tree: *ast.Tree) !void {
+    // TODO: Currently only detects `const smth = @import("string literal")<.SomeThing>;`
     var idx: usize = 0;
     while (tree.root_node.iterate(idx)) |decl| : (idx += 1) {
         if (decl.id != .VarDecl) continue;
@@ -362,7 +345,7 @@ pub fn collectImports(allocator: *std.mem.Allocator, tree: *ast.Tree) ![][]const
         switch (var_decl.init_node.?.id) {
             .BuiltinCall => {
                 const builtin_call = var_decl.init_node.?.cast(ast.Node.BuiltinCall).?;
-                try maybeCollectImport(tree, builtin_call, &arr);
+                try maybeCollectImport(tree, builtin_call, import_arr);
             },
             .InfixOp => {
                 const infix_op = var_decl.init_node.?.cast(ast.Node.InfixOp).?;
@@ -372,13 +355,11 @@ pub fn collectImports(allocator: *std.mem.Allocator, tree: *ast.Tree) ![][]const
                     else => continue,
                 }
                 if (infix_op.lhs.id != .BuiltinCall) continue;
-                try maybeCollectImport(tree, infix_op.lhs.cast(ast.Node.BuiltinCall).?, &arr);
+                try maybeCollectImport(tree, infix_op.lhs.cast(ast.Node.BuiltinCall).?, import_arr);
             },
             else => {},
         }
     }
-
-    return arr.toOwnedSlice();
 }
 
 pub fn getFieldAccessTypeNode(analysis_ctx: *AnalysisContext, tokenizer: *std.zig.Tokenizer) ?*ast.Node {
@@ -387,12 +368,8 @@ pub fn getFieldAccessTypeNode(analysis_ctx: *AnalysisContext, tokenizer: *std.zi
     while (true) {
         var next = tokenizer.next();
         switch (next.id) {
-            .Eof => {
-                return current_node;
-            },
+            .Eof => return current_node,
             .Identifier => {
-                // var root = current_node.cast(ast.Node.Root).?;
-                // current_node.
                 if (getChildOfSlice(analysis_ctx.tree, analysis_ctx.scope_nodes, tokenizer.buffer[next.start..next.end])) |child| {
                     if (resolveTypeOfNode(analysis_ctx, child)) |node_type| {
                         current_node = node_type;
@@ -411,9 +388,7 @@ pub fn getFieldAccessTypeNode(analysis_ctx: *AnalysisContext, tokenizer: *std.zi
                     } else return null;
                 }
             },
-            else => {
-                std.debug.warn("Not implemented; {}\n", .{next.id});
-            },
+            else => std.debug.warn("Not implemented; {}\n", .{next.id}),
         }
     }
 
@@ -462,70 +437,44 @@ pub fn nodeToString(tree: *ast.Tree, node: *ast.Node) ?[]const u8 {
     return null;
 }
 
-pub fn declsFromIndexInternal(allocator: *std.mem.Allocator, tree: *ast.Tree, node: *ast.Node, nodes: *std.ArrayList(*ast.Node)) anyerror!void {
+pub fn declsFromIndexInternal(decls: *std.ArrayList(*ast.Node), tree: *ast.Tree, node: *ast.Node) anyerror!void {
     switch (node.id) {
         .FnProto => {
             const func = node.cast(ast.Node.FnProto).?;
 
             var param_index: usize = 0;
             while (param_index < func.params.len) : (param_index += 1)
-                try declsFromIndexInternal(allocator, tree, func.params.at(param_index).*, nodes);
+                try declsFromIndexInternal(decls, tree, func.params.at(param_index).*);
 
             if (func.body_node) |body_node|
-                try declsFromIndexInternal(allocator, tree, body_node, nodes);
+                try declsFromIndexInternal(decls, tree, body_node);
         },
         .Block => {
             var index: usize = 0;
-
-            while (node.iterate(index)) |inode| {
-                try declsFromIndexInternal(allocator, tree, inode, nodes);
-                index += 1;
+            while (node.iterate(index)) |inode| : (index += 1) {
+                try declsFromIndexInternal(decls, tree, inode);
             }
         },
-        .VarDecl => {
-            try nodes.append(node);
-        },
-        .ParamDecl => {
-            try nodes.append(node);
-        },
-        else => {
-            try nodes.appendSlice(try getCompletionsFromNode(allocator, tree, node));
-        },
+        .VarDecl, .ParamDecl => try decls.append(node),
+        else => try addChildrenNodes(decls, tree, node),
     }
 }
 
-pub fn getCompletionsFromNode(allocator: *std.mem.Allocator, tree: *ast.Tree, node: *ast.Node) ![]*ast.Node {
-    var nodes = std.ArrayList(*ast.Node).init(allocator);
-
+pub fn addChildrenNodes(decls: *std.ArrayList(*ast.Node), tree: *ast.Tree, node: *ast.Node) !void {
     var index: usize = 0;
-    while (node.iterate(index)) |child_node| {
-        try nodes.append(child_node);
-
-        index += 1;
+    while (node.iterate(index)) |child_node| : (index += 1) {
+        try decls.append(child_node);
     }
-
-    return nodes.items;
 }
 
-pub fn declsFromIndex(allocator: *std.mem.Allocator, tree: *ast.Tree, index: usize) ![]*ast.Node {
-    var iindex: usize = 0;
-
+pub fn declsFromIndex(decls: *std.ArrayList(*ast.Node), tree: *ast.Tree, index: usize) !void {
     var node = &tree.root_node.base;
-    var nodes = std.ArrayList(*ast.Node).init(allocator);
 
-    try nodes.appendSlice(try getCompletionsFromNode(allocator, tree, node));
-
-    while (node.iterate(iindex)) |inode| {
-        if (tree.tokens.at(inode.firstToken()).start < index and index < tree.tokens.at(inode.lastToken()).start) {
-            try declsFromIndexInternal(allocator, tree, inode, &nodes);
+    try addChildrenNodes(decls, tree, node);
+    var node_index: usize = 0;
+    while (node.iterate(node_index)) |inode| : (node_index += 1) {
+        if (tree.tokens.at(inode.firstToken()).start < index and index < tree.tokens.at(inode.lastToken()).end) {
+            try declsFromIndexInternal(decls, tree, inode);
         }
-
-        iindex += 1;
     }
-
-    if (tree.tokens.at(node.firstToken()).start < index and index < tree.tokens.at(node.lastToken()).start) {
-        return nodes.items;
-    }
-
-    return nodes.items;
 }
