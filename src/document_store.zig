@@ -259,7 +259,7 @@ pub const AnalysisContext = struct {
 
     fn refreshScopeNodes(self: *AnalysisContext) !void {
         var scope_nodes = std.ArrayList(*std.zig.ast.Node).init(&self.arena.allocator);
-        try analysis.getCompletionsFromNode(&scope_nodes, self.tree, &self.tree.root_node.base);
+        try analysis.addChildrenNodes(&scope_nodes, self.tree, &self.tree.root_node.base);
         self.scope_nodes = scope_nodes.items;
     }
 
