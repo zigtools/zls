@@ -344,10 +344,8 @@ fn maybeCollectImport(tree: *ast.Tree, builtin_call: *ast.Node.BuiltinCall, arr:
 
 /// Collects all imports we can find into a slice of import paths (without quotes).
 /// The import paths are valid as long as the tree is.
-pub fn collectImports(allocator: *std.mem.Allocator, tree: *ast.Tree) ![][]const u8 {
+pub fn collectImports(import_arr: *std.ArrayList([]const u8), tree: *ast.Tree) !void {
     // TODO: Currently only detects `const smth = @import("string literal")<.SometThing>;`
-    var arr = std.ArrayList([]const u8).init(allocator);
-
     var idx: usize = 0;
     while (tree.root_node.iterate(idx)) |decl| : (idx += 1) {
         if (decl.id != .VarDecl) continue;
@@ -357,7 +355,7 @@ pub fn collectImports(allocator: *std.mem.Allocator, tree: *ast.Tree) ![][]const
         switch (var_decl.init_node.?.id) {
             .BuiltinCall => {
                 const builtin_call = var_decl.init_node.?.cast(ast.Node.BuiltinCall).?;
-                try maybeCollectImport(tree, builtin_call, &arr);
+                try maybeCollectImport(tree, builtin_call, import_arr);
             },
             .InfixOp => {
                 const infix_op = var_decl.init_node.?.cast(ast.Node.InfixOp).?;
@@ -367,13 +365,11 @@ pub fn collectImports(allocator: *std.mem.Allocator, tree: *ast.Tree) ![][]const
                     else => continue,
                 }
                 if (infix_op.lhs.id != .BuiltinCall) continue;
-                try maybeCollectImport(tree, infix_op.lhs.cast(ast.Node.BuiltinCall).?, &arr);
+                try maybeCollectImport(tree, infix_op.lhs.cast(ast.Node.BuiltinCall).?, import_arr);
             },
             else => {},
         }
     }
-
-    return arr.toOwnedSlice();
 }
 
 pub fn getFieldAccessTypeNode(analysis_ctx: *AnalysisContext, tokenizer: *std.zig.Tokenizer) ?*ast.Node {
