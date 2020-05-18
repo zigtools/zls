@@ -656,7 +656,7 @@ pub fn main() anyerror!void {
         json_parser.reset();
 
         if (debug_alloc) |dbg| {
-            std.debug.warn("{}", .{dbg.info});
+            std.debug.warn("{}\n", .{dbg.info});
         }
     }
 }
