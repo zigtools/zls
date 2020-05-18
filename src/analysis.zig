@@ -382,7 +382,7 @@ pub fn getFieldAccessTypeNode(
             },
             .Period => {
                 var after_period = tokenizer.next();
-                if (after_period.id == .Eof) {
+                if (after_period.id == .Eof or after_period.id == .Comma) {
                     return current_node;
                 } else if (after_period.id == .Identifier) {
                     // TODO: This works for now, maybe we should filter based on the partial identifier ourselves?
