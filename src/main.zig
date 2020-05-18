@@ -53,24 +53,6 @@ fn send(reqOrRes: var) !void {
     try stdout.flush();
 }
 
-fn log(comptime fmt: []const u8, args: var) !void {
-    // Disable logs on Release modes.
-    if (std.builtin.mode != .Debug) return;
-
-    var message = try std.fmt.allocPrint(allocator, fmt, args);
-    defer allocator.free(message);
-
-    try send(types.Notification{
-        .method = "window/logMessage",
-        .params = .{
-            .LogMessageParams = .{
-                .@"type" = .Log,
-                .message = message,
-            },
-        },
-    });
-}
-
 fn respondGeneric(id: i64, response: []const u8) !void {
     const id_digits = blk: {
         if (id == 0) break :blk 1;
@@ -527,7 +509,7 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
         const content_changes = params.getValue("contentChanges").?.Array;
 
         const handle = document_store.getHandle(uri) orelse {
-            try log("Trying to change non existent document {}", .{uri});
+            std.debug.warn("Trying to change non existent document {}", .{uri});
             return;
         };
 
@@ -548,7 +530,7 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
         const position = params.getValue("position").?.Object;
 
         const handle = document_store.getHandle(uri) orelse {
-            try log("Trying to complete in non existent document {}", .{uri});
+            std.debug.warn("Trying to complete in non existent document {}", .{uri});
             return;
         };
 
@@ -591,10 +573,10 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
             \\,"result":{"signatures":[]}}
         );
     } else if (root.Object.getValue("id")) |_| {
-        try log("Method with return value not implemented: {}", .{method});
+        std.debug.warn("Method with return value not implemented: {}", .{method});
         try respondGeneric(id, not_implemented_response);
     } else {
-        try log("Method without return value not implemented: {}", .{method});
+        std.debug.warn("Method without return value not implemented: {}", .{method});
     }
 }
 
@@ -663,7 +645,7 @@ pub fn main() anyerror!void {
 
     while (true) {
         const headers = readRequestHeader(allocator, in_stream) catch |err| {
-            try log("{}; exiting!", .{@errorName(err)});
+            std.debug.warn("{}; exiting!", .{@errorName(err)});
             return;
         };
         defer headers.deinit(allocator);
