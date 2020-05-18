@@ -180,26 +180,42 @@ pub fn isPascalCase(name: []const u8) bool {
 
 // ANALYSIS ENGINE
 
+pub fn getDeclNameToken(tree: *ast.Tree, node: *ast.Node) ?ast.TokenIndex {
+    switch (node.id) {
+        .VarDecl => {
+            const vari = node.cast(ast.Node.VarDecl).?;
+            return vari.name_token;
+        },
+        .ParamDecl => {
+            const decl = node.cast(ast.Node.ParamDecl).?;
+            if (decl.name_token == null) return null;
+            return decl.name_token.?;
+        },
+        .FnProto => {
+            const func = node.cast(ast.Node.FnProto).?;
+            if (func.name_token == null) return null;
+            return func.name_token.?;
+        },
+        .ContainerField => {
+            const field = node.cast(ast.Node.ContainerField).?;
+            return field.name_token;
+        },
+        else => {},
+    }
+
+    return null;
+}
+
+fn getDeclName(tree: *ast.Tree, node: *ast.Node) ?[]const u8 {
+    return tree.tokenSlice(getDeclNameToken(tree, node) orelse return null);
+}
+
 /// Gets the child of node
 pub fn getChild(tree: *ast.Tree, node: *ast.Node, name: []const u8) ?*ast.Node {
     var index: usize = 0;
-    while (node.iterate(index)) |child| {
-        switch (child.id) {
-            .VarDecl => {
-                const vari = child.cast(ast.Node.VarDecl).?;
-                if (std.mem.eql(u8, tree.tokenSlice(vari.name_token), name)) return child;
-            },
-            .FnProto => {
-                const func = child.cast(ast.Node.FnProto).?;
-                if (func.name_token != null and std.mem.eql(u8, tree.tokenSlice(func.name_token.?), name)) return child;
-            },
-            .ContainerField => {
-                const field = child.cast(ast.Node.ContainerField).?;
-                if (std.mem.eql(u8, tree.tokenSlice(field.name_token), name)) return child;
-            },
-            else => {},
-        }
-        index += 1;
+    while (node.iterate(index)) |child| : (index += 1) {
+        const child_name = getDeclName(tree, child) orelse continue;
+        if (std.mem.eql(u8, child_name, name)) return child;
     }
     return null;
 }
@@ -207,25 +223,8 @@ pub fn getChild(tree: *ast.Tree, node: *ast.Node, name: []const u8) ?*ast.Node {
 /// Gets the child of slice
 pub fn getChildOfSlice(tree: *ast.Tree, nodes: []*ast.Node, name: []const u8) ?*ast.Node {
     for (nodes) |child| {
-        switch (child.id) {
-            .VarDecl => {
-                const vari = child.cast(ast.Node.VarDecl).?;
-                if (std.mem.eql(u8, tree.tokenSlice(vari.name_token), name)) return child;
-            },
-            .ParamDecl => {
-                const decl = child.cast(ast.Node.ParamDecl).?;
-                if (decl.name_token != null and std.mem.eql(u8, tree.tokenSlice(decl.name_token.?), name)) return child;
-            },
-            .FnProto => {
-                const func = child.cast(ast.Node.FnProto).?;
-                if (func.name_token != null and std.mem.eql(u8, tree.tokenSlice(func.name_token.?), name)) return child;
-            },
-            .ContainerField => {
-                const field = child.cast(ast.Node.ContainerField).?;
-                if (std.mem.eql(u8, tree.tokenSlice(field.name_token), name)) return child;
-            },
-            else => {},
-        }
+        const child_name = getDeclName(tree, child) orelse continue;
+        if (std.mem.eql(u8, child_name, name)) return child;
     }
     return null;
 }
