@@ -298,6 +298,15 @@ fn completeGlobal(id: i64, pos_index: usize, handle: DocumentStore.Handle, confi
     });
 }
 
+fn nodePosition(tree: *std.zig.ast.Tree, node: *std.zig.ast.Node) types.Position {
+    const location = tree.tokenLocation(0, node.firstToken());
+
+    return types.Position{
+        .line = @intCast(i64, location.line),
+        .character = @intCast(i64, location.column),
+    };
+}
+
 fn completeFieldAccess(id: i64, handle: *DocumentStore.Handle, position: types.Position, line_start_idx: usize, config: Config) !void {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
@@ -312,49 +321,37 @@ fn completeFieldAccess(id: i64, handle: *DocumentStore.Handle, position: types.P
 
     // var decls = try analysis.declsFromIndex(&arena.allocator, analysis_ctx.tree, try handle.document.positionToIndex(position));
     if (analysis.getFieldAccessTypeNode(&analysis_ctx, &tokenizer)) |node| {
-        var index: usize = 0;
-        while (node.iterate(index)) |child_node| {
-            if (analysis.isNodePublic(analysis_ctx.tree, child_node)) {
-                // TODO: Not great to allocate it again and again inside a loop
-                // Creating a new context, so that we don't destroy the tree that is iterated above when resolving imports
-                const initial_handle = analysis_ctx.handle;
-                std.debug.warn("\ncompleteFieldAccess calling resolveTypeOfNode for {}\n", .{analysis_ctx.tree.getNodeSource(child_node)});
-                var node_analysis_ctx = (try document_store.analysisContext(initial_handle, &arena)) orelse {
-                    return send(types.Response{
-                        .id = .{ .Integer = id },
-                        .result = .{
-                            .CompletionList = .{
-                                .isIncomplete = true,
-                                .items = completions.items,
-                            },
-                        },
-                    });
-                };
-                defer node_analysis_ctx.deinit();
+        try nodeToCompletion(&completions, analysis_ctx.tree, node, config);
+        // var index: usize = 0;
+        // while (node.iterate(index)) |child_node| {
+        //     if (analysis.isNodePublic(analysis_ctx.tree, child_node)) {
+        //         // TODO: Not great to allocate it again and again inside a loop
+        //         // Creating a new context, so that we don't destroy the tree that is iterated above when resolving imports
+        //         const initial_handle = analysis_ctx.handle;
+        //         std.debug.warn("\ncompleteFieldAccess calling resolveTypeOfNode for {}\n", .{analysis_ctx.tree.getNodeSource(child_node)});
+        //         var node_analysis_ctx = try document_store.analysisContext(initial_handle, &arena, nodePosition(analysis_ctx.tree, node));
+        //         defer node_analysis_ctx.deinit();
 
-                const resolved_node = analysis.resolveTypeOfNode(&node_analysis_ctx, child_node);
-                if (resolved_node) |n| {
-                    std.debug.warn("completeFieldAccess resolveTypeOfNode result = {}\n", .{resolved_node});
-                }
+        //         const resolved_node = analysis.resolveTypeOfNode(&node_analysis_ctx, child_node);
+        //         if (resolved_node) |n| {
+        //             std.debug.warn("completeFieldAccess resolveTypeOfNode result = {}\n", .{resolved_node});
+        //         }
 
-                const completion_node: struct { node: *std.zig.ast.Node, context: *DocumentStore.AnalysisContext } = blk: {
-                    if (resolved_node) |n| {
-                        break :blk .{ .node = n, .context = &node_analysis_ctx };
-                    }
+        //         const completion_node: struct { node: *std.zig.ast.Node, context: *DocumentStore.AnalysisContext } = blk: {
+        //             if (resolved_node) |n| {
+        //                 break :blk .{ .node = n, .context = &node_analysis_ctx };
+        //             }
 
-                    break :blk .{ .node = child_node, .context = &analysis_ctx };
-                };
+        //             break :blk .{ .node = child_node, .context = &analysis_ctx };
+        //         };
 
-                std.debug.warn("completeFieldAccess resolved_node = {}\n", .{completion_node.context.tree.getNodeSource(completion_node.node)});
+        //         std.debug.warn("completeFieldAccess resolved_node = {}\n", .{completion_node.context.tree.getNodeSource(completion_node.node)});
 
-                if (try nodeToCompletion(&arena.allocator, completion_node.context.tree, completion_node.node, config)) |completion| {
-                    try completions.append(completion);
-                }
-            }
-            index += 1;
-        }
+        //         try nodeToCompletion(&completions, completion_node.context.tree, completion_node.node, config);
+        //     }
+        //     index += 1;
+        // }
     }
-
     try send(types.Response{
         .id = .{ .Integer = id },
         .result = .{

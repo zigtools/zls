@@ -274,7 +274,7 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
             const suffix_op = node.cast(ast.Node.SuffixOp).?;
             switch (suffix_op.op) {
                 .Call, .StructInitializer => {
-                	const func_decl = resolveTypeOfNode(analysis_ctx, suffix_op.lhs.node) orelse return null;
+                    const func_decl = resolveTypeOfNode(analysis_ctx, suffix_op.lhs.node) orelse return null;
 
                     if (func_decl.id == .FnProto) {
                         const func = node.cast(ast.Node.FnProto).?;

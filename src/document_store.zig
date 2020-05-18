@@ -52,7 +52,10 @@ pub fn init(self: *DocumentStore, allocator: *std.mem.Allocator, zig_lib_path: ?
 fn newDocument(self: *DocumentStore, uri: []const u8, text: []u8) !*Handle {
     std.debug.warn("Opened document: {}\n", .{uri});
 
-    var handle = Handle{
+    var handle = try self.allocator.create(Handle);
+    errdefer self.allocator.destroy(handle);
+
+    handle.* = Handle{
         .count = 1,
         .import_uris = std.ArrayList([]const u8).init(self.allocator),
         .document = .{
@@ -61,9 +64,9 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: []u8) !*Handle {
             .mem = text,
         },
     };
-    try self.checkSanity(&handle);
+    try self.checkSanity(handle);
     const kv = try self.handles.getOrPutValue(uri, handle);
-    return &kv.value;
+    return kv.value;
 }
 
 pub fn openDocument(self: *DocumentStore, uri: []const u8, text: []const u8) !*Handle {
