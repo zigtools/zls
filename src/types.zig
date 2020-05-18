@@ -51,7 +51,8 @@ pub const NotificationParams = union(enum) {
 
 /// Params of a response (result)
 pub const ResponseParams = union(enum) {
-    CompletionList: CompletionList
+    CompletionList: CompletionList,
+    Location: Location,
 };
 
 /// JSONRPC error
@@ -282,4 +283,3 @@ pub const CompletionItem = struct {
     documentation: ?MarkupContent = null
     // filterText: String = .NotDefined,
 };
-

@@ -17,7 +17,7 @@ var allocator: *std.mem.Allocator = undefined;
 var document_store: DocumentStore = undefined;
 
 const initialize_response =
-    \\,"result":{"capabilities":{"signatureHelpProvider":{"triggerCharacters":["(",","]},"textDocumentSync":1,"completionProvider":{"resolveProvider":false,"triggerCharacters":[".",":","@"]},"documentHighlightProvider":false,"codeActionProvider":false,"workspace":{"workspaceFolders":{"supported":true}}}}}
+    \\,"result":{"capabilities":{"signatureHelpProvider":{"triggerCharacters":["(",","]},"textDocumentSync":1,"completionProvider":{"resolveProvider":false,"triggerCharacters":[".",":","@"]},"documentHighlightProvider":false,"codeActionProvider":false,"declarationProvider":true,"definitionProvider":true,"typeDefinitionProvider":true,"workspace":{"workspaceFolders":{"supported":true}}}}}
 ;
 
 const not_implemented_response =
@@ -172,7 +172,7 @@ fn publishDiagnostics(handle: DocumentStore.Handle, config: Config) !void {
 
 fn containerToCompletion(list: *std.ArrayList(types.CompletionItem), tree: *std.zig.ast.Tree, container: *std.zig.ast.Node, config: Config) !void {
     var index: usize = 0;
-    while (container.iterate(index)) |child_node| : (index+=1) {
+    while (container.iterate(index)) |child_node| : (index += 1) {
         if (analysis.isNodePublic(tree, child_node)) {
             try nodeToCompletion(list, tree, child_node, config);
         }
@@ -256,6 +256,78 @@ fn nodeToCompletion(list: *std.ArrayList(types.CompletionItem), tree: *std.zig.a
             });
         },
     }
+}
+
+fn identifierFromPosition(pos_index: usize, handle: DocumentStore.Handle) []const u8 {
+    var start_idx = pos_index;
+    while (start_idx > 0 and
+        (std.ascii.isAlNum(handle.document.text[start_idx]) or handle.document.text[start_idx] == '_')) : (start_idx -= 1)
+    {}
+
+    var end_idx = pos_index;
+    while (end_idx < handle.document.text.len and
+        (std.ascii.isAlNum(handle.document.text[end_idx]) or handle.document.text[end_idx] == '_')) : (end_idx += 1)
+    {}
+
+    return handle.document.text[start_idx + 1 .. end_idx];
+}
+
+fn gotoDefinitionGlobal(id: i64, pos_index: usize, handle: DocumentStore.Handle) !void {
+    var tree = try handle.tree(allocator);
+    defer tree.deinit();
+
+    const name = identifierFromPosition(pos_index, handle);
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+
+    var decl_nodes = std.ArrayList(*std.zig.ast.Node).init(&arena.allocator);
+    try analysis.declsFromIndex(&decl_nodes, tree, pos_index);
+
+    const decl = analysis.getChildOfSlice(tree, decl_nodes.items, name) orelse return try respondGeneric(id, null_result_response);
+    const name_token = analysis.getDeclNameToken(tree, decl) orelse unreachable;
+
+    try send(types.Response{
+        .id = .{ .Integer = id },
+        .result = .{
+            .Location = .{
+                .uri = handle.document.uri,
+                .range = astLocationToRange(tree.tokenLocation(0, name_token)),
+            },
+        },
+    });
+}
+
+fn gotoDefinitionFieldAccess(id: i64, handle: *DocumentStore.Handle, position: types.Position, line_start_idx: usize) !void {
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+
+    var analysis_ctx = try document_store.analysisContext(handle, &arena, position);
+    defer analysis_ctx.deinit();
+
+    const pos_index = try handle.document.positionToIndex(position);
+    var name = identifierFromPosition(pos_index, handle.*);
+
+    const line = try handle.document.getLine(@intCast(usize, position.line));
+    var tokenizer = std.zig.Tokenizer.init(line[line_start_idx..]);
+
+    const line_length = @ptrToInt(name.ptr) - @ptrToInt(line.ptr) + name.len - line_start_idx;
+    name = try std.mem.dupe(&arena.allocator, u8, name);
+
+    if (analysis.getFieldAccessTypeNode(&analysis_ctx, &tokenizer, line_length)) |container| {
+        const decl = analysis.getChild(analysis_ctx.tree, container, name) orelse return try respondGeneric(id, null_result_response);
+        const name_token = analysis.getDeclNameToken(analysis_ctx.tree, decl) orelse unreachable;
+        return try send(types.Response{
+            .id = .{ .Integer = id },
+            .result = .{
+                .Location = .{
+                    .uri = analysis_ctx.handle.document.uri,
+                    .range = astLocationToRange(analysis_ctx.tree.tokenLocation(0, name_token)),
+                },
+            },
+        });
+    }
+
+    try respondGeneric(id, null_result_response);
 }
 
 fn completeGlobal(id: i64, pos_index: usize, handle: DocumentStore.Handle, config: Config) !void {
@@ -531,7 +603,7 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
 
         const handle = document_store.getHandle(uri) orelse {
             std.debug.warn("Trying to complete in non existent document {}", .{uri});
-            return;
+            return try respondGeneric(id, no_completions_response);
         };
 
         const pos = types.Position{
@@ -560,18 +632,36 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
             try respondGeneric(id, no_completions_response);
         }
     } else if (std.mem.eql(u8, method, "textDocument/signatureHelp")) {
-        // try respondGeneric(id,
-        // \\,"result":{"signatures":[{
-        // \\"label": "nameOfFunction(aNumber: u8)",
-        // \\"documentation": {"kind": "markdown", "value": "Description of the function in **Markdown**!"},
-        // \\"parameters": [
-        // \\{"label": [15, 27], "documentation": {"kind": "markdown", "value": "An argument"}}
-        // \\]
-        // \\}]}}
-        // );
         try respondGeneric(id,
             \\,"result":{"signatures":[]}}
         );
+    } else if (std.mem.eql(u8, method, "textDocument/definition") or
+        std.mem.eql(u8, method, "textDocument/declaration") or
+        std.mem.eql(u8, method, "textDocument/typeDefinition"))
+    {
+        const document = params.getValue("textDocument").?.Object;
+        const uri = document.getValue("uri").?.String;
+        const position = params.getValue("position").?.Object;
+
+        const handle = document_store.getHandle(uri) orelse {
+            std.debug.warn("Trying to got to definition in non existent document {}", .{uri});
+            return try respondGeneric(id, null_result_response);
+        };
+
+        const pos = types.Position{
+            .line = position.getValue("line").?.Integer,
+            .character = position.getValue("character").?.Integer - 1,
+        };
+        if (pos.character >= 0) {
+            const pos_index = try handle.document.positionToIndex(pos);
+            const pos_context = documentPositionContext(handle.document, pos_index);
+
+            switch (pos_context) {
+                .var_access => try gotoDefinitionGlobal(id, pos_index, handle.*),
+                .field_access => |start_idx| try gotoDefinitionFieldAccess(id, handle, pos, start_idx),
+                else => try respondGeneric(id, null_result_response),
+            }
+        }
     } else if (root.Object.getValue("id")) |_| {
         std.debug.warn("Method with return value not implemented: {}", .{method});
         try respondGeneric(id, not_implemented_response);
