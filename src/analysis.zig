@@ -385,6 +385,7 @@ pub fn getFieldAccessTypeNode(
                 if (after_period.id == .Eof) {
                     return current_node;
                 } else if (after_period.id == .Identifier) {
+                    // TODO: This works for now, maybe we should filter based on the partial identifier ourselves?
                     if (after_period.end == line_length) return current_node;
 
                     if (getChild(analysis_ctx.tree, current_node, tokenizer.buffer[after_period.start..after_period.end])) |child| {
