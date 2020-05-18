@@ -309,8 +309,9 @@ fn completeFieldAccess(id: i64, handle: *DocumentStore.Handle, position: types.P
 
     const line = try handle.document.getLine(@intCast(usize, position.line));
     var tokenizer = std.zig.Tokenizer.init(line[line_start_idx..]);
+    const line_length = line.len - line_start_idx;
 
-    if (analysis.getFieldAccessTypeNode(&analysis_ctx, &tokenizer)) |node| {
+    if (analysis.getFieldAccessTypeNode(&analysis_ctx, &tokenizer, line_length)) |node| {
         try nodeToCompletion(&completions, analysis_ctx.tree, node, config);
     }
 

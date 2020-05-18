@@ -362,7 +362,11 @@ pub fn collectImports(import_arr: *std.ArrayList([]const u8), tree: *ast.Tree) !
     }
 }
 
-pub fn getFieldAccessTypeNode(analysis_ctx: *AnalysisContext, tokenizer: *std.zig.Tokenizer) ?*ast.Node {
+pub fn getFieldAccessTypeNode(
+    analysis_ctx: *AnalysisContext,
+    tokenizer: *std.zig.Tokenizer,
+    line_length: usize,
+) ?*ast.Node {
     var current_node = &analysis_ctx.tree.root_node.base;
 
     while (true) {
@@ -381,6 +385,8 @@ pub fn getFieldAccessTypeNode(analysis_ctx: *AnalysisContext, tokenizer: *std.zi
                 if (after_period.id == .Eof) {
                     return current_node;
                 } else if (after_period.id == .Identifier) {
+                    if (after_period.end == line_length) return current_node;
+
                     if (getChild(analysis_ctx.tree, current_node, tokenizer.buffer[after_period.start..after_period.end])) |child| {
                         if (resolveTypeOfNode(analysis_ctx, child)) |child_type| {
                             current_node = child_type;
