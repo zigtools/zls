@@ -287,13 +287,12 @@ fn completeFieldAccess(id: i64, handle: *DocumentStore.Handle, position: types.P
     var tokenizer = std.zig.Tokenizer.init(line_copy);
 
     if (analysis.getFieldAccessTypeNode(&analysis_ctx, &tokenizer)) |node| {
-        const initial_document = try std.mem.dupe(&arena.allocator, u8, analysis_ctx.handle.document.uri);
         var index: usize = 0;
         while (node.iterate(index)) |child_node| {
             if (analysis.isNodePublic(analysis_ctx.tree, child_node)) {
                 // TODO: Not great to allocate it again and again inside a loop
                 // Creating a new context, so that we don't destroy the tree that is iterated above when resolving imports
-                const initial_handle = document_store.getHandle(initial_document) orelse continue;
+                const initial_handle = analysis_ctx.handle;
                 std.debug.warn("\ncompleteFieldAccess calling resolveTypeOfNode for {}\n", .{analysis_ctx.tree.getNodeSource(child_node)});
                 var node_analysis_ctx = (try document_store.analysisContext(initial_handle, &arena)) orelse {
                     return send(types.Response{

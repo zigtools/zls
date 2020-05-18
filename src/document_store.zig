@@ -35,12 +35,12 @@ pub const Handle = struct {
 };
 
 allocator: *std.mem.Allocator,
-handles: std.StringHashMap(Handle),
+handles: std.StringHashMap(*Handle),
 std_uri: ?[]const u8,
 
 pub fn init(self: *DocumentStore, allocator: *std.mem.Allocator, zig_lib_path: ?[]const u8) !void {
     self.allocator = allocator;
-    self.handles = std.StringHashMap(Handle).init(allocator);
+    self.handles = std.StringHashMap(*Handle).init(allocator);
     errdefer self.handles.deinit();
 
     if (zig_lib_path) |zpath| {
@@ -71,7 +71,10 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: []u8) !*Handle {
         self.allocator.free(text);
     }
 
-    var handle = Handle{
+    var handle = try self.allocator.create(Handle);
+    errdefer self.allocator.destroy(handle);
+
+    handle.* = Handle{
         .count = 1,
         .import_uris = std.ArrayList([]const u8).init(self.allocator),
         .document = .{
@@ -81,9 +84,9 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: []u8) !*Handle {
             .sane_text = null,
         },
     };
-    try self.checkSanity(&handle);
+    try self.checkSanity(handle);
     try self.handles.putNoClobber(uri, handle);
-    return &(self.handles.get(uri) orelse unreachable).value;
+    return (self.handles.get(uri) orelse unreachable).value;
 }
 
 pub fn openDocument(self: *DocumentStore, uri: []const u8, text: []const u8) !*Handle {
@@ -91,7 +94,7 @@ pub fn openDocument(self: *DocumentStore, uri: []const u8, text: []const u8) !*H
         std.debug.warn("Document already open: {}, incrementing count\n", .{uri});
         entry.value.count += 1;
         std.debug.warn("New count: {}\n", .{entry.value.count});
-        return &entry.value;
+        return entry.value;
     }
 
     const duped_text = try std.mem.dupe(self.allocator, u8, text);
@@ -124,6 +127,7 @@ fn decrementCount(self: *DocumentStore, uri: []const u8) void {
         const uri_key = entry.key;
         self.handles.removeAssertDiscard(uri);
         self.allocator.free(uri_key);
+        self.allocator.destroy(entry.value);
     }
 }
 
@@ -133,7 +137,7 @@ pub fn closeDocument(self: *DocumentStore, uri: []const u8) void {
 
 pub fn getHandle(self: *DocumentStore, uri: []const u8) ?*Handle {
     if (self.handles.get(uri)) |entry| {
-        return &entry.value;
+        return entry.value;
     }
 
     return null;
@@ -394,6 +398,7 @@ pub fn deinit(self: *DocumentStore) void {
 
         entry.value.import_uris.deinit();
         self.allocator.free(entry.key);
+        self.allocator.destroy(entry.value);
     }
 
     self.handles.deinit();
