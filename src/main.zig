@@ -3,6 +3,8 @@ const build_options = @import("build_options");
 
 const Config = @import("config.zig");
 const DocumentStore = @import("document_store.zig");
+const DebugAllocator = @import("debug_allocator.zig");
+const readRequestHeader = @import("header.zig").readRequestHeader;
 const data = @import("data/" ++ build_options.data_version ++ ".zig");
 const types = @import("types.zig");
 const analysis = @import("analysis.zig");
@@ -99,7 +101,7 @@ fn astLocationToRange(loc: std.zig.ast.Tree.Location) types.Range {
 }
 
 fn publishDiagnostics(handle: DocumentStore.Handle, config: Config) !void {
-    const tree = try handle.dirtyTree(allocator);
+    const tree = try handle.tree(allocator);
     defer tree.deinit();
 
     // Use an arena for our local memory allocations.
@@ -137,34 +139,30 @@ fn publishDiagnostics(handle: DocumentStore.Handle, config: Config) !void {
                     if (is_extern)
                         break :blk;
 
-                    if (func.name_token) |name_token| {
-                        const loc = tree.tokenLocation(0, name_token);
+                    if (config.warn_style) {
+                        if (func.name_token) |name_token| {
+                            const loc = tree.tokenLocation(0, name_token);
 
-                        const is_type_function = switch (func.return_type) {
-                            .Explicit => |node| if (node.cast(std.zig.ast.Node.Identifier)) |ident|
-                                std.mem.eql(u8, tree.tokenSlice(ident.token), "type")
-                            else
-                                false,
-                            .InferErrorSet => false,
-                        };
+                            const is_type_function = analysis.isTypeFunction(tree, func);
 
-                        const func_name = tree.tokenSlice(name_token);
-                        if (!is_type_function and !analysis.isCamelCase(func_name)) {
-                            try diagnostics.append(.{
-                                .range = astLocationToRange(loc),
-                                .severity = .Information,
-                                .code = "BadStyle",
-                                .source = "zls",
-                                .message = "Functions should be camelCase",
-                            });
-                        } else if (is_type_function and !analysis.isPascalCase(func_name)) {
-                            try diagnostics.append(.{
-                                .range = astLocationToRange(loc),
-                                .severity = .Information,
-                                .code = "BadStyle",
-                                .source = "zls",
-                                .message = "Type functions should be PascalCase",
-                            });
+                            const func_name = tree.tokenSlice(name_token);
+                            if (!is_type_function and !analysis.isCamelCase(func_name)) {
+                                try diagnostics.append(.{
+                                    .range = astLocationToRange(loc),
+                                    .severity = .Information,
+                                    .code = "BadStyle",
+                                    .source = "zls",
+                                    .message = "Functions should be camelCase",
+                                });
+                            } else if (is_type_function and !analysis.isPascalCase(func_name)) {
+                                try diagnostics.append(.{
+                                    .range = astLocationToRange(loc),
+                                    .severity = .Information,
+                                    .code = "BadStyle",
+                                    .source = "zls",
+                                    .message = "Type functions should be PascalCase",
+                                });
+                            }
                         }
                     }
                 },
@@ -184,8 +182,17 @@ fn publishDiagnostics(handle: DocumentStore.Handle, config: Config) !void {
     });
 }
 
-fn nodeToCompletion(alloc: *std.mem.Allocator, tree: *std.zig.ast.Tree, decl: *std.zig.ast.Node, config: Config) !?types.CompletionItem {
-    var doc = if (try analysis.getDocComments(alloc, tree, decl)) |doc_comments|
+fn containerToCompletion(list: *std.ArrayList(types.CompletionItem), tree: *std.zig.ast.Tree, container: *std.zig.ast.Node, config: Config) !void {
+    var index: usize = 0;
+    while (container.iterate(index)) |child_node| : (index+=1) {
+        if (analysis.isNodePublic(tree, child_node)) {
+            try nodeToCompletion(list, tree, child_node, config);
+        }
+    }
+}
+
+fn nodeToCompletion(list: *std.ArrayList(types.CompletionItem), tree: *std.zig.ast.Tree, node: *std.zig.ast.Node, config: Config) error{OutOfMemory}!void {
+    var doc = if (try analysis.getDocComments(list.allocator, tree, node)) |doc_comments|
         types.MarkupContent{
             .kind = .Markdown,
             .value = doc_comments,
@@ -193,48 +200,78 @@ fn nodeToCompletion(alloc: *std.mem.Allocator, tree: *std.zig.ast.Tree, decl: *s
     else
         null;
 
-    switch (decl.id) {
+    switch (node.id) {
+        .ErrorSetDecl, .Root, .ContainerDecl => {
+            try containerToCompletion(list, tree, node, config);
+        },
         .FnProto => {
-            const func = decl.cast(std.zig.ast.Node.FnProto).?;
+            const func = node.cast(std.zig.ast.Node.FnProto).?;
             if (func.name_token) |name_token| {
                 const insert_text = if (config.enable_snippets)
-                    try analysis.getFunctionSnippet(alloc, tree, func)
+                    try analysis.getFunctionSnippet(list.allocator, tree, func)
                 else
                     null;
 
-                return types.CompletionItem{
+                const is_type_function = analysis.isTypeFunction(tree, func);
+
+                try list.append(.{
                     .label = tree.tokenSlice(name_token),
-                    .kind = .Function,
+                    .kind = if (is_type_function) .Struct else .Function,
                     .documentation = doc,
                     .detail = analysis.getFunctionSignature(tree, func),
                     .insertText = insert_text,
                     .insertTextFormat = if (config.enable_snippets) .Snippet else .PlainText,
-                };
+                });
             }
         },
         .VarDecl => {
-            const var_decl = decl.cast(std.zig.ast.Node.VarDecl).?;
-            return types.CompletionItem{
+            const var_decl = node.cast(std.zig.ast.Node.VarDecl).?;
+            const is_const = tree.tokens.at(var_decl.mut_token).id == .Keyword_const;
+            try list.append(.{
                 .label = tree.tokenSlice(var_decl.name_token),
-                .kind = .Variable,
+                .kind = if (is_const) .Constant else .Variable,
                 .documentation = doc,
                 .detail = analysis.getVariableSignature(tree, var_decl),
-            };
+            });
         },
-        else => if (analysis.nodeToString(tree, decl)) |string| {
-            return types.CompletionItem{
+        .ParamDecl => {
+            const param = node.cast(std.zig.ast.Node.ParamDecl).?;
+            if (param.name_token) |name_token|
+                try list.append(.{
+                    .label = tree.tokenSlice(name_token),
+                    .kind = .Constant,
+                    .documentation = doc,
+                    .detail = analysis.getParamSignature(tree, param),
+                });
+        },
+        .PrefixOp => {
+            try list.append(.{
+                .label = "len",
+                .kind = .Field,
+            });
+            try list.append(.{
+                .label = "ptr",
+                .kind = .Field,
+            });
+        },
+        .StringLiteral => {
+            try list.append(.{
+                .label = "len",
+                .kind = .Field,
+            });
+        },
+        else => if (analysis.nodeToString(tree, node)) |string| {
+            try list.append(.{
                 .label = string,
                 .kind = .Field,
                 .documentation = doc,
-            };
+            });
         },
     }
-
-    return null;
 }
 
-fn completeGlobal(id: i64, handle: DocumentStore.Handle, config: Config) !void {
-    var tree = (try handle.saneTree(allocator)) orelse return respondGeneric(id, no_completions_response);
+fn completeGlobal(id: i64, pos_index: usize, handle: DocumentStore.Handle, config: Config) !void {
+    var tree = try handle.tree(allocator);
     defer tree.deinit();
 
     // We use a local arena allocator to deallocate all temporary data without iterating
@@ -243,12 +280,11 @@ fn completeGlobal(id: i64, handle: DocumentStore.Handle, config: Config) !void {
     // Deallocate all temporary data.
     defer arena.deinit();
 
-    var decls = tree.root_node.decls.iterator(0);
-    while (decls.next()) |decl_ptr| {
+    // var decls = tree.root_node.decls.iterator(0);
+    var decls = try analysis.declsFromIndex(&arena.allocator, tree, pos_index);
+    for (decls) |decl_ptr| {
         var decl = decl_ptr.*;
-        if (try nodeToCompletion(&arena.allocator, tree, decl, config)) |completion| {
-            try completions.append(completion);
-        }
+        try nodeToCompletion(&completions, tree, decl_ptr, config);
     }
 
     try send(types.Response{
@@ -266,26 +302,15 @@ fn completeFieldAccess(id: i64, handle: *DocumentStore.Handle, position: types.P
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
-    var analysis_ctx = (try document_store.analysisContext(handle, &arena)) orelse {
-        return send(types.Response{
-            .id = .{ .Integer = id },
-            .result = .{
-                .CompletionList = .{
-                    .isIncomplete = false,
-                    .items = &[_]types.CompletionItem{},
-                },
-            },
-        });
-    };
+    var analysis_ctx = try document_store.analysisContext(handle, &arena, position);
     defer analysis_ctx.deinit();
 
     var completions = std.ArrayList(types.CompletionItem).init(&arena.allocator);
 
-    var line = try handle.document.getLine(@intCast(usize, position.line));
-    // handle pointer could change from underneath us, so let's copy the line
-    var line_copy = try std.mem.dupe(&arena.allocator, u8, line[line_start_idx..]);
-    var tokenizer = std.zig.Tokenizer.init(line_copy);
+    const line = try handle.document.getLine(@intCast(usize, position.line));
+    var tokenizer = std.zig.Tokenizer.init(line[line_start_idx..]);
 
+    // var decls = try analysis.declsFromIndex(&arena.allocator, analysis_ctx.tree, try handle.document.positionToIndex(position));
     if (analysis.getFieldAccessTypeNode(&analysis_ctx, &tokenizer)) |node| {
         var index: usize = 0;
         while (node.iterate(index)) |child_node| {
@@ -579,7 +604,7 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
                         },
                     },
                 }),
-                .var_access, .empty => try completeGlobal(id, handle.*, config),
+                .var_access, .empty => try completeGlobal(id, pos_index, handle.*, config),
                 .field_access => |start_idx| try completeFieldAccess(id, handle, pos, start_idx, config),
                 else => try respondGeneric(id, no_completions_response),
             }
@@ -607,20 +632,20 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
     }
 }
 
-var debug_alloc_state: std.testing.LeakCountAllocator = undefined;
+var debug_alloc_state: DebugAllocator = undefined;
 // We can now use if(leak_count_alloc) |alloc| { ... } as a comptime check.
-const debug_alloc: ?*std.testing.LeakCountAllocator = if (build_options.allocation_info) &debug_alloc_state else null;
+const debug_alloc: ?*DebugAllocator = if (build_options.allocation_info) &debug_alloc_state else null;
 
 pub fn main() anyerror!void {
     // TODO: Use a better purpose general allocator once std has one.
     // Probably after the generic composable allocators PR?
-    // This is not too bad for now since most allocations happen in local areans.
+    // This is not too bad for now since most allocations happen in local arenas.
     allocator = std.heap.page_allocator;
 
     if (build_options.allocation_info) {
         // TODO: Use a better debugging allocator, track size in bytes, memory reserved etc..
         // Initialize the leak counting allocator.
-        debug_alloc_state = std.testing.LeakCountAllocator.init(allocator);
+        debug_alloc_state = DebugAllocator.init(allocator);
         allocator = &debug_alloc_state.allocator;
     }
 
@@ -636,9 +661,10 @@ pub fn main() anyerror!void {
     const stdin = std.io.getStdIn().inStream();
     stdout = std.io.getStdOut().outStream();
 
-    // Read he configuration, if any.
-    var config = Config{};
+    // Read the configuration, if any.
     const config_parse_options = std.json.ParseOptions{ .allocator = allocator };
+    var config = Config{};
+    defer std.json.parseFree(Config, config, config_parse_options);
 
     // TODO: Investigate using std.fs.Watch to detect writes to the config and reload it.
     config_read: {
@@ -648,30 +674,26 @@ pub fn main() anyerror!void {
         var exec_dir = std.fs.cwd().openDir(exec_dir_path, .{}) catch break :config_read;
         defer exec_dir.close();
 
-        var conf_file = exec_dir.openFile("zls.json", .{}) catch break :config_read;
+        const conf_file = exec_dir.openFile("zls.json", .{}) catch break :config_read;
         defer conf_file.close();
 
-        const conf_file_stat = conf_file.stat() catch break :config_read;
-
-        // Allocate enough memory for the whole file.
-        var file_buf = try allocator.alloc(u8, conf_file_stat.size);
+        // Max 1MB
+        const file_buf = conf_file.inStream().readAllAlloc(allocator, 0x1000000) catch break :config_read;
         defer allocator.free(file_buf);
 
-        const bytes_read = conf_file.readAll(file_buf) catch break :config_read;
-        if (bytes_read != conf_file_stat.size) break :config_read;
-
-        // TODO: Better errors? Doesnt seem like std.json can provide us positions or context.
+        // TODO: Better errors? Doesn't seem like std.json can provide us positions or context.
         config = std.json.parse(Config, &std.json.TokenStream.init(file_buf), config_parse_options) catch |err| {
             std.debug.warn("Error while parsing configuration file: {}\nUsing default config.\n", .{err});
             break :config_read;
         };
     }
-    defer std.json.parseFree(Config, config, config_parse_options);
 
-    if (config.zig_lib_path != null and !std.fs.path.isAbsolute(config.zig_lib_path.?)) {
-        std.debug.warn("zig library path is not absolute, defaulting to null.\n", .{});
-        allocator.free(config.zig_lib_path.?);
-        config.zig_lib_path = null;
+    if (config.zig_lib_path) |zig_lib_path| {
+        if (!std.fs.path.isAbsolute(zig_lib_path)) {
+            std.debug.warn("zig library path is not absolute, defaulting to null.\n", .{});
+            allocator.free(zig_lib_path);
+            config.zig_lib_path = null;
+        }
     }
 
     try document_store.init(allocator, config.zig_lib_path);
@@ -681,77 +703,20 @@ pub fn main() anyerror!void {
     var json_parser = std.json.Parser.init(allocator, false);
     defer json_parser.deinit();
 
-    var offset: usize = 0;
-    var bytes_read: usize = 0;
-
-    var index: usize = 0;
-    var content_len: usize = 0;
-
-    stdin_poll: while (true) {
-        if (offset >= 16 and std.mem.startsWith(u8, buffer.items, "Content-Length: ")) {
-            index = 16;
-            while (index <= offset + 10) : (index += 1) {
-                const c = buffer.items[index];
-                if (c >= '0' and c <= '9') {
-                    content_len = content_len * 10 + (c - '0');
-                }
-                if (c == '\r' and buffer.items[index + 1] == '\n') {
-                    index += 2;
-                    break;
-                }
-            }
-
-            if (buffer.items[index] == '\r') {
-                index += 2;
-                if (buffer.items.len < index + content_len) {
-                    try buffer.resize(index + content_len);
-                }
-
-                body_poll: while (offset < content_len + index) {
-                    bytes_read = try stdin.readAll(buffer.items[offset .. index + content_len]);
-                    if (bytes_read == 0) {
-                        try log("0 bytes read; exiting!", .{});
-                        return;
-                    }
-
-                    offset += bytes_read;
-                }
-
-                try processJsonRpc(&json_parser, buffer.items[index .. index + content_len], config);
-                json_parser.reset();
-
-                offset = 0;
-                content_len = 0;
-            } else {
-                try log("\\r not found", .{});
-            }
-        } else if (offset >= 16) {
-            try log("Offset is greater than 16!", .{});
+    while (true) {
+        const headers = readRequestHeader(allocator, stdin) catch |err| {
+            try log("{}; exiting!", .{@errorName(err)});
             return;
-        }
-
-        if (offset < 16) {
-            bytes_read = try stdin.readAll(buffer.items[offset..25]);
-        } else {
-            if (offset == buffer.items.len) {
-                try buffer.resize(buffer.items.len * 2);
-            }
-            if (index + content_len > buffer.items.len) {
-                bytes_read = try stdin.readAll(buffer.items[offset..buffer.items.len]);
-            } else {
-                bytes_read = try stdin.readAll(buffer.items[offset .. index + content_len]);
-            }
-        }
-
-        if (bytes_read == 0) {
-            try log("0 bytes read; exiting!", .{});
-            return;
-        }
-
-        offset += bytes_read;
+        };
+        defer headers.deinit(allocator);
+        const buf = try allocator.alloc(u8, headers.content_length);
+        defer allocator.free(buf);
+        try stdin.readNoEof(buf);
+        try processJsonRpc(&json_parser, buf, config);
+        json_parser.reset();
 
         if (debug_alloc) |dbg| {
-            try log("Allocations alive: {}", .{dbg.count});
+            try log("{}", .{dbg.info});
         }
     }
 }

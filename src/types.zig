@@ -140,7 +140,6 @@ pub const TextDocument = struct {
     text: String,
     // This holds the memory that we have actually allocated.
     mem: []u8,
-    sane_text: ?String = null,
 
     pub fn positionToIndex(self: TextDocument, position: Position) !usize {
         var split_iterator = std.mem.split(self.text, "\n");
@@ -186,11 +185,11 @@ pub const MarkupKind = enum(u1) {
         options: json.StringifyOptions,
         out_stream: var,
     ) !void {
-        if (@enumToInt(value) == 0) {
-            try json.stringify("plaintext", options, out_stream);
-        } else {
-            try json.stringify("markdown", options, out_stream);
-        }
+        const str = switch (value) {
+            .PlainText => "plaintext",
+            .Markdown => "markdown",
+        };
+        try json.stringify(str, options, out_stream);
     }
 };
 
