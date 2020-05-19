@@ -310,7 +310,6 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
             const builtin_call = node.cast(ast.Node.BuiltinCall).?;
             if (!std.mem.eql(u8, analysis_ctx.tree.tokenSlice(builtin_call.builtin_token), "@import")) return null;
             if (builtin_call.params.len > 1) return null;
-            std.debug.warn("Importing {}\n", .{analysis_ctx.tree.getNodeSource(node)});
 
             const import_param = builtin_call.params.at(0).*;
             if (import_param.id != .StringLiteral) return null;

@@ -376,15 +376,6 @@ fn completeGlobal(id: i64, pos_index: usize, handle: *DocumentStore.Handle, conf
     });
 }
 
-fn nodePosition(tree: *std.zig.ast.Tree, node: *std.zig.ast.Node) types.Position {
-    const location = tree.tokenLocation(0, node.firstToken());
-
-    return types.Position{
-        .line = @intCast(i64, location.line),
-        .character = @intCast(i64, location.column),
-    };
-}
-
 fn completeFieldAccess(id: i64, handle: *DocumentStore.Handle, position: types.Position, line_start_idx: usize, config: Config) !void {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
