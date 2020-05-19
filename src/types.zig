@@ -40,9 +40,7 @@ pub const RequestId = union(enum) {
 };
 
 /// Params of a request
-pub const RequestParams = union(enum) {
-
-};
+pub const RequestParams = void;
 
 pub const NotificationParams = union(enum) {
     LogMessageParams: LogMessageParams,

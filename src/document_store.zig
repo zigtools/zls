@@ -22,29 +22,11 @@ pub const Handle = struct {
 
 allocator: *std.mem.Allocator,
 handles: std.StringHashMap(*Handle),
-std_uri: ?[]const u8,
 
-pub fn init(self: *DocumentStore, allocator: *std.mem.Allocator, zig_lib_path: ?[]const u8) !void {
+pub fn init(self: *DocumentStore, allocator: *std.mem.Allocator) !void {
     self.allocator = allocator;
     self.handles = std.StringHashMap(*Handle).init(allocator);
     errdefer self.handles.deinit();
-
-    if (zig_lib_path) |zpath| {
-        const std_path = std.fs.path.resolve(allocator, &[_][]const u8{
-            zpath, "./std/std.zig",
-        }) catch |err| block: {
-            std.debug.warn("Failed to resolve zig std library path, error: {}\n", .{err});
-            self.std_uri = null;
-            return;
-        };
-
-        defer allocator.free(std_path);
-        // Get the std_path as a URI, so we can just append to it!
-        self.std_uri = try URI.fromPath(allocator, std_path);
-        std.debug.warn("Standard library base uri: {}\n", .{self.std_uri});
-    } else {
-        self.std_uri = null;
-    }
 }
 
 /// This function asserts the document is not open yet and takes ownership
@@ -120,7 +102,7 @@ pub fn getHandle(self: *DocumentStore, uri: []const u8) ?*Handle {
 }
 
 // Check if the document text is now sane, move it to sane_text if so.
-fn removeOldImports(self: *DocumentStore, handle: *Handle) !void {
+fn removeOldImports(self: *DocumentStore, handle: *Handle, zig_lib_path: ?[]const u8) !void {
     std.debug.warn("New text for document {}\n", .{handle.uri()});
     // TODO: Better algorithm or data structure?
     // Removing the imports is costly since they live in an array list
@@ -144,7 +126,8 @@ fn removeOldImports(self: *DocumentStore, handle: *Handle) !void {
     }
 
     for (import_strs.items) |str| {
-        const uri = (try uriFromImportStr(self, &arena.allocator, handle.*, str)) orelse continue;
+        const std_uri = try stdUriFromLibPath(&arena.allocator, zig_lib_path);
+        const uri = (try uriFromImportStr(self, &arena.allocator, handle.*, str, std_uri)) orelse continue;
 
         var idx: usize = 0;
         exists_loop: while (idx < still_exist.len) : (idx += 1) {
@@ -172,7 +155,12 @@ fn removeOldImports(self: *DocumentStore, handle: *Handle) !void {
     }
 }
 
-pub fn applyChanges(self: *DocumentStore, handle: *Handle, content_changes: std.json.Array) !void {
+pub fn applyChanges(
+    self: *DocumentStore,
+    handle: *Handle,
+    content_changes: std.json.Array,
+    zig_lib_path: ?[]const u8,
+) !void {
     const document = &handle.document;
 
     for (content_changes.items) |change| {
@@ -225,12 +213,18 @@ pub fn applyChanges(self: *DocumentStore, handle: *Handle, content_changes: std.
         }
     }
 
-    try self.removeOldImports(handle);
+    try self.removeOldImports(handle, zig_lib_path);
 }
 
-fn uriFromImportStr(store: *DocumentStore, allocator: *std.mem.Allocator, handle: Handle, import_str: []const u8) !?[]const u8 {
+fn uriFromImportStr(
+    store: *DocumentStore,
+    allocator: *std.mem.Allocator,
+    handle: Handle,
+    import_str: []const u8,
+    std_uri: ?[]const u8,
+) !?[]const u8 {
     return if (std.mem.eql(u8, import_str, "std"))
-        if (store.std_uri) |std_root_uri| try std.mem.dupe(allocator, u8, std_root_uri) else {
+        if (std_uri) |uri| try std.mem.dupe(allocator, u8, uri) else {
             std.debug.warn("Cannot resolve std library import, path is null.\n", .{});
             return null;
         }
@@ -259,6 +253,7 @@ pub const AnalysisContext = struct {
     tree: *std.zig.ast.Tree,
     scope_nodes: []*std.zig.ast.Node,
     last_this_node: *std.zig.ast.Node,
+    std_uri: ?[]const u8,
 
     fn refreshScopeNodes(self: *AnalysisContext) !void {
         var scope_nodes = std.ArrayList(*std.zig.ast.Node).init(&self.arena.allocator);
@@ -269,7 +264,13 @@ pub const AnalysisContext = struct {
 
     pub fn onImport(self: *AnalysisContext, import_str: []const u8) !?*std.zig.ast.Node {
         const allocator = self.store.allocator;
-        const final_uri = (try uriFromImportStr(self.store, self.store.allocator, self.handle.*, import_str)) orelse return null;
+        const final_uri = (try uriFromImportStr(
+            self.store,
+            self.store.allocator,
+            self.handle.*,
+            import_str,
+            self.std_uri,
+        )) orelse return null;
 
         std.debug.warn("Import final URI: {}\n", .{final_uri});
         var consumed_final_uri = false;
@@ -351,6 +352,7 @@ pub const AnalysisContext = struct {
             .tree = tree,
             .scope_nodes = self.scope_nodes,
             .last_this_node = &tree.root_node.base,
+            .std_uri = self.std_uri,
         };
     }
 
@@ -369,12 +371,36 @@ pub const AnalysisContext = struct {
     }
 };
 
-pub fn analysisContext(self: *DocumentStore, handle: *Handle, arena: *std.heap.ArenaAllocator, position: types.Position) !AnalysisContext {
+fn stdUriFromLibPath(allocator: *std.mem.Allocator, zig_lib_path: ?[]const u8) !?[]const u8 {
+    if (zig_lib_path) |zpath| {
+        const std_path = std.fs.path.resolve(allocator, &[_][]const u8{
+            zpath, "./std/std.zig",
+        }) catch |err| block: {
+            std.debug.warn("Failed to resolve zig std library path, error: {}\n", .{err});
+            return null;
+        };
+
+        defer allocator.free(std_path);
+        // Get the std_path as a URI, so we can just append to it!
+        return try URI.fromPath(allocator, std_path);
+    }
+
+    return null;
+}
+
+pub fn analysisContext(
+    self: *DocumentStore,
+    handle: *Handle,
+    arena: *std.heap.ArenaAllocator,
+    position: types.Position,
+    zig_lib_path: ?[]const u8,
+) !AnalysisContext {
     const tree = try handle.tree(self.allocator);
 
     var scope_nodes = std.ArrayList(*std.zig.ast.Node).init(&arena.allocator);
     try analysis.declsFromIndex(&scope_nodes, tree, try handle.document.positionToIndex(position));
 
+    const std_uri = try stdUriFromLibPath(&arena.allocator, zig_lib_path);
     return AnalysisContext{
         .store = self,
         .handle = handle,
@@ -382,6 +408,7 @@ pub fn analysisContext(self: *DocumentStore, handle: *Handle, arena: *std.heap.A
         .tree = tree,
         .scope_nodes = scope_nodes.items,
         .last_this_node = &tree.root_node.base,
+        .std_uri = std_uri,
     };
 }
 
@@ -400,7 +427,4 @@ pub fn deinit(self: *DocumentStore) void {
     }
 
     self.handles.deinit();
-    if (self.std_uri) |uri| {
-        self.allocator.free(uri);
-    }
 }

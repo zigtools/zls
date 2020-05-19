@@ -8,6 +8,7 @@ const readRequestHeader = @import("header.zig").readRequestHeader;
 const data = @import("data/" ++ build_options.data_version ++ ".zig");
 const types = @import("types.zig");
 const analysis = @import("analysis.zig");
+const URI = @import("uri.zig");
 
 // Code is largely based off of https://github.com/andersfr/zig-lsp/blob/master/server.zig
 
@@ -15,9 +16,10 @@ var stdout: std.io.BufferedOutStream(4096, std.fs.File.OutStream) = undefined;
 var allocator: *std.mem.Allocator = undefined;
 
 var document_store: DocumentStore = undefined;
+var workspace_folder_configs: std.StringHashMap(?Config) = undefined;
 
 const initialize_response =
-    \\,"result":{"capabilities":{"signatureHelpProvider":{"triggerCharacters":["(",","]},"textDocumentSync":1,"completionProvider":{"resolveProvider":false,"triggerCharacters":[".",":","@"]},"documentHighlightProvider":false,"codeActionProvider":false,"declarationProvider":true,"definitionProvider":true,"typeDefinitionProvider":true,"workspace":{"workspaceFolders":{"supported":true}}}}}
+    \\,"result":{"capabilities":{"signatureHelpProvider":{"triggerCharacters":["(",","]},"textDocumentSync":1,"completionProvider":{"resolveProvider":false,"triggerCharacters":[".",":","@"]},"documentHighlightProvider":false,"codeActionProvider":false,"declarationProvider":true,"definitionProvider":true,"typeDefinitionProvider":true,"workspace":{"workspaceFolders":{"supported":true,"changeNotifications":true}}}}}
 ;
 
 const not_implemented_response =
@@ -319,11 +321,17 @@ fn gotoDefinitionGlobal(id: i64, pos_index: usize, handle: DocumentStore.Handle)
     });
 }
 
-fn gotoDefinitionFieldAccess(id: i64, handle: *DocumentStore.Handle, position: types.Position, line_start_idx: usize) !void {
+fn gotoDefinitionFieldAccess(
+    id: i64,
+    handle: *DocumentStore.Handle,
+    position: types.Position,
+    line_start_idx: usize,
+    config: Config,
+) !void {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
-    var analysis_ctx = try document_store.analysisContext(handle, &arena, position);
+    var analysis_ctx = try document_store.analysisContext(handle, &arena, position, config.zig_lib_path);
     defer analysis_ctx.deinit();
 
     const pos_index = try handle.document.positionToIndex(position);
@@ -365,7 +373,7 @@ fn completeGlobal(id: i64, pos_index: usize, handle: *DocumentStore.Handle, conf
     var analysis_ctx = try document_store.analysisContext(handle, &arena, types.Position{
         .line = 0,
         .character = 0,
-    });
+    }, config.zig_lib_path);
     defer analysis_ctx.deinit();
 
     var decl_nodes = std.ArrayList(*std.zig.ast.Node).init(&arena.allocator);
@@ -390,7 +398,7 @@ fn completeFieldAccess(id: i64, handle: *DocumentStore.Handle, position: types.P
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
-    var analysis_ctx = try document_store.analysisContext(handle, &arena, position);
+    var analysis_ctx = try document_store.analysisContext(handle, &arena, position, config.zig_lib_path);
     defer analysis_ctx.deinit();
 
     var completions = std.ArrayList(types.CompletionItem).init(&arena.allocator);
@@ -573,26 +581,120 @@ fn documentPositionContext(doc: types.TextDocument, pos_index: usize) PositionCo
     return context;
 }
 
+fn loadConfig(folder_path: []const u8) ?Config {
+    var folder = std.fs.cwd().openDir(folder_path, .{}) catch return null;
+    defer folder.close();
+
+    const conf_file = folder.openFile("zls.json", .{}) catch return null;
+    defer conf_file.close();
+
+    // Max 1MB
+    const file_buf = conf_file.inStream().readAllAlloc(allocator, 0x1000000) catch return null;
+    defer allocator.free(file_buf);
+
+    // TODO: Better errors? Doesn't seem like std.json can provide us positions or context.
+    var config = std.json.parse(Config, &std.json.TokenStream.init(file_buf), std.json.ParseOptions{ .allocator = allocator }) catch |err| {
+        std.debug.warn("Error while parsing configuration file: {}\nUsing default config.\n", .{err});
+        return null;
+    };
+
+    if (config.zig_lib_path) |zig_lib_path| {
+        if (!std.fs.path.isAbsolute(zig_lib_path)) {
+            std.debug.warn("zig library path is not absolute, defaulting to null.\n", .{});
+            allocator.free(zig_lib_path);
+            config.zig_lib_path = null;
+        }
+    }
+
+    return config;
+}
+
+fn loadWorkspaceConfigs() !void {
+    var folder_config_it = workspace_folder_configs.iterator();
+    while (folder_config_it.next()) |entry| {
+        if (entry.value) |_| continue;
+
+        const folder_path = try URI.parse(allocator, entry.key);
+        defer allocator.free(folder_path);
+
+        entry.value = loadConfig(folder_path);
+    }
+}
+
+fn configFromUriOr(uri: []const u8, default: Config) Config {
+    var folder_config_it = workspace_folder_configs.iterator();
+    while (folder_config_it.next()) |entry| {
+        if (std.mem.startsWith(u8, uri, entry.key)) {
+            return entry.value orelse default;
+        }
+    }
+
+    return default;
+}
+
 fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !void {
     var tree = try parser.parse(json);
     defer tree.deinit();
 
     const root = tree.root;
 
-    std.debug.assert(root.Object.getValue("method") != null);
-
-    const method = root.Object.getValue("method").?.String;
     const id = if (root.Object.getValue("id")) |id| id.Integer else 0;
+    if (id == 1337 and (root.Object.getValue("method") == null or std.mem.eql(u8, root.Object.getValue("method").?.String, ""))) {
+        const result = (root.Object.getValue("result") orelse return).Array;
 
+        for (result.items) |workspace_folder| {
+            const duped_uri = try std.mem.dupe(allocator, u8, workspace_folder.Object.getValue("uri").?.String);
+            try workspace_folder_configs.putNoClobber(duped_uri, null);
+        }
+
+        try loadWorkspaceConfigs();
+        return;
+    }
+
+    std.debug.assert(root.Object.getValue("method") != null);
+    const method = root.Object.getValue("method").?.String;
     const params = root.Object.getValue("params").?.Object;
 
     // Core
     if (std.mem.eql(u8, method, "initialize")) {
         try respondGeneric(id, initialize_response);
     } else if (std.mem.eql(u8, method, "initialized")) {
-        // noop
+        // Send the workspaceFolders request
+        try send(types.Request{
+            .id = .{ .Integer = 1337 },
+            .method = "workspace/workspaceFolders",
+            .params = {},
+        });
     } else if (std.mem.eql(u8, method, "$/cancelRequest")) {
         // noop
+    }
+    // Workspace folder changes
+    else if (std.mem.eql(u8, method, "workspace/didChangeWorkspaceFolders")) {
+        const event = params.getValue("event").?.Object;
+        const added = event.getValue("added").?.Array;
+        const removed = event.getValue("removed").?.Array;
+
+        for (removed.items) |rem| {
+            const uri = rem.Object.getValue("uri").?.String;
+            if (workspace_folder_configs.remove(uri)) |entry| {
+                allocator.free(entry.key);
+                if (entry.value) |c| {
+                    std.json.parseFree(Config, c, std.json.ParseOptions{ .allocator = allocator });
+                }
+            }
+        }
+
+        for (added.items) |add| {
+            const duped_uri = try std.mem.dupe(allocator, u8, add.Object.getValue("uri").?.String);
+            if (try workspace_folder_configs.put(duped_uri, null)) |old| {
+                allocator.free(old.key);
+                if (old.value) |c| {
+                    std.json.parseFree(Config, c, std.json.ParseOptions{ .allocator = allocator });
+                }
+            }
+        }
+
+        try loadWorkspaceConfigs();
     }
     // File changes
     else if (std.mem.eql(u8, method, "textDocument/didOpen")) {
@@ -601,7 +703,7 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
         const text = document.getValue("text").?.String;
 
         const handle = try document_store.openDocument(uri, text);
-        try publishDiagnostics(handle.*, config);
+        try publishDiagnostics(handle.*, configFromUriOr(uri, config));
     } else if (std.mem.eql(u8, method, "textDocument/didChange")) {
         const text_document = params.getValue("textDocument").?.Object;
         const uri = text_document.getValue("uri").?.String;
@@ -612,8 +714,9 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
             return;
         };
 
-        try document_store.applyChanges(handle, content_changes);
-        try publishDiagnostics(handle.*, config);
+        const local_config = configFromUriOr(uri, config);
+        try document_store.applyChanges(handle, content_changes, local_config.zig_lib_path);
+        try publishDiagnostics(handle.*, local_config);
     } else if (std.mem.eql(u8, method, "textDocument/didSave")) {
         // noop
     } else if (std.mem.eql(u8, method, "textDocument/didClose")) {
@@ -641,18 +744,19 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
             const pos_index = try handle.document.positionToIndex(pos);
             const pos_context = documentPositionContext(handle.document, pos_index);
 
+            const this_config = configFromUriOr(uri, config);
             switch (pos_context) {
                 .builtin => try send(types.Response{
                     .id = .{ .Integer = id },
                     .result = .{
                         .CompletionList = .{
                             .isIncomplete = false,
-                            .items = builtin_completions[@boolToInt(config.enable_snippets)][0..],
+                            .items = builtin_completions[@boolToInt(this_config.enable_snippets)][0..],
                         },
                     },
                 }),
-                .var_access, .empty => try completeGlobal(id, pos_index, handle, config),
-                .field_access => |start_idx| try completeFieldAccess(id, handle, pos, start_idx, config),
+                .var_access, .empty => try completeGlobal(id, pos_index, handle, this_config),
+                .field_access => |start_idx| try completeFieldAccess(id, handle, pos, start_idx, this_config),
                 else => try respondGeneric(id, no_completions_response),
             }
         } else {
@@ -685,7 +789,13 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
 
             switch (pos_context) {
                 .var_access => try gotoDefinitionGlobal(id, pos_index, handle.*),
-                .field_access => |start_idx| try gotoDefinitionFieldAccess(id, handle, pos, start_idx),
+                .field_access => |start_idx| try gotoDefinitionFieldAccess(
+                    id,
+                    handle,
+                    pos,
+                    start_idx,
+                    configFromUriOr(uri, config),
+                ),
                 else => try respondGeneric(id, null_result_response),
             }
         }
@@ -723,38 +833,30 @@ pub fn main() anyerror!void {
     var config = Config{};
     defer std.json.parseFree(Config, config, config_parse_options);
 
-    // TODO: Investigate using std.fs.Watch to detect writes to the config and reload it.
     config_read: {
+        const known_folders = @import("known-folders/known-folders.zig");
+        const res = try known_folders.getPath(allocator, .local_configuration);
+        if (res) |local_config_path| {
+            defer allocator.free(local_config_path);
+            if (loadConfig(local_config_path)) |conf| {
+                config = conf;
+                break :config_read;
+            }
+        }
+
         var exec_dir_bytes: [std.fs.MAX_PATH_BYTES]u8 = undefined;
         const exec_dir_path = std.fs.selfExeDirPath(&exec_dir_bytes) catch break :config_read;
 
-        var exec_dir = std.fs.cwd().openDir(exec_dir_path, .{}) catch break :config_read;
-        defer exec_dir.close();
-
-        const conf_file = exec_dir.openFile("zls.json", .{}) catch break :config_read;
-        defer conf_file.close();
-
-        // Max 1MB
-        const file_buf = conf_file.inStream().readAllAlloc(allocator, 0x1000000) catch break :config_read;
-        defer allocator.free(file_buf);
-
-        // TODO: Better errors? Doesn't seem like std.json can provide us positions or context.
-        config = std.json.parse(Config, &std.json.TokenStream.init(file_buf), config_parse_options) catch |err| {
-            std.debug.warn("Error while parsing configuration file: {}\nUsing default config.\n", .{err});
-            break :config_read;
-        };
-    }
-
-    if (config.zig_lib_path) |zig_lib_path| {
-        if (!std.fs.path.isAbsolute(zig_lib_path)) {
-            std.debug.warn("zig library path is not absolute, defaulting to null.\n", .{});
-            allocator.free(zig_lib_path);
-            config.zig_lib_path = null;
+        if (loadConfig(exec_dir_path)) |conf| {
+            config = conf;
         }
     }
 
-    try document_store.init(allocator, config.zig_lib_path);
+    try document_store.init(allocator);
     defer document_store.deinit();
+
+    workspace_folder_configs = std.StringHashMap(?Config).init(allocator);
+    defer workspace_folder_configs.deinit();
 
     // This JSON parser is passed to processJsonRpc and reset.
     var json_parser = std.json.Parser.init(allocator, false);
