@@ -397,7 +397,7 @@ fn completeFieldAccess(id: i64, handle: *DocumentStore.Handle, position: types.P
     const line_length = line.len - line_start_idx;
 
     if (analysis.getFieldAccessTypeNode(&analysis_ctx, &tokenizer, line_length)) |node| {
-        try nodeToCompletion(&completions, analysis_ctx, node, config);
+        try nodeToCompletion(&completions, &analysis_ctx, node, config);
     }
     try send(types.Response{
         .id = .{ .Integer = id },
