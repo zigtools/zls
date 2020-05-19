@@ -19,6 +19,7 @@ jobs:
         wget --quiet --output-document=- $ZIG | tar Jx
         mv zig-linux-x86_64-* zig
         echo zig version $(./zig/zig version)
+        git submodule update
     - name: build
       run: |
         export PATH=./zig:$PATH
