@@ -234,6 +234,7 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
     switch (node.id) {
         .VarDecl => {
             const vari = node.cast(ast.Node.VarDecl).?;
+
             return resolveTypeOfNode(analysis_ctx, vari.type_node orelse vari.init_node.?) orelse null;
         },
         .ParamDecl => {
@@ -246,11 +247,7 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
             }
         },
         .FnProto => {
-            const func = node.cast(ast.Node.FnProto).?;
-            switch (func.return_type) {
-                .Explicit, .InferErrorSet => |return_type| return resolveTypeOfNode(analysis_ctx, return_type),
-                .Invalid => {},
-            }
+            return node;
         },
         .Identifier => {
             if (getChildOfSlice(analysis_ctx.tree, analysis_ctx.scope_nodes, analysis_ctx.tree.getNodeSource(node))) |child| {
@@ -265,7 +262,16 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
             const suffix_op = node.cast(ast.Node.SuffixOp).?;
             switch (suffix_op.op) {
                 .Call, .StructInitializer => {
-                    return resolveTypeOfNode(analysis_ctx, suffix_op.lhs.node);
+                    const func_or_struct_decl = resolveTypeOfNode(analysis_ctx, suffix_op.lhs.node) orelse return null;
+
+                    if (func_or_struct_decl.id == .FnProto) {
+                        const func = func_or_struct_decl.cast(ast.Node.FnProto).?;
+                        switch (func.return_type) {
+                            .Explicit, .InferErrorSet => |return_type| return resolveTypeOfNode(analysis_ctx, return_type),
+                            .Invalid => {},
+                        }
+                    }
+                    return func_or_struct_decl;
                 },
                 else => {},
             }

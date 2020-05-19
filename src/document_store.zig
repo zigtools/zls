@@ -21,17 +21,17 @@ pub const Handle = struct {
 };
 
 allocator: *std.mem.Allocator,
-handles: std.StringHashMap(Handle),
+handles: std.StringHashMap(*Handle),
 std_uri: ?[]const u8,
 
 pub fn init(self: *DocumentStore, allocator: *std.mem.Allocator, zig_lib_path: ?[]const u8) !void {
     self.allocator = allocator;
-    self.handles = std.StringHashMap(Handle).init(allocator);
+    self.handles = std.StringHashMap(*Handle).init(allocator);
     errdefer self.handles.deinit();
 
     if (zig_lib_path) |zpath| {
-        const std_path = std.fs.path.resolve(allocator, &[_][]const u8 {
-            zpath, "./std/std.zig"
+        const std_path = std.fs.path.resolve(allocator, &[_][]const u8{
+            zpath, "./std/std.zig",
         }) catch |err| block: {
             std.debug.warn("Failed to resolve zig std library path, error: {}\n", .{err});
             self.std_uri = null;
@@ -52,7 +52,10 @@ pub fn init(self: *DocumentStore, allocator: *std.mem.Allocator, zig_lib_path: ?
 fn newDocument(self: *DocumentStore, uri: []const u8, text: []u8) !*Handle {
     std.debug.warn("Opened document: {}\n", .{uri});
 
-    var handle = Handle{
+    var handle = try self.allocator.create(Handle);
+    errdefer self.allocator.destroy(handle);
+
+    handle.* = Handle{
         .count = 1,
         .import_uris = std.ArrayList([]const u8).init(self.allocator),
         .document = .{
@@ -62,7 +65,7 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: []u8) !*Handle {
         },
     };
     const kv = try self.handles.getOrPutValue(uri, handle);
-    return &kv.value;
+    return kv.value;
 }
 
 pub fn openDocument(self: *DocumentStore, uri: []const u8, text: []const u8) !*Handle {
@@ -70,7 +73,7 @@ pub fn openDocument(self: *DocumentStore, uri: []const u8, text: []const u8) !*H
         std.debug.warn("Document already open: {}, incrementing count\n", .{uri});
         entry.value.count += 1;
         std.debug.warn("New count: {}\n", .{entry.value.count});
-        return &entry.value;
+        return entry.value;
     }
 
     const duped_text = try std.mem.dupe(self.allocator, u8, text);
@@ -100,6 +103,7 @@ fn decrementCount(self: *DocumentStore, uri: []const u8) void {
         const uri_key = entry.key;
         self.handles.removeAssertDiscard(uri);
         self.allocator.free(uri_key);
+        self.allocator.destroy(entry.value);
     }
 }
 
@@ -109,7 +113,7 @@ pub fn closeDocument(self: *DocumentStore, uri: []const u8) void {
 
 pub fn getHandle(self: *DocumentStore, uri: []const u8) ?*Handle {
     if (self.handles.get(uri)) |entry| {
-        return &entry.value;
+        return entry.value;
     }
 
     return null;
@@ -175,11 +179,11 @@ pub fn applyChanges(self: *DocumentStore, handle: *Handle, content_changes: std.
         if (change.Object.getValue("range")) |range| {
             const start_pos = types.Position{
                 .line = range.Object.getValue("start").?.Object.getValue("line").?.Integer,
-                .character = range.Object.getValue("start").?.Object.getValue("character").?.Integer
+                .character = range.Object.getValue("start").?.Object.getValue("character").?.Integer,
             };
             const end_pos = types.Position{
                 .line = range.Object.getValue("end").?.Object.getValue("line").?.Integer,
-                .character = range.Object.getValue("end").?.Object.getValue("character").?.Integer
+                .character = range.Object.getValue("end").?.Object.getValue("character").?.Integer,
             };
 
             const change_text = change.Object.getValue("text").?.String;
@@ -200,12 +204,12 @@ pub fn applyChanges(self: *DocumentStore, handle: *Handle, content_changes: std.
             // The first part of the string, [0 .. start_index] need not be changed.
             // We then copy the last part of the string, [end_index ..] to its
             //    new position, [start_index + change_len .. ]
-            std.mem.copy(u8, document.mem[start_index + change_text.len..][0 .. old_len - end_index], document.mem[end_index .. old_len]);
+            std.mem.copy(u8, document.mem[start_index + change_text.len ..][0 .. old_len - end_index], document.mem[end_index..old_len]);
             // Finally, we copy the changes over.
-            std.mem.copy(u8, document.mem[start_index..][0 .. change_text.len], change_text);
+            std.mem.copy(u8, document.mem[start_index..][0..change_text.len], change_text);
 
             // Reset the text substring.
-            document.text = document.mem[0 .. new_len];
+            document.text = document.mem[0..new_len];
         } else {
             const change_text = change.Object.getValue("text").?.String;
             const old_len = document.text.len;
@@ -216,8 +220,8 @@ pub fn applyChanges(self: *DocumentStore, handle: *Handle, content_changes: std.
                 document.mem = try self.allocator.realloc(document.mem, realloc_len);
             }
 
-            std.mem.copy(u8, document.mem[0 .. change_text.len], change_text);
-            document.text = document.mem[0 .. change_text.len];
+            std.mem.copy(u8, document.mem[0..change_text.len], change_text);
+            document.text = document.mem[0..change_text.len];
         }
     }
 
@@ -226,8 +230,7 @@ pub fn applyChanges(self: *DocumentStore, handle: *Handle, content_changes: std.
 
 fn uriFromImportStr(store: *DocumentStore, allocator: *std.mem.Allocator, handle: Handle, import_str: []const u8) !?[]const u8 {
     return if (std.mem.eql(u8, import_str, "std"))
-        if (store.std_uri) |std_root_uri| try std.mem.dupe(allocator, u8, std_root_uri)
-        else {
+        if (store.std_uri) |std_root_uri| try std.mem.dupe(allocator, u8, std_root_uri) else {
             std.debug.warn("Cannot resolve std library import, path is null.\n", .{});
             return null;
         }
@@ -237,8 +240,8 @@ fn uriFromImportStr(store: *DocumentStore, allocator: *std.mem.Allocator, handle
         defer allocator.free(path);
 
         const dir_path = std.fs.path.dirname(path) orelse "";
-        const import_path = try std.fs.path.resolve(allocator, &[_][]const u8 {
-            dir_path, import_str
+        const import_path = try std.fs.path.resolve(allocator, &[_][]const u8{
+            dir_path, import_str,
         });
 
         defer allocator.free(import_path);
@@ -336,6 +339,18 @@ pub const AnalysisContext = struct {
         return &self.tree.root_node.base;
     }
 
+    pub fn clone(self: *AnalysisContext) !AnalysisContext {
+        // Create a new tree so it can be destroyed by the cloned AnalysisContext without affecting the original
+        const tree = try self.handle.tree(self.store.allocator);
+        return AnalysisContext{
+            .store = self.store,
+            .handle = self.handle,
+            .arena = self.arena,
+            .tree = tree,
+            .scope_nodes = self.scope_nodes,
+        };
+    }
+
     pub fn deinit(self: *AnalysisContext) void {
         self.tree.deinit();
     }
@@ -367,6 +382,7 @@ pub fn deinit(self: *DocumentStore) void {
 
         entry.value.import_uris.deinit();
         self.allocator.free(entry.key);
+        self.allocator.destroy(entry.value);
     }
 
     self.handles.deinit();
