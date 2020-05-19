@@ -125,8 +125,8 @@ fn removeOldImports(self: *DocumentStore, handle: *Handle, zig_lib_path: ?[]cons
         ex.* = false;
     }
 
+    const std_uri = try stdUriFromLibPath(&arena.allocator, zig_lib_path);
     for (import_strs.items) |str| {
-        const std_uri = try stdUriFromLibPath(&arena.allocator, zig_lib_path);
         const uri = (try uriFromImportStr(self, &arena.allocator, handle.*, str, std_uri)) orelse continue;
 
         var idx: usize = 0;
