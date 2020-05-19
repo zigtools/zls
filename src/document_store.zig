@@ -230,8 +230,7 @@ pub fn applyChanges(self: *DocumentStore, handle: *Handle, content_changes: std.
 
 fn uriFromImportStr(store: *DocumentStore, allocator: *std.mem.Allocator, handle: Handle, import_str: []const u8) !?[]const u8 {
     return if (std.mem.eql(u8, import_str, "std"))
-        if (store.std_uri) |std_root_uri| try std.mem.dupe(allocator, u8, std_root_uri)
-        else {
+        if (store.std_uri) |std_root_uri| try std.mem.dupe(allocator, u8, std_root_uri) else {
             std.debug.warn("Cannot resolve std library import, path is null.\n", .{});
             return null;
         }
@@ -241,8 +240,8 @@ fn uriFromImportStr(store: *DocumentStore, allocator: *std.mem.Allocator, handle
         defer allocator.free(path);
 
         const dir_path = std.fs.path.dirname(path) orelse "";
-        const import_path = try std.fs.path.resolve(allocator, &[_][]const u8 {
-            dir_path, import_str
+        const import_path = try std.fs.path.resolve(allocator, &[_][]const u8{
+            dir_path, import_str,
         });
 
         defer allocator.free(import_path);
@@ -252,8 +251,6 @@ fn uriFromImportStr(store: *DocumentStore, allocator: *std.mem.Allocator, handle
 }
 
 pub const AnalysisContext = struct {
-    const Self = @This();
-
     store: *DocumentStore,
     handle: *Handle,
     // This arena is used for temporary allocations while analyzing,
@@ -342,10 +339,10 @@ pub const AnalysisContext = struct {
         return &self.tree.root_node.base;
     }
 
-    pub fn clone(self: *Self) !Self {
+    pub fn clone(self: *AnalysisContext) !AnalysisContext {
         // Create a new tree so it can be destroyed by the cloned AnalysisContext without affecting the original
         const tree = try self.handle.tree(self.store.allocator);
-        return Self{
+        return AnalysisContext{
             .store = self.store,
             .handle = self.handle,
             .arena = self.arena,

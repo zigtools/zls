@@ -355,7 +355,10 @@ fn completeGlobal(id: i64, pos_index: usize, handle: *DocumentStore.Handle, conf
     // Deallocate all temporary data.
     defer arena.deinit();
 
-    var analysis_ctx = try document_store.analysisContext(handle, &arena, types.Position{.line = 0, .character = 0,});
+    var analysis_ctx = try document_store.analysisContext(handle, &arena, types.Position{
+        .line = 0,
+        .character = 0,
+    });
     defer analysis_ctx.deinit();
 
     var decl_nodes = std.ArrayList(*std.zig.ast.Node).init(&arena.allocator);
