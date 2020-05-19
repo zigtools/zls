@@ -37,7 +37,12 @@ Then, you can use the `zls` executable in an editor of your choice that has a Zi
 
 ### Configuration Options
 
-You can configure zls by providing a zls.json file in the same directory as the executable.  
+You can configure zls by providing a zls.json file.  
+zls will look for a zls.json configuration file in multiple locations with the following priority:  
+- In the folders open in your workspace (this applies for files in those folders)  
+- In the local configuration folder of your OS (as provided by [known-folders](https://github.com/ziglibs/known-folders#folder-list))  
+- In the same directory as the executable  
+
 The following options are currently available.  
 
 | Option | Type | Default value | What it Does |
@@ -60,6 +65,8 @@ Install the `zls-vscode` extension from [here](https://github.com/zigtools/zls-v
   - Uses data provided by `src/data` to perform builtin autocompletion
 - [`zig-lsp` by @xackus](https://github.com/xackus/zig-lsp)
   - Inspiration for `zls`
+- [`known-folders` by @ziglibs](https://github.com/ziglibs/known-folders)
+  - Provides API to acces known folders on Linux, Windows and Mac OS
 
 ## License
 MIT

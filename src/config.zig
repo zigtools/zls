@@ -1,7 +1,7 @@
 // Configuration options for zls.
 
 /// Whether to enable snippet completions
-enable_snippets: bool = true,
+enable_snippets: bool = false,
 
 /// zig library path
 zig_lib_path: ?[]const u8 = null,

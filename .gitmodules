@@ -1,0 +1,3 @@
+[submodule "src/known-folders"]
+	path = src/known-folders
+	url = https://github.com/ziglibs/known-folders
