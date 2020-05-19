@@ -229,6 +229,53 @@ pub fn getChildOfSlice(tree: *ast.Tree, nodes: []*ast.Node, name: []const u8) ?*
     return null;
 }
 
+fn findReturnStatementInternal(base_node: *ast.Node, already_found: *bool) ?*ast.Node.ControlFlowExpression {
+    var result: ?*ast.Node.ControlFlowExpression = null;
+    var idx: usize = 0;
+    while (base_node.iterate(idx)) |child_node| : (idx += 1) {
+        switch (child_node.id) {
+            .ControlFlowExpression => {
+                const cfe = child_node.cast(ast.Node.ControlFlowExpression).?;
+                if (cfe.kind == .Return) {
+                    if (already_found.*) return null;
+                    already_found.* = true;
+                    result = cfe;
+                    continue;
+                }
+            },
+            else => {},
+        }
+
+        result = findReturnStatementInternal(child_node, already_found);
+    }
+    return result;
+}
+
+fn findReturnStatement(base_node: *ast.Node) ?*ast.Node.ControlFlowExpression {
+    var already_found = false;
+    return findReturnStatementInternal(base_node, &already_found);
+}
+
+/// Resolves the return type of a function
+fn resolveReturnType(analysis_ctx: *AnalysisContext, fn_decl: *ast.Node.FnProto) ?*ast.Node {
+    if (isTypeFunction(analysis_ctx.tree, fn_decl) and fn_decl.body_node != null) {
+        // If this is a type function and it only contains a single return statement that returns
+        // a container declaration, we will return that declaration.
+        const ret = findReturnStatement(fn_decl.body_node.?) orelse return null; 
+        if (ret.rhs) |rhs| if (resolveTypeOfNode(analysis_ctx, rhs)) |res_rhs| switch(res_rhs.id) {
+            .ContainerDecl => return res_rhs,
+            else => return null,
+        };
+
+        return null;
+    }
+
+    return switch (fn_decl.return_type) {
+        .Explicit, .InferErrorSet => |return_type| resolveTypeOfNode(analysis_ctx, return_type),
+        .Invalid => null,
+    };
+}
+
 /// Resolves the type of a node
 pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.Node {
     switch (node.id) {
@@ -246,9 +293,6 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
                 else => {},
             }
         },
-        .FnProto => {
-            return node;
-        },
         .Identifier => {
             if (getChildOfSlice(analysis_ctx.tree, analysis_ctx.scope_nodes, analysis_ctx.tree.getNodeSource(node))) |child| {
                 return resolveTypeOfNode(analysis_ctx, child);
@@ -262,16 +306,11 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
             const suffix_op = node.cast(ast.Node.SuffixOp).?;
             switch (suffix_op.op) {
                 .Call, .StructInitializer => {
-                    const func_or_struct_decl = resolveTypeOfNode(analysis_ctx, suffix_op.lhs.node) orelse return null;
-
-                    if (func_or_struct_decl.id == .FnProto) {
-                        const func = func_or_struct_decl.cast(ast.Node.FnProto).?;
-                        switch (func.return_type) {
-                            .Explicit, .InferErrorSet => |return_type| return resolveTypeOfNode(analysis_ctx, return_type),
-                            .Invalid => {},
-                        }
-                    }
-                    return func_or_struct_decl;
+                    const decl = resolveTypeOfNode(analysis_ctx, suffix_op.lhs.node) orelse return null;
+                    return switch (decl.id) {
+                        .FnProto => resolveReturnType(analysis_ctx, decl.cast(ast.Node.FnProto).?),
+                        else => decl,
+                    };
                 },
                 else => {},
             }
@@ -320,7 +359,7 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
                 break :block null;
             };
         },
-        .MultilineStringLiteral, .StringLiteral, .ContainerDecl, .ErrorSetDecl => return node,
+        .MultilineStringLiteral, .StringLiteral, .ContainerDecl, .ErrorSetDecl, .FnProto => return node,
         else => std.debug.warn("Type resolution case not implemented; {}\n", .{node.id}),
     }
     return null;

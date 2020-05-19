@@ -219,10 +219,17 @@ fn nodeToCompletion(list: *std.ArrayList(types.CompletionItem), analysis_ctx: *D
             var child_analysis_context = try analysis_ctx.clone();
             defer child_analysis_context.deinit();
 
-            const child_node = var_decl.type_node orelse var_decl.init_node.?;
-            const maybe_resolved_node = analysis.resolveTypeOfNode(&child_analysis_context, child_node);
+            const child_node = block: {
+                if (var_decl.type_node) |type_node| {
+                    if (std.mem.eql(u8, "type", analysis_ctx.tree.tokenSlice(type_node.firstToken()))) {
+                        break :block var_decl.init_node orelse type_node;
+                    }
+                    break :block type_node;
+                }
+                break :block var_decl.init_node.?;
+            };
 
-            if (maybe_resolved_node) |resolved_node| {
+            if (analysis.resolveTypeOfNode(&child_analysis_context, child_node)) |resolved_node| {
                 // Special case for function aliases
                 // In the future it might be used to print types of values instead of their declarations
                 if (resolved_node.id == .FnProto) {
