@@ -640,11 +640,15 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
 
     const id = if (root.Object.getValue("id")) |id| id.Integer else 0;
     if (id == 1337 and (root.Object.getValue("method") == null or std.mem.eql(u8, root.Object.getValue("method").?.String, ""))) {
-        const result = (root.Object.getValue("result") orelse return).Array;
+        if (root.Object.getValue("result")) |result_obj| {
+            if (result_obj == .Array) {
+                const result = result_obj.Array;
 
-        for (result.items) |workspace_folder| {
-            const duped_uri = try std.mem.dupe(allocator, u8, workspace_folder.Object.getValue("uri").?.String);
-            try workspace_folder_configs.putNoClobber(duped_uri, null);
+                for (result.items) |workspace_folder| {
+                    const duped_uri = try std.mem.dupe(allocator, u8, workspace_folder.Object.getValue("uri").?.String);
+                    try workspace_folder_configs.putNoClobber(duped_uri, null);
+                }
+            }
         }
 
         try loadWorkspaceConfigs();
