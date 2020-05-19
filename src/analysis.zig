@@ -263,7 +263,10 @@ fn resolveReturnType(analysis_ctx: *AnalysisContext, fn_decl: *ast.Node.FnProto)
         // a container declaration, we will return that declaration.
         const ret = findReturnStatement(fn_decl.body_node.?) orelse return null; 
         if (ret.rhs) |rhs| if (resolveTypeOfNode(analysis_ctx, rhs)) |res_rhs| switch(res_rhs.id) {
-            .ContainerDecl => return res_rhs,
+            .ContainerDecl => {
+                analysis_ctx.onContainer(res_rhs.cast(ast.Node.ContainerDecl).?) catch return null;
+                return res_rhs;
+            },
             else => return null,
         };
 
@@ -295,6 +298,7 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
         },
         .Identifier => {
             if (getChildOfSlice(analysis_ctx.tree, analysis_ctx.scope_nodes, analysis_ctx.tree.getNodeSource(node))) |child| {
+                std.debug.warn("Found node {}\n", .{child});
                 return resolveTypeOfNode(analysis_ctx, child);
             } else return null;
         },
@@ -347,7 +351,13 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
         },
         .BuiltinCall => {
             const builtin_call = node.cast(ast.Node.BuiltinCall).?;
-            if (!std.mem.eql(u8, analysis_ctx.tree.tokenSlice(builtin_call.builtin_token), "@import")) return null;
+            const call_name = analysis_ctx.tree.tokenSlice(builtin_call.builtin_token);
+            if (std.mem.eql(u8, call_name, "@This")) {
+                if (builtin_call.params.len != 0) return null;
+                return analysis_ctx.last_this_node;
+            }
+            
+            if (!std.mem.eql(u8, call_name, "@import")) return null;
             if (builtin_call.params.len > 1) return null;
 
             const import_param = builtin_call.params.at(0).*;
@@ -359,7 +369,11 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
                 break :block null;
             };
         },
-        .MultilineStringLiteral, .StringLiteral, .ContainerDecl, .ErrorSetDecl, .FnProto => return node,
+        .ContainerDecl => {
+            analysis_ctx.onContainer(node.cast(ast.Node.ContainerDecl).?) catch return null;
+            return node;
+        },
+        .MultilineStringLiteral, .StringLiteral, .ErrorSetDecl, .FnProto => return node,
         else => std.debug.warn("Type resolution case not implemented; {}\n", .{node.id}),
     }
     return null;
