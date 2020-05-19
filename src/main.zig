@@ -223,6 +223,8 @@ fn nodeToCompletion(list: *std.ArrayList(types.CompletionItem), analysis_ctx: *D
             const maybe_resolved_node = analysis.resolveTypeOfNode(&child_analysis_context, child_node);
 
             if (maybe_resolved_node) |resolved_node| {
+                // Special case for function aliases
+                // In the future it might be used to print types of values instead of their declarations
                 if (resolved_node.id == .FnProto) {
                     try nodeToCompletion(list, &child_analysis_context, resolved_node, config);
                     return;

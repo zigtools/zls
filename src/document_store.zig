@@ -343,7 +343,7 @@ pub const AnalysisContext = struct {
     }
 
     pub fn clone(self: *Self) !Self {
-        // Copy the tree, so it can be destroyed by the cloned AnalysisContext without affecting the original
+        // Create a new tree so it can be destroyed by the cloned AnalysisContext without affecting the original
         const tree = try self.handle.tree(self.store.allocator);
         return Self{
             .store = self.store,

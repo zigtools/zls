@@ -262,16 +262,16 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
             const suffix_op = node.cast(ast.Node.SuffixOp).?;
             switch (suffix_op.op) {
                 .Call, .StructInitializer => {
-                    const func_decl = resolveTypeOfNode(analysis_ctx, suffix_op.lhs.node) orelse return null;
+                    const func_or_struct_decl = resolveTypeOfNode(analysis_ctx, suffix_op.lhs.node) orelse return null;
 
-                    if (func_decl.id == .FnProto) {
-                        const func = node.cast(ast.Node.FnProto).?;
+                    if (func_or_struct_decl.id == .FnProto) {
+                        const func = func_or_struct_decl.cast(ast.Node.FnProto).?;
                         switch (func.return_type) {
                             .Explicit, .InferErrorSet => |return_type| return resolveTypeOfNode(analysis_ctx, return_type),
                             .Invalid => {},
                         }
                     }
-                    return null;
+                    return func_or_struct_decl;
                 },
                 else => {},
             }
@@ -280,13 +280,9 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
             const infix_op = node.cast(ast.Node.InfixOp).?;
             switch (infix_op.op) {
                 .Period => {
-                    std.debug.warn("\n\n\nPeriod\n\n\n", .{});
-                    std.debug.warn("InfixOp file = {}\n{}\n", .{ analysis_ctx.handle.document.uri, analysis_ctx.tree.getNodeSource(&analysis_ctx.tree.root_node.base) });
-                    std.debug.warn("InfixOp full = {}\n", .{analysis_ctx.tree.getNodeSource(node)});
                     // Save the child string from this tree since the tree may switch when processing
                     // an import lhs.
                     var rhs_str = nodeToString(analysis_ctx.tree, infix_op.rhs) orelse return null;
-                    std.debug.warn("InfixOp rhs_str = {}\n", .{rhs_str});
                     // Use the analysis context temporary arena to store the rhs string.
                     rhs_str = std.mem.dupe(&analysis_ctx.arena.allocator, u8, rhs_str) catch return null;
                     const left = resolveTypeOfNode(analysis_ctx, infix_op.lhs) orelse return null;
