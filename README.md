@@ -27,9 +27,9 @@ zig build
 
 ### Build Options
 
-| Option | Type | What it Does |
-| --- | --- | --- |
-| `-Ddata_version` | `string` | The data file version. Any files in the `src/data` file that correspond with the Zig version you want the language server to build for (0.6.0, master).
+| Option | Type | Default Value | What it Does |
+| --- | --- | --- | --- |
+| `-Ddata_version` | `string` (master or 0.6.0) | 0.6.0 | The data file version. This selects the files in the `src/data` folder that correspond to the Zig version being served.
 
 Then, you can use the `zls` executable in an editor of your choice that has a Zig language server client!
 

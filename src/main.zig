@@ -11,13 +11,13 @@ const analysis = @import("analysis.zig");
 
 // Code is largely based off of https://github.com/andersfr/zig-lsp/blob/master/server.zig
 
-var stdout: std.fs.File.OutStream = undefined;
+var stdout: std.io.BufferedOutStream(4096, std.fs.File.OutStream) = undefined;
 var allocator: *std.mem.Allocator = undefined;
 
 var document_store: DocumentStore = undefined;
 
 const initialize_response =
-    \\,"result":{"capabilities":{"signatureHelpProvider":{"triggerCharacters":["(",","]},"textDocumentSync":1,"completionProvider":{"resolveProvider":false,"triggerCharacters":[".",":","@"]},"documentHighlightProvider":false,"codeActionProvider":false,"workspace":{"workspaceFolders":{"supported":true}}}}}
+    \\,"result":{"capabilities":{"signatureHelpProvider":{"triggerCharacters":["(",","]},"textDocumentSync":1,"completionProvider":{"resolveProvider":false,"triggerCharacters":[".",":","@"]},"documentHighlightProvider":false,"codeActionProvider":false,"declarationProvider":true,"definitionProvider":true,"typeDefinitionProvider":true,"workspace":{"workspaceFolders":{"supported":true}}}}}
 ;
 
 const not_implemented_response =
@@ -46,26 +46,11 @@ fn send(reqOrRes: var) !void {
     var mem_buffer: [1024 * 128]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&mem_buffer);
     try std.json.stringify(reqOrRes, std.json.StringifyOptions{}, fbs.outStream());
-    try stdout.print("Content-Length: {}\r\n\r\n", .{fbs.pos});
-    try stdout.writeAll(fbs.getWritten());
-}
 
-fn log(comptime fmt: []const u8, args: var) !void {
-    // Disable logs on Release modes.
-    if (std.builtin.mode != .Debug) return;
-
-    var message = try std.fmt.allocPrint(allocator, fmt, args);
-    defer allocator.free(message);
-
-    try send(types.Notification{
-        .method = "window/logMessage",
-        .params = .{
-            .LogMessageParams = .{
-                .@"type" = .Log,
-                .message = message,
-            },
-        },
-    });
+    const stdout_stream = stdout.outStream();
+    try stdout_stream.print("Content-Length: {}\r\n\r\n", .{fbs.pos});
+    try stdout_stream.writeAll(fbs.getWritten());
+    try stdout.flush();
 }
 
 fn respondGeneric(id: i64, response: []const u8) !void {
@@ -82,8 +67,11 @@ fn respondGeneric(id: i64, response: []const u8) !void {
     // Numbers of character that will be printed from this string: len - 3 brackets
     // 1 from the beginning (escaped) and the 2 from the arg {}
     const json_fmt = "{{\"jsonrpc\":\"2.0\",\"id\":{}";
-    try stdout.print("Content-Length: {}\r\n\r\n" ++ json_fmt, .{ response.len + id_digits + json_fmt.len - 3, id });
-    try stdout.writeAll(response);
+
+    const stdout_stream = stdout.outStream();
+    try stdout_stream.print("Content-Length: {}\r\n\r\n" ++ json_fmt, .{ response.len + id_digits + json_fmt.len - 3, id });
+    try stdout_stream.writeAll(response);
+    try stdout.flush();
 }
 
 // TODO: Is this correct or can we get a better end?
@@ -184,7 +172,7 @@ fn publishDiagnostics(handle: DocumentStore.Handle, config: Config) !void {
 
 fn containerToCompletion(list: *std.ArrayList(types.CompletionItem), analysis_ctx: *DocumentStore.AnalysisContext, container: *std.zig.ast.Node, config: Config) !void {
     var index: usize = 0;
-    while (container.iterate(index)) |child_node| : (index+=1) {
+    while (container.iterate(index)) |child_node| : (index += 1) {
         if (analysis.isNodePublic(analysis_ctx.tree, child_node)) {
             try nodeToCompletion(list, analysis_ctx, child_node, config);
         }
@@ -283,6 +271,78 @@ fn nodeToCompletion(list: *std.ArrayList(types.CompletionItem), analysis_ctx: *D
     }
 }
 
+fn identifierFromPosition(pos_index: usize, handle: DocumentStore.Handle) []const u8 {
+    var start_idx = pos_index;
+    while (start_idx > 0 and
+        (std.ascii.isAlNum(handle.document.text[start_idx]) or handle.document.text[start_idx] == '_')) : (start_idx -= 1)
+    {}
+
+    var end_idx = pos_index;
+    while (end_idx < handle.document.text.len and
+        (std.ascii.isAlNum(handle.document.text[end_idx]) or handle.document.text[end_idx] == '_')) : (end_idx += 1)
+    {}
+
+    return handle.document.text[start_idx + 1 .. end_idx];
+}
+
+fn gotoDefinitionGlobal(id: i64, pos_index: usize, handle: DocumentStore.Handle) !void {
+    var tree = try handle.tree(allocator);
+    defer tree.deinit();
+
+    const name = identifierFromPosition(pos_index, handle);
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+
+    var decl_nodes = std.ArrayList(*std.zig.ast.Node).init(&arena.allocator);
+    try analysis.declsFromIndex(&decl_nodes, tree, pos_index);
+
+    const decl = analysis.getChildOfSlice(tree, decl_nodes.items, name) orelse return try respondGeneric(id, null_result_response);
+    const name_token = analysis.getDeclNameToken(tree, decl) orelse unreachable;
+
+    try send(types.Response{
+        .id = .{ .Integer = id },
+        .result = .{
+            .Location = .{
+                .uri = handle.document.uri,
+                .range = astLocationToRange(tree.tokenLocation(0, name_token)),
+            },
+        },
+    });
+}
+
+fn gotoDefinitionFieldAccess(id: i64, handle: *DocumentStore.Handle, position: types.Position, line_start_idx: usize) !void {
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+
+    var analysis_ctx = try document_store.analysisContext(handle, &arena, position);
+    defer analysis_ctx.deinit();
+
+    const pos_index = try handle.document.positionToIndex(position);
+    var name = identifierFromPosition(pos_index, handle.*);
+
+    const line = try handle.document.getLine(@intCast(usize, position.line));
+    var tokenizer = std.zig.Tokenizer.init(line[line_start_idx..]);
+
+    const line_length = @ptrToInt(name.ptr) - @ptrToInt(line.ptr) + name.len - line_start_idx;
+    name = try std.mem.dupe(&arena.allocator, u8, name);
+
+    if (analysis.getFieldAccessTypeNode(&analysis_ctx, &tokenizer, line_length)) |container| {
+        const decl = analysis.getChild(analysis_ctx.tree, container, name) orelse return try respondGeneric(id, null_result_response);
+        const name_token = analysis.getDeclNameToken(analysis_ctx.tree, decl) orelse unreachable;
+        return try send(types.Response{
+            .id = .{ .Integer = id },
+            .result = .{
+                .Location = .{
+                    .uri = analysis_ctx.handle.document.uri,
+                    .range = astLocationToRange(analysis_ctx.tree.tokenLocation(0, name_token)),
+                },
+            },
+        });
+    }
+
+    try respondGeneric(id, null_result_response);
+}
+
 fn completeGlobal(id: i64, pos_index: usize, handle: *DocumentStore.Handle, config: Config) !void {
     var tree = try handle.tree(allocator);
     defer tree.deinit();
@@ -296,9 +356,9 @@ fn completeGlobal(id: i64, pos_index: usize, handle: *DocumentStore.Handle, conf
     var analysis_ctx = try document_store.analysisContext(handle, &arena, types.Position{.line = 0, .character = 0,});
     defer analysis_ctx.deinit();
 
-    // var decls = tree.root_node.decls.iterator(0);
-    var decls = try analysis.declsFromIndex(&arena.allocator, tree, pos_index);
-    for (decls) |decl_ptr| {
+    var decl_nodes = std.ArrayList(*std.zig.ast.Node).init(&arena.allocator);
+    try analysis.declsFromIndex(&decl_nodes, tree, pos_index);
+    for (decl_nodes.items) |decl_ptr| {
         var decl = decl_ptr.*;
         try nodeToCompletion(&completions, &analysis_ctx, decl_ptr, config);
     }
@@ -334,39 +394,10 @@ fn completeFieldAccess(id: i64, handle: *DocumentStore.Handle, position: types.P
 
     const line = try handle.document.getLine(@intCast(usize, position.line));
     var tokenizer = std.zig.Tokenizer.init(line[line_start_idx..]);
+    const line_length = line.len - line_start_idx;
 
-    // var decls = try analysis.declsFromIndex(&arena.allocator, analysis_ctx.tree, try handle.document.positionToIndex(position));
-    if (analysis.getFieldAccessTypeNode(&analysis_ctx, &tokenizer)) |node| {
-        try nodeToCompletion(&completions, &analysis_ctx, node, config);
-        // var index: usize = 0;
-        // while (node.iterate(index)) |child_node| {
-        //     if (analysis.isNodePublic(analysis_ctx.tree, child_node)) {
-        //         // TODO: Not great to allocate it again and again inside a loop
-        //         // Creating a new context, so that we don't destroy the tree that is iterated above when resolving imports
-        //         const initial_handle = analysis_ctx.handle;
-        //         std.debug.warn("\ncompleteFieldAccess calling resolveTypeOfNode for {}\n", .{analysis_ctx.tree.getNodeSource(child_node)});
-        //         var node_analysis_ctx = try document_store.analysisContext(initial_handle, &arena, nodePosition(analysis_ctx.tree, node));
-        //         defer node_analysis_ctx.deinit();
-
-        //         const resolved_node = analysis.resolveTypeOfNode(&node_analysis_ctx, child_node);
-        //         if (resolved_node) |n| {
-        //             std.debug.warn("completeFieldAccess resolveTypeOfNode result = {}\n", .{resolved_node});
-        //         }
-
-        //         const completion_node: struct { node: *std.zig.ast.Node, context: *DocumentStore.AnalysisContext } = blk: {
-        //             if (resolved_node) |n| {
-        //                 break :blk .{ .node = n, .context = &node_analysis_ctx };
-        //             }
-
-        //             break :blk .{ .node = child_node, .context = &analysis_ctx };
-        //         };
-
-        //         std.debug.warn("completeFieldAccess resolved_node = {}\n", .{completion_node.context.tree.getNodeSource(completion_node.node)});
-
-        //         try nodeToCompletion(&completions, completion_node.context.tree, completion_node.node, config);
-        //     }
-        //     index += 1;
-        // }
+    if (analysis.getFieldAccessTypeNode(&analysis_ctx, &tokenizer, line_length)) |node| {
+        try nodeToCompletion(&completions, analysis_ctx, node, config);
     }
     try send(types.Response{
         .id = .{ .Integer = id },
@@ -574,7 +605,7 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
         const content_changes = params.getValue("contentChanges").?.Array;
 
         const handle = document_store.getHandle(uri) orelse {
-            try log("Trying to change non existent document {}", .{uri});
+            std.debug.warn("Trying to change non existent document {}", .{uri});
             return;
         };
 
@@ -595,8 +626,8 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
         const position = params.getValue("position").?.Object;
 
         const handle = document_store.getHandle(uri) orelse {
-            try log("Trying to complete in non existent document {}", .{uri});
-            return;
+            std.debug.warn("Trying to complete in non existent document {}", .{uri});
+            return try respondGeneric(id, no_completions_response);
         };
 
         const pos = types.Position{
@@ -625,23 +656,41 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
             try respondGeneric(id, no_completions_response);
         }
     } else if (std.mem.eql(u8, method, "textDocument/signatureHelp")) {
-        // try respondGeneric(id,
-        // \\,"result":{"signatures":[{
-        // \\"label": "nameOfFunction(aNumber: u8)",
-        // \\"documentation": {"kind": "markdown", "value": "Description of the function in **Markdown**!"},
-        // \\"parameters": [
-        // \\{"label": [15, 27], "documentation": {"kind": "markdown", "value": "An argument"}}
-        // \\]
-        // \\}]}}
-        // );
         try respondGeneric(id,
             \\,"result":{"signatures":[]}}
         );
+    } else if (std.mem.eql(u8, method, "textDocument/definition") or
+        std.mem.eql(u8, method, "textDocument/declaration") or
+        std.mem.eql(u8, method, "textDocument/typeDefinition"))
+    {
+        const document = params.getValue("textDocument").?.Object;
+        const uri = document.getValue("uri").?.String;
+        const position = params.getValue("position").?.Object;
+
+        const handle = document_store.getHandle(uri) orelse {
+            std.debug.warn("Trying to got to definition in non existent document {}", .{uri});
+            return try respondGeneric(id, null_result_response);
+        };
+
+        const pos = types.Position{
+            .line = position.getValue("line").?.Integer,
+            .character = position.getValue("character").?.Integer - 1,
+        };
+        if (pos.character >= 0) {
+            const pos_index = try handle.document.positionToIndex(pos);
+            const pos_context = documentPositionContext(handle.document, pos_index);
+
+            switch (pos_context) {
+                .var_access => try gotoDefinitionGlobal(id, pos_index, handle.*),
+                .field_access => |start_idx| try gotoDefinitionFieldAccess(id, handle, pos, start_idx),
+                else => try respondGeneric(id, null_result_response),
+            }
+        }
     } else if (root.Object.getValue("id")) |_| {
-        try log("Method with return value not implemented: {}", .{method});
+        std.debug.warn("Method with return value not implemented: {}", .{method});
         try respondGeneric(id, not_implemented_response);
     } else {
-        try log("Method without return value not implemented: {}", .{method});
+        std.debug.warn("Method without return value not implemented: {}", .{method});
     }
 }
 
@@ -662,17 +711,9 @@ pub fn main() anyerror!void {
         allocator = &debug_alloc_state.allocator;
     }
 
-    // Init buffer for stdin read
-
-    var buffer = std.ArrayList(u8).init(allocator);
-    defer buffer.deinit();
-
-    try buffer.resize(4096);
-
     // Init global vars
-
-    const stdin = std.io.getStdIn().inStream();
-    stdout = std.io.getStdOut().outStream();
+    const in_stream = std.io.getStdIn().inStream();
+    stdout = std.io.bufferedOutStream(std.io.getStdOut().outStream());
 
     // Read the configuration, if any.
     const config_parse_options = std.json.ParseOptions{ .allocator = allocator };
@@ -717,19 +758,19 @@ pub fn main() anyerror!void {
     defer json_parser.deinit();
 
     while (true) {
-        const headers = readRequestHeader(allocator, stdin) catch |err| {
-            try log("{}; exiting!", .{@errorName(err)});
+        const headers = readRequestHeader(allocator, in_stream) catch |err| {
+            std.debug.warn("{}; exiting!", .{@errorName(err)});
             return;
         };
         defer headers.deinit(allocator);
         const buf = try allocator.alloc(u8, headers.content_length);
         defer allocator.free(buf);
-        try stdin.readNoEof(buf);
+        try in_stream.readNoEof(buf);
         try processJsonRpc(&json_parser, buf, config);
         json_parser.reset();
 
         if (debug_alloc) |dbg| {
-            try log("{}", .{dbg.info});
+            std.debug.warn("{}\n", .{dbg.info});
         }
     }
 }
