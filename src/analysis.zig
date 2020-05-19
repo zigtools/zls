@@ -257,7 +257,7 @@ fn findReturnStatement(base_node: *ast.Node) ?*ast.Node.ControlFlowExpression {
 }
 
 /// Resolves the return type of a function
-fn getContainerReturnType(analysis_ctx: *AnalysisContext, fn_decl: *ast.Node.FnProto) ?*ast.Node {
+fn resolveReturnType(analysis_ctx: *AnalysisContext, fn_decl: *ast.Node.FnProto) ?*ast.Node {
     if (isTypeFunction(analysis_ctx.tree, fn_decl) and fn_decl.body_node != null) {
         // If this is a type function and it only contains a single return statement that returns
         // a container declaration, we will return that declaration.
@@ -308,7 +308,7 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
                 .Call, .StructInitializer => {
                     const decl = resolveTypeOfNode(analysis_ctx, suffix_op.lhs.node) orelse return null;
                     return switch (decl.id) {
-                        .FnProto => getContainerReturnType(analysis_ctx, decl.cast(ast.Node.FnProto).?),
+                        .FnProto => resolveReturnType(analysis_ctx, decl.cast(ast.Node.FnProto).?),
                         else => decl,
                     };
                 },
