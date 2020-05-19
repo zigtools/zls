@@ -182,17 +182,17 @@ fn publishDiagnostics(handle: DocumentStore.Handle, config: Config) !void {
     });
 }
 
-fn containerToCompletion(list: *std.ArrayList(types.CompletionItem), tree: *std.zig.ast.Tree, container: *std.zig.ast.Node, config: Config) !void {
+fn containerToCompletion(list: *std.ArrayList(types.CompletionItem), analysis_ctx: *DocumentStore.AnalysisContext, container: *std.zig.ast.Node, config: Config) !void {
     var index: usize = 0;
     while (container.iterate(index)) |child_node| : (index+=1) {
-        if (analysis.isNodePublic(tree, child_node)) {
-            try nodeToCompletion(list, tree, child_node, config);
+        if (analysis.isNodePublic(analysis_ctx.tree, child_node)) {
+            try nodeToCompletion(list, analysis_ctx, child_node, config);
         }
     }
 }
 
-fn nodeToCompletion(list: *std.ArrayList(types.CompletionItem), tree: *std.zig.ast.Tree, node: *std.zig.ast.Node, config: Config) error{OutOfMemory}!void {
-    var doc = if (try analysis.getDocComments(list.allocator, tree, node)) |doc_comments|
+fn nodeToCompletion(list: *std.ArrayList(types.CompletionItem), analysis_ctx: *DocumentStore.AnalysisContext, node: *std.zig.ast.Node, config: Config) error{OutOfMemory}!void {
+    var doc = if (try analysis.getDocComments(list.allocator, analysis_ctx.tree, node)) |doc_comments|
         types.MarkupContent{
             .kind = .Markdown,
             .value = doc_comments,
@@ -202,23 +202,23 @@ fn nodeToCompletion(list: *std.ArrayList(types.CompletionItem), tree: *std.zig.a
 
     switch (node.id) {
         .ErrorSetDecl, .Root, .ContainerDecl => {
-            try containerToCompletion(list, tree, node, config);
+            try containerToCompletion(list, analysis_ctx, node, config);
         },
         .FnProto => {
             const func = node.cast(std.zig.ast.Node.FnProto).?;
             if (func.name_token) |name_token| {
                 const insert_text = if (config.enable_snippets)
-                    try analysis.getFunctionSnippet(list.allocator, tree, func)
+                    try analysis.getFunctionSnippet(list.allocator, analysis_ctx.tree, func)
                 else
                     null;
 
-                const is_type_function = analysis.isTypeFunction(tree, func);
+                const is_type_function = analysis.isTypeFunction(analysis_ctx.tree, func);
 
                 try list.append(.{
-                    .label = tree.tokenSlice(name_token),
+                    .label = analysis_ctx.tree.tokenSlice(name_token),
                     .kind = if (is_type_function) .Struct else .Function,
                     .documentation = doc,
-                    .detail = analysis.getFunctionSignature(tree, func),
+                    .detail = analysis.getFunctionSignature(analysis_ctx.tree, func),
                     .insertText = insert_text,
                     .insertTextFormat = if (config.enable_snippets) .Snippet else .PlainText,
                 });
@@ -226,22 +226,35 @@ fn nodeToCompletion(list: *std.ArrayList(types.CompletionItem), tree: *std.zig.a
         },
         .VarDecl => {
             const var_decl = node.cast(std.zig.ast.Node.VarDecl).?;
-            const is_const = tree.tokens.at(var_decl.mut_token).id == .Keyword_const;
+            const is_const = analysis_ctx.tree.tokens.at(var_decl.mut_token).id == .Keyword_const;
+
+            var child_analysis_context = try analysis_ctx.clone();
+            defer child_analysis_context.deinit();
+
+            const child_node = var_decl.type_node orelse var_decl.init_node.?;
+            const maybe_resolved_node = analysis.resolveTypeOfNode(&child_analysis_context, child_node);
+
+            if (maybe_resolved_node) |resolved_node| {
+                if (resolved_node.id == .FnProto) {
+                    try nodeToCompletion(list, &child_analysis_context, resolved_node, config);
+                    return;
+                }
+            }
             try list.append(.{
-                .label = tree.tokenSlice(var_decl.name_token),
+                .label = analysis_ctx.tree.tokenSlice(var_decl.name_token),
                 .kind = if (is_const) .Constant else .Variable,
                 .documentation = doc,
-                .detail = analysis.getVariableSignature(tree, var_decl),
+                .detail = analysis.getVariableSignature(analysis_ctx.tree, var_decl),
             });
         },
         .ParamDecl => {
             const param = node.cast(std.zig.ast.Node.ParamDecl).?;
             if (param.name_token) |name_token|
                 try list.append(.{
-                    .label = tree.tokenSlice(name_token),
+                    .label = analysis_ctx.tree.tokenSlice(name_token),
                     .kind = .Constant,
                     .documentation = doc,
-                    .detail = analysis.getParamSignature(tree, param),
+                    .detail = analysis.getParamSignature(analysis_ctx.tree, param),
                 });
         },
         .PrefixOp => {
@@ -260,7 +273,7 @@ fn nodeToCompletion(list: *std.ArrayList(types.CompletionItem), tree: *std.zig.a
                 .kind = .Field,
             });
         },
-        else => if (analysis.nodeToString(tree, node)) |string| {
+        else => if (analysis.nodeToString(analysis_ctx.tree, node)) |string| {
             try list.append(.{
                 .label = string,
                 .kind = .Field,
@@ -270,7 +283,7 @@ fn nodeToCompletion(list: *std.ArrayList(types.CompletionItem), tree: *std.zig.a
     }
 }
 
-fn completeGlobal(id: i64, pos_index: usize, handle: DocumentStore.Handle, config: Config) !void {
+fn completeGlobal(id: i64, pos_index: usize, handle: *DocumentStore.Handle, config: Config) !void {
     var tree = try handle.tree(allocator);
     defer tree.deinit();
 
@@ -280,11 +293,14 @@ fn completeGlobal(id: i64, pos_index: usize, handle: DocumentStore.Handle, confi
     // Deallocate all temporary data.
     defer arena.deinit();
 
+    var analysis_ctx = try document_store.analysisContext(handle, &arena, types.Position{.line = 0, .character = 0,});
+    defer analysis_ctx.deinit();
+
     // var decls = tree.root_node.decls.iterator(0);
     var decls = try analysis.declsFromIndex(&arena.allocator, tree, pos_index);
     for (decls) |decl_ptr| {
         var decl = decl_ptr.*;
-        try nodeToCompletion(&completions, tree, decl_ptr, config);
+        try nodeToCompletion(&completions, &analysis_ctx, decl_ptr, config);
     }
 
     try send(types.Response{
@@ -321,7 +337,7 @@ fn completeFieldAccess(id: i64, handle: *DocumentStore.Handle, position: types.P
 
     // var decls = try analysis.declsFromIndex(&arena.allocator, analysis_ctx.tree, try handle.document.positionToIndex(position));
     if (analysis.getFieldAccessTypeNode(&analysis_ctx, &tokenizer)) |node| {
-        try nodeToCompletion(&completions, analysis_ctx.tree, node, config);
+        try nodeToCompletion(&completions, &analysis_ctx, node, config);
         // var index: usize = 0;
         // while (node.iterate(index)) |child_node| {
         //     if (analysis.isNodePublic(analysis_ctx.tree, child_node)) {
@@ -601,7 +617,7 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
                         },
                     },
                 }),
-                .var_access, .empty => try completeGlobal(id, pos_index, handle.*, config),
+                .var_access, .empty => try completeGlobal(id, pos_index, handle, config),
                 .field_access => |start_idx| try completeFieldAccess(id, handle, pos, start_idx, config),
                 else => try respondGeneric(id, no_completions_response),
             }

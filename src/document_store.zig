@@ -252,6 +252,8 @@ fn uriFromImportStr(store: *DocumentStore, handle: Handle, import_str: []const u
 }
 
 pub const AnalysisContext = struct {
+    const Self = @This();
+
     store: *DocumentStore,
     handle: *Handle,
     // This arena is used for temporary allocations while analyzing,
@@ -329,6 +331,18 @@ pub const AnalysisContext = struct {
         self.tree.deinit();
         self.tree = try self.handle.tree(allocator);
         return &self.tree.root_node.base;
+    }
+
+    pub fn clone(self: *Self) !Self {
+        // Copy the tree, so it can be destroyed by the cloned AnalysisContext without affecting the original
+        const tree = try self.handle.tree(self.store.allocator);
+        return Self{
+            .store = self.store,
+            .handle = self.handle,
+            .arena = self.arena,
+            .tree = tree,
+            .scope_nodes = self.scope_nodes,
+        };
     }
 
     pub fn deinit(self: *AnalysisContext) void {
