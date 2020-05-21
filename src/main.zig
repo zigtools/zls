@@ -283,6 +283,7 @@ fn nodeToCompletion(list: *std.ArrayList(types.CompletionItem), analysis_ctx: *D
 }
 
 fn identifierFromPosition(pos_index: usize, handle: DocumentStore.Handle) []const u8 {
+    if (pos_index + 1 >= handle.document.text.len) return &[0]u8{};
     var start_idx = pos_index;
 
     while (start_idx > 0 and
@@ -290,7 +291,7 @@ fn identifierFromPosition(pos_index: usize, handle: DocumentStore.Handle) []cons
     {}
 
     var end_idx = pos_index;
-    while (end_idx < handle.document.text.len and
+    while (end_idx < handle.document.text.len - 1 and
         (std.ascii.isAlNum(handle.document.text[end_idx]) or handle.document.text[end_idx] == '_')) : (end_idx += 1)
     {}
 
