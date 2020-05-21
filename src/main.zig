@@ -283,6 +283,7 @@ fn nodeToCompletion(list: *std.ArrayList(types.CompletionItem), analysis_ctx: *D
 }
 
 fn identifierFromPosition(pos_index: usize, handle: DocumentStore.Handle) []const u8 {
+    if (pos_index + 1 >= handle.document.text.len) return &[0]u8{};
     var start_idx = pos_index;
 
     while (start_idx > 0 and
