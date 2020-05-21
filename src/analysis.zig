@@ -513,6 +513,10 @@ pub fn declsFromIndexInternal(decls: *std.ArrayList(*ast.Node), tree: *ast.Tree,
             if (func.body_node) |body_node|
                 try declsFromIndexInternal(decls, tree, body_node);
         },
+        .TestDecl => {
+            const test_decl = node.cast(ast.Node.TestDecl).?;
+            try declsFromIndexInternal(decls, tree, test_decl.body_node);
+        },
         .Block => {
             var index: usize = 0;
             while (node.iterate(index)) |inode| : (index += 1) {
