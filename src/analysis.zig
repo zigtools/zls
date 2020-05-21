@@ -345,6 +345,17 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
                         else => unreachable,
                     }
                 },
+                .Try => {
+                    const rhs_type = resolveTypeOfNode(analysis_ctx, prefix_op.rhs) orelse return null;
+                    switch (rhs_type.id) {
+                        .InfixOp => {
+                            const infix_op = rhs_type.cast(ast.Node.InfixOp).?;
+                            if (infix_op.op == .ErrorUnion) return infix_op.rhs;
+                        },
+                        else => {},
+                    }
+                    return rhs_type;
+                },
                 else => {},
             }
         },
