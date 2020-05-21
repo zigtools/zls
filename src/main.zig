@@ -284,6 +284,7 @@ fn nodeToCompletion(list: *std.ArrayList(types.CompletionItem), analysis_ctx: *D
 
 fn identifierFromPosition(pos_index: usize, handle: DocumentStore.Handle) []const u8 {
     var start_idx = pos_index;
+
     while (start_idx > 0 and
         (std.ascii.isAlNum(handle.document.text[start_idx]) or handle.document.text[start_idx] == '_')) : (start_idx -= 1)
     {}
@@ -301,6 +302,8 @@ fn gotoDefinitionGlobal(id: i64, pos_index: usize, handle: DocumentStore.Handle)
     defer tree.deinit();
 
     const name = identifierFromPosition(pos_index, handle);
+    if (name.len == 0) return try respondGeneric(id, null_result_response);
+
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
@@ -328,14 +331,15 @@ fn gotoDefinitionFieldAccess(
     line_start_idx: usize,
     config: Config,
 ) !void {
+    const pos_index = try handle.document.positionToIndex(position);
+    var name = identifierFromPosition(pos_index, handle.*);
+    if (name.len == 0) return try respondGeneric(id, null_result_response);
+
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
     var analysis_ctx = try document_store.analysisContext(handle, &arena, position, config.zig_lib_path);
     defer analysis_ctx.deinit();
-
-    const pos_index = try handle.document.positionToIndex(position);
-    var name = identifierFromPosition(pos_index, handle.*);
 
     const line = try handle.document.getLine(@intCast(usize, position.line));
     var tokenizer = std.zig.Tokenizer.init(line[line_start_idx..]);

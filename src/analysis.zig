@@ -298,7 +298,6 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
         },
         .Identifier => {
             if (getChildOfSlice(analysis_ctx.tree, analysis_ctx.scope_nodes, analysis_ctx.tree.getNodeSource(node))) |child| {
-                std.debug.warn("Found node {}\n", .{child});
                 return resolveTypeOfNode(analysis_ctx, child);
             } else return null;
         },
