@@ -216,7 +216,7 @@ pub fn applyChanges(
     try self.removeOldImports(handle, zig_lib_path);
 }
 
-fn uriFromImportStr(
+pub fn uriFromImportStr(
     store: *DocumentStore,
     allocator: *std.mem.Allocator,
     handle: Handle,
@@ -371,7 +371,7 @@ pub const AnalysisContext = struct {
     }
 };
 
-fn stdUriFromLibPath(allocator: *std.mem.Allocator, zig_lib_path: ?[]const u8) !?[]const u8 {
+pub fn stdUriFromLibPath(allocator: *std.mem.Allocator, zig_lib_path: ?[]const u8) !?[]const u8 {
     if (zig_lib_path) |zpath| {
         const std_path = std.fs.path.resolve(allocator, &[_][]const u8{
             zpath, "./std/std.zig",
