@@ -223,12 +223,16 @@ pub fn uriFromImportStr(
     import_str: []const u8,
     std_uri: ?[]const u8,
 ) !?[]const u8 {
-    return if (std.mem.eql(u8, import_str, "std"))
-        if (std_uri) |uri| try std.mem.dupe(allocator, u8, uri) else {
+    if (std.mem.eql(u8, import_str, "std")) {
+        if (std_uri) |uri| return try std.mem.dupe(allocator, u8, uri) else {
             std.debug.warn("Cannot resolve std library import, path is null.\n", .{});
             return null;
         }
-    else b: {
+    } else if (std.mem.eql(u8, import_str, "builtin")) {
+        return null; // TODO find the correct zig-cache folder
+    } else if (!std.mem.endsWith(u8, import_str, ".zig")) {
+        return null; // TODO find packages based on build.zig
+    } else {
         // Find relative uri
         const path = try URI.parse(allocator, handle.uri());
         defer allocator.free(path);
@@ -240,8 +244,8 @@ pub fn uriFromImportStr(
 
         defer allocator.free(import_path);
 
-        break :b (try URI.fromPath(allocator, import_path));
-    };
+        return try URI.fromPath(allocator, import_path);
+    }
 }
 
 pub const AnalysisContext = struct {
