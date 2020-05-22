@@ -513,7 +513,7 @@ pub fn nodeToString(tree: *ast.Tree, node: *ast.Node) ?[]const u8 {
     return null;
 }
 
-pub fn declsFromIndexInternal(decls: *std.ArrayList(*ast.Node), tree: *ast.Tree, node: *ast.Node) anyerror!void {
+pub fn declsFromIndexInternal(decls: *std.ArrayList(*ast.Node), tree: *ast.Tree, node: *ast.Node) error{OutOfMemory}!void {
     switch (node.id) {
         .FnProto => {
             const func = node.cast(ast.Node.FnProto).?;
@@ -536,7 +536,7 @@ pub fn declsFromIndexInternal(decls: *std.ArrayList(*ast.Node), tree: *ast.Tree,
             }
         },
         .VarDecl, .ParamDecl => try decls.append(node),
-        else => try addChildrenNodes(decls, tree, node),
+        else => {},
     }
 }
 
@@ -553,7 +553,7 @@ pub fn declsFromIndex(decls: *std.ArrayList(*ast.Node), tree: *ast.Tree, index: 
     try addChildrenNodes(decls, tree, node);
     var node_index: usize = 0;
     while (node.iterate(node_index)) |inode| : (node_index += 1) {
-        if (tree.tokens.at(inode.firstToken()).start < index and index < tree.tokens.at(inode.lastToken()).end) {
+        if (nodeContainsSourceIndex(tree, inode, index)) {
             try declsFromIndexInternal(decls, tree, inode);
         }
     }

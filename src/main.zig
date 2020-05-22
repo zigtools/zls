@@ -190,6 +190,8 @@ fn nodeToCompletion(list: *std.ArrayList(types.CompletionItem), analysis_ctx: *D
     else
         null;
 
+    std.debug.warn("{}\n", .{node.id});
+
     switch (node.id) {
         .ErrorSetDecl, .Root, .ContainerDecl => {
             try containerToCompletion(list, analysis_ctx, node, config);
@@ -411,6 +413,7 @@ fn completeGlobal(id: i64, pos_index: usize, handle: *DocumentStore.Handle, conf
     try analysis.declsFromIndex(&decl_nodes, analysis_ctx.tree, pos_index);
     for (decl_nodes.items) |decl_ptr| {
         var decl = decl_ptr.*;
+        std.debug.warn("Global completion: {}\n", .{decl});
         try nodeToCompletion(&completions, &analysis_ctx, decl_ptr, config);
     }
 
