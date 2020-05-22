@@ -297,7 +297,7 @@ fn identifierFromPosition(pos_index: usize, handle: DocumentStore.Handle) []cons
         (std.ascii.isAlNum(text[end_idx]) or text[end_idx] == '_')) : (end_idx += 1)
     {}
 
-    return handle.document.text[start_idx + 1 .. end_idx];
+    return text[start_idx + 1 .. end_idx];
 }
 
 fn gotoDefinitionGlobal(id: i64, pos_index: usize, handle: DocumentStore.Handle) !void {

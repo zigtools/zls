@@ -515,6 +515,20 @@ pub fn nodeToString(tree: *ast.Tree, node: *ast.Node) ?[]const u8 {
 
 pub fn declsFromIndexInternal(decls: *std.ArrayList(*ast.Node), tree: *ast.Tree, node: *ast.Node, source_index: usize) error{OutOfMemory}!void {
     switch (node.id) {
+        .Root, .ContainerDecl => {
+            var node_index: usize = 0;
+            while (node.iterate(node_index)) |child_node| : (node_index += 1) {
+                // Skip over container fields, we can only dot access those.
+                if (child_node.id == .ContainerField) continue;
+
+                const is_contained = nodeContainsSourceIndex(tree, child_node, source_index);
+                // If the cursor is in a variable decls it will insert itself anyway, we don't need to take care of it.
+                if ((is_contained and child_node.id != .VarDecl) or !is_contained) try decls.append(child_node); 
+                if (is_contained) {
+                    try declsFromIndexInternal(decls, tree, child_node, source_index);
+                }
+            }
+        },
         .FnProto => {
             const func = node.cast(ast.Node.FnProto).?;
 
@@ -606,7 +620,15 @@ pub fn declsFromIndexInternal(decls: *std.ArrayList(*ast.Node), tree: *ast.Tree,
                 try decls.append(idx);
             }
         },
-        .VarDecl, .ParamDecl => try decls.append(node),
+        .VarDecl => {
+            try decls.append(node);
+            if (node.cast(ast.Node.VarDecl).?.init_node) |child| {
+                if (nodeContainsSourceIndex(tree, child, source_index)) {
+                    try declsFromIndexInternal(decls, tree, child, source_index);
+                }
+            }
+        },
+        .ParamDecl => try decls.append(node),
         else => {},
     }
 }
@@ -620,14 +642,7 @@ pub fn addChildrenNodes(decls: *std.ArrayList(*ast.Node), tree: *ast.Tree, node:
 
 pub fn declsFromIndex(decls: *std.ArrayList(*ast.Node), tree: *ast.Tree, source_index: usize) !void {
     var node = &tree.root_node.base;
-
-    try addChildrenNodes(decls, tree, node);
-    var node_index: usize = 0;
-    while (node.iterate(node_index)) |inode| : (node_index += 1) {
-        if (nodeContainsSourceIndex(tree, inode, source_index)) {
-            try declsFromIndexInternal(decls, tree, inode, source_index);
-        }
-    }
+    try declsFromIndexInternal(decls, tree, &tree.root_node.base, source_index);
 }
 
 fn nodeContainsSourceIndex(tree: *ast.Tree, node: *ast.Node, source_index: usize) bool {
