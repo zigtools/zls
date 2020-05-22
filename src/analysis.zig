@@ -200,6 +200,11 @@ pub fn getDeclNameToken(tree: *ast.Tree, node: *ast.Node) ?ast.TokenIndex {
             const field = node.cast(ast.Node.ContainerField).?;
             return field.name_token;
         },
+        // We need identifier for captures
+        .Identifier => {
+            const ident = node.cast(ast.Node.Identifier).?;
+            return ident.token;
+        },
         else => {},
     }
 
