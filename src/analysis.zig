@@ -523,7 +523,7 @@ pub fn declsFromIndexInternal(decls: *std.ArrayList(*ast.Node), tree: *ast.Tree,
 
                 const is_contained = nodeContainsSourceIndex(tree, child_node, source_index);
                 // If the cursor is in a variable decls it will insert itself anyway, we don't need to take care of it.
-                if ((is_contained and child_node.id != .VarDecl) or !is_contained) try decls.append(child_node); 
+                if ((is_contained and child_node.id != .VarDecl) or !is_contained) try decls.append(child_node);
                 if (is_contained) {
                     try declsFromIndexInternal(decls, tree, child_node, source_index);
                 }
@@ -607,6 +607,19 @@ pub fn declsFromIndexInternal(decls: *std.ArrayList(*ast.Node), tree: *ast.Tree,
                         try declsFromIndexInternal(decls, tree, payload, source_index);
                     }
                     return try declsFromIndexInternal(decls, tree, else_node.body, source_index);
+                }
+            }
+        },
+        .Switch => {
+            const switch_node = node.cast(ast.Node.Switch).?;
+            var case_it = switch_node.cases.iterator(0);
+            while (case_it.next()) |case| {
+                const case_node = case.*.cast(ast.Node.SwitchCase).?;
+                if (nodeContainsSourceIndex(tree, case_node.expr, source_index)) {
+                    if (case_node.payload) |payload| {
+                        try declsFromIndexInternal(decls, tree, payload, source_index);
+                    }
+                    return try declsFromIndexInternal(decls, tree, case_node.expr, source_index);
                 }
             }
         },

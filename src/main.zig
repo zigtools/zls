@@ -293,10 +293,11 @@ fn identifierFromPosition(pos_index: usize, handle: DocumentStore.Handle) []cons
     {}
 
     var end_idx = pos_index;
-    while (end_idx < handle.document.text.len - 1 and
+    while (end_idx < handle.document.text.len and
         (std.ascii.isAlNum(text[end_idx]) or text[end_idx] == '_')) : (end_idx += 1)
     {}
 
+    if (end_idx <= start_idx) return &[0]u8{};
     return text[start_idx + 1 .. end_idx];
 }
 
