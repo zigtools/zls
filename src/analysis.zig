@@ -513,26 +513,97 @@ pub fn nodeToString(tree: *ast.Tree, node: *ast.Node) ?[]const u8 {
     return null;
 }
 
-pub fn declsFromIndexInternal(decls: *std.ArrayList(*ast.Node), tree: *ast.Tree, node: *ast.Node) error{OutOfMemory}!void {
+pub fn declsFromIndexInternal(decls: *std.ArrayList(*ast.Node), tree: *ast.Tree, node: *ast.Node, source_index: usize) error{OutOfMemory}!void {
     switch (node.id) {
         .FnProto => {
             const func = node.cast(ast.Node.FnProto).?;
 
             var param_index: usize = 0;
             while (param_index < func.params.len) : (param_index += 1)
-                try declsFromIndexInternal(decls, tree, func.params.at(param_index).*);
+                try declsFromIndexInternal(decls, tree, func.params.at(param_index).*, source_index);
 
-            if (func.body_node) |body_node|
-                try declsFromIndexInternal(decls, tree, body_node);
+            if (func.body_node) |body_node| {
+                if (!nodeContainsSourceIndex(tree, body_node, source_index)) return;
+                try declsFromIndexInternal(decls, tree, body_node, source_index);
+            }
         },
         .TestDecl => {
             const test_decl = node.cast(ast.Node.TestDecl).?;
-            try declsFromIndexInternal(decls, tree, test_decl.body_node);
+            if (!nodeContainsSourceIndex(tree, test_decl.body_node, source_index)) return;
+            try declsFromIndexInternal(decls, tree, test_decl.body_node, source_index);
         },
         .Block => {
             var index: usize = 0;
             while (node.iterate(index)) |inode| : (index += 1) {
-                try declsFromIndexInternal(decls, tree, inode);
+                if (nodeComesAfterSourceIndex(tree, inode, source_index)) return;
+                try declsFromIndexInternal(decls, tree, inode, source_index);
+            }
+        },
+        .Comptime => {
+            const comptime_stmt = node.cast(ast.Node.Comptime).?;
+            if (nodeComesAfterSourceIndex(tree, comptime_stmt.expr, source_index)) return;
+            try declsFromIndexInternal(decls, tree, comptime_stmt.expr, source_index);
+        },
+        .If => {
+            const if_node = node.cast(ast.Node.If).?;
+            if (nodeContainsSourceIndex(tree, if_node.body, source_index)) {
+                if (if_node.payload) |payload| {
+                    try declsFromIndexInternal(decls, tree, payload, source_index);
+                }
+                return try declsFromIndexInternal(decls, tree, if_node.body, source_index);
+            }
+
+            if (if_node.@"else") |else_node| {
+                if (nodeContainsSourceIndex(tree, else_node.body, source_index)) {
+                    if (else_node.payload) |payload| {
+                        try declsFromIndexInternal(decls, tree, payload, source_index);
+                    }
+                    return try declsFromIndexInternal(decls, tree, else_node.body, source_index);
+                }
+            }
+        },
+        .While => {
+            const while_node = node.cast(ast.Node.While).?;
+            if (nodeContainsSourceIndex(tree, while_node.body, source_index)) {
+                if (while_node.payload) |payload| {
+                    try declsFromIndexInternal(decls, tree, payload, source_index);
+                }
+                return try declsFromIndexInternal(decls, tree, while_node.body, source_index);
+            }
+
+            if (while_node.@"else") |else_node| {
+                if (nodeContainsSourceIndex(tree, else_node.body, source_index)) {
+                    if (else_node.payload) |payload| {
+                        try declsFromIndexInternal(decls, tree, payload, source_index);
+                    }
+                    return try declsFromIndexInternal(decls, tree, else_node.body, source_index);
+                }
+            }
+        },
+        .For => {
+            const for_node = node.cast(ast.Node.For).?;
+            if (nodeContainsSourceIndex(tree, for_node.body, source_index)) {
+                try declsFromIndexInternal(decls, tree, for_node.payload, source_index);
+                return try declsFromIndexInternal(decls, tree, for_node.body, source_index);
+            }
+
+            if (for_node.@"else") |else_node| {
+                if (nodeContainsSourceIndex(tree, else_node.body, source_index)) {
+                    if (else_node.payload) |payload| {
+                        try declsFromIndexInternal(decls, tree, payload, source_index);
+                    }
+                    return try declsFromIndexInternal(decls, tree, else_node.body, source_index);
+                }
+            }
+        },
+        // TODO: These convey no type information...
+        .Payload => try decls.append(node.cast(ast.Node.Payload).?.error_symbol),
+        .PointerPayload => try decls.append(node.cast(ast.Node.PointerPayload).?.value_symbol),
+        .PointerIndexPayload => {
+            const payload = node.cast(ast.Node.PointerIndexPayload).?;
+            try decls.append(payload.value_symbol);
+            if (payload.index_symbol) |idx| {
+                try decls.append(idx);
             }
         },
         .VarDecl, .ParamDecl => try decls.append(node),
@@ -547,14 +618,14 @@ pub fn addChildrenNodes(decls: *std.ArrayList(*ast.Node), tree: *ast.Tree, node:
     }
 }
 
-pub fn declsFromIndex(decls: *std.ArrayList(*ast.Node), tree: *ast.Tree, index: usize) !void {
+pub fn declsFromIndex(decls: *std.ArrayList(*ast.Node), tree: *ast.Tree, source_index: usize) !void {
     var node = &tree.root_node.base;
 
     try addChildrenNodes(decls, tree, node);
     var node_index: usize = 0;
     while (node.iterate(node_index)) |inode| : (node_index += 1) {
-        if (nodeContainsSourceIndex(tree, inode, index)) {
-            try declsFromIndexInternal(decls, tree, inode);
+        if (nodeContainsSourceIndex(tree, inode, source_index)) {
+            try declsFromIndexInternal(decls, tree, inode, source_index);
         }
     }
 }
@@ -563,6 +634,12 @@ fn nodeContainsSourceIndex(tree: *ast.Tree, node: *ast.Node, source_index: usize
     const first_token = tree.tokens.at(node.firstToken());
     const last_token = tree.tokens.at(node.lastToken());
     return source_index >= first_token.start and source_index <= last_token.end;
+}
+
+fn nodeComesAfterSourceIndex(tree: *ast.Tree, node: *ast.Node, source_index: usize) bool {
+    const first_token = tree.tokens.at(node.firstToken());
+    const last_token = tree.tokens.at(node.lastToken());
+    return source_index < first_token.start;
 }
 
 pub fn getImportStr(tree: *ast.Tree, source_index: usize) ?[]const u8 {
