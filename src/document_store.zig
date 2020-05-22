@@ -216,19 +216,23 @@ pub fn applyChanges(
     try self.removeOldImports(handle, zig_lib_path);
 }
 
-fn uriFromImportStr(
+pub fn uriFromImportStr(
     store: *DocumentStore,
     allocator: *std.mem.Allocator,
     handle: Handle,
     import_str: []const u8,
     std_uri: ?[]const u8,
 ) !?[]const u8 {
-    return if (std.mem.eql(u8, import_str, "std"))
-        if (std_uri) |uri| try std.mem.dupe(allocator, u8, uri) else {
+    if (std.mem.eql(u8, import_str, "std")) {
+        if (std_uri) |uri| return try std.mem.dupe(allocator, u8, uri) else {
             std.debug.warn("Cannot resolve std library import, path is null.\n", .{});
             return null;
         }
-    else b: {
+    } else if (std.mem.eql(u8, import_str, "builtin")) {
+        return null; // TODO find the correct zig-cache folder
+    } else if (!std.mem.endsWith(u8, import_str, ".zig")) {
+        return null; // TODO find packages based on build.zig
+    } else {
         // Find relative uri
         const path = try URI.parse(allocator, handle.uri());
         defer allocator.free(path);
@@ -240,8 +244,8 @@ fn uriFromImportStr(
 
         defer allocator.free(import_path);
 
-        break :b (try URI.fromPath(allocator, import_path));
-    };
+        return try URI.fromPath(allocator, import_path);
+    }
 }
 
 pub const AnalysisContext = struct {
@@ -371,7 +375,7 @@ pub const AnalysisContext = struct {
     }
 };
 
-fn stdUriFromLibPath(allocator: *std.mem.Allocator, zig_lib_path: ?[]const u8) !?[]const u8 {
+pub fn stdUriFromLibPath(allocator: *std.mem.Allocator, zig_lib_path: ?[]const u8) !?[]const u8 {
     if (zig_lib_path) |zpath| {
         const std_path = std.fs.path.resolve(allocator, &[_][]const u8{
             zpath, "./std/std.zig",

@@ -365,10 +365,36 @@ fn gotoDefinitionFieldAccess(
     try respondGeneric(id, null_result_response);
 }
 
-fn completeGlobal(id: i64, pos_index: usize, handle: *DocumentStore.Handle, config: Config) !void {
+fn gotoDefinitionString(id: i64, pos_index: usize, handle: *DocumentStore.Handle, config: Config) !void {
     var tree = try handle.tree(allocator);
     defer tree.deinit();
 
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+
+    const import_str = analysis.getImportStr(tree, pos_index) orelse return try respondGeneric(id, null_result_response);
+    const uri =  (try document_store.uriFromImportStr(
+        &arena.allocator,
+        handle.*,
+        import_str,
+        try DocumentStore.stdUriFromLibPath(&arena.allocator, config.zig_lib_path),
+    )) orelse return try respondGeneric(id, null_result_response);
+
+    try send(types.Response{
+        .id = .{ .Integer = id },
+        .result = .{
+            .Location = .{
+                .uri = uri,
+                .range = .{
+                    .start = .{ .line = 0, .character = 0 },
+                    .end = .{ .line = 0, .character = 0 },
+                },
+            },
+        },
+    });
+}
+
+fn completeGlobal(id: i64, pos_index: usize, handle: *DocumentStore.Handle, config: Config) !void {
     // We use a local arena allocator to deallocate all temporary data without iterating
     var arena = std.heap.ArenaAllocator.init(allocator);
     var completions = std.ArrayList(types.CompletionItem).init(&arena.allocator);
@@ -382,7 +408,7 @@ fn completeGlobal(id: i64, pos_index: usize, handle: *DocumentStore.Handle, conf
     defer analysis_ctx.deinit();
 
     var decl_nodes = std.ArrayList(*std.zig.ast.Node).init(&arena.allocator);
-    try analysis.declsFromIndex(&decl_nodes, tree, pos_index);
+    try analysis.declsFromIndex(&decl_nodes, analysis_ctx.tree, pos_index);
     for (decl_nodes.items) |decl_ptr| {
         var decl = decl_ptr.*;
         try nodeToCompletion(&completions, &analysis_ctx, decl_ptr, config);
@@ -805,6 +831,7 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
                     start_idx,
                     configFromUriOr(uri, config),
                 ),
+                .string_literal => try gotoDefinitionString(id, pos_index, handle, config),
                 else => try respondGeneric(id, null_result_response),
             }
         }

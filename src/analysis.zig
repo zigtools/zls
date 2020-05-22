@@ -261,14 +261,15 @@ fn resolveReturnType(analysis_ctx: *AnalysisContext, fn_decl: *ast.Node.FnProto)
     if (isTypeFunction(analysis_ctx.tree, fn_decl) and fn_decl.body_node != null) {
         // If this is a type function and it only contains a single return statement that returns
         // a container declaration, we will return that declaration.
-        const ret = findReturnStatement(fn_decl.body_node.?) orelse return null; 
-        if (ret.rhs) |rhs| if (resolveTypeOfNode(analysis_ctx, rhs)) |res_rhs| switch(res_rhs.id) {
-            .ContainerDecl => {
-                analysis_ctx.onContainer(res_rhs.cast(ast.Node.ContainerDecl).?) catch return null;
-                return res_rhs;
-            },
-            else => return null,
-        };
+        const ret = findReturnStatement(fn_decl.body_node.?) orelse return null;
+        if (ret.rhs) |rhs|
+            if (resolveTypeOfNode(analysis_ctx, rhs)) |res_rhs| switch (res_rhs.id) {
+                .ContainerDecl => {
+                    analysis_ctx.onContainer(res_rhs.cast(ast.Node.ContainerDecl).?) catch return null;
+                    return res_rhs;
+                },
+                else => return null,
+            };
 
         return null;
     }
@@ -366,7 +367,7 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
                 if (builtin_call.params.len != 0) return null;
                 return analysis_ctx.last_this_node;
             }
-            
+
             if (!std.mem.eql(u8, call_name, "@import")) return null;
             if (builtin_call.params.len > 1) return null;
 
@@ -556,4 +557,35 @@ pub fn declsFromIndex(decls: *std.ArrayList(*ast.Node), tree: *ast.Tree, index: 
             try declsFromIndexInternal(decls, tree, inode);
         }
     }
+}
+
+fn nodeContainsSourceIndex(tree: *ast.Tree, node: *ast.Node, source_index: usize) bool {
+    const first_token = tree.tokens.at(node.firstToken());
+    const last_token = tree.tokens.at(node.lastToken());
+    return source_index >= first_token.start and source_index <= last_token.end;
+}
+
+pub fn getImportStr(tree: *ast.Tree, source_index: usize) ?[]const u8 {
+    var node = &tree.root_node.base;
+    var index: usize = 0;
+    while (node.iterate(index)) |child| {
+        if (!nodeContainsSourceIndex(tree, child, source_index)) {
+            index += 1;
+            continue;
+        }
+        if (child.cast(ast.Node.BuiltinCall)) |builtin_call| blk: {
+            const call_name = tree.tokenSlice(builtin_call.builtin_token);
+
+            if (!std.mem.eql(u8, call_name, "@import")) break :blk;
+            if (builtin_call.params.len != 1) break :blk;
+
+            const import_param = builtin_call.params.at(0).*;
+            const import_str_node = import_param.cast(ast.Node.StringLiteral) orelse break :blk;
+            const import_str = tree.tokenSlice(import_str_node.token);
+            return import_str[1 .. import_str.len - 1];
+        }
+        node = child;
+        index = 0;
+    }
+    return null;
 }
