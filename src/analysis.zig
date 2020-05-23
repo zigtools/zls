@@ -265,17 +265,14 @@ fn findReturnStatement(base_node: *ast.Node) ?*ast.Node.ControlFlowExpression {
 }
 
 /// Resolves the return type of a function
-fn resolveReturnType(analysis_ctx: *AnalysisContext, fn_decl: *ast.Node.FnProto) ?*ast.Node {
+fn resolveReturnType(analysis_ctx: *AnalysisContext, fn_decl: *ast.Node.FnProto, current_container: *ast.Node) ?*ast.Node {
     if (isTypeFunction(analysis_ctx.tree, fn_decl) and fn_decl.body_node != null) {
         // If this is a type function and it only contains a single return statement that returns
         // a container declaration, we will return that declaration.
         const ret = findReturnStatement(fn_decl.body_node.?) orelse return null;
         if (ret.rhs) |rhs|
-            if (resolveTypeOfNode(analysis_ctx, rhs)) |res_rhs| switch (res_rhs.id) {
-                .ContainerDecl => {
-                    analysis_ctx.onContainer(res_rhs.cast(ast.Node.ContainerDecl).?) catch return null;
-                    return res_rhs;
-                },
+            if (resolveTypeOfNode(analysis_ctx, rhs, current_container)) |res_rhs| switch (res_rhs.id) {
+                .ContainerDecl => return res_rhs,
                 else => return null,
             };
 
@@ -283,18 +280,18 @@ fn resolveReturnType(analysis_ctx: *AnalysisContext, fn_decl: *ast.Node.FnProto)
     }
 
     return switch (fn_decl.return_type) {
-        .Explicit, .InferErrorSet => |return_type| resolveTypeOfNode(analysis_ctx, return_type),
+        .Explicit, .InferErrorSet => |return_type| resolveTypeOfNode(analysis_ctx, return_type, current_container),
         .Invalid => null,
     };
 }
 
 /// Resolves the type of a node
-pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.Node {
+pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node, current_container: *ast.Node) ?*ast.Node {
     switch (node.id) {
         .VarDecl => {
             const vari = node.cast(ast.Node.VarDecl).?;
 
-            return resolveTypeOfNode(analysis_ctx, vari.type_node orelse vari.init_node.?) orelse null;
+            return resolveTypeOfNode(analysis_ctx, vari.type_node orelse vari.init_node.?, current_container) orelse null;
         },
         // @TODO Param decl is no longer a node type.
         // .ParamDecl => {
@@ -308,26 +305,26 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
         // },
         .Identifier => {
             if (getChildOfSlice(analysis_ctx.tree, analysis_ctx.scope_nodes, analysis_ctx.tree.getNodeSource(node))) |child| {
-                return resolveTypeOfNode(analysis_ctx, child);
+                return resolveTypeOfNode(analysis_ctx, child, current_container);
             } else return null;
         },
         .ContainerField => {
             const field = node.cast(ast.Node.ContainerField).?;
-            return resolveTypeOfNode(analysis_ctx, field.type_expr orelse return null);
+            return resolveTypeOfNode(analysis_ctx, field.type_expr orelse return null, current_container);
         },
         .Call => {
             const call = node.cast(ast.Node.Call).?;
-            const decl = resolveTypeOfNode(analysis_ctx, call.lhs) orelse return null;
+            const decl = resolveTypeOfNode(analysis_ctx, call.lhs, current_container) orelse return null;
             return switch (decl.id) {
-                .FnProto => resolveReturnType(analysis_ctx, decl.cast(ast.Node.FnProto).?),
+                .FnProto => resolveReturnType(analysis_ctx, decl.cast(ast.Node.FnProto).?, current_container),
                 else => decl,
             };
         },
         .StructInitializer => {
             const struct_init = node.cast(ast.Node.StructInitializer).?;
-            const decl = resolveTypeOfNode(analysis_ctx, struct_init.lhs) orelse return null;
+            const decl = resolveTypeOfNode(analysis_ctx, struct_init.lhs, current_container) orelse return null;
             return switch (decl.id) {
-                .FnProto => resolveReturnType(analysis_ctx, decl.cast(ast.Node.FnProto).?),
+                .FnProto => resolveReturnType(analysis_ctx, decl.cast(ast.Node.FnProto).?, current_container),
                 else => decl,
             };
         },
@@ -340,8 +337,9 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
                     var rhs_str = nodeToString(analysis_ctx.tree, infix_op.rhs) orelse return null;
                     // Use the analysis context temporary arena to store the rhs string.
                     rhs_str = std.mem.dupe(&analysis_ctx.arena.allocator, u8, rhs_str) catch return null;
-                    const left = resolveTypeOfNode(analysis_ctx, infix_op.lhs) orelse return null;
-                    return resolveTypeOfNode(analysis_ctx, getChild(analysis_ctx.tree, left, rhs_str) orelse return null);
+                    const left = resolveTypeOfNode(analysis_ctx, infix_op.lhs, current_container) orelse return null;
+                    const child = getChild(analysis_ctx.tree, left, rhs_str) orelse return null;
+                    return resolveTypeOfNode(analysis_ctx, child, current_container);
                 },
                 else => {},
             }
@@ -353,13 +351,13 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
                 .PtrType => {
                     const op_token_id = analysis_ctx.tree.token_ids[prefix_op.op_token];
                     switch (op_token_id) {
-                        .Asterisk => return resolveTypeOfNode(analysis_ctx, prefix_op.rhs),
+                        .Asterisk => return resolveTypeOfNode(analysis_ctx, prefix_op.rhs, current_container),
                         .LBracket, .AsteriskAsterisk => return null,
                         else => unreachable,
                     }
                 },
                 .Try => {
-                    const rhs_type = resolveTypeOfNode(analysis_ctx, prefix_op.rhs) orelse return null;
+                    const rhs_type = resolveTypeOfNode(analysis_ctx, prefix_op.rhs, current_container) orelse return null;
                     switch (rhs_type.id) {
                         .InfixOp => {
                             const infix_op = rhs_type.cast(ast.Node.InfixOp).?;
@@ -377,7 +375,7 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
             const call_name = analysis_ctx.tree.tokenSlice(builtin_call.builtin_token);
             if (std.mem.eql(u8, call_name, "@This")) {
                 if (builtin_call.params_len != 0) return null;
-                return analysis_ctx.last_this_node;
+                return current_container;
             }
 
             if (!std.mem.eql(u8, call_name, "@import")) return null;
@@ -392,10 +390,7 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
                 break :block null;
             };
         },
-        .ContainerDecl => {
-            analysis_ctx.onContainer(node.cast(ast.Node.ContainerDecl).?) catch return null;
-            return node;
-        },
+        .ContainerDecl => return node,
         .MultilineStringLiteral, .StringLiteral, .ErrorSetDecl, .FnProto => return node,
         else => std.debug.warn("Type resolution case not implemented; {}\n", .{node.id}),
     }
@@ -447,7 +442,7 @@ pub fn getFieldAccessTypeNode(
     tokenizer: *std.zig.Tokenizer,
     line_length: usize,
 ) ?*ast.Node {
-    var current_node = &analysis_ctx.tree.root_node.base;
+    var current_node = analysis_ctx.in_container;
 
     while (true) {
         var next = tokenizer.next();
@@ -455,7 +450,7 @@ pub fn getFieldAccessTypeNode(
             .Eof => return current_node,
             .Identifier => {
                 if (getChildOfSlice(analysis_ctx.tree, analysis_ctx.scope_nodes, tokenizer.buffer[next.loc.start..next.loc.end])) |child| {
-                    if (resolveTypeOfNode(analysis_ctx, child)) |node_type| {
+                    if (resolveTypeOfNode(analysis_ctx, child, current_node)) |node_type| {
                         current_node = node_type;
                     } else return null;
                 } else return null;
@@ -469,7 +464,7 @@ pub fn getFieldAccessTypeNode(
                     if (after_period.loc.end == line_length) return current_node;
 
                     if (getChild(analysis_ctx.tree, current_node, tokenizer.buffer[after_period.loc.start..after_period.loc.end])) |child| {
-                        if (resolveTypeOfNode(analysis_ctx, child)) |child_type| {
+                        if (resolveTypeOfNode(analysis_ctx, child, current_node)) |child_type| {
                             current_node = child_type;
                         } else return null;
                     } else return null;
@@ -524,9 +519,16 @@ pub fn nodeToString(tree: *ast.Tree, node: *ast.Node) ?[]const u8 {
     return null;
 }
 
-pub fn declsFromIndexInternal(decls: *std.ArrayList(*ast.Node), tree: *ast.Tree, node: *ast.Node, source_index: usize) error{OutOfMemory}!void {
+pub fn declsFromIndexInternal(
+    decls: *std.ArrayList(*ast.Node),
+    tree: *ast.Tree,
+    node: *ast.Node,
+    container: **ast.Node,
+    source_index: usize,
+) error{OutOfMemory}!void {
     switch (node.id) {
         .Root, .ContainerDecl => {
+            container.* = node;
             var node_it = node.iterate();
             while (node_it.next()) |child_node| {
                 // Skip over container fields, we can only dot access those.
@@ -536,55 +538,54 @@ pub fn declsFromIndexInternal(decls: *std.ArrayList(*ast.Node), tree: *ast.Tree,
                 // If the cursor is in a variable decls it will insert itself anyway, we don't need to take care of it.
                 if ((is_contained and child_node.id != .VarDecl) or !is_contained) try decls.append(child_node);
                 if (is_contained) {
-                    try declsFromIndexInternal(decls, tree, child_node, source_index);
+                    try declsFromIndexInternal(decls, tree, child_node, container, source_index);
                 }
             }
         },
         .FnProto => {
             const func = node.cast(ast.Node.FnProto).?;
 
-            for (func.paramsConst()) |param| {
-                // try decls.append(node)
-                // @TODO We need to store something else than nodes from now on.
-            }
+            // @TODO Param decls are no longer nodes.
+            // for (func.paramsConst()) |param| {
+            // }
 
             if (func.body_node) |body_node| {
                 if (!nodeContainsSourceIndex(tree, body_node, source_index)) return;
-                try declsFromIndexInternal(decls, tree, body_node, source_index);
+                try declsFromIndexInternal(decls, tree, body_node, container, source_index);
             }
         },
         .TestDecl => {
             const test_decl = node.cast(ast.Node.TestDecl).?;
             if (!nodeContainsSourceIndex(tree, test_decl.body_node, source_index)) return;
-            try declsFromIndexInternal(decls, tree, test_decl.body_node, source_index);
+            try declsFromIndexInternal(decls, tree, test_decl.body_node, container, source_index);
         },
         .Block => {
             var node_it = node.iterate();
             while (node_it.next()) |inode| {
                 if (nodeComesAfterSourceIndex(tree, inode, source_index)) return;
-                try declsFromIndexInternal(decls, tree, inode, source_index);
+                try declsFromIndexInternal(decls, tree, inode, container, source_index);
             }
         },
         .Comptime => {
             const comptime_stmt = node.cast(ast.Node.Comptime).?;
             if (nodeComesAfterSourceIndex(tree, comptime_stmt.expr, source_index)) return;
-            try declsFromIndexInternal(decls, tree, comptime_stmt.expr, source_index);
+            try declsFromIndexInternal(decls, tree, comptime_stmt.expr, container, source_index);
         },
         .If => {
             const if_node = node.cast(ast.Node.If).?;
             if (nodeContainsSourceIndex(tree, if_node.body, source_index)) {
                 if (if_node.payload) |payload| {
-                    try declsFromIndexInternal(decls, tree, payload, source_index);
+                    try declsFromIndexInternal(decls, tree, payload, container, source_index);
                 }
-                return try declsFromIndexInternal(decls, tree, if_node.body, source_index);
+                return try declsFromIndexInternal(decls, tree, if_node.body, container, source_index);
             }
 
             if (if_node.@"else") |else_node| {
                 if (nodeContainsSourceIndex(tree, else_node.body, source_index)) {
                     if (else_node.payload) |payload| {
-                        try declsFromIndexInternal(decls, tree, payload, source_index);
+                        try declsFromIndexInternal(decls, tree, payload, container, source_index);
                     }
-                    return try declsFromIndexInternal(decls, tree, else_node.body, source_index);
+                    return try declsFromIndexInternal(decls, tree, else_node.body, container, source_index);
                 }
             }
         },
@@ -592,33 +593,33 @@ pub fn declsFromIndexInternal(decls: *std.ArrayList(*ast.Node), tree: *ast.Tree,
             const while_node = node.cast(ast.Node.While).?;
             if (nodeContainsSourceIndex(tree, while_node.body, source_index)) {
                 if (while_node.payload) |payload| {
-                    try declsFromIndexInternal(decls, tree, payload, source_index);
+                    try declsFromIndexInternal(decls, tree, payload, container, source_index);
                 }
-                return try declsFromIndexInternal(decls, tree, while_node.body, source_index);
+                return try declsFromIndexInternal(decls, tree, while_node.body, container, source_index);
             }
 
             if (while_node.@"else") |else_node| {
                 if (nodeContainsSourceIndex(tree, else_node.body, source_index)) {
                     if (else_node.payload) |payload| {
-                        try declsFromIndexInternal(decls, tree, payload, source_index);
+                        try declsFromIndexInternal(decls, tree, payload, container, source_index);
                     }
-                    return try declsFromIndexInternal(decls, tree, else_node.body, source_index);
+                    return try declsFromIndexInternal(decls, tree, else_node.body, container, source_index);
                 }
             }
         },
         .For => {
             const for_node = node.cast(ast.Node.For).?;
             if (nodeContainsSourceIndex(tree, for_node.body, source_index)) {
-                try declsFromIndexInternal(decls, tree, for_node.payload, source_index);
-                return try declsFromIndexInternal(decls, tree, for_node.body, source_index);
+                try declsFromIndexInternal(decls, tree, for_node.payload, container, source_index);
+                return try declsFromIndexInternal(decls, tree, for_node.body, container, source_index);
             }
 
             if (for_node.@"else") |else_node| {
                 if (nodeContainsSourceIndex(tree, else_node.body, source_index)) {
                     if (else_node.payload) |payload| {
-                        try declsFromIndexInternal(decls, tree, payload, source_index);
+                        try declsFromIndexInternal(decls, tree, payload, container, source_index);
                     }
-                    return try declsFromIndexInternal(decls, tree, else_node.body, source_index);
+                    return try declsFromIndexInternal(decls, tree, else_node.body, container, source_index);
                 }
             }
         },
@@ -628,9 +629,9 @@ pub fn declsFromIndexInternal(decls: *std.ArrayList(*ast.Node), tree: *ast.Tree,
                 const case_node = case.*.cast(ast.Node.SwitchCase).?;
                 if (nodeContainsSourceIndex(tree, case_node.expr, source_index)) {
                     if (case_node.payload) |payload| {
-                        try declsFromIndexInternal(decls, tree, payload, source_index);
+                        try declsFromIndexInternal(decls, tree, payload, container, source_index);
                     }
-                    return try declsFromIndexInternal(decls, tree, case_node.expr, source_index);
+                    return try declsFromIndexInternal(decls, tree, case_node.expr, container, source_index);
                 }
             }
         },
@@ -648,7 +649,7 @@ pub fn declsFromIndexInternal(decls: *std.ArrayList(*ast.Node), tree: *ast.Tree,
             try decls.append(node);
             if (node.cast(ast.Node.VarDecl).?.init_node) |child| {
                 if (nodeContainsSourceIndex(tree, child, source_index)) {
-                    try declsFromIndexInternal(decls, tree, child, source_index);
+                    try declsFromIndexInternal(decls, tree, child, container, source_index);
                 }
             }
         },
@@ -663,9 +664,10 @@ pub fn addChildrenNodes(decls: *std.ArrayList(*ast.Node), tree: *ast.Tree, node:
     }
 }
 
-pub fn declsFromIndex(decls: *std.ArrayList(*ast.Node), tree: *ast.Tree, source_index: usize) !void {
-    var node = &tree.root_node.base;
-    try declsFromIndexInternal(decls, tree, &tree.root_node.base, source_index);
+pub fn declsFromIndex(decls: *std.ArrayList(*ast.Node), tree: *ast.Tree, source_index: usize) !*ast.Node {
+    var result = &tree.root_node.base;
+    try declsFromIndexInternal(decls, tree, &tree.root_node.base, &result, source_index);
+    return result;
 }
 
 fn nodeContainsSourceIndex(tree: *ast.Tree, node: *ast.Node, source_index: usize) bool {
