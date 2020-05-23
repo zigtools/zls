@@ -256,14 +256,14 @@ pub const AnalysisContext = struct {
     arena: *std.heap.ArenaAllocator,
     tree: *std.zig.ast.Tree,
     scope_nodes: []*std.zig.ast.Node,
-    last_this_node: *std.zig.ast.Node,
+    in_container: *std.zig.ast.Node,
     std_uri: ?[]const u8,
 
     fn refreshScopeNodes(self: *AnalysisContext) !void {
         var scope_nodes = std.ArrayList(*std.zig.ast.Node).init(&self.arena.allocator);
         try analysis.addChildrenNodes(&scope_nodes, self.tree, &self.tree.root_node.base);
         self.scope_nodes = scope_nodes.items;
-        self.last_this_node = &self.tree.root_node.base;
+        self.in_container = &self.tree.root_node.base;
     }
 
     pub fn onImport(self: *AnalysisContext, import_str: []const u8) !?*std.zig.ast.Node {
@@ -355,19 +355,9 @@ pub const AnalysisContext = struct {
             .arena = self.arena,
             .tree = tree,
             .scope_nodes = self.scope_nodes,
-            .last_this_node = &tree.root_node.base,
+            .in_container = self.in_container,
             .std_uri = self.std_uri,
         };
-    }
-
-    pub fn onContainer(self: *AnalysisContext, container: *std.zig.ast.Node.ContainerDecl) !void {
-        if (self.last_this_node != &container.base) {
-            self.last_this_node = &container.base;
-
-            var scope_nodes = std.ArrayList(*std.zig.ast.Node).init(&self.arena.allocator);
-            try analysis.addChildrenNodes(&scope_nodes, self.tree, &container.base);
-            self.scope_nodes = scope_nodes.items;
-        }
     }
 
     pub fn deinit(self: *AnalysisContext) void {
@@ -396,13 +386,13 @@ pub fn analysisContext(
     self: *DocumentStore,
     handle: *Handle,
     arena: *std.heap.ArenaAllocator,
-    position: types.Position,
+    position: usize,
     zig_lib_path: ?[]const u8,
 ) !AnalysisContext {
     const tree = try handle.tree(self.allocator);
 
     var scope_nodes = std.ArrayList(*std.zig.ast.Node).init(&arena.allocator);
-    try analysis.declsFromIndex(&scope_nodes, tree, try handle.document.positionToIndex(position));
+    const in_container = try analysis.declsFromIndex(&scope_nodes, tree, position);
 
     const std_uri = try stdUriFromLibPath(&arena.allocator, zig_lib_path);
     return AnalysisContext{
@@ -411,7 +401,7 @@ pub fn analysisContext(
         .arena = arena,
         .tree = tree,
         .scope_nodes = scope_nodes.items,
-        .last_this_node = &tree.root_node.base,
+        .in_container = in_container,
         .std_uri = std_uri,
     };
 }
