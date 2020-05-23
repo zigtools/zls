@@ -245,7 +245,7 @@ fn nodeToCompletion(
                 break :block var_decl.init_node.?;
             };
 
-            if (analysis.resolveTypeOfNode(&child_analysis_context, current_container, child_node)) |resolved_node| {
+            if (analysis.resolveTypeOfNode(&child_analysis_context, child_node, current_container)) |resolved_node| {
                 // Special case for function aliases
                 // In the future it might be used to print types of values instead of their declarations
                 if (resolved_node.id == .FnProto) {
