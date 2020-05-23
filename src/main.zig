@@ -172,16 +172,29 @@ fn publishDiagnostics(handle: DocumentStore.Handle, config: Config) !void {
     });
 }
 
-fn containerToCompletion(list: *std.ArrayList(types.CompletionItem), analysis_ctx: *DocumentStore.AnalysisContext, container: *std.zig.ast.Node, config: Config) !void {
+fn containerToCompletion(
+    list: *std.ArrayList(types.CompletionItem),
+    analysis_ctx: *DocumentStore.AnalysisContext,
+    orig_handle: *DocumentStore.Handle,
+    container: *std.zig.ast.Node,
+    config: Config,
+) !void {
     var index: usize = 0;
     while (container.iterate(index)) |child_node| : (index += 1) {
-        if (analysis.isNodePublic(analysis_ctx.tree, child_node)) {
-            try nodeToCompletion(list, analysis_ctx, child_node, config);
+        // Declarations in the same file do not need to be public.
+        if (orig_handle == analysis_ctx.handle or analysis.isNodePublic(analysis_ctx.tree, child_node)) {
+            try nodeToCompletion(list, analysis_ctx, orig_handle, child_node, config);
         }
     }
 }
 
-fn nodeToCompletion(list: *std.ArrayList(types.CompletionItem), analysis_ctx: *DocumentStore.AnalysisContext, node: *std.zig.ast.Node, config: Config) error{OutOfMemory}!void {
+fn nodeToCompletion(
+    list: *std.ArrayList(types.CompletionItem),
+    analysis_ctx: *DocumentStore.AnalysisContext,
+    orig_handle: *DocumentStore.Handle,
+    node: *std.zig.ast.Node,
+    config: Config,
+) error{OutOfMemory}!void {
     var doc = if (try analysis.getDocComments(list.allocator, analysis_ctx.tree, node)) |doc_comments|
         types.MarkupContent{
             .kind = .Markdown,
@@ -192,7 +205,7 @@ fn nodeToCompletion(list: *std.ArrayList(types.CompletionItem), analysis_ctx: *D
 
     switch (node.id) {
         .ErrorSetDecl, .Root, .ContainerDecl => {
-            try containerToCompletion(list, analysis_ctx, node, config);
+            try containerToCompletion(list, analysis_ctx, orig_handle, node, config);
         },
         .FnProto => {
             const func = node.cast(std.zig.ast.Node.FnProto).?;
@@ -235,7 +248,7 @@ fn nodeToCompletion(list: *std.ArrayList(types.CompletionItem), analysis_ctx: *D
                 // Special case for function aliases
                 // In the future it might be used to print types of values instead of their declarations
                 if (resolved_node.id == .FnProto) {
-                    try nodeToCompletion(list, &child_analysis_context, resolved_node, config);
+                    try nodeToCompletion(list, &child_analysis_context, orig_handle, resolved_node, config);
                     return;
                 }
             }
@@ -376,7 +389,7 @@ fn gotoDefinitionString(id: i64, pos_index: usize, handle: *DocumentStore.Handle
     defer arena.deinit();
 
     const import_str = analysis.getImportStr(tree, pos_index) orelse return try respondGeneric(id, null_result_response);
-    const uri =  (try document_store.uriFromImportStr(
+    const uri = (try document_store.uriFromImportStr(
         &arena.allocator,
         handle.*,
         import_str,
@@ -414,7 +427,7 @@ fn completeGlobal(id: i64, pos_index: usize, handle: *DocumentStore.Handle, conf
     try analysis.declsFromIndex(&decl_nodes, analysis_ctx.tree, pos_index);
     for (decl_nodes.items) |decl_ptr| {
         var decl = decl_ptr.*;
-        try nodeToCompletion(&completions, &analysis_ctx, decl_ptr, config);
+        try nodeToCompletion(&completions, &analysis_ctx, handle, decl_ptr, config);
     }
 
     try send(types.Response{
@@ -442,7 +455,7 @@ fn completeFieldAccess(id: i64, handle: *DocumentStore.Handle, position: types.P
     const line_length = line.len - line_start_idx;
 
     if (analysis.getFieldAccessTypeNode(&analysis_ctx, &tokenizer, line_length)) |node| {
-        try nodeToCompletion(&completions, &analysis_ctx, node, config);
+        try nodeToCompletion(&completions, &analysis_ctx, handle, node, config);
     }
     try send(types.Response{
         .id = .{ .Integer = id },
