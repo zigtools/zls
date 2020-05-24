@@ -706,6 +706,12 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
     const method = root.Object.getValue("method").?.String;
     const params = root.Object.getValue("params").?.Object;
 
+    const start_time = std.time.milliTimestamp();
+    defer {
+        const end_time = std.time.milliTimestamp();
+        std.debug.warn("Took {}ms to process method {}\n", .{end_time - start_time, method});
+    }
+
     // Core
     if (std.mem.eql(u8, method, "initialize")) {
         try respondGeneric(id, initialize_response);
