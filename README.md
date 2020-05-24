@@ -12,6 +12,7 @@ Zig Language Server, or `zls`, is a language server for Zig. The Zig wiki states
   - [Configuration Options](#configuration-options)
 - [Usage](#usage)
   - [VSCode](#vscode)
+  - [Sublime Text 3](#sublime-text-3)
 - [Related Projects](#related-projects)
 - [License](#license)
 
@@ -33,7 +34,7 @@ zig build
 
 Then, you can use the `zls` executable in an editor of your choice that has a Zig language server client!
 
-*Note:`zls` itself must be built using the master branch of zig currently due to a bug in `std.json` which was [fixed](https://github.com/ziglang/zig/pull/5167) after 0.6.0 was released, as well as various parser changes that have happened since.*
+*Note: `zls` itself must be built using the master branch of zig currently due to a bug in `std.json` which was [fixed](https://github.com/ziglang/zig/pull/5167) after 0.6.0 was released, as well as various parser changes that have happened since.*
 
 ### Configuration Options
 
@@ -53,7 +54,7 @@ The following options are currently available.
 
 ## Usage
 
-`zls` is in its early stages, with a full analysis/completion engine coming soon, but it is still usable. 
+`zls` will supercharge your Zig programming experience with autocomplete, function documentation, and more! Follow the instructions for your specific editor below:
 
 ### VSCode
 
