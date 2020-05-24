@@ -176,8 +176,8 @@ fn containerToCompletion(
     container: *std.zig.ast.Node,
     config: Config,
 ) !void {
-    var child_it = container.iterate();
-    while (child_it.next()) |child_node| {
+    var child_idx: usize = 0;
+    while (container.iterate(child_idx)) |child_node| : (child_idx += 1) {
         // Declarations in the same file do not need to be public.
         if (orig_handle == analysis_ctx.handle or analysis.isNodePublic(analysis_ctx.tree, child_node)) {
             try nodeToCompletion(list, analysis_ctx, orig_handle, child_node, container, config);

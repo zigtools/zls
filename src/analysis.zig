@@ -220,8 +220,8 @@ fn getDeclName(tree: *ast.Tree, node: *ast.Node) ?[]const u8 {
 
 /// Gets the child of node
 pub fn getChild(tree: *ast.Tree, node: *ast.Node, name: []const u8) ?*ast.Node {
-    var child_it = node.iterate();
-    while (child_it.next()) |child| {
+    var child_idx: usize = 0;
+    while (node.iterate(child_idx)) |child| : (child_idx += 1) {
         const child_name = getDeclName(tree, child) orelse continue;
         if (std.mem.eql(u8, child_name, name)) return child;
     }
@@ -239,8 +239,8 @@ pub fn getChildOfSlice(tree: *ast.Tree, nodes: []*ast.Node, name: []const u8) ?*
 
 fn findReturnStatementInternal(base_node: *ast.Node, already_found: *bool) ?*ast.Node.ControlFlowExpression {
     var result: ?*ast.Node.ControlFlowExpression = null;
-    var child_it = base_node.iterate();
-    while (child_it.next()) |child_node|  {
+    var child_idx: usize = 0;
+    while (base_node.iterate(child_idx)) |child_node| : (child_idx += 1)  {
         switch (child_node.id) {
             .ControlFlowExpression => {
                 const cfe = child_node.cast(ast.Node.ControlFlowExpression).?;
@@ -529,8 +529,8 @@ pub fn declsFromIndexInternal(
     switch (node.id) {
         .Root, .ContainerDecl => {
             container.* = node;
-            var node_it = node.iterate();
-            while (node_it.next()) |child_node| {
+            var node_idx: usize = 0;
+            while (node.iterate(node_idx)) |child_node| : (node_idx += 1) {
                 // Skip over container fields, we can only dot access those.
                 if (child_node.id == .ContainerField) continue;
 
@@ -560,8 +560,8 @@ pub fn declsFromIndexInternal(
             try declsFromIndexInternal(decls, tree, test_decl.body_node, container, source_index);
         },
         .Block => {
-            var node_it = node.iterate();
-            while (node_it.next()) |inode| {
+            var inode_idx: usize = 0;
+            while (node.iterate(inode_idx)) |inode| : (inode_idx += 1) {
                 if (nodeComesAfterSourceIndex(tree, inode, source_index)) return;
                 try declsFromIndexInternal(decls, tree, inode, container, source_index);
             }
@@ -658,8 +658,8 @@ pub fn declsFromIndexInternal(
 }
 
 pub fn addChildrenNodes(decls: *std.ArrayList(*ast.Node), tree: *ast.Tree, node: *ast.Node) !void {
-    var node_it = node.iterate();
-    while (node_it.next()) |child_node| {
+    var node_idx: usize = 0;
+    while (node.iterate(node_idx)) |child_node| : (node_idx += 1) {
         try decls.append(child_node);
     }
 }
@@ -685,8 +685,8 @@ fn nodeComesAfterSourceIndex(tree: *ast.Tree, node: *ast.Node, source_index: usi
 pub fn getImportStr(tree: *ast.Tree, source_index: usize) ?[]const u8 {
     var node = &tree.root_node.base;
 
-    var child_it = node.iterate();
-    while (child_it.next()) |child| {
+    var child_idx: usize = 0;
+    while (node.iterate(child_idx)) |child| : (child_idx += 1) {
         if (!nodeContainsSourceIndex(tree, child, source_index)) {
             continue;
         }
@@ -702,7 +702,7 @@ pub fn getImportStr(tree: *ast.Tree, source_index: usize) ?[]const u8 {
             return import_str[1 .. import_str.len - 1];
         }
         node = child;
-        child_it = node.iterate();
+        child_idx = 0;
     }
     return null;
 }
