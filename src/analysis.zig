@@ -578,7 +578,8 @@ pub fn declsFromIndexInternal(
 
             // TODO: This is a hack to enable param decls with the new parser
             for (func.paramsConst()) |param| {
-                    if (param.name_token) |name_token| {
+                if (param.param_type != .type_expr) continue;
+                if (param.name_token) |name_token| {
                     const var_decl_node = try arena.allocator.create(ast.Node.VarDecl);
                     var_decl_node.* = .{
                         .doc_comments = param.doc_comments,
@@ -592,7 +593,7 @@ pub fn declsFromIndexInternal(
                         .lib_name = null,
                         .type_node = switch (param.param_type) {
                             .type_expr => |t| t,
-                            else => null,
+                            else => unreachable,
                         },
                         .align_node = null,
                         .section_node = null,
