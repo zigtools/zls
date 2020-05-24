@@ -262,10 +262,10 @@ fn findReturnStatement(tree: *ast.Tree, fn_decl: *ast.Node.FnProto) ?*ast.Node.C
 
 /// Resolves the return type of a function
 fn resolveReturnType(analysis_ctx: *AnalysisContext, fn_decl: *ast.Node.FnProto) ?*ast.Node {
-    if (isTypeFunction(analysis_ctx.tree, fn_decl) and fn_decl.body_node != null) {
+    if (isTypeFunction(analysis_ctx.tree(), fn_decl) and fn_decl.body_node != null) {
         // If this is a type function and it only contains a single return statement that returns
         // a container declaration, we will return that declaration.
-        const ret = findReturnStatement(analysis_ctx.tree, fn_decl) orelse return null;
+        const ret = findReturnStatement(analysis_ctx.tree(), fn_decl) orelse return null;
         if (ret.rhs) |rhs|
             if (resolveTypeOfNode(analysis_ctx, rhs)) |res_rhs| switch (res_rhs.id) {
                 .ContainerDecl => {
@@ -293,7 +293,7 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
             return resolveTypeOfNode(analysis_ctx, vari.type_node orelse vari.init_node.?) orelse null;
         },
         .Identifier => {
-            if (getChildOfSlice(analysis_ctx.tree, analysis_ctx.scope_nodes, analysis_ctx.tree.getNodeSource(node))) |child| {
+            if (getChildOfSlice(analysis_ctx.tree(), analysis_ctx.scope_nodes, analysis_ctx.tree().getNodeSource(node))) |child| {
                 return resolveTypeOfNode(analysis_ctx, child);
             } else return null;
         },
@@ -323,11 +323,11 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
                 .Period => {
                     // Save the child string from this tree since the tree may switch when processing
                     // an import lhs.
-                    var rhs_str = nodeToString(analysis_ctx.tree, infix_op.rhs) orelse return null;
+                    var rhs_str = nodeToString(analysis_ctx.tree(), infix_op.rhs) orelse return null;
                     // Use the analysis context temporary arena to store the rhs string.
                     rhs_str = std.mem.dupe(&analysis_ctx.arena.allocator, u8, rhs_str) catch return null;
                     const left = resolveTypeOfNode(analysis_ctx, infix_op.lhs) orelse return null;
-                    const child = getChild(analysis_ctx.tree, left, rhs_str) orelse return null;
+                    const child = getChild(analysis_ctx.tree(), left, rhs_str) orelse return null;
                     return resolveTypeOfNode(analysis_ctx, child);
                 },
                 else => {},
@@ -338,7 +338,7 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
             switch (prefix_op.op) {
                 .SliceType, .ArrayType => return node,
                 .PtrType => {
-                    const op_token_id = analysis_ctx.tree.token_ids[prefix_op.op_token];
+                    const op_token_id = analysis_ctx.tree().token_ids[prefix_op.op_token];
                     switch (op_token_id) {
                         .Asterisk => return resolveTypeOfNode(analysis_ctx, prefix_op.rhs),
                         .LBracket, .AsteriskAsterisk => return null,
@@ -361,7 +361,7 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
         },
         .BuiltinCall => {
             const builtin_call = node.cast(ast.Node.BuiltinCall).?;
-            const call_name = analysis_ctx.tree.tokenSlice(builtin_call.builtin_token);
+            const call_name = analysis_ctx.tree().tokenSlice(builtin_call.builtin_token);
             if (std.mem.eql(u8, call_name, "@This")) {
                 if (builtin_call.params_len != 0) return null;
                 return analysis_ctx.in_container;
@@ -373,7 +373,7 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
             const import_param = builtin_call.paramsConst()[0];
             if (import_param.id != .StringLiteral) return null;
 
-            const import_str = analysis_ctx.tree.tokenSlice(import_param.cast(ast.Node.StringLiteral).?.token);
+            const import_str = analysis_ctx.tree().tokenSlice(import_param.cast(ast.Node.StringLiteral).?.token);
             return analysis_ctx.onImport(import_str[1 .. import_str.len - 1]) catch |err| block: {
                 std.debug.warn("Error {} while processing import {}\n", .{ err, import_str });
                 break :block null;
@@ -442,7 +442,7 @@ pub fn getFieldAccessTypeNode(
         switch (next.id) {
             .Eof => return current_node,
             .Identifier => {
-                if (getChildOfSlice(analysis_ctx.tree, analysis_ctx.scope_nodes, tokenizer.buffer[next.loc.start..next.loc.end])) |child| {
+                if (getChildOfSlice(analysis_ctx.tree(), analysis_ctx.scope_nodes, tokenizer.buffer[next.loc.start..next.loc.end])) |child| {
                     if (resolveTypeOfNode(analysis_ctx, child)) |node_type| {
                         current_node = node_type;
                     } else return null;
@@ -456,7 +456,7 @@ pub fn getFieldAccessTypeNode(
                     // TODO: This works for now, maybe we should filter based on the partial identifier ourselves?
                     if (after_period.loc.end == line_length) return current_node;
 
-                    if (getChild(analysis_ctx.tree, current_node, tokenizer.buffer[after_period.loc.start..after_period.loc.end])) |child| {
+                    if (getChild(analysis_ctx.tree(), current_node, tokenizer.buffer[after_period.loc.start..after_period.loc.end])) |child| {
                         if (resolveTypeOfNode(analysis_ctx, child)) |child_type| {
                             current_node = child_type;
                         } else return null;

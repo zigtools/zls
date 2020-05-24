@@ -91,8 +91,7 @@ fn astLocationToRange(loc: std.zig.ast.Tree.Location) types.Range {
 }
 
 fn publishDiagnostics(handle: DocumentStore.Handle, config: Config) !void {
-    const tree = try handle.tree(allocator);
-    defer tree.deinit();
+    const tree = handle.tree;
 
     // Use an arena for our local memory allocations.
     var arena = std.heap.ArenaAllocator.init(allocator);
@@ -179,7 +178,7 @@ fn containerToCompletion(
     var child_idx: usize = 0;
     while (container.iterate(child_idx)) |child_node| : (child_idx += 1) {
         // Declarations in the same file do not need to be public.
-        if (orig_handle == analysis_ctx.handle or analysis.isNodePublic(analysis_ctx.tree, child_node)) {
+        if (orig_handle == analysis_ctx.handle or analysis.isNodePublic(analysis_ctx.tree(), child_node)) {
             try nodeToCompletion(list, analysis_ctx, orig_handle, child_node, config);
         }
     }
@@ -192,7 +191,7 @@ fn nodeToCompletion(
     node: *std.zig.ast.Node,
     config: Config,
 ) error{OutOfMemory}!void {
-    var doc = if (try analysis.getDocComments(list.allocator, analysis_ctx.tree, node)) |doc_comments|
+    var doc = if (try analysis.getDocComments(list.allocator, analysis_ctx.tree(), node)) |doc_comments|
         types.MarkupContent{
             .kind = .Markdown,
             .value = doc_comments,
@@ -208,17 +207,17 @@ fn nodeToCompletion(
             const func = node.cast(std.zig.ast.Node.FnProto).?;
             if (func.name_token) |name_token| {
                 const insert_text = if (config.enable_snippets)
-                    try analysis.getFunctionSnippet(list.allocator, analysis_ctx.tree, func)
+                    try analysis.getFunctionSnippet(list.allocator, analysis_ctx.tree(), func)
                 else
                     null;
 
-                const is_type_function = analysis.isTypeFunction(analysis_ctx.tree, func);
+                const is_type_function = analysis.isTypeFunction(analysis_ctx.tree(), func);
 
                 try list.append(.{
-                    .label = analysis_ctx.tree.tokenSlice(name_token),
+                    .label = analysis_ctx.tree().tokenSlice(name_token),
                     .kind = if (is_type_function) .Struct else .Function,
                     .documentation = doc,
-                    .detail = analysis.getFunctionSignature(analysis_ctx.tree, func),
+                    .detail = analysis.getFunctionSignature(analysis_ctx.tree(), func),
                     .insertText = insert_text,
                     .insertTextFormat = if (config.enable_snippets) .Snippet else .PlainText,
                 });
@@ -226,14 +225,13 @@ fn nodeToCompletion(
         },
         .VarDecl => {
             const var_decl = node.cast(std.zig.ast.Node.VarDecl).?;
-            const is_const = analysis_ctx.tree.token_ids[var_decl.mut_token] == .Keyword_const;
+            const is_const = analysis_ctx.tree().token_ids[var_decl.mut_token] == .Keyword_const;
 
-            var child_analysis_context = try analysis_ctx.clone();
-            defer child_analysis_context.deinit();
+            var child_analysis_context = analysis_ctx.clone();
 
             const child_node = block: {
                 if (var_decl.type_node) |type_node| {
-                    if (std.mem.eql(u8, "type", analysis_ctx.tree.tokenSlice(type_node.firstToken()))) {
+                    if (std.mem.eql(u8, "type", analysis_ctx.tree().tokenSlice(type_node.firstToken()))) {
                         break :block var_decl.init_node orelse type_node;
                     }
                     break :block type_node;
@@ -250,10 +248,10 @@ fn nodeToCompletion(
                 }
             }
             try list.append(.{
-                .label = analysis_ctx.tree.tokenSlice(var_decl.name_token),
+                .label = analysis_ctx.tree().tokenSlice(var_decl.name_token),
                 .kind = if (is_const) .Constant else .Variable,
                 .documentation = doc,
-                .detail = analysis.getVariableSignature(analysis_ctx.tree, var_decl),
+                .detail = analysis.getVariableSignature(analysis_ctx.tree(), var_decl),
             });
         },
         .PrefixOp => {
@@ -272,7 +270,7 @@ fn nodeToCompletion(
                 .kind = .Field,
             });
         },
-        else => if (analysis.nodeToString(analysis_ctx.tree, node)) |string| {
+        else => if (analysis.nodeToString(analysis_ctx.tree(), node)) |string| {
             try list.append(.{
                 .label = string,
                 .kind = .Field,
@@ -302,8 +300,7 @@ fn identifierFromPosition(pos_index: usize, handle: DocumentStore.Handle) []cons
 }
 
 fn gotoDefinitionGlobal(id: i64, pos_index: usize, handle: DocumentStore.Handle) !void {
-    var tree = try handle.tree(allocator);
-    defer tree.deinit();
+    const tree = handle.tree;
 
     const name = identifierFromPosition(pos_index, handle);
     if (name.len == 0) return try respondGeneric(id, null_result_response);
@@ -343,7 +340,6 @@ fn gotoDefinitionFieldAccess(
     defer arena.deinit();
 
     var analysis_ctx = try document_store.analysisContext(handle, &arena, try handle.document.positionToIndex(position), config.zig_lib_path);
-    defer analysis_ctx.deinit();
 
     const line = try handle.document.getLine(@intCast(usize, position.line));
     var tokenizer = std.zig.Tokenizer.init(line[line_start_idx..]);
@@ -352,14 +348,14 @@ fn gotoDefinitionFieldAccess(
     name = try std.mem.dupe(&arena.allocator, u8, name);
 
     if (analysis.getFieldAccessTypeNode(&analysis_ctx, &tokenizer, line_length)) |container| {
-        const decl = analysis.getChild(analysis_ctx.tree, container, name) orelse return try respondGeneric(id, null_result_response);
-        const name_token = analysis.getDeclNameToken(analysis_ctx.tree, decl) orelse unreachable;
+        const decl = analysis.getChild(analysis_ctx.tree(), container, name) orelse return try respondGeneric(id, null_result_response);
+        const name_token = analysis.getDeclNameToken(analysis_ctx.tree(), decl) orelse unreachable;
         return try send(types.Response{
             .id = .{ .Integer = id },
             .result = .{
                 .Location = .{
                     .uri = analysis_ctx.handle.document.uri,
-                    .range = astLocationToRange(analysis_ctx.tree.tokenLocation(0, name_token)),
+                    .range = astLocationToRange(analysis_ctx.tree().tokenLocation(0, name_token)),
                 },
             },
         });
@@ -369,8 +365,7 @@ fn gotoDefinitionFieldAccess(
 }
 
 fn gotoDefinitionString(id: i64, pos_index: usize, handle: *DocumentStore.Handle, config: Config) !void {
-    var tree = try handle.tree(allocator);
-    defer tree.deinit();
+    const tree = handle.tree;
 
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
@@ -405,8 +400,6 @@ fn completeGlobal(id: i64, pos_index: usize, handle: *DocumentStore.Handle, conf
     defer arena.deinit();
 
     var analysis_ctx = try document_store.analysisContext(handle, &arena, pos_index, config.zig_lib_path);
-    defer analysis_ctx.deinit();
-
     for (analysis_ctx.scope_nodes) |decl_ptr| {
         var decl = decl_ptr.*;
         try nodeToCompletion(&completions, &analysis_ctx, handle, decl_ptr, config);
@@ -428,8 +421,6 @@ fn completeFieldAccess(id: i64, handle: *DocumentStore.Handle, position: types.P
     defer arena.deinit();
 
     var analysis_ctx = try document_store.analysisContext(handle, &arena, try handle.document.positionToIndex(position), config.zig_lib_path);
-    defer analysis_ctx.deinit();
-
     var completions = std.ArrayList(types.CompletionItem).init(&arena.allocator);
 
     const line = try handle.document.getLine(@intCast(usize, position.line));
