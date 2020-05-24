@@ -51,24 +51,24 @@ pub fn getDocComments(allocator: *std.mem.Allocator, tree: *ast.Tree, node: *ast
                 return try collectDocComments(allocator, tree, doc_comments);
             }
         },
-        .ParamDecl => {
-            const param = node.cast(ast.Node.ParamDecl).?;
-            if (param.doc_comments) |doc_comments| {
-                return try collectDocComments(allocator, tree, doc_comments);
-            }
-        },
         else => {},
     }
     return null;
 }
 
 fn collectDocComments(allocator: *std.mem.Allocator, tree: *ast.Tree, doc_comments: *ast.Node.DocComment) ![]const u8 {
-    var doc_it = doc_comments.lines.iterator(0);
     var lines = std.ArrayList([]const u8).init(allocator);
     defer lines.deinit();
 
-    while (doc_it.next()) |doc_comment| {
-        _ = try lines.append(std.fmt.trim(tree.tokenSlice(doc_comment.*)[3..]));
+    var curr_line_tok = doc_comments.first_line;
+    while (true) : (curr_line_tok += 1) {
+        switch (tree.token_ids[curr_line_tok]) {
+            .LineComment => continue,
+            .DocComment, .ContainerDocComment => {
+                try lines.append(std.fmt.trim(tree.tokenSlice(curr_line_tok)[3..]));
+            },
+            else => break,
+        }
     }
 
     return try std.mem.join(allocator, "\n", lines.items);
@@ -76,11 +76,11 @@ fn collectDocComments(allocator: *std.mem.Allocator, tree: *ast.Tree, doc_commen
 
 /// Gets a function signature (keywords, name, return value)
 pub fn getFunctionSignature(tree: *ast.Tree, func: *ast.Node.FnProto) []const u8 {
-    const start = tree.tokens.at(func.firstToken()).start;
-    const end = tree.tokens.at(switch (func.return_type) {
+    const start = tree.token_locs[func.firstToken()].start;
+    const end = tree.token_locs[switch (func.return_type) {
         .Explicit, .InferErrorSet => |node| node.lastToken(),
         .Invalid => |r_paren| r_paren,
-    }).end;
+    }].end;
     return tree.source[start..end];
 }
 
@@ -96,38 +96,33 @@ pub fn getFunctionSnippet(allocator: *std.mem.Allocator, tree: *ast.Tree, func: 
 
     var buf_stream = buffer.outStream();
 
-    var param_num = @as(usize, 1);
-    var param_it = func.params.iterator(0);
-    while (param_it.next()) |param_ptr| : (param_num += 1) {
-        const param = param_ptr.*;
-        const param_decl = param.cast(ast.Node.ParamDecl).?;
+    for (func.paramsConst()) |param, param_num| {
+        if (param_num != 0) try buffer.appendSlice(", ${") else try buffer.appendSlice("${");
 
-        if (param_num != 1) try buffer.appendSlice(", ${") else try buffer.appendSlice("${");
+        try buf_stream.print("{}:", .{param_num + 1});
 
-        try buf_stream.print("{}:", .{param_num});
-
-        if (param_decl.comptime_token) |_| {
+        if (param.comptime_token) |_| {
             try buffer.appendSlice("comptime ");
         }
 
-        if (param_decl.noalias_token) |_| {
+        if (param.noalias_token) |_| {
             try buffer.appendSlice("noalias ");
         }
 
-        if (param_decl.name_token) |name_token| {
+        if (param.name_token) |name_token| {
             try buffer.appendSlice(tree.tokenSlice(name_token));
             try buffer.appendSlice(": ");
         }
 
-        switch (param_decl.param_type) {
+        switch (param.param_type) {
             .var_args => try buffer.appendSlice("..."),
             .var_type => try buffer.appendSlice("var"),
             .type_expr => |type_expr| {
                 var curr_tok = type_expr.firstToken();
                 var end_tok = type_expr.lastToken();
                 while (curr_tok <= end_tok) : (curr_tok += 1) {
-                    const id = tree.tokens.at(curr_tok).id;
-                    const is_comma = tree.tokens.at(curr_tok).id == .Comma;
+                    const id = tree.token_ids[curr_tok];
+                    const is_comma = id == .Comma;
 
                     if (curr_tok == end_tok and is_comma) continue;
 
@@ -146,15 +141,8 @@ pub fn getFunctionSnippet(allocator: *std.mem.Allocator, tree: *ast.Tree, func: 
 
 /// Gets a function signature (keywords, name, return value)
 pub fn getVariableSignature(tree: *ast.Tree, var_decl: *ast.Node.VarDecl) []const u8 {
-    const start = tree.tokens.at(var_decl.firstToken()).start;
-    const end = tree.tokens.at(var_decl.semicolon_token).start;
-    return tree.source[start..end];
-}
-
-/// Gets a param signature
-pub fn getParamSignature(tree: *ast.Tree, param: *ast.Node.ParamDecl) []const u8 {
-    const start = tree.tokens.at(param.firstToken()).start;
-    const end = tree.tokens.at(param.lastToken()).end;
+    const start = tree.token_locs[var_decl.firstToken()].start;
+    const end = tree.token_locs[var_decl.semicolon_token].start;
     return tree.source[start..end];
 }
 
@@ -186,11 +174,6 @@ pub fn getDeclNameToken(tree: *ast.Tree, node: *ast.Node) ?ast.TokenIndex {
             const vari = node.cast(ast.Node.VarDecl).?;
             return vari.name_token;
         },
-        .ParamDecl => {
-            const decl = node.cast(ast.Node.ParamDecl).?;
-            if (decl.name_token == null) return null;
-            return decl.name_token.?;
-        },
         .FnProto => {
             const func = node.cast(ast.Node.FnProto).?;
             if (func.name_token == null) return null;
@@ -217,8 +200,8 @@ fn getDeclName(tree: *ast.Tree, node: *ast.Node) ?[]const u8 {
 
 /// Gets the child of node
 pub fn getChild(tree: *ast.Tree, node: *ast.Node, name: []const u8) ?*ast.Node {
-    var index: usize = 0;
-    while (node.iterate(index)) |child| : (index += 1) {
+    var child_idx: usize = 0;
+    while (node.iterate(child_idx)) |child| : (child_idx += 1) {
         const child_name = getDeclName(tree, child) orelse continue;
         if (std.mem.eql(u8, child_name, name)) return child;
     }
@@ -241,20 +224,18 @@ fn findReturnStatementInternal(
     already_found: *bool,
 ) ?*ast.Node.ControlFlowExpression {
     var result: ?*ast.Node.ControlFlowExpression = null;
-    var idx: usize = 0;
-    while (base_node.iterate(idx)) |child_node| : (idx += 1) {
+    var child_idx: usize = 0;
+    while (base_node.iterate(child_idx)) |child_node| : (child_idx += 1) {
         switch (child_node.id) {
             .ControlFlowExpression => {
                 const cfe = child_node.cast(ast.Node.ControlFlowExpression).?;
                 if (cfe.kind == .Return) {
                     // If we are calling ourselves recursively, ignore this return.
                     if (cfe.rhs) |rhs| {
-                        if (rhs.cast(ast.Node.SuffixOp)) |suffix_op| {
-                            if (suffix_op.op == .Call) {
-                                if (suffix_op.lhs.node.id == .Identifier) {
-                                    if (std.mem.eql(u8, getDeclName(tree, suffix_op.lhs.node).?, getDeclName(tree, &fn_decl.base).?)) {
-                                        continue;
-                                    }
+                        if (rhs.cast(ast.Node.Call)) |call_node| {
+                            if (call_node.lhs.id == .Identifier) {
+                                if (std.mem.eql(u8, getDeclName(tree, call_node.lhs).?, getDeclName(tree, &fn_decl.base).?)) {
+                                    continue;
                                 }
                             }
                         }
@@ -311,15 +292,6 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
 
             return resolveTypeOfNode(analysis_ctx, vari.type_node orelse vari.init_node.?) orelse null;
         },
-        .ParamDecl => {
-            const decl = node.cast(ast.Node.ParamDecl).?;
-            switch (decl.param_type) {
-                .var_type, .type_expr => |var_type| {
-                    return resolveTypeOfNode(analysis_ctx, var_type) orelse null;
-                },
-                else => {},
-            }
-        },
         .Identifier => {
             if (getChildOfSlice(analysis_ctx.tree, analysis_ctx.scope_nodes, analysis_ctx.tree.getNodeSource(node))) |child| {
                 return resolveTypeOfNode(analysis_ctx, child);
@@ -329,18 +301,21 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
             const field = node.cast(ast.Node.ContainerField).?;
             return resolveTypeOfNode(analysis_ctx, field.type_expr orelse return null);
         },
-        .SuffixOp => {
-            const suffix_op = node.cast(ast.Node.SuffixOp).?;
-            switch (suffix_op.op) {
-                .Call, .StructInitializer => {
-                    const decl = resolveTypeOfNode(analysis_ctx, suffix_op.lhs.node) orelse return null;
-                    return switch (decl.id) {
-                        .FnProto => resolveReturnType(analysis_ctx, decl.cast(ast.Node.FnProto).?),
-                        else => decl,
-                    };
-                },
-                else => {},
-            }
+        .Call => {
+            const call = node.cast(ast.Node.Call).?;
+            const decl = resolveTypeOfNode(analysis_ctx, call.lhs) orelse return null;
+            return switch (decl.id) {
+                .FnProto => resolveReturnType(analysis_ctx, decl.cast(ast.Node.FnProto).?),
+                else => decl,
+            };
+        },
+        .StructInitializer => {
+            const struct_init = node.cast(ast.Node.StructInitializer).?;
+            const decl = resolveTypeOfNode(analysis_ctx, struct_init.lhs) orelse return null;
+            return switch (decl.id) {
+                .FnProto => resolveReturnType(analysis_ctx, decl.cast(ast.Node.FnProto).?),
+                else => decl,
+            };
         },
         .InfixOp => {
             const infix_op = node.cast(ast.Node.InfixOp).?;
@@ -363,8 +338,8 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
             switch (prefix_op.op) {
                 .SliceType, .ArrayType => return node,
                 .PtrType => {
-                    const op_token = analysis_ctx.tree.tokens.at(prefix_op.op_token);
-                    switch (op_token.id) {
+                    const op_token_id = analysis_ctx.tree.token_ids[prefix_op.op_token];
+                    switch (op_token_id) {
                         .Asterisk => return resolveTypeOfNode(analysis_ctx, prefix_op.rhs),
                         .LBracket, .AsteriskAsterisk => return null,
                         else => unreachable,
@@ -388,14 +363,14 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
             const builtin_call = node.cast(ast.Node.BuiltinCall).?;
             const call_name = analysis_ctx.tree.tokenSlice(builtin_call.builtin_token);
             if (std.mem.eql(u8, call_name, "@This")) {
-                if (builtin_call.params.len != 0) return null;
+                if (builtin_call.params_len != 0) return null;
                 return analysis_ctx.in_container;
             }
 
             if (!std.mem.eql(u8, call_name, "@import")) return null;
-            if (builtin_call.params.len > 1) return null;
+            if (builtin_call.params_len > 1) return null;
 
-            const import_param = builtin_call.params.at(0).*;
+            const import_param = builtin_call.paramsConst()[0];
             if (import_param.id != .StringLiteral) return null;
 
             const import_str = analysis_ctx.tree.tokenSlice(import_param.cast(ast.Node.StringLiteral).?.token);
@@ -416,9 +391,9 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
 
 fn maybeCollectImport(tree: *ast.Tree, builtin_call: *ast.Node.BuiltinCall, arr: *std.ArrayList([]const u8)) !void {
     if (!std.mem.eql(u8, tree.tokenSlice(builtin_call.builtin_token), "@import")) return;
-    if (builtin_call.params.len > 1) return;
+    if (builtin_call.params_len > 1) return;
 
-    const import_param = builtin_call.params.at(0).*;
+    const import_param = builtin_call.paramsConst()[0];
     if (import_param.id != .StringLiteral) return;
 
     const import_str = tree.tokenSlice(import_param.cast(ast.Node.StringLiteral).?.token);
@@ -429,8 +404,7 @@ fn maybeCollectImport(tree: *ast.Tree, builtin_call: *ast.Node.BuiltinCall, arr:
 /// The import paths are valid as long as the tree is.
 pub fn collectImports(import_arr: *std.ArrayList([]const u8), tree: *ast.Tree) !void {
     // TODO: Currently only detects `const smth = @import("string literal")<.SomeThing>;`
-    var idx: usize = 0;
-    while (tree.root_node.iterate(idx)) |decl| : (idx += 1) {
+    for (tree.root_node.decls()) |decl| {
         if (decl.id != .VarDecl) continue;
         const var_decl = decl.cast(ast.Node.VarDecl).?;
         if (var_decl.init_node == null) continue;
@@ -468,7 +442,7 @@ pub fn getFieldAccessTypeNode(
         switch (next.id) {
             .Eof => return current_node,
             .Identifier => {
-                if (getChildOfSlice(analysis_ctx.tree, analysis_ctx.scope_nodes, tokenizer.buffer[next.start..next.end])) |child| {
+                if (getChildOfSlice(analysis_ctx.tree, analysis_ctx.scope_nodes, tokenizer.buffer[next.loc.start..next.loc.end])) |child| {
                     if (resolveTypeOfNode(analysis_ctx, child)) |node_type| {
                         current_node = node_type;
                     } else return null;
@@ -480,9 +454,9 @@ pub fn getFieldAccessTypeNode(
                     return current_node;
                 } else if (after_period.id == .Identifier) {
                     // TODO: This works for now, maybe we should filter based on the partial identifier ourselves?
-                    if (after_period.end == line_length) return current_node;
+                    if (after_period.loc.end == line_length) return current_node;
 
-                    if (getChild(analysis_ctx.tree, current_node, tokenizer.buffer[after_period.start..after_period.end])) |child| {
+                    if (getChild(analysis_ctx.tree, current_node, tokenizer.buffer[after_period.loc.start..after_period.loc.end])) |child| {
                         if (resolveTypeOfNode(analysis_ctx, child)) |child_type| {
                             current_node = child_type;
                         } else return null;
@@ -575,6 +549,7 @@ pub fn nodeToString(tree: *ast.Tree, node: *ast.Node) ?[]const u8 {
 }
 
 pub fn declsFromIndexInternal(
+    arena: *std.heap.ArenaAllocator,
     decls: *std.ArrayList(*ast.Node),
     tree: *ast.Tree,
     node: *ast.Node,
@@ -584,8 +559,8 @@ pub fn declsFromIndexInternal(
     switch (node.id) {
         .Root, .ContainerDecl => {
             container.* = node;
-            var node_index: usize = 0;
-            while (node.iterate(node_index)) |child_node| : (node_index += 1) {
+            var node_idx: usize = 0;
+            while (node.iterate(node_idx)) |child_node| : (node_idx += 1) {
                 // Skip over container fields, we can only dot access those.
                 if (child_node.id == .ContainerField) continue;
 
@@ -593,54 +568,78 @@ pub fn declsFromIndexInternal(
                 // If the cursor is in a variable decls it will insert itself anyway, we don't need to take care of it.
                 if ((is_contained and child_node.id != .VarDecl) or !is_contained) try decls.append(child_node);
                 if (is_contained) {
-                    try declsFromIndexInternal(decls, tree, child_node, container, source_index);
+                    try declsFromIndexInternal(arena, decls, tree, child_node, container, source_index);
                 }
             }
         },
         .FnProto => {
             const func = node.cast(ast.Node.FnProto).?;
 
-            var param_index: usize = 0;
-            while (param_index < func.params.len) : (param_index += 1)
-                try declsFromIndexInternal(decls, tree, func.params.at(param_index).*, container, source_index);
+            // TODO: This is a hack to enable param decls with the new parser
+            for (func.paramsConst()) |param| {
+                    if (param.name_token) |name_token| {
+                    const var_decl_node = try arena.allocator.create(ast.Node.VarDecl);
+                    var_decl_node.* = .{
+                        .doc_comments = param.doc_comments,
+                        .comptime_token = param.comptime_token,
+                        .visib_token = null,
+                        .thread_local_token = null,
+                        .name_token = name_token,
+                        .eq_token = null,
+                        .mut_token = name_token, // TODO: better tokens for mut_token. semicolon_token?
+                        .extern_export_token = null,
+                        .lib_name = null,
+                        .type_node = switch (param.param_type) {
+                            .type_expr => |t| t,
+                            else => null,
+                        },
+                        .align_node = null,
+                        .section_node = null,
+                        .init_node = null,
+                        .semicolon_token = name_token,
+                    };
+
+                    try decls.append(&var_decl_node.base);
+                }
+            }
 
             if (func.body_node) |body_node| {
                 if (!nodeContainsSourceIndex(tree, body_node, source_index)) return;
-                try declsFromIndexInternal(decls, tree, body_node, container, source_index);
+                try declsFromIndexInternal(arena, decls, tree, body_node, container, source_index);
             }
         },
         .TestDecl => {
             const test_decl = node.cast(ast.Node.TestDecl).?;
             if (!nodeContainsSourceIndex(tree, test_decl.body_node, source_index)) return;
-            try declsFromIndexInternal(decls, tree, test_decl.body_node, container, source_index);
+            try declsFromIndexInternal(arena, decls, tree, test_decl.body_node, container, source_index);
         },
         .Block => {
-            var index: usize = 0;
-            while (node.iterate(index)) |inode| : (index += 1) {
+            var inode_idx: usize = 0;
+            while (node.iterate(inode_idx)) |inode| : (inode_idx += 1) {
                 if (nodeComesAfterSourceIndex(tree, inode, source_index)) return;
-                try declsFromIndexInternal(decls, tree, inode, container, source_index);
+                try declsFromIndexInternal(arena, decls, tree, inode, container, source_index);
             }
         },
         .Comptime => {
             const comptime_stmt = node.cast(ast.Node.Comptime).?;
             if (nodeComesAfterSourceIndex(tree, comptime_stmt.expr, source_index)) return;
-            try declsFromIndexInternal(decls, tree, comptime_stmt.expr, container, source_index);
+            try declsFromIndexInternal(arena, decls, tree, comptime_stmt.expr, container, source_index);
         },
         .If => {
             const if_node = node.cast(ast.Node.If).?;
             if (nodeContainsSourceIndex(tree, if_node.body, source_index)) {
                 if (if_node.payload) |payload| {
-                    try declsFromIndexInternal(decls, tree, payload, container, source_index);
+                    try declsFromIndexInternal(arena, decls, tree, payload, container, source_index);
                 }
-                return try declsFromIndexInternal(decls, tree, if_node.body, container, source_index);
+                return try declsFromIndexInternal(arena, decls, tree, if_node.body, container, source_index);
             }
 
             if (if_node.@"else") |else_node| {
                 if (nodeContainsSourceIndex(tree, else_node.body, source_index)) {
                     if (else_node.payload) |payload| {
-                        try declsFromIndexInternal(decls, tree, payload, container, source_index);
+                        try declsFromIndexInternal(arena, decls, tree, payload, container, source_index);
                     }
-                    return try declsFromIndexInternal(decls, tree, else_node.body, container, source_index);
+                    return try declsFromIndexInternal(arena, decls, tree, else_node.body, container, source_index);
                 }
             }
         },
@@ -648,46 +647,45 @@ pub fn declsFromIndexInternal(
             const while_node = node.cast(ast.Node.While).?;
             if (nodeContainsSourceIndex(tree, while_node.body, source_index)) {
                 if (while_node.payload) |payload| {
-                    try declsFromIndexInternal(decls, tree, payload, container, source_index);
+                    try declsFromIndexInternal(arena, decls, tree, payload, container, source_index);
                 }
-                return try declsFromIndexInternal(decls, tree, while_node.body, container, source_index);
+                return try declsFromIndexInternal(arena, decls, tree, while_node.body, container, source_index);
             }
 
             if (while_node.@"else") |else_node| {
                 if (nodeContainsSourceIndex(tree, else_node.body, source_index)) {
                     if (else_node.payload) |payload| {
-                        try declsFromIndexInternal(decls, tree, payload, container, source_index);
+                        try declsFromIndexInternal(arena, decls, tree, payload, container, source_index);
                     }
-                    return try declsFromIndexInternal(decls, tree, else_node.body, container, source_index);
+                    return try declsFromIndexInternal(arena, decls, tree, else_node.body, container, source_index);
                 }
             }
         },
         .For => {
             const for_node = node.cast(ast.Node.For).?;
             if (nodeContainsSourceIndex(tree, for_node.body, source_index)) {
-                try declsFromIndexInternal(decls, tree, for_node.payload, container, source_index);
-                return try declsFromIndexInternal(decls, tree, for_node.body, container, source_index);
+                try declsFromIndexInternal(arena, decls, tree, for_node.payload, container, source_index);
+                return try declsFromIndexInternal(arena, decls, tree, for_node.body, container, source_index);
             }
 
             if (for_node.@"else") |else_node| {
                 if (nodeContainsSourceIndex(tree, else_node.body, source_index)) {
                     if (else_node.payload) |payload| {
-                        try declsFromIndexInternal(decls, tree, payload, container, source_index);
+                        try declsFromIndexInternal(arena, decls, tree, payload, container, source_index);
                     }
-                    return try declsFromIndexInternal(decls, tree, else_node.body, container, source_index);
+                    return try declsFromIndexInternal(arena, decls, tree, else_node.body, container, source_index);
                 }
             }
         },
         .Switch => {
             const switch_node = node.cast(ast.Node.Switch).?;
-            var case_it = switch_node.cases.iterator(0);
-            while (case_it.next()) |case| {
+            for (switch_node.casesConst()) |case| {
                 const case_node = case.*.cast(ast.Node.SwitchCase).?;
                 if (nodeContainsSourceIndex(tree, case_node.expr, source_index)) {
                     if (case_node.payload) |payload| {
-                        try declsFromIndexInternal(decls, tree, payload, container, source_index);
+                        try declsFromIndexInternal(arena, decls, tree, payload, container, source_index);
                     }
-                    return try declsFromIndexInternal(decls, tree, case_node.expr, container, source_index);
+                    return try declsFromIndexInternal(arena, decls, tree, case_node.expr, container, source_index);
                 }
             }
         },
@@ -705,61 +703,60 @@ pub fn declsFromIndexInternal(
             try decls.append(node);
             if (node.cast(ast.Node.VarDecl).?.init_node) |child| {
                 if (nodeContainsSourceIndex(tree, child, source_index)) {
-                    try declsFromIndexInternal(decls, tree, child, container, source_index);
+                    try declsFromIndexInternal(arena, decls, tree, child, container, source_index);
                 }
             }
         },
-        .ParamDecl => try decls.append(node),
         else => {},
     }
 }
 
 pub fn addChildrenNodes(decls: *std.ArrayList(*ast.Node), tree: *ast.Tree, node: *ast.Node) !void {
-    var index: usize = 0;
-    while (node.iterate(index)) |child_node| : (index += 1) {
+    var node_idx: usize = 0;
+    while (node.iterate(node_idx)) |child_node| : (node_idx += 1) {
         try decls.append(child_node);
     }
 }
 
-pub fn declsFromIndex(decls: *std.ArrayList(*ast.Node), tree: *ast.Tree, source_index: usize) !*ast.Node {
+pub fn declsFromIndex(arena: *std.heap.ArenaAllocator, decls: *std.ArrayList(*ast.Node), tree: *ast.Tree, source_index: usize) !*ast.Node {
     var result = &tree.root_node.base;
-    try declsFromIndexInternal(decls, tree, &tree.root_node.base, &result, source_index);
+    try declsFromIndexInternal(arena, decls, tree, &tree.root_node.base, &result, source_index);
     return result;
 }
 
 fn nodeContainsSourceIndex(tree: *ast.Tree, node: *ast.Node, source_index: usize) bool {
-    const first_token = tree.tokens.at(node.firstToken());
-    const last_token = tree.tokens.at(node.lastToken());
+    const first_token = tree.token_locs[node.firstToken()];
+    const last_token = tree.token_locs[node.lastToken()];
     return source_index >= first_token.start and source_index <= last_token.end;
 }
 
 fn nodeComesAfterSourceIndex(tree: *ast.Tree, node: *ast.Node, source_index: usize) bool {
-    const first_token = tree.tokens.at(node.firstToken());
-    const last_token = tree.tokens.at(node.lastToken());
+    const first_token = tree.token_locs[node.firstToken()];
+    const last_token = tree.token_locs[node.lastToken()];
     return source_index < first_token.start;
 }
 
 pub fn getImportStr(tree: *ast.Tree, source_index: usize) ?[]const u8 {
     var node = &tree.root_node.base;
-    var index: usize = 0;
-    while (node.iterate(index)) |child| {
+
+    var child_idx: usize = 0;
+    while (node.iterate(child_idx)) |child| : (child_idx += 1) {
         if (!nodeContainsSourceIndex(tree, child, source_index)) {
-            index += 1;
             continue;
         }
         if (child.cast(ast.Node.BuiltinCall)) |builtin_call| blk: {
             const call_name = tree.tokenSlice(builtin_call.builtin_token);
 
             if (!std.mem.eql(u8, call_name, "@import")) break :blk;
-            if (builtin_call.params.len != 1) break :blk;
+            if (builtin_call.params_len != 1) break :blk;
 
-            const import_param = builtin_call.params.at(0).*;
+            const import_param = builtin_call.paramsConst()[0];
             const import_str_node = import_param.cast(ast.Node.StringLiteral) orelse break :blk;
             const import_str = tree.tokenSlice(import_str_node.token);
             return import_str[1 .. import_str.len - 1];
         }
         node = child;
-        index = 0;
+        child_idx = 0;
     }
     return null;
 }

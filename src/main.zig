@@ -100,8 +100,7 @@ fn publishDiagnostics(handle: DocumentStore.Handle, config: Config) !void {
 
     var diagnostics = std.ArrayList(types.Diagnostic).init(&arena.allocator);
 
-    var error_it = tree.errors.iterator(0);
-    while (error_it.next()) |err| {
+    for (tree.errors) |*err| {
         const loc = tree.tokenLocation(0, err.loc());
 
         var mem_buffer: [256]u8 = undefined;
@@ -119,9 +118,7 @@ fn publishDiagnostics(handle: DocumentStore.Handle, config: Config) !void {
     }
 
     if (tree.errors.len == 0) {
-        var decls = tree.root_node.decls.iterator(0);
-        while (decls.next()) |decl_ptr| {
-            var decl = decl_ptr.*;
+        for (tree.root_node.decls()) |decl| {
             switch (decl.id) {
                 .FnProto => blk: {
                     const func = decl.cast(std.zig.ast.Node.FnProto).?;
@@ -179,8 +176,8 @@ fn containerToCompletion(
     container: *std.zig.ast.Node,
     config: Config,
 ) !void {
-    var index: usize = 0;
-    while (container.iterate(index)) |child_node| : (index += 1) {
+    var child_idx: usize = 0;
+    while (container.iterate(child_idx)) |child_node| : (child_idx += 1) {
         // Declarations in the same file do not need to be public.
         if (orig_handle == analysis_ctx.handle or analysis.isNodePublic(analysis_ctx.tree, child_node)) {
             try nodeToCompletion(list, analysis_ctx, orig_handle, child_node, config);
@@ -229,7 +226,7 @@ fn nodeToCompletion(
         },
         .VarDecl => {
             const var_decl = node.cast(std.zig.ast.Node.VarDecl).?;
-            const is_const = analysis_ctx.tree.tokens.at(var_decl.mut_token).id == .Keyword_const;
+            const is_const = analysis_ctx.tree.token_ids[var_decl.mut_token] == .Keyword_const;
 
             var child_analysis_context = try analysis_ctx.clone();
             defer child_analysis_context.deinit();
@@ -258,16 +255,6 @@ fn nodeToCompletion(
                 .documentation = doc,
                 .detail = analysis.getVariableSignature(analysis_ctx.tree, var_decl),
             });
-        },
-        .ParamDecl => {
-            const param = node.cast(std.zig.ast.Node.ParamDecl).?;
-            if (param.name_token) |name_token|
-                try list.append(.{
-                    .label = analysis_ctx.tree.tokenSlice(name_token),
-                    .kind = .Constant,
-                    .documentation = doc,
-                    .detail = analysis.getParamSignature(analysis_ctx.tree, param),
-                });
         },
         .PrefixOp => {
             try list.append(.{
@@ -325,7 +312,7 @@ fn gotoDefinitionGlobal(id: i64, pos_index: usize, handle: DocumentStore.Handle)
     defer arena.deinit();
 
     var decl_nodes = std.ArrayList(*std.zig.ast.Node).init(&arena.allocator);
-    _ = try analysis.declsFromIndex(&decl_nodes, tree, pos_index);
+    _ = try analysis.declsFromIndex(&arena, &decl_nodes, tree, pos_index);
 
     const decl = analysis.getChildOfSlice(tree, decl_nodes.items, name) orelse return try respondGeneric(id, null_result_response);
     const name_token = analysis.getDeclNameToken(tree, decl) orelse unreachable;
