@@ -266,6 +266,16 @@ pub const AnalysisContext = struct {
         self.in_container = &self.tree.root_node.base;
     }
 
+    pub fn onContainer(self: *AnalysisContext, container: *std.zig.ast.Node.ContainerDecl) !void {
+        if (self.in_container != &container.base) {
+            self.in_container = &container.base;
+
+            var scope_nodes = std.ArrayList(*std.zig.ast.Node).init(&self.arena.allocator);
+            try analysis.addChildrenNodes(&scope_nodes, self.tree, &container.base);
+            self.scope_nodes = scope_nodes.items;
+        }
+    }
+
     pub fn onImport(self: *AnalysisContext, import_str: []const u8) !?*std.zig.ast.Node {
         const allocator = self.store.allocator;
         const final_uri = (try uriFromImportStr(

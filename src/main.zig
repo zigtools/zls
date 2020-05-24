@@ -180,7 +180,7 @@ fn containerToCompletion(
     while (container.iterate(child_idx)) |child_node| : (child_idx += 1) {
         // Declarations in the same file do not need to be public.
         if (orig_handle == analysis_ctx.handle or analysis.isNodePublic(analysis_ctx.tree, child_node)) {
-            try nodeToCompletion(list, analysis_ctx, orig_handle, child_node, container, config);
+            try nodeToCompletion(list, analysis_ctx, orig_handle, child_node, config);
         }
     }
 }
@@ -190,7 +190,6 @@ fn nodeToCompletion(
     analysis_ctx: *DocumentStore.AnalysisContext,
     orig_handle: *DocumentStore.Handle,
     node: *std.zig.ast.Node,
-    current_container: *std.zig.ast.Node,
     config: Config,
 ) error{OutOfMemory}!void {
     var doc = if (try analysis.getDocComments(list.allocator, analysis_ctx.tree, node)) |doc_comments|
@@ -242,11 +241,11 @@ fn nodeToCompletion(
                 break :block var_decl.init_node.?;
             };
 
-            if (analysis.resolveTypeOfNode(&child_analysis_context, child_node, current_container)) |resolved_node| {
+            if (analysis.resolveTypeOfNode(&child_analysis_context, child_node)) |resolved_node| {
                 // Special case for function aliases
                 // In the future it might be used to print types of values instead of their declarations
                 if (resolved_node.id == .FnProto) {
-                    try nodeToCompletion(list, &child_analysis_context, orig_handle, resolved_node, current_container, config);
+                    try nodeToCompletion(list, &child_analysis_context, orig_handle, resolved_node, config);
                     return;
                 }
             }
@@ -421,7 +420,7 @@ fn completeGlobal(id: i64, pos_index: usize, handle: *DocumentStore.Handle, conf
 
     for (analysis_ctx.scope_nodes) |decl_ptr| {
         var decl = decl_ptr.*;
-        try nodeToCompletion(&completions, &analysis_ctx, handle, decl_ptr, &analysis_ctx.tree.root_node.base, config);
+        try nodeToCompletion(&completions, &analysis_ctx, handle, decl_ptr, config);
     }
 
     try send(types.Response{
@@ -449,7 +448,7 @@ fn completeFieldAccess(id: i64, handle: *DocumentStore.Handle, position: types.P
     const line_length = line.len - line_start_idx;
 
     if (analysis.getFieldAccessTypeNode(&analysis_ctx, &tokenizer, line_length)) |node| {
-        try nodeToCompletion(&completions, &analysis_ctx, handle, node, node, config);
+        try nodeToCompletion(&completions, &analysis_ctx, handle, node, config);
     }
     try send(types.Response{
         .id = .{ .Integer = id },
@@ -540,6 +539,11 @@ fn documentPositionContext(doc: types.TextDocument, pos_index: usize) PositionCo
     // and determine the context.
     curr_position = 0;
     var expr_start: usize = skipped_ws;
+
+    // std.debug.warn("{}", .{curr_position});
+
+    if (pos_index != 0 and doc.text[pos_index - 1] == ')')
+        return .{ .field_access = expr_start };
 
     var new_token = true;
     var context: PositionContext = .other;
@@ -699,6 +703,12 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
     std.debug.assert(root.Object.getValue("method") != null);
     const method = root.Object.getValue("method").?.String;
     const params = root.Object.getValue("params").?.Object;
+
+    const start_time = std.time.milliTimestamp();
+    defer {
+        const end_time = std.time.milliTimestamp();
+        std.debug.warn("Took {}ms to process method {}\n", .{end_time - start_time, method});
+    }
 
     // Core
     if (std.mem.eql(u8, method, "initialize")) {
