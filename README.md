@@ -59,6 +59,24 @@ The following options are currently available.
 
 Install the `zls-vscode` extension from [here](https://github.com/zigtools/zls-vscode/releases).
 
+### Sublime Text 3
+
+- Install the `LSP` package from [here](https://github.com/sublimelsp/LSP/releases) or via Package Control.
+- Add this snippet to `LSP's` user settings:
+```json
+{
+    "clients": {
+        "zig":{
+            "command": ["zls"],
+            "enabled": true,
+            "languageId": "zig",
+            "document_selector": "source.zig",
+            "syntaxes": ["Packages/Zig/Syntaxes/Zig.tmLanguage"]
+        }
+    }
+}
+```
+
 ## Related Projects
 - [`sublime-zig-language` by @prime31](https://github.com/prime31/sublime-zig-language)
   - Supports basic language features
