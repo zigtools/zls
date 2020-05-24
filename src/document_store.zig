@@ -273,7 +273,7 @@ pub const AnalysisContext = struct {
         if (self.in_container != &container.base) {
             self.in_container = &container.base;
 
-            var scope_nodes = std.ArrayList(*std.zig.ast.Node).init(&self.arena.allocator);
+            var scope_nodes = std.ArrayList(*std.zig.ast.Node).fromOwnedSlice(&self.arena.allocator, self.scope_nodes);
             try analysis.addChildrenNodes(&scope_nodes, self.tree(), &container.base);
             self.scope_nodes = scope_nodes.items;
         }
