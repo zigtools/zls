@@ -234,7 +234,12 @@ pub fn getChildOfSlice(tree: *ast.Tree, nodes: []*ast.Node, name: []const u8) ?*
     return null;
 }
 
-fn findReturnStatementInternal(base_node: *ast.Node, already_found: *bool) ?*ast.Node.ControlFlowExpression {
+fn findReturnStatementInternal(
+    tree: *ast.Tree,
+    fn_decl: *ast.Node.FnProto,
+    base_node: *ast.Node,
+    already_found: *bool,
+) ?*ast.Node.ControlFlowExpression {
     var result: ?*ast.Node.ControlFlowExpression = null;
     var idx: usize = 0;
     while (base_node.iterate(idx)) |child_node| : (idx += 1) {
@@ -242,6 +247,19 @@ fn findReturnStatementInternal(base_node: *ast.Node, already_found: *bool) ?*ast
             .ControlFlowExpression => {
                 const cfe = child_node.cast(ast.Node.ControlFlowExpression).?;
                 if (cfe.kind == .Return) {
+                    // If we are calling ourselves recursively, ignore this return.
+                    if (cfe.rhs) |rhs| {
+                        if (rhs.cast(ast.Node.SuffixOp)) |suffix_op| {
+                            if (suffix_op.op == .Call) {
+                                if (suffix_op.lhs.node.id == .Identifier) {
+                                    if (std.mem.eql(u8, getDeclName(tree, suffix_op.lhs.node).?, getDeclName(tree, &fn_decl.base).?)) {
+                                        continue;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     if (already_found.*) return null;
                     already_found.* = true;
                     result = cfe;
@@ -251,25 +269,28 @@ fn findReturnStatementInternal(base_node: *ast.Node, already_found: *bool) ?*ast
             else => {},
         }
 
-        result = findReturnStatementInternal(child_node, already_found);
+        result = findReturnStatementInternal(tree, fn_decl, child_node, already_found);
     }
     return result;
 }
 
-fn findReturnStatement(base_node: *ast.Node) ?*ast.Node.ControlFlowExpression {
+fn findReturnStatement(tree: *ast.Tree, fn_decl: *ast.Node.FnProto) ?*ast.Node.ControlFlowExpression {
     var already_found = false;
-    return findReturnStatementInternal(base_node, &already_found);
+    return findReturnStatementInternal(tree, fn_decl, fn_decl.body_node.?, &already_found);
 }
 
 /// Resolves the return type of a function
-fn resolveReturnType(analysis_ctx: *AnalysisContext, fn_decl: *ast.Node.FnProto, current_container: *ast.Node) ?*ast.Node {
+fn resolveReturnType(analysis_ctx: *AnalysisContext, fn_decl: *ast.Node.FnProto) ?*ast.Node {
     if (isTypeFunction(analysis_ctx.tree, fn_decl) and fn_decl.body_node != null) {
         // If this is a type function and it only contains a single return statement that returns
         // a container declaration, we will return that declaration.
-        const ret = findReturnStatement(fn_decl.body_node.?) orelse return null;
+        const ret = findReturnStatement(analysis_ctx.tree, fn_decl) orelse return null;
         if (ret.rhs) |rhs|
-            if (resolveTypeOfNode(analysis_ctx, rhs, current_container)) |res_rhs| switch (res_rhs.id) {
-                .ContainerDecl => return res_rhs,
+            if (resolveTypeOfNode(analysis_ctx, rhs)) |res_rhs| switch (res_rhs.id) {
+                .ContainerDecl => {
+                    analysis_ctx.onContainer(res_rhs.cast(ast.Node.ContainerDecl).?) catch return null;
+                    return res_rhs;
+                },
                 else => return null,
             };
 
@@ -277,44 +298,44 @@ fn resolveReturnType(analysis_ctx: *AnalysisContext, fn_decl: *ast.Node.FnProto,
     }
 
     return switch (fn_decl.return_type) {
-        .Explicit, .InferErrorSet => |return_type| resolveTypeOfNode(analysis_ctx, return_type, current_container),
+        .Explicit, .InferErrorSet => |return_type| resolveTypeOfNode(analysis_ctx, return_type),
         .Invalid => null,
     };
 }
 
 /// Resolves the type of a node
-pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node, current_container: *ast.Node) ?*ast.Node {
+pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.Node {
     switch (node.id) {
         .VarDecl => {
             const vari = node.cast(ast.Node.VarDecl).?;
 
-            return resolveTypeOfNode(analysis_ctx, vari.type_node orelse vari.init_node.?, current_container) orelse null;
+            return resolveTypeOfNode(analysis_ctx, vari.type_node orelse vari.init_node.?) orelse null;
         },
         .ParamDecl => {
             const decl = node.cast(ast.Node.ParamDecl).?;
             switch (decl.param_type) {
                 .var_type, .type_expr => |var_type| {
-                    return resolveTypeOfNode(analysis_ctx, var_type, current_container) orelse null;
+                    return resolveTypeOfNode(analysis_ctx, var_type) orelse null;
                 },
                 else => {},
             }
         },
         .Identifier => {
             if (getChildOfSlice(analysis_ctx.tree, analysis_ctx.scope_nodes, analysis_ctx.tree.getNodeSource(node))) |child| {
-                return resolveTypeOfNode(analysis_ctx, child, current_container);
+                return resolveTypeOfNode(analysis_ctx, child);
             } else return null;
         },
         .ContainerField => {
             const field = node.cast(ast.Node.ContainerField).?;
-            return resolveTypeOfNode(analysis_ctx, field.type_expr orelse return null, current_container);
+            return resolveTypeOfNode(analysis_ctx, field.type_expr orelse return null);
         },
         .SuffixOp => {
             const suffix_op = node.cast(ast.Node.SuffixOp).?;
             switch (suffix_op.op) {
                 .Call, .StructInitializer => {
-                    const decl = resolveTypeOfNode(analysis_ctx, suffix_op.lhs.node, current_container) orelse return null;
+                    const decl = resolveTypeOfNode(analysis_ctx, suffix_op.lhs.node) orelse return null;
                     return switch (decl.id) {
-                        .FnProto => resolveReturnType(analysis_ctx, decl.cast(ast.Node.FnProto).?, current_container),
+                        .FnProto => resolveReturnType(analysis_ctx, decl.cast(ast.Node.FnProto).?),
                         else => decl,
                     };
                 },
@@ -330,9 +351,9 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node, curren
                     var rhs_str = nodeToString(analysis_ctx.tree, infix_op.rhs) orelse return null;
                     // Use the analysis context temporary arena to store the rhs string.
                     rhs_str = std.mem.dupe(&analysis_ctx.arena.allocator, u8, rhs_str) catch return null;
-                    const left = resolveTypeOfNode(analysis_ctx, infix_op.lhs, current_container) orelse return null;
+                    const left = resolveTypeOfNode(analysis_ctx, infix_op.lhs) orelse return null;
                     const child = getChild(analysis_ctx.tree, left, rhs_str) orelse return null;
-                    return resolveTypeOfNode(analysis_ctx, child, current_container);
+                    return resolveTypeOfNode(analysis_ctx, child);
                 },
                 else => {},
             }
@@ -344,13 +365,13 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node, curren
                 .PtrType => {
                     const op_token = analysis_ctx.tree.tokens.at(prefix_op.op_token);
                     switch (op_token.id) {
-                        .Asterisk => return resolveTypeOfNode(analysis_ctx, prefix_op.rhs, current_container),
+                        .Asterisk => return resolveTypeOfNode(analysis_ctx, prefix_op.rhs),
                         .LBracket, .AsteriskAsterisk => return null,
                         else => unreachable,
                     }
                 },
                 .Try => {
-                    const rhs_type = resolveTypeOfNode(analysis_ctx, prefix_op.rhs, current_container) orelse return null;
+                    const rhs_type = resolveTypeOfNode(analysis_ctx, prefix_op.rhs) orelse return null;
                     switch (rhs_type.id) {
                         .InfixOp => {
                             const infix_op = rhs_type.cast(ast.Node.InfixOp).?;
@@ -368,7 +389,7 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node, curren
             const call_name = analysis_ctx.tree.tokenSlice(builtin_call.builtin_token);
             if (std.mem.eql(u8, call_name, "@This")) {
                 if (builtin_call.params.len != 0) return null;
-                return current_container;
+                return analysis_ctx.in_container;
             }
 
             if (!std.mem.eql(u8, call_name, "@import")) return null;
@@ -383,7 +404,10 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node, curren
                 break :block null;
             };
         },
-        .ContainerDecl => return node,
+        .ContainerDecl => {
+            analysis_ctx.onContainer(node.cast(ast.Node.ContainerDecl).?) catch return null;
+            return node;
+        },
         .MultilineStringLiteral, .StringLiteral, .ErrorSetDecl, .FnProto => return node,
         else => std.debug.warn("Type resolution case not implemented; {}\n", .{node.id}),
     }
@@ -437,6 +461,7 @@ pub fn getFieldAccessTypeNode(
     line_length: usize,
 ) ?*ast.Node {
     var current_node = analysis_ctx.in_container;
+    var current_container = analysis_ctx.in_container;
 
     while (true) {
         var next = tokenizer.next();
@@ -444,7 +469,7 @@ pub fn getFieldAccessTypeNode(
             .Eof => return current_node,
             .Identifier => {
                 if (getChildOfSlice(analysis_ctx.tree, analysis_ctx.scope_nodes, tokenizer.buffer[next.start..next.end])) |child| {
-                    if (resolveTypeOfNode(analysis_ctx, child, current_node)) |node_type| {
+                    if (resolveTypeOfNode(analysis_ctx, child)) |node_type| {
                         current_node = node_type;
                     } else return null;
                 } else return null;
@@ -458,7 +483,7 @@ pub fn getFieldAccessTypeNode(
                     if (after_period.end == line_length) return current_node;
 
                     if (getChild(analysis_ctx.tree, current_node, tokenizer.buffer[after_period.start..after_period.end])) |child| {
-                        if (resolveTypeOfNode(analysis_ctx, child, current_node)) |child_type| {
+                        if (resolveTypeOfNode(analysis_ctx, child)) |child_type| {
                             current_node = child_type;
                         } else return null;
                     } else return null;
@@ -468,16 +493,39 @@ pub fn getFieldAccessTypeNode(
                 switch (current_node.id) {
                     .FnProto => {
                         const func = current_node.cast(ast.Node.FnProto).?;
-                        if (resolveReturnType(analysis_ctx, func, current_node)) |ret| {
+                        if (resolveReturnType(analysis_ctx, func)) |ret| {
                             current_node = ret;
+                            // Skip to the right paren
+                            var paren_count: usize = 1;
+                            next = tokenizer.next();
+                            while (next.id != .Eof) : (next = tokenizer.next()) {
+                                if (next.id == .RParen) {
+                                    paren_count -= 1;
+                                    if (paren_count == 0) break;
+                                } else if (next.id == .LParen) {
+                                    paren_count += 1;
+                                }
+                            } else return null;
                         } else {
                             return null;
                         }
                     },
-                    else => {}
+                    else => {},
+                }
+            },
+            .Keyword_const, .Keyword_var => {
+                next = tokenizer.next();
+                if (next.id == .Identifier) {
+                    next = tokenizer.next();
+                    if (next.id != .Equal) return null;
+                    continue;
                 }
             },
             else => std.debug.warn("Not implemented; {}\n", .{next.id}),
+        }
+
+        if (current_node.id == .ContainerDecl or current_node.id == .Root) {
+            current_container = current_node;
         }
     }
 
