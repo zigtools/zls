@@ -256,17 +256,6 @@ fn nodeToCompletion(
                 .detail = analysis.getVariableSignature(analysis_ctx.tree, var_decl),
             });
         },
-        // @TODO: No more ParamDecl node.
-        // .ParamDecl => {
-        //     const param = node.cast(std.zig.ast.Node.ParamDecl).?;
-        //     if (param.name_token) |name_token|
-        //         try list.append(.{
-        //             .label = analysis_ctx.tree.tokenSlice(name_token),
-        //             .kind = .Constant,
-        //             .documentation = doc,
-        //             .detail = analysis.getParamSignature(analysis_ctx.tree, param),
-        //         });
-        // },
         .PrefixOp => {
             try list.append(.{
                 .label = "len",
@@ -323,7 +312,7 @@ fn gotoDefinitionGlobal(id: i64, pos_index: usize, handle: DocumentStore.Handle)
     defer arena.deinit();
 
     var decl_nodes = std.ArrayList(*std.zig.ast.Node).init(&arena.allocator);
-    _ = try analysis.declsFromIndex(&decl_nodes, tree, pos_index);
+    _ = try analysis.declsFromIndex(&arena, &decl_nodes, tree, pos_index);
 
     const decl = analysis.getChildOfSlice(tree, decl_nodes.items, name) orelse return try respondGeneric(id, null_result_response);
     const name_token = analysis.getDeclNameToken(tree, decl) orelse unreachable;

@@ -402,7 +402,7 @@ pub fn analysisContext(
     const tree = try handle.tree(self.allocator);
 
     var scope_nodes = std.ArrayList(*std.zig.ast.Node).init(&arena.allocator);
-    const in_container = try analysis.declsFromIndex(&scope_nodes, tree, position);
+    const in_container = try analysis.declsFromIndex(arena, &scope_nodes, tree, position);
 
     const std_uri = try stdUriFromLibPath(&arena.allocator, zig_lib_path);
     return AnalysisContext{
