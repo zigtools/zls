@@ -9,14 +9,10 @@ pub const Handle = struct {
     document: types.TextDocument,
     count: usize,
     import_uris: std.ArrayList([]const u8),
+    tree: *std.zig.ast.Tree,
 
     pub fn uri(handle: Handle) []const u8 {
         return handle.document.uri;
-    }
-
-    /// Returns a zig AST, with all its errors.
-    pub fn tree(handle: Handle, allocator: *std.mem.Allocator) !*std.zig.ast.Tree {
-        return try std.zig.parse(allocator, handle.document.text);
     }
 };
 
@@ -45,9 +41,11 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: []u8) !*Handle {
             .text = text,
             .mem = text,
         },
+        .tree = try std.zig.parse(self.allocator, text),
     };
-    const kv = try self.handles.getOrPutValue(uri, handle);
-    return kv.value;
+
+    try self.handles.putNoClobber(uri, handle);
+    return handle;
 }
 
 pub fn openDocument(self: *DocumentStore, uri: []const u8, text: []const u8) !*Handle {
@@ -73,6 +71,8 @@ fn decrementCount(self: *DocumentStore, uri: []const u8) void {
             return;
 
         std.debug.warn("Freeing document: {}\n", .{uri});
+
+        entry.value.tree.deinit();
         self.allocator.free(entry.value.document.mem);
 
         for (entry.value.import_uris.items) |import_uri| {
@@ -102,8 +102,11 @@ pub fn getHandle(self: *DocumentStore, uri: []const u8) ?*Handle {
 }
 
 // Check if the document text is now sane, move it to sane_text if so.
-fn removeOldImports(self: *DocumentStore, handle: *Handle, zig_lib_path: ?[]const u8) !void {
+fn refreshDocument(self: *DocumentStore, handle: *Handle, zig_lib_path: ?[]const u8) !void {
     std.debug.warn("New text for document {}\n", .{handle.uri()});
+    handle.tree.deinit();
+    handle.tree = try std.zig.parse(self.allocator, handle.document.text);
+
     // TODO: Better algorithm or data structure?
     // Removing the imports is costly since they live in an array list
     // Perhaps we should use an AutoHashMap([]const u8, {}) ?
@@ -111,14 +114,11 @@ fn removeOldImports(self: *DocumentStore, handle: *Handle, zig_lib_path: ?[]cons
     // Try to detect removed imports and decrement their counts.
     if (handle.import_uris.items.len == 0) return;
 
-    const tree = try handle.tree(self.allocator);
-    defer tree.deinit();
-
     var arena = std.heap.ArenaAllocator.init(self.allocator);
     defer arena.deinit();
 
     var import_strs = std.ArrayList([]const u8).init(&arena.allocator);
-    try analysis.collectImports(&import_strs, tree);
+    try analysis.collectImports(&import_strs, handle.tree);
 
     const still_exist = try arena.allocator.alloc(bool, handle.import_uris.items.len);
     for (still_exist) |*ex| {
@@ -150,7 +150,7 @@ fn removeOldImports(self: *DocumentStore, handle: *Handle, zig_lib_path: ?[]cons
         const uri = handle.import_uris.orderedRemove(idx - offset);
         offset += 1;
 
-        self.closeDocument(uri);
+        self.decrementCount(uri);
         self.allocator.free(uri);
     }
 }
@@ -213,7 +213,7 @@ pub fn applyChanges(
         }
     }
 
-    try self.removeOldImports(handle, zig_lib_path);
+    try self.refreshDocument(handle, zig_lib_path);
 }
 
 pub fn uriFromImportStr(
@@ -254,16 +254,19 @@ pub const AnalysisContext = struct {
     // This arena is used for temporary allocations while analyzing,
     // not for the tree allocations.
     arena: *std.heap.ArenaAllocator,
-    tree: *std.zig.ast.Tree,
     scope_nodes: []*std.zig.ast.Node,
     in_container: *std.zig.ast.Node,
     std_uri: ?[]const u8,
 
+    pub fn tree(self: AnalysisContext) *std.zig.ast.Tree {
+        return self.handle.tree;
+    }
+
     fn refreshScopeNodes(self: *AnalysisContext) !void {
         var scope_nodes = std.ArrayList(*std.zig.ast.Node).init(&self.arena.allocator);
-        try analysis.addChildrenNodes(&scope_nodes, self.tree, &self.tree.root_node.base);
+        try analysis.addChildrenNodes(&scope_nodes, self.tree(), &self.tree().root_node.base);
         self.scope_nodes = scope_nodes.items;
-        self.in_container = &self.tree.root_node.base;
+        self.in_container = &self.tree().root_node.base;
     }
 
     pub fn onContainer(self: *AnalysisContext, container: *std.zig.ast.Node.ContainerDecl) !void {
@@ -271,7 +274,7 @@ pub const AnalysisContext = struct {
             self.in_container = &container.base;
 
             var scope_nodes = std.ArrayList(*std.zig.ast.Node).init(&self.arena.allocator);
-            try analysis.addChildrenNodes(&scope_nodes, self.tree, &container.base);
+            try analysis.addChildrenNodes(&scope_nodes, self.tree(), &container.base);
             self.scope_nodes = scope_nodes.items;
         }
     }
@@ -295,11 +298,8 @@ pub const AnalysisContext = struct {
             // If we did, set our new handle and return the parsed tree root node.
             if (std.mem.eql(u8, uri, final_uri)) {
                 self.handle = self.store.getHandle(final_uri) orelse return null;
-
-                self.tree.deinit();
-                self.tree = try self.handle.tree(allocator);
                 try self.refreshScopeNodes();
-                return &self.tree.root_node.base;
+                return &self.tree().root_node.base;
             }
         }
 
@@ -309,11 +309,8 @@ pub const AnalysisContext = struct {
             // If it is, increment the count, set our new handle and return the parsed tree root node.
             new_handle.count += 1;
             self.handle = new_handle;
-
-            self.tree.deinit();
-            self.tree = try self.handle.tree(allocator);
             try self.refreshScopeNodes();
-            return &self.tree.root_node.base;
+            return &self.tree().root_node.base;
         }
 
         // New document, read the file then call into openDocument.
@@ -341,37 +338,26 @@ pub const AnalysisContext = struct {
             try self.handle.import_uris.append(final_uri);
             consumed_final_uri = true;
 
-            // Swap handles and get new tree.
+            // Swap handles.
             // This takes ownership of the passed uri and text.
             const duped_final_uri = try std.mem.dupe(allocator, u8, final_uri);
             errdefer allocator.free(duped_final_uri);
             self.handle = try newDocument(self.store, duped_final_uri, file_contents);
         }
 
-        // Free old tree, add new one if it exists.
-        // If we return null, no one should access the tree.
-        self.tree.deinit();
-        self.tree = try self.handle.tree(allocator);
         try self.refreshScopeNodes();
-        return &self.tree.root_node.base;
+        return &self.tree().root_node.base;
     }
 
-    pub fn clone(self: *AnalysisContext) !AnalysisContext {
-        // Create a new tree so it can be destroyed by the cloned AnalysisContext without affecting the original
-        const tree = try self.handle.tree(self.store.allocator);
+    pub fn clone(self: *AnalysisContext) AnalysisContext {
         return AnalysisContext{
             .store = self.store,
             .handle = self.handle,
             .arena = self.arena,
-            .tree = tree,
             .scope_nodes = self.scope_nodes,
             .in_container = self.in_container,
             .std_uri = self.std_uri,
         };
-    }
-
-    pub fn deinit(self: *AnalysisContext) void {
-        self.tree.deinit();
     }
 };
 
@@ -399,17 +385,14 @@ pub fn analysisContext(
     position: usize,
     zig_lib_path: ?[]const u8,
 ) !AnalysisContext {
-    const tree = try handle.tree(self.allocator);
-
     var scope_nodes = std.ArrayList(*std.zig.ast.Node).init(&arena.allocator);
-    const in_container = try analysis.declsFromIndex(arena, &scope_nodes, tree, position);
+    const in_container = try analysis.declsFromIndex(arena, &scope_nodes, handle.tree, position);
 
     const std_uri = try stdUriFromLibPath(&arena.allocator, zig_lib_path);
     return AnalysisContext{
         .store = self,
         .handle = handle,
         .arena = arena,
-        .tree = tree,
         .scope_nodes = scope_nodes.items,
         .in_container = in_container,
         .std_uri = std_uri,
