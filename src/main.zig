@@ -543,6 +543,11 @@ fn documentPositionContext(doc: types.TextDocument, pos_index: usize) PositionCo
     curr_position = 0;
     var expr_start: usize = skipped_ws;
 
+    // std.debug.warn("{}", .{curr_position});
+
+    if (pos_index != 0 and doc.text[pos_index - 1] == ')')
+        return .{ .field_access = expr_start };
+
     var new_token = true;
     var context: PositionContext = .other;
     var string_pop_ctx: PositionContext = .other;
@@ -790,6 +795,8 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
         if (pos.character >= 0) {
             const pos_index = try handle.document.positionToIndex(pos);
             const pos_context = documentPositionContext(handle.document, pos_index);
+
+            std.debug.warn("{}", .{pos_context});
 
             const this_config = configFromUriOr(uri, config);
             switch (pos_context) {

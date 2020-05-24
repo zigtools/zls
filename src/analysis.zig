@@ -464,6 +464,19 @@ pub fn getFieldAccessTypeNode(
                     } else return null;
                 }
             },
+            .LParen => {
+                switch (current_node.id) {
+                    .FnProto => {
+                        const func = current_node.cast(ast.Node.FnProto).?;
+                        if (resolveReturnType(analysis_ctx, func, current_node)) |ret| {
+                            current_node = ret;
+                        } else {
+                            return null;
+                        }
+                    },
+                    else => {}
+                }
+            },
             else => std.debug.warn("Not implemented; {}\n", .{next.id}),
         }
     }
