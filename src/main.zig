@@ -687,7 +687,7 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
     const start_time = std.time.milliTimestamp();
     defer {
         const end_time = std.time.milliTimestamp();
-        std.debug.warn("Took {}ms to process method {}\n", .{end_time - start_time, method});
+        std.debug.warn("Took {}ms to process method {}\n", .{ end_time - start_time, method });
     }
 
     // Core
@@ -870,7 +870,8 @@ pub fn main() anyerror!void {
     defer std.json.parseFree(Config, config, config_parse_options);
 
     config_read: {
-        const known_folders = @import("known-folders/known-folders.zig");
+        const known_folders = @import("known-folders");
+
         const res = try known_folders.getPath(allocator, .local_configuration);
         if (res) |local_config_path| {
             defer allocator.free(local_config_path);
@@ -880,15 +881,59 @@ pub fn main() anyerror!void {
             }
         }
 
-        var exec_dir_bytes: [std.fs.MAX_PATH_BYTES]u8 = undefined;
-        const exec_dir_path = std.fs.selfExeDirPath(&exec_dir_bytes) catch break :config_read;
+        var exe_dir_bytes: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+        const exe_dir_path = std.fs.selfExeDirPath(&exe_dir_bytes) catch break :config_read;
 
-        if (loadConfig(exec_dir_path)) |conf| {
+        if (loadConfig(exe_dir_path)) |conf| {
             config = conf;
         }
     }
 
-    try document_store.init(allocator);
+    // Find the zig executable in PATH
+    var has_zig = false;
+
+    // TODO: Should we just spawn a child process that calls "zig version" or something
+    // and check that way?
+    find_zig: {
+        const env_path = std.process.getEnvVarOwned(allocator, "PATH") catch |err| switch (err) {
+            error.EnvironmentVariableNotFound => {
+                std.debug.warn("Could not get PATH.\n", .{});
+                break :find_zig;
+            },
+            else => return err,
+        };
+        defer allocator.free(env_path);
+
+        const exe_extension = @as(std.zig.CrossTarget, .{}).exeFileExt();
+        const zig_exe = try std.fmt.allocPrint(allocator, "zig{}", .{exe_extension});
+        defer allocator.free(zig_exe);
+
+        var it = std.mem.tokenize(env_path, &[_]u8{std.fs.path.delimiter});
+        while (it.next()) |path| {
+            const full_path = try std.fs.path.join(allocator, &[_][]const u8{
+                path,
+                zig_exe,
+            });
+            defer allocator.free(full_path);
+
+            var buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+            const zig_path = std.os.realpath(full_path, &buf) catch continue;
+            std.debug.warn("Found zig in PATH: {}\n", .{zig_path});
+            has_zig = true;
+            break :find_zig;
+        }
+    }
+
+    if (config.build_runner_path) |build_runner_path| {
+        try document_store.init(allocator, has_zig, try std.mem.dupe(allocator, u8, build_runner_path));
+    } else {
+        var exe_dir_bytes: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+        const exe_dir_path = try std.fs.selfExeDirPath(&exe_dir_bytes);
+
+        const build_runner_path = try std.fs.path.resolve(allocator, &[_][]const u8{ exe_dir_path, "build_runner.zig" });
+        try document_store.init(allocator, has_zig, build_runner_path);
+    }
+
     defer document_store.deinit();
 
     workspace_folder_configs = std.StringHashMap(?Config).init(allocator);
