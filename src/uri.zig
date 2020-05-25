@@ -41,6 +41,13 @@ pub fn fromPath(allocator: *std.mem.Allocator, path: []const u8) ![]const u8 {
     return buf.toOwnedSlice();
 }
 
+pub const UriParseError = error {
+    UriBadScheme,
+    UriBadHexChar,
+    UriBadEscape,
+    OutOfMemory,
+};
+
 // Original code: https://github.com/andersfr/zig-lsp/blob/master/uri.zig
 fn parseHex(c: u8) !u8 {
     return switch (c) {

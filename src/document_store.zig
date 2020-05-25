@@ -5,11 +5,24 @@ const analysis = @import("analysis.zig");
 
 const DocumentStore = @This();
 
+const BuildFile = struct {
+    const Pkg = struct {
+        name: []const u8,
+        uri: []const u8,
+    };
+
+    uri: []const u8,
+    packages: std.ArrayListUnmanaged(Pkg),
+};
+
 pub const Handle = struct {
     document: types.TextDocument,
     count: usize,
     import_uris: std.ArrayList([]const u8),
     tree: *std.zig.ast.Tree,
+
+    associated_build_file: ?*BuildFile,
+    is_build_file: ?*BuildFile,
 
     pub fn uri(handle: Handle) []const u8 {
         return handle.document.uri;
@@ -18,16 +31,21 @@ pub const Handle = struct {
 
 allocator: *std.mem.Allocator,
 handles: std.StringHashMap(*Handle),
+has_zig: bool,
+build_files: std.ArrayListUnmanaged(*BuildFile),
 
-pub fn init(self: *DocumentStore, allocator: *std.mem.Allocator) !void {
+pub fn init(self: *DocumentStore, allocator: *std.mem.Allocator, has_zig: bool) !void {
     self.allocator = allocator;
     self.handles = std.StringHashMap(*Handle).init(allocator);
-    errdefer self.handles.deinit();
+    self.has_zig = has_zig;
+    self.build_files = .{};
 }
+
+const NewDocumentError = std.fs.File.ReadError || URI.UriParseError || error{StreamTooLong};
 
 /// This function asserts the document is not open yet and takes ownership
 /// of the uri and text passed in.
-fn newDocument(self: *DocumentStore, uri: []const u8, text: []u8) !*Handle {
+fn newDocument(self: *DocumentStore, uri: []const u8, text: []u8) NewDocumentError!*Handle {
     std.debug.warn("Opened document: {}\n", .{uri});
 
     var handle = try self.allocator.create(Handle);
@@ -42,7 +60,66 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: []u8) !*Handle {
             .mem = text,
         },
         .tree = try std.zig.parse(self.allocator, text),
+        .associated_build_file = null,
+        .is_build_file = null,
     };
+
+    if (std.mem.endsWith(u8, uri, "build.zig") and self.has_zig) {
+        std.debug.warn("Document is a build file, extracting packages...\n", .{});
+        // This is a build file.
+        // @TODO Here copy the runner, run `zig run`, parse the output,
+        //      make a BuildFile pointer called build_file
+        var build_file = try self.allocator.create(BuildFile);
+
+        build_file.* = .{
+            .uri = try std.mem.dupe(self.allocator, u8, uri),
+            .packages = .{},
+        };
+
+        handle.is_build_file = build_file;
+    } else if (self.has_zig) associate_build_file: {
+        // Look into build files to see if we already have one that fits
+        for (self.build_files.items) |build_file| {
+            // @TODO: Check if this is correct
+            const build_file_base_uri = build_file.uri[0 .. std.mem.lastIndexOfScalar(u8, build_file.uri, '/').? + 1];
+
+            if (std.mem.startsWith(u8, uri, build_file_base_uri)) {
+                std.debug.warn("Found an associated build file: {}\n", .{build_file.uri});
+                handle.associated_build_file = build_file;
+                break :associate_build_file;
+            }
+        }
+        // Otherwise, try to find a build file.
+        var curr_path = try URI.parse(self.allocator, uri);
+        defer self.allocator.free(curr_path);
+        while (true) {
+            // @TODO Add temporary traces to see what is going on.
+
+            // std.fs.path.sep
+            if (std.mem.lastIndexOfScalar(u8, curr_path[0 .. curr_path.len - 1], std.fs.path.sep)) |idx| {
+                // This includes the last separator
+                curr_path = curr_path[0..idx + 1];
+                var candidate_path = try std.mem.concat(self.allocator, u8, &[_][]const u8 { curr_path, "build.zig" });
+                defer self.allocator.free(candidate_path);
+                // Try to open the file, read it and add the new document if we find it.
+                var file = std.fs.cwd().openFile(candidate_path, .{ .read = true, .write = false }) catch continue;
+                defer file.close();
+
+                const build_file_text = try file.inStream().readAllAlloc(self.allocator, std.math.maxInt(usize));
+                errdefer self.allocator.free(build_file_text);
+
+                const build_file_uri = try URI.fromPath(self.allocator, candidate_path);
+                errdefer self.allocator.free(build_file_uri);
+
+                const build_file_handle = try self.newDocument(build_file_uri, build_file_text);
+                handle.associated_build_file = build_file_handle.is_build_file;
+                break;
+            } else break :associate_build_file;
+        }
+    }
+
+    // @TODO: Handle the text refresh if we have a is_build_file
+    // @TODO: Handle package imports if we have an associated_build_file
 
     try self.handles.putNoClobber(uri, handle);
     return handle;

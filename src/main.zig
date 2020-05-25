@@ -891,6 +891,8 @@ pub fn main() anyerror!void {
     // Find the zig executable in PATH
     var has_zig = false;
 
+    // TODO: Should we just spawn a child process that calls "zig version" or something
+    // and check that way?
     find_zig: {
         const env_path = std.process.getEnvVarOwned(allocator, "PATH") catch |err| switch (err) {
             error.EnvironmentVariableNotFound => {
@@ -901,16 +903,18 @@ pub fn main() anyerror!void {
         };
         defer allocator.free(env_path);
 
-        var it = std.mem.tokenize(env_path,&[_]u8{std.fs.path.delimiter});
         const exe_extension = @as(std.zig.CrossTarget, .{}).exeFileExt();
         const zig_exe = try std.fmt.allocPrint(allocator, "zig{}", .{exe_extension});
         defer allocator.free(zig_exe);
 
+        var it = std.mem.tokenize(env_path,&[_]u8{std.fs.path.delimiter});
         while (it.next()) |path| {
             const full_path = try std.fs.path.join(allocator, &[_][]const u8{
                 path,
                 zig_exe,
             });
+            defer allocator.free(full_path);
+
             var buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
             const zig_path = std.os.realpath(full_path, &buf) catch continue;
             std.debug.warn("Found zig in PATH: {}\n", .{zig_path});
@@ -919,7 +923,7 @@ pub fn main() anyerror!void {
         }
     }
 
-    try document_store.init(allocator);
+    try document_store.init(allocator, has_zig);
     defer document_store.deinit();
 
     workspace_folder_configs = std.StringHashMap(?Config).init(allocator);
