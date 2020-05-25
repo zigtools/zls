@@ -11,6 +11,7 @@ const BuildFile = struct {
         uri: []const u8,
     };
 
+    refs: usize,
     uri: []const u8,
     packages: std.ArrayListUnmanaged(Pkg),
 };
@@ -163,6 +164,7 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: []u8) anyerror!*Hand
         errdefer self.allocator.destroy(build_file);
 
         build_file.* = .{
+            .refs = 1,
             .uri = try std.mem.dupe(self.allocator, u8, uri),
             .packages = .{},
         };
@@ -186,6 +188,7 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: []u8) anyerror!*Hand
 
             if (std.mem.startsWith(u8, uri, build_file_base_uri)) {
                 std.debug.warn("Found an associated build file: {}\n", .{build_file.uri});
+                build_file.refs += 1;
                 handle.associated_build_file = build_file;
                 break :associate_build_file;
             }
@@ -227,6 +230,9 @@ pub fn openDocument(self: *DocumentStore, uri: []const u8, text: []const u8) !*H
     if (self.handles.get(uri)) |entry| {
         std.debug.warn("Document already open: {}, incrementing count\n", .{uri});
         entry.value.count += 1;
+        if (entry.value.is_build_file) |build_file| {
+            build_file.refs += 1;
+        }
         std.debug.warn("New count: {}\n", .{entry.value.count});
         return entry.value;
     }
@@ -239,9 +245,41 @@ pub fn openDocument(self: *DocumentStore, uri: []const u8, text: []const u8) !*H
     return try self.newDocument(duped_uri, duped_text);
 }
 
+fn decrementBuildFileRefs(self: *DocumentStore, build_file_ptr: *?*BuildFile) void {
+    const build_file = build_file_ptr.*.?;
+
+    build_file.refs -= 1;
+    if (build_file.refs == 0) {
+        std.debug.warn("Freeing build file {}\n", .{build_file.uri});
+        // Free the build file, set the pointer to null.
+        for (build_file.packages.items) |pkg| {
+            self.allocator.free(pkg.name);
+            self.allocator.free(pkg.uri);
+        }
+
+        build_file.packages.deinit(self.allocator);
+
+        // Decrement count of the document since one count comes
+        // from the build file existing.
+        self.decrementCount(build_file.uri);    
+        self.allocator.free(build_file.uri);
+
+        // Remove the build file from the array list
+        _ = self.build_files.swapRemove(std.mem.indexOfScalar(*BuildFile, self.build_files.items, build_file).?);
+
+        self.allocator.destroy(build_file);
+        build_file_ptr.* = null;
+    }
+}
+
 fn decrementCount(self: *DocumentStore, uri: []const u8) void {
     if (self.handles.get(uri)) |entry| {
         entry.value.count -= 1;
+
+        if (entry.value.associated_build_file != null) {
+            self.decrementBuildFileRefs(&entry.value.associated_build_file);
+        }
+
         if (entry.value.count > 0)
             return;
 
