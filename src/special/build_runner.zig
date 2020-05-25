@@ -23,10 +23,11 @@ pub fn main() !void {
 
     const stdout_stream = io.getStdOut().outStream();
 
+    // TODO: We currently add packages from every LibExeObj step that the install step depends on.
+    //       Should we error out or keep one step or something similar?
+    // We also flatten them, we should probably keep the nested structure.
     for (builder.getInstallStep().dependencies.items) |step| {
-        std.debug.warn("step.id {}\n", .{step.id});
         if (step.cast(InstallArtifactStep)) |install_exe| {
-            std.debug.warn("libexeobj!\n", .{});
             for (install_exe.artifact.packages.items) |pkg| {
                 try processPackage(stdout_stream, pkg);
             }
