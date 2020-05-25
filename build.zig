@@ -1,8 +1,82 @@
 const std = @import("std");
 const builtin = @import("builtin");
-// const build_options = @import("build_options");
+// const build_options = @import("build_options")
+
+const zinput = @import("src/zinput/src/main.zig");
+
+var builder: *std.build.Builder = undefined;
+
+pub fn config(step: *std.build.Step) anyerror!void {
+    @setEvalBranchQuota(2500);
+    std.debug.warn("Welcome to the ZLS configuration wizard! (insert mage emoji here)\n", .{});
+
+    // std.debug.warn("{}", .{dir.});
+    
+    const lib_path = try zinput.askDirPath(builder.allocator, "What is your Zig lib path (path that contains the 'std' folder)?", 512);
+    const snippets = try zinput.askBool("Do you want to enable snippets?");
+    const style = try zinput.askBool("Do you want to enable style warnings?");
+
+    var dir = try std.fs.cwd().openDir(builder.exe_dir, .{});
+    defer dir.close();
+
+    var file = try dir.openFile("zls.json", .{ .write = true });
+    defer file.close();
+
+    const out = file.outStream();
+
+    std.debug.warn("Writing to config...\n", .{});
+    
+    const content = std.json.stringify(.{
+
+        .zig_lib_path = lib_path,
+        .enable_snippets = snippets,
+        .warn_style = style
+
+    }, std.json.StringifyOptions{}, out);
+
+    std.debug.warn("Successfully saved configuration options!\n", .{});
+
+    const editor = try zinput.askSelectOne("Which code editor do you use?", enum { VSCode, Sublime, Other });
+    std.debug.warn("\n", .{});
+
+    switch (editor) {
+        .VSCode => {
+            std.debug.warn(
+                \\To use ZLS in Visual Studio Code, install the 'ZLS for VSCode' extension.
+                \\Then, open VSCode's 'settings.json' file, and add `"zigLanguageClient.path": "[command_or_path_to_zls]"`.
+            , .{});
+        },
+        .Sublime => {
+            std.debug.warn(
+                \\To use ZLS in Sublime, install the `LSP` package from `https://github.com/sublimelsp/LSP/releases` or via Package Control.
+                \\Then, add the following snippet to `LSP`'s user settings:
+                \\
+                \\{{
+                \\  "clients": {{
+                \\    "zig": {{
+                \\      "command": ["zls"],
+                \\      "enabled": true,
+                \\      "languageId": "zig",
+                \\      "document_selector": "source.zig",
+                \\      "syntaxes": ["Packages/Zig/Syntaxes/Zig.tmLanguage"]
+                \\    }}
+                \\  }}
+                \\}}
+            , .{});
+        },
+        .Other => {
+            std.debug.warn(
+                \\We might not *officially* support your editor, but you can definitely still use ZLS!
+                \\Simply configure your editor for use with language servers and point it to the ZLS executable!
+            , .{});
+        }
+    }
+
+    std.debug.warn("\nYou can find the ZLS executable in the \"zig-cache/bin\" by default.\nNOTE: Make sure that if you move the ZLS executable, you move the `zls.json` config file with it as well!\n\nAnd finally: Thanks for choosing ZLS!\n\n", .{});
+}
 
 pub fn build(b: *std.build.Builder) !void {
+    builder = b;
     // Standard target options allows the person running `zig build` to choose
     // what target to build for. Here we do not override the defaults, which
     // means any target is allowed, and the default is native. Other options
@@ -42,4 +116,8 @@ pub fn build(b: *std.build.Builder) !void {
 
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
+
+    // const configure_step = std.build.Step.init("config", b.allocator, config);
+    const configure_step = b.step("config", "Configure zls");
+    configure_step.makeFn = config;
 }

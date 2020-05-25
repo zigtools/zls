@@ -1,3 +1,6 @@
 [submodule "src/known-folders"]
 	path = src/known-folders
 	url = https://github.com/ziglibs/known-folders
+[submodule "src/zinput"]
+	path = src/zinput
+	url = https://github.com/ziglibs/zinput
