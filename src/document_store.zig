@@ -29,23 +29,98 @@ pub const Handle = struct {
     }
 };
 
+// @TODO Deinit the new stuff
 allocator: *std.mem.Allocator,
 handles: std.StringHashMap(*Handle),
 has_zig: bool,
 build_files: std.ArrayListUnmanaged(*BuildFile),
+build_runner_path: []const u8,
 
-pub fn init(self: *DocumentStore, allocator: *std.mem.Allocator, has_zig: bool) !void {
+pub fn init(
+    self: *DocumentStore,
+    allocator: *std.mem.Allocator,
+    has_zig: bool,
+    build_runner_path: []const u8,
+) !void {
     self.allocator = allocator;
     self.handles = std.StringHashMap(*Handle).init(allocator);
     self.has_zig = has_zig;
     self.build_files = .{};
+    self.build_runner_path = build_runner_path;
 }
 
-const NewDocumentError = std.fs.File.ReadError || URI.UriParseError || error{StreamTooLong};
+const LoadPackagesContext = struct {
+    build_file: *BuildFile,
+    allocator: *std.mem.Allocator,
+    build_runner_path: []const u8,
+};
+
+fn loadPackages(context: LoadPackagesContext) !void {
+    const allocator = context.allocator;
+    const build_file = context.build_file;
+    const build_runner_path = context.build_runner_path;
+
+    const directory_path = try URI.parse(allocator, build_file.uri[0 .. build_file.uri.len - "build.zig".len]);
+    defer allocator.free(directory_path);
+
+    const target_path = try std.fs.path.resolve(allocator, &[_][]const u8{ directory_path, "build_runner.zig" });
+    defer allocator.free(target_path);
+
+    try std.fs.copyFileAbsolute(build_runner_path, target_path, .{});
+    defer std.fs.deleteFileAbsolute(target_path) catch {};
+
+    const zig_run_result = try std.ChildProcess.exec(.{
+        .allocator = allocator,
+        .argv = &[_][]const u8{ "zig", "run", "build_runner.zig" },
+        .cwd = directory_path,
+    });
+
+    defer {
+        allocator.free(zig_run_result.stdout);
+        allocator.free(zig_run_result.stderr);
+    }
+
+    switch (zig_run_result.term) {
+        .Exited => |exit_code| {
+            if (exit_code == 0) {
+                std.debug.warn("Finished zig run for build file {}\n", .{build_file.uri});
+
+                for (build_file.packages.items) |old_pkg| {
+                    allocator.free(old_pkg.name);
+                    allocator.free(old_pkg.uri);
+                }
+
+                build_file.packages.shrink(allocator, 0);
+                var line_it = std.mem.split(zig_run_result.stdout, "\n");
+                while (line_it.next()) |line| {
+                    if (std.mem.indexOfScalar(u8, line, '\x00')) |zero_byte_idx| {
+                        const name = line[0..zero_byte_idx];
+                        const rel_path = line[zero_byte_idx + 1 ..];
+
+                        const pkg_abs_path = try std.fs.path.resolve(allocator, &[_][]const u8{ directory_path, rel_path });
+                        defer allocator.free(pkg_abs_path);
+
+                        const pkg_uri = try URI.fromPath(allocator, pkg_abs_path);
+                        errdefer allocator.free(pkg_uri);
+
+                        const duped_name = try std.mem.dupe(allocator, u8, name);
+                        errdefer allocator.free(duped_name);
+
+                        (try build_file.packages.addOne(allocator)).* = .{
+                            .name = duped_name,
+                            .uri = pkg_uri,
+                        };
+                    }
+                }
+            }
+        },
+        else => {},
+    }
+}
 
 /// This function asserts the document is not open yet and takes ownership
 /// of the uri and text passed in.
-fn newDocument(self: *DocumentStore, uri: []const u8, text: []u8) NewDocumentError!*Handle {
+fn newDocument(self: *DocumentStore, uri: []const u8, text: []u8) anyerror!*Handle {
     std.debug.warn("Opened document: {}\n", .{uri});
 
     var handle = try self.allocator.create(Handle);
@@ -64,13 +139,11 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: []u8) NewDocumentErr
         .is_build_file = null,
     };
 
-    // TODO: Better logic?
+    // TODO: Better logic for detecting std or subdirectories?
     const in_std = std.mem.indexOf(u8, uri, "/std/") != null;
-    if (self.has_zig and std.mem.endsWith(u8, uri, "build.zig") and !in_std) {
+    if (self.has_zig and std.mem.endsWith(u8, uri, "/build.zig") and !in_std) {
         std.debug.warn("Document is a build file, extracting packages...\n", .{});
         // This is a build file.
-        // @TODO Here copy the runner, run `zig run`, parse the output,
-        //      make a BuildFile pointer called build_file
         var build_file = try self.allocator.create(BuildFile);
         errdefer self.allocator.destroy(build_file);
 
@@ -81,6 +154,15 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: []u8) NewDocumentErr
 
         try self.build_files.append(self.allocator, build_file);
         handle.is_build_file = build_file;
+
+        // TODO: Do this in a separate thread?
+        // It can take quite long.
+        const context = LoadPackagesContext{
+            .build_file = build_file,
+            .allocator = self.allocator,
+            .build_runner_path = self.build_runner_path,
+        };
+        try loadPackages(context);
     } else if (self.has_zig and !in_std) associate_build_file: {
         // Look into build files to see if we already have one that fits
         for (self.build_files.items) |build_file| {
@@ -97,13 +179,11 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: []u8) NewDocumentErr
         defer self.allocator.free(curr_path);
         while (true) {
             if (curr_path.len == 0) break :associate_build_file;
-            // @TODO Add temporary traces to see what is going on.
 
-            // std.fs.path.sep
             if (std.mem.lastIndexOfScalar(u8, curr_path[0 .. curr_path.len - 1], std.fs.path.sep)) |idx| {
                 // This includes the last separator
-                curr_path = curr_path[0..idx + 1];
-                var candidate_path = try std.mem.concat(self.allocator, u8, &[_][]const u8 { curr_path, "build.zig" });
+                curr_path = curr_path[0 .. idx + 1];
+                var candidate_path = try std.mem.concat(self.allocator, u8, &[_][]const u8{ curr_path, "build.zig" });
                 defer self.allocator.free(candidate_path);
                 // Try to open the file, read it and add the new document if we find it.
                 var file = std.fs.cwd().openFile(candidate_path, .{ .read = true, .write = false }) catch continue;
@@ -122,9 +202,6 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: []u8) NewDocumentErr
             } else break :associate_build_file;
         }
     }
-
-    // @TODO: Handle the text refresh if we have a is_build_file
-    // @TODO: Handle package imports if we have an associated_build_file
 
     try self.handles.putNoClobber(uri, handle);
     return handle;
@@ -296,6 +373,13 @@ pub fn applyChanges(
     }
 
     try self.refreshDocument(handle, zig_lib_path);
+    if (handle.is_build_file) |build_file| {
+        try loadPackages(.{
+            .build_file = build_file,
+            .allocator = self.allocator,
+            .build_runner_path = self.build_runner_path,
+        });
+    }
 }
 
 pub fn uriFromImportStr(
@@ -313,7 +397,14 @@ pub fn uriFromImportStr(
     } else if (std.mem.eql(u8, import_str, "builtin")) {
         return null; // TODO find the correct zig-cache folder
     } else if (!std.mem.endsWith(u8, import_str, ".zig")) {
-        return null; // TODO find packages based on build.zig
+        if (handle.associated_build_file) |build_file| {
+            for (build_file.packages.items) |pkg| {
+                if (std.mem.eql(u8, import_str, pkg.name)) {
+                    return try std.mem.dupe(allocator, u8, pkg.uri);
+                }
+            }
+        }
+        return null;
     } else {
         // Find relative uri
         const path = try URI.parse(allocator, handle.uri());

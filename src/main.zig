@@ -687,7 +687,7 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
     const start_time = std.time.milliTimestamp();
     defer {
         const end_time = std.time.milliTimestamp();
-        std.debug.warn("Took {}ms to process method {}\n", .{end_time - start_time, method});
+        std.debug.warn("Took {}ms to process method {}\n", .{ end_time - start_time, method });
     }
 
     // Core
@@ -880,10 +880,10 @@ pub fn main() anyerror!void {
             }
         }
 
-        var exec_dir_bytes: [std.fs.MAX_PATH_BYTES]u8 = undefined;
-        const exec_dir_path = std.fs.selfExeDirPath(&exec_dir_bytes) catch break :config_read;
+        var exe_dir_bytes: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+        const exe_dir_path = std.fs.selfExeDirPath(&exe_dir_bytes) catch break :config_read;
 
-        if (loadConfig(exec_dir_path)) |conf| {
+        if (loadConfig(exe_dir_path)) |conf| {
             config = conf;
         }
     }
@@ -907,7 +907,7 @@ pub fn main() anyerror!void {
         const zig_exe = try std.fmt.allocPrint(allocator, "zig{}", .{exe_extension});
         defer allocator.free(zig_exe);
 
-        var it = std.mem.tokenize(env_path,&[_]u8{std.fs.path.delimiter});
+        var it = std.mem.tokenize(env_path, &[_]u8{std.fs.path.delimiter});
         while (it.next()) |path| {
             const full_path = try std.fs.path.join(allocator, &[_][]const u8{
                 path,
@@ -923,7 +923,14 @@ pub fn main() anyerror!void {
         }
     }
 
-    try document_store.init(allocator, has_zig);
+    {
+        var exe_dir_bytes: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+        const exe_dir_path = try std.fs.selfExeDirPath(&exe_dir_bytes);
+
+        const document_runner_path = try std.fs.path.resolve(allocator, &[_][]const u8{ exe_dir_path, "build_runner.zig" });
+        try document_store.init(allocator, has_zig, document_runner_path);
+    }
+
     defer document_store.deinit();
 
     workspace_folder_configs = std.StringHashMap(?Config).init(allocator);
