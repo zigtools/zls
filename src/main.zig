@@ -184,6 +184,33 @@ fn containerToCompletion(
     }
 }
 
+const ResolveVarDeclFnAliasRewsult = struct {
+    decl: *std.zig.ast.Node,
+    analysis_ctx: DocumentStore.AnalysisContext,
+};
+
+fn resolveVarDeclFnAlias(analysis_ctx: *DocumentStore.AnalysisContext, decl: *std.zig.ast.Node) ResolveVarDeclFnAliasRewsult {
+    var child_analysis_context = analysis_ctx.clone();
+    if (decl.cast(std.zig.ast.Node.VarDecl)) |var_decl| {
+        const child_node = block: {
+            if (var_decl.type_node) |type_node| {
+                if (std.mem.eql(u8, "type", analysis_ctx.tree().tokenSlice(type_node.firstToken()))) {
+                    break :block var_decl.init_node orelse type_node;
+                }
+                break :block type_node;
+            }
+            break :block var_decl.init_node.?;
+        };
+
+        if (analysis.resolveTypeOfNode(&child_analysis_context, child_node)) |resolved_node| {
+            if (resolved_node.id == .FnProto) {
+                return .{ .decl = resolved_node, .analysis_ctx = child_analysis_context };
+            }
+        }
+    }
+    return .{ .decl = decl, .analysis_ctx = analysis_ctx.* };
+}
+
 fn nodeToCompletion(
     list: *std.ArrayList(types.CompletionItem),
     analysis_ctx: *DocumentStore.AnalysisContext,
@@ -227,26 +254,11 @@ fn nodeToCompletion(
             const var_decl = node.cast(std.zig.ast.Node.VarDecl).?;
             const is_const = analysis_ctx.tree().token_ids[var_decl.mut_token] == .Keyword_const;
 
-            var child_analysis_context = analysis_ctx.clone();
-
-            const child_node = block: {
-                if (var_decl.type_node) |type_node| {
-                    if (std.mem.eql(u8, "type", analysis_ctx.tree().tokenSlice(type_node.firstToken()))) {
-                        break :block var_decl.init_node orelse type_node;
-                    }
-                    break :block type_node;
-                }
-                break :block var_decl.init_node.?;
-            };
-
-            if (analysis.resolveTypeOfNode(&child_analysis_context, child_node)) |resolved_node| {
-                // Special case for function aliases
-                // In the future it might be used to print types of values instead of their declarations
-                if (resolved_node.id == .FnProto) {
-                    try nodeToCompletion(list, &child_analysis_context, orig_handle, resolved_node, config);
-                    return;
-                }
+            var result = resolveVarDeclFnAlias(analysis_ctx, node);
+            if (result.decl != node) {
+                return try nodeToCompletion(list, &result.analysis_ctx, orig_handle, result.decl, config);
             }
+
             try list.append(.{
                 .label = analysis_ctx.tree().tokenSlice(var_decl.name_token),
                 .kind = if (is_const) .Constant else .Variable,
@@ -299,6 +311,47 @@ fn identifierFromPosition(pos_index: usize, handle: DocumentStore.Handle) []cons
     return text[start_idx + 1 .. end_idx];
 }
 
+fn gotoDefinitionSymbol(id: i64, analysis_ctx: *DocumentStore.AnalysisContext, decl: *std.zig.ast.Node) !void {
+    const result = resolveVarDeclFnAlias(analysis_ctx, decl);
+
+    const name_token = analysis.getDeclNameToken(result.analysis_ctx.tree(), result.decl) orelse unreachable;
+
+    try send(types.Response{
+        .id = .{ .Integer = id },
+        .result = .{
+            .Location = .{
+                .uri = result.analysis_ctx.handle.document.uri,
+                .range = astLocationToRange(result.analysis_ctx.tree().tokenLocation(0, name_token)),
+            },
+        },
+    });
+}
+
+fn hoverSymbol(id: i64, analysis_ctx: *DocumentStore.AnalysisContext, decl: *std.zig.ast.Node) !void {
+    const result = resolveVarDeclFnAlias(analysis_ctx, decl);
+
+    const str_value = switch (result.decl.id) {
+        .VarDecl => blk: {
+            const var_decl = result.decl.cast(std.zig.ast.Node.VarDecl).?;
+            break :blk analysis.getVariableSignature(result.analysis_ctx.tree(), var_decl);
+        },
+        .FnProto => blk: {
+            const fn_decl = result.decl.cast(std.zig.ast.Node.FnProto).?;
+            break :blk analysis.getFunctionSignature(result.analysis_ctx.tree(), fn_decl);
+        },
+        else => analysis.nodeToString(result.analysis_ctx.tree(), result.decl) orelse return try respondGeneric(id, null_result_response),
+    };
+
+    try send(types.Response{
+        .id = .{ .Integer = id },
+        .result = .{
+            .Hover = .{
+                .contents = .{ .value = str_value },
+            },
+        },
+    });
+}
+
 fn getSymbolGlobal(arena: *std.heap.ArenaAllocator, pos_index: usize, handle: DocumentStore.Handle) !?*std.zig.ast.Node {
     const name = identifierFromPosition(pos_index, handle);
     if (name.len == 0) return null;
@@ -309,22 +362,22 @@ fn getSymbolGlobal(arena: *std.heap.ArenaAllocator, pos_index: usize, handle: Do
     return analysis.getChildOfSlice(handle.tree, decl_nodes.items, name);
 }
 
-fn gotoDefinitionGlobal(id: i64, pos_index: usize, handle: DocumentStore.Handle) !void {
+fn gotoDefinitionGlobal(id: i64, pos_index: usize, handle: *DocumentStore.Handle, config: Config) !void {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
-    const decl = (try getSymbolGlobal(&arena, pos_index, handle)) orelse return try respondGeneric(id, null_result_response);
-    const name_token = analysis.getDeclNameToken(handle.tree, decl) orelse unreachable;
+    const decl = (try getSymbolGlobal(&arena, pos_index, handle.*)) orelse return try respondGeneric(id, null_result_response);
+    var analysis_ctx = try document_store.analysisContext(handle, &arena, pos_index, config.zig_lib_path);
+    return try gotoDefinitionSymbol(id, &analysis_ctx, decl);
+}
 
-    try send(types.Response{
-        .id = .{ .Integer = id },
-        .result = .{
-            .Location = .{
-                .uri = handle.document.uri,
-                .range = astLocationToRange(handle.tree.tokenLocation(0, name_token)),
-            },
-        },
-    });
+fn hoverDefinitionGlobal(id: i64, pos_index: usize, handle: *DocumentStore.Handle, config: Config) !void {
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+
+    const decl = (try getSymbolGlobal(&arena, pos_index, handle.*)) orelse return try respondGeneric(id, null_result_response);
+    var analysis_ctx = try document_store.analysisContext(handle, &arena, pos_index, config.zig_lib_path);
+    return try hoverSymbol(id, &analysis_ctx, decl);
 }
 
 fn getSymbolFieldAccess(
@@ -361,17 +414,22 @@ fn gotoDefinitionFieldAccess(
 
     var analysis_ctx = try document_store.analysisContext(handle, &arena, try handle.document.positionToIndex(position), config.zig_lib_path);
     const decl = (try getSymbolFieldAccess(&analysis_ctx, position, line_start_idx, config)) orelse return try respondGeneric(id, null_result_response);
-    const name_token = analysis.getDeclNameToken(analysis_ctx.tree(), decl) orelse unreachable;
+    return try gotoDefinitionSymbol(id, &analysis_ctx, decl);
+}
 
-    return try send(types.Response{
-        .id = .{ .Integer = id },
-        .result = .{
-            .Location = .{
-                .uri = analysis_ctx.handle.document.uri,
-                .range = astLocationToRange(analysis_ctx.tree().tokenLocation(0, name_token)),
-            },
-        },
-    });
+fn hoverDefinitionFieldAccess(
+    id: i64,
+    handle: *DocumentStore.Handle,
+    position: types.Position,
+    line_start_idx: usize,
+    config: Config,
+) !void {
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+
+    var analysis_ctx = try document_store.analysisContext(handle, &arena, try handle.document.positionToIndex(position), config.zig_lib_path);
+    const decl = (try getSymbolFieldAccess(&analysis_ctx, position, line_start_idx, config)) orelse return try respondGeneric(id, null_result_response);
+    return try hoverSymbol(id, &analysis_ctx, decl);
 }
 
 fn gotoDefinitionString(id: i64, pos_index: usize, handle: *DocumentStore.Handle, config: Config) !void {
@@ -833,7 +891,12 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
             const pos_context = documentPositionContext(handle.document, pos_index);
 
             switch (pos_context) {
-                .var_access => try gotoDefinitionGlobal(id, pos_index, handle.*),
+                .var_access => try gotoDefinitionGlobal(
+                    id,
+                    pos_index,
+                    handle,
+                    configFromUriOr(uri, config),
+                ),
                 .field_access => |start_idx| try gotoDefinitionFieldAccess(
                     id,
                     handle,
@@ -860,25 +923,26 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
             .character = position.getValue("character").?.Integer - 1,
         };
         if (pos.character >= 0) {
-            // @TODO
-            // const pos_index = try handle.document.positionToIndex(pos);
-            // const pos_context = documentPositionContext(handle.document, pos_index);
+            const pos_index = try handle.document.positionToIndex(pos);
+            const pos_context = documentPositionContext(handle.document, pos_index);
 
-            // switch (pos_context) {
-            //     .var_access => try gotoDefinitionGlobal(id, pos_index, handle.*),
-            //     .field_access => |start_idx| try gotoDefinitionFieldAccess(
-            //         id,
-            //         handle,
-            //         pos,
-            //         start_idx,
-            //         configFromUriOr(uri, config),
-            //     ),
-            //     .string_literal => try gotoDefinitionString(id, pos_index, handle, config),
-            //     else => try respondGeneric(id, null_result_response),
-            // }
+            switch (pos_context) {
+                .var_access => try hoverDefinitionGlobal(
+                    id,
+                    pos_index,
+                    handle,
+                    configFromUriOr(uri, config),
+                ),
+                .field_access => |start_idx| try hoverDefinitionFieldAccess(
+                    id,
+                    handle,
+                    pos,
+                    start_idx,
+                    configFromUriOr(uri, config),
+                ),
+                else => try respondGeneric(id, null_result_response),
+            }
         }
-        // @TODO Implement hover
-        try respondGeneric(id, null_result_response);
     } else if (root.Object.getValue("id")) |_| {
         std.debug.warn("Method with return value not implemented: {}", .{method});
         try respondGeneric(id, not_implemented_response);

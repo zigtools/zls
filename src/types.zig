@@ -47,10 +47,21 @@ pub const NotificationParams = union(enum) {
     PublishDiagnosticsParams: PublishDiagnosticsParams
 };
 
+pub const MarkedString = struct {
+    language: String = "zig",
+    value: String,
+};
+
+/// Hover response
+pub const Hover = struct {
+    contents: MarkedString,
+};
+
 /// Params of a response (result)
 pub const ResponseParams = union(enum) {
     CompletionList: CompletionList,
     Location: Location,
+    Hover: Hover,
 };
 
 /// JSONRPC error
