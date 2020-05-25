@@ -65,6 +65,22 @@ fn loadPackages(context: LoadPackagesContext) !void {
     const target_path = try std.fs.path.resolve(allocator, &[_][]const u8{ directory_path, "build_runner.zig" });
     defer allocator.free(target_path);
 
+    // For example, instead of testing if a file exists and then opening it, just
+    // open it and handle the error for file not found.
+    var file_exists = true;
+    check_file_exists: {
+        var fhandle = std.fs.cwd().openFile(target_path, .{.read = true, .write = false }) catch |err| switch (err) {
+            error.FileNotFound => {
+                file_exists = false;
+                break :check_file_exists;
+            },
+            else => break :check_file_exists,
+        };
+        fhandle.close();
+    }
+
+    if (file_exists) return error.BuildRunnerFileExists;
+
     try std.fs.copyFileAbsolute(build_runner_path, target_path, .{});
     defer std.fs.deleteFileAbsolute(target_path) catch {};
 
@@ -156,11 +172,13 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: []u8) anyerror!*Hand
 
         // TODO: Do this in a separate thread?
         // It can take quite long.
-        try loadPackages(.{
+        loadPackages(.{
             .build_file = build_file,
             .allocator = self.allocator,
             .build_runner_path = self.build_runner_path,
-        });
+        }) catch {
+            std.debug.warn("Failed to load packages of build file {}\n", .{build_file.uri});
+        };
     } else if (self.has_zig and !in_std) associate_build_file: {
         // Look into build files to see if we already have one that fits
         for (self.build_files.items) |build_file| {
@@ -372,11 +390,13 @@ pub fn applyChanges(
 
     try self.refreshDocument(handle, zig_lib_path);
     if (handle.is_build_file) |build_file| {
-        try loadPackages(.{
+        loadPackages(.{
             .build_file = build_file,
             .allocator = self.allocator,
             .build_runner_path = self.build_runner_path,
-        });
+        }) catch {
+            std.debug.warn("Failed to load packages of build file {}\n", .{build_file.uri});
+        };
     }
 }
 
