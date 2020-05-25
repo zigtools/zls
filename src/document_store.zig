@@ -29,7 +29,6 @@ pub const Handle = struct {
     }
 };
 
-// @TODO Deinit the new stuff
 allocator: *std.mem.Allocator,
 handles: std.StringHashMap(*Handle),
 has_zig: bool,
@@ -157,12 +156,11 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: []u8) anyerror!*Hand
 
         // TODO: Do this in a separate thread?
         // It can take quite long.
-        const context = LoadPackagesContext{
+        try loadPackages(.{
             .build_file = build_file,
             .allocator = self.allocator,
             .build_runner_path = self.build_runner_path,
-        };
-        try loadPackages(context);
+        });
     } else if (self.has_zig and !in_std) associate_build_file: {
         // Look into build files to see if we already have one that fits
         for (self.build_files.items) |build_file| {
@@ -587,4 +585,15 @@ pub fn deinit(self: *DocumentStore) void {
     }
 
     self.handles.deinit();
+
+    for (self.build_files.items) |build_file| {
+        for (build_file.packages.items) |pkg| {
+            self.allocator.free(pkg.name);
+            self.allocator.free(pkg.uri);
+        }
+        self.allocator.free(build_file.uri);
+        self.allocator.destroy(build_file);
+    }
+
+    self.build_files.deinit(self.allocator);
 }

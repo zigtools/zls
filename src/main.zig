@@ -871,6 +871,7 @@ pub fn main() anyerror!void {
 
     config_read: {
         const known_folders = @import("known-folders");
+
         const res = try known_folders.getPath(allocator, .local_configuration);
         if (res) |local_config_path| {
             defer allocator.free(local_config_path);
