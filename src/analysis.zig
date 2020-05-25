@@ -742,8 +742,9 @@ pub fn getImportStr(tree: *ast.Tree, source_index: usize) ?[]const u8 {
     var node = &tree.root_node.base;
 
     var child_idx: usize = 0;
-    while (node.iterate(child_idx)) |child| : (child_idx += 1) {
+    while (node.iterate(child_idx)) |child| {
         if (!nodeContainsSourceIndex(tree, child, source_index)) {
+            child_idx += 1;
             continue;
         }
         if (child.cast(ast.Node.BuiltinCall)) |builtin_call| blk: {

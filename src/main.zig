@@ -299,30 +299,54 @@ fn identifierFromPosition(pos_index: usize, handle: DocumentStore.Handle) []cons
     return text[start_idx + 1 .. end_idx];
 }
 
-fn gotoDefinitionGlobal(id: i64, pos_index: usize, handle: DocumentStore.Handle) !void {
-    const tree = handle.tree;
-
+fn getSymbolGlobal(arena: *std.heap.ArenaAllocator, pos_index: usize, handle: DocumentStore.Handle) !?*std.zig.ast.Node {
     const name = identifierFromPosition(pos_index, handle);
-    if (name.len == 0) return try respondGeneric(id, null_result_response);
+    if (name.len == 0) return null;
 
+    var decl_nodes = std.ArrayList(*std.zig.ast.Node).init(&arena.allocator);
+    _ = try analysis.declsFromIndex(arena, &decl_nodes, handle.tree, pos_index);
+
+    return analysis.getChildOfSlice(handle.tree, decl_nodes.items, name);
+}
+
+fn gotoDefinitionGlobal(id: i64, pos_index: usize, handle: DocumentStore.Handle) !void {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
-    var decl_nodes = std.ArrayList(*std.zig.ast.Node).init(&arena.allocator);
-    _ = try analysis.declsFromIndex(&arena, &decl_nodes, tree, pos_index);
-
-    const decl = analysis.getChildOfSlice(tree, decl_nodes.items, name) orelse return try respondGeneric(id, null_result_response);
-    const name_token = analysis.getDeclNameToken(tree, decl) orelse unreachable;
+    const decl = (try getSymbolGlobal(&arena, pos_index, handle)) orelse return try respondGeneric(id, null_result_response);
+    const name_token = analysis.getDeclNameToken(handle.tree, decl) orelse unreachable;
 
     try send(types.Response{
         .id = .{ .Integer = id },
         .result = .{
             .Location = .{
                 .uri = handle.document.uri,
-                .range = astLocationToRange(tree.tokenLocation(0, name_token)),
+                .range = astLocationToRange(handle.tree.tokenLocation(0, name_token)),
             },
         },
     });
+}
+
+fn getSymbolFieldAccess(
+    analysis_ctx: *DocumentStore.AnalysisContext,
+    position: types.Position,
+    line_start_idx: usize,
+    config: Config,
+) !?*std.zig.ast.Node {
+    const pos_index = try analysis_ctx.handle.document.positionToIndex(position);
+    var name = identifierFromPosition(pos_index, analysis_ctx.handle.*);
+    if (name.len == 0) return null;
+
+    const line = try analysis_ctx.handle.document.getLine(@intCast(usize, position.line));
+    var tokenizer = std.zig.Tokenizer.init(line[line_start_idx..]);
+
+    const line_length = @ptrToInt(name.ptr) - @ptrToInt(line.ptr) + name.len - line_start_idx;
+    name = try std.mem.dupe(&analysis_ctx.arena.allocator, u8, name);
+
+    if (analysis.getFieldAccessTypeNode(analysis_ctx, &tokenizer, line_length)) |container| {
+        return analysis.getChild(analysis_ctx.tree(), container, name);
+    }
+    return null;
 }
 
 fn gotoDefinitionFieldAccess(
@@ -332,36 +356,22 @@ fn gotoDefinitionFieldAccess(
     line_start_idx: usize,
     config: Config,
 ) !void {
-    const pos_index = try handle.document.positionToIndex(position);
-    var name = identifierFromPosition(pos_index, handle.*);
-    if (name.len == 0) return try respondGeneric(id, null_result_response);
-
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
     var analysis_ctx = try document_store.analysisContext(handle, &arena, try handle.document.positionToIndex(position), config.zig_lib_path);
+    const decl = (try getSymbolFieldAccess(&analysis_ctx, position, line_start_idx, config)) orelse return try respondGeneric(id, null_result_response);
+    const name_token = analysis.getDeclNameToken(analysis_ctx.tree(), decl) orelse unreachable;
 
-    const line = try handle.document.getLine(@intCast(usize, position.line));
-    var tokenizer = std.zig.Tokenizer.init(line[line_start_idx..]);
-
-    const line_length = @ptrToInt(name.ptr) - @ptrToInt(line.ptr) + name.len - line_start_idx;
-    name = try std.mem.dupe(&arena.allocator, u8, name);
-
-    if (analysis.getFieldAccessTypeNode(&analysis_ctx, &tokenizer, line_length)) |container| {
-        const decl = analysis.getChild(analysis_ctx.tree(), container, name) orelse return try respondGeneric(id, null_result_response);
-        const name_token = analysis.getDeclNameToken(analysis_ctx.tree(), decl) orelse unreachable;
-        return try send(types.Response{
-            .id = .{ .Integer = id },
-            .result = .{
-                .Location = .{
-                    .uri = analysis_ctx.handle.document.uri,
-                    .range = astLocationToRange(analysis_ctx.tree().tokenLocation(0, name_token)),
-                },
+    return try send(types.Response{
+        .id = .{ .Integer = id },
+        .result = .{
+            .Location = .{
+                .uri = analysis_ctx.handle.document.uri,
+                .range = astLocationToRange(analysis_ctx.tree().tokenLocation(0, name_token)),
             },
-        });
-    }
-
-    try respondGeneric(id, null_result_response);
+        },
+    });
 }
 
 fn gotoDefinitionString(id: i64, pos_index: usize, handle: *DocumentStore.Handle, config: Config) !void {
@@ -835,6 +845,40 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
                 else => try respondGeneric(id, null_result_response),
             }
         }
+    } else if (std.mem.eql(u8, method, "textDocument/hover")) {
+        const document = params.getValue("textDocument").?.Object;
+        const uri = document.getValue("uri").?.String;
+        const position = params.getValue("position").?.Object;
+
+        const handle = document_store.getHandle(uri) orelse {
+            std.debug.warn("Trying to got to definition in non existent document {}", .{uri});
+            return try respondGeneric(id, null_result_response);
+        };
+
+        const pos = types.Position{
+            .line = position.getValue("line").?.Integer,
+            .character = position.getValue("character").?.Integer - 1,
+        };
+        if (pos.character >= 0) {
+            // @TODO
+            // const pos_index = try handle.document.positionToIndex(pos);
+            // const pos_context = documentPositionContext(handle.document, pos_index);
+
+            // switch (pos_context) {
+            //     .var_access => try gotoDefinitionGlobal(id, pos_index, handle.*),
+            //     .field_access => |start_idx| try gotoDefinitionFieldAccess(
+            //         id,
+            //         handle,
+            //         pos,
+            //         start_idx,
+            //         configFromUriOr(uri, config),
+            //     ),
+            //     .string_literal => try gotoDefinitionString(id, pos_index, handle, config),
+            //     else => try respondGeneric(id, null_result_response),
+            // }
+        }
+        // @TODO Implement hover
+        try respondGeneric(id, null_result_response);
     } else if (root.Object.getValue("id")) |_| {
         std.debug.warn("Method with return value not implemented: {}", .{method});
         try respondGeneric(id, not_implemented_response);
