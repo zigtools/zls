@@ -870,7 +870,7 @@ pub fn main() anyerror!void {
     defer std.json.parseFree(Config, config, config_parse_options);
 
     config_read: {
-        const known_folders = @import("known-folders/known-folders.zig");
+        const known_folders = @import("known-folders");
         const res = try known_folders.getPath(allocator, .local_configuration);
         if (res) |local_config_path| {
             defer allocator.free(local_config_path);

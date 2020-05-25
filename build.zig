@@ -29,9 +29,13 @@ pub fn build(b: *std.build.Builder) !void {
         b.option(bool, "allocation_info", "Enable use of debugging allocator and info logging.") orelse false,
     );
 
+    exe.addPackage(.{ .name = "known-folders", .path = "src/known-folders/known-folders.zig" });
+
     exe.setTarget(target);
     exe.setBuildMode(mode);
     exe.install();
+
+    b.installFile("src/special/build_runner.zig", "bin/build_runner.zig");
 
     const run_cmd = exe.run();
     run_cmd.step.dependOn(b.getInstallStep());
