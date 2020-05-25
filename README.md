@@ -51,6 +51,7 @@ The following options are currently available.
 | `enable_snippets` | `bool` | `false` | Enables snippet completion, set to false for compatibility with language clients that do not support snippets (such as ale). |
 | `zig_lib_path` | `?[]const u8` | `null` | zig library path, e.g. `/path/to/zig/lib/zig`, used to analyze std library imports. |
 | `warn_style` | `bool` | `false` | Enables warnings for style *guideline* mismatches |
+| `build_runner_path` | `?[]const u8` | `null` | Path to the build_runner.zig file provided by zls. This option must be present in one of the global configuration files to have any effect. `null` is equivalent to `${executable_directory}/build_runner.zig` |
 
 ## Usage
 

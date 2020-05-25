@@ -924,12 +924,14 @@ pub fn main() anyerror!void {
         }
     }
 
-    {
+    if (config.build_runner_path) |build_runner_path| {
+        try document_store.init(allocator, has_zig, try std.mem.dupe(allocator, u8, build_runner_path));
+    } else {
         var exe_dir_bytes: [std.fs.MAX_PATH_BYTES]u8 = undefined;
         const exe_dir_path = try std.fs.selfExeDirPath(&exe_dir_bytes);
 
-        const document_runner_path = try std.fs.path.resolve(allocator, &[_][]const u8{ exe_dir_path, "build_runner.zig" });
-        try document_store.init(allocator, has_zig, document_runner_path);
+        const build_runner_path = try std.fs.path.resolve(allocator, &[_][]const u8{ exe_dir_path, "build_runner.zig" });
+        try document_store.init(allocator, has_zig, build_runner_path);
     }
 
     defer document_store.deinit();
