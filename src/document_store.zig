@@ -64,23 +64,26 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: []u8) NewDocumentErr
         .is_build_file = null,
     };
 
-    if (std.mem.endsWith(u8, uri, "build.zig") and self.has_zig) {
+    // TODO: Better logic?
+    const in_std = std.mem.indexOf(u8, uri, "/std/") != null;
+    if (self.has_zig and std.mem.endsWith(u8, uri, "build.zig") and !in_std) {
         std.debug.warn("Document is a build file, extracting packages...\n", .{});
         // This is a build file.
         // @TODO Here copy the runner, run `zig run`, parse the output,
         //      make a BuildFile pointer called build_file
         var build_file = try self.allocator.create(BuildFile);
+        errdefer self.allocator.destroy(build_file);
 
         build_file.* = .{
             .uri = try std.mem.dupe(self.allocator, u8, uri),
             .packages = .{},
         };
 
+        try self.build_files.append(self.allocator, build_file);
         handle.is_build_file = build_file;
-    } else if (self.has_zig) associate_build_file: {
+    } else if (self.has_zig and !in_std) associate_build_file: {
         // Look into build files to see if we already have one that fits
         for (self.build_files.items) |build_file| {
-            // @TODO: Check if this is correct
             const build_file_base_uri = build_file.uri[0 .. std.mem.lastIndexOfScalar(u8, build_file.uri, '/').? + 1];
 
             if (std.mem.startsWith(u8, uri, build_file_base_uri)) {
@@ -93,6 +96,7 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: []u8) NewDocumentErr
         var curr_path = try URI.parse(self.allocator, uri);
         defer self.allocator.free(curr_path);
         while (true) {
+            if (curr_path.len == 0) break :associate_build_file;
             // @TODO Add temporary traces to see what is going on.
 
             // std.fs.path.sep
@@ -112,6 +116,7 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: []u8) NewDocumentErr
                 errdefer self.allocator.free(build_file_uri);
 
                 const build_file_handle = try self.newDocument(build_file_uri, build_file_text);
+
                 handle.associated_build_file = build_file_handle.is_build_file;
                 break;
             } else break :associate_build_file;
