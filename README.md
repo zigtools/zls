@@ -24,6 +24,9 @@ Installing `zls` is pretty simple;
 git clone --recurse-submodules https://github.com/zigtools/zls
 cd zls
 zig build
+
+# To configure ZLS:
+zig build config
 ```
 
 ### Build Options
