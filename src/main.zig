@@ -19,7 +19,7 @@ var document_store: DocumentStore = undefined;
 var workspace_folder_configs: std.StringHashMap(?Config) = undefined;
 
 const initialize_response =
-    \\,"result":{"capabilities":{"signatureHelpProvider":{"triggerCharacters":["(",","]},"textDocumentSync":1,"completionProvider":{"resolveProvider":false,"triggerCharacters":[".",":","@"]},"documentHighlightProvider":false,"codeActionProvider":false,"declarationProvider":true,"definitionProvider":true,"typeDefinitionProvider":true,"workspace":{"workspaceFolders":{"supported":true,"changeNotifications":true}}}}}
+    \\,"result":{"capabilities":{"signatureHelpProvider":{"triggerCharacters":["(",","]},"textDocumentSync":1,"completionProvider":{"resolveProvider":false,"triggerCharacters":[".",":","@"]},"documentHighlightProvider":false,"hoverProvider":true,"codeActionProvider":false,"declarationProvider":true,"definitionProvider":true,"typeDefinitionProvider":true,"implementationProvider":false,"referencesProvider":false,"documentSymbolProvider":false,"colorProvider":false,"documentFormattingProvider":false,"documentRangeFormattingProvider":false,"foldingRangeProvider":false,"selectionRangeProvider":false,"workspaceSymbolProvider":false,"workspace":{"workspaceFolders":{"supported":true,"changeNotifications":true}}}}}
 ;
 
 const not_implemented_response =
