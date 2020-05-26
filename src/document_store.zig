@@ -245,30 +245,24 @@ pub fn openDocument(self: *DocumentStore, uri: []const u8, text: []const u8) !*H
     return try self.newDocument(duped_uri, duped_text);
 }
 
-fn decrementBuildFileRefs(self: *DocumentStore, build_file_ptr: *?*BuildFile) void {
-    const build_file = build_file_ptr.*.?;
-
+fn decrementBuildFileRefs(self: *DocumentStore, build_file: *BuildFile) void {
     build_file.refs -= 1;
     if (build_file.refs == 0) {
         std.debug.warn("Freeing build file {}\n", .{build_file.uri});
-        // Free the build file, set the pointer to null.
         for (build_file.packages.items) |pkg| {
             self.allocator.free(pkg.name);
             self.allocator.free(pkg.uri);
         }
-
         build_file.packages.deinit(self.allocator);
 
         // Decrement count of the document since one count comes
         // from the build file existing.
-        self.decrementCount(build_file.uri);    
+        self.decrementCount(build_file.uri);
         self.allocator.free(build_file.uri);
 
         // Remove the build file from the array list
         _ = self.build_files.swapRemove(std.mem.indexOfScalar(*BuildFile, self.build_files.items, build_file).?);
-
         self.allocator.destroy(build_file);
-        build_file_ptr.* = null;
     }
 }
 
@@ -276,8 +270,8 @@ fn decrementCount(self: *DocumentStore, uri: []const u8) void {
     if (self.handles.get(uri)) |entry| {
         entry.value.count -= 1;
 
-        if (entry.value.associated_build_file != null) {
-            self.decrementBuildFileRefs(&entry.value.associated_build_file);
+        if (entry.value.associated_build_file) |build_file| {
+            self.decrementBuildFileRefs(build_file);
         }
 
         if (entry.value.count > 0)
@@ -535,7 +529,11 @@ pub const AnalysisContext = struct {
         // New import.
         // Check if the import is already opened by others.
         if (self.store.getHandle(final_uri)) |new_handle| {
-            // If it is, increment the count, set our new handle and return the parsed tree root node.
+            // If it is, append it to our imports, increment the count, set our new handle
+            // and return the parsed tree root node.
+            try self.handle.import_uris.append(final_uri);
+            consumed_final_uri = true;
+
             new_handle.count += 1;
             self.handle = new_handle;
             try self.refreshScopeNodes();
