@@ -327,6 +327,7 @@ fn refreshDocument(self: *DocumentStore, handle: *Handle, zig_lib_path: ?[]const
     var import_strs = std.ArrayList([]const u8).init(&arena.allocator);
     try analysis.collectImports(&import_strs, handle.tree);
 
+    // @TODO: Check final resolved import path and not just import string
     const still_exist = try arena.allocator.alloc(bool, handle.import_uris.items.len);
     for (still_exist) |*ex| {
         ex.* = false;
@@ -576,12 +577,14 @@ pub const AnalysisContext = struct {
         return &self.tree().root_node.base;
     }
 
-    pub fn clone(self: *AnalysisContext) AnalysisContext {
+    pub fn clone(self: *AnalysisContext) !AnalysisContext {
+        // Copy the cope nodes, the rest are references
+        // that are not owned by the context.
         return AnalysisContext{
             .store = self.store,
             .handle = self.handle,
             .arena = self.arena,
-            .scope_nodes = self.scope_nodes,
+            .scope_nodes = try std.mem.dupe(&self.arena.allocator, *std.zig.ast.Node, self.scope_nodes),
             .in_container = self.in_container,
             .std_uri = self.std_uri,
         };
