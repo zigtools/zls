@@ -327,7 +327,6 @@ fn refreshDocument(self: *DocumentStore, handle: *Handle, zig_lib_path: ?[]const
     var import_strs = std.ArrayList([]const u8).init(&arena.allocator);
     try analysis.collectImports(&import_strs, handle.tree);
 
-    // @TODO: Check final resolved import path and not just import string
     const still_exist = try arena.allocator.alloc(bool, handle.import_uris.items.len);
     for (still_exist) |*ex| {
         ex.* = false;
