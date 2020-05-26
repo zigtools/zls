@@ -491,7 +491,7 @@ pub fn getFieldAccessTypeNode(
                                 } else if (next.id == .LParen) {
                                     paren_count += 1;
                                 }
-                            } else unreachable;
+                            } else return null;
                         } else return null;
                     },
                     else => {},
@@ -784,8 +784,7 @@ const PositionContext = union(enum) {
     other,
     empty,
 
-    // @TODO remove pub
-    pub fn range(self: PositionContext) ?SourceRange {
+    fn range(self: PositionContext) ?SourceRange {
         return switch (self) {
             .builtin => |r| r,
             .comment => null,
@@ -825,7 +824,6 @@ fn tokenRangeAppend(prev: SourceRange, token: std.zig.Token) SourceRange {
     };
 }
 
-// @TODO Test this thoroughly
 pub fn documentPositionContext(allocator: *std.mem.Allocator, document: types.TextDocument, position: types.Position) !PositionContext {
     const line = try document.getLine(@intCast(usize, position.line));
     const pos_char = @intCast(usize, position.character) + 1;
@@ -837,7 +835,6 @@ pub fn documentPositionContext(allocator: *std.mem.Allocator, document: types.Te
     var tokenizer = std.zig.Tokenizer.init(line[0..idx]);
     var stack = try std.ArrayList(StackState).initCapacity(&arena.allocator, 8);
 
-    // @TODO What happens when we don't close a string? (probably an .Eof)
     while (true) {
         const tok = tokenizer.next();
         // Early exits.
