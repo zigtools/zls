@@ -57,7 +57,7 @@ pub fn config(step: *std.build.Step) anyerror!void {
                 \\      "command": ["zls"],
                 \\      "enabled": true,
                 \\      "languageId": "zig",
-                \\      "document_selector": "source.zig",
+                \\      "scopes": ["source.zig"],
                 \\      "syntaxes": ["Packages/Zig/Syntaxes/Zig.tmLanguage"]
                 \\    }}
                 \\  }}
