@@ -130,7 +130,7 @@ fn loadPackages(context: LoadPackagesContext) !void {
                 }
             }
         },
-        else => {},
+        else => return error.RunFailed,
     }
 }
 
@@ -178,8 +178,8 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: []u8) anyerror!*Hand
             .build_file = build_file,
             .allocator = self.allocator,
             .build_runner_path = self.build_runner_path,
-        }) catch {
-            std.debug.warn("Failed to load packages of build file {}\n", .{build_file.uri});
+        }) catch |err| {
+            std.debug.warn("Failed to load packages of build file {} (error: {})\n", .{build_file.uri, err});
         };
     } else if (self.has_zig and !in_std) associate_build_file: {
         // Look into build files to see if we already have one that fits
@@ -278,7 +278,6 @@ fn decrementCount(self: *DocumentStore, uri: []const u8) void {
             return;
 
         std.debug.warn("Freeing document: {}\n", .{uri});
-
         entry.value.tree.deinit();
         self.allocator.free(entry.value.document.mem);
 
@@ -288,11 +287,10 @@ fn decrementCount(self: *DocumentStore, uri: []const u8) void {
         }
 
         entry.value.import_uris.deinit();
-
+        self.allocator.destroy(entry.value);
         const uri_key = entry.key;
         self.handles.removeAssertDiscard(uri);
         self.allocator.free(uri_key);
-        self.allocator.destroy(entry.value);
     }
 }
 
@@ -426,8 +424,8 @@ pub fn applyChanges(
             .build_file = build_file,
             .allocator = self.allocator,
             .build_runner_path = self.build_runner_path,
-        }) catch {
-            std.debug.warn("Failed to load packages of build file {}\n", .{build_file.uri});
+        }) catch |err| {
+            std.debug.warn("Failed to load packages of build file {} (error: {})\n", .{build_file.uri, err});
         };
     }
 }
