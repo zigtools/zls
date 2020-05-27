@@ -910,7 +910,7 @@ pub fn getImportStr(tree: *ast.Tree, source_index: usize) ?[]const u8 {
 const types = @import("types.zig");
 pub const SourceRange = std.zig.Token.Loc;
 
-const PositionContext = union(enum) {
+pub const PositionContext = union(enum) {
     builtin: SourceRange,
     comment,
     string_literal: SourceRange,
@@ -920,7 +920,7 @@ const PositionContext = union(enum) {
     other,
     empty,
 
-    fn range(self: PositionContext) ?SourceRange {
+    pub fn range(self: PositionContext) ?SourceRange {
         return switch (self) {
             .builtin => |r| r,
             .comment => null,

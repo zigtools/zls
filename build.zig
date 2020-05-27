@@ -131,7 +131,15 @@ pub fn build(b: *std.build.Builder) !void {
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
 
-    // const configure_step = std.build.Step.init("config", b.allocator, config);
     const configure_step = b.step("config", "Configure zls");
     configure_step.makeFn = config;
+
+    const test_step = b.step("test", "Run all the tests");
+    test_step.dependOn(&exe.step);
+
+    var unit_tests = b.addTest("tests/unit_tests.zig");
+    unit_tests.addPackage(.{  .name = "analysis", .path = "src/analysis.zig" });
+    unit_tests.addPackage(.{  .name = "types", .path = "src/types.zig" });
+    unit_tests.setBuildMode(.Debug);
+    test_step.dependOn(&unit_tests.step);
 }
