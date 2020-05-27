@@ -353,7 +353,7 @@ fn resolveBracketAccessType(
                             if (rhs == .Single) {
                                 return resolveTypeOfNode(analysis_ctx, child_pop.rhs);
                             }
-                            return makeSliceType(analysis_ctx, child_pop.rhs);
+                            return lhs;
                         },
                         else => {},
                     }
