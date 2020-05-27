@@ -273,6 +273,20 @@ fn nodeToCompletion(
             });
         },
         .PrefixOp => {
+            const prefix_op = node.cast(std.zig.ast.Node.PrefixOp).?;
+            switch (prefix_op.op) {
+                .ArrayType, .SliceType => {},
+                .PtrType => {
+                    if (prefix_op.rhs.cast(std.zig.ast.Node.PrefixOp)) |child_pop| {
+                        switch (child_pop.op) {
+                            .ArrayType => {},
+                            else => return,
+                        }
+                    } else return;
+                },
+                else => return,
+            }
+
             try list.append(.{
                 .label = "len",
                 .kind = .Field,
