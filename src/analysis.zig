@@ -284,6 +284,92 @@ fn resolveReturnType(analysis_ctx: *AnalysisContext, fn_decl: *ast.Node.FnProto)
     };
 }
 
+/// Resolves the child type of an optional type
+fn resolveUnwrapOptionalType(analysis_ctx: *AnalysisContext, opt: *ast.Node) ?*ast.Node {
+    if (opt.cast(ast.Node.PrefixOp)) |prefix_op| {
+        if (prefix_op.op == .OptionalType) {
+            return resolveTypeOfNode(analysis_ctx, prefix_op.rhs);
+        }
+    }
+
+    return null;
+}
+
+/// Resolves the child type of a defer type
+fn resolveDerefType(analysis_ctx: *AnalysisContext, deref: *ast.Node) ?*ast.Node {
+    if (deref.cast(ast.Node.PrefixOp)) |pop| {
+        if (pop.op == .PtrType) {
+            const op_token_id = analysis_ctx.tree().token_ids[pop.op_token];
+            switch (op_token_id) {
+                .Asterisk => return resolveTypeOfNode(analysis_ctx, pop.rhs),
+                .LBracket, .AsteriskAsterisk => return null,
+                else => unreachable,
+            }
+        }
+    }
+    return null;
+}
+
+fn makeSliceType(analysis_ctx: *AnalysisContext, child_type: *ast.Node) ?*ast.Node {
+    // TODO: Better values for fields, better way to do this?
+    var slice_type = analysis_ctx.arena.allocator.create(ast.Node.PrefixOp) catch return null;
+    slice_type.* = .{
+        .op_token = child_type.firstToken(),
+        .op = .{
+            .SliceType = .{
+                .allowzero_token = null,
+                .align_info = null,
+                .const_token = null,
+                .volatile_token = null,
+                .sentinel = null,
+            },
+        },
+        .rhs = child_type,
+    };
+
+    return &slice_type.base;
+}
+
+/// Resolves bracket access type (both slicing and array access)
+fn resolveBracketAccessType(
+    analysis_ctx: *AnalysisContext,
+    lhs: *ast.Node,
+    rhs: enum { Single, Range },
+) ?*ast.Node {
+    if (lhs.cast(ast.Node.PrefixOp)) |pop| {
+        switch (pop.op) {
+            .SliceType => {
+                if (rhs == .Single) return resolveTypeOfNode(analysis_ctx, pop.rhs);
+                return lhs;
+            },
+            .ArrayType => {
+                if (rhs == .Single) return resolveTypeOfNode(analysis_ctx, pop.rhs);
+                return makeSliceType(analysis_ctx, pop.rhs);
+            },
+            .PtrType => {
+                if (pop.rhs.cast(std.zig.ast.Node.PrefixOp)) |child_pop| {
+                    switch (child_pop.op) {
+                        .ArrayType => {
+                            if (rhs == .Single) {
+                                return resolveTypeOfNode(analysis_ctx, child_pop.rhs);
+                            }
+                            return lhs;
+                        },
+                        else => {},
+                    }
+                }
+            },
+            else => {},
+        }
+    }
+    return null;
+}
+
+/// Called to remove one level of pointerness before a field access
+fn resolveFieldAccessLhsType(analysis_ctx: *AnalysisContext, lhs: *ast.Node) *ast.Node {
+    return resolveDerefType(analysis_ctx, lhs) orelse lhs;
+}
+
 /// Resolves the type of a node
 pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.Node {
     switch (node.id) {
@@ -318,6 +404,28 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
                 else => decl,
             };
         },
+        .SuffixOp => {
+            const suffix_op = node.cast(ast.Node.SuffixOp).?;
+            switch (suffix_op.op) {
+                .UnwrapOptional => {
+                    const left_type = resolveTypeOfNode(analysis_ctx, suffix_op.lhs) orelse return null;
+                    return resolveUnwrapOptionalType(analysis_ctx, left_type);
+                },
+                .Deref => {
+                    const left_type = resolveTypeOfNode(analysis_ctx, suffix_op.lhs) orelse return null;
+                    return resolveDerefType(analysis_ctx, left_type);
+                },
+                .ArrayAccess => {
+                    const left_type = resolveTypeOfNode(analysis_ctx, suffix_op.lhs) orelse return null;
+                    return resolveBracketAccessType(analysis_ctx, left_type, .Single);
+                },
+                .Slice => {
+                    const left_type = resolveTypeOfNode(analysis_ctx, suffix_op.lhs) orelse return null;
+                    return resolveBracketAccessType(analysis_ctx, left_type, .Range);
+                },
+                else => {},
+            }
+        },
         .InfixOp => {
             const infix_op = node.cast(ast.Node.InfixOp).?;
             switch (infix_op.op) {
@@ -327,9 +435,19 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
                     var rhs_str = nodeToString(analysis_ctx.tree(), infix_op.rhs) orelse return null;
                     // Use the analysis context temporary arena to store the rhs string.
                     rhs_str = std.mem.dupe(&analysis_ctx.arena.allocator, u8, rhs_str) catch return null;
-                    const left = resolveTypeOfNode(analysis_ctx, infix_op.lhs) orelse return null;
-                    const child = getChild(analysis_ctx.tree(), left, rhs_str) orelse return null;
+
+                    // If we are accessing a pointer type, remove one pointerness level :)
+                    const left_type = resolveFieldAccessLhsType(
+                        analysis_ctx,
+                        resolveTypeOfNode(analysis_ctx, infix_op.lhs) orelse return null,
+                    );
+
+                    const child = getChild(analysis_ctx.tree(), left_type, rhs_str) orelse return null;
                     return resolveTypeOfNode(analysis_ctx, child);
+                },
+                .UnwrapOptional => {
+                    const left_type = resolveTypeOfNode(analysis_ctx, infix_op.lhs) orelse return null;
+                    return resolveUnwrapOptionalType(analysis_ctx, left_type);
                 },
                 else => {},
             }
@@ -337,15 +455,11 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
         .PrefixOp => {
             const prefix_op = node.cast(ast.Node.PrefixOp).?;
             switch (prefix_op.op) {
-                .SliceType, .ArrayType => return node,
-                .PtrType => {
-                    const op_token_id = analysis_ctx.tree().token_ids[prefix_op.op_token];
-                    switch (op_token_id) {
-                        .Asterisk => return resolveTypeOfNode(analysis_ctx, prefix_op.rhs),
-                        .LBracket, .AsteriskAsterisk => return null,
-                        else => unreachable,
-                    }
-                },
+                .SliceType,
+                .ArrayType,
+                .OptionalType,
+                .PtrType,
+                => return node,
                 .Try => {
                     const rhs_type = resolveTypeOfNode(analysis_ctx, prefix_op.rhs) orelse return null;
                     switch (rhs_type.id) {
@@ -433,36 +547,49 @@ pub fn collectImports(import_arr: *std.ArrayList([]const u8), tree: *ast.Tree) !
 pub fn getFieldAccessTypeNode(
     analysis_ctx: *AnalysisContext,
     tokenizer: *std.zig.Tokenizer,
-    line_length: usize,
 ) ?*ast.Node {
     var current_node = analysis_ctx.in_container;
-    var current_container = analysis_ctx.in_container;
 
     while (true) {
-        var next = tokenizer.next();
-        switch (next.id) {
-            .Eof => return current_node,
+        const tok = tokenizer.next();
+        switch (tok.id) {
+            .Eof => return resolveFieldAccessLhsType(analysis_ctx, current_node),
             .Identifier => {
-                if (getChildOfSlice(analysis_ctx.tree(), analysis_ctx.scope_nodes, tokenizer.buffer[next.loc.start..next.loc.end])) |child| {
-                    if (resolveTypeOfNode(analysis_ctx, child)) |node_type| {
-                        current_node = node_type;
+                if (getChildOfSlice(analysis_ctx.tree(), analysis_ctx.scope_nodes, tokenizer.buffer[tok.loc.start..tok.loc.end])) |child| {
+                    if (resolveTypeOfNode(analysis_ctx, child)) |child_type| {
+                        current_node = child_type;
                     } else return null;
                 } else return null;
             },
             .Period => {
-                var after_period = tokenizer.next();
-                if (after_period.id == .Eof or after_period.id == .Comma) {
-                    return current_node;
-                } else if (after_period.id == .Identifier) {
-                    // TODO: This works for now, maybe we should filter based on the partial identifier ourselves?
-                    if (after_period.loc.end == line_length) return current_node;
+                const after_period = tokenizer.next();
+                switch (after_period.id) {
+                    .Eof => return resolveFieldAccessLhsType(analysis_ctx, current_node),
+                    .Identifier => {
+                        if (after_period.loc.end == tokenizer.buffer.len) return resolveFieldAccessLhsType(analysis_ctx, current_node);
 
-                    if (getChild(analysis_ctx.tree(), current_node, tokenizer.buffer[after_period.loc.start..after_period.loc.end])) |child| {
-                        if (resolveTypeOfNode(analysis_ctx, child)) |child_type| {
+                        current_node = resolveFieldAccessLhsType(analysis_ctx, current_node);
+                        if (getChild(analysis_ctx.tree(), current_node, tokenizer.buffer[after_period.loc.start..after_period.loc.end])) |child| {
+                            if (resolveTypeOfNode(analysis_ctx, child)) |child_type| {
+                                current_node = child_type;
+                            } else return null;
+                        } else return null;
+                    },
+                    .QuestionMark => {
+                        if (resolveUnwrapOptionalType(analysis_ctx, current_node)) |child_type| {
                             current_node = child_type;
                         } else return null;
-                    } else return null;
+                    },
+                    else => {
+                        std.debug.warn("Unrecognized token {} after period.\n", .{after_period.id});
+                        return null;
+                    },
                 }
+            },
+            .PeriodAsterisk => {
+                if (resolveDerefType(analysis_ctx, current_node)) |child_type| {
+                    current_node = child_type;
+                } else return null;
             },
             .LParen => {
                 switch (current_node.id) {
@@ -472,7 +599,7 @@ pub fn getFieldAccessTypeNode(
                             current_node = ret;
                             // Skip to the right paren
                             var paren_count: usize = 1;
-                            next = tokenizer.next();
+                            var next = tokenizer.next();
                             while (next.id != .Eof) : (next = tokenizer.next()) {
                                 if (next.id == .RParen) {
                                     paren_count -= 1;
@@ -481,30 +608,46 @@ pub fn getFieldAccessTypeNode(
                                     paren_count += 1;
                                 }
                             } else return null;
-                        } else {
-                            return null;
-                        }
+                        } else return null;
                     },
                     else => {},
                 }
             },
-            .Keyword_const, .Keyword_var => {
-                next = tokenizer.next();
-                if (next.id == .Identifier) {
-                    next = tokenizer.next();
-                    if (next.id != .Equal) return null;
-                    continue;
-                }
+            .LBracket => {
+                var brack_count: usize = 1;
+                var next = tokenizer.next();
+                var is_range = false;
+                while (next.id != .Eof) : (next = tokenizer.next()) {
+                    if (next.id == .RBracket) {
+                        brack_count -= 1;
+                        if (brack_count == 0) break;
+                    } else if (next.id == .LBracket) {
+                        brack_count += 1;
+                    } else if (next.id == .Ellipsis2 and brack_count == 1) {
+                        is_range = true;
+                    }
+                } else return null;
+
+                if (resolveBracketAccessType(
+                    analysis_ctx,
+                    current_node,
+                    if (is_range) .Range else .Single,
+                )) |child_type| {
+                    current_node = child_type;
+                } else return null;
             },
-            else => std.debug.warn("Not implemented; {}\n", .{next.id}),
+            else => {
+                std.debug.warn("Unimplemented token: {}\n", .{tok.id});
+                return null;
+            },
         }
 
-        if (current_node.id == .ContainerDecl or current_node.id == .Root) {
-            current_container = current_node;
+        if (current_node.cast(ast.Node.ContainerDecl)) |container_decl| {
+            analysis_ctx.onContainer(container_decl) catch return null;
         }
     }
 
-    return current_node;
+    return resolveFieldAccessLhsType(analysis_ctx, current_node);
 }
 
 pub fn isNodePublic(tree: *ast.Tree, node: *ast.Node) bool {
@@ -762,4 +905,138 @@ pub fn getImportStr(tree: *ast.Tree, source_index: usize) ?[]const u8 {
         child_idx = 0;
     }
     return null;
+}
+
+const types = @import("types.zig");
+pub const SourceRange = std.zig.Token.Loc;
+
+pub const PositionContext = union(enum) {
+    builtin: SourceRange,
+    comment,
+    string_literal: SourceRange,
+    field_access: SourceRange,
+    var_access: SourceRange,
+    enum_literal,
+    other,
+    empty,
+
+    pub fn range(self: PositionContext) ?SourceRange {
+        return switch (self) {
+            .builtin => |r| r,
+            .comment => null,
+            .string_literal => |r| r,
+            .field_access => |r| r,
+            .var_access => |r| r,
+            .enum_literal => null,
+            .other => null,
+            .empty => null,
+        };
+    }
+};
+
+const StackState = struct {
+    ctx: PositionContext,
+    stack_id: enum { Paren, Bracket, Global },
+};
+
+fn peek(arr: *std.ArrayList(StackState)) !*StackState {
+    if (arr.items.len == 0) {
+        try arr.append(.{ .ctx = .empty, .stack_id = .Global });
+    }
+    return &arr.items[arr.items.len - 1];
+}
+
+fn tokenRangeAppend(prev: SourceRange, token: std.zig.Token) SourceRange {
+    return .{
+        .start = prev.start,
+        .end = token.loc.end,
+    };
+}
+
+pub fn documentPositionContext(allocator: *std.mem.Allocator, document: types.TextDocument, position: types.Position) !PositionContext {
+    const line = try document.getLine(@intCast(usize, position.line));
+    const pos_char = @intCast(usize, position.character) + 1;
+    const idx = if (pos_char > line.len) line.len else pos_char;
+
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+
+    var tokenizer = std.zig.Tokenizer.init(line[0..idx]);
+    var stack = try std.ArrayList(StackState).initCapacity(&arena.allocator, 8);
+
+    while (true) {
+        const tok = tokenizer.next();
+        // Early exits.
+        switch (tok.id) {
+            .Invalid, .Invalid_ampersands => {
+                // Single '@' do not return a builtin token so we check this on our own.
+                if (line[idx - 1] == '@') {
+                    return PositionContext{
+                        .builtin = .{
+                            .start = idx - 1,
+                            .end = idx,
+                        },
+                    };
+                }
+                return .other;
+            },
+            .LineComment, .DocComment, .ContainerDocComment => return .comment,
+            .Eof => break,
+            else => {},
+        }
+
+        // State changes
+        var curr_ctx = try peek(&stack);
+        switch (tok.id) {
+            .StringLiteral, .MultilineStringLiteralLine => curr_ctx.ctx = .{ .string_literal = tok.loc },
+            .Identifier => switch (curr_ctx.ctx) {
+                .empty => curr_ctx.ctx = .{ .var_access = tok.loc },
+                else => {},
+            },
+            .Builtin => switch (curr_ctx.ctx) {
+                .empty => curr_ctx.ctx = .{ .builtin = tok.loc },
+                else => {},
+            },
+            .Period, .PeriodAsterisk => switch (curr_ctx.ctx) {
+                .empty => curr_ctx.ctx = .enum_literal,
+                .enum_literal => curr_ctx.ctx = .empty,
+                .field_access => {},
+                .other => {},
+                else => curr_ctx.ctx = .{
+                    .field_access = tokenRangeAppend(curr_ctx.ctx.range().?, tok),
+                },
+            },
+            .QuestionMark => switch (curr_ctx.ctx) {
+                .field_access => {},
+                else => curr_ctx.ctx = .empty,
+            },
+            .LParen => try stack.append(.{ .ctx = .empty, .stack_id = .Paren }),
+            .LBracket => try stack.append(.{ .ctx = .empty, .stack_id = .Bracket }),
+            .RParen => {
+                _ = stack.pop();
+                if (curr_ctx.stack_id != .Paren) {
+                    (try peek(&stack)).ctx = .empty;
+                }
+            },
+            .RBracket => {
+                _ = stack.pop();
+                if (curr_ctx.stack_id != .Bracket) {
+                    (try peek(&stack)).ctx = .empty;
+                }
+            },
+            else => curr_ctx.ctx = .empty,
+        }
+
+        switch (curr_ctx.ctx) {
+            .field_access => |r| curr_ctx.ctx = .{
+                .field_access = tokenRangeAppend(r, tok),
+            },
+            else => {},
+        }
+    }
+
+    return block: {
+        if (stack.popOrNull()) |state| break :block state.ctx;
+        break :block .empty;
+    };
 }

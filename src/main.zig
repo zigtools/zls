@@ -273,6 +273,20 @@ fn nodeToCompletion(
             });
         },
         .PrefixOp => {
+            const prefix_op = node.cast(std.zig.ast.Node.PrefixOp).?;
+            switch (prefix_op.op) {
+                .ArrayType, .SliceType => {},
+                .PtrType => {
+                    if (prefix_op.rhs.cast(std.zig.ast.Node.PrefixOp)) |child_pop| {
+                        switch (child_pop.op) {
+                            .ArrayType => {},
+                            else => return,
+                        }
+                    } else return;
+                },
+                else => return,
+            }
+
             try list.append(.{
                 .label = "len",
                 .kind = .Field,
@@ -389,7 +403,7 @@ fn hoverDefinitionGlobal(id: i64, pos_index: usize, handle: *DocumentStore.Handl
 fn getSymbolFieldAccess(
     analysis_ctx: *DocumentStore.AnalysisContext,
     position: types.Position,
-    line_start_idx: usize,
+    range: analysis.SourceRange,
     config: Config,
 ) !?*std.zig.ast.Node {
     const pos_index = try analysis_ctx.handle.document.positionToIndex(position);
@@ -397,12 +411,10 @@ fn getSymbolFieldAccess(
     if (name.len == 0) return null;
 
     const line = try analysis_ctx.handle.document.getLine(@intCast(usize, position.line));
-    var tokenizer = std.zig.Tokenizer.init(line[line_start_idx..]);
+    var tokenizer = std.zig.Tokenizer.init(line[range.start..range.end]);
 
-    const line_length = @ptrToInt(name.ptr) - @ptrToInt(line.ptr) + name.len - line_start_idx;
     name = try std.mem.dupe(&analysis_ctx.arena.allocator, u8, name);
-
-    if (analysis.getFieldAccessTypeNode(analysis_ctx, &tokenizer, line_length)) |container| {
+    if (analysis.getFieldAccessTypeNode(analysis_ctx, &tokenizer)) |container| {
         return analysis.getChild(analysis_ctx.tree(), container, name);
     }
     return null;
@@ -412,14 +424,14 @@ fn gotoDefinitionFieldAccess(
     id: i64,
     handle: *DocumentStore.Handle,
     position: types.Position,
-    line_start_idx: usize,
+    range: analysis.SourceRange,
     config: Config,
 ) !void {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
     var analysis_ctx = try document_store.analysisContext(handle, &arena, try handle.document.positionToIndex(position), config.zig_lib_path);
-    const decl = (try getSymbolFieldAccess(&analysis_ctx, position, line_start_idx, config)) orelse return try respondGeneric(id, null_result_response);
+    const decl = (try getSymbolFieldAccess(&analysis_ctx, position, range, config)) orelse return try respondGeneric(id, null_result_response);
     return try gotoDefinitionSymbol(id, &analysis_ctx, decl);
 }
 
@@ -427,14 +439,14 @@ fn hoverDefinitionFieldAccess(
     id: i64,
     handle: *DocumentStore.Handle,
     position: types.Position,
-    line_start_idx: usize,
+    range: analysis.SourceRange,
     config: Config,
 ) !void {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
     var analysis_ctx = try document_store.analysisContext(handle, &arena, try handle.document.positionToIndex(position), config.zig_lib_path);
-    const decl = (try getSymbolFieldAccess(&analysis_ctx, position, line_start_idx, config)) orelse return try respondGeneric(id, null_result_response);
+    const decl = (try getSymbolFieldAccess(&analysis_ctx, position, range, config)) orelse return try respondGeneric(id, null_result_response);
     return try hoverSymbol(id, &analysis_ctx, decl);
 }
 
@@ -490,7 +502,7 @@ fn completeGlobal(id: i64, pos_index: usize, handle: *DocumentStore.Handle, conf
     });
 }
 
-fn completeFieldAccess(id: i64, handle: *DocumentStore.Handle, position: types.Position, line_start_idx: usize, config: Config) !void {
+fn completeFieldAccess(id: i64, handle: *DocumentStore.Handle, position: types.Position, range: analysis.SourceRange, config: Config) !void {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
@@ -498,10 +510,9 @@ fn completeFieldAccess(id: i64, handle: *DocumentStore.Handle, position: types.P
     var completions = std.ArrayList(types.CompletionItem).init(&arena.allocator);
 
     const line = try handle.document.getLine(@intCast(usize, position.line));
-    var tokenizer = std.zig.Tokenizer.init(line[line_start_idx..]);
-    const line_length = line.len - line_start_idx;
+    var tokenizer = std.zig.Tokenizer.init(line[range.start..range.end]);
 
-    if (analysis.getFieldAccessTypeNode(&analysis_ctx, &tokenizer, line_length)) |node| {
+    if (analysis.getFieldAccessTypeNode(&analysis_ctx, &tokenizer)) |node| {
         try nodeToCompletion(&completions, &analysis_ctx, handle, node, config);
     }
     try send(types.Response{
@@ -549,136 +560,6 @@ const builtin_completions = block: {
         without_snippets, with_snippets,
     };
 };
-
-const PositionContext = union(enum) {
-    builtin,
-    comment,
-    string_literal,
-    field_access: usize,
-    var_access,
-    other,
-    empty,
-};
-
-const token_separators = [_]u8{
-    ' ', '\t', '(', ')', '[', ']',
-    '{', '}',  '|', '=', '!', ';',
-    ',', '?',  ':', '%', '+', '*',
-    '>', '<',  '~', '-', '/', '&',
-};
-
-fn documentPositionContext(doc: types.TextDocument, pos_index: usize) PositionContext {
-    // First extract the whole current line up to the cursor.
-    var curr_position = pos_index;
-    while (curr_position > 0) : (curr_position -= 1) {
-        if (doc.text[curr_position - 1] == '\n') break;
-    }
-
-    var line = doc.text[curr_position .. pos_index + 1];
-    // Strip any leading whitespace.
-    var skipped_ws: usize = 0;
-    while (skipped_ws < line.len and (line[skipped_ws] == ' ' or line[skipped_ws] == '\t')) : (skipped_ws += 1) {}
-    if (skipped_ws >= line.len) return .empty;
-    line = line[skipped_ws..];
-
-    // Quick exit for comment lines and multi line string literals.
-    if (line.len >= 2 and line[0] == '/' and line[1] == '/')
-        return .comment;
-    if (line.len >= 2 and line[0] == '\\' and line[1] == '\\')
-        return .string_literal;
-
-    // TODO: This does not detect if we are in a string literal over multiple lines.
-    // Find out what context we are in.
-    // Go over the current line character by character
-    // and determine the context.
-    curr_position = 0;
-    var expr_start: usize = skipped_ws;
-
-    // std.debug.warn("{}", .{curr_position});
-
-    if (pos_index != 0 and doc.text[pos_index - 1] == ')')
-        return .{ .field_access = expr_start };
-
-    var new_token = true;
-    var context: PositionContext = .other;
-    var string_pop_ctx: PositionContext = .other;
-    while (curr_position < line.len) : (curr_position += 1) {
-        const c = line[curr_position];
-        const next_char = if (curr_position < line.len - 1) line[curr_position + 1] else null;
-
-        if (context != .string_literal and c == '"') {
-            expr_start = curr_position + skipped_ws;
-            context = .string_literal;
-            continue;
-        }
-
-        if (context == .string_literal) {
-            // Skip over escaped quotes
-            if (c == '\\' and next_char != null and next_char.? == '"') {
-                curr_position += 1;
-            } else if (c == '"') {
-                context = string_pop_ctx;
-                string_pop_ctx = .other;
-                new_token = true;
-            }
-
-            continue;
-        }
-
-        if (c == '/' and next_char != null and next_char.? == '/') {
-            context = .comment;
-            break;
-        }
-
-        if (std.mem.indexOfScalar(u8, &token_separators, c) != null) {
-            expr_start = curr_position + skipped_ws + 1;
-            new_token = true;
-            context = .other;
-            continue;
-        }
-
-        if (c == '.' and (!new_token or context == .string_literal)) {
-            new_token = true;
-            if (next_char != null and next_char.? == '.') continue;
-            context = .{ .field_access = expr_start };
-            continue;
-        }
-
-        if (new_token) {
-            const access_ctx: PositionContext = if (context == .field_access)
-                .{ .field_access = expr_start }
-            else
-                .var_access;
-
-            new_token = false;
-
-            if (c == '_' or std.ascii.isAlpha(c)) {
-                context = access_ctx;
-            } else if (c == '@') {
-                // This checks for @"..." identifiers by controlling
-                // the context the string will set after it is over.
-                if (next_char != null and next_char.? == '"') {
-                    string_pop_ctx = access_ctx;
-                }
-                context = .builtin;
-            } else {
-                context = .other;
-            }
-            continue;
-        }
-
-        if (context == .field_access or context == .var_access or context == .builtin) {
-            if (c != '_' and !std.ascii.isAlNum(c)) {
-                context = .other;
-            }
-            continue;
-        }
-
-        context = .other;
-    }
-
-    return context;
-}
 
 fn loadConfig(folder_path: []const u8) ?Config {
     var folder = std.fs.cwd().openDir(folder_path, .{}) catch return null;
@@ -851,7 +732,7 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
         };
         if (pos.character >= 0) {
             const pos_index = try handle.document.positionToIndex(pos);
-            const pos_context = documentPositionContext(handle.document, pos_index);
+            const pos_context = try analysis.documentPositionContext(allocator, handle.document, pos);
 
             const this_config = configFromUriOr(uri, config);
             switch (pos_context) {
@@ -865,7 +746,7 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
                     },
                 }),
                 .var_access, .empty => try completeGlobal(id, pos_index, handle, this_config),
-                .field_access => |start_idx| try completeFieldAccess(id, handle, pos, start_idx, this_config),
+                .field_access => |range| try completeFieldAccess(id, handle, pos, range, this_config),
                 else => try respondGeneric(id, no_completions_response),
             }
         } else {
@@ -894,7 +775,7 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
         };
         if (pos.character >= 0) {
             const pos_index = try handle.document.positionToIndex(pos);
-            const pos_context = documentPositionContext(handle.document, pos_index);
+            const pos_context = try analysis.documentPositionContext(allocator, handle.document, pos);
 
             switch (pos_context) {
                 .var_access => try gotoDefinitionGlobal(
@@ -903,16 +784,18 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
                     handle,
                     configFromUriOr(uri, config),
                 ),
-                .field_access => |start_idx| try gotoDefinitionFieldAccess(
+                .field_access => |range| try gotoDefinitionFieldAccess(
                     id,
                     handle,
                     pos,
-                    start_idx,
+                    range,
                     configFromUriOr(uri, config),
                 ),
                 .string_literal => try gotoDefinitionString(id, pos_index, handle, config),
                 else => try respondGeneric(id, null_result_response),
             }
+        } else {
+            try respondGeneric(id, null_result_response);
         }
     } else if (std.mem.eql(u8, method, "textDocument/hover")) {
         const document = params.getValue("textDocument").?.Object;
@@ -930,7 +813,7 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
         };
         if (pos.character >= 0) {
             const pos_index = try handle.document.positionToIndex(pos);
-            const pos_context = documentPositionContext(handle.document, pos_index);
+            const pos_context = try analysis.documentPositionContext(allocator, handle.document, pos);
 
             switch (pos_context) {
                 .var_access => try hoverDefinitionGlobal(
@@ -939,15 +822,17 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
                     handle,
                     configFromUriOr(uri, config),
                 ),
-                .field_access => |start_idx| try hoverDefinitionFieldAccess(
+                .field_access => |range| try hoverDefinitionFieldAccess(
                     id,
                     handle,
                     pos,
-                    start_idx,
+                    range,
                     configFromUriOr(uri, config),
                 ),
                 else => try respondGeneric(id, null_result_response),
             }
+        } else {
+            try respondGeneric(id, null_result_response);
         }
     } else if (root.Object.getValue("id")) |_| {
         std.debug.warn("Method with return value not implemented: {}", .{method});
