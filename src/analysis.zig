@@ -810,13 +810,6 @@ fn peek(arr: *std.ArrayList(StackState)) !*StackState {
     return &arr.items[arr.items.len - 1];
 }
 
-fn tokenRange(token: std.zig.Token) SourceRange {
-    return .{
-        .start = token.loc.start,
-        .end = token.loc.end,
-    };
-}
-
 fn tokenRangeAppend(prev: SourceRange, token: std.zig.Token) SourceRange {
     return .{
         .start = prev.start,
@@ -859,13 +852,13 @@ pub fn documentPositionContext(allocator: *std.mem.Allocator, document: types.Te
         // State changes
         var curr_ctx = try peek(&stack);
         switch (tok.id) {
-            .StringLiteral, .MultilineStringLiteralLine => curr_ctx.ctx = .{ .string_literal = tokenRange(tok) },
+            .StringLiteral, .MultilineStringLiteralLine => curr_ctx.ctx = .{ .string_literal = tok.loc },
             .Identifier => switch (curr_ctx.ctx) {
-                .empty => curr_ctx.ctx = .{ .var_access = tokenRange(tok) },
+                .empty => curr_ctx.ctx = .{ .var_access = tok.loc },
                 else => {},
             },
             .Builtin => switch (curr_ctx.ctx) {
-                .empty => curr_ctx.ctx = .{ .builtin = tokenRange(tok) },
+                .empty => curr_ctx.ctx = .{ .builtin = tok.loc },
                 else => {},
             },
             .Period, .PeriodAsterisk => switch (curr_ctx.ctx) {
