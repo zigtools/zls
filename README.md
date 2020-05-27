@@ -13,6 +13,7 @@ Zig Language Server, or `zls`, is a language server for Zig. The Zig wiki states
 - [Usage](#usage)
   - [VSCode](#vscode)
   - [Sublime Text 3](#sublime-text-3)
+  - [Kate](#kate)
 - [Related Projects](#related-projects)
 - [License](#license)
 
@@ -77,6 +78,23 @@ Install the `zls-vscode` extension from [here](https://github.com/zigtools/zls-v
             "languageId": "zig",
             "scopes": ["source.zig"],
             "syntaxes": ["Packages/Zig/Syntaxes/Zig.tmLanguage"]
+        }
+    }
+}
+```
+
+### Kate
+
+- Enable `LSP client` plugin in Kate settings.
+- Add this snippet to `LSP client's` user settings (e.g. /$HOME/.config/kate/lspclient)
+  (or paste it in `LSP client's` GUI settings)
+```json
+{
+    "servers": {
+        "zig": {
+            "command": ["zls"],
+            "url": "https://github.com/zigtools/zls",
+            "highlightingModeRegex": "^Zig$"
         }
     }
 }

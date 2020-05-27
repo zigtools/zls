@@ -11,7 +11,7 @@ pub fn config(step: *std.build.Step) anyerror!void {
     std.debug.warn("Welcome to the ZLS configuration wizard! (insert mage emoji here)\n", .{});
 
     // std.debug.warn("{}", .{dir.});
-    
+
     const lib_path = try zinput.askDirPath(builder.allocator, "What is your Zig lib path (path that contains the 'std' folder)?", 512);
     const snippets = try zinput.askBool("Do you want to enable snippets?");
     const style = try zinput.askBool("Do you want to enable style warnings?");
@@ -25,18 +25,16 @@ pub fn config(step: *std.build.Step) anyerror!void {
     const out = file.outStream();
 
     std.debug.warn("Writing to config...\n", .{});
-    
-    const content = std.json.stringify(.{
 
+    const content = std.json.stringify(.{
         .zig_lib_path = lib_path,
         .enable_snippets = snippets,
-        .warn_style = style
-
+        .warn_style = style,
     }, std.json.StringifyOptions{}, out);
 
     std.debug.warn("Successfully saved configuration options!\n", .{});
 
-    const editor = try zinput.askSelectOne("Which code editor do you use?", enum { VSCode, Sublime, Other });
+    const editor = try zinput.askSelectOne("Which code editor do you use?", enum { VSCode, Sublime, Kate, Other });
     std.debug.warn("\n", .{});
 
     switch (editor) {
@@ -64,12 +62,28 @@ pub fn config(step: *std.build.Step) anyerror!void {
                 \\}}
             , .{});
         },
+        .Kate => {
+            std.debug.warn(
+                \\To use ZLS in Kate, enable `LSP client` plugin in Kate settings.
+                \\Then, add the following snippet to `LSP client's` user settings:
+                \\(or paste it in `LSP client's` GUI settings)
+                \\{{
+                \\    "servers": {{
+                \\        "zig": {{
+                \\            "command": ["zls"],
+                \\            "url": "https://github.com/zigtools/zls",
+                \\            "highlightingModeRegex": "^Zig$"
+                \\        }}
+                \\    }}
+                \\}}
+            , .{});
+        },
         .Other => {
             std.debug.warn(
                 \\We might not *officially* support your editor, but you can definitely still use ZLS!
                 \\Simply configure your editor for use with language servers and point it to the ZLS executable!
             , .{});
-        }
+        },
     }
 
     std.debug.warn("\nYou can find the ZLS executable in the \"zig-cache/bin\" by default.\nNOTE: Make sure that if you move the ZLS executable, you move the `zls.json` config file with it as well!\n\nAnd finally: Thanks for choosing ZLS!\n\n", .{});
@@ -89,7 +103,7 @@ pub fn build(b: *std.build.Builder) !void {
 
     const exe = b.addExecutable("zls", "src/main.zig");
 
-    const data_version = try std.mem.concat(b.allocator, u8, &[3][]const u8{"\"", b.option([]const u8, "data_version", "The data version - either 0.6.0 or master.") orelse "0.6.0", "\""});
+    const data_version = try std.mem.concat(b.allocator, u8, &[3][]const u8{ "\"", b.option([]const u8, "data_version", "The data version - either 0.6.0 or master.") orelse "0.6.0", "\"" });
     defer b.allocator.free(data_version);
     exe.addBuildOption(
         []const u8,
