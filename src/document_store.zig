@@ -30,35 +30,35 @@ pub const Handle = struct {
     }
 };
 
-pub const ErrorCompletion = struct {
+pub const TagStore = struct {
     values: std.StringHashMap(void),
-    completions: std.ArrayList(types.CompletionItem),
+    completions: std.ArrayListUnmanaged(types.CompletionItem),
 
-    pub fn init(allocator: *std.mem.Allocator) ErrorCompletion {
+    pub fn init(allocator: *std.mem.Allocator) TagStore {
         return .{
             .values = std.StringHashMap(void).init(allocator),
-            .completions = std.ArrayList(types.CompletionItem).init(allocator),
+            .completions = .{},
         };
     }
 
-    pub fn deinit(self: *ErrorCompletion) void {
+    pub fn deinit(self: *TagStore) void {
         const alloc = self.values.allocator;
         for (self.completions.items) |item| {
             alloc.free(item.label);
             if (item.documentation) |some| alloc.free(some.value);
         }
         self.values.deinit();
-        self.completions.deinit();
+        self.completions.deinit(self.values.allocator);
     }
 
-    pub fn add(self: *ErrorCompletion, tree: *std.zig.ast.Tree, tag: *std.zig.ast.Node.ErrorTag) !void {
-        const name = tree.tokenSlice(tag.name_token);
+    pub fn add(self: *TagStore, tree: *std.zig.ast.Tree, tag: *std.zig.ast.Node) !void {
+        const name = analysis.nodeToString(tree, tag).?;
         if (self.values.contains(name)) return;
         const alloc = self.values.allocator;
         const item = types.CompletionItem{
             .label = try std.mem.dupe(alloc, u8, name),
             .kind = .Constant,
-            .documentation = if (try analysis.getDocComments(alloc, tree, &tag.base)) |docs|
+            .documentation = if (try analysis.getDocComments(alloc, tree, tag)) |docs|
                 .{
                     .kind = .Markdown,
                     .value = docs,
@@ -68,7 +68,7 @@ pub const ErrorCompletion = struct {
         };
 
         try self.values.putNoClobber(item.label, {});
-        try self.completions.append(item);
+        try self.completions.append(self.values.allocator, item);
     }
 };
 
@@ -78,7 +78,8 @@ has_zig: bool,
 build_files: std.ArrayListUnmanaged(*BuildFile),
 build_runner_path: []const u8,
 
-error_completions: ErrorCompletion,
+error_completions: TagStore,
+enum_completions: TagStore,
 
 pub fn init(
     self: *DocumentStore,
@@ -91,7 +92,8 @@ pub fn init(
     self.has_zig = has_zig;
     self.build_files = .{};
     self.build_runner_path = build_runner_path;
-    self.error_completions = ErrorCompletion.init(allocator);
+    self.error_completions = TagStore.init(allocator);
+    self.enum_completions = TagStore.init(allocator);
 }
 
 const LoadPackagesContext = struct {
@@ -523,7 +525,8 @@ pub const AnalysisContext = struct {
     scope_nodes: []*std.zig.ast.Node,
     in_container: *std.zig.ast.Node,
     std_uri: ?[]const u8,
-    error_completions: *ErrorCompletion,
+    error_completions: *TagStore,
+    enum_completions: *TagStore,
 
     pub fn tree(self: AnalysisContext) *std.zig.ast.Tree {
         return self.handle.tree;
@@ -631,6 +634,7 @@ pub const AnalysisContext = struct {
             .in_container = self.in_container,
             .std_uri = self.std_uri,
             .error_completions = self.error_completions,
+            .enum_completions = self.enum_completions,
         };
     }
 };
@@ -671,6 +675,7 @@ pub fn analysisContext(
         .in_container = in_container,
         .std_uri = std_uri,
         .error_completions = &self.error_completions,
+        .enum_completions = &self.enum_completions,
     };
 }
 
@@ -701,4 +706,5 @@ pub fn deinit(self: *DocumentStore) void {
 
     self.build_files.deinit(self.allocator);
     self.error_completions.deinit();
+    self.enum_completions.deinit();
 }

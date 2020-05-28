@@ -769,6 +769,15 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
                         },
                     },
                 }),
+                .enum_literal =>  try send(types.Response{
+                    .id = .{ .Integer = id },
+                    .result = .{
+                        .CompletionList = .{
+                            .isIncomplete = false,
+                            .items = document_store.enum_completions.completions.items,
+                        },
+                    },
+                }),
                 else => try respondGeneric(id, no_completions_response),
             }
         } else {
