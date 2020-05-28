@@ -413,6 +413,15 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
                 else => decl,
             };
         },
+        .ErrorSetDecl => {
+            const set = node.cast(ast.Node.ErrorSetDecl).?;
+            var i: usize = 0;
+            while (set.iterate(i)) |decl| : (i += 1) {
+                // TODO handle errors better?
+                analysis_ctx.error_completions.add(analysis_ctx.tree(), decl) catch {};
+            }
+            return node;
+        },
         .SuffixOp => {
             const suffix_op = node.cast(ast.Node.SuffixOp).?;
             switch (suffix_op.op) {
@@ -505,9 +514,23 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
         },
         .ContainerDecl => {
             analysis_ctx.onContainer(node.cast(ast.Node.ContainerDecl).?) catch return null;
+
+            const container = node.cast(ast.Node.ContainerDecl).?;
+            const kind = analysis_ctx.tree().token_ids[container.kind_token];
+
+            if (kind == .Keyword_struct or (kind == .Keyword_union and container.init_arg_expr == .None)) {
+                return node;
+            }
+
+            var i: usize = 0;
+            while (container.iterate(i)) |decl| : (i += 1) {
+                if (decl.id != .ContainerField) continue;
+                // TODO handle errors better?
+                analysis_ctx.enum_completions.add(analysis_ctx.tree(), decl) catch {};
+            }
             return node;
         },
-        .MultilineStringLiteral, .StringLiteral, .ErrorSetDecl, .FnProto => return node,
+        .MultilineStringLiteral, .StringLiteral, .FnProto => return node,
         else => std.debug.warn("Type resolution case not implemented; {}\n", .{node.id}),
     }
     return null;
@@ -924,6 +947,7 @@ pub const PositionContext = union(enum) {
     string_literal: SourceRange,
     field_access: SourceRange,
     var_access: SourceRange,
+    global_error_set,
     enum_literal,
     other,
     empty,
@@ -938,6 +962,7 @@ pub const PositionContext = union(enum) {
             .enum_literal => null,
             .other => null,
             .empty => null,
+            .global_error_set => null,
         };
     }
 };
@@ -1010,6 +1035,7 @@ pub fn documentPositionContext(allocator: *std.mem.Allocator, document: types.Te
                 .enum_literal => curr_ctx.ctx = .empty,
                 .field_access => {},
                 .other => {},
+                .global_error_set => {},
                 else => curr_ctx.ctx = .{
                     .field_access = tokenRangeAppend(curr_ctx.ctx.range().?, tok),
                 },
@@ -1032,6 +1058,7 @@ pub fn documentPositionContext(allocator: *std.mem.Allocator, document: types.Te
                     (try peek(&stack)).ctx = .empty;
                 }
             },
+            .Keyword_error => curr_ctx.ctx = .global_error_set,
             else => curr_ctx.ctx = .empty,
         }
 
@@ -1065,7 +1092,7 @@ fn addOutlineNodes(allocator: *std.mem.Allocator, children: *std.ArrayList(types
                 try addOutlineNodes(allocator, children, tree, cchild);
             return;
         },
-        else => {}
+        else => {},
     }
     std.debug.warn("{}\n", .{child.id});
     _ = try children.append(try getDocumentSymbolsInternal(allocator, tree, child));
@@ -1073,7 +1100,6 @@ fn addOutlineNodes(allocator: *std.mem.Allocator, children: *std.ArrayList(types
 
 fn getDocumentSymbolsInternal(allocator: *std.mem.Allocator, tree: *ast.Tree, node: *ast.Node) anyerror!types.DocumentSymbol {
     // const symbols = std.ArrayList(types.DocumentSymbol).init(allocator);
-
     const start_loc = tree.tokenLocation(0, node.firstToken());
     const end_loc = tree.tokenLocation(0, node.lastToken());
     const range = types.Range{
@@ -1084,14 +1110,14 @@ fn getDocumentSymbolsInternal(allocator: *std.mem.Allocator, tree: *ast.Tree, no
         .end = .{
             .line = @intCast(i64, end_loc.line),
             .character = @intCast(i64, end_loc.column),
-        }
+        },
     };
 
     if (getDeclName(tree, node) == null) {
         std.debug.warn("NULL NAME: {}\n", .{node.id});
     }
 
-    // TODO: Get my lazy bum to fix detail newlines 
+    // TODO: Get my lazy bum to fix detail newlines
     return types.DocumentSymbol{
         .name = getDeclName(tree, node) orelse "no_name",
         // .detail = (try getDocComments(allocator, tree, node)) orelse "",
@@ -1100,7 +1126,7 @@ fn getDocumentSymbolsInternal(allocator: *std.mem.Allocator, tree: *ast.Tree, no
             .FnProto => .Function,
             .VarDecl => .Variable,
             .ContainerField => .Field,
-            else => .Variable
+            else => .Variable,
         },
         .range = range,
         .selectionRange = range,
