@@ -100,6 +100,21 @@ Install the `zls-vscode` extension from [here](https://github.com/zigtools/zls-v
 }
 ```
 
+### Neovim/Vim8
+
+- Install the CoC engine from [here](https://github.com/neoclide/coc.nvim).
+- Issue `:CocConfig` from within your Vim editor, and the following snippet:
+```json
+{
+   "lanuageserver": {
+       "zls" : {
+           "command": "command_or_path_to_zls",
+           "filetypes": ["zig"]
+       }
+   }
+}
+```
+
 ## Related Projects
 - [`sublime-zig-language` by @prime31](https://github.com/prime31/sublime-zig-language)
   - Supports basic language features
