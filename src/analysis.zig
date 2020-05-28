@@ -189,6 +189,10 @@ pub fn getDeclNameToken(tree: *ast.Tree, node: *ast.Node) ?ast.TokenIndex {
             const ident = node.cast(ast.Node.Identifier).?;
             return ident.token;
         },
+        .TestDecl => {
+            const decl = node.cast(ast.Node.TestDecl).?;
+            return (decl.name.cast(ast.Node.StringLiteral) orelse return null).token;
+        },
         else => {},
     }
 
@@ -196,7 +200,11 @@ pub fn getDeclNameToken(tree: *ast.Tree, node: *ast.Node) ?ast.TokenIndex {
 }
 
 fn getDeclName(tree: *ast.Tree, node: *ast.Node) ?[]const u8 {
-    return tree.tokenSlice(getDeclNameToken(tree, node) orelse return null);
+    const name = tree.tokenSlice(getDeclNameToken(tree, node) orelse return null);
+    return switch (node.id) {
+        .TestDecl => name[1..name.len - 1],
+        else => name
+    };
 }
 
 /// Gets the child of node
@@ -1048,22 +1056,13 @@ fn addOutlineNodes(allocator: *std.mem.Allocator, children: *std.ArrayList(types
         .SwitchCase, .For, .EnumLiteral, .PointerIndexPayload , .StructInitializerDot, 
         .PointerPayload, .While, .Switch, .Else, .BoolLiteral, .NullLiteral, .Defer,
         .StructInitializer, .FieldInitializer, .If, .FnProto, .MultilineStringLiteral,
-        .UndefinedLiteral, .VarType => return,
+        .UndefinedLiteral, .VarType, .Block => return,
         
         .ContainerDecl => {
             const decl = child.cast(ast.Node.ContainerDecl).?;
 
-            for (decl.fieldsAndDecls()) |cchild| 
+            for (decl.fieldsAndDecls()) |cchild|
                 try addOutlineNodes(allocator, children, tree, cchild);
-                // _ = try children.append(try getDocumentSymbolsInternal(allocator, tree, cchild));
-            return;
-        },
-        .Block => {
-            // const block = child.cast(ast.Node.Block).?;
-
-            // for (block.statements()) |cchild| 
-                // try addOutlineNodes(allocator, children, tree, cchild);
-                // _ = try children.append(try getDocumentSymbolsInternal(allocator, tree, cchild));
             return;
         },
         else => {}
