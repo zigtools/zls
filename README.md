@@ -14,6 +14,7 @@ Zig Language Server, or `zls`, is a language server for Zig. The Zig wiki states
   - [VSCode](#vscode)
   - [Sublime Text 3](#sublime-text-3)
   - [Kate](#kate)
+  - [Neovim/Vim8](#neovimvim8)
 - [Related Projects](#related-projects)
 - [License](#license)
 
@@ -97,6 +98,21 @@ Install the `zls-vscode` extension from [here](https://github.com/zigtools/zls-v
             "highlightingModeRegex": "^Zig$"
         }
     }
+}
+```
+
+### Neovim/Vim8
+
+- Install the CoC engine from [here](https://github.com/neoclide/coc.nvim).
+- Issue `:CocConfig` from within your Vim editor, and the following snippet:
+```json
+{
+   "lanuageserver": {
+       "zls" : {
+           "command": "command_or_path_to_zls",
+           "filetypes": ["zig"]
+       }
+   }
 }
 ```
 
