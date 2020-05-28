@@ -1,6 +1,7 @@
 const std = @import("std");
 const AnalysisContext = @import("document_store.zig").AnalysisContext;
 const ast = std.zig.ast;
+const types = @import("types.zig");
 
 /// REALLY BAD CODE, PLEASE DON'T USE THIS!!!!!!! (only for testing)
 pub fn getFunctionByName(tree: *ast.Tree, name: []const u8) ?*ast.Node.FnProto {
@@ -907,7 +908,6 @@ pub fn getImportStr(tree: *ast.Tree, source_index: usize) ?[]const u8 {
     return null;
 }
 
-const types = @import("types.zig");
 pub const SourceRange = std.zig.Token.Loc;
 
 pub const PositionContext = union(enum) {
@@ -1039,4 +1039,92 @@ pub fn documentPositionContext(allocator: *std.mem.Allocator, document: types.Te
         if (stack.popOrNull()) |state| break :block state.ctx;
         break :block .empty;
     };
+}
+
+fn addOutlineNodes(allocator: *std.mem.Allocator, children: *std.ArrayList(types.DocumentSymbol), tree: *ast.Tree, child: *ast.Node) anyerror!void {
+    switch (child.id) {
+        .StringLiteral, .IntegerLiteral, .BuiltinCall, .Call, .Identifier, .InfixOp,
+        .PrefixOp, .SuffixOp, .ControlFlowExpression, .ArrayInitializerDot, .SwitchElse,
+        .SwitchCase, .For, .EnumLiteral, .PointerIndexPayload , .StructInitializerDot, 
+        .PointerPayload, .While, .Switch, .Else, .BoolLiteral, .NullLiteral, .Defer,
+        .StructInitializer, .FieldInitializer, .If, .FnProto => return,
+        
+        .ContainerDecl => {
+            const decl = child.cast(ast.Node.ContainerDecl).?;
+
+            for (decl.fieldsAndDecls()) |cchild| 
+                try addOutlineNodes(allocator, children, tree, cchild);
+                // _ = try children.append(try getDocumentSymbolsInternal(allocator, tree, cchild));
+            return;
+        },
+        .Block => {
+            // const block = child.cast(ast.Node.Block).?;
+
+            // for (block.statements()) |cchild| 
+                // try addOutlineNodes(allocator, children, tree, cchild);
+                // _ = try children.append(try getDocumentSymbolsInternal(allocator, tree, cchild));
+            return;
+        },
+        else => {}
+    }
+    std.debug.warn("{}\n", .{child.id});
+    _ = try children.append(try getDocumentSymbolsInternal(allocator, tree, child));
+}
+
+fn getDocumentSymbolsInternal(allocator: *std.mem.Allocator, tree: *ast.Tree, node: *ast.Node) anyerror!types.DocumentSymbol {
+    // const symbols = std.ArrayList(types.DocumentSymbol).init(allocator);
+
+    const start_loc = tree.tokenLocation(0, node.firstToken());
+    const end_loc = tree.tokenLocation(0, node.lastToken());
+    const range = types.Range{
+        .start = .{
+            .line = @intCast(i64, start_loc.line),
+            .character = @intCast(i64, start_loc.column),
+        },
+        .end = .{
+            .line = @intCast(i64, end_loc.line),
+            .character = @intCast(i64, end_loc.column),
+        }
+    };
+
+    if (getDeclName(tree, node) == null) {
+        std.debug.warn("NULL NAME: {}\n", .{node.id});
+    }
+
+    // TODO: Get my lazy bum to fix detail newlines 
+    return types.DocumentSymbol{
+        .name = getDeclName(tree, node) orelse "no_name",
+        // .detail = (try getDocComments(allocator, tree, node)) orelse "",
+        .detail = "",
+        .kind = switch (node.id) {
+            .FnProto => .Function,
+            .VarDecl => .Variable,
+            .ContainerField => .Field,
+            else => .Variable
+        },
+        .range = range,
+        .selectionRange = range,
+        .children = ch: {
+            var children = std.ArrayList(types.DocumentSymbol).init(allocator);
+
+            var index: usize = 0;
+            while (node.iterate(index)) |child| : (index += 1) {
+                try addOutlineNodes(allocator, &children, tree, child);
+            }
+
+            break :ch children.items;
+        },
+    };
+
+    // return symbols.items;
+}
+
+pub fn getDocumentSymbols(allocator: *std.mem.Allocator, tree: *ast.Tree) ![]types.DocumentSymbol {
+    var symbols = std.ArrayList(types.DocumentSymbol).init(allocator);
+
+    for (tree.root_node.decls()) |node| {
+        _ = try symbols.append(try getDocumentSymbolsInternal(allocator, tree, node));
+    }
+
+    return symbols.items;
 }

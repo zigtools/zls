@@ -19,7 +19,7 @@ var document_store: DocumentStore = undefined;
 var workspace_folder_configs: std.StringHashMap(?Config) = undefined;
 
 const initialize_response =
-    \\,"result":{"capabilities":{"signatureHelpProvider":{"triggerCharacters":["(",","]},"textDocumentSync":1,"completionProvider":{"resolveProvider":false,"triggerCharacters":[".",":","@"]},"documentHighlightProvider":false,"hoverProvider":true,"codeActionProvider":false,"declarationProvider":true,"definitionProvider":true,"typeDefinitionProvider":true,"implementationProvider":false,"referencesProvider":false,"documentSymbolProvider":false,"colorProvider":false,"documentFormattingProvider":false,"documentRangeFormattingProvider":false,"foldingRangeProvider":false,"selectionRangeProvider":false,"workspaceSymbolProvider":false,"workspace":{"workspaceFolders":{"supported":true,"changeNotifications":true}}}}}
+    \\,"result":{"capabilities":{"signatureHelpProvider":{"triggerCharacters":["(",","]},"textDocumentSync":1,"completionProvider":{"resolveProvider":false,"triggerCharacters":[".",":","@"]},"documentHighlightProvider":false,"hoverProvider":true,"codeActionProvider":false,"declarationProvider":true,"definitionProvider":true,"typeDefinitionProvider":true,"implementationProvider":false,"referencesProvider":false,"documentSymbolProvider":true,"colorProvider":false,"documentFormattingProvider":false,"documentRangeFormattingProvider":false,"foldingRangeProvider":false,"selectionRangeProvider":false,"workspaceSymbolProvider":false,"workspace":{"workspaceFolders":{"supported":true,"changeNotifications":true}}}}}
 ;
 
 const not_implemented_response =
@@ -44,14 +44,15 @@ const no_completions_response =
 
 /// Sends a request or response
 fn send(reqOrRes: var) !void {
-    // The most memory we'll probably need
-    var mem_buffer: [1024 * 128]u8 = undefined;
-    var fbs = std.io.fixedBufferStream(&mem_buffer);
-    try std.json.stringify(reqOrRes, std.json.StringifyOptions{}, fbs.outStream());
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+
+    var arr = std.ArrayList(u8).init(&arena.allocator);
+    try std.json.stringify(reqOrRes, std.json.StringifyOptions{}, arr.outStream());
 
     const stdout_stream = stdout.outStream();
-    try stdout_stream.print("Content-Length: {}\r\n\r\n", .{fbs.pos});
-    try stdout_stream.writeAll(fbs.getWritten());
+    try stdout_stream.print("Content-Length: {}\r\n\r\n", .{arr.items.len});
+    try stdout_stream.writeAll(arr.items);
     try stdout.flush();
 }
 
@@ -526,6 +527,18 @@ fn completeFieldAccess(id: i64, handle: *DocumentStore.Handle, position: types.P
     });
 }
 
+fn documentSymbol(id: i64, handle: *DocumentStore.Handle) !void {
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+
+    try send(types.Response{
+        .id = .{ .Integer = id },
+        .result = .{
+            .DocumentSymbols = try analysis.getDocumentSymbols(&arena.allocator, handle.tree)
+        },
+    });
+}
+
 // Compute builtin completions at comptime.
 const builtin_completions = block: {
     @setEvalBranchQuota(3_500);
@@ -834,6 +847,16 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
         } else {
             try respondGeneric(id, null_result_response);
         }
+    } else if (std.mem.eql(u8, method, "textDocument/documentSymbol")) {
+        const document = params.getValue("textDocument").?.Object;
+        const uri = document.getValue("uri").?.String;
+
+        const handle = document_store.getHandle(uri) orelse {
+            std.debug.warn("Trying to got to definition in non existent document {}", .{uri});
+            return try respondGeneric(id, null_result_response);
+        };
+
+        try documentSymbol(id, handle);
     } else if (root.Object.getValue("id")) |_| {
         std.debug.warn("Method with return value not implemented: {}", .{method});
         try respondGeneric(id, not_implemented_response);
