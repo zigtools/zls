@@ -14,6 +14,7 @@ Zig Language Server, or `zls`, is a language server for Zig. The Zig wiki states
   - [VSCode](#vscode)
   - [Sublime Text 3](#sublime-text-3)
   - [Kate](#kate)
+  - [Neovim/Vim8](#neovimvim8)
 - [Related Projects](#related-projects)
 - [License](#license)
 
