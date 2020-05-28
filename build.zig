@@ -19,7 +19,7 @@ pub fn config(step: *std.build.Step) anyerror!void {
     var dir = try std.fs.cwd().openDir(builder.exe_dir, .{});
     defer dir.close();
 
-    var file = try dir.openFile("zls.json", .{ .write = true });
+    var file = try dir.createFile("zls.json", .{});
     defer file.close();
 
     const out = file.outStream();

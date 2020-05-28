@@ -1047,7 +1047,8 @@ fn addOutlineNodes(allocator: *std.mem.Allocator, children: *std.ArrayList(types
         .PrefixOp, .SuffixOp, .ControlFlowExpression, .ArrayInitializerDot, .SwitchElse,
         .SwitchCase, .For, .EnumLiteral, .PointerIndexPayload , .StructInitializerDot, 
         .PointerPayload, .While, .Switch, .Else, .BoolLiteral, .NullLiteral, .Defer,
-        .StructInitializer, .FieldInitializer, .If, .FnProto => return,
+        .StructInitializer, .FieldInitializer, .If, .FnProto, .MultilineStringLiteral,
+        .UndefinedLiteral, .VarType => return,
         
         .ContainerDecl => {
             const decl = child.cast(ast.Node.ContainerDecl).?;
