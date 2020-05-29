@@ -30,11 +30,56 @@ pub const Handle = struct {
     }
 };
 
+pub const TagStore = struct {
+    values: std.StringHashMap(void),
+    completions: std.ArrayListUnmanaged(types.CompletionItem),
+
+    pub fn init(allocator: *std.mem.Allocator) TagStore {
+        return .{
+            .values = std.StringHashMap(void).init(allocator),
+            .completions = .{},
+        };
+    }
+
+    pub fn deinit(self: *TagStore) void {
+        const alloc = self.values.allocator;
+        for (self.completions.items) |item| {
+            alloc.free(item.label);
+            if (item.documentation) |some| alloc.free(some.value);
+        }
+        self.values.deinit();
+        self.completions.deinit(self.values.allocator);
+    }
+
+    pub fn add(self: *TagStore, tree: *std.zig.ast.Tree, tag: *std.zig.ast.Node) !void {
+        const name = analysis.nodeToString(tree, tag).?;
+        if (self.values.contains(name)) return;
+        const alloc = self.values.allocator;
+        const item = types.CompletionItem{
+            .label = try std.mem.dupe(alloc, u8, name),
+            .kind = .Constant,
+            .documentation = if (try analysis.getDocComments(alloc, tree, tag)) |docs|
+                .{
+                    .kind = .Markdown,
+                    .value = docs,
+                }
+            else
+                null,
+        };
+
+        try self.values.putNoClobber(item.label, {});
+        try self.completions.append(self.values.allocator, item);
+    }
+};
+
 allocator: *std.mem.Allocator,
 handles: std.StringHashMap(*Handle),
 has_zig: bool,
 build_files: std.ArrayListUnmanaged(*BuildFile),
 build_runner_path: []const u8,
+
+error_completions: TagStore,
+enum_completions: TagStore,
 
 pub fn init(
     self: *DocumentStore,
@@ -47,6 +92,8 @@ pub fn init(
     self.has_zig = has_zig;
     self.build_files = .{};
     self.build_runner_path = build_runner_path;
+    self.error_completions = TagStore.init(allocator);
+    self.enum_completions = TagStore.init(allocator);
 }
 
 const LoadPackagesContext = struct {
@@ -70,7 +117,7 @@ fn loadPackages(context: LoadPackagesContext) !void {
     // open it and handle the error for file not found.
     var file_exists = true;
     check_file_exists: {
-        var fhandle = std.fs.cwd().openFile(target_path, .{.read = true, .write = false }) catch |err| switch (err) {
+        var fhandle = std.fs.cwd().openFile(target_path, .{ .read = true, .write = false }) catch |err| switch (err) {
             error.FileNotFound => {
                 file_exists = false;
                 break :check_file_exists;
@@ -179,7 +226,7 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: []u8) anyerror!*Hand
             .allocator = self.allocator,
             .build_runner_path = self.build_runner_path,
         }) catch |err| {
-            std.debug.warn("Failed to load packages of build file {} (error: {})\n", .{build_file.uri, err});
+            std.debug.warn("Failed to load packages of build file {} (error: {})\n", .{ build_file.uri, err });
         };
     } else if (self.has_zig and !in_std) associate_build_file: {
         // Look into build files to see if we already have one that fits
@@ -425,7 +472,7 @@ pub fn applyChanges(
             .allocator = self.allocator,
             .build_runner_path = self.build_runner_path,
         }) catch |err| {
-            std.debug.warn("Failed to load packages of build file {} (error: {})\n", .{build_file.uri, err});
+            std.debug.warn("Failed to load packages of build file {} (error: {})\n", .{ build_file.uri, err });
         };
     }
 }
@@ -478,6 +525,8 @@ pub const AnalysisContext = struct {
     scope_nodes: []*std.zig.ast.Node,
     in_container: *std.zig.ast.Node,
     std_uri: ?[]const u8,
+    error_completions: *TagStore,
+    enum_completions: *TagStore,
 
     pub fn tree(self: AnalysisContext) *std.zig.ast.Tree {
         return self.handle.tree;
@@ -490,12 +539,14 @@ pub const AnalysisContext = struct {
         self.in_container = &self.tree().root_node.base;
     }
 
-    pub fn onContainer(self: *AnalysisContext, container: *std.zig.ast.Node.ContainerDecl) !void {
-        if (self.in_container != &container.base) {
-            self.in_container = &container.base;
+    pub fn onContainer(self: *AnalysisContext, container: *std.zig.ast.Node) !void {
+        std.debug.assert(container.id == .ContainerDecl or container.id == .Root);
+
+        if (self.in_container != container) {
+            self.in_container = container;
 
             var scope_nodes = std.ArrayList(*std.zig.ast.Node).fromOwnedSlice(&self.arena.allocator, self.scope_nodes);
-            try analysis.addChildrenNodes(&scope_nodes, self.tree(), &container.base);
+            try analysis.addChildrenNodes(&scope_nodes, self.tree(), container);
             self.scope_nodes = scope_nodes.items;
         }
     }
@@ -584,6 +635,8 @@ pub const AnalysisContext = struct {
             .scope_nodes = try std.mem.dupe(&self.arena.allocator, *std.zig.ast.Node, self.scope_nodes),
             .in_container = self.in_container,
             .std_uri = self.std_uri,
+            .error_completions = self.error_completions,
+            .enum_completions = self.enum_completions,
         };
     }
 };
@@ -613,7 +666,7 @@ pub fn analysisContext(
     zig_lib_path: ?[]const u8,
 ) !AnalysisContext {
     var scope_nodes = std.ArrayList(*std.zig.ast.Node).init(&arena.allocator);
-    const in_container = try analysis.declsFromIndex(arena, &scope_nodes, handle.tree, position);
+    try analysis.declsFromIndex(arena, &scope_nodes, handle.tree, position);
 
     const std_uri = try stdUriFromLibPath(&arena.allocator, zig_lib_path);
     return AnalysisContext{
@@ -621,8 +674,10 @@ pub fn analysisContext(
         .handle = handle,
         .arena = arena,
         .scope_nodes = scope_nodes.items,
-        .in_container = in_container,
+        .in_container = &handle.tree.root_node.base,
         .std_uri = std_uri,
+        .error_completions = &self.error_completions,
+        .enum_completions = &self.enum_completions,
     };
 }
 
@@ -652,4 +707,6 @@ pub fn deinit(self: *DocumentStore) void {
     }
 
     self.build_files.deinit(self.allocator);
+    self.error_completions.deinit();
+    self.enum_completions.deinit();
 }

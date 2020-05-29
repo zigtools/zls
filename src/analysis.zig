@@ -278,7 +278,7 @@ fn resolveReturnType(analysis_ctx: *AnalysisContext, fn_decl: *ast.Node.FnProto)
         if (ret.rhs) |rhs|
             if (resolveTypeOfNode(analysis_ctx, rhs)) |res_rhs| switch (res_rhs.id) {
                 .ContainerDecl => {
-                    analysis_ctx.onContainer(res_rhs.cast(ast.Node.ContainerDecl).?) catch return null;
+                    analysis_ctx.onContainer(res_rhs) catch return null;
                     return res_rhs;
                 },
                 else => return null,
@@ -413,6 +413,15 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
                 else => decl,
             };
         },
+        .ErrorSetDecl => {
+            const set = node.cast(ast.Node.ErrorSetDecl).?;
+            var i: usize = 0;
+            while (set.iterate(i)) |decl| : (i += 1) {
+                // TODO handle errors better?
+                analysis_ctx.error_completions.add(analysis_ctx.tree(), decl) catch {};
+            }
+            return node;
+        },
         .SuffixOp => {
             const suffix_op = node.cast(ast.Node.SuffixOp).?;
             switch (suffix_op.op) {
@@ -504,10 +513,24 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
             };
         },
         .ContainerDecl => {
-            analysis_ctx.onContainer(node.cast(ast.Node.ContainerDecl).?) catch return null;
+            analysis_ctx.onContainer(node) catch return null;
+
+            const container = node.cast(ast.Node.ContainerDecl).?;
+            const kind = analysis_ctx.tree().token_ids[container.kind_token];
+
+            if (kind == .Keyword_struct or (kind == .Keyword_union and container.init_arg_expr == .None)) {
+                return node;
+            }
+
+            var i: usize = 0;
+            while (container.iterate(i)) |decl| : (i += 1) {
+                if (decl.id != .ContainerField) continue;
+                // TODO handle errors better?
+                analysis_ctx.enum_completions.add(analysis_ctx.tree(), decl) catch {};
+            }
             return node;
         },
-        .MultilineStringLiteral, .StringLiteral, .ErrorSetDecl, .FnProto => return node,
+        .MultilineStringLiteral, .StringLiteral, .FnProto => return node,
         else => std.debug.warn("Type resolution case not implemented; {}\n", .{node.id}),
     }
     return null;
@@ -553,6 +576,17 @@ pub fn collectImports(import_arr: *std.ArrayList([]const u8), tree: *ast.Tree) !
     }
 }
 
+fn checkForContainerAndResolveFieldAccessLhsType(analysis_ctx: *AnalysisContext, node: *ast.Node) *ast.Node {
+    const current_node = resolveFieldAccessLhsType(analysis_ctx, node);
+
+    if (current_node.id == .ContainerDecl or current_node.id == .Root) {
+        // TODO: Handle errors
+        analysis_ctx.onContainer(current_node) catch {};
+    }
+
+    return current_node;
+}
+
 pub fn getFieldAccessTypeNode(
     analysis_ctx: *AnalysisContext,
     tokenizer: *std.zig.Tokenizer,
@@ -577,7 +611,7 @@ pub fn getFieldAccessTypeNode(
                     .Identifier => {
                         if (after_period.loc.end == tokenizer.buffer.len) return resolveFieldAccessLhsType(analysis_ctx, current_node);
 
-                        current_node = resolveFieldAccessLhsType(analysis_ctx, current_node);
+                        current_node = checkForContainerAndResolveFieldAccessLhsType(analysis_ctx, current_node);
                         if (getChild(analysis_ctx.tree(), current_node, tokenizer.buffer[after_period.loc.start..after_period.loc.end])) |child| {
                             if (resolveTypeOfNode(analysis_ctx, child)) |child_type| {
                                 current_node = child_type;
@@ -651,8 +685,8 @@ pub fn getFieldAccessTypeNode(
             },
         }
 
-        if (current_node.cast(ast.Node.ContainerDecl)) |container_decl| {
-            analysis_ctx.onContainer(container_decl) catch return null;
+        if (current_node.id == .ContainerDecl or current_node.id == .Root) {
+            analysis_ctx.onContainer(current_node) catch return null;
         }
     }
 
@@ -706,12 +740,10 @@ pub fn declsFromIndexInternal(
     decls: *std.ArrayList(*ast.Node),
     tree: *ast.Tree,
     node: *ast.Node,
-    container: **ast.Node,
     source_index: usize,
 ) error{OutOfMemory}!void {
     switch (node.id) {
         .Root, .ContainerDecl => {
-            container.* = node;
             var node_idx: usize = 0;
             while (node.iterate(node_idx)) |child_node| : (node_idx += 1) {
                 // Skip over container fields, we can only dot access those.
@@ -721,7 +753,7 @@ pub fn declsFromIndexInternal(
                 // If the cursor is in a variable decls it will insert itself anyway, we don't need to take care of it.
                 if ((is_contained and child_node.id != .VarDecl) or !is_contained) try decls.append(child_node);
                 if (is_contained) {
-                    try declsFromIndexInternal(arena, decls, tree, child_node, container, source_index);
+                    try declsFromIndexInternal(arena, decls, tree, child_node, source_index);
                 }
             }
         },
@@ -759,41 +791,41 @@ pub fn declsFromIndexInternal(
 
             if (func.body_node) |body_node| {
                 if (!nodeContainsSourceIndex(tree, body_node, source_index)) return;
-                try declsFromIndexInternal(arena, decls, tree, body_node, container, source_index);
+                try declsFromIndexInternal(arena, decls, tree, body_node, source_index);
             }
         },
         .TestDecl => {
             const test_decl = node.cast(ast.Node.TestDecl).?;
             if (!nodeContainsSourceIndex(tree, test_decl.body_node, source_index)) return;
-            try declsFromIndexInternal(arena, decls, tree, test_decl.body_node, container, source_index);
+            try declsFromIndexInternal(arena, decls, tree, test_decl.body_node, source_index);
         },
         .Block => {
             var inode_idx: usize = 0;
             while (node.iterate(inode_idx)) |inode| : (inode_idx += 1) {
                 if (nodeComesAfterSourceIndex(tree, inode, source_index)) return;
-                try declsFromIndexInternal(arena, decls, tree, inode, container, source_index);
+                try declsFromIndexInternal(arena, decls, tree, inode, source_index);
             }
         },
         .Comptime => {
             const comptime_stmt = node.cast(ast.Node.Comptime).?;
             if (nodeComesAfterSourceIndex(tree, comptime_stmt.expr, source_index)) return;
-            try declsFromIndexInternal(arena, decls, tree, comptime_stmt.expr, container, source_index);
+            try declsFromIndexInternal(arena, decls, tree, comptime_stmt.expr, source_index);
         },
         .If => {
             const if_node = node.cast(ast.Node.If).?;
             if (nodeContainsSourceIndex(tree, if_node.body, source_index)) {
                 if (if_node.payload) |payload| {
-                    try declsFromIndexInternal(arena, decls, tree, payload, container, source_index);
+                    try declsFromIndexInternal(arena, decls, tree, payload, source_index);
                 }
-                return try declsFromIndexInternal(arena, decls, tree, if_node.body, container, source_index);
+                return try declsFromIndexInternal(arena, decls, tree, if_node.body, source_index);
             }
 
             if (if_node.@"else") |else_node| {
                 if (nodeContainsSourceIndex(tree, else_node.body, source_index)) {
                     if (else_node.payload) |payload| {
-                        try declsFromIndexInternal(arena, decls, tree, payload, container, source_index);
+                        try declsFromIndexInternal(arena, decls, tree, payload, source_index);
                     }
-                    return try declsFromIndexInternal(arena, decls, tree, else_node.body, container, source_index);
+                    return try declsFromIndexInternal(arena, decls, tree, else_node.body, source_index);
                 }
             }
         },
@@ -801,33 +833,33 @@ pub fn declsFromIndexInternal(
             const while_node = node.cast(ast.Node.While).?;
             if (nodeContainsSourceIndex(tree, while_node.body, source_index)) {
                 if (while_node.payload) |payload| {
-                    try declsFromIndexInternal(arena, decls, tree, payload, container, source_index);
+                    try declsFromIndexInternal(arena, decls, tree, payload, source_index);
                 }
-                return try declsFromIndexInternal(arena, decls, tree, while_node.body, container, source_index);
+                return try declsFromIndexInternal(arena, decls, tree, while_node.body, source_index);
             }
 
             if (while_node.@"else") |else_node| {
                 if (nodeContainsSourceIndex(tree, else_node.body, source_index)) {
                     if (else_node.payload) |payload| {
-                        try declsFromIndexInternal(arena, decls, tree, payload, container, source_index);
+                        try declsFromIndexInternal(arena, decls, tree, payload, source_index);
                     }
-                    return try declsFromIndexInternal(arena, decls, tree, else_node.body, container, source_index);
+                    return try declsFromIndexInternal(arena, decls, tree, else_node.body, source_index);
                 }
             }
         },
         .For => {
             const for_node = node.cast(ast.Node.For).?;
             if (nodeContainsSourceIndex(tree, for_node.body, source_index)) {
-                try declsFromIndexInternal(arena, decls, tree, for_node.payload, container, source_index);
-                return try declsFromIndexInternal(arena, decls, tree, for_node.body, container, source_index);
+                try declsFromIndexInternal(arena, decls, tree, for_node.payload, source_index);
+                return try declsFromIndexInternal(arena, decls, tree, for_node.body, source_index);
             }
 
             if (for_node.@"else") |else_node| {
                 if (nodeContainsSourceIndex(tree, else_node.body, source_index)) {
                     if (else_node.payload) |payload| {
-                        try declsFromIndexInternal(arena, decls, tree, payload, container, source_index);
+                        try declsFromIndexInternal(arena, decls, tree, payload, source_index);
                     }
-                    return try declsFromIndexInternal(arena, decls, tree, else_node.body, container, source_index);
+                    return try declsFromIndexInternal(arena, decls, tree, else_node.body, source_index);
                 }
             }
         },
@@ -837,9 +869,9 @@ pub fn declsFromIndexInternal(
                 const case_node = case.*.cast(ast.Node.SwitchCase).?;
                 if (nodeContainsSourceIndex(tree, case_node.expr, source_index)) {
                     if (case_node.payload) |payload| {
-                        try declsFromIndexInternal(arena, decls, tree, payload, container, source_index);
+                        try declsFromIndexInternal(arena, decls, tree, payload, source_index);
                     }
-                    return try declsFromIndexInternal(arena, decls, tree, case_node.expr, container, source_index);
+                    return try declsFromIndexInternal(arena, decls, tree, case_node.expr, source_index);
                 }
             }
         },
@@ -857,7 +889,7 @@ pub fn declsFromIndexInternal(
             try decls.append(node);
             if (node.cast(ast.Node.VarDecl).?.init_node) |child| {
                 if (nodeContainsSourceIndex(tree, child, source_index)) {
-                    try declsFromIndexInternal(arena, decls, tree, child, container, source_index);
+                    try declsFromIndexInternal(arena, decls, tree, child, source_index);
                 }
             }
         },
@@ -872,10 +904,8 @@ pub fn addChildrenNodes(decls: *std.ArrayList(*ast.Node), tree: *ast.Tree, node:
     }
 }
 
-pub fn declsFromIndex(arena: *std.heap.ArenaAllocator, decls: *std.ArrayList(*ast.Node), tree: *ast.Tree, source_index: usize) !*ast.Node {
-    var result = &tree.root_node.base;
-    try declsFromIndexInternal(arena, decls, tree, &tree.root_node.base, &result, source_index);
-    return result;
+pub fn declsFromIndex(arena: *std.heap.ArenaAllocator, decls: *std.ArrayList(*ast.Node), tree: *ast.Tree, source_index: usize) !void {
+    try declsFromIndexInternal(arena, decls, tree, &tree.root_node.base, source_index);
 }
 
 fn nodeContainsSourceIndex(tree: *ast.Tree, node: *ast.Node, source_index: usize) bool {
@@ -924,6 +954,7 @@ pub const PositionContext = union(enum) {
     string_literal: SourceRange,
     field_access: SourceRange,
     var_access: SourceRange,
+    global_error_set,
     enum_literal,
     other,
     empty,
@@ -938,6 +969,7 @@ pub const PositionContext = union(enum) {
             .enum_literal => null,
             .other => null,
             .empty => null,
+            .global_error_set => null,
         };
     }
 };
@@ -1010,6 +1042,7 @@ pub fn documentPositionContext(allocator: *std.mem.Allocator, document: types.Te
                 .enum_literal => curr_ctx.ctx = .empty,
                 .field_access => {},
                 .other => {},
+                .global_error_set => {},
                 else => curr_ctx.ctx = .{
                     .field_access = tokenRangeAppend(curr_ctx.ctx.range().?, tok),
                 },
@@ -1032,6 +1065,7 @@ pub fn documentPositionContext(allocator: *std.mem.Allocator, document: types.Te
                     (try peek(&stack)).ctx = .empty;
                 }
             },
+            .Keyword_error => curr_ctx.ctx = .global_error_set,
             else => curr_ctx.ctx = .empty,
         }
 
@@ -1065,14 +1099,13 @@ fn addOutlineNodes(allocator: *std.mem.Allocator, children: *std.ArrayList(types
                 try addOutlineNodes(allocator, children, tree, cchild);
             return;
         },
-        else => {}
+        else => {},
     }
     _ = try children.append(try getDocumentSymbolsInternal(allocator, tree, child));
 }
 
 fn getDocumentSymbolsInternal(allocator: *std.mem.Allocator, tree: *ast.Tree, node: *ast.Node) anyerror!types.DocumentSymbol {
     // const symbols = std.ArrayList(types.DocumentSymbol).init(allocator);
-
     const start_loc = tree.tokenLocation(0, node.firstToken());
     const end_loc = tree.tokenLocation(0, node.lastToken());
     const range = types.Range{
@@ -1083,14 +1116,14 @@ fn getDocumentSymbolsInternal(allocator: *std.mem.Allocator, tree: *ast.Tree, no
         .end = .{
             .line = @intCast(i64, end_loc.line),
             .character = @intCast(i64, end_loc.column),
-        }
+        },
     };
 
     if (getDeclName(tree, node) == null) {
         std.debug.warn("NULL NAME: {}\n", .{node.id});
     }
 
-    // TODO: Get my lazy bum to fix detail newlines 
+    // TODO: Get my lazy bum to fix detail newlines
     return types.DocumentSymbol{
         .name = getDeclName(tree, node) orelse "no_name",
         // .detail = (try getDocComments(allocator, tree, node)) orelse "",
@@ -1099,7 +1132,7 @@ fn getDocumentSymbolsInternal(allocator: *std.mem.Allocator, tree: *ast.Tree, no
             .FnProto => .Function,
             .VarDecl => .Variable,
             .ContainerField => .Field,
-            else => .Variable
+            else => .Variable,
         },
         .range = range,
         .selectionRange = range,

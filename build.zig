@@ -34,7 +34,7 @@ pub fn config(step: *std.build.Step) anyerror!void {
 
     std.debug.warn("Successfully saved configuration options!\n", .{});
 
-    const editor = try zinput.askSelectOne("Which code editor do you use?", enum { VSCode, Sublime, Kate, Other });
+    const editor = try zinput.askSelectOne("Which code editor do you use?", enum { VSCode, Sublime, Kate, Neovim, Vim8, Other });
     std.debug.warn("\n", .{});
 
     switch (editor) {
@@ -75,6 +75,20 @@ pub fn config(step: *std.build.Step) anyerror!void {
                 \\            "highlightingModeRegex": "^Zig$"
                 \\        }}
                 \\    }}
+                \\}}
+            , .{});
+        },
+        .Neovim, .Vim8 => {
+            std.debug.warn(
+                \\To use ZLS in Neovim/Vim8, we recommend using CoC engine. You can get it from 'https://github.com/neoclide/coc.nvim'.
+                \\Then, simply issue cmd from Neovim/Vim8 `:CocConfig`, and add this to your CoC config:
+                \\{{
+                \\  "lanuageserver": {{
+                \\    "zls" : {{
+                \\      "command": "command_or_path_to_zls",
+                \\      "filetypes": ["zig"]
+                \\    }}
+                \\  }}
                 \\}}
             , .{});
         },
@@ -138,8 +152,8 @@ pub fn build(b: *std.build.Builder) !void {
     test_step.dependOn(&exe.step);
 
     var unit_tests = b.addTest("tests/unit_tests.zig");
-    unit_tests.addPackage(.{  .name = "analysis", .path = "src/analysis.zig" });
-    unit_tests.addPackage(.{  .name = "types", .path = "src/types.zig" });
+    unit_tests.addPackage(.{ .name = "analysis", .path = "src/analysis.zig" });
+    unit_tests.addPackage(.{ .name = "types", .path = "src/types.zig" });
     unit_tests.setBuildMode(.Debug);
     test_step.dependOn(&unit_tests.step);
 }
