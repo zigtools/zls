@@ -539,12 +539,14 @@ pub const AnalysisContext = struct {
         self.in_container = &self.tree().root_node.base;
     }
 
-    pub fn onContainer(self: *AnalysisContext, container: *std.zig.ast.Node.ContainerDecl) !void {
-        if (self.in_container != &container.base) {
-            self.in_container = &container.base;
+    pub fn onContainer(self: *AnalysisContext, container: *std.zig.ast.Node) !void {
+        std.debug.assert(container.id == .ContainerDecl or container.id == .Root);
+
+        if (self.in_container != container) {
+            self.in_container = container;
 
             var scope_nodes = std.ArrayList(*std.zig.ast.Node).fromOwnedSlice(&self.arena.allocator, self.scope_nodes);
-            try analysis.addChildrenNodes(&scope_nodes, self.tree(), &container.base);
+            try analysis.addChildrenNodes(&scope_nodes, self.tree(), container);
             self.scope_nodes = scope_nodes.items;
         }
     }
@@ -664,7 +666,7 @@ pub fn analysisContext(
     zig_lib_path: ?[]const u8,
 ) !AnalysisContext {
     var scope_nodes = std.ArrayList(*std.zig.ast.Node).init(&arena.allocator);
-    const in_container = try analysis.declsFromIndex(arena, &scope_nodes, handle.tree, position);
+    try analysis.declsFromIndex(arena, &scope_nodes, handle.tree, position);
 
     const std_uri = try stdUriFromLibPath(&arena.allocator, zig_lib_path);
     return AnalysisContext{
@@ -672,7 +674,7 @@ pub fn analysisContext(
         .handle = handle,
         .arena = arena,
         .scope_nodes = scope_nodes.items,
-        .in_container = in_container,
+        .in_container = &handle.tree.root_node.base,
         .std_uri = std_uri,
         .error_completions = &self.error_completions,
         .enum_completions = &self.enum_completions,
