@@ -1067,7 +1067,6 @@ fn addOutlineNodes(allocator: *std.mem.Allocator, children: *std.ArrayList(types
         },
         else => {}
     }
-    std.debug.warn("{}\n", .{child.id});
     _ = try children.append(try getDocumentSymbolsInternal(allocator, tree, child));
 }
 
