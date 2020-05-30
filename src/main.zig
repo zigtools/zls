@@ -533,9 +533,7 @@ fn documentSymbol(id: i64, handle: *DocumentStore.Handle) !void {
 
     try send(types.Response{
         .id = .{ .Integer = id },
-        .result = .{
-            .DocumentSymbols = try analysis.getDocumentSymbols(&arena.allocator, handle.tree)
-        },
+        .result = .{ .DocumentSymbols = try analysis.getDocumentSymbols(&arena.allocator, handle.tree) },
     });
 }
 
@@ -760,7 +758,7 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
                 }),
                 .var_access, .empty => try completeGlobal(id, pos_index, handle, this_config),
                 .field_access => |range| try completeFieldAccess(id, handle, pos, range, this_config),
-                .global_error_set =>  try send(types.Response{
+                .global_error_set => try send(types.Response{
                     .id = .{ .Integer = id },
                     .result = .{
                         .CompletionList = .{
@@ -769,7 +767,7 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
                         },
                     },
                 }),
-                .enum_literal =>  try send(types.Response{
+                .enum_literal => try send(types.Response{
                     .id = .{ .Integer = id },
                     .result = .{
                         .CompletionList = .{
@@ -930,11 +928,19 @@ pub fn main() anyerror!void {
     }
 
     // Find the zig executable in PATH
-    var has_zig = false;
+    var zig_exe_path: ?[]const u8 = null;
+    defer if (zig_exe_path) |exe_path| allocator.free(exe_path);
 
-    // TODO: Should we just spawn a child process that calls "zig version" or something
-    // and check that way?
     find_zig: {
+        if (config.zig_exe_path) |exe_path| {
+            if (std.fs.path.isAbsolute(exe_path)) {
+                zig_exe_path = try std.mem.dupe(allocator, u8, exe_path);
+                break :find_zig;
+            }
+
+            std.debug.warn("zig path `{}` is not absolute, will look in path\n", .{exe_path});
+        }
+
         const env_path = std.process.getEnvVarOwned(allocator, "PATH") catch |err| switch (err) {
             error.EnvironmentVariableNotFound => {
                 std.debug.warn("Could not get PATH.\n", .{});
@@ -957,21 +963,32 @@ pub fn main() anyerror!void {
             defer allocator.free(full_path);
 
             var buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
-            const zig_path = std.os.realpath(full_path, &buf) catch continue;
-            std.debug.warn("Found zig in PATH: {}\n", .{zig_path});
-            has_zig = true;
+            zig_exe_path = std.os.realpath(full_path, &buf) catch continue;
+            std.debug.warn("Found zig in PATH: {}\n", .{zig_exe_path});
             break :find_zig;
         }
     }
 
+    if (zig_exe_path) |exe_path| {
+        std.debug.warn("Using zig executable {}\n", .{exe_path});
+        if (config.zig_lib_path == null) {
+            // Set the lib path relative to the executable path.
+            config.zig_lib_path = try std.fs.path.resolve(allocator, &[_][]const u8{
+                std.fs.path.dirname(exe_path).?, "./lib/zig",
+            });
+
+            std.debug.warn("Resolved standard library from executable: {}\n", .{config.zig_lib_path});
+        }
+    }
+
     if (config.build_runner_path) |build_runner_path| {
-        try document_store.init(allocator, has_zig, try std.mem.dupe(allocator, u8, build_runner_path));
+        try document_store.init(allocator, zig_exe_path, try std.mem.dupe(allocator, u8, build_runner_path));
     } else {
         var exe_dir_bytes: [std.fs.MAX_PATH_BYTES]u8 = undefined;
         const exe_dir_path = try std.fs.selfExeDirPath(&exe_dir_bytes);
 
         const build_runner_path = try std.fs.path.resolve(allocator, &[_][]const u8{ exe_dir_path, "build_runner.zig" });
-        try document_store.init(allocator, has_zig, build_runner_path);
+        try document_store.init(allocator, zig_exe_path, build_runner_path);
     }
 
     defer document_store.deinit();
