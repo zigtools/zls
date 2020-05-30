@@ -74,7 +74,7 @@ pub const TagStore = struct {
 
 allocator: *std.mem.Allocator,
 handles: std.StringHashMap(*Handle),
-has_zig: bool,
+zig_exe_path: ?[]const u8,
 build_files: std.ArrayListUnmanaged(*BuildFile),
 build_runner_path: []const u8,
 
@@ -84,12 +84,12 @@ enum_completions: TagStore,
 pub fn init(
     self: *DocumentStore,
     allocator: *std.mem.Allocator,
-    has_zig: bool,
+    zig_exe_path: ?[]const u8,
     build_runner_path: []const u8,
 ) !void {
     self.allocator = allocator;
     self.handles = std.StringHashMap(*Handle).init(allocator);
-    self.has_zig = has_zig;
+    self.zig_exe_path = zig_exe_path;
     self.build_files = .{};
     self.build_runner_path = build_runner_path;
     self.error_completions = TagStore.init(allocator);
@@ -100,12 +100,14 @@ const LoadPackagesContext = struct {
     build_file: *BuildFile,
     allocator: *std.mem.Allocator,
     build_runner_path: []const u8,
+    zig_exe_path: []const u8,
 };
 
 fn loadPackages(context: LoadPackagesContext) !void {
     const allocator = context.allocator;
     const build_file = context.build_file;
     const build_runner_path = context.build_runner_path;
+    const zig_exe_path = context.zig_exe_path;
 
     const directory_path = try URI.parse(allocator, build_file.uri[0 .. build_file.uri.len - "build.zig".len]);
     defer allocator.free(directory_path);
@@ -134,7 +136,7 @@ fn loadPackages(context: LoadPackagesContext) !void {
 
     const zig_run_result = try std.ChildProcess.exec(.{
         .allocator = allocator,
-        .argv = &[_][]const u8{ "zig", "run", "build_runner.zig" },
+        .argv = &[_][]const u8{ zig_exe_path, "run", "build_runner.zig" },
         .cwd = directory_path,
     });
 
@@ -204,7 +206,7 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: []u8) anyerror!*Hand
 
     // TODO: Better logic for detecting std or subdirectories?
     const in_std = std.mem.indexOf(u8, uri, "/std/") != null;
-    if (self.has_zig and std.mem.endsWith(u8, uri, "/build.zig") and !in_std) {
+    if (self.zig_exe_path != null and std.mem.endsWith(u8, uri, "/build.zig") and !in_std) {
         std.debug.warn("Document is a build file, extracting packages...\n", .{});
         // This is a build file.
         var build_file = try self.allocator.create(BuildFile);
@@ -225,10 +227,11 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: []u8) anyerror!*Hand
             .build_file = build_file,
             .allocator = self.allocator,
             .build_runner_path = self.build_runner_path,
+            .zig_exe_path = self.zig_exe_path.?,
         }) catch |err| {
             std.debug.warn("Failed to load packages of build file {} (error: {})\n", .{ build_file.uri, err });
         };
-    } else if (self.has_zig and !in_std) associate_build_file: {
+    } else if (self.zig_exe_path != null and !in_std) associate_build_file: {
         // Look into build files to see if we already have one that fits
         for (self.build_files.items) |build_file| {
             const build_file_base_uri = build_file.uri[0 .. std.mem.lastIndexOfScalar(u8, build_file.uri, '/').? + 1];
@@ -471,6 +474,7 @@ pub fn applyChanges(
             .build_file = build_file,
             .allocator = self.allocator,
             .build_runner_path = self.build_runner_path,
+            .zig_exe_path = self.zig_exe_path.?,
         }) catch |err| {
             std.debug.warn("Failed to load packages of build file {} (error: {})\n", .{ build_file.uri, err });
         };
