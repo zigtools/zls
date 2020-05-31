@@ -335,7 +335,8 @@ fn identifierFromPosition(pos_index: usize, handle: DocumentStore.Handle) []cons
 fn gotoDefinitionSymbol(id: i64, analysis_ctx: *DocumentStore.AnalysisContext, decl: *std.zig.ast.Node) !void {
     const result = try resolveVarDeclFnAlias(analysis_ctx, decl);
 
-    const name_token = analysis.getDeclNameToken(result.analysis_ctx.tree(), result.decl) orelse unreachable;
+    const name_token = analysis.getDeclNameToken(result.analysis_ctx.tree(), result.decl) orelse
+        return try respondGeneric(id, null_result_response);
 
     try send(types.Response{
         .id = .{ .Integer = id },
