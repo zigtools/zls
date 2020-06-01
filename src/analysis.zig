@@ -202,8 +202,8 @@ pub fn getDeclNameToken(tree: *ast.Tree, node: *ast.Node) ?ast.TokenIndex {
 fn getDeclName(tree: *ast.Tree, node: *ast.Node) ?[]const u8 {
     const name = tree.tokenSlice(getDeclNameToken(tree, node) orelse return null);
     return switch (node.id) {
-        .TestDecl => name[1..name.len - 1],
-        else => name
+        .TestDecl => name[1 .. name.len - 1],
+        else => name,
     };
 }
 
@@ -400,18 +400,62 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
         .Call => {
             const call = node.cast(ast.Node.Call).?;
             const decl = resolveTypeOfNode(analysis_ctx, call.lhs) orelse return null;
-            return switch (decl.id) {
-                .FnProto => resolveReturnType(analysis_ctx, decl.cast(ast.Node.FnProto).?),
-                else => decl,
-            };
+            if (decl.cast(ast.Node.FnProto)) |fn_decl| {
+                // Add type param values to the scope nodes
+                const param_len = std.math.min(call.params_len, fn_decl.params_len);
+                for (fn_decl.paramsConst()) |decl_param, param_idx| {
+                    if (decl_param.name_token == null) continue;
+
+                    // @TODO
+                    const type_param = switch (decl_param.param_type) {
+                        .type_expr => |type_node| if (type_node.cast(ast.Node.Identifier)) |ident|
+                            std.mem.eql(u8, analysis_ctx.tree().tokenSlice(ident.token), "type")
+                        else
+                            false,
+                        else => false,
+                    };
+                    if (!type_param) continue;
+
+                    // TODO Handle errors better
+                    // TODO This may invalidate the analysis context so we copy it.
+                    //      However, if the argument hits an import we just ignore it for now.
+                    //      Once we return our own types instead of directly using nodes we can fix this.
+                    var analysis_ctx_clone = analysis_ctx.clone() catch return null;
+                    const call_param_type = resolveTypeOfNode(&analysis_ctx_clone, call.paramsConst()[param_idx]) orelse continue;
+                    if (analysis_ctx_clone.handle != analysis_ctx.handle) {
+                        continue;
+                    }
+
+                    const var_decl_node = analysis_ctx.arena.allocator.create(ast.Node.VarDecl) catch return null;
+                    var_decl_node.* = .{
+                        .doc_comments = decl_param.doc_comments,
+                        .comptime_token = decl_param.comptime_token,
+                        .visib_token = null,
+                        .thread_local_token = null,
+                        .name_token = decl_param.name_token.?,
+                        .eq_token = null,
+                        .mut_token = decl_param.name_token.?,
+                        .extern_export_token = null,
+                        .lib_name = null,
+                        .type_node = null,
+                        .align_node = null,
+                        .section_node = null,
+                        .init_node = call_param_type,
+                        .semicolon_token = decl_param.name_token.?,
+                    };
+
+                    var scope_nodes = std.ArrayList(*ast.Node).fromOwnedSlice(&analysis_ctx.arena.allocator, analysis_ctx.scope_nodes);
+                    scope_nodes.append(&var_decl_node.base) catch return null;
+                    analysis_ctx.scope_nodes = scope_nodes.items;
+                }
+
+                return resolveReturnType(analysis_ctx, fn_decl);
+            }
+            return decl;
         },
         .StructInitializer => {
             const struct_init = node.cast(ast.Node.StructInitializer).?;
-            const decl = resolveTypeOfNode(analysis_ctx, struct_init.lhs) orelse return null;
-            return switch (decl.id) {
-                .FnProto => resolveReturnType(analysis_ctx, decl.cast(ast.Node.FnProto).?),
-                else => decl,
-            };
+            return resolveTypeOfNode(analysis_ctx, struct_init.lhs);
         },
         .ErrorSetDecl => {
             const set = node.cast(ast.Node.ErrorSetDecl).?;
@@ -1085,13 +1129,8 @@ pub fn documentPositionContext(allocator: *std.mem.Allocator, document: types.Te
 
 fn addOutlineNodes(allocator: *std.mem.Allocator, children: *std.ArrayList(types.DocumentSymbol), tree: *ast.Tree, child: *ast.Node) anyerror!void {
     switch (child.id) {
-        .StringLiteral, .IntegerLiteral, .BuiltinCall, .Call, .Identifier, .InfixOp,
-        .PrefixOp, .SuffixOp, .ControlFlowExpression, .ArrayInitializerDot, .SwitchElse,
-        .SwitchCase, .For, .EnumLiteral, .PointerIndexPayload , .StructInitializerDot, 
-        .PointerPayload, .While, .Switch, .Else, .BoolLiteral, .NullLiteral, .Defer,
-        .StructInitializer, .FieldInitializer, .If, .MultilineStringLiteral,
-        .UndefinedLiteral, .VarType, .Block => return,
-        
+        .StringLiteral, .IntegerLiteral, .BuiltinCall, .Call, .Identifier, .InfixOp, .PrefixOp, .SuffixOp, .ControlFlowExpression, .ArrayInitializerDot, .SwitchElse, .SwitchCase, .For, .EnumLiteral, .PointerIndexPayload, .StructInitializerDot, .PointerPayload, .While, .Switch, .Else, .BoolLiteral, .NullLiteral, .Defer, .StructInitializer, .FieldInitializer, .If, .MultilineStringLiteral, .UndefinedLiteral, .VarType, .Block => return,
+
         .ContainerDecl => {
             const decl = child.cast(ast.Node.ContainerDecl).?;
 
