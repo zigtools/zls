@@ -719,7 +719,7 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
         const local_config = configFromUriOr(uri, config);
         try document_store.applyChanges(handle, content_changes, local_config.zig_lib_path);
         try publishDiagnostics(handle.*, local_config);
-    } else if (std.mem.eql(u8, method, "textDocument/didSave")) {
+    } else if (std.mem.eql(u8, method, "textDocument/didSave") or std.mem.eql(u8, method, "textDocument/willSave")) {
         // noop
     } else if (std.mem.eql(u8, method, "textDocument/didClose")) {
         const document = params.getValue("textDocument").?.Object;
@@ -783,12 +783,14 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
             try respondGeneric(id, no_completions_response);
         }
     } else if (std.mem.eql(u8, method, "textDocument/signatureHelp")) {
+        // TODO: Implement this
         try respondGeneric(id,
             \\,"result":{"signatures":[]}}
         );
     } else if (std.mem.eql(u8, method, "textDocument/definition") or
         std.mem.eql(u8, method, "textDocument/declaration") or
-        std.mem.eql(u8, method, "textDocument/typeDefinition"))
+        std.mem.eql(u8, method, "textDocument/typeDefinition") or
+        std.mem.eql(u8, method, "textDocument/implementation"))
     {
         const document = params.getValue("textDocument").?.Object;
         const uri = document.getValue("uri").?.String;
@@ -874,6 +876,21 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
         };
 
         try documentSymbol(id, handle);
+    } else if (std.mem.eql(u8, method, "textDocument/references") or
+        std.mem.eql(u8, method, "textDocument/documentHighlight") or
+        std.mem.eql(u8, method, "textDocument/codeAction") or
+        std.mem.eql(u8, method, "textDocument/codeLens") or
+        std.mem.eql(u8, method, "textDocument/documentLink") or
+        std.mem.eql(u8, method, "textDocument/formatting") or
+        std.mem.eql(u8, method, "textDocument/rangeFormatting") or
+        std.mem.eql(u8, method, "textDocument/onTypeFormatting") or
+        std.mem.eql(u8, method, "textDocument/rename") or
+        std.mem.eql(u8, method, "textDocument/prepareRename") or
+        std.mem.eql(u8, method, "textDocument/foldingRange") or
+        std.mem.eql(u8, method, "textDocument/selectionRange"))
+    {
+        // TODO: Unimplemented methods, implement them and add them to server capabilities.
+        try respondGeneric(id, null_result_response);
     } else if (root.Object.getValue("id")) |_| {
         std.debug.warn("Method with return value not implemented: {}", .{method});
         try respondGeneric(id, not_implemented_response);
