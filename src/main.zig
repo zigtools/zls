@@ -18,6 +18,12 @@ var allocator: *std.mem.Allocator = undefined;
 var document_store: DocumentStore = undefined;
 var workspace_folder_configs: std.StringHashMap(?Config) = undefined;
 
+const ClientCapabilities = struct {
+    supports_snippets: bool = false,
+};
+
+var client_capabilities = ClientCapabilities{};
+
 const initialize_response =
     \\,"result":{"capabilities":{"signatureHelpProvider":{"triggerCharacters":["(",","]},"textDocumentSync":1,"completionProvider":{"resolveProvider":false,"triggerCharacters":[".",":","@"]},"documentHighlightProvider":false,"hoverProvider":true,"codeActionProvider":false,"declarationProvider":true,"definitionProvider":true,"typeDefinitionProvider":true,"implementationProvider":false,"referencesProvider":false,"documentSymbolProvider":true,"colorProvider":false,"documentFormattingProvider":false,"documentRangeFormattingProvider":false,"foldingRangeProvider":false,"selectionRangeProvider":false,"workspaceSymbolProvider":false,"workspace":{"workspaceFolders":{"supported":true,"changeNotifications":true}}}}}
 ;
@@ -240,7 +246,8 @@ fn nodeToCompletion(
         .FnProto => {
             const func = node.cast(std.zig.ast.Node.FnProto).?;
             if (func.name_token) |name_token| {
-                const insert_text = if (config.enable_snippets)
+                const use_snippets = config.enable_snippets and client_capabilities.supports_snippets;
+                const insert_text = if (use_snippets)
                     try analysis.getFunctionSnippet(list.allocator, analysis_ctx.tree(), func)
                 else
                     null;
@@ -253,7 +260,7 @@ fn nodeToCompletion(
                     .documentation = doc,
                     .detail = analysis.getFunctionSignature(analysis_ctx.tree(), func),
                     .insertText = insert_text,
-                    .insertTextFormat = if (config.enable_snippets) .Snippet else .PlainText,
+                    .insertTextFormat = if (use_snippets) .Snippet else .PlainText,
                 });
             }
         },
@@ -659,6 +666,16 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
 
     // Core
     if (std.mem.eql(u8, method, "initialize")) {
+        const client_capabs = params.getValue("capabilities").?.Object;
+        if (client_capabs.getValue("textDocument")) |text_doc_capabs| {
+            if (text_doc_capabs.Object.getValue("completion")) |completion_capabs| {
+                if (completion_capabs.Object.getValue("completionItem")) |item_capabs| {
+                    const maybe_support_snippet = item_capabs.Object.getValue("snippetSupport");
+                    client_capabilities.supports_snippets = maybe_support_snippet != null and maybe_support_snippet.?.Bool;
+                }
+            }
+        }
+
         try respondGeneric(id, initialize_response);
     } else if (std.mem.eql(u8, method, "initialized")) {
         // Send the workspaceFolders request
@@ -747,13 +764,14 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
             const pos_context = try analysis.documentPositionContext(allocator, handle.document, pos);
 
             const this_config = configFromUriOr(uri, config);
+            const use_snippets = this_config.enable_snippets and client_capabilities.supports_snippets;
             switch (pos_context) {
                 .builtin => try send(types.Response{
                     .id = .{ .Integer = id },
                     .result = .{
                         .CompletionList = .{
                             .isIncomplete = false,
-                            .items = builtin_completions[@boolToInt(this_config.enable_snippets)][0..],
+                            .items = builtin_completions[@boolToInt(use_snippets)][0..],
                         },
                     },
                 }),
