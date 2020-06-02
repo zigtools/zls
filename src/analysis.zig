@@ -429,7 +429,6 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
                     // TODO This may invalidate the analysis context so we copy it.
                     //      However, if the argument hits an import we just ignore it for now.
                     //      Once we return our own types instead of directly using nodes we can fix this.
-                    std.debug.warn("Arg {} of fn {}\n", .{param_idx, analysis_ctx.tree().tokenSlice(fn_decl.name_token.?)});
                     const call_param_type = resolveTypeOfNode(&analysis_ctx_clone, call.paramsConst()[param_idx]) orelse continue;
                     if (analysis_ctx_clone.handle != analysis_ctx.handle) {
                         analysis_ctx_clone = analysis_ctx.clone() catch return null;
