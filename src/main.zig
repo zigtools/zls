@@ -25,7 +25,7 @@ const ClientCapabilities = struct {
 var client_capabilities = ClientCapabilities{};
 
 const initialize_response =
-    \\,"result":{"capabilities":{"signatureHelpProvider":{"triggerCharacters":["(",","]},"textDocumentSync":1,"completionProvider":{"resolveProvider":false,"triggerCharacters":[".",":","@"]},"documentHighlightProvider":false,"hoverProvider":true,"codeActionProvider":false,"declarationProvider":true,"definitionProvider":true,"typeDefinitionProvider":true,"implementationProvider":false,"referencesProvider":false,"documentSymbolProvider":true,"colorProvider":false,"documentFormattingProvider":false,"documentRangeFormattingProvider":false,"foldingRangeProvider":false,"selectionRangeProvider":false,"workspaceSymbolProvider":false,"workspace":{"workspaceFolders":{"supported":true,"changeNotifications":true}}}}}
+    \\,"result":{"capabilities":{"signatureHelpProvider":{"triggerCharacters":["(",","]},"textDocumentSync":1,"completionProvider":{"resolveProvider":false,"triggerCharacters":[".",":","@"]},"documentHighlightProvider":false,"hoverProvider":true,"codeActionProvider":false,"declarationProvider":true,"definitionProvider":true,"typeDefinitionProvider":true,"implementationProvider":false,"referencesProvider":false,"documentSymbolProvider":true,"colorProvider":false,"documentFormattingProvider":false,"documentRangeFormattingProvider":false,"foldingRangeProvider":false,"selectionRangeProvider":false,"workspaceSymbolProvider":false,"semanticTokensProvider":{"legend":{"tokenTypes":["type","struct","enum","parameter","variable","enumMember","function","member","keyword","modifier","comment","string","number","operator"],"tokenModifiers":["definition","async","documentation"]},"rangeProvider":false,"documentProvider":true},"workspace":{"workspaceFolders":{"supported":true,"changeNotifications":true}}}}}
 ;
 
 const not_implemented_response =
@@ -743,6 +743,11 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
         const uri = document.getValue("uri").?.String;
 
         document_store.closeDocument(uri);
+    }
+    // Semantic highlighting
+    else if (std.mem.eql(u8, method, "textDocument/semanticTokens")) {
+        // @TODO Implement this (we dont get here from vscode atm even when we get the client capab.)
+        return try respondGeneric(id, empty_array_response);
     }
     // Autocomplete / Signatures
     else if (std.mem.eql(u8, method, "textDocument/completion")) {
