@@ -399,11 +399,20 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
         },
         .Call => {
             const call = node.cast(ast.Node.Call).?;
+            const previous_tree = analysis_ctx.tree();
+
             const decl = resolveTypeOfNode(analysis_ctx, call.lhs) orelse return null;
             if (decl.cast(ast.Node.FnProto)) |fn_decl| {
+                if (previous_tree != analysis_ctx.tree()) {
+                    return resolveReturnType(analysis_ctx, fn_decl);
+                }
+
                 // Add type param values to the scope nodes
                 const param_len = std.math.min(call.params_len, fn_decl.params_len);
+                var scope_nodes = std.ArrayList(*ast.Node).fromOwnedSlice(&analysis_ctx.arena.allocator, analysis_ctx.scope_nodes);
+                var analysis_ctx_clone = analysis_ctx.clone() catch return null;
                 for (fn_decl.paramsConst()) |decl_param, param_idx| {
+                    if (param_idx >= param_len) break;
                     if (decl_param.name_token == null) continue;
 
                     // @TODO
@@ -420,9 +429,9 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
                     // TODO This may invalidate the analysis context so we copy it.
                     //      However, if the argument hits an import we just ignore it for now.
                     //      Once we return our own types instead of directly using nodes we can fix this.
-                    var analysis_ctx_clone = analysis_ctx.clone() catch return null;
                     const call_param_type = resolveTypeOfNode(&analysis_ctx_clone, call.paramsConst()[param_idx]) orelse continue;
                     if (analysis_ctx_clone.handle != analysis_ctx.handle) {
+                        analysis_ctx_clone = analysis_ctx.clone() catch return null;
                         continue;
                     }
 
@@ -444,7 +453,6 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
                         .semicolon_token = decl_param.name_token.?,
                     };
 
-                    var scope_nodes = std.ArrayList(*ast.Node).fromOwnedSlice(&analysis_ctx.arena.allocator, analysis_ctx.scope_nodes);
                     scope_nodes.append(&var_decl_node.base) catch return null;
                     analysis_ctx.scope_nodes = scope_nodes.items;
                 }
