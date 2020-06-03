@@ -405,7 +405,6 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
                     if (param_idx >= param_len) break;
                     if (decl_param.name_token == null) continue;
 
-                    // @TODO
                     const type_param = switch (decl_param.param_type) {
                         .type_expr => |type_node| if (type_node.cast(ast.Node.Identifier)) |ident|
                             std.mem.eql(u8, analysis_ctx.tree().tokenSlice(ident.token), "type")
@@ -425,25 +424,14 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
                         continue;
                     }
 
-                    const var_decl_node = analysis_ctx.arena.allocator.create(ast.Node.VarDecl) catch return null;
-                    var_decl_node.* = .{
-                        .doc_comments = decl_param.doc_comments,
-                        .comptime_token = decl_param.comptime_token,
-                        .visib_token = null,
-                        .thread_local_token = null,
-                        .name_token = decl_param.name_token.?,
-                        .eq_token = null,
-                        .mut_token = decl_param.name_token.?,
-                        .extern_export_token = null,
-                        .lib_name = null,
-                        .type_node = null,
-                        .align_node = null,
-                        .section_node = null,
-                        .init_node = call_param_type,
-                        .semicolon_token = decl_param.name_token.?,
-                    };
-
-                    scope_nodes.append(&var_decl_node.base) catch return null;
+                    scope_nodes.append(makeVarDeclNode(
+                        &analysis_ctx.arena.allocator,
+                        decl_param.doc_comments,
+                        decl_param.comptime_token,
+                        decl_param.name_token.?,
+                        null,
+                        call_param_type,
+                    ) catch return null) catch return null;
                     analysis_ctx.scope_nodes = scope_nodes.items;
                 }
 
@@ -777,15 +765,68 @@ pub fn nodeToString(tree: *ast.Tree, node: *ast.Node) ?[]const u8 {
     return null;
 }
 
+fn makeAccessNode(allocator: *std.mem.Allocator, expr: *ast.Node) !*ast.Node {
+    const suffix_op_node = try allocator.create(ast.Node.SuffixOp);
+    suffix_op_node.* = .{
+        .op = .{ .ArrayAccess = expr },
+        .lhs = expr,
+        .rtoken = expr.lastToken(),
+    };
+    return &suffix_op_node.base;
+}
+
+fn makeUnwrapNode(allocator: *std.mem.Allocator, expr: *ast.Node) !*ast.Node {
+    const suffix_op_node = try allocator.create(ast.Node.SuffixOp);
+    suffix_op_node.* = .{
+        .op = .UnwrapOptional,
+        .lhs = expr,
+        .rtoken = expr.lastToken(),
+    };
+    return &suffix_op_node.base;
+}
+
+fn makeVarDeclNode(
+    allocator: *std.mem.Allocator,
+    doc: ?*ast.Node.DocComment,
+    comptime_token: ?ast.TokenIndex,
+    name_token: ast.TokenIndex,
+    type_expr: ?*ast.Node,
+    init_expr: ?*ast.Node,
+) !*ast.Node {
+    // TODO: This will not be needed anymore when we use out own decl type instead of directly
+    // repurposing ast nodes.
+    const var_decl_node = try allocator.create(ast.Node.VarDecl);
+    var_decl_node.* = .{
+        .doc_comments = doc,
+        .comptime_token = comptime_token,
+        .visib_token = null,
+        .thread_local_token = null,
+        .name_token = name_token,
+        .eq_token = null,
+        .mut_token = name_token,
+        .extern_export_token = null,
+        .lib_name = null,
+        .type_node = type_expr,
+        .align_node = null,
+        .section_node = null,
+        .init_node = init_expr,
+        .semicolon_token = name_token,
+    };
+
+    return &var_decl_node.base;
+}
+
 pub fn declsFromIndexInternal(
     arena: *std.heap.ArenaAllocator,
     decls: *std.ArrayList(*ast.Node),
     tree: *ast.Tree,
     node: *ast.Node,
     source_index: usize,
+    innermost_container: **ast.Node,
 ) error{OutOfMemory}!void {
     switch (node.id) {
         .Root, .ContainerDecl => {
+            innermost_container.* = node;
             var node_idx: usize = 0;
             while (node.iterate(node_idx)) |child_node| : (node_idx += 1) {
                 // Skip over container fields, we can only dot access those.
@@ -795,7 +836,7 @@ pub fn declsFromIndexInternal(
                 // If the cursor is in a variable decls it will insert itself anyway, we don't need to take care of it.
                 if ((is_contained and child_node.id != .VarDecl) or !is_contained) try decls.append(child_node);
                 if (is_contained) {
-                    try declsFromIndexInternal(arena, decls, tree, child_node, source_index);
+                    try declsFromIndexInternal(arena, decls, tree, child_node, source_index, innermost_container);
                 }
             }
         },
@@ -804,70 +845,66 @@ pub fn declsFromIndexInternal(
 
             // TODO: This is a hack to enable param decls with the new parser
             for (func.paramsConst()) |param| {
-                if (param.param_type != .type_expr) continue;
-                if (param.name_token) |name_token| {
-                    const var_decl_node = try arena.allocator.create(ast.Node.VarDecl);
-                    var_decl_node.* = .{
-                        .doc_comments = param.doc_comments,
-                        .comptime_token = param.comptime_token,
-                        .visib_token = null,
-                        .thread_local_token = null,
-                        .name_token = name_token,
-                        .eq_token = null,
-                        .mut_token = name_token, // TODO: better tokens for mut_token. semicolon_token?
-                        .extern_export_token = null,
-                        .lib_name = null,
-                        .type_node = switch (param.param_type) {
-                            .type_expr => |t| t,
-                            else => unreachable,
-                        },
-                        .align_node = null,
-                        .section_node = null,
-                        .init_node = null,
-                        .semicolon_token = name_token,
-                    };
+                if (param.param_type != .type_expr or param.name_token == null) continue;
 
-                    try decls.append(&var_decl_node.base);
-                }
+                try decls.append(try makeVarDeclNode(
+                    &arena.allocator,
+                    param.doc_comments,
+                    param.comptime_token,
+                    param.name_token.?,
+                    param.param_type.type_expr,
+                    null,
+                ));
             }
 
             if (func.body_node) |body_node| {
                 if (!nodeContainsSourceIndex(tree, body_node, source_index)) return;
-                try declsFromIndexInternal(arena, decls, tree, body_node, source_index);
+                try declsFromIndexInternal(arena, decls, tree, body_node, source_index, innermost_container);
             }
         },
         .TestDecl => {
             const test_decl = node.cast(ast.Node.TestDecl).?;
             if (!nodeContainsSourceIndex(tree, test_decl.body_node, source_index)) return;
-            try declsFromIndexInternal(arena, decls, tree, test_decl.body_node, source_index);
+            try declsFromIndexInternal(arena, decls, tree, test_decl.body_node, source_index, innermost_container);
         },
         .Block => {
             var inode_idx: usize = 0;
             while (node.iterate(inode_idx)) |inode| : (inode_idx += 1) {
                 if (nodeComesAfterSourceIndex(tree, inode, source_index)) return;
-                try declsFromIndexInternal(arena, decls, tree, inode, source_index);
+                try declsFromIndexInternal(arena, decls, tree, inode, source_index, innermost_container);
             }
         },
         .Comptime => {
             const comptime_stmt = node.cast(ast.Node.Comptime).?;
             if (nodeComesAfterSourceIndex(tree, comptime_stmt.expr, source_index)) return;
-            try declsFromIndexInternal(arena, decls, tree, comptime_stmt.expr, source_index);
+            try declsFromIndexInternal(arena, decls, tree, comptime_stmt.expr, source_index, innermost_container);
         },
         .If => {
             const if_node = node.cast(ast.Node.If).?;
             if (nodeContainsSourceIndex(tree, if_node.body, source_index)) {
                 if (if_node.payload) |payload| {
-                    try declsFromIndexInternal(arena, decls, tree, payload, source_index);
+                    std.debug.assert(payload.id == .PointerPayload);
+                    const ptr_payload = payload.cast(ast.Node.PointerPayload).?;
+                    std.debug.assert(ptr_payload.value_symbol.id == .Identifier);
+
+                    try decls.append(try makeVarDeclNode(
+                        &arena.allocator,
+                        null,
+                        null,
+                        ptr_payload.value_symbol.firstToken(),
+                        null,
+                        try makeUnwrapNode(&arena.allocator, if_node.condition),
+                    ));
                 }
-                return try declsFromIndexInternal(arena, decls, tree, if_node.body, source_index);
+                return try declsFromIndexInternal(arena, decls, tree, if_node.body, source_index, innermost_container);
             }
 
             if (if_node.@"else") |else_node| {
                 if (nodeContainsSourceIndex(tree, else_node.body, source_index)) {
                     if (else_node.payload) |payload| {
-                        try declsFromIndexInternal(arena, decls, tree, payload, source_index);
+                        try declsFromIndexInternal(arena, decls, tree, payload, source_index, innermost_container);
                     }
-                    return try declsFromIndexInternal(arena, decls, tree, else_node.body, source_index);
+                    return try declsFromIndexInternal(arena, decls, tree, else_node.body, source_index, innermost_container);
                 }
             }
         },
@@ -875,33 +912,59 @@ pub fn declsFromIndexInternal(
             const while_node = node.cast(ast.Node.While).?;
             if (nodeContainsSourceIndex(tree, while_node.body, source_index)) {
                 if (while_node.payload) |payload| {
-                    try declsFromIndexInternal(arena, decls, tree, payload, source_index);
+                    std.debug.assert(payload.id == .PointerPayload);
+                    const ptr_payload = payload.cast(ast.Node.PointerPayload).?;
+                    std.debug.assert(ptr_payload.value_symbol.id == .Identifier);
+
+                    try decls.append(try makeVarDeclNode(
+                        &arena.allocator,
+                        null,
+                        null,
+                        ptr_payload.value_symbol.firstToken(),
+                        null,
+                        try makeUnwrapNode(&arena.allocator, while_node.condition),
+                    ));
                 }
-                return try declsFromIndexInternal(arena, decls, tree, while_node.body, source_index);
+                return try declsFromIndexInternal(arena, decls, tree, while_node.body, source_index, innermost_container);
             }
 
             if (while_node.@"else") |else_node| {
                 if (nodeContainsSourceIndex(tree, else_node.body, source_index)) {
                     if (else_node.payload) |payload| {
-                        try declsFromIndexInternal(arena, decls, tree, payload, source_index);
+                        try declsFromIndexInternal(arena, decls, tree, payload, source_index, innermost_container);
                     }
-                    return try declsFromIndexInternal(arena, decls, tree, else_node.body, source_index);
+                    return try declsFromIndexInternal(arena, decls, tree, else_node.body, source_index, innermost_container);
                 }
             }
         },
         .For => {
             const for_node = node.cast(ast.Node.For).?;
             if (nodeContainsSourceIndex(tree, for_node.body, source_index)) {
-                try declsFromIndexInternal(arena, decls, tree, for_node.payload, source_index);
-                return try declsFromIndexInternal(arena, decls, tree, for_node.body, source_index);
+                std.debug.assert(for_node.payload.id == .PointerIndexPayload);
+                const ptr_idx_payload = for_node.payload.cast(ast.Node.PointerIndexPayload).?;
+                std.debug.assert(ptr_idx_payload.value_symbol.id == .Identifier);
+                try decls.append(try makeVarDeclNode(
+                    &arena.allocator,
+                    null,
+                    null,
+                    ptr_idx_payload.value_symbol.firstToken(),
+                    null,
+                    try makeAccessNode(&arena.allocator, for_node.array_expr),
+                ));
+
+                if (ptr_idx_payload.index_symbol) |idx| {
+                    try decls.append(idx);
+                }
+
+                return try declsFromIndexInternal(arena, decls, tree, for_node.body, source_index, innermost_container);
             }
 
             if (for_node.@"else") |else_node| {
                 if (nodeContainsSourceIndex(tree, else_node.body, source_index)) {
                     if (else_node.payload) |payload| {
-                        try declsFromIndexInternal(arena, decls, tree, payload, source_index);
+                        try declsFromIndexInternal(arena, decls, tree, payload, source_index, innermost_container);
                     }
-                    return try declsFromIndexInternal(arena, decls, tree, else_node.body, source_index);
+                    return try declsFromIndexInternal(arena, decls, tree, else_node.body, source_index, innermost_container);
                 }
             }
         },
@@ -911,27 +974,22 @@ pub fn declsFromIndexInternal(
                 const case_node = case.*.cast(ast.Node.SwitchCase).?;
                 if (nodeContainsSourceIndex(tree, case_node.expr, source_index)) {
                     if (case_node.payload) |payload| {
-                        try declsFromIndexInternal(arena, decls, tree, payload, source_index);
+                        try declsFromIndexInternal(arena, decls, tree, payload, source_index, innermost_container);
                     }
-                    return try declsFromIndexInternal(arena, decls, tree, case_node.expr, source_index);
+                    return try declsFromIndexInternal(arena, decls, tree, case_node.expr, source_index, innermost_container);
                 }
             }
         },
         // TODO: These convey no type information...
         .Payload => try decls.append(node.cast(ast.Node.Payload).?.error_symbol),
-        .PointerPayload => try decls.append(node.cast(ast.Node.PointerPayload).?.value_symbol),
-        .PointerIndexPayload => {
-            const payload = node.cast(ast.Node.PointerIndexPayload).?;
-            try decls.append(payload.value_symbol);
-            if (payload.index_symbol) |idx| {
-                try decls.append(idx);
-            }
-        },
+        // Those are handled in the If, While, For cases.
+        .PointerPayload => unreachable,
+        .PointerIndexPayload => unreachable,
         .VarDecl => {
             try decls.append(node);
             if (node.cast(ast.Node.VarDecl).?.init_node) |child| {
                 if (nodeContainsSourceIndex(tree, child, source_index)) {
-                    try declsFromIndexInternal(arena, decls, tree, child, source_index);
+                    try declsFromIndexInternal(arena, decls, tree, child, source_index, innermost_container);
                 }
             }
         },
@@ -946,8 +1004,10 @@ pub fn addChildrenNodes(decls: *std.ArrayList(*ast.Node), tree: *ast.Tree, node:
     }
 }
 
-pub fn declsFromIndex(arena: *std.heap.ArenaAllocator, decls: *std.ArrayList(*ast.Node), tree: *ast.Tree, source_index: usize) !void {
-    try declsFromIndexInternal(arena, decls, tree, &tree.root_node.base, source_index);
+pub fn declsFromIndex(arena: *std.heap.ArenaAllocator, decls: *std.ArrayList(*ast.Node), tree: *ast.Tree, source_index: usize) !*ast.Node {
+    var innermost_container = &tree.root_node.base;
+    try declsFromIndexInternal(arena, decls, tree, &tree.root_node.base, source_index, &innermost_container);
+    return innermost_container;
 }
 
 fn nodeContainsSourceIndex(tree: *ast.Tree, node: *ast.Node, source_index: usize) bool {

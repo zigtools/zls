@@ -673,7 +673,7 @@ pub fn analysisContext(
     zig_lib_path: ?[]const u8,
 ) !AnalysisContext {
     var scope_nodes = std.ArrayList(*std.zig.ast.Node).init(&arena.allocator);
-    try analysis.declsFromIndex(arena, &scope_nodes, handle.tree, position);
+    const in_container = try analysis.declsFromIndex(arena, &scope_nodes, handle.tree, position);
 
     const std_uri = try stdUriFromLibPath(&arena.allocator, zig_lib_path);
     return AnalysisContext{
@@ -681,7 +681,7 @@ pub fn analysisContext(
         .handle = handle,
         .arena = arena,
         .scope_nodes = scope_nodes.items,
-        .in_container = &handle.tree.root_node.base,
+        .in_container = in_container,
         .std_uri = std_uri,
         .error_completions = &self.error_completions,
         .enum_completions = &self.enum_completions,
