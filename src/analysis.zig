@@ -20,39 +20,29 @@ pub fn getFunctionByName(tree: *ast.Tree, name: []const u8) ?*ast.Node.FnProto {
     return null;
 }
 
-/// Gets a function's doc comments, caller must free memory when a value is returned
+/// Get a declaration's doc comment node
+fn getDocCommentNode(tree: *ast.Tree, node: *ast.Node) ?*ast.Node.DocComment {
+    if (node.cast(ast.Node.FnProto)) |func| {
+        return func.doc_comments;
+    } else if (node.cast(ast.Node.VarDecl)) |var_decl| {
+        return var_decl.doc_comments;
+    } else if (node.cast(ast.Node.ContainerField)) |field| {
+        return field.doc_comments;
+    } else if (node.cast(ast.Node.ErrorTag)) |tag| {
+        return tag.doc_comments;
+    }
+    return null;
+}
+
+/// Gets a declaration's doc comments, caller must free memory when a value is returned
 /// Like:
 ///```zig
 ///var comments = getFunctionDocComments(allocator, tree, func);
 ///defer if (comments) |comments_pointer| allocator.free(comments_pointer);
 ///```
 pub fn getDocComments(allocator: *std.mem.Allocator, tree: *ast.Tree, node: *ast.Node) !?[]const u8 {
-    switch (node.id) {
-        .FnProto => {
-            const func = node.cast(ast.Node.FnProto).?;
-            if (func.doc_comments) |doc_comments| {
-                return try collectDocComments(allocator, tree, doc_comments);
-            }
-        },
-        .VarDecl => {
-            const var_decl = node.cast(ast.Node.VarDecl).?;
-            if (var_decl.doc_comments) |doc_comments| {
-                return try collectDocComments(allocator, tree, doc_comments);
-            }
-        },
-        .ContainerField => {
-            const field = node.cast(ast.Node.ContainerField).?;
-            if (field.doc_comments) |doc_comments| {
-                return try collectDocComments(allocator, tree, doc_comments);
-            }
-        },
-        .ErrorTag => {
-            const tag = node.cast(ast.Node.ErrorTag).?;
-            if (tag.doc_comments) |doc_comments| {
-                return try collectDocComments(allocator, tree, doc_comments);
-            }
-        },
-        else => {},
+    if (getDocCommentNode(tree, node)) |doc_comment_node| {
+        return try collectDocComments(allocator, tree, doc_comment_node);
     }
     return null;
 }

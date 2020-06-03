@@ -231,7 +231,7 @@ fn nodeToCompletion(
     node: *std.zig.ast.Node,
     config: Config,
 ) error{OutOfMemory}!void {
-    var doc = if (try analysis.getDocComments(list.allocator, analysis_ctx.tree(), node)) |doc_comments|
+    const doc = if (try analysis.getDocComments(list.allocator, analysis_ctx.tree(), node)) |doc_comments|
         types.MarkupContent{
             .kind = .Markdown,
             .value = doc_comments,
@@ -359,7 +359,12 @@ fn gotoDefinitionSymbol(id: i64, analysis_ctx: *DocumentStore.AnalysisContext, d
 fn hoverSymbol(id: i64, analysis_ctx: *DocumentStore.AnalysisContext, decl: *std.zig.ast.Node) !void {
     const result = try resolveVarDeclFnAlias(analysis_ctx, decl);
 
-    const str_value = switch (result.decl.id) {
+    const doc_str = if (try analysis.getDocComments(&analysis_ctx.arena.allocator, result.analysis_ctx.tree(), result.decl)) |str|
+        str
+    else
+        "";
+
+    const signature_str = switch (result.decl.id) {
         .VarDecl => blk: {
             const var_decl = result.decl.cast(std.zig.ast.Node.VarDecl).?;
             break :blk analysis.getVariableSignature(result.analysis_ctx.tree(), var_decl);
@@ -371,11 +376,12 @@ fn hoverSymbol(id: i64, analysis_ctx: *DocumentStore.AnalysisContext, decl: *std
         else => analysis.nodeToString(result.analysis_ctx.tree(), result.decl) orelse return try respondGeneric(id, null_result_response),
     };
 
+    const md_string = try std.fmt.allocPrint(&analysis_ctx.arena.allocator, "```zig\n{}\n```\n```markdown\n{}\n```", .{ signature_str, doc_str });
     try send(types.Response{
         .id = .{ .Integer = id },
         .result = .{
             .Hover = .{
-                .contents = .{ .value = str_value },
+                .contents = .{ .value = md_string },
             },
         },
     });

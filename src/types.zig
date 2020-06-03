@@ -47,14 +47,9 @@ pub const NotificationParams = union(enum) {
     PublishDiagnosticsParams: PublishDiagnosticsParams
 };
 
-pub const MarkedString = struct {
-    language: String = "zig",
-    value: String,
-};
-
 /// Hover response
 pub const Hover = struct {
-    contents: MarkedString,
+    contents: MarkupContent,
 };
 
 /// Params of a response (result)
