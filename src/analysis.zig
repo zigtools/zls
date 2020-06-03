@@ -982,8 +982,8 @@ pub fn declsFromIndexInternal(
         },
         // TODO: These convey no type information...
         .Payload => try decls.append(node.cast(ast.Node.Payload).?.error_symbol),
-        // Those are handled in the If, While, For cases.
-        .PointerPayload => unreachable,
+        .PointerPayload => try decls.append(node.cast(ast.Node.PointerPayload).?.value_symbol),
+        // This should be completely handled for the .For code.
         .PointerIndexPayload => unreachable,
         .VarDecl => {
             try decls.append(node);
