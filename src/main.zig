@@ -742,7 +742,16 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
         const local_config = configFromUriOr(uri, config);
         try document_store.applyChanges(handle, content_changes, local_config.zig_lib_path);
         try publishDiagnostics(handle.*, local_config);
-    } else if (std.mem.eql(u8, method, "textDocument/didSave") or std.mem.eql(u8, method, "textDocument/willSave")) {
+    } else if (std.mem.eql(u8, method, "textDocument/didSave")) {
+        const text_document = params.getValue("textDocument").?.Object;
+        const uri = text_document.getValue("uri").?.String;
+        const handle = document_store.getHandle(uri) orelse {
+            std.debug.warn("Trying to save non existent document {}", .{uri});
+            return;
+        };
+
+        try document_store.applySave(handle);
+    } else if (std.mem.eql(u8, method, "textDocument/willSave")) {
         // noop
     } else if (std.mem.eql(u8, method, "textDocument/didClose")) {
         const document = params.getValue("textDocument").?.Object;

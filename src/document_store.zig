@@ -410,6 +410,19 @@ fn refreshDocument(self: *DocumentStore, handle: *Handle, zig_lib_path: ?[]const
     }
 }
 
+pub fn applySave(self: *DocumentStore, handle: *Handle) !void {
+    if (handle.is_build_file) |build_file| {
+        loadPackages(.{
+            .build_file = build_file,
+            .allocator = self.allocator,
+            .build_runner_path = self.build_runner_path,
+            .zig_exe_path = self.zig_exe_path.?,
+        }) catch |err| {
+            std.debug.warn("Failed to load packages of build file {} (error: {})\n", .{ build_file.uri, err });
+        };
+    }
+}
+
 pub fn applyChanges(
     self: *DocumentStore,
     handle: *Handle,
@@ -469,16 +482,6 @@ pub fn applyChanges(
     }
 
     try self.refreshDocument(handle, zig_lib_path);
-    if (handle.is_build_file) |build_file| {
-        loadPackages(.{
-            .build_file = build_file,
-            .allocator = self.allocator,
-            .build_runner_path = self.build_runner_path,
-            .zig_exe_path = self.zig_exe_path.?,
-        }) catch |err| {
-            std.debug.warn("Failed to load packages of build file {} (error: {})\n", .{ build_file.uri, err });
-        };
-    }
 }
 
 pub fn uriFromImportStr(
