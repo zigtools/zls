@@ -62,7 +62,7 @@ fn collectDocComments(allocator: *std.mem.Allocator, tree: *ast.Tree, doc_commen
         }
     }
 
-    return try std.mem.join(allocator, "\n", lines.items);
+    return try std.mem.join(allocator, "\\\n", lines.items);
 }
 
 /// Gets a function signature (keywords, name, return value)

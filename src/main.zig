@@ -376,7 +376,7 @@ fn hoverSymbol(id: i64, analysis_ctx: *DocumentStore.AnalysisContext, decl: *std
         else => analysis.nodeToString(result.analysis_ctx.tree(), result.decl) orelse return try respondGeneric(id, null_result_response),
     };
 
-    const md_string = try std.fmt.allocPrint(&analysis_ctx.arena.allocator, "```zig\n{}\n```\n```markdown\n{}\n```", .{ signature_str, doc_str });
+    const md_string = try std.fmt.allocPrint(&analysis_ctx.arena.allocator, "```zig\n{}\n```\n{}", .{ signature_str, doc_str });
     try send(types.Response{
         .id = .{ .Integer = id },
         .result = .{
