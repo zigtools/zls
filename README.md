@@ -124,7 +124,7 @@ Install the `zls-vscode` extension from [here](https://github.com/zigtools/zls-v
 - [`zig-lsp` by @xackus](https://github.com/xackus/zig-lsp)
   - Inspiration for `zls`
 - [`known-folders` by @ziglibs](https://github.com/ziglibs/known-folders)
-  - Provides API to acces known folders on Linux, Windows and Mac OS
+  - Provides API to access known folders on Linux, Windows and Mac OS
 
 ## License
 MIT
