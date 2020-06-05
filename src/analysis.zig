@@ -76,7 +76,7 @@ pub fn getFunctionSignature(tree: *ast.Tree, func: *ast.Node.FnProto) []const u8
 }
 
 /// Gets a function snippet insert text
-pub fn getFunctionSnippet(allocator: *std.mem.Allocator, tree: *ast.Tree, func: *ast.Node.FnProto) ![]const u8 {
+pub fn getFunctionSnippet(allocator: *std.mem.Allocator, tree: *ast.Tree, func: *ast.Node.FnProto, skip_self_param: bool) ![]const u8 {
     const name_tok = func.name_token orelse unreachable;
 
     var buffer = std.ArrayList(u8).init(allocator);
@@ -88,6 +88,7 @@ pub fn getFunctionSnippet(allocator: *std.mem.Allocator, tree: *ast.Tree, func: 
     var buf_stream = buffer.outStream();
 
     for (func.paramsConst()) |param, param_num| {
+        if (skip_self_param and param_num == 0) continue;
         if (param_num != 0) try buffer.appendSlice(", ${") else try buffer.appendSlice("${");
 
         try buf_stream.print("{}:", .{param_num + 1});

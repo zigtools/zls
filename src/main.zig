@@ -247,9 +247,24 @@ fn nodeToCompletion(
             const func = node.cast(std.zig.ast.Node.FnProto).?;
             if (func.name_token) |name_token| {
                 const use_snippets = config.enable_snippets and client_capabilities.supports_snippets;
-                const insert_text = if (use_snippets)
-                    try analysis.getFunctionSnippet(list.allocator, analysis_ctx.tree(), func)
-                else
+
+                const insert_text = if (use_snippets) blk: {
+                    const skip_self_param = if (func.params_len > 0) param_check: {
+                        var child_analysis_ctx = try analysis_ctx.clone();
+                        break :param_check switch (func.paramsConst()[0].param_type) {
+                            .type_expr => |type_node| if (analysis_ctx.in_container == analysis.resolveTypeOfNode(&child_analysis_ctx, type_node))
+                                true
+                            else if (type_node.cast(std.zig.ast.Node.PrefixOp)) |prefix_op|
+                                prefix_op.op == .PtrType and analysis_ctx.in_container == analysis.resolveTypeOfNode(&child_analysis_ctx, prefix_op.rhs)
+                            else
+                                false,
+                            else => false,
+                        };
+                    } else
+                        false;
+
+                    break :blk try analysis.getFunctionSnippet(list.allocator, analysis_ctx.tree(), func, skip_self_param);
+                } else
                     null;
 
                 const is_type_function = analysis.isTypeFunction(analysis_ctx.tree(), func);
