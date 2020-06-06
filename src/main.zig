@@ -673,8 +673,6 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
         else => types.RequestId{ .Integer = 0 },
     } else types.RequestId{ .Integer = 0 };
 
-    std.debug.warn("Id: {}\n", .{id});
-
     if (id == .Integer and id.Integer == 1337 and (root.Object.getValue("method") == null or std.mem.eql(u8, root.Object.getValue("method").?.String, ""))) {
         if (root.Object.getValue("result")) |result_obj| {
             if (result_obj == .Array) {
