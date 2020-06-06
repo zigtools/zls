@@ -89,7 +89,7 @@ pub fn getFunctionSnippet(allocator: *std.mem.Allocator, tree: *ast.Tree, func: 
 
     for (func.paramsConst()) |param, param_num| {
         if (skip_self_param and param_num == 0) continue;
-        if (param_num != 0) try buffer.appendSlice(", ${") else try buffer.appendSlice("${");
+        if (param_num != @boolToInt(skip_self_param)) try buffer.appendSlice(", ${") else try buffer.appendSlice("${");
 
         try buf_stream.print("{}:", .{param_num + 1});
 
