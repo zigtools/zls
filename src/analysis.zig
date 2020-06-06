@@ -1188,7 +1188,7 @@ pub fn documentPositionContext(allocator: *std.mem.Allocator, document: types.Te
 
 fn addOutlineNodes(allocator: *std.mem.Allocator, children: *std.ArrayList(types.DocumentSymbol), tree: *ast.Tree, child: *ast.Node) anyerror!void {
     switch (child.id) {
-        .StringLiteral, .IntegerLiteral, .BuiltinCall, .Call, .Identifier, .InfixOp, .PrefixOp, .SuffixOp, .ControlFlowExpression, .ArrayInitializerDot, .SwitchElse, .SwitchCase, .For, .EnumLiteral, .PointerIndexPayload, .StructInitializerDot, .PointerPayload, .While, .Switch, .Else, .BoolLiteral, .NullLiteral, .Defer, .StructInitializer, .FieldInitializer, .If, .MultilineStringLiteral, .UndefinedLiteral, .VarType, .Block => return,
+        .StringLiteral, .IntegerLiteral, .BuiltinCall, .Call, .Identifier, .InfixOp, .PrefixOp, .SuffixOp, .ControlFlowExpression, .ArrayInitializerDot, .SwitchElse, .SwitchCase, .For, .EnumLiteral, .PointerIndexPayload, .StructInitializerDot, .PointerPayload, .While, .Switch, .Else, .BoolLiteral, .NullLiteral, .Defer, .StructInitializer, .FieldInitializer, .If, .MultilineStringLiteral, .UndefinedLiteral, .VarType, .Block, .ErrorSetDecl => return,
 
         .ContainerDecl => {
             const decl = child.cast(ast.Node.ContainerDecl).?;
@@ -1223,7 +1223,10 @@ fn getDocumentSymbolsInternal(allocator: *std.mem.Allocator, tree: *ast.Tree, no
 
     // TODO: Get my lazy bum to fix detail newlines
     return types.DocumentSymbol{
-        .name = getDeclName(tree, node) orelse "no_name",
+        .name = if ((getDeclName(tree, node) orelse "no_name").len == 0) switch (node.id) {
+            .TestDecl => "Nameless Test",
+            else => "no_name"
+        } else getDeclName(tree, node).?,
         // .detail = (try getDocComments(allocator, tree, node)) orelse "",
         .detail = "",
         .kind = switch (node.id) {
