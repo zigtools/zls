@@ -27,13 +27,5 @@ jobs:
 
         FILE=zig-cache/bin/zls
 
-        if test -f "$FILE"; then
-          if zig build test; then
-            exit 0
-          else
-            exit 1
-          fi
-        else
-          exit 1
-        fi
-        
+        test -f "$FILE" || exit 1
+        zig build test || exit 1
