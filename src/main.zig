@@ -62,23 +62,32 @@ fn send(reqOrRes: var) !void {
     try stdout.flush();
 }
 
-fn respondGeneric(id: i64, response: []const u8) !void {
-    const id_digits = blk: {
-        if (id == 0) break :blk 1;
-        var digits: usize = 1;
-        var value = @divTrunc(id, 10);
-        while (value != 0) : (value = @divTrunc(value, 10)) {
-            digits += 1;
-        }
-        break :blk digits;
+fn respondGeneric(id: types.RequestId, response: []const u8) !void {
+    const id_len = switch (id) {
+        .Integer => |id_val| blk: {
+            if (id_val == 0) break :blk 1;
+            var digits: usize = 1;
+            var value = @divTrunc(id_val, 10);
+            while (value != 0) : (value = @divTrunc(value, 10)) {
+                digits += 1;
+            }
+            break :blk digits;
+        },
+        .String => |str_val| str_val.len + 2,
+        else => unreachable,
     };
 
-    // Numbers of character that will be printed from this string: len - 3 brackets
-    // 1 from the beginning (escaped) and the 2 from the arg {}
-    const json_fmt = "{{\"jsonrpc\":\"2.0\",\"id\":{}";
+    // Numbers of character that will be printed from this string: len - 1 brackets
+    const json_fmt = "{{\"jsonrpc\":\"2.0\",\"id\":";
 
     const stdout_stream = stdout.outStream();
-    try stdout_stream.print("Content-Length: {}\r\n\r\n" ++ json_fmt, .{ response.len + id_digits + json_fmt.len - 3, id });
+    try stdout_stream.print("Content-Length: {}\r\n\r\n" ++ json_fmt, .{ response.len + id_len + json_fmt.len - 1 });
+    switch (id) {
+        .Integer => |int| try stdout_stream.print("{}", .{int}),
+        .String => |str| try stdout_stream.print("\"{}\"", .{str}),
+        else => unreachable,
+    }
+
     try stdout_stream.writeAll(response);
     try stdout.flush();
 }
@@ -354,14 +363,14 @@ fn identifierFromPosition(pos_index: usize, handle: DocumentStore.Handle) []cons
     return text[start_idx + 1 .. end_idx];
 }
 
-fn gotoDefinitionSymbol(id: i64, analysis_ctx: *DocumentStore.AnalysisContext, decl: *std.zig.ast.Node) !void {
+fn gotoDefinitionSymbol(id: types.RequestId, analysis_ctx: *DocumentStore.AnalysisContext, decl: *std.zig.ast.Node) !void {
     const result = try resolveVarDeclFnAlias(analysis_ctx, decl);
 
     const name_token = analysis.getDeclNameToken(result.analysis_ctx.tree(), result.decl) orelse
         return try respondGeneric(id, null_result_response);
 
     try send(types.Response{
-        .id = .{ .Integer = id },
+        .id = id,
         .result = .{
             .Location = .{
                 .uri = result.analysis_ctx.handle.document.uri,
@@ -371,7 +380,7 @@ fn gotoDefinitionSymbol(id: i64, analysis_ctx: *DocumentStore.AnalysisContext, d
     });
 }
 
-fn hoverSymbol(id: i64, analysis_ctx: *DocumentStore.AnalysisContext, decl: *std.zig.ast.Node) !void {
+fn hoverSymbol(id: types.RequestId, analysis_ctx: *DocumentStore.AnalysisContext, decl: *std.zig.ast.Node) !void {
     const result = try resolveVarDeclFnAlias(analysis_ctx, decl);
 
     const doc_str = if (try analysis.getDocComments(&analysis_ctx.arena.allocator, result.analysis_ctx.tree(), result.decl)) |str|
@@ -393,7 +402,7 @@ fn hoverSymbol(id: i64, analysis_ctx: *DocumentStore.AnalysisContext, decl: *std
 
     const md_string = try std.fmt.allocPrint(&analysis_ctx.arena.allocator, "```zig\n{}\n```\n{}", .{ signature_str, doc_str });
     try send(types.Response{
-        .id = .{ .Integer = id },
+        .id = id,
         .result = .{
             .Hover = .{
                 .contents = .{ .value = md_string },
@@ -412,7 +421,7 @@ fn getSymbolGlobal(arena: *std.heap.ArenaAllocator, pos_index: usize, handle: Do
     return analysis.getChildOfSlice(handle.tree, decl_nodes.items, name);
 }
 
-fn gotoDefinitionGlobal(id: i64, pos_index: usize, handle: *DocumentStore.Handle, config: Config) !void {
+fn gotoDefinitionGlobal(id: types.RequestId, pos_index: usize, handle: *DocumentStore.Handle, config: Config) !void {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
@@ -421,7 +430,7 @@ fn gotoDefinitionGlobal(id: i64, pos_index: usize, handle: *DocumentStore.Handle
     return try gotoDefinitionSymbol(id, &analysis_ctx, decl);
 }
 
-fn hoverDefinitionGlobal(id: i64, pos_index: usize, handle: *DocumentStore.Handle, config: Config) !void {
+fn hoverDefinitionGlobal(id: types.RequestId, pos_index: usize, handle: *DocumentStore.Handle, config: Config) !void {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
@@ -451,7 +460,7 @@ fn getSymbolFieldAccess(
 }
 
 fn gotoDefinitionFieldAccess(
-    id: i64,
+    id: types.RequestId,
     handle: *DocumentStore.Handle,
     position: types.Position,
     range: analysis.SourceRange,
@@ -466,7 +475,7 @@ fn gotoDefinitionFieldAccess(
 }
 
 fn hoverDefinitionFieldAccess(
-    id: i64,
+    id: types.RequestId,
     handle: *DocumentStore.Handle,
     position: types.Position,
     range: analysis.SourceRange,
@@ -480,7 +489,7 @@ fn hoverDefinitionFieldAccess(
     return try hoverSymbol(id, &analysis_ctx, decl);
 }
 
-fn gotoDefinitionString(id: i64, pos_index: usize, handle: *DocumentStore.Handle, config: Config) !void {
+fn gotoDefinitionString(id: types.RequestId, pos_index: usize, handle: *DocumentStore.Handle, config: Config) !void {
     const tree = handle.tree;
 
     var arena = std.heap.ArenaAllocator.init(allocator);
@@ -495,7 +504,7 @@ fn gotoDefinitionString(id: i64, pos_index: usize, handle: *DocumentStore.Handle
     )) orelse return try respondGeneric(id, null_result_response);
 
     try send(types.Response{
-        .id = .{ .Integer = id },
+        .id = id,
         .result = .{
             .Location = .{
                 .uri = uri,
@@ -508,7 +517,7 @@ fn gotoDefinitionString(id: i64, pos_index: usize, handle: *DocumentStore.Handle
     });
 }
 
-fn completeGlobal(id: i64, pos_index: usize, handle: *DocumentStore.Handle, config: Config) !void {
+fn completeGlobal(id: types.RequestId, pos_index: usize, handle: *DocumentStore.Handle, config: Config) !void {
     // We use a local arena allocator to deallocate all temporary data without iterating
     var arena = std.heap.ArenaAllocator.init(allocator);
     var completions = std.ArrayList(types.CompletionItem).init(&arena.allocator);
@@ -522,7 +531,7 @@ fn completeGlobal(id: i64, pos_index: usize, handle: *DocumentStore.Handle, conf
     }
 
     try send(types.Response{
-        .id = .{ .Integer = id },
+        .id = id,
         .result = .{
             .CompletionList = .{
                 .isIncomplete = false,
@@ -532,7 +541,7 @@ fn completeGlobal(id: i64, pos_index: usize, handle: *DocumentStore.Handle, conf
     });
 }
 
-fn completeFieldAccess(id: i64, handle: *DocumentStore.Handle, position: types.Position, range: analysis.SourceRange, config: Config) !void {
+fn completeFieldAccess(id: types.RequestId, handle: *DocumentStore.Handle, position: types.Position, range: analysis.SourceRange, config: Config) !void {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
@@ -546,7 +555,7 @@ fn completeFieldAccess(id: i64, handle: *DocumentStore.Handle, position: types.P
         try nodeToCompletion(&completions, &analysis_ctx, handle, node, config);
     }
     try send(types.Response{
-        .id = .{ .Integer = id },
+        .id = id,
         .result = .{
             .CompletionList = .{
                 .isIncomplete = false,
@@ -556,12 +565,12 @@ fn completeFieldAccess(id: i64, handle: *DocumentStore.Handle, position: types.P
     });
 }
 
-fn documentSymbol(id: i64, handle: *DocumentStore.Handle) !void {
+fn documentSymbol(id: types.RequestId, handle: *DocumentStore.Handle) !void {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
     try send(types.Response{
-        .id = .{ .Integer = id },
+        .id = id,
         .result = .{ .DocumentSymbols = try analysis.getDocumentSymbols(&arena.allocator, handle.tree) },
     });
 }
@@ -658,8 +667,15 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
 
     const root = tree.root;
 
-    const id = if (root.Object.getValue("id")) |id| id.Integer else 0;
-    if (id == 1337 and (root.Object.getValue("method") == null or std.mem.eql(u8, root.Object.getValue("method").?.String, ""))) {
+    const id = if (root.Object.getValue("id")) |id| switch (id) {
+        .Integer => |int| types.RequestId{ .Integer = int },
+        .String => |str| types.RequestId{ .String = str },
+        else => types.RequestId{ .Integer = 0 },
+    } else types.RequestId{ .Integer = 0 };
+
+    std.debug.warn("Id: {}\n", .{id});
+
+    if (id == .Integer and id.Integer == 1337 and (root.Object.getValue("method") == null or std.mem.eql(u8, root.Object.getValue("method").?.String, ""))) {
         if (root.Object.getValue("result")) |result_obj| {
             if (result_obj == .Array) {
                 const result = result_obj.Array;
@@ -802,7 +818,7 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
             const use_snippets = this_config.enable_snippets and client_capabilities.supports_snippets;
             switch (pos_context) {
                 .builtin => try send(types.Response{
-                    .id = .{ .Integer = id },
+                    .id = id,
                     .result = .{
                         .CompletionList = .{
                             .isIncomplete = false,
@@ -813,7 +829,7 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
                 .var_access, .empty => try completeGlobal(id, pos_index, handle, this_config),
                 .field_access => |range| try completeFieldAccess(id, handle, pos, range, this_config),
                 .global_error_set => try send(types.Response{
-                    .id = .{ .Integer = id },
+                    .id = id,
                     .result = .{
                         .CompletionList = .{
                             .isIncomplete = false,
@@ -822,7 +838,7 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
                     },
                 }),
                 .enum_literal => try send(types.Response{
-                    .id = .{ .Integer = id },
+                    .id = id,
                     .result = .{
                         .CompletionList = .{
                             .isIncomplete = false,
