@@ -339,6 +339,7 @@ fn nodeToCompletion(
                 .label = string,
                 .kind = .Field,
                 .documentation = doc,
+                .detail = analysis_ctx.tree().getNodeSource(node)
             });
         },
     }
