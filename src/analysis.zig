@@ -1221,12 +1221,17 @@ fn getDocumentSymbolsInternal(allocator: *std.mem.Allocator, tree: *ast.Tree, no
         std.debug.warn("NULL NAME: {}\n", .{node.id});
     }
 
+    const maybe_name = if (getDeclName(tree, node)) |name|
+        name
+    else
+        "";
+
     // TODO: Get my lazy bum to fix detail newlines
     return types.DocumentSymbol{
-        .name = if ((getDeclName(tree, node) orelse "no_name").len == 0) switch (node.id) {
+        .name = if (maybe_name.len == 0) switch (node.id) {
             .TestDecl => "Nameless Test",
-            else => "no_name"
-        } else getDeclName(tree, node).?,
+            else => "no_name",
+        } else maybe_name,
         // .detail = (try getDocComments(allocator, tree, node)) orelse "",
         .detail = "",
         .kind = switch (node.id) {
