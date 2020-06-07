@@ -79,7 +79,7 @@ Install the `zls-vscode` extension from [here](https://github.com/zigtools/zls-v
             "enabled": true,
             "languageId": "zig",
             "scopes": ["source.zig"],
-            "syntaxes": ["Packages/Zig/Syntaxes/Zig.tmLanguage"]
+            "syntaxes": ["Packages/Zig Language/Syntaxes/Zig.tmLanguage"]
         }
     }
 }
