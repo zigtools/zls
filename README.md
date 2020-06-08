@@ -72,6 +72,7 @@ Install the `zls-vscode` extension from [here](https://github.com/zigtools/zls-v
 
 - Install the `LSP` package from [here](https://github.com/sublimelsp/LSP/releases) or via Package Control.
 - Add this snippet to `LSP's` user settings:
+
 ```json
 {
     "clients": {
@@ -91,6 +92,7 @@ Install the `zls-vscode` extension from [here](https://github.com/zigtools/zls-v
 - Enable `LSP client` plugin in Kate settings.
 - Add this snippet to `LSP client's` user settings (e.g. /$HOME/.config/kate/lspclient)
   (or paste it in `LSP client's` GUI settings)
+
 ```json
 {
     "servers": {
@@ -107,6 +109,7 @@ Install the `zls-vscode` extension from [here](https://github.com/zigtools/zls-v
 
 - Install the CoC engine from [here](https://github.com/neoclide/coc.nvim).
 - Issue `:CocConfig` from within your Vim editor, and the following snippet:
+
 ```json
 {
    "languageserver": {

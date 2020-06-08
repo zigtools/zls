@@ -34,7 +34,7 @@ pub fn config(step: *std.build.Step) anyerror!void {
 
     std.debug.warn("Successfully saved configuration options!\n", .{});
 
-    const editor = try zinput.askSelectOne("Which code editor do you use?", enum { VSCode, Sublime, Kate, Neovim, Vim8, Other });
+    const editor = try zinput.askSelectOne("Which code editor do you use?", enum { VSCode, Sublime, Kate, Neovim, Vim8, Emacs, Other });
     std.debug.warn("\n", .{});
 
     switch (editor) {
@@ -67,6 +67,7 @@ pub fn config(step: *std.build.Step) anyerror!void {
                 \\To use ZLS in Kate, enable `LSP client` plugin in Kate settings.
                 \\Then, add the following snippet to `LSP client's` user settings:
                 \\(or paste it in `LSP client's` GUI settings)
+                \\
                 \\{{
                 \\    "servers": {{
                 \\        "zig": {{
@@ -82,14 +83,30 @@ pub fn config(step: *std.build.Step) anyerror!void {
             std.debug.warn(
                 \\To use ZLS in Neovim/Vim8, we recommend using CoC engine. You can get it from 'https://github.com/neoclide/coc.nvim'.
                 \\Then, simply issue cmd from Neovim/Vim8 `:CocConfig`, and add this to your CoC config:
+                \\
                 \\{{
-                \\  "lanuageserver": {{
+                \\  "languageserver": {{
                 \\    "zls" : {{
                 \\      "command": "command_or_path_to_zls",
                 \\      "filetypes": ["zig"]
                 \\    }}
                 \\  }}
                 \\}}
+            , .{});
+        },
+        .Emacs => {
+            std.debug.warn(
+                \\To use ZLS in Emacs, install lsp-mode (https://github.com/emacs-lsp/lsp-mode) from melpa.
+                \\Zig mode (https://github.com/ziglang/zig-mode) is also useful!
+                \\Then, add the following to your emacs config:
+                \\
+                \\(require 'lsp)
+                \\(add-to-list 'lsp-language-id-configuration '(zig-mode . "zig"))
+                \\(lsp-register-client
+                \\  (make-lsp-client
+                \\    :new-connection (lsp-stdio-connection "<path to zls>")
+                \\    :major-modes '(zig-mode)
+                \\    :server-id 'zls))
             , .{});
         },
         .Other => {

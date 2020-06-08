@@ -44,7 +44,8 @@ pub const RequestParams = void;
 
 pub const NotificationParams = union(enum) {
     LogMessageParams: LogMessageParams,
-    PublishDiagnosticsParams: PublishDiagnosticsParams
+    PublishDiagnosticsParams: PublishDiagnosticsParams,
+    ShowMessageParams: ShowMessageParams
 };
 
 /// Hover response
@@ -327,11 +328,16 @@ const SymbolKind = enum {
 };
 
 pub const DocumentSymbol = struct {
-    name: []const u8,
-    detail: ?[]const u8 = null,
+    name: String,
+    detail: ?String = null,
     kind: SymbolKind,
     deprecated: bool = false,
     range: Range,
     selectionRange: Range,
     children: []DocumentSymbol = &[_]DocumentSymbol{}
+};
+
+pub const ShowMessageParams = struct {
+    @"type": MessageType,
+    message: String
 };
