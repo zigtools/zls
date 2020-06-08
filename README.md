@@ -108,7 +108,7 @@ Install the `zls-vscode` extension from [here](https://github.com/zigtools/zls-v
 - Issue `:CocConfig` from within your Vim editor, and the following snippet:
 ```json
 {
-   "lanuageserver": {
+   "languageserver": {
        "zls" : {
            "command": "command_or_path_to_zls",
            "filetypes": ["zig"]
