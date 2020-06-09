@@ -21,7 +21,7 @@ Zig Language Server, or `zls`, is a language server for Zig. The Zig wiki states
 
 ## Installation
 
-Installing `zls` is pretty simple;
+Installing `zls` is pretty simple. You will need [a build of Zig master](https://ziglang.org/download/) (or >0.6) to build ZLS.
 
 ```bash
 git clone --recurse-submodules https://github.com/zigtools/zls
