@@ -531,8 +531,27 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
                 return analysis_ctx.in_container;
             }
 
+            // TODO: https://github.com/ziglang/zig/issues/4335
+            const cast_map = std.ComptimeStringMap(void, .{
+                .{ .@"0" = "@as" },
+                .{ .@"0" = "@bitCast" },
+                .{ .@"0" = "@fieldParentPtr" },
+                .{ .@"0" = "@floatCast" },
+                .{ .@"0" = "@floatToInt" },
+                .{ .@"0" = "@intCast" },
+                .{ .@"0" = "@intToEnum" },
+                .{ .@"0" = "@intToFloat" },
+                .{ .@"0" = "@intToPtr" },
+                .{ .@"0" = "@truncate" },
+                .{ .@"0" = "@ptrCast" },
+            });
+            if (cast_map.has(call_name)) {
+                if (builtin_call.params_len < 1) return null;
+                return resolveTypeOfNode(analysis_ctx, builtin_call.paramsConst()[0]);
+            }
+
             if (!std.mem.eql(u8, call_name, "@import")) return null;
-            if (builtin_call.params_len > 1) return null;
+            if (builtin_call.params_len < 1) return null;
 
             const import_param = builtin_call.paramsConst()[0];
             if (import_param.id != .StringLiteral) return null;
