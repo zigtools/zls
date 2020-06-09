@@ -994,6 +994,9 @@ pub fn declsFromIndexInternal(
                 }
             }
         },
+        .Use => {
+            
+        },
         else => {},
     }
 }

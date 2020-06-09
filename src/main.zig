@@ -92,6 +92,18 @@ fn respondGeneric(id: types.RequestId, response: []const u8) !void {
     try stdout.flush();
 }
 
+fn showMessage(@"type": types.MessageType, message: []const u8) !void {
+    try send(types.Notification{
+        .method = "window/showMessage",
+        .params = .{
+            .ShowMessageParams = .{
+                .@"type" = @"type",
+                .message = message
+            },
+        },
+    });
+}
+
 // TODO: Is this correct or can we get a better end?
 fn astLocationToRange(loc: std.zig.ast.Tree.Location) types.Range {
     return .{
@@ -528,6 +540,11 @@ fn completeGlobal(id: types.RequestId, pos_index: usize, handle: *DocumentStore.
     var analysis_ctx = try document_store.analysisContext(handle, &arena, pos_index, config.zig_lib_path);
     for (analysis_ctx.scope_nodes) |decl_ptr| {
         var decl = decl_ptr.*;
+        if (decl.id == .Use) {
+            std.debug.warn("Found use!", .{});
+            continue;
+        }
+
         try nodeToCompletion(&completions, &analysis_ctx, handle, decl_ptr, config);
     }
 
