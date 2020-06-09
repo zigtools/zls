@@ -997,7 +997,7 @@ pub fn main() anyerror!void {
     if (build_options.allocation_info) {
         // TODO: Use a better debugging allocator, track size in bytes, memory reserved etc..
         // Initialize the leak counting allocator.
-        debug_alloc_state = DebugAllocator.init(allocator);
+        debug_alloc_state = DebugAllocator.init(allocator, build_options.max_bytes_allocated);
         allocator = &debug_alloc_state.allocator;
     }
 

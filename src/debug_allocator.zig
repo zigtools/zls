@@ -35,8 +35,14 @@ pub const AllocationInfo = struct {
     deallocation_count: usize = 0,
     deallocation_total: usize = 0,
 
+    peak_allocated: usize = 0,
+
     reallocation_stats: Stats = Stats{},
     shrink_stats: Stats = Stats{},
+
+    fn currentlyAllocated(self: AllocationInfo) usize {
+        return self.allocation_stats.total + self.reallocation_stats.total - self.deallocation_total - self.shrink_stats.total;
+    }
 
     pub fn format(
         self: AllocationInfo,
@@ -51,7 +57,7 @@ pub const AllocationInfo = struct {
             out_stream,
             \\------------------------------------------ Allocation info ------------------------------------------
             \\{} total allocations (total: {d:.2} MB, mean: {d:.2} MB, std. dev: {d:.2} MB), {} deallocations
-            \\{} current allocations ({d:.2} MB)
+            \\{} current allocations ({d:.2} MB), peak mem usage: {d:.2} MB
             \\{} reallocations (total: {d:.2} MB, mean: {d:.2} MB, std. dev: {d:.2} MB)
             \\{} shrinks (total: {d:.2} MB, mean: {d:.2} MB, std. dev: {d:.2} MB)
             \\-----------------------------------------------------------------------------------------------------
@@ -63,7 +69,8 @@ pub const AllocationInfo = struct {
                 toMB(self.allocation_stats.stdDev()),
                 self.deallocation_count,
                 self.allocation_stats.count - self.deallocation_count,
-                toMB(self.allocation_stats.total + self.reallocation_stats.total - self.deallocation_total - self.shrink_stats.total),
+                toMB(self.currentlyAllocated()),
+                toMB(self.peak_allocated),
                 self.reallocation_stats.count,
                 toMB(self.reallocation_stats.total),
                 toMB(self.reallocation_stats.mean),
@@ -79,14 +86,16 @@ pub const AllocationInfo = struct {
 
 base_allocator: *std.mem.Allocator,
 info: AllocationInfo,
+max_bytes: usize,
 
 // Interface implementation
 allocator: std.mem.Allocator,
 
-pub fn init(base_allocator: *std.mem.Allocator) DebugAllocator {
+pub fn init(base_allocator: *std.mem.Allocator, max_bytes: usize) DebugAllocator {
     return .{
         .base_allocator = base_allocator,
         .info = .{},
+        .max_bytes = max_bytes,
         .allocator = .{
             .reallocFn = realloc,
             .shrinkFn = shrink,
@@ -103,6 +112,16 @@ fn realloc(allocator: *std.mem.Allocator, old_mem: []u8, old_align: u29, new_siz
         self.info.reallocation_stats.addSample(new_size - old_mem.len);
     } else if (new_size < old_mem.len) {
         self.info.shrink_stats.addSample(old_mem.len - new_size);
+    }
+
+    const curr_allocs = self.info.currentlyAllocated();
+    if (self.max_bytes != 0 and curr_allocs >= self.max_bytes) {
+        std.debug.warn("Exceeded maximum bytes {}, exiting.\n", .{self.max_bytes});
+        std.process.exit(1);
+    }
+
+    if (curr_allocs > self.info.peak_allocated) {
+        self.info.peak_allocated = curr_allocs;
     }
     return data;
 }
