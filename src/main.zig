@@ -197,6 +197,7 @@ fn publishDiagnostics(handle: DocumentStore.Handle, config: Config) !void {
 }
 
 fn containerToCompletion(
+    arena: *std.heap.ArenaAllocator,
     list: *std.ArrayList(types.CompletionItem),
     container_handle: analysis.NodeWithHandle,
     orig_handle: *DocumentStore.Handle,
@@ -211,7 +212,7 @@ fn containerToCompletion(
     while (container.iterate(child_idx)) |child_node| : (child_idx += 1) {
         // Declarations in the same file do not need to be public.
         if (orig_handle == handle or analysis.isNodePublic(handle.tree, child_node)) {
-            try nodeToCompletion(list, .{ .node = child_node, .handle = handle }, orig_handle, config);
+            try nodeToCompletion(arena, list, .{ .node = child_node, .handle = handle }, orig_handle, config);
         }
     }
 }
@@ -244,6 +245,7 @@ fn resolveVarDeclFnAlias(arena: *std.heap.ArenaAllocator, decl_handle: analysis.
 }
 
 fn nodeToCompletion(
+    arena: *std.heap.ArenaAllocator,
     list: *std.ArrayList(types.CompletionItem),
     node_handle: analysis.NodeWithHandle,
     orig_handle: *DocumentStore.Handle,
@@ -262,7 +264,7 @@ fn nodeToCompletion(
 
     switch (node.id) {
         .ErrorSetDecl, .Root, .ContainerDecl => {
-            try containerToCompletion(list, node_handle, orig_handle, config);
+            try containerToCompletion(arena, list, node_handle, orig_handle, config);
         },
         .FnProto => {
             const func = node.cast(std.zig.ast.Node.FnProto).?;
@@ -270,31 +272,32 @@ fn nodeToCompletion(
                 const use_snippets = config.enable_snippets and client_capabilities.supports_snippets;
 
                 const insert_text = if (use_snippets) blk: {
-                    const skip_self_param = if (func.params_len > 0) param_check: {
-                        var child_analysis_ctx = try analysis_ctx.clone();
-                        break :param_check switch (func.paramsConst()[0].param_type) {
-                            .type_expr => |type_node| if (analysis_ctx.in_container == analysis.resolveTypeOfNode(&child_analysis_ctx, type_node))
-                                true
-                            else if (type_node.cast(std.zig.ast.Node.PrefixOp)) |prefix_op|
-                                prefix_op.op == .PtrType and analysis_ctx.in_container == analysis.resolveTypeOfNode(&child_analysis_ctx, prefix_op.rhs)
-                            else
-                                false,
-                            else => false,
-                        };
-                    } else
-                        false;
+                    // @TODO Rebuild this.
+                    const skip_self_param = false;
+                    // const skip_self_param = if (func.params_len > 0) param_check: {
+                    //     break :param_check switch (func.paramsConst()[0].param_type) {
+                    //         .type_expr => |type_node| if (analysis_ctx.in_container == analysis.resolveTypeOfNode(&child_analysis_ctx, type_node))
+                    //             true
+                    //         else if (type_node.cast(std.zig.ast.Node.PrefixOp)) |prefix_op|
+                    //             prefix_op.op == .PtrType and analysis_ctx.in_container == analysis.resolveTypeOfNode(&child_analysis_ctx, prefix_op.rhs)
+                    //         else
+                    //             false,
+                    //         else => false,
+                    //     };
+                    // } else
+                    //     false;
 
-                    break :blk try analysis.getFunctionSnippet(list.allocator, analysis_ctx.tree(), func, skip_self_param);
+                    break :blk try analysis.getFunctionSnippet(&arena.allocator, handle.tree, func, skip_self_param);
                 } else
                     null;
 
-                const is_type_function = analysis.isTypeFunction(analysis_ctx.tree(), func);
+                const is_type_function = analysis.isTypeFunction(handle.tree, func);
 
                 try list.append(.{
-                    .label = analysis_ctx.tree().tokenSlice(name_token),
+                    .label = handle.tree.tokenSlice(name_token),
                     .kind = if (is_type_function) .Struct else .Function,
                     .documentation = doc,
-                    .detail = analysis.getFunctionSignature(analysis_ctx.tree(), func),
+                    .detail = analysis.getFunctionSignature(handle.tree, func),
                     .insertText = insert_text,
                     .insertTextFormat = if (use_snippets) .Snippet else .PlainText,
                 });
@@ -302,18 +305,18 @@ fn nodeToCompletion(
         },
         .VarDecl => {
             const var_decl = node.cast(std.zig.ast.Node.VarDecl).?;
-            const is_const = analysis_ctx.tree().token_ids[var_decl.mut_token] == .Keyword_const;
+            const is_const = handle.tree.token_ids[var_decl.mut_token] == .Keyword_const;
 
-            var result = try resolveVarDeclFnAlias(analysis_ctx, node);
-            if (result.decl != node) {
-                return try nodeToCompletion(list, &result.analysis_ctx, orig_handle, result.decl, config);
+            const result = try resolveVarDeclFnAlias(arena, node_handle);
+            if (result.node != node) {
+                return try nodeToCompletion(arena, list, result, orig_handle, config);
             }
 
             try list.append(.{
-                .label = analysis_ctx.tree().tokenSlice(var_decl.name_token),
+                .label = handle.tree.tokenSlice(var_decl.name_token),
                 .kind = if (is_const) .Constant else .Variable,
                 .documentation = doc,
-                .detail = analysis.getVariableSignature(analysis_ctx.tree(), var_decl),
+                .detail = analysis.getVariableSignature(handle.tree, var_decl),
             });
         },
         .PrefixOp => {
@@ -547,7 +550,7 @@ const DeclToCompletionContext = struct {
 fn decltoCompletion(context: DeclToCompletionContext, decl_handle: analysis.DeclWithHandle) !void {
     switch (decl_handle.decl.*) {
         .ast_node => |node| {
-            try nodeToCompletion(context.completions, .{ .node = node, .handle = decl_handle.handle }, context.orig_handle, context.config.*);
+            try nodeToCompletion(context.arena, context.completions, .{ .node = node, .handle = decl_handle.handle }, context.orig_handle, context.config.*);
         },
         else => {},
         // @TODO The rest
@@ -590,7 +593,7 @@ fn completeFieldAccess(id: types.RequestId, handle: *DocumentStore.Handle, posit
     var tokenizer = std.zig.Tokenizer.init(line[range.start..range.end]);
 
     if (try analysis.getFieldAccessTypeNode(&document_store, &arena, handle, &tokenizer)) |node| {
-        try nodeToCompletion(&completions, node, handle, config);
+        try nodeToCompletion(&arena, &completions, node, handle, config);
     }
 
     try send(types.Response{
@@ -829,7 +832,7 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
     }
     // Semantic highlighting
     else if (std.mem.eql(u8, method, "textDocument/semanticTokens")) {
-        // @TODO Implement this (we dont get here from vscode atm even when we get the client capab.)
+        // TODO Implement this (we dont get here from vscode atm even when we get the client capab.)
         return try respondGeneric(id, empty_array_response);
     }
     // Autocomplete / Signatures
