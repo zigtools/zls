@@ -555,6 +555,7 @@ pub fn getFieldAccessTypeNode(
     store: *DocumentStore,
     arena: *std.heap.ArenaAllocator,
     handle: *DocumentStore.Handle,
+    source_index: usize,
     tokenizer: *std.zig.Tokenizer,
 ) !?NodeWithHandle {
     var current_node = NodeWithHandle{
@@ -567,7 +568,7 @@ pub fn getFieldAccessTypeNode(
         switch (tok.id) {
             .Eof => return try resolveFieldAccessLhsType(store, arena, current_node),
             .Identifier => {
-                if (try lookupSymbolGlobal(store, current_node.handle, tokenizer.buffer[tok.loc.start..tok.loc.end], tok.loc.start)) |child| {
+                if (try lookupSymbolGlobal(store, current_node.handle, tokenizer.buffer[tok.loc.start..tok.loc.end], source_index)) |child| {
                     current_node = (try child.resolveType(store, arena)) orelse return null;
                 } else return null;
             },

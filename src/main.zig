@@ -525,7 +525,7 @@ fn getSymbolFieldAccess(
     const line = try handle.document.getLine(@intCast(usize, position.line));
     var tokenizer = std.zig.Tokenizer.init(line[range.start..range.end]);
 
-    if (try analysis.getFieldAccessTypeNode(&document_store, arena, handle, &tokenizer)) |container_handle| {
+    if (try analysis.getFieldAccessTypeNode(&document_store, arena, handle, pos_index, &tokenizer)) |container_handle| {
         return try analysis.lookupSymbolContainer(&document_store, container_handle, name, true);
     }
     return null;
@@ -670,7 +670,8 @@ fn completeFieldAccess(id: types.RequestId, handle: *DocumentStore.Handle, posit
     const line = try handle.document.getLine(@intCast(usize, position.line));
     var tokenizer = std.zig.Tokenizer.init(line[range.start..range.end]);
 
-    if (try analysis.getFieldAccessTypeNode(&document_store, &arena, handle, &tokenizer)) |node| {
+    const pos_index = try handle.document.positionToIndex(position);
+    if (try analysis.getFieldAccessTypeNode(&document_store, &arena, handle, pos_index, &tokenizer)) |node| {
         try nodeToCompletion(&arena, &completions, node, handle, config);
     }
 
