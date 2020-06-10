@@ -994,10 +994,10 @@ pub const DeclWithHandle = struct {
             .array_payload => |pay| try resolveBracketAccessType(
                 store,
                 arena,
-                .{
+                (try resolveTypeOfNode(store, arena, .{
                     .node = pay.array_expr,
                     .handle = self.handle,
-                },
+                })) orelse return null,
                 .Single,
             ),
             // TODO Resolve switch payload types
