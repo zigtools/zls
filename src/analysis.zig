@@ -181,25 +181,6 @@ fn getDeclName(tree: *ast.Tree, node: *ast.Node) ?[]const u8 {
     };
 }
 
-/// Gets the child of node
-pub fn getChild(tree: *ast.Tree, node: *ast.Node, name: []const u8) ?*ast.Node {
-    var child_idx: usize = 0;
-    while (node.iterate(child_idx)) |child| : (child_idx += 1) {
-        const child_name = getDeclName(tree, child) orelse continue;
-        if (std.mem.eql(u8, child_name, name)) return child;
-    }
-    return null;
-}
-
-/// Gets the child of slice
-pub fn getChildOfSlice(tree: *ast.Tree, nodes: []*ast.Node, name: []const u8) ?*ast.Node {
-    for (nodes) |child| {
-        const child_name = getDeclName(tree, child) orelse continue;
-        if (std.mem.eql(u8, child_name, name)) return child;
-    }
-    return null;
-}
-
 fn findReturnStatementInternal(
     tree: *ast.Tree,
     fn_decl: *ast.Node.FnProto,
@@ -378,22 +359,7 @@ pub fn resolveTypeOfNode(store: *DocumentStore, arena: *std.heap.ArenaAllocator,
 
             const decl = (try resolveTypeOfNode(store, arena, .{ .node = call.lhs, .handle = handle })) orelse return null;
             if (decl.node.cast(ast.Node.FnProto)) |fn_decl| {
-                // @TODO use BoundTypeParams: ParamDecl -> NodeWithHandle or something
-                // Add type param values to the scope nodes
-                // const param_len = std.math.min(call.params_len, fn_decl.params_len);
-                // for (fn_decl.paramsConst()) |decl_param, param_idx| {
-                //     if (param_idx >= param_len) break;
-                //     if (decl_param.name_token == null) continue;
-                //     const type_param = switch (decl_param.param_type) {
-                //         .type_expr => |type_node| if (type_node.cast(ast.Node.Identifier)) |ident|
-                //             std.mem.eql(u8, analysis_ctx.tree().tokenSlice(ident.token), "type")
-                //         else
-                //             false,
-                //         else => false,
-                //     };
-                //     if (!type_param) continue;
-                //     const call_param_type = (try resolveTypeOfNode(store, arena, .{ .node = call.paramsConst()[param_idx], .handle = handle })) orelse continue;
-                // }
+                // TODO Use some type of ParamDecl -> NodeWithHandle map while resolving, and associate type params here.
                 return try resolveReturnType(store, arena, fn_decl, decl.handle);
             }
             return decl;
@@ -724,57 +690,6 @@ pub fn nodeToString(tree: *ast.Tree, node: *ast.Node) ?[]const u8 {
     }
 
     return null;
-}
-
-fn makeAccessNode(allocator: *std.mem.Allocator, expr: *ast.Node) !*ast.Node {
-    const suffix_op_node = try allocator.create(ast.Node.SuffixOp);
-    suffix_op_node.* = .{
-        .op = .{ .ArrayAccess = expr },
-        .lhs = expr,
-        .rtoken = expr.lastToken(),
-    };
-    return &suffix_op_node.base;
-}
-
-fn makeUnwrapNode(allocator: *std.mem.Allocator, expr: *ast.Node) !*ast.Node {
-    const suffix_op_node = try allocator.create(ast.Node.SuffixOp);
-    suffix_op_node.* = .{
-        .op = .UnwrapOptional,
-        .lhs = expr,
-        .rtoken = expr.lastToken(),
-    };
-    return &suffix_op_node.base;
-}
-
-fn makeVarDeclNode(
-    allocator: *std.mem.Allocator,
-    doc: ?*ast.Node.DocComment,
-    comptime_token: ?ast.TokenIndex,
-    name_token: ast.TokenIndex,
-    type_expr: ?*ast.Node,
-    init_expr: ?*ast.Node,
-) !*ast.Node {
-    // TODO: This will not be needed anymore when we use out own decl type instead of directly
-    // repurposing ast nodes.
-    const var_decl_node = try allocator.create(ast.Node.VarDecl);
-    var_decl_node.* = .{
-        .doc_comments = doc,
-        .comptime_token = comptime_token,
-        .visib_token = null,
-        .thread_local_token = null,
-        .name_token = name_token,
-        .eq_token = null,
-        .mut_token = name_token,
-        .extern_export_token = null,
-        .lib_name = null,
-        .type_node = type_expr,
-        .align_node = null,
-        .section_node = null,
-        .init_node = init_expr,
-        .semicolon_token = name_token,
-    };
-
-    return &var_decl_node.base;
 }
 
 fn nodeContainsSourceIndex(tree: *ast.Tree, node: *ast.Node, source_index: usize) bool {
@@ -1265,7 +1180,8 @@ fn nodeSourceRange(tree: *ast.Tree, node: *ast.Node) SourceRange {
 // TODO Make enum and error stores per-document
 //      CLear the doc ones before calling this and
 //      rebuild them here.
-
+// TODO Possibly collect all imports to diff them on changes
+//      as well
 fn makeScopeInternal(
     allocator: *std.mem.Allocator,
     scopes: *std.ArrayList(Scope),

@@ -204,7 +204,6 @@ fn containerToCompletion(
     config: Config,
 ) !void {
     // @TODO Something like iterateSymbolsGlobal but for container to support uses.
-
     const container = container_handle.node;
     const handle = container_handle.handle;
 
@@ -272,20 +271,36 @@ fn nodeToCompletion(
                 const use_snippets = config.enable_snippets and client_capabilities.supports_snippets;
 
                 const insert_text = if (use_snippets) blk: {
-                    // @TODO Rebuild this.
-                    const skip_self_param = false;
-                    // const skip_self_param = if (func.params_len > 0) param_check: {
-                    //     break :param_check switch (func.paramsConst()[0].param_type) {
-                    //         .type_expr => |type_node| if (analysis_ctx.in_container == analysis.resolveTypeOfNode(&child_analysis_ctx, type_node))
-                    //             true
-                    //         else if (type_node.cast(std.zig.ast.Node.PrefixOp)) |prefix_op|
-                    //             prefix_op.op == .PtrType and analysis_ctx.in_container == analysis.resolveTypeOfNode(&child_analysis_ctx, prefix_op.rhs)
-                    //         else
-                    //             false,
-                    //         else => false,
-                    //     };
-                    // } else
-                    //     false;
+                    const skip_self_param = if (func.params_len > 0) param_check: {
+                        const in_container = analysis.innermostContainer(handle, handle.tree.token_locs[func.firstToken()].start);
+                        switch (func.paramsConst()[0].param_type) {
+                            .type_expr => |type_node| {
+                                if (try analysis.resolveTypeOfNode(&document_store, arena, .{
+                                    .node = type_node,
+                                    .handle = handle,
+                                })) |resolved_type| {
+                                    if (in_container.node == resolved_type.node)
+                                        break :param_check true;
+                                }
+
+                                if (type_node.cast(std.zig.ast.Node.PrefixOp)) |prefix_op| {
+                                    if (prefix_op.op == .PtrType) {
+                                        if (try analysis.resolveTypeOfNode(&document_store, arena, .{
+                                            .node = prefix_op.rhs,
+                                            .handle = handle,
+                                        })) |resolved_prefix_op| {
+                                            if (in_container.node == resolved_prefix_op.node)
+                                                break :param_check true;
+                                        }
+                                    }
+                                }
+
+                                break :param_check false;
+                            },
+                            else => break :param_check false,
+                        }
+                    } else
+                        false;
 
                     break :blk try analysis.getFunctionSnippet(&arena.allocator, handle.tree, func, skip_self_param);
                 } else
