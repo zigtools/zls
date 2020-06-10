@@ -21,6 +21,7 @@ pub const Handle = struct {
     count: usize,
     import_uris: std.ArrayList([]const u8),
     tree: *std.zig.ast.Tree,
+    document_scope: analysis.DocumentScope,
 
     associated_build_file: ?*BuildFile,
     is_build_file: ?*BuildFile,
@@ -191,6 +192,12 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: []u8) anyerror!*Hand
     var handle = try self.allocator.create(Handle);
     errdefer self.allocator.destroy(handle);
 
+    const tree = try std.zig.parse(self.allocator, text);
+    errdefer tree.deinit();
+
+    const document_scope = try analysis.makeDocumentScope(self.allocator, tree);
+    errdefer document_scope.deinit(self.allocator);
+
     handle.* = Handle{
         .count = 1,
         .import_uris = std.ArrayList([]const u8).init(self.allocator),
@@ -199,7 +206,8 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: []u8) anyerror!*Hand
             .text = text,
             .mem = text,
         },
-        .tree = try std.zig.parse(self.allocator, text),
+        .tree = tree,
+        .document_scope = document_scope,
         .associated_build_file = null,
         .is_build_file = null,
     };
@@ -361,6 +369,9 @@ fn refreshDocument(self: *DocumentStore, handle: *Handle, zig_lib_path: ?[]const
     std.debug.warn("New text for document {}\n", .{handle.uri()});
     handle.tree.deinit();
     handle.tree = try std.zig.parse(self.allocator, handle.document.text);
+
+    handle.document_scope.deinit(self.allocator);
+    handle.document_scope = try analysis.makeDocumentScope(self.allocator, handle.tree);
 
     // TODO: Better algorithm or data structure?
     // Removing the imports is costly since they live in an array list
@@ -700,6 +711,8 @@ pub fn deinit(self: *DocumentStore) void {
         entry.value.import_uris.deinit();
         self.allocator.free(entry.key);
         self.allocator.destroy(entry.value);
+    
+        entry.value.document_scope.deinit(self.allocator);
     }
 
     self.handles.deinit();

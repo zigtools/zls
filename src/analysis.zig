@@ -1013,9 +1013,7 @@ pub fn declsFromIndexInternal(
                 }
             }
         },
-        .Use => {
-            
-        },
+        .Use => {},
         else => {},
     }
 }
@@ -1287,4 +1285,402 @@ pub fn getDocumentSymbols(allocator: *std.mem.Allocator, tree: *ast.Tree) ![]typ
     }
 
     return symbols.items;
+}
+
+const DocumentStore = @import("document_store.zig");
+
+// TODO Will I need to store a handle with the nodes?
+pub const Declaration = union(enum) {
+    ast_node: *ast.Node,
+    param_decl: *ast.Node.FnProto.ParamDecl,
+    pointer_payload: struct {
+        node: *ast.Node.PointerPayload,
+        condition: *ast.Node,
+    },
+    array_payload: struct {
+        identifier: *ast.Node,
+        array_expr: *ast.Node,
+    },
+    switch_payload: struct {
+        node: *ast.Node.PointerPayload,
+        items: []const *ast.Node,
+    },
+};
+
+pub const DocumentScope = struct {
+    scopes: []const Scope,
+
+    // TODO Methods
+
+    // TODO When looking up a symbol, have an accept_field argument.
+
+    pub fn debugPrint(self: DocumentScope) void {
+        for (self.scopes) |scope| {
+            std.debug.warn(
+                \\--------------------------
+                \\Scope {}, range: [{}, {})
+                \\ {} usingnamespaces
+                \\Decls: 
+            , .{
+                scope.data,
+                scope.range.start,
+                scope.range.end,
+                scope.uses.len,
+            });
+
+            var decl_it = scope.decls.iterator();
+            var idx: usize = 0;
+            while (decl_it.next()) |name_decl| : (idx += 1) {
+                if (idx != 0) std.debug.warn(", ", .{});
+                std.debug.warn("{}", .{name_decl.key});
+            }
+            std.debug.warn("\n--------------------------\n", .{});
+        }
+    }
+
+    pub fn deinit(self: DocumentScope, allocator: *std.mem.Allocator) void {
+        for (self.scopes) |scope| {
+            scope.decls.deinit();
+            allocator.free(scope.uses);
+        }
+        allocator.free(self.scopes);
+    }
+};
+
+pub const Scope = struct {
+    pub const Data = union(enum) {
+        container: *ast.Node, // .id is ContainerDecl or Root
+        function: *ast.Node, // .id is FnProto
+        block: *ast.Node, // .id is Block
+        other,
+    };
+
+    range: SourceRange,
+    decls: std.StringHashMap(Declaration),
+    uses: []const *ast.Node.Use,
+
+    data: Data,
+
+    // TODO Methods
+};
+
+pub fn makeDocumentScope(allocator: *std.mem.Allocator, tree: *ast.Tree) !DocumentScope {
+    var scopes = std.ArrayList(Scope).init(allocator);
+    errdefer scopes.deinit();
+
+    try makeScopeInternal(allocator, &scopes, tree, &tree.root_node.base);
+    return DocumentScope{
+        .scopes = scopes.toOwnedSlice(),
+    };
+}
+
+fn nodeSourceRange(tree: *ast.Tree, node: *ast.Node) SourceRange {
+    return SourceRange{
+        .start = tree.token_locs[node.firstToken()].start,
+        .end = tree.token_locs[node.lastToken()].end,
+    };
+}
+
+fn makeScopeInternal(
+    allocator: *std.mem.Allocator,
+    scopes: *std.ArrayList(Scope),
+    tree: *ast.Tree,
+    node: *ast.Node,
+) error{OutOfMemory}!void {
+    if (node.id == .Root or node.id == .ContainerDecl) {
+        const ast_decls = switch (node.id) {
+            .ContainerDecl => node.cast(ast.Node.ContainerDecl).?.fieldsAndDeclsConst(),
+            .Root => node.cast(ast.Node.Root).?.declsConst(),
+            else => unreachable,
+        };
+
+        (try scopes.addOne()).* = .{
+            .range = nodeSourceRange(tree, node),
+            .decls = std.StringHashMap(Declaration).init(allocator),
+            .uses = &[0]*ast.Node.Use{},
+            .data = .{ .container = node },
+        };
+        var scope_idx = scopes.items.len - 1;
+        var uses = std.ArrayList(*ast.Node.Use).init(allocator);
+
+        errdefer {
+            scopes.items[scope_idx].decls.deinit();
+            uses.deinit();
+        }
+
+        for (ast_decls) |decl| {
+            if (decl.cast(ast.Node.Use)) |use| {
+                try uses.append(use);
+                continue;
+            }
+
+            try makeScopeInternal(allocator, scopes, tree, decl);
+            const name = getDeclName(tree, decl) orelse continue;
+            if (try scopes.items[scope_idx].decls.put(name, .{ .ast_node = decl })) |existing| {
+                // TODO Record a redefinition error.
+            }
+        }
+
+        scopes.items[scope_idx].uses = uses.toOwnedSlice();
+        return;
+    }
+
+    switch (node.id) {
+        .FnProto => {
+            const func = node.cast(ast.Node.FnProto).?;
+
+            (try scopes.addOne()).* = .{
+                .range = nodeSourceRange(tree, node),
+                .decls = std.StringHashMap(Declaration).init(allocator),
+                .uses = &[0]*ast.Node.Use{},
+                .data = .{ .function = node },
+            };
+            var scope_idx = scopes.items.len - 1;
+            errdefer scopes.items[scope_idx].decls.deinit();
+
+            for (func.params()) |*param| {
+                if (param.name_token) |name_tok| {
+                    if (try scopes.items[scope_idx].decls.put(tree.tokenSlice(name_tok), .{ .param_decl = param })) |existing| {
+                        // TODO Record a redefinition error
+                    }
+                }
+            }
+
+            if (func.body_node) |body| {
+                try makeScopeInternal(allocator, scopes, tree, body);
+            }
+
+            return;
+        },
+        .TestDecl => {
+            return try makeScopeInternal(allocator, scopes, tree, node.cast(ast.Node.TestDecl).?.body_node);
+        },
+        .Block => {
+            (try scopes.addOne()).* = .{
+                .range = nodeSourceRange(tree, node),
+                .decls = std.StringHashMap(Declaration).init(allocator),
+                .uses = &[0]*ast.Node.Use{},
+                .data = .{ .block = node },
+            };
+            var scope_idx = scopes.items.len - 1;
+            var uses = std.ArrayList(*ast.Node.Use).init(allocator);
+
+            errdefer {
+                scopes.items[scope_idx].decls.deinit();
+                uses.deinit();
+            }
+
+            var child_idx: usize = 0;
+            while (node.iterate(child_idx)) |child_node| : (child_idx += 1) {
+                if (child_node.cast(ast.Node.Use)) |use| {
+                    try uses.append(use);
+                    continue;
+                }
+
+                try makeScopeInternal(allocator, scopes, tree, child_node);
+                if (child_node.cast(ast.Node.VarDecl)) |var_decl| {
+                    const name = tree.tokenSlice(var_decl.name_token);
+                    if (try scopes.items[scope_idx].decls.put(name, .{ .ast_node = child_node })) |existing| {
+                        // TODO Record a redefinition error.
+                    }
+                }
+            }
+
+            scopes.items[scope_idx].uses = uses.toOwnedSlice();
+            return;
+        },
+        .Comptime => {
+            return try makeScopeInternal(allocator, scopes, tree, node.cast(ast.Node.Comptime).?.expr);
+        },
+        .If => {
+            const if_node = node.cast(ast.Node.If).?;
+
+            if (if_node.payload) |payload| {
+                std.debug.assert(payload.id == .PointerPayload);
+                var scope = try scopes.addOne();
+                scope.* = .{
+                    .range = .{
+                        .start = tree.token_locs[payload.firstToken()].start,
+                        .end = tree.token_locs[if_node.body.lastToken()].end,
+                    },
+                    .decls = std.StringHashMap(Declaration).init(allocator),
+                    .uses = &[0]*ast.Node.Use{},
+                    .data = .other,
+                };
+                errdefer scope.decls.deinit();
+
+                const ptr_payload = payload.cast(ast.Node.PointerPayload).?;
+                std.debug.assert(ptr_payload.value_symbol.id == .Identifier);
+                const name = tree.tokenSlice(ptr_payload.value_symbol.firstToken());
+                try scope.decls.putNoClobber(name, .{
+                    .pointer_payload = .{
+                        .node = ptr_payload,
+                        .condition = if_node.condition,
+                    },
+                });
+            }
+            try makeScopeInternal(allocator, scopes, tree, if_node.body);
+
+            if (if_node.@"else") |else_node| {
+                if (else_node.payload) |payload| {
+                    std.debug.assert(payload.id == .Payload);
+                    var scope = try scopes.addOne();
+                    scope.* = .{
+                        .range = .{
+                            .start = tree.token_locs[payload.firstToken()].start,
+                            .end = tree.token_locs[else_node.body.lastToken()].end,
+                        },
+                        .decls = std.StringHashMap(Declaration).init(allocator),
+                        .uses = &[0]*ast.Node.Use{},
+                        .data = .other,
+                    };
+                    errdefer scope.decls.deinit();
+
+                    const err_payload = payload.cast(ast.Node.Payload).?;
+                    std.debug.assert(err_payload.error_symbol.id == .Identifier);
+                    const name = tree.tokenSlice(err_payload.error_symbol.firstToken());
+                    try scope.decls.putNoClobber(name, .{ .ast_node = payload });
+                }
+                try makeScopeInternal(allocator, scopes, tree, else_node.body);
+            }
+        },
+        .While => {
+            const while_node = node.cast(ast.Node.While).?;
+            if (while_node.payload) |payload| {
+                std.debug.assert(payload.id == .PointerPayload);
+                var scope = try scopes.addOne();
+                scope.* = .{
+                    .range = .{
+                        .start = tree.token_locs[payload.firstToken()].start,
+                        .end = tree.token_locs[while_node.body.lastToken()].end,
+                    },
+                    .decls = std.StringHashMap(Declaration).init(allocator),
+                    .uses = &[0]*ast.Node.Use{},
+                    .data = .other,
+                };
+                errdefer scope.decls.deinit();
+
+                const ptr_payload = payload.cast(ast.Node.PointerPayload).?;
+                std.debug.assert(ptr_payload.value_symbol.id == .Identifier);
+                const name = tree.tokenSlice(ptr_payload.value_symbol.firstToken());
+                try scope.decls.putNoClobber(name, .{
+                    .pointer_payload = .{
+                        .node = ptr_payload,
+                        .condition = while_node.condition,
+                    },
+                });
+            }
+            try makeScopeInternal(allocator, scopes, tree, while_node.body);
+
+            if (while_node.@"else") |else_node| {
+                if (else_node.payload) |payload| {
+                    std.debug.assert(payload.id == .Payload);
+                    var scope = try scopes.addOne();
+                    scope.* = .{
+                        .range = .{
+                            .start = tree.token_locs[payload.firstToken()].start,
+                            .end = tree.token_locs[else_node.body.lastToken()].end,
+                        },
+                        .decls = std.StringHashMap(Declaration).init(allocator),
+                        .uses = &[0]*ast.Node.Use{},
+                        .data = .other,
+                    };
+                    errdefer scope.decls.deinit();
+
+                    const err_payload = payload.cast(ast.Node.Payload).?;
+                    std.debug.assert(err_payload.error_symbol.id == .Identifier);
+                    const name = tree.tokenSlice(err_payload.error_symbol.firstToken());
+                    try scope.decls.putNoClobber(name, .{ .ast_node = payload });
+                }
+                try makeScopeInternal(allocator, scopes, tree, else_node.body);
+            }
+        },
+        .For => {
+            const for_node = node.cast(ast.Node.For).?;
+            std.debug.assert(for_node.payload.id == .PointerIndexPayload);
+            const ptr_idx_payload = for_node.payload.cast(ast.Node.PointerIndexPayload).?;
+            std.debug.assert(ptr_idx_payload.value_symbol.id == .Identifier);
+
+            var scope = try scopes.addOne();
+            scope.* = .{
+                .range = .{
+                    .start = tree.token_locs[ptr_idx_payload.firstToken()].start,
+                    .end = tree.token_locs[for_node.body.lastToken()].end,
+                },
+                .decls = std.StringHashMap(Declaration).init(allocator),
+                .uses = &[0]*ast.Node.Use{},
+                .data = .other,
+            };
+            errdefer scope.decls.deinit();
+
+            const value_name = tree.tokenSlice(ptr_idx_payload.value_symbol.firstToken());
+            try scope.decls.putNoClobber(value_name, .{
+                .array_payload = .{
+                    .identifier = ptr_idx_payload.value_symbol,
+                    .array_expr = for_node.array_expr,
+                },
+            });
+
+            if (ptr_idx_payload.index_symbol) |index_symbol| {
+                std.debug.assert(index_symbol.id == .Identifier);
+                const index_name = tree.tokenSlice(index_symbol.firstToken());
+                if (try scope.decls.put(index_name, .{ .ast_node = index_symbol })) |existing| {
+                    // TODO Record a redefinition error
+                }
+            }
+
+            try makeScopeInternal(allocator, scopes, tree, for_node.body);
+            if (for_node.@"else") |else_node| {
+                std.debug.assert(else_node.payload == null);
+                try makeScopeInternal(allocator, scopes, tree, else_node.body);
+            }
+        },
+        .Switch => {
+            const switch_node = node.cast(ast.Node.Switch).?;
+            for (switch_node.casesConst()) |case| {
+                if (case.*.cast(ast.Node.SwitchCase)) |case_node| {
+                    if (case_node.payload) |payload| {
+                        std.debug.assert(payload.id == .PointerPayload);
+                        var scope = try scopes.addOne();
+                        scope.* = .{
+                            .range = .{
+                                .start = tree.token_locs[payload.firstToken()].start,
+                                .end = tree.token_locs[case_node.expr.lastToken()].end,
+                            },
+                            .decls = std.StringHashMap(Declaration).init(allocator),
+                            .uses = &[0]*ast.Node.Use{},
+                            .data = .other,
+                        };
+                        errdefer scope.decls.deinit();
+
+                        const ptr_payload = payload.cast(ast.Node.PointerPayload).?;
+                        std.debug.assert(ptr_payload.value_symbol.id == .Identifier);
+                        const name = tree.tokenSlice(ptr_payload.value_symbol.firstToken());
+                        try scope.decls.putNoClobber(name, .{
+                            .switch_payload = .{
+                                .node = ptr_payload,
+                                .items = case_node.itemsConst(),
+                            },
+                        });
+                    }
+                    try makeScopeInternal(allocator, scopes, tree, case_node.expr);
+                }
+            }
+        },
+        .VarDecl => {
+            const var_decl = node.cast(ast.Node.VarDecl).?;
+            if (var_decl.type_node) |type_node| {
+                try makeScopeInternal(allocator, scopes, tree, type_node);
+            }
+            if (var_decl.init_node) |init_node| {
+                try makeScopeInternal(allocator, scopes, tree, init_node);
+            }
+        },
+        else => {
+            var child_idx: usize = 0;
+            while (node.iterate(child_idx)) |child_node| : (child_idx += 1) {
+                try makeScopeInternal(allocator, scopes, tree, child_node);
+            }
+        },
+    }
 }
