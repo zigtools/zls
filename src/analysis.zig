@@ -121,6 +121,13 @@ pub fn getVariableSignature(tree: *ast.Tree, var_decl: *ast.Node.VarDecl) []cons
     return tree.source[start..end];
 }
 
+// analysis.getContainerFieldSignature(handle.tree, field)
+pub fn getContainerFieldSignature(tree: *ast.Tree, field: *ast.Node.ContainerField) []const u8 {
+    const start = tree.token_locs[field.firstToken()].start;
+    const end = tree.token_locs[field.lastToken()].end;
+    return tree.source[start..end];
+}
+
 pub fn isTypeFunction(tree: *ast.Tree, func: *ast.Node.FnProto) bool {
     switch (func.return_type) {
         .Explicit => |node| return if (node.cast(std.zig.ast.Node.Identifier)) |ident|
@@ -158,7 +165,7 @@ pub fn getDeclNameToken(tree: *ast.Tree, node: *ast.Node) ?ast.TokenIndex {
             const field = node.cast(ast.Node.ContainerField).?;
             return field.name_token;
         },
-        // We need identifier for captures
+        // We need identifier for captures and error set tags
         .Identifier => {
             const ident = node.cast(ast.Node.Identifier).?;
             return ident.token;
@@ -402,9 +409,6 @@ pub fn resolveTypeOfNode(store: *DocumentStore, arena: *std.heap.ArenaAllocator,
                         })) orelse return null,
                     );
 
-                    // @TODO Error sets
-                    if (left_type.node.id != .ContainerDecl and left_type.node.id != .Root) return null;
-
                     if (try lookupSymbolContainer(store, left_type, rhs_str, true)) |child| {
                         return try child.resolveType(store, arena);
                     } else return null;
@@ -580,12 +584,6 @@ pub fn getFieldAccessTypeNode(
                         if (after_period.loc.end == tokenizer.buffer.len) return try resolveFieldAccessLhsType(store, arena, current_node);
 
                         current_node = try resolveFieldAccessLhsType(store, arena, current_node);
-                        // @TODO Error sets
-                        if (current_node.node.id != .ContainerDecl and current_node.node.id != .Root) {
-                            // @TODO Is this ok?
-                            return null;
-                        }
-
                         if (try lookupSymbolContainer(store, current_node, tokenizer.buffer[after_period.loc.start..after_period.loc.end], true)) |child| {
                             current_node = (try child.resolveType(store, arena)) orelse return null;
                         } else return null;
@@ -1077,7 +1075,11 @@ pub fn lookupSymbolGlobal(store: *DocumentStore, handle: *DocumentStore.Handle, 
 pub fn lookupSymbolContainer(store: *DocumentStore, container_handle: NodeWithHandle, symbol: []const u8, accept_fields: bool) !?DeclWithHandle {
     const container = container_handle.node;
     const handle = container_handle.handle;
-    std.debug.assert(container.id == .ContainerDecl or container.id == .Root);
+
+    if (container.id != .ContainerDecl and container.id != .Root and container.id != .ErrorSetDecl) {
+        return null;
+    }
+
     // Find the container scope.
     var maybe_container_scope: ?*Scope = null;
     for (handle.document_scope.scopes) |*scope| {
@@ -1094,7 +1096,7 @@ pub fn lookupSymbolContainer(store: *DocumentStore, container_handle: NodeWithHa
         if (container_scope.decls.get(symbol)) |candidate| {
             switch (candidate.value) {
                 .ast_node => |node| {
-                    if (node.id == .ContainerDecl and !accept_fields) return null;
+                    if (node.id == .ContainerField and !accept_fields) return null;
                 },
                 else => {},
             }
@@ -1106,7 +1108,9 @@ pub fn lookupSymbolContainer(store: *DocumentStore, container_handle: NodeWithHa
         }
         return null;
     }
-    unreachable;
+
+    std.debug.warn("Did not find container scope when looking up in container {} (name: {})\n", .{container, getDeclName(handle.tree, container)});
+    return null;
 }
 
 pub const DocumentScope = struct {
@@ -1147,7 +1151,7 @@ pub const DocumentScope = struct {
 
 pub const Scope = struct {
     pub const Data = union(enum) {
-        container: *ast.Node, // .id is ContainerDecl or Root
+        container: *ast.Node, // .id is ContainerDecl or Root or ErrorSetDecl
         function: *ast.Node, // .id is FnProto
         block: *ast.Node, // .id is Block
         other,
@@ -1189,10 +1193,11 @@ fn makeScopeInternal(
     tree: *ast.Tree,
     node: *ast.Node,
 ) error{OutOfMemory}!void {
-    if (node.id == .Root or node.id == .ContainerDecl) {
+    if (node.id == .Root or node.id == .ContainerDecl or node.id == .ErrorSetDecl) {
         const ast_decls = switch (node.id) {
             .ContainerDecl => node.cast(ast.Node.ContainerDecl).?.fieldsAndDeclsConst(),
             .Root => node.cast(ast.Node.Root).?.declsConst(),
+            .ErrorSetDecl => node.cast(ast.Node.ErrorSetDecl).?.declsConst(),
             else => unreachable,
         };
 

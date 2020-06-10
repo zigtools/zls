@@ -334,6 +334,15 @@ fn nodeToCompletion(
                 .detail = analysis.getVariableSignature(handle.tree, var_decl),
             });
         },
+        .ContainerField => {
+            const field = node.cast(std.zig.ast.Node.ContainerField).?;
+            try list.append(.{
+                .label = handle.tree.tokenSlice(field.name_token),
+                .kind = .Field,
+                .documentation = doc,
+                .detail = analysis.getContainerFieldSignature(handle.tree, field),
+            });
+        },
         .PrefixOp => {
             const prefix_op = node.cast(std.zig.ast.Node.PrefixOp).?;
             switch (prefix_op.op) {
@@ -440,6 +449,10 @@ fn hoverSymbol(id: types.RequestId, arena: *std.heap.ArenaAllocator, decl_handle
                 .FnProto => blk: {
                     const fn_decl = result.node.cast(std.zig.ast.Node.FnProto).?;
                     break :blk analysis.getFunctionSignature(result.handle.tree, fn_decl);
+                },
+                .ContainerField => blk: {
+                    const field = node.cast(std.zig.ast.Node.ContainerField).?;
+                    break :blk analysis.getContainerFieldSignature(result.handle.tree, field);
                 },
                 else => analysis.nodeToString(result.handle.tree, result.node) orelse return try respondGeneric(id, null_result_response),
             };
