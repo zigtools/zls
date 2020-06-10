@@ -540,33 +540,12 @@ pub const AnalysisContext = struct {
     // This arena is used for temporary allocations while analyzing,
     // not for the tree allocations.
     arena: *std.heap.ArenaAllocator,
-    scope_nodes: []*std.zig.ast.Node,
-    in_container: *std.zig.ast.Node,
     std_uri: ?[]const u8,
     error_completions: *TagStore,
     enum_completions: *TagStore,
 
     pub fn tree(self: AnalysisContext) *std.zig.ast.Tree {
         return self.handle.tree;
-    }
-
-    fn refreshScopeNodes(self: *AnalysisContext) !void {
-        var scope_nodes = std.ArrayList(*std.zig.ast.Node).init(&self.arena.allocator);
-        try analysis.addChildrenNodes(&scope_nodes, self.tree(), &self.tree().root_node.base);
-        self.scope_nodes = scope_nodes.items;
-        self.in_container = &self.tree().root_node.base;
-    }
-
-    pub fn onContainer(self: *AnalysisContext, container: *std.zig.ast.Node) !void {
-        std.debug.assert(container.id == .ContainerDecl or container.id == .Root);
-
-        if (self.in_container != container) {
-            self.in_container = container;
-
-            var scope_nodes = std.ArrayList(*std.zig.ast.Node).fromOwnedSlice(&self.arena.allocator, self.scope_nodes);
-            try analysis.addChildrenNodes(&scope_nodes, self.tree(), container);
-            self.scope_nodes = scope_nodes.items;
-        }
     }
 
     pub fn onImport(self: *AnalysisContext, import_str: []const u8) !?*std.zig.ast.Node {
@@ -588,7 +567,6 @@ pub const AnalysisContext = struct {
             // If we did, set our new handle and return the parsed tree root node.
             if (std.mem.eql(u8, uri, final_uri)) {
                 self.handle = self.store.getHandle(final_uri) orelse return null;
-                try self.refreshScopeNodes();
                 return &self.tree().root_node.base;
             }
         }
@@ -603,7 +581,6 @@ pub const AnalysisContext = struct {
 
             new_handle.count += 1;
             self.handle = new_handle;
-            try self.refreshScopeNodes();
             return &self.tree().root_node.base;
         }
 
@@ -639,23 +616,7 @@ pub const AnalysisContext = struct {
             self.handle = try newDocument(self.store, duped_final_uri, file_contents);
         }
 
-        try self.refreshScopeNodes();
         return &self.tree().root_node.base;
-    }
-
-    pub fn clone(self: *AnalysisContext) !AnalysisContext {
-        // Copy the cope nodes, the rest are references
-        // that are not owned by the context.
-        return AnalysisContext{
-            .store = self.store,
-            .handle = self.handle,
-            .arena = self.arena,
-            .scope_nodes = try std.mem.dupe(&self.arena.allocator, *std.zig.ast.Node, self.scope_nodes),
-            .in_container = self.in_container,
-            .std_uri = self.std_uri,
-            .error_completions = self.error_completions,
-            .enum_completions = self.enum_completions,
-        };
     }
 };
 
@@ -680,19 +641,13 @@ pub fn analysisContext(
     self: *DocumentStore,
     handle: *Handle,
     arena: *std.heap.ArenaAllocator,
-    position: usize,
     zig_lib_path: ?[]const u8,
 ) !AnalysisContext {
-    var scope_nodes = std.ArrayList(*std.zig.ast.Node).init(&arena.allocator);
-    const in_container = try analysis.declsFromIndex(arena, &scope_nodes, handle.tree, position);
-
     const std_uri = try stdUriFromLibPath(&arena.allocator, zig_lib_path);
     return AnalysisContext{
         .store = self,
         .handle = handle,
         .arena = arena,
-        .scope_nodes = scope_nodes.items,
-        .in_container = in_container,
         .std_uri = std_uri,
         .error_completions = &self.error_completions,
         .enum_completions = &self.enum_completions,

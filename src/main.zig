@@ -218,8 +218,8 @@ const ResolveVarDeclFnAliasRewsult = struct {
 };
 
 fn resolveVarDeclFnAlias(analysis_ctx: *DocumentStore.AnalysisContext, decl: *std.zig.ast.Node) !ResolveVarDeclFnAliasRewsult {
-    var child_analysis_context = try analysis_ctx.clone();
     if (decl.cast(std.zig.ast.Node.VarDecl)) |var_decl| {
+        var child_analysis_context = analysis_ctx.*;
         const child_node = block: {
             if (var_decl.type_node) |type_node| {
                 if (std.mem.eql(u8, "type", analysis_ctx.tree().tokenSlice(type_node.firstToken()))) {
@@ -376,18 +376,26 @@ fn identifierFromPosition(pos_index: usize, handle: DocumentStore.Handle) []cons
     return text[start_idx + 1 .. end_idx];
 }
 
-fn gotoDefinitionSymbol(id: types.RequestId, analysis_ctx: *DocumentStore.AnalysisContext, decl: *std.zig.ast.Node) !void {
-    const result = try resolveVarDeclFnAlias(analysis_ctx, decl);
+fn gotoDefinitionSymbol(id: types.RequestId, analysis_ctx: *DocumentStore.AnalysisContext, decl_handle: analysis.DeclWithHandle) !void {
+    var handle = analysis_ctx.handle;
 
-    const name_token = analysis.getDeclNameToken(result.analysis_ctx.tree(), result.decl) orelse
-        return try respondGeneric(id, null_result_response);
+    const location = switch (decl_handle.decl.*) {
+        .ast_node => |node| block: {
+            const result = try resolveVarDeclFnAlias(analysis_ctx, node);
+            handle = result.analysis_ctx.handle;
+            const name_token = analysis.getDeclNameToken(handle.tree, result.decl) orelse
+                return try respondGeneric(id, null_result_response);
+            break :block handle.tree.tokenLocation(0, name_token);
+        },
+        else => decl_handle.location(),
+    };
 
     try send(types.Response{
         .id = id,
         .result = .{
             .Location = .{
-                .uri = result.analysis_ctx.handle.document.uri,
-                .range = astLocationToRange(result.analysis_ctx.tree().tokenLocation(0, name_token)),
+                .uri = handle.document.uri,
+                .range = astLocationToRange(location),
             },
         },
     });
@@ -424,22 +432,20 @@ fn hoverSymbol(id: types.RequestId, analysis_ctx: *DocumentStore.AnalysisContext
     });
 }
 
-fn getSymbolGlobal(arena: *std.heap.ArenaAllocator, pos_index: usize, handle: DocumentStore.Handle) !?*std.zig.ast.Node {
-    const name = identifierFromPosition(pos_index, handle);
+fn getSymbolGlobal(arena: *std.heap.ArenaAllocator, pos_index: usize, handle: *DocumentStore.Handle) !?analysis.DeclWithHandle {
+    const name = identifierFromPosition(pos_index, handle.*);
     if (name.len == 0) return null;
 
-    var decl_nodes = std.ArrayList(*std.zig.ast.Node).init(&arena.allocator);
-    _ = try analysis.declsFromIndex(arena, &decl_nodes, handle.tree, pos_index);
-
-    return analysis.getChildOfSlice(handle.tree, decl_nodes.items, name);
+    return try analysis.lookupSymbolGlobal(&document_store, handle, name, pos_index);
 }
 
 fn gotoDefinitionGlobal(id: types.RequestId, pos_index: usize, handle: *DocumentStore.Handle, config: Config) !void {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
-    const decl = (try getSymbolGlobal(&arena, pos_index, handle.*)) orelse return try respondGeneric(id, null_result_response);
-    var analysis_ctx = try document_store.analysisContext(handle, &arena, pos_index, config.zig_lib_path);
+    const decl = (try getSymbolGlobal(&arena, pos_index, handle)) orelse return try respondGeneric(id, null_result_response);
+
+    var analysis_ctx = try document_store.analysisContext(decl.handle, &arena, config.zig_lib_path);
     return try gotoDefinitionSymbol(id, &analysis_ctx, decl);
 }
 
@@ -482,7 +488,7 @@ fn gotoDefinitionFieldAccess(
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
-    var analysis_ctx = try document_store.analysisContext(handle, &arena, try handle.document.positionToIndex(position), config.zig_lib_path);
+    var analysis_ctx = try document_store.analysisContext(handle, &arena, config.zig_lib_path);
     const decl = (try getSymbolFieldAccess(&analysis_ctx, position, range, config)) orelse return try respondGeneric(id, null_result_response);
     return try gotoDefinitionSymbol(id, &analysis_ctx, decl);
 }
@@ -530,6 +536,24 @@ fn gotoDefinitionString(id: types.RequestId, pos_index: usize, handle: *Document
     });
 }
 
+const DeclToCompletionContext = struct {
+    completions: *std.ArrayList(types.CompletionItem),
+    config: *const Config,
+    arena: *std.heap.ArenaAllocator,
+};
+
+fn decltoCompletion(context: DeclToCompletionContext, decl_handle: analysis.DeclWithHandle) !void {
+    switch (decl_handle.decl.*) {
+        .ast_node => |node| {
+            // @TODO Remove analysis context
+            var analysis_ctx = try document_store.analysisContext(decl_handle.handle, context.arena, context.config.zig_lib_path);
+            try nodeToCompletion(context.completions, &analysis_ctx, decl_handle.handle, node, context.config.*);
+        },
+        else => {},
+        // @TODO The rest
+    }
+}
+
 fn completeGlobal(id: types.RequestId, pos_index: usize, handle: *DocumentStore.Handle, config: Config) !void {
     // We use a local arena allocator to deallocate all temporary data without iterating
     var arena = std.heap.ArenaAllocator.init(allocator);
@@ -537,16 +561,22 @@ fn completeGlobal(id: types.RequestId, pos_index: usize, handle: *DocumentStore.
     // Deallocate all temporary data.
     defer arena.deinit();
 
-    var analysis_ctx = try document_store.analysisContext(handle, &arena, pos_index, config.zig_lib_path);
-    for (analysis_ctx.scope_nodes) |decl_ptr| {
-        var decl = decl_ptr.*;
-        if (decl.id == .Use) {
-            std.debug.warn("Found use!", .{});
-            continue;
-        }
+    const context = DeclToCompletionContext{
+        .completions = &completions,
+        .config = &config,
+        .arena = &arena,
+    };
+    try analysis.iterateSymbolsGlobal(&document_store, handle, pos_index, decltoCompletion, context);
 
-        try nodeToCompletion(&completions, &analysis_ctx, handle, decl_ptr, config);
-    }
+    // for (analysis_ctx.scope_nodes) |decl_ptr| {
+    //     var decl = decl_ptr.*;
+    //     if (decl.id == .Use) {
+    //         std.debug.warn("Found use!", .{});
+    //         continue;
+    //     }
+
+    //     try nodeToCompletion(&completions, &analysis_ctx, handle, decl_ptr, config);
+    // }
 
     try send(types.Response{
         .id = id,
@@ -563,7 +593,7 @@ fn completeFieldAccess(id: types.RequestId, handle: *DocumentStore.Handle, posit
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
-    var analysis_ctx = try document_store.analysisContext(handle, &arena, try handle.document.positionToIndex(position), config.zig_lib_path);
+    var analysis_ctx = try document_store.analysisContext(handle, &arena, config.zig_lib_path);
     var completions = std.ArrayList(types.CompletionItem).init(&arena.allocator);
 
     const line = try handle.document.getLine(@intCast(usize, position.line));
