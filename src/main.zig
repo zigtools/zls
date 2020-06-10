@@ -196,26 +196,6 @@ fn publishDiagnostics(handle: DocumentStore.Handle, config: Config) !void {
     });
 }
 
-fn containerToCompletion(
-    arena: *std.heap.ArenaAllocator,
-    list: *std.ArrayList(types.CompletionItem),
-    container_handle: analysis.NodeWithHandle,
-    orig_handle: *DocumentStore.Handle,
-    config: Config,
-) !void {
-    // @TODO Something like iterateSymbolsGlobal but for container to support uses.
-    const container = container_handle.node;
-    const handle = container_handle.handle;
-
-    var child_idx: usize = 0;
-    while (container.iterate(child_idx)) |child_node| : (child_idx += 1) {
-        // Declarations in the same file do not need to be public.
-        if (orig_handle == handle or analysis.isNodePublic(handle.tree, child_node)) {
-            try nodeToCompletion(arena, list, .{ .node = child_node, .handle = handle }, orig_handle, config);
-        }
-    }
-}
-
 fn resolveVarDeclFnAlias(arena: *std.heap.ArenaAllocator, decl_handle: analysis.NodeWithHandle) !analysis.NodeWithHandle {
     const decl = decl_handle.node;
     const handle = decl_handle.handle;
@@ -263,7 +243,13 @@ fn nodeToCompletion(
 
     switch (node.id) {
         .ErrorSetDecl, .Root, .ContainerDecl => {
-            try containerToCompletion(arena, list, node_handle, orig_handle, config);
+            const context = DeclToCompletionContext{
+                .completions = list,
+                .config = &config,
+                .arena = arena,
+                .orig_handle = orig_handle,
+            };
+            try analysis.iterateSymbolsContainer(&document_store, arena, node_handle, orig_handle, declToCompletion, context);
         },
         .FnProto => {
             const func = node.cast(std.zig.ast.Node.FnProto).?;
@@ -505,7 +491,7 @@ fn getSymbolGlobal(arena: *std.heap.ArenaAllocator, pos_index: usize, handle: *D
     const name = identifierFromPosition(pos_index, handle.*);
     if (name.len == 0) return null;
 
-    return try analysis.lookupSymbolGlobal(&document_store, handle, name, pos_index);
+    return try analysis.lookupSymbolGlobal(&document_store, arena, handle, name, pos_index);
 }
 
 fn gotoDefinitionGlobal(id: types.RequestId, pos_index: usize, handle: *DocumentStore.Handle, config: Config) !void {
@@ -539,7 +525,7 @@ fn getSymbolFieldAccess(
     var tokenizer = std.zig.Tokenizer.init(line[range.start..range.end]);
 
     if (try analysis.getFieldAccessTypeNode(&document_store, arena, handle, pos_index, &tokenizer)) |container_handle| {
-        return try analysis.lookupSymbolContainer(&document_store, container_handle, name, true);
+        return try analysis.lookupSymbolContainer(&document_store, arena, container_handle, name, true);
     }
     return null;
 }
@@ -606,7 +592,7 @@ const DeclToCompletionContext = struct {
     orig_handle: *DocumentStore.Handle,
 };
 
-fn decltoCompletion(context: DeclToCompletionContext, decl_handle: analysis.DeclWithHandle) !void {
+fn declToCompletion(context: DeclToCompletionContext, decl_handle: analysis.DeclWithHandle) !void {
     const tree = decl_handle.handle.tree;
 
     switch (decl_handle.decl.*) {
@@ -661,7 +647,7 @@ fn completeGlobal(id: types.RequestId, pos_index: usize, handle: *DocumentStore.
         .arena = &arena,
         .orig_handle = handle,
     };
-    try analysis.iterateSymbolsGlobal(&document_store, handle, pos_index, decltoCompletion, context);
+    try analysis.iterateSymbolsGlobal(&document_store, &arena, handle, pos_index, declToCompletion, context);
 
     try send(types.Response{
         .id = id,

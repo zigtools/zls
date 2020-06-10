@@ -265,6 +265,16 @@ fn resolveUnwrapOptionalType(store: *DocumentStore, arena: *std.heap.ArenaAlloca
     return null;
 }
 
+fn resolveUnwrapErrorType(store: *DocumentStore, arena: *std.heap.ArenaAllocator, rhs: NodeWithHandle) !?NodeWithHandle {
+    if (rhs.node.cast(ast.Node.InfixOp)) |infix_op| {
+        if (infix_op.op == .ErrorUnion) {
+            return try resolveTypeOfNode(store, arena, .{ .node = infix_op.rhs, .handle = rhs.handle });
+        }
+    }
+
+    return null;
+}
+
 /// Resolves the child type of a defer type
 fn resolveDerefType(store: *DocumentStore, arena: *std.heap.ArenaAllocator, deref: NodeWithHandle) !?NodeWithHandle {
     if (deref.node.cast(ast.Node.PrefixOp)) |pop| {
@@ -352,7 +362,7 @@ pub fn resolveTypeOfNode(store: *DocumentStore, arena: *std.heap.ArenaAllocator,
             return try resolveTypeOfNode(store, arena, .{ .node = vari.type_node orelse vari.init_node.?, .handle = handle });
         },
         .Identifier => {
-            if (try lookupSymbolGlobal(store, handle, handle.tree.getNodeSource(node), handle.tree.token_locs[node.firstToken()].start)) |child| {
+            if (try lookupSymbolGlobal(store, arena, handle, handle.tree.getNodeSource(node), handle.tree.token_locs[node.firstToken()].start)) |child| {
                 return try child.resolveType(store, arena);
             }
             return null;
@@ -409,7 +419,7 @@ pub fn resolveTypeOfNode(store: *DocumentStore, arena: *std.heap.ArenaAllocator,
                         })) orelse return null,
                     );
 
-                    if (try lookupSymbolContainer(store, left_type, rhs_str, true)) |child| {
+                    if (try lookupSymbolContainer(store, arena, left_type, rhs_str, true)) |child| {
                         return try child.resolveType(store, arena);
                     } else return null;
                 },
@@ -420,6 +430,7 @@ pub fn resolveTypeOfNode(store: *DocumentStore, arena: *std.heap.ArenaAllocator,
                     })) orelse return null;
                     return try resolveUnwrapOptionalType(store, arena, left_type);
                 },
+                .ErrorUnion => return node_handle,
                 else => return null,
             }
         },
@@ -433,17 +444,7 @@ pub fn resolveTypeOfNode(store: *DocumentStore, arena: *std.heap.ArenaAllocator,
                 => return node_handle,
                 .Try => {
                     const rhs_type = (try resolveTypeOfNode(store, arena, .{ .node = prefix_op.rhs, .handle = handle })) orelse return null;
-                    switch (rhs_type.node.id) {
-                        .InfixOp => {
-                            const infix_op = rhs_type.node.cast(ast.Node.InfixOp).?;
-                            if (infix_op.op == .ErrorUnion) return NodeWithHandle{
-                                .node = infix_op.rhs,
-                                .handle = rhs_type.handle,
-                            };
-                        },
-                        else => {},
-                    }
-                    return rhs_type;
+                    return try resolveUnwrapErrorType(store, arena, rhs_type);
                 },
                 else => {},
             }
@@ -572,7 +573,7 @@ pub fn getFieldAccessTypeNode(
         switch (tok.id) {
             .Eof => return try resolveFieldAccessLhsType(store, arena, current_node),
             .Identifier => {
-                if (try lookupSymbolGlobal(store, current_node.handle, tokenizer.buffer[tok.loc.start..tok.loc.end], source_index)) |child| {
+                if (try lookupSymbolGlobal(store, arena, current_node.handle, tokenizer.buffer[tok.loc.start..tok.loc.end], source_index)) |child| {
                     current_node = (try child.resolveType(store, arena)) orelse return null;
                 } else return null;
             },
@@ -584,7 +585,7 @@ pub fn getFieldAccessTypeNode(
                         if (after_period.loc.end == tokenizer.buffer.len) return try resolveFieldAccessLhsType(store, arena, current_node);
 
                         current_node = try resolveFieldAccessLhsType(store, arena, current_node);
-                        if (try lookupSymbolContainer(store, current_node, tokenizer.buffer[after_period.loc.start..after_period.loc.end], true)) |child| {
+                        if (try lookupSymbolContainer(store, arena, current_node, tokenizer.buffer[after_period.loc.start..after_period.loc.end], true)) |child| {
                             current_node = (try child.resolveType(store, arena)) orelse return null;
                         } else return null;
                     },
@@ -976,6 +977,13 @@ pub const DeclWithHandle = struct {
         };
     }
 
+    fn isPublic(self: DeclWithHandle) bool {
+        return switch (self.decl.*) {
+            .ast_node => |node| isNodePublic(self.handle.tree, node),
+            else => true,
+        };
+    }
+
     fn resolveType(self: DeclWithHandle, store: *DocumentStore, arena: *std.heap.ArenaAllocator) !?NodeWithHandle {
         return switch (self.decl.*) {
             .ast_node => |node| try resolveTypeOfNode(store, arena, .{ .node = node, .handle = self.handle }),
@@ -1006,13 +1014,65 @@ pub const DeclWithHandle = struct {
     }
 };
 
+fn findContainerScope(container_handle: NodeWithHandle) ?*Scope {
+    const container = container_handle.node;
+    const handle = container_handle.handle;
+
+    if (container.id != .ContainerDecl and container.id != .Root and container.id != .ErrorSetDecl) {
+        return null;
+    }
+
+    // Find the container scope.
+    var container_scope: ?*Scope = null;
+    for (handle.document_scope.scopes) |*scope| {
+        switch (scope.*.data) {
+            .container => |node| if (node == container) {
+                container_scope = scope;
+                break;
+            },
+            else => {},
+        }
+    }
+    return container_scope;
+}
+
+pub fn iterateSymbolsContainer(
+    store: *DocumentStore,
+    arena: *std.heap.ArenaAllocator,
+    container_handle: NodeWithHandle,
+    orig_handle: *DocumentStore.Handle,
+    comptime callback: var,
+    context: var,
+) error{OutOfMemory}!void {
+    const container = container_handle.node;
+    const handle = container_handle.handle;
+
+    if (findContainerScope(container_handle)) |container_scope| {
+        var decl_it = container_scope.decls.iterator();
+        while (decl_it.next()) |entry| {
+            const decl = DeclWithHandle{ .decl = &entry.value, .handle = handle };
+            if (handle != orig_handle and !decl.isPublic()) continue;
+            try callback(context, decl);
+        }
+
+        for (container_scope.uses) |use| {
+            if (handle != orig_handle and use.visib_token == null) continue;
+            const use_expr = (try resolveTypeOfNode(store, arena, .{ .node = use.expr, .handle = handle })) orelse continue;
+            try iterateSymbolsContainer(store, arena, use_expr, orig_handle, callback, context);
+        }
+    }
+
+    std.debug.warn("Did not find container scope when iterating container {} (name: {})\n", .{ container, getDeclName(handle.tree, container) });
+}
+
 pub fn iterateSymbolsGlobal(
     store: *DocumentStore,
+    arena: *std.heap.ArenaAllocator,
     handle: *DocumentStore.Handle,
     source_index: usize,
     comptime callback: var,
     context: var,
-) !void {
+) error{OutOfMemory}!void {
     for (handle.document_scope.scopes) |scope| {
         if (source_index >= scope.range.start and source_index < scope.range.end) {
             var decl_it = scope.decls.iterator();
@@ -1022,6 +1082,8 @@ pub fn iterateSymbolsGlobal(
 
             for (scope.uses) |use| {
                 // @TODO Resolve uses, iterate over their symbols.
+                const use_expr = (try resolveTypeOfNode(store, arena, .{ .node = use.expr, .handle = handle })) orelse continue;
+                try iterateSymbolsContainer(store, arena, use_expr, handle, callback, context);
             }
         }
 
@@ -1045,7 +1107,32 @@ pub fn innermostContainer(handle: *DocumentStore.Handle, source_index: usize) No
     return .{ .node = current, .handle = handle };
 }
 
-pub fn lookupSymbolGlobal(store: *DocumentStore, handle: *DocumentStore.Handle, symbol: []const u8, source_index: usize) !?DeclWithHandle {
+fn resolveUse(
+    store: *DocumentStore,
+    arena: *std.heap.ArenaAllocator,
+    uses: []const *ast.Node.Use,
+    symbol: []const u8,
+    handle: *DocumentStore.Handle,
+) error{OutOfMemory}!?DeclWithHandle {
+    for (uses) |use| {
+        const use_expr = (try resolveTypeOfNode(store, arena, .{ .node = use.expr, .handle = handle })) orelse continue;
+        if (try lookupSymbolContainer(store, arena, use_expr, symbol, false)) |candidate| {
+            if (candidate.handle != handle and !candidate.isPublic()) {
+                continue;
+            }
+            return candidate;
+        }
+    }
+    return null;
+}
+
+pub fn lookupSymbolGlobal(
+    store: *DocumentStore,
+    arena: *std.heap.ArenaAllocator,
+    handle: *DocumentStore.Handle,
+    symbol: []const u8,
+    source_index: usize,
+) error{OutOfMemory}!?DeclWithHandle {
     for (handle.document_scope.scopes) |scope| {
         if (source_index >= scope.range.start and source_index < scope.range.end) {
             if (scope.decls.get(symbol)) |candidate| {
@@ -1061,9 +1148,7 @@ pub fn lookupSymbolGlobal(store: *DocumentStore, handle: *DocumentStore.Handle, 
                 };
             }
 
-            for (scope.uses) |use| {
-                // @TODO Resolve use, lookup symbol in resulting scope.
-            }
+            if (try resolveUse(store, arena, scope.uses, symbol, handle)) |result| return result;
         }
 
         if (scope.range.start > source_index) return null;
@@ -1072,27 +1157,17 @@ pub fn lookupSymbolGlobal(store: *DocumentStore, handle: *DocumentStore.Handle, 
     return null;
 }
 
-pub fn lookupSymbolContainer(store: *DocumentStore, container_handle: NodeWithHandle, symbol: []const u8, accept_fields: bool) !?DeclWithHandle {
+pub fn lookupSymbolContainer(
+    store: *DocumentStore,
+    arena: *std.heap.ArenaAllocator,
+    container_handle: NodeWithHandle,
+    symbol: []const u8,
+    accept_fields: bool,
+) error{OutOfMemory}!?DeclWithHandle {
     const container = container_handle.node;
     const handle = container_handle.handle;
 
-    if (container.id != .ContainerDecl and container.id != .Root and container.id != .ErrorSetDecl) {
-        return null;
-    }
-
-    // Find the container scope.
-    var maybe_container_scope: ?*Scope = null;
-    for (handle.document_scope.scopes) |*scope| {
-        switch (scope.*.data) {
-            .container => |node| if (node == container) {
-                maybe_container_scope = scope;
-                break;
-            },
-            else => {},
-        }
-    }
-
-    if (maybe_container_scope) |container_scope| {
+    if (findContainerScope(container_handle)) |container_scope| {
         if (container_scope.decls.get(symbol)) |candidate| {
             switch (candidate.value) {
                 .ast_node => |node| {
@@ -1103,13 +1178,11 @@ pub fn lookupSymbolContainer(store: *DocumentStore, container_handle: NodeWithHa
             return DeclWithHandle{ .decl = &candidate.value, .handle = handle };
         }
 
-        for (container_scope.uses) |use| {
-            // @TODO Resolve use, lookup symbol in resulting scope.
-        }
+        if (try resolveUse(store, arena, container_scope.uses, symbol, handle)) |result| return result;
         return null;
     }
 
-    std.debug.warn("Did not find container scope when looking up in container {} (name: {})\n", .{container, getDeclName(handle.tree, container)});
+    std.debug.warn("Did not find container scope when looking up in container {} (name: {})\n", .{ container, getDeclName(handle.tree, container) });
     return null;
 }
 
