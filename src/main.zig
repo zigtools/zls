@@ -421,9 +421,11 @@ fn gotoDefinitionSymbol(id: types.RequestId, arena: *std.heap.ArenaAllocator, de
 }
 
 fn hoverSymbol(id: types.RequestId, arena: *std.heap.ArenaAllocator, decl_handle: analysis.DeclWithHandle) !void {
-    switch (decl_handle.decl.*) {
-        .ast_node => |node| {
-            const result = try resolveVarDeclFnAlias(arena, .{ .node = node, .handle = decl_handle.handle });
+    const handle = decl_handle.handle;
+
+    const md_string = switch (decl_handle.decl.*) {
+        .ast_node => |node| ast_node: {
+            const result = try resolveVarDeclFnAlias(arena, .{ .node = node, .handle = handle });
 
             const doc_str = if (try analysis.getDocComments(&arena.allocator, result.handle.tree, result.node)) |str|
                 str
@@ -442,19 +444,48 @@ fn hoverSymbol(id: types.RequestId, arena: *std.heap.ArenaAllocator, decl_handle
                 else => analysis.nodeToString(result.handle.tree, result.node) orelse return try respondGeneric(id, null_result_response),
             };
 
-            const md_string = try std.fmt.allocPrint(&arena.allocator, "```zig\n{}\n```\n{}", .{ signature_str, doc_str });
-            try send(types.Response{
-                .id = id,
-                .result = .{
-                    .Hover = .{
-                        .contents = .{ .value = md_string },
-                    },
-                },
-            });
+            break :ast_node try std.fmt.allocPrint(&arena.allocator, "```zig\n{}\n```\n{}", .{ signature_str, doc_str });
         },
-        // @TODO Rest of decls
-        else => return try respondGeneric(id, null_result_response),
-    }
+        .param_decl => |param| param_decl: {
+            const doc_str = if (param.doc_comments) |doc_comments|
+                try analysis.collectDocComments(&arena.allocator, handle.tree, doc_comments)
+            else
+                "";
+
+            break :param_decl try std.fmt.allocPrint(
+                &arena.allocator,
+                "```zig\n{}\n```\n{}",
+                .{
+                    handle.tree.source[handle.tree.token_locs[param.firstToken()].start..handle.tree.token_locs[param.lastToken()].end],
+                    doc_str,
+                },
+            );
+        },
+        .pointer_payload => |payload| try std.fmt.allocPrint(
+            &arena.allocator,
+            "```zig\n{}\n```",
+            .{handle.tree.tokenSlice(payload.node.value_symbol.firstToken())},
+        ),
+        .array_payload => |payload| try std.fmt.allocPrint(
+            &arena.allocator,
+            "```zig\n{}\n```",
+            .{handle.tree.tokenSlice(payload.identifier.firstToken())},
+        ),
+        .switch_payload => |payload| try std.fmt.allocPrint(
+            &arena.allocator,
+            "```zig\n{}\n```",
+            .{handle.tree.tokenSlice(payload.node.value_symbol.firstToken())},
+        ),
+    };
+
+    try send(types.Response{
+        .id = id,
+        .result = .{
+            .Hover = .{
+                .contents = .{ .value = md_string },
+            },
+        },
+    });
 }
 
 fn getSymbolGlobal(arena: *std.heap.ArenaAllocator, pos_index: usize, handle: *DocumentStore.Handle) !?analysis.DeclWithHandle {
@@ -563,12 +594,44 @@ const DeclToCompletionContext = struct {
 };
 
 fn decltoCompletion(context: DeclToCompletionContext, decl_handle: analysis.DeclWithHandle) !void {
+    const tree = decl_handle.handle.tree;
+
     switch (decl_handle.decl.*) {
-        .ast_node => |node| {
-            try nodeToCompletion(context.arena, context.completions, .{ .node = node, .handle = decl_handle.handle }, context.orig_handle, context.config.*);
+        .ast_node => |node| try nodeToCompletion(context.arena, context.completions, .{ .node = node, .handle = decl_handle.handle }, context.orig_handle, context.config.*),
+        .param_decl => |param| {
+            const doc = if (param.doc_comments) |doc_comments|
+                types.MarkupContent{
+                    .kind = .Markdown,
+                    .value = try analysis.collectDocComments(&context.arena.allocator, tree, doc_comments),
+                }
+            else
+                null;
+
+            try context.completions.append(.{
+                .label = tree.tokenSlice(param.name_token.?),
+                .kind = .Constant,
+                .documentation = doc,
+                .detail = tree.source[tree.token_locs[param.firstToken()].start..tree.token_locs[param.lastToken()].end],
+            });
         },
-        else => {},
-        // @TODO The rest
+        .pointer_payload => |payload| {
+            try context.completions.append(.{
+                .label = tree.tokenSlice(payload.node.value_symbol.firstToken()),
+                .kind = .Variable,
+            });
+        },
+        .array_payload => |payload| {
+            try context.completions.append(.{
+                .label = tree.tokenSlice(payload.identifier.firstToken()),
+                .kind = .Variable,
+            });
+        },
+        .switch_payload => |payload| {
+            try context.completions.append(.{
+                .label = tree.tokenSlice(payload.node.value_symbol.firstToken()),
+                .kind = .Variable,
+            });
+        },
     }
 }
 
