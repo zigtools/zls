@@ -81,7 +81,7 @@ fn respondGeneric(id: types.RequestId, response: []const u8) !void {
     const json_fmt = "{{\"jsonrpc\":\"2.0\",\"id\":";
 
     const stdout_stream = stdout.outStream();
-    try stdout_stream.print("Content-Length: {}\r\n\r\n" ++ json_fmt, .{ response.len + id_len + json_fmt.len - 1 });
+    try stdout_stream.print("Content-Length: {}\r\n\r\n" ++ json_fmt, .{response.len + id_len + json_fmt.len - 1});
     switch (id) {
         .Integer => |int| try stdout_stream.print("{}", .{int}),
         .String => |str| try stdout_stream.print("\"{}\"", .{str}),
@@ -98,7 +98,7 @@ fn showMessage(@"type": types.MessageType, message: []const u8) !void {
         .params = .{
             .ShowMessageParams = .{
                 .@"type" = @"type",
-                .message = message
+                .message = message,
             },
         },
     });
@@ -198,31 +198,32 @@ fn publishDiagnostics(handle: DocumentStore.Handle, config: Config) !void {
 
 fn containerToCompletion(
     list: *std.ArrayList(types.CompletionItem),
-    analysis_ctx: *DocumentStore.AnalysisContext,
+    container_handle: analysis.NodeWithHandle,
     orig_handle: *DocumentStore.Handle,
-    container: *std.zig.ast.Node,
     config: Config,
 ) !void {
+    // @TODO Something like iterateSymbolsGlobal but for container to support uses.
+
+    const container = container_handle.node;
+    const handle = container_handle.handle;
+
     var child_idx: usize = 0;
     while (container.iterate(child_idx)) |child_node| : (child_idx += 1) {
         // Declarations in the same file do not need to be public.
-        if (orig_handle == analysis_ctx.handle or analysis.isNodePublic(analysis_ctx.tree(), child_node)) {
-            try nodeToCompletion(list, analysis_ctx, orig_handle, child_node, config);
+        if (orig_handle == handle or analysis.isNodePublic(handle.tree, child_node)) {
+            try nodeToCompletion(list, .{ .node = child_node, .handle = handle }, orig_handle, config);
         }
     }
 }
 
-const ResolveVarDeclFnAliasRewsult = struct {
-    decl: *std.zig.ast.Node,
-    analysis_ctx: DocumentStore.AnalysisContext,
-};
+fn resolveVarDeclFnAlias(arena: *std.heap.ArenaAllocator, decl_handle: analysis.NodeWithHandle) !analysis.NodeWithHandle {
+    const decl = decl_handle.node;
+    const handle = decl_handle.handle;
 
-fn resolveVarDeclFnAlias(analysis_ctx: *DocumentStore.AnalysisContext, decl: *std.zig.ast.Node) !ResolveVarDeclFnAliasRewsult {
     if (decl.cast(std.zig.ast.Node.VarDecl)) |var_decl| {
-        var child_analysis_context = analysis_ctx.*;
         const child_node = block: {
             if (var_decl.type_node) |type_node| {
-                if (std.mem.eql(u8, "type", analysis_ctx.tree().tokenSlice(type_node.firstToken()))) {
+                if (std.mem.eql(u8, "type", handle.tree.tokenSlice(type_node.firstToken()))) {
                     break :block var_decl.init_node orelse type_node;
                 }
                 break :block type_node;
@@ -230,27 +231,28 @@ fn resolveVarDeclFnAlias(analysis_ctx: *DocumentStore.AnalysisContext, decl: *st
             break :block var_decl.init_node.?;
         };
 
-        if (analysis.resolveTypeOfNode(&child_analysis_context, child_node)) |resolved_node| {
-            if (resolved_node.id == .FnProto) {
-                return ResolveVarDeclFnAliasRewsult{
-                    .decl = resolved_node,
-                    .analysis_ctx = child_analysis_context,
-                };
+        if (try analysis.resolveTypeOfNode(&document_store, arena, .{ .node = child_node, .handle = handle })) |resolved_node| {
+            // TODO Just return it anyway?
+            //      This would allow deep goto definition etc.
+            //      Try it out.
+            if (resolved_node.node.id == .FnProto) {
+                return resolved_node;
             }
         }
     }
-    return ResolveVarDeclFnAliasRewsult{
-        .decl = decl,
-        .analysis_ctx = analysis_ctx.*,
-    };
+    return decl_handle;
 }
 
 fn nodeToCompletion(
     list: *std.ArrayList(types.CompletionItem),
     node_handle: analysis.NodeWithHandle,
+    orig_handle: *DocumentStore.Handle,
     config: Config,
 ) error{OutOfMemory}!void {
-    const doc = if (try analysis.getDocComments(list.allocator, analysis_ctx.tree(), node)) |doc_comments|
+    const node = node_handle.node;
+    const handle = node_handle.handle;
+
+    const doc = if (try analysis.getDocComments(list.allocator, handle.tree, node)) |doc_comments|
         types.MarkupContent{
             .kind = .Markdown,
             .value = doc_comments,
@@ -260,7 +262,7 @@ fn nodeToCompletion(
 
     switch (node.id) {
         .ErrorSetDecl, .Root, .ContainerDecl => {
-            try containerToCompletion(list, analysis_ctx, orig_handle, node, config);
+            try containerToCompletion(list, node_handle, orig_handle, config);
         },
         .FnProto => {
             const func = node.cast(std.zig.ast.Node.FnProto).?;
@@ -344,12 +346,12 @@ fn nodeToCompletion(
                 .kind = .Field,
             });
         },
-        else => if (analysis.nodeToString(analysis_ctx.tree(), node)) |string| {
+        else => if (analysis.nodeToString(handle.tree, node)) |string| {
             try list.append(.{
                 .label = string,
                 .kind = .Field,
                 .documentation = doc,
-                .detail = analysis_ctx.tree().getNodeSource(node)
+                .detail = handle.tree.getNodeSource(node),
             });
         },
     }
@@ -374,16 +376,17 @@ fn identifierFromPosition(pos_index: usize, handle: DocumentStore.Handle) []cons
     return text[start_idx + 1 .. end_idx];
 }
 
-fn gotoDefinitionSymbol(id: types.RequestId, analysis_ctx: *DocumentStore.AnalysisContext, decl_handle: analysis.DeclWithHandle) !void {
-    var handle = analysis_ctx.handle;
+fn gotoDefinitionSymbol(id: types.RequestId, arena: *std.heap.ArenaAllocator, decl_handle: analysis.DeclWithHandle) !void {
+    var handle = decl_handle.handle;
 
     const location = switch (decl_handle.decl.*) {
         .ast_node => |node| block: {
-            const result = try resolveVarDeclFnAlias(analysis_ctx, node);
-            handle = result.analysis_ctx.handle;
-            const name_token = analysis.getDeclNameToken(handle.tree, result.decl) orelse
+            const result = try resolveVarDeclFnAlias(arena, .{ .node = node, .handle = handle });
+            handle = result.handle;
+
+            const name_token = analysis.getDeclNameToken(result.handle.tree, result.node) orelse
                 return try respondGeneric(id, null_result_response);
-            break :block handle.tree.tokenLocation(0, name_token);
+            break :block result.handle.tree.tokenLocation(0, name_token);
         },
         else => decl_handle.location(),
     };
@@ -399,35 +402,41 @@ fn gotoDefinitionSymbol(id: types.RequestId, analysis_ctx: *DocumentStore.Analys
     });
 }
 
-fn hoverSymbol(id: types.RequestId, analysis_ctx: *DocumentStore.AnalysisContext, decl: *std.zig.ast.Node) !void {
-    const result = try resolveVarDeclFnAlias(analysis_ctx, decl);
+fn hoverSymbol(id: types.RequestId, arena: *std.heap.ArenaAllocator, decl_handle: analysis.DeclWithHandle) !void {
+    switch (decl_handle.decl.*) {
+        .ast_node => |node| {
+            const result = try resolveVarDeclFnAlias(arena, .{ .node = node, .handle = decl_handle.handle });
 
-    const doc_str = if (try analysis.getDocComments(&analysis_ctx.arena.allocator, result.analysis_ctx.tree(), result.decl)) |str|
-        str
-    else
-        "";
+            const doc_str = if (try analysis.getDocComments(&arena.allocator, result.handle.tree, result.node)) |str|
+                str
+            else
+                "";
 
-    const signature_str = switch (result.decl.id) {
-        .VarDecl => blk: {
-            const var_decl = result.decl.cast(std.zig.ast.Node.VarDecl).?;
-            break :blk analysis.getVariableSignature(result.analysis_ctx.tree(), var_decl);
-        },
-        .FnProto => blk: {
-            const fn_decl = result.decl.cast(std.zig.ast.Node.FnProto).?;
-            break :blk analysis.getFunctionSignature(result.analysis_ctx.tree(), fn_decl);
-        },
-        else => analysis.nodeToString(result.analysis_ctx.tree(), result.decl) orelse return try respondGeneric(id, null_result_response),
-    };
+            const signature_str = switch (result.node.id) {
+                .VarDecl => blk: {
+                    const var_decl = result.node.cast(std.zig.ast.Node.VarDecl).?;
+                    break :blk analysis.getVariableSignature(result.handle.tree, var_decl);
+                },
+                .FnProto => blk: {
+                    const fn_decl = result.node.cast(std.zig.ast.Node.FnProto).?;
+                    break :blk analysis.getFunctionSignature(result.handle.tree, fn_decl);
+                },
+                else => analysis.nodeToString(result.handle.tree, result.node) orelse return try respondGeneric(id, null_result_response),
+            };
 
-    const md_string = try std.fmt.allocPrint(&analysis_ctx.arena.allocator, "```zig\n{}\n```\n{}", .{ signature_str, doc_str });
-    try send(types.Response{
-        .id = id,
-        .result = .{
-            .Hover = .{
-                .contents = .{ .value = md_string },
-            },
+            const md_string = try std.fmt.allocPrint(&arena.allocator, "```zig\n{}\n```\n{}", .{ signature_str, doc_str });
+            try send(types.Response{
+                .id = id,
+                .result = .{
+                    .Hover = .{
+                        .contents = .{ .value = md_string },
+                    },
+                },
+            });
         },
-    });
+        // @TODO Rest of decls
+        else => return try respondGeneric(id, null_result_response),
+    }
 }
 
 fn getSymbolGlobal(arena: *std.heap.ArenaAllocator, pos_index: usize, handle: *DocumentStore.Handle) !?analysis.DeclWithHandle {
@@ -442,36 +451,33 @@ fn gotoDefinitionGlobal(id: types.RequestId, pos_index: usize, handle: *Document
     defer arena.deinit();
 
     const decl = (try getSymbolGlobal(&arena, pos_index, handle)) orelse return try respondGeneric(id, null_result_response);
-
-    var analysis_ctx = try document_store.analysisContext(decl.handle, &arena, config.zig_lib_path);
-    return try gotoDefinitionSymbol(id, &analysis_ctx, decl);
+    return try gotoDefinitionSymbol(id, &arena, decl);
 }
 
 fn hoverDefinitionGlobal(id: types.RequestId, pos_index: usize, handle: *DocumentStore.Handle, config: Config) !void {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
-    const decl = (try getSymbolGlobal(&arena, pos_index, handle.*)) orelse return try respondGeneric(id, null_result_response);
-    var analysis_ctx = try document_store.analysisContext(handle, &arena, pos_index, config.zig_lib_path);
-    return try hoverSymbol(id, &analysis_ctx, decl);
+    const decl = (try getSymbolGlobal(&arena, pos_index, handle)) orelse return try respondGeneric(id, null_result_response);
+    return try hoverSymbol(id, &arena, decl);
 }
 
 fn getSymbolFieldAccess(
-    analysis_ctx: *DocumentStore.AnalysisContext,
+    handle: *DocumentStore.Handle,
+    arena: *std.heap.ArenaAllocator,
     position: types.Position,
     range: analysis.SourceRange,
     config: Config,
-) !?*std.zig.ast.Node {
-    const pos_index = try analysis_ctx.handle.document.positionToIndex(position);
-    var name = identifierFromPosition(pos_index, analysis_ctx.handle.*);
+) !?analysis.DeclWithHandle {
+    const pos_index = try handle.document.positionToIndex(position);
+    const name = identifierFromPosition(pos_index, handle.*);
     if (name.len == 0) return null;
 
-    const line = try analysis_ctx.handle.document.getLine(@intCast(usize, position.line));
+    const line = try handle.document.getLine(@intCast(usize, position.line));
     var tokenizer = std.zig.Tokenizer.init(line[range.start..range.end]);
 
-    name = try std.mem.dupe(&analysis_ctx.arena.allocator, u8, name);
-    if (analysis.getFieldAccessTypeNode(analysis_ctx, &tokenizer)) |container| {
-        return analysis.getChild(analysis_ctx.tree(), container, name);
+    if (try analysis.getFieldAccessTypeNode(&document_store, arena, handle, &tokenizer)) |container_handle| {
+        return try analysis.lookupSymbolContainer(&document_store, container_handle, name, true);
     }
     return null;
 }
@@ -486,9 +492,8 @@ fn gotoDefinitionFieldAccess(
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
-    var analysis_ctx = try document_store.analysisContext(handle, &arena, config.zig_lib_path);
-    const decl = (try getSymbolFieldAccess(&analysis_ctx, position, range, config)) orelse return try respondGeneric(id, null_result_response);
-    return try gotoDefinitionSymbol(id, &analysis_ctx, decl);
+    const decl = (try getSymbolFieldAccess(handle, &arena, position, range, config)) orelse return try respondGeneric(id, null_result_response);
+    return try gotoDefinitionSymbol(id, &arena, decl);
 }
 
 fn hoverDefinitionFieldAccess(
@@ -501,9 +506,8 @@ fn hoverDefinitionFieldAccess(
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
-    var analysis_ctx = try document_store.analysisContext(handle, &arena, try handle.document.positionToIndex(position), config.zig_lib_path);
-    const decl = (try getSymbolFieldAccess(&analysis_ctx, position, range, config)) orelse return try respondGeneric(id, null_result_response);
-    return try hoverSymbol(id, &analysis_ctx, decl);
+    const decl = (try getSymbolFieldAccess(handle, &arena, position, range, config)) orelse return try respondGeneric(id, null_result_response);
+    return try hoverSymbol(id, &arena, decl);
 }
 
 fn gotoDefinitionString(id: types.RequestId, pos_index: usize, handle: *DocumentStore.Handle, config: Config) !void {
@@ -537,12 +541,13 @@ const DeclToCompletionContext = struct {
     completions: *std.ArrayList(types.CompletionItem),
     config: *const Config,
     arena: *std.heap.ArenaAllocator,
+    orig_handle: *DocumentStore.Handle,
 };
 
 fn decltoCompletion(context: DeclToCompletionContext, decl_handle: analysis.DeclWithHandle) !void {
     switch (decl_handle.decl.*) {
         .ast_node => |node| {
-            try nodeToCompletion(context.completions, .{ .node = node, .handle = decl_handle.handle }, context.config.*);
+            try nodeToCompletion(context.completions, .{ .node = node, .handle = decl_handle.handle }, context.orig_handle, context.config.*);
         },
         else => {},
         // @TODO The rest
@@ -560,6 +565,7 @@ fn completeGlobal(id: types.RequestId, pos_index: usize, handle: *DocumentStore.
         .completions = &completions,
         .config = &config,
         .arena = &arena,
+        .orig_handle = handle,
     };
     try analysis.iterateSymbolsGlobal(&document_store, handle, pos_index, decltoCompletion, context);
 
@@ -578,15 +584,15 @@ fn completeFieldAccess(id: types.RequestId, handle: *DocumentStore.Handle, posit
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
-    var analysis_ctx = try document_store.analysisContext(handle, &arena, config.zig_lib_path);
     var completions = std.ArrayList(types.CompletionItem).init(&arena.allocator);
 
     const line = try handle.document.getLine(@intCast(usize, position.line));
     var tokenizer = std.zig.Tokenizer.init(line[range.start..range.end]);
 
-    if (analysis.getFieldAccessTypeNode(&analysis_ctx, &tokenizer)) |node| {
-        try nodeToCompletion(&completions, &analysis_ctx, handle, node, config);
+    if (try analysis.getFieldAccessTypeNode(&document_store, &arena, handle, &tokenizer)) |node| {
+        try nodeToCompletion(&completions, node, handle, config);
     }
+
     try send(types.Response{
         .id = id,
         .result = .{
