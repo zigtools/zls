@@ -40,8 +40,6 @@ zig build config
 
 Then, you can use the `zls` executable in an editor of your choice that has a Zig language server client!
 
-*Note: `zls` itself must be built using the master branch of zig currently due to a bug in `std.json` which was [fixed](https://github.com/ziglang/zig/pull/5167) after 0.6.0 was released, as well as various parser changes that have happened since.*
-
 ### Configuration Options
 
 You can configure zls by providing a zls.json file.  
