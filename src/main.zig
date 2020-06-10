@@ -247,9 +247,7 @@ fn resolveVarDeclFnAlias(analysis_ctx: *DocumentStore.AnalysisContext, decl: *st
 
 fn nodeToCompletion(
     list: *std.ArrayList(types.CompletionItem),
-    analysis_ctx: *DocumentStore.AnalysisContext,
-    orig_handle: *DocumentStore.Handle,
-    node: *std.zig.ast.Node,
+    node_handle: analysis.NodeWithHandle,
     config: Config,
 ) error{OutOfMemory}!void {
     const doc = if (try analysis.getDocComments(list.allocator, analysis_ctx.tree(), node)) |doc_comments|
@@ -519,7 +517,6 @@ fn gotoDefinitionString(id: types.RequestId, pos_index: usize, handle: *Document
         &arena.allocator,
         handle.*,
         import_str,
-        try DocumentStore.stdUriFromLibPath(&arena.allocator, config.zig_lib_path),
     )) orelse return try respondGeneric(id, null_result_response);
 
     try send(types.Response{
@@ -545,9 +542,7 @@ const DeclToCompletionContext = struct {
 fn decltoCompletion(context: DeclToCompletionContext, decl_handle: analysis.DeclWithHandle) !void {
     switch (decl_handle.decl.*) {
         .ast_node => |node| {
-            // @TODO Remove analysis context
-            var analysis_ctx = try document_store.analysisContext(decl_handle.handle, context.arena, context.config.zig_lib_path);
-            try nodeToCompletion(context.completions, &analysis_ctx, decl_handle.handle, node, context.config.*);
+            try nodeToCompletion(context.completions, .{ .node = node, .handle = decl_handle.handle }, context.config.*);
         },
         else => {},
         // @TODO The rest
@@ -567,16 +562,6 @@ fn completeGlobal(id: types.RequestId, pos_index: usize, handle: *DocumentStore.
         .arena = &arena,
     };
     try analysis.iterateSymbolsGlobal(&document_store, handle, pos_index, decltoCompletion, context);
-
-    // for (analysis_ctx.scope_nodes) |decl_ptr| {
-    //     var decl = decl_ptr.*;
-    //     if (decl.id == .Use) {
-    //         std.debug.warn("Found use!", .{});
-    //         continue;
-    //     }
-
-    //     try nodeToCompletion(&completions, &analysis_ctx, handle, decl_ptr, config);
-    // }
 
     try send(types.Response{
         .id = id,
@@ -1115,13 +1100,13 @@ pub fn main() anyerror!void {
     }
 
     if (config.build_runner_path) |build_runner_path| {
-        try document_store.init(allocator, zig_exe_path, try std.mem.dupe(allocator, u8, build_runner_path));
+        try document_store.init(allocator, zig_exe_path, try std.mem.dupe(allocator, u8, build_runner_path), config.zig_lib_path);
     } else {
         var exe_dir_bytes: [std.fs.MAX_PATH_BYTES]u8 = undefined;
         const exe_dir_path = try std.fs.selfExeDirPath(&exe_dir_bytes);
 
         const build_runner_path = try std.fs.path.resolve(allocator, &[_][]const u8{ exe_dir_path, "build_runner.zig" });
-        try document_store.init(allocator, zig_exe_path, build_runner_path);
+        try document_store.init(allocator, zig_exe_path, build_runner_path, config.zig_lib_path);
     }
 
     defer document_store.deinit();

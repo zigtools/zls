@@ -1,5 +1,5 @@
 const std = @import("std");
-const AnalysisContext = @import("document_store.zig").AnalysisContext;
+const DocumentStore = @import("document_store.zig");
 const ast = std.zig.ast;
 const types = @import("types.zig");
 
@@ -244,15 +244,14 @@ fn findReturnStatement(tree: *ast.Tree, fn_decl: *ast.Node.FnProto) ?*ast.Node.C
 }
 
 /// Resolves the return type of a function
-fn resolveReturnType(analysis_ctx: *AnalysisContext, fn_decl: *ast.Node.FnProto) ?*ast.Node {
-    if (isTypeFunction(analysis_ctx.tree(), fn_decl) and fn_decl.body_node != null) {
+fn resolveReturnType(store: *DocumentStore, fn_decl: *ast.Node.FnProto, handle: *DocumentStore.Handle) !?NodeWithHandle {
+    if (isTypeFunction(handle.tree, fn_decl) and fn_decl.body_node != null) {
         // If this is a type function and it only contains a single return statement that returns
         // a container declaration, we will return that declaration.
-        const ret = findReturnStatement(analysis_ctx.tree(), fn_decl) orelse return null;
+        const ret = findReturnStatement(handle.tree, fn_decl) orelse return null;
         if (ret.rhs) |rhs|
-            if (resolveTypeOfNode(analysis_ctx, rhs)) |res_rhs| switch (res_rhs.id) {
+            if (try resolveTypeOfNode(store, .{ .node = rhs, .handle = handle })) |res_rhs| switch (res_rhs.node.id) {
                 .ContainerDecl => {
-                    analysis_ctx.onContainer(res_rhs) catch return null;
                     return res_rhs;
                 },
                 else => return null,
@@ -262,16 +261,16 @@ fn resolveReturnType(analysis_ctx: *AnalysisContext, fn_decl: *ast.Node.FnProto)
     }
 
     return switch (fn_decl.return_type) {
-        .Explicit, .InferErrorSet => |return_type| resolveTypeOfNode(analysis_ctx, return_type),
+        .Explicit, .InferErrorSet => |return_type| try resolveTypeOfNode(store, .{ .node = return_type, .handle = handle }),
         .Invalid => null,
     };
 }
 
 /// Resolves the child type of an optional type
-fn resolveUnwrapOptionalType(analysis_ctx: *AnalysisContext, opt: *ast.Node) ?*ast.Node {
-    if (opt.cast(ast.Node.PrefixOp)) |prefix_op| {
+fn resolveUnwrapOptionalType(store: *DocumentStore, opt: NodeWithHandle) !?NodeWithHandle {
+    if (opt.node.cast(ast.Node.PrefixOp)) |prefix_op| {
         if (prefix_op.op == .OptionalType) {
-            return resolveTypeOfNode(analysis_ctx, prefix_op.rhs);
+            return try resolveTypeOfNode(store, .{ .node = prefix_op.rhs, .handle = opt.handle });
         }
     }
 
@@ -279,12 +278,12 @@ fn resolveUnwrapOptionalType(analysis_ctx: *AnalysisContext, opt: *ast.Node) ?*a
 }
 
 /// Resolves the child type of a defer type
-fn resolveDerefType(analysis_ctx: *AnalysisContext, deref: *ast.Node) ?*ast.Node {
-    if (deref.cast(ast.Node.PrefixOp)) |pop| {
+fn resolveDerefType(store: *DocumentStore, deref: NodeWithHandle) !?NodeWithHandle {
+    if (deref.node.cast(ast.Node.PrefixOp)) |pop| {
         if (pop.op == .PtrType) {
-            const op_token_id = analysis_ctx.tree().token_ids[pop.op_token];
+            const op_token_id = deref.handle.tree.token_ids[pop.op_token];
             switch (op_token_id) {
-                .Asterisk => return resolveTypeOfNode(analysis_ctx, pop.rhs),
+                .Asterisk => return try resolveTypeOfNode(store, .{ .node = pop.rhs, .handle = deref.handle }),
                 .LBracket, .AsteriskAsterisk => return null,
                 else => unreachable,
             }
@@ -293,9 +292,9 @@ fn resolveDerefType(analysis_ctx: *AnalysisContext, deref: *ast.Node) ?*ast.Node
     return null;
 }
 
-fn makeSliceType(analysis_ctx: *AnalysisContext, child_type: *ast.Node) ?*ast.Node {
+fn makeSliceType(arena: *std.heap.ArenaAllocator, child_type: *ast.Node) ?*ast.Node {
     // TODO: Better values for fields, better way to do this?
-    var slice_type = analysis_ctx.arena.allocator.create(ast.Node.PrefixOp) catch return null;
+    var slice_type = arena.allocator.create(ast.Node.PrefixOp) catch return null;
     slice_type.* = .{
         .op_token = child_type.firstToken(),
         .op = .{
@@ -315,26 +314,27 @@ fn makeSliceType(analysis_ctx: *AnalysisContext, child_type: *ast.Node) ?*ast.No
 
 /// Resolves bracket access type (both slicing and array access)
 fn resolveBracketAccessType(
-    analysis_ctx: *AnalysisContext,
-    lhs: *ast.Node,
+    store: *DocumentStore,
+    lhs: NodeWithHandle,
+    arena: *std.heap.ArenaAllocator,
     rhs: enum { Single, Range },
-) ?*ast.Node {
-    if (lhs.cast(ast.Node.PrefixOp)) |pop| {
+) !?NodeWithHandle {
+    if (lhs.node.cast(ast.Node.PrefixOp)) |pop| {
         switch (pop.op) {
             .SliceType => {
-                if (rhs == .Single) return resolveTypeOfNode(analysis_ctx, pop.rhs);
+                if (rhs == .Single) return resolveTypeOfNode(store, .{ .node = pop.rhs, .handle = lhs.handle });
                 return lhs;
             },
             .ArrayType => {
-                if (rhs == .Single) return resolveTypeOfNode(analysis_ctx, pop.rhs);
-                return makeSliceType(analysis_ctx, pop.rhs);
+                if (rhs == .Single) return resolveTypeOfNode(store, .{ .node = pop.rhs, .handle = lhs.handle });
+                return NodeWithHandle{ .node = makeSliceType(arena, pop.rhs), .handle = lhs.handle };
             },
             .PtrType => {
                 if (pop.rhs.cast(std.zig.ast.Node.PrefixOp)) |child_pop| {
                     switch (child_pop.op) {
                         .ArrayType => {
                             if (rhs == .Single) {
-                                return resolveTypeOfNode(analysis_ctx, child_pop.rhs);
+                                return resolveTypeOfNode(store, .{ .node = child_pop.rhs, .handle = lhs.handle });
                             }
                             return lhs;
                         },
@@ -349,12 +349,13 @@ fn resolveBracketAccessType(
 }
 
 /// Called to remove one level of pointerness before a field access
-fn resolveFieldAccessLhsType(analysis_ctx: *AnalysisContext, lhs: *ast.Node) *ast.Node {
-    return resolveDerefType(analysis_ctx, lhs) orelse lhs;
+fn resolveFieldAccessLhsType(store: *DocumentStore, lhs: NodeWithHandle) !NodeWithHandle {
+    return resolveDerefType(store, lhs) orelse lhs;
 }
 
+// @TODO try errors
 /// Resolves the type of a node
-pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.Node {
+pub fn resolveTypeOfNode(store: *DocumentStore, node_handle: NodeWithHandle) !?NodeWithHandle {
     switch (node.id) {
         .VarDecl => {
             const vari = node.cast(ast.Node.VarDecl).?;
@@ -609,52 +610,50 @@ pub fn collectImports(import_arr: *std.ArrayList([]const u8), tree: *ast.Tree) !
     }
 }
 
-fn checkForContainerAndResolveFieldAccessLhsType(analysis_ctx: *AnalysisContext, node: *ast.Node) *ast.Node {
-    const current_node = resolveFieldAccessLhsType(analysis_ctx, node);
-
-    if (current_node.id == .ContainerDecl or current_node.id == .Root) {
-        // TODO: Handle errors
-        analysis_ctx.onContainer(current_node) catch {};
-    }
-
-    return current_node;
-}
+pub const NodeWithHandle = struct {
+    node: *ast.Node,
+    handle: *DocumentStore.Handle,
+};
 
 pub fn getFieldAccessTypeNode(
-    analysis_ctx: *AnalysisContext,
+    store: *DocumentStore,
+    arena: *std.heap.ArenaAllocator,
+    handle: *DocumentStore.Handle,
     tokenizer: *std.zig.Tokenizer,
-) ?*ast.Node {
-    var current_node = analysis_ctx.in_container;
+) !?NodeWithHandle {
+    var current_node = NodeWithHandle{
+        .node = &handle.tree.root_node.base,
+        .handle = handle,
+    };
 
     while (true) {
         const tok = tokenizer.next();
         switch (tok.id) {
-            .Eof => return resolveFieldAccessLhsType(analysis_ctx, current_node),
+            .Eof => return try resolveFieldAccessLhsType(store, current_node),
             .Identifier => {
-                if (getChildOfSlice(analysis_ctx.tree(), analysis_ctx.scope_nodes, tokenizer.buffer[tok.loc.start..tok.loc.end])) |child| {
-                    if (resolveTypeOfNode(analysis_ctx, child)) |child_type| {
-                        current_node = child_type;
-                    } else return null;
+                if (try lookupSymbolGlobal(store, current_node.handle, tokenizer.buffer[tok.loc.start..tok.loc.end], tok.loc.start)) |child| {
+                    current_node = (try child.resolveType(store, arena)) orelse return null;
                 } else return null;
             },
             .Period => {
                 const after_period = tokenizer.next();
                 switch (after_period.id) {
-                    .Eof => return resolveFieldAccessLhsType(analysis_ctx, current_node),
+                    .Eof => return try resolveFieldAccessLhsType(store, current_node),
                     .Identifier => {
-                        if (after_period.loc.end == tokenizer.buffer.len) return resolveFieldAccessLhsType(analysis_ctx, current_node);
+                        if (after_period.loc.end == tokenizer.buffer.len) return try resolveFieldAccessLhsType(store, current_node);
 
-                        current_node = checkForContainerAndResolveFieldAccessLhsType(analysis_ctx, current_node);
-                        if (getChild(analysis_ctx.tree(), current_node, tokenizer.buffer[after_period.loc.start..after_period.loc.end])) |child| {
-                            if (resolveTypeOfNode(analysis_ctx, child)) |child_type| {
-                                current_node = child_type;
-                            } else return null;
+                        current_node = resolveFieldAccessLhsType(store, current_node);
+                        if (current_node.node.id != .ContainerDecl and current_node.node.id != .Root) {
+                            // @TODO Is this ok?
+                            return null;
+                        }
+
+                        if (lookupSymbolContainer(store, current_node, tokenizer.buffer[after_period.loc.start..after_period.loc.end], true)) |child| {
+                            current_node = (try child.resolveType(store, arena)) orelse return null;
                         } else return null;
                     },
                     .QuestionMark => {
-                        if (resolveUnwrapOptionalType(analysis_ctx, current_node)) |child_type| {
-                            current_node = child_type;
-                        } else return null;
+                        current_node = (try resolveUnwrapOptionalType(store, current_node)) orelse return null;
                     },
                     else => {
                         std.debug.warn("Unrecognized token {} after period.\n", .{after_period.id});
@@ -663,15 +662,13 @@ pub fn getFieldAccessTypeNode(
                 }
             },
             .PeriodAsterisk => {
-                if (resolveDerefType(analysis_ctx, current_node)) |child_type| {
-                    current_node = child_type;
-                } else return null;
+                current_node = (try resolveDerefType(store, current_node)) orelse return null;
             },
             .LParen => {
-                switch (current_node.id) {
+                switch (current_node.node.id) {
                     .FnProto => {
-                        const func = current_node.cast(ast.Node.FnProto).?;
-                        if (resolveReturnType(analysis_ctx, func)) |ret| {
+                        const func = current_node.node.cast(ast.Node.FnProto).?;
+                        if (try resolveReturnType(store, func, current_node.handle)) |ret| {
                             current_node = ret;
                             // Skip to the right paren
                             var paren_count: usize = 1;
@@ -704,26 +701,16 @@ pub fn getFieldAccessTypeNode(
                     }
                 } else return null;
 
-                if (resolveBracketAccessType(
-                    analysis_ctx,
-                    current_node,
-                    if (is_range) .Range else .Single,
-                )) |child_type| {
-                    current_node = child_type;
-                } else return null;
+                current_node = (try resolveBracketAccessType(store, current_node, arena, if (is_range) .Range else .Single)) orelse return null;
             },
             else => {
                 std.debug.warn("Unimplemented token: {}\n", .{tok.id});
                 return null;
             },
         }
-
-        if (current_node.id == .ContainerDecl or current_node.id == .Root) {
-            analysis_ctx.onContainer(current_node) catch return null;
-        }
     }
 
-    return resolveFieldAccessLhsType(analysis_ctx, current_node);
+    return try resolveFieldAccessLhsType(store, current_node);
 }
 
 pub fn isNodePublic(tree: *ast.Tree, node: *ast.Node) bool {
@@ -1069,8 +1056,6 @@ pub fn getDocumentSymbols(allocator: *std.mem.Allocator, tree: *ast.Tree) ![]typ
     return symbols.items;
 }
 
-const DocumentStore = @import("document_store.zig");
-
 pub const Declaration = union(enum) {
     ast_node: *ast.Node,
     param_decl: *ast.Node.FnProto.ParamDecl,
@@ -1103,6 +1088,35 @@ pub const DeclWithHandle = struct {
             .pointer_payload => |pp| tree.tokenLocation(0, pp.node.value_symbol.firstToken()),
             .array_payload => |ap| tree.tokenLocation(0, ap.identifier.firstToken()),
             .switch_payload => |sp| tree.tokenLocation(0, sp.node.value_symbol.firstToken()),
+        };
+    }
+
+    fn resolveType(self: DeclWithHandle, store: *DocumentStore, arena: *std.heap.ArenaAllocator) !?NodeWithHandle {
+        // resolveTypeOfNode(store: *DocumentStore, node_handle: NodeWithHandle)
+        return switch (self.decl) {
+            .ast_node => |node| try resolveTypeOfNode(store, .{ .node = node, .handle = self.handle }),
+            .param_decl => |param_decl| switch (param_decl.param_type) {
+                .type_expr => |type_node| try resolveTypeOfNode(store, .{ .node = node, .handle = self.handle }),
+                else => null,
+            },
+            .pointer_payload => |pay| try resolveUnwrapOptionalType(
+                store,
+                try resolveTypeOfNode(store, .{
+                    .node = pay.condition,
+                    .handle = self.handle,
+                }) orelse return null,
+            ),
+            .array_payload => |pay| try resolveBracketAccessType(
+                store,
+                .{
+                    .node = pay.array_expr,
+                    .handle = self.handle,
+                },
+                arena,
+                .Single,
+            ),
+            // TODO Resolve switch payload types
+            .switch_payload => |pay| return null,
         };
     }
 };
@@ -1157,7 +1171,9 @@ pub fn lookupSymbolGlobal(store: *DocumentStore, handle: *DocumentStore.Handle, 
     return null;
 }
 
-pub fn lookupSymbolContainer(store: *DocumentScope, handle: *DocumentStore.Handle, container: *ast.Node, symbol: []const u8, accept_fields: bool) !?DeclWithHandle {
+pub fn lookupSymbolContainer(store: *DocumentScope, container_handle: NodeWithHandle, symbol: []const u8, accept_fields: bool) !?DeclWithHandle {
+    const container = container_handle.node;
+    const handle = container_handle.handle;
     std.debug.assert(container.id == .ContainerDecl or container.id == .Root);
     // Find the container scope.
     var maybe_container_scope: ?*Scope = null;
