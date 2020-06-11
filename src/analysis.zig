@@ -165,6 +165,10 @@ pub fn getDeclNameToken(tree: *ast.Tree, node: *ast.Node) ?ast.TokenIndex {
             const field = node.cast(ast.Node.ContainerField).?;
             return field.name_token;
         },
+        .ErrorTag => {
+            const tag = node.cast(ast.Node.ErrorTag).?;
+            return tag.name_token;
+        },
         // We need identifier for captures and error set tags
         .Identifier => {
             const ident = node.cast(ast.Node.Identifier).?;
@@ -1291,7 +1295,7 @@ fn makeScopeInternal(
             .tests = &[0]*ast.Node{},
             .data = .{ .container = node },
         };
-        var scope_idx = scopes.items.len - 1;
+        const scope_idx = scopes.items.len - 1;
         var uses = std.ArrayList(*ast.Node.Use).init(allocator);
         var tests = std.ArrayList(*ast.Node).init(allocator);
 
