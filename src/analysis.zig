@@ -381,6 +381,10 @@ pub fn resolveTypeOfNode(store: *DocumentStore, arena: *std.heap.ArenaAllocator,
             }
             return decl;
         },
+        .GroupedExpression => {
+            const grouped = node.cast(ast.Node.GroupedExpression).?;
+            return try resolveTypeOfNode(store, arena, .{ .node = grouped.expr, .handle = handle });
+        },
         .StructInitializer => {
             const struct_init = node.cast(ast.Node.StructInitializer).?;
             return try resolveTypeOfNode(store, arena, .{ .node = struct_init.lhs, .handle = handle });
@@ -429,6 +433,13 @@ pub fn resolveTypeOfNode(store: *DocumentStore, arena: *std.heap.ArenaAllocator,
                         .handle = handle,
                     })) orelse return null;
                     return try resolveUnwrapOptionalType(store, arena, left_type);
+                },
+                .Catch => {
+                    const left_type = (try resolveTypeOfNode(store, arena, .{
+                        .node = infix_op.lhs,
+                        .handle = handle,
+                    })) orelse return null;
+                    return try resolveUnwrapErrorType(store, arena, left_type);
                 },
                 .ErrorUnion => return node_handle,
                 else => return null,
@@ -1305,7 +1316,13 @@ fn makeScopeInternal(
 
             if (decl.cast(ast.Node.ContainerField)) |field| {
                 if (field.type_expr == null and field.value_expr == null) {
-                    continue;
+                    if (node.id == .Root) continue;
+                    if (node.cast(ast.Node.ContainerDecl)) |container| {
+                        const kind = tree.token_ids[container.kind_token];
+                        if (kind == .Keyword_struct or (kind == .Keyword_union and container.init_arg_expr == .None)) {
+                            continue;
+                        }
+                    }
                 }
             }
 
