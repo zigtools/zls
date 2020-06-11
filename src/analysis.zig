@@ -1081,7 +1081,6 @@ pub fn iterateSymbolsGlobal(
             }
 
             for (scope.uses) |use| {
-                // @TODO Resolve uses, iterate over their symbols.
                 const use_expr = (try resolveTypeOfNode(store, arena, .{ .node = use.expr, .handle = handle })) orelse continue;
                 try iterateSymbolsContainer(store, arena, use_expr, handle, callback, context);
             }
@@ -1302,6 +1301,12 @@ fn makeScopeInternal(
             if (decl.id == .TestDecl) {
                 try tests.append(decl);
                 continue;
+            }
+
+            if (decl.cast(ast.Node.ContainerField)) |field| {
+                if (field.type_expr == null and field.value_expr == null) {
+                    continue;
+                }
             }
 
             if (try scopes.items[scope_idx].decls.put(name, .{ .ast_node = decl })) |existing| {
