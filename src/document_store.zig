@@ -21,6 +21,7 @@ pub const Handle = struct {
     count: usize,
     import_uris: std.ArrayList([]const u8),
     tree: *std.zig.ast.Tree,
+    document_scope: analysis.DocumentScope,
 
     associated_build_file: ?*BuildFile,
     is_build_file: ?*BuildFile,
@@ -77,6 +78,7 @@ handles: std.StringHashMap(*Handle),
 zig_exe_path: ?[]const u8,
 build_files: std.ArrayListUnmanaged(*BuildFile),
 build_runner_path: []const u8,
+std_uri: ?[]const u8,
 
 error_completions: TagStore,
 enum_completions: TagStore,
@@ -86,12 +88,14 @@ pub fn init(
     allocator: *std.mem.Allocator,
     zig_exe_path: ?[]const u8,
     build_runner_path: []const u8,
+    zig_lib_path: ?[]const u8,
 ) !void {
     self.allocator = allocator;
     self.handles = std.StringHashMap(*Handle).init(allocator);
     self.zig_exe_path = zig_exe_path;
     self.build_files = .{};
     self.build_runner_path = build_runner_path;
+    self.std_uri = try stdUriFromLibPath(allocator, zig_lib_path);
     self.error_completions = TagStore.init(allocator);
     self.enum_completions = TagStore.init(allocator);
 }
@@ -191,6 +195,12 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: []u8) anyerror!*Hand
     var handle = try self.allocator.create(Handle);
     errdefer self.allocator.destroy(handle);
 
+    const tree = try std.zig.parse(self.allocator, text);
+    errdefer tree.deinit();
+
+    const document_scope = try analysis.makeDocumentScope(self.allocator, tree);
+    errdefer document_scope.deinit(self.allocator);
+
     handle.* = Handle{
         .count = 1,
         .import_uris = std.ArrayList([]const u8).init(self.allocator),
@@ -199,7 +209,8 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: []u8) anyerror!*Hand
             .text = text,
             .mem = text,
         },
-        .tree = try std.zig.parse(self.allocator, text),
+        .tree = tree,
+        .document_scope = document_scope,
         .associated_build_file = null,
         .is_build_file = null,
     };
@@ -362,6 +373,9 @@ fn refreshDocument(self: *DocumentStore, handle: *Handle, zig_lib_path: ?[]const
     handle.tree.deinit();
     handle.tree = try std.zig.parse(self.allocator, handle.document.text);
 
+    handle.document_scope.deinit(self.allocator);
+    handle.document_scope = try analysis.makeDocumentScope(self.allocator, handle.tree);
+
     // TODO: Better algorithm or data structure?
     // Removing the imports is costly since they live in an array list
     // Perhaps we should use an AutoHashMap([]const u8, {}) ?
@@ -382,7 +396,7 @@ fn refreshDocument(self: *DocumentStore, handle: *Handle, zig_lib_path: ?[]const
 
     const std_uri = try stdUriFromLibPath(&arena.allocator, zig_lib_path);
     for (import_strs.items) |str| {
-        const uri = (try uriFromImportStr(self, &arena.allocator, handle.*, str, std_uri)) orelse continue;
+        const uri = (try self.uriFromImportStr(&arena.allocator, handle.*, str)) orelse continue;
 
         var idx: usize = 0;
         exists_loop: while (idx < still_exist.len) : (idx += 1) {
@@ -485,14 +499,13 @@ pub fn applyChanges(
 }
 
 pub fn uriFromImportStr(
-    store: *DocumentStore,
+    self: *DocumentStore,
     allocator: *std.mem.Allocator,
     handle: Handle,
     import_str: []const u8,
-    std_uri: ?[]const u8,
 ) !?[]const u8 {
     if (std.mem.eql(u8, import_str, "std")) {
-        if (std_uri) |uri| return try std.mem.dupe(allocator, u8, uri) else {
+        if (self.std_uri) |uri| return try std.mem.dupe(allocator, u8, uri) else {
             std.debug.warn("Cannot resolve std library import, path is null.\n", .{});
             return null;
         }
@@ -523,132 +536,72 @@ pub fn uriFromImportStr(
     }
 }
 
-pub const AnalysisContext = struct {
-    store: *DocumentStore,
-    handle: *Handle,
-    // This arena is used for temporary allocations while analyzing,
-    // not for the tree allocations.
-    arena: *std.heap.ArenaAllocator,
-    scope_nodes: []*std.zig.ast.Node,
-    in_container: *std.zig.ast.Node,
-    std_uri: ?[]const u8,
-    error_completions: *TagStore,
-    enum_completions: *TagStore,
+pub fn resolveImport(self: *DocumentStore, handle: *Handle, import_str: []const u8) !?*Handle {
+    const allocator = self.allocator;
+    const final_uri = (try self.uriFromImportStr(
+        self.allocator,
+        handle.*,
+        import_str,
+    )) orelse return null;
 
-    pub fn tree(self: AnalysisContext) *std.zig.ast.Tree {
-        return self.handle.tree;
-    }
+    std.debug.warn("Import final URI: {}\n", .{final_uri});
+    var consumed_final_uri = false;
+    defer if (!consumed_final_uri) allocator.free(final_uri);
 
-    fn refreshScopeNodes(self: *AnalysisContext) !void {
-        var scope_nodes = std.ArrayList(*std.zig.ast.Node).init(&self.arena.allocator);
-        try analysis.addChildrenNodes(&scope_nodes, self.tree(), &self.tree().root_node.base);
-        self.scope_nodes = scope_nodes.items;
-        self.in_container = &self.tree().root_node.base;
-    }
-
-    pub fn onContainer(self: *AnalysisContext, container: *std.zig.ast.Node) !void {
-        std.debug.assert(container.id == .ContainerDecl or container.id == .Root);
-
-        if (self.in_container != container) {
-            self.in_container = container;
-
-            var scope_nodes = std.ArrayList(*std.zig.ast.Node).fromOwnedSlice(&self.arena.allocator, self.scope_nodes);
-            try analysis.addChildrenNodes(&scope_nodes, self.tree(), container);
-            self.scope_nodes = scope_nodes.items;
+    // Check if we already imported this.
+    for (handle.import_uris.items) |uri| {
+        // If we did, set our new handle and return the parsed tree root node.
+        if (std.mem.eql(u8, uri, final_uri)) {
+            return self.getHandle(final_uri);
         }
     }
 
-    pub fn onImport(self: *AnalysisContext, import_str: []const u8) !?*std.zig.ast.Node {
-        const allocator = self.store.allocator;
-        const final_uri = (try uriFromImportStr(
-            self.store,
-            self.store.allocator,
-            self.handle.*,
-            import_str,
-            self.std_uri,
-        )) orelse return null;
+    // New import.
+    // Check if the import is already opened by others.
+    if (self.getHandle(final_uri)) |new_handle| {
+        // If it is, append it to our imports, increment the count, set our new handle
+        // and return the parsed tree root node.
+        try handle.import_uris.append(final_uri);
+        consumed_final_uri = true;
 
-        std.debug.warn("Import final URI: {}\n", .{final_uri});
-        var consumed_final_uri = false;
-        defer if (!consumed_final_uri) allocator.free(final_uri);
+        new_handle.count += 1;
+        return new_handle;
+    }
 
-        // Check if we already imported this.
-        for (self.handle.import_uris.items) |uri| {
-            // If we did, set our new handle and return the parsed tree root node.
-            if (std.mem.eql(u8, uri, final_uri)) {
-                self.handle = self.store.getHandle(final_uri) orelse return null;
-                try self.refreshScopeNodes();
-                return &self.tree().root_node.base;
-            }
-        }
+    // New document, read the file then call into openDocument.
+    const file_path = try URI.parse(allocator, final_uri);
+    defer allocator.free(file_path);
 
-        // New import.
-        // Check if the import is already opened by others.
-        if (self.store.getHandle(final_uri)) |new_handle| {
-            // If it is, append it to our imports, increment the count, set our new handle
-            // and return the parsed tree root node.
-            try self.handle.import_uris.append(final_uri);
-            consumed_final_uri = true;
+    var file = std.fs.cwd().openFile(file_path, .{}) catch {
+        std.debug.warn("Cannot open import file {}\n", .{file_path});
+        return null;
+    };
 
-            new_handle.count += 1;
-            self.handle = new_handle;
-            try self.refreshScopeNodes();
-            return &self.tree().root_node.base;
-        }
+    defer file.close();
+    const size = std.math.cast(usize, try file.getEndPos()) catch std.math.maxInt(usize);
 
-        // New document, read the file then call into openDocument.
-        const file_path = try URI.parse(allocator, final_uri);
-        defer allocator.free(file_path);
+    {
+        const file_contents = try allocator.alloc(u8, size);
+        errdefer allocator.free(file_contents);
 
-        var file = std.fs.cwd().openFile(file_path, .{}) catch {
-            std.debug.warn("Cannot open import file {}\n", .{file_path});
+        file.inStream().readNoEof(file_contents) catch {
+            std.debug.warn("Could not read from file {}\n", .{file_path});
             return null;
         };
 
-        defer file.close();
-        const size = std.math.cast(usize, try file.getEndPos()) catch std.math.maxInt(usize);
+        // Add to import table of current handle.
+        try handle.import_uris.append(final_uri);
+        consumed_final_uri = true;
 
-        {
-            const file_contents = try allocator.alloc(u8, size);
-            errdefer allocator.free(file_contents);
-
-            file.inStream().readNoEof(file_contents) catch {
-                std.debug.warn("Could not read from file {}\n", .{file_path});
-                return null;
-            };
-
-            // Add to import table of current handle.
-            try self.handle.import_uris.append(final_uri);
-            consumed_final_uri = true;
-
-            // Swap handles.
-            // This takes ownership of the passed uri and text.
-            const duped_final_uri = try std.mem.dupe(allocator, u8, final_uri);
-            errdefer allocator.free(duped_final_uri);
-            self.handle = try newDocument(self.store, duped_final_uri, file_contents);
-        }
-
-        try self.refreshScopeNodes();
-        return &self.tree().root_node.base;
+        // Swap handles.
+        // This takes ownership of the passed uri and text.
+        const duped_final_uri = try std.mem.dupe(allocator, u8, final_uri);
+        errdefer allocator.free(duped_final_uri);
+        return try self.newDocument(duped_final_uri, file_contents);
     }
+}
 
-    pub fn clone(self: *AnalysisContext) !AnalysisContext {
-        // Copy the cope nodes, the rest are references
-        // that are not owned by the context.
-        return AnalysisContext{
-            .store = self.store,
-            .handle = self.handle,
-            .arena = self.arena,
-            .scope_nodes = try std.mem.dupe(&self.arena.allocator, *std.zig.ast.Node, self.scope_nodes),
-            .in_container = self.in_container,
-            .std_uri = self.std_uri,
-            .error_completions = self.error_completions,
-            .enum_completions = self.enum_completions,
-        };
-    }
-};
-
-pub fn stdUriFromLibPath(allocator: *std.mem.Allocator, zig_lib_path: ?[]const u8) !?[]const u8 {
+fn stdUriFromLibPath(allocator: *std.mem.Allocator, zig_lib_path: ?[]const u8) !?[]const u8 {
     if (zig_lib_path) |zpath| {
         const std_path = std.fs.path.resolve(allocator, &[_][]const u8{
             zpath, "./std/std.zig",
@@ -665,29 +618,6 @@ pub fn stdUriFromLibPath(allocator: *std.mem.Allocator, zig_lib_path: ?[]const u
     return null;
 }
 
-pub fn analysisContext(
-    self: *DocumentStore,
-    handle: *Handle,
-    arena: *std.heap.ArenaAllocator,
-    position: usize,
-    zig_lib_path: ?[]const u8,
-) !AnalysisContext {
-    var scope_nodes = std.ArrayList(*std.zig.ast.Node).init(&arena.allocator);
-    const in_container = try analysis.declsFromIndex(arena, &scope_nodes, handle.tree, position);
-
-    const std_uri = try stdUriFromLibPath(&arena.allocator, zig_lib_path);
-    return AnalysisContext{
-        .store = self,
-        .handle = handle,
-        .arena = arena,
-        .scope_nodes = scope_nodes.items,
-        .in_container = in_container,
-        .std_uri = std_uri,
-        .error_completions = &self.error_completions,
-        .enum_completions = &self.enum_completions,
-    };
-}
-
 pub fn deinit(self: *DocumentStore) void {
     var entry_iterator = self.handles.iterator();
     while (entry_iterator.next()) |entry| {
@@ -700,6 +630,8 @@ pub fn deinit(self: *DocumentStore) void {
         entry.value.import_uris.deinit();
         self.allocator.free(entry.key);
         self.allocator.destroy(entry.value);
+    
+        entry.value.document_scope.deinit(self.allocator);
     }
 
     self.handles.deinit();
@@ -711,6 +643,10 @@ pub fn deinit(self: *DocumentStore) void {
         }
         self.allocator.free(build_file.uri);
         self.allocator.destroy(build_file);
+    }
+
+    if (self.std_uri) |std_uri| {
+        self.allocator.free(std_uri);
     }
 
     self.build_files.deinit(self.allocator);

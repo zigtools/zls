@@ -1,24 +1,7 @@
 const std = @import("std");
-const AnalysisContext = @import("document_store.zig").AnalysisContext;
+const DocumentStore = @import("document_store.zig");
 const ast = std.zig.ast;
 const types = @import("types.zig");
-
-/// REALLY BAD CODE, PLEASE DON'T USE THIS!!!!!!! (only for testing)
-pub fn getFunctionByName(tree: *ast.Tree, name: []const u8) ?*ast.Node.FnProto {
-    var decls = tree.root_node.decls.iterator(0);
-    while (decls.next()) |decl_ptr| {
-        var decl = decl_ptr.*;
-        switch (decl.id) {
-            .FnProto => {
-                const func = decl.cast(ast.Node.FnProto).?;
-                if (std.mem.eql(u8, tree.tokenSlice(func.name_token.?), name)) return func;
-            },
-            else => {},
-        }
-    }
-
-    return null;
-}
 
 /// Get a declaration's doc comment node
 fn getDocCommentNode(tree: *ast.Tree, node: *ast.Node) ?*ast.Node.DocComment {
@@ -47,7 +30,7 @@ pub fn getDocComments(allocator: *std.mem.Allocator, tree: *ast.Tree, node: *ast
     return null;
 }
 
-fn collectDocComments(allocator: *std.mem.Allocator, tree: *ast.Tree, doc_comments: *ast.Node.DocComment) ![]const u8 {
+pub fn collectDocComments(allocator: *std.mem.Allocator, tree: *ast.Tree, doc_comments: *ast.Node.DocComment) ![]const u8 {
     var lines = std.ArrayList([]const u8).init(allocator);
     defer lines.deinit();
 
@@ -138,6 +121,13 @@ pub fn getVariableSignature(tree: *ast.Tree, var_decl: *ast.Node.VarDecl) []cons
     return tree.source[start..end];
 }
 
+// analysis.getContainerFieldSignature(handle.tree, field)
+pub fn getContainerFieldSignature(tree: *ast.Tree, field: *ast.Node.ContainerField) []const u8 {
+    const start = tree.token_locs[field.firstToken()].start;
+    const end = tree.token_locs[field.lastToken()].end;
+    return tree.source[start..end];
+}
+
 pub fn isTypeFunction(tree: *ast.Tree, func: *ast.Node.FnProto) bool {
     switch (func.return_type) {
         .Explicit => |node| return if (node.cast(std.zig.ast.Node.Identifier)) |ident|
@@ -175,7 +165,11 @@ pub fn getDeclNameToken(tree: *ast.Tree, node: *ast.Node) ?ast.TokenIndex {
             const field = node.cast(ast.Node.ContainerField).?;
             return field.name_token;
         },
-        // We need identifier for captures
+        .ErrorTag => {
+            const tag = node.cast(ast.Node.ErrorTag).?;
+            return tag.name_token;
+        },
+        // We need identifier for captures and error set tags
         .Identifier => {
             const ident = node.cast(ast.Node.Identifier).?;
             return ident.token;
@@ -196,25 +190,6 @@ fn getDeclName(tree: *ast.Tree, node: *ast.Node) ?[]const u8 {
         .TestDecl => name[1 .. name.len - 1],
         else => name,
     };
-}
-
-/// Gets the child of node
-pub fn getChild(tree: *ast.Tree, node: *ast.Node, name: []const u8) ?*ast.Node {
-    var child_idx: usize = 0;
-    while (node.iterate(child_idx)) |child| : (child_idx += 1) {
-        const child_name = getDeclName(tree, child) orelse continue;
-        if (std.mem.eql(u8, child_name, name)) return child;
-    }
-    return null;
-}
-
-/// Gets the child of slice
-pub fn getChildOfSlice(tree: *ast.Tree, nodes: []*ast.Node, name: []const u8) ?*ast.Node {
-    for (nodes) |child| {
-        const child_name = getDeclName(tree, child) orelse continue;
-        if (std.mem.eql(u8, child_name, name)) return child;
-    }
-    return null;
 }
 
 fn findReturnStatementInternal(
@@ -261,15 +236,14 @@ fn findReturnStatement(tree: *ast.Tree, fn_decl: *ast.Node.FnProto) ?*ast.Node.C
 }
 
 /// Resolves the return type of a function
-fn resolveReturnType(analysis_ctx: *AnalysisContext, fn_decl: *ast.Node.FnProto) ?*ast.Node {
-    if (isTypeFunction(analysis_ctx.tree(), fn_decl) and fn_decl.body_node != null) {
+fn resolveReturnType(store: *DocumentStore, arena: *std.heap.ArenaAllocator, fn_decl: *ast.Node.FnProto, handle: *DocumentStore.Handle) !?NodeWithHandle {
+    if (isTypeFunction(handle.tree, fn_decl) and fn_decl.body_node != null) {
         // If this is a type function and it only contains a single return statement that returns
         // a container declaration, we will return that declaration.
-        const ret = findReturnStatement(analysis_ctx.tree(), fn_decl) orelse return null;
+        const ret = findReturnStatement(handle.tree, fn_decl) orelse return null;
         if (ret.rhs) |rhs|
-            if (resolveTypeOfNode(analysis_ctx, rhs)) |res_rhs| switch (res_rhs.id) {
+            if (try resolveTypeOfNode(store, arena, .{ .node = rhs, .handle = handle })) |res_rhs| switch (res_rhs.node.id) {
                 .ContainerDecl => {
-                    analysis_ctx.onContainer(res_rhs) catch return null;
                     return res_rhs;
                 },
                 else => return null,
@@ -279,16 +253,26 @@ fn resolveReturnType(analysis_ctx: *AnalysisContext, fn_decl: *ast.Node.FnProto)
     }
 
     return switch (fn_decl.return_type) {
-        .Explicit, .InferErrorSet => |return_type| resolveTypeOfNode(analysis_ctx, return_type),
+        .Explicit, .InferErrorSet => |return_type| try resolveTypeOfNode(store, arena, .{ .node = return_type, .handle = handle }),
         .Invalid => null,
     };
 }
 
 /// Resolves the child type of an optional type
-fn resolveUnwrapOptionalType(analysis_ctx: *AnalysisContext, opt: *ast.Node) ?*ast.Node {
-    if (opt.cast(ast.Node.PrefixOp)) |prefix_op| {
+fn resolveUnwrapOptionalType(store: *DocumentStore, arena: *std.heap.ArenaAllocator, opt: NodeWithHandle) !?NodeWithHandle {
+    if (opt.node.cast(ast.Node.PrefixOp)) |prefix_op| {
         if (prefix_op.op == .OptionalType) {
-            return resolveTypeOfNode(analysis_ctx, prefix_op.rhs);
+            return try resolveTypeOfNode(store, arena, .{ .node = prefix_op.rhs, .handle = opt.handle });
+        }
+    }
+
+    return null;
+}
+
+fn resolveUnwrapErrorType(store: *DocumentStore, arena: *std.heap.ArenaAllocator, rhs: NodeWithHandle) !?NodeWithHandle {
+    if (rhs.node.cast(ast.Node.InfixOp)) |infix_op| {
+        if (infix_op.op == .ErrorUnion) {
+            return try resolveTypeOfNode(store, arena, .{ .node = infix_op.rhs, .handle = rhs.handle });
         }
     }
 
@@ -296,12 +280,12 @@ fn resolveUnwrapOptionalType(analysis_ctx: *AnalysisContext, opt: *ast.Node) ?*a
 }
 
 /// Resolves the child type of a defer type
-fn resolveDerefType(analysis_ctx: *AnalysisContext, deref: *ast.Node) ?*ast.Node {
-    if (deref.cast(ast.Node.PrefixOp)) |pop| {
+fn resolveDerefType(store: *DocumentStore, arena: *std.heap.ArenaAllocator, deref: NodeWithHandle) !?NodeWithHandle {
+    if (deref.node.cast(ast.Node.PrefixOp)) |pop| {
         if (pop.op == .PtrType) {
-            const op_token_id = analysis_ctx.tree().token_ids[pop.op_token];
+            const op_token_id = deref.handle.tree.token_ids[pop.op_token];
             switch (op_token_id) {
-                .Asterisk => return resolveTypeOfNode(analysis_ctx, pop.rhs),
+                .Asterisk => return try resolveTypeOfNode(store, arena, .{ .node = pop.rhs, .handle = deref.handle }),
                 .LBracket, .AsteriskAsterisk => return null,
                 else => unreachable,
             }
@@ -310,9 +294,9 @@ fn resolveDerefType(analysis_ctx: *AnalysisContext, deref: *ast.Node) ?*ast.Node
     return null;
 }
 
-fn makeSliceType(analysis_ctx: *AnalysisContext, child_type: *ast.Node) ?*ast.Node {
+fn makeSliceType(arena: *std.heap.ArenaAllocator, child_type: *ast.Node) ?*ast.Node {
     // TODO: Better values for fields, better way to do this?
-    var slice_type = analysis_ctx.arena.allocator.create(ast.Node.PrefixOp) catch return null;
+    var slice_type = arena.allocator.create(ast.Node.PrefixOp) catch return null;
     slice_type.* = .{
         .op_token = child_type.firstToken(),
         .op = .{
@@ -332,26 +316,27 @@ fn makeSliceType(analysis_ctx: *AnalysisContext, child_type: *ast.Node) ?*ast.No
 
 /// Resolves bracket access type (both slicing and array access)
 fn resolveBracketAccessType(
-    analysis_ctx: *AnalysisContext,
-    lhs: *ast.Node,
+    store: *DocumentStore,
+    arena: *std.heap.ArenaAllocator,
+    lhs: NodeWithHandle,
     rhs: enum { Single, Range },
-) ?*ast.Node {
-    if (lhs.cast(ast.Node.PrefixOp)) |pop| {
+) !?NodeWithHandle {
+    if (lhs.node.cast(ast.Node.PrefixOp)) |pop| {
         switch (pop.op) {
             .SliceType => {
-                if (rhs == .Single) return resolveTypeOfNode(analysis_ctx, pop.rhs);
+                if (rhs == .Single) return try resolveTypeOfNode(store, arena, .{ .node = pop.rhs, .handle = lhs.handle });
                 return lhs;
             },
             .ArrayType => {
-                if (rhs == .Single) return resolveTypeOfNode(analysis_ctx, pop.rhs);
-                return makeSliceType(analysis_ctx, pop.rhs);
+                if (rhs == .Single) return try resolveTypeOfNode(store, arena, .{ .node = pop.rhs, .handle = lhs.handle });
+                return NodeWithHandle{ .node = makeSliceType(arena, pop.rhs) orelse return null, .handle = lhs.handle };
             },
             .PtrType => {
                 if (pop.rhs.cast(std.zig.ast.Node.PrefixOp)) |child_pop| {
                     switch (child_pop.op) {
                         .ArrayType => {
                             if (rhs == .Single) {
-                                return resolveTypeOfNode(analysis_ctx, child_pop.rhs);
+                                return try resolveTypeOfNode(store, arena, .{ .node = child_pop.rhs, .handle = lhs.handle });
                             }
                             return lhs;
                         },
@@ -366,139 +351,102 @@ fn resolveBracketAccessType(
 }
 
 /// Called to remove one level of pointerness before a field access
-fn resolveFieldAccessLhsType(analysis_ctx: *AnalysisContext, lhs: *ast.Node) *ast.Node {
-    return resolveDerefType(analysis_ctx, lhs) orelse lhs;
+fn resolveFieldAccessLhsType(store: *DocumentStore, arena: *std.heap.ArenaAllocator, lhs: NodeWithHandle) !NodeWithHandle {
+    return (try resolveDerefType(store, arena, lhs)) orelse lhs;
 }
 
 /// Resolves the type of a node
-pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.Node {
+pub fn resolveTypeOfNode(store: *DocumentStore, arena: *std.heap.ArenaAllocator, node_handle: NodeWithHandle) error{OutOfMemory}!?NodeWithHandle {
+    const node = node_handle.node;
+    const handle = node_handle.handle;
+
     switch (node.id) {
         .VarDecl => {
             const vari = node.cast(ast.Node.VarDecl).?;
-
-            return resolveTypeOfNode(analysis_ctx, vari.type_node orelse vari.init_node.?) orelse null;
+            return try resolveTypeOfNode(store, arena, .{ .node = vari.type_node orelse vari.init_node.?, .handle = handle });
         },
         .Identifier => {
-            if (getChildOfSlice(analysis_ctx.tree(), analysis_ctx.scope_nodes, analysis_ctx.tree().getNodeSource(node))) |child| {
-                if (child == node) return null;
-                return resolveTypeOfNode(analysis_ctx, child);
-            } else return null;
+            if (try lookupSymbolGlobal(store, arena, handle, handle.tree.getNodeSource(node), handle.tree.token_locs[node.firstToken()].start)) |child| {
+                return try child.resolveType(store, arena);
+            }
+            return null;
         },
         .ContainerField => {
             const field = node.cast(ast.Node.ContainerField).?;
-            return resolveTypeOfNode(analysis_ctx, field.type_expr orelse return null);
+            return try resolveTypeOfNode(store, arena, .{ .node = field.type_expr orelse return null, .handle = handle });
         },
         .Call => {
             const call = node.cast(ast.Node.Call).?;
-            const previous_tree = analysis_ctx.tree();
 
-            const decl = resolveTypeOfNode(analysis_ctx, call.lhs) orelse return null;
-            if (decl.cast(ast.Node.FnProto)) |fn_decl| {
-                if (previous_tree != analysis_ctx.tree()) {
-                    return resolveReturnType(analysis_ctx, fn_decl);
-                }
-
-                // Add type param values to the scope nodes
-                const param_len = std.math.min(call.params_len, fn_decl.params_len);
-                var scope_nodes = std.ArrayList(*ast.Node).fromOwnedSlice(&analysis_ctx.arena.allocator, analysis_ctx.scope_nodes);
-                var analysis_ctx_clone = analysis_ctx.clone() catch return null;
-                for (fn_decl.paramsConst()) |decl_param, param_idx| {
-                    if (param_idx >= param_len) break;
-                    if (decl_param.name_token == null) continue;
-
-                    const type_param = switch (decl_param.param_type) {
-                        .type_expr => |type_node| if (type_node.cast(ast.Node.Identifier)) |ident|
-                            std.mem.eql(u8, analysis_ctx.tree().tokenSlice(ident.token), "type")
-                        else
-                            false,
-                        else => false,
-                    };
-                    if (!type_param) continue;
-
-                    // TODO Handle errors better
-                    // TODO This may invalidate the analysis context so we copy it.
-                    //      However, if the argument hits an import we just ignore it for now.
-                    //      Once we return our own types instead of directly using nodes we can fix this.
-                    const call_param_type = resolveTypeOfNode(&analysis_ctx_clone, call.paramsConst()[param_idx]) orelse continue;
-                    if (analysis_ctx_clone.handle != analysis_ctx.handle) {
-                        analysis_ctx_clone = analysis_ctx.clone() catch return null;
-                        continue;
-                    }
-
-                    scope_nodes.append(makeVarDeclNode(
-                        &analysis_ctx.arena.allocator,
-                        decl_param.doc_comments,
-                        decl_param.comptime_token,
-                        decl_param.name_token.?,
-                        null,
-                        call_param_type,
-                    ) catch return null) catch return null;
-                    analysis_ctx.scope_nodes = scope_nodes.items;
-                }
-
-                return resolveReturnType(analysis_ctx, fn_decl);
+            const decl = (try resolveTypeOfNode(store, arena, .{ .node = call.lhs, .handle = handle })) orelse return null;
+            if (decl.node.cast(ast.Node.FnProto)) |fn_decl| {
+                // TODO Use some type of ParamDecl -> NodeWithHandle map while resolving, and associate type params here.
+                return try resolveReturnType(store, arena, fn_decl, decl.handle);
             }
             return decl;
         },
+        .GroupedExpression => {
+            const grouped = node.cast(ast.Node.GroupedExpression).?;
+            return try resolveTypeOfNode(store, arena, .{ .node = grouped.expr, .handle = handle });
+        },
         .StructInitializer => {
             const struct_init = node.cast(ast.Node.StructInitializer).?;
-            return resolveTypeOfNode(analysis_ctx, struct_init.lhs);
+            return try resolveTypeOfNode(store, arena, .{ .node = struct_init.lhs, .handle = handle });
         },
         .ErrorSetDecl => {
             const set = node.cast(ast.Node.ErrorSetDecl).?;
             var i: usize = 0;
             while (set.iterate(i)) |decl| : (i += 1) {
-                // TODO handle errors better?
-                analysis_ctx.error_completions.add(analysis_ctx.tree(), decl) catch {};
+                try store.error_completions.add(handle.tree, decl);
             }
-            return node;
+            return node_handle;
         },
         .SuffixOp => {
             const suffix_op = node.cast(ast.Node.SuffixOp).?;
-            switch (suffix_op.op) {
-                .UnwrapOptional => {
-                    const left_type = resolveTypeOfNode(analysis_ctx, suffix_op.lhs) orelse return null;
-                    return resolveUnwrapOptionalType(analysis_ctx, left_type);
-                },
-                .Deref => {
-                    const left_type = resolveTypeOfNode(analysis_ctx, suffix_op.lhs) orelse return null;
-                    return resolveDerefType(analysis_ctx, left_type);
-                },
-                .ArrayAccess => {
-                    const left_type = resolveTypeOfNode(analysis_ctx, suffix_op.lhs) orelse return null;
-                    return resolveBracketAccessType(analysis_ctx, left_type, .Single);
-                },
-                .Slice => {
-                    const left_type = resolveTypeOfNode(analysis_ctx, suffix_op.lhs) orelse return null;
-                    return resolveBracketAccessType(analysis_ctx, left_type, .Range);
-                },
-                else => {},
-            }
+            const left_type = (try resolveTypeOfNode(store, arena, .{ .node = suffix_op.lhs, .handle = handle })) orelse return null;
+            return switch (suffix_op.op) {
+                .UnwrapOptional => try resolveUnwrapOptionalType(store, arena, left_type),
+                .Deref => try resolveDerefType(store, arena, left_type),
+                .ArrayAccess => try resolveBracketAccessType(store, arena, left_type, .Single),
+                .Slice => try resolveBracketAccessType(store, arena, left_type, .Range),
+                else => null,
+            };
         },
         .InfixOp => {
             const infix_op = node.cast(ast.Node.InfixOp).?;
             switch (infix_op.op) {
                 .Period => {
-                    // Save the child string from this tree since the tree may switch when processing
-                    // an import lhs.
-                    var rhs_str = nodeToString(analysis_ctx.tree(), infix_op.rhs) orelse return null;
-                    // Use the analysis context temporary arena to store the rhs string.
-                    rhs_str = std.mem.dupe(&analysis_ctx.arena.allocator, u8, rhs_str) catch return null;
-
+                    const rhs_str = nodeToString(handle.tree, infix_op.rhs) orelse return null;
                     // If we are accessing a pointer type, remove one pointerness level :)
-                    const left_type = resolveFieldAccessLhsType(
-                        analysis_ctx,
-                        resolveTypeOfNode(analysis_ctx, infix_op.lhs) orelse return null,
+                    const left_type = try resolveFieldAccessLhsType(
+                        store,
+                        arena,
+                        (try resolveTypeOfNode(store, arena, .{
+                            .node = infix_op.lhs,
+                            .handle = handle,
+                        })) orelse return null,
                     );
 
-                    const child = getChild(analysis_ctx.tree(), left_type, rhs_str) orelse return null;
-                    return resolveTypeOfNode(analysis_ctx, child);
+                    if (try lookupSymbolContainer(store, arena, left_type, rhs_str, true)) |child| {
+                        return try child.resolveType(store, arena);
+                    } else return null;
                 },
                 .UnwrapOptional => {
-                    const left_type = resolveTypeOfNode(analysis_ctx, infix_op.lhs) orelse return null;
-                    return resolveUnwrapOptionalType(analysis_ctx, left_type);
+                    const left_type = (try resolveTypeOfNode(store, arena, .{
+                        .node = infix_op.lhs,
+                        .handle = handle,
+                    })) orelse return null;
+                    return try resolveUnwrapOptionalType(store, arena, left_type);
                 },
-                else => {},
+                .Catch => {
+                    const left_type = (try resolveTypeOfNode(store, arena, .{
+                        .node = infix_op.lhs,
+                        .handle = handle,
+                    })) orelse return null;
+                    return try resolveUnwrapErrorType(store, arena, left_type);
+                },
+                .ErrorUnion => return node_handle,
+                else => return null,
             }
         },
         .PrefixOp => {
@@ -508,27 +456,20 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
                 .ArrayType,
                 .OptionalType,
                 .PtrType,
-                => return node,
+                => return node_handle,
                 .Try => {
-                    const rhs_type = resolveTypeOfNode(analysis_ctx, prefix_op.rhs) orelse return null;
-                    switch (rhs_type.id) {
-                        .InfixOp => {
-                            const infix_op = rhs_type.cast(ast.Node.InfixOp).?;
-                            if (infix_op.op == .ErrorUnion) return infix_op.rhs;
-                        },
-                        else => {},
-                    }
-                    return rhs_type;
+                    const rhs_type = (try resolveTypeOfNode(store, arena, .{ .node = prefix_op.rhs, .handle = handle })) orelse return null;
+                    return try resolveUnwrapErrorType(store, arena, rhs_type);
                 },
                 else => {},
             }
         },
         .BuiltinCall => {
             const builtin_call = node.cast(ast.Node.BuiltinCall).?;
-            const call_name = analysis_ctx.tree().tokenSlice(builtin_call.builtin_token);
+            const call_name = handle.tree.tokenSlice(builtin_call.builtin_token);
             if (std.mem.eql(u8, call_name, "@This")) {
                 if (builtin_call.params_len != 0) return null;
-                return analysis_ctx.in_container;
+                return innermostContainer(handle, handle.tree.token_locs[builtin_call.firstToken()].start);
             }
 
             // TODO: https://github.com/ziglang/zig/issues/4335
@@ -547,7 +488,7 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
             });
             if (cast_map.has(call_name)) {
                 if (builtin_call.params_len < 1) return null;
-                return resolveTypeOfNode(analysis_ctx, builtin_call.paramsConst()[0]);
+                return try resolveTypeOfNode(store, arena, .{ .node = builtin_call.paramsConst()[0], .handle = handle });
             }
 
             if (!std.mem.eql(u8, call_name, "@import")) return null;
@@ -556,31 +497,30 @@ pub fn resolveTypeOfNode(analysis_ctx: *AnalysisContext, node: *ast.Node) ?*ast.
             const import_param = builtin_call.paramsConst()[0];
             if (import_param.id != .StringLiteral) return null;
 
-            const import_str = analysis_ctx.tree().tokenSlice(import_param.cast(ast.Node.StringLiteral).?.token);
-            return analysis_ctx.onImport(import_str[1 .. import_str.len - 1]) catch |err| block: {
+            const import_str = handle.tree.tokenSlice(import_param.cast(ast.Node.StringLiteral).?.token);
+            const new_handle = (store.resolveImport(handle, import_str[1 .. import_str.len - 1]) catch |err| block: {
                 std.debug.warn("Error {} while processing import {}\n", .{ err, import_str });
-                break :block null;
-            };
+                return null;
+            }) orelse return null;
+
+            return NodeWithHandle{ .node = &new_handle.tree.root_node.base, .handle = new_handle };
         },
         .ContainerDecl => {
-            analysis_ctx.onContainer(node) catch return null;
-
             const container = node.cast(ast.Node.ContainerDecl).?;
-            const kind = analysis_ctx.tree().token_ids[container.kind_token];
+            const kind = handle.tree.token_ids[container.kind_token];
 
             if (kind == .Keyword_struct or (kind == .Keyword_union and container.init_arg_expr == .None)) {
-                return node;
+                return node_handle;
             }
 
             var i: usize = 0;
             while (container.iterate(i)) |decl| : (i += 1) {
                 if (decl.id != .ContainerField) continue;
-                // TODO handle errors better?
-                analysis_ctx.enum_completions.add(analysis_ctx.tree(), decl) catch {};
+                try store.enum_completions.add(handle.tree, decl);
             }
-            return node;
+            return node_handle;
         },
-        .MultilineStringLiteral, .StringLiteral, .FnProto => return node,
+        .MultilineStringLiteral, .StringLiteral, .FnProto => return node_handle,
         else => std.debug.warn("Type resolution case not implemented; {}\n", .{node.id}),
     }
     return null;
@@ -626,52 +566,46 @@ pub fn collectImports(import_arr: *std.ArrayList([]const u8), tree: *ast.Tree) !
     }
 }
 
-fn checkForContainerAndResolveFieldAccessLhsType(analysis_ctx: *AnalysisContext, node: *ast.Node) *ast.Node {
-    const current_node = resolveFieldAccessLhsType(analysis_ctx, node);
-
-    if (current_node.id == .ContainerDecl or current_node.id == .Root) {
-        // TODO: Handle errors
-        analysis_ctx.onContainer(current_node) catch {};
-    }
-
-    return current_node;
-}
+pub const NodeWithHandle = struct {
+    node: *ast.Node,
+    handle: *DocumentStore.Handle,
+};
 
 pub fn getFieldAccessTypeNode(
-    analysis_ctx: *AnalysisContext,
+    store: *DocumentStore,
+    arena: *std.heap.ArenaAllocator,
+    handle: *DocumentStore.Handle,
+    source_index: usize,
     tokenizer: *std.zig.Tokenizer,
-) ?*ast.Node {
-    var current_node = analysis_ctx.in_container;
+) !?NodeWithHandle {
+    var current_node = NodeWithHandle{
+        .node = &handle.tree.root_node.base,
+        .handle = handle,
+    };
 
     while (true) {
         const tok = tokenizer.next();
         switch (tok.id) {
-            .Eof => return resolveFieldAccessLhsType(analysis_ctx, current_node),
+            .Eof => return try resolveFieldAccessLhsType(store, arena, current_node),
             .Identifier => {
-                if (getChildOfSlice(analysis_ctx.tree(), analysis_ctx.scope_nodes, tokenizer.buffer[tok.loc.start..tok.loc.end])) |child| {
-                    if (resolveTypeOfNode(analysis_ctx, child)) |child_type| {
-                        current_node = child_type;
-                    } else return null;
+                if (try lookupSymbolGlobal(store, arena, current_node.handle, tokenizer.buffer[tok.loc.start..tok.loc.end], source_index)) |child| {
+                    current_node = (try child.resolveType(store, arena)) orelse return null;
                 } else return null;
             },
             .Period => {
                 const after_period = tokenizer.next();
                 switch (after_period.id) {
-                    .Eof => return resolveFieldAccessLhsType(analysis_ctx, current_node),
+                    .Eof => return try resolveFieldAccessLhsType(store, arena, current_node),
                     .Identifier => {
-                        if (after_period.loc.end == tokenizer.buffer.len) return resolveFieldAccessLhsType(analysis_ctx, current_node);
+                        if (after_period.loc.end == tokenizer.buffer.len) return try resolveFieldAccessLhsType(store, arena, current_node);
 
-                        current_node = checkForContainerAndResolveFieldAccessLhsType(analysis_ctx, current_node);
-                        if (getChild(analysis_ctx.tree(), current_node, tokenizer.buffer[after_period.loc.start..after_period.loc.end])) |child| {
-                            if (resolveTypeOfNode(analysis_ctx, child)) |child_type| {
-                                current_node = child_type;
-                            } else return null;
+                        current_node = try resolveFieldAccessLhsType(store, arena, current_node);
+                        if (try lookupSymbolContainer(store, arena, current_node, tokenizer.buffer[after_period.loc.start..after_period.loc.end], true)) |child| {
+                            current_node = (try child.resolveType(store, arena)) orelse return null;
                         } else return null;
                     },
                     .QuestionMark => {
-                        if (resolveUnwrapOptionalType(analysis_ctx, current_node)) |child_type| {
-                            current_node = child_type;
-                        } else return null;
+                        current_node = (try resolveUnwrapOptionalType(store, arena, current_node)) orelse return null;
                     },
                     else => {
                         std.debug.warn("Unrecognized token {} after period.\n", .{after_period.id});
@@ -680,15 +614,13 @@ pub fn getFieldAccessTypeNode(
                 }
             },
             .PeriodAsterisk => {
-                if (resolveDerefType(analysis_ctx, current_node)) |child_type| {
-                    current_node = child_type;
-                } else return null;
+                current_node = (try resolveDerefType(store, arena, current_node)) orelse return null;
             },
             .LParen => {
-                switch (current_node.id) {
+                switch (current_node.node.id) {
                     .FnProto => {
-                        const func = current_node.cast(ast.Node.FnProto).?;
-                        if (resolveReturnType(analysis_ctx, func)) |ret| {
+                        const func = current_node.node.cast(ast.Node.FnProto).?;
+                        if (try resolveReturnType(store, arena, func, current_node.handle)) |ret| {
                             current_node = ret;
                             // Skip to the right paren
                             var paren_count: usize = 1;
@@ -721,26 +653,16 @@ pub fn getFieldAccessTypeNode(
                     }
                 } else return null;
 
-                if (resolveBracketAccessType(
-                    analysis_ctx,
-                    current_node,
-                    if (is_range) .Range else .Single,
-                )) |child_type| {
-                    current_node = child_type;
-                } else return null;
+                current_node = (try resolveBracketAccessType(store, arena, current_node, if (is_range) .Range else .Single)) orelse return null;
             },
             else => {
                 std.debug.warn("Unimplemented token: {}\n", .{tok.id});
                 return null;
             },
         }
-
-        if (current_node.id == .ContainerDecl or current_node.id == .Root) {
-            analysis_ctx.onContainer(current_node) catch return null;
-        }
     }
 
-    return resolveFieldAccessLhsType(analysis_ctx, current_node);
+    return try resolveFieldAccessLhsType(store, arena, current_node);
 }
 
 pub fn isNodePublic(tree: *ast.Tree, node: *ast.Node) bool {
@@ -785,264 +707,10 @@ pub fn nodeToString(tree: *ast.Tree, node: *ast.Node) ?[]const u8 {
     return null;
 }
 
-fn makeAccessNode(allocator: *std.mem.Allocator, expr: *ast.Node) !*ast.Node {
-    const suffix_op_node = try allocator.create(ast.Node.SuffixOp);
-    suffix_op_node.* = .{
-        .op = .{ .ArrayAccess = expr },
-        .lhs = expr,
-        .rtoken = expr.lastToken(),
-    };
-    return &suffix_op_node.base;
-}
-
-fn makeUnwrapNode(allocator: *std.mem.Allocator, expr: *ast.Node) !*ast.Node {
-    const suffix_op_node = try allocator.create(ast.Node.SuffixOp);
-    suffix_op_node.* = .{
-        .op = .UnwrapOptional,
-        .lhs = expr,
-        .rtoken = expr.lastToken(),
-    };
-    return &suffix_op_node.base;
-}
-
-fn makeVarDeclNode(
-    allocator: *std.mem.Allocator,
-    doc: ?*ast.Node.DocComment,
-    comptime_token: ?ast.TokenIndex,
-    name_token: ast.TokenIndex,
-    type_expr: ?*ast.Node,
-    init_expr: ?*ast.Node,
-) !*ast.Node {
-    // TODO: This will not be needed anymore when we use out own decl type instead of directly
-    // repurposing ast nodes.
-    const var_decl_node = try allocator.create(ast.Node.VarDecl);
-    var_decl_node.* = .{
-        .doc_comments = doc,
-        .comptime_token = comptime_token,
-        .visib_token = null,
-        .thread_local_token = null,
-        .name_token = name_token,
-        .eq_token = null,
-        .mut_token = name_token,
-        .extern_export_token = null,
-        .lib_name = null,
-        .type_node = type_expr,
-        .align_node = null,
-        .section_node = null,
-        .init_node = init_expr,
-        .semicolon_token = name_token,
-    };
-
-    return &var_decl_node.base;
-}
-
-pub fn declsFromIndexInternal(
-    arena: *std.heap.ArenaAllocator,
-    decls: *std.ArrayList(*ast.Node),
-    tree: *ast.Tree,
-    node: *ast.Node,
-    source_index: usize,
-    innermost_container: **ast.Node,
-) error{OutOfMemory}!void {
-    switch (node.id) {
-        .Root, .ContainerDecl => {
-            innermost_container.* = node;
-            var node_idx: usize = 0;
-            while (node.iterate(node_idx)) |child_node| : (node_idx += 1) {
-                // Skip over container fields, we can only dot access those.
-                if (child_node.id == .ContainerField) continue;
-
-                const is_contained = nodeContainsSourceIndex(tree, child_node, source_index);
-                // If the cursor is in a variable decls it will insert itself anyway, we don't need to take care of it.
-                if ((is_contained and child_node.id != .VarDecl) or !is_contained) try decls.append(child_node);
-                if (is_contained) {
-                    try declsFromIndexInternal(arena, decls, tree, child_node, source_index, innermost_container);
-                }
-            }
-        },
-        .FnProto => {
-            const func = node.cast(ast.Node.FnProto).?;
-
-            // TODO: This is a hack to enable param decls with the new parser
-            for (func.paramsConst()) |param| {
-                if (param.param_type != .type_expr or param.name_token == null) continue;
-
-                try decls.append(try makeVarDeclNode(
-                    &arena.allocator,
-                    param.doc_comments,
-                    param.comptime_token,
-                    param.name_token.?,
-                    param.param_type.type_expr,
-                    null,
-                ));
-            }
-
-            if (func.body_node) |body_node| {
-                if (!nodeContainsSourceIndex(tree, body_node, source_index)) return;
-                try declsFromIndexInternal(arena, decls, tree, body_node, source_index, innermost_container);
-            }
-        },
-        .TestDecl => {
-            const test_decl = node.cast(ast.Node.TestDecl).?;
-            if (!nodeContainsSourceIndex(tree, test_decl.body_node, source_index)) return;
-            try declsFromIndexInternal(arena, decls, tree, test_decl.body_node, source_index, innermost_container);
-        },
-        .Block => {
-            var inode_idx: usize = 0;
-            while (node.iterate(inode_idx)) |inode| : (inode_idx += 1) {
-                if (nodeComesAfterSourceIndex(tree, inode, source_index)) return;
-                try declsFromIndexInternal(arena, decls, tree, inode, source_index, innermost_container);
-            }
-        },
-        .Comptime => {
-            const comptime_stmt = node.cast(ast.Node.Comptime).?;
-            if (nodeComesAfterSourceIndex(tree, comptime_stmt.expr, source_index)) return;
-            try declsFromIndexInternal(arena, decls, tree, comptime_stmt.expr, source_index, innermost_container);
-        },
-        .If => {
-            const if_node = node.cast(ast.Node.If).?;
-            if (nodeContainsSourceIndex(tree, if_node.body, source_index)) {
-                if (if_node.payload) |payload| {
-                    std.debug.assert(payload.id == .PointerPayload);
-                    const ptr_payload = payload.cast(ast.Node.PointerPayload).?;
-                    std.debug.assert(ptr_payload.value_symbol.id == .Identifier);
-
-                    try decls.append(try makeVarDeclNode(
-                        &arena.allocator,
-                        null,
-                        null,
-                        ptr_payload.value_symbol.firstToken(),
-                        null,
-                        try makeUnwrapNode(&arena.allocator, if_node.condition),
-                    ));
-                }
-                return try declsFromIndexInternal(arena, decls, tree, if_node.body, source_index, innermost_container);
-            }
-
-            if (if_node.@"else") |else_node| {
-                if (nodeContainsSourceIndex(tree, else_node.body, source_index)) {
-                    if (else_node.payload) |payload| {
-                        try declsFromIndexInternal(arena, decls, tree, payload, source_index, innermost_container);
-                    }
-                    return try declsFromIndexInternal(arena, decls, tree, else_node.body, source_index, innermost_container);
-                }
-            }
-        },
-        .While => {
-            const while_node = node.cast(ast.Node.While).?;
-            if (nodeContainsSourceIndex(tree, while_node.body, source_index)) {
-                if (while_node.payload) |payload| {
-                    std.debug.assert(payload.id == .PointerPayload);
-                    const ptr_payload = payload.cast(ast.Node.PointerPayload).?;
-                    std.debug.assert(ptr_payload.value_symbol.id == .Identifier);
-
-                    try decls.append(try makeVarDeclNode(
-                        &arena.allocator,
-                        null,
-                        null,
-                        ptr_payload.value_symbol.firstToken(),
-                        null,
-                        try makeUnwrapNode(&arena.allocator, while_node.condition),
-                    ));
-                }
-                return try declsFromIndexInternal(arena, decls, tree, while_node.body, source_index, innermost_container);
-            }
-
-            if (while_node.@"else") |else_node| {
-                if (nodeContainsSourceIndex(tree, else_node.body, source_index)) {
-                    if (else_node.payload) |payload| {
-                        try declsFromIndexInternal(arena, decls, tree, payload, source_index, innermost_container);
-                    }
-                    return try declsFromIndexInternal(arena, decls, tree, else_node.body, source_index, innermost_container);
-                }
-            }
-        },
-        .For => {
-            const for_node = node.cast(ast.Node.For).?;
-            if (nodeContainsSourceIndex(tree, for_node.body, source_index)) {
-                std.debug.assert(for_node.payload.id == .PointerIndexPayload);
-                const ptr_idx_payload = for_node.payload.cast(ast.Node.PointerIndexPayload).?;
-                std.debug.assert(ptr_idx_payload.value_symbol.id == .Identifier);
-                try decls.append(try makeVarDeclNode(
-                    &arena.allocator,
-                    null,
-                    null,
-                    ptr_idx_payload.value_symbol.firstToken(),
-                    null,
-                    try makeAccessNode(&arena.allocator, for_node.array_expr),
-                ));
-
-                if (ptr_idx_payload.index_symbol) |idx| {
-                    try decls.append(idx);
-                }
-
-                return try declsFromIndexInternal(arena, decls, tree, for_node.body, source_index, innermost_container);
-            }
-
-            if (for_node.@"else") |else_node| {
-                if (nodeContainsSourceIndex(tree, else_node.body, source_index)) {
-                    if (else_node.payload) |payload| {
-                        try declsFromIndexInternal(arena, decls, tree, payload, source_index, innermost_container);
-                    }
-                    return try declsFromIndexInternal(arena, decls, tree, else_node.body, source_index, innermost_container);
-                }
-            }
-        },
-        .Switch => {
-            const switch_node = node.cast(ast.Node.Switch).?;
-            for (switch_node.casesConst()) |case| {
-                const case_node = case.*.cast(ast.Node.SwitchCase).?;
-                if (nodeContainsSourceIndex(tree, case_node.expr, source_index)) {
-                    if (case_node.payload) |payload| {
-                        try declsFromIndexInternal(arena, decls, tree, payload, source_index, innermost_container);
-                    }
-                    return try declsFromIndexInternal(arena, decls, tree, case_node.expr, source_index, innermost_container);
-                }
-            }
-        },
-        // TODO: These convey no type information...
-        .Payload => try decls.append(node.cast(ast.Node.Payload).?.error_symbol),
-        .PointerPayload => try decls.append(node.cast(ast.Node.PointerPayload).?.value_symbol),
-        // This should be completely handled for the .For code.
-        .PointerIndexPayload => unreachable,
-        .VarDecl => {
-            try decls.append(node);
-            if (node.cast(ast.Node.VarDecl).?.init_node) |child| {
-                if (nodeContainsSourceIndex(tree, child, source_index)) {
-                    try declsFromIndexInternal(arena, decls, tree, child, source_index, innermost_container);
-                }
-            }
-        },
-        .Use => {
-            
-        },
-        else => {},
-    }
-}
-
-pub fn addChildrenNodes(decls: *std.ArrayList(*ast.Node), tree: *ast.Tree, node: *ast.Node) !void {
-    var node_idx: usize = 0;
-    while (node.iterate(node_idx)) |child_node| : (node_idx += 1) {
-        try decls.append(child_node);
-    }
-}
-
-pub fn declsFromIndex(arena: *std.heap.ArenaAllocator, decls: *std.ArrayList(*ast.Node), tree: *ast.Tree, source_index: usize) !*ast.Node {
-    var innermost_container = &tree.root_node.base;
-    try declsFromIndexInternal(arena, decls, tree, &tree.root_node.base, source_index, &innermost_container);
-    return innermost_container;
-}
-
 fn nodeContainsSourceIndex(tree: *ast.Tree, node: *ast.Node, source_index: usize) bool {
     const first_token = tree.token_locs[node.firstToken()];
     const last_token = tree.token_locs[node.lastToken()];
     return source_index >= first_token.start and source_index <= last_token.end;
-}
-
-fn nodeComesAfterSourceIndex(tree: *ast.Tree, node: *ast.Node, source_index: usize) bool {
-    const first_token = tree.token_locs[node.firstToken()];
-    const last_token = tree.token_locs[node.lastToken()];
-    return source_index < first_token.start;
 }
 
 pub fn getImportStr(tree: *ast.Tree, source_index: usize) ?[]const u8 {
@@ -1287,4 +955,654 @@ pub fn getDocumentSymbols(allocator: *std.mem.Allocator, tree: *ast.Tree) ![]typ
     }
 
     return symbols.items;
+}
+
+pub const Declaration = union(enum) {
+    ast_node: *ast.Node,
+    param_decl: *ast.Node.FnProto.ParamDecl,
+    pointer_payload: struct {
+        node: *ast.Node.PointerPayload,
+        condition: *ast.Node,
+    },
+    array_payload: struct {
+        identifier: *ast.Node,
+        array_expr: *ast.Node,
+    },
+    switch_payload: struct {
+        node: *ast.Node.PointerPayload,
+        items: []const *ast.Node,
+    },
+};
+
+pub const DeclWithHandle = struct {
+    decl: *Declaration,
+    handle: *DocumentStore.Handle,
+
+    pub fn location(self: DeclWithHandle) ast.Tree.Location {
+        const tree = self.handle.tree;
+        return switch (self.decl.*) {
+            .ast_node => |n| block: {
+                const name_token = getDeclNameToken(tree, n).?;
+                break :block tree.tokenLocation(0, name_token);
+            },
+            .param_decl => |p| tree.tokenLocation(0, p.name_token.?),
+            .pointer_payload => |pp| tree.tokenLocation(0, pp.node.value_symbol.firstToken()),
+            .array_payload => |ap| tree.tokenLocation(0, ap.identifier.firstToken()),
+            .switch_payload => |sp| tree.tokenLocation(0, sp.node.value_symbol.firstToken()),
+        };
+    }
+
+    fn isPublic(self: DeclWithHandle) bool {
+        return switch (self.decl.*) {
+            .ast_node => |node| isNodePublic(self.handle.tree, node),
+            else => true,
+        };
+    }
+
+    fn resolveType(self: DeclWithHandle, store: *DocumentStore, arena: *std.heap.ArenaAllocator) !?NodeWithHandle {
+        return switch (self.decl.*) {
+            .ast_node => |node| try resolveTypeOfNode(store, arena, .{ .node = node, .handle = self.handle }),
+            .param_decl => |param_decl| switch (param_decl.param_type) {
+                .type_expr => |type_node| try resolveTypeOfNode(store, arena, .{ .node = type_node, .handle = self.handle }),
+                else => null,
+            },
+            .pointer_payload => |pay| try resolveUnwrapOptionalType(
+                store,
+                arena,
+                (try resolveTypeOfNode(store, arena, .{
+                    .node = pay.condition,
+                    .handle = self.handle,
+                })) orelse return null,
+            ),
+            .array_payload => |pay| try resolveBracketAccessType(
+                store,
+                arena,
+                (try resolveTypeOfNode(store, arena, .{
+                    .node = pay.array_expr,
+                    .handle = self.handle,
+                })) orelse return null,
+                .Single,
+            ),
+            // TODO Resolve switch payload types
+            .switch_payload => |pay| return null,
+        };
+    }
+};
+
+fn findContainerScope(container_handle: NodeWithHandle) ?*Scope {
+    const container = container_handle.node;
+    const handle = container_handle.handle;
+
+    if (container.id != .ContainerDecl and container.id != .Root and container.id != .ErrorSetDecl) {
+        return null;
+    }
+
+    // Find the container scope.
+    var container_scope: ?*Scope = null;
+    for (handle.document_scope.scopes) |*scope| {
+        switch (scope.*.data) {
+            .container => |node| if (node == container) {
+                container_scope = scope;
+                break;
+            },
+            else => {},
+        }
+    }
+    return container_scope;
+}
+
+pub fn iterateSymbolsContainer(
+    store: *DocumentStore,
+    arena: *std.heap.ArenaAllocator,
+    container_handle: NodeWithHandle,
+    orig_handle: *DocumentStore.Handle,
+    comptime callback: var,
+    context: var,
+) error{OutOfMemory}!void {
+    const container = container_handle.node;
+    const handle = container_handle.handle;
+
+    if (findContainerScope(container_handle)) |container_scope| {
+        var decl_it = container_scope.decls.iterator();
+        while (decl_it.next()) |entry| {
+            const decl = DeclWithHandle{ .decl = &entry.value, .handle = handle };
+            if (handle != orig_handle and !decl.isPublic()) continue;
+            try callback(context, decl);
+        }
+
+        for (container_scope.uses) |use| {
+            if (handle != orig_handle and use.visib_token == null) continue;
+            const use_expr = (try resolveTypeOfNode(store, arena, .{ .node = use.expr, .handle = handle })) orelse continue;
+            try iterateSymbolsContainer(store, arena, use_expr, orig_handle, callback, context);
+        }
+    }
+
+    std.debug.warn("Did not find container scope when iterating container {} (name: {})\n", .{ container, getDeclName(handle.tree, container) });
+}
+
+pub fn iterateSymbolsGlobal(
+    store: *DocumentStore,
+    arena: *std.heap.ArenaAllocator,
+    handle: *DocumentStore.Handle,
+    source_index: usize,
+    comptime callback: var,
+    context: var,
+) error{OutOfMemory}!void {
+    for (handle.document_scope.scopes) |scope| {
+        if (source_index >= scope.range.start and source_index < scope.range.end) {
+            var decl_it = scope.decls.iterator();
+            while (decl_it.next()) |entry| {
+                try callback(context, DeclWithHandle{ .decl = &entry.value, .handle = handle });
+            }
+
+            for (scope.uses) |use| {
+                const use_expr = (try resolveTypeOfNode(store, arena, .{ .node = use.expr, .handle = handle })) orelse continue;
+                try iterateSymbolsContainer(store, arena, use_expr, handle, callback, context);
+            }
+        }
+
+        if (scope.range.start >= source_index) return;
+    }
+}
+
+pub fn innermostContainer(handle: *DocumentStore.Handle, source_index: usize) NodeWithHandle {
+    var current = handle.document_scope.scopes[0].data.container;
+    if (handle.document_scope.scopes.len == 1) return .{ .node = current, .handle = handle };
+
+    for (handle.document_scope.scopes[1..]) |scope| {
+        if (source_index >= scope.range.start and source_index < scope.range.end) {
+            switch (scope.data) {
+                .container => |node| current = node,
+                else => {},
+            }
+        }
+        if (scope.range.start > source_index) break;
+    }
+    return .{ .node = current, .handle = handle };
+}
+
+fn resolveUse(
+    store: *DocumentStore,
+    arena: *std.heap.ArenaAllocator,
+    uses: []const *ast.Node.Use,
+    symbol: []const u8,
+    handle: *DocumentStore.Handle,
+) error{OutOfMemory}!?DeclWithHandle {
+    for (uses) |use| {
+        const use_expr = (try resolveTypeOfNode(store, arena, .{ .node = use.expr, .handle = handle })) orelse continue;
+        if (try lookupSymbolContainer(store, arena, use_expr, symbol, false)) |candidate| {
+            if (candidate.handle != handle and !candidate.isPublic()) {
+                continue;
+            }
+            return candidate;
+        }
+    }
+    return null;
+}
+
+pub fn lookupSymbolGlobal(
+    store: *DocumentStore,
+    arena: *std.heap.ArenaAllocator,
+    handle: *DocumentStore.Handle,
+    symbol: []const u8,
+    source_index: usize,
+) error{OutOfMemory}!?DeclWithHandle {
+    for (handle.document_scope.scopes) |scope| {
+        if (source_index >= scope.range.start and source_index < scope.range.end) {
+            if (scope.decls.get(symbol)) |candidate| {
+                switch (candidate.value) {
+                    .ast_node => |node| {
+                        if (node.id == .ContainerField) continue;
+                    },
+                    else => {},
+                }
+                return DeclWithHandle{
+                    .decl = &candidate.value,
+                    .handle = handle,
+                };
+            }
+
+            if (try resolveUse(store, arena, scope.uses, symbol, handle)) |result| return result;
+        }
+
+        if (scope.range.start > source_index) return null;
+    }
+
+    return null;
+}
+
+pub fn lookupSymbolContainer(
+    store: *DocumentStore,
+    arena: *std.heap.ArenaAllocator,
+    container_handle: NodeWithHandle,
+    symbol: []const u8,
+    accept_fields: bool,
+) error{OutOfMemory}!?DeclWithHandle {
+    const container = container_handle.node;
+    const handle = container_handle.handle;
+
+    if (findContainerScope(container_handle)) |container_scope| {
+        if (container_scope.decls.get(symbol)) |candidate| {
+            switch (candidate.value) {
+                .ast_node => |node| {
+                    if (node.id == .ContainerField and !accept_fields) return null;
+                },
+                else => {},
+            }
+            return DeclWithHandle{ .decl = &candidate.value, .handle = handle };
+        }
+
+        if (try resolveUse(store, arena, container_scope.uses, symbol, handle)) |result| return result;
+        return null;
+    }
+
+    std.debug.warn("Did not find container scope when looking up in container {} (name: {})\n", .{ container, getDeclName(handle.tree, container) });
+    return null;
+}
+
+pub const DocumentScope = struct {
+    scopes: []Scope,
+
+    pub fn debugPrint(self: DocumentScope) void {
+        for (self.scopes) |scope| {
+            std.debug.warn(
+                \\--------------------------
+                \\Scope {}, range: [{}, {})
+                \\ {} usingnamespaces
+                \\Decls: 
+            , .{
+                scope.data,
+                scope.range.start,
+                scope.range.end,
+                scope.uses.len,
+            });
+
+            var decl_it = scope.decls.iterator();
+            var idx: usize = 0;
+            while (decl_it.next()) |name_decl| : (idx += 1) {
+                if (idx != 0) std.debug.warn(", ", .{});
+                std.debug.warn("{}", .{name_decl.key});
+            }
+            std.debug.warn("\n--------------------------\n", .{});
+        }
+    }
+
+    pub fn deinit(self: DocumentScope, allocator: *std.mem.Allocator) void {
+        for (self.scopes) |scope| {
+            scope.decls.deinit();
+            allocator.free(scope.uses);
+        }
+        allocator.free(self.scopes);
+    }
+};
+
+pub const Scope = struct {
+    pub const Data = union(enum) {
+        container: *ast.Node, // .id is ContainerDecl or Root or ErrorSetDecl
+        function: *ast.Node, // .id is FnProto
+        block: *ast.Node, // .id is Block
+        other,
+    };
+
+    range: SourceRange,
+    decls: std.StringHashMap(Declaration),
+    tests: []const *ast.Node,
+    uses: []const *ast.Node.Use,
+
+    data: Data,
+};
+
+pub fn makeDocumentScope(allocator: *std.mem.Allocator, tree: *ast.Tree) !DocumentScope {
+    var scopes = std.ArrayList(Scope).init(allocator);
+    errdefer scopes.deinit();
+
+    try makeScopeInternal(allocator, &scopes, tree, &tree.root_node.base);
+    return DocumentScope{
+        .scopes = scopes.toOwnedSlice(),
+    };
+}
+
+fn nodeSourceRange(tree: *ast.Tree, node: *ast.Node) SourceRange {
+    return SourceRange{
+        .start = tree.token_locs[node.firstToken()].start,
+        .end = tree.token_locs[node.lastToken()].end,
+    };
+}
+
+// TODO Make enum and error stores per-document
+//      CLear the doc ones before calling this and
+//      rebuild them here.
+// TODO Possibly collect all imports to diff them on changes
+//      as well
+fn makeScopeInternal(
+    allocator: *std.mem.Allocator,
+    scopes: *std.ArrayList(Scope),
+    tree: *ast.Tree,
+    node: *ast.Node,
+) error{OutOfMemory}!void {
+    if (node.id == .Root or node.id == .ContainerDecl or node.id == .ErrorSetDecl) {
+        const ast_decls = switch (node.id) {
+            .ContainerDecl => node.cast(ast.Node.ContainerDecl).?.fieldsAndDeclsConst(),
+            .Root => node.cast(ast.Node.Root).?.declsConst(),
+            .ErrorSetDecl => node.cast(ast.Node.ErrorSetDecl).?.declsConst(),
+            else => unreachable,
+        };
+
+        (try scopes.addOne()).* = .{
+            .range = nodeSourceRange(tree, node),
+            .decls = std.StringHashMap(Declaration).init(allocator),
+            .uses = &[0]*ast.Node.Use{},
+            .tests = &[0]*ast.Node{},
+            .data = .{ .container = node },
+        };
+        const scope_idx = scopes.items.len - 1;
+        var uses = std.ArrayList(*ast.Node.Use).init(allocator);
+        var tests = std.ArrayList(*ast.Node).init(allocator);
+
+        errdefer {
+            scopes.items[scope_idx].decls.deinit();
+            uses.deinit();
+            tests.deinit();
+        }
+
+        for (ast_decls) |decl| {
+            if (decl.cast(ast.Node.Use)) |use| {
+                try uses.append(use);
+                continue;
+            }
+
+            try makeScopeInternal(allocator, scopes, tree, decl);
+            const name = getDeclName(tree, decl) orelse continue;
+            if (decl.id == .TestDecl) {
+                try tests.append(decl);
+                continue;
+            }
+
+            if (decl.cast(ast.Node.ContainerField)) |field| {
+                if (field.type_expr == null and field.value_expr == null) {
+                    if (node.id == .Root) continue;
+                    if (node.cast(ast.Node.ContainerDecl)) |container| {
+                        const kind = tree.token_ids[container.kind_token];
+                        if (kind == .Keyword_struct or (kind == .Keyword_union and container.init_arg_expr == .None)) {
+                            continue;
+                        }
+                    }
+                }
+            }
+
+            if (try scopes.items[scope_idx].decls.put(name, .{ .ast_node = decl })) |existing| {
+                // TODO Record a redefinition error.
+            }
+        }
+
+        scopes.items[scope_idx].uses = uses.toOwnedSlice();
+        return;
+    }
+
+    switch (node.id) {
+        .FnProto => {
+            const func = node.cast(ast.Node.FnProto).?;
+
+            (try scopes.addOne()).* = .{
+                .range = nodeSourceRange(tree, node),
+                .decls = std.StringHashMap(Declaration).init(allocator),
+                .uses = &[0]*ast.Node.Use{},
+                .tests = &[0]*ast.Node{},
+                .data = .{ .function = node },
+            };
+            var scope_idx = scopes.items.len - 1;
+            errdefer scopes.items[scope_idx].decls.deinit();
+
+            for (func.params()) |*param| {
+                if (param.name_token) |name_tok| {
+                    if (try scopes.items[scope_idx].decls.put(tree.tokenSlice(name_tok), .{ .param_decl = param })) |existing| {
+                        // TODO Record a redefinition error
+                    }
+                }
+            }
+
+            if (func.body_node) |body| {
+                try makeScopeInternal(allocator, scopes, tree, body);
+            }
+
+            return;
+        },
+        .TestDecl => {
+            return try makeScopeInternal(allocator, scopes, tree, node.cast(ast.Node.TestDecl).?.body_node);
+        },
+        .Block => {
+            (try scopes.addOne()).* = .{
+                .range = nodeSourceRange(tree, node),
+                .decls = std.StringHashMap(Declaration).init(allocator),
+                .uses = &[0]*ast.Node.Use{},
+                .tests = &[0]*ast.Node{},
+                .data = .{ .block = node },
+            };
+            var scope_idx = scopes.items.len - 1;
+            var uses = std.ArrayList(*ast.Node.Use).init(allocator);
+
+            errdefer {
+                scopes.items[scope_idx].decls.deinit();
+                uses.deinit();
+            }
+
+            var child_idx: usize = 0;
+            while (node.iterate(child_idx)) |child_node| : (child_idx += 1) {
+                if (child_node.cast(ast.Node.Use)) |use| {
+                    try uses.append(use);
+                    continue;
+                }
+
+                try makeScopeInternal(allocator, scopes, tree, child_node);
+                if (child_node.cast(ast.Node.VarDecl)) |var_decl| {
+                    const name = tree.tokenSlice(var_decl.name_token);
+                    if (try scopes.items[scope_idx].decls.put(name, .{ .ast_node = child_node })) |existing| {
+                        // TODO Record a redefinition error.
+                    }
+                }
+            }
+
+            scopes.items[scope_idx].uses = uses.toOwnedSlice();
+            return;
+        },
+        .Comptime => {
+            return try makeScopeInternal(allocator, scopes, tree, node.cast(ast.Node.Comptime).?.expr);
+        },
+        .If => {
+            const if_node = node.cast(ast.Node.If).?;
+
+            if (if_node.payload) |payload| {
+                std.debug.assert(payload.id == .PointerPayload);
+                var scope = try scopes.addOne();
+                scope.* = .{
+                    .range = .{
+                        .start = tree.token_locs[payload.firstToken()].start,
+                        .end = tree.token_locs[if_node.body.lastToken()].end,
+                    },
+                    .decls = std.StringHashMap(Declaration).init(allocator),
+                    .uses = &[0]*ast.Node.Use{},
+                    .tests = &[0]*ast.Node{},
+                    .data = .other,
+                };
+                errdefer scope.decls.deinit();
+
+                const ptr_payload = payload.cast(ast.Node.PointerPayload).?;
+                std.debug.assert(ptr_payload.value_symbol.id == .Identifier);
+                const name = tree.tokenSlice(ptr_payload.value_symbol.firstToken());
+                try scope.decls.putNoClobber(name, .{
+                    .pointer_payload = .{
+                        .node = ptr_payload,
+                        .condition = if_node.condition,
+                    },
+                });
+            }
+            try makeScopeInternal(allocator, scopes, tree, if_node.body);
+
+            if (if_node.@"else") |else_node| {
+                if (else_node.payload) |payload| {
+                    std.debug.assert(payload.id == .Payload);
+                    var scope = try scopes.addOne();
+                    scope.* = .{
+                        .range = .{
+                            .start = tree.token_locs[payload.firstToken()].start,
+                            .end = tree.token_locs[else_node.body.lastToken()].end,
+                        },
+                        .decls = std.StringHashMap(Declaration).init(allocator),
+                        .uses = &[0]*ast.Node.Use{},
+                        .tests = &[0]*ast.Node{},
+                        .data = .other,
+                    };
+                    errdefer scope.decls.deinit();
+
+                    const err_payload = payload.cast(ast.Node.Payload).?;
+                    std.debug.assert(err_payload.error_symbol.id == .Identifier);
+                    const name = tree.tokenSlice(err_payload.error_symbol.firstToken());
+                    try scope.decls.putNoClobber(name, .{ .ast_node = payload });
+                }
+                try makeScopeInternal(allocator, scopes, tree, else_node.body);
+            }
+        },
+        .While => {
+            const while_node = node.cast(ast.Node.While).?;
+            if (while_node.payload) |payload| {
+                std.debug.assert(payload.id == .PointerPayload);
+                var scope = try scopes.addOne();
+                scope.* = .{
+                    .range = .{
+                        .start = tree.token_locs[payload.firstToken()].start,
+                        .end = tree.token_locs[while_node.body.lastToken()].end,
+                    },
+                    .decls = std.StringHashMap(Declaration).init(allocator),
+                    .uses = &[0]*ast.Node.Use{},
+                    .tests = &[0]*ast.Node{},
+                    .data = .other,
+                };
+                errdefer scope.decls.deinit();
+
+                const ptr_payload = payload.cast(ast.Node.PointerPayload).?;
+                std.debug.assert(ptr_payload.value_symbol.id == .Identifier);
+                const name = tree.tokenSlice(ptr_payload.value_symbol.firstToken());
+                try scope.decls.putNoClobber(name, .{
+                    .pointer_payload = .{
+                        .node = ptr_payload,
+                        .condition = while_node.condition,
+                    },
+                });
+            }
+            try makeScopeInternal(allocator, scopes, tree, while_node.body);
+
+            if (while_node.@"else") |else_node| {
+                if (else_node.payload) |payload| {
+                    std.debug.assert(payload.id == .Payload);
+                    var scope = try scopes.addOne();
+                    scope.* = .{
+                        .range = .{
+                            .start = tree.token_locs[payload.firstToken()].start,
+                            .end = tree.token_locs[else_node.body.lastToken()].end,
+                        },
+                        .decls = std.StringHashMap(Declaration).init(allocator),
+                        .uses = &[0]*ast.Node.Use{},
+                        .tests = &[0]*ast.Node{},
+                        .data = .other,
+                    };
+                    errdefer scope.decls.deinit();
+
+                    const err_payload = payload.cast(ast.Node.Payload).?;
+                    std.debug.assert(err_payload.error_symbol.id == .Identifier);
+                    const name = tree.tokenSlice(err_payload.error_symbol.firstToken());
+                    try scope.decls.putNoClobber(name, .{ .ast_node = payload });
+                }
+                try makeScopeInternal(allocator, scopes, tree, else_node.body);
+            }
+        },
+        .For => {
+            const for_node = node.cast(ast.Node.For).?;
+            std.debug.assert(for_node.payload.id == .PointerIndexPayload);
+            const ptr_idx_payload = for_node.payload.cast(ast.Node.PointerIndexPayload).?;
+            std.debug.assert(ptr_idx_payload.value_symbol.id == .Identifier);
+
+            var scope = try scopes.addOne();
+            scope.* = .{
+                .range = .{
+                    .start = tree.token_locs[ptr_idx_payload.firstToken()].start,
+                    .end = tree.token_locs[for_node.body.lastToken()].end,
+                },
+                .decls = std.StringHashMap(Declaration).init(allocator),
+                .uses = &[0]*ast.Node.Use{},
+                .tests = &[0]*ast.Node{},
+                .data = .other,
+            };
+            errdefer scope.decls.deinit();
+
+            const value_name = tree.tokenSlice(ptr_idx_payload.value_symbol.firstToken());
+            try scope.decls.putNoClobber(value_name, .{
+                .array_payload = .{
+                    .identifier = ptr_idx_payload.value_symbol,
+                    .array_expr = for_node.array_expr,
+                },
+            });
+
+            if (ptr_idx_payload.index_symbol) |index_symbol| {
+                std.debug.assert(index_symbol.id == .Identifier);
+                const index_name = tree.tokenSlice(index_symbol.firstToken());
+                if (try scope.decls.put(index_name, .{ .ast_node = index_symbol })) |existing| {
+                    // TODO Record a redefinition error
+                }
+            }
+
+            try makeScopeInternal(allocator, scopes, tree, for_node.body);
+            if (for_node.@"else") |else_node| {
+                std.debug.assert(else_node.payload == null);
+                try makeScopeInternal(allocator, scopes, tree, else_node.body);
+            }
+        },
+        .Switch => {
+            const switch_node = node.cast(ast.Node.Switch).?;
+            for (switch_node.casesConst()) |case| {
+                if (case.*.cast(ast.Node.SwitchCase)) |case_node| {
+                    if (case_node.payload) |payload| {
+                        std.debug.assert(payload.id == .PointerPayload);
+                        var scope = try scopes.addOne();
+                        scope.* = .{
+                            .range = .{
+                                .start = tree.token_locs[payload.firstToken()].start,
+                                .end = tree.token_locs[case_node.expr.lastToken()].end,
+                            },
+                            .decls = std.StringHashMap(Declaration).init(allocator),
+                            .uses = &[0]*ast.Node.Use{},
+                            .tests = &[0]*ast.Node{},
+                            .data = .other,
+                        };
+                        errdefer scope.decls.deinit();
+
+                        const ptr_payload = payload.cast(ast.Node.PointerPayload).?;
+                        std.debug.assert(ptr_payload.value_symbol.id == .Identifier);
+                        const name = tree.tokenSlice(ptr_payload.value_symbol.firstToken());
+                        try scope.decls.putNoClobber(name, .{
+                            .switch_payload = .{
+                                .node = ptr_payload,
+                                .items = case_node.itemsConst(),
+                            },
+                        });
+                    }
+                    try makeScopeInternal(allocator, scopes, tree, case_node.expr);
+                }
+            }
+        },
+        .VarDecl => {
+            const var_decl = node.cast(ast.Node.VarDecl).?;
+            if (var_decl.type_node) |type_node| {
+                try makeScopeInternal(allocator, scopes, tree, type_node);
+            }
+            if (var_decl.init_node) |init_node| {
+                try makeScopeInternal(allocator, scopes, tree, init_node);
+            }
+        },
+        else => {
+            var child_idx: usize = 0;
+            while (node.iterate(child_idx)) |child_node| : (child_idx += 1) {
+                try makeScopeInternal(allocator, scopes, tree, child_node);
+            }
+        },
+    }
 }
