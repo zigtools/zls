@@ -4,13 +4,6 @@ const std = @import("std");
 
 const DebugAllocator = @This();
 
-fn toMB(value: var) f64 {
-    return switch (@TypeOf(value)) {
-        f64 => value / (1024 * 1024),
-        else => @intToFloat(f64, value) / (1024 * 1024),
-    };
-}
-
 const Stats = struct {
     mean: f64 = 0,
     mean_of_squares: f64 = 0,
@@ -52,33 +45,32 @@ pub const AllocationInfo = struct {
     ) !void {
         @setEvalBranchQuota(2000);
 
-        // TODO Fix these to use `Bi` and remove toMB once `https://github.com/ziglang/zig/pull/5592` is accepted
         return std.fmt.format(
             out_stream,
             \\------------------------------------------ Allocation info ------------------------------------------
-            \\{} total allocations (total: {d:.2} MB, mean: {d:.2} MB, std. dev: {d:.2} MB), {} deallocations
-            \\{} current allocations ({d:.2} MB), peak mem usage: {d:.2} MB
-            \\{} reallocations (total: {d:.2} MB, mean: {d:.2} MB, std. dev: {d:.2} MB)
-            \\{} shrinks (total: {d:.2} MB, mean: {d:.2} MB, std. dev: {d:.2} MB)
+            \\{} total allocations (total: {Bi:.2}, mean: {Bi:.2}, std. dev: {Bi:.2} MB), {} deallocations
+            \\{} current allocations ({Bi:.2}), peak mem usage: {Bi:.2}
+            \\{} reallocations (total: {Bi:.2}, mean: {Bi:.2}, std. dev: {Bi:.2})
+            \\{} shrinks (total: {Bi:.2}, mean: {Bi:.2}, std. dev: {Bi:.2})
             \\-----------------------------------------------------------------------------------------------------
         ,
             .{
                 self.allocation_stats.count,
-                toMB(self.allocation_stats.total),
-                toMB(self.allocation_stats.mean),
-                toMB(self.allocation_stats.stdDev()),
+                self.allocation_stats.total,
+                self.allocation_stats.mean,
+                self.allocation_stats.stdDev(),
                 self.deallocation_count,
                 self.allocation_stats.count - self.deallocation_count,
-                toMB(self.currentlyAllocated()),
-                toMB(self.peak_allocated),
+                self.currentlyAllocated(),
+                self.peak_allocated,
                 self.reallocation_stats.count,
-                toMB(self.reallocation_stats.total),
-                toMB(self.reallocation_stats.mean),
-                toMB(self.reallocation_stats.stdDev()),
+                self.reallocation_stats.total,
+                self.reallocation_stats.mean,
+                self.reallocation_stats.stdDev(),
                 self.shrink_stats.count,
-                toMB(self.shrink_stats.total),
-                toMB(self.shrink_stats.mean),
-                toMB(self.shrink_stats.stdDev()),
+                self.shrink_stats.total,
+                self.shrink_stats.mean,
+                self.shrink_stats.stdDev(),
             },
         );
     }
