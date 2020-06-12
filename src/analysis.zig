@@ -55,7 +55,7 @@ pub fn collectDocComments(
         }
     }
 
-    return try std.mem.join(allocator, if (format == .Markdown) "\\\n" else "\n", lines.items);
+    return try std.mem.join(allocator, if (format == .Markdown) "  \n" else "\n", lines.items);
 }
 
 /// Gets a function signature (keywords, name, return value)

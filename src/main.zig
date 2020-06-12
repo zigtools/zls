@@ -819,7 +819,6 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
 
     std.debug.assert(root.Object.getValue("method") != null);
     const method = root.Object.getValue("method").?.String;
-    const params = root.Object.getValue("params").?.Object;
 
     const start_time = std.time.milliTimestamp();
     defer {
@@ -829,6 +828,7 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
 
     // Core
     if (std.mem.eql(u8, method, "initialize")) {
+        const params = root.Object.getValue("params").?.Object;
         const client_capabs = params.getValue("capabilities").?.Object;
         if (client_capabs.getValue("textDocument")) |text_doc_capabs| {
             if (text_doc_capabs.Object.getValue("semanticTokens")) |_| {
@@ -875,6 +875,7 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
     }
     // Workspace folder changes
     else if (std.mem.eql(u8, method, "workspace/didChangeWorkspaceFolders")) {
+        const params = root.Object.getValue("params").?.Object;
         const event = params.getValue("event").?.Object;
         const added = event.getValue("added").?.Array;
         const removed = event.getValue("removed").?.Array;
@@ -903,6 +904,7 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
     }
     // File changes
     else if (std.mem.eql(u8, method, "textDocument/didOpen")) {
+        const params = root.Object.getValue("params").?.Object;
         const document = params.getValue("textDocument").?.Object;
         const uri = document.getValue("uri").?.String;
         const text = document.getValue("text").?.String;
@@ -910,6 +912,7 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
         const handle = try document_store.openDocument(uri, text);
         try publishDiagnostics(handle.*, configFromUriOr(uri, config));
     } else if (std.mem.eql(u8, method, "textDocument/didChange")) {
+        const params = root.Object.getValue("params").?.Object;
         const text_document = params.getValue("textDocument").?.Object;
         const uri = text_document.getValue("uri").?.String;
         const content_changes = params.getValue("contentChanges").?.Array;
@@ -923,6 +926,7 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
         try document_store.applyChanges(handle, content_changes, local_config.zig_lib_path);
         try publishDiagnostics(handle.*, local_config);
     } else if (std.mem.eql(u8, method, "textDocument/didSave")) {
+        const params = root.Object.getValue("params").?.Object;
         const text_document = params.getValue("textDocument").?.Object;
         const uri = text_document.getValue("uri").?.String;
         const handle = document_store.getHandle(uri) orelse {
@@ -934,6 +938,7 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
     } else if (std.mem.eql(u8, method, "textDocument/willSave")) {
         // noop
     } else if (std.mem.eql(u8, method, "textDocument/didClose")) {
+        const params = root.Object.getValue("params").?.Object;
         const document = params.getValue("textDocument").?.Object;
         const uri = document.getValue("uri").?.String;
 
@@ -941,11 +946,13 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
     }
     // Semantic highlighting
     else if (std.mem.eql(u8, method, "textDocument/semanticTokens")) {
+        const params = root.Object.getValue("params").?.Object;
         // TODO Implement this (we dont get here from vscode atm even when we get the client capab.)
         return try respondGeneric(id, empty_array_response);
     }
     // Autocomplete / Signatures
     else if (std.mem.eql(u8, method, "textDocument/completion")) {
+        const params = root.Object.getValue("params").?.Object;
         const text_document = params.getValue("textDocument").?.Object;
         const uri = text_document.getValue("uri").?.String;
         const position = params.getValue("position").?.Object;
@@ -1010,6 +1017,7 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
         std.mem.eql(u8, method, "textDocument/typeDefinition") or
         std.mem.eql(u8, method, "textDocument/implementation"))
     {
+        const params = root.Object.getValue("params").?.Object;
         const document = params.getValue("textDocument").?.Object;
         const uri = document.getValue("uri").?.String;
         const position = params.getValue("position").?.Object;
@@ -1048,6 +1056,7 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
             try respondGeneric(id, null_result_response);
         }
     } else if (std.mem.eql(u8, method, "textDocument/hover")) {
+        const params = root.Object.getValue("params").?.Object;
         const document = params.getValue("textDocument").?.Object;
         const uri = document.getValue("uri").?.String;
         const position = params.getValue("position").?.Object;
@@ -1085,6 +1094,7 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
             try respondGeneric(id, null_result_response);
         }
     } else if (std.mem.eql(u8, method, "textDocument/documentSymbol")) {
+        const params = root.Object.getValue("params").?.Object;
         const document = params.getValue("textDocument").?.Object;
         const uri = document.getValue("uri").?.String;
 
