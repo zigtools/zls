@@ -23,14 +23,24 @@ fn getDocCommentNode(tree: *ast.Tree, node: *ast.Node) ?*ast.Node.DocComment {
 ///var comments = getFunctionDocComments(allocator, tree, func);
 ///defer if (comments) |comments_pointer| allocator.free(comments_pointer);
 ///```
-pub fn getDocComments(allocator: *std.mem.Allocator, tree: *ast.Tree, node: *ast.Node) !?[]const u8 {
+pub fn getDocComments(
+    allocator: *std.mem.Allocator,
+    tree: *ast.Tree,
+    node: *ast.Node,
+    format: types.MarkupKind,
+) !?[]const u8 {
     if (getDocCommentNode(tree, node)) |doc_comment_node| {
-        return try collectDocComments(allocator, tree, doc_comment_node);
+        return try collectDocComments(allocator, tree, doc_comment_node, format);
     }
     return null;
 }
 
-pub fn collectDocComments(allocator: *std.mem.Allocator, tree: *ast.Tree, doc_comments: *ast.Node.DocComment) ![]const u8 {
+pub fn collectDocComments(
+    allocator: *std.mem.Allocator,
+    tree: *ast.Tree,
+    doc_comments: *ast.Node.DocComment,
+    format: types.MarkupKind,
+) ![]const u8 {
     var lines = std.ArrayList([]const u8).init(allocator);
     defer lines.deinit();
 
@@ -45,7 +55,7 @@ pub fn collectDocComments(allocator: *std.mem.Allocator, tree: *ast.Tree, doc_co
         }
     }
 
-    return try std.mem.join(allocator, "\\\n", lines.items);
+    return try std.mem.join(allocator, if (format == .Markdown) "\\\n" else "\n", lines.items);
 }
 
 /// Gets a function signature (keywords, name, return value)

@@ -59,7 +59,7 @@ pub const TagStore = struct {
         const item = types.CompletionItem{
             .label = try std.mem.dupe(alloc, u8, name),
             .kind = .Constant,
-            .documentation = if (try analysis.getDocComments(alloc, tree, tag)) |docs|
+            .documentation = if (try analysis.getDocComments(alloc, tree, tag, .Markdown)) |docs|
                 .{
                     .kind = .Markdown,
                     .value = docs,

@@ -20,6 +20,9 @@ var workspace_folder_configs: std.StringHashMap(?Config) = undefined;
 
 const ClientCapabilities = struct {
     supports_snippets: bool = false,
+    supports_semantic_tokens: bool = false,
+    hover_supports_md: bool = false,
+    completion_doc_supports_md: bool = false,
 };
 
 var client_capabilities = ClientCapabilities{};
@@ -233,9 +236,15 @@ fn nodeToCompletion(
     const node = node_handle.node;
     const handle = node_handle.handle;
 
-    const doc = if (try analysis.getDocComments(list.allocator, handle.tree, node)) |doc_comments|
+    const doc_kind: types.MarkupKind = if (client_capabilities.completion_doc_supports_md) .Markdown else .PlainText;
+    const doc = if (try analysis.getDocComments(
+        list.allocator,
+        handle.tree,
+        node,
+        doc_kind,
+    )) |doc_comments|
         types.MarkupContent{
-            .kind = .Markdown,
+            .kind = doc_kind,
             .value = doc_comments,
         }
     else
@@ -418,11 +427,12 @@ fn gotoDefinitionSymbol(id: types.RequestId, arena: *std.heap.ArenaAllocator, de
 fn hoverSymbol(id: types.RequestId, arena: *std.heap.ArenaAllocator, decl_handle: analysis.DeclWithHandle) !void {
     const handle = decl_handle.handle;
 
+    const hover_kind: types.MarkupKind = if (client_capabilities.hover_supports_md) .Markdown else .PlainText;
     const md_string = switch (decl_handle.decl.*) {
         .ast_node => |node| ast_node: {
             const result = try resolveVarDeclFnAlias(arena, .{ .node = node, .handle = handle });
 
-            const doc_str = if (try analysis.getDocComments(&arena.allocator, result.handle.tree, result.node)) |str|
+            const doc_str = if (try analysis.getDocComments(&arena.allocator, result.handle.tree, result.node, hover_kind)) |str|
                 str
             else
                 "";
@@ -443,38 +453,35 @@ fn hoverSymbol(id: types.RequestId, arena: *std.heap.ArenaAllocator, decl_handle
                 else => analysis.nodeToString(result.handle.tree, result.node) orelse return try respondGeneric(id, null_result_response),
             };
 
-            break :ast_node try std.fmt.allocPrint(&arena.allocator, "```zig\n{}\n```\n{}", .{ signature_str, doc_str });
+            break :ast_node if (hover_kind == .Markdown)
+                try std.fmt.allocPrint(&arena.allocator, "```zig\n{}\n```\n{}", .{ signature_str, doc_str })
+            else
+                try std.fmt.allocPrint(&arena.allocator, "{}\n{}", .{ signature_str, doc_str });
         },
         .param_decl => |param| param_decl: {
             const doc_str = if (param.doc_comments) |doc_comments|
-                try analysis.collectDocComments(&arena.allocator, handle.tree, doc_comments)
+                try analysis.collectDocComments(&arena.allocator, handle.tree, doc_comments, hover_kind)
             else
                 "";
 
-            break :param_decl try std.fmt.allocPrint(
-                &arena.allocator,
-                "```zig\n{}\n```\n{}",
-                .{
-                    handle.tree.source[handle.tree.token_locs[param.firstToken()].start..handle.tree.token_locs[param.lastToken()].end],
-                    doc_str,
-                },
-            );
+            const signature_str = handle.tree.source[handle.tree.token_locs[param.firstToken()].start..handle.tree.token_locs[param.lastToken()].end];
+            break :param_decl if (hover_kind == .Markdown)
+                try std.fmt.allocPrint(&arena.allocator, "```zig\n{}\n```\n{}", .{ signature_str, doc_str })
+            else
+                try std.fmt.allocPrint(&arena.allocator, "{}\n{}", .{ signature_str, doc_str });
         },
-        .pointer_payload => |payload| try std.fmt.allocPrint(
-            &arena.allocator,
-            "```zig\n{}\n```",
-            .{handle.tree.tokenSlice(payload.node.value_symbol.firstToken())},
-        ),
-        .array_payload => |payload| try std.fmt.allocPrint(
-            &arena.allocator,
-            "```zig\n{}\n```",
-            .{handle.tree.tokenSlice(payload.identifier.firstToken())},
-        ),
-        .switch_payload => |payload| try std.fmt.allocPrint(
-            &arena.allocator,
-            "```zig\n{}\n```",
-            .{handle.tree.tokenSlice(payload.node.value_symbol.firstToken())},
-        ),
+        .pointer_payload => |payload| if (hover_kind == .Markdown)
+            try std.fmt.allocPrint(&arena.allocator, "```zig\n{}\n```", .{handle.tree.tokenSlice(payload.node.value_symbol.firstToken())})
+        else
+            try std.fmt.allocPrint(&arena.allocator, "{}", .{handle.tree.tokenSlice(payload.node.value_symbol.firstToken())}),
+        .array_payload => |payload| if (hover_kind == .Markdown)
+            try std.fmt.allocPrint(&arena.allocator, "```zig\n{}\n```", .{handle.tree.tokenSlice(payload.identifier.firstToken())})
+        else
+            try std.fmt.allocPrint(&arena.allocator, "{}", .{handle.tree.tokenSlice(payload.identifier.firstToken())}),
+        .switch_payload => |payload| if (hover_kind == .Markdown)
+            try std.fmt.allocPrint(&arena.allocator, "```zig\n{}\n```", .{handle.tree.tokenSlice(payload.node.value_symbol.firstToken())})
+        else
+            try std.fmt.allocPrint(&arena.allocator, "{}", .{handle.tree.tokenSlice(payload.node.value_symbol.firstToken())}),
     };
 
     try send(types.Response{
@@ -598,10 +605,11 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: analysis.Decl
     switch (decl_handle.decl.*) {
         .ast_node => |node| try nodeToCompletion(context.arena, context.completions, .{ .node = node, .handle = decl_handle.handle }, context.orig_handle, context.config.*),
         .param_decl => |param| {
+            const doc_kind: types.MarkupKind = if (client_capabilities.completion_doc_supports_md) .Markdown else .PlainText;
             const doc = if (param.doc_comments) |doc_comments|
                 types.MarkupContent{
-                    .kind = .Markdown,
-                    .value = try analysis.collectDocComments(&context.arena.allocator, tree, doc_comments),
+                    .kind = doc_kind,
+                    .value = try analysis.collectDocComments(&context.arena.allocator, tree, doc_comments, doc_kind),
                 }
             else
                 null;
@@ -823,14 +831,37 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
     if (std.mem.eql(u8, method, "initialize")) {
         const client_capabs = params.getValue("capabilities").?.Object;
         if (client_capabs.getValue("textDocument")) |text_doc_capabs| {
+            if (text_doc_capabs.Object.getValue("semanticTokens")) |_| {
+                client_capabilities.supports_semantic_tokens = true;
+            }
+
+            if (text_doc_capabs.Object.getValue("hover")) |hover_capabs| {
+                if (hover_capabs.Object.getValue("contentFormat")) |content_formats| {
+                    for (content_formats.Array.items) |format| {
+                        if (std.mem.eql(u8, "markdown", format.String)) {
+                            client_capabilities.hover_supports_md = true;
+                        }
+                    }
+                }
+            }
+
             if (text_doc_capabs.Object.getValue("completion")) |completion_capabs| {
                 if (completion_capabs.Object.getValue("completionItem")) |item_capabs| {
                     const maybe_support_snippet = item_capabs.Object.getValue("snippetSupport");
                     client_capabilities.supports_snippets = maybe_support_snippet != null and maybe_support_snippet.?.Bool;
+
+                    if (item_capabs.Object.getValue("documentationFormat")) |content_formats| {
+                        for (content_formats.Array.items) |format| {
+                            if (std.mem.eql(u8, "markdown", format.String)) {
+                                client_capabilities.completion_doc_supports_md = true;
+                            }
+                        }
+                    }
                 }
             }
         }
 
+        std.debug.warn("{}\n", .{client_capabilities});
         try respondGeneric(id, initialize_response);
     } else if (std.mem.eql(u8, method, "initialized")) {
         // Send the workspaceFolders request
