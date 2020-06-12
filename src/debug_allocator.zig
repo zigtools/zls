@@ -56,7 +56,7 @@ pub const AllocationInfo = struct {
         return std.fmt.format(
             out_stream,
             \\------------------------------------------ Allocation info ------------------------------------------
-            \\{} total allocations (total: {d:.2}, mean: {d:.2} MB, std. dev: {d:.2} MB), {} deallocations
+            \\{} total allocations (total: {d:.2} MB, mean: {d:.2} MB, std. dev: {d:.2} MB), {} deallocations
             \\{} current allocations ({d:.2} MB), peak mem usage: {d:.2} MB
             \\{} reallocations (total: {d:.2} MB, mean: {d:.2} MB, std. dev: {d:.2} MB)
             \\{} shrinks (total: {d:.2} MB, mean: {d:.2} MB, std. dev: {d:.2} MB)
@@ -64,7 +64,7 @@ pub const AllocationInfo = struct {
         ,
             .{
                 self.allocation_stats.count,
-                self.allocation_stats.total,
+                toMB(self.allocation_stats.total),
                 toMB(self.allocation_stats.mean),
                 toMB(self.allocation_stats.stdDev()),
                 self.deallocation_count,
