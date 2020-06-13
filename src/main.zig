@@ -28,7 +28,7 @@ const ClientCapabilities = struct {
 var client_capabilities = ClientCapabilities{};
 
 const initialize_response =
-    \\,"result":{"capabilities":{"signatureHelpProvider":{"triggerCharacters":["(",","]},"textDocumentSync":1,"completionProvider":{"resolveProvider":false,"triggerCharacters":[".",":","@"]},"documentHighlightProvider":false,"hoverProvider":true,"codeActionProvider":false,"declarationProvider":true,"definitionProvider":true,"typeDefinitionProvider":true,"implementationProvider":false,"referencesProvider":false,"documentSymbolProvider":true,"colorProvider":false,"documentFormattingProvider":false,"documentRangeFormattingProvider":false,"foldingRangeProvider":false,"selectionRangeProvider":false,"workspaceSymbolProvider":false,"rangeProvider":false,"documentProvider":true},"workspace":{"workspaceFolders":{"supported":true,"changeNotifications":true}},"semanticTokensProvider":{"documentProvider":true, "legend":{"tokenTypes":["type","struct","enum","union","parameter","variable","tagField","field","function","keyword","modifier","comment","string","number","operator"],"tokenModifiers":["definition","async","documentation"]}}}}
+    \\,"result":{"capabilities":{"signatureHelpProvider":{"triggerCharacters":["(",","]},"textDocumentSync":1,"completionProvider":{"resolveProvider":false,"triggerCharacters":[".",":","@"]},"documentHighlightProvider":false,"hoverProvider":true,"codeActionProvider":false,"declarationProvider":true,"definitionProvider":true,"typeDefinitionProvider":true,"implementationProvider":false,"referencesProvider":false,"documentSymbolProvider":true,"colorProvider":false,"documentFormattingProvider":false,"documentRangeFormattingProvider":false,"foldingRangeProvider":false,"selectionRangeProvider":false,"workspaceSymbolProvider":false,"rangeProvider":false,"documentProvider":true},"workspace":{"workspaceFolders":{"supported":true,"changeNotifications":true}},"semanticTokensProvider":{"documentProvider":true, "legend":{"tokenTypes":["type","struct","enum","union","parameter","variable","tagField","field","function","keyword","modifier","comment","string","number","operator","builtin"],"tokenModifiers":["definition","async","documentation"]}}}}
 ;
 
 const not_implemented_response =
@@ -957,7 +957,6 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
 
         // TODO Actually test this in some editor, VSCode won't send me requests -_-'.
         const semantic_tokens = @import("semantic_tokens.zig");
-
         const token_array = try semantic_tokens.writeAllSemanticTokens(allocator, handle.*);
         defer allocator.free(token_array);
 
