@@ -28,7 +28,7 @@ const ClientCapabilities = struct {
 var client_capabilities = ClientCapabilities{};
 
 const initialize_response =
-    \\,"result":{"capabilities":{"signatureHelpProvider":{"triggerCharacters":["(",","]},"textDocumentSync":1,"completionProvider":{"resolveProvider":false,"triggerCharacters":[".",":","@"]},"documentHighlightProvider":false,"hoverProvider":true,"codeActionProvider":false,"declarationProvider":true,"definitionProvider":true,"typeDefinitionProvider":true,"implementationProvider":false,"referencesProvider":false,"documentSymbolProvider":true,"colorProvider":false,"documentFormattingProvider":false,"documentRangeFormattingProvider":false,"foldingRangeProvider":false,"selectionRangeProvider":false,"workspaceSymbolProvider":false,"semanticTokensProvider":{"legend":{"tokenTypes":["type","struct","enum","parameter","variable","enumMember","function","member","keyword","modifier","comment","string","number","operator"],"tokenModifiers":["definition","async","documentation"]},"rangeProvider":false,"documentProvider":true},"workspace":{"workspaceFolders":{"supported":true,"changeNotifications":true}}}}}
+    \\,"result":{"capabilities":{"signatureHelpProvider":{"triggerCharacters":["(",","]},"textDocumentSync":1,"completionProvider":{"resolveProvider":false,"triggerCharacters":[".",":","@"]},"documentHighlightProvider":false,"hoverProvider":true,"codeActionProvider":false,"declarationProvider":true,"definitionProvider":true,"typeDefinitionProvider":true,"implementationProvider":false,"referencesProvider":false,"documentSymbolProvider":true,"colorProvider":false,"documentFormattingProvider":false,"documentRangeFormattingProvider":false,"foldingRangeProvider":false,"selectionRangeProvider":false,"workspaceSymbolProvider":false,"rangeProvider":false,"documentProvider":true},"workspace":{"workspaceFolders":{"supported":true,"changeNotifications":true}},"semanticTokensProvider":{"documentProvider":true, "legend":{"tokenTypes":["type","struct","enum","union","parameter","variable","tagField","field","function","keyword","modifier","comment","string","number","operator"],"tokenModifiers":["definition","async","documentation"]}}}}
 ;
 
 const not_implemented_response =
@@ -947,8 +947,24 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
     // Semantic highlighting
     else if (std.mem.eql(u8, method, "textDocument/semanticTokens")) {
         const params = root.Object.getValue("params").?.Object;
-        // TODO Implement this (we dont get here from vscode atm even when we get the client capab.)
-        return try respondGeneric(id, empty_array_response);
+        const document = params.getValue("textDocument").?.Object;
+        const uri = document.getValue("uri").?.String;
+
+        const handle = document_store.getHandle(uri) orelse {
+            std.debug.warn("Trying to complete in non existent document {}", .{uri});
+            return try respondGeneric(id, no_completions_response);
+        };
+
+        // TODO Actually test this in some editor, VSCode won't send me requests -_-'.
+        const semantic_tokens = @import("semantic_tokens.zig");
+
+        const token_array = try semantic_tokens.writeAllSemanticTokens(allocator, handle.*);
+        defer allocator.free(token_array);
+
+        return try send(types.Response{
+            .id = id,
+            .result = .{ .SemanticTokens = token_array },
+        });
     }
     // Autocomplete / Signatures
     else if (std.mem.eql(u8, method, "textDocument/completion")) {

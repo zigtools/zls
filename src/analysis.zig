@@ -277,7 +277,14 @@ fn resolveReturnType(
     }
 
     return switch (fn_decl.return_type) {
-        .Explicit, .InferErrorSet => |return_type| try resolveTypeOfNodeInternal(store, arena, .{
+        .InferErrorSet => |return_type| block: {
+            const child_type = (try resolveTypeOfNodeInternal(store, arena, .{
+                .node = return_type,
+                .handle = handle,
+            }, bound_type_params)) orelse return null;
+            break :block NodeWithHandle{ .node = try makeErrorUnionType(arena, child_type.node), .handle = child_type.handle };
+        },
+        .Explicit => |return_type| try resolveTypeOfNodeInternal(store, arena, .{
             .node = return_type,
             .handle = handle,
         }, bound_type_params),
@@ -345,9 +352,22 @@ fn resolveDerefType(
     return null;
 }
 
-fn makeSliceType(arena: *std.heap.ArenaAllocator, child_type: *ast.Node) ?*ast.Node {
+fn makeErrorUnionType(arena: *std.heap.ArenaAllocator, child_type: *ast.Node) !*ast.Node {
     // TODO: Better values for fields, better way to do this?
-    var slice_type = arena.allocator.create(ast.Node.PrefixOp) catch return null;
+    var error_union_type = try arena.allocator.create(ast.Node.InfixOp);
+    error_union_type.* = .{
+        .op_token = child_type.firstToken(),
+        .op = .ErrorUnion,
+        .lhs = child_type, // This is a dummy value
+        .rhs = child_type,
+    };
+
+    return &error_union_type.base;
+}
+
+fn makeSliceType(arena: *std.heap.ArenaAllocator, child_type: *ast.Node) !*ast.Node {
+    // TODO: Better values for fields, better way to do this?
+    var slice_type = try arena.allocator.create(ast.Node.PrefixOp);
     slice_type.* = .{
         .op_token = child_type.firstToken(),
         .op = .{
@@ -389,7 +409,7 @@ fn resolveBracketAccessType(
                         .node = pop.rhs,
                         .handle = lhs.handle,
                     }, bound_type_params);
-                return NodeWithHandle{ .node = makeSliceType(arena, pop.rhs) orelse return null, .handle = lhs.handle };
+                return NodeWithHandle{ .node = try makeSliceType(arena, pop.rhs), .handle = lhs.handle };
             },
             .PtrType => {
                 if (pop.rhs.cast(std.zig.ast.Node.PrefixOp)) |child_pop| {
@@ -455,9 +475,17 @@ fn resolveTypeOfNodeInternal(
 
             const decl = (try resolveTypeOfNodeInternal(store, arena, .{ .node = call.lhs, .handle = handle }, bound_type_params)) orelse return null;
             if (decl.node.cast(ast.Node.FnProto)) |fn_decl| {
+                var has_self_param: u8 = 0;
+                if (call.lhs.cast(ast.Node.InfixOp)) |lhs_infix_op| {
+                    if (lhs_infix_op.op == .Period) {
+                        has_self_param = 1;
+                    }
+                }
+
                 // Bidn type params to the expressions passed in the calls.
-                const param_len = std.math.min(call.params_len, fn_decl.params_len);
+                const param_len = std.math.min(call.params_len + has_self_param, fn_decl.params_len);
                 for (fn_decl.paramsConst()) |*decl_param, param_idx| {
+                    if (param_idx < has_self_param) continue;
                     if (param_idx >= param_len) break;
 
                     const type_param = switch (decl_param.param_type) {
@@ -467,11 +495,11 @@ fn resolveTypeOfNodeInternal(
                     if (!type_param) continue;
 
                     const call_param_type = (try resolveTypeOfNodeInternal(store, arena, .{
-                        .node = call.paramsConst()[param_idx],
+                        .node = call.paramsConst()[param_idx - has_self_param],
                         .handle = handle,
                     }, bound_type_params)) orelse continue;
 
-                    try bound_type_params.putNoClobber(decl_param, call_param_type);
+                    _ = try bound_type_params.put(decl_param, call_param_type);
                 }
 
                 return try resolveReturnType(store, arena, fn_decl, decl.handle, bound_type_params);

@@ -58,7 +58,8 @@ pub const ResponseParams = union(enum) {
     CompletionList: CompletionList,
     Location: Location,
     Hover: Hover,
-    DocumentSymbols: []DocumentSymbol
+    DocumentSymbols: []DocumentSymbol,
+    SemanticTokens: []u32,
 };
 
 /// JSONRPC error
