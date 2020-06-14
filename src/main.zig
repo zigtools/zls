@@ -482,6 +482,13 @@ fn hoverSymbol(id: types.RequestId, arena: *std.heap.ArenaAllocator, decl_handle
             try std.fmt.allocPrint(&arena.allocator, "```zig\n{}\n```", .{handle.tree.tokenSlice(payload.node.value_symbol.firstToken())})
         else
             try std.fmt.allocPrint(&arena.allocator, "{}", .{handle.tree.tokenSlice(payload.node.value_symbol.firstToken())}),
+        .label_decl => |label_decl| block: {
+            const source = handle.tree.source[handle.tree.token_locs[label_decl.firstToken()].start..handle.tree.token_locs[label_decl.lastToken()].end];
+            break :block if (hover_kind == .Markdown)
+                try std.fmt.allocPrint(&arena.allocator, "```zig\n{}\n```", .{source})
+            else
+                try std.fmt.allocPrint(&arena.allocator, "```{}```", .{source});
+        },
     };
 
     try send(types.Response{
@@ -494,11 +501,26 @@ fn hoverSymbol(id: types.RequestId, arena: *std.heap.ArenaAllocator, decl_handle
     });
 }
 
+fn getLabelGlobal(pos_index: usize, handle: *DocumentStore.Handle) !?analysis.DeclWithHandle {
+    const name = identifierFromPosition(pos_index, handle.*);
+    if (name.len == 0) return null;
+
+    return try analysis.lookupLabel(handle, name, pos_index);
+}
+
 fn getSymbolGlobal(arena: *std.heap.ArenaAllocator, pos_index: usize, handle: *DocumentStore.Handle) !?analysis.DeclWithHandle {
     const name = identifierFromPosition(pos_index, handle.*);
     if (name.len == 0) return null;
 
     return try analysis.lookupSymbolGlobal(&document_store, arena, handle, name, pos_index);
+}
+
+fn gotoDefinitionLabel(id: types.RequestId, pos_index: usize, handle: *DocumentStore.Handle, config: Config) !void {
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+
+    const decl = (try getLabelGlobal(pos_index, handle)) orelse return try respondGeneric(id, null_result_response);
+    return try gotoDefinitionSymbol(id, &arena, decl);
 }
 
 fn gotoDefinitionGlobal(id: types.RequestId, pos_index: usize, handle: *DocumentStore.Handle, config: Config) !void {
@@ -507,6 +529,14 @@ fn gotoDefinitionGlobal(id: types.RequestId, pos_index: usize, handle: *Document
 
     const decl = (try getSymbolGlobal(&arena, pos_index, handle)) orelse return try respondGeneric(id, null_result_response);
     return try gotoDefinitionSymbol(id, &arena, decl);
+}
+
+fn hoverDefinitionLabel(id: types.RequestId, pos_index: usize, handle: *DocumentStore.Handle, config: Config) !void {
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+
+    const decl = (try getLabelGlobal(pos_index, handle)) orelse return try respondGeneric(id, null_result_response);
+    return try hoverSymbol(id, &arena, decl);
 }
 
 fn hoverDefinitionGlobal(id: types.RequestId, pos_index: usize, handle: *DocumentStore.Handle, config: Config) !void {
@@ -639,7 +669,39 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: analysis.Decl
                 .kind = .Variable,
             });
         },
+        .label_decl => |label_decl| {
+            try context.completions.append(.{
+                .label = tree.tokenSlice(label_decl.firstToken()),
+                .kind = .Variable,
+            });
+        },
     }
+}
+
+fn completeLabel(id: types.RequestId, pos_index: usize, handle: *DocumentStore.Handle, config: Config) !void {
+    // We use a local arena allocator to deallocate all temporary data without iterating
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    var completions = std.ArrayList(types.CompletionItem).init(&arena.allocator);
+    // Deallocate all temporary data.
+    defer arena.deinit();
+
+    const context = DeclToCompletionContext{
+        .completions = &completions,
+        .config = &config,
+        .arena = &arena,
+        .orig_handle = handle,
+    };
+    try analysis.iterateLabels(handle, pos_index, declToCompletion, context);
+
+    try send(types.Response{
+        .id = id,
+        .result = .{
+            .CompletionList = .{
+                .isIncomplete = false,
+                .items = completions.items,
+            },
+        },
+    });
 }
 
 fn completeGlobal(id: types.RequestId, pos_index: usize, handle: *DocumentStore.Handle, config: Config) !void {
@@ -1017,6 +1079,7 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
                         },
                     },
                 }),
+                .label => try completeLabel(id, pos_index, handle, this_config),
                 else => try respondGeneric(id, no_completions_response),
             }
         } else {
@@ -1051,20 +1114,10 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
             const pos_context = try analysis.documentPositionContext(allocator, handle.document, pos);
 
             switch (pos_context) {
-                .var_access => try gotoDefinitionGlobal(
-                    id,
-                    pos_index,
-                    handle,
-                    configFromUriOr(uri, config),
-                ),
-                .field_access => |range| try gotoDefinitionFieldAccess(
-                    id,
-                    handle,
-                    pos,
-                    range,
-                    configFromUriOr(uri, config),
-                ),
+                .var_access => try gotoDefinitionGlobal(id, pos_index, handle, configFromUriOr(uri, config)),
+                .field_access => |range| try gotoDefinitionFieldAccess(id, handle, pos, range, configFromUriOr(uri, config)),
                 .string_literal => try gotoDefinitionString(id, pos_index, handle, config),
+                .label => try gotoDefinitionLabel(id, pos_index, handle, configFromUriOr(uri, config)),
                 else => try respondGeneric(id, null_result_response),
             }
         } else {
@@ -1090,19 +1143,9 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
             const pos_context = try analysis.documentPositionContext(allocator, handle.document, pos);
 
             switch (pos_context) {
-                .var_access => try hoverDefinitionGlobal(
-                    id,
-                    pos_index,
-                    handle,
-                    configFromUriOr(uri, config),
-                ),
-                .field_access => |range| try hoverDefinitionFieldAccess(
-                    id,
-                    handle,
-                    pos,
-                    range,
-                    configFromUriOr(uri, config),
-                ),
+                .var_access => try hoverDefinitionGlobal(id, pos_index, handle, configFromUriOr(uri, config)),
+                .field_access => |range| try hoverDefinitionFieldAccess(id, handle, pos, range, configFromUriOr(uri, config)),
+                .label => try hoverDefinitionLabel(id, pos_index, handle, configFromUriOr(uri, config)),
                 else => try respondGeneric(id, null_result_response),
             }
         } else {

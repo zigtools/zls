@@ -889,6 +889,7 @@ pub const PositionContext = union(enum) {
     var_access: SourceRange,
     global_error_set,
     enum_literal,
+    label,
     other,
     empty,
 
@@ -900,6 +901,7 @@ pub const PositionContext = union(enum) {
             .field_access => |r| r,
             .var_access => |r| r,
             .enum_literal => null,
+            .label => null,
             .other => null,
             .empty => null,
             .global_error_set => null,
@@ -980,6 +982,7 @@ pub fn documentPositionContext(allocator: *std.mem.Allocator, document: types.Te
                     .field_access = tokenRangeAppend(curr_ctx.ctx.range().?, tok),
                 },
             },
+            .Colon => curr_ctx.ctx = .label,
             .QuestionMark => switch (curr_ctx.ctx) {
                 .field_access => {},
                 else => curr_ctx.ctx = .empty,
@@ -1112,6 +1115,7 @@ pub const Declaration = union(enum) {
         node: *ast.Node.PointerPayload,
         items: []const *ast.Node,
     },
+    label_decl: *ast.Node, // .id is While, For or Block (firstToken will be the label)
 };
 
 pub const DeclWithHandle = struct {
@@ -1129,6 +1133,7 @@ pub const DeclWithHandle = struct {
             .pointer_payload => |pp| tree.tokenLocation(0, pp.node.value_symbol.firstToken()),
             .array_payload => |ap| tree.tokenLocation(0, ap.identifier.firstToken()),
             .switch_payload => |sp| tree.tokenLocation(0, sp.node.value_symbol.firstToken()),
+            .label_decl => |ld| tree.tokenLocation(0, ld.firstToken()),
         };
     }
 
@@ -1174,6 +1179,7 @@ pub const DeclWithHandle = struct {
                 .Single,
                 bound_type_params,
             ),
+            .label_decl => return null,
             // TODO Resolve switch payload types
             .switch_payload => |pay| return null,
         };
@@ -1218,6 +1224,7 @@ pub fn iterateSymbolsContainer(
         var decl_it = container_scope.decls.iterator();
         while (decl_it.next()) |entry| {
             if (!include_fields and entry.value == .ast_node and entry.value.ast_node.id == .ContainerField) continue;
+            if (entry.value == .label_decl) continue;
             const decl = DeclWithHandle{ .decl = &entry.value, .handle = handle };
             if (handle != orig_handle and !decl.isPublic()) continue;
             try callback(context, decl);
@@ -1233,6 +1240,27 @@ pub fn iterateSymbolsContainer(
     std.debug.warn("Did not find container scope when iterating container {} (name: {})\n", .{ container, getDeclName(handle.tree, container) });
 }
 
+pub fn iterateLabels(
+    handle: *DocumentStore.Handle,
+    source_index: usize,
+    comptime callback: var,
+    context: var,
+) error{OutOfMemory}!void {
+    for (handle.document_scope.scopes) |scope| {
+        if (source_index >= scope.range.start and source_index < scope.range.end) {
+            var decl_it = scope.decls.iterator();
+            while (decl_it.next()) |entry| {
+                switch (entry.value) {
+                    .label_decl => {},
+                    else => continue,
+                }
+                try callback(context, DeclWithHandle{ .decl = &entry.value, .handle = handle });
+            }
+        }
+        if (scope.range.start >= source_index) return;
+    }
+}
+
 pub fn iterateSymbolsGlobal(
     store: *DocumentStore,
     arena: *std.heap.ArenaAllocator,
@@ -1246,6 +1274,7 @@ pub fn iterateSymbolsGlobal(
             var decl_it = scope.decls.iterator();
             while (decl_it.next()) |entry| {
                 if (entry.value == .ast_node and entry.value.ast_node.id == .ContainerField) continue;
+                if (entry.value == .label_decl) continue;
                 try callback(context, DeclWithHandle{ .decl = &entry.value, .handle = handle });
             }
 
@@ -1294,6 +1323,29 @@ fn resolveUse(
     return null;
 }
 
+pub fn lookupLabel(
+    handle: *DocumentStore.Handle,
+    symbol: []const u8,
+    source_index: usize,
+) error{OutOfMemory}!?DeclWithHandle {
+    for (handle.document_scope.scopes) |scope| {
+        if (source_index >= scope.range.start and source_index < scope.range.end) {
+            if (scope.decls.get(symbol)) |candidate| {
+                switch (candidate.value) {
+                    .label_decl => {},
+                    else => continue,
+                }
+                return DeclWithHandle{
+                    .decl = &candidate.value,
+                    .handle = handle,
+                };
+            }
+        }
+        if (scope.range.start > source_index) return null;
+    }
+    return null;
+}
+
 pub fn lookupSymbolGlobal(
     store: *DocumentStore,
     arena: *std.heap.ArenaAllocator,
@@ -1308,6 +1360,7 @@ pub fn lookupSymbolGlobal(
                     .ast_node => |node| {
                         if (node.id == .ContainerField) continue;
                     },
+                    .label_decl => continue,
                     else => {},
                 }
                 return DeclWithHandle{
@@ -1341,6 +1394,7 @@ pub fn lookupSymbolContainer(
                 .ast_node => |node| {
                     if (node.id == .ContainerField and !accept_fields) return null;
                 },
+                .label_decl => unreachable,
                 else => {},
             }
             return DeclWithHandle{ .decl = &candidate.value, .handle = handle };
@@ -1525,6 +1579,27 @@ fn makeScopeInternal(
             return try makeScopeInternal(allocator, scopes, tree, node.cast(ast.Node.TestDecl).?.body_node);
         },
         .Block => {
+            const block = node.cast(ast.Node.Block).?;
+            if (block.label) |label| {
+                std.debug.assert(tree.token_ids[label] == .Identifier);
+                var scope = try scopes.addOne();
+                scope.* = .{
+                    .range = .{
+                        .start = tree.token_locs[block.lbrace].start,
+                        .end = tree.token_locs[block.rbrace].end,
+                    },
+                    .decls = std.StringHashMap(Declaration).init(allocator),
+                    .uses = &[0]*ast.Node.Use{},
+                    .tests = &[0]*ast.Node{},
+                    .data = .other,
+                };
+                errdefer scope.decls.deinit();
+
+                try scope.decls.putNoClobber(tree.tokenSlice(label), .{
+                    .label_decl = node,
+                });
+            }
+
             (try scopes.addOne()).* = .{
                 .range = nodeSourceRange(tree, node),
                 .decls = std.StringHashMap(Declaration).init(allocator),
@@ -1618,6 +1693,26 @@ fn makeScopeInternal(
         },
         .While => {
             const while_node = node.cast(ast.Node.While).?;
+            if (while_node.label) |label| {
+                std.debug.assert(tree.token_ids[label] == .Identifier);
+                var scope = try scopes.addOne();
+                scope.* = .{
+                    .range = .{
+                        .start = tree.token_locs[while_node.while_token].start,
+                        .end = tree.token_locs[while_node.lastToken()].end,
+                    },
+                    .decls = std.StringHashMap(Declaration).init(allocator),
+                    .uses = &[0]*ast.Node.Use{},
+                    .tests = &[0]*ast.Node{},
+                    .data = .other,
+                };
+                errdefer scope.decls.deinit();
+
+                try scope.decls.putNoClobber(tree.tokenSlice(label), .{
+                    .label_decl = node,
+                });
+            }
+
             if (while_node.payload) |payload| {
                 std.debug.assert(payload.id == .PointerPayload);
                 var scope = try scopes.addOne();
@@ -1671,6 +1766,26 @@ fn makeScopeInternal(
         },
         .For => {
             const for_node = node.cast(ast.Node.For).?;
+            if (for_node.label) |label| {
+                std.debug.assert(tree.token_ids[label] == .Identifier);
+                var scope = try scopes.addOne();
+                scope.* = .{
+                    .range = .{
+                        .start = tree.token_locs[for_node.for_token].start,
+                        .end = tree.token_locs[for_node.lastToken()].end,
+                    },
+                    .decls = std.StringHashMap(Declaration).init(allocator),
+                    .uses = &[0]*ast.Node.Use{},
+                    .tests = &[0]*ast.Node{},
+                    .data = .other,
+                };
+                errdefer scope.decls.deinit();
+
+                try scope.decls.putNoClobber(tree.tokenSlice(label), .{
+                    .label_decl = node,
+                });
+            }
+
             std.debug.assert(for_node.payload.id == .PointerIndexPayload);
             const ptr_idx_payload = for_node.payload.cast(ast.Node.PointerIndexPayload).?;
             std.debug.assert(ptr_idx_payload.value_symbol.id == .Identifier);
