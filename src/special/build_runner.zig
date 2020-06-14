@@ -5,6 +5,7 @@ const fmt = std.fmt;
 const Builder = std.build.Builder;
 const Pkg = std.build.Pkg;
 const InstallArtifactStep = std.build.InstallArtifactStep;
+const LibExeObjStep = std.build.LibExeObjStep;
 const ArrayList = std.ArrayList;
 
 ///! This is a modified build runner to extract information out of build.zig
@@ -26,10 +27,16 @@ pub fn main() !void {
     // TODO: We currently add packages from every LibExeObj step that the install step depends on.
     //       Should we error out or keep one step or something similar?
     // We also flatten them, we should probably keep the nested structure.
-    for (builder.getInstallStep().dependencies.items) |step| {
-        if (step.cast(InstallArtifactStep)) |install_exe| {
-            for (install_exe.artifact.packages.items) |pkg| {
-                try processPackage(stdout_stream, pkg);
+    for (builder.top_level_steps.items) |tls| {
+        for (tls.step.dependencies.items) |step| {
+            if (step.cast(InstallArtifactStep)) |install_exe| {
+                for (install_exe.artifact.packages.items) |pkg| {
+                    try processPackage(stdout_stream, pkg);
+                }
+            } else if (step.cast(LibExeObjStep)) |exe| {
+                for (exe.packages.items) |pkg| {
+                    try processPackage(stdout_stream, pkg);
+                }
             }
         }
     }
