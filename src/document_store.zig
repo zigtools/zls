@@ -307,8 +307,6 @@ pub fn openDocument(self: *DocumentStore, uri: []const u8, text: []const u8) !*H
 }
 
 fn decrementBuildFileRefs(self: *DocumentStore, build_file: *BuildFile) void {
-    if (build_file.refs == 0) return;
-
     build_file.refs -= 1;
     if (build_file.refs == 0) {
         std.debug.warn("Freeing build file {}\n", .{build_file.uri});
@@ -333,14 +331,19 @@ fn decrementCount(self: *DocumentStore, uri: []const u8) void {
     if (self.handles.get(uri)) |entry| {
         entry.value.count -= 1;
 
-        if (entry.value.associated_build_file) |build_file| {
-            self.decrementBuildFileRefs(build_file);
-        }
-
         if (entry.value.count > 0)
             return;
 
         std.debug.warn("Freeing document: {}\n", .{uri});
+
+        if (entry.value.associated_build_file) |build_file| {
+            self.decrementBuildFileRefs(build_file);
+        }
+
+        if (entry.value.is_build_file) |build_file| {
+            self.decrementBuildFileRefs(build_file);
+        }
+
         entry.value.tree.deinit();
         self.allocator.free(entry.value.document.mem);
 
