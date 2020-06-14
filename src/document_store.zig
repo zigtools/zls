@@ -307,6 +307,8 @@ pub fn openDocument(self: *DocumentStore, uri: []const u8, text: []const u8) !*H
 }
 
 fn decrementBuildFileRefs(self: *DocumentStore, build_file: *BuildFile) void {
+    if (build_file.refs == 0) return;
+
     build_file.refs -= 1;
     if (build_file.refs == 0) {
         std.debug.warn("Freeing build file {}\n", .{build_file.uri});
