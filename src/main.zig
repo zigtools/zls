@@ -199,33 +199,6 @@ fn publishDiagnostics(handle: DocumentStore.Handle, config: Config) !void {
     });
 }
 
-fn resolveVarDeclFnAlias(arena: *std.heap.ArenaAllocator, decl_handle: analysis.NodeWithHandle) !analysis.NodeWithHandle {
-    const decl = decl_handle.node;
-    const handle = decl_handle.handle;
-
-    if (decl.cast(std.zig.ast.Node.VarDecl)) |var_decl| {
-        const child_node = block: {
-            if (var_decl.type_node) |type_node| {
-                if (std.mem.eql(u8, "type", handle.tree.tokenSlice(type_node.firstToken()))) {
-                    break :block var_decl.init_node orelse type_node;
-                }
-                break :block type_node;
-            }
-            break :block var_decl.init_node.?;
-        };
-
-        if (try analysis.resolveTypeOfNode(&document_store, arena, .{ .node = child_node, .handle = handle })) |resolved_node| {
-            // TODO Just return it anyway?
-            //      This would allow deep goto definition etc.
-            //      Try it out.
-            if (resolved_node.node.id == .FnProto) {
-                return resolved_node;
-            }
-        }
-    }
-    return decl_handle;
-}
-
 fn nodeToCompletion(
     arena: *std.heap.ArenaAllocator,
     list: *std.ArrayList(types.CompletionItem),
@@ -317,9 +290,14 @@ fn nodeToCompletion(
             const var_decl = node.cast(std.zig.ast.Node.VarDecl).?;
             const is_const = handle.tree.token_ids[var_decl.mut_token] == .Keyword_const;
 
-            const result = try resolveVarDeclFnAlias(arena, node_handle);
-            if (result.node != node) {
-                return try nodeToCompletion(arena, list, result, orig_handle, config);
+            if (try analysis.resolveVarDeclAlias(&document_store, arena, node_handle)) |result| {
+                const context = DeclToCompletionContext{
+                    .completions = list,
+                    .config = &config,
+                    .arena = arena,
+                    .orig_handle = orig_handle,
+                };
+                return try declToCompletion(context, result);
             }
 
             try list.append(.{
@@ -403,12 +381,14 @@ fn gotoDefinitionSymbol(id: types.RequestId, arena: *std.heap.ArenaAllocator, de
 
     const location = switch (decl_handle.decl.*) {
         .ast_node => |node| block: {
-            const result = try resolveVarDeclFnAlias(arena, .{ .node = node, .handle = handle });
-            handle = result.handle;
+            if (try analysis.resolveVarDeclAlias(&document_store, arena, .{ .node = node, .handle = handle })) |result| {
+                handle = result.handle;
+                break :block result.location();
+            }
 
-            const name_token = analysis.getDeclNameToken(result.handle.tree, result.node) orelse
+            const name_token = analysis.getDeclNameToken(handle.tree, node) orelse
                 return try respondGeneric(id, null_result_response);
-            break :block result.handle.tree.tokenLocation(0, name_token);
+            break :block handle.tree.tokenLocation(0, name_token);
         },
         else => decl_handle.location(),
     };
@@ -424,33 +404,35 @@ fn gotoDefinitionSymbol(id: types.RequestId, arena: *std.heap.ArenaAllocator, de
     });
 }
 
-fn hoverSymbol(id: types.RequestId, arena: *std.heap.ArenaAllocator, decl_handle: analysis.DeclWithHandle) !void {
+fn hoverSymbol(id: types.RequestId, arena: *std.heap.ArenaAllocator, decl_handle: analysis.DeclWithHandle) (std.os.WriteError || error{OutOfMemory})!void {
     const handle = decl_handle.handle;
 
     const hover_kind: types.MarkupKind = if (client_capabilities.hover_supports_md) .Markdown else .PlainText;
     const md_string = switch (decl_handle.decl.*) {
         .ast_node => |node| ast_node: {
-            const result = try resolveVarDeclFnAlias(arena, .{ .node = node, .handle = handle });
+            if (try analysis.resolveVarDeclAlias(&document_store, arena, .{ .node = node, .handle = handle })) |result| {
+                return try hoverSymbol(id, arena, result);
+            }
 
-            const doc_str = if (try analysis.getDocComments(&arena.allocator, result.handle.tree, result.node, hover_kind)) |str|
+            const doc_str = if (try analysis.getDocComments(&arena.allocator, handle.tree, node, hover_kind)) |str|
                 str
             else
                 "";
 
-            const signature_str = switch (result.node.id) {
+            const signature_str = switch (node.id) {
                 .VarDecl => blk: {
-                    const var_decl = result.node.cast(std.zig.ast.Node.VarDecl).?;
-                    break :blk analysis.getVariableSignature(result.handle.tree, var_decl);
+                    const var_decl = node.cast(std.zig.ast.Node.VarDecl).?;
+                    break :blk analysis.getVariableSignature(handle.tree, var_decl);
                 },
                 .FnProto => blk: {
-                    const fn_decl = result.node.cast(std.zig.ast.Node.FnProto).?;
-                    break :blk analysis.getFunctionSignature(result.handle.tree, fn_decl);
+                    const fn_decl = node.cast(std.zig.ast.Node.FnProto).?;
+                    break :blk analysis.getFunctionSignature(handle.tree, fn_decl);
                 },
                 .ContainerField => blk: {
                     const field = node.cast(std.zig.ast.Node.ContainerField).?;
-                    break :blk analysis.getContainerFieldSignature(result.handle.tree, field);
+                    break :blk analysis.getContainerFieldSignature(handle.tree, field);
                 },
-                else => analysis.nodeToString(result.handle.tree, result.node) orelse return try respondGeneric(id, null_result_response),
+                else => analysis.nodeToString(handle.tree, node) orelse return try respondGeneric(id, null_result_response),
             };
 
             break :ast_node if (hover_kind == .Markdown)

@@ -207,6 +207,35 @@ fn getDeclName(tree: *ast.Tree, node: *ast.Node) ?[]const u8 {
     };
 }
 
+/// Resolves variable declarationms like `const decl = @import("decl-file.zig").decl;` to the module's node
+pub fn resolveVarDeclAlias(store: *DocumentStore, arena: *std.heap.ArenaAllocator, decl_handle: NodeWithHandle) !?DeclWithHandle {
+    const decl = decl_handle.node;
+    const handle = decl_handle.handle;
+
+    if (decl.cast(ast.Node.VarDecl)) |var_decl| {
+        if (var_decl.init_node == null) return null;
+
+        const base_expr = var_decl.init_node.?;
+        if (base_expr.cast(ast.Node.InfixOp)) |infix_op| {
+            if (infix_op.op != .Period) return null;
+            if (infix_op.lhs.cast(ast.Node.BuiltinCall)) |builtin_call| {
+                const name = handle.tree.tokenSlice(infix_op.rhs.firstToken());
+
+                if (!std.mem.eql(u8, handle.tree.tokenSlice(builtin_call.builtin_token), "@import"))
+                    return null;
+
+                if (!std.mem.eql(u8, handle.tree.tokenSlice(var_decl.name_token), name))
+                    return null;
+
+                const container_node = (try resolveTypeOfNode(store, arena, .{ .node = infix_op.lhs, .handle = handle })) orelse return null;
+                return lookupSymbolContainer(store, arena, container_node, name, false);
+            }
+        }
+    }
+
+    return null;
+}
+
 fn findReturnStatementInternal(
     tree: *ast.Tree,
     fn_decl: *ast.Node.FnProto,
