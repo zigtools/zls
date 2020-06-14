@@ -1209,6 +1209,7 @@ pub fn iterateSymbolsContainer(
     orig_handle: *DocumentStore.Handle,
     comptime callback: var,
     context: var,
+    include_fields: bool,
 ) error{OutOfMemory}!void {
     const container = container_handle.node;
     const handle = container_handle.handle;
@@ -1216,6 +1217,7 @@ pub fn iterateSymbolsContainer(
     if (findContainerScope(container_handle)) |container_scope| {
         var decl_it = container_scope.decls.iterator();
         while (decl_it.next()) |entry| {
+            if (!include_fields and entry.value == .ast_node and entry.value.ast_node.id == .ContainerField) continue;
             const decl = DeclWithHandle{ .decl = &entry.value, .handle = handle };
             if (handle != orig_handle and !decl.isPublic()) continue;
             try callback(context, decl);
@@ -1224,7 +1226,7 @@ pub fn iterateSymbolsContainer(
         for (container_scope.uses) |use| {
             if (handle != orig_handle and use.visib_token == null) continue;
             const use_expr = (try resolveTypeOfNode(store, arena, .{ .node = use.expr, .handle = handle })) orelse continue;
-            try iterateSymbolsContainer(store, arena, use_expr, orig_handle, callback, context);
+            try iterateSymbolsContainer(store, arena, use_expr, orig_handle, callback, context, false);
         }
     }
 
@@ -1243,12 +1245,13 @@ pub fn iterateSymbolsGlobal(
         if (source_index >= scope.range.start and source_index < scope.range.end) {
             var decl_it = scope.decls.iterator();
             while (decl_it.next()) |entry| {
+                if (entry.value == .ast_node and entry.value.ast_node.id == .ContainerField) continue;
                 try callback(context, DeclWithHandle{ .decl = &entry.value, .handle = handle });
             }
 
             for (scope.uses) |use| {
                 const use_expr = (try resolveTypeOfNode(store, arena, .{ .node = use.expr, .handle = handle })) orelse continue;
-                try iterateSymbolsContainer(store, arena, use_expr, handle, callback, context);
+                try iterateSymbolsContainer(store, arena, use_expr, handle, callback, context, false);
             }
         }
 
