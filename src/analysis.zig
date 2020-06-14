@@ -217,25 +217,25 @@ fn findReturnStatementInternal(
     var child_idx: usize = 0;
     while (base_node.iterate(child_idx)) |child_node| : (child_idx += 1) {
         switch (child_node.id) {
-            .ControlFlowExpression => {
+            .ControlFlowExpression => blk: {
                 const cfe = child_node.cast(ast.Node.ControlFlowExpression).?;
-                if (cfe.kind == .Return) {
-                    // If we are calling ourselves recursively, ignore this return.
-                    if (cfe.rhs) |rhs| {
-                        if (rhs.cast(ast.Node.Call)) |call_node| {
-                            if (call_node.lhs.id == .Identifier) {
-                                if (std.mem.eql(u8, getDeclName(tree, call_node.lhs).?, getDeclName(tree, &fn_decl.base).?)) {
-                                    continue;
-                                }
+                if (cfe.kind != .Return) break :blk;
+
+                // If we are calling ourselves recursively, ignore this return.
+                if (cfe.rhs) |rhs| {
+                    if (rhs.cast(ast.Node.Call)) |call_node| {
+                        if (call_node.lhs.id == .Identifier) {
+                            if (std.mem.eql(u8, getDeclName(tree, call_node.lhs).?, getDeclName(tree, &fn_decl.base).?)) {
+                                continue;
                             }
                         }
                     }
-
-                    if (already_found.*) return null;
-                    already_found.* = true;
-                    result = cfe;
-                    continue;
                 }
+
+                if (already_found.*) return null;
+                already_found.* = true;
+                result = cfe;
+                continue;
             },
             else => {},
         }
@@ -262,16 +262,12 @@ fn resolveReturnType(
         // If this is a type function and it only contains a single return statement that returns
         // a container declaration, we will return that declaration.
         const ret = findReturnStatement(handle.tree, fn_decl) orelse return null;
-        if (ret.rhs) |rhs|
-            if (try resolveTypeOfNodeInternal(store, arena, .{
+        if (ret.rhs) |rhs| {
+            return try resolveTypeOfNodeInternal(store, arena, .{
                 .node = rhs,
                 .handle = handle,
-            }, bound_type_params)) |res_rhs| switch (res_rhs.node.id) {
-                .ContainerDecl => {
-                    return res_rhs;
-                },
-                else => return null,
-            };
+            }, bound_type_params);
+        }
 
         return null;
     }
