@@ -1009,7 +1009,7 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
 
         return try send(types.Response{
             .id = id,
-            .result = .{ .SemanticTokens = token_array },
+            .result = .{ .SemanticTokens = .{ .data = token_array } },
         });
     }
     // Autocomplete / Signatures
