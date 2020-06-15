@@ -376,14 +376,16 @@ fn identifierFromPosition(pos_index: usize, handle: DocumentStore.Handle) []cons
     return text[start_idx + 1 .. end_idx];
 }
 
-fn gotoDefinitionSymbol(id: types.RequestId, arena: *std.heap.ArenaAllocator, decl_handle: analysis.DeclWithHandle) !void {
+fn gotoDefinitionSymbol(id: types.RequestId, arena: *std.heap.ArenaAllocator, decl_handle: analysis.DeclWithHandle, resolve_alias: bool) !void {
     var handle = decl_handle.handle;
 
     const location = switch (decl_handle.decl.*) {
         .ast_node => |node| block: {
-            if (try analysis.resolveVarDeclAlias(&document_store, arena, .{ .node = node, .handle = handle })) |result| {
-                handle = result.handle;
-                break :block result.location();
+            if (resolve_alias) {
+                if (try analysis.resolveVarDeclAlias(&document_store, arena, .{ .node = node, .handle = handle })) |result| {
+                    handle = result.handle;
+                    break :block result.location();
+                }
             }
 
             const name_token = analysis.getDeclNameToken(handle.tree, node) orelse
@@ -502,15 +504,15 @@ fn gotoDefinitionLabel(id: types.RequestId, pos_index: usize, handle: *DocumentS
     defer arena.deinit();
 
     const decl = (try getLabelGlobal(pos_index, handle)) orelse return try respondGeneric(id, null_result_response);
-    return try gotoDefinitionSymbol(id, &arena, decl);
+    return try gotoDefinitionSymbol(id, &arena, decl, false);
 }
 
-fn gotoDefinitionGlobal(id: types.RequestId, pos_index: usize, handle: *DocumentStore.Handle, config: Config) !void {
+fn gotoDefinitionGlobal(id: types.RequestId, pos_index: usize, handle: *DocumentStore.Handle, config: Config, resolve_alias: bool) !void {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
     const decl = (try getSymbolGlobal(&arena, pos_index, handle)) orelse return try respondGeneric(id, null_result_response);
-    return try gotoDefinitionSymbol(id, &arena, decl);
+    return try gotoDefinitionSymbol(id, &arena, decl, resolve_alias);
 }
 
 fn hoverDefinitionLabel(id: types.RequestId, pos_index: usize, handle: *DocumentStore.Handle, config: Config) !void {
@@ -555,12 +557,13 @@ fn gotoDefinitionFieldAccess(
     position: types.Position,
     range: analysis.SourceRange,
     config: Config,
+    resolve_alias: bool,
 ) !void {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
     const decl = (try getSymbolFieldAccess(handle, &arena, position, range, config)) orelse return try respondGeneric(id, null_result_response);
-    return try gotoDefinitionSymbol(id, &arena, decl);
+    return try gotoDefinitionSymbol(id, &arena, decl, resolve_alias);
 }
 
 fn hoverDefinitionFieldAccess(
@@ -1092,12 +1095,13 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
             .character = position.getValue("character").?.Integer - 1,
         };
         if (pos.character >= 0) {
+            const resolve_alias = !std.mem.eql(u8, method, "textDocument/declaration");
             const pos_index = try handle.document.positionToIndex(pos);
             const pos_context = try analysis.documentPositionContext(allocator, handle.document, pos);
 
             switch (pos_context) {
-                .var_access => try gotoDefinitionGlobal(id, pos_index, handle, configFromUriOr(uri, config)),
-                .field_access => |range| try gotoDefinitionFieldAccess(id, handle, pos, range, configFromUriOr(uri, config)),
+                .var_access => try gotoDefinitionGlobal(id, pos_index, handle, configFromUriOr(uri, config), resolve_alias),
+                .field_access => |range| try gotoDefinitionFieldAccess(id, handle, pos, range, configFromUriOr(uri, config), resolve_alias),
                 .string_literal => try gotoDefinitionString(id, pos_index, handle, config),
                 .label => try gotoDefinitionLabel(id, pos_index, handle, configFromUriOr(uri, config)),
                 else => try respondGeneric(id, null_result_response),
