@@ -207,7 +207,55 @@ fn getDeclName(tree: *ast.Tree, node: *ast.Node) ?[]const u8 {
     };
 }
 
-/// Resolves variable declarationms like `const decl = @import("decl-file.zig").decl;` to the module's node
+fn isContainerDecl(decl_handle: DeclWithHandle) bool {
+    return switch (decl_handle.decl.*) {
+        .ast_node => |inner_node| inner_node.id == .ContainerDecl or inner_node.id == .Root,
+        else => false,
+    };
+}
+
+fn resolveVarDeclAliasInternal(
+    store: *DocumentStore,
+    arena: *std.heap.ArenaAllocator,
+    node_handle: NodeWithHandle,
+    root: bool,
+) error{OutOfMemory}!?DeclWithHandle {
+    const handle = node_handle.handle;
+    if (node_handle.node.cast(ast.Node.Identifier)) |ident| {
+        return try lookupSymbolGlobal(store, arena, handle, handle.tree.tokenSlice(ident.token), handle.tree.token_locs[ident.token].start);
+    }
+
+    if (node_handle.node.cast(ast.Node.InfixOp)) |infix_op| {
+        if (infix_op.op != .Period) return null;
+
+        const container_node = if (infix_op.lhs.cast(ast.Node.BuiltinCall)) |builtin_call| block: {
+            if (!std.mem.eql(u8, handle.tree.tokenSlice(builtin_call.builtin_token), "@import"))
+                return null;
+            const inner_node = (try resolveTypeOfNode(store, arena, .{ .node = infix_op.lhs, .handle = handle })) orelse return null;
+            std.debug.assert(inner_node.node.id == .Root);
+            break :block inner_node;
+        } else if (try resolveVarDeclAliasInternal(store, arena, .{ .node = infix_op.lhs, .handle = handle }, false)) |decl_handle| block: {
+            if (!isContainerDecl(decl_handle)) return null;
+            break :block NodeWithHandle{
+                .node = decl_handle.decl.ast_node,
+                .handle = decl_handle.handle,
+            };
+        } else return null;
+
+        if (try lookupSymbolContainer(store, arena, container_node, handle.tree.tokenSlice(infix_op.rhs.firstToken()), false)) |inner_decl| {
+            if (!root and !isContainerDecl(inner_decl)) return null;
+            return inner_decl;
+        }
+    }
+    return null;
+}
+
+/// Resolves variable declarations consisting of chains of imports and field accesses of containers, ending with the same name as the variable decl's name
+/// Examples:
+///```zig
+/// const decl = @import("decl-file.zig").decl;
+/// const other = decl.middle.other;
+///```
 pub fn resolveVarDeclAlias(store: *DocumentStore, arena: *std.heap.ArenaAllocator, decl_handle: NodeWithHandle) !?DeclWithHandle {
     const decl = decl_handle.node;
     const handle = decl_handle.handle;
@@ -218,18 +266,11 @@ pub fn resolveVarDeclAlias(store: *DocumentStore, arena: *std.heap.ArenaAllocato
         const base_expr = var_decl.init_node.?;
         if (base_expr.cast(ast.Node.InfixOp)) |infix_op| {
             if (infix_op.op != .Period) return null;
-            if (infix_op.lhs.cast(ast.Node.BuiltinCall)) |builtin_call| {
-                const name = handle.tree.tokenSlice(infix_op.rhs.firstToken());
+            const name = handle.tree.tokenSlice(infix_op.rhs.firstToken());
+            if (!std.mem.eql(u8, handle.tree.tokenSlice(var_decl.name_token), name))
+                return null;
 
-                if (!std.mem.eql(u8, handle.tree.tokenSlice(builtin_call.builtin_token), "@import"))
-                    return null;
-
-                if (!std.mem.eql(u8, handle.tree.tokenSlice(var_decl.name_token), name))
-                    return null;
-
-                const container_node = (try resolveTypeOfNode(store, arena, .{ .node = infix_op.lhs, .handle = handle })) orelse return null;
-                return lookupSymbolContainer(store, arena, container_node, name, false);
-            }
+            return try resolveVarDeclAliasInternal(store, arena, .{ .node = base_expr, .handle = handle }, true);
         }
     }
 

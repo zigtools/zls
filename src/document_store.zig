@@ -277,6 +277,9 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: []u8) anyerror!*Hand
 
                 const build_file_handle = try self.newDocument(build_file_uri, build_file_text);
 
+                if (build_file_handle.is_build_file) |build_file| {
+                    build_file.refs += 1;
+                }
                 handle.associated_build_file = build_file_handle.is_build_file;
                 break;
             } else break :associate_build_file;
