@@ -235,15 +235,16 @@ fn resolveVarDeclAliasInternal(
             std.debug.assert(inner_node.node.id == .Root);
             break :block inner_node;
         } else if (try resolveVarDeclAliasInternal(store, arena, .{ .node = infix_op.lhs, .handle = handle }, false)) |decl_handle| block: {
-            if (!isContainerDecl(decl_handle)) return null;
-            break :block NodeWithHandle{
-                .node = decl_handle.decl.ast_node,
-                .handle = decl_handle.handle,
-            };
+            if (decl_handle.decl.* != .ast_node) return null;
+            const resolved = (try resolveTypeOfNode(store, arena, .{ .node = decl_handle.decl.ast_node, .handle = decl_handle.handle })) orelse return null;
+            if (resolved.node.id != .ContainerDecl and resolved.node.id != .Root) return null;
+            break :block resolved;
         } else return null;
 
         if (try lookupSymbolContainer(store, arena, container_node, handle.tree.tokenSlice(infix_op.rhs.firstToken()), false)) |inner_decl| {
-            if (!root and !isContainerDecl(inner_decl)) return null;
+            if (root) return inner_decl;
+
+            // if (!root and !isContainerDecl(inner_decl)) return null;
             return inner_decl;
         }
     }
@@ -955,6 +956,7 @@ pub const PositionContext = union(enum) {
     var_access: SourceRange,
     global_error_set,
     enum_literal,
+    pre_label,
     label,
     other,
     empty,
@@ -967,6 +969,7 @@ pub const PositionContext = union(enum) {
             .field_access => |r| r,
             .var_access => |r| r,
             .enum_literal => null,
+            .pre_label => null,
             .label => null,
             .other => null,
             .empty => null,
@@ -1031,15 +1034,15 @@ pub fn documentPositionContext(allocator: *std.mem.Allocator, document: types.Te
         switch (tok.id) {
             .StringLiteral, .MultilineStringLiteralLine => curr_ctx.ctx = .{ .string_literal = tok.loc },
             .Identifier => switch (curr_ctx.ctx) {
-                .empty => curr_ctx.ctx = .{ .var_access = tok.loc },
+                .empty, .pre_label => curr_ctx.ctx = .{ .var_access = tok.loc },
                 else => {},
             },
             .Builtin => switch (curr_ctx.ctx) {
-                .empty => curr_ctx.ctx = .{ .builtin = tok.loc },
+                .empty, .pre_label => curr_ctx.ctx = .{ .builtin = tok.loc },
                 else => {},
             },
             .Period, .PeriodAsterisk => switch (curr_ctx.ctx) {
-                .empty => curr_ctx.ctx = .enum_literal,
+                .empty, .pre_label => curr_ctx.ctx = .enum_literal,
                 .enum_literal => curr_ctx.ctx = .empty,
                 .field_access => {},
                 .other => {},
@@ -1048,7 +1051,8 @@ pub fn documentPositionContext(allocator: *std.mem.Allocator, document: types.Te
                     .field_access = tokenRangeAppend(curr_ctx.ctx.range().?, tok),
                 },
             },
-            .Colon => curr_ctx.ctx = .label,
+            .Keyword_break, .Keyword_continue => curr_ctx.ctx = .pre_label,
+            .Colon => if (curr_ctx.ctx == .pre_label) { curr_ctx.ctx = .label; },
             .QuestionMark => switch (curr_ctx.ctx) {
                 .field_access => {},
                 else => curr_ctx.ctx = .empty,
