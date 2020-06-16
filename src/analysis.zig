@@ -1510,6 +1510,7 @@ pub const DocumentScope = struct {
         for (self.scopes) |scope| {
             scope.decls.deinit();
             allocator.free(scope.uses);
+            allocator.free(scope.tests);
         }
         allocator.free(self.scopes);
     }

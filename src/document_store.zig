@@ -629,6 +629,7 @@ fn stdUriFromLibPath(allocator: *std.mem.Allocator, zig_lib_path: ?[]const u8) !
 pub fn deinit(self: *DocumentStore) void {
     var entry_iterator = self.handles.iterator();
     while (entry_iterator.next()) |entry| {
+        entry.value.document_scope.deinit(self.allocator);
         self.allocator.free(entry.value.document.mem);
 
         for (entry.value.import_uris.items) |uri| {
@@ -638,8 +639,6 @@ pub fn deinit(self: *DocumentStore) void {
         entry.value.import_uris.deinit();
         self.allocator.free(entry.key);
         self.allocator.destroy(entry.value);
-    
-        entry.value.document_scope.deinit(self.allocator);
     }
 
     self.handles.deinit();

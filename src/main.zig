@@ -839,7 +839,9 @@ fn configFromUriOr(uri: []const u8, default: Config) Config {
     return default;
 }
 
-fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !void {
+// TODO Rewrite this, use a ComptimeStringMap that points to a fn pointer + Param type to decode into and pass to the function
+//      Split into multiple files?
+fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config, keep_running: *bool) !void {
     var tree = try parser.parse(json);
     defer tree.deinit();
 
@@ -920,6 +922,10 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
 
         std.debug.warn("{}\n", .{client_capabilities});
         try respondGeneric(id, initialize_response);
+    } else if (std.mem.eql(u8, method, "shutdown")) {
+        keep_running.* = false;
+        // Technically we shoudl deinitialize first and send possible errors to the client
+        try respondGeneric(id, null_result_response);
     } else if (std.mem.eql(u8, method, "initialized")) {
         // All gucci
     } else if (std.mem.eql(u8, method, "$/cancelRequest")) {
@@ -1240,6 +1246,11 @@ pub fn main() anyerror!void {
         allocator = &debug_alloc_state.allocator;
     }
 
+    defer if (debug_alloc) |dbg| {
+        std.debug.warn("Finished cleanup, last allocation info.\n", .{});
+        std.debug.warn("{}\n", .{dbg.info});
+    };
+
     // Init global vars
     const in_stream = std.io.getStdIn().inStream();
     stdout = std.io.bufferedOutStream(std.io.getStdOut().outStream());
@@ -1271,7 +1282,6 @@ pub fn main() anyerror!void {
 
     // Find the zig executable in PATH
     var zig_exe_path: ?[]const u8 = null;
-    defer if (zig_exe_path) |exe_path| allocator.free(exe_path);
 
     find_zig: {
         if (config.zig_exe_path) |exe_path| {
@@ -1343,7 +1353,8 @@ pub fn main() anyerror!void {
     var json_parser = std.json.Parser.init(allocator, false);
     defer json_parser.deinit();
 
-    while (true) {
+    var keep_running = true;
+    while (keep_running) {
         const headers = readRequestHeader(allocator, in_stream) catch |err| {
             std.debug.warn("{}; exiting!", .{@errorName(err)});
             return;
@@ -1352,7 +1363,7 @@ pub fn main() anyerror!void {
         const buf = try allocator.alloc(u8, headers.content_length);
         defer allocator.free(buf);
         try in_stream.readNoEof(buf);
-        try processJsonRpc(&json_parser, buf, config);
+        try processJsonRpc(&json_parser, buf, config, &keep_running);
         json_parser.reset();
 
         if (debug_alloc) |dbg| {
