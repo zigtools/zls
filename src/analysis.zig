@@ -668,17 +668,17 @@ fn resolveTypeOfNodeInternal(
             }
 
             const cast_map = std.ComptimeStringMap(void, .{
-                .{ "@as" },
-                .{ "@bitCast" },
-                .{ "@fieldParentPtr" },
-                .{ "@floatCast" },
-                .{ "@floatToInt" },
-                .{ "@intCast" },
-                .{ "@intToEnum" },
-                .{ "@intToFloat" },
-                .{ "@intToPtr" },
-                .{ "@truncate" },
-                .{ "@ptrCast" },
+                .{"@as"},
+                .{"@bitCast"},
+                .{"@fieldParentPtr"},
+                .{"@floatCast"},
+                .{"@floatToInt"},
+                .{"@intCast"},
+                .{"@intToEnum"},
+                .{"@intToFloat"},
+                .{"@intToPtr"},
+                .{"@truncate"},
+                .{"@ptrCast"},
             });
             if (cast_map.has(call_name)) {
                 if (builtin_call.params_len < 1) return null;
@@ -1051,7 +1051,9 @@ pub fn documentPositionContext(allocator: *std.mem.Allocator, document: types.Te
                 },
             },
             .Keyword_break, .Keyword_continue => curr_ctx.ctx = .pre_label,
-            .Colon => if (curr_ctx.ctx == .pre_label) { curr_ctx.ctx = .label; },
+            .Colon => if (curr_ctx.ctx == .pre_label) {
+                curr_ctx.ctx = .label;
+            },
             .QuestionMark => switch (curr_ctx.ctx) {
                 .field_access => {},
                 else => curr_ctx.ctx = .empty,
