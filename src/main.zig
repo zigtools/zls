@@ -1167,8 +1167,6 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
                 return try respondGeneric(id, null_result_response);
             };
 
-            // TODO This is a hack, we should run `zig fmt --stdin` instead and pass the buffer there.
-            // Didnt find a way to pass in a stdin buffer, only seems to accept a file.
             var process = try std.ChildProcess.init(&[_][]const u8{ zig_exe_path, "fmt", "--stdin" }, allocator);
             defer process.deinit();
             process.stdin_behavior = .Pipe;
