@@ -11,7 +11,6 @@ const analysis = @import("analysis.zig");
 const URI = @import("uri.zig");
 
 // Code is largely based off of https://github.com/andersfr/zig-lsp/blob/master/server.zig
-
 var stdout: std.io.BufferedOutStream(4096, std.fs.File.OutStream) = undefined;
 var allocator: *std.mem.Allocator = undefined;
 
@@ -29,7 +28,7 @@ const ClientCapabilities = struct {
 var client_capabilities = ClientCapabilities{};
 
 const initialize_response =
-    \\,"result": {"capabilities": {"signatureHelpProvider": {"triggerCharacters": ["(",","]},"textDocumentSync": 1,"completionProvider": {"resolveProvider": false,"triggerCharacters": [".",":","@"]},"documentHighlightProvider": false,"hoverProvider": true,"codeActionProvider": false,"declarationProvider": true,"definitionProvider": true,"typeDefinitionProvider": true,"implementationProvider": false,"referencesProvider": false,"documentSymbolProvider": true,"colorProvider": false,"documentFormattingProvider": false,"documentRangeFormattingProvider": false,"foldingRangeProvider": false,"selectionRangeProvider": false,"workspaceSymbolProvider": false,"rangeProvider": false,"documentProvider": true,"workspace": {"workspaceFolders": {"supported": true,"changeNotifications": true}},"semanticTokensProvider": {"documentProvider": true,"legend": {"tokenTypes": ["type","struct","enum","union","parameter","variable","tagField","field","function","keyword","modifier","comment","string","number","operator","builtin"],"tokenModifiers": ["definition","async","documentation", "generic"]}}}}}
+    \\,"result": {"capabilities": {"signatureHelpProvider": {"triggerCharacters": ["(",","]},"textDocumentSync": 1,"completionProvider": {"resolveProvider": false,"triggerCharacters": [".",":","@"]},"documentHighlightProvider": false,"hoverProvider": true,"codeActionProvider": false,"declarationProvider": true,"definitionProvider": true,"typeDefinitionProvider": true,"implementationProvider": false,"referencesProvider": false,"documentSymbolProvider": true,"colorProvider": false,"documentFormattingProvider": true,"documentRangeFormattingProvider": false,"foldingRangeProvider": false,"selectionRangeProvider": false,"workspaceSymbolProvider": false,"rangeProvider": false,"documentProvider": true,"workspace": {"workspaceFolders": {"supported": true,"changeNotifications": true}},"semanticTokensProvider": {"documentProvider": true,"legend": {"tokenTypes": ["type","struct","enum","union","parameter","variable","tagField","field","function","keyword","modifier","comment","string","number","operator","builtin"],"tokenModifiers": ["definition","async","documentation", "generic"]}}}}}
 ;
 
 const not_implemented_response =
@@ -1157,12 +1156,58 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
         };
 
         try documentSymbol(id, handle);
+    } else if (std.mem.eql(u8, method, "textDocument/formatting")) {
+        if (config.zig_exe_path) |zig_exe_path| {
+            const params = root.Object.getValue("params").?.Object;
+            const document = params.getValue("textDocument").?.Object;
+            const uri = document.getValue("uri").?.String;
+
+            const handle = document_store.getHandle(uri) orelse {
+                std.debug.warn("Trying to got to definition in non existent document {}", .{uri});
+                return try respondGeneric(id, null_result_response);
+            };
+
+            // TODO This is a hack, we should run `zig fmt --stdin` instead and pass the buffer there.
+            // Didnt find a way to pass in a stdin buffer, only seems to accept a file.
+            var process = try std.ChildProcess.init(&[_][]const u8{ zig_exe_path, "fmt", "--stdin" }, allocator);
+            defer process.deinit();
+            process.stdin_behavior = .Pipe;
+            process.stdout_behavior = .Pipe;
+
+            process.spawn() catch |err| {
+                std.debug.warn("Failied to spawn zig fmt process, error: {}\n", .{err});
+                return try respondGeneric(id, null_result_response);
+            };
+            try process.stdin.?.writeAll(handle.document.text);
+            process.stdin.?.close();
+            process.stdin = null;
+
+            const stdout_bytes = try process.stdout.?.reader().readAllAlloc(allocator, std.math.maxInt(usize));
+            defer allocator.free(stdout_bytes);
+
+            switch (try process.wait()) {
+                .Exited => |code| if (code == 0) {
+                    try send(types.Response{
+                        .id = id,
+                        .result = .{
+                            .TextEdits = &[1]types.TextEdit{
+                                .{
+                                    .range = handle.document.range(),
+                                    .newText = stdout_bytes,
+                                },
+                            },
+                        },
+                    });
+                },
+                else => {},
+            }
+        }
+        return try respondGeneric(id, null_result_response);
     } else if (std.mem.eql(u8, method, "textDocument/references") or
         std.mem.eql(u8, method, "textDocument/documentHighlight") or
         std.mem.eql(u8, method, "textDocument/codeAction") or
         std.mem.eql(u8, method, "textDocument/codeLens") or
         std.mem.eql(u8, method, "textDocument/documentLink") or
-        std.mem.eql(u8, method, "textDocument/formatting") or
         std.mem.eql(u8, method, "textDocument/rangeFormatting") or
         std.mem.eql(u8, method, "textDocument/onTypeFormatting") or
         std.mem.eql(u8, method, "textDocument/rename") or
@@ -1269,6 +1314,7 @@ pub fn main() anyerror!void {
     }
 
     if (zig_exe_path) |exe_path| {
+        config.zig_exe_path = exe_path;
         std.debug.warn("Using zig executable {}\n", .{exe_path});
         if (config.zig_lib_path == null) {
             // Set the lib path relative to the executable path.

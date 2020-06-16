@@ -60,6 +60,7 @@ pub const ResponseParams = union(enum) {
     Hover: Hover,
     DocumentSymbols: []DocumentSymbol,
     SemanticTokens: struct { data: []const u32 },
+    TextEdits: []TextEdit,
 };
 
 /// JSONRPC error
@@ -176,6 +177,27 @@ pub const TextDocument = struct {
         if (split_iterator.next()) |next| {
             return next;
         } else return error.InvalidParams;
+    }
+
+    pub fn range(self: TextDocument) Range {
+        var line_idx: i64 = 0;
+        var curr_line: []const u8 = self.text;
+
+        var split_iterator = std.mem.split(self.text, "\n");
+        while (split_iterator.next()) |line| : (line_idx += 1) {
+            curr_line = line;
+        }
+
+        return .{
+            .start = .{
+                .line = 0,
+                .character = 0,
+            },
+            .end = .{
+                .line = line_idx,
+                .character = @intCast(i64, curr_line.len),
+            }
+        };
     }
 };
 
