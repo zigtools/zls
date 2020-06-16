@@ -25,17 +25,14 @@ const TokenModifiers = packed struct {
     definition: bool = false,
     @"async": bool = false,
     documentation: bool = false,
+    generic: bool = false,
 
     fn toInt(self: TokenModifiers) u32 {
-        return @as(u32, @bitCast(u3, self));
+        return @as(u32, @bitCast(u4, self));
     }
 
-    fn with(lhs: TokenModifiers, rhs: TokenModifiers) TokenModifiers {
-        return fromInt(toInt(lhs) | toInt(rhs));
-    }
-
-    fn intersect(lhs: TokenModifiers, rhs: TokenModifiers) TokenModifiers {
-        return fromInt(toInt(lhs) & toInt(rhs));
+    inline fn set(self: *TokenModifiers, comptime field: []const u8) void {
+        @field(self, field) = true;
     }
 };
 
@@ -111,6 +108,7 @@ pub fn writeAllSemanticTokens(allocator: *std.mem.Allocator, handle: DocumentSto
 
     // TODO We only scan tokens for now, we need to actually do semantic analysis
     for (handle.tree.token_ids) |token_id, token_idx| {
+        var token_mod = TokenModifiers{};
         const token_type: TokenType = switch (token_id) {
             .StringLiteral, .MultilineStringLiteralLine, .CharLiteral => .string,
             .Builtin => .builtin,
@@ -158,7 +156,11 @@ pub fn writeAllSemanticTokens(allocator: *std.mem.Allocator, handle: DocumentSto
             .AngleBracketAngleBracketRightEqual,
             .Tilde,
             => .operator,
-            .LineComment, .DocComment, .ContainerDocComment => .comment,
+            .LineComment, .ContainerDocComment => .comment,
+            .DocComment => block: {
+                token_mod.set("documentation");
+                break :block .comment;
+            },
             .Keyword_align,
             .Keyword_allowzero,
             .Keyword_and,
@@ -214,7 +216,7 @@ pub fn writeAllSemanticTokens(allocator: *std.mem.Allocator, handle: DocumentSto
             else => continue,
         };
 
-        try builder.add(token_idx, token_type, TokenModifiers{});
+        try builder.add(token_idx, token_type, token_mod);
     }
 
     return builder.toOwnedSlice();

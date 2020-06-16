@@ -23,12 +23,13 @@ const ClientCapabilities = struct {
     supports_semantic_tokens: bool = false,
     hover_supports_md: bool = false,
     completion_doc_supports_md: bool = false,
+    supports_workspace_folders: bool = false,
 };
 
 var client_capabilities = ClientCapabilities{};
 
 const initialize_response =
-    \\,"result": {"capabilities": {"signatureHelpProvider": {"triggerCharacters": ["(",","]},"textDocumentSync": 1,"completionProvider": {"resolveProvider": false,"triggerCharacters": [".",":","@"]},"documentHighlightProvider": false,"hoverProvider": true,"codeActionProvider": false,"declarationProvider": true,"definitionProvider": true,"typeDefinitionProvider": true,"implementationProvider": false,"referencesProvider": false,"documentSymbolProvider": true,"colorProvider": false,"documentFormattingProvider": false,"documentRangeFormattingProvider": false,"foldingRangeProvider": false,"selectionRangeProvider": false,"workspaceSymbolProvider": false,"rangeProvider": false,"documentProvider": true,"workspace": {"workspaceFolders": {"supported": true,"changeNotifications": true}},"semanticTokensProvider": {"documentProvider": true,"legend": {"tokenTypes": ["type","struct","enum","union","parameter","variable","tagField","field","function","keyword","modifier","comment","string","number","operator","builtin"],"tokenModifiers": ["definition","async","documentation"]}}}}}
+    \\,"result": {"capabilities": {"signatureHelpProvider": {"triggerCharacters": ["(",","]},"textDocumentSync": 1,"completionProvider": {"resolveProvider": false,"triggerCharacters": [".",":","@"]},"documentHighlightProvider": false,"hoverProvider": true,"codeActionProvider": false,"declarationProvider": true,"definitionProvider": true,"typeDefinitionProvider": true,"implementationProvider": false,"referencesProvider": false,"documentSymbolProvider": true,"colorProvider": false,"documentFormattingProvider": false,"documentRangeFormattingProvider": false,"foldingRangeProvider": false,"selectionRangeProvider": false,"workspaceSymbolProvider": false,"rangeProvider": false,"documentProvider": true,"workspace": {"workspaceFolders": {"supported": true,"changeNotifications": true}},"semanticTokensProvider": {"documentProvider": true,"legend": {"tokenTypes": ["type","struct","enum","union","parameter","variable","tagField","field","function","keyword","modifier","comment","string","number","operator","builtin"],"tokenModifiers": ["definition","async","documentation", "generic"]}}}}}
 ;
 
 const not_implemented_response =
@@ -60,7 +61,7 @@ fn send(reqOrRes: var) !void {
     defer arena.deinit();
 
     var arr = std.ArrayList(u8).init(&arena.allocator);
-    try std.json.stringify(reqOrRes, std.json.StringifyOptions{}, arr.outStream());
+    try std.json.stringify(reqOrRes, .{}, arr.outStream());
 
     const stdout_stream = stdout.outStream();
     try stdout_stream.print("Content-Length: {}\r\n\r\n", .{arr.items.len});
@@ -851,22 +852,6 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
         else => types.RequestId{ .Integer = 0 },
     } else types.RequestId{ .Integer = 0 };
 
-    if (id == .Integer and id.Integer == 1337 and (root.Object.getValue("method") == null or std.mem.eql(u8, root.Object.getValue("method").?.String, ""))) {
-        if (root.Object.getValue("result")) |result_obj| {
-            if (result_obj == .Array) {
-                const result = result_obj.Array;
-
-                for (result.items) |workspace_folder| {
-                    const duped_uri = try std.mem.dupe(allocator, u8, workspace_folder.Object.getValue("uri").?.String);
-                    try workspace_folder_configs.putNoClobber(duped_uri, null);
-                }
-            }
-        }
-
-        try loadWorkspaceConfigs();
-        return;
-    }
-
     std.debug.assert(root.Object.getValue("method") != null);
     const method = root.Object.getValue("method").?.String;
 
@@ -880,6 +865,12 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
     if (std.mem.eql(u8, method, "initialize")) {
         const params = root.Object.getValue("params").?.Object;
         const client_capabs = params.getValue("capabilities").?.Object;
+        if (client_capabs.getValue("workspace")) |workspace_capabs| {
+            if (workspace_capabs.Object.getValue("workspaceFolders")) |folders_capab| {
+                client_capabilities.supports_workspace_folders = folders_capab.Bool;
+            }
+        }
+
         if (client_capabs.getValue("textDocument")) |text_doc_capabs| {
             if (text_doc_capabs.Object.getValue("semanticTokens")) |_| {
                 client_capabilities.supports_semantic_tokens = true;
@@ -911,15 +902,27 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
             }
         }
 
+        if (params.getValue("workspaceFolders")) |workspace_folders| {
+            switch (workspace_folders) {
+                .Array => |folders| {
+                    std.debug.warn("Got workspace folders in initialization.\n", .{});
+
+                    for (folders.items) |workspace_folder| {
+                        const folder_uri = workspace_folder.Object.getValue("uri").?.String;
+                        std.debug.warn("Loaded folder {}\n", .{folder_uri});
+                        const duped_uri = try std.mem.dupe(allocator, u8, folder_uri);
+                        try workspace_folder_configs.putNoClobber(duped_uri, null);
+                    }
+                    try loadWorkspaceConfigs();
+                },
+                else => {},
+            }
+        }
+
         std.debug.warn("{}\n", .{client_capabilities});
         try respondGeneric(id, initialize_response);
     } else if (std.mem.eql(u8, method, "initialized")) {
-        // Send the workspaceFolders request
-        try send(types.Request{
-            .id = .{ .Integer = 1337 },
-            .method = "workspace/workspaceFolders",
-            .params = {},
-        });
+        // All gucci
     } else if (std.mem.eql(u8, method, "$/cancelRequest")) {
         // noop
     }
