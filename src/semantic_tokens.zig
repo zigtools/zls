@@ -54,15 +54,15 @@ const Builder = struct {
 
     fn add(self: *Builder, token: ast.TokenIndex, token_type: TokenType, token_modifiers: TokenModifiers) !void {
         const start_idx = if (self.current_token) |current_token|
-            self.tree.token_locs[current_token].start + 1
+            self.tree.token_locs[current_token].start
         else
             0;
 
         const token_loc = self.tree.token_locs[token];
         const delta_loc = self.tree.tokenLocationLoc(start_idx, token_loc);
         try self.arr.appendSlice(&[_]u32{
-            @truncate(u32, if (self.current_token == null) delta_loc.line + 1 else delta_loc.line),
-            @truncate(u32, delta_loc.column + 1),
+            @truncate(u32, delta_loc.line),
+            @truncate(u32, delta_loc.column),
             @truncate(u32, token_loc.end - token_loc.start),
             @enumToInt(token_type),
             token_modifiers.toInt(),

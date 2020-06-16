@@ -28,7 +28,7 @@ const ClientCapabilities = struct {
 var client_capabilities = ClientCapabilities{};
 
 const initialize_response =
-    \\,"result":{"capabilities":{"signatureHelpProvider":{"triggerCharacters":["(",","]},"textDocumentSync":1,"completionProvider":{"resolveProvider":false,"triggerCharacters":[".",":","@"]},"documentHighlightProvider":false,"hoverProvider":true,"codeActionProvider":false,"declarationProvider":true,"definitionProvider":true,"typeDefinitionProvider":true,"implementationProvider":false,"referencesProvider":false,"documentSymbolProvider":true,"colorProvider":false,"documentFormattingProvider":false,"documentRangeFormattingProvider":false,"foldingRangeProvider":false,"selectionRangeProvider":false,"workspaceSymbolProvider":false,"rangeProvider":false,"documentProvider":true},"workspace":{"workspaceFolders":{"supported":true,"changeNotifications":true}},"semanticTokensProvider":{"documentProvider":true, "legend":{"tokenTypes":["type","struct","enum","union","parameter","variable","tagField","field","function","keyword","modifier","comment","string","number","operator","builtin"],"tokenModifiers":["definition","async","documentation"]}}}}
+    \\,"result": {"capabilities": {"signatureHelpProvider": {"triggerCharacters": ["(",","]},"textDocumentSync": 1,"completionProvider": {"resolveProvider": false,"triggerCharacters": [".",":","@"]},"documentHighlightProvider": false,"hoverProvider": true,"codeActionProvider": false,"declarationProvider": true,"definitionProvider": true,"typeDefinitionProvider": true,"implementationProvider": false,"referencesProvider": false,"documentSymbolProvider": true,"colorProvider": false,"documentFormattingProvider": false,"documentRangeFormattingProvider": false,"foldingRangeProvider": false,"selectionRangeProvider": false,"workspaceSymbolProvider": false,"rangeProvider": false,"documentProvider": true,"workspace": {"workspaceFolders": {"supported": true,"changeNotifications": true}},"semanticTokensProvider": {"documentProvider": true,"legend": {"tokenTypes": ["type","struct","enum","union","parameter","variable","tagField","field","function","keyword","modifier","comment","string","number","operator","builtin"],"tokenModifiers": ["definition","async","documentation"]}}}}}
 ;
 
 const not_implemented_response =
@@ -49,6 +49,9 @@ const edit_not_applied_response =
 ;
 const no_completions_response =
     \\,"result":{"isIncomplete":false,"items":[]}}
+;
+const no_semantic_tokens_response =
+    \\,"result":{"data":[]}}
 ;
 
 /// Sends a request or response
@@ -997,20 +1000,23 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config) !v
         const document = params.getValue("textDocument").?.Object;
         const uri = document.getValue("uri").?.String;
 
-        const handle = document_store.getHandle(uri) orelse {
-            std.debug.warn("Trying to complete in non existent document {}", .{uri});
-            return try respondGeneric(id, no_completions_response);
-        };
+        const this_config = configFromUriOr(uri, config);
+        if (this_config.enable_semantic_tokens) {
+            const handle = document_store.getHandle(uri) orelse {
+                std.debug.warn("Trying to complete in non existent document {}", .{uri});
+                return try respondGeneric(id, no_semantic_tokens_response);
+            };
 
-        // TODO Actually test this in some editor, VSCode won't send me requests -_-'.
-        const semantic_tokens = @import("semantic_tokens.zig");
-        const token_array = try semantic_tokens.writeAllSemanticTokens(allocator, handle.*);
-        defer allocator.free(token_array);
+            const semantic_tokens = @import("semantic_tokens.zig");
+            const token_array = try semantic_tokens.writeAllSemanticTokens(allocator, handle.*);
+            defer allocator.free(token_array);
 
-        return try send(types.Response{
-            .id = id,
-            .result = .{ .SemanticTokens = .{ .data = token_array } },
-        });
+            return try send(types.Response{
+                .id = id,
+                .result = .{ .SemanticTokens = .{ .data = token_array } },
+            });
+        } else
+            return try respondGeneric(id, no_semantic_tokens_response);
     }
     // Autocomplete / Signatures
     else if (std.mem.eql(u8, method, "textDocument/completion")) {

@@ -59,7 +59,7 @@ pub const ResponseParams = union(enum) {
     Location: Location,
     Hover: Hover,
     DocumentSymbols: []DocumentSymbol,
-    SemanticTokens: struct { data: []u32 },
+    SemanticTokens: struct { data: []const u32 },
 };
 
 /// JSONRPC error
