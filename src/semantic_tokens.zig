@@ -84,18 +84,18 @@ fn isAllDigit(str: []const u8) bool {
 
 fn isTypeIdent(tree: *ast.Tree, token_idx: ast.TokenIndex) bool {
     const PrimitiveTypes = std.ComptimeStringMap(void, .{
-        .{ .@"0" = "isize" },          .{ .@"0" = "usize" },
-        .{ .@"0" = "c_short" },        .{ .@"0" = "c_ushort" },
-        .{ .@"0" = "c_int" },          .{ .@"0" = "c_uint" },
-        .{ .@"0" = "c_long" },         .{ .@"0" = "c_ulong" },
-        .{ .@"0" = "c_longlong" },     .{ .@"0" = "c_ulonglong" },
-        .{ .@"0" = "c_longdouble" },   .{ .@"0" = "c_void" },
-        .{ .@"0" = "f16" },            .{ .@"0" = "f32" },
-        .{ .@"0" = "f64" },            .{ .@"0" = "f128" },
-        .{ .@"0" = "bool" },           .{ .@"0" = "void" },
-        .{ .@"0" = "noreturn" },       .{ .@"0" = "type" },
-        .{ .@"0" = "anyerror" },       .{ .@"0" = "comptime_int" },
-        .{ .@"0" = "comptime_float" }, .{ .@"0" = "anyframe" },
+        .{ "isize" },          .{ "usize" },
+        .{ "c_short" },        .{ "c_ushort" },
+        .{ "c_int" },          .{ "c_uint" },
+        .{ "c_long" },         .{ "c_ulong" },
+        .{ "c_longlong" },     .{ "c_ulonglong" },
+        .{ "c_longdouble" },   .{ "c_void" },
+        .{ "f16" },            .{ "f32" },
+        .{ "f64" },            .{ "f128" },
+        .{ "bool" },           .{ "void" },
+        .{ "noreturn" },       .{ "type" },
+        .{ "anyerror" },       .{ "comptime_int" },
+        .{ "comptime_float" }, .{ "anyframe" },
     });
 
     const text = tree.tokenSlice(token_idx);

@@ -667,19 +667,18 @@ fn resolveTypeOfNodeInternal(
                 return innermostContainer(handle, handle.tree.token_locs[builtin_call.firstToken()].start);
             }
 
-            // TODO: https://github.com/ziglang/zig/issues/4335
             const cast_map = std.ComptimeStringMap(void, .{
-                .{ .@"0" = "@as" },
-                .{ .@"0" = "@bitCast" },
-                .{ .@"0" = "@fieldParentPtr" },
-                .{ .@"0" = "@floatCast" },
-                .{ .@"0" = "@floatToInt" },
-                .{ .@"0" = "@intCast" },
-                .{ .@"0" = "@intToEnum" },
-                .{ .@"0" = "@intToFloat" },
-                .{ .@"0" = "@intToPtr" },
-                .{ .@"0" = "@truncate" },
-                .{ .@"0" = "@ptrCast" },
+                .{ "@as" },
+                .{ "@bitCast" },
+                .{ "@fieldParentPtr" },
+                .{ "@floatCast" },
+                .{ "@floatToInt" },
+                .{ "@intCast" },
+                .{ "@intToEnum" },
+                .{ "@intToFloat" },
+                .{ "@intToPtr" },
+                .{ "@truncate" },
+                .{ "@ptrCast" },
             });
             if (cast_map.has(call_name)) {
                 if (builtin_call.params_len < 1) return null;
