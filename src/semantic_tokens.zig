@@ -148,6 +148,13 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
                 try writeNodeTokens(builder, arena, store, child);
                 previous_end = child.lastToken();
             }
+
+            var i = previous_end;
+            while (i < node.lastToken()) : (i += 1) {
+                if (handle.tree.token_ids[i] == .LineComment) {
+                    try writeToken(builder, i, .comment);
+                }
+            }
         },
         .VarDecl => {
             const var_decl = node.cast(ast.Node.VarDecl).?;
@@ -220,6 +227,13 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
                     }
                 } else {
                     try writeNodeTokens(builder, arena, store, child);
+                }
+            }
+
+            var i = previous_end;
+            while (i < node.lastToken()) : (i += 1) {
+                if (handle.tree.token_ids[i] == .LineComment) {
+                    try writeToken(builder, i, .comment);
                 }
             }
         },
@@ -358,6 +372,13 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
 
                 try writeNodeTokens(builder, arena, store, case_node);
             }
+
+            var i = previous_end;
+            while (i < node.lastToken()) : (i += 1) {
+                if (handle.tree.token_ids[i] == .LineComment) {
+                    try writeToken(builder, i, .comment);
+                }
+            }
         },
         .SwitchCase => {
             const switch_case = node.cast(ast.Node.SwitchCase).?;
@@ -401,8 +422,6 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
         },
         .InfixOp => {
             const infix_op = node.cast(ast.Node.InfixOp).?;
-            // @TODO This crashes the server....
-            std.debug.warn("INFIX OP: {}\n", .{infix_op.op});
             // @TODO Im blowing up my stack!
             // try writeNodeTokens(builder, arena, store, infix_op.lhs);
             if (infix_op.op != .Period and infix_op.op != .Catch) {
@@ -421,13 +440,31 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
         },
         .PrefixOp => {
             const prefix_op = node.cast(ast.Node.PrefixOp).?;
-            // TODO Arrays
             const tok_type: TokenType = switch (prefix_op.op) {
                 .Try, .Await, .Resume => .keyword,
                 else => .operator,
             };
 
             try writeToken(builder, prefix_op.op_token, tok_type);
+            switch (prefix_op.op) {
+                .ArrayType => |info| {
+                    try writeNodeTokens(builder, arena, store, info.len_expr);
+                    try writeToken(builder, info.len_expr.lastToken() + 1, tok_type);
+                },
+                .SliceType, .PtrType => |info| {
+                    if (prefix_op.op == .SliceType)
+                        try writeToken(builder, prefix_op.op_token + 1, tok_type);
+
+                    if (info.align_info) |align_info| {
+                        try writeToken(builder, align_info.node.firstToken() - 2, .keyword);
+                    }
+                    try writeToken(builder, info.const_token, .keyword);
+                    try writeToken(builder, info.volatile_token, .keyword);
+                    try writeToken(builder, info.allowzero_token, .keyword);
+                },
+                else => {},
+            }
+
             try writeNodeTokens(builder, arena, store, prefix_op.rhs);
         },
         .ArrayInitializer => {
@@ -540,7 +577,7 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
             try writeToken(builder, asm_expr.asm_token, .keyword);
             try writeToken(builder, asm_expr.volatile_token, .keyword);
             try writeNodeTokens(builder, arena, store, asm_expr.template);
-            // @TODO Inputs, outputs.
+            // TODO Inputs, outputs.
         },
         .VarType => {
             try writeToken(builder, node.firstToken(), .type);
@@ -556,8 +593,7 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
         else => {},
     }
 
-    // TODO Handle in the Container initialization itself to highlight with the correct type FieldInitializer
-
+    // TODO Where we are handling comments, also handle keywords etc.
     // TODO While editing, the current AST node will be invalid and thus will not exist in the tree at all.
     // Scan over the tokens we are not covering at all and color the keywords etc.
 }
