@@ -400,7 +400,7 @@ fn resolveUnwrapErrorType(
     const rhs_node = switch (rhs.type.data) {
         .other => |n| n,
         .error_union => |n| return TypeWithHandle{
-            .type = .{ .data = .{ .other = n }, .is_type_val = false },
+            .type = .{ .data = .{ .other = n }, .is_type_val = rhs.type.is_type_val },
             .handle = rhs.handle,
         },
         .slice => return null,
@@ -557,8 +557,14 @@ fn resolveTypeOfNodeInternal(
         },
         .Call => {
             const call = node.cast(ast.Node.Call).?;
+            const decl = (try resolveTypeOfNodeInternal(
+                store,
+                arena,
+                .{ .node = call.lhs, .handle = handle },
+                bound_type_params,
+            )) orelse return null;
 
-            const decl = (try resolveTypeOfNodeInternal(store, arena, .{ .node = call.lhs, .handle = handle }, bound_type_params)) orelse return null;
+            if (decl.type.is_type_val) return null;
             const decl_node = switch (decl.type.data) {
                 .other => |n| n,
                 else => return null,
@@ -594,7 +600,7 @@ fn resolveTypeOfNodeInternal(
 
                 return try resolveReturnType(store, arena, fn_decl, decl.handle, bound_type_params);
             }
-            return decl;
+            return null;
         },
         .GroupedExpression => {
             const grouped = node.cast(ast.Node.GroupedExpression).?;
@@ -728,6 +734,7 @@ fn resolveTypeOfNodeInternal(
             }
 
             // Almost the same as the above, return a type value though.
+            // TODO Do peer type resolution, we just keep the first for now.
             if (std.mem.eql(u8, call_name, "@TypeOf")) {
                 if (builtin_call.params_len < 1) return null;
                 var resolved_type = (try resolveTypeOfNodeInternal(store, arena, .{
@@ -769,7 +776,17 @@ fn resolveTypeOfNodeInternal(
             }
             return TypeWithHandle.typeVal(node_handle);
         },
-        .MultilineStringLiteral, .StringLiteral, .FnProto => return TypeWithHandle{
+        .FnProto => {
+            // This is a function type
+            if (node.cast(ast.Node.FnProto).?.name_token == null) {
+                return TypeWithHandle.typeVal(node_handle);
+            }
+            return TypeWithHandle{
+                .type = .{ .data = .{ .other = node }, .is_type_val = false },
+                .handle = handle,
+            };
+        },
+        .MultilineStringLiteral, .StringLiteral => return TypeWithHandle{
             .type = .{ .data = .{ .other = node }, .is_type_val = false },
             .handle = handle,
         },
@@ -929,6 +946,8 @@ pub fn getFieldAccessType(
                     else => return null,
                 };
 
+                // Can't call a function type, we need a function type instance.
+                if (current_type.type.is_type_val) return null;
                 if (current_type_node.cast(ast.Node.FnProto)) |func| {
                     if (try resolveReturnType(store, arena, func, current_type.handle, &bound_type_params)) |ret| {
                         current_type = ret;
@@ -1155,6 +1174,8 @@ pub fn documentPositionContext(allocator: *std.mem.Allocator, document: types.Te
             .Keyword_break, .Keyword_continue => curr_ctx.ctx = .pre_label,
             .Colon => if (curr_ctx.ctx == .pre_label) {
                 curr_ctx.ctx = .label;
+            } else {
+                curr_ctx.ctx = .empty;
             },
             .QuestionMark => switch (curr_ctx.ctx) {
                 .field_access => {},
@@ -1329,7 +1350,12 @@ pub const DeclWithHandle = struct {
                         }
                         return null;
                     }
-                    return try resolveTypeOfNodeInternal(store, arena, .{ .node = type_node, .handle = self.handle }, bound_type_params);
+                    return ((try resolveTypeOfNodeInternal(
+                        store,
+                        arena,
+                        .{ .node = type_node, .handle = self.handle },
+                        bound_type_params,
+                    )) orelse return null).instanceTypeVal();
                 },
                 else => null,
             },
