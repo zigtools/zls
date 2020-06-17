@@ -403,7 +403,7 @@ fn resolveUnwrapErrorType(
             .type = .{ .data = .{ .other = n }, .is_type_val = rhs.type.is_type_val },
             .handle = rhs.handle,
         },
-        .slice => return null,
+        .primitive, .slice => return null,
     };
 
     if (rhs_node.cast(ast.Node.InfixOp)) |infix_op| {
@@ -514,7 +514,38 @@ fn resolveFieldAccessLhsType(
     return (try resolveDerefType(store, arena, lhs, bound_type_params)) orelse lhs;
 }
 
-const BoundTypeParams = std.AutoHashMap(*const ast.Node.FnProto.ParamDecl, TypeWithHandle);
+pub const BoundTypeParams = std.AutoHashMap(*const ast.Node.FnProto.ParamDecl, TypeWithHandle);
+
+fn allDigits(str: []const u8) bool {
+    for (str) |c| {
+        if (!std.ascii.isDigit(c)) return false;
+    }
+    return true;
+}
+
+pub fn isTypeIdent(tree: *ast.Tree, token_idx: ast.TokenIndex) bool {
+    const PrimitiveTypes = std.ComptimeStringMap(void, .{
+        .{"isize"},          .{"usize"},
+        .{"c_short"},        .{"c_ushort"},
+        .{"c_int"},          .{"c_uint"},
+        .{"c_long"},         .{"c_ulong"},
+        .{"c_longlong"},     .{"c_ulonglong"},
+        .{"c_longdouble"},   .{"c_void"},
+        .{"f16"},            .{"f32"},
+        .{"f64"},            .{"f128"},
+        .{"bool"},           .{"void"},
+        .{"noreturn"},       .{"type"},
+        .{"anyerror"},       .{"comptime_int"},
+        .{"comptime_float"}, .{"anyframe"},
+    });
+
+    const text = tree.tokenSlice(token_idx);
+    if (PrimitiveTypes.has(text)) return true;
+    if (text.len > 1 and (text[0] == 'u' or text[0] == 'i') and allDigits(text[1..]))
+        return true;
+
+    return false;
+}
 
 /// Resolves the type of a node
 fn resolveTypeOfNodeInternal(
@@ -541,6 +572,13 @@ fn resolveTypeOfNodeInternal(
             return try resolveTypeOfNodeInternal(store, arena, .{ .node = vari.init_node.?, .handle = handle }, bound_type_params);
         },
         .Identifier => {
+            if (isTypeIdent(handle.tree, node.firstToken())) {
+                return TypeWithHandle{
+                    .type = .{ .data = .primitive, .is_type_val = true },
+                    .handle = handle,
+                };
+            }
+
             if (try lookupSymbolGlobal(store, arena, handle, handle.tree.getNodeSource(node), handle.tree.token_locs[node.firstToken()].start)) |child| {
                 return try child.resolveType(store, arena, bound_type_params);
             }
@@ -802,6 +840,7 @@ pub const Type = struct {
         slice: *ast.Node,
         error_union: *ast.Node,
         other: *ast.Node,
+        primitive,
     },
     /// If true, the type `type`, the attached data is the value of the type value.
     is_type_val: bool,
@@ -827,6 +866,37 @@ pub const TypeWithHandle = struct {
             .type = .{ .data = self.type.data, .is_type_val = false },
             .handle = self.handle,
         };
+    }
+
+    fn isRoot(self: TypeWithHandle) bool {
+        switch (self.type.data) {
+            .other => |n| return n.id == .Root,
+            else => return false,
+        }
+    }
+
+    fn isContainer(self: TypeWithHandle, container_kind_tok: std.zig.Token.Id) bool {
+        switch (self.type.data) {
+            .other => |n| {
+                if (n.cast(ast.Node.ContainerDecl)) |cont| {
+                    return self.handle.tree.token_ids[cont.kind_token] == container_kind_tok;
+                }
+                return false;
+            },
+            else => return false,
+        }
+    }
+
+    pub fn isStructType(self: TypeWithHandle) bool {
+        return self.isContainer(.Keyword_struct) or self.isRoot();
+    }
+
+    pub fn isEnumType(self: TypeWithHandle) bool {
+        return self.isContainer(.Keyword_enum);
+    }
+
+    pub fn isUnionType(self: TypeWithHandle) bool {
+        return self.isContainer(.Keyword_union);
     }
 };
 
@@ -1338,7 +1408,7 @@ pub const DeclWithHandle = struct {
         };
     }
 
-    fn resolveType(self: DeclWithHandle, store: *DocumentStore, arena: *std.heap.ArenaAllocator, bound_type_params: *BoundTypeParams) !?TypeWithHandle {
+    pub fn resolveType(self: DeclWithHandle, store: *DocumentStore, arena: *std.heap.ArenaAllocator, bound_type_params: *BoundTypeParams) !?TypeWithHandle {
         return switch (self.decl.*) {
             .ast_node => |node| try resolveTypeOfNodeInternal(store, arena, .{ .node = node, .handle = self.handle }, bound_type_params),
             .param_decl => |param_decl| switch (param_decl.param_type) {
