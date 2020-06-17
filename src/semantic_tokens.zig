@@ -455,6 +455,8 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
                     try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, info.len_expr);
                 },
                 .SliceType, .PtrType => |info| {
+                    if (prefix_op.op == .PtrType) try writeToken(builder, prefix_op.op_token, tok_type);
+
                     if (info.align_info) |align_info| {
                         try writeToken(builder, align_info.node.firstToken() - 2, .keyword);
                         try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, align_info.node);
