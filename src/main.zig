@@ -202,11 +202,44 @@ fn publishDiagnostics(handle: DocumentStore.Handle, config: Config) !void {
     });
 }
 
+fn typeToCompletion(
+    arena: *std.heap.ArenaAllocator,
+    list: *std.ArrayList(types.CompletionItem),
+    type_handle: analysis.TypeWithHandle,
+    orig_handle: *DocumentStore.Handle,
+    config: Config,
+) error{OutOfMemory}!void {
+    switch (type_handle.type.data) {
+        .slice => {
+            if (!type_handle.type.is_type_val) {
+                try list.append(.{
+                    .label = "len",
+                    .kind = .Field,
+                });
+                try list.append(.{
+                    .label = "ptr",
+                    .kind = .Field,
+                });
+            }
+        },
+        .error_union => {},
+        .other => |n| try nodeToCompletion(
+            arena,
+            list,
+            .{ .node = n, .handle = type_handle.handle },
+            orig_handle,
+            type_handle.type.is_type_val,
+            config,
+        ),
+    }
+}
+
 fn nodeToCompletion(
     arena: *std.heap.ArenaAllocator,
     list: *std.ArrayList(types.CompletionItem),
     node_handle: analysis.NodeWithHandle,
     orig_handle: *DocumentStore.Handle,
+    is_type_val: bool,
     config: Config,
 ) error{OutOfMemory}!void {
     const node = node_handle.node;
@@ -226,31 +259,36 @@ fn nodeToCompletion(
     else
         null;
 
+    if (node.id == .ErrorSetDecl or node.id == .Root or node.id == .ContainerDecl) {
+        const context = DeclToCompletionContext{
+            .completions = list,
+            .config = &config,
+            .arena = arena,
+            .orig_handle = orig_handle,
+        };
+        try analysis.iterateSymbolsContainer(&document_store, arena, node_handle, orig_handle, declToCompletion, context, !is_type_val);
+    }
+
+    if (is_type_val) return;
+
     switch (node.id) {
-        .ErrorSetDecl, .Root, .ContainerDecl => {
-            const context = DeclToCompletionContext{
-                .completions = list,
-                .config = &config,
-                .arena = arena,
-                .orig_handle = orig_handle,
-            };
-            try analysis.iterateSymbolsContainer(&document_store, arena, node_handle, orig_handle, declToCompletion, context, true);
-        },
         .FnProto => {
             const func = node.cast(std.zig.ast.Node.FnProto).?;
             if (func.name_token) |name_token| {
                 const use_snippets = config.enable_snippets and client_capabilities.supports_snippets;
 
                 const insert_text = if (use_snippets) blk: {
+                    // TODO Also check if we are dot accessing from a type val and dont skip in that case.
                     const skip_self_param = if (func.params_len > 0) param_check: {
                         const in_container = analysis.innermostContainer(handle, handle.tree.token_locs[func.firstToken()].start);
+
                         switch (func.paramsConst()[0].param_type) {
                             .type_expr => |type_node| {
                                 if (try analysis.resolveTypeOfNode(&document_store, arena, .{
                                     .node = type_node,
                                     .handle = handle,
                                 })) |resolved_type| {
-                                    if (in_container.node == resolved_type.node)
+                                    if (std.meta.eql(in_container, resolved_type))
                                         break :param_check true;
                                 }
 
@@ -260,7 +298,7 @@ fn nodeToCompletion(
                                             .node = prefix_op.rhs,
                                             .handle = handle,
                                         })) |resolved_prefix_op| {
-                                            if (in_container.node == resolved_prefix_op.node)
+                                            if (std.meta.eql(in_container, resolved_prefix_op))
                                                 break :param_check true;
                                         }
                                     }
@@ -548,8 +586,18 @@ fn getSymbolFieldAccess(
     const line = try handle.document.getLine(@intCast(usize, position.line));
     var tokenizer = std.zig.Tokenizer.init(line[range.start..range.end]);
 
-    if (try analysis.getFieldAccessTypeNode(&document_store, arena, handle, pos_index, &tokenizer)) |container_handle| {
-        return try analysis.lookupSymbolContainer(&document_store, arena, container_handle, name, true);
+    if (try analysis.getFieldAccessType(&document_store, arena, handle, pos_index, &tokenizer)) |container_handle| {
+        const container_handle_node = switch (container_handle.type.data) {
+            .other => |n| n,
+            else => return null,
+        };
+        return try analysis.lookupSymbolContainer(
+            &document_store,
+            arena,
+            .{ .node = container_handle_node, .handle = container_handle.handle },
+            name,
+            true,
+        );
     }
     return null;
 }
@@ -621,7 +669,7 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: analysis.Decl
     const tree = decl_handle.handle.tree;
 
     switch (decl_handle.decl.*) {
-        .ast_node => |node| try nodeToCompletion(context.arena, context.completions, .{ .node = node, .handle = decl_handle.handle }, context.orig_handle, context.config.*),
+        .ast_node => |node| try nodeToCompletion(context.arena, context.completions, .{ .node = node, .handle = decl_handle.handle }, context.orig_handle, false, context.config.*),
         .param_decl => |param| {
             const doc_kind: types.MarkupKind = if (client_capabilities.completion_doc_supports_md) .Markdown else .PlainText;
             const doc = if (param.doc_comments) |doc_comments|
@@ -728,8 +776,8 @@ fn completeFieldAccess(id: types.RequestId, handle: *DocumentStore.Handle, posit
     var tokenizer = std.zig.Tokenizer.init(line[range.start..range.end]);
 
     const pos_index = try handle.document.positionToIndex(position);
-    if (try analysis.getFieldAccessTypeNode(&document_store, &arena, handle, pos_index, &tokenizer)) |node| {
-        try nodeToCompletion(&arena, &completions, node, handle, config);
+    if (try analysis.getFieldAccessType(&document_store, &arena, handle, pos_index, &tokenizer)) |node| {
+        try typeToCompletion(&arena, &completions, node, handle, config);
     }
 
     try send(types.Response{
