@@ -3,8 +3,6 @@ const DocumentStore = @import("document_store.zig");
 const analysis = @import("analysis.zig");
 const ast = std.zig.ast;
 
-// TODO Some align expressions break the highlighting
-
 const TokenType = enum(u32) {
     type,
     @"struct",

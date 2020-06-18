@@ -332,6 +332,7 @@ fn decrementBuildFileRefs(self: *DocumentStore, build_file: *BuildFile) void {
 
 fn decrementCount(self: *DocumentStore, uri: []const u8) void {
     if (self.handles.get(uri)) |entry| {
+        if (entry.value.count == 0) return;
         entry.value.count -= 1;
 
         if (entry.value.count > 0)
