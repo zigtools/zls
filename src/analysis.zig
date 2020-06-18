@@ -505,7 +505,7 @@ fn resolveBracketAccessType(
 }
 
 /// Called to remove one level of pointerness before a field access
-fn resolveFieldAccessLhsType(
+pub fn resolveFieldAccessLhsType(
     store: *DocumentStore,
     arena: *std.heap.ArenaAllocator,
     lhs: TypeWithHandle,
@@ -548,7 +548,7 @@ pub fn isTypeIdent(tree: *ast.Tree, token_idx: ast.TokenIndex) bool {
 }
 
 /// Resolves the type of a node
-fn resolveTypeOfNodeInternal(
+pub fn resolveTypeOfNodeInternal(
     store: *DocumentStore,
     arena: *std.heap.ArenaAllocator,
     node_handle: NodeWithHandle,
@@ -580,7 +580,7 @@ fn resolveTypeOfNodeInternal(
             }
 
             if (try lookupSymbolGlobal(store, arena, handle, handle.tree.getNodeSource(node), handle.tree.token_locs[node.firstToken()].start)) |child| {
-                switch(child.decl.*) {
+                switch (child.decl.*) {
                     .ast_node => |n| if (n == node) return null,
                     else => {},
                 }
@@ -902,6 +902,27 @@ pub const TypeWithHandle = struct {
     pub fn isUnionType(self: TypeWithHandle) bool {
         return self.isContainer(.Keyword_union);
     }
+
+    pub fn isTypeFunc(self: TypeWithHandle) bool {
+        switch (self.type.data) {
+            .other => |n| {
+                if (n.cast(ast.Node.FnProto)) |fn_proto| {
+                    return isTypeFunction(self.handle.tree, fn_proto);
+                }
+                return false;
+            },
+            else => return false,
+        }
+    }
+
+    pub fn isFunc(self: TypeWithHandle) bool {
+        switch (self.type.data) {
+            .other => |n| {
+                return n.id == .FnProto;
+            },
+            else => return false,
+        }
+    }
 };
 
 pub fn resolveTypeOfNode(store: *DocumentStore, arena: *std.heap.ArenaAllocator, node_handle: NodeWithHandle) error{OutOfMemory}!?TypeWithHandle {
@@ -1151,7 +1172,7 @@ pub const PositionContext = union(enum) {
     global_error_set,
     enum_literal,
     pre_label,
-    label,
+    label: bool,
     other,
     empty,
 
@@ -1229,6 +1250,11 @@ pub fn documentPositionContext(allocator: *std.mem.Allocator, document: types.Te
             .StringLiteral, .MultilineStringLiteralLine => curr_ctx.ctx = .{ .string_literal = tok.loc },
             .Identifier => switch (curr_ctx.ctx) {
                 .empty, .pre_label => curr_ctx.ctx = .{ .var_access = tok.loc },
+                .label => |filled| if (!filled) {
+                    curr_ctx.ctx = .{ .label = true };
+                } else {
+                    curr_ctx.ctx = .{ .var_access = tok.loc };
+                },
                 else => {},
             },
             .Builtin => switch (curr_ctx.ctx) {
@@ -1247,7 +1273,7 @@ pub fn documentPositionContext(allocator: *std.mem.Allocator, document: types.Te
             },
             .Keyword_break, .Keyword_continue => curr_ctx.ctx = .pre_label,
             .Colon => if (curr_ctx.ctx == .pre_label) {
-                curr_ctx.ctx = .label;
+                curr_ctx.ctx = .{ .label = false };
             } else {
                 curr_ctx.ctx = .empty;
             },

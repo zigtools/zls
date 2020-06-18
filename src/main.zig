@@ -28,7 +28,7 @@ const ClientCapabilities = struct {
 var client_capabilities = ClientCapabilities{};
 
 const initialize_response =
-    \\,"result": {"capabilities": {"signatureHelpProvider": {"triggerCharacters": ["(",","]},"textDocumentSync": 1,"completionProvider": {"resolveProvider": false,"triggerCharacters": [".",":","@"]},"documentHighlightProvider": false,"hoverProvider": true,"codeActionProvider": false,"declarationProvider": true,"definitionProvider": true,"typeDefinitionProvider": true,"implementationProvider": false,"referencesProvider": false,"documentSymbolProvider": true,"colorProvider": false,"documentFormattingProvider": true,"documentRangeFormattingProvider": false,"foldingRangeProvider": false,"selectionRangeProvider": false,"workspaceSymbolProvider": false,"rangeProvider": false,"documentProvider": true,"workspace": {"workspaceFolders": {"supported": true,"changeNotifications": true}},"semanticTokensProvider": {"documentProvider": true,"legend": {"tokenTypes": ["type","struct","enum","union","parameter","variable","tagField","field","errorTag","function","keyword","modifier","comment","string","number","operator","builtin","label"],"tokenModifiers": ["definition","async","documentation", "generic"]}}}}}
+    \\,"result": {"capabilities": {"signatureHelpProvider": {"triggerCharacters": ["(",","]},"textDocumentSync": 1,"completionProvider": {"resolveProvider": false,"triggerCharacters": [".",":","@"]},"documentHighlightProvider": false,"hoverProvider": true,"codeActionProvider": false,"declarationProvider": true,"definitionProvider": true,"typeDefinitionProvider": true,"implementationProvider": false,"referencesProvider": false,"documentSymbolProvider": true,"colorProvider": false,"documentFormattingProvider": true,"documentRangeFormattingProvider": false,"foldingRangeProvider": false,"selectionRangeProvider": false,"workspaceSymbolProvider": false,"rangeProvider": false,"documentProvider": true,"workspace": {"workspaceFolders": {"supported": true,"changeNotifications": true}},"semanticTokensProvider": {"documentProvider": true,"legend": {"tokenTypes": ["type","struct","enum","union","parameter","variable","tagField","field","errorTag","function","keyword","comment","string","number","operator","builtin","label"],"tokenModifiers": ["definition","async","documentation", "generic"]}}}}}
 ;
 
 const not_implemented_response =
@@ -1228,7 +1228,7 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config, ke
             process.stdout_behavior = .Pipe;
 
             process.spawn() catch |err| {
-                std.debug.warn("Failied to spawn zig fmt process, error: {}\n", .{err});
+                std.debug.warn("Failed to spawn zig fmt process, error: {}\n", .{err});
                 return try respondGeneric(id, null_result_response);
             };
             try process.stdin.?.writeAll(handle.document.text);
