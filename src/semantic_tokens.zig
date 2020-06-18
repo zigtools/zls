@@ -383,18 +383,22 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
         .Payload => {
             const payload = node.cast(ast.Node.Payload).?;
             try writeToken(builder, payload.lpipe, .operator);
+            try writeToken(builder, payload.error_symbol.firstToken(), .variable);
             try writeToken(builder, payload.rpipe, .operator);
         },
         .PointerPayload => {
             const payload = node.cast(ast.Node.PointerPayload).?;
             try writeToken(builder, payload.lpipe, .operator);
             try writeToken(builder, payload.ptr_token, .operator);
+            try writeToken(builder, payload.value_symbol.firstToken(), .variable);
             try writeToken(builder, payload.rpipe, .operator);
         },
         .PointerIndexPayload => {
             const payload = node.cast(ast.Node.PointerIndexPayload).?;
             try writeToken(builder, payload.lpipe, .operator);
             try writeToken(builder, payload.ptr_token, .operator);
+            try writeToken(builder, payload.value_symbol.firstToken(), .variable);
+            if (payload.index_symbol) |index_symbol| try writeToken(builder, index_symbol.firstToken(), .variable);
             try writeToken(builder, payload.rpipe, .operator);
         },
         .Else => {
@@ -538,7 +542,6 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
                 .SliceType, .PtrType => |info| {
                     if (prefix_op.op == .PtrType) try writeToken(builder, prefix_op.op_token, tok_type);
 
-                    // @TODO Fix align info
                     if (info.align_info) |align_info| {
                         if (prefix_op.op == .PtrType) {
                             try writeToken(builder, prefix_op.op_token + 1, .keyword);
