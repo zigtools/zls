@@ -3,6 +3,8 @@ const DocumentStore = @import("document_store.zig");
 const analysis = @import("analysis.zig");
 const ast = std.zig.ast;
 
+// TODO Some align expressions break the highlighting
+
 const TokenType = enum(u32) {
     type,
     @"struct",
@@ -99,6 +101,7 @@ fn writeDocComments(builder: *Builder, tree: *ast.Tree, doc: *ast.Node.DocCommen
 }
 
 fn fieldTokenType(container_decl: *ast.Node.ContainerDecl, handle: *DocumentStore.Handle) ?TokenType {
+    if (container_decl.kind_token > handle.tree.token_ids.len) return null;
     return @as(?TokenType, switch (handle.tree.token_ids[container_decl.kind_token]) {
         .Keyword_struct => .field,
         .Keyword_union, .Keyword_enum => .tagField,
@@ -188,16 +191,19 @@ fn writeContainerField(
     if (container_field.doc_comments) |docs| try writeDocComments(builder, builder.handle.tree, docs);
     try writeToken(builder, container_field.comptime_token, .keyword);
     if (field_token_type) |tok_type| try writeToken(builder, container_field.name_token, tok_type);
-    try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, container_field.align_expr);
     try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, container_field.type_expr);
+    if (container_field.align_expr) |n| {
+        try writeToken(builder, n.firstToken() - 2, .keyword);
+        try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, n);
+    }
 
-    if (container_field.value_expr) |value_expr| {
+    if (container_field.value_expr) |value_expr| block: {
         const eq_tok: ast.TokenIndex = if (container_field.type_expr) |type_expr|
             type_expr.lastToken() + 1
         else if (container_field.align_expr) |align_expr|
             align_expr.lastToken() + 1
         else
-            unreachable; // Check this, I believe it is correct.
+            break :block; // Check this, I believe it is correct.
 
         try writeToken(builder, eq_tok, .operator);
         try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, value_expr);
@@ -535,10 +541,11 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
                 .SliceType, .PtrType => |info| {
                     if (prefix_op.op == .PtrType) try writeToken(builder, prefix_op.op_token, tok_type);
 
-                    if (info.align_info) |align_info| {
-                        try writeToken(builder, align_info.node.firstToken() - 2, .keyword);
-                        try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, align_info.node);
-                    }
+                    // TODO Fix align info
+                    // if (info.align_info) |align_info| {
+                    //     try writeToken(builder, align_info.node.firstToken() - 2, .keyword);
+                    //     try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, align_info.node);
+                    // }
                     try writeToken(builder, info.const_token, .keyword);
                     try writeToken(builder, info.volatile_token, .keyword);
                     try writeToken(builder, info.allowzero_token, .keyword);
@@ -568,7 +575,9 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
                 else => null,
             } else null;
 
+            var gap_highlighter = GapHighlighter.init(builder, struct_initializer.lhs.lastToken() + 1);
             for (struct_initializer.listConst()) |field_init_node| {
+                try gap_highlighter.next(field_init_node);
                 std.debug.assert(field_init_node.id == .FieldInitializer);
                 const field_init = field_init_node.cast(ast.Node.FieldInitializer).?;
                 if (field_token_type) |tok_type| {
@@ -578,15 +587,20 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
                 try writeToken(builder, field_init.name_token + 1, .operator);
                 try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, field_init.expr);
             }
+            try gap_highlighter.end(struct_initializer.rtoken);
         },
         .StructInitializerDot => {
             const struct_initializer = node.cast(ast.Node.StructInitializerDot).?;
+
+            var gap_highlighter = GapHighlighter.init(builder, struct_initializer.dot + 1);
             for (struct_initializer.listConst()) |field_init_node| {
+                try gap_highlighter.next(field_init_node);
                 std.debug.assert(field_init_node.id == .FieldInitializer);
                 const field_init = field_init_node.cast(ast.Node.FieldInitializer).?;
                 try writeToken(builder, field_init.name_token + 1, .operator);
                 try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, field_init.expr);
             }
+            try gap_highlighter.end(struct_initializer.rtoken);
         },
         .Call => {
             const call = node.cast(ast.Node.Call).?;
