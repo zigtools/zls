@@ -754,16 +754,6 @@ pub fn resolveTypeOfNodeInternal(
                 return innermostContainer(handle, handle.tree.token_locs[builtin_call.firstToken()].start);
             }
 
-            if (std.mem.eql(u8, call_name, "@cImport")) {
-                // @TODO
-                if (builtin_call.params_len != 1) return null;
-                
-                // 1 - Get innermost container scope.
-                if (builtin_call.paramsConst()[0].cast(ast.Node.Block)) |block| {
-                    std.debug.warn("cImport block: {}\n", .{block});
-                }
-            }
-
             const cast_map = std.ComptimeStringMap(void, .{
                 .{"@as"},
                 .{"@bitCast"},
