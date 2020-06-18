@@ -499,7 +499,6 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
                     if (try analysis.lookupSymbolContainer(store, arena, .{ .node = left_type_node, .handle = lhs_type.handle }, rhs_str, !lhs_type.type.is_type_val)) |decl_type| {
                         switch (decl_type.decl.*) {
                             .ast_node => |decl_node| {
-                                // @TODO Other field types?
                                 if (decl_node.id == .ContainerField) {
                                     const tok_type: ?TokenType = if (left_type_node.cast(ast.Node.ContainerDecl)) |container_decl|
                                         fieldTokenType(container_decl, lhs_type.handle)
@@ -539,11 +538,15 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
                 .SliceType, .PtrType => |info| {
                     if (prefix_op.op == .PtrType) try writeToken(builder, prefix_op.op_token, tok_type);
 
-                    // TODO Fix align info
-                    // if (info.align_info) |align_info| {
-                    //     try writeToken(builder, align_info.node.firstToken() - 2, .keyword);
-                    //     try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, align_info.node);
-                    // }
+                    // @TODO Fix align info
+                    if (info.align_info) |align_info| {
+                        if (prefix_op.op == .PtrType) {
+                            try writeToken(builder, prefix_op.op_token + 1, .keyword);
+                        } else {
+                            try writeToken(builder, prefix_op.op_token + 2, .keyword);
+                        }
+                        try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, align_info.node);
+                    }
                     try writeToken(builder, info.const_token, .keyword);
                     try writeToken(builder, info.volatile_token, .keyword);
                     try writeToken(builder, info.allowzero_token, .keyword);
