@@ -177,6 +177,7 @@ fn colorIdentifierBasedOnType(builder: *Builder, type_node: analysis.TypeWithHan
     }
 }
 
+// TODO This is very slow and does a lot of extra work, improve in the future.
 fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *DocumentStore, maybe_node: ?*ast.Node) error{OutOfMemory}!void {
     if (maybe_node == null) return;
     const node = maybe_node.?;
