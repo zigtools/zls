@@ -254,21 +254,24 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
                     return try writeToken(builder, node.firstToken(), .parameter);
                 }
                 // TODO: Clean this up.
-                // @TODO This stack overflows
-                // var bound_type_params = analysis.BoundTypeParams.init(&arena.allocator);
-                // if (try child.resolveType(store, arena, &bound_type_params)) |decl_type| {
-                //     if (decl_type.type.is_type_val) {
-                //         const tok_type = if (decl_type.isStructType())
-                //             .@"struct"
-                //         else if (decl_type.isEnumType())
-                //             .@"enum"
-                //         else if (decl_type.isUnionType())
-                //             .@"union"
-                //         else
-                //             TokenType.type;
-                //         return try writeTokenMod(builder, node.firstToken(), tok_type, .{});
-                //     }
-                // }
+                var bound_type_params = analysis.BoundTypeParams.init(&arena.allocator);
+
+                var resolve_type_frame = try arena.child_allocator.alignedAlloc(u8, std.Target.stack_align, @sizeOf(@Frame(analysis.DeclWithHandle.resolveType)));
+                defer arena.child_allocator.free(resolve_type_frame);
+
+                if (try child.resolveType(store, arena, &bound_type_params)) |decl_type| {
+                    if (decl_type.type.is_type_val) {
+                        const tok_type = if (decl_type.isStructType())
+                            .@"struct"
+                        else if (decl_type.isEnumType())
+                            .@"enum"
+                        else if (decl_type.isUnionType())
+                            .@"union"
+                        else
+                            TokenType.type;
+                        return try writeTokenMod(builder, node.firstToken(), tok_type, .{});
+                    }
+                }
             }
         },
         .FnProto => {

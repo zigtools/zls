@@ -580,6 +580,10 @@ fn resolveTypeOfNodeInternal(
             }
 
             if (try lookupSymbolGlobal(store, arena, handle, handle.tree.getNodeSource(node), handle.tree.token_locs[node.firstToken()].start)) |child| {
+                switch(child.decl.*) {
+                    .ast_node => |n| if (n == node) return null,
+                    else => {},
+                }
                 return try child.resolveType(store, arena, bound_type_params);
             }
             return null;
