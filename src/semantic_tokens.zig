@@ -177,6 +177,33 @@ fn colorIdentifierBasedOnType(builder: *Builder, type_node: analysis.TypeWithHan
     }
 }
 
+fn writeContainerField(
+    builder: *Builder,
+    arena: *std.heap.ArenaAllocator,
+    store: *DocumentStore,
+    container_field: *ast.Node.ContainerField,
+    field_token_type: ?TokenType,
+    child_frame: var,
+) !void {
+    if (container_field.doc_comments) |docs| try writeDocComments(builder, builder.handle.tree, docs);
+    try writeToken(builder, container_field.comptime_token, .keyword);
+    if (field_token_type) |tok_type| try writeToken(builder, container_field.name_token, tok_type);
+    try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, container_field.align_expr);
+    try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, container_field.type_expr);
+
+    if (container_field.value_expr) |value_expr| {
+        const eq_tok: ast.TokenIndex = if (container_field.type_expr) |type_expr|
+            type_expr.lastToken() + 1
+        else if (container_field.align_expr) |align_expr|
+            align_expr.lastToken() + 1
+        else
+            unreachable; // Check this, I believe it is correct.
+
+        try writeToken(builder, eq_tok, .operator);
+        try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, value_expr);
+    }
+}
+
 // TODO This is very slow and does a lot of extra work, improve in the future.
 fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *DocumentStore, maybe_node: ?*ast.Node) error{OutOfMemory}!void {
     if (maybe_node == null) return;
@@ -198,7 +225,11 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
             var child_idx: usize = 0;
             while (node.iterate(child_idx)) |child| : (child_idx += 1) {
                 try gap_highlighter.next(child);
-                try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, child);
+                if (child.cast(ast.Node.ContainerField)) |container_field| {
+                    try writeContainerField(builder, arena, store, container_field, .field, child_frame);
+                } else {
+                    try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, child);
+                }
             }
             try gap_highlighter.end(node.lastToken());
         },
@@ -251,25 +282,8 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
             const field_token_type = fieldTokenType(container_decl, handle);
             for (container_decl.fieldsAndDeclsConst()) |child| {
                 try gap_highlighter.next(child);
-
                 if (child.cast(ast.Node.ContainerField)) |container_field| {
-                    if (container_field.doc_comments) |docs| try writeDocComments(builder, handle.tree, docs);
-                    try writeToken(builder, container_field.comptime_token, .keyword);
-                    if (field_token_type) |tok_type| try writeToken(builder, container_field.name_token, tok_type);
-                    try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, container_field.align_expr);
-                    try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, container_field.type_expr);
-
-                    if (container_field.value_expr) |value_expr| {
-                        const eq_tok: ast.TokenIndex = if (container_field.type_expr) |type_expr|
-                            type_expr.lastToken() + 1
-                        else if (container_field.align_expr) |align_expr|
-                            align_expr.lastToken() + 1
-                        else
-                            unreachable; // Check this, I believe it is correct.
-
-                        try writeToken(builder, eq_tok, .operator);
-                        try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, value_expr);
-                    }
+                    try writeContainerField(builder, arena, store, container_field, field_token_type, child_frame);
                 } else {
                     try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, child);
                 }
