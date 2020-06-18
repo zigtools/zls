@@ -832,7 +832,7 @@ pub fn resolveTypeOfNodeInternal(
             .type = .{ .data = .{ .other = node }, .is_type_val = false },
             .handle = handle,
         },
-        else => std.debug.warn("Type resolution case not implemented; {}\n", .{node.id}),
+        else => {}, //std.debug.warn("Type resolution case not implemented; {}\n", .{node.id}),
     }
     return null;
 }
@@ -1514,16 +1514,29 @@ pub fn iterateSymbolsContainer(
     orig_handle: *DocumentStore.Handle,
     comptime callback: var,
     context: var,
-    include_fields: bool,
+    instance_access: bool,
 ) error{OutOfMemory}!void {
     const container = container_handle.node;
     const handle = container_handle.handle;
 
+    const is_enum = if (container.cast(ast.Node.ContainerDecl)) |cont_decl|
+        handle.tree.token_ids[cont_decl.kind_token] == .Keyword_enum
+    else
+        false;
+
     if (findContainerScope(container_handle)) |container_scope| {
         var decl_it = container_scope.decls.iterator();
         while (decl_it.next()) |entry| {
-            if (!include_fields and entry.value == .ast_node and entry.value.ast_node.id == .ContainerField) continue;
-            if (entry.value == .label_decl) continue;
+            switch (entry.value) {
+                .ast_node => |node| {
+                    if (node.id == .ContainerField) {
+                        if (!instance_access and !is_enum) continue;
+                        if (instance_access and is_enum) continue;
+                    }
+                },
+                .label_decl => continue,
+                else => {},
+            }
             const decl = DeclWithHandle{ .decl = &entry.value, .handle = handle };
             if (handle != orig_handle and !decl.isPublic()) continue;
             try callback(context, decl);
@@ -1694,16 +1707,26 @@ pub fn lookupSymbolContainer(
     arena: *std.heap.ArenaAllocator,
     container_handle: NodeWithHandle,
     symbol: []const u8,
-    accept_fields: bool,
+    /// If true, we are looking up the symbol like we are accessing through a field access
+    /// of an instance of the type, otherwise as a field access of the type value itself.
+    instance_access: bool,
 ) error{OutOfMemory}!?DeclWithHandle {
     const container = container_handle.node;
     const handle = container_handle.handle;
+
+    const is_enum = if (container.cast(ast.Node.ContainerDecl)) |cont_decl|
+        handle.tree.token_ids[cont_decl.kind_token] == .Keyword_enum
+    else
+        false;
 
     if (findContainerScope(container_handle)) |container_scope| {
         if (container_scope.decls.get(symbol)) |candidate| {
             switch (candidate.value) {
                 .ast_node => |node| {
-                    if (node.id == .ContainerField and !accept_fields) return null;
+                    if (node.id == .ContainerField) {
+                        if (!instance_access and !is_enum) return null;
+                        if (instance_access and is_enum) return null;
+                    }
                 },
                 .label_decl => unreachable,
                 else => {},
@@ -1715,7 +1738,7 @@ pub fn lookupSymbolContainer(
         return null;
     }
 
-    std.debug.warn("Did not find container scope when looking up in container {} (name: {})\n", .{ container, getDeclName(handle.tree, container) });
+    // std.debug.warn("Did not find container scope when looking up in container {} (name: {})\n", .{ container, getDeclName(handle.tree, container) });
     return null;
 }
 

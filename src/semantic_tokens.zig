@@ -492,6 +492,8 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
 
                                     if (tok_type) |tt| try writeToken(builder, infix_op.rhs.firstToken(), tt);
                                     return;
+                                } else if (decl_node.id == .ErrorTag) {
+                                    try writeToken(builder, infix_op.rhs.firstToken(), .errorTag);
                                 }
                             },
                             else => {},

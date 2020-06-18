@@ -552,7 +552,7 @@ pub fn resolveImport(self: *DocumentStore, handle: *Handle, import_str: []const 
         import_str,
     )) orelse return null;
 
-    std.debug.warn("Import final URI: {}\n", .{final_uri});
+    // std.debug.warn("Import final URI: {}\n", .{final_uri});
     var consumed_final_uri = false;
     defer if (!consumed_final_uri) allocator.free(final_uri);
 
