@@ -29,15 +29,23 @@ pub fn main() !void {
     // We also flatten them, we should probably keep the nested structure.
     for (builder.top_level_steps.items) |tls| {
         for (tls.step.dependencies.items) |step| {
-            if (step.cast(InstallArtifactStep)) |install_exe| {
-                for (install_exe.artifact.packages.items) |pkg| {
-                    try processPackage(stdout_stream, pkg);
-                }
-            } else if (step.cast(LibExeObjStep)) |exe| {
-                for (exe.packages.items) |pkg| {
-                    try processPackage(stdout_stream, pkg);
-                }
-            }
+            try processStep(stdout_stream, step);
+        }
+    }
+}
+
+fn processStep(stdout_stream: var, step: *std.build.Step) anyerror!void {
+    if (step.cast(InstallArtifactStep)) |install_exe| {
+        for (install_exe.artifact.packages.items) |pkg| {
+            try processPackage(stdout_stream, pkg);
+        }
+    } else if (step.cast(LibExeObjStep)) |exe| {
+        for (exe.packages.items) |pkg| {
+            try processPackage(stdout_stream, pkg);
+        }
+    } else {
+        for (step.dependencies.items) |unknown_step| {
+            try processStep(stdout_stream, unknown_step);
         }
     }
 }
