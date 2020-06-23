@@ -1407,6 +1407,7 @@ pub const Declaration = union(enum) {
     },
     switch_payload: struct {
         node: *ast.Node.PointerPayload,
+        switch_expr: *ast.Node,
         items: []const *ast.Node,
     },
     label_decl: *ast.Node, // .id is While, For or Block (firstToken will be the label)
@@ -1484,8 +1485,40 @@ pub const DeclWithHandle = struct {
                 bound_type_params,
             ),
             .label_decl => return null,
-            // TODO Resolve switch payload types
-            .switch_payload => |pay| return null,
+            .switch_payload => |pay| {
+                if (pay.items.len == 0) return null;
+                // TODO Peer type resolution, we just use the first item for now.
+                const switch_expr_type = (try resolveTypeOfNodeInternal(store, arena, .{
+                    .node = pay.switch_expr,
+                    .handle = self.handle,
+                }, bound_type_params)) orelse return null;
+                if (!switch_expr_type.isUnionType())
+                    return null;
+
+                if (pay.items[0].cast(ast.Node.EnumLiteral)) |enum_lit| {
+                    const scope = findContainerScope(.{ .node = switch_expr_type.type.data.other, .handle = switch_expr_type.handle }) orelse return null;
+                    if (scope.decls.get(self.handle.tree.tokenSlice(enum_lit.name))) |candidate| {
+                        switch (candidate.value) {
+                            .ast_node => |node| {
+                                if (node.cast(ast.Node.ContainerField)) |container_field| {
+                                    if (container_field.type_expr) |type_expr| {
+                                        return ((try resolveTypeOfNodeInternal(
+                                            store,
+                                            arena,
+                                            .{ .node = type_expr, .handle = switch_expr_type.handle },
+                                            bound_type_params,
+                                        )) orelse return null).instanceTypeVal();
+                                    }
+                                }
+                            },
+                            else => {},
+                        }
+                        return null;
+                    }
+                }
+                // @TODO
+                return null;
+            },
         };
     }
 };
@@ -1551,7 +1584,7 @@ fn iterateSymbolsContainerInternal(
         for (container_scope.uses) |use| {
             if (handle != orig_handle and use.visib_token == null) continue;
             if (std.mem.indexOfScalar(*ast.Node.Use, use_trail.items, use) != null) continue;
-                try use_trail.append(use);
+            try use_trail.append(use);
 
             const use_expr = (try resolveTypeOfNode(store, arena, .{ .node = use.expr, .handle = handle })) orelse continue;
             const use_expr_node = switch (use_expr.type.data) {
@@ -2250,6 +2283,7 @@ fn makeScopeInternal(
                         try scope.decls.putNoClobber(name, .{
                             .switch_payload = .{
                                 .node = ptr_payload,
+                                .switch_expr = switch_node.expr,
                                 .items = case_node.itemsConst(),
                             },
                         });
