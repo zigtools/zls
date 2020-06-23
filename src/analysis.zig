@@ -1516,7 +1516,6 @@ pub const DeclWithHandle = struct {
                         return null;
                     }
                 }
-                // @TODO
                 return null;
             },
         };
