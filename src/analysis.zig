@@ -582,6 +582,8 @@ pub fn resolveTypeOfNodeInternal(
             if (try lookupSymbolGlobal(store, arena, handle, handle.tree.getNodeSource(node), handle.tree.token_locs[node.firstToken()].start)) |child| {
                 switch (child.decl.*) {
                     .ast_node => |n| if (n == node) return null,
+                    // @TODO
+                    .param_decl => |p_decl| {},
                     else => {},
                 }
                 return try child.resolveType(store, arena, bound_type_params);
@@ -1449,6 +1451,11 @@ pub const DeclWithHandle = struct {
                             if (entry.key == param_decl) return entry.value;
                         }
                         return null;
+                    } else if (type_node.cast(ast.Node.Identifier)) |type_ident| {
+                        if (param_decl.name_token) |name_tok| {
+                            if (std.mem.eql(u8, self.handle.tree.tokenSlice(type_ident.firstToken()), self.handle.tree.tokenSlice(name_tok)))
+                                return null;
+                        }
                     }
                     return ((try resolveTypeOfNodeInternal(
                         store,
