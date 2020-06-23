@@ -644,6 +644,10 @@ pub fn resolveTypeOfNodeInternal(
             }
             return null;
         },
+        .Comptime => {
+            const ct = node.cast(ast.Node.Comptime).?;
+            return try resolveTypeOfNodeInternal(store, arena, .{ .node = ct.expr, .handle = handle }, bound_type_params);
+        },
         .GroupedExpression => {
             const grouped = node.cast(ast.Node.GroupedExpression).?;
             return try resolveTypeOfNodeInternal(store, arena, .{ .node = grouped.expr, .handle = handle }, bound_type_params);
