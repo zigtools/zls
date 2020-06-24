@@ -156,11 +156,11 @@ pub fn isTypeFunction(tree: *ast.Tree, func: *ast.Node.FnProto) bool {
 // STYLE
 
 pub fn isCamelCase(name: []const u8) bool {
-    return !std.ascii.isUpper(name[0]) and std.mem.indexOf(u8, name, "_") == null;
+    return !std.ascii.isUpper(name[0]) and std.mem.indexOf(u8, name[0..(name.len - 1)], "_") == null;
 }
 
 pub fn isPascalCase(name: []const u8) bool {
-    return std.ascii.isUpper(name[0]) and std.mem.indexOf(u8, name, "_") == null;
+    return std.ascii.isUpper(name[0]) and std.mem.indexOf(u8, name[0..(name.len - 1)], "_") == null;
 }
 
 // ANALYSIS ENGINE
