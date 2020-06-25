@@ -601,6 +601,8 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
                 try gap_highlighter.next(field_init_node);
                 std.debug.assert(field_init_node.id == .FieldInitializer);
                 const field_init = field_init_node.cast(ast.Node.FieldInitializer).?;
+                try writeToken(builder, field_init.period_token, .field);
+                try writeToken(builder, field_init.name_token, .field);
                 try writeToken(builder, field_init.name_token + 1, .operator);
                 try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, field_init.expr);
             }
