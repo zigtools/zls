@@ -119,6 +119,8 @@ const GapHighlighter = struct {
         const tok_id = self.builder.handle.tree.token_ids[tok];
         if (tok_id == .LineComment) {
             try writeToken(self.builder, tok, .comment);
+        } else if (tok_id == .ContainerDocComment) {
+            try writeTokenMod(self.builder, tok, .comment, TokenModifiers{ .documentation = true });
         } else if (@enumToInt(tok_id) >= @enumToInt(std.zig.Token.Id.Keyword_align) and
             @enumToInt(tok_id) <= @enumToInt(std.zig.Token.Id.Keyword_while))
         {

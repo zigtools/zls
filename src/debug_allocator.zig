@@ -108,7 +108,7 @@ fn realloc(allocator: *std.mem.Allocator, old_mem: []u8, old_align: u29, new_siz
 
     const curr_allocs = self.info.currentlyAllocated();
     if (self.max_bytes != 0 and curr_allocs >= self.max_bytes) {
-        std.debug.warn("Exceeded maximum bytes {}, exiting.\n", .{self.max_bytes});
+        std.debug.print("Exceeded maximum bytes {}, exiting.\n", .{self.max_bytes});
         std.process.exit(1);
     }
 
