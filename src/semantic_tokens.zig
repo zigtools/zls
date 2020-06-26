@@ -144,6 +144,10 @@ const GapHighlighter = struct {
     }
 
     fn next(self: *GapHighlighter, node: *ast.Node) !void {
+        if (self.current_idx > 0 and self.builder.handle.tree.token_ids[self.current_idx - 1] == .ContainerDocComment) {
+            try self.handleTok(self.current_idx - 1);
+        }
+
         var i = self.current_idx;
         while (i < node.firstToken()) : (i += 1) {
             try self.handleTok(i);

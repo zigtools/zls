@@ -111,7 +111,7 @@ pub const MessageType = enum(Integer) {
 
 /// Params for a LogMessage Notification (window/logMessage)
 pub const LogMessageParams = struct {
-    @"type": MessageType,
+    type: MessageType,
     message: String
 };
 
@@ -361,6 +361,6 @@ pub const DocumentSymbol = struct {
 };
 
 pub const ShowMessageParams = struct {
-    @"type": MessageType,
+    type: MessageType,
     message: String
 };

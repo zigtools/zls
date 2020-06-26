@@ -801,7 +801,7 @@ pub fn resolveTypeOfNodeInternal(
 
             const import_str = handle.tree.tokenSlice(import_param.cast(ast.Node.StringLiteral).?.token);
             const new_handle = (store.resolveImport(handle, import_str[1 .. import_str.len - 1]) catch |err| block: {
-                std.debug.print("Error {} while processing import {}\n", .{ err, import_str });
+                std.log.debug(.analysis, "Error {} while processing import {}\n", .{ err, import_str });
                 return null;
             }) orelse return null;
 
@@ -836,7 +836,7 @@ pub fn resolveTypeOfNodeInternal(
             .type = .{ .data = .{ .other = node }, .is_type_val = false },
             .handle = handle,
         },
-        else => {}, //std.debug.print("Type resolution case not implemented; {}\n", .{node.id}),
+        else => {}, //std.log.debug(.analysis, "Type resolution case not implemented; {}\n", .{node.id}),
     }
     return null;
 }
@@ -1031,7 +1031,7 @@ pub fn getFieldAccessType(
                         current_type = (try resolveUnwrapOptionalType(store, arena, current_type, &bound_type_params)) orelse return null;
                     },
                     else => {
-                        std.debug.print("Unrecognized token {} after period.\n", .{after_period.id});
+                        std.log.debug(.analysis, "Unrecognized token {} after period.\n", .{after_period.id});
                         return null;
                     },
                 }
@@ -1082,7 +1082,7 @@ pub fn getFieldAccessType(
                 current_type = (try resolveBracketAccessType(store, arena, current_type, if (is_range) .Range else .Single, &bound_type_params)) orelse return null;
             },
             else => {
-                std.debug.print("Unimplemented token: {}\n", .{tok.id});
+                std.log.debug(.analysis, "Unimplemented token: {}\n", .{tok.id});
                 return null;
             },
         }
@@ -1126,7 +1126,7 @@ pub fn nodeToString(tree: *ast.Tree, node: *ast.Node) ?[]const u8 {
             }
         },
         else => {
-            std.debug.print("INVALID: {}\n", .{node.id});
+            std.log.debug(.analysis, "INVALID: {}\n", .{node.id});
         },
     }
 
@@ -1349,7 +1349,7 @@ fn getDocumentSymbolsInternal(allocator: *std.mem.Allocator, tree: *ast.Tree, no
     };
 
     if (getDeclName(tree, node) == null) {
-        std.debug.print("NULL NAME: {}\n", .{node.id});
+        std.log.debug(.analysis, "NULL NAME: {}\n", .{node.id});
     }
 
     const maybe_name = if (getDeclName(tree, node)) |name|
@@ -1848,7 +1848,7 @@ pub const DocumentScope = struct {
 
     pub fn debugPrint(self: DocumentScope) void {
         for (self.scopes) |scope| {
-            std.debug.print(
+            std.log.debug(.analysis,
                 \\--------------------------
                 \\Scope {}, range: [{}, {})
                 \\ {} usingnamespaces
@@ -1863,10 +1863,10 @@ pub const DocumentScope = struct {
             var decl_it = scope.decls.iterator();
             var idx: usize = 0;
             while (decl_it.next()) |name_decl| : (idx += 1) {
-                if (idx != 0) std.debug.print(", ", .{});
-                std.debug.print("{}", .{name_decl.key});
+                if (idx != 0) std.log.debug(.analysis, ", ", .{});
+                std.log.debug(.analysis, "{}", .{name_decl.key});
             }
-            std.debug.print("\n--------------------------\n", .{});
+            std.log.debug(.analysis, "\n--------------------------\n", .{});
         }
     }
 

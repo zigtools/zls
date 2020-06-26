@@ -10,6 +10,56 @@ const types = @import("types.zig");
 const analysis = @import("analysis.zig");
 const URI = @import("uri.zig");
 
+pub const log_level: std.log.Level = switch (std.builtin.mode) {
+    .Debug => .debug,
+    else => .notice,
+};
+
+pub fn log(
+    comptime message_level: std.log.Level,
+    comptime scope: @Type(.EnumLiteral),
+    comptime format: []const u8,
+    args: var,
+) void {
+    var message = std.fmt.allocPrint(allocator, "[{}-{}] " ++ format, .{ @tagName(message_level), @tagName(scope) } ++ args) catch |err| {
+        std.debug.print("Failed to allocPrint message.", .{});
+        return;
+    };
+    if (@enumToInt(message_level) <= @enumToInt(std.log.Level.notice)) {
+        const message_type: types.MessageType = switch (message_level) {
+            .info => .Log,
+            .notice => .Info,
+            .warn => .Warning,
+            .err => .Error,
+            else => .Error,
+        };
+        send(types.Notification{
+            .method = "window/showMessage",
+            .params = types.NotificationParams{ .ShowMessageParams = .{
+                .type = message_type,
+                .message = message, },
+            },
+        }) catch |err| {
+            std.debug.print("Failed to send show message notification (error: {}).", .{err});
+        };
+    } else {
+        const message_type: types.MessageType = if (message_level == .debug)
+            .Log
+        else
+            .Info;
+
+        send(types.Notification{
+            .method = "window/logMessage",
+            .params = types.NotificationParams{ .LogMessageParams = .{
+                .type = message_type,
+                .message = message, },
+            },
+        }) catch |err| {
+            std.debug.print("Failed to send show message notification (error: {}).", .{err});
+        };
+    }
+}
+
 // Code is largely based off of https://github.com/andersfr/zig-lsp/blob/master/server.zig
 var stdout: std.io.BufferedOutStream(4096, std.fs.File.OutStream) = undefined;
 var allocator: *std.mem.Allocator = undefined;
@@ -850,13 +900,13 @@ fn loadConfig(folder_path: []const u8) ?Config {
 
     // TODO: Better errors? Doesn't seem like std.json can provide us positions or context.
     var config = std.json.parse(Config, &std.json.TokenStream.init(file_buf), std.json.ParseOptions{ .allocator = allocator }) catch |err| {
-        std.debug.print("Error while parsing configuration file: {}\nUsing default config.\n", .{err});
+        std.log.debug(.main, "Error while parsing configuration file: {}\nUsing default config.\n", .{err});
         return null;
     };
 
     if (config.zig_lib_path) |zig_lib_path| {
         if (!std.fs.path.isAbsolute(zig_lib_path)) {
-            std.debug.print("zig library path is not absolute, defaulting to null.\n", .{});
+            std.log.debug(.main, "zig library path is not absolute, defaulting to null.\n", .{});
             allocator.free(zig_lib_path);
             config.zig_lib_path = null;
         }
@@ -908,7 +958,7 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config, ke
     const start_time = std.time.milliTimestamp();
     defer {
         const end_time = std.time.milliTimestamp();
-        std.debug.print("Took {}ms to process method {}\n", .{ end_time - start_time, method });
+        std.log.debug(.main, "Took {}ms to process method {}\n", .{ end_time - start_time, method });
     }
 
     // Core
@@ -955,11 +1005,11 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config, ke
         if (params.getValue("workspaceFolders")) |workspace_folders| {
             switch (workspace_folders) {
                 .Array => |folders| {
-                    std.debug.print("Got workspace folders in initialization.\n", .{});
+                    std.log.debug(.main, "Got workspace folders in initialization.\n", .{});
 
                     for (folders.items) |workspace_folder| {
                         const folder_uri = workspace_folder.Object.getValue("uri").?.String;
-                        std.debug.print("Loaded folder {}\n", .{folder_uri});
+                        std.log.debug(.main, "Loaded folder {}\n", .{folder_uri});
                         const duped_uri = try std.mem.dupe(allocator, u8, folder_uri);
                         try workspace_folder_configs.putNoClobber(duped_uri, null);
                     }
@@ -969,8 +1019,9 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config, ke
             }
         }
 
-        std.debug.print("{}\n", .{client_capabilities});
+        std.log.debug(.main, "{}\n", .{client_capabilities});
         try respondGeneric(id, initialize_response);
+        std.log.notice(.main, "zls initialized", .{});
     } else if (std.mem.eql(u8, method, "shutdown")) {
         keep_running.* = false;
         // Technically we shoudl deinitialize first and send possible errors to the client
@@ -1025,7 +1076,7 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config, ke
         const content_changes = params.getValue("contentChanges").?.Array;
 
         const handle = document_store.getHandle(uri) orelse {
-            std.debug.print("Trying to change non existent document {}", .{uri});
+            std.log.debug(.main, "Trying to change non existent document {}", .{uri});
             return;
         };
 
@@ -1037,7 +1088,7 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config, ke
         const text_document = params.getValue("textDocument").?.Object;
         const uri = text_document.getValue("uri").?.String;
         const handle = document_store.getHandle(uri) orelse {
-            std.debug.print("Trying to save non existent document {}", .{uri});
+            std.log.debug(.main, "Trying to save non existent document {}", .{uri});
             return;
         };
 
@@ -1060,7 +1111,7 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config, ke
         const this_config = configFromUriOr(uri, config);
         if (this_config.enable_semantic_tokens) {
             const handle = document_store.getHandle(uri) orelse {
-                std.debug.print("Trying to complete in non existent document {}", .{uri});
+                std.log.debug(.main, "Trying to complete in non existent document {}", .{uri});
                 return try respondGeneric(id, no_semantic_tokens_response);
             };
 
@@ -1083,7 +1134,7 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config, ke
         const position = params.getValue("position").?.Object;
 
         const handle = document_store.getHandle(uri) orelse {
-            std.debug.print("Trying to complete in non existent document {}", .{uri});
+            std.log.debug(.main, "Trying to complete in non existent document {}", .{uri});
             return try respondGeneric(id, no_completions_response);
         };
 
@@ -1149,7 +1200,7 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config, ke
         const position = params.getValue("position").?.Object;
 
         const handle = document_store.getHandle(uri) orelse {
-            std.debug.print("Trying to got to definition in non existent document {}", .{uri});
+            std.log.debug(.main, "Trying to got to definition in non existent document {}", .{uri});
             return try respondGeneric(id, null_result_response);
         };
 
@@ -1179,7 +1230,7 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config, ke
         const position = params.getValue("position").?.Object;
 
         const handle = document_store.getHandle(uri) orelse {
-            std.debug.print("Trying to got to definition in non existent document {}", .{uri});
+            std.log.debug(.main, "Trying to got to definition in non existent document {}", .{uri});
             return try respondGeneric(id, null_result_response);
         };
 
@@ -1206,7 +1257,7 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config, ke
         const uri = document.getValue("uri").?.String;
 
         const handle = document_store.getHandle(uri) orelse {
-            std.debug.print("Trying to got to definition in non existent document {}", .{uri});
+            std.log.debug(.main, "Trying to got to definition in non existent document {}", .{uri});
             return try respondGeneric(id, null_result_response);
         };
 
@@ -1218,7 +1269,7 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config, ke
             const uri = document.getValue("uri").?.String;
 
             const handle = document_store.getHandle(uri) orelse {
-                std.debug.print("Trying to got to definition in non existent document {}", .{uri});
+                std.log.debug(.main, "Trying to got to definition in non existent document {}", .{uri});
                 return try respondGeneric(id, null_result_response);
             };
 
@@ -1228,7 +1279,7 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config, ke
             process.stdout_behavior = .Pipe;
 
             process.spawn() catch |err| {
-                std.debug.print("Failed to spawn zig fmt process, error: {}\n", .{err});
+                std.log.debug(.main, "Failed to spawn zig fmt process, error: {}\n", .{err});
                 return try respondGeneric(id, null_result_response);
             };
             try process.stdin.?.writeAll(handle.document.text);
@@ -1271,10 +1322,10 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config, ke
         // TODO: Unimplemented methods, implement them and add them to server capabilities.
         try respondGeneric(id, null_result_response);
     } else if (root.Object.getValue("id")) |_| {
-        std.debug.print("Method with return value not implemented: {}", .{method});
+        std.log.debug(.main, "Method with return value not implemented: {}", .{method});
         try respondGeneric(id, not_implemented_response);
     } else {
-        std.debug.print("Method without return value not implemented: {}", .{method});
+        std.log.debug(.main, "Method without return value not implemented: {}", .{method});
     }
 }
 
@@ -1296,8 +1347,8 @@ pub fn main() anyerror!void {
     }
 
     defer if (debug_alloc) |dbg| {
-        std.debug.print("Finished cleanup, last allocation info.\n", .{});
-        std.debug.print("{}\n", .{dbg.info});
+        std.log.debug(.main, "Finished cleanup, last allocation info.\n", .{});
+        std.log.debug(.main, "{}\n", .{dbg.info});
     };
 
     // Init global vars
@@ -1339,12 +1390,12 @@ pub fn main() anyerror!void {
                 break :find_zig;
             }
 
-            std.debug.print("zig path `{}` is not absolute, will look in path\n", .{exe_path});
+            std.log.debug(.main, "zig path `{}` is not absolute, will look in path\n", .{exe_path});
         }
 
         const env_path = std.process.getEnvVarOwned(allocator, "PATH") catch |err| switch (err) {
             error.EnvironmentVariableNotFound => {
-                std.debug.print("Could not get PATH.\n", .{});
+                std.log.debug(.main, "Could not get PATH.\n", .{});
                 break :find_zig;
             },
             else => return err,
@@ -1365,21 +1416,21 @@ pub fn main() anyerror!void {
 
             var buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
             zig_exe_path = std.os.realpath(full_path, &buf) catch continue;
-            std.debug.print("Found zig in PATH: {}\n", .{zig_exe_path});
+            std.log.debug(.main, "Found zig in PATH: {}\n", .{zig_exe_path});
             break :find_zig;
         }
     }
 
     if (zig_exe_path) |exe_path| {
         config.zig_exe_path = exe_path;
-        std.debug.print("Using zig executable {}\n", .{exe_path});
+        std.log.debug(.main, "Using zig executable {}\n", .{exe_path});
         if (config.zig_lib_path == null) {
             // Set the lib path relative to the executable path.
             config.zig_lib_path = try std.fs.path.resolve(allocator, &[_][]const u8{
                 std.fs.path.dirname(exe_path).?, "./lib/zig",
             });
 
-            std.debug.print("Resolved standard library from executable: {}\n", .{config.zig_lib_path});
+            std.log.debug(.main, "Resolved standard library from executable: {}\n", .{config.zig_lib_path});
         }
     }
 
@@ -1405,7 +1456,7 @@ pub fn main() anyerror!void {
     var keep_running = true;
     while (keep_running) {
         const headers = readRequestHeader(allocator, reader) catch |err| {
-            std.debug.print("{}; exiting!", .{@errorName(err)});
+            std.log.debug(.main, "{}; exiting!", .{@errorName(err)});
             return;
         };
         defer headers.deinit(allocator);
@@ -1416,7 +1467,7 @@ pub fn main() anyerror!void {
         json_parser.reset();
 
         if (debug_alloc) |dbg| {
-            std.debug.print("{}\n", .{dbg.info});
+            std.log.debug(.main, "{}\n", .{dbg.info});
         }
     }
 }
