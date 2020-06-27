@@ -9,6 +9,10 @@ const data = @import("data/" ++ build_options.data_version ++ ".zig");
 const types = @import("types.zig");
 const analysis = @import("analysis.zig");
 const URI = @import("uri.zig");
+const rename = @import("rename.zig");
+
+// TODO Fix LSP -> byte and byte -> LSP offsets
+// Implement clangd extension for utf8 offsets as well.
 
 pub const log_level: std.log.Level = switch (std.builtin.mode) {
     .Debug => .debug,
@@ -35,9 +39,11 @@ pub fn log(
         };
         send(types.Notification{
             .method = "window/showMessage",
-            .params = types.NotificationParams{ .ShowMessageParams = .{
-                .type = message_type,
-                .message = message, },
+            .params = types.NotificationParams{
+                .ShowMessageParams = .{
+                    .type = message_type,
+                    .message = message,
+                },
             },
         }) catch |err| {
             std.debug.print("Failed to send show message notification (error: {}).", .{err});
@@ -50,9 +56,11 @@ pub fn log(
 
         send(types.Notification{
             .method = "window/logMessage",
-            .params = types.NotificationParams{ .LogMessageParams = .{
-                .type = message_type,
-                .message = message, },
+            .params = types.NotificationParams{
+                .LogMessageParams = .{
+                    .type = message_type,
+                    .message = message,
+                },
             },
         }) catch |err| {
             std.debug.print("Failed to send show message notification (error: {}).", .{err});
@@ -78,7 +86,7 @@ const ClientCapabilities = struct {
 var client_capabilities = ClientCapabilities{};
 
 const initialize_response =
-    \\,"result": {"capabilities": {"signatureHelpProvider": {"triggerCharacters": ["(",","]},"textDocumentSync": 1,"completionProvider": {"resolveProvider": false,"triggerCharacters": [".",":","@"]},"documentHighlightProvider": false,"hoverProvider": true,"codeActionProvider": false,"declarationProvider": true,"definitionProvider": true,"typeDefinitionProvider": true,"implementationProvider": false,"referencesProvider": false,"documentSymbolProvider": true,"colorProvider": false,"documentFormattingProvider": true,"documentRangeFormattingProvider": false,"foldingRangeProvider": false,"selectionRangeProvider": false,"workspaceSymbolProvider": false,"rangeProvider": false,"documentProvider": true,"workspace": {"workspaceFolders": {"supported": true,"changeNotifications": true}},"semanticTokensProvider": {"documentProvider": true,"legend": {"tokenTypes": ["type","struct","enum","union","parameter","variable","tagField","field","errorTag","function","keyword","comment","string","number","operator","builtin","label"],"tokenModifiers": ["definition","async","documentation", "generic"]}}}}}
+    \\,"result": {"capabilities": {"signatureHelpProvider": {"triggerCharacters": ["(",","]},"textDocumentSync": 1,"renameProvider":true,"completionProvider": {"resolveProvider": false,"triggerCharacters": [".",":","@"]},"documentHighlightProvider": false,"hoverProvider": true,"codeActionProvider": false,"declarationProvider": true,"definitionProvider": true,"typeDefinitionProvider": true,"implementationProvider": false,"referencesProvider": false,"documentSymbolProvider": true,"colorProvider": false,"documentFormattingProvider": true,"documentRangeFormattingProvider": false,"foldingRangeProvider": false,"selectionRangeProvider": false,"workspaceSymbolProvider": false,"rangeProvider": false,"documentProvider": true,"workspace": {"workspaceFolders": {"supported": true,"changeNotifications": true}},"semanticTokensProvider": {"documentProvider": true,"legend": {"tokenTypes": ["type","struct","enum","union","parameter","variable","tagField","field","errorTag","function","keyword","comment","string","number","operator","builtin","label"],"tokenModifiers": ["definition","async","documentation", "generic"]}}}}}
 ;
 
 const not_implemented_response =
@@ -110,7 +118,7 @@ fn send(reqOrRes: var) !void {
     defer arena.deinit();
 
     var arr = std.ArrayList(u8).init(&arena.allocator);
-    try std.json.stringify(reqOrRes, .{}, arr.outStream());
+    try std.json.stringify(reqOrRes, .{}, arr.writer());
 
     const stdout_stream = stdout.outStream();
     try stdout_stream.print("Content-Length: {}\r\n\r\n", .{arr.items.len});
@@ -709,6 +717,32 @@ fn gotoDefinitionString(id: types.RequestId, pos_index: usize, handle: *Document
     });
 }
 
+fn renameDefinitionGlobal(id: types.RequestId, handle: *DocumentStore.Handle, pos_index: usize, new_name: []const u8) !void {
+    // @TODO
+}
+
+fn renameDefinitionFieldAccess(id: types.RequestId, handle: *DocumentStore.Handle, position: types.Position, new_name: []const u8) !void {
+    // @TODO
+}
+
+fn renameDefinitionLabel(id: types.RequestId, handle: *DocumentStore.Handle, pos_index: usize, new_name: []const u8) !void {
+    // @TODO
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+
+    const decl = (try getLabelGlobal(pos_index, handle)) orelse return try respondGeneric(id, null_result_response);
+
+    var workspace_edit = types.WorkspaceEdit{
+        .changes = std.StringHashMap([]types.TextEdit).init(&arena.allocator),
+    };
+    try rename.renameLabel(&arena, decl, new_name, &workspace_edit.changes.?);
+
+    try send(types.Response{
+        .id = id,
+        .result = .{ .WorkspaceEdit = workspace_edit },
+    });
+}
+
 const DeclToCompletionContext = struct {
     completions: *std.ArrayList(types.CompletionItem),
     config: *const Config,
@@ -1140,7 +1174,7 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config, ke
 
         const pos = types.Position{
             .line = position.getValue("line").?.Integer,
-            .character = position.getValue("character").?.Integer - 1,
+            .character = position.getValue("character").?.Integer,
         };
         if (pos.character >= 0) {
             const pos_index = try handle.document.positionToIndex(pos);
@@ -1206,7 +1240,7 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config, ke
 
         const pos = types.Position{
             .line = position.getValue("line").?.Integer,
-            .character = position.getValue("character").?.Integer - 1,
+            .character = position.getValue("character").?.Integer,
         };
         if (pos.character >= 0) {
             const resolve_alias = !std.mem.eql(u8, method, "textDocument/declaration");
@@ -1236,7 +1270,7 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config, ke
 
         const pos = types.Position{
             .line = position.getValue("line").?.Integer,
-            .character = position.getValue("character").?.Integer - 1,
+            .character = position.getValue("character").?.Integer,
         };
         if (pos.character >= 0) {
             const pos_index = try handle.document.positionToIndex(pos);
@@ -1307,6 +1341,36 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config, ke
             }
         }
         return try respondGeneric(id, null_result_response);
+    } else if (std.mem.eql(u8, method, "textDocument/rename")) {
+        const params = root.Object.getValue("params").?.Object;
+        const document = params.getValue("textDocument").?.Object;
+        const uri = document.getValue("uri").?.String;
+        const position = params.getValue("position").?.Object;
+
+        const handle = document_store.getHandle(uri) orelse {
+            std.log.debug(.main, "Trying to got to definition in non existent document {}", .{uri});
+            return try respondGeneric(id, null_result_response);
+        };
+
+        // @TODO
+        const pos = types.Position{
+            .line = position.getValue("line").?.Integer,
+            .character = position.getValue("character").?.Integer,
+        };
+        if (pos.character >= 0) {
+            const new_name = params.getValue("newName").?.String;
+            const pos_index = try handle.document.positionToIndex(pos);
+            const pos_context = try analysis.documentPositionContext(allocator, handle.document, pos);
+
+            switch (pos_context) {
+                .var_access => try renameDefinitionGlobal(id, handle, pos_index, new_name),
+                .field_access => try renameDefinitionFieldAccess(id, handle, pos, new_name),
+                .label => try renameDefinitionLabel(id, handle, pos_index, new_name),
+                else => try respondGeneric(id, null_result_response),
+            }
+        } else {
+            try respondGeneric(id, null_result_response);
+        }
     } else if (std.mem.eql(u8, method, "textDocument/references") or
         std.mem.eql(u8, method, "textDocument/documentHighlight") or
         std.mem.eql(u8, method, "textDocument/codeAction") or
@@ -1314,7 +1378,6 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config, ke
         std.mem.eql(u8, method, "textDocument/documentLink") or
         std.mem.eql(u8, method, "textDocument/rangeFormatting") or
         std.mem.eql(u8, method, "textDocument/onTypeFormatting") or
-        std.mem.eql(u8, method, "textDocument/rename") or
         std.mem.eql(u8, method, "textDocument/prepareRename") or
         std.mem.eql(u8, method, "textDocument/foldingRange") or
         std.mem.eql(u8, method, "textDocument/selectionRange"))

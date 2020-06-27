@@ -61,6 +61,7 @@ pub const ResponseParams = union(enum) {
     DocumentSymbols: []DocumentSymbol,
     SemanticTokens: struct { data: []const u32 },
     TextEdits: []TextEdit,
+    WorkspaceEdit: WorkspaceEdit,
 };
 
 /// JSONRPC error
@@ -198,6 +199,33 @@ pub const TextDocument = struct {
                 .character = @intCast(i64, curr_line.len),
             }
         };
+    }
+};
+
+pub const WorkspaceEdit = struct {
+    changes: ?std.StringHashMap([]TextEdit),
+
+    pub fn jsonStringify(
+        self: WorkspaceEdit,
+        options: std.json.StringifyOptions,
+        writer: var,
+    ) @TypeOf(writer).Error!void {
+        try writer.writeByte('{');
+        if (self.changes) |changes| {
+            try writer.writeAll("\"changes\": {");
+            var it = changes.iterator();
+            var idx: usize = 0;
+            while (it.next()) |entry| : (idx += 1) {
+                if (idx != 0) try writer.writeAll(", ");
+
+                try writer.writeByte('"');
+                try writer.writeAll(entry.key);
+                try writer.writeAll("\":");
+                try std.json.stringify(entry.value, options, writer);
+            }
+            try writer.writeByte('}');
+        }
+        try writer.writeByte('}');
     }
 };
 
