@@ -4,6 +4,7 @@ const analysis = @import("analysis.zig");
 const ast = std.zig.ast;
 
 const TokenType = enum(u32) {
+    namespace,
     type,
     @"struct",
     @"enum",
@@ -165,7 +166,9 @@ const GapHighlighter = struct {
 
 fn colorIdentifierBasedOnType(builder: *Builder, type_node: analysis.TypeWithHandle, target_tok: ast.TokenIndex, tok_mod: TokenModifiers) !void {
     if (type_node.type.is_type_val) {
-        const tok_type = if (type_node.isStructType())
+        const tok_type = if (type_node.isNamespace())
+            .namespace
+        else if (type_node.isStructType())
             .@"struct"
         else if (type_node.isEnumType())
             .@"enum"
@@ -178,7 +181,11 @@ fn colorIdentifierBasedOnType(builder: *Builder, type_node: analysis.TypeWithHan
     } else if (type_node.isTypeFunc()) {
         try writeTokenMod(builder, target_tok, .type, tok_mod);
     } else if (type_node.isFunc()) {
-        try writeTokenMod(builder, target_tok, .function, tok_mod);
+        var new_tok_mod = tok_mod;
+        if (type_node.isGenericFunc()) {
+            new_tok_mod.set("generic");
+        }
+        try writeTokenMod(builder, target_tok, .function, new_tok_mod);
     } else {
         try writeTokenMod(builder, target_tok, .variable, tok_mod);
     }
@@ -334,7 +341,13 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
                 .type
             else
                 .function;
-            try writeToken(builder, fn_proto.name_token, func_name_tok_type);
+
+            const tok_mod = if (analysis.isGenericFunction(handle.tree, fn_proto))
+                TokenModifiers{ .generic = true }
+            else
+                TokenModifiers{};
+
+            try writeTokenMod(builder, fn_proto.name_token, func_name_tok_type, tok_mod);
 
             for (fn_proto.paramsConst()) |param_decl| {
                 if (param_decl.doc_comments) |docs| try writeDocComments(builder, handle.tree, docs);
@@ -618,6 +631,11 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
             const call = node.cast(ast.Node.Call).?;
             try writeToken(builder, call.async_token, .keyword);
             try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, call.lhs);
+            if (builder.current_token) |curr_tok| {
+                if (curr_tok != call.lhs.lastToken() and  handle.tree.token_ids[call.lhs.lastToken()] == .Identifier) {
+                    try writeToken(builder, call.lhs.lastToken(), .function);
+                }
+            }
             for (call.paramsConst()) |param| try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, param);
         },
         .SuffixOp => {

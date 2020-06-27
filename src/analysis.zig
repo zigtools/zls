@@ -153,6 +153,15 @@ pub fn isTypeFunction(tree: *ast.Tree, func: *ast.Node.FnProto) bool {
     }
 }
 
+// @TODO
+pub fn isGenericFunction(tree: *ast.Tree, func: *ast.Node.FnProto) bool {
+    for (func.paramsConst()) |param| {
+        if (param.param_type == .var_type or param.comptime_token != null) {
+            return true;
+        }
+    }
+    return false;
+}
 // STYLE
 
 pub fn isCamelCase(name: []const u8) bool {
@@ -899,6 +908,16 @@ pub const TypeWithHandle = struct {
         return self.isContainer(.Keyword_struct) or self.isRoot();
     }
 
+    pub fn isNamespace(self: TypeWithHandle) bool {
+        if (!self.isStructType()) return false;
+        var idx: usize = 0;
+        while (self.type.data.other.iterate(idx)) |child| : (idx += 1) {
+            if (child.id == .ContainerField)
+                return false;
+        }
+        return true;
+    }
+
     pub fn isEnumType(self: TypeWithHandle) bool {
         return self.isContainer(.Keyword_enum);
     }
@@ -912,6 +931,18 @@ pub const TypeWithHandle = struct {
             .other => |n| {
                 if (n.cast(ast.Node.FnProto)) |fn_proto| {
                     return isTypeFunction(self.handle.tree, fn_proto);
+                }
+                return false;
+            },
+            else => return false,
+        }
+    }
+
+    pub fn isGenericFunc(self: TypeWithHandle) bool {
+        switch (self.type.data) {
+            .other => |n| {
+                if (n.cast(ast.Node.FnProto)) |fn_proto| {
+                    return isGenericFunction(self.handle.tree, fn_proto);
                 }
                 return false;
             },
