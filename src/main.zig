@@ -718,7 +718,6 @@ fn gotoDefinitionString(id: types.RequestId, pos_index: usize, handle: *Document
 }
 
 fn renameDefinitionGlobal(id: types.RequestId, handle: *DocumentStore.Handle, pos_index: usize, new_name: []const u8) !void {
-    // @TODO
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
@@ -742,7 +741,6 @@ fn renameDefinitionFieldAccess(
     new_name: []const u8,
     config: Config,
 ) !void {
-    // @TODO
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
@@ -1383,7 +1381,6 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config, ke
             return try respondGeneric(id, null_result_response);
         };
 
-        // @TODO
         const pos = types.Position{
             .line = position.getValue("line").?.Integer,
             .character = position.getValue("character").?.Integer,
