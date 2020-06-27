@@ -719,14 +719,46 @@ fn gotoDefinitionString(id: types.RequestId, pos_index: usize, handle: *Document
 
 fn renameDefinitionGlobal(id: types.RequestId, handle: *DocumentStore.Handle, pos_index: usize, new_name: []const u8) !void {
     // @TODO
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+
+    const decl = (try getSymbolGlobal(&arena, pos_index, handle)) orelse return try respondGeneric(id, null_result_response);
+
+    var workspace_edit = types.WorkspaceEdit{
+        .changes = std.StringHashMap([]types.TextEdit).init(&arena.allocator),
+    };
+    try rename.renameSymbol(&arena, &document_store, decl, new_name, &workspace_edit.changes.?);
+    try send(types.Response{
+        .id = id,
+        .result = .{ .WorkspaceEdit = workspace_edit },
+    });
 }
 
-fn renameDefinitionFieldAccess(id: types.RequestId, handle: *DocumentStore.Handle, position: types.Position, new_name: []const u8) !void {
+fn renameDefinitionFieldAccess(
+    id: types.RequestId,
+    handle: *DocumentStore.Handle,
+    position: types.Position,
+    range: analysis.SourceRange,
+    new_name: []const u8,
+    config: Config,
+) !void {
     // @TODO
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+
+    const decl = (try getSymbolFieldAccess(handle, &arena, position, range, config)) orelse return try respondGeneric(id, null_result_response);
+
+    var workspace_edit = types.WorkspaceEdit{
+        .changes = std.StringHashMap([]types.TextEdit).init(&arena.allocator),
+    };
+    try rename.renameSymbol(&arena, &document_store, decl, new_name, &workspace_edit.changes.?);
+    try send(types.Response{
+        .id = id,
+        .result = .{ .WorkspaceEdit = workspace_edit },
+    });
 }
 
 fn renameDefinitionLabel(id: types.RequestId, handle: *DocumentStore.Handle, pos_index: usize, new_name: []const u8) !void {
-    // @TODO
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
@@ -736,7 +768,6 @@ fn renameDefinitionLabel(id: types.RequestId, handle: *DocumentStore.Handle, pos
         .changes = std.StringHashMap([]types.TextEdit).init(&arena.allocator),
     };
     try rename.renameLabel(&arena, decl, new_name, &workspace_edit.changes.?);
-
     try send(types.Response{
         .id = id,
         .result = .{ .WorkspaceEdit = workspace_edit },
@@ -1362,9 +1393,10 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config, ke
             const pos_index = try handle.document.positionToIndex(pos);
             const pos_context = try analysis.documentPositionContext(allocator, handle.document, pos);
 
+            const this_config = configFromUriOr(uri, config);
             switch (pos_context) {
                 .var_access => try renameDefinitionGlobal(id, handle, pos_index, new_name),
-                .field_access => try renameDefinitionFieldAccess(id, handle, pos, new_name),
+                .field_access => |range| try renameDefinitionFieldAccess(id, handle, pos, range, new_name, this_config),
                 .label => try renameDefinitionLabel(id, handle, pos_index, new_name),
                 else => try respondGeneric(id, null_result_response),
             }

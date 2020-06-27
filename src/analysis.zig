@@ -1421,19 +1421,21 @@ pub const DeclWithHandle = struct {
     decl: *Declaration,
     handle: *DocumentStore.Handle,
 
-    pub fn location(self: DeclWithHandle) ast.Tree.Location {
+    pub fn nameToken(self: DeclWithHandle) ast.TokenIndex {
         const tree = self.handle.tree;
         return switch (self.decl.*) {
-            .ast_node => |n| block: {
-                const name_token = getDeclNameToken(tree, n).?;
-                break :block tree.tokenLocation(0, name_token);
-            },
-            .param_decl => |p| tree.tokenLocation(0, p.name_token.?),
-            .pointer_payload => |pp| tree.tokenLocation(0, pp.node.value_symbol.firstToken()),
-            .array_payload => |ap| tree.tokenLocation(0, ap.identifier.firstToken()),
-            .switch_payload => |sp| tree.tokenLocation(0, sp.node.value_symbol.firstToken()),
-            .label_decl => |ld| tree.tokenLocation(0, ld.firstToken()),
+            .ast_node => |n| getDeclNameToken(tree, n).?,
+            .param_decl => |p| p.name_token.?,
+            .pointer_payload => |pp| pp.node.value_symbol.firstToken(),
+            .array_payload => |ap| ap.identifier.firstToken(),
+            .switch_payload => |sp| sp.node.value_symbol.firstToken(),
+            .label_decl => |ld| ld.firstToken(),
         };
+    }
+
+    pub fn location(self: DeclWithHandle) ast.Tree.Location {
+        const tree = self.handle.tree;
+        return tree.tokenLocation(0, self.nameToken());
     }
 
     fn isPublic(self: DeclWithHandle) bool {

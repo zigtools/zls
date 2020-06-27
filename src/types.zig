@@ -18,18 +18,15 @@ pub const Object = json.ObjectMap;
 pub const DocumentUri = String;
 
 pub const Position = struct {
-    line: Integer,
-    character: Integer
+    line: Integer, character: Integer
 };
 
 pub const Range = struct {
-    start: Position,
-    end: Position
+    start: Position, end: Position
 };
 
 pub const Location = struct {
-    uri: DocumentUri,
-    range: Range
+    uri: DocumentUri, range: Range
 };
 
 /// Id of a request
@@ -43,9 +40,7 @@ pub const RequestId = union(enum) {
 pub const RequestParams = void;
 
 pub const NotificationParams = union(enum) {
-    LogMessageParams: LogMessageParams,
-    PublishDiagnosticsParams: PublishDiagnosticsParams,
-    ShowMessageParams: ShowMessageParams
+    LogMessageParams: LogMessageParams, PublishDiagnosticsParams: PublishDiagnosticsParams, ShowMessageParams: ShowMessageParams
 };
 
 /// Hover response
@@ -73,17 +68,12 @@ pub const Error = struct {
 
 /// JSONRPC request
 pub const Request = struct {
-    jsonrpc: String = "2.0",
-    method: String,
-    id: ?RequestId = RequestId{.Integer = 0},
-    params: RequestParams
+    jsonrpc: String = "2.0", method: String, id: ?RequestId = RequestId{ .Integer = 0 }, params: RequestParams
 };
 
 /// JSONRPC notifications
 pub const Notification = struct {
-    jsonrpc: String = "2.0",
-    method: String,
-    params: NotificationParams
+    jsonrpc: String = "2.0", method: String, params: NotificationParams
 };
 
 /// JSONRPC response
@@ -112,8 +102,7 @@ pub const MessageType = enum(Integer) {
 
 /// Params for a LogMessage Notification (window/logMessage)
 pub const LogMessageParams = struct {
-    type: MessageType,
-    message: String
+    type: MessageType, message: String
 };
 
 pub const DiagnosticSeverity = enum(Integer) {
@@ -140,8 +129,7 @@ pub const Diagnostic = struct {
 };
 
 pub const PublishDiagnosticsParams = struct {
-    uri: DocumentUri,
-    diagnostics: []Diagnostic
+    uri: DocumentUri, diagnostics: []Diagnostic
 };
 
 pub const TextDocument = struct {
@@ -197,7 +185,7 @@ pub const TextDocument = struct {
             .end = .{
                 .line = line_idx,
                 .character = @intCast(i64, curr_line.len),
-            }
+            },
         };
     }
 };
@@ -236,7 +224,7 @@ pub const TextEdit = struct {
 
 pub const MarkupKind = enum(u1) {
     PlainText = 0, // plaintext
-    Markdown = 1,  // markdown
+    Markdown = 1, // markdown
 
     pub fn jsonStringify(
         value: MarkupKind,
@@ -252,8 +240,7 @@ pub const MarkupKind = enum(u1) {
 };
 
 pub const MarkupContent = struct {
-    kind: MarkupKind = MarkupKind.Markdown,
-    value: String
+    kind: MarkupKind = MarkupKind.Markdown, value: String
 };
 
 // pub const TextDocumentIdentifier = struct {
@@ -329,15 +316,7 @@ pub const InsertTextFormat = enum(Integer) {
 };
 
 pub const CompletionItem = struct {
-    label: String,
-    kind: CompletionItemKind,
-    textEdit: ?TextEdit = null,
-    filterText: ?String = null,
-    insertText: ?String = null,
-    insertTextFormat: ?InsertTextFormat = InsertTextFormat.PlainText,
-
-    detail: ?String = null,
-    documentation: ?MarkupContent = null
+    label: String, kind: CompletionItemKind, textEdit: ?TextEdit = null, filterText: ?String = null, insertText: ?String = null, insertTextFormat: ?InsertTextFormat = InsertTextFormat.PlainText, detail: ?String = null, documentation: ?MarkupContent = null
     // filterText: String = .NotDefined,
 };
 
@@ -379,16 +358,9 @@ const SymbolKind = enum {
 };
 
 pub const DocumentSymbol = struct {
-    name: String,
-    detail: ?String = null,
-    kind: SymbolKind,
-    deprecated: bool = false,
-    range: Range,
-    selectionRange: Range,
-    children: []DocumentSymbol = &[_]DocumentSymbol{}
+    name: String, detail: ?String = null, kind: SymbolKind, deprecated: bool = false, range: Range, selectionRange: Range, children: []DocumentSymbol = &[_]DocumentSymbol{}
 };
 
 pub const ShowMessageParams = struct {
-    type: MessageType,
-    message: String
+    type: MessageType, message: String
 };
