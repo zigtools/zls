@@ -33,7 +33,7 @@ fn testContext(comptime line: []const u8, comptime tag: var, comptime range: ?[]
 
     const ctx = try analysis.documentPositionContext(allocator, doc, types.Position{
         .line = 0,
-        .character = @intCast(i64, cursor_idx - 1),
+        .character = @intCast(i64, cursor_idx),
     });
 
     if (std.meta.activeTag(ctx) != tag) {
