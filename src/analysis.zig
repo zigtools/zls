@@ -276,6 +276,7 @@ pub fn resolveVarDeclAlias(store: *DocumentStore, arena: *std.heap.ArenaAllocato
     if (decl.cast(ast.Node.VarDecl)) |var_decl| {
         if (var_decl.init_node == null) return null;
         if (handle.tree.token_ids[var_decl.mut_token] != .Keyword_const) return null;
+        if (var_decl.init_node == null) return null;
 
         const base_expr = var_decl.init_node.?;
         if (base_expr.cast(ast.Node.InfixOp)) |infix_op| {
@@ -577,6 +578,7 @@ pub fn resolveTypeOfNodeInternal(
                     bound_type_params,
                 )) orelse break :block).instanceTypeVal();
             }
+            if (vari.init_node == null) return null;
 
             return try resolveTypeOfNodeInternal(store, arena, .{ .node = vari.init_node.?, .handle = handle }, bound_type_params);
         },
