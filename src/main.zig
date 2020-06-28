@@ -1349,11 +1349,8 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config, ke
             process.stdin.?.close();
             process.stdin = null;
 
-            // TODO readAllAlloc degfaults with the page allocator
-            var arena = std.heap.ArenaAllocator.init(allocator);
-            defer arena.deinit();
-            const stdout_bytes = try process.stdout.?.reader().readAllAlloc(&arena.allocator, std.math.maxInt(usize));
-            // defer allocator.free(stdout_bytes);
+            const stdout_bytes = try process.stdout.?.reader().readAllAlloc(allocator, std.math.maxInt(usize));
+            defer allocator.free(stdout_bytes);
 
             switch (try process.wait()) {
                 .Exited => |code| if (code == 0) {

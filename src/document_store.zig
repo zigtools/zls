@@ -138,20 +138,16 @@ fn loadPackages(context: LoadPackagesContext) !void {
     try std.fs.copyFileAbsolute(build_runner_path, target_path, .{});
     defer std.fs.deleteFileAbsolute(target_path) catch {};
 
-    // TODO Using the page allocator directly here causes a segfault
-    var arena = std.heap.ArenaAllocator.init(allocator);
-    defer arena.deinit();
     const zig_run_result = try std.ChildProcess.exec(.{
-        .allocator = &arena.allocator,
+        .allocator = allocator,
         .argv = &[_][]const u8{ zig_exe_path, "run", "build_runner.zig" },
         .cwd = directory_path,
     });
 
-    // TODO Add those back in when we stop using the arena
-    // defer {
-    //     allocator.free(zig_run_result.stdout);
-    //     allocator.free(zig_run_result.stderr);
-    // }
+    defer {
+        allocator.free(zig_run_result.stdout);
+        allocator.free(zig_run_result.stderr);
+    }
 
     switch (zig_run_result.term) {
         .Exited => |exit_code| {
