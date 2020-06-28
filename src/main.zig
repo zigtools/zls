@@ -954,16 +954,16 @@ fn loadConfig(folder_path: []const u8) ?Config {
     var folder = std.fs.cwd().openDir(folder_path, .{}) catch return null;
     defer folder.close();
 
-    const conf_file = folder.openFile("zls.json", .{}) catch return null;
-    defer conf_file.close();
-
-    // Max 1MB
-    const file_buf = conf_file.reader().readAllAlloc(allocator, 0x1000000) catch return null;
+    const file_buf = folder.readFileAlloc(allocator, "zls.json", 0x1000000) catch |err| {
+        if (err != error.FileNotFound)
+            std.log.debug(.main, "Error while reading configuration file: {}\n", .{err});
+        return null;
+    };
     defer allocator.free(file_buf);
 
     // TODO: Better errors? Doesn't seem like std.json can provide us positions or context.
     var config = std.json.parse(Config, &std.json.TokenStream.init(file_buf), std.json.ParseOptions{ .allocator = allocator }) catch |err| {
-        std.log.debug(.main, "Error while parsing configuration file: {}\nUsing default config.\n", .{err});
+        std.log.debug(.main, "Error while parsing configuration file: {}\n", .{err});
         return null;
     };
 

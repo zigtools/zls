@@ -202,10 +202,10 @@ fn writeContainerField(
     if (container_field.doc_comments) |docs| try writeDocComments(builder, builder.handle.tree, docs);
     try writeToken(builder, container_field.comptime_token, .keyword);
     if (field_token_type) |tok_type| try writeToken(builder, container_field.name_token, tok_type);
-    try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, container_field.type_expr);
+    try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, container_field.type_expr});
     if (container_field.align_expr) |n| {
         try writeToken(builder, n.firstToken() - 2, .keyword);
-        try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, n);
+        try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, n});
     }
 
     if (container_field.value_expr) |value_expr| block: {
@@ -217,7 +217,7 @@ fn writeContainerField(
             break :block; // Check this, I believe it is correct.
 
         try writeToken(builder, eq_tok, .operator);
-        try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, value_expr);
+        try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, value_expr});
     }
 }
 
@@ -245,7 +245,7 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
                 if (child.cast(ast.Node.ContainerField)) |container_field| {
                     try writeContainerField(builder, arena, store, container_field, .field, child_frame);
                 } else {
-                    try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, child);
+                    try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, child});
                 }
             }
             try gap_highlighter.end(node.lastToken());
@@ -263,24 +263,24 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
             } else {
                 try writeTokenMod(builder, var_decl.name_token, .variable, .{ .definition = true });
             }
-            try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, var_decl.type_node);
-            try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, var_decl.align_node);
-            try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, var_decl.section_node);
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, var_decl.type_node});
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, var_decl.align_node});
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, var_decl.section_node});
             try writeToken(builder, var_decl.eq_token, .operator);
-            try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, var_decl.init_node);
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, var_decl.init_node});
         },
         .Use => {
             const use = node.cast(ast.Node.Use).?;
             if (use.doc_comments) |docs| try writeDocComments(builder, builder.handle.tree, docs);
             try writeToken(builder, use.visib_token, .keyword);
             try writeToken(builder, use.use_token, .keyword);
-            try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, use.expr);
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, use.expr});
         },
         .ErrorSetDecl => {
             const error_set = node.cast(ast.Node.ErrorSetDecl).?;
             try writeToken(builder, error_set.error_token, .keyword);
             for (error_set.declsConst()) |decl|
-                try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, decl);
+                try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, decl});
         },
         .ContainerDecl => {
             const container_decl = node.cast(ast.Node.ContainerDecl).?;
@@ -289,10 +289,10 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
             switch (container_decl.init_arg_expr) {
                 .None => {},
                 .Enum => |enum_expr| if (enum_expr) |expr|
-                    try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, expr)
+                    try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, expr})
                 else
                     try writeToken(builder, container_decl.kind_token + 2, .keyword),
-                .Type => |type_node| try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, type_node),
+                .Type => |type_node| try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, type_node}),
             }
 
             var gap_highlighter = GapHighlighter.init(builder, container_decl.lbrace_token + 1);
@@ -302,7 +302,7 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
                 if (child.cast(ast.Node.ContainerField)) |container_field| {
                     try writeContainerField(builder, arena, store, container_field, field_token_type, child_frame);
                 } else {
-                    try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, child);
+                    try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, child});
                 }
             }
             try gap_highlighter.end(node.lastToken());
@@ -334,7 +334,7 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
             if (fn_proto.doc_comments) |docs| try writeDocComments(builder, handle.tree, docs);
             try writeToken(builder, fn_proto.visib_token, .keyword);
             try writeToken(builder, fn_proto.extern_export_inline_token, .keyword);
-            try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, fn_proto.lib_name);
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, fn_proto.lib_name});
             try writeToken(builder, fn_proto.fn_token, .keyword);
 
             const func_name_tok_type: TokenType = if (analysis.isTypeFunction(handle.tree, fn_proto))
@@ -357,47 +357,47 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
                 switch (param_decl.param_type) {
                     .var_type => |var_node| try writeToken(builder, var_node.firstToken(), .type),
                     .var_args => |var_args_tok| try writeToken(builder, var_args_tok, .operator),
-                    .type_expr => |type_expr| try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, type_expr),
+                    .type_expr => |type_expr| try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, type_expr}),
                 }
             }
-            try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, fn_proto.align_expr);
-            try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, fn_proto.section_expr);
-            try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, fn_proto.callconv_expr);
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, fn_proto.align_expr});
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, fn_proto.section_expr});
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, fn_proto.callconv_expr});
 
             switch (fn_proto.return_type) {
-                .Explicit => |type_expr| try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, type_expr),
+                .Explicit => |type_expr| try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, type_expr}),
                 .InferErrorSet => |type_expr| {
                     try writeToken(builder, type_expr.firstToken() - 1, .operator);
-                    try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, type_expr);
+                    try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, type_expr});
                 },
                 .Invalid => {},
             }
-            try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, fn_proto.body_node);
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, fn_proto.body_node});
         },
         .AnyFrameType => {
             const any_frame_type = node.cast(ast.Node.AnyFrameType).?;
             try writeToken(builder, any_frame_type.anyframe_token, .type);
             if (any_frame_type.result) |any_frame_result| {
                 try writeToken(builder, any_frame_result.arrow_token, .type);
-                try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, any_frame_result.return_type);
+                try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, any_frame_result.return_type});
             }
         },
         .Defer => {
             const defer_node = node.cast(ast.Node.Defer).?;
             try writeToken(builder, defer_node.defer_token, .keyword);
-            try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, defer_node.payload);
-            try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, defer_node.expr);
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, defer_node.payload});
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, defer_node.expr});
         },
         .Comptime => {
             const comptime_node = node.cast(ast.Node.Comptime).?;
             if (comptime_node.doc_comments) |docs| try writeDocComments(builder, handle.tree, docs);
             try writeToken(builder, comptime_node.comptime_token, .keyword);
-            try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, comptime_node.expr);
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, comptime_node.expr});
         },
         .Nosuspend => {
             const nosuspend_node = node.cast(ast.Node.Nosuspend).?;
             try writeToken(builder, nosuspend_node.nosuspend_token, .keyword);
-            try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, nosuspend_node.expr);
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, nosuspend_node.expr});
         },
         .Payload => {
             const payload = node.cast(ast.Node.Payload).?;
@@ -423,27 +423,27 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
         .Else => {
             const else_node = node.cast(ast.Node.Else).?;
             try writeToken(builder, else_node.else_token, .keyword);
-            try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, else_node.payload);
-            try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, else_node.body);
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, else_node.payload});
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, else_node.body});
         },
         .Switch => {
             const switch_node = node.cast(ast.Node.Switch).?;
             try writeToken(builder, switch_node.switch_token, .keyword);
-            try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, switch_node.expr);
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, switch_node.expr});
 
             var gap_highlighter = GapHighlighter.init(builder, switch_node.expr.lastToken() + 3);
             for (switch_node.casesConst()) |case_node| {
                 try gap_highlighter.next(case_node);
-                try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, case_node);
+                try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, case_node});
             }
             try gap_highlighter.end(node.lastToken());
         },
         .SwitchCase => {
             const switch_case = node.cast(ast.Node.SwitchCase).?;
-            for (switch_case.itemsConst()) |item_node| try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, item_node);
+            for (switch_case.itemsConst()) |item_node| try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, item_node});
             try writeToken(builder, switch_case.arrow_token, .operator);
-            try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, switch_case.payload);
-            try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, switch_case.expr);
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, switch_case.payload});
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, switch_case.expr});
         },
         .SwitchElse => {
             const switch_else = node.cast(ast.Node.SwitchElse).?;
@@ -454,36 +454,36 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
             try writeToken(builder, while_node.label, .label);
             try writeToken(builder, while_node.inline_token, .keyword);
             try writeToken(builder, while_node.while_token, .keyword);
-            try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, while_node.condition);
-            try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, while_node.payload);
-            try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, while_node.continue_expr);
-            try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, while_node.body);
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, while_node.condition});
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, while_node.payload});
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, while_node.continue_expr});
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, while_node.body});
             if (while_node.@"else") |else_node|
-                try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, &else_node.base);
+                try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, &else_node.base});
         },
         .For => {
             const for_node = node.cast(ast.Node.For).?;
             try writeToken(builder, for_node.label, .label);
             try writeToken(builder, for_node.inline_token, .keyword);
             try writeToken(builder, for_node.for_token, .keyword);
-            try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, for_node.array_expr);
-            try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, for_node.payload);
-            try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, for_node.body);
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, for_node.array_expr});
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, for_node.payload});
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, for_node.body});
             if (for_node.@"else") |else_node|
-                try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, &else_node.base);
+                try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, &else_node.base});
         },
         .If => {
             const if_node = node.cast(ast.Node.If).?;
             try writeToken(builder, if_node.if_token, .keyword);
-            try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, if_node.condition);
-            try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, if_node.payload);
-            try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, if_node.body);
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, if_node.condition});
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, if_node.payload});
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, if_node.body});
             if (if_node.@"else") |else_node|
-                try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, &else_node.base);
+                try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, &else_node.base});
         },
         .InfixOp => {
             const infix_op = node.cast(ast.Node.InfixOp).?;
-            try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, infix_op.lhs);
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, infix_op.lhs});
             if (infix_op.op != .Period and infix_op.op != .Catch) {
                 const token_type: TokenType = switch (infix_op.op) {
                     .BoolAnd, .BoolOr, .UnwrapOptional => .keyword,
@@ -491,13 +491,13 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
                 };
 
                 try writeToken(builder, infix_op.op_token, token_type);
-                try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, infix_op.rhs);
+                try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, infix_op.rhs});
             }
             switch (infix_op.op) {
                 .Catch => |n| {
                     try writeToken(builder, infix_op.op_token, .keyword);
-                    try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, n);
-                    try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, infix_op.rhs);
+                    try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, n});
+                    try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, infix_op.rhs});
                 },
                 .Period => {
                     const rhs_str = handle.tree.tokenSlice(infix_op.rhs.firstToken());
@@ -556,7 +556,7 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
 
             switch (prefix_op.op) {
                 .ArrayType => |info| {
-                    try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, info.len_expr);
+                    try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, info.len_expr});
                 },
                 .SliceType, .PtrType => |info| {
                     if (prefix_op.op == .PtrType) try writeToken(builder, prefix_op.op_token, tok_type);
@@ -567,7 +567,7 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
                         } else {
                             try writeToken(builder, prefix_op.op_token + 2, .keyword);
                         }
-                        try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, align_info.node);
+                        try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, align_info.node});
                     }
                     try writeToken(builder, info.const_token, .keyword);
                     try writeToken(builder, info.volatile_token, .keyword);
@@ -576,20 +576,20 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
                 else => try writeToken(builder, prefix_op.op_token, tok_type),
             }
 
-            try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, prefix_op.rhs);
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, prefix_op.rhs});
         },
         .ArrayInitializer => {
             const array_initializer = node.cast(ast.Node.ArrayInitializer).?;
-            try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, array_initializer.lhs);
-            for (array_initializer.listConst()) |elem| try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, elem);
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, array_initializer.lhs});
+            for (array_initializer.listConst()) |elem| try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, elem});
         },
         .ArrayInitializerDot => {
             const array_initializer = node.cast(ast.Node.ArrayInitializerDot).?;
-            for (array_initializer.listConst()) |elem| try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, elem);
+            for (array_initializer.listConst()) |elem| try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, elem});
         },
         .StructInitializer => {
             const struct_initializer = node.cast(ast.Node.StructInitializer).?;
-            try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, struct_initializer.lhs);
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, struct_initializer.lhs});
             const field_token_type = if (try analysis.resolveTypeOfNode(store, arena, .{ .node = struct_initializer.lhs, .handle = handle })) |struct_type| switch (struct_type.type.data) {
                 .other => |type_node| if (type_node.cast(ast.Node.ContainerDecl)) |container_decl|
                     fieldTokenType(container_decl, handle)
@@ -608,7 +608,7 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
                     try writeToken(builder, field_init.name_token, tok_type);
                 }
                 try writeToken(builder, field_init.name_token + 1, .operator);
-                try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, field_init.expr);
+                try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, field_init.expr});
             }
             try gap_highlighter.end(struct_initializer.rtoken);
         },
@@ -623,40 +623,40 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
                 try writeToken(builder, field_init.period_token, .field);
                 try writeToken(builder, field_init.name_token, .field);
                 try writeToken(builder, field_init.name_token + 1, .operator);
-                try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, field_init.expr);
+                try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, field_init.expr});
             }
             try gap_highlighter.end(struct_initializer.rtoken);
         },
         .Call => {
             const call = node.cast(ast.Node.Call).?;
             try writeToken(builder, call.async_token, .keyword);
-            try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, call.lhs);
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, call.lhs});
             if (builder.current_token) |curr_tok| {
                 if (curr_tok != call.lhs.lastToken() and  handle.tree.token_ids[call.lhs.lastToken()] == .Identifier) {
                     try writeToken(builder, call.lhs.lastToken(), .function);
                 }
             }
-            for (call.paramsConst()) |param| try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, param);
+            for (call.paramsConst()) |param| try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, param});
         },
         .SuffixOp => {
             const suffix_op = node.cast(ast.Node.SuffixOp).?;
-            try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, suffix_op.lhs);
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, suffix_op.lhs});
             switch (suffix_op.op) {
                 .ArrayAccess => |n| {
-                    try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, n);
+                    try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, n});
                 },
                 .Slice => |s| {
-                    try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, s.start);
+                    try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, s.start});
                     try writeToken(builder, s.start.lastToken() + 1, .operator);
-                    try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, s.end);
-                    try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, s.sentinel);
+                    try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, s.end});
+                    try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, s.sentinel});
                 },
                 else => try writeToken(builder, suffix_op.rtoken, .operator),
             }
         },
         .GroupedExpression => {
             const grouped_expr = node.cast(ast.Node.GroupedExpression).?;
-            try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, grouped_expr.expr);
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, grouped_expr.expr});
         },
         .ControlFlowExpression => {
             const cfe = node.cast(ast.Node.ControlFlowExpression).?;
@@ -666,12 +666,12 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
                 .Continue => |label| if (label) |n| try writeToken(builder, n.firstToken(), .label),
                 else => {},
             }
-            try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, cfe.rhs);
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, cfe.rhs});
         },
         .Suspend => {
             const suspend_node = node.cast(ast.Node.Suspend).?;
             try writeToken(builder, suspend_node.suspend_token, .keyword);
-            try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, suspend_node.body);
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, suspend_node.body});
         },
         .IntegerLiteral => {
             try writeToken(builder, node.firstToken(), .number);
@@ -688,7 +688,7 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
             const builtin_call = node.cast(ast.Node.BuiltinCall).?;
             try writeToken(builder, builtin_call.builtin_token, .builtin);
             for (builtin_call.paramsConst()) |param|
-                try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, param);
+                try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, param});
         },
         .StringLiteral, .CharLiteral => {
             try writeToken(builder, node.firstToken(), .string);
@@ -704,7 +704,7 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
             const asm_expr = node.cast(ast.Node.Asm).?;
             try writeToken(builder, asm_expr.asm_token, .keyword);
             try writeToken(builder, asm_expr.volatile_token, .keyword);
-            try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, asm_expr.template);
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, asm_expr.template});
             // TODO Inputs, outputs.
         },
         .VarType => {
@@ -714,8 +714,8 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
             const test_decl = node.cast(ast.Node.TestDecl).?;
             if (test_decl.doc_comments) |doc| try writeDocComments(builder, handle.tree, doc);
             try writeToken(builder, test_decl.test_token, .keyword);
-            try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, test_decl.name);
-            try await @asyncCall(child_frame, {}, writeNodeTokens, builder, arena, store, test_decl.body_node);
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, test_decl.name});
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{builder, arena, store, test_decl.body_node});
         },
         else => {},
     }

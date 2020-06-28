@@ -138,16 +138,20 @@ fn loadPackages(context: LoadPackagesContext) !void {
     try std.fs.copyFileAbsolute(build_runner_path, target_path, .{});
     defer std.fs.deleteFileAbsolute(target_path) catch {};
 
+    // TODO Using the page allocator directly here causes a segfault
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
     const zig_run_result = try std.ChildProcess.exec(.{
-        .allocator = allocator,
+        .allocator = &arena.allocator,
         .argv = &[_][]const u8{ zig_exe_path, "run", "build_runner.zig" },
         .cwd = directory_path,
     });
 
-    defer {
-        allocator.free(zig_run_result.stdout);
-        allocator.free(zig_run_result.stderr);
-    }
+    // TODO Add those back in when we stop using the arena
+    // defer {
+    //     allocator.free(zig_run_result.stdout);
+    //     allocator.free(zig_run_result.stderr);
+    // }
 
     switch (zig_run_result.term) {
         .Exited => |exit_code| {
@@ -263,14 +267,19 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: []u8) anyerror!*Hand
             if (std.mem.lastIndexOfScalar(u8, curr_path[0 .. curr_path.len - 1], std.fs.path.sep)) |idx| {
                 // This includes the last separator
                 curr_path = curr_path[0 .. idx + 1];
+
+                var folder = try std.fs.cwd().openDir(curr_path, .{});
+                defer folder.close();
+
+                // Try to open the file, read it and add the new document if we find it.
+                const build_file_text = folder.readFileAlloc(self.allocator, "build.zig", std.math.maxInt(usize)) catch |err| switch (err) {
+                    error.FileNotFound, error.AccessDenied => continue,
+                    else => return err,
+                };
+                errdefer self.allocator.free(build_file_text);
+
                 var candidate_path = try std.mem.concat(self.allocator, u8, &[_][]const u8{ curr_path, "build.zig" });
                 defer self.allocator.free(candidate_path);
-                // Try to open the file, read it and add the new document if we find it.
-                var file = std.fs.cwd().openFile(candidate_path, .{ .read = true, .write = false }) catch continue;
-                defer file.close();
-
-                const build_file_text = try file.inStream().readAllAlloc(self.allocator, std.math.maxInt(usize));
-                errdefer self.allocator.free(build_file_text);
 
                 const build_file_uri = try URI.fromPath(self.allocator, candidate_path);
                 errdefer self.allocator.free(build_file_uri);
