@@ -722,11 +722,8 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
 }
 
 // TODO Range version, edit version.
-pub fn writeAllSemanticTokens(allocator: *std.mem.Allocator, store: *DocumentStore, handle: *DocumentStore.Handle) ![]u32 {
-    var arena = std.heap.ArenaAllocator.init(allocator);
-    defer arena.deinit();
-
-    var builder = Builder.init(allocator, handle);
-    try writeNodeTokens(&builder, &arena, store, &handle.tree.root_node.base);
+pub fn writeAllSemanticTokens(arena: *std.heap.ArenaAllocator, store: *DocumentStore, handle: *DocumentStore.Handle) ![]u32 {
+    var builder = Builder.init(arena.child_allocator, handle);
+    try writeNodeTokens(&builder, arena, store, &handle.tree.root_node.base);
     return builder.toOwnedSlice();
 }

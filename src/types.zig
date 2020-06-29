@@ -358,9 +358,21 @@ const SymbolKind = enum {
 };
 
 pub const DocumentSymbol = struct {
-    name: String, detail: ?String = null, kind: SymbolKind, deprecated: bool = false, range: Range, selectionRange: Range, children: []DocumentSymbol = &[_]DocumentSymbol{}
+    name: String,
+    detail: ?String = null,
+    kind: SymbolKind,
+    deprecated: bool = false,
+    range: Range,
+    selectionRange: Range,
+    children: []DocumentSymbol = &[_]DocumentSymbol{},
 };
 
 pub const ShowMessageParams = struct {
-    type: MessageType, message: String
+    type: MessageType,
+    message: String,
+};
+
+pub const WorkspaceFolder = struct {
+    uri: DocumentUri,
+    name: String,
 };

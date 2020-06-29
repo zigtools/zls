@@ -6,6 +6,7 @@ const DocumentStore = @import("document_store.zig");
 const DebugAllocator = @import("debug_allocator.zig");
 const readRequestHeader = @import("header.zig").readRequestHeader;
 const data = @import("data/" ++ build_options.data_version ++ ".zig");
+const requests = @import("requests.zig");
 const types = @import("types.zig");
 const analysis = @import("analysis.zig");
 const URI = @import("uri.zig");
@@ -25,7 +26,10 @@ pub fn log(
     comptime format: []const u8,
     args: var,
 ) void {
-    var message = std.fmt.allocPrint(allocator, "[{}-{}] " ++ format, .{ @tagName(message_level), @tagName(scope) } ++ args) catch |err| {
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+
+    var message = std.fmt.allocPrint(&arena.allocator, "[{}-{}] " ++ format, .{ @tagName(message_level), @tagName(scope) } ++ args) catch |err| {
         std.debug.print("Failed to allocPrint message.", .{});
         return;
     };
@@ -37,7 +41,7 @@ pub fn log(
             .err => .Error,
             else => .Error,
         };
-        send(types.Notification{
+        send(&arena, types.Notification{
             .method = "window/showMessage",
             .params = types.NotificationParams{
                 .ShowMessageParams = .{
@@ -54,7 +58,7 @@ pub fn log(
         else
             .Info;
 
-        send(types.Notification{
+        send(&arena, types.Notification{
             .method = "window/logMessage",
             .params = types.NotificationParams{
                 .LogMessageParams = .{
@@ -113,14 +117,11 @@ const no_semantic_tokens_response =
 ;
 
 /// Sends a request or response
-fn send(reqOrRes: var) !void {
-    var arena = std.heap.ArenaAllocator.init(allocator);
-    defer arena.deinit();
-
+fn send(arena: *std.heap.ArenaAllocator, reqOrRes: var) !void {
     var arr = std.ArrayList(u8).init(&arena.allocator);
     try std.json.stringify(reqOrRes, .{}, arr.writer());
 
-    const stdout_stream = stdout.outStream();
+    const stdout_stream = stdout.writer();
     try stdout_stream.print("Content-Length: {}\r\n\r\n", .{arr.items.len});
     try stdout_stream.writeAll(arr.items);
     try stdout.flush();
@@ -182,12 +183,8 @@ fn astLocationToRange(loc: std.zig.ast.Tree.Location) types.Range {
     };
 }
 
-fn publishDiagnostics(handle: DocumentStore.Handle, config: Config) !void {
+fn publishDiagnostics(arena: *std.heap.ArenaAllocator, handle: DocumentStore.Handle, config: Config) !void {
     const tree = handle.tree;
-
-    // Use an arena for our local memory allocations.
-    var arena = std.heap.ArenaAllocator.init(allocator);
-    defer arena.deinit();
 
     var diagnostics = std.ArrayList(types.Diagnostic).init(&arena.allocator);
 
@@ -249,7 +246,7 @@ fn publishDiagnostics(handle: DocumentStore.Handle, config: Config) !void {
         }
     }
 
-    try send(types.Notification{
+    try send(arena, types.Notification{
         .method = "textDocument/publishDiagnostics",
         .params = .{
             .PublishDiagnosticsParams = .{
@@ -1001,9 +998,127 @@ fn configFromUriOr(uri: []const u8, default: Config) Config {
     return default;
 }
 
-// TODO Rewrite this, use a ComptimeStringMap that points to a fn pointer + Param type to decode into and pass to the function
-//      Split into multiple files?
-fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config, keep_running: *bool) !void {
+fn initializeHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.Initialize, config: Config) !void {
+    if (req.params.capabilities.workspace) |workspace| {
+        client_capabilities.supports_workspace_folders = workspace.workspaceFolders.value;
+    }
+
+    if (req.params.capabilities.textDocument) |textDocument| {
+        client_capabilities.supports_semantic_tokens = textDocument.semanticTokens.exists;
+        if (textDocument.hover) |hover| {
+            for (hover.contentFormat.value) |format| {
+                if (std.mem.eql(u8, "markdown", format)) {
+                    client_capabilities.hover_supports_md = true;
+                }
+            }
+        }
+        if (textDocument.completion) |completion| {
+            if (completion.completionItem) |completionItem| {
+                client_capabilities.supports_snippets = completionItem.snippetSupport.value;
+                for (completionItem.documentationFormat.value) |documentationFormat| {
+                    if (std.mem.eql(u8, "markdown", documentationFormat)) {
+                        client_capabilities.completion_doc_supports_md = true;
+                    }
+                }
+            }
+        }
+    }
+
+    if (req.params.workspaceFolders) |workspaceFolders| {
+        if (workspaceFolders.len != 0) {
+            std.log.debug(.main, "Got workspace folders in initialization.\n", .{});
+        }
+        for (workspaceFolders) |workspace_folder| {
+            std.log.debug(.main, "Loaded folder {}\n", .{workspace_folder.uri});
+            const duped_uri = try std.mem.dupe(allocator, u8, workspace_folder.uri);
+            try workspace_folder_configs.putNoClobber(duped_uri, null);
+        }
+        try loadWorkspaceConfigs();
+    }
+
+    std.log.debug(.main, "{}\n", .{client_capabilities});
+    try respondGeneric(id, initialize_response);
+    std.log.notice(.main, "zls initialized", .{});
+}
+
+var keep_running = true;
+fn shutdownHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, config: Config) !void {
+    keep_running = false;
+    // Technically we should deinitialize first and send possible errors to the client
+    try respondGeneric(id, null_result_response);
+}
+
+fn workspaceFoldersChangeHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.WorkspaceFoldersChange, config: Config) !void {
+    for (req.params.event.removed) |rem| {
+        if (workspace_folder_configs.remove(rem.uri)) |entry| {
+            allocator.free(entry.key);
+            if (entry.value) |c| {
+                std.json.parseFree(Config, c, std.json.ParseOptions{ .allocator = allocator });
+            }
+        }
+    }
+
+    for (req.params.event.added) |add| {
+        const duped_uri = try std.mem.dupe(allocator, u8, add.uri);
+        if (try workspace_folder_configs.put(duped_uri, null)) |old| {
+            allocator.free(old.key);
+            if (old.value) |c| {
+                std.json.parseFree(Config, c, std.json.ParseOptions{ .allocator = allocator });
+            }
+        }
+    }
+
+    try loadWorkspaceConfigs();
+}
+
+fn openDocumentHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.OpenDocument, config: Config) !void {
+    const handle = try document_store.openDocument(req.params.textDocument.uri, req.params.textDocument.text);
+    try publishDiagnostics(arena, handle.*, configFromUriOr(req.params.textDocument.uri, config));
+}
+
+fn changeDocumentHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.ChangeDocument, config: Config) !void {
+    const handle = document_store.getHandle(req.params.textDocument.uri) orelse {
+        std.log.debug(.main, "Trying to change non existent document {}", .{req.params.textDocument.uri});
+        return;
+    };
+
+    const local_config = configFromUriOr(req.params.textDocument.uri, config);
+    try document_store.applyChanges(handle, req.params.contentChanges.Array, local_config.zig_lib_path);
+    try publishDiagnostics(arena, handle.*, local_config);
+}
+
+fn saveDocumentHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.SaveDocument, config: Config) !void {
+    const handle = document_store.getHandle(req.params.textDocument.uri) orelse {
+        std.log.debug(.main, "Trying to save non existent document {}", .{req.params.textDocument.uri});
+        return;
+    };
+    try document_store.applySave(handle);
+}
+
+fn closeDocumentHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.CloseDocument, config: Config) !void {
+    document_store.closeDocument(req.params.textDocument.uri);
+}
+
+fn semanticTokensHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.SemanticTokens, config: Config) !void {
+    const this_config = configFromUriOr(req.params.textDocument.uri, config);
+    if (this_config.enable_semantic_tokens) {
+        const handle = document_store.getHandle(req.params.textDocument.uri) orelse {
+            std.log.debug(.main, "Trying to complete in non existent document {}", .{req.params.textDocument.uri});
+            return try respondGeneric(id, no_semantic_tokens_response);
+        };
+
+        const semantic_tokens = @import("semantic_tokens.zig");
+        const token_array = try semantic_tokens.writeAllSemanticTokens(arena, &document_store, handle);
+
+        return try send(arena, types.Response{
+            .id = id,
+            .result = .{ .SemanticTokens = .{ .data = token_array } },
+        });
+    } else
+        return try respondGeneric(id, no_semantic_tokens_response);
+}
+
+fn processJsonRpc(arena: *std.heap.ArenaAllocator, parser: *std.json.Parser, json: []const u8, config: Config) !void {
     var tree = try parser.parse(json);
     defer tree.deinit();
 
@@ -1024,401 +1139,272 @@ fn processJsonRpc(parser: *std.json.Parser, json: []const u8, config: Config, ke
         std.log.debug(.main, "Took {}ms to process method {}\n", .{ end_time - start_time, method });
     }
 
-    // Core
-    if (std.mem.eql(u8, method, "initialize")) {
-        const params = root.Object.getValue("params").?.Object;
-        const client_capabs = params.getValue("capabilities").?.Object;
-        if (client_capabs.getValue("workspace")) |workspace_capabs| {
-            if (workspace_capabs.Object.getValue("workspaceFolders")) |folders_capab| {
-                client_capabilities.supports_workspace_folders = folders_capab.Bool;
-            }
-        }
+    const method_map = .{
+        .{ "initialize", .{ requests.Initialize, initializeHandler } },
+        .{ "shutdown", .{ void, shutdownHandler } },
+        .{ "initialized", .{} },
+        .{ "$/cancelRequest", .{} },
+        .{ "workspace/didChangeWorkspaceFolders", .{ requests.WorkspaceFoldersChange, workspaceFoldersChangeHandler } },
+        .{ "textDocument/didOpen", .{ requests.OpenDocument, openDocumentHandler } },
+        .{ "textDocument/didChange", .{ requests.ChangeDocument, changeDocumentHandler } },
+        .{ "textDocument/didSave", .{ requests.SaveDocument, saveDocumentHandler } },
+        .{ "textDocument/willSave", .{} },
+        .{ "textDocument/didClose", .{ requests.CloseDocument, closeDocumentHandler } },
+        .{ "textDocument/semanticTokens", .{ requests.SemanticTokens, semanticTokensHandler } },
+    };
 
-        if (client_capabs.getValue("textDocument")) |text_doc_capabs| {
-            if (text_doc_capabs.Object.getValue("semanticTokens")) |_| {
-                client_capabilities.supports_semantic_tokens = true;
-            }
-
-            if (text_doc_capabs.Object.getValue("hover")) |hover_capabs| {
-                if (hover_capabs.Object.getValue("contentFormat")) |content_formats| {
-                    for (content_formats.Array.items) |format| {
-                        if (std.mem.eql(u8, "markdown", format.String)) {
-                            client_capabilities.hover_supports_md = true;
-                        }
-                    }
-                }
-            }
-
-            if (text_doc_capabs.Object.getValue("completion")) |completion_capabs| {
-                if (completion_capabs.Object.getValue("completionItem")) |item_capabs| {
-                    const maybe_support_snippet = item_capabs.Object.getValue("snippetSupport");
-                    client_capabilities.supports_snippets = maybe_support_snippet != null and maybe_support_snippet.?.Bool;
-
-                    if (item_capabs.Object.getValue("documentationFormat")) |content_formats| {
-                        for (content_formats.Array.items) |format| {
-                            if (std.mem.eql(u8, "markdown", format.String)) {
-                                client_capabilities.completion_doc_supports_md = true;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        if (params.getValue("workspaceFolders")) |workspace_folders| {
-            switch (workspace_folders) {
-                .Array => |folders| {
-                    std.log.debug(.main, "Got workspace folders in initialization.\n", .{});
-
-                    for (folders.items) |workspace_folder| {
-                        const folder_uri = workspace_folder.Object.getValue("uri").?.String;
-                        std.log.debug(.main, "Loaded folder {}\n", .{folder_uri});
-                        const duped_uri = try std.mem.dupe(allocator, u8, folder_uri);
-                        try workspace_folder_configs.putNoClobber(duped_uri, null);
-                    }
-                    try loadWorkspaceConfigs();
-                },
-                else => {},
-            }
-        }
-
-        std.log.debug(.main, "{}\n", .{client_capabilities});
-        try respondGeneric(id, initialize_response);
-        std.log.notice(.main, "zls initialized", .{});
-    } else if (std.mem.eql(u8, method, "shutdown")) {
-        keep_running.* = false;
-        // Technically we shoudl deinitialize first and send possible errors to the client
-        try respondGeneric(id, null_result_response);
-    } else if (std.mem.eql(u8, method, "initialized")) {
-        // All gucci
-    } else if (std.mem.eql(u8, method, "$/cancelRequest")) {
-        // noop
-    }
-    // Workspace folder changes
-    else if (std.mem.eql(u8, method, "workspace/didChangeWorkspaceFolders")) {
-        const params = root.Object.getValue("params").?.Object;
-        const event = params.getValue("event").?.Object;
-        const added = event.getValue("added").?.Array;
-        const removed = event.getValue("removed").?.Array;
-
-        for (removed.items) |rem| {
-            const uri = rem.Object.getValue("uri").?.String;
-            if (workspace_folder_configs.remove(uri)) |entry| {
-                allocator.free(entry.key);
-                if (entry.value) |c| {
-                    std.json.parseFree(Config, c, std.json.ParseOptions{ .allocator = allocator });
-                }
-            }
-        }
-
-        for (added.items) |add| {
-            const duped_uri = try std.mem.dupe(allocator, u8, add.Object.getValue("uri").?.String);
-            if (try workspace_folder_configs.put(duped_uri, null)) |old| {
-                allocator.free(old.key);
-                if (old.value) |c| {
-                    std.json.parseFree(Config, c, std.json.ParseOptions{ .allocator = allocator });
-                }
-            }
-        }
-
-        try loadWorkspaceConfigs();
-    }
-    // File changes
-    else if (std.mem.eql(u8, method, "textDocument/didOpen")) {
-        const params = root.Object.getValue("params").?.Object;
-        const document = params.getValue("textDocument").?.Object;
-        const uri = document.getValue("uri").?.String;
-        const text = document.getValue("text").?.String;
-
-        const handle = try document_store.openDocument(uri, text);
-        try publishDiagnostics(handle.*, configFromUriOr(uri, config));
-    } else if (std.mem.eql(u8, method, "textDocument/didChange")) {
-        const params = root.Object.getValue("params").?.Object;
-        const text_document = params.getValue("textDocument").?.Object;
-        const uri = text_document.getValue("uri").?.String;
-        const content_changes = params.getValue("contentChanges").?.Array;
-
-        const handle = document_store.getHandle(uri) orelse {
-            std.log.debug(.main, "Trying to change non existent document {}", .{uri});
-            return;
-        };
-
-        const local_config = configFromUriOr(uri, config);
-        try document_store.applyChanges(handle, content_changes, local_config.zig_lib_path);
-        try publishDiagnostics(handle.*, local_config);
-    } else if (std.mem.eql(u8, method, "textDocument/didSave")) {
-        const params = root.Object.getValue("params").?.Object;
-        const text_document = params.getValue("textDocument").?.Object;
-        const uri = text_document.getValue("uri").?.String;
-        const handle = document_store.getHandle(uri) orelse {
-            std.log.debug(.main, "Trying to save non existent document {}", .{uri});
-            return;
-        };
-
-        try document_store.applySave(handle);
-    } else if (std.mem.eql(u8, method, "textDocument/willSave")) {
-        // noop
-    } else if (std.mem.eql(u8, method, "textDocument/didClose")) {
-        const params = root.Object.getValue("params").?.Object;
-        const document = params.getValue("textDocument").?.Object;
-        const uri = document.getValue("uri").?.String;
-
-        document_store.closeDocument(uri);
-    }
-    // Semantic highlighting
-    else if (std.mem.eql(u8, method, "textDocument/semanticTokens")) {
-        const params = root.Object.getValue("params").?.Object;
-        const document = params.getValue("textDocument").?.Object;
-        const uri = document.getValue("uri").?.String;
-
-        const this_config = configFromUriOr(uri, config);
-        if (this_config.enable_semantic_tokens) {
-            const handle = document_store.getHandle(uri) orelse {
-                std.log.debug(.main, "Trying to complete in non existent document {}", .{uri});
-                return try respondGeneric(id, no_semantic_tokens_response);
-            };
-
-            const semantic_tokens = @import("semantic_tokens.zig");
-            const token_array = try semantic_tokens.writeAllSemanticTokens(allocator, &document_store, handle);
-            defer allocator.free(token_array);
-
-            return try send(types.Response{
-                .id = id,
-                .result = .{ .SemanticTokens = .{ .data = token_array } },
-            });
-        } else
-            return try respondGeneric(id, no_semantic_tokens_response);
-    }
-    // Autocomplete / Signatures
-    else if (std.mem.eql(u8, method, "textDocument/completion")) {
-        const params = root.Object.getValue("params").?.Object;
-        const text_document = params.getValue("textDocument").?.Object;
-        const uri = text_document.getValue("uri").?.String;
-        const position = params.getValue("position").?.Object;
-
-        const handle = document_store.getHandle(uri) orelse {
-            std.log.debug(.main, "Trying to complete in non existent document {}", .{uri});
-            return try respondGeneric(id, no_completions_response);
-        };
-
-        const pos = types.Position{
-            .line = position.getValue("line").?.Integer,
-            .character = position.getValue("character").?.Integer,
-        };
-        if (pos.character >= 0) {
-            const pos_index = try handle.document.positionToIndex(pos);
-            const pos_context = try analysis.documentPositionContext(allocator, handle.document, pos);
-
-            const this_config = configFromUriOr(uri, config);
-            const use_snippets = this_config.enable_snippets and client_capabilities.supports_snippets;
-            switch (pos_context) {
-                .builtin => try send(types.Response{
-                    .id = id,
-                    .result = .{
-                        .CompletionList = .{
-                            .isIncomplete = false,
-                            .items = builtin_completions[@boolToInt(use_snippets)][0..],
-                        },
-                    },
-                }),
-                .var_access, .empty => try completeGlobal(id, pos_index, handle, this_config),
-                .field_access => |range| try completeFieldAccess(id, handle, pos, range, this_config),
-                .global_error_set => try send(types.Response{
-                    .id = id,
-                    .result = .{
-                        .CompletionList = .{
-                            .isIncomplete = false,
-                            .items = document_store.error_completions.completions.items,
-                        },
-                    },
-                }),
-                .enum_literal => try send(types.Response{
-                    .id = id,
-                    .result = .{
-                        .CompletionList = .{
-                            .isIncomplete = false,
-                            .items = document_store.enum_completions.completions.items,
-                        },
-                    },
-                }),
-                .label => try completeLabel(id, pos_index, handle, this_config),
-                else => try respondGeneric(id, no_completions_response),
-            }
-        } else {
-            try respondGeneric(id, no_completions_response);
-        }
-    } else if (std.mem.eql(u8, method, "textDocument/signatureHelp")) {
-        // TODO: Implement this
-        try respondGeneric(id,
-            \\,"result":{"signatures":[]}}
-        );
-    } else if (std.mem.eql(u8, method, "textDocument/definition") or
-        std.mem.eql(u8, method, "textDocument/declaration") or
-        std.mem.eql(u8, method, "textDocument/typeDefinition") or
-        std.mem.eql(u8, method, "textDocument/implementation"))
-    {
-        const params = root.Object.getValue("params").?.Object;
-        const document = params.getValue("textDocument").?.Object;
-        const uri = document.getValue("uri").?.String;
-        const position = params.getValue("position").?.Object;
-
-        const handle = document_store.getHandle(uri) orelse {
-            std.log.debug(.main, "Trying to got to definition in non existent document {}", .{uri});
-            return try respondGeneric(id, null_result_response);
-        };
-
-        const pos = types.Position{
-            .line = position.getValue("line").?.Integer,
-            .character = position.getValue("character").?.Integer,
-        };
-        if (pos.character >= 0) {
-            const resolve_alias = !std.mem.eql(u8, method, "textDocument/declaration");
-            const pos_index = try handle.document.positionToIndex(pos);
-            const pos_context = try analysis.documentPositionContext(allocator, handle.document, pos);
-
-            switch (pos_context) {
-                .var_access => try gotoDefinitionGlobal(id, pos_index, handle, configFromUriOr(uri, config), resolve_alias),
-                .field_access => |range| try gotoDefinitionFieldAccess(id, handle, pos, range, configFromUriOr(uri, config), resolve_alias),
-                .string_literal => try gotoDefinitionString(id, pos_index, handle, config),
-                .label => try gotoDefinitionLabel(id, pos_index, handle, configFromUriOr(uri, config)),
-                else => try respondGeneric(id, null_result_response),
-            }
-        } else {
-            try respondGeneric(id, null_result_response);
-        }
-    } else if (std.mem.eql(u8, method, "textDocument/hover")) {
-        const params = root.Object.getValue("params").?.Object;
-        const document = params.getValue("textDocument").?.Object;
-        const uri = document.getValue("uri").?.String;
-        const position = params.getValue("position").?.Object;
-
-        const handle = document_store.getHandle(uri) orelse {
-            std.log.debug(.main, "Trying to got to definition in non existent document {}", .{uri});
-            return try respondGeneric(id, null_result_response);
-        };
-
-        const pos = types.Position{
-            .line = position.getValue("line").?.Integer,
-            .character = position.getValue("character").?.Integer,
-        };
-        if (pos.character >= 0) {
-            const pos_index = try handle.document.positionToIndex(pos);
-            const pos_context = try analysis.documentPositionContext(allocator, handle.document, pos);
-
-            switch (pos_context) {
-                .var_access => try hoverDefinitionGlobal(id, pos_index, handle, configFromUriOr(uri, config)),
-                .field_access => |range| try hoverDefinitionFieldAccess(id, handle, pos, range, configFromUriOr(uri, config)),
-                .label => try hoverDefinitionLabel(id, pos_index, handle, configFromUriOr(uri, config)),
-                else => try respondGeneric(id, null_result_response),
-            }
-        } else {
-            try respondGeneric(id, null_result_response);
-        }
-    } else if (std.mem.eql(u8, method, "textDocument/documentSymbol")) {
-        const params = root.Object.getValue("params").?.Object;
-        const document = params.getValue("textDocument").?.Object;
-        const uri = document.getValue("uri").?.String;
-
-        const handle = document_store.getHandle(uri) orelse {
-            std.log.debug(.main, "Trying to got to definition in non existent document {}", .{uri});
-            return try respondGeneric(id, null_result_response);
-        };
-
-        try documentSymbol(id, handle);
-    } else if (std.mem.eql(u8, method, "textDocument/formatting")) {
-        if (config.zig_exe_path) |zig_exe_path| {
-            const params = root.Object.getValue("params").?.Object;
-            const document = params.getValue("textDocument").?.Object;
-            const uri = document.getValue("uri").?.String;
-
-            const handle = document_store.getHandle(uri) orelse {
-                std.log.debug(.main, "Trying to got to definition in non existent document {}", .{uri});
-                return try respondGeneric(id, null_result_response);
-            };
-
-            var process = try std.ChildProcess.init(&[_][]const u8{ zig_exe_path, "fmt", "--stdin" }, allocator);
-            defer process.deinit();
-            process.stdin_behavior = .Pipe;
-            process.stdout_behavior = .Pipe;
-
-            process.spawn() catch |err| {
-                std.log.debug(.main, "Failed to spawn zig fmt process, error: {}\n", .{err});
-                return try respondGeneric(id, null_result_response);
-            };
-            try process.stdin.?.writeAll(handle.document.text);
-            process.stdin.?.close();
-            process.stdin = null;
-
-            const stdout_bytes = try process.stdout.?.reader().readAllAlloc(allocator, std.math.maxInt(usize));
-            defer allocator.free(stdout_bytes);
-
-            switch (try process.wait()) {
-                .Exited => |code| if (code == 0) {
-                    try send(types.Response{
-                        .id = id,
-                        .result = .{
-                            .TextEdits = &[1]types.TextEdit{
-                                .{
-                                    .range = handle.document.range(),
-                                    .newText = stdout_bytes,
-                                },
+    inline for (method_map) |method_info| {
+        if (std.mem.eql(u8, method_info[0], method)) {
+            if (method_info[1].len != 0) {
+                const info = method_info[1];
+                if (info[0] != void) {
+                    const request_obj = requests.fromDynamicTree(arena, info[0], tree.root) catch |err| {
+                        switch (err) {
+                            error.MalformedJson => {
+                                std.log.debug(.main, "Could not create request type {} from JSON {}\n", .{ @typeName(info[0]), json });
+                                // @TODO What should we return to the client in this case?
+                                return;
                             },
-                        },
-                    });
-                },
-                else => {},
+                            error.OutOfMemory => return err,
+                        }
+                    };
+                    return try info[1](arena, id, request_obj, config);
+                } else {
+                    return try info[1](arena, id, config);
+                }
             }
         }
-        return try respondGeneric(id, null_result_response);
-    } else if (std.mem.eql(u8, method, "textDocument/rename")) {
-        const params = root.Object.getValue("params").?.Object;
-        const document = params.getValue("textDocument").?.Object;
-        const uri = document.getValue("uri").?.String;
-        const position = params.getValue("position").?.Object;
-
-        const handle = document_store.getHandle(uri) orelse {
-            std.log.debug(.main, "Trying to got to definition in non existent document {}", .{uri});
-            return try respondGeneric(id, null_result_response);
-        };
-
-        const pos = types.Position{
-            .line = position.getValue("line").?.Integer,
-            .character = position.getValue("character").?.Integer,
-        };
-        if (pos.character >= 0) {
-            const new_name = params.getValue("newName").?.String;
-            const pos_index = try handle.document.positionToIndex(pos);
-            const pos_context = try analysis.documentPositionContext(allocator, handle.document, pos);
-
-            const this_config = configFromUriOr(uri, config);
-            switch (pos_context) {
-                .var_access => try renameDefinitionGlobal(id, handle, pos_index, new_name),
-                .field_access => |range| try renameDefinitionFieldAccess(id, handle, pos, range, new_name, this_config),
-                .label => try renameDefinitionLabel(id, handle, pos_index, new_name),
-                else => try respondGeneric(id, null_result_response),
-            }
-        } else {
-            try respondGeneric(id, null_result_response);
-        }
-    } else if (std.mem.eql(u8, method, "textDocument/references") or
-        std.mem.eql(u8, method, "textDocument/documentHighlight") or
-        std.mem.eql(u8, method, "textDocument/codeAction") or
-        std.mem.eql(u8, method, "textDocument/codeLens") or
-        std.mem.eql(u8, method, "textDocument/documentLink") or
-        std.mem.eql(u8, method, "textDocument/rangeFormatting") or
-        std.mem.eql(u8, method, "textDocument/onTypeFormatting") or
-        std.mem.eql(u8, method, "textDocument/prepareRename") or
-        std.mem.eql(u8, method, "textDocument/foldingRange") or
-        std.mem.eql(u8, method, "textDocument/selectionRange"))
-    {
-        // TODO: Unimplemented methods, implement them and add them to server capabilities.
-        try respondGeneric(id, null_result_response);
-    } else if (root.Object.getValue("id")) |_| {
-        std.log.debug(.main, "Method with return value not implemented: {}", .{method});
-        try respondGeneric(id, not_implemented_response);
-    } else {
-        std.log.debug(.main, "Method without return value not implemented: {}", .{method});
     }
+
+    // if (std.mem.eql(u8, method, "textDocument/completion")) {
+    //     const params = root.Object.getValue("params").?.Object;
+    //     const text_document = params.getValue("textDocument").?.Object;
+    //     const uri = text_document.getValue("uri").?.String;
+    //     const position = params.getValue("position").?.Object;
+
+    //     const handle = document_store.getHandle(uri) orelse {
+    //         std.log.debug(.main, "Trying to complete in non existent document {}", .{uri});
+    //         return try respondGeneric(id, no_completions_response);
+    //     };
+
+    //     const pos = types.Position{
+    //         .line = position.getValue("line").?.Integer,
+    //         .character = position.getValue("character").?.Integer,
+    //     };
+    //     if (pos.character >= 0) {
+    //         const pos_index = try handle.document.positionToIndex(pos);
+    //         const pos_context = try analysis.documentPositionContext(allocator, handle.document, pos);
+
+    //         const this_config = configFromUriOr(uri, config);
+    //         const use_snippets = this_config.enable_snippets and client_capabilities.supports_snippets;
+    //         switch (pos_context) {
+    //             .builtin => try send(types.Response{
+    //                 .id = id,
+    //                 .result = .{
+    //                     .CompletionList = .{
+    //                         .isIncomplete = false,
+    //                         .items = builtin_completions[@boolToInt(use_snippets)][0..],
+    //                     },
+    //                 },
+    //             }),
+    //             .var_access, .empty => try completeGlobal(id, pos_index, handle, this_config),
+    //             .field_access => |range| try completeFieldAccess(id, handle, pos, range, this_config),
+    //             .global_error_set => try send(types.Response{
+    //                 .id = id,
+    //                 .result = .{
+    //                     .CompletionList = .{
+    //                         .isIncomplete = false,
+    //                         .items = document_store.error_completions.completions.items,
+    //                     },
+    //                 },
+    //             }),
+    //             .enum_literal => try send(types.Response{
+    //                 .id = id,
+    //                 .result = .{
+    //                     .CompletionList = .{
+    //                         .isIncomplete = false,
+    //                         .items = document_store.enum_completions.completions.items,
+    //                     },
+    //                 },
+    //             }),
+    //             .label => try completeLabel(id, pos_index, handle, this_config),
+    //             else => try respondGeneric(id, no_completions_response),
+    //         }
+    //     } else {
+    //         try respondGeneric(id, no_completions_response);
+    //     }
+    // } else if (std.mem.eql(u8, method, "textDocument/signatureHelp")) {
+    //     // TODO: Implement this
+    //     try respondGeneric(id,
+    //         \\,"result":{"signatures":[]}}
+    //     );
+    // } else if (std.mem.eql(u8, method, "textDocument/definition") or
+    //     std.mem.eql(u8, method, "textDocument/declaration") or
+    //     std.mem.eql(u8, method, "textDocument/typeDefinition") or
+    //     std.mem.eql(u8, method, "textDocument/implementation"))
+    // {
+    //     const params = root.Object.getValue("params").?.Object;
+    //     const document = params.getValue("textDocument").?.Object;
+    //     const uri = document.getValue("uri").?.String;
+    //     const position = params.getValue("position").?.Object;
+
+    //     const handle = document_store.getHandle(uri) orelse {
+    //         std.log.debug(.main, "Trying to got to definition in non existent document {}", .{uri});
+    //         return try respondGeneric(id, null_result_response);
+    //     };
+
+    //     const pos = types.Position{
+    //         .line = position.getValue("line").?.Integer,
+    //         .character = position.getValue("character").?.Integer,
+    //     };
+    //     if (pos.character >= 0) {
+    //         const resolve_alias = !std.mem.eql(u8, method, "textDocument/declaration");
+    //         const pos_index = try handle.document.positionToIndex(pos);
+    //         const pos_context = try analysis.documentPositionContext(allocator, handle.document, pos);
+
+    //         switch (pos_context) {
+    //             .var_access => try gotoDefinitionGlobal(id, pos_index, handle, configFromUriOr(uri, config), resolve_alias),
+    //             .field_access => |range| try gotoDefinitionFieldAccess(id, handle, pos, range, configFromUriOr(uri, config), resolve_alias),
+    //             .string_literal => try gotoDefinitionString(id, pos_index, handle, config),
+    //             .label => try gotoDefinitionLabel(id, pos_index, handle, configFromUriOr(uri, config)),
+    //             else => try respondGeneric(id, null_result_response),
+    //         }
+    //     } else {
+    //         try respondGeneric(id, null_result_response);
+    //     }
+    // } else if (std.mem.eql(u8, method, "textDocument/hover")) {
+    //     const params = root.Object.getValue("params").?.Object;
+    //     const document = params.getValue("textDocument").?.Object;
+    //     const uri = document.getValue("uri").?.String;
+    //     const position = params.getValue("position").?.Object;
+
+    //     const handle = document_store.getHandle(uri) orelse {
+    //         std.log.debug(.main, "Trying to got to definition in non existent document {}", .{uri});
+    //         return try respondGeneric(id, null_result_response);
+    //     };
+
+    //     const pos = types.Position{
+    //         .line = position.getValue("line").?.Integer,
+    //         .character = position.getValue("character").?.Integer,
+    //     };
+    //     if (pos.character >= 0) {
+    //         const pos_index = try handle.document.positionToIndex(pos);
+    //         const pos_context = try analysis.documentPositionContext(allocator, handle.document, pos);
+
+    //         switch (pos_context) {
+    //             .var_access => try hoverDefinitionGlobal(id, pos_index, handle, configFromUriOr(uri, config)),
+    //             .field_access => |range| try hoverDefinitionFieldAccess(id, handle, pos, range, configFromUriOr(uri, config)),
+    //             .label => try hoverDefinitionLabel(id, pos_index, handle, configFromUriOr(uri, config)),
+    //             else => try respondGeneric(id, null_result_response),
+    //         }
+    //     } else {
+    //         try respondGeneric(id, null_result_response);
+    //     }
+    // } else if (std.mem.eql(u8, method, "textDocument/documentSymbol")) {
+    //     const params = root.Object.getValue("params").?.Object;
+    //     const document = params.getValue("textDocument").?.Object;
+    //     const uri = document.getValue("uri").?.String;
+
+    //     const handle = document_store.getHandle(uri) orelse {
+    //         std.log.debug(.main, "Trying to got to definition in non existent document {}", .{uri});
+    //         return try respondGeneric(id, null_result_response);
+    //     };
+
+    //     try documentSymbol(id, handle);
+    // } else if (std.mem.eql(u8, method, "textDocument/formatting")) {
+    //     if (config.zig_exe_path) |zig_exe_path| {
+    //         const params = root.Object.getValue("params").?.Object;
+    //         const document = params.getValue("textDocument").?.Object;
+    //         const uri = document.getValue("uri").?.String;
+
+    //         const handle = document_store.getHandle(uri) orelse {
+    //             std.log.debug(.main, "Trying to got to definition in non existent document {}", .{uri});
+    //             return try respondGeneric(id, null_result_response);
+    //         };
+
+    //         var process = try std.ChildProcess.init(&[_][]const u8{ zig_exe_path, "fmt", "--stdin" }, allocator);
+    //         defer process.deinit();
+    //         process.stdin_behavior = .Pipe;
+    //         process.stdout_behavior = .Pipe;
+
+    //         process.spawn() catch |err| {
+    //             std.log.debug(.main, "Failed to spawn zig fmt process, error: {}\n", .{err});
+    //             return try respondGeneric(id, null_result_response);
+    //         };
+    //         try process.stdin.?.writeAll(handle.document.text);
+    //         process.stdin.?.close();
+    //         process.stdin = null;
+
+    //         const stdout_bytes = try process.stdout.?.reader().readAllAlloc(allocator, std.math.maxInt(usize));
+    //         defer allocator.free(stdout_bytes);
+
+    //         switch (try process.wait()) {
+    //             .Exited => |code| if (code == 0) {
+    //                 try send(types.Response{
+    //                     .id = id,
+    //                     .result = .{
+    //                         .TextEdits = &[1]types.TextEdit{
+    //                             .{
+    //                                 .range = handle.document.range(),
+    //                                 .newText = stdout_bytes,
+    //                             },
+    //                         },
+    //                     },
+    //                 });
+    //             },
+    //             else => {},
+    //         }
+    //     }
+    //     return try respondGeneric(id, null_result_response);
+    // } else if (std.mem.eql(u8, method, "textDocument/rename")) {
+    //     const params = root.Object.getValue("params").?.Object;
+    //     const document = params.getValue("textDocument").?.Object;
+    //     const uri = document.getValue("uri").?.String;
+    //     const position = params.getValue("position").?.Object;
+
+    //     const handle = document_store.getHandle(uri) orelse {
+    //         std.log.debug(.main, "Trying to got to definition in non existent document {}", .{uri});
+    //         return try respondGeneric(id, null_result_response);
+    //     };
+
+    //     const pos = types.Position{
+    //         .line = position.getValue("line").?.Integer,
+    //         .character = position.getValue("character").?.Integer,
+    //     };
+    //     if (pos.character >= 0) {
+    //         const new_name = params.getValue("newName").?.String;
+    //         const pos_index = try handle.document.positionToIndex(pos);
+    //         const pos_context = try analysis.documentPositionContext(allocator, handle.document, pos);
+
+    //         const this_config = configFromUriOr(uri, config);
+    //         switch (pos_context) {
+    //             .var_access => try renameDefinitionGlobal(id, handle, pos_index, new_name),
+    //             .field_access => |range| try renameDefinitionFieldAccess(id, handle, pos, range, new_name, this_config),
+    //             .label => try renameDefinitionLabel(id, handle, pos_index, new_name),
+    //             else => try respondGeneric(id, null_result_response),
+    //         }
+    //     } else {
+    //         try respondGeneric(id, null_result_response);
+    //     }
+    // } else if (std.mem.eql(u8, method, "textDocument/references") or
+    //     std.mem.eql(u8, method, "textDocument/documentHighlight") or
+    //     std.mem.eql(u8, method, "textDocument/codeAction") or
+    //     std.mem.eql(u8, method, "textDocument/codeLens") or
+    //     std.mem.eql(u8, method, "textDocument/documentLink") or
+    //     std.mem.eql(u8, method, "textDocument/rangeFormatting") or
+    //     std.mem.eql(u8, method, "textDocument/onTypeFormatting") or
+    //     std.mem.eql(u8, method, "textDocument/prepareRename") or
+    //     std.mem.eql(u8, method, "textDocument/foldingRange") or
+    //     std.mem.eql(u8, method, "textDocument/selectionRange"))
+    // {
+    //     // TODO: Unimplemented methods, implement them and add them to server capabilities.
+    //     try respondGeneric(id, null_result_response);
+    // } else if (root.Object.getValue("id")) |_| {
+    //     std.log.debug(.main, "Method with return value not implemented: {}", .{method});
+    //     try respondGeneric(id, not_implemented_response);
+    // } else {
+    //     std.log.debug(.main, "Method without return value not implemented: {}", .{method});
+    // }
 }
 
 var debug_alloc_state: DebugAllocator = undefined;
@@ -1545,18 +1531,22 @@ pub fn main() anyerror!void {
     var json_parser = std.json.Parser.init(allocator, false);
     defer json_parser.deinit();
 
-    var keep_running = true;
+    // Arena used for temporary allocations while handlign a request
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+
     while (keep_running) {
-        const headers = readRequestHeader(allocator, reader) catch |err| {
+        const headers = readRequestHeader(&arena.allocator, reader) catch |err| {
             std.log.debug(.main, "{}; exiting!", .{@errorName(err)});
             return;
         };
-        defer headers.deinit(allocator);
-        const buf = try allocator.alloc(u8, headers.content_length);
-        defer allocator.free(buf);
+        const buf = try arena.allocator.alloc(u8, headers.content_length);
         try reader.readNoEof(buf);
-        try processJsonRpc(&json_parser, buf, config, &keep_running);
+
+        try processJsonRpc(&arena, &json_parser, buf, config);
         json_parser.reset();
+        arena.deinit();
+        arena.state.buffer_list = .{};
 
         if (debug_alloc) |dbg| {
             std.log.debug(.main, "{}\n", .{dbg.info});
