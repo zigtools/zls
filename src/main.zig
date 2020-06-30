@@ -1033,6 +1033,8 @@ fn workspaceFoldersChangeHandler(arena: *std.heap.ArenaAllocator, id: types.Requ
 fn openDocumentHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.OpenDocument, config: Config) !void {
     const handle = try document_store.openDocument(req.params.textDocument.uri, req.params.textDocument.text);
     try publishDiagnostics(arena, handle.*, configFromUriOr(req.params.textDocument.uri, config));
+
+    try semanticTokensHandler(arena, id, .{ .params = .{ .textDocument = .{ .uri = req.params.textDocument.uri } } }, config);
 }
 
 fn changeDocumentHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.ChangeDocument, config: Config) !void {
@@ -1046,7 +1048,7 @@ fn changeDocumentHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, r
     try publishDiagnostics(arena, handle.*, local_config);
 }
 
-fn saveDocumentHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.SaveDocument, config: Config) !void {
+fn saveDocumentHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.SaveDocument, config: Config) error{OutOfMemory}!void {
     const handle = document_store.getHandle(req.params.textDocument.uri) orelse {
         std.log.debug(.main, "Trying to save non existent document {}", .{req.params.textDocument.uri});
         return;
@@ -1054,13 +1056,11 @@ fn saveDocumentHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req
     try document_store.applySave(handle);
 }
 
-fn closeDocumentHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.CloseDocument, config: Config) !void {
-    std.log.debug(.main, "CLOSING DOCUMENT!!!, id: {}\n", .{id});
-
+fn closeDocumentHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.CloseDocument, config: Config) error{}!void {
     document_store.closeDocument(req.params.textDocument.uri);
 }
 
-fn semanticTokensHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.SemanticTokens, config: Config) !void {
+fn semanticTokensHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.SemanticTokens, config: Config) (error{OutOfMemory} || std.fs.File.WriteError)!void {
     const this_config = configFromUriOr(req.params.textDocument.uri, config);
     if (this_config.enable_semantic_tokens) {
         const handle = document_store.getHandle(req.params.textDocument.uri) orelse {
@@ -1262,6 +1262,12 @@ fn renameHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requ
     }
 }
 
+// Needed for the hack seen below.
+fn extractErr(val: var) anyerror {
+    val catch |e| return e;
+    return error.HackDone;
+}
+
 fn processJsonRpc(arena: *std.heap.ArenaAllocator, parser: *std.json.Parser, json: []const u8, config: Config) !void {
     var tree = try parser.parse(json);
     defer tree.deinit();
@@ -1305,40 +1311,46 @@ fn processJsonRpc(arena: *std.heap.ArenaAllocator, parser: *std.json.Parser, jso
         .{ "textDocument/rename", requests.Rename, renameHandler },
     };
 
+    // Hack to avoid `return`ing in the inline for, which causes bugs.
+    var done: ?anyerror = null;
     inline for (method_map) |method_info| {
-        if (std.mem.eql(u8, method, method_info[0])) {
+        if (done == null and std.mem.eql(u8, method, method_info[0])) {
             if (method_info.len == 1) {
-                return;
+                done = error.HackDone;
             } else if (method_info[1] != void) {
-                const request_obj = requests.fromDynamicTree(arena, method_info[1], tree.root) catch |err| {
-                    switch (err) {
-                        error.MalformedJson => {
-                            std.log.debug(.main, "Could not create request type {} from JSON {}\n", .{ @typeName(method_info[1]), json });
-                            return try respondGeneric(id, null_result_response);
-                        },
-                        error.OutOfMemory => return err,
+                const ReqT = method_info[1];
+                if (requests.fromDynamicTree(arena, ReqT, tree.root)) |request_obj| {
+                    done = error.HackDone;
+                    done = extractErr(method_info[2](arena, id, request_obj, config));
+                } else |err| {
+                    if (err == error.MalformedJson) {
+                        std.log.debug(.main, "Could not create request type {} from JSON {}\n", .{ @typeName(ReqT), json });
                     }
-                };
-
-                std.log.debug(.TEMPORARY, "{} {}\n", .{method, method_info[0]});
-                return try (method_info[2])(arena, id, request_obj, config);
+                    done = err;
+                }
             } else {
-                return try (method_info[2])(arena, id, config);
+                done = error.HackDone;
+                (method_info[2])(arena, id, config) catch |err| { done = err; };
             }
         }
     }
+    if (done) |err| switch (err) {
+        error.MalformedJson => return try respondGeneric(id, null_result_response),
+        error.HackDone => return,
+        else => return err,
+    };
 
     const unimplemented_map = std.ComptimeStringMap(void, .{
-        .{ "textDocument/references" },
-        .{ "textDocument/documentHighlight" },
-        .{ "textDocument/codeAction" },
-        .{ "textDocument/codeLens" },
-        .{ "textDocument/documentLink" },
-        .{ "textDocument/rangeFormatting" },
-        .{ "textDocument/onTypeFormatting" },
-        .{ "textDocument/prepareRename" },
-        .{ "textDocument/foldingRange" },
-        .{ "textDocument/selectionRange" },
+        .{"textDocument/references"},
+        .{"textDocument/documentHighlight"},
+        .{"textDocument/codeAction"},
+        .{"textDocument/codeLens"},
+        .{"textDocument/documentLink"},
+        .{"textDocument/rangeFormatting"},
+        .{"textDocument/onTypeFormatting"},
+        .{"textDocument/prepareRename"},
+        .{"textDocument/foldingRange"},
+        .{"textDocument/selectionRange"},
     });
 
     if (unimplemented_map.has(method)) {
@@ -1380,7 +1392,16 @@ pub fn main() anyerror!void {
     // Read the configuration, if any.
     const config_parse_options = std.json.ParseOptions{ .allocator = allocator };
     var config = Config{};
-    defer std.json.parseFree(Config, config, config_parse_options);
+    var config_had_null_zig_path = config.zig_exe_path == null;
+    defer {
+        if (config_had_null_zig_path) {
+            if (config.zig_exe_path) |exe_path| {
+                allocator.free(exe_path);
+                config.zig_exe_path = null;
+            }
+        }
+        std.json.parseFree(Config, config, config_parse_options);
+    }
 
     config_read: {
         const known_folders = @import("known-folders");
@@ -1437,7 +1458,7 @@ pub fn main() anyerror!void {
             defer allocator.free(full_path);
 
             var buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
-            zig_exe_path = std.os.realpath(full_path, &buf) catch continue;
+            zig_exe_path = try std.mem.dupe(allocator, u8, std.os.realpath(full_path, &buf) catch continue);
             std.log.debug(.main, "Found zig in PATH: {}\n", .{zig_exe_path});
             break :find_zig;
         }

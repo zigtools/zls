@@ -89,17 +89,40 @@ pub fn init(base_allocator: *std.mem.Allocator, max_bytes: usize) DebugAllocator
         .info = .{},
         .max_bytes = max_bytes,
         .allocator = .{
-            .reallocFn = realloc,
-            .shrinkFn = shrink,
+            .allocFn = alloc,
+            .resizeFn = resize,
         },
     };
 }
 
-fn realloc(allocator: *std.mem.Allocator, old_mem: []u8, old_align: u29, new_size: usize, new_align: u29) ![]u8 {
+fn alloc(allocator: *std.mem.Allocator, len: usize, ptr_align: u29, len_align: u29) error{OutOfMemory}![]u8 {
     const self = @fieldParentPtr(DebugAllocator, "allocator", allocator);
-    var data = try self.base_allocator.reallocFn(self.base_allocator, old_mem, old_align, new_size, new_align);
+    const ptr = try self.base_allocator.callAllocFn(len, ptr_align, len_align);
+    self.info.allocation_stats.addSample(ptr.len);
+
+    const curr_allocs = self.info.currentlyAllocated();
+    if (self.max_bytes != 0 and curr_allocs >= self.max_bytes) {
+        std.debug.print("Exceeded maximum bytes {}, exiting.\n", .{self.max_bytes});
+        std.process.exit(1);
+    }
+
+    if (curr_allocs > self.info.peak_allocated) {
+        self.info.peak_allocated = curr_allocs;
+    }
+    return ptr;
+}
+
+fn resize(allocator: *std.mem.Allocator, old_mem: []u8, new_size: usize, len_align: u29) error{OutOfMemory}!usize {
+    const self = @fieldParentPtr(DebugAllocator, "allocator", allocator);
+
     if (old_mem.len == 0) {
         self.info.allocation_stats.addSample(new_size);
+    } else if (new_size == 0) {
+        if (self.info.allocation_stats.count == self.info.deallocation_count) {
+            @panic("error - too many calls to free, most likely double free");
+        }
+        self.info.deallocation_total += old_mem.len;
+        self.info.deallocation_count += 1;
     } else if (new_size > old_mem.len) {
         self.info.reallocation_stats.addSample(new_size - old_mem.len);
     } else if (new_size < old_mem.len) {
@@ -115,21 +138,8 @@ fn realloc(allocator: *std.mem.Allocator, old_mem: []u8, old_align: u29, new_siz
     if (curr_allocs > self.info.peak_allocated) {
         self.info.peak_allocated = curr_allocs;
     }
-    return data;
-}
 
-fn shrink(allocator: *std.mem.Allocator, old_mem: []u8, old_align: u29, new_size: usize, new_align: u29) []u8 {
-    const self = @fieldParentPtr(DebugAllocator, "allocator", allocator);
-    if (new_size == 0) {
-        if (self.info.allocation_stats.count == self.info.deallocation_count) {
-            @panic("error - too many calls to free, most likely double free");
-        }
-        self.info.deallocation_total += old_mem.len;
-        self.info.deallocation_count += 1;
-    } else if (new_size < old_mem.len) {
-        self.info.shrink_stats.addSample(old_mem.len - new_size);
-    } else if (new_size > old_mem.len) {
-        @panic("error - trying to shrink to a bigger size");
-    }
-    return self.base_allocator.shrinkFn(self.base_allocator, old_mem, old_align, new_size, new_align);
+    return self.base_allocator.callResizeFn(old_mem, new_size, len_align) catch |e| {
+        return e;
+    };
 }
