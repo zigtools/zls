@@ -186,3 +186,24 @@ const TextDocumentIdentifierRequest = struct {
 pub const SaveDocument = TextDocumentIdentifierRequest;
 pub const CloseDocument = TextDocumentIdentifierRequest;
 pub const SemanticTokens = TextDocumentIdentifierRequest;
+
+const TextDocumentIdentifierPositionRequest = struct {
+    params: struct {
+        textDocument: TextDocumentIdentifier,
+        position: types.Position,
+    },
+};
+
+pub const Completion = TextDocumentIdentifierPositionRequest;
+pub const GotoDefinition = TextDocumentIdentifierPositionRequest;
+pub const GotoDeclaration = TextDocumentIdentifierPositionRequest;
+pub const Hover = TextDocumentIdentifierPositionRequest;
+pub const DocumentSymbols = TextDocumentIdentifierRequest;
+pub const Formatting = TextDocumentIdentifierRequest;
+pub const Rename = struct {
+    params: struct {
+        textDocument: TextDocumentIdentifier,
+        position: types.Position,
+        newName: types.String,
+    },
+};

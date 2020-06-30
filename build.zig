@@ -179,5 +179,10 @@ pub fn build(b: *std.build.Builder) !void {
     unit_tests.addPackage(.{ .name = "analysis", .path = "src/analysis.zig" });
     unit_tests.addPackage(.{ .name = "types", .path = "src/types.zig" });
     unit_tests.setBuildMode(.Debug);
-    test_step.dependOn(&unit_tests.step);
+
+    var session_tests = b.addTest("tests/sessions.zig");
+    session_tests.addPackage(.{ .name = "header", .path = "src/header.zig" });
+    session_tests.setBuildMode(.Debug);
+
+    test_step.dependOn(&session_tests.step);
 }

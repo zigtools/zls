@@ -1249,14 +1249,10 @@ fn tokenRangeAppend(prev: SourceRange, token: std.zig.Token) SourceRange {
     };
 }
 
-pub fn documentPositionContext(allocator: *std.mem.Allocator, document: types.TextDocument, position: types.Position) !PositionContext {
+pub fn documentPositionContext(arena: *std.heap.ArenaAllocator, document: types.TextDocument, position: types.Position) !PositionContext {
     const line = try document.getLine(@intCast(usize, position.line));
     const pos_char = @intCast(usize, position.character);
     const idx = if (pos_char > line.len) line.len else pos_char;
-
-    var arena = std.heap.ArenaAllocator.init(allocator);
-    defer arena.deinit();
-
     var tokenizer = std.zig.Tokenizer.init(line[0..idx]);
     var stack = try std.ArrayList(StackState).initCapacity(&arena.allocator, 8);
 
