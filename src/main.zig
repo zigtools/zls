@@ -1070,6 +1070,7 @@ fn semanticTokensHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, r
 
         const semantic_tokens = @import("semantic_tokens.zig");
         const token_array = try semantic_tokens.writeAllSemanticTokens(arena, &document_store, handle);
+        defer allocator.free(token_array);
 
         return try send(arena, types.Response{
             .id = id,
@@ -1382,6 +1383,8 @@ pub fn main() anyerror!void {
     defer if (debug_alloc) |dbg| {
         std.debug.print("Finished cleanup, last allocation info.\n", .{});
         std.debug.print("\n{}\n", .{dbg.info});
+        dbg.printRemainingStackTraces();
+        dbg.deinit();
     };
 
     // Init global vars

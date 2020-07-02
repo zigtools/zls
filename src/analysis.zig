@@ -2010,6 +2010,7 @@ fn makeScopeInternal(
             }
         }
 
+        scopes.items[scope_idx].tests = tests.toOwnedSlice();
         scopes.items[scope_idx].uses = uses.toOwnedSlice();
         return;
     }

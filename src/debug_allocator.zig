@@ -76,9 +76,12 @@ pub const AllocationInfo = struct {
     }
 };
 
+const stack_addresses_size = 15;
+
 base_allocator: *std.mem.Allocator,
 info: AllocationInfo,
 max_bytes: usize,
+allocation_strack_addresses: std.AutoHashMap(usize, [stack_addresses_size]usize),
 
 // Interface implementation
 allocator: std.mem.Allocator,
@@ -88,6 +91,7 @@ pub fn init(base_allocator: *std.mem.Allocator, max_bytes: usize) DebugAllocator
         .base_allocator = base_allocator,
         .info = .{},
         .max_bytes = max_bytes,
+        .allocation_strack_addresses = std.AutoHashMap(usize, [stack_addresses_size]usize).init(base_allocator),
         .allocator = .{
             .allocFn = alloc,
             .resizeFn = resize,
@@ -95,10 +99,23 @@ pub fn init(base_allocator: *std.mem.Allocator, max_bytes: usize) DebugAllocator
     };
 }
 
+pub fn deinit(self: DebugAllocator) void {
+    self.allocation_strack_addresses.deinit();
+}
+
 fn alloc(allocator: *std.mem.Allocator, len: usize, ptr_align: u29, len_align: u29) error{OutOfMemory}![]u8 {
     const self = @fieldParentPtr(DebugAllocator, "allocator", allocator);
+
     const ptr = try self.base_allocator.callAllocFn(len, ptr_align, len_align);
     self.info.allocation_stats.addSample(ptr.len);
+
+    var stack_addresses = std.mem.zeroes([stack_addresses_size + 2]usize);
+    var stack_trace = std.builtin.StackTrace{
+        .instruction_addresses = &stack_addresses,
+        .index = 0,
+    };
+    std.debug.captureStackTrace(@returnAddress(), &stack_trace);
+    try self.allocation_strack_addresses.putNoClobber(@ptrToInt(ptr.ptr), stack_addresses[2..].*);
 
     const curr_allocs = self.info.currentlyAllocated();
     if (self.max_bytes != 0 and curr_allocs >= self.max_bytes) {
@@ -109,6 +126,7 @@ fn alloc(allocator: *std.mem.Allocator, len: usize, ptr_align: u29, len_align: u
     if (curr_allocs > self.info.peak_allocated) {
         self.info.peak_allocated = curr_allocs;
     }
+
     return ptr;
 }
 
@@ -116,13 +134,21 @@ fn resize(allocator: *std.mem.Allocator, old_mem: []u8, new_size: usize, len_ali
     const self = @fieldParentPtr(DebugAllocator, "allocator", allocator);
 
     if (old_mem.len == 0) {
-        self.info.allocation_stats.addSample(new_size);
-    } else if (new_size == 0) {
+        std.log.debug(.debug_alloc, "Trying to resize empty slice\n", .{});
+        std.process.exit(1);
+    }
+
+    if (self.allocation_strack_addresses.get(@ptrToInt(old_mem.ptr)) == null) {
+        @panic("error - resize call on block not allocated by debug allocator");
+    }
+
+    if (new_size == 0) {
         if (self.info.allocation_stats.count == self.info.deallocation_count) {
             @panic("error - too many calls to free, most likely double free");
         }
         self.info.deallocation_total += old_mem.len;
         self.info.deallocation_count += 1;
+        self.allocation_strack_addresses.removeAssertDiscard(@ptrToInt(old_mem.ptr));
     } else if (new_size > old_mem.len) {
         self.info.reallocation_stats.addSample(new_size - old_mem.len);
     } else if (new_size < old_mem.len) {
@@ -131,7 +157,7 @@ fn resize(allocator: *std.mem.Allocator, old_mem: []u8, new_size: usize, len_ali
 
     const curr_allocs = self.info.currentlyAllocated();
     if (self.max_bytes != 0 and curr_allocs >= self.max_bytes) {
-        std.debug.print("Exceeded maximum bytes {}, exiting.\n", .{self.max_bytes});
+        std.log.debug(.debug_alloc, "Exceeded maximum bytes {}, exiting.\n", .{self.max_bytes});
         std.process.exit(1);
     }
 
@@ -142,4 +168,24 @@ fn resize(allocator: *std.mem.Allocator, old_mem: []u8, new_size: usize, len_ali
     return self.base_allocator.callResizeFn(old_mem, new_size, len_align) catch |e| {
         return e;
     };
+}
+
+pub fn printRemainingStackTraces(self: DebugAllocator) void {
+    std.debug.print(
+        \\{} allocations - stack traces follow
+        \\------------------------------------
+    ,
+    .{self.allocation_strack_addresses.count()});
+    var it = self.allocation_strack_addresses.iterator();
+    var idx: usize = 1;
+    while (it.next()) |entry| : (idx += 1) {
+        std.debug.print("\nAllocation {}\n-------------\n", .{idx});
+        var len: usize = 0;
+        while (len < stack_addresses_size and entry.value[len] != 0) : (len += 1) {}
+        const stack_trace = std.builtin.StackTrace{
+            .instruction_addresses = &entry.value,
+            .index = len,
+        };
+        std.debug.dumpStackTrace(stack_trace);
+    }
 }
