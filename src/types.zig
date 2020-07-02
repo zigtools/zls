@@ -139,35 +139,6 @@ pub const TextDocument = struct {
     // This holds the memory that we have actually allocated.
     mem: []u8,
 
-    pub fn positionToIndex(self: TextDocument, position: Position) !usize {
-        var split_iterator = std.mem.split(self.text, "\n");
-
-        var line: i64 = 0;
-        while (line < position.line) : (line += 1) {
-            _ = split_iterator.next() orelse return error.InvalidParams;
-        }
-
-        var index = @intCast(i64, split_iterator.index.?) + position.character;
-
-        if (index < 0 or index > @intCast(i64, self.text.len)) {
-            return error.InvalidParams;
-        }
-
-        return @intCast(usize, index);
-    }
-
-    pub fn getLine(self: TextDocument, target_line: usize) ![]const u8 {
-        var split_iterator = std.mem.split(self.text, "\n");
-
-        var line: i64 = 0;
-        while (line < target_line) : (line += 1) {
-            _ = split_iterator.next() orelse return error.InvalidParams;
-        }
-        if (split_iterator.next()) |next| {
-            return next;
-        } else return error.InvalidParams;
-    }
-
     pub fn range(self: TextDocument) Range {
         var line_idx: i64 = 0;
         var curr_line: []const u8 = self.text;

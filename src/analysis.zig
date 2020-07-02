@@ -1249,11 +1249,11 @@ fn tokenRangeAppend(prev: SourceRange, token: std.zig.Token) SourceRange {
     };
 }
 
-pub fn documentPositionContext(arena: *std.heap.ArenaAllocator, document: types.TextDocument, position: types.Position) !PositionContext {
-    const line = try document.getLine(@intCast(usize, position.line));
-    const pos_char = @intCast(usize, position.character);
-    const idx = if (pos_char > line.len) line.len else pos_char;
-    var tokenizer = std.zig.Tokenizer.init(line[0..idx]);
+const DocumentPosition = @import("offsets.zig").DocumentPosition;
+
+pub fn documentPositionContext(arena: *std.heap.ArenaAllocator, document: types.TextDocument, doc_position: DocumentPosition) !PositionContext {
+    const line = doc_position.line;
+    var tokenizer = std.zig.Tokenizer.init(line[0..doc_position.line_index]);
     var stack = try std.ArrayList(StackState).initCapacity(&arena.allocator, 8);
 
     while (true) {
@@ -1262,11 +1262,11 @@ pub fn documentPositionContext(arena: *std.heap.ArenaAllocator, document: types.
         switch (tok.id) {
             .Invalid, .Invalid_ampersands => {
                 // Single '@' do not return a builtin token so we check this on our own.
-                if (line[idx - 1] == '@') {
+                if (line[doc_position.line_index - 1] == '@') {
                     return PositionContext{
                         .builtin = .{
-                            .start = idx - 1,
-                            .end = idx,
+                            .start = doc_position.line_index - 1,
+                            .end = doc_position.line_index,
                         },
                     };
                 }

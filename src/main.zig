@@ -11,9 +11,7 @@ const types = @import("types.zig");
 const analysis = @import("analysis.zig");
 const URI = @import("uri.zig");
 const rename = @import("rename.zig");
-
-// TODO Fix LSP -> byte and byte -> LSP offsets
-// Implement clangd extension for utf8 offsets as well.
+const offsets = @import("offsets.zig");
 
 pub const log_level: std.log.Level = switch (std.builtin.mode) {
     .Debug => .debug,
@@ -619,18 +617,15 @@ fn hoverDefinitionGlobal(arena: *std.heap.ArenaAllocator, id: types.RequestId, p
 fn getSymbolFieldAccess(
     handle: *DocumentStore.Handle,
     arena: *std.heap.ArenaAllocator,
-    position: types.Position,
+    position: offsets.DocumentPosition,
     range: analysis.SourceRange,
     config: Config,
 ) !?analysis.DeclWithHandle {
-    const pos_index = try handle.document.positionToIndex(position);
-    const name = identifierFromPosition(pos_index, handle.*);
+    const name = identifierFromPosition(position.absolute_index, handle.*);
     if (name.len == 0) return null;
+    var tokenizer = std.zig.Tokenizer.init(position.line[range.start..range.end]);
 
-    const line = try handle.document.getLine(@intCast(usize, position.line));
-    var tokenizer = std.zig.Tokenizer.init(line[range.start..range.end]);
-
-    if (try analysis.getFieldAccessType(&document_store, arena, handle, pos_index, &tokenizer)) |container_handle| {
+    if (try analysis.getFieldAccessType(&document_store, arena, handle, position.absolute_index, &tokenizer)) |container_handle| {
         const container_handle_node = switch (container_handle.type.data) {
             .other => |n| n,
             else => return null,
@@ -650,7 +645,7 @@ fn gotoDefinitionFieldAccess(
     arena: *std.heap.ArenaAllocator,
     id: types.RequestId,
     handle: *DocumentStore.Handle,
-    position: types.Position,
+    position: offsets.DocumentPosition,
     range: analysis.SourceRange,
     config: Config,
     resolve_alias: bool,
@@ -663,7 +658,7 @@ fn hoverDefinitionFieldAccess(
     arena: *std.heap.ArenaAllocator,
     id: types.RequestId,
     handle: *DocumentStore.Handle,
-    position: types.Position,
+    position: offsets.DocumentPosition,
     range: analysis.SourceRange,
     config: Config,
 ) !void {
@@ -712,7 +707,7 @@ fn renameDefinitionFieldAccess(
     arena: *std.heap.ArenaAllocator,
     id: types.RequestId,
     handle: *DocumentStore.Handle,
-    position: types.Position,
+    position: offsets.DocumentPosition,
     range: analysis.SourceRange,
     new_name: []const u8,
     config: Config,
@@ -842,14 +837,17 @@ fn completeGlobal(arena: *std.heap.ArenaAllocator, id: types.RequestId, pos_inde
     });
 }
 
-fn completeFieldAccess(arena: *std.heap.ArenaAllocator, id: types.RequestId, handle: *DocumentStore.Handle, position: types.Position, range: analysis.SourceRange, config: Config) !void {
+fn completeFieldAccess(
+    arena: *std.heap.ArenaAllocator,
+    id: types.RequestId,
+    handle: *DocumentStore.Handle,
+    position: offsets.DocumentPosition,
+    range: analysis.SourceRange,
+    config: Config,
+) !void {
     var completions = std.ArrayList(types.CompletionItem).init(&arena.allocator);
-
-    const line = try handle.document.getLine(@intCast(usize, position.line));
-    var tokenizer = std.zig.Tokenizer.init(line[range.start..range.end]);
-
-    const pos_index = try handle.document.positionToIndex(position);
-    if (try analysis.getFieldAccessType(&document_store, arena, handle, pos_index, &tokenizer)) |node| {
+    var tokenizer = std.zig.Tokenizer.init(position.line[range.start..range.end]);
+    if (try analysis.getFieldAccessType(&document_store, arena, handle, position.absolute_index, &tokenizer)) |node| {
         try typeToCompletion(arena, &completions, node, handle, config);
     }
 
@@ -1087,8 +1085,8 @@ fn completionHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: 
     };
 
     if (req.params.position.character >= 0) {
-        const pos_index = try handle.document.positionToIndex(req.params.position);
-        const pos_context = try analysis.documentPositionContext(arena, handle.document, req.params.position);
+        const doc_position = try offsets.documentPosition(handle.document, req.params.position, .utf16);
+        const pos_context = try analysis.documentPositionContext(arena, handle.document, doc_position);
 
         const this_config = configFromUriOr(req.params.textDocument.uri, config);
         const use_snippets = this_config.enable_snippets and client_capabilities.supports_snippets;
@@ -1102,8 +1100,8 @@ fn completionHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: 
                     },
                 },
             }),
-            .var_access, .empty => try completeGlobal(arena, id, pos_index, handle, this_config),
-            .field_access => |range| try completeFieldAccess(arena, id, handle, req.params.position, range, this_config),
+            .var_access, .empty => try completeGlobal(arena, id, doc_position.absolute_index, handle, this_config),
+            .field_access => |range| try completeFieldAccess(arena, id, handle, doc_position, range, this_config),
             .global_error_set => try send(arena, types.Response{
                 .id = id,
                 .result = .{
@@ -1122,7 +1120,7 @@ fn completionHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: 
                     },
                 },
             }),
-            .label => try completeLabel(arena, id, pos_index, handle, this_config),
+            .label => try completeLabel(arena, id, doc_position.absolute_index, handle, this_config),
             else => try respondGeneric(id, no_completions_response),
         }
     } else {
@@ -1144,15 +1142,15 @@ fn gotoHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: reques
     };
 
     if (req.params.position.character >= 0) {
-        const pos_index = try handle.document.positionToIndex(req.params.position);
-        const pos_context = try analysis.documentPositionContext(arena, handle.document, req.params.position);
+        const doc_position = try offsets.documentPosition(handle.document, req.params.position, .utf16);
+        const pos_context = try analysis.documentPositionContext(arena, handle.document, doc_position);
 
         const this_config = configFromUriOr(req.params.textDocument.uri, config);
         switch (pos_context) {
-            .var_access => try gotoDefinitionGlobal(arena, id, pos_index, handle, this_config, resolve_alias),
-            .field_access => |range| try gotoDefinitionFieldAccess(arena, id, handle, req.params.position, range, this_config, resolve_alias),
-            .string_literal => try gotoDefinitionString(arena, id, pos_index, handle, config),
-            .label => try gotoDefinitionLabel(arena, id, pos_index, handle, this_config),
+            .var_access => try gotoDefinitionGlobal(arena, id, doc_position.absolute_index, handle, this_config, resolve_alias),
+            .field_access => |range| try gotoDefinitionFieldAccess(arena, id, handle, doc_position, range, this_config, resolve_alias),
+            .string_literal => try gotoDefinitionString(arena, id, doc_position.absolute_index, handle, config),
+            .label => try gotoDefinitionLabel(arena, id, doc_position.absolute_index, handle, this_config),
             else => try respondGeneric(id, null_result_response),
         }
     } else {
@@ -1175,14 +1173,14 @@ fn hoverHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: reque
     };
 
     if (req.params.position.character >= 0) {
-        const pos_index = try handle.document.positionToIndex(req.params.position);
-        const pos_context = try analysis.documentPositionContext(arena, handle.document, req.params.position);
+        const doc_position = try offsets.documentPosition(handle.document, req.params.position, .utf16);
+        const pos_context = try analysis.documentPositionContext(arena, handle.document, doc_position);
 
         const this_config = configFromUriOr(req.params.textDocument.uri, config);
         switch (pos_context) {
-            .var_access => try hoverDefinitionGlobal(arena, id, pos_index, handle, this_config),
-            .field_access => |range| try hoverDefinitionFieldAccess(arena, id, handle, req.params.position, range, this_config),
-            .label => try hoverDefinitionLabel(arena, id, pos_index, handle, this_config),
+            .var_access => try hoverDefinitionGlobal(arena, id, doc_position.absolute_index, handle, this_config),
+            .field_access => |range| try hoverDefinitionFieldAccess(arena, id, handle, doc_position, range, this_config),
+            .label => try hoverDefinitionLabel(arena, id, doc_position.absolute_index, handle, this_config),
             else => try respondGeneric(id, null_result_response),
         }
     } else {
@@ -1248,14 +1246,14 @@ fn renameHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requ
     };
 
     if (req.params.position.character >= 0) {
-        const pos_index = try handle.document.positionToIndex(req.params.position);
-        const pos_context = try analysis.documentPositionContext(arena, handle.document, req.params.position);
+        const doc_position = try offsets.documentPosition(handle.document, req.params.position, .utf16);
+        const pos_context = try analysis.documentPositionContext(arena, handle.document, doc_position);
 
         const this_config = configFromUriOr(req.params.textDocument.uri, config);
         switch (pos_context) {
-            .var_access => try renameDefinitionGlobal(arena, id, handle, pos_index, req.params.newName),
-            .field_access => |range| try renameDefinitionFieldAccess(arena, id, handle, req.params.position, range, req.params.newName, this_config),
-            .label => try renameDefinitionLabel(arena, id, handle, pos_index, req.params.newName),
+            .var_access => try renameDefinitionGlobal(arena, id, handle, doc_position.absolute_index, req.params.newName),
+            .field_access => |range| try renameDefinitionFieldAccess(arena, id, handle, doc_position, range, req.params.newName, this_config),
+            .label => try renameDefinitionLabel(arena, id, handle, doc_position.absolute_index, req.params.newName),
             else => try respondGeneric(id, null_result_response),
         }
     } else {
@@ -1331,7 +1329,9 @@ fn processJsonRpc(arena: *std.heap.ArenaAllocator, parser: *std.json.Parser, jso
                 }
             } else {
                 done = error.HackDone;
-                (method_info[2])(arena, id, config) catch |err| { done = err; };
+                (method_info[2])(arena, id, config) catch |err| {
+                    done = err;
+                };
             }
         }
     }

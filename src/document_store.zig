@@ -2,6 +2,7 @@ const std = @import("std");
 const types = @import("types.zig");
 const URI = @import("uri.zig");
 const analysis = @import("analysis.zig");
+const offsets = @import("offsets.zig");
 
 const DocumentStore = @This();
 
@@ -471,8 +472,9 @@ pub fn applyChanges(
             };
 
             const change_text = change.Object.getValue("text").?.String;
-            const start_index = try document.positionToIndex(start_pos);
-            const end_index = try document.positionToIndex(end_pos);
+
+            const start_index = (try offsets.documentPosition(document.*, start_pos, .utf16)).absolute_index;
+            const end_index = (try offsets.documentPosition(document.*, end_pos, .utf16)).absolute_index;
 
             const old_len = document.text.len;
             const new_len = old_len + change_text.len;
