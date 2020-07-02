@@ -1374,15 +1374,14 @@ pub fn main() anyerror!void {
     allocator = std.heap.page_allocator;
 
     if (build_options.allocation_info) {
-        // TODO: Use a better debugging allocator, track size in bytes, memory reserved etc..
         // Initialize the leak counting allocator.
         debug_alloc_state = DebugAllocator.init(allocator, build_options.max_bytes_allocated);
         allocator = &debug_alloc_state.allocator;
     }
 
     defer if (debug_alloc) |dbg| {
-        std.log.debug(.main, "Finished cleanup, last allocation info.\n", .{});
-        std.log.debug(.main, "{}\n", .{dbg.info});
+        std.debug.print("Finished cleanup, last allocation info.\n", .{});
+        std.debug.print("\n{}\n", .{dbg.info});
     };
 
     // Init global vars
@@ -1490,7 +1489,16 @@ pub fn main() anyerror!void {
     defer document_store.deinit();
 
     workspace_folder_configs = std.StringHashMap(?Config).init(allocator);
-    defer workspace_folder_configs.deinit();
+    defer {
+        var it = workspace_folder_configs.iterator();
+        while (it.next()) |entry| {
+            allocator.free(entry.key);
+            if (entry.value) |c| {
+                std.json.parseFree(Config, c, std.json.ParseOptions{ .allocator = allocator });
+            }
+        }
+        workspace_folder_configs.deinit();
+    }
 
     // This JSON parser is passed to processJsonRpc and reset.
     var json_parser = std.json.Parser.init(allocator, false);
@@ -1514,7 +1522,7 @@ pub fn main() anyerror!void {
         arena.state.buffer_list = .{};
 
         if (debug_alloc) |dbg| {
-            std.log.debug(.main, "{}\n", .{dbg.info});
+            std.log.debug(.main, "\n{}\n", .{dbg.info});
         }
     }
 }

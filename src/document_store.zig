@@ -636,6 +636,7 @@ pub fn deinit(self: *DocumentStore) void {
     var entry_iterator = self.handles.iterator();
     while (entry_iterator.next()) |entry| {
         entry.value.document_scope.deinit(self.allocator);
+        entry.value.tree.deinit();
         self.allocator.free(entry.value.document.mem);
 
         for (entry.value.import_uris.items) |uri| {
@@ -662,6 +663,7 @@ pub fn deinit(self: *DocumentStore) void {
         self.allocator.free(std_uri);
     }
 
+    self.allocator.free(self.build_runner_path);
     self.build_files.deinit(self.allocator);
     self.error_completions.deinit();
     self.enum_completions.deinit();
