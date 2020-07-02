@@ -1,16 +1,6 @@
 const std = @import("std");
 const types = @import("types.zig");
 
-fn utf16leCharSequenceLength(first_char: u16) !u2 {
-    const c0: u21 = first_char;
-    if (first_char & ~@as(u21, 0x03ff) == 0xd800) {
-        return 2;
-    } else if (c0 & ~@as(u21, 0x03ff) == 0xdc00) {
-        return error.UnexpectedSecondSurrogateHalf;
-    }
-    return 1;
-}
-
 pub const Encoding = enum {
     utf8,
     utf16,
