@@ -149,7 +149,7 @@ pub const TextDocument = struct {
 
         var index = @intCast(i64, split_iterator.index.?) + position.character;
 
-        if (index < 0 or index >= @intCast(i64, self.text.len)) {
+        if (index < 0 or index > @intCast(i64, self.text.len)) {
             return error.InvalidParams;
         }
 

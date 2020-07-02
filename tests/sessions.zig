@@ -13,12 +13,12 @@ const initialized_message = \\{"jsonrpc":"2.0","method":"initialized","params":{
 const shutdown_message = \\{"jsonrpc":"2.0", "id":"STDWN", "method":"shutdown","params":{}}
 ;
 
-fn sendRequest(req: []const u8, process: var) !void {
+fn sendRequest(req: []const u8, process: *std.ChildProcess) !void {
     try process.stdin.?.writer().print("Content-Length: {}\r\n\r\n", .{req.len});
     try process.stdin.?.writeAll(req);
 }
 
-fn readResponses(process: var) !void {
+fn readResponses(process: *std.ChildProcess) !void {
     while (true) {
         const header = headerPkg.readRequestHeader(allocator, process.stdout.?.reader()) catch |err| {
             switch(err) {
@@ -36,9 +36,8 @@ fn readResponses(process: var) !void {
     }
 }
 
-test "Open file, ask for semantic tokens" {
+fn startZls() !*std.ChildProcess {
     var process = try std.ChildProcess.init(&[_][]const u8{ "zig-cache/bin/zls" ++ suffix }, allocator);
-    defer process.deinit();
     process.stdin_behavior = .Pipe;
     process.stdout_behavior = .Pipe;
     process.stderr_behavior = std.ChildProcess.StdIo.Inherit;
@@ -48,6 +47,30 @@ test "Open file, ask for semantic tokens" {
         return err;
     };
 
+    return process;
+}
+
+fn waitNoError(process: *std.ChildProcess) !void {
+    const result = try process.wait();
+    switch (result) {
+        .Exited => |code| if (code == 0) {
+            return;
+        },
+        else => {},
+    }
+    return error.ShutdownWithError;
+}
+
+fn consumeOutputAndWait(process: *std.ChildProcess) !void {
+    process.stdin.?.close();
+    process.stdin = null;
+    try readResponses(process);
+    try waitNoError(process);
+    process.deinit();
+}
+
+test "Open file, ask for semantic tokens" {
+    var process = try startZls();
     try sendRequest(initialize_message, process);
     try sendRequest(initialized_message, process);
 
@@ -57,26 +80,37 @@ test "Open file, ask for semantic tokens" {
     const sem_toks_req = \\{"jsonrpc":"2.0","id":2,"method":"textDocument/semanticTokens","params":{"textDocument":{"uri":"file:///test.zig"}}}
     ;
     try sendRequest(sem_toks_req, process);
-
     try sendRequest(shutdown_message, process);
-
-    process.stdin.?.close();
-    process.stdin = null;
-
-    try readResponses(process);
-    const result = try process.wait();
-
-    // const stderr_bytes = try process.stderr.?.reader().readAllAlloc(allocator, std.math.maxInt(usize));
-    // defer allocator.free(stderr_bytes);
-    // if (stderr_bytes.len != 0) {
-    //     std.debug.print("Stderr output\n{}\n", .{stderr_bytes});
-    // }
-
-    switch (result) {
-        .Exited => |code| if (code == 0) {
-            return;
-        },
-        else => {},
-    }
-    return error.ShutdownWithError;
+    try consumeOutputAndWait(process);
 }
+
+test "Requesting a completion in an empty file" {
+    var process = try startZls();
+    try sendRequest(initialize_message, process);
+    try sendRequest(initialized_message, process);
+
+    const new_file_req = \\{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file:///test.zig","languageId":"zig","version":420,"text":""}}}
+    ;
+    try sendRequest(new_file_req, process);
+    const completion_req = \\{"jsonrpc":"2.0","id":2,"method":"textDocument/completion","params":{"textDocument":{"uri":"file:///test.zig"}, "position":{"line":0,"character":0}}}
+    ;
+    try sendRequest(completion_req, process);
+    try sendRequest(shutdown_message, process);
+    try consumeOutputAndWait(process);
+}
+
+test "Requesting a completion with no trailing whitespace" {
+    var process = try startZls();
+    try sendRequest(initialize_message, process);
+    try sendRequest(initialized_message, process);
+
+    const new_file_req = \\{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file:///test.zig","languageId":"zig","version":420,"text":"const std = @import(\"std\");\nc"}}}
+    ;
+    try sendRequest(new_file_req, process);
+    const completion_req = \\{"jsonrpc":"2.0","id":2,"method":"textDocument/completion","params":{"textDocument":{"uri":"file:///test.zig"}, "position":{"line":1,"character":1}}}
+    ;
+    try sendRequest(completion_req, process);
+    try sendRequest(shutdown_message, process);
+    try consumeOutputAndWait(process);
+}
+
