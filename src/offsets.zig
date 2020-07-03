@@ -77,7 +77,7 @@ pub fn tokenRelativeLocation(tree: *std.zig.ast.Tree, start_index: usize, token:
         } else {
             if (encoding == .utf16) {
                 const n = try std.unicode.utf8ByteSequenceLength(c);
-                const codepoint = try std.unicode.utf8Decode(source[i..i + n]);
+                const codepoint = try std.unicode.utf8Decode(source[i .. i + n]);
                 if (codepoint < 0x10000) {
                     loc.column += 1;
                 } else {
@@ -103,7 +103,7 @@ pub fn tokenLength(tree: *std.zig.ast.Tree, token: std.zig.ast.TokenIndex, encod
     var utf16_len: usize = 0;
     while (i < token_loc.end) {
         const n = std.unicode.utf8ByteSequenceLength(tree.source[i]) catch unreachable;
-        const codepoint = std.unicode.utf8Decode(tree.source[i..i + n]) catch unreachable;
+        const codepoint = std.unicode.utf8Decode(tree.source[i .. i + n]) catch unreachable;
         if (codepoint < 0x10000) {
             utf16_len += 1;
         } else {

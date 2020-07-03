@@ -1009,9 +1009,8 @@ fn initializeHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: 
         try respondGeneric(id, initialize_response);
     } else {
         const response_str = try std.fmt.allocPrint(&arena.allocator, ",\"result\": {{\"offsetEncoding\":\"{}\",{}", .{
-            if (offset_encoding == .utf8) @as([]const u8, "utf-8")
-            else @as([]const u8, "utf-16"),
-            initialize_capabilities
+            if (offset_encoding == .utf8) @as([]const u8, "utf-8") else @as([]const u8, "utf-16"),
+            initialize_capabilities,
         });
         try respondGeneric(id, response_str);
     }
@@ -1241,7 +1240,7 @@ fn formattingHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: 
 
         switch (try process.wait()) {
             .Exited => |code| if (code == 0) {
-                try send(arena, types.Response{
+                return try send(arena, types.Response{
                     .id = id,
                     .result = .{
                         .TextEdits = &[1]types.TextEdit{
