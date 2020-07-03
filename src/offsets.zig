@@ -52,3 +52,64 @@ pub fn documentPosition(doc: types.TextDocument, position: types.Position, encod
         return DocumentPosition{ .line = line, .absolute_index = line_start_idx + utf8_idx, .line_index = utf8_idx };
     }
 }
+
+pub const TokenLocation = struct {
+    line: usize,
+    column: usize,
+};
+
+pub fn tokenRelativeLocation(tree: *std.zig.ast.Tree, start_index: usize, token: std.zig.ast.TokenIndex, encoding: Encoding) !TokenLocation {
+    const token_loc = tree.token_locs[token];
+
+    var loc = TokenLocation{
+        .line = 0,
+        .column = 0,
+    };
+    const token_start = token_loc.start;
+    const source = tree.source[start_index..];
+    var i: usize = 0;
+    while (i < token_start - start_index) {
+        const c = source[i];
+        if (c == '\n') {
+            loc.line += 1;
+            loc.column = 0;
+            i += 1;
+        } else {
+            if (encoding == .utf16) {
+                const n = try std.unicode.utf8ByteSequenceLength(c);
+                const codepoint = try std.unicode.utf8Decode(source[i..i + n]);
+                if (codepoint < 0x10000) {
+                    loc.column += 1;
+                } else {
+                    loc.column += 2;
+                }
+                i += n;
+            } else {
+                loc.column += 1;
+                i += 1;
+            }
+        }
+    }
+    return loc;
+}
+
+/// Asserts the token is comprised of valid utf8
+pub fn tokenLength(tree: *std.zig.ast.Tree, token: std.zig.ast.TokenIndex, encoding: Encoding) usize {
+    const token_loc = tree.token_locs[token];
+    if (encoding == .utf8)
+        return token_loc.end - token_loc.start;
+
+    var i: usize = token_loc.start;
+    var utf16_len: usize = 0;
+    while (i < token_loc.end) {
+        const n = std.unicode.utf8ByteSequenceLength(tree.source[i]) catch unreachable;
+        const codepoint = std.unicode.utf8Decode(tree.source[i..i + n]) catch unreachable;
+        if (codepoint < 0x10000) {
+            utf16_len += 1;
+        } else {
+            utf16_len += 2;
+        }
+        i += n;
+    }
+    return utf16_len;
+}

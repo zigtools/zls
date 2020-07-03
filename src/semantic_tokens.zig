@@ -1,4 +1,5 @@
 const std = @import("std");
+const offsets = @import("offsets.zig");
 const DocumentStore = @import("document_store.zig");
 const analysis = @import("analysis.zig");
 const ast = std.zig.ast;
@@ -43,12 +44,14 @@ const Builder = struct {
     handle: *DocumentStore.Handle,
     current_token: ?ast.TokenIndex,
     arr: std.ArrayList(u32),
+    encoding: offsets.Encoding,
 
-    fn init(allocator: *std.mem.Allocator, handle: *DocumentStore.Handle) Builder {
+    fn init(allocator: *std.mem.Allocator, handle: *DocumentStore.Handle, encoding: offsets.Encoding) Builder {
         return Builder{
             .handle = handle,
             .current_token = null,
             .arr = std.ArrayList(u32).init(allocator),
+            .encoding = encoding,
         };
     }
 
@@ -57,13 +60,11 @@ const Builder = struct {
             self.handle.tree.token_locs[current_token].start
         else
             0;
-
-        const token_loc = self.handle.tree.token_locs[token];
-        const delta_loc = self.handle.tree.tokenLocationLoc(start_idx, token_loc);
+        const delta_loc = offsets.tokenRelativeLocation(self.handle.tree, start_idx, token, self.encoding) catch return;
         try self.arr.appendSlice(&[_]u32{
             @truncate(u32, delta_loc.line),
             @truncate(u32, delta_loc.column),
-            @truncate(u32, token_loc.end - token_loc.start),
+            @truncate(u32, offsets.tokenLength(self.handle.tree, token, self.encoding)),
             @enumToInt(token_type),
             token_modifiers.toInt(),
         });
@@ -722,8 +723,8 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
 }
 
 // TODO Range version, edit version.
-pub fn writeAllSemanticTokens(arena: *std.heap.ArenaAllocator, store: *DocumentStore, handle: *DocumentStore.Handle) ![]u32 {
-    var builder = Builder.init(arena.child_allocator, handle);
+pub fn writeAllSemanticTokens(arena: *std.heap.ArenaAllocator, store: *DocumentStore, handle: *DocumentStore.Handle, encoding: offsets.Encoding) ![]u32 {
+    var builder = Builder.init(arena.child_allocator, handle, encoding);
     try writeNodeTokens(&builder, arena, store, &handle.tree.root_node.base);
     return builder.toOwnedSlice();
 }

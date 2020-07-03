@@ -86,6 +86,7 @@ const ClientCapabilities = struct {
 };
 
 var client_capabilities = ClientCapabilities{};
+var offset_encoding = offsets.Encoding.utf16;
 
 const initialize_response =
     \\,"result": {"capabilities": {"signatureHelpProvider": {"triggerCharacters": ["(",","]},"textDocumentSync": 1,"renameProvider":true,"completionProvider": {"resolveProvider": false,"triggerCharacters": [".",":","@"]},"documentHighlightProvider": false,"hoverProvider": true,"codeActionProvider": false,"declarationProvider": true,"definitionProvider": true,"typeDefinitionProvider": true,"implementationProvider": false,"referencesProvider": false,"documentSymbolProvider": true,"colorProvider": false,"documentFormattingProvider": true,"documentRangeFormattingProvider": false,"foldingRangeProvider": false,"selectionRangeProvider": false,"workspaceSymbolProvider": false,"rangeProvider": false,"documentProvider": true,"workspace": {"workspaceFolders": {"supported": true,"changeNotifications": true}},"semanticTokensProvider": {"documentProvider": true,"legend": {"tokenTypes": ["namespace","type","struct","enum","union","parameter","variable","tagField","field","errorTag","function","keyword","comment","string","number","operator","builtin","label"],"tokenModifiers": ["definition","async","documentation", "generic"]}}}}}
@@ -1067,7 +1068,7 @@ fn semanticTokensHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, r
         };
 
         const semantic_tokens = @import("semantic_tokens.zig");
-        const token_array = try semantic_tokens.writeAllSemanticTokens(arena, &document_store, handle);
+        const token_array = try semantic_tokens.writeAllSemanticTokens(arena, &document_store, handle, offset_encoding);
         defer allocator.free(token_array);
 
         return try send(arena, types.Response{
@@ -1085,7 +1086,7 @@ fn completionHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: 
     };
 
     if (req.params.position.character >= 0) {
-        const doc_position = try offsets.documentPosition(handle.document, req.params.position, .utf16);
+        const doc_position = try offsets.documentPosition(handle.document, req.params.position, offset_encoding);
         const pos_context = try analysis.documentPositionContext(arena, handle.document, doc_position);
 
         const this_config = configFromUriOr(req.params.textDocument.uri, config);
@@ -1142,7 +1143,7 @@ fn gotoHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: reques
     };
 
     if (req.params.position.character >= 0) {
-        const doc_position = try offsets.documentPosition(handle.document, req.params.position, .utf16);
+        const doc_position = try offsets.documentPosition(handle.document, req.params.position, offset_encoding);
         const pos_context = try analysis.documentPositionContext(arena, handle.document, doc_position);
 
         const this_config = configFromUriOr(req.params.textDocument.uri, config);
@@ -1173,7 +1174,7 @@ fn hoverHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: reque
     };
 
     if (req.params.position.character >= 0) {
-        const doc_position = try offsets.documentPosition(handle.document, req.params.position, .utf16);
+        const doc_position = try offsets.documentPosition(handle.document, req.params.position, offset_encoding);
         const pos_context = try analysis.documentPositionContext(arena, handle.document, doc_position);
 
         const this_config = configFromUriOr(req.params.textDocument.uri, config);
@@ -1246,7 +1247,7 @@ fn renameHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requ
     };
 
     if (req.params.position.character >= 0) {
-        const doc_position = try offsets.documentPosition(handle.document, req.params.position, .utf16);
+        const doc_position = try offsets.documentPosition(handle.document, req.params.position, offset_encoding);
         const pos_context = try analysis.documentPositionContext(arena, handle.document, doc_position);
 
         const this_config = configFromUriOr(req.params.textDocument.uri, config);
