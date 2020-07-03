@@ -88,9 +88,11 @@ const ClientCapabilities = struct {
 var client_capabilities = ClientCapabilities{};
 var offset_encoding = offsets.Encoding.utf16;
 
-const initialize_response =
-    \\,"result": {"capabilities": {"signatureHelpProvider": {"triggerCharacters": ["(",","]},"textDocumentSync": 1,"renameProvider":true,"completionProvider": {"resolveProvider": false,"triggerCharacters": [".",":","@"]},"documentHighlightProvider": false,"hoverProvider": true,"codeActionProvider": false,"declarationProvider": true,"definitionProvider": true,"typeDefinitionProvider": true,"implementationProvider": false,"referencesProvider": false,"documentSymbolProvider": true,"colorProvider": false,"documentFormattingProvider": true,"documentRangeFormattingProvider": false,"foldingRangeProvider": false,"selectionRangeProvider": false,"workspaceSymbolProvider": false,"rangeProvider": false,"documentProvider": true,"workspace": {"workspaceFolders": {"supported": true,"changeNotifications": true}},"semanticTokensProvider": {"documentProvider": true,"legend": {"tokenTypes": ["namespace","type","struct","enum","union","parameter","variable","tagField","field","errorTag","function","keyword","comment","string","number","operator","builtin","label"],"tokenModifiers": ["definition","async","documentation", "generic"]}}}}}
+const initialize_capabilities =
+    \\"capabilities": {"signatureHelpProvider": {"triggerCharacters": ["(",","]},"textDocumentSync": 1,"renameProvider":true,"completionProvider": {"resolveProvider": false,"triggerCharacters": [".",":","@"]},"documentHighlightProvider": false,"hoverProvider": true,"codeActionProvider": false,"declarationProvider": true,"definitionProvider": true,"typeDefinitionProvider": true,"implementationProvider": false,"referencesProvider": false,"documentSymbolProvider": true,"colorProvider": false,"documentFormattingProvider": true,"documentRangeFormattingProvider": false,"foldingRangeProvider": false,"selectionRangeProvider": false,"workspaceSymbolProvider": false,"rangeProvider": false,"documentProvider": true,"workspace": {"workspaceFolders": {"supported": true,"changeNotifications": true}},"semanticTokensProvider": {"documentProvider": true,"legend": {"tokenTypes": ["namespace","type","struct","enum","union","parameter","variable","tagField","field","errorTag","function","keyword","comment","string","number","operator","builtin","label"],"tokenModifiers": ["definition","async","documentation", "generic"]}}}}}
 ;
+
+const initialize_response = ",\"result\": {" ++ initialize_capabilities;
 
 const not_implemented_response =
     \\,"error":{"code":-32601,"message":"NotImplemented"}}
@@ -957,6 +959,13 @@ fn configFromUriOr(uri: []const u8, default: Config) Config {
 }
 
 fn initializeHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.Initialize, config: Config) !void {
+    var send_encoding = req.params.capabilities.offsetEncoding.value.len != 0;
+    for (req.params.capabilities.offsetEncoding.value) |encoding| {
+        if (std.mem.eql(u8, encoding, "utf-8")) {
+            offset_encoding = .utf8;
+        }
+    }
+
     if (req.params.capabilities.workspace) |workspace| {
         client_capabilities.supports_workspace_folders = workspace.workspaceFolders.value;
     }
@@ -995,7 +1004,17 @@ fn initializeHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: 
     }
 
     std.log.debug(.main, "{}\n", .{client_capabilities});
-    try respondGeneric(id, initialize_response);
+    std.log.debug(.main, "Using offset encoding: {}\n", .{std.meta.tagName(offset_encoding)});
+    if (!send_encoding) {
+        try respondGeneric(id, initialize_response);
+    } else {
+        const response_str = try std.fmt.allocPrint(&arena.allocator, ",\"result\": {{\"offsetEncoding\":\"{}\",{}", .{
+            if (offset_encoding == .utf8) @as([]const u8, "utf-8")
+            else @as([]const u8, "utf-16"),
+            initialize_capabilities
+        });
+        try respondGeneric(id, response_str);
+    }
     std.log.notice(.main, "zls initialized", .{});
 }
 

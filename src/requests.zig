@@ -140,6 +140,7 @@ pub const Initialize = struct {
                 },
             },
         },
+        offsetEncoding: MaybeStringArray,
     };
 
     params: struct {
