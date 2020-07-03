@@ -113,3 +113,49 @@ pub fn tokenLength(tree: *std.zig.ast.Tree, token: std.zig.ast.TokenIndex, encod
     }
     return utf16_len;
 }
+
+pub fn documentRange(doc: types.TextDocument, encoding: Encoding) !types.Range {
+    var line_idx: i64 = 0;
+    var curr_line: []const u8 = doc.text;
+
+    var split_iterator = std.mem.split(doc.text, "\n");
+    while (split_iterator.next()) |line| : (line_idx += 1) {
+        curr_line = line;
+    }
+
+    if (encoding == .utf8) {
+        return types.Range{
+            .start = .{
+                .line = 0,
+                .character = 0,
+            },
+            .end = .{
+                .line = line_idx,
+                .character = @intCast(i64, curr_line.len),
+            },
+        };
+    } else {
+        var utf16_len: usize = 0;
+        var line_utf8_idx: usize = 0;
+        while (line_utf8_idx < curr_line.len) {
+            const n = try std.unicode.utf8ByteSequenceLength(curr_line[line_utf8_idx]);
+            const codepoint = try std.unicode.utf8Decode(curr_line[line_utf8_idx .. line_utf8_idx + n]);
+            if (codepoint < 0x10000) {
+                utf16_len += 1;
+            } else {
+                utf16_len += 2;
+            }
+            line_utf8_idx += n;
+        }
+        return types.Range{
+            .start = .{
+                .line = 0,
+                .character = 0,
+            },
+            .end = .{
+                .line = line_idx,
+                .character = @intCast(i64, utf16_len),
+            },
+        };
+    }
+}

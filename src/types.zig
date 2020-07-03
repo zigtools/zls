@@ -138,27 +138,6 @@ pub const TextDocument = struct {
     text: String,
     // This holds the memory that we have actually allocated.
     mem: []u8,
-
-    pub fn range(self: TextDocument) Range {
-        var line_idx: i64 = 0;
-        var curr_line: []const u8 = self.text;
-
-        var split_iterator = std.mem.split(self.text, "\n");
-        while (split_iterator.next()) |line| : (line_idx += 1) {
-            curr_line = line;
-        }
-
-        return .{
-            .start = .{
-                .line = 0,
-                .character = 0,
-            },
-            .end = .{
-                .line = line_idx,
-                .character = @intCast(i64, curr_line.len),
-            },
-        };
-    }
 };
 
 pub const WorkspaceEdit = struct {

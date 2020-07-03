@@ -1245,7 +1245,7 @@ fn formattingHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: 
                     .result = .{
                         .TextEdits = &[1]types.TextEdit{
                             .{
-                                .range = handle.document.range(),
+                                .range = try offsets.documentRange(handle.document, offset_encoding),
                                 .newText = stdout_bytes,
                             },
                         },
