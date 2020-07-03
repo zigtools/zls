@@ -173,7 +173,7 @@ pub fn build(b: *std.build.Builder) !void {
     configure_step.makeFn = config;
 
     const test_step = b.step("test", "Run all the tests");
-    test_step.dependOn(&exe.step);
+    test_step.dependOn(builder.getInstallStep());
 
     var unit_tests = b.addTest("tests/unit_tests.zig");
     unit_tests.addPackage(.{ .name = "analysis", .path = "src/analysis.zig" });
