@@ -699,7 +699,7 @@ fn renameDefinitionGlobal(arena: *std.heap.ArenaAllocator, id: types.RequestId, 
     var workspace_edit = types.WorkspaceEdit{
         .changes = std.StringHashMap([]types.TextEdit).init(&arena.allocator),
     };
-    try rename.renameSymbol(arena, &document_store, decl, new_name, &workspace_edit.changes.?);
+    try rename.renameSymbol(arena, &document_store, decl, new_name, &workspace_edit.changes.?, offset_encoding);
     try send(arena, types.Response{
         .id = id,
         .result = .{ .WorkspaceEdit = workspace_edit },
@@ -720,7 +720,7 @@ fn renameDefinitionFieldAccess(
     var workspace_edit = types.WorkspaceEdit{
         .changes = std.StringHashMap([]types.TextEdit).init(&arena.allocator),
     };
-    try rename.renameSymbol(arena, &document_store, decl, new_name, &workspace_edit.changes.?);
+    try rename.renameSymbol(arena, &document_store, decl, new_name, &workspace_edit.changes.?, offset_encoding);
     try send(arena, types.Response{
         .id = id,
         .result = .{ .WorkspaceEdit = workspace_edit },
@@ -733,7 +733,7 @@ fn renameDefinitionLabel(arena: *std.heap.ArenaAllocator, id: types.RequestId, h
     var workspace_edit = types.WorkspaceEdit{
         .changes = std.StringHashMap([]types.TextEdit).init(&arena.allocator),
     };
-    try rename.renameLabel(arena, decl, new_name, &workspace_edit.changes.?);
+    try rename.renameLabel(arena, decl, new_name, &workspace_edit.changes.?, offset_encoding);
     try send(arena, types.Response{
         .id = id,
         .result = .{ .WorkspaceEdit = workspace_edit },
