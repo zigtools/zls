@@ -15,6 +15,7 @@ pub fn config(step: *std.build.Step) anyerror!void {
     const lib_path = try zinput.askDirPath(builder.allocator, "What is your Zig lib path (path that contains the 'std' folder)?", 512);
     const snippets = try zinput.askBool("Do you want to enable snippets?");
     const style = try zinput.askBool("Do you want to enable style warnings?");
+    const semantic_tokens = try zinput.askBool("Do you want to enable semantic highlighting?");
 
     var dir = try std.fs.cwd().openDir(builder.exe_dir, .{});
     defer dir.close();
@@ -30,6 +31,7 @@ pub fn config(step: *std.build.Step) anyerror!void {
         .zig_lib_path = lib_path,
         .enable_snippets = snippets,
         .warn_style = style,
+        .enable_semantic_tokens = semantic_tokens,
     }, std.json.StringifyOptions{}, out);
 
     std.debug.warn("Successfully saved configuration options!\n", .{});
