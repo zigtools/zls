@@ -209,10 +209,12 @@ pub const Rename = struct {
     },
 };
 
-pub const Reference = struct {
+pub const References = struct {
     params: struct {
         textDocument: TextDocumentIdentifier,
         position: types.Position,
-        includeDeclaration: bool,
+        context: struct {
+            includeDeclaration: bool,
+        },
     },
 };

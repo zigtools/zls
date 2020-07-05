@@ -18,11 +18,13 @@ pub const Object = json.ObjectMap;
 pub const DocumentUri = String;
 
 pub const Position = struct {
-    line: Integer, character: Integer,
+    line: Integer,
+    character: Integer,
 };
 
 pub const Range = struct {
-    start: Position, end: Position,
+    start: Position,
+    end: Position,
 };
 
 pub const Location = struct {
@@ -56,6 +58,7 @@ pub const ResponseParams = union(enum) {
     DocumentSymbols: []DocumentSymbol,
     SemanticTokens: struct { data: []const u32 },
     TextEdits: []TextEdit,
+    Locations: []Location,
     WorkspaceEdit: WorkspaceEdit,
 };
 
