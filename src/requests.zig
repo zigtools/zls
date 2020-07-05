@@ -208,3 +208,11 @@ pub const Rename = struct {
         newName: types.String,
     },
 };
+
+pub const Reference = struct {
+    params: struct {
+        textDocument: TextDocumentIdentifier,
+        position: types.Position,
+        includeDeclaration: bool,
+    },
+};
