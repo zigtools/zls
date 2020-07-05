@@ -1036,7 +1036,7 @@ fn workspaceFoldersChangeHandler(arena: *std.heap.ArenaAllocator, id: types.Requ
 
     for (req.params.event.added) |add| {
         const duped_uri = try std.mem.dupe(allocator, u8, add.uri);
-        if (try workspace_folder_configs.put(duped_uri, null)) |old| {
+        if (try workspace_folder_configs.fetchPut(duped_uri, null)) |old| {
             allocator.free(old.key);
             if (old.value) |c| {
                 std.json.parseFree(Config, c, std.json.ParseOptions{ .allocator = allocator });
@@ -1290,14 +1290,14 @@ fn processJsonRpc(arena: *std.heap.ArenaAllocator, parser: *std.json.Parser, jso
     var tree = try parser.parse(json);
     defer tree.deinit();
 
-    const id = if (tree.root.Object.getValue("id")) |id| switch (id) {
+    const id = if (tree.root.Object.get("id")) |id| switch (id) {
         .Integer => |int| types.RequestId{ .Integer = int },
         .String => |str| types.RequestId{ .String = str },
         else => types.RequestId{ .Integer = 0 },
     } else types.RequestId{ .Integer = 0 };
 
-    std.debug.assert(tree.root.Object.getValue("method") != null);
-    const method = tree.root.Object.getValue("method").?.String;
+    std.debug.assert(tree.root.Object.get("method") != null);
+    const method = tree.root.Object.get("method").?.String;
 
     const start_time = std.time.milliTimestamp();
     defer {
@@ -1377,7 +1377,7 @@ fn processJsonRpc(arena: *std.heap.ArenaAllocator, parser: *std.json.Parser, jso
         // TODO: Unimplemented methods, implement them and add them to server capabilities.
         return try respondGeneric(id, null_result_response);
     }
-    if (tree.root.Object.getValue("id")) |_| {
+    if (tree.root.Object.get("id")) |_| {
         return try respondGeneric(id, not_implemented_response);
     }
     std.log.debug(.main, "Method without return value not implemented: {}", .{method});

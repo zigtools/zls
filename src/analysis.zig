@@ -1532,7 +1532,7 @@ pub const DeclWithHandle = struct {
 
                 if (pay.items[0].cast(ast.Node.EnumLiteral)) |enum_lit| {
                     const scope = findContainerScope(.{ .node = switch_expr_type.type.data.other, .handle = switch_expr_type.handle }) orelse return null;
-                    if (scope.decls.get(self.handle.tree.tokenSlice(enum_lit.name))) |candidate| {
+                    if (scope.decls.getEntry(self.handle.tree.tokenSlice(enum_lit.name))) |candidate| {
                         switch (candidate.value) {
                             .ast_node => |node| {
                                 if (node.cast(ast.Node.ContainerField)) |container_field| {
@@ -1761,7 +1761,7 @@ pub fn lookupLabel(
 ) error{OutOfMemory}!?DeclWithHandle {
     for (handle.document_scope.scopes) |scope| {
         if (source_index >= scope.range.start and source_index < scope.range.end) {
-            if (scope.decls.get(symbol)) |candidate| {
+            if (scope.decls.getEntry(symbol)) |candidate| {
                 switch (candidate.value) {
                     .label_decl => {},
                     else => continue,
@@ -1787,7 +1787,7 @@ fn lookupSymbolGlobalInternal(
 ) error{OutOfMemory}!?DeclWithHandle {
     for (handle.document_scope.scopes) |scope| {
         if (source_index >= scope.range.start and source_index < scope.range.end) {
-            if (scope.decls.get(symbol)) |candidate| {
+            if (scope.decls.getEntry(symbol)) |candidate| {
                 switch (candidate.value) {
                     .ast_node => |node| {
                         if (node.id == .ContainerField) continue;
@@ -1840,7 +1840,7 @@ fn lookupSymbolContainerInternal(
         false;
 
     if (findContainerScope(container_handle)) |container_scope| {
-        if (container_scope.decls.get(symbol)) |candidate| {
+        if (container_scope.decls.getEntry(symbol)) |candidate| {
             switch (candidate.value) {
                 .ast_node => |node| {
                     if (node.id == .ContainerField) {
@@ -1902,7 +1902,7 @@ pub const DocumentScope = struct {
     }
 
     pub fn deinit(self: DocumentScope, allocator: *std.mem.Allocator) void {
-        for (self.scopes) |scope| {
+        for (self.scopes) |*scope| {
             scope.decls.deinit();
             allocator.free(scope.uses);
             allocator.free(scope.tests);
@@ -2005,7 +2005,7 @@ fn makeScopeInternal(
                 }
             }
 
-            if (try scopes.items[scope_idx].decls.put(name, .{ .ast_node = decl })) |existing| {
+            if (try scopes.items[scope_idx].decls.fetchPut(name, .{ .ast_node = decl })) |existing| {
                 // TODO Record a redefinition error.
             }
         }
@@ -2031,7 +2031,7 @@ fn makeScopeInternal(
 
             for (func.params()) |*param| {
                 if (param.name_token) |name_tok| {
-                    if (try scopes.items[scope_idx].decls.put(tree.tokenSlice(name_tok), .{ .param_decl = param })) |existing| {
+                    if (try scopes.items[scope_idx].decls.fetchPut(tree.tokenSlice(name_tok), .{ .param_decl = param })) |existing| {
                         // TODO Record a redefinition error
                     }
                 }
@@ -2093,7 +2093,7 @@ fn makeScopeInternal(
                 try makeScopeInternal(allocator, scopes, tree, child_node);
                 if (child_node.cast(ast.Node.VarDecl)) |var_decl| {
                     const name = tree.tokenSlice(var_decl.name_token);
-                    if (try scopes.items[scope_idx].decls.put(name, .{ .ast_node = child_node })) |existing| {
+                    if (try scopes.items[scope_idx].decls.fetchPut(name, .{ .ast_node = child_node })) |existing| {
                         // TODO Record a redefinition error.
                     }
                 }
@@ -2282,7 +2282,7 @@ fn makeScopeInternal(
             if (ptr_idx_payload.index_symbol) |index_symbol| {
                 std.debug.assert(index_symbol.id == .Identifier);
                 const index_name = tree.tokenSlice(index_symbol.firstToken());
-                if (try scope.decls.put(index_name, .{ .ast_node = index_symbol })) |existing| {
+                if (try scope.decls.fetchPut(index_name, .{ .ast_node = index_symbol })) |existing| {
                     // TODO Record a redefinition error
                 }
             }

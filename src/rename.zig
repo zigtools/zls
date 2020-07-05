@@ -7,7 +7,7 @@ const offsets = @import("offsets.zig");
 
 const ast = std.zig.ast;
 
-// TODO Use an map to array lists and collect at the end instead?
+// TODO Use a map to array lists and collect at the end instead?
 const RefHandlerContext = struct {
     edits: *std.StringHashMap([]types.TextEdit),
     allocator: *std.mem.Allocator,
@@ -15,7 +15,7 @@ const RefHandlerContext = struct {
 };
 
 fn refHandler(context: RefHandlerContext, loc: types.Location) !void {
-    var text_edits = if (context.edits.getValue(loc.uri)) |slice|
+    var text_edits = if (context.edits.get(loc.uri)) |slice|
         std.ArrayList(types.TextEdit).fromOwnedSlice(context.allocator, slice)
     else
         std.ArrayList(types.TextEdit).init(context.allocator);
@@ -24,7 +24,7 @@ fn refHandler(context: RefHandlerContext, loc: types.Location) !void {
         .range = loc.range,
         .newText = context.new_name,
     };
-    _ = try context.edits.put(loc.uri, text_edits.toOwnedSlice());
+    try context.edits.put(loc.uri, text_edits.toOwnedSlice());
 }
 
 pub fn renameSymbol(

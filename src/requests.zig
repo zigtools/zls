@@ -40,7 +40,7 @@ inline fn fromDynamicTreeInternal(arena: *std.heap.ArenaAllocator, value: std.js
             const is_default = comptime if (is_struct) std.meta.trait.hasDecls(actual_type, .{ "default", "value_type" }) else false;
             const is_transform = comptime if (is_struct) std.meta.trait.hasDecls(actual_type, .{ "original_type", "transform" }) else false;
 
-            if (value.Object.getValue(field.name)) |json_field| {
+            if (value.Object.get(field.name)) |json_field| {
                 if (is_exists) {
                     @field(out, field.name) = Exists{ .exists = true };
                 } else if (is_transform) {

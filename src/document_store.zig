@@ -297,7 +297,7 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: []u8) anyerror!*Hand
 }
 
 pub fn openDocument(self: *DocumentStore, uri: []const u8, text: []const u8) !*Handle {
-    if (self.handles.get(uri)) |entry| {
+    if (self.handles.getEntry(uri)) |entry| {
         std.log.debug(.doc_store, "Document already open: {}, incrementing count\n", .{uri});
         entry.value.count += 1;
         if (entry.value.is_build_file) |build_file| {
@@ -337,7 +337,7 @@ fn decrementBuildFileRefs(self: *DocumentStore, build_file: *BuildFile) void {
 }
 
 fn decrementCount(self: *DocumentStore, uri: []const u8) void {
-    if (self.handles.get(uri)) |entry| {
+    if (self.handles.getEntry(uri)) |entry| {
         if (entry.value.count == 0) return;
         entry.value.count -= 1;
 
@@ -375,11 +375,7 @@ pub fn closeDocument(self: *DocumentStore, uri: []const u8) void {
 }
 
 pub fn getHandle(self: *DocumentStore, uri: []const u8) ?*Handle {
-    if (self.handles.get(uri)) |entry| {
-        return entry.value;
-    }
-
-    return null;
+    return self.handles.get(uri);
 }
 
 // Check if the document text is now sane, move it to sane_text if so.
@@ -461,17 +457,17 @@ pub fn applyChanges(
     const document = &handle.document;
 
     for (content_changes.items) |change| {
-        if (change.Object.getValue("range")) |range| {
+        if (change.Object.get("range")) |range| {
             const start_pos = types.Position{
-                .line = range.Object.getValue("start").?.Object.getValue("line").?.Integer,
-                .character = range.Object.getValue("start").?.Object.getValue("character").?.Integer,
+                .line = range.Object.get("start").?.Object.get("line").?.Integer,
+                .character = range.Object.get("start").?.Object.get("character").?.Integer,
             };
             const end_pos = types.Position{
-                .line = range.Object.getValue("end").?.Object.getValue("line").?.Integer,
-                .character = range.Object.getValue("end").?.Object.getValue("character").?.Integer,
+                .line = range.Object.get("end").?.Object.get("line").?.Integer,
+                .character = range.Object.get("end").?.Object.get("character").?.Integer,
             };
 
-            const change_text = change.Object.getValue("text").?.String;
+            const change_text = change.Object.get("text").?.String;
 
             const start_index = (try offsets.documentPosition(document.*, start_pos, .utf16)).absolute_index;
             const end_index = (try offsets.documentPosition(document.*, end_pos, .utf16)).absolute_index;
@@ -497,7 +493,7 @@ pub fn applyChanges(
             // Reset the text substring.
             document.text = document.mem[0..new_len];
         } else {
-            const change_text = change.Object.getValue("text").?.String;
+            const change_text = change.Object.get("text").?.String;
             const old_len = document.text.len;
 
             if (change_text.len > document.mem.len) {
