@@ -262,10 +262,11 @@ fn publishDiagnostics(arena: *std.heap.ArenaAllocator, handle: DocumentStore.Han
 fn typeToCompletion(
     arena: *std.heap.ArenaAllocator,
     list: *std.ArrayList(types.CompletionItem),
-    type_handle: analysis.TypeWithHandle,
+    field_access: analysis.FieldAccessReturn,
     orig_handle: *DocumentStore.Handle,
     config: Config,
 ) error{OutOfMemory}!void {
+    const type_handle = field_access.original;
     switch (type_handle.type.data) {
         .slice => {
             if (!type_handle.type.is_type_val) {
@@ -284,6 +285,7 @@ fn typeToCompletion(
             arena,
             list,
             .{ .node = n, .handle = type_handle.handle },
+            field_access.unwrapped,
             orig_handle,
             type_handle.type.is_type_val,
             config,
@@ -296,6 +298,7 @@ fn nodeToCompletion(
     arena: *std.heap.ArenaAllocator,
     list: *std.ArrayList(types.CompletionItem),
     node_handle: analysis.NodeWithHandle,
+    unwrapped: ?analysis.TypeWithHandle,
     orig_handle: *DocumentStore.Handle,
     is_type_val: bool,
     config: Config,
@@ -417,15 +420,40 @@ fn nodeToCompletion(
         },
         .PrefixOp => {
             const prefix_op = node.cast(std.zig.ast.Node.PrefixOp).?;
+
             switch (prefix_op.op) {
                 .ArrayType, .SliceType => {},
                 .PtrType => {
+                    if (config.operator_completions) {
+                        try list.append(.{
+                            .label = "*",
+                            .kind = .Operator,
+                        });
+                    }
+
                     if (prefix_op.rhs.cast(std.zig.ast.Node.PrefixOp)) |child_pop| {
                         switch (child_pop.op) {
-                            .ArrayType => {},
-                            else => return,
+                            .ArrayType => {
+                                try list.append(.{
+                                    .label = "len",
+                                    .kind = .Field,
+                                });
+                            },
+                            else => {},
                         }
-                    } else return;
+                    } else if (unwrapped) |actual_type| {
+                        try typeToCompletion(arena, list, .{ .original = actual_type }, orig_handle, config);
+                    }
+                    return;
+                },
+                .OptionalType => {
+                    if (config.operator_completions) {
+                        try list.append(.{
+                            .label = "?",
+                            .kind = .Operator,
+                        });
+                    }
+                    return;
                 },
                 else => return,
             }
@@ -638,7 +666,8 @@ fn getSymbolFieldAccess(
     if (name.len == 0) return null;
     var tokenizer = std.zig.Tokenizer.init(position.line[range.start..range.end]);
 
-    if (try analysis.getFieldAccessType(&document_store, arena, handle, position.absolute_index, &tokenizer)) |container_handle| {
+    if (try analysis.getFieldAccessType(&document_store, arena, handle, position.absolute_index, &tokenizer)) |result| {
+        const container_handle = result.original;
         const container_handle_node = switch (container_handle.type.data) {
             .other => |n| n,
             else => return null,
@@ -799,7 +828,7 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: analysis.Decl
     const tree = decl_handle.handle.tree;
 
     switch (decl_handle.decl.*) {
-        .ast_node => |node| try nodeToCompletion(context.arena, context.completions, .{ .node = node, .handle = decl_handle.handle }, context.orig_handle, false, context.config.*),
+        .ast_node => |node| try nodeToCompletion(context.arena, context.completions, .{ .node = node, .handle = decl_handle.handle }, null, context.orig_handle, false, context.config.*),
         .param_decl => |param| {
             const doc_kind: types.MarkupKind = if (client_capabilities.completion_doc_supports_md) .Markdown else .PlainText;
             const doc = if (param.doc_comments) |doc_comments|
@@ -898,8 +927,8 @@ fn completeFieldAccess(
 ) !void {
     var completions = std.ArrayList(types.CompletionItem).init(&arena.allocator);
     var tokenizer = std.zig.Tokenizer.init(position.line[range.start..range.end]);
-    if (try analysis.getFieldAccessType(&document_store, arena, handle, position.absolute_index, &tokenizer)) |node| {
-        try typeToCompletion(arena, &completions, node, handle, config);
+    if (try analysis.getFieldAccessType(&document_store, arena, handle, position.absolute_index, &tokenizer)) |result| {
+        try typeToCompletion(arena, &completions, result, handle, config);
     }
 
     try send(arena, types.Response{

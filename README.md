@@ -21,14 +21,14 @@ Zig Language Server, or `zls`, is a language server for Zig. The Zig wiki states
 
 ## Installation
 
-Installing `zls` is pretty simple. You will need [a build of Zig master](https://ziglang.org/download/) (or >0.6) to build ZLS.
+Installing `zls` is pretty simple. You will need [a build of Zig master](https://ziglang.org/download/) to build zls.
 
 ```bash
 git clone --recurse-submodules https://github.com/zigtools/zls
 cd zls
 zig build
 
-# To configure ZLS:
+# To configure zls:
 zig build config
 ```
 
@@ -36,7 +36,9 @@ zig build config
 
 | Option | Type | Default Value | What it Does |
 | --- | --- | --- | --- |
-| `-Ddata_version` | `string` (master or 0.6.0) | 0.6.0 | The data file version. This selects the files in the `src/data` folder that correspond to the Zig version being served.
+| `-Ddata_version` | `string` (master or 0.6.0) | 0.6.0 | The data file version. This selects the files in the `src/data` folder that correspond to the Zig version being served.|
+| `-Dallocation_info` | `bool` | `false` | Enable the use of the debug allocator that will print out information in debug mode and track memory leaks.|
+| `-Dmax_bytes_allocated` | `usize` | `0` | When `allocation_info` is true, enables a maximum allowed allocation size (excluding stacktraces) before the program panics.|
 
 Then, you can use the `zls` executable in an editor of your choice that has a Zig language server client!
 
@@ -57,15 +59,29 @@ The following options are currently available.
 | `zig_exe_path` | `?[]const u8` | `null` | zig executable path, e.g. `/path/to/zig/zig`, used to run the custom build runner. If `null`, zig is looked up in `PATH`. Will be used to infer the zig standard library path if none is provided. |
 | `warn_style` | `bool` | `false` | Enables warnings for style *guideline* mismatches |
 | `build_runner_path` | `?[]const u8` | `null` | Path to the build_runner.zig file provided by zls. This option must be present in one of the global configuration files to have any effect. `null` is equivalent to `${executable_directory}/build_runner.zig` |
-| `enable_semantic_tokens` | `bool` | false | Enables semantic token support when the client also supports it. |
+| `enable_semantic_tokens` | `bool` | `false` | Enables semantic token support when the client also supports it. |
+| `operator_completions` | `bool` | `true` | Enables `*` and `?` operators in completion lists. |
 
-## Usage
+## Features
 
-`zls` will supercharge your Zig programming experience with autocomplete, function documentation, and more! Follow the instructions for your specific editor below:
+`zls` supports most language features, including simple type function support, usingnamespace, payload capture type resolution, custom packages and others. 
+Notable language features that are not currently implemented include `@cImport` as well as most forms of compile time evaluation.  
+
+The following LSP features are supported:  
+- Completions
+- Hover
+- Goto definition/declaration
+- Document symbols
+- Find references
+- Rename symbol
+- Formatting using `zig fmt`
+- Semantic token highlighting (LSP 3.16 proposed feature, implemented by a few clients including VSCode, kak and emacs lsp-mode)
+
+You can install `zls` using the instuctions for your text editor below:  
 
 ### VSCode
 
-Install the `zls-vscode` extension from [here](https://github.com/zigtools/zls-vscode/releases).
+Install the `zls-vscode` extension from [here](https://github.com/zigtools/zls-vscode/releases) and provide a path to the build `zls` executable.
 
 ### Sublime Text 3
 

@@ -1012,13 +1012,18 @@ pub const NodeWithHandle = struct {
     handle: *DocumentStore.Handle,
 };
 
+pub const FieldAccessReturn = struct {
+    original: TypeWithHandle,
+    unwrapped: ?TypeWithHandle = null,
+};
+
 pub fn getFieldAccessType(
     store: *DocumentStore,
     arena: *std.heap.ArenaAllocator,
     handle: *DocumentStore.Handle,
     source_index: usize,
     tokenizer: *std.zig.Tokenizer,
-) !?TypeWithHandle {
+) !?FieldAccessReturn {
     var current_type = TypeWithHandle.typeVal(.{
         .node = &handle.tree.root_node.base,
         .handle = handle,
@@ -1030,7 +1035,10 @@ pub fn getFieldAccessType(
     while (true) {
         const tok = tokenizer.next();
         switch (tok.id) {
-            .Eof => return try resolveFieldAccessLhsType(store, arena, current_type, &bound_type_params),
+            .Eof => return FieldAccessReturn{
+                .original = current_type,
+                .unwrapped = try resolveDerefType(store, arena, current_type, &bound_type_params),
+            },
             .Identifier => {
                 if (try lookupSymbolGlobal(store, arena, current_type.handle, tokenizer.buffer[tok.loc.start..tok.loc.end], source_index)) |child| {
                     current_type = (try child.resolveType(store, arena, &bound_type_params)) orelse return null;
@@ -1039,10 +1047,17 @@ pub fn getFieldAccessType(
             .Period => {
                 const after_period = tokenizer.next();
                 switch (after_period.id) {
-                    .Eof => return try resolveFieldAccessLhsType(store, arena, current_type, &bound_type_params),
+                    .Eof => return FieldAccessReturn{
+                        .original = current_type,
+                        .unwrapped = try resolveDerefType(store, arena, current_type, &bound_type_params),
+                    },
                     .Identifier => {
-                        if (after_period.loc.end == tokenizer.buffer.len)
-                            return try resolveFieldAccessLhsType(store, arena, current_type, &bound_type_params);
+                        if (after_period.loc.end == tokenizer.buffer.len) {
+                            return FieldAccessReturn{
+                                .original = current_type,
+                                .unwrapped = try resolveDerefType(store, arena, current_type, &bound_type_params),
+                            };
+                        }
 
                         current_type = try resolveFieldAccessLhsType(store, arena, current_type, &bound_type_params);
                         const current_type_node = switch (current_type.type.data) {
@@ -1121,7 +1136,10 @@ pub fn getFieldAccessType(
         }
     }
 
-    return try resolveFieldAccessLhsType(store, arena, current_type, &bound_type_params);
+    return FieldAccessReturn{
+        .original = current_type,
+        .unwrapped = try resolveDerefType(store, arena, current_type, &bound_type_params),
+    };
 }
 
 pub fn isNodePublic(tree: *ast.Tree, node: *ast.Node) bool {
@@ -1428,7 +1446,7 @@ fn getDocumentSymbolsInternal(allocator: *std.mem.Allocator, tree: *ast.Tree, no
 pub fn getDocumentSymbols(allocator: *std.mem.Allocator, tree: *ast.Tree, encoding: offsets.Encoding) ![]types.DocumentSymbol {
     var symbols = try std.ArrayList(types.DocumentSymbol).initCapacity(allocator, tree.root_node.decls_len);
 
-    var context = GetDocumentSymbolsContext {
+    var context = GetDocumentSymbolsContext{
         .symbols = &symbols,
         .encoding = encoding,
     };
