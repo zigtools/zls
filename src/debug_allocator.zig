@@ -99,7 +99,7 @@ pub fn init(base_allocator: *std.mem.Allocator, max_bytes: usize) DebugAllocator
     };
 }
 
-pub fn deinit(self: DebugAllocator) void {
+pub fn deinit(self: *DebugAllocator) void {
     self.allocation_strack_addresses.deinit();
 }
 

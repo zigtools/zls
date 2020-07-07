@@ -483,15 +483,15 @@ fn gotoDefinitionSymbol(id: types.RequestId, arena: *std.heap.ArenaAllocator, de
             if (resolve_alias) {
                 if (try analysis.resolveVarDeclAlias(&document_store, arena, .{ .node = node, .handle = handle })) |result| {
                     handle = result.handle;
-                    break :block result.location();
+                    break :block result.location(offset_encoding) catch return;
                 }
             }
 
             const name_token = analysis.getDeclNameToken(handle.tree, node) orelse
                 return try respondGeneric(id, null_result_response);
-            break :block handle.tree.tokenLocation(0, name_token);
+            break :block offsets.tokenRelativeLocation(handle.tree, 0, name_token, offset_encoding) catch return;
         },
-        else => decl_handle.location(),
+        else => decl_handle.location(offset_encoding) catch return,
     };
 
     try send(arena, types.Response{
@@ -499,7 +499,16 @@ fn gotoDefinitionSymbol(id: types.RequestId, arena: *std.heap.ArenaAllocator, de
         .result = .{
             .Location = .{
                 .uri = handle.document.uri,
-                .range = astLocationToRange(location),
+                .range = .{
+                    .start = .{
+                        .line = @intCast(i64, location.line),
+                        .character = @intCast(i64, location.column),
+                    },
+                    .end = .{
+                        .line = @intCast(i64, location.line),
+                        .character = @intCast(i64, location.column),
+                    },
+                },
             },
         },
     });
@@ -907,7 +916,7 @@ fn completeFieldAccess(
 fn documentSymbol(arena: *std.heap.ArenaAllocator, id: types.RequestId, handle: *DocumentStore.Handle) !void {
     try send(arena, types.Response{
         .id = id,
-        .result = .{ .DocumentSymbols = try analysis.getDocumentSymbols(&arena.allocator, handle.tree) },
+        .result = .{ .DocumentSymbols = try analysis.getDocumentSymbols(&arena.allocator, handle.tree, offset_encoding) },
     });
 }
 

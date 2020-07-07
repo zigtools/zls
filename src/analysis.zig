@@ -2,6 +2,7 @@ const std = @import("std");
 const DocumentStore = @import("document_store.zig");
 const ast = std.zig.ast;
 const types = @import("types.zig");
+const offsets = @import("offsets.zig");
 
 /// Get a declaration's doc comment node
 fn getDocCommentNode(tree: *ast.Tree, node: *ast.Node) ?*ast.Node.DocComment {
@@ -153,7 +154,6 @@ pub fn isTypeFunction(tree: *ast.Tree, func: *ast.Node.FnProto) bool {
     }
 }
 
-// @TODO
 pub fn isGenericFunction(tree: *ast.Tree, func: *ast.Node.FnProto) bool {
     for (func.paramsConst()) |param| {
         if (param.param_type == .var_type or param.comptime_token != null) {
@@ -1346,7 +1346,7 @@ pub fn documentPositionContext(arena: *std.heap.ArenaAllocator, document: types.
     };
 }
 
-fn addOutlineNodes(allocator: *std.mem.Allocator, children: *std.ArrayList(types.DocumentSymbol), tree: *ast.Tree, child: *ast.Node) anyerror!void {
+fn addOutlineNodes(allocator: *std.mem.Allocator, tree: *ast.Tree, child: *ast.Node, context: *GetDocumentSymbolsContext) anyerror!void {
     switch (child.id) {
         .StringLiteral, .IntegerLiteral, .BuiltinCall, .Call, .Identifier, .InfixOp, .PrefixOp, .SuffixOp, .ControlFlowExpression, .ArrayInitializerDot, .SwitchElse, .SwitchCase, .For, .EnumLiteral, .PointerIndexPayload, .StructInitializerDot, .PointerPayload, .While, .Switch, .Else, .BoolLiteral, .NullLiteral, .Defer, .StructInitializer, .FieldInitializer, .If, .MultilineStringLiteral, .UndefinedLiteral, .VarType, .Block, .ErrorSetDecl => return,
 
@@ -1354,18 +1354,36 @@ fn addOutlineNodes(allocator: *std.mem.Allocator, children: *std.ArrayList(types
             const decl = child.cast(ast.Node.ContainerDecl).?;
 
             for (decl.fieldsAndDecls()) |cchild|
-                try addOutlineNodes(allocator, children, tree, cchild);
+                try addOutlineNodes(allocator, tree, cchild, context);
             return;
         },
         else => {},
     }
-    _ = try children.append(try getDocumentSymbolsInternal(allocator, tree, child));
+    try getDocumentSymbolsInternal(allocator, tree, child, context);
 }
 
-fn getDocumentSymbolsInternal(allocator: *std.mem.Allocator, tree: *ast.Tree, node: *ast.Node) anyerror!types.DocumentSymbol {
-    // const symbols = std.ArrayList(types.DocumentSymbol).init(allocator);
-    const start_loc = tree.tokenLocation(0, node.firstToken());
-    const end_loc = tree.tokenLocation(0, node.lastToken());
+const GetDocumentSymbolsContext = struct {
+    prev_loc: offsets.TokenLocation = .{
+        .line = 0,
+        .column = 0,
+        .offset = 0,
+    },
+    symbols: *std.ArrayList(types.DocumentSymbol),
+    encoding: offsets.Encoding,
+};
+
+fn getDocumentSymbolsInternal(allocator: *std.mem.Allocator, tree: *ast.Tree, node: *ast.Node, context: *GetDocumentSymbolsContext) anyerror!void {
+    const name = if (getDeclName(tree, node)) |name|
+        name
+    else
+        return;
+
+    if (name.len == 0)
+        return;
+
+    const start_loc = context.prev_loc.add(try offsets.tokenRelativeLocation(tree, context.prev_loc.offset, node.firstToken(), context.encoding));
+    const end_loc = start_loc.add(try offsets.tokenRelativeLocation(tree, start_loc.offset, node.lastToken(), context.encoding));
+    context.prev_loc = end_loc;
     const range = types.Range{
         .start = .{
             .line = @intCast(i64, start_loc.line),
@@ -1377,23 +1395,8 @@ fn getDocumentSymbolsInternal(allocator: *std.mem.Allocator, tree: *ast.Tree, no
         },
     };
 
-    if (getDeclName(tree, node) == null) {
-        std.log.debug(.analysis, "NULL NAME: {}\n", .{node.id});
-    }
-
-    const maybe_name = if (getDeclName(tree, node)) |name|
-        name
-    else
-        "";
-
-    // TODO: Get my lazy bum to fix detail newlines
-    return types.DocumentSymbol{
-        .name = if (maybe_name.len == 0) switch (node.id) {
-            .TestDecl => "Nameless Test",
-            else => "no_name",
-        } else maybe_name,
-        // .detail = (try getDocComments(allocator, tree, node)) orelse "",
-        .detail = "",
+    (try context.symbols.addOne()).* = .{
+        .name = name,
         .kind = switch (node.id) {
             .FnProto => .Function,
             .VarDecl => .Variable,
@@ -1402,26 +1405,36 @@ fn getDocumentSymbolsInternal(allocator: *std.mem.Allocator, tree: *ast.Tree, no
         },
         .range = range,
         .selectionRange = range,
+        .detail = "",
         .children = ch: {
             var children = std.ArrayList(types.DocumentSymbol).init(allocator);
 
+            var child_context = GetDocumentSymbolsContext{
+                .prev_loc = start_loc,
+                .symbols = &children,
+                .encoding = context.encoding,
+            };
+
             var index: usize = 0;
             while (node.iterate(index)) |child| : (index += 1) {
-                try addOutlineNodes(allocator, &children, tree, child);
+                try addOutlineNodes(allocator, tree, child, &child_context);
             }
 
             break :ch children.items;
         },
     };
-
-    // return symbols.items;
 }
 
-pub fn getDocumentSymbols(allocator: *std.mem.Allocator, tree: *ast.Tree) ![]types.DocumentSymbol {
-    var symbols = std.ArrayList(types.DocumentSymbol).init(allocator);
+pub fn getDocumentSymbols(allocator: *std.mem.Allocator, tree: *ast.Tree, encoding: offsets.Encoding) ![]types.DocumentSymbol {
+    var symbols = try std.ArrayList(types.DocumentSymbol).initCapacity(allocator, tree.root_node.decls_len);
+
+    var context = GetDocumentSymbolsContext {
+        .symbols = &symbols,
+        .encoding = encoding,
+    };
 
     for (tree.root_node.decls()) |node| {
-        _ = try symbols.append(try getDocumentSymbolsInternal(allocator, tree, node));
+        try getDocumentSymbolsInternal(allocator, tree, node, &context);
     }
 
     return symbols.items;
@@ -1462,9 +1475,9 @@ pub const DeclWithHandle = struct {
         };
     }
 
-    pub fn location(self: DeclWithHandle) ast.Tree.Location {
+    pub fn location(self: DeclWithHandle, encoding: offsets.Encoding) !offsets.TokenLocation {
         const tree = self.handle.tree;
-        return tree.tokenLocation(0, self.nameToken());
+        return try offsets.tokenRelativeLocation(tree, 0, self.nameToken(), encoding);
     }
 
     fn isPublic(self: DeclWithHandle) bool {

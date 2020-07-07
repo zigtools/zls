@@ -56,6 +56,18 @@ pub fn documentPosition(doc: types.TextDocument, position: types.Position, encod
 pub const TokenLocation = struct {
     line: usize,
     column: usize,
+    offset: usize,
+
+    pub fn add(lhs: TokenLocation, rhs: TokenLocation) TokenLocation {
+        return .{
+            .line = lhs.line + rhs.line,
+            .column = if (rhs.line == 0)
+                lhs.column + rhs.column
+            else
+                rhs.column,
+            .offset = rhs.offset,
+        };
+    }
 };
 
 pub fn tokenRelativeLocation(tree: *std.zig.ast.Tree, start_index: usize, token: std.zig.ast.TokenIndex, encoding: Encoding) !TokenLocation {
@@ -64,6 +76,7 @@ pub fn tokenRelativeLocation(tree: *std.zig.ast.Tree, start_index: usize, token:
     var loc = TokenLocation{
         .line = 0,
         .column = 0,
+        .offset = 0,
     };
     const token_start = token_loc.start;
     const source = tree.source[start_index..];
@@ -90,6 +103,7 @@ pub fn tokenRelativeLocation(tree: *std.zig.ast.Tree, start_index: usize, token:
             }
         }
     }
+    loc.offset = i + start_index;
     return loc;
 }
 

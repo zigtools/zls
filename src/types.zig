@@ -317,7 +317,7 @@ pub const DocumentSymbol = struct {
     deprecated: bool = false,
     range: Range,
     selectionRange: Range,
-    children: []DocumentSymbol = &[_]DocumentSymbol{},
+    children: []const DocumentSymbol = &[_]DocumentSymbol{},
 };
 
 pub const ShowMessageParams = struct {
