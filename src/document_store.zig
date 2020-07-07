@@ -265,7 +265,10 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: []u8) anyerror!*Hand
                 // This includes the last separator
                 curr_path = curr_path[0 .. idx + 1];
 
-                var folder = try std.fs.cwd().openDir(curr_path, .{});
+                var folder = std.fs.cwd().openDir(curr_path, .{}) catch |err| switch(err) {
+                    error.FileNotFound => continue,
+                    else => return err,
+                };
                 defer folder.close();
 
                 // Try to open the file, read it and add the new document if we find it.

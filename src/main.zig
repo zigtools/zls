@@ -1643,7 +1643,7 @@ pub fn main() anyerror!void {
         arena.state.buffer_list = .{};
 
         if (debug_alloc) |dbg| {
-            std.log.notice(.main, "\n{}\n", .{dbg.info});
+            std.log.debug(.main, "\n{}\n", .{dbg.info});
         }
     }
 }
