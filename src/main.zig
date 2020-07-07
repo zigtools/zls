@@ -667,7 +667,7 @@ fn getSymbolFieldAccess(
     var tokenizer = std.zig.Tokenizer.init(position.line[range.start..range.end]);
 
     if (try analysis.getFieldAccessType(&document_store, arena, handle, position.absolute_index, &tokenizer)) |result| {
-        const container_handle = result.original;
+        const container_handle = result.unwrapped orelse result.original;
         const container_handle_node = switch (container_handle.type.data) {
             .other => |n| n,
             else => return null,
