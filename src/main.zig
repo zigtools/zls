@@ -1203,7 +1203,7 @@ fn completionHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: 
                 .result = .{
                     .CompletionList = .{
                         .isIncomplete = false,
-                        .items = document_store.error_completions.completions.items,
+                        .items = try document_store.errorCompletionItems(arena, handle),
                     },
                 },
             }),
@@ -1212,7 +1212,7 @@ fn completionHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: 
                 .result = .{
                     .CompletionList = .{
                         .isIncomplete = false,
-                        .items = document_store.enum_completions.completions.items,
+                        .items = try document_store.enumCompletionItems(arena, handle),
                     },
                 },
             }),
@@ -1640,7 +1640,7 @@ pub fn main() anyerror!void {
         try processJsonRpc(&arena, &json_parser, buf, config);
         json_parser.reset();
         arena.deinit();
-        arena.state.buffer_list = .{};
+        arena.state = .{};
 
         if (debug_alloc) |dbg| {
             std.log.debug(.main, "\n{}\n", .{dbg.info});

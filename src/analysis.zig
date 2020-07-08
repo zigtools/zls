@@ -673,11 +673,6 @@ pub fn resolveTypeOfNodeInternal(
             )) orelse return null).instanceTypeVal();
         },
         .ErrorSetDecl => {
-            const set = node.cast(ast.Node.ErrorSetDecl).?;
-            var i: usize = 0;
-            while (set.iterate(i)) |decl| : (i += 1) {
-                try store.error_completions.add(handle.tree, decl);
-            }
             return TypeWithHandle.typeVal(node_handle);
         },
         .SuffixOp => {
@@ -821,16 +816,6 @@ pub fn resolveTypeOfNodeInternal(
         .ContainerDecl => {
             const container = node.cast(ast.Node.ContainerDecl).?;
             const kind = handle.tree.token_ids[container.kind_token];
-
-            if (kind == .Keyword_struct or (kind == .Keyword_union and container.init_arg_expr == .None)) {
-                return TypeWithHandle.typeVal(node_handle);
-            }
-
-            var i: usize = 0;
-            while (container.iterate(i)) |decl| : (i += 1) {
-                if (decl.id != .ContainerField) continue;
-                try store.enum_completions.add(handle.tree, decl);
-            }
             return TypeWithHandle.typeVal(node_handle);
         },
         .FnProto => {
@@ -1907,6 +1892,8 @@ pub fn lookupSymbolContainer(
 
 pub const DocumentScope = struct {
     scopes: []Scope,
+    error_completions: []types.CompletionItem,
+    enum_completions: []types.CompletionItem,
 
     pub fn debugPrint(self: DocumentScope) void {
         for (self.scopes) |scope| {
@@ -1939,6 +1926,10 @@ pub const DocumentScope = struct {
             allocator.free(scope.tests);
         }
         allocator.free(self.scopes);
+        for (self.error_completions) |item| if (item.documentation) |doc| allocator.free(doc.value);
+        allocator.free(self.error_completions);
+        for (self.enum_completions) |item| if (item.documentation) |doc| allocator.free(doc.value);
+        allocator.free(self.enum_completions);
     }
 };
 
@@ -1959,12 +1950,23 @@ pub const Scope = struct {
 };
 
 pub fn makeDocumentScope(allocator: *std.mem.Allocator, tree: *ast.Tree) !DocumentScope {
-    var scopes = std.ArrayList(Scope).init(allocator);
-    errdefer scopes.deinit();
+    var scopes = std.ArrayListUnmanaged(Scope){};
+    var error_completions = std.ArrayListUnmanaged(types.CompletionItem){};
+    var enum_completions = std.ArrayListUnmanaged(types.CompletionItem){};
 
-    try makeScopeInternal(allocator, &scopes, tree, &tree.root_node.base);
+    errdefer {
+        scopes.deinit(allocator);
+        for (error_completions.items) |item| if (item.documentation) |doc| allocator.free(doc.value);
+        error_completions.deinit(allocator);
+        for (enum_completions.items) |item| if (item.documentation) |doc| allocator.free(doc.value);
+        enum_completions.deinit(allocator);
+    }
+
+    try makeScopeInternal(allocator, &scopes, &error_completions, &enum_completions, tree, &tree.root_node.base);
     return DocumentScope{
-        .scopes = scopes.toOwnedSlice(),
+        .scopes = scopes.toOwnedSlice(allocator),
+        .error_completions = error_completions.toOwnedSlice(allocator),
+        .enum_completions = enum_completions.toOwnedSlice(allocator),
     };
 }
 
@@ -1975,14 +1977,13 @@ fn nodeSourceRange(tree: *ast.Tree, node: *ast.Node) SourceRange {
     };
 }
 
-// TODO Make enum and error stores per-document
-//      CLear the doc ones before calling this and
-//      rebuild them here.
 // TODO Possibly collect all imports to diff them on changes
 //      as well
 fn makeScopeInternal(
     allocator: *std.mem.Allocator,
-    scopes: *std.ArrayList(Scope),
+    scopes: *std.ArrayListUnmanaged(Scope),
+    error_completions: *std.ArrayListUnmanaged(types.CompletionItem),
+    enum_completions: *std.ArrayListUnmanaged(types.CompletionItem),
     tree: *ast.Tree,
     node: *ast.Node,
 ) error{OutOfMemory}!void {
@@ -1994,7 +1995,7 @@ fn makeScopeInternal(
             else => unreachable,
         };
 
-        (try scopes.addOne()).* = .{
+        (try scopes.addOne(allocator)).* = .{
             .range = nodeSourceRange(tree, node),
             .decls = std.StringHashMap(Declaration).init(allocator),
             .uses = &[0]*ast.Node.Use{},
@@ -2017,22 +2018,44 @@ fn makeScopeInternal(
                 continue;
             }
 
-            try makeScopeInternal(allocator, scopes, tree, decl);
+            try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, decl);
             const name = getDeclName(tree, decl) orelse continue;
             if (decl.id == .TestDecl) {
                 try tests.append(decl);
                 continue;
             }
 
+            if (node.id == .ErrorSetDecl) {
+                (try error_completions.addOne(allocator)).* = .{
+                    .label = name,
+                    .kind = .Constant,
+                    .documentation = if (try getDocComments(allocator, tree, decl, .Markdown)) |docs|
+                        .{ .kind = .Markdown, .value = docs }
+                    else
+                        null,
+                };
+            }
+
             if (decl.cast(ast.Node.ContainerField)) |field| {
-                if (field.type_expr == null and field.value_expr == null) {
-                    if (node.id == .Root) continue;
-                    if (node.cast(ast.Node.ContainerDecl)) |container| {
-                        const kind = tree.token_ids[container.kind_token];
-                        if (kind == .Keyword_struct or (kind == .Keyword_union and container.init_arg_expr == .None)) {
-                            continue;
-                        }
+                const empty_field = field.type_expr == null and field.value_expr == null;
+                if (empty_field and node.id == .Root) {
+                    continue;
+                }
+
+                if (node.cast(ast.Node.ContainerDecl)) |container| {
+                    const kind = tree.token_ids[container.kind_token];
+                    if (empty_field and (kind == .Keyword_struct or (kind == .Keyword_union and container.init_arg_expr == .None))) {
+                        continue;
                     }
+
+                    (try enum_completions.addOne(allocator)).* = .{
+                        .label = name,
+                        .kind = .Constant,
+                        .documentation = if (try getDocComments(allocator, tree, decl, .Markdown)) |docs|
+                            .{ .kind = .Markdown, .value = docs }
+                        else
+                            null,
+                    };
                 }
             }
 
@@ -2050,7 +2073,7 @@ fn makeScopeInternal(
         .FnProto => {
             const func = node.cast(ast.Node.FnProto).?;
 
-            (try scopes.addOne()).* = .{
+            (try scopes.addOne(allocator)).* = .{
                 .range = nodeSourceRange(tree, node),
                 .decls = std.StringHashMap(Declaration).init(allocator),
                 .uses = &[0]*ast.Node.Use{},
@@ -2069,19 +2092,19 @@ fn makeScopeInternal(
             }
 
             if (func.body_node) |body| {
-                try makeScopeInternal(allocator, scopes, tree, body);
+                try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, body);
             }
 
             return;
         },
         .TestDecl => {
-            return try makeScopeInternal(allocator, scopes, tree, node.cast(ast.Node.TestDecl).?.body_node);
+            return try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, node.cast(ast.Node.TestDecl).?.body_node);
         },
         .Block => {
             const block = node.cast(ast.Node.Block).?;
             if (block.label) |label| {
                 std.debug.assert(tree.token_ids[label] == .Identifier);
-                var scope = try scopes.addOne();
+                var scope = try scopes.addOne(allocator);
                 scope.* = .{
                     .range = .{
                         .start = tree.token_locs[block.lbrace].start,
@@ -2099,7 +2122,7 @@ fn makeScopeInternal(
                 });
             }
 
-            (try scopes.addOne()).* = .{
+            (try scopes.addOne(allocator)).* = .{
                 .range = nodeSourceRange(tree, node),
                 .decls = std.StringHashMap(Declaration).init(allocator),
                 .uses = &[0]*ast.Node.Use{},
@@ -2121,7 +2144,7 @@ fn makeScopeInternal(
                     continue;
                 }
 
-                try makeScopeInternal(allocator, scopes, tree, child_node);
+                try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, child_node);
                 if (child_node.cast(ast.Node.VarDecl)) |var_decl| {
                     const name = tree.tokenSlice(var_decl.name_token);
                     if (try scopes.items[scope_idx].decls.fetchPut(name, .{ .ast_node = child_node })) |existing| {
@@ -2134,14 +2157,14 @@ fn makeScopeInternal(
             return;
         },
         .Comptime => {
-            return try makeScopeInternal(allocator, scopes, tree, node.cast(ast.Node.Comptime).?.expr);
+            return try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, node.cast(ast.Node.Comptime).?.expr);
         },
         .If => {
             const if_node = node.cast(ast.Node.If).?;
 
             if (if_node.payload) |payload| {
                 std.debug.assert(payload.id == .PointerPayload);
-                var scope = try scopes.addOne();
+                var scope = try scopes.addOne(allocator);
                 scope.* = .{
                     .range = .{
                         .start = tree.token_locs[payload.firstToken()].start,
@@ -2164,12 +2187,12 @@ fn makeScopeInternal(
                     },
                 });
             }
-            try makeScopeInternal(allocator, scopes, tree, if_node.body);
+            try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, if_node.body);
 
             if (if_node.@"else") |else_node| {
                 if (else_node.payload) |payload| {
                     std.debug.assert(payload.id == .Payload);
-                    var scope = try scopes.addOne();
+                    var scope = try scopes.addOne(allocator);
                     scope.* = .{
                         .range = .{
                             .start = tree.token_locs[payload.firstToken()].start,
@@ -2187,14 +2210,14 @@ fn makeScopeInternal(
                     const name = tree.tokenSlice(err_payload.error_symbol.firstToken());
                     try scope.decls.putNoClobber(name, .{ .ast_node = payload });
                 }
-                try makeScopeInternal(allocator, scopes, tree, else_node.body);
+                try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, else_node.body);
             }
         },
         .While => {
             const while_node = node.cast(ast.Node.While).?;
             if (while_node.label) |label| {
                 std.debug.assert(tree.token_ids[label] == .Identifier);
-                var scope = try scopes.addOne();
+                var scope = try scopes.addOne(allocator);
                 scope.* = .{
                     .range = .{
                         .start = tree.token_locs[while_node.while_token].start,
@@ -2214,7 +2237,7 @@ fn makeScopeInternal(
 
             if (while_node.payload) |payload| {
                 std.debug.assert(payload.id == .PointerPayload);
-                var scope = try scopes.addOne();
+                var scope = try scopes.addOne(allocator);
                 scope.* = .{
                     .range = .{
                         .start = tree.token_locs[payload.firstToken()].start,
@@ -2237,12 +2260,12 @@ fn makeScopeInternal(
                     },
                 });
             }
-            try makeScopeInternal(allocator, scopes, tree, while_node.body);
+            try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, while_node.body);
 
             if (while_node.@"else") |else_node| {
                 if (else_node.payload) |payload| {
                     std.debug.assert(payload.id == .Payload);
-                    var scope = try scopes.addOne();
+                    var scope = try scopes.addOne(allocator);
                     scope.* = .{
                         .range = .{
                             .start = tree.token_locs[payload.firstToken()].start,
@@ -2260,14 +2283,14 @@ fn makeScopeInternal(
                     const name = tree.tokenSlice(err_payload.error_symbol.firstToken());
                     try scope.decls.putNoClobber(name, .{ .ast_node = payload });
                 }
-                try makeScopeInternal(allocator, scopes, tree, else_node.body);
+                try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, else_node.body);
             }
         },
         .For => {
             const for_node = node.cast(ast.Node.For).?;
             if (for_node.label) |label| {
                 std.debug.assert(tree.token_ids[label] == .Identifier);
-                var scope = try scopes.addOne();
+                var scope = try scopes.addOne(allocator);
                 scope.* = .{
                     .range = .{
                         .start = tree.token_locs[for_node.for_token].start,
@@ -2289,7 +2312,7 @@ fn makeScopeInternal(
             const ptr_idx_payload = for_node.payload.cast(ast.Node.PointerIndexPayload).?;
             std.debug.assert(ptr_idx_payload.value_symbol.id == .Identifier);
 
-            var scope = try scopes.addOne();
+            var scope = try scopes.addOne(allocator);
             scope.* = .{
                 .range = .{
                     .start = tree.token_locs[ptr_idx_payload.firstToken()].start,
@@ -2318,10 +2341,10 @@ fn makeScopeInternal(
                 }
             }
 
-            try makeScopeInternal(allocator, scopes, tree, for_node.body);
+            try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, for_node.body);
             if (for_node.@"else") |else_node| {
                 std.debug.assert(else_node.payload == null);
-                try makeScopeInternal(allocator, scopes, tree, else_node.body);
+                try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, else_node.body);
             }
         },
         .Switch => {
@@ -2330,7 +2353,7 @@ fn makeScopeInternal(
                 if (case.*.cast(ast.Node.SwitchCase)) |case_node| {
                     if (case_node.payload) |payload| {
                         std.debug.assert(payload.id == .PointerPayload);
-                        var scope = try scopes.addOne();
+                        var scope = try scopes.addOne(allocator);
                         scope.* = .{
                             .range = .{
                                 .start = tree.token_locs[payload.firstToken()].start,
@@ -2354,23 +2377,23 @@ fn makeScopeInternal(
                             },
                         });
                     }
-                    try makeScopeInternal(allocator, scopes, tree, case_node.expr);
+                    try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, case_node.expr);
                 }
             }
         },
         .VarDecl => {
             const var_decl = node.cast(ast.Node.VarDecl).?;
             if (var_decl.type_node) |type_node| {
-                try makeScopeInternal(allocator, scopes, tree, type_node);
+                try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, type_node);
             }
             if (var_decl.init_node) |init_node| {
-                try makeScopeInternal(allocator, scopes, tree, init_node);
+                try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, init_node);
             }
         },
         else => {
             var child_idx: usize = 0;
             while (node.iterate(child_idx)) |child_node| : (child_idx += 1) {
-                try makeScopeInternal(allocator, scopes, tree, child_node);
+                try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, child_node);
             }
         },
     }

@@ -269,7 +269,14 @@ pub const InsertTextFormat = enum(Integer) {
 };
 
 pub const CompletionItem = struct {
-    label: String, kind: CompletionItemKind, textEdit: ?TextEdit = null, filterText: ?String = null, insertText: ?String = null, insertTextFormat: ?InsertTextFormat = InsertTextFormat.PlainText, detail: ?String = null, documentation: ?MarkupContent = null
+    label: String,
+    kind: CompletionItemKind,
+    textEdit: ?TextEdit = null,
+    filterText: ?String = null,
+    insertText: ?String = null,
+    insertTextFormat: ?InsertTextFormat = InsertTextFormat.PlainText,
+    detail: ?String = null,
+    documentation: ?MarkupContent = null,
     // filterText: String = .NotDefined,
 };
 

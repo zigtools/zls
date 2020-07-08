@@ -32,57 +32,12 @@ pub const Handle = struct {
     }
 };
 
-pub const TagStore = struct {
-    values: std.StringHashMap(void),
-    completions: std.ArrayListUnmanaged(types.CompletionItem),
-
-    pub fn init(allocator: *std.mem.Allocator) TagStore {
-        return .{
-            .values = std.StringHashMap(void).init(allocator),
-            .completions = .{},
-        };
-    }
-
-    pub fn deinit(self: *TagStore) void {
-        const alloc = self.values.allocator;
-        for (self.completions.items) |item| {
-            alloc.free(item.label);
-            if (item.documentation) |some| alloc.free(some.value);
-        }
-        self.values.deinit();
-        self.completions.deinit(self.values.allocator);
-    }
-
-    pub fn add(self: *TagStore, tree: *std.zig.ast.Tree, tag: *std.zig.ast.Node) !void {
-        const name = analysis.nodeToString(tree, tag).?;
-        if (self.values.contains(name)) return;
-        const alloc = self.values.allocator;
-        const item = types.CompletionItem{
-            .label = try std.mem.dupe(alloc, u8, name),
-            .kind = .Constant,
-            .documentation = if (try analysis.getDocComments(alloc, tree, tag, .Markdown)) |docs|
-                .{
-                    .kind = .Markdown,
-                    .value = docs,
-                }
-            else
-                null,
-        };
-
-        try self.values.putNoClobber(item.label, {});
-        try self.completions.append(self.values.allocator, item);
-    }
-};
-
 allocator: *std.mem.Allocator,
 handles: std.StringHashMap(*Handle),
 zig_exe_path: ?[]const u8,
 build_files: std.ArrayListUnmanaged(*BuildFile),
 build_runner_path: []const u8,
 std_uri: ?[]const u8,
-
-error_completions: TagStore,
-enum_completions: TagStore,
 
 pub fn init(
     self: *DocumentStore,
@@ -97,8 +52,6 @@ pub fn init(
     self.build_files = .{};
     self.build_runner_path = build_runner_path;
     self.std_uri = try stdUriFromLibPath(allocator, zig_lib_path);
-    self.error_completions = TagStore.init(allocator);
-    self.enum_completions = TagStore.init(allocator);
 }
 
 const LoadPackagesContext = struct {
@@ -265,7 +218,7 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: []u8) anyerror!*Hand
                 // This includes the last separator
                 curr_path = curr_path[0 .. idx + 1];
 
-                var folder = std.fs.cwd().openDir(curr_path, .{}) catch |err| switch(err) {
+                var folder = std.fs.cwd().openDir(curr_path, .{}) catch |err| switch (err) {
                     error.FileNotFound => continue,
                     else => return err,
                 };
@@ -365,6 +318,7 @@ fn decrementCount(self: *DocumentStore, uri: []const u8) void {
             self.allocator.free(import_uri);
         }
 
+        entry.value.document_scope.deinit(self.allocator);
         entry.value.import_uris.deinit();
         self.allocator.destroy(entry.value);
         const uri_key = entry.key;
@@ -650,7 +604,6 @@ pub fn deinit(self: *DocumentStore) void {
     }
 
     self.handles.deinit();
-
     for (self.build_files.items) |build_file| {
         for (build_file.packages.items) |pkg| {
             self.allocator.free(pkg.name);
@@ -659,13 +612,38 @@ pub fn deinit(self: *DocumentStore) void {
         self.allocator.free(build_file.uri);
         self.allocator.destroy(build_file);
     }
-
     if (self.std_uri) |std_uri| {
         self.allocator.free(std_uri);
     }
-
     self.allocator.free(self.build_runner_path);
     self.build_files.deinit(self.allocator);
-    self.error_completions.deinit();
-    self.enum_completions.deinit();
+}
+
+fn tagStoreCompletionItems(self: DocumentStore, arena: *std.heap.ArenaAllocator, base: *DocumentStore.Handle, comptime name: []const u8) ![]types.CompletionItem {
+    // TODO Better solution for deciding what tags to include
+    var handle_arr = try arena.allocator.alloc(*DocumentStore.Handle, base.import_uris.items.len + 1);
+    handle_arr[0] = base;
+    var len: usize = @field(base.document_scope, name).len;
+    for (base.import_uris.items) |uri, idx| {
+        handle_arr[idx + 1] = self.handles.get(uri).?;
+        len += @field(handle_arr[idx + 1].document_scope, name).len;
+    }
+
+    var result = try arena.allocator.alloc(types.CompletionItem, len);
+    var res_idx: usize = 0;
+    for (handle_arr) |handle| {
+        for (@field(handle.document_scope, name)) |item| {
+            result[res_idx] = item;
+            res_idx += 1;
+        }
+    }
+    return result;
+}
+
+pub fn errorCompletionItems(self: DocumentStore, arena: *std.heap.ArenaAllocator, base: *DocumentStore.Handle) ![]types.CompletionItem {
+    return try self.tagStoreCompletionItems(arena, base, "error_completions");
+}
+
+pub fn enumCompletionItems(self: DocumentStore, arena: *std.heap.ArenaAllocator, base: *DocumentStore.Handle) ![]types.CompletionItem {
+    return try self.tagStoreCompletionItems(arena, base, "enum_completions");
 }
