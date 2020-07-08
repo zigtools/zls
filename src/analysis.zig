@@ -2044,18 +2044,20 @@ fn makeScopeInternal(
 
                 if (node.cast(ast.Node.ContainerDecl)) |container| {
                     const kind = tree.token_ids[container.kind_token];
-                    if (empty_field and (kind == .Keyword_struct or (kind == .Keyword_union and container.init_arg_expr == .None))) {
+                    if (kind == .Keyword_struct or (kind == .Keyword_union and container.init_arg_expr == .None)) {
                         continue;
                     }
 
-                    (try enum_completions.addOne(allocator)).* = .{
-                        .label = name,
-                        .kind = .Constant,
-                        .documentation = if (try getDocComments(allocator, tree, decl, .Markdown)) |docs|
-                            .{ .kind = .Markdown, .value = docs }
-                        else
-                            null,
-                    };
+                    if (!std.mem.eql(u8, name, "_")) {
+                        (try enum_completions.addOne(allocator)).* = .{
+                            .label = name,
+                            .kind = .Constant,
+                            .documentation = if (try getDocComments(allocator, tree, decl, .Markdown)) |docs|
+                                .{ .kind = .Markdown, .value = docs }
+                            else
+                                null,
+                        };
+                    }
                 }
             }
 
