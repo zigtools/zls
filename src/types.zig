@@ -97,7 +97,7 @@ pub const MessageType = enum(Integer) {
     pub fn jsonStringify(
         value: MessageType,
         options: json.StringifyOptions,
-        out_stream: var,
+        out_stream: anytype,
     ) !void {
         try json.stringify(@enumToInt(value), options, out_stream);
     }
@@ -117,7 +117,7 @@ pub const DiagnosticSeverity = enum(Integer) {
     pub fn jsonStringify(
         value: DiagnosticSeverity,
         options: json.StringifyOptions,
-        out_stream: var,
+        out_stream: anytype,
     ) !void {
         try json.stringify(@enumToInt(value), options, out_stream);
     }
@@ -149,7 +149,7 @@ pub const WorkspaceEdit = struct {
     pub fn jsonStringify(
         self: WorkspaceEdit,
         options: std.json.StringifyOptions,
-        writer: var,
+        writer: anytype,
     ) @TypeOf(writer).Error!void {
         try writer.writeByte('{');
         if (self.changes) |changes| {
@@ -182,7 +182,7 @@ pub const MarkupKind = enum(u1) {
     pub fn jsonStringify(
         value: MarkupKind,
         options: json.StringifyOptions,
-        out_stream: var,
+        out_stream: anytype,
     ) !void {
         const str = switch (value) {
             .PlainText => "plaintext",
@@ -249,7 +249,7 @@ pub const CompletionItemKind = enum(Integer) {
     pub fn jsonStringify(
         value: CompletionItemKind,
         options: json.StringifyOptions,
-        out_stream: var,
+        out_stream: anytype,
     ) !void {
         try json.stringify(@enumToInt(value), options, out_stream);
     }
@@ -262,7 +262,7 @@ pub const InsertTextFormat = enum(Integer) {
     pub fn jsonStringify(
         value: InsertTextFormat,
         options: json.StringifyOptions,
-        out_stream: var,
+        out_stream: anytype,
     ) !void {
         try json.stringify(@enumToInt(value), options, out_stream);
     }
@@ -311,7 +311,7 @@ const SymbolKind = enum {
     pub fn jsonStringify(
         value: SymbolKind,
         options: json.StringifyOptions,
-        out_stream: var,
+        out_stream: anytype,
     ) !void {
         try json.stringify(@enumToInt(value), options, out_stream);
     }

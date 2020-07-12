@@ -23,7 +23,7 @@ pub fn log(
     comptime message_level: std.log.Level,
     comptime scope: @Type(.EnumLiteral),
     comptime format: []const u8,
-    args: var,
+    args: anytype,
 ) void {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
@@ -119,7 +119,7 @@ const no_semantic_tokens_response =
 ;
 
 /// Sends a request or response
-fn send(arena: *std.heap.ArenaAllocator, reqOrRes: var) !void {
+fn send(arena: *std.heap.ArenaAllocator, reqOrRes: anytype) !void {
     var arr = std.ArrayList(u8).init(&arena.allocator);
     try std.json.stringify(reqOrRes, .{}, arr.writer());
 
@@ -1381,7 +1381,7 @@ fn referencesHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: 
 }
 
 // Needed for the hack seen below.
-fn extractErr(val: var) anyerror {
+fn extractErr(val: anytype) anyerror {
     val catch |e| return e;
     return error.HackDone;
 }

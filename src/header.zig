@@ -12,7 +12,7 @@ const RequestHeader = struct {
     }
 };
 
-pub fn readRequestHeader(allocator: *mem.Allocator, instream: var) !RequestHeader {
+pub fn readRequestHeader(allocator: *mem.Allocator, instream: anytype) !RequestHeader {
     var r = RequestHeader{
         .content_length = undefined,
         .content_type = null,
@@ -26,8 +26,8 @@ pub fn readRequestHeader(allocator: *mem.Allocator, instream: var) !RequestHeade
         if (header.len == 0 or header[header.len - 1] != '\r') return error.MissingCarriageReturn;
         if (header.len == 1) break;
 
-        const header_name = header[0..mem.indexOf(u8, header, ": ") orelse return error.MissingColon];
-        const header_value = header[header_name.len + 2..header.len-1];
+        const header_name = header[0 .. mem.indexOf(u8, header, ": ") orelse return error.MissingColon];
+        const header_value = header[header_name.len + 2 .. header.len - 1];
         if (mem.eql(u8, header_name, "Content-Length")) {
             if (header_value.len == 0) return error.MissingHeaderValue;
             r.content_length = std.fmt.parseInt(usize, header_value, 10) catch return error.InvalidContentLength;

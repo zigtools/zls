@@ -10,8 +10,8 @@ fn tokenReference(
     handle: *DocumentStore.Handle,
     tok: ast.TokenIndex,
     encoding: offsets.Encoding,
-    context: var,
-    comptime handler: var,
+    context: anytype,
+    comptime handler: anytype,
 ) !void {
     const loc = offsets.tokenRelativeLocation(handle.tree, 0, tok, encoding) catch return;
     try handler(context, types.Location{
@@ -34,8 +34,8 @@ pub fn labelReferences(
     decl: analysis.DeclWithHandle,
     encoding: offsets.Encoding,
     include_decl: bool,
-    context: var,
-    comptime handler: var,
+    context: anytype,
+    comptime handler: anytype,
 ) !void {
     std.debug.assert(decl.decl.* == .label_decl);
     const handle = decl.handle;
@@ -69,8 +69,8 @@ fn symbolReferencesInternal(
     node_handle: analysis.NodeWithHandle,
     decl: analysis.DeclWithHandle,
     encoding: offsets.Encoding,
-    context: var,
-    comptime handler: var,
+    context: anytype,
+    comptime handler: anytype,
 ) error{OutOfMemory}!void {
     const node = node_handle.node;
     const handle = node_handle.handle;
@@ -354,8 +354,8 @@ pub fn symbolReferences(
     decl_handle: analysis.DeclWithHandle,
     encoding: offsets.Encoding,
     include_decl: bool,
-    context: var,
-    comptime handler: var,
+    context: anytype,
+    comptime handler: anytype,
 ) !void {
     std.debug.assert(decl_handle.decl.* != .label_decl);
     const curr_handle = decl_handle.handle;

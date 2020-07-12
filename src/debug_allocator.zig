@@ -41,7 +41,7 @@ pub const AllocationInfo = struct {
         self: AllocationInfo,
         comptime fmt: []const u8,
         options: std.fmt.FormatOptions,
-        out_stream: var,
+        out_stream: anytype,
     ) !void {
         @setEvalBranchQuota(2000);
 
@@ -174,8 +174,7 @@ pub fn printRemainingStackTraces(self: DebugAllocator) void {
     std.debug.print(
         \\{} allocations - stack traces follow
         \\------------------------------------
-    ,
-    .{self.allocation_strack_addresses.count()});
+    , .{self.allocation_strack_addresses.count()});
     var it = self.allocation_strack_addresses.iterator();
     var idx: usize = 1;
     while (it.next()) |entry| : (idx += 1) {

@@ -102,7 +102,7 @@ pub fn getFunctionSnippet(allocator: *std.mem.Allocator, tree: *ast.Tree, func: 
 
         switch (param.param_type) {
             .var_args => try buffer.appendSlice("..."),
-            .var_type => try buffer.appendSlice("var"),
+            .any_type => try buffer.appendSlice("anytype"),
             .type_expr => |type_expr| {
                 var curr_tok = type_expr.firstToken();
                 var end_tok = type_expr.lastToken();
@@ -156,7 +156,7 @@ pub fn isTypeFunction(tree: *ast.Tree, func: *ast.Node.FnProto) bool {
 
 pub fn isGenericFunction(tree: *ast.Tree, func: *ast.Node.FnProto) bool {
     for (func.paramsConst()) |param| {
-        if (param.param_type == .var_type or param.comptime_token != null) {
+        if (param.param_type == .any_type or param.comptime_token != null) {
             return true;
         }
     }
@@ -1351,7 +1351,7 @@ pub fn documentPositionContext(arena: *std.heap.ArenaAllocator, document: types.
 
 fn addOutlineNodes(allocator: *std.mem.Allocator, tree: *ast.Tree, child: *ast.Node, context: *GetDocumentSymbolsContext) anyerror!void {
     switch (child.id) {
-        .StringLiteral, .IntegerLiteral, .BuiltinCall, .Call, .Identifier, .InfixOp, .PrefixOp, .SuffixOp, .ControlFlowExpression, .ArrayInitializerDot, .SwitchElse, .SwitchCase, .For, .EnumLiteral, .PointerIndexPayload, .StructInitializerDot, .PointerPayload, .While, .Switch, .Else, .BoolLiteral, .NullLiteral, .Defer, .StructInitializer, .FieldInitializer, .If, .MultilineStringLiteral, .UndefinedLiteral, .VarType, .Block, .ErrorSetDecl => return,
+        .StringLiteral, .IntegerLiteral, .BuiltinCall, .Call, .Identifier, .InfixOp, .PrefixOp, .SuffixOp, .ControlFlowExpression, .ArrayInitializerDot, .SwitchElse, .SwitchCase, .For, .EnumLiteral, .PointerIndexPayload, .StructInitializerDot, .PointerPayload, .While, .Switch, .Else, .BoolLiteral, .NullLiteral, .Defer, .StructInitializer, .FieldInitializer, .If, .MultilineStringLiteral, .UndefinedLiteral, .AnyType, .Block, .ErrorSetDecl => return,
 
         .ContainerDecl => {
             const decl = child.cast(ast.Node.ContainerDecl).?;
@@ -1600,8 +1600,8 @@ fn iterateSymbolsContainerInternal(
     arena: *std.heap.ArenaAllocator,
     container_handle: NodeWithHandle,
     orig_handle: *DocumentStore.Handle,
-    comptime callback: var,
-    context: var,
+    comptime callback: anytype,
+    context: anytype,
     instance_access: bool,
     use_trail: *std.ArrayList(*ast.Node.Use),
 ) error{OutOfMemory}!void {
@@ -1651,8 +1651,8 @@ pub fn iterateSymbolsContainer(
     arena: *std.heap.ArenaAllocator,
     container_handle: NodeWithHandle,
     orig_handle: *DocumentStore.Handle,
-    comptime callback: var,
-    context: var,
+    comptime callback: anytype,
+    context: anytype,
     instance_access: bool,
 ) error{OutOfMemory}!void {
     var use_trail = std.ArrayList(*ast.Node.Use).init(&arena.allocator);
@@ -1662,8 +1662,8 @@ pub fn iterateSymbolsContainer(
 pub fn iterateLabels(
     handle: *DocumentStore.Handle,
     source_index: usize,
-    comptime callback: var,
-    context: var,
+    comptime callback: anytype,
+    context: anytype,
 ) error{OutOfMemory}!void {
     for (handle.document_scope.scopes) |scope| {
         if (source_index >= scope.range.start and source_index < scope.range.end) {
@@ -1685,8 +1685,8 @@ fn iterateSymbolsGlobalInternal(
     arena: *std.heap.ArenaAllocator,
     handle: *DocumentStore.Handle,
     source_index: usize,
-    comptime callback: var,
-    context: var,
+    comptime callback: anytype,
+    context: anytype,
     use_trail: *std.ArrayList(*ast.Node.Use),
 ) error{OutOfMemory}!void {
     for (handle.document_scope.scopes) |scope| {
@@ -1720,8 +1720,8 @@ pub fn iterateSymbolsGlobal(
     arena: *std.heap.ArenaAllocator,
     handle: *DocumentStore.Handle,
     source_index: usize,
-    comptime callback: var,
-    context: var,
+    comptime callback: anytype,
+    context: anytype,
 ) error{OutOfMemory}!void {
     var use_trail = std.ArrayList(*ast.Node.Use).init(&arena.allocator);
     return try iterateSymbolsGlobalInternal(store, arena, handle, source_index, callback, context, &use_trail);

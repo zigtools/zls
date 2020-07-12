@@ -14,7 +14,7 @@ fn Default(comptime T: type, comptime default_value: T) type {
     };
 }
 
-fn Transform(comptime Original: type, comptime transform_fn: var) type {
+fn Transform(comptime Original: type, comptime transform_fn: anytype) type {
     return struct {
         pub const original_type = Original;
         pub const transform = transform_fn;
@@ -23,7 +23,7 @@ fn Transform(comptime Original: type, comptime transform_fn: var) type {
     };
 }
 
-inline fn fromDynamicTreeInternal(arena: *std.heap.ArenaAllocator, value: std.json.Value, out: var) error{ MalformedJson, OutOfMemory }!void {
+inline fn fromDynamicTreeInternal(arena: *std.heap.ArenaAllocator, value: std.json.Value, out: anytype) error{ MalformedJson, OutOfMemory }!void {
     const T = comptime std.meta.Child(@TypeOf(out));
 
     if (comptime std.meta.trait.is(.Struct)(T)) {

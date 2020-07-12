@@ -198,7 +198,7 @@ fn writeContainerField(
     store: *DocumentStore,
     container_field: *ast.Node.ContainerField,
     field_token_type: ?TokenType,
-    child_frame: var,
+    child_frame: anytype,
 ) !void {
     if (container_field.doc_comments) |docs| try writeDocComments(builder, builder.handle.tree, docs);
     try writeToken(builder, container_field.comptime_token, .keyword);
@@ -356,7 +356,7 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
                 try writeToken(builder, param_decl.comptime_token, .keyword);
                 try writeTokenMod(builder, param_decl.name_token, .parameter, .{ .definition = true });
                 switch (param_decl.param_type) {
-                    .var_type => |var_node| try writeToken(builder, var_node.firstToken(), .type),
+                    .any_type => |var_node| try writeToken(builder, var_node.firstToken(), .type),
                     .var_args => |var_args_tok| try writeToken(builder, var_args_tok, .operator),
                     .type_expr => |type_expr| try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, type_expr }),
                 }
@@ -708,7 +708,7 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
             try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, asm_expr.template });
             // TODO Inputs, outputs.
         },
-        .VarType => {
+        .AnyType => {
             try writeToken(builder, node.firstToken(), .type);
         },
         .TestDecl => {
