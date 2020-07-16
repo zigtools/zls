@@ -395,7 +395,7 @@ pub fn symbolReferences(
                 std.log.warn(.references, "Could not find param decl's function", .{});
                 return;
             };
-            if (fn_node.body_node) |body| {
+            if (fn_node.getTrailer("body_node")) |body| {
                 try symbolReferencesInternal(arena, store, .{ .node = body, .handle = curr_handle }, decl_handle, encoding, context, handler);
             }
         },

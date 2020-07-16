@@ -183,7 +183,7 @@ pub fn getDeclNameToken(tree: *ast.Tree, node: *ast.Node) ?ast.TokenIndex {
         .FnProto => {
             const func = node.castTag(.FnProto).?;
             if (func.getTrailer("name_token") == null) return null;
-            return func.name_token.?;
+            return func.getTrailer("name_token").?;
         },
         .ContainerField => {
             const field = node.castTag(.ContainerField).?;
@@ -971,7 +971,7 @@ pub fn collectImports(import_arr: *std.ArrayList([]const u8), tree: *ast.Tree) !
         const var_decl = decl.castTag(.VarDecl).?;
         if (!var_decl.trailer_flags.has("init_node")) continue;
 
-        switch (var_decl.init_node.?.tag) {
+        switch (var_decl.getTrailer("init_node").?.tag) {
             .BuiltinCall => {
                 const builtin_call = var_decl.init_node.?.castTag(.BuiltinCall).?;
                 try maybeCollectImport(tree, builtin_call, import_arr);
@@ -2146,7 +2146,7 @@ fn makeScopeInternal(
                 }
             }
 
-            if (func.body_node) |body| {
+            if (func.getTrailer("body_node")) |body| {
                 try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, body);
             }
 
@@ -2438,10 +2438,10 @@ fn makeScopeInternal(
         },
         .VarDecl => {
             const var_decl = node.castTag(.VarDecl).?;
-            if (var_decl.type_node) |type_node| {
+            if (var_decl.getTrailer("type_node")) |type_node| {
                 try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, type_node);
             }
-            if (var_decl.init_node) |init_node| {
+            if (var_decl.getTrailer("init_node")) |init_node| {
                 try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, init_node);
             }
         },
