@@ -75,7 +75,7 @@ fn symbolReferencesInternal(
     const node = node_handle.node;
     const handle = node_handle.handle;
 
-    switch (node.id) {
+    switch (node.tag) {
         .ContainerDecl, .Root, .Block => {
             var idx: usize = 0;
             while (node.iterate(idx)) |child| : (idx += 1) {

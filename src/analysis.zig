@@ -1019,7 +1019,7 @@ pub fn getFieldAccessType(
 
     while (true) {
         const tok = tokenizer.next();
-        switch (tok.tag) {
+        switch (tok.id) {
             .Eof => return FieldAccessReturn{
                 .original = current_type,
                 .unwrapped = try resolveDerefType(store, arena, current_type, &bound_type_params),
@@ -1806,7 +1806,7 @@ fn lookupSymbolGlobalInternal(
             if (scope.decls.getEntry(symbol)) |candidate| {
                 switch (candidate.value) {
                     .ast_node => |node| {
-                        if (node.id == .ContainerField) continue;
+                        if (node.tag == .ContainerField) continue;
                     },
                     .label_decl => continue,
                     else => {},

@@ -232,7 +232,7 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
     var child_frame = try arena.child_allocator.alignedAlloc(u8, std.Target.stack_align, FrameSize);
     defer arena.child_allocator.free(child_frame);
 
-    switch (node.id) {
+    switch (node.tag) {
         .Root, .Block => {
             const first_tok = if (node.cast(ast.Node.Block)) |block_node| block: {
                 try writeToken(builder, block_node.label, .label);
