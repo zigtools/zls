@@ -18,7 +18,7 @@ fn sendRequest(req: []const u8, process: *std.ChildProcess) !void {
     try process.stdin.?.writeAll(req);
 }
 
-fn readResponses(process: *std.ChildProcess, expected_responses: var) !void {
+fn readResponses(process: *std.ChildProcess, expected_responses: anytype) !void {
     var seen = std.mem.zeroes([expected_responses.len]bool);
     while (true) {
         const header = headerPkg.readRequestHeader(allocator, process.stdout.?.reader()) catch |err| {
@@ -76,7 +76,7 @@ fn waitNoError(process: *std.ChildProcess) !void {
     return error.ShutdownWithError;
 }
 
-fn consumeOutputAndWait(process: *std.ChildProcess, expected_responses: var) !void {
+fn consumeOutputAndWait(process: *std.ChildProcess, expected_responses: anytype) !void {
     process.stdin.?.close();
     process.stdin = null;
     try readResponses(process, expected_responses);

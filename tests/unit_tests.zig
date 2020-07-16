@@ -24,7 +24,7 @@ fn makeUnnamedDocument(text: []const u8) !types.TextDocument {
     return try makeDocument("test", text);
 }
 
-fn testContext(comptime line: []const u8, comptime tag: var, comptime range: ?[]const u8) !void {
+fn testContext(comptime line: []const u8, comptime tag: anytype, comptime range: ?[]const u8) !void {
     const cursor_idx = comptime std.mem.indexOf(u8, line, "<cursor>").?;
     const final_line = line[0..cursor_idx] ++ line[cursor_idx + "<cursor>".len ..];
 
