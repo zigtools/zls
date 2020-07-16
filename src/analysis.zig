@@ -7,9 +7,9 @@ const offsets = @import("offsets.zig");
 /// Get a declaration's doc comment node
 fn getDocCommentNode(tree: *ast.Tree, node: *ast.Node) ?*ast.Node.DocComment {
     if (node.castTag(.FnProto)) |func| {
-        return func.doc_comments;
+        return func.getTrailer("doc_comments");
     } else if (node.castTag(.VarDecl)) |var_decl| {
-        return var_decl.doc_comments;
+        return var_decl.getTrailer("doc_comments");
     } else if (node.castTag(.ContainerField)) |field| {
         return field.doc_comments;
     } else if (node.castTag(.ErrorTag)) |tag| {
@@ -182,7 +182,7 @@ pub fn getDeclNameToken(tree: *ast.Tree, node: *ast.Node) ?ast.TokenIndex {
         },
         .FnProto => {
             const func = node.castTag(.FnProto).?;
-            if (func.name_token == null) return null;
+            if (func.getTrailer("name_token") == null) return null;
             return func.name_token.?;
         },
         .ContainerField => {
@@ -274,11 +274,10 @@ pub fn resolveVarDeclAlias(store: *DocumentStore, arena: *std.heap.ArenaAllocato
     const handle = decl_handle.handle;
 
     if (decl.castTag(.VarDecl)) |var_decl| {
-        if (var_decl.init_node == null) return null;
+        if (!var_decl.trailer_flags.has("init_node")) return null;
         if (handle.tree.token_ids[var_decl.mut_token] != .Keyword_const) return null;
-        if (var_decl.init_node == null) return null;
 
-        const base_expr = var_decl.init_node.?;
+        const base_expr = var_decl.getTrailer("init_node").?;
         if (base_expr.castTag(.InfixOp)) |infix_op| {
             if (infix_op.op != .Period) return null;
             const name = handle.tree.tokenSlice(infix_op.rhs.firstToken());
@@ -970,7 +969,7 @@ pub fn collectImports(import_arr: *std.ArrayList([]const u8), tree: *ast.Tree) !
     for (tree.root_node.decls()) |decl| {
         if (decl.tag != .VarDecl) continue;
         const var_decl = decl.castTag(.VarDecl).?;
-        if (var_decl.init_node == null) continue;
+        if (!var_decl.trailer_flags.has("init_node")) continue;
 
         switch (var_decl.init_node.?.tag) {
             .BuiltinCall => {
@@ -1131,11 +1130,11 @@ pub fn isNodePublic(tree: *ast.Tree, node: *ast.Node) bool {
     switch (node.tag) {
         .VarDecl => {
             const var_decl = node.castTag(.VarDecl).?;
-            return var_decl.visib_token != null;
+            return var_decl.trailer_flags.has("visib_token");
         },
         .FnProto => {
             const func = node.castTag(.FnProto).?;
-            return func.visib_token != null;
+            return func.trailer_flags.has("visib_token");
         },
         else => return true,
     }
@@ -1157,7 +1156,7 @@ pub fn nodeToString(tree: *ast.Tree, node: *ast.Node) ?[]const u8 {
         },
         .FnProto => {
             const func = node.castTag(.FnProto).?;
-            if (func.name_token) |name_token| {
+            if (func.getTrailer("name_token")) |name_token| {
                 return tree.tokenSlice(name_token);
             }
         },
@@ -1351,7 +1350,61 @@ pub fn documentPositionContext(arena: *std.heap.ArenaAllocator, document: types.
 
 fn addOutlineNodes(allocator: *std.mem.Allocator, tree: *ast.Tree, child: *ast.Node, context: *GetDocumentSymbolsContext) anyerror!void {
     switch (child.tag) {
-        .StringLiteral, .IntegerLiteral, .BuiltinCall, .Call, .Identifier, .InfixOp, .PrefixOp, .SuffixOp, .ControlFlowExpression, .ArrayInitializerDot, .SwitchElse, .SwitchCase, .For, .EnumLiteral, .PointerIndexPayload, .StructInitializerDot, .PointerPayload, .While, .Switch, .Else, .BoolLiteral, .NullLiteral, .Defer, .StructInitializer, .FieldInitializer, .If, .MultilineStringLiteral, .UndefinedLiteral, .AnyType, .Block, .ErrorSetDecl => return,
+        .StringLiteral, .IntegerLiteral, .BuiltinCall, .Call, .Identifier, .Add,
+        .AddWrap,
+        .ArrayCat,
+        .ArrayMult,
+        .Assign,
+        .AssignBitAnd,
+        .AssignBitOr,
+        .AssignBitShiftLeft,
+        .AssignBitShiftRight,
+        .AssignBitXor,
+        .AssignDiv,
+        .AssignSub,
+        .AssignSubWrap,
+        .AssignMod,
+        .AssignAdd,
+        .AssignAddWrap,
+        .AssignMul,
+        .AssignMulWrap,
+        .BangEqual,
+        .BitAnd,
+        .BitOr,
+        .BitShiftLeft,
+        .BitShiftRight,
+        .BitXor,
+        .BoolAnd,
+        .BoolOr,
+        .Div,
+        .EqualEqual,
+        .ErrorUnion,
+        .GreaterOrEqual,
+        .GreaterThan,
+        .LessOrEqual,
+        .LessThan,
+        .MergeErrorSets,
+        .Mod,
+        .Mul,
+        .MulWrap,
+        .Period,
+        .Range,
+        .Sub,
+        .SubWrap,
+        .UnwrapOptional,
+        .AddressOf,
+        .Await,
+        .BitNot,
+        .BoolNot,
+        .OptionalType,
+        .Negation,
+        .NegationWrap,
+        .Resume,
+        .Try,
+        .ArrayType,
+        .ArrayTypeSentinel,
+        .PtrType,
+        .SliceType, .SuffixOp, .ControlFlowExpression, .ArrayInitializerDot, .SwitchElse, .SwitchCase, .For, .EnumLiteral, .PointerIndexPayload, .StructInitializerDot, .PointerPayload, .While, .Switch, .Else, .BoolLiteral, .NullLiteral, .Defer, .StructInitializer, .FieldInitializer, .If, .MultilineStringLiteral, .UndefinedLiteral, .AnyType, .Block, .ErrorSetDecl => return,
 
         .ContainerDecl => {
             const decl = child.castTag(.ContainerDecl).?;
