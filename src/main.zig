@@ -353,8 +353,8 @@ fn nodeToCompletion(
                                         break :param_check true;
                                 }
 
-                                if (type_node.cast(std.zig.ast.Node.PrefixOp)) |prefix_op| {
-                                    if (prefix_op.op == .PtrType) {
+                                if (type_node.cast(std.zig.ast.Node.SimplePrefixOp)) |prefix_op| {
+                                    if (type_node.tag == .PtrType) {
                                         if (try analysis.resolveTypeOfNode(&document_store, arena, .{
                                             .node = prefix_op.rhs,
                                             .handle = handle,
@@ -427,8 +427,9 @@ fn nodeToCompletion(
                 });
             }
 
-            if (prefix_op.rhs.cast(std.zig.ast.Node.PrefixOp)) |child_pop| {
-                switch (child_pop.op) {
+            const prefix_op = node.cast(std.zig.ast.Node.SimplePrefixOp).?;
+            if (prefix_op.rhs.cast(std.zig.ast.Node.SimplePrefixOp)) |child_pop| {
+                switch (prefix_op.rhs.tag) {
                     .ArrayType => {
                         try list.append(.{
                             .label = "len",

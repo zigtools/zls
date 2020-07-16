@@ -71,7 +71,7 @@ pub fn getFunctionSignature(tree: *ast.Tree, func: *ast.Node.FnProto) []const u8
 
 /// Gets a function snippet insert text
 pub fn getFunctionSnippet(allocator: *std.mem.Allocator, tree: *ast.Tree, func: *ast.Node.FnProto, skip_self_param: bool) ![]const u8 {
-    const name_tok = func.name_token orelse unreachable;
+    const name_tok = func.getTrailer("name_token") orelse unreachable;
 
     var buffer = std.ArrayList(u8).init(allocator);
     try buffer.ensureCapacity(128);
@@ -101,7 +101,6 @@ pub fn getFunctionSnippet(allocator: *std.mem.Allocator, tree: *ast.Tree, func: 
         }
 
         switch (param.param_type) {
-            .var_args => try buffer.appendSlice("..."),
             .any_type => try buffer.appendSlice("anytype"),
             .type_expr => |type_expr| {
                 var curr_tok = type_expr.firstToken();
@@ -234,8 +233,8 @@ fn resolveVarDeclAliasInternal(
         return try lookupSymbolGlobal(store, arena, handle, handle.tree.tokenSlice(ident.token), handle.tree.token_locs[ident.token].start);
     }
 
-    if (node_handle.node.castTag(.InfixOp)) |infix_op| {
-        if (infix_op.op != .Period) return null;
+    if (node_handle.node.cast(ast.Node.SimpleInfixOp)) |infix_op| {
+        if (node_handle.node.tag != .Period) return null;
 
         const container_node = if (infix_op.lhs.castTag(.BuiltinCall)) |builtin_call| block: {
             if (!std.mem.eql(u8, handle.tree.tokenSlice(builtin_call.builtin_token), "@import"))
@@ -278,8 +277,8 @@ pub fn resolveVarDeclAlias(store: *DocumentStore, arena: *std.heap.ArenaAllocato
         if (handle.tree.token_ids[var_decl.mut_token] != .Keyword_const) return null;
 
         const base_expr = var_decl.getTrailer("init_node").?;
-        if (base_expr.castTag(.InfixOp)) |infix_op| {
-            if (infix_op.op != .Period) return null;
+        if (base_expr.cast(ast.Node.SimpleInfixOp)) |infix_op| {
+            if (base_expr.tag != .Period) return null;
             const name = handle.tree.tokenSlice(infix_op.rhs.firstToken());
             if (!std.mem.eql(u8, handle.tree.tokenSlice(var_decl.name_token), name))
                 return null;
@@ -331,7 +330,7 @@ fn findReturnStatementInternal(
 
 fn findReturnStatement(tree: *ast.Tree, fn_decl: *ast.Node.FnProto) ?*ast.Node.ControlFlowExpression {
     var already_found = false;
-    return findReturnStatementInternal(tree, fn_decl, fn_decl.body_node.?, &already_found);
+    return findReturnStatementInternal(tree, fn_decl, fn_decl.getTrailer("body_node").?, &already_found);
 }
 
 /// Resolves the return type of a function
@@ -342,7 +341,7 @@ fn resolveReturnType(
     handle: *DocumentStore.Handle,
     bound_type_params: *BoundTypeParams,
 ) !?TypeWithHandle {
-    if (isTypeFunction(handle.tree, fn_decl) and fn_decl.body_node != null) {
+    if (isTypeFunction(handle.tree, fn_decl) and fn_decl.trailer_flags.has("body_node")) {
         // If this is a type function and it only contains a single return statement that returns
         // a container declaration, we will return that declaration.
         const ret = findReturnStatement(handle.tree, fn_decl) orelse return null;
@@ -388,8 +387,8 @@ fn resolveUnwrapOptionalType(
         else => return null,
     };
 
-    if (opt_node.castTag(.PrefixOp)) |prefix_op| {
-        if (prefix_op.op == .OptionalType) {
+    if (opt_node.cast(ast.Node.SimplePrefixOp)) |prefix_op| {
+        if (opt_node.tag == .OptionalType) {
             return ((try resolveTypeOfNodeInternal(store, arena, .{
                 .node = prefix_op.rhs,
                 .handle = opt.handle,
@@ -415,8 +414,8 @@ fn resolveUnwrapErrorType(
         .primitive, .slice => return null,
     };
 
-    if (rhs_node.castTag(.InfixOp)) |infix_op| {
-        if (infix_op.op == .ErrorUnion) {
+    if (rhs_node.cast(ast.Node.SimpleInfixOp)) |infix_op| {
+        if (rhs_node.tag == .ErrorUnion) {
             return ((try resolveTypeOfNodeInternal(store, arena, .{
                 .node = infix_op.rhs,
                 .handle = rhs.handle,
@@ -427,7 +426,7 @@ fn resolveUnwrapErrorType(
     return null;
 }
 
-/// Resolves the child type of a defer type
+/// Resolves the child type of a deref type
 fn resolveDerefType(
     store: *DocumentStore,
     arena: *std.heap.ArenaAllocator,
@@ -439,8 +438,8 @@ fn resolveDerefType(
         else => return null,
     };
 
-    if (deref_node.castTag(.PrefixOp)) |pop| {
-        if (pop.op == .PtrType) {
+    if (deref_node.cast(ast.Node.SimplePrefixOp)) |pop| {
+        if (deref_node.tag == .PtrType) {
             const op_token_id = deref.handle.tree.token_ids[pop.op_token];
             switch (op_token_id) {
                 .Asterisk => {
@@ -470,8 +469,8 @@ fn resolveBracketAccessType(
         else => return null,
     };
 
-    if (lhs_node.castTag(.PrefixOp)) |pop| {
-        switch (pop.op) {
+    if (lhs_node.cast(ast.Node.SimplePrefixOp)) |pop| {
+        switch (lhs_node.tag) {
             .SliceType => {
                 if (rhs == .Single)
                     return ((try resolveTypeOfNodeInternal(store, arena, .{
@@ -492,8 +491,8 @@ fn resolveBracketAccessType(
                 };
             },
             .PtrType => {
-                if (pop.rhs.castTag(std.zig.ast.Node.PrefixOp)) |child_pop| {
-                    switch (child_pop.op) {
+                if (pop.rhs.cast(ast.Node.SimplePrefixOp)) |child_pop| {
+                    switch (pop.rhs.tag) {
                         .ArrayType => {
                             if (rhs == .Single) {
                                 return ((try resolveTypeOfNodeInternal(store, arena, .{
@@ -569,17 +568,17 @@ pub fn resolveTypeOfNodeInternal(
     switch (node.tag) {
         .VarDecl => {
             const vari = node.castTag(.VarDecl).?;
-            if (vari.type_node) |type_node| block: {
+            if (vari.getTrailer("type_node")) |type_node| block: {
                 return ((try resolveTypeOfNodeInternal(
                     store,
                     arena,
-                    .{ .node = vari.type_node orelse break :block, .handle = handle },
+                    .{ .node = vari.getTrailer("type_node") orelse break :block, .handle = handle },
                     bound_type_params,
                 )) orelse break :block).instanceTypeVal();
             }
-            if (vari.init_node == null) return null;
+            if (vari.getTrailer("init_node") == null) return null;
 
-            return try resolveTypeOfNodeInternal(store, arena, .{ .node = vari.init_node.?, .handle = handle }, bound_type_params);
+            return try resolveTypeOfNodeInternal(store, arena, .{ .node = vari.getTrailer("init_node").?, .handle = handle }, bound_type_params);
         },
         .Identifier => {
             if (isTypeIdent(handle.tree, node.firstToken())) {
@@ -623,8 +622,8 @@ pub fn resolveTypeOfNodeInternal(
             };
             if (decl_node.castTag(.FnProto)) |fn_decl| {
                 var has_self_param: u8 = 0;
-                if (call.lhs.castTag(.InfixOp)) |lhs_infix_op| {
-                    if (lhs_infix_op.op == .Period) {
+                if (call.lhs.cast(ast.Node.SimpleInfixOp)) |lhs_infix_op| {
+                    if (call.lhs.tag == .Period) {
                         has_self_param = 1;
                     }
                 }
@@ -688,10 +687,11 @@ pub fn resolveTypeOfNodeInternal(
                 else => null,
             };
         },
-        .InfixOp => {
-            const infix_op = node.castTag(.InfixOp).?;
-            switch (infix_op.op) {
+        // .InfixOp => {
+        //     const infix_op = node.castTag(.InfixOp).?;
+        //     switch (infix_op.op) {
                 .Period => {
+                    const infix_op = node.cast(ast.Node.SimpleInfixOp).?;
                     const rhs_str = nodeToString(handle.tree, infix_op.rhs) orelse return null;
                     // If we are accessing a pointer type, remove one pointerness level :)
                     const left_type = try resolveFieldAccessLhsType(
@@ -720,6 +720,7 @@ pub fn resolveTypeOfNodeInternal(
                     } else return null;
                 },
                 .UnwrapOptional => {
+                    const infix_op = node.cast(ast.Node.SimpleInfixOp).?;
                     const left_type = (try resolveTypeOfNodeInternal(store, arena, .{
                         .node = infix_op.lhs,
                         .handle = handle,
@@ -727,6 +728,7 @@ pub fn resolveTypeOfNodeInternal(
                     return try resolveUnwrapOptionalType(store, arena, left_type, bound_type_params);
                 },
                 .Catch => {
+                    const infix_op = node.cast(ast.Node.SimpleInfixOp).?;
                     const left_type = (try resolveTypeOfNodeInternal(store, arena, .{
                         .node = infix_op.lhs,
                         .handle = handle,
@@ -734,27 +736,28 @@ pub fn resolveTypeOfNodeInternal(
                     return try resolveUnwrapErrorType(store, arena, left_type, bound_type_params);
                 },
                 .ErrorUnion => return TypeWithHandle.typeVal(node_handle),
-                else => return null,
-            }
-        },
-        .PrefixOp => {
-            const prefix_op = node.castTag(.PrefixOp).?;
-            switch (prefix_op.op) {
+                // else => return null,
+            // }
+        // },
+        // .PrefixOp => {
+            // const prefix_op = node.castTag(.PrefixOp).?;
+            // switch (prefix_op.op) {
                 .SliceType,
                 .ArrayType,
                 .OptionalType,
                 .PtrType,
                 => return TypeWithHandle.typeVal(node_handle),
                 .Try => {
+                    const prefix_op = node.cast(ast.Node.SimplePrefixOp).?;
                     const rhs_type = (try resolveTypeOfNodeInternal(store, arena, .{
                         .node = prefix_op.rhs,
                         .handle = handle,
                     }, bound_type_params)) orelse return null;
                     return try resolveUnwrapErrorType(store, arena, rhs_type, bound_type_params);
                 },
-                else => {},
-            }
-        },
+                // else => {},
+            // }
+        // },
         .BuiltinCall => {
             const builtin_call = node.castTag(.BuiltinCall).?;
             const call_name = handle.tree.tokenSlice(builtin_call.builtin_token);
@@ -819,7 +822,7 @@ pub fn resolveTypeOfNodeInternal(
         },
         .FnProto => {
             // This is a function type
-            if (node.castTag(.FnProto).?.name_token == null) {
+            if (node.castTag(.FnProto).?.trailer_flags.has("name_token")) {
                 return TypeWithHandle.typeVal(node_handle);
             }
             return TypeWithHandle{
@@ -973,16 +976,12 @@ pub fn collectImports(import_arr: *std.ArrayList([]const u8), tree: *ast.Tree) !
 
         switch (var_decl.getTrailer("init_node").?.tag) {
             .BuiltinCall => {
-                const builtin_call = var_decl.init_node.?.castTag(.BuiltinCall).?;
+                const builtin_call = var_decl.getTrailer("init_node").?.castTag(.BuiltinCall).?;
                 try maybeCollectImport(tree, builtin_call, import_arr);
             },
-            .InfixOp => {
-                const infix_op = var_decl.init_node.?.castTag(.InfixOp).?;
+            .Period => {
+                const infix_op = var_decl.getTrailer("init_node").?.cast(ast.Node.SimpleInfixOp).?;
 
-                switch (infix_op.op) {
-                    .Period => {},
-                    else => continue,
-                }
                 if (infix_op.lhs.tag != .BuiltinCall) continue;
                 try maybeCollectImport(tree, infix_op.lhs.castTag(.BuiltinCall).?, import_arr);
             },
@@ -1030,7 +1029,7 @@ pub fn getFieldAccessType(
             },
             .Period => {
                 const after_period = tokenizer.next();
-                switch (after_period.tag) {
+                switch (after_period.id) {
                     .Eof => return FieldAccessReturn{
                         .original = current_type,
                         .unwrapped = try resolveDerefType(store, arena, current_type, &bound_type_params),
