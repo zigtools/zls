@@ -214,7 +214,7 @@ fn symbolReferencesInternal(
             const info = switch (node.tag) {
                 .PtrType => node.castTag(.PtrType).?.ptr_info,
                 .SliceType => node.castTag(.SliceType).?.ptr_info,
-                else => return
+                else => return,
             };
             const prefix_op = node.cast(ast.Node.SimplePrefixOp).?;
 
@@ -317,50 +317,47 @@ fn symbolReferencesInternal(
             const test_decl = node.cast(ast.Node.TestDecl).?;
             try symbolReferencesInternal(arena, store, .{ .node = test_decl.body_node, .handle = handle }, decl, encoding, context, handler);
         },
-        else => {
-            // switch (ast.Node.Tag.Type(node.tag)) {
-            //     SimpleInfixOp => {
-            //         switch (node.tag) {
-            //             .Period => {
-            //                 try symbolReferencesInternal(arena, store, .{ .node = infix_op.lhs, .handle = handle }, decl, encoding, context, handler);
+        .Period => {
+            const infix_op = node.cast(ast.Node.SimpleInfixOp).?;
 
-            //                 const rhs_str = analysis.nodeToString(handle.tree, infix_op.rhs) orelse return;
-            //                 var bound_type_params = analysis.BoundTypeParams.init(&arena.allocator);
-            //                 const left_type = try analysis.resolveFieldAccessLhsType(
-            //                     store,
-            //                     arena,
-            //                     (try analysis.resolveTypeOfNodeInternal(store, arena, .{
-            //                         .node = infix_op.lhs,
-            //                         .handle = handle,
-            //                     }, &bound_type_params)) orelse return,
-            //                     &bound_type_params,
-            //                 );
+            try symbolReferencesInternal(arena, store, .{ .node = infix_op.lhs, .handle = handle }, decl, encoding, context, handler);
 
-            //                 const left_type_node = switch (left_type.type.data) {
-            //                     .other => |n| n,
-            //                     else => return,
-            //                 };
+            const rhs_str = analysis.nodeToString(handle.tree, infix_op.rhs) orelse return;
+            var bound_type_params = analysis.BoundTypeParams.init(&arena.allocator);
+            const left_type = try analysis.resolveFieldAccessLhsType(
+                store,
+                arena,
+                (try analysis.resolveTypeOfNodeInternal(store, arena, .{
+                    .node = infix_op.lhs,
+                    .handle = handle,
+                }, &bound_type_params)) orelse return,
+                &bound_type_params,
+            );
 
-            //                 if (try analysis.lookupSymbolContainer(
-            //                     store,
-            //                     arena,
-            //                     .{ .node = left_type_node, .handle = left_type.handle },
-            //                     rhs_str,
-            //                     !left_type.type.is_type_val,
-            //                 )) |child| {
-            //                     if (std.meta.eql(child, decl)) {
-            //                         try tokenReference(handle, infix_op.rhs.firstToken(), encoding, context, handler);
-            //                     }
-            //                 }
-            //             },
-            //             else => {
-            //                 try symbolReferencesInternal(arena, store, .{ .node = infix_op.lhs, .handle = handle }, decl, encoding, context, handler);
-            //                 try symbolReferencesInternal(arena, store, .{ .node = infix_op.rhs, .handle = handle }, decl, encoding, context, handler);
-            //             },
-            //         }
-            //     }
-            // }
+            const left_type_node = switch (left_type.type.data) {
+                .other => |n| n,
+                else => return,
+            };
+
+            if (try analysis.lookupSymbolContainer(
+                store,
+                arena,
+                .{ .node = left_type_node, .handle = left_type.handle },
+                rhs_str,
+                !left_type.type.is_type_val,
+            )) |child| {
+                if (std.meta.eql(child, decl)) {
+                    try tokenReference(handle, infix_op.rhs.firstToken(), encoding, context, handler);
+                }
+            }
         },
+        .Add, .AddWrap, .ArrayCat, .ArrayMult, .Assign, .AssignBitAnd, .AssignBitOr, .AssignBitShiftLeft, .AssignBitShiftRight, .AssignBitXor, .AssignDiv, .AssignSub, .AssignSubWrap, .AssignMod, .AssignAdd, .AssignAddWrap, .AssignMul, .AssignMulWrap, .BangEqual, .BitAnd, .BitOr, .BitShiftLeft, .BitShiftRight, .BitXor, .BoolOr, .Div, .EqualEqual, .ErrorUnion, .GreaterOrEqual, .GreaterThan, .LessOrEqual, .LessThan, .MergeErrorSets, .Mod, .Mul, .MulWrap, .Range, .Sub, .SubWrap, .UnwrapOptional => {
+            const infix_op = node.cast(ast.Node.SimpleInfixOp).?;
+
+            try symbolReferencesInternal(arena, store, .{ .node = infix_op.lhs, .handle = handle }, decl, encoding, context, handler);
+            try symbolReferencesInternal(arena, store, .{ .node = infix_op.rhs, .handle = handle }, decl, encoding, context, handler);
+        },
+        else => {},
     }
 }
 

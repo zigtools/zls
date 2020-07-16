@@ -687,77 +687,65 @@ pub fn resolveTypeOfNodeInternal(
                 else => null,
             };
         },
-        // .InfixOp => {
-        //     const infix_op = node.castTag(.InfixOp).?;
-        //     switch (infix_op.op) {
-                .Period => {
-                    const infix_op = node.cast(ast.Node.SimpleInfixOp).?;
-                    const rhs_str = nodeToString(handle.tree, infix_op.rhs) orelse return null;
-                    // If we are accessing a pointer type, remove one pointerness level :)
-                    const left_type = try resolveFieldAccessLhsType(
-                        store,
-                        arena,
-                        (try resolveTypeOfNodeInternal(store, arena, .{
-                            .node = infix_op.lhs,
-                            .handle = handle,
-                        }, bound_type_params)) orelse return null,
-                        bound_type_params,
-                    );
+        .Period => {
+            const infix_op = node.cast(ast.Node.SimpleInfixOp).?;
+            const rhs_str = nodeToString(handle.tree, infix_op.rhs) orelse return null;
+            // If we are accessing a pointer type, remove one pointerness level :)
+            const left_type = try resolveFieldAccessLhsType(
+                store,
+                arena,
+                (try resolveTypeOfNodeInternal(store, arena, .{
+                    .node = infix_op.lhs,
+                    .handle = handle,
+                }, bound_type_params)) orelse return null,
+                bound_type_params,
+            );
 
-                    const left_type_node = switch (left_type.type.data) {
-                        .other => |n| n,
-                        else => return null,
-                    };
+            const left_type_node = switch (left_type.type.data) {
+                .other => |n| n,
+                else => return null,
+            };
 
-                    if (try lookupSymbolContainer(
-                        store,
-                        arena,
-                        .{ .node = left_type_node, .handle = left_type.handle },
-                        rhs_str,
-                        !left_type.type.is_type_val,
-                    )) |child| {
-                        return try child.resolveType(store, arena, bound_type_params);
-                    } else return null;
-                },
-                .UnwrapOptional => {
-                    const infix_op = node.cast(ast.Node.SimpleInfixOp).?;
-                    const left_type = (try resolveTypeOfNodeInternal(store, arena, .{
-                        .node = infix_op.lhs,
-                        .handle = handle,
-                    }, bound_type_params)) orelse return null;
-                    return try resolveUnwrapOptionalType(store, arena, left_type, bound_type_params);
-                },
-                .Catch => {
-                    const infix_op = node.cast(ast.Node.SimpleInfixOp).?;
-                    const left_type = (try resolveTypeOfNodeInternal(store, arena, .{
-                        .node = infix_op.lhs,
-                        .handle = handle,
-                    }, bound_type_params)) orelse return null;
-                    return try resolveUnwrapErrorType(store, arena, left_type, bound_type_params);
-                },
-                .ErrorUnion => return TypeWithHandle.typeVal(node_handle),
-                // else => return null,
-            // }
-        // },
-        // .PrefixOp => {
-            // const prefix_op = node.castTag(.PrefixOp).?;
-            // switch (prefix_op.op) {
-                .SliceType,
-                .ArrayType,
-                .OptionalType,
-                .PtrType,
-                => return TypeWithHandle.typeVal(node_handle),
-                .Try => {
-                    const prefix_op = node.cast(ast.Node.SimplePrefixOp).?;
-                    const rhs_type = (try resolveTypeOfNodeInternal(store, arena, .{
-                        .node = prefix_op.rhs,
-                        .handle = handle,
-                    }, bound_type_params)) orelse return null;
-                    return try resolveUnwrapErrorType(store, arena, rhs_type, bound_type_params);
-                },
-                // else => {},
-            // }
-        // },
+            if (try lookupSymbolContainer(
+                store,
+                arena,
+                .{ .node = left_type_node, .handle = left_type.handle },
+                rhs_str,
+                !left_type.type.is_type_val,
+            )) |child| {
+                return try child.resolveType(store, arena, bound_type_params);
+            } else return null;
+        },
+        .UnwrapOptional => {
+            const infix_op = node.cast(ast.Node.SimpleInfixOp).?;
+            const left_type = (try resolveTypeOfNodeInternal(store, arena, .{
+                .node = infix_op.lhs,
+                .handle = handle,
+            }, bound_type_params)) orelse return null;
+            return try resolveUnwrapOptionalType(store, arena, left_type, bound_type_params);
+        },
+        .Catch => {
+            const infix_op = node.cast(ast.Node.SimpleInfixOp).?;
+            const left_type = (try resolveTypeOfNodeInternal(store, arena, .{
+                .node = infix_op.lhs,
+                .handle = handle,
+            }, bound_type_params)) orelse return null;
+            return try resolveUnwrapErrorType(store, arena, left_type, bound_type_params);
+        },
+        .ErrorUnion => return TypeWithHandle.typeVal(node_handle),
+        .SliceType,
+        .ArrayType,
+        .OptionalType,
+        .PtrType,
+        => return TypeWithHandle.typeVal(node_handle),
+        .Try => {
+            const prefix_op = node.cast(ast.Node.SimplePrefixOp).?;
+            const rhs_type = (try resolveTypeOfNodeInternal(store, arena, .{
+                .node = prefix_op.rhs,
+                .handle = handle,
+            }, bound_type_params)) orelse return null;
+            return try resolveUnwrapErrorType(store, arena, rhs_type, bound_type_params);
+        },
         .BuiltinCall => {
             const builtin_call = node.castTag(.BuiltinCall).?;
             const call_name = handle.tree.tokenSlice(builtin_call.builtin_token);
@@ -1349,61 +1337,7 @@ pub fn documentPositionContext(arena: *std.heap.ArenaAllocator, document: types.
 
 fn addOutlineNodes(allocator: *std.mem.Allocator, tree: *ast.Tree, child: *ast.Node, context: *GetDocumentSymbolsContext) anyerror!void {
     switch (child.tag) {
-        .StringLiteral, .IntegerLiteral, .BuiltinCall, .Call, .Identifier, .Add,
-        .AddWrap,
-        .ArrayCat,
-        .ArrayMult,
-        .Assign,
-        .AssignBitAnd,
-        .AssignBitOr,
-        .AssignBitShiftLeft,
-        .AssignBitShiftRight,
-        .AssignBitXor,
-        .AssignDiv,
-        .AssignSub,
-        .AssignSubWrap,
-        .AssignMod,
-        .AssignAdd,
-        .AssignAddWrap,
-        .AssignMul,
-        .AssignMulWrap,
-        .BangEqual,
-        .BitAnd,
-        .BitOr,
-        .BitShiftLeft,
-        .BitShiftRight,
-        .BitXor,
-        .BoolAnd,
-        .BoolOr,
-        .Div,
-        .EqualEqual,
-        .ErrorUnion,
-        .GreaterOrEqual,
-        .GreaterThan,
-        .LessOrEqual,
-        .LessThan,
-        .MergeErrorSets,
-        .Mod,
-        .Mul,
-        .MulWrap,
-        .Period,
-        .Range,
-        .Sub,
-        .SubWrap,
-        .UnwrapOptional,
-        .AddressOf,
-        .Await,
-        .BitNot,
-        .BoolNot,
-        .OptionalType,
-        .Negation,
-        .NegationWrap,
-        .Resume,
-        .Try,
-        .ArrayType,
-        .ArrayTypeSentinel,
-        .PtrType,
-        .SliceType, .SuffixOp, .ControlFlowExpression, .ArrayInitializerDot, .SwitchElse, .SwitchCase, .For, .EnumLiteral, .PointerIndexPayload, .StructInitializerDot, .PointerPayload, .While, .Switch, .Else, .BoolLiteral, .NullLiteral, .Defer, .StructInitializer, .FieldInitializer, .If, .MultilineStringLiteral, .UndefinedLiteral, .AnyType, .Block, .ErrorSetDecl => return,
+        .StringLiteral, .IntegerLiteral, .BuiltinCall, .Call, .Identifier, .Add, .AddWrap, .ArrayCat, .ArrayMult, .Assign, .AssignBitAnd, .AssignBitOr, .AssignBitShiftLeft, .AssignBitShiftRight, .AssignBitXor, .AssignDiv, .AssignSub, .AssignSubWrap, .AssignMod, .AssignAdd, .AssignAddWrap, .AssignMul, .AssignMulWrap, .BangEqual, .BitAnd, .BitOr, .BitShiftLeft, .BitShiftRight, .BitXor, .BoolAnd, .BoolOr, .Div, .EqualEqual, .ErrorUnion, .GreaterOrEqual, .GreaterThan, .LessOrEqual, .LessThan, .MergeErrorSets, .Mod, .Mul, .MulWrap, .Period, .Range, .Sub, .SubWrap, .UnwrapOptional, .AddressOf, .Await, .BitNot, .BoolNot, .OptionalType, .Negation, .NegationWrap, .Resume, .Try, .ArrayType, .ArrayTypeSentinel, .PtrType, .SliceType, .SuffixOp, .ControlFlowExpression, .ArrayInitializerDot, .SwitchElse, .SwitchCase, .For, .EnumLiteral, .PointerIndexPayload, .StructInitializerDot, .PointerPayload, .While, .Switch, .Else, .BoolLiteral, .NullLiteral, .Defer, .StructInitializer, .FieldInitializer, .If, .MultilineStringLiteral, .UndefinedLiteral, .AnyType, .Block, .ErrorSetDecl => return,
 
         .ContainerDecl => {
             const decl = child.castTag(.ContainerDecl).?;
