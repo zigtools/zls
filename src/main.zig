@@ -209,7 +209,7 @@ fn publishDiagnostics(arena: *std.heap.ArenaAllocator, handle: DocumentStore.Han
 
     if (tree.errors.len == 0) {
         for (tree.root_node.decls()) |decl| {
-            switch (decl.id) {
+            switch (decl.tag) {
                 .FnProto => blk: {
                     const func = decl.cast(std.zig.ast.Node.FnProto).?;
                     const is_extern = func.extern_export_inline_token != null;
@@ -320,7 +320,7 @@ fn nodeToCompletion(
     else
         null;
 
-    if (node.id == .ErrorSetDecl or node.id == .Root or node.id == .ContainerDecl) {
+    if (node.tag == .ErrorSetDecl or node.tag == .Root or node.tag == .ContainerDecl) {
         const context = DeclToCompletionContext{
             .completions = list,
             .config = &config,
@@ -332,7 +332,7 @@ fn nodeToCompletion(
 
     if (is_type_val) return;
 
-    switch (node.id) {
+    switch (node.tag) {
         .FnProto => {
             const func = node.cast(std.zig.ast.Node.FnProto).?;
             if (func.name_token) |name_token| {
@@ -557,7 +557,7 @@ fn hoverSymbol(id: types.RequestId, arena: *std.heap.ArenaAllocator, decl_handle
             else
                 "";
 
-            const signature_str = switch (node.id) {
+            const signature_str = switch (node.tag) {
                 .VarDecl => blk: {
                     const var_decl = node.cast(std.zig.ast.Node.VarDecl).?;
                     break :blk analysis.getVariableSignature(handle.tree, var_decl);
