@@ -725,7 +725,7 @@ pub fn resolveTypeOfNodeInternal(
             return try resolveUnwrapOptionalType(store, arena, left_type, bound_type_params);
         },
         .Catch => {
-            const infix_op = node.cast(ast.Node.SimpleInfixOp).?;
+            const infix_op = node.cast(ast.Node.Catch).?;
             const left_type = (try resolveTypeOfNodeInternal(store, arena, .{
                 .node = infix_op.lhs,
                 .handle = handle,

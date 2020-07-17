@@ -427,9 +427,9 @@ fn nodeToCompletion(
                 });
             }
 
-            const prefix_op = node.cast(std.zig.ast.Node.SimplePrefixOp).?;
-            if (prefix_op.rhs.cast(std.zig.ast.Node.SimplePrefixOp)) |child_pop| {
-                switch (prefix_op.rhs.tag) {
+            const ptr_type = node.castTag(.PtrType).?;
+            if (ptr_type.rhs.cast(std.zig.ast.Node.SimplePrefixOp)) |child_pop| {
+                switch (ptr_type.rhs.tag) {
                     .ArrayType => {
                         try list.append(.{
                             .label = "len",
