@@ -458,6 +458,18 @@ fn nodeToCompletion(
                 .kind = .Field,
             });
         },
+        .ContainerDecl => {
+            log(std.log.Level.debug, .cont, "Unhandled container decl", .{});
+            const container = node.castTag(.ContainerDecl).?;
+            for (container.fieldsAndDecls()) |snode|
+                if (snode.castTag(.ContainerField)) |field|
+                    try list.append(.{
+                        .label = handle.tree.tokenSlice(field.name_token),
+                        .kind = .Field,
+                        .documentation = doc,
+                        .detail = analysis.getContainerFieldSignature(handle.tree, field),
+                    });
+        },
         else => if (analysis.nodeToString(handle.tree, node)) |string| {
             try list.append(.{
                 .label = string,
