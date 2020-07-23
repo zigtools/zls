@@ -197,26 +197,21 @@ fn symbolReferencesInternal(
         },
         .ArrayType => {
             const info = node.castTag(.ArrayType).?;
-            const prefix_op = node.cast(ast.Node.SimplePrefixOp).?;
-
             try symbolReferencesInternal(arena, store, .{ .node = info.len_expr, .handle = handle }, decl, encoding, context, handler);
-            try symbolReferencesInternal(arena, store, .{ .node = prefix_op.rhs, .handle = handle }, decl, encoding, context, handler);
+            try symbolReferencesInternal(arena, store, .{ .node = info.rhs, .handle = handle }, decl, encoding, context, handler);
         },
         .ArrayTypeSentinel => {
             const info = node.castTag(.ArrayTypeSentinel).?;
-            const prefix_op = node.cast(ast.Node.SimplePrefixOp).?;
-
             try symbolReferencesInternal(arena, store, .{ .node = info.len_expr, .handle = handle }, decl, encoding, context, handler);
             try symbolReferencesInternal(arena, store, .{ .node = info.sentinel, .handle = handle }, decl, encoding, context, handler);
-            try symbolReferencesInternal(arena, store, .{ .node = prefix_op.rhs, .handle = handle }, decl, encoding, context, handler);
+            try symbolReferencesInternal(arena, store, .{ .node = info.rhs, .handle = handle }, decl, encoding, context, handler);
         },
         .PtrType, .SliceType => {
             const info = switch (node.tag) {
                 .PtrType => node.castTag(.PtrType).?.ptr_info,
                 .SliceType => node.castTag(.SliceType).?.ptr_info,
-                else => return,
+                else => unreachable,
             };
-            const prefix_op = node.cast(ast.Node.SimplePrefixOp).?;
 
             if (info.align_info) |align_info| {
                 try symbolReferencesInternal(arena, store, .{ .node = align_info.node, .handle = handle }, decl, encoding, context, handler);
@@ -228,9 +223,13 @@ fn symbolReferencesInternal(
             if (info.sentinel) |sentinel| {
                 try symbolReferencesInternal(arena, store, .{ .node = sentinel, .handle = handle }, decl, encoding, context, handler);
             }
-            try symbolReferencesInternal(arena, store, .{ .node = prefix_op.rhs, .handle = handle }, decl, encoding, context, handler);
+            switch (node.tag) {
+                .PtrType => try symbolReferencesInternal(arena, store, .{ .node = node.castTag(.PtrType).?.rhs, .handle = handle }, decl, encoding, context, handler),
+                .SliceType => try symbolReferencesInternal(arena, store, .{ .node = node.castTag(.SliceType).?.rhs, .handle = handle }, decl, encoding, context, handler),
+                else => unreachable,
+            }
         },
-        .AddressOf, .Await, .BitNot, .BoolAnd, .OptionalType, .Negation, .NegationWrap => {
+        .AddressOf, .Await, .BitNot, .BoolNot, .OptionalType, .Negation, .NegationWrap, .Resume, .Try => {
             const prefix_op = node.cast(ast.Node.SimplePrefixOp).?;
             try symbolReferencesInternal(arena, store, .{ .node = prefix_op.rhs, .handle = handle }, decl, encoding, context, handler);
         },
