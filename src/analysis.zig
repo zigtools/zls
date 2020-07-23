@@ -466,46 +466,35 @@ fn resolveBracketAccessType(
         else => return null,
     };
 
-    if (lhs_node.cast(ast.Node.SimplePrefixOp)) |pop| {
-        switch (lhs_node.tag) {
-            .SliceType => {
-                if (rhs == .Single)
-                    return ((try resolveTypeOfNodeInternal(store, arena, .{
-                        .node = pop.rhs,
-                        .handle = lhs.handle,
-                    }, bound_type_params)) orelse return null).instanceTypeVal();
-                return lhs;
-            },
-            .ArrayType => {
-                if (rhs == .Single)
-                    return ((try resolveTypeOfNodeInternal(store, arena, .{
-                        .node = pop.rhs,
-                        .handle = lhs.handle,
-                    }, bound_type_params)) orelse return null).instanceTypeVal();
-                return TypeWithHandle{
-                    .type = .{ .data = .{ .slice = pop.rhs }, .is_type_val = false },
+    if (lhs_node.castTag(.SliceType)) |slice_type| {
+        if (rhs == .Single)
+            return ((try resolveTypeOfNodeInternal(store, arena, .{
+                .node = slice_type.rhs,
+                .handle = lhs.handle,
+            }, bound_type_params)) orelse return null).instanceTypeVal();
+        return lhs;
+    } else if (lhs_node.castTag(.ArrayType)) |array_type| {
+        if (rhs == .Single)
+            return ((try resolveTypeOfNodeInternal(store, arena, .{
+                .node = array_type.rhs,
+                .handle = lhs.handle,
+            }, bound_type_params)) orelse return null).instanceTypeVal();
+        return TypeWithHandle{
+            .type = .{ .data = .{ .slice = array_type.rhs }, .is_type_val = false },
+            .handle = lhs.handle,
+        };
+    } else if (lhs_node.castTag(.PtrType)) |ptr_type| {
+        if (ptr_type.rhs.castTag(.ArrayType)) |child_arr| {
+            if (rhs == .Single) {
+                return ((try resolveTypeOfNodeInternal(store, arena, .{
+                    .node = child_arr.rhs,
                     .handle = lhs.handle,
-                };
-            },
-            .PtrType => {
-                if (pop.rhs.cast(ast.Node.SimplePrefixOp)) |child_pop| {
-                    switch (pop.rhs.tag) {
-                        .ArrayType => {
-                            if (rhs == .Single) {
-                                return ((try resolveTypeOfNodeInternal(store, arena, .{
-                                    .node = child_pop.rhs,
-                                    .handle = lhs.handle,
-                                }, bound_type_params)) orelse return null).instanceTypeVal();
-                            }
-                            return lhs;
-                        },
-                        else => {},
-                    }
-                }
-            },
-            else => {},
+                }, bound_type_params)) orelse return null).instanceTypeVal();
+            }
+            return lhs;
         }
     }
+
     return null;
 }
 
