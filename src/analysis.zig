@@ -2041,7 +2041,7 @@ fn makeScopeInternal(
 
                 if (node.castTag(.ContainerDecl)) |container| {
                     const kind = tree.token_ids[container.kind_token];
-                    if (kind == .Keyword_struct or (kind == .Keyword_union and container.init_arg_expr == .None)) {
+                    if (empty_field and (kind == .Keyword_struct or (kind == .Keyword_union and container.init_arg_expr == .None))) {
                         continue;
                     }
 
