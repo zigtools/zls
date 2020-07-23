@@ -428,16 +428,11 @@ fn nodeToCompletion(
             }
 
             const ptr_type = node.castTag(.PtrType).?;
-            if (ptr_type.rhs.cast(std.zig.ast.Node.SimplePrefixOp)) |child_pop| {
-                switch (ptr_type.rhs.tag) {
-                    .ArrayType => {
-                        try list.append(.{
-                            .label = "len",
-                            .kind = .Field,
-                        });
-                    },
-                    else => {},
-                }
+            if (ptr_type.rhs.castTag(.ArrayType) != null) {
+                try list.append(.{
+                    .label = "len",
+                    .kind = .Field,
+                });
             } else if (unwrapped) |actual_type| {
                 try typeToCompletion(arena, list, .{ .original = actual_type }, orig_handle, config);
             }

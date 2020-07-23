@@ -438,19 +438,16 @@ fn resolveDerefType(
         else => return null,
     };
 
-    if (deref_node.cast(ast.Node.SimplePrefixOp)) |pop| {
-        if (deref_node.tag == .PtrType) {
-            const op_token_id = deref.handle.tree.token_ids[pop.op_token];
-            switch (op_token_id) {
-                .Asterisk => {
-                    return ((try resolveTypeOfNodeInternal(store, arena, .{
-                        .node = pop.rhs,
-                        .handle = deref.handle,
-                    }, bound_type_params)) orelse return null).instanceTypeVal();
-                },
-                .LBracket, .AsteriskAsterisk => return null,
-                else => unreachable,
-            }
+    if (deref_node.castTag(.PtrType)) |ptr_type| {
+        switch (deref.handle.tree.token_ids[ptr_type.op_token]) {
+            .Asterisk => {
+                return ((try resolveTypeOfNodeInternal(store, arena, .{
+                    .node = ptr_type.rhs,
+                    .handle = deref.handle,
+                }, bound_type_params)) orelse return null).instanceTypeVal();
+            },
+            .LBracket, .AsteriskAsterisk => return null,
+            else => unreachable,
         }
     }
     return null;
@@ -824,7 +821,7 @@ pub fn resolveTypeOfNodeInternal(
         },
         .FnProto => {
             // This is a function type
-            if (node.castTag(.FnProto).?.trailer_flags.has("name_token")) {
+            if (!node.castTag(.FnProto).?.trailer_flags.has("name_token")) {
                 return TypeWithHandle.typeVal(node_handle);
             }
             return TypeWithHandle{
@@ -1010,7 +1007,7 @@ pub fn getFieldAccessType(
     tokenizer: *std.zig.Tokenizer,
 ) !?FieldAccessReturn {
     var current_type = TypeWithHandle.typeVal(.{
-        .node = &handle.tree.root_node.base,
+        .node = undefined,
         .handle = handle,
     });
 
