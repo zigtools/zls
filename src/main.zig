@@ -1148,8 +1148,7 @@ fn semanticTokensHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, r
             .id = id,
             .result = .{ .SemanticTokens = .{ .data = token_array } },
         });
-    } else
-        return try respondGeneric(id, no_semantic_tokens_response);
+    }
 }
 
 fn completionHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.Completion, config: Config) !void {
