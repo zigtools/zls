@@ -273,22 +273,25 @@ fn symbolReferencesInternal(
                 try symbolReferencesInternal(arena, store, .{ .node = param, .handle = handle }, decl, encoding, context, handler);
             }
         },
-        .SuffixOp => {
-            const suffix_op = node.cast(ast.Node.SuffixOp).?;
-            try symbolReferencesInternal(arena, store, .{ .node = suffix_op.lhs, .handle = handle }, decl, encoding, context, handler);
-            switch (suffix_op.op) {
-                .ArrayAccess => |acc| try symbolReferencesInternal(arena, store, .{ .node = acc, .handle = handle }, decl, encoding, context, handler),
-                .Slice => |sl| {
-                    try symbolReferencesInternal(arena, store, .{ .node = sl.start, .handle = handle }, decl, encoding, context, handler);
-                    if (sl.end) |end| {
-                        try symbolReferencesInternal(arena, store, .{ .node = end, .handle = handle }, decl, encoding, context, handler);
-                    }
-                    if (sl.sentinel) |sentinel| {
-                        try symbolReferencesInternal(arena, store, .{ .node = sentinel, .handle = handle }, decl, encoding, context, handler);
-                    }
-                },
-                else => {},
+        .Slice => {
+            const slice = node.castTag(.Slice).?;
+            try symbolReferencesInternal(arena, store, .{ .node = slice.lhs, .handle = handle }, decl, encoding, context, handler);
+            try symbolReferencesInternal(arena, store, .{ .node = slice.start, .handle = handle }, decl, encoding, context, handler);
+            if (slice.end) |end| {
+                try symbolReferencesInternal(arena, store, .{ .node = end, .handle = handle }, decl, encoding, context, handler);
             }
+            if (slice.sentinel) |sentinel| {
+                try symbolReferencesInternal(arena, store, .{ .node = sentinel, .handle = handle }, decl, encoding, context, handler);
+            }
+        },
+        .ArrayAccess => {
+            const arr_acc = node.castTag(.ArrayAccess).?;
+            try symbolReferencesInternal(arena, store, .{ .node = arr_acc.lhs, .handle = handle }, decl, encoding, context, handler);
+            try symbolReferencesInternal(arena, store, .{ .node = arr_acc.index_expr, .handle = handle }, decl, encoding, context, handler);
+        },
+        .Deref, .UnwrapOptional => {
+            const suffix = node.cast(ast.Node.SimpleSuffixOp).?;
+            try symbolReferencesInternal(arena, store, .{ .node = suffix.lhs, .handle = handle }, decl, encoding, context, handler);
         },
         .GroupedExpression => {
             const grouped = node.cast(ast.Node.GroupedExpression).?;
@@ -351,7 +354,7 @@ fn symbolReferencesInternal(
                 }
             }
         },
-        .Add, .AddWrap, .ArrayCat, .ArrayMult, .Assign, .AssignBitAnd, .AssignBitOr, .AssignBitShiftLeft, .AssignBitShiftRight, .AssignBitXor, .AssignDiv, .AssignSub, .AssignSubWrap, .AssignMod, .AssignAdd, .AssignAddWrap, .AssignMul, .AssignMulWrap, .BangEqual, .BitAnd, .BitOr, .BitShiftLeft, .BitShiftRight, .BitXor, .BoolOr, .Div, .EqualEqual, .ErrorUnion, .GreaterOrEqual, .GreaterThan, .LessOrEqual, .LessThan, .MergeErrorSets, .Mod, .Mul, .MulWrap, .Range, .Sub, .SubWrap, .UnwrapOptional => {
+        .Add, .AddWrap, .ArrayCat, .ArrayMult, .Assign, .AssignBitAnd, .AssignBitOr, .AssignBitShiftLeft, .AssignBitShiftRight, .AssignBitXor, .AssignDiv, .AssignSub, .AssignSubWrap, .AssignMod, .AssignAdd, .AssignAddWrap, .AssignMul, .AssignMulWrap, .BangEqual, .BitAnd, .BitOr, .BitShiftLeft, .BitShiftRight, .BitXor, .BoolOr, .Div, .EqualEqual, .ErrorUnion, .GreaterOrEqual, .GreaterThan, .LessOrEqual, .LessThan, .MergeErrorSets, .Mod, .Mul, .MulWrap, .Range, .Sub, .SubWrap, .OrElse => {
             const infix_op = node.cast(ast.Node.SimpleInfixOp).?;
 
             try symbolReferencesInternal(arena, store, .{ .node = infix_op.lhs, .handle = handle }, decl, encoding, context, handler);

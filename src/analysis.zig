@@ -673,19 +673,33 @@ pub fn resolveTypeOfNodeInternal(
         .ErrorSetDecl => {
             return TypeWithHandle.typeVal(node_handle);
         },
-        .SuffixOp => {
-            const suffix_op = node.castTag(.SuffixOp).?;
+        .Slice => {
+            const slice = node.castTag(.Slice).?;
             const left_type = (try resolveTypeOfNodeInternal(store, arena, .{
-                .node = suffix_op.lhs,
+                .node = slice.lhs,
                 .handle = handle,
             }, bound_type_params)) orelse return null;
-            return switch (suffix_op.op) {
+            return try resolveBracketAccessType(store, arena, left_type, .Range, bound_type_params); 
+        },
+        .Deref, .UnwrapOptional => {
+            const suffix = node.cast(ast.Node.SimpleSuffixOp).?;
+            const left_type = (try resolveTypeOfNodeInternal(store, arena, .{
+                .node = suffix.lhs,
+                .handle = handle,
+            }, bound_type_params)) orelse return null;
+            return switch (node.tag) {
                 .UnwrapOptional => try resolveUnwrapOptionalType(store, arena, left_type, bound_type_params),
                 .Deref => try resolveDerefType(store, arena, left_type, bound_type_params),
-                .ArrayAccess => try resolveBracketAccessType(store, arena, left_type, .Single, bound_type_params),
-                .Slice => try resolveBracketAccessType(store, arena, left_type, .Range, bound_type_params),
-                else => null,
-            };
+                else => unreachable,
+            }; 
+        },
+        .ArrayAccess => {
+            const arr_acc = node.castTag(.ArrayAccess).?;
+            const left_type = (try resolveTypeOfNodeInternal(store, arena, .{
+                .node = arr_acc.lhs,
+                .handle = handle,
+            }, bound_type_params)) orelse return null;
+            return try resolveBracketAccessType(store, arena, left_type, .Single, bound_type_params);
         },
         .Period => {
             const infix_op = node.cast(ast.Node.SimpleInfixOp).?;
@@ -716,7 +730,7 @@ pub fn resolveTypeOfNodeInternal(
                 return try child.resolveType(store, arena, bound_type_params);
             } else return null;
         },
-        .UnwrapOptional => {
+        .OrElse => {
             const infix_op = node.cast(ast.Node.SimpleInfixOp).?;
             const left_type = (try resolveTypeOfNodeInternal(store, arena, .{
                 .node = infix_op.lhs,
@@ -1337,7 +1351,7 @@ pub fn documentPositionContext(arena: *std.heap.ArenaAllocator, document: types.
 
 fn addOutlineNodes(allocator: *std.mem.Allocator, tree: *ast.Tree, child: *ast.Node, context: *GetDocumentSymbolsContext) anyerror!void {
     switch (child.tag) {
-        .StringLiteral, .IntegerLiteral, .BuiltinCall, .Call, .Identifier, .Add, .AddWrap, .ArrayCat, .ArrayMult, .Assign, .AssignBitAnd, .AssignBitOr, .AssignBitShiftLeft, .AssignBitShiftRight, .AssignBitXor, .AssignDiv, .AssignSub, .AssignSubWrap, .AssignMod, .AssignAdd, .AssignAddWrap, .AssignMul, .AssignMulWrap, .BangEqual, .BitAnd, .BitOr, .BitShiftLeft, .BitShiftRight, .BitXor, .BoolAnd, .BoolOr, .Div, .EqualEqual, .ErrorUnion, .GreaterOrEqual, .GreaterThan, .LessOrEqual, .LessThan, .MergeErrorSets, .Mod, .Mul, .MulWrap, .Period, .Range, .Sub, .SubWrap, .UnwrapOptional, .AddressOf, .Await, .BitNot, .BoolNot, .OptionalType, .Negation, .NegationWrap, .Resume, .Try, .ArrayType, .ArrayTypeSentinel, .PtrType, .SliceType, .SuffixOp, .ControlFlowExpression, .ArrayInitializerDot, .SwitchElse, .SwitchCase, .For, .EnumLiteral, .PointerIndexPayload, .StructInitializerDot, .PointerPayload, .While, .Switch, .Else, .BoolLiteral, .NullLiteral, .Defer, .StructInitializer, .FieldInitializer, .If, .MultilineStringLiteral, .UndefinedLiteral, .AnyType, .Block, .ErrorSetDecl => return,
+        .StringLiteral, .IntegerLiteral, .BuiltinCall, .Call, .Identifier, .Add, .AddWrap, .ArrayCat, .ArrayMult, .Assign, .AssignBitAnd, .AssignBitOr, .AssignBitShiftLeft, .AssignBitShiftRight, .AssignBitXor, .AssignDiv, .AssignSub, .AssignSubWrap, .AssignMod, .AssignAdd, .AssignAddWrap, .AssignMul, .AssignMulWrap, .BangEqual, .BitAnd, .BitOr, .BitShiftLeft, .BitShiftRight, .BitXor, .BoolAnd, .BoolOr, .Div, .EqualEqual, .ErrorUnion, .GreaterOrEqual, .GreaterThan, .LessOrEqual, .LessThan, .MergeErrorSets, .Mod, .Mul, .MulWrap, .Period, .Range, .Sub, .SubWrap, .OrElse, .AddressOf, .Await, .BitNot, .BoolNot, .OptionalType, .Negation, .NegationWrap, .Resume, .Try, .ArrayType, .ArrayTypeSentinel, .PtrType, .SliceType, .Slice, .Deref, .UnwrapOptional, .ArrayAccess, .ControlFlowExpression, .ArrayInitializerDot, .SwitchElse, .SwitchCase, .For, .EnumLiteral, .PointerIndexPayload, .StructInitializerDot, .PointerPayload, .While, .Switch, .Else, .BoolLiteral, .NullLiteral, .Defer, .StructInitializer, .FieldInitializer, .If, .MultilineStringLiteral, .UndefinedLiteral, .AnyType, .Block, .ErrorSetDecl => return,
 
         .ContainerDecl => {
             const decl = child.castTag(.ContainerDecl).?;

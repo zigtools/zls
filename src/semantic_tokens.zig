@@ -541,21 +541,23 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
             }
             for (call.paramsConst()) |param| try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, param });
         },
-        .SuffixOp => {
-            const suffix_op = node.cast(ast.Node.SuffixOp).?;
-            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, suffix_op.lhs });
-            switch (suffix_op.op) {
-                .ArrayAccess => |n| {
-                    try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, n });
-                },
-                .Slice => |s| {
-                    try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, s.start });
-                    try writeToken(builder, s.start.lastToken() + 1, .operator);
-                    try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, s.end });
-                    try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, s.sentinel });
-                },
-                else => try writeToken(builder, suffix_op.rtoken, .operator),
-            }
+        .Slice => {
+            const slice = node.castTag(.Slice).?;
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, slice.lhs });
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, slice.start });
+            try writeToken(builder, slice.start.lastToken() + 1, .operator);
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, slice.end });
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, slice.sentinel });
+        },
+        .ArrayAccess => {
+            const arr_acc = node.castTag(.ArrayAccess).?;
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, arr_acc.lhs });
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, arr_acc.index_expr });
+        },
+        .Deref, .UnwrapOptional => {
+            const suffix = node.cast(ast.Node.SimpleSuffixOp).?;
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, suffix.lhs });
+            try writeToken(builder, suffix.rtoken, .operator);
         },
         .GroupedExpression => {
             const grouped_expr = node.cast(ast.Node.GroupedExpression).?;
@@ -620,12 +622,12 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
             try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, test_decl.name });
             try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, test_decl.body_node });
         },
-        .Add, .AddWrap, .ArrayCat, .ArrayMult, .Assign, .AssignBitAnd, .AssignBitOr, .AssignBitShiftLeft, .AssignBitShiftRight, .AssignBitXor, .AssignDiv, .AssignSub, .AssignSubWrap, .AssignMod, .AssignAdd, .AssignAddWrap, .AssignMul, .AssignMulWrap, .BangEqual, .BitAnd, .BitOr, .BitShiftLeft, .BitShiftRight, .BitXor, .BoolAnd, .BoolOr, .Div, .EqualEqual, .ErrorUnion, .GreaterOrEqual, .GreaterThan, .LessOrEqual, .LessThan, .MergeErrorSets, .Mod, .Mul, .MulWrap, .Period, .Range, .Sub, .SubWrap, .UnwrapOptional => {
+        .Add, .AddWrap, .ArrayCat, .ArrayMult, .Assign, .AssignBitAnd, .AssignBitOr, .AssignBitShiftLeft, .AssignBitShiftRight, .AssignBitXor, .AssignDiv, .AssignSub, .AssignSubWrap, .AssignMod, .AssignAdd, .AssignAddWrap, .AssignMul, .AssignMulWrap, .BangEqual, .BitAnd, .BitOr, .BitShiftLeft, .BitShiftRight, .BitXor, .BoolAnd, .BoolOr, .Div, .EqualEqual, .ErrorUnion, .GreaterOrEqual, .GreaterThan, .LessOrEqual, .LessThan, .MergeErrorSets, .Mod, .Mul, .MulWrap, .Period, .Range, .Sub, .SubWrap, .OrElse => {
             const infix_op = node.cast(ast.Node.SimpleInfixOp).?;
             try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, infix_op.lhs });
             if (node.tag != .Period and node.tag != .Catch) {
                 const token_type: TokenType = switch (node.tag) {
-                    .BoolAnd, .BoolOr, .UnwrapOptional => .keyword,
+                    .BoolAnd, .BoolOr, .OrElse => .keyword,
                     else => .operator,
                 };
 
