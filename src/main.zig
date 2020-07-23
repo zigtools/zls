@@ -353,15 +353,13 @@ fn nodeToCompletion(
                                         break :param_check true;
                                 }
 
-                                if (type_node.cast(std.zig.ast.Node.SimplePrefixOp)) |prefix_op| {
-                                    if (type_node.tag == .PtrType) {
-                                        if (try analysis.resolveTypeOfNode(&document_store, arena, .{
-                                            .node = prefix_op.rhs,
-                                            .handle = handle,
-                                        })) |resolved_prefix_op| {
-                                            if (std.meta.eql(in_container, resolved_prefix_op))
-                                                break :param_check true;
-                                        }
+                                if (type_node.castTag(.PtrType)) |ptr_type| {
+                                    if (try analysis.resolveTypeOfNode(&document_store, arena, .{
+                                        .node = ptr_type.rhs,
+                                        .handle = handle,
+                                    })) |resolved_prefix_op| {
+                                        if (std.meta.eql(in_container, resolved_prefix_op))
+                                            break :param_check true;
                                     }
                                 }
 
