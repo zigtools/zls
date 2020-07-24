@@ -34,7 +34,7 @@ pub fn main() !void {
     }
 }
 
-fn processStep(stdout_stream: var, step: *std.build.Step) anyerror!void {
+fn processStep(stdout_stream: anytype, step: *std.build.Step) anyerror!void {
     if (step.cast(InstallArtifactStep)) |install_exe| {
         for (install_exe.artifact.packages.items) |pkg| {
             try processPackage(stdout_stream, pkg);
@@ -50,7 +50,7 @@ fn processStep(stdout_stream: var, step: *std.build.Step) anyerror!void {
     }
 }
 
-fn processPackage(out_stream: var, pkg: Pkg) anyerror!void {
+fn processPackage(out_stream: anytype, pkg: Pkg) anyerror!void {
     try out_stream.print("{}\x00{}\n", .{ pkg.name, pkg.path });
     if (pkg.dependencies) |dependencies| {
         for (dependencies) |dep| {
