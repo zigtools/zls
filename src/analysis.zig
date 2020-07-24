@@ -299,28 +299,22 @@ fn findReturnStatementInternal(
     var result: ?*ast.Node.ControlFlowExpression = null;
     var child_idx: usize = 0;
     while (base_node.iterate(child_idx)) |child_node| : (child_idx += 1) {
-        switch (child_node.tag) {
-            .ControlFlowExpression => blk: {
-                const cfe = child_node.castTag(.ControlFlowExpression).?;
-                if (cfe.kind != .Return) break :blk;
-
-                // If we are calling ourselves recursively, ignore this return.
-                if (cfe.rhs) |rhs| {
-                    if (rhs.castTag(.Call)) |call_node| {
-                        if (call_node.lhs.tag == .Identifier) {
-                            if (std.mem.eql(u8, getDeclName(tree, call_node.lhs).?, getDeclName(tree, &fn_decl.base).?)) {
-                                continue;
-                            }
+        if (child_node.castTag(.Return)) |cfe| {
+            // If we are calling ourselves recursively, ignore this return.
+            if (cfe.getRHS()) |rhs| {
+                if (rhs.castTag(.Call)) |call_node| {
+                    if (call_node.lhs.tag == .Identifier) {
+                        if (std.mem.eql(u8, getDeclName(tree, call_node.lhs).?, getDeclName(tree, &fn_decl.base).?)) {
+                            continue;
                         }
                     }
                 }
+            }
 
-                if (already_found.*) return null;
-                already_found.* = true;
-                result = cfe;
-                continue;
-            },
-            else => {},
+            if (already_found.*) return null;
+            already_found.* = true;
+            result = cfe;
+            continue;
         }
 
         result = findReturnStatementInternal(tree, fn_decl, child_node, already_found);
@@ -345,7 +339,7 @@ fn resolveReturnType(
         // If this is a type function and it only contains a single return statement that returns
         // a container declaration, we will return that declaration.
         const ret = findReturnStatement(handle.tree, fn_decl) orelse return null;
-        if (ret.rhs) |rhs| {
+        if (ret.getRHS()) |rhs| {
             return try resolveTypeOfNodeInternal(store, arena, .{
                 .node = rhs,
                 .handle = handle,
@@ -665,7 +659,7 @@ pub fn resolveTypeOfNodeInternal(
                 .node = slice.lhs,
                 .handle = handle,
             }, bound_type_params)) orelse return null;
-            return try resolveBracketAccessType(store, arena, left_type, .Range, bound_type_params); 
+            return try resolveBracketAccessType(store, arena, left_type, .Range, bound_type_params);
         },
         .Deref, .UnwrapOptional => {
             const suffix = node.cast(ast.Node.SimpleSuffixOp).?;
@@ -677,7 +671,7 @@ pub fn resolveTypeOfNodeInternal(
                 .UnwrapOptional => try resolveUnwrapOptionalType(store, arena, left_type, bound_type_params),
                 .Deref => try resolveDerefType(store, arena, left_type, bound_type_params),
                 else => unreachable,
-            }; 
+            };
         },
         .ArrayAccess => {
             const arr_acc = node.castTag(.ArrayAccess).?;
@@ -1337,7 +1331,96 @@ pub fn documentPositionContext(arena: *std.heap.ArenaAllocator, document: types.
 
 fn addOutlineNodes(allocator: *std.mem.Allocator, tree: *ast.Tree, child: *ast.Node, context: *GetDocumentSymbolsContext) anyerror!void {
     switch (child.tag) {
-        .StringLiteral, .IntegerLiteral, .BuiltinCall, .Call, .Identifier, .Add, .AddWrap, .ArrayCat, .ArrayMult, .Assign, .AssignBitAnd, .AssignBitOr, .AssignBitShiftLeft, .AssignBitShiftRight, .AssignBitXor, .AssignDiv, .AssignSub, .AssignSubWrap, .AssignMod, .AssignAdd, .AssignAddWrap, .AssignMul, .AssignMulWrap, .BangEqual, .BitAnd, .BitOr, .BitShiftLeft, .BitShiftRight, .BitXor, .BoolAnd, .BoolOr, .Div, .EqualEqual, .ErrorUnion, .GreaterOrEqual, .GreaterThan, .LessOrEqual, .LessThan, .MergeErrorSets, .Mod, .Mul, .MulWrap, .Period, .Range, .Sub, .SubWrap, .OrElse, .AddressOf, .Await, .BitNot, .BoolNot, .OptionalType, .Negation, .NegationWrap, .Resume, .Try, .ArrayType, .ArrayTypeSentinel, .PtrType, .SliceType, .Slice, .Deref, .UnwrapOptional, .ArrayAccess, .ControlFlowExpression, .ArrayInitializerDot, .SwitchElse, .SwitchCase, .For, .EnumLiteral, .PointerIndexPayload, .StructInitializerDot, .PointerPayload, .While, .Switch, .Else, .BoolLiteral, .NullLiteral, .Defer, .StructInitializer, .FieldInitializer, .If, .MultilineStringLiteral, .UndefinedLiteral, .AnyType, .Block, .ErrorSetDecl => return,
+        .StringLiteral,
+        .IntegerLiteral,
+        .BuiltinCall,
+        .Call,
+        .Identifier,
+        .Add,
+        .AddWrap,
+        .ArrayCat,
+        .ArrayMult,
+        .Assign,
+        .AssignBitAnd,
+        .AssignBitOr,
+        .AssignBitShiftLeft,
+        .AssignBitShiftRight,
+        .AssignBitXor,
+        .AssignDiv,
+        .AssignSub,
+        .AssignSubWrap,
+        .AssignMod,
+        .AssignAdd,
+        .AssignAddWrap,
+        .AssignMul,
+        .AssignMulWrap,
+        .BangEqual,
+        .BitAnd,
+        .BitOr,
+        .BitShiftLeft,
+        .BitShiftRight,
+        .BitXor,
+        .BoolAnd,
+        .BoolOr,
+        .Div,
+        .EqualEqual,
+        .ErrorUnion,
+        .GreaterOrEqual,
+        .GreaterThan,
+        .LessOrEqual,
+        .LessThan,
+        .MergeErrorSets,
+        .Mod,
+        .Mul,
+        .MulWrap,
+        .Period,
+        .Range,
+        .Sub,
+        .SubWrap,
+        .OrElse,
+        .AddressOf,
+        .Await,
+        .BitNot,
+        .BoolNot,
+        .OptionalType,
+        .Negation,
+        .NegationWrap,
+        .Resume,
+        .Try,
+        .ArrayType,
+        .ArrayTypeSentinel,
+        .PtrType,
+        .SliceType,
+        .Slice,
+        .Deref,
+        .UnwrapOptional,
+        .ArrayAccess,
+        .Return,
+        .Break,
+        .Continue,
+        .ArrayInitializerDot,
+        .SwitchElse,
+        .SwitchCase,
+        .For,
+        .EnumLiteral,
+        .PointerIndexPayload,
+        .StructInitializerDot,
+        .PointerPayload,
+        .While,
+        .Switch,
+        .Else,
+        .BoolLiteral,
+        .NullLiteral,
+        .Defer,
+        .StructInitializer,
+        .FieldInitializer,
+        .If,
+        .MultilineStringLiteral,
+        .UndefinedLiteral,
+        .AnyType,
+        .Block,
+        .ErrorSetDecl,
+        => return,
 
         .ContainerDecl => {
             const decl = child.castTag(.ContainerDecl).?;

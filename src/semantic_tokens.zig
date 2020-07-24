@@ -563,15 +563,15 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
             const grouped_expr = node.cast(ast.Node.GroupedExpression).?;
             try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, grouped_expr.expr });
         },
-        .ControlFlowExpression => {
+        .Return, .Break, .Continue => {
             const cfe = node.cast(ast.Node.ControlFlowExpression).?;
             try writeToken(builder, cfe.ltoken, .keyword);
-            switch (cfe.kind) {
-                .Break => |label| if (label) |n| try writeToken(builder, n.firstToken(), .label),
-                .Continue => |label| if (label) |n| try writeToken(builder, n.firstToken(), .label),
+            switch (node.tag) {
+                .Break => if (cfe.getLabel()) |n| try writeToken(builder, n, .label),
+                .Continue => if (cfe.getLabel()) |n| try writeToken(builder, n, .label),
                 else => {},
             }
-            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, cfe.rhs });
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, cfe.getRHS() });
         },
         .Suspend => {
             const suspend_node = node.cast(ast.Node.Suspend).?;

@@ -296,9 +296,9 @@ fn symbolReferencesInternal(
             const grouped = node.cast(ast.Node.GroupedExpression).?;
             try symbolReferencesInternal(arena, store, .{ .node = grouped.expr, .handle = handle }, decl, encoding, context, handler);
         },
-        .ControlFlowExpression => {
+        .Return, .Break, .Continue => {
             const cfe = node.cast(ast.Node.ControlFlowExpression).?;
-            if (cfe.rhs) |rhs| {
+            if (cfe.getRHS()) |rhs| {
                 try symbolReferencesInternal(arena, store, .{ .node = rhs, .handle = handle }, decl, encoding, context, handler);
             }
         },
