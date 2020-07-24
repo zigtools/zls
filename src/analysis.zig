@@ -1445,11 +1445,7 @@ const GetDocumentSymbolsContext = struct {
 };
 
 fn getDocumentSymbolsInternal(allocator: *std.mem.Allocator, tree: *ast.Tree, node: *ast.Node, context: *GetDocumentSymbolsContext) anyerror!void {
-    const name = if (getDeclName(tree, node)) |name|
-        name
-    else
-        return;
-
+    const name = getDeclName(tree, node) orelse return;
     if (name.len == 0)
         return;
 
