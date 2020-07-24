@@ -405,7 +405,7 @@ fn resolveUnwrapErrorType(
             .type = .{ .data = .{ .other = n }, .is_type_val = rhs.type.is_type_val },
             .handle = rhs.handle,
         },
-        .primitive, .slice => return null,
+        .primitive, .slice, .pointer => return null,
     };
 
     if (rhs_node.cast(ast.Node.SimpleInfixOp)) |infix_op| {
@@ -740,6 +740,23 @@ pub fn resolveTypeOfNodeInternal(
             }, bound_type_params)) orelse return null;
             return try resolveUnwrapErrorType(store, arena, rhs_type, bound_type_params);
         },
+        .AddressOf => {
+            const prefix_op = node.cast(ast.Node.SimplePrefixOp).?;
+            const rhs_type = (try resolveTypeOfNodeInternal(store, arena, .{
+                .node = prefix_op.rhs,
+                .handle = handle,
+            }, bound_type_params)) orelse return null;
+
+            const rhs_node = switch (rhs_type.type.data) {
+                .other => |n| n,
+                else => return null,
+            };
+
+            return TypeWithHandle{
+                .type = .{ .data = .{ .pointer = rhs_node }, .is_type_val = false },
+                .handle = rhs_type.handle,
+            };
+        },
         .BuiltinCall => {
             const builtin_call = node.castTag(.BuiltinCall).?;
             const call_name = handle.tree.tokenSlice(builtin_call.builtin_token);
@@ -825,6 +842,7 @@ pub fn resolveTypeOfNodeInternal(
 // TODO Make this better, nested levels of type vals
 pub const Type = struct {
     data: union(enum) {
+        pointer: *ast.Node,
         slice: *ast.Node,
         error_union: *ast.Node,
         other: *ast.Node,

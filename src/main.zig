@@ -281,6 +281,23 @@ fn typeToCompletion(
             }
         },
         .error_union => {},
+        .pointer => |n| {
+            if (config.operator_completions) {
+                try list.append(.{
+                    .label = "*",
+                    .kind = .Operator,
+                });
+            }
+            try nodeToCompletion(
+                arena,
+                list,
+                .{ .node = n, .handle = type_handle.handle },
+                null,
+                orig_handle,
+                type_handle.type.is_type_val,
+                config,
+            );
+        },
         .other => |n| try nodeToCompletion(
             arena,
             list,
@@ -416,7 +433,22 @@ fn nodeToCompletion(
                 .detail = analysis.getContainerFieldSignature(handle.tree, field),
             });
         },
-        .ArrayType, .SliceType => {},
+        .SliceType => {
+            try list.append(.{
+                .label = "len",
+                .kind = .Field,
+            });
+            try list.append(.{
+                .label = "ptr",
+                .kind = .Field,
+            });
+        },
+        .ArrayType => {
+            try list.append(.{
+                .label = "len",
+                .kind = .Field,
+            });
+        },
         .PtrType => {
             if (config.operator_completions) {
                 try list.append(.{
