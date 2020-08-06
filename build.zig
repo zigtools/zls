@@ -135,13 +135,11 @@ pub fn build(b: *std.build.Builder) !void {
     const mode = b.standardReleaseOptions();
 
     const exe = b.addExecutable("zls", "src/main.zig");
-
-    const data_version = try std.mem.concat(b.allocator, u8, &[3][]const u8{ "\"", b.option([]const u8, "data_version", "The data version - either 0.6.0 or master.") orelse "0.6.0", "\"" });
-    defer b.allocator.free(data_version);
+    
     exe.addBuildOption(
         []const u8,
         "data_version",
-        data_version,
+        b.option([]const u8, "data_version", "The data version - either 0.6.0 or master.") orelse "0.6.0",
     );
 
     exe.addBuildOption(
