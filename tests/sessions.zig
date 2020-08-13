@@ -1,4 +1,5 @@
 const std = @import("std");
+const log = std.log.scoped(.main);
 const headerPkg = @import("header");
 
 const suffix = if (std.builtin.os.tag == .windows) ".exe" else "";
@@ -58,7 +59,7 @@ fn startZls() !*std.ChildProcess {
     process.stderr_behavior = std.ChildProcess.StdIo.Inherit;
 
     process.spawn() catch |err| {
-        std.log.debug(.main, "Failed to spawn zls process, error: {}\n", .{err});
+        log.debug("Failed to spawn zls process, error: {}\n", .{err});
         return err;
     };
 

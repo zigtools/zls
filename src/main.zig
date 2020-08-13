@@ -1,4 +1,5 @@
 const std = @import("std");
+const main_log = std.log.scoped(.main);
 const build_options = @import("build_options");
 
 const Config = @import("config.zig");
@@ -1000,20 +1001,20 @@ fn loadConfig(folder_path: []const u8) ?Config {
 
     const file_buf = folder.readFileAlloc(allocator, "zls.json", 0x1000000) catch |err| {
         if (err != error.FileNotFound)
-            std.log.warn(.main, "Error while reading configuration file: {}\n", .{err});
+            main_log.warn("Error while reading configuration file: {}\n", .{err});
         return null;
     };
     defer allocator.free(file_buf);
 
     // TODO: Better errors? Doesn't seem like std.json can provide us positions or context.
     var config = std.json.parse(Config, &std.json.TokenStream.init(file_buf), std.json.ParseOptions{ .allocator = allocator }) catch |err| {
-        std.log.warn(.main, "Error while parsing configuration file: {}\n", .{err});
+        main_log.warn("Error while parsing configuration file: {}\n", .{err});
         return null;
     };
 
     if (config.zig_lib_path) |zig_lib_path| {
         if (!std.fs.path.isAbsolute(zig_lib_path)) {
-            std.log.warn(.main, "zig library path is not absolute, defaulting to null.\n", .{});
+            main_log.warn("zig library path is not absolute, defaulting to null.\n", .{});
             allocator.free(zig_lib_path);
             config.zig_lib_path = null;
         }
@@ -1080,10 +1081,10 @@ fn initializeHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: 
 
     if (req.params.workspaceFolders) |workspaceFolders| {
         if (workspaceFolders.len != 0) {
-            std.log.debug(.main, "Got workspace folders in initialization.\n", .{});
+            main_log.debug("Got workspace folders in initialization.\n", .{});
         }
         for (workspaceFolders) |workspace_folder| {
-            std.log.debug(.main, "Loaded folder {}\n", .{workspace_folder.uri});
+            main_log.debug("Loaded folder {}\n", .{workspace_folder.uri});
             const duped_uri = try std.mem.dupe(allocator, u8, workspace_folder.uri);
             try workspace_folder_configs.putNoClobber(duped_uri, null);
         }
@@ -1099,9 +1100,9 @@ fn initializeHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: 
         });
         try respondGeneric(id, response_str);
     }
-    std.log.notice(.main, "zls initialized", .{});
-    std.log.info(.main, "{}\n", .{client_capabilities});
-    std.log.notice(.main, "Using offset encoding: {}\n", .{std.meta.tagName(offset_encoding)});
+    main_log.notice("zls initialized", .{});
+    main_log.info("{}\n", .{client_capabilities});
+    main_log.notice("Using offset encoding: {}\n", .{std.meta.tagName(offset_encoding)});
 }
 
 var keep_running = true;
@@ -1143,7 +1144,7 @@ fn openDocumentHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req
 
 fn changeDocumentHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.ChangeDocument, config: Config) !void {
     const handle = document_store.getHandle(req.params.textDocument.uri) orelse {
-        std.log.debug(.main, "Trying to change non existent document {}", .{req.params.textDocument.uri});
+        main_log.debug("Trying to change non existent document {}", .{req.params.textDocument.uri});
         return;
     };
 
@@ -1154,7 +1155,7 @@ fn changeDocumentHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, r
 
 fn saveDocumentHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.SaveDocument, config: Config) error{OutOfMemory}!void {
     const handle = document_store.getHandle(req.params.textDocument.uri) orelse {
-        std.log.warn(.main, "Trying to save non existent document {}", .{req.params.textDocument.uri});
+        main_log.warn("Trying to save non existent document {}", .{req.params.textDocument.uri});
         return;
     };
     try document_store.applySave(handle);
@@ -1168,7 +1169,7 @@ fn semanticTokensHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, r
     const this_config = configFromUriOr(req.params.textDocument.uri, config);
     if (this_config.enable_semantic_tokens) {
         const handle = document_store.getHandle(req.params.textDocument.uri) orelse {
-            std.log.warn(.main, "Trying to get semantic tokens of non existent document {}", .{req.params.textDocument.uri});
+            main_log.warn("Trying to get semantic tokens of non existent document {}", .{req.params.textDocument.uri});
             return try respondGeneric(id, no_semantic_tokens_response);
         };
 
@@ -1185,7 +1186,7 @@ fn semanticTokensHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, r
 
 fn completionHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.Completion, config: Config) !void {
     const handle = document_store.getHandle(req.params.textDocument.uri) orelse {
-        std.log.warn(.main, "Trying to complete in non existent document {}", .{req.params.textDocument.uri});
+        main_log.warn("Trying to complete in non existent document {}", .{req.params.textDocument.uri});
         return try respondGeneric(id, no_completions_response);
     };
 
@@ -1242,7 +1243,7 @@ fn signatureHelperHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, 
 
 fn gotoHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.GotoDefinition, config: Config, resolve_alias: bool) !void {
     const handle = document_store.getHandle(req.params.textDocument.uri) orelse {
-        std.log.warn(.main, "Trying to go to definition in non existent document {}", .{req.params.textDocument.uri});
+        main_log.warn("Trying to go to definition in non existent document {}", .{req.params.textDocument.uri});
         return try respondGeneric(id, null_result_response);
     };
 
@@ -1273,7 +1274,7 @@ fn gotoDeclarationHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, 
 
 fn hoverHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.Hover, config: Config) !void {
     const handle = document_store.getHandle(req.params.textDocument.uri) orelse {
-        std.log.warn(.main, "Trying to get hover in non existent document {}", .{req.params.textDocument.uri});
+        main_log.warn("Trying to get hover in non existent document {}", .{req.params.textDocument.uri});
         return try respondGeneric(id, null_result_response);
     };
 
@@ -1295,7 +1296,7 @@ fn hoverHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: reque
 
 fn documentSymbolsHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.DocumentSymbols, config: Config) !void {
     const handle = document_store.getHandle(req.params.textDocument.uri) orelse {
-        std.log.warn(.main, "Trying to get document symbols in non existent document {}", .{req.params.textDocument.uri});
+        main_log.warn("Trying to get document symbols in non existent document {}", .{req.params.textDocument.uri});
         return try respondGeneric(id, null_result_response);
     };
     try documentSymbol(arena, id, handle);
@@ -1304,7 +1305,7 @@ fn documentSymbolsHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, 
 fn formattingHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.Formatting, config: Config) !void {
     if (config.zig_exe_path) |zig_exe_path| {
         const handle = document_store.getHandle(req.params.textDocument.uri) orelse {
-            std.log.warn(.main, "Trying to got to definition in non existent document {}", .{req.params.textDocument.uri});
+            main_log.warn("Trying to got to definition in non existent document {}", .{req.params.textDocument.uri});
             return try respondGeneric(id, null_result_response);
         };
 
@@ -1314,7 +1315,7 @@ fn formattingHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: 
         process.stdout_behavior = .Pipe;
 
         process.spawn() catch |err| {
-            std.log.warn(.main, "Failed to spawn zig fmt process, error: {}\n", .{err});
+            main_log.warn("Failed to spawn zig fmt process, error: {}\n", .{err});
             return try respondGeneric(id, null_result_response);
         };
         try process.stdin.?.writeAll(handle.document.text);
@@ -1346,7 +1347,7 @@ fn formattingHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: 
 
 fn renameHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.Rename, config: Config) !void {
     const handle = document_store.getHandle(req.params.textDocument.uri) orelse {
-        std.log.warn(.main, "Trying to rename in non existent document {}", .{req.params.textDocument.uri});
+        main_log.warn("Trying to rename in non existent document {}", .{req.params.textDocument.uri});
         return try respondGeneric(id, null_result_response);
     };
 
@@ -1368,7 +1369,7 @@ fn renameHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requ
 
 fn referencesHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.References, config: Config) !void {
     const handle = document_store.getHandle(req.params.textDocument.uri) orelse {
-        std.log.warn(.main, "Trying to get references in non existent document {}", .{req.params.textDocument.uri});
+        main_log.warn("Trying to get references in non existent document {}", .{req.params.textDocument.uri});
         return try respondGeneric(id, null_result_response);
     };
 
@@ -1411,7 +1412,7 @@ fn processJsonRpc(arena: *std.heap.ArenaAllocator, parser: *std.json.Parser, jso
     const start_time = std.time.milliTimestamp();
     defer {
         const end_time = std.time.milliTimestamp();
-        std.log.debug(.main, "Took {}ms to process method {}\n", .{ end_time - start_time, method });
+        main_log.debug("Took {}ms to process method {}\n", .{ end_time - start_time, method });
     }
 
     const method_map = .{
@@ -1452,7 +1453,7 @@ fn processJsonRpc(arena: *std.heap.ArenaAllocator, parser: *std.json.Parser, jso
                     done = extractErr(method_info[2](arena, id, request_obj, config));
                 } else |err| {
                     if (err == error.MalformedJson) {
-                        std.log.warn(.main, "Could not create request type {} from JSON {}\n", .{ @typeName(ReqT), json });
+                        main_log.warn("Could not create request type {} from JSON {}\n", .{ @typeName(ReqT), json });
                     }
                     done = err;
                 }
@@ -1489,7 +1490,7 @@ fn processJsonRpc(arena: *std.heap.ArenaAllocator, parser: *std.json.Parser, jso
     if (tree.root.Object.get("id")) |_| {
         return try respondGeneric(id, not_implemented_response);
     }
-    std.log.debug(.main, "Method without return value not implemented: {}", .{method});
+    main_log.debug("Method without return value not implemented: {}", .{method});
 }
 
 var debug_alloc_state: DebugAllocator = undefined;
@@ -1563,12 +1564,12 @@ pub fn main() anyerror!void {
                 break :find_zig;
             }
 
-            std.log.debug(.main, "zig path `{}` is not absolute, will look in path\n", .{exe_path});
+            main_log.debug("zig path `{}` is not absolute, will look in path\n", .{exe_path});
         }
 
         const env_path = std.process.getEnvVarOwned(allocator, "PATH") catch |err| switch (err) {
             error.EnvironmentVariableNotFound => {
-                std.log.warn(.main, "Could not get PATH.\n", .{});
+                main_log.warn("Could not get PATH.\n", .{});
                 break :find_zig;
             },
             else => return err,
@@ -1589,21 +1590,21 @@ pub fn main() anyerror!void {
 
             var buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
             zig_exe_path = try std.mem.dupe(allocator, u8, std.os.realpath(full_path, &buf) catch continue);
-            std.log.info(.main, "Found zig in PATH: {}\n", .{zig_exe_path});
+            main_log.info("Found zig in PATH: {}\n", .{zig_exe_path});
             break :find_zig;
         }
     }
 
     if (zig_exe_path) |exe_path| {
         config.zig_exe_path = exe_path;
-        std.log.info(.main, "Using zig executable {}\n", .{exe_path});
+        main_log.info("Using zig executable {}\n", .{exe_path});
         if (config.zig_lib_path == null) {
             // Set the lib path relative to the executable path.
             config.zig_lib_path = try std.fs.path.resolve(allocator, &[_][]const u8{
                 std.fs.path.dirname(exe_path).?, "./lib/zig",
             });
 
-            std.log.info(.main, "Resolved standard library from executable: {}\n", .{config.zig_lib_path});
+            main_log.info("Resolved standard library from executable: {}\n", .{config.zig_lib_path});
         }
     }
 
@@ -1640,7 +1641,7 @@ pub fn main() anyerror!void {
 
     while (keep_running) {
         const headers = readRequestHeader(&arena.allocator, reader) catch |err| {
-            std.log.crit(.main, "{}; exiting!", .{@errorName(err)});
+            main_log.crit("{}; exiting!", .{@errorName(err)});
             return;
         };
         const buf = try arena.allocator.alloc(u8, headers.content_length);
@@ -1652,7 +1653,7 @@ pub fn main() anyerror!void {
         arena.state = .{};
 
         if (debug_alloc) |dbg| {
-            std.log.debug(.main, "\n{}\n", .{dbg.info});
+            main_log.debug("\n{}\n", .{dbg.info});
         }
     }
 }
