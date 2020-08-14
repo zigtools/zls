@@ -104,10 +104,10 @@ pub fn deinit(self: *DebugAllocator) void {
     self.allocation_strack_addresses.deinit();
 }
 
-fn alloc(allocator: *std.mem.Allocator, len: usize, ptr_align: u29, len_align: u29) error{OutOfMemory}![]u8 {
+fn alloc(allocator: *std.mem.Allocator, len: usize, ptr_align: u29, len_align: u29, ret_addr: usize) std.mem.Allocator.Error![]u8 {
     const self = @fieldParentPtr(DebugAllocator, "allocator", allocator);
 
-    const ptr = try self.base_allocator.callAllocFn(len, ptr_align, len_align);
+    const ptr = try self.base_allocator.allocFn(self.base_allocator, len, ptr_align, len_align, ret_addr);
     self.info.allocation_stats.addSample(ptr.len);
 
     var stack_addresses = std.mem.zeroes([stack_addresses_size + 2]usize);
@@ -131,7 +131,8 @@ fn alloc(allocator: *std.mem.Allocator, len: usize, ptr_align: u29, len_align: u
     return ptr;
 }
 
-fn resize(allocator: *std.mem.Allocator, old_mem: []u8, new_size: usize, len_align: u29) error{OutOfMemory}!usize {
+// TODO: Check if this complies with the new allocator interface.
+fn resize(allocator: *std.mem.Allocator, old_mem: []u8, buf_align: u29, new_size: usize, len_align: u29, ret_addr: usize) std.mem.Allocator.Error!usize {
     const self = @fieldParentPtr(DebugAllocator, "allocator", allocator);
 
     if (old_mem.len == 0) {
@@ -166,7 +167,7 @@ fn resize(allocator: *std.mem.Allocator, old_mem: []u8, new_size: usize, len_ali
         self.info.peak_allocated = curr_allocs;
     }
 
-    return self.base_allocator.callResizeFn(old_mem, new_size, len_align) catch |e| {
+    return self.base_allocator.resizeFn(self.base_allocator, old_mem, buf_align, new_size, len_align, ret_addr) catch |e| {
         return e;
     };
 }
