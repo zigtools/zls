@@ -807,7 +807,7 @@ pub fn resolveTypeOfNodeInternal(
             if (import_param.tag != .StringLiteral) return null;
 
             const import_str = handle.tree.tokenSlice(import_param.castTag(.StringLiteral).?.token);
-            const new_handle = (store.resolveImport(handle, import_str[1 .. import_str.len - 1]) catch |err| block: {
+            const new_handle = (store.resolveImport(handle, import_str[1 .. import_str.len - 1]) catch |err| {
                 std.log.debug(.analysis, "Error {} while processing import {}\n", .{ err, import_str });
                 return null;
             }) orelse return null;
