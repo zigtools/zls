@@ -1,6 +1,7 @@
 //! This allocator collects information about allocation sizes
 
 const std = @import("std");
+const log = std.log.scoped(.debug_alloc);
 
 const DebugAllocator = @This();
 
@@ -134,7 +135,7 @@ fn resize(allocator: *std.mem.Allocator, old_mem: []u8, new_size: usize, len_ali
     const self = @fieldParentPtr(DebugAllocator, "allocator", allocator);
 
     if (old_mem.len == 0) {
-        std.log.debug(.debug_alloc, "Trying to resize empty slice\n", .{});
+        log.debug("Trying to resize empty slice\n", .{});
         std.process.exit(1);
     }
 
@@ -157,7 +158,7 @@ fn resize(allocator: *std.mem.Allocator, old_mem: []u8, new_size: usize, len_ali
 
     const curr_allocs = self.info.currentlyAllocated();
     if (self.max_bytes != 0 and curr_allocs >= self.max_bytes) {
-        std.log.debug(.debug_alloc, "Exceeded maximum bytes {}, exiting.\n", .{self.max_bytes});
+        log.debug("Exceeded maximum bytes {}, exiting.\n", .{self.max_bytes});
         std.process.exit(1);
     }
 

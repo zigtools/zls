@@ -3,6 +3,7 @@ const DocumentStore = @import("document_store.zig");
 const ast = std.zig.ast;
 const types = @import("types.zig");
 const offsets = @import("offsets.zig");
+const log = std.log.scoped(.analysis);
 
 /// Get a declaration's doc comment node
 fn getDocCommentNode(tree: *ast.Tree, node: *ast.Node) ?*ast.Node.DocComment {
@@ -808,7 +809,7 @@ pub fn resolveTypeOfNodeInternal(
 
             const import_str = handle.tree.tokenSlice(import_param.castTag(.StringLiteral).?.token);
             const new_handle = (store.resolveImport(handle, import_str[1 .. import_str.len - 1]) catch |err| {
-                std.log.debug(.analysis, "Error {} while processing import {}\n", .{ err, import_str });
+                log.debug("Error {} while processing import {}\n", .{ err, import_str });
                 return null;
             }) orelse return null;
 
@@ -833,7 +834,7 @@ pub fn resolveTypeOfNodeInternal(
             .type = .{ .data = .{ .other = node }, .is_type_val = false },
             .handle = handle,
         },
-        else => {}, //std.log.debug(.analysis, "Type resolution case not implemented; {}\n", .{node.id}),
+        else => {},
     }
     return null;
 }
@@ -1062,7 +1063,7 @@ pub fn getFieldAccessType(
                         current_type = (try resolveUnwrapOptionalType(store, arena, current_type, &bound_type_params)) orelse return null;
                     },
                     else => {
-                        std.log.debug(.analysis, "Unrecognized token {} after period.\n", .{after_period.id});
+                        log.debug("Unrecognized token {} after period.\n", .{after_period.id});
                         return null;
                     },
                 }
@@ -1113,7 +1114,7 @@ pub fn getFieldAccessType(
                 current_type = (try resolveBracketAccessType(store, arena, current_type, if (is_range) .Range else .Single, &bound_type_params)) orelse return null;
             },
             else => {
-                std.log.debug(.analysis, "Unimplemented token: {}\n", .{tok.id});
+                log.debug("Unimplemented token: {}\n", .{tok.id});
                 return null;
             },
         }
@@ -1160,7 +1161,7 @@ pub fn nodeToString(tree: *ast.Tree, node: *ast.Node) ?[]const u8 {
             }
         },
         else => {
-            std.log.debug(.analysis, "INVALID: {}\n", .{node.tag});
+            log.debug("INVALID: {}\n", .{node.tag});
         },
     }
 
@@ -1980,7 +1981,7 @@ pub const DocumentScope = struct {
 
     pub fn debugPrint(self: DocumentScope) void {
         for (self.scopes) |scope| {
-            std.log.debug(.analysis,
+            log.debug(
                 \\--------------------------
                 \\Scope {}, range: [{}, {})
                 \\ {} usingnamespaces
@@ -1995,10 +1996,10 @@ pub const DocumentScope = struct {
             var decl_it = scope.decls.iterator();
             var idx: usize = 0;
             while (decl_it.next()) |name_decl| : (idx += 1) {
-                if (idx != 0) std.log.debug(.analysis, ", ", .{});
-                std.log.debug(.analysis, "{}", .{name_decl.key});
+                if (idx != 0) log.debug(", ", .{});
+                log.debug("{}", .{name_decl.key});
             }
-            std.log.debug(.analysis, "\n--------------------------\n", .{});
+            log.debug("\n--------------------------\n", .{});
         }
     }
 

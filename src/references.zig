@@ -3,6 +3,7 @@ const DocumentStore = @import("document_store.zig");
 const analysis = @import("analysis.zig");
 const types = @import("types.zig");
 const offsets = @import("offsets.zig");
+const log = std.log.scoped(.references);
 
 const ast = std.zig.ast;
 
@@ -407,7 +408,7 @@ pub fn symbolReferences(
                     else => {},
                 }
             } else {
-                std.log.warn(.references, "Could not find param decl's function", .{});
+                log.warn("Could not find param decl's function", .{});
                 return;
             };
             if (fn_node.getTrailer("body_node")) |body| {
