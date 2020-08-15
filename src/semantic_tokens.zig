@@ -233,11 +233,14 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
     defer arena.child_allocator.free(child_frame);
 
     switch (node.tag) {
-        .Root, .Block => {
-            const first_tok = if (node.cast(ast.Node.Block)) |block_node| block: {
+        .Root, .Block, .LabeledBlock => {
+            const first_tok = if (node.castTag(.LabeledBlock)) |block_node| block: {
                 try writeToken(builder, block_node.label, .label);
                 break :block block_node.lbrace + 1;
-            } else 0;
+            } else if (node.castTag(.Block)) |block_node|
+                block_node.lbrace + 1
+            else
+                0;
 
             var gap_highlighter = GapHighlighter.init(builder, first_tok);
             var child_idx: usize = 0;

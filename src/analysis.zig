@@ -2186,27 +2186,62 @@ fn makeScopeInternal(
         .TestDecl => {
             return try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, node.castTag(.TestDecl).?.body_node);
         },
+        .LabeledBlock => {
+            const block = node.castTag(.LabeledBlock).?;
+            std.debug.assert(tree.token_ids[block.label] == .Identifier);
+            var scope = try scopes.addOne(allocator);
+            scope.* = .{
+                .range = .{
+                    .start = tree.token_locs[block.lbrace].start,
+                    .end = tree.token_locs[block.rbrace].end,
+                },
+                .decls = std.StringHashMap(Declaration).init(allocator),
+                .uses = &[0]*ast.Node.Use{},
+                .tests = &[0]*ast.Node{},
+                .data = .other,
+            };
+            errdefer scope.decls.deinit();
+
+            try scope.decls.putNoClobber(tree.tokenSlice(block.label), .{
+                .label_decl = node,
+            });
+
+            (try scopes.addOne(allocator)).* = .{
+                .range = nodeSourceRange(tree, node),
+                .decls = std.StringHashMap(Declaration).init(allocator),
+                .uses = &[0]*ast.Node.Use{},
+                .tests = &[0]*ast.Node{},
+                .data = .{ .block = node },
+            };
+            var scope_idx = scopes.items.len - 1;
+            var uses = std.ArrayList(*ast.Node.Use).init(allocator);
+
+            errdefer {
+                scopes.items[scope_idx].decls.deinit();
+                uses.deinit();
+            }
+
+            var child_idx: usize = 0;
+            while (node.iterate(child_idx)) |child_node| : (child_idx += 1) {
+                if (child_node.castTag(.Use)) |use| {
+                    try uses.append(use);
+                    continue;
+                }
+
+                try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, child_node);
+                if (child_node.castTag(.VarDecl)) |var_decl| {
+                    const name = tree.tokenSlice(var_decl.name_token);
+                    if (try scopes.items[scope_idx].decls.fetchPut(name, .{ .ast_node = child_node })) |existing| {
+                        // TODO Record a redefinition error.
+                    }
+                }
+            }
+
+            scopes.items[scope_idx].uses = uses.toOwnedSlice();
+            return;
+        },
         .Block => {
             const block = node.castTag(.Block).?;
-            if (block.label) |label| {
-                std.debug.assert(tree.token_ids[label] == .Identifier);
-                var scope = try scopes.addOne(allocator);
-                scope.* = .{
-                    .range = .{
-                        .start = tree.token_locs[block.lbrace].start,
-                        .end = tree.token_locs[block.rbrace].end,
-                    },
-                    .decls = std.StringHashMap(Declaration).init(allocator),
-                    .uses = &[0]*ast.Node.Use{},
-                    .tests = &[0]*ast.Node{},
-                    .data = .other,
-                };
-                errdefer scope.decls.deinit();
-
-                try scope.decls.putNoClobber(tree.tokenSlice(label), .{
-                    .label_decl = node,
-                });
-            }
 
             (try scopes.addOne(allocator)).* = .{
                 .range = nodeSourceRange(tree, node),
