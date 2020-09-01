@@ -58,7 +58,7 @@ fn startZls() !*std.ChildProcess {
     process.stderr_behavior = std.ChildProcess.StdIo.Inherit;
 
     process.spawn() catch |err| {
-        std.log.debug(.main, "Failed to spawn zls process, error: {}\n", .{err});
+        std.log.debug("Failed to spawn zls process, error: {}\n", .{err});
         return err;
     };
 
