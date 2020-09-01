@@ -214,12 +214,12 @@ fn publishDiagnostics(arena: *std.heap.ArenaAllocator, handle: DocumentStore.Han
             switch (decl.tag) {
                 .FnProto => blk: {
                     const func = decl.cast(std.zig.ast.Node.FnProto).?;
-                    const is_extern = func.trailer_flags.has("extern_export_inline_token");
+                    const is_extern = func.getExternExportInlineToken() != null;
                     if (is_extern)
                         break :blk;
 
                     if (config.warn_style) {
-                        if (func.getTrailer("name_token")) |name_token| {
+                        if (func.getNameToken()) |name_token| {
                             const loc = tree.tokenLocation(0, name_token);
 
                             const is_type_function = analysis.isTypeFunction(tree, func);
@@ -354,7 +354,7 @@ fn nodeToCompletion(
     switch (node.tag) {
         .FnProto => {
             const func = node.cast(std.zig.ast.Node.FnProto).?;
-            if (func.getTrailer("name_token")) |name_token| {
+            if (func.getNameToken()) |name_token| {
                 const use_snippets = config.enable_snippets and client_capabilities.supports_snippets;
 
                 const insert_text = if (use_snippets) blk: {

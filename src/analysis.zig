@@ -8,9 +8,9 @@ const log = std.log.scoped(.analysis);
 /// Get a declaration's doc comment node
 fn getDocCommentNode(tree: *ast.Tree, node: *ast.Node) ?*ast.Node.DocComment {
     if (node.castTag(.FnProto)) |func| {
-        return func.getTrailer("doc_comments");
+        return func.getDocComments();
     } else if (node.castTag(.VarDecl)) |var_decl| {
-        return var_decl.getTrailer("doc_comments");
+        return var_decl.getDocComments();
     } else if (node.castTag(.ContainerField)) |field| {
         return field.doc_comments;
     } else if (node.castTag(.ErrorTag)) |tag| {
@@ -72,7 +72,7 @@ pub fn getFunctionSignature(tree: *ast.Tree, func: *ast.Node.FnProto) []const u8
 
 /// Gets a function snippet insert text
 pub fn getFunctionSnippet(allocator: *std.mem.Allocator, tree: *ast.Tree, func: *ast.Node.FnProto, skip_self_param: bool) ![]const u8 {
-    const name_tok = func.getTrailer("name_token") orelse unreachable;
+    const name_tok = func.getNameToken() orelse unreachable;
 
     var buffer = std.ArrayList(u8).init(allocator);
     try buffer.ensureCapacity(128);
@@ -182,8 +182,7 @@ pub fn getDeclNameToken(tree: *ast.Tree, node: *ast.Node) ?ast.TokenIndex {
         },
         .FnProto => {
             const func = node.castTag(.FnProto).?;
-            if (func.getTrailer("name_token") == null) return null;
-            return func.getTrailer("name_token").?;
+            return func.getNameToken();
         },
         .ContainerField => {
             const field = node.castTag(.ContainerField).?;
@@ -274,10 +273,9 @@ pub fn resolveVarDeclAlias(store: *DocumentStore, arena: *std.heap.ArenaAllocato
     const handle = decl_handle.handle;
 
     if (decl.castTag(.VarDecl)) |var_decl| {
-        if (!var_decl.trailer_flags.has("init_node")) return null;
+        const base_expr = var_decl.getInitNode() orelse return null;
         if (handle.tree.token_ids[var_decl.mut_token] != .Keyword_const) return null;
 
-        const base_expr = var_decl.getTrailer("init_node").?;
         if (base_expr.cast(ast.Node.SimpleInfixOp)) |infix_op| {
             if (base_expr.tag != .Period) return null;
             const name = handle.tree.tokenSlice(infix_op.rhs.firstToken());
@@ -325,7 +323,7 @@ fn findReturnStatementInternal(
 
 fn findReturnStatement(tree: *ast.Tree, fn_decl: *ast.Node.FnProto) ?*ast.Node.ControlFlowExpression {
     var already_found = false;
-    return findReturnStatementInternal(tree, fn_decl, fn_decl.getTrailer("body_node").?, &already_found);
+    return findReturnStatementInternal(tree, fn_decl, fn_decl.getBodyNode().?, &already_found);
 }
 
 /// Resolves the return type of a function
@@ -336,7 +334,7 @@ fn resolveReturnType(
     handle: *DocumentStore.Handle,
     bound_type_params: *BoundTypeParams,
 ) !?TypeWithHandle {
-    if (isTypeFunction(handle.tree, fn_decl) and fn_decl.trailer_flags.has("body_node")) {
+    if (isTypeFunction(handle.tree, fn_decl) and fn_decl.getBodyNode() != null) {
         // If this is a type function and it only contains a single return statement that returns
         // a container declaration, we will return that declaration.
         const ret = findReturnStatement(handle.tree, fn_decl) orelse return null;
@@ -549,17 +547,17 @@ pub fn resolveTypeOfNodeInternal(
     switch (node.tag) {
         .VarDecl => {
             const vari = node.castTag(.VarDecl).?;
-            if (vari.getTrailer("type_node")) |type_node| block: {
+            if (vari.getTypeNode()) |type_node| block: {
                 return ((try resolveTypeOfNodeInternal(
                     store,
                     arena,
-                    .{ .node = vari.getTrailer("type_node") orelse break :block, .handle = handle },
+                    .{ .node = type_node, .handle = handle },
                     bound_type_params,
                 )) orelse break :block).instanceTypeVal();
             }
-            if (vari.getTrailer("init_node") == null) return null;
+            const init_node = vari.getInitNode() orelse return null;
 
-            return try resolveTypeOfNodeInternal(store, arena, .{ .node = vari.getTrailer("init_node").?, .handle = handle }, bound_type_params);
+            return try resolveTypeOfNodeInternal(store, arena, .{ .node = init_node, .handle = handle }, bound_type_params);
         },
         .Identifier => {
             if (isTypeIdent(handle.tree, node.firstToken())) {
@@ -822,7 +820,7 @@ pub fn resolveTypeOfNodeInternal(
         },
         .FnProto => {
             // This is a function type
-            if (!node.castTag(.FnProto).?.trailer_flags.has("name_token")) {
+            if (node.castTag(.FnProto).?.getNameToken() == null) {
                 return TypeWithHandle.typeVal(node_handle);
             }
             return TypeWithHandle{
@@ -973,15 +971,15 @@ pub fn collectImports(import_arr: *std.ArrayList([]const u8), tree: *ast.Tree) !
     for (tree.root_node.decls()) |decl| {
         if (decl.tag != .VarDecl) continue;
         const var_decl = decl.castTag(.VarDecl).?;
-        if (!var_decl.trailer_flags.has("init_node")) continue;
+        const init_node = var_decl.getInitNode() orelse continue;
 
-        switch (var_decl.getTrailer("init_node").?.tag) {
+        switch (init_node.tag) {
             .BuiltinCall => {
-                const builtin_call = var_decl.getTrailer("init_node").?.castTag(.BuiltinCall).?;
+                const builtin_call = init_node.castTag(.BuiltinCall).?;
                 try maybeCollectImport(tree, builtin_call, import_arr);
             },
             .Period => {
-                const infix_op = var_decl.getTrailer("init_node").?.cast(ast.Node.SimpleInfixOp).?;
+                const infix_op = init_node.cast(ast.Node.SimpleInfixOp).?;
 
                 if (infix_op.lhs.tag != .BuiltinCall) continue;
                 try maybeCollectImport(tree, infix_op.lhs.castTag(.BuiltinCall).?, import_arr);
@@ -1130,11 +1128,11 @@ pub fn isNodePublic(tree: *ast.Tree, node: *ast.Node) bool {
     switch (node.tag) {
         .VarDecl => {
             const var_decl = node.castTag(.VarDecl).?;
-            return var_decl.trailer_flags.has("visib_token");
+            return var_decl.getVisibToken() != null;
         },
         .FnProto => {
             const func = node.castTag(.FnProto).?;
-            return func.trailer_flags.has("visib_token");
+            return func.getVisibToken() != null;
         },
         else => return true,
     }
@@ -1156,7 +1154,7 @@ pub fn nodeToString(tree: *ast.Tree, node: *ast.Node) ?[]const u8 {
         },
         .FnProto => {
             const func = node.castTag(.FnProto).?;
-            if (func.getTrailer("name_token")) |name_token| {
+            if (func.getNameToken()) |name_token| {
                 return tree.tokenSlice(name_token);
             }
         },
@@ -2177,7 +2175,7 @@ fn makeScopeInternal(
                 }
             }
 
-            if (func.getTrailer("body_node")) |body| {
+            if (func.getBodyNode()) |body| {
                 try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, body);
             }
 
@@ -2504,10 +2502,10 @@ fn makeScopeInternal(
         },
         .VarDecl => {
             const var_decl = node.castTag(.VarDecl).?;
-            if (var_decl.getTrailer("type_node")) |type_node| {
+            if (var_decl.getTypeNode()) |type_node| {
                 try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, type_node);
             }
-            if (var_decl.getTrailer("init_node")) |init_node| {
+            if (var_decl.getInitNode()) |init_node| {
                 try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, init_node);
             }
         },
