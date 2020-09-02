@@ -85,10 +85,10 @@ fn symbolReferencesInternal(
         },
         .VarDecl => {
             const var_decl = node.cast(ast.Node.VarDecl).?;
-            if (var_decl.getTrailer("type_node")) |type_node| {
+            if (var_decl.getTypeNode()) |type_node| {
                 try symbolReferencesInternal(arena, store, .{ .node = type_node, .handle = handle }, decl, encoding, context, handler);
             }
-            if (var_decl.getTrailer("init_node")) |init_node| {
+            if (var_decl.getInitNode()) |init_node| {
                 try symbolReferencesInternal(arena, store, .{ .node = init_node, .handle = handle }, decl, encoding, context, handler);
             }
         },
@@ -128,16 +128,16 @@ fn symbolReferencesInternal(
                 },
                 else => {},
             }
-            if (fn_proto.getTrailer("align_expr")) |align_expr| {
+            if (fn_proto.getAlignExpr()) |align_expr| {
                 try symbolReferencesInternal(arena, store, .{ .node = align_expr, .handle = handle }, decl, encoding, context, handler);
             }
-            if (fn_proto.getTrailer("section_expr")) |section_expr| {
+            if (fn_proto.getSectionExpr()) |section_expr| {
                 try symbolReferencesInternal(arena, store, .{ .node = section_expr, .handle = handle }, decl, encoding, context, handler);
             }
-            if (fn_proto.getTrailer("callconv_expr")) |callconv_expr| {
+            if (fn_proto.getCallconvExpr()) |callconv_expr| {
                 try symbolReferencesInternal(arena, store, .{ .node = callconv_expr, .handle = handle }, decl, encoding, context, handler);
             }
-            if (fn_proto.getTrailer("body_node")) |body| {
+            if (fn_proto.getBodyNode()) |body| {
                 try symbolReferencesInternal(arena, store, .{ .node = body, .handle = handle }, decl, encoding, context, handler);
             }
         },
@@ -411,7 +411,7 @@ pub fn symbolReferences(
                 log.warn("Could not find param decl's function", .{});
                 return;
             };
-            if (fn_node.getTrailer("body_node")) |body| {
+            if (fn_node.getBodyNode()) |body| {
                 try symbolReferencesInternal(arena, store, .{ .node = body, .handle = curr_handle }, decl_handle, encoding, context, handler);
             }
         },

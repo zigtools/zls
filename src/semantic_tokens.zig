@@ -256,22 +256,22 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
         },
         .VarDecl => {
             const var_decl = node.cast(ast.Node.VarDecl).?;
-            if (var_decl.getTrailer("doc_comments")) |doc| try writeDocComments(builder, handle.tree, doc);
-            try writeToken(builder, var_decl.getTrailer("visib_token"), .keyword);
-            try writeToken(builder, var_decl.getTrailer("extern_export_token"), .keyword);
-            try writeToken(builder, var_decl.getTrailer("thread_local_token"), .keyword);
-            try writeToken(builder, var_decl.getTrailer("comptime_token"), .keyword);
+            if (var_decl.getDocComments()) |doc| try writeDocComments(builder, handle.tree, doc);
+            try writeToken(builder, var_decl.getVisibToken(), .keyword);
+            try writeToken(builder, var_decl.getExternExportToken(), .keyword);
+            try writeToken(builder, var_decl.getThreadLocalToken(), .keyword);
+            try writeToken(builder, var_decl.getComptimeToken(), .keyword);
             try writeToken(builder, var_decl.mut_token, .keyword);
             if (try analysis.resolveTypeOfNode(store, arena, .{ .node = node, .handle = handle })) |decl_type| {
                 try colorIdentifierBasedOnType(builder, decl_type, var_decl.name_token, .{ .definition = true });
             } else {
                 try writeTokenMod(builder, var_decl.name_token, .variable, .{ .definition = true });
             }
-            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, var_decl.getTrailer("type_node") });
-            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, var_decl.getTrailer("align_node") });
-            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, var_decl.getTrailer("section_node") });
-            try writeToken(builder, var_decl.getTrailer("eq_token"), .operator);
-            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, var_decl.getTrailer("init_node") });
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, var_decl.getTypeNode() });
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, var_decl.getAlignNode() });
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, var_decl.getSectionNode() });
+            try writeToken(builder, var_decl.getEqToken(), .operator);
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, var_decl.getInitNode() });
         },
         .Use => {
             const use = node.cast(ast.Node.Use).?;
@@ -335,10 +335,10 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
         },
         .FnProto => {
             const fn_proto = node.cast(ast.Node.FnProto).?;
-            if (fn_proto.getTrailer("doc_comments")) |docs| try writeDocComments(builder, handle.tree, docs);
-            try writeToken(builder, fn_proto.getTrailer("visib_token"), .keyword);
-            try writeToken(builder, fn_proto.getTrailer("extern_export_inline_token"), .keyword);
-            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, fn_proto.getTrailer("lib_name") });
+            if (fn_proto.getDocComments()) |docs| try writeDocComments(builder, handle.tree, docs);
+            try writeToken(builder, fn_proto.getVisibToken(), .keyword);
+            try writeToken(builder, fn_proto.getExternExportInlineToken(), .keyword);
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, fn_proto.getLibName() });
             try writeToken(builder, fn_proto.fn_token, .keyword);
 
             const func_name_tok_type: TokenType = if (analysis.isTypeFunction(handle.tree, fn_proto))
@@ -351,7 +351,7 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
             else
                 TokenModifiers{};
 
-            try writeTokenMod(builder, fn_proto.getTrailer("name_token"), func_name_tok_type, tok_mod);
+            try writeTokenMod(builder, fn_proto.getNameToken(), func_name_tok_type, tok_mod);
 
             for (fn_proto.paramsConst()) |param_decl| {
                 if (param_decl.doc_comments) |docs| try writeDocComments(builder, handle.tree, docs);
@@ -363,9 +363,9 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
                     .type_expr => |type_expr| try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, type_expr }),
                 }
             }
-            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, fn_proto.getTrailer("align_expr") });
-            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, fn_proto.getTrailer("section_expr") });
-            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, fn_proto.getTrailer("callconv_expr") });
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, fn_proto.getAlignExpr() });
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, fn_proto.getSectionExpr() });
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, fn_proto.getCallconvExpr() });
 
             switch (fn_proto.return_type) {
                 .Explicit => |type_expr| try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, type_expr }),
@@ -375,7 +375,7 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
                 },
                 .Invalid => {},
             }
-            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, fn_proto.getTrailer("body_node") });
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, fn_proto.getBodyNode() });
         },
         .AnyFrameType => {
             const any_frame_type = node.cast(ast.Node.AnyFrameType).?;
