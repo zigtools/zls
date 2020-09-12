@@ -6,7 +6,7 @@ const offsets = @import("offsets.zig");
 const log = std.log.scoped(.analysis);
 
 /// Get a declaration's doc comment node
-fn getDocCommentNode(tree: *ast.Tree, node: *ast.Node) ?*ast.Node.DocComment {
+pub fn getDocCommentNode(tree: *ast.Tree, node: *ast.Node) ?*ast.Node.DocComment {
     if (node.castTag(.FnProto)) |func| {
         return func.getDocComments();
     } else if (node.castTag(.VarDecl)) |var_decl| {
@@ -327,7 +327,7 @@ fn findReturnStatement(tree: *ast.Tree, fn_decl: *ast.Node.FnProto) ?*ast.Node.C
 }
 
 /// Resolves the return type of a function
-fn resolveReturnType(
+pub fn resolveReturnType(
     store: *DocumentStore,
     arena: *std.heap.ArenaAllocator,
     fn_decl: *ast.Node.FnProto,
@@ -855,7 +855,7 @@ pub const TypeWithHandle = struct {
     type: Type,
     handle: *DocumentStore.Handle,
 
-    fn typeVal(node_handle: NodeWithHandle) TypeWithHandle {
+    pub fn typeVal(node_handle: NodeWithHandle) TypeWithHandle {
         return .{
             .type = .{
                 .data = .{ .other = node_handle.node },
