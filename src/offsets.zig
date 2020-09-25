@@ -81,7 +81,7 @@ pub fn tokenRelativeLocation(tree: *std.zig.ast.Tree, start_index: usize, token:
     const token_start = token_loc.start;
     const source = tree.source[start_index..];
     var i: usize = 0;
-    while (i < token_start - start_index) {
+    while (i + start_index < token_start) {
         const c = source[i];
         if (c == '\n') {
             loc.line += 1;
