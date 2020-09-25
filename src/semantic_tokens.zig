@@ -32,7 +32,16 @@ const TokenModifiers = packed struct {
     generic: bool = false,
 
     fn toInt(self: TokenModifiers) u32 {
-        return @as(u32, @bitCast(u4, self));
+        var res: u32 = 0;
+        if (self.definition)
+            res |= 1 << 0;
+        if (self.@"async")
+            res |= 1 << 1;
+        if (self.documentation)
+            res |= 1 << 2;
+        if (self.generic)
+            res |= 1 << 3;
+        return res;
     }
 
     inline fn set(self: *TokenModifiers, comptime field: []const u8) void {
