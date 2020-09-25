@@ -1140,7 +1140,7 @@ fn openDocumentHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req
     const handle = try document_store.openDocument(req.params.textDocument.uri, req.params.textDocument.text);
     try publishDiagnostics(arena, handle.*, configFromUriOr(req.params.textDocument.uri, config));
 
-    try semanticTokensHandler(arena, id, .{ .params = .{ .textDocument = .{ .uri = req.params.textDocument.uri } } }, config);
+    try semanticTokensFullHandler(arena, id, .{ .params = .{ .textDocument = .{ .uri = req.params.textDocument.uri } } }, config);
 }
 
 fn changeDocumentHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.ChangeDocument, config: Config) !void {
@@ -1166,7 +1166,7 @@ fn closeDocumentHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, re
     document_store.closeDocument(req.params.textDocument.uri);
 }
 
-fn semanticTokensHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.SemanticTokens, config: Config) (error{OutOfMemory} || std.fs.File.WriteError)!void {
+fn semanticTokensFullHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.SemanticTokensFull, config: Config) (error{OutOfMemory} || std.fs.File.WriteError)!void {
     const this_config = configFromUriOr(req.params.textDocument.uri, config);
     if (this_config.enable_semantic_tokens) {
         const handle = document_store.getHandle(req.params.textDocument.uri) orelse {
@@ -1180,7 +1180,7 @@ fn semanticTokensHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, r
 
         return try send(arena, types.Response{
             .id = id,
-            .result = .{ .SemanticTokens = .{ .data = token_array } },
+            .result = .{ .SemanticTokensFull = .{ .data = token_array } },
         });
     }
 }
@@ -1427,7 +1427,7 @@ fn processJsonRpc(arena: *std.heap.ArenaAllocator, parser: *std.json.Parser, jso
         .{ "textDocument/didChange", requests.ChangeDocument, changeDocumentHandler },
         .{ "textDocument/didSave", requests.SaveDocument, saveDocumentHandler },
         .{ "textDocument/didClose", requests.CloseDocument, closeDocumentHandler },
-        .{ "textDocument/semanticTokens", requests.SemanticTokens, semanticTokensHandler },
+        .{ "textDocument/semanticTokens/full", requests.SemanticTokensFull, semanticTokensFullHandler },
         .{ "textDocument/completion", requests.Completion, completionHandler },
         .{ "textDocument/signatureHelp", void, signatureHelperHandler },
         .{ "textDocument/definition", requests.GotoDefinition, gotoDefinitionHandler },
@@ -1482,6 +1482,7 @@ fn processJsonRpc(arena: *std.heap.ArenaAllocator, parser: *std.json.Parser, jso
         .{"textDocument/prepareRename"},
         .{"textDocument/foldingRange"},
         .{"textDocument/selectionRange"},
+        .{"textDocument/semanticTokens/range"},
     });
 
     if (unimplemented_map.has(method)) {

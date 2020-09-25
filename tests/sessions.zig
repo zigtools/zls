@@ -92,7 +92,7 @@ test "Open file, ask for semantic tokens" {
     const new_file_req = \\{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file://./tests/test.zig","languageId":"zig","version":420,"text":"const std = @import(\"std\");"}}}
     ;
     try sendRequest(new_file_req, process);
-    const sem_toks_req = \\{"jsonrpc":"2.0","id":2,"method":"textDocument/semanticTokens","params":{"textDocument":{"uri":"file://./tests/test.zig"}}}
+    const sem_toks_req = \\{"jsonrpc":"2.0","id":2,"method":"textDocument/semanticTokens/full","params":{"textDocument":{"uri":"file://./tests/test.zig"}}}
     ;
     try sendRequest(sem_toks_req, process);
     try sendRequest(shutdown_message, process);
