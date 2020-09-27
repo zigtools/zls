@@ -56,7 +56,7 @@ pub const ResponseParams = union(enum) {
     Location: Location,
     Hover: Hover,
     DocumentSymbols: []DocumentSymbol,
-    SemanticTokens: struct { data: []const u32 },
+    SemanticTokensFull: struct { data: []const u32 },
     TextEdits: []TextEdit,
     Locations: []Location,
     WorkspaceEdit: WorkspaceEdit,

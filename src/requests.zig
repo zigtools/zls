@@ -186,7 +186,7 @@ const TextDocumentIdentifierRequest = struct {
 
 pub const SaveDocument = TextDocumentIdentifierRequest;
 pub const CloseDocument = TextDocumentIdentifierRequest;
-pub const SemanticTokens = TextDocumentIdentifierRequest;
+pub const SemanticTokensFull = TextDocumentIdentifierRequest;
 
 const TextDocumentIdentifierPositionRequest = struct {
     params: struct {
