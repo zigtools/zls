@@ -743,6 +743,7 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
                 .Try, .Await, .Resume => .keyword,
                 else => .operator,
             };
+            try writeToken(builder, prefix_op.op_token, tok_type);
             try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, prefix_op.rhs });
         },
         else => {},
