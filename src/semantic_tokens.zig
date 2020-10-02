@@ -634,10 +634,16 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
             try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, test_decl.name });
             try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, test_decl.body_node });
         },
+        .Catch => {
+            const catch_expr = node.cast(ast.Node.Catch).?;
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, catch_expr.lhs });
+            try writeToken(builder, catch_expr.op_token, .keyword);
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, catch_expr.rhs });
+        },
         .Add, .AddWrap, .ArrayCat, .ArrayMult, .Assign, .AssignBitAnd, .AssignBitOr, .AssignBitShiftLeft, .AssignBitShiftRight, .AssignBitXor, .AssignDiv, .AssignSub, .AssignSubWrap, .AssignMod, .AssignAdd, .AssignAddWrap, .AssignMul, .AssignMulWrap, .BangEqual, .BitAnd, .BitOr, .BitShiftLeft, .BitShiftRight, .BitXor, .BoolAnd, .BoolOr, .Div, .EqualEqual, .ErrorUnion, .GreaterOrEqual, .GreaterThan, .LessOrEqual, .LessThan, .MergeErrorSets, .Mod, .Mul, .MulWrap, .Period, .Range, .Sub, .SubWrap, .OrElse => {
             const infix_op = node.cast(ast.Node.SimpleInfixOp).?;
             try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, infix_op.lhs });
-            if (node.tag != .Period and node.tag != .Catch) {
+            if (node.tag != .Period) {
                 const token_type: TokenType = switch (node.tag) {
                     .BoolAnd, .BoolOr, .OrElse => .keyword,
                     else => .operator,
@@ -647,11 +653,6 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
                 try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, infix_op.rhs });
             }
             switch (node.tag) {
-                .Catch => {
-                    try writeToken(builder, infix_op.op_token, .keyword);
-                    try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, infix_op.lhs });
-                    try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, infix_op.rhs });
-                },
                 .Period => {
                     const rhs_str = handle.tree.tokenSlice(infix_op.rhs.firstToken());
 
@@ -700,42 +701,48 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
                 else => {},
             }
         },
+        .SliceType => {
+            const slice_type = node.castTag(.SliceType).?;
+            const ptr_info = slice_type.ptr_info;
+            if (ptr_info.align_info) |align_info| {
+                try writeToken(builder, slice_type.op_token + 2, .keyword);
+                try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, align_info.node });
+            }
+            try writeToken(builder, ptr_info.const_token, .keyword);
+            try writeToken(builder, ptr_info.volatile_token, .keyword);
+            try writeToken(builder, ptr_info.allowzero_token, .keyword);
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, slice_type.rhs });
+        },
+        .PtrType => {
+            const pointer_type = node.castTag(.PtrType).?;
+            try writeToken(builder, pointer_type.op_token, .operator);
+            const ptr_info = pointer_type.ptr_info;
+            if (ptr_info.align_info) |align_info| {
+                try writeToken(builder, pointer_type.op_token + 1, .keyword);
+                try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, align_info.node });
+            }
+            try writeToken(builder, ptr_info.const_token, .keyword);
+            try writeToken(builder, ptr_info.volatile_token, .keyword);
+            try writeToken(builder, ptr_info.allowzero_token, .keyword);
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, pointer_type.rhs });
+        },
+        .ArrayType => {
+            const array_type = node.castTag(.ArrayType).?;
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, array_type.len_expr });
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, array_type.rhs });
+        },
+        .ArrayTypeSentinel => {
+            const array_type = node.castTag(.ArrayTypeSentinel).?;
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, array_type.len_expr });
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, array_type.sentinel });
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, array_type.rhs });
+        },
         .AddressOf, .Await, .BitNot, .BoolNot, .OptionalType, .Negation, .NegationWrap, .Resume, .Try => {
             const prefix_op = node.cast(ast.Node.SimplePrefixOp).?;
             const tok_type: TokenType = switch (node.tag) {
                 .Try, .Await, .Resume => .keyword,
                 else => .operator,
             };
-
-            switch (node.tag) {
-                .ArrayType => {
-                    const info = node.castTag(.ArrayType).?;
-                    try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, info.len_expr });
-                },
-                .SliceType, .PtrType => {
-                    const info = switch (node.tag) {
-                        .PtrType => node.castTag(.PtrType).?.ptr_info,
-                        .SliceType => node.castTag(.SliceType).?.ptr_info,
-                        else => return,
-                    };
-
-                    if (node.tag == .PtrType) try writeToken(builder, prefix_op.op_token, tok_type);
-
-                    if (info.align_info) |align_info| {
-                        if (node.tag == .PtrType) {
-                            try writeToken(builder, prefix_op.op_token + 1, .keyword);
-                        } else {
-                            try writeToken(builder, prefix_op.op_token + 2, .keyword);
-                        }
-                        try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, align_info.node });
-                    }
-                    try writeToken(builder, info.const_token, .keyword);
-                    try writeToken(builder, info.volatile_token, .keyword);
-                    try writeToken(builder, info.allowzero_token, .keyword);
-                },
-                else => try writeToken(builder, prefix_op.op_token, tok_type),
-            }
-
             try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, prefix_op.rhs });
         },
         else => {},
