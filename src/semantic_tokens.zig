@@ -23,6 +23,7 @@ const TokenType = enum(u32) {
     operator,
     builtin,
     label,
+    keywordLiteral,
 };
 
 const TokenModifiers = packed struct {
@@ -135,7 +136,17 @@ const GapHighlighter = struct {
         } else if (@enumToInt(tok_id) >= @enumToInt(std.zig.Token.Id.Keyword_align) and
             @enumToInt(tok_id) <= @enumToInt(std.zig.Token.Id.Keyword_while))
         {
-            try writeToken(self.builder, tok, .keyword);
+            const tok_type: TokenType = switch (tok_id) {
+                .Keyword_true,
+                .Keyword_false,
+                .Keyword_null,
+                .Keyword_undefined,
+                .Keyword_unreachable,
+                => .keywordLiteral,
+                else => .keyword,
+            };
+
+            try writeToken(self.builder, tok, tok_type);
         } else if (@enumToInt(tok_id) >= @enumToInt(std.zig.Token.Id.Bang) and
             @enumToInt(tok_id) <= @enumToInt(std.zig.Token.Id.Tilde) and
             tok_id != .Period and tok_id != .Comma and tok_id != .RParen and
@@ -614,7 +625,10 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
             const multi_line = node.cast(ast.Node.MultilineStringLiteral).?;
             for (multi_line.linesConst()) |line| try writeToken(builder, line, .string);
         },
-        .BoolLiteral, .NullLiteral, .UndefinedLiteral, .Unreachable, .ErrorType => {
+        .BoolLiteral, .NullLiteral, .UndefinedLiteral, .Unreachable => {
+            try writeToken(builder, node.firstToken(), .keywordLiteral);
+        },
+        .ErrorType => {
             try writeToken(builder, node.firstToken(), .keyword);
         },
         .Asm => {
@@ -715,16 +729,48 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
         },
         .PtrType => {
             const pointer_type = node.castTag(.PtrType).?;
-            try writeToken(builder, pointer_type.op_token, .operator);
-            const ptr_info = pointer_type.ptr_info;
+            const tok_ids = builder.handle.tree.token_ids;
+
+            const ptr_info = switch(tok_ids[pointer_type.op_token]) {
+                .AsteriskAsterisk => pointer_type.rhs.castTag(.PtrType).?.ptr_info,
+                else => pointer_type.ptr_info,
+            };
+            const rhs = switch(tok_ids[pointer_type.op_token]) {
+                .AsteriskAsterisk => pointer_type.rhs.castTag(.PtrType).?.rhs,
+                else => pointer_type.rhs,
+            };
+
+            const off = switch (tok_ids[pointer_type.op_token]) {
+                .Asterisk, .AsteriskAsterisk => blk: {
+                    try writeToken(builder, pointer_type.op_token, .operator);
+                    break :blk pointer_type.op_token + 1;
+                },
+                .LBracket => blk: {
+                    try writeToken(builder, pointer_type.op_token + 1, .operator);
+                    const is_c_ptr = tok_ids[pointer_type.op_token + 2] == .Identifier;
+
+                    if (is_c_ptr) {
+                        try writeToken(builder, pointer_type.op_token + 2, .operator);
+                    }
+
+                    if (ptr_info.sentinel) |sentinel| {
+                        try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, sentinel });
+                        break :blk sentinel.lastToken() + 2;
+                    }
+
+                    break :blk pointer_type.op_token + 3 + @boolToInt(is_c_ptr);
+                },
+                else => 0,
+            };
+
             if (ptr_info.align_info) |align_info| {
-                try writeToken(builder, pointer_type.op_token + 1, .keyword);
+                try writeToken(builder, off, .keyword);
                 try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, align_info.node });
             }
             try writeToken(builder, ptr_info.const_token, .keyword);
             try writeToken(builder, ptr_info.volatile_token, .keyword);
             try writeToken(builder, ptr_info.allowzero_token, .keyword);
-            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, pointer_type.rhs });
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, rhs });
         },
         .ArrayType => {
             const array_type = node.castTag(.ArrayType).?;
