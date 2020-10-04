@@ -31,6 +31,7 @@ zig build
 # To configure zls:
 zig build config
 ```
+The `zls` executable will be saved to `zls\zig-cache\bin`. 
 
 ### Build Options
 
