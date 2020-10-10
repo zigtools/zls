@@ -38,8 +38,6 @@ The `zls` executable will be saved to `zls\zig-cache\bin`.
 | Option | Type | Default Value | What it Does |
 | --- | --- | --- | --- |
 | `-Ddata_version` | `string` (master or 0.6.0) | 0.6.0 | The data file version. This selects the files in the `src/data` folder that correspond to the Zig version being served.|
-| `-Dallocation_info` | `bool` | `false` | Enable the use of the debug allocator that will print out information in debug mode and track memory leaks.|
-| `-Dmax_bytes_allocated` | `usize` | `0` | When `allocation_info` is true, enables a maximum allowed allocation size (excluding stacktraces) before the program panics.|
 
 Then, you can use the `zls` executable in an editor of your choice that has a Zig language server client!
 

@@ -3,7 +3,6 @@ const build_options = @import("build_options");
 
 const Config = @import("config.zig");
 const DocumentStore = @import("document_store.zig");
-const DebugAllocator = @import("debug_allocator.zig");
 const readRequestHeader = @import("header.zig").readRequestHeader;
 const data = @import("data/" ++ build_options.data_version ++ ".zig");
 const requests = @import("requests.zig");
@@ -27,6 +26,12 @@ pub fn log(
     comptime format: []const u8,
     args: anytype,
 ) void {
+    // After shutdown, pipe output to stderr
+    if (!keep_running) {
+        std.debug.print("[{}-{}] " ++ format, .{ @tagName(message_level), @tagName(scope) } ++ args);
+        return;
+    }
+
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
@@ -34,6 +39,7 @@ pub fn log(
         std.debug.print("Failed to allocPrint message.", .{});
         return;
     };
+
     if (@enumToInt(message_level) <= @enumToInt(std.log.Level.notice)) {
         const message_type: types.MessageType = switch (message_level) {
             .info => .Log,
@@ -1108,6 +1114,8 @@ fn initializeHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: 
 
 var keep_running = true;
 fn shutdownHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, config: Config) !void {
+    logger.notice("Server closing...", .{});
+
     keep_running = false;
     // Technically we should deinitialize first and send possible errors to the client
     try respondGeneric(id, null_result_response);
@@ -1495,28 +1503,10 @@ fn processJsonRpc(arena: *std.heap.ArenaAllocator, parser: *std.json.Parser, jso
     logger.debug("Method without return value not implemented: {}", .{method});
 }
 
-var debug_alloc_state: DebugAllocator = undefined;
-// We can now use if(leak_count_alloc) |alloc| { ... } as a comptime check.
-const debug_alloc: ?*DebugAllocator = if (build_options.allocation_info) &debug_alloc_state else null;
-
+var gpa_state = std.heap.GeneralPurposeAllocator(.{}){};
 pub fn main() anyerror!void {
-    // TODO: Use a better purpose general allocator once std has one.
-    // Probably after the generic composable allocators PR?
-    // This is not too bad for now since most allocations happen in local arenas.
-    allocator = std.heap.page_allocator;
-
-    if (build_options.allocation_info) {
-        // Initialize the leak counting allocator.
-        debug_alloc_state = DebugAllocator.init(allocator, build_options.max_bytes_allocated);
-        allocator = &debug_alloc_state.allocator;
-    }
-
-    defer if (debug_alloc) |dbg| {
-        std.debug.print("Finished cleanup, last allocation info.\n", .{});
-        std.debug.print("\n{}\n", .{dbg.info});
-        dbg.printRemainingStackTraces();
-        dbg.deinit();
-    };
+    defer _ = gpa_state.deinit();
+    allocator = &gpa_state.allocator;
 
     // Init global vars
     const reader = std.io.getStdIn().reader();
@@ -1653,9 +1643,5 @@ pub fn main() anyerror!void {
         json_parser.reset();
         arena.deinit();
         arena.state = .{};
-
-        if (debug_alloc) |dbg| {
-            logger.debug("\n{}\n", .{dbg.info});
-        }
     }
 }

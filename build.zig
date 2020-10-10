@@ -142,19 +142,6 @@ pub fn build(b: *std.build.Builder) !void {
         b.option([]const u8, "data_version", "The data version - either 0.6.0 or master.") orelse "0.6.0",
     );
 
-    exe.addBuildOption(
-        bool,
-        "allocation_info",
-        b.option(bool, "allocation_info", "Enable use of debugging allocator and info logging.") orelse false,
-    );
-
-    const max_bytes_str = b.option([]const u8, "max_bytes_allocated", "Maximum amount of bytes to allocate before we exit. Zero for unlimited allocations. Only takes effect when allocation_info=true") orelse "0";
-    exe.addBuildOption(
-        usize,
-        "max_bytes_allocated",
-        try std.fmt.parseInt(usize, max_bytes_str, 10),
-    );
-
     exe.addPackage(.{ .name = "known-folders", .path = "src/known-folders/known-folders.zig" });
 
     exe.setTarget(target);
