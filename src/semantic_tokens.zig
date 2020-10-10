@@ -10,6 +10,7 @@ const TokenType = enum(u32) {
     @"struct",
     @"enum",
     @"union",
+    @"opaque",
     parameter,
     variable,
     tagField,
@@ -195,6 +196,8 @@ fn colorIdentifierBasedOnType(builder: *Builder, type_node: analysis.TypeWithHan
             .@"enum"
         else if (type_node.isUnionType())
             .@"union"
+        else if (type_node.isOpaqueType())
+            .@"opaque"
         else
             TokenType.type;
 

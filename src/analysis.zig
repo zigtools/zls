@@ -914,6 +914,10 @@ pub const TypeWithHandle = struct {
         return self.isContainer(.Keyword_union);
     }
 
+    pub fn isOpaqueType(self: TypeWithHandle) bool {
+        return self.isContainer(.Keyword_opaque);
+    }
+
     pub fn isTypeFunc(self: TypeWithHandle) bool {
         switch (self.type.data) {
             .other => |n| {
