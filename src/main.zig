@@ -969,7 +969,7 @@ fn documentSymbol(arena: *std.heap.ArenaAllocator, id: types.RequestId, handle: 
 
 // Compute builtin completions at comptime.
 const builtin_completions = block: {
-    @setEvalBranchQuota(3_500);
+    @setEvalBranchQuota(10_000);
     const CompletionList = [data.builtins.len]types.CompletionItem;
     var with_snippets: CompletionList = undefined;
     var without_snippets: CompletionList = undefined;
