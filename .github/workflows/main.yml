@@ -23,7 +23,7 @@ jobs:
     - name: build
       run: |
         export PATH=./zig:$PATH
-        zig build -Dallocation_info
+        zig build
 
         FILE=zig-cache/bin/zls
 
