@@ -1,37 +1,32 @@
 let
-  pkgs = import <nixpkgs> {};
-  gitignoreSrc = pkgs.fetchFromGitHub { 
+  zig-overlay = import (builtins.fetchGit {
+    url = "https://github.com/arqv/zig-overlay.git";
+    rev = "a56601116906a2f192702e0b97487b8e7f796fdc";
+  });
+  pkgs = import <nixpkgs> { overlays = [ zig-overlay ]; };
+
+  gitignoreSrc = pkgs.fetchFromGitHub {
     owner = "hercules-ci";
     repo = "gitignore";
     rev = "c4662e662462e7bf3c2a968483478a665d00e717";
     sha256 = "1npnx0h6bd0d7ql93ka7azhj40zgjp815fw2r6smg8ch9p7mzdlx";
   };
   inherit (import gitignoreSrc { inherit (pkgs) lib; }) gitignoreSource;
-    
-  zig = pkgs.stdenvNoCC.mkDerivation rec {
-    name = "zig";
+
+  zig = pkgs.zig.custom {
+    sha256 = "7d715ea8948611734986d8a056fdec98d0f39b064e38efcd088823c02b1afba8";
     version = "0.6.0+91a1c20e7";
-    src = pkgs.fetchurl {
-      url = "https://ziglang.org/builds/zig-linux-x86_64-${version}.tar.xz";
-      sha256 = "7d715ea8948611734986d8a056fdec98d0f39b064e38efcd088823c02b1afba8";
-    };
-    dontConfigure = true;
-    dontBuild = true;
-    installPhase = ''
-      mkdir -p $out $out/bin $out/doc
-      mv lib/ $out/
-      mv zig $out/bin
-      mv langref.html $out/doc
-    '';
   };
 in
   pkgs.stdenvNoCC.mkDerivation {
     name = "zls";
     version = "master";
     src = gitignoreSource ./.;
-    nativeBuildInputs = [ zig ];
+    nativeBuildInputs = [
+      zig
+    ];
+
     dontConfigure = true;
-    
     buildPhase = ''
       zig build -Drelease-safe=true
     '';
