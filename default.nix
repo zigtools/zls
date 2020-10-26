@@ -1,8 +1,13 @@
 let
-  sources = import ./nix/sources.nix;
-  pkgs = import sources.nixpkgs {};
-  gitignore = import sources.gitignore {};
-  
+  pkgs = import <nixpkgs> {};
+  gitignoreSrc = pkgs.fetchFromGitHub { 
+    owner = "hercules-ci";
+    repo = "gitignore";
+    rev = "c4662e662462e7bf3c2a968483478a665d00e717";
+    sha256 = "1npnx0h6bd0d7ql93ka7azhj40zgjp815fw2r6smg8ch9p7mzdlx";
+  };
+  inherit (import gitignoreSrc { inherit (pkgs) lib; }) gitignoreSource;
+    
   zig = pkgs.stdenvNoCC.mkDerivation rec {
     name = "zig";
     version = "0.6.0+91a1c20e7";
@@ -23,7 +28,7 @@ in
   pkgs.stdenvNoCC.mkDerivation {
     name = "zls";
     version = "master";
-    src = gitignore.gitignoreSource ./.;
+    src = gitignoreSource ./.;
     nativeBuildInputs = [ zig ];
     dontConfigure = true;
     
