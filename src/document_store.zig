@@ -609,6 +609,7 @@ pub fn deinit(self: *DocumentStore) void {
             self.allocator.free(pkg.name);
             self.allocator.free(pkg.uri);
         }
+        build_file.packages.deinit(self.allocator);
         self.allocator.free(build_file.uri);
         self.allocator.destroy(build_file);
     }
