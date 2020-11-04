@@ -51,7 +51,7 @@ pub fn collectDocComments(
         switch (tree.token_ids[curr_line_tok]) {
             .LineComment => continue,
             .DocComment, .ContainerDocComment => {
-                try lines.append(std.fmt.trim(tree.tokenSlice(curr_line_tok)[3..]));
+                try lines.append(std.mem.trim(u8, tree.tokenSlice(curr_line_tok)[3..], &std.ascii.spaces));
             },
             else => break,
         }
