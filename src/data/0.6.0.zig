@@ -1,316 +1,1347 @@
-/// data from 0.6.0 documentation
-
-/// Builtin functions
-pub const builtins = [_][]const u8{
-    "@addWithOverflow(${1:comptime T: type}, ${2:a: T}, ${3:b: T}, ${4:result: *T})",
-    "@alignCast(${1:comptime alignment: u29}, ${2:ptr: var})",
-    "@alignOf(${1:comptime T: type})",
-    "@as(${1:comptime T: type}, ${2:expression})",
-    "@asyncCall(${1:frame_buffer: []align(@alignOf(@Frame(anyAsyncFunction))) u8}, ${2:result_ptr}, ${3:function_ptr}, ${4:args: ...})",
-    "@atomicLoad(${1:comptime T: type}, ${2:ptr: *const T}, ${3:comptime ordering: builtin.AtomicOrder})",
-    "@atomicRmw(${1:comptime T: type}, ${2:ptr: *T}, ${3:comptime op: builtin.AtomicRmwOp}, ${4:operand: T}, ${5:comptime ordering: builtin.AtomicOrder})",
-    "@atomicStore(${1:comptime T: type}, ${2:ptr: *T}, ${3:value: T}, ${4:comptime ordering: builtin.AtomicOrder})",
-    "@bitCast(${1:comptime DestType: type}, ${2:value: var})",
-    "@bitOffsetOf(${1:comptime T: type}, ${2:comptime field_name: []const u8})",
-    "@boolToInt(${1:value: bool})",
-    "@bitSizeOf(${1:comptime T: type})",
-    "@breakpoint()",
-    "@mulAdd(${1:comptime T: type}, ${2:a: T}, ${3:b: T}, ${4:c: T})",
-    "@byteSwap(${1:comptime T: type}, ${2:operand: T})",
-    "@bitReverse(${1:comptime T: type}, ${2:integer: T})",
-    "@byteOffsetOf(${1:comptime T: type}, ${2:comptime field_name: []const u8})",
-    "@call(${1:options: std.builtin.CallOptions}, ${2:function: var}, ${3:args: var})",
-    "@cDefine(${1:comptime name: []u8}, ${2:value})",
-    "@cImport(${1:expression})",
-    "@cInclude(${1:comptime path: []u8})",
-    "@clz(${1:comptime T: type}, ${2:integer: T})",
-    "@cmpxchgStrong(${1:comptime T: type}, ${2:ptr: *T}, ${3:expected_value: T}, ${4:new_value: T}, ${5:success_order: AtomicOrder}, ${6:fail_order: AtomicOrder})",
-    "@cmpxchgWeak(${1:comptime T: type}, ${2:ptr: *T}, ${3:expected_value: T}, ${4:new_value: T}, ${5:success_order: AtomicOrder}, ${6:fail_order: AtomicOrder})",
-    "@compileError(${1:comptime msg: []u8})",
-    "@compileLog(${1:args: ...})",
-    "@ctz(${1:comptime T: type}, ${2:integer: T})",
-    "@cUndef(${1:comptime name: []u8})",
-    "@divExact(${1:numerator: T}, ${2:denominator: T})",
-    "@divFloor(${1:numerator: T}, ${2:denominator: T})",
-    "@divTrunc(${1:numerator: T}, ${2:denominator: T})",
-    "@embedFile(${1:comptime path: []const u8})",
-    "@enumToInt(${1:enum_or_tagged_union: var})",
-    "@errorName(${1:err: anyerror})",
-    "@errorReturnTrace()",
-    "@errorToInt(${1:err: var) std.meta.IntType(false}, ${2:@sizeOf(anyerror})",
-    "@errSetCast(${1:comptime T: DestType}, ${2:value: var})",
-    "@export(${1:target: var}, ${2:comptime options: std.builtin.ExportOptions})",
-    "@fence(${1:order: AtomicOrder})",
-    "@field(${1:lhs: var}, ${2:comptime field_name: []const u8})",
-    "@fieldParentPtr(${1:comptime ParentType: type}, ${2:comptime field_name: []const u8}, ${3:\n    field_ptr: *T})",
-    "@floatCast(${1:comptime DestType: type}, ${2:value: var})",
-    "@floatToInt(${1:comptime DestType: type}, ${2:float: var})",
-    "@frame()",
-    "@Frame(${1:func: var})",
-    "@frameAddress()",
-    "@frameSize()",
-    "@hasDecl(${1:comptime Container: type}, ${2:comptime name: []const u8})",
-    "@hasField(${1:comptime Container: type}, ${2:comptime name: []const u8})",
-    "@import(${1:comptime path: []u8})",
-    "@intCast(${1:comptime DestType: type}, ${2:int: var})",
-    "@intToEnum(${1:comptime DestType: type}, ${2:int_value: @TagType(DestType)})",
-    "@intToError(${1:value: std.meta.IntType(false, @sizeOf(anyerror) * 8)})",
-    "@intToFloat(${1:comptime DestType: type}, ${2:int: var})",
-    "@intToPtr(${1:comptime DestType: type}, ${2:address: usize})",
-    "@memcpy(${1:noalias dest: [*]u8}, ${2:noalias source: [*]const u8}, ${3:byte_count: usize})",
-    "@memset(${1:dest: [*]u8}, ${2:c: u8}, ${3:byte_count: usize})",
-    "@mod(${1:numerator: T}, ${2:denominator: T})",
-    "@mulWithOverflow(${1:comptime T: type}, ${2:a: T}, ${3:b: T}, ${4:result: *T})",
-    "@OpaqueType()",
-    "@panic(${1:message: []const u8})",
-    "@popCount(${1:comptime T: type}, ${2:integer: T})",
-    "@ptrCast(${1:comptime DestType: type}, ${2:value: var})",
-    "@ptrToInt(${1:value: var})",
-    "@rem(${1:numerator: T}, ${2:denominator: T})",
-    "@returnAddress()",
-    "@setAlignStack(${1:comptime alignment: u29})",
-    "@setCold(${1:is_cold: bool})",
-    "@setEvalBranchQuota(${1:new_quota: usize})",
-    "@setFloatMode(${1:mode: @import(\"builtin\").FloatMode})",
-    "@setRuntimeSafety(${1:safety_on: bool})",
-    "@shlExact(${1:value: T}, ${2:shift_amt: Log2T})",
-    "@shlWithOverflow(${1:comptime T: type}, ${2:a: T}, ${3:shift_amt: Log2T}, ${4:result: *T})",
-    "@shrExact(${1:value: T}, ${2:shift_amt: Log2T})",
-    "@shuffle(${1:comptime E: type}, ${2:a: @Vector(a_len, E)}, ${3:b: @Vector(b_len, E)}, ${4:comptime mask: @Vector(mask_len, i32)})",
-    "@sizeOf(${1:comptime T: type})",
-    "@splat(${1:comptime len: u32}, ${2:scalar: var})",
-    "@sqrt(${1:value: var})",
-    "@sin(${1:value: var})",
-    "@cos(${1:value: var})",
-    "@exp(${1:value: var})",
-    "@exp2(${1:value: var})",
-    "@log(${1:value: var})",
-    "@log2(${1:value: var})",
-    "@log10(${1:value: var})",
-    "@fabs(${1:value: var})",
-    "@floor(${1:value: var})",
-    "@ceil(${1:value: var})",
-    "@trunc(${1:value: var})",
-    "@round(${1:value: var})",
-    "@subWithOverflow(${1:comptime T: type}, ${2:a: T}, ${3:b: T}, ${4:result: *T})",
-    "@tagName(${1:value: var})",
-    "@TagType(${1:T: type})",
-    "@This()",
-    "@truncate(${1:comptime T: type}, ${2:integer: var})",
-    "@Type(${1:comptime info: @import(\"builtin\").TypeInfo})",
-    "@typeInfo(${1:comptime T: type})",
-    "@typeName(${1:T: type})",
-    "@TypeOf(${1:...})",
-    "@unionInit(${1:comptime Union: type}, ${2:comptime active_field_name: []const u8}, ${3:init_expr})",
-    "@Vector(${1:comptime len: u32}, ${2:comptime ElemType: type})"
+const Builtin = struct {
+    name: []const u8,
+    signature: []const u8,
+    snippet: []const u8,
+    documentation: []const u8,
 };
 
-/// Builtin function details
-pub const builtin_details = [_][]const u8{
-    "@addWithOverflow(comptime T: type, a: T, b: T, result: *T) bool",
-    "@alignCast(comptime alignment: u29, ptr: var) var",
-    "@alignOf(comptime T: type) comptime_int",
-    "@as(comptime T: type, expression) T",
-    "@asyncCall(frame_buffer: []align(@alignOf(@Frame(anyAsyncFunction))) u8, result_ptr, function_ptr, args: ...) anyframe->T",
-    "@atomicLoad(comptime T: type, ptr: *const T, comptime ordering: builtin.AtomicOrder) T",
-    "@atomicRmw(comptime T: type, ptr: *T, comptime op: builtin.AtomicRmwOp, operand: T, comptime ordering: builtin.AtomicOrder) T",
-    "@atomicStore(comptime T: type, ptr: *T, value: T, comptime ordering: builtin.AtomicOrder) void",
-    "@bitCast(comptime DestType: type, value: var) DestType",
-    "@bitOffsetOf(comptime T: type, comptime field_name: []const u8) comptime_int",
-    "@boolToInt(value: bool) u1",
-    "@bitSizeOf(comptime T: type) comptime_int",
-    "@breakpoint()",
-    "@mulAdd(comptime T: type, a: T, b: T, c: T) T",
-    "@byteSwap(comptime T: type, operand: T) T",
-    "@bitReverse(comptime T: type, integer: T) T",
-    "@byteOffsetOf(comptime T: type, comptime field_name: []const u8) comptime_int",
-    "@call(options: std.builtin.CallOptions, function: var, args: var) var",
-    "@cDefine(comptime name: []u8, value)",
-    "@cImport(expression) type",
-    "@cInclude(comptime path: []u8)",
-    "@clz(comptime T: type, integer: T)",
-    "@cmpxchgStrong(comptime T: type, ptr: *T, expected_value: T, new_value: T, success_order: AtomicOrder, fail_order: AtomicOrder) ?T",
-    "@cmpxchgWeak(comptime T: type, ptr: *T, expected_value: T, new_value: T, success_order: AtomicOrder, fail_order: AtomicOrder) ?T",
-    "@compileError(comptime msg: []u8)",
-    "@compileLog(args: ...)",
-    "@ctz(comptime T: type, integer: T)",
-    "@cUndef(comptime name: []u8)",
-    "@divExact(numerator: T, denominator: T) T",
-    "@divFloor(numerator: T, denominator: T) T",
-    "@divTrunc(numerator: T, denominator: T) T",
-    "@embedFile(comptime path: []const u8) *const [X:0]u8",
-    "@enumToInt(enum_or_tagged_union: var) var",
-    "@errorName(err: anyerror) []const u8",
-    "@errorReturnTrace() ?*builtin.StackTrace",
-    "@errorToInt(err: var) std.meta.IntType(false, @sizeOf(anyerror) * 8)",
-    "@errSetCast(comptime T: DestType, value: var) DestType",
-    "@export(target: var, comptime options: std.builtin.ExportOptions) void",
-    "@fence(order: AtomicOrder)",
-    "@field(lhs: var, comptime field_name: []const u8) (field)",
-    "@fieldParentPtr(comptime ParentType: type, comptime field_name: []const u8,\n    field_ptr: *T) *ParentType",
-    "@floatCast(comptime DestType: type, value: var) DestType",
-    "@floatToInt(comptime DestType: type, float: var) DestType",
-    "@frame() *@Frame(func)",
-    "@Frame(func: var) type",
-    "@frameAddress() usize",
-    "@frameSize() usize",
-    "@hasDecl(comptime Container: type, comptime name: []const u8) bool",
-    "@hasField(comptime Container: type, comptime name: []const u8) bool",
-    "@import(comptime path: []u8) type",
-    "@intCast(comptime DestType: type, int: var) DestType",
-    "@intToEnum(comptime DestType: type, int_value: @TagType(DestType)) DestType",
-    "@intToError(value: std.meta.IntType(false, @sizeOf(anyerror) * 8)) anyerror",
-    "@intToFloat(comptime DestType: type, int: var) DestType",
-    "@intToPtr(comptime DestType: type, address: usize) DestType",
-    "@memcpy(noalias dest: [*]u8, noalias source: [*]const u8, byte_count: usize)",
-    "@memset(dest: [*]u8, c: u8, byte_count: usize)",
-    "@mod(numerator: T, denominator: T) T",
-    "@mulWithOverflow(comptime T: type, a: T, b: T, result: *T) bool",
-    "@OpaqueType() type",
-    "@panic(message: []const u8) noreturn",
-    "@popCount(comptime T: type, integer: T)",
-    "@ptrCast(comptime DestType: type, value: var) DestType",
-    "@ptrToInt(value: var) usize",
-    "@rem(numerator: T, denominator: T) T",
-    "@returnAddress() usize",
-    "@setAlignStack(comptime alignment: u29)",
-    "@setCold(is_cold: bool)",
-    "@setEvalBranchQuota(new_quota: usize)",
-    "@setFloatMode(mode: @import(\"builtin\").FloatMode)",
-    "@setRuntimeSafety(safety_on: bool)",
-    "@shlExact(value: T, shift_amt: Log2T) T",
-    "@shlWithOverflow(comptime T: type, a: T, shift_amt: Log2T, result: *T) bool",
-    "@shrExact(value: T, shift_amt: Log2T) T",
-    "@shuffle(comptime E: type, a: @Vector(a_len, E), b: @Vector(b_len, E), comptime mask: @Vector(mask_len, i32)) @Vector(mask_len, E)",
-    "@sizeOf(comptime T: type) comptime_int",
-    "@splat(comptime len: u32, scalar: var) @Vector(len, @TypeOf(scalar))",
-    "@sqrt(value: var) @TypeOf(value)",
-    "@sin(value: var) @TypeOf(value)",
-    "@cos(value: var) @TypeOf(value)",
-    "@exp(value: var) @TypeOf(value)",
-    "@exp2(value: var) @TypeOf(value)",
-    "@log(value: var) @TypeOf(value)",
-    "@log2(value: var) @TypeOf(value)",
-    "@log10(value: var) @TypeOf(value)",
-    "@fabs(value: var) @TypeOf(value)",
-    "@floor(value: var) @TypeOf(value)",
-    "@ceil(value: var) @TypeOf(value)",
-    "@trunc(value: var) @TypeOf(value)",
-    "@round(value: var) @TypeOf(value)",
-    "@subWithOverflow(comptime T: type, a: T, b: T, result: *T) bool",
-    "@tagName(value: var) []const u8",
-    "@TagType(T: type) type",
-    "@This() type",
-    "@truncate(comptime T: type, integer: var) T",
-    "@Type(comptime info: @import(\"builtin\").TypeInfo) type",
-    "@typeInfo(comptime T: type) @import(\"std\").builtin.TypeInfo",
-    "@typeName(T: type) [N]u8",
-    "@TypeOf(...) type",
-    "@unionInit(comptime Union: type, comptime active_field_name: []const u8, init_expr) Union",
-    "@Vector(comptime len: u32, comptime ElemType: type) type"
-};
-
-/// Builtin function docs
-pub const builtin_docs = [_][]const u8{
-    "Performs result.* = a + b. If overflow or underflow occurs, stores the overflowed bits in result and returns true. If no overflow or underflow occurs, returns false.",
-    "ptr can be *T, fn(), ?*T, ?fn(), or []T. It returns the same type as ptr except with the alignment adjusted to the new value.",
-    "This function returns the number of bytes that this type should be aligned to for the current target to match the C ABI. When the child type of a pointer has this alignment, the alignment can be omitted from the type.",
-    "Performs Type Coercion. This cast is allowed when the conversion is unambiguous and safe, and is the preferred way to convert between types, whenever possible.",
-    "@asyncCall performs an async call on a function pointer, which may or may not be an async function.",
-    "This builtin function atomically dereferences a pointer and returns the value.",
-    "This builtin function atomically modifies memory and then returns the previous value.",
-    "This builtin function atomically stores a value.",
-    "Converts a value of one type to another type.",
-    "Returns the bit offset of a field relative to its containing struct.",
-    "Converts true to u1(1) and false to u1(0).",
-    "This function returns the number of bits it takes to store T in memory. The result is a target-specific compile time constant.",
-    "This function inserts a platform-specific debug trap instruction which causes debuggers to break there.",
-    "Fused multiply add, similar to (a * b) + c, except only rounds once, and is thus more accurate.",
-    "T must be an integer type with bit count evenly divisible by 8.",
-    "T accepts any integer type.",
-    "Returns the byte offset of a field relative to its containing struct.",
-    "Calls a function, in the same way that invoking an expression with parentheses does:",
-    "This function can only occur inside @cImport.",
-    "This function parses C code and imports the functions, types, variables, and compatible macro definitions into a new empty struct type, and then returns that type.",
-    "This function can only occur inside @cImport.",
-    "This function counts the number of most-significant (leading in a big-Endian sense) zeroes in integer.",
-    "This function performs a strong atomic compare exchange operation. It's the equivalent of this code, except atomic:",
-    "This function performs a weak atomic compare exchange operation. It's the equivalent of this code, except atomic:",
-    "This function, when semantically analyzed, causes a compile error with the message msg.",
-    "This function prints the arguments passed to it at compile-time.",
-    "This function counts the number of least-significant (trailing in a big-Endian sense) zeroes in integer.",
-    "This function can only occur inside @cImport.",
-    "Exact division. Caller guarantees denominator != 0 and @divTrunc(numerator, denominator) * denominator == numerator.",
-    "Floored division. Rounds toward negative infinity. For unsigned integers it is the same as numerator / denominator. Caller guarantees denominator != 0 and !(@typeInfo(T) == .Int and T.is_signed and numerator == std.math.minInt(T) and denominator == -1).",
-    "Truncated division. Rounds toward zero. For unsigned integers it is the same as numerator / denominator. Caller guarantees denominator != 0 and !(@typeInfo(T) == .Int and T.is_signed and numerator == std.math.minInt(T) and denominator == -1).",
-    "This function returns a compile time constant pointer to null-terminated, fixed-size array with length equal to the byte count of the file given by path. The contents of the array are the contents of the file. This is equivalent to a string literal with the file contents.",
-    "Converts an enumeration value into its integer tag type. When a tagged union is passed, the tag value is used as the enumeration value.",
-    "This function returns the string representation of an error. The string representation of error.OutOfMem is \"OutOfMem\".",
-    "If the binary is built with error return tracing, and this function is invoked in a function that calls a function with an error or error union return type, returns a stack trace object. Otherwise returns `null`.",
-    "Supports the following types:",
-    "Converts an error value from one error set to another error set. Attempting to convert an error which is not in the destination error set results in safety-protected Undefined Behavior.",
-    "Creates a symbol in the output object file.",
-    "The fence function is used to introduce happens-before edges between operations.",
-    "Performs field access by a compile-time string.",
-    "Given a pointer to a field, returns the base pointer of a struct.",
-    "Convert from one float type to another. This cast is safe, but may cause the numeric value to lose precision.",
-    "Converts the integer part of a floating point number to the destination type.",
-    "This function returns a pointer to the frame for a given function. This type can be coerced to anyframe->T and to anyframe, where T is the return type of the function in scope.",
-    "This function returns the frame type of a function. This works for Async Functions as well as any function without a specific calling convention.",
-    "This function returns the base pointer of the current stack frame.",
-    "This is the same as @sizeOf(@Frame(func)), where func may be runtime-known.",
-    "Returns whether or not a struct, enum, or union has a declaration matching name.",
-    "Returns whether the field name of a struct, union, or enum exists.",
-    "This function finds a zig file corresponding to path and adds it to the build, if it is not already added.",
-    "Converts an integer to another integer while keeping the same numerical value. Attempting to convert a number which is out of range of the destination type results in safety-protected Undefined Behavior.",
-    "Converts an integer into an enum value.",
-    "Converts from the integer representation of an error into The Global Error Set type.",
-    "Converts an integer to the closest floating point representation. To convert the other way, use @floatToInt. This cast is always safe.",
-    "Converts an integer to a pointer. To convert the other way, use @ptrToInt.",
-    "This function copies bytes from one region of memory to another. dest and source are both pointers and must not overlap.",
-    "This function sets a region of memory to c. dest is a pointer.",
-    "Modulus division. For unsigned integers this is the same as numerator % denominator. Caller guarantees denominator > 0.",
-    "Performs result.* = a * b. If overflow or underflow occurs, stores the overflowed bits in result and returns true. If no overflow or underflow occurs, returns false.",
-    "Creates a new type with an unknown (but non-zero) size and alignment.",
-    "Invokes the panic handler function. By default the panic handler function calls the public panic function exposed in the root source file, or if there is not one specified, the std.builtin.default_panic function from std/builtin.zig.",
-    "Counts the number of bits set in an integer.",
-    "Converts a pointer of one type to a pointer of another type.",
-    "Converts value to a usize which is the address of the pointer. value can be one of these types:",
-    "Remainder division. For unsigned integers this is the same as numerator % denominator. Caller guarantees denominator > 0.",
-    "This function returns the address of the next machine code instruction that will be executed when the current function returns.",
-    "Ensures that a function will have a stack alignment of at least alignment bytes.",
-    "Tells the optimizer that a function is rarely called.",
-    "Changes the maximum number of backwards branches that compile-time code execution can use before giving up and making a compile error.",
-    "Sets the floating point mode of the current scope. Possible values are:",
-    "Sets whether runtime safety checks are enabled for the scope that contains the function call.",
-    "Performs the left shift operation (<<). Caller guarantees that the shift will not shift any 1 bits out.",
-    "Performs result.* = a << b. If overflow or underflow occurs, stores the overflowed bits in result and returns true. If no overflow or underflow occurs, returns false.",
-    "Performs the right shift operation (>>). Caller guarantees that the shift will not shift any 1 bits out.",
-    "Constructs a new vector by selecting elements from a and b based on mask.",
-    "This function returns the number of bytes it takes to store T in memory. The result is a target-specific compile time constant.",
-    "Produces a vector of length len where each element is the value scalar:",
-    "Performs the square root of a floating point number. Uses a dedicated hardware instruction when available.",
-    "Sine trigometric function on a floating point number. Uses a dedicated hardware instruction when available.",
-    "Cosine trigometric function on a floating point number. Uses a dedicated hardware instruction when available.",
-    "Base-e exponential function on a floating point number. Uses a dedicated hardware instruction when available.",
-    "Base-2 exponential function on a floating point number. Uses a dedicated hardware instruction when available.",
-    "Returns the natural logarithm of a floating point number. Uses a dedicated hardware instruction when available.",
-    "Returns the logarithm to the base 2 of a floating point number. Uses a dedicated hardware instruction when available.",
-    "Returns the logarithm to the base 10 of a floating point number. Uses a dedicated hardware instruction when available.",
-    "Returns the absolute value of a floating point number. Uses a dedicated hardware instruction when available.",
-    "Returns the largest integral value not greater than the given floating point number. Uses a dedicated hardware instruction when available.",
-    "Returns the largest integral value not less than the given floating point number. Uses a dedicated hardware instruction when available.",
-    "Rounds the given floating point number to an integer, towards zero. Uses a dedicated hardware instruction when available.",
-    "Rounds the given floating point number to an integer, away from zero. Uses a dedicated hardware instruction when available.",
-    "Performs result.* = a - b. If overflow or underflow occurs, stores the overflowed bits in result and returns true. If no overflow or underflow occurs, returns false.",
-    "Converts an enum value or union value to a slice of bytes representing the name.",
-    "For an enum, returns the integer type that is used to store the enumeration value.",
-    "Returns the innermost struct or union that this function call is inside. This can be useful for an anonymous struct that needs to refer to itself:",
-    "This function truncates bits from an integer type, resulting in a smaller or same-sized integer type.",
-    "This function is the inverse of @typeInfo. It reifies type information into a type.",
-    "Provides type reflection.",
-    "This function returns the string representation of a type, as an array. It is equivalent to a string literal of the type name.",
-    "@TypeOf is a special builtin function that takes any (nonzero) number of expressions as parameters and returns the type of the result, using Peer Type Resolution.",
-    "This is the same thing as union initialization syntax, except that the field name is a comptime-known value rather than an identifier token.",
-    "This function returns a vector type for SIMD."
+pub const builtins = [_]Builtin{
+    .{
+        .name = "@addWithOverflow",
+        .signature = "@addWithOverflow(comptime T: type, a: T, b: T, result: *T) bool",
+        .snippet = "@addWithOverflow(${1:comptime T: type}, ${2:a: T}, ${3:b: T}, ${4:result: *T})",
+        .documentation =
+        \\ Performs result.* = a + b. If overflow or underflow occurs, stores the overflowed bits in result and returns true. If no overflow or underflow occurs, returns false. 
+    },
+    .{
+        .name = "@alignCast",
+        .signature = "@alignCast(comptime alignment: u29, ptr: var) var",
+        .snippet = "@alignCast(${1:comptime alignment: u29}, ${2:ptr: var})",
+        .documentation =
+        \\ ptr can be *T, fn(), ?*T, ?fn(), or []T. It returns the same type as ptr except with the alignment adjusted to the new value. 
+        \\A pointer alignment safety check is added to the generated code to make sure the pointer is aligned as promised.
+    },
+    .{
+        .name = "@alignOf",
+        .signature = "@alignOf(comptime T: type) comptime_int",
+        .snippet = "@alignOf(${1:comptime T: type})",
+        .documentation =
+        \\ This function returns the number of bytes that this type should be aligned to for the current target to match the C ABI. When the child type of a pointer has this alignment, the alignment can be omitted from the type. 
+        \\```zig
+        \\const assert = @import("std").debug.assert;
+        \\comptime {
+        \\    assert(*u32 == *align(@alignOf(u32)) u32);
+        \\}
+        \\```
+        \\ The result is a target-specific compile time constant. It is guaranteed to be less than or equal to @sizeOf(T). 
+    },
+    .{
+        .name = "@as",
+        .signature = "@as(comptime T: type, expression) T",
+        .snippet = "@as(${1:comptime T: type}, ${2:expression})",
+        .documentation =
+        \\ Performs Type Coercion. This cast is allowed when the conversion is unambiguous and safe, and is the preferred way to convert between types, whenever possible. 
+    },
+    .{
+        .name = "@asyncCall",
+        .signature = "@asyncCall(frame_buffer: []align(@alignOf(@Frame(anyAsyncFunction))) u8, result_ptr, function_ptr, args: ...) anyframe->T",
+        .snippet = "@asyncCall(${1:frame_buffer: []align(@alignOf(@Frame(anyAsyncFunction))) u8}, ${2:result_ptr}, ${3:function_ptr}, ${4:args: ...})",
+        .documentation =
+        \\ @asyncCall performs an async call on a function pointer, which may or may not be an async function. 
+        \\ The provided frame_buffer must be large enough to fit the entire function frame. This size can be determined with @frameSize. To provide a too-small buffer invokes safety-checked Undefined Behavior. 
+        \\ result_ptr is optional (null may be provided). If provided, the function call will write its result directly to the result pointer, which will be available to read after await completes. Any result location provided to await will copy the result from result_ptr. 
+        \\test.zig
+        \\```zig
+        \\const std = @import("std");
+        \\const assert = std.debug.assert;
+        \\
+        \\test "async fn pointer in a struct field" {
+        \\    var data: i32 = 1;
+        \\    const Foo = struct {
+        \\        bar: async fn (*i32) void,
+        \\    };
+        \\    var foo = Foo{ .bar = func };
+        \\    var bytes: [64]u8 align(@alignOf(@Frame(func))) = undefined;
+        \\    const f = @asyncCall(&bytes, {}, foo.bar, &data);
+        \\    assert(data == 2);
+        \\    resume f;
+        \\    assert(data == 4);
+        \\}
+        \\
+        \\async fn func(y: *i32) void {
+        \\    defer y.* += 2;
+        \\    y.* += 1;
+        \\    suspend;
+        \\}
+        \\```
+        \\```zig
+        \\$ zig test test.zig
+        \\1/1 test "async fn pointer in a struct field"...OK
+        \\All 1 tests passed.
+        \\
+        \\```
+    },
+    .{
+        .name = "@atomicLoad",
+        .signature = "@atomicLoad(comptime T: type, ptr: *const T, comptime ordering: builtin.AtomicOrder) T",
+        .snippet = "@atomicLoad(${1:comptime T: type}, ${2:ptr: *const T}, ${3:comptime ordering: builtin.AtomicOrder})",
+        .documentation =
+        \\ This builtin function atomically dereferences a pointer and returns the value. 
+        \\ T must be a bool, a float, an integer or an enum. 
+    },
+    .{
+        .name = "@atomicRmw",
+        .signature = "@atomicRmw(comptime T: type, ptr: *T, comptime op: builtin.AtomicRmwOp, operand: T, comptime ordering: builtin.AtomicOrder) T",
+        .snippet = "@atomicRmw(${1:comptime T: type}, ${2:ptr: *T}, ${3:comptime op: builtin.AtomicRmwOp}, ${4:operand: T}, ${5:comptime ordering: builtin.AtomicOrder})",
+        .documentation =
+        \\ This builtin function atomically modifies memory and then returns the previous value. 
+        \\ T must be a bool, a float, an integer or an enum. 
+        \\ Supported operations: 
+    },
+    .{
+        .name = "@atomicStore",
+        .signature = "@atomicStore(comptime T: type, ptr: *T, value: T, comptime ordering: builtin.AtomicOrder) void",
+        .snippet = "@atomicStore(${1:comptime T: type}, ${2:ptr: *T}, ${3:value: T}, ${4:comptime ordering: builtin.AtomicOrder})",
+        .documentation =
+        \\ This builtin function atomically stores a value. 
+        \\ T must be a bool, a float, an integer or an enum. 
+    },
+    .{
+        .name = "@bitCast",
+        .signature = "@bitCast(comptime DestType: type, value: var) DestType",
+        .snippet = "@bitCast(${1:comptime DestType: type}, ${2:value: var})",
+        .documentation =
+        \\ Converts a value of one type to another type. 
+        \\ Asserts that @sizeOf(@TypeOf(value)) == @sizeOf(DestType). 
+        \\ Asserts that @typeInfo(DestType) != .Pointer. Use @ptrCast or @intToPtr if you need this. 
+        \\ Can be used for these things for example: 
+    },
+    .{
+        .name = "@bitOffsetOf",
+        .signature = "@bitOffsetOf(comptime T: type, comptime field_name: []const u8) comptime_int",
+        .snippet = "@bitOffsetOf(${1:comptime T: type}, ${2:comptime field_name: []const u8})",
+        .documentation =
+        \\ Returns the bit offset of a field relative to its containing struct. 
+        \\ For non packed structs, this will always be divisible by 8. For packed structs, non-byte-aligned fields will share a byte offset, but they will have different bit offsets. 
+    },
+    .{
+        .name = "@boolToInt",
+        .signature = "@boolToInt(value: bool) u1",
+        .snippet = "@boolToInt(${1:value: bool})",
+        .documentation =
+        \\ Converts true to u1(1) and false to u1(0). 
+        \\ If the value is known at compile-time, the return type is comptime_int instead of u1. 
+    },
+    .{
+        .name = "@bitSizeOf",
+        .signature = "@bitSizeOf(comptime T: type) comptime_int",
+        .snippet = "@bitSizeOf(${1:comptime T: type})",
+        .documentation =
+        \\ This function returns the number of bits it takes to store T in memory. The result is a target-specific compile time constant. 
+        \\ This function measures the size at runtime. For types that are disallowed at runtime, such as comptime_int and type, the result is 0. 
+    },
+    .{
+        .name = "@breakpoint",
+        .signature = "@breakpoint()",
+        .snippet = "@breakpoint()",
+        .documentation =
+        \\ This function inserts a platform-specific debug trap instruction which causes debuggers to break there. 
+        \\ This function is only valid within function scope. 
+    },
+    .{
+        .name = "@mulAdd",
+        .signature = "@mulAdd(comptime T: type, a: T, b: T, c: T) T",
+        .snippet = "@mulAdd(${1:comptime T: type}, ${2:a: T}, ${3:b: T}, ${4:c: T})",
+        .documentation =
+        \\ Fused multiply add, similar to (a * b) + c, except only rounds once, and is thus more accurate. 
+        \\ Supports Floats and Vectors of floats. 
+    },
+    .{
+        .name = "@byteSwap",
+        .signature = "@byteSwap(comptime T: type, operand: T) T",
+        .snippet = "@byteSwap(${1:comptime T: type}, ${2:operand: T})",
+        .documentation =
+        \\T must be an integer type with bit count evenly divisible by 8.
+        \\operand may be an integer or vector.
+        \\ Swaps the byte order of the integer. This converts a big endian integer to a little endian integer, and converts a little endian integer to a big endian integer. 
+        \\ Note that for the purposes of memory layout with respect to endianness, the integer type should be related to the number of bytes reported by @sizeOf bytes. This is demonstrated with u24. @sizeOf(u24) == 4, which means that a u24 stored in memory takes 4 bytes, and those 4 bytes are what are swapped on a little vs big endian system. On the other hand, if T is specified to be u24, then only 3 bytes are reversed. 
+    },
+    .{
+        .name = "@bitReverse",
+        .signature = "@bitReverse(comptime T: type, integer: T) T",
+        .snippet = "@bitReverse(${1:comptime T: type}, ${2:integer: T})",
+        .documentation =
+        \\T accepts any integer type.
+        \\ Reverses the bitpattern of an integer value, including the sign bit if applicable. 
+        \\ For example 0b10110110 (u8 = 182, i8 = -74) becomes 0b01101101 (u8 = 109, i8 = 109). 
+    },
+    .{
+        .name = "@byteOffsetOf",
+        .signature = "@byteOffsetOf(comptime T: type, comptime field_name: []const u8) comptime_int",
+        .snippet = "@byteOffsetOf(${1:comptime T: type}, ${2:comptime field_name: []const u8})",
+        .documentation =
+        \\ Returns the byte offset of a field relative to its containing struct. 
+    },
+    .{
+        .name = "@call",
+        .signature = "@call(options: std.builtin.CallOptions, function: var, args: var) var",
+        .snippet = "@call(${1:options: std.builtin.CallOptions}, ${2:function: var}, ${3:args: var})",
+        .documentation =
+        \\ Calls a function, in the same way that invoking an expression with parentheses does: 
+        \\call.zig
+        \\```zig
+        \\const assert = @import("std").debug.assert;
+        \\
+        \\test "noinline function call" {
+        \\    assert(@call(.{}, add, .{3, 9}) == 12);
+        \\}
+        \\
+        \\fn add(a: i32, b: i32) i32 {
+        \\    return a + b;
+        \\}
+        \\```
+        \\```zig
+        \\$ zig test call.zig
+        \\1/1 test "noinline function call"...OK
+        \\All 1 tests passed.
+        \\
+        \\```
+        \\ @call allows more flexibility than normal function call syntax does. The CallOptions struct is reproduced here: 
+        \\```zig
+        \\pub const CallOptions = struct {
+        \\    modifier: Modifier = .auto,
+        \\    stack: ?[]align(std.Target.stack_align) u8 = null,
+        \\
+        \\    pub const Modifier = enum {
+        \\        /// Equivalent to function call syntax.
+        \\        auto,
+        \\
+        \\        /// Equivalent to async keyword used with function call syntax.
+        \\        async_kw,
+        \\
+        \\        /// Prevents tail call optimization. This guarantees that the return
+        \\        /// address will point to the callsite, as opposed to the callsite's
+        \\        /// callsite. If the call is otherwise required to be tail-called
+        \\        /// or inlined, a compile error is emitted instead.
+        \\        never_tail,
+        \\
+        \\        /// Guarantees that the call will not be inlined. If the call is
+        \\        /// otherwise required to be inlined, a compile error is emitted instead.
+        \\        never_inline,
+        \\
+        \\        /// Asserts that the function call will not suspend. This allows a
+        \\        /// non-async function to call an async function.
+        \\        no_async,
+        \\
+        \\        /// Guarantees that the call will be generated with tail call optimization.
+        \\        /// If this is not possible, a compile error is emitted instead.
+        \\        always_tail,
+        \\
+        \\        /// Guarantees that the call will inlined at the callsite.
+        \\        /// If this is not possible, a compile error is emitted instead.
+        \\        always_inline,
+        \\
+        \\        /// Evaluates the call at compile-time. If the call cannot be completed at
+        \\        /// compile-time, a compile error is emitted instead.
+        \\        compile_time,
+        \\    };
+        \\};
+        \\```
+    },
+    .{
+        .name = "@cDefine",
+        .signature = "@cDefine(comptime name: []u8, value)",
+        .snippet = "@cDefine(${1:comptime name: []u8}, ${2:value})",
+        .documentation =
+        \\ This function can only occur inside @cImport. 
+        \\ This appends #define $name $value to the @cImport temporary buffer. 
+        \\ To define without a value, like this: 
+        \\```zig
+        \\#define _GNU_SOURCE
+        \\```
+        \\ Use the void value, like this: 
+        \\```zig
+        \\@cDefine("_GNU_SOURCE", {})
+        \\```
+    },
+    .{
+        .name = "@cImport",
+        .signature = "@cImport(expression) type",
+        .snippet = "@cImport(${1:expression})",
+        .documentation =
+        \\ This function parses C code and imports the functions, types, variables, and compatible macro definitions into a new empty struct type, and then returns that type. 
+        \\ expression is interpreted at compile time. The builtin functions @cInclude, @cDefine, and @cUndef work within this expression, appending to a temporary buffer which is then parsed as C code. 
+        \\ Usually you should only have one @cImport in your entire application, because it saves the compiler from invoking clang multiple times, and prevents inline functions from being duplicated. 
+        \\ Reasons for having multiple @cImport expressions would be: 
+    },
+    .{
+        .name = "@cInclude",
+        .signature = "@cInclude(comptime path: []u8)",
+        .snippet = "@cInclude(${1:comptime path: []u8})",
+        .documentation =
+        \\ This function can only occur inside @cImport. 
+        \\ This appends #include <$path>\n to the c_import temporary buffer. 
+    },
+    .{
+        .name = "@clz",
+        .signature = "@clz(comptime T: type, integer: T)",
+        .snippet = "@clz(${1:comptime T: type}, ${2:integer: T})",
+        .documentation =
+        \\ This function counts the number of most-significant (leading in a big-Endian sense) zeroes in integer. 
+        \\ If integer is known at comptime, the return type is comptime_int. Otherwise, the return type is an unsigned integer with the minimum number of bits that can represent the bit count of the integer type. 
+        \\ If integer is zero, @clz returns the bit width of integer type T. 
+    },
+    .{
+        .name = "@cmpxchgStrong",
+        .signature = "@cmpxchgStrong(comptime T: type, ptr: *T, expected_value: T, new_value: T, success_order: AtomicOrder, fail_order: AtomicOrder) ?T",
+        .snippet = "@cmpxchgStrong(${1:comptime T: type}, ${2:ptr: *T}, ${3:expected_value: T}, ${4:new_value: T}, ${5:success_order: AtomicOrder}, ${6:fail_order: AtomicOrder})",
+        .documentation =
+        \\ This function performs a strong atomic compare exchange operation. It's the equivalent of this code, except atomic: 
+        \\```zig
+        \\fn cmpxchgStrongButNotAtomic(comptime T: type, ptr: *T, expected_value: T, new_value: T) ?T {
+        \\    const old_value = ptr.*;
+        \\    if (old_value == expected_value) {
+        \\        ptr.* = new_value;
+        \\        return null;
+        \\    } else {
+        \\        return old_value;
+        \\    }
+        \\}
+        \\```
+        \\ If you are using cmpxchg in a loop, @cmpxchgWeak is the better choice, because it can be implemented more efficiently in machine instructions. 
+        \\ T must be a bool, a float, an integer or an enum. 
+        \\@TypeOf(ptr).alignment must be >= @sizeOf(T).
+    },
+    .{
+        .name = "@cmpxchgWeak",
+        .signature = "@cmpxchgWeak(comptime T: type, ptr: *T, expected_value: T, new_value: T, success_order: AtomicOrder, fail_order: AtomicOrder) ?T",
+        .snippet = "@cmpxchgWeak(${1:comptime T: type}, ${2:ptr: *T}, ${3:expected_value: T}, ${4:new_value: T}, ${5:success_order: AtomicOrder}, ${6:fail_order: AtomicOrder})",
+        .documentation =
+        \\ This function performs a weak atomic compare exchange operation. It's the equivalent of this code, except atomic: 
+        \\```zig
+        \\fn cmpxchgWeakButNotAtomic(comptime T: type, ptr: *T, expected_value: T, new_value: T) ?T {
+        \\    const old_value = ptr.*;
+        \\    if (old_value == expected_value and usuallyTrueButSometimesFalse()) {
+        \\        ptr.* = new_value;
+        \\        return null;
+        \\    } else {
+        \\        return old_value;
+        \\    }
+        \\}
+        \\```
+        \\ If you are using cmpxchg in a loop, the sporadic failure will be no problem, and cmpxchgWeak is the better choice, because it can be implemented more efficiently in machine instructions. However if you need a stronger guarantee, use @cmpxchgStrong. 
+        \\ T must be a bool, a float, an integer or an enum. 
+        \\@TypeOf(ptr).alignment must be >= @sizeOf(T).
+    },
+    .{
+        .name = "@compileError",
+        .signature = "@compileError(comptime msg: []u8)",
+        .snippet = "@compileError(${1:comptime msg: []u8})",
+        .documentation =
+        \\ This function, when semantically analyzed, causes a compile error with the message msg. 
+        \\ There are several ways that code avoids being semantically checked, such as using if or switch with compile time constants, and comptime functions. 
+    },
+    .{
+        .name = "@compileLog",
+        .signature = "@compileLog(args: ...)",
+        .snippet = "@compileLog(${1:args: ...})",
+        .documentation =
+        \\ This function prints the arguments passed to it at compile-time. 
+        \\ To prevent accidentally leaving compile log statements in a codebase, a compilation error is added to the build, pointing to the compile log statement. This error prevents code from being generated, but does not otherwise interfere with analysis. 
+        \\ This function can be used to do "printf debugging" on compile-time executing code. 
+        \\test.zig
+        \\```zig
+        \\const warn = @import("std").debug.warn;
+        \\
+        \\const num1 = blk: {
+        \\    var val1: i32 = 99;
+        \\    @compileLog("comptime val1 = ", val1);
+        \\    val1 = val1 + 1;
+        \\    break :blk val1;
+        \\};
+        \\
+        \\test "main" {
+        \\    @compileLog("comptime in main");
+        \\
+        \\    warn("Runtime in main, num1 = {}.\n", .{num1});
+        \\}
+        \\```
+        \\```zig
+        \\$ zig test test.zig
+        \\| *"comptime in main"
+        \\| *"comptime val1 = ", 99
+        \\./docgen_tmp/test.zig:11:5: error: found compile log statement
+        \\    @compileLog("comptime in main");
+        \\    ^
+        \\./docgen_tmp/test.zig:1:34: note: referenced here
+        \\const warn = @import("std").debug.warn;
+        \\                                 ^
+        \\./docgen_tmp/test.zig:13:5: note: referenced here
+        \\    warn("Runtime in main, num1 = {}.\n", .{num1});
+        \\    ^
+        \\./docgen_tmp/test.zig:5:5: error: found compile log statement
+        \\    @compileLog("comptime val1 = ", val1);
+        \\    ^
+        \\./docgen_tmp/test.zig:13:45: note: referenced here
+        \\    warn("Runtime in main, num1 = {}.\n", .{num1});
+        \\                                            ^
+        \\
+        \\```
+        \\ will ouput: 
+        \\ If all @compileLog calls are removed or not encountered by analysis, the program compiles successfully and the generated executable prints: 
+        \\test.zig
+        \\```zig
+        \\const warn = @import("std").debug.warn;
+        \\
+        \\const num1 = blk: {
+        \\    var val1: i32 = 99;
+        \\    val1 = val1 + 1;
+        \\    break :blk val1;
+        \\};
+        \\
+        \\test "main" {
+        \\    warn("Runtime in main, num1 = {}.\n", .{num1});
+        \\}
+        \\```
+        \\```zig
+        \\$ zig test test.zig
+        \\1/1 test "main"...Runtime in main, num1 = 100.
+        \\OK
+        \\All 1 tests passed.
+        \\
+        \\```
+    },
+    .{
+        .name = "@ctz",
+        .signature = "@ctz(comptime T: type, integer: T)",
+        .snippet = "@ctz(${1:comptime T: type}, ${2:integer: T})",
+        .documentation =
+        \\ This function counts the number of least-significant (trailing in a big-Endian sense) zeroes in integer. 
+        \\ If integer is known at comptime, the return type is comptime_int. Otherwise, the return type is an unsigned integer with the minimum number of bits that can represent the bit count of the integer type. 
+        \\ If integer is zero, @ctz returns the bit width of integer type T. 
+    },
+    .{
+        .name = "@cUndef",
+        .signature = "@cUndef(comptime name: []u8)",
+        .snippet = "@cUndef(${1:comptime name: []u8})",
+        .documentation =
+        \\ This function can only occur inside @cImport. 
+        \\ This appends #undef $name to the @cImport temporary buffer. 
+    },
+    .{
+        .name = "@divExact",
+        .signature = "@divExact(numerator: T, denominator: T) T",
+        .snippet = "@divExact(${1:numerator: T}, ${2:denominator: T})",
+        .documentation =
+        \\ Exact division. Caller guarantees denominator != 0 and @divTrunc(numerator, denominator) * denominator == numerator. 
+    },
+    .{
+        .name = "@divFloor",
+        .signature = "@divFloor(numerator: T, denominator: T) T",
+        .snippet = "@divFloor(${1:numerator: T}, ${2:denominator: T})",
+        .documentation =
+        \\ Floored division. Rounds toward negative infinity. For unsigned integers it is the same as numerator / denominator. Caller guarantees denominator != 0 and !(@typeInfo(T) == .Int and T.is_signed and numerator == std.math.minInt(T) and denominator == -1). 
+    },
+    .{
+        .name = "@divTrunc",
+        .signature = "@divTrunc(numerator: T, denominator: T) T",
+        .snippet = "@divTrunc(${1:numerator: T}, ${2:denominator: T})",
+        .documentation =
+        \\ Truncated division. Rounds toward zero. For unsigned integers it is the same as numerator / denominator. Caller guarantees denominator != 0 and !(@typeInfo(T) == .Int and T.is_signed and numerator == std.math.minInt(T) and denominator == -1). 
+    },
+    .{
+        .name = "@embedFile",
+        .signature = "@embedFile(comptime path: []const u8) *const [X:0]u8",
+        .snippet = "@embedFile(${1:comptime path: []const u8})",
+        .documentation =
+        \\ This function returns a compile time constant pointer to null-terminated, fixed-size array with length equal to the byte count of the file given by path. The contents of the array are the contents of the file. This is equivalent to a string literal with the file contents. 
+        \\ path is absolute or relative to the current file, just like @import. 
+    },
+    .{
+        .name = "@enumToInt",
+        .signature = "@enumToInt(enum_or_tagged_union: var) var",
+        .snippet = "@enumToInt(${1:enum_or_tagged_union: var})",
+        .documentation =
+        \\ Converts an enumeration value into its integer tag type. When a tagged union is passed, the tag value is used as the enumeration value. 
+        \\ If there is only one possible enum value, the resut is a comptime_int known at comptime. 
+    },
+    .{
+        .name = "@errorName",
+        .signature = "@errorName(err: anyerror) []const u8",
+        .snippet = "@errorName(${1:err: anyerror})",
+        .documentation =
+        \\ This function returns the string representation of an error. The string representation of error.OutOfMem is "OutOfMem". 
+        \\ If there are no calls to @errorName in an entire application, or all calls have a compile-time known value for err, then no error name table will be generated. 
+    },
+    .{
+        .name = "@errorReturnTrace",
+        .signature = "@errorReturnTrace() ?*builtin.StackTrace",
+        .snippet = "@errorReturnTrace()",
+        .documentation =
+        \\ If the binary is built with error return tracing, and this function is invoked in a function that calls a function with an error or error union return type, returns a stack trace object. Otherwise returns `null`. 
+    },
+    .{
+        .name = "@errorToInt",
+        .signature = "@errorToInt(err: var) std.meta.IntType(false, @sizeOf(anyerror) * 8)",
+        .snippet = "@errorToInt(${1:err: var})",
+        .documentation =
+        \\ Supports the following types: 
+    },
+    .{
+        .name = "@errSetCast",
+        .signature = "@errSetCast(comptime T: DestType, value: var) DestType",
+        .snippet = "@errSetCast(${1:comptime T: DestType}, ${2:value: var})",
+        .documentation =
+        \\ Converts an error value from one error set to another error set. Attempting to convert an error which is not in the destination error set results in safety-protected Undefined Behavior. 
+    },
+    .{
+        .name = "@export",
+        .signature = "@export(target: var, comptime options: std.builtin.ExportOptions) void",
+        .snippet = "@export(${1:target: var}, ${2:comptime options: std.builtin.ExportOptions})",
+        .documentation =
+        \\ Creates a symbol in the output object file. 
+        \\ This function can be called from a comptime block to conditionally export symbols. When target is a function with the C calling convention and options.linkage is Strong, this is equivalent to the export keyword used on a function: 
+        \\test.zig
+        \\```zig
+        \\comptime {
+        \\    @export(internalName, .{ .name = "foo", .linkage = .Strong });
+        \\}
+        \\
+        \\fn internalName() callconv(.C) void {}
+        \\```
+        \\```zig
+        \\$ zig build-obj test.zig
+        \\```
+        \\This is equivalent to:
+        \\test.zig
+        \\```zig
+        \\export fn foo() void {}
+        \\```
+        \\```zig
+        \\$ zig build-obj test.zig
+        \\```
+        \\Note that even when using export, @"foo" syntax can be used to choose any string for the symbol name:
+        \\test.zig
+        \\```zig
+        \\export fn @"A function name that is a complete sentence."() void {}
+        \\```
+        \\```zig
+        \\$ zig build-obj test.zig
+        \\```
+        \\ When looking at the resulting object, you can see the symbol is used verbatim: 
+        \\```zig
+        \\
+        \\```
+    },
+    .{
+        .name = "@fence",
+        .signature = "@fence(order: AtomicOrder)",
+        .snippet = "@fence(${1:order: AtomicOrder})",
+        .documentation =
+        \\ The fence function is used to introduce happens-before edges between operations. 
+        \\ AtomicOrder can be found with @import("builtin").AtomicOrder. 
+    },
+    .{
+        .name = "@field",
+        .signature = "@field(lhs: var, comptime field_name: []const u8) (field)",
+        .snippet = "@field(${1:lhs: var}, ${2:comptime field_name: []const u8})",
+        .documentation =
+        \\Performs field access by a compile-time string. 
+        \\test.zig
+        \\```zig
+        \\const std = @import("std");
+        \\
+        \\const Point = struct {
+        \\    x: u32,
+        \\    y: u32
+        \\};
+        \\
+        \\test "field access by string" {
+        \\    const assert = std.debug.assert;
+        \\    var p = Point {.x = 0, .y = 0};
+        \\
+        \\    @field(p, "x") = 4;
+        \\    @field(p, "y") = @field(p, "x") + 1;
+        \\
+        \\    assert(@field(p, "x") == 4);
+        \\    assert(@field(p, "y") == 5);
+        \\}
+        \\```
+        \\```zig
+        \\$ zig test test.zig
+        \\1/1 test "field access by string"...OK
+        \\All 1 tests passed.
+        \\
+        \\```
+    },
+    .{
+        .name = "@fieldParentPtr",
+        .signature = "@fieldParentPtr(comptime ParentType: type, comptime field_name: []const u8,    field_ptr: *T) *ParentType",
+        .snippet = "@fieldParentPtr(${1:comptime ParentType: type}, ${2:comptime field_name: []const u8}, ${3:field_ptr: *T})",
+        .documentation =
+        \\ Given a pointer to a field, returns the base pointer of a struct. 
+    },
+    .{
+        .name = "@floatCast",
+        .signature = "@floatCast(comptime DestType: type, value: var) DestType",
+        .snippet = "@floatCast(${1:comptime DestType: type}, ${2:value: var})",
+        .documentation =
+        \\ Convert from one float type to another. This cast is safe, but may cause the numeric value to lose precision. 
+    },
+    .{
+        .name = "@floatToInt",
+        .signature = "@floatToInt(comptime DestType: type, float: var) DestType",
+        .snippet = "@floatToInt(${1:comptime DestType: type}, ${2:float: var})",
+        .documentation =
+        \\ Converts the integer part of a floating point number to the destination type. 
+        \\ If the integer part of the floating point number cannot fit in the destination type, it invokes safety-checked Undefined Behavior. 
+    },
+    .{
+        .name = "@frame",
+        .signature = "@frame() *@Frame(func)",
+        .snippet = "@frame()",
+        .documentation =
+        \\ This function returns a pointer to the frame for a given function. This type can be coerced to anyframe->T and to anyframe, where T is the return type of the function in scope. 
+        \\ This function does not mark a suspension point, but it does cause the function in scope to become an async function. 
+    },
+    .{
+        .name = "@Frame",
+        .signature = "@Frame(func: var) type",
+        .snippet = "@Frame(${1:func: var})",
+        .documentation =
+        \\ This function returns the frame type of a function. This works for Async Functions as well as any function without a specific calling convention. 
+        \\ This type is suitable to be used as the return type of async which allows one to, for example, heap-allocate an async function frame: 
+        \\test.zig
+        \\```zig
+        \\const std = @import("std");
+        \\
+        \\test "heap allocated frame" {
+        \\    const frame = try std.heap.page_allocator.create(@Frame(func));
+        \\    frame.* = async func();
+        \\}
+        \\
+        \\fn func() void {
+        \\    suspend;
+        \\}
+        \\```
+        \\```zig
+        \\$ zig test test.zig
+        \\1/1 test "heap allocated frame"...OK
+        \\All 1 tests passed.
+        \\
+        \\```
+    },
+    .{
+        .name = "@frameAddress",
+        .signature = "@frameAddress() usize",
+        .snippet = "@frameAddress()",
+        .documentation =
+        \\ This function returns the base pointer of the current stack frame. 
+        \\ The implications of this are target specific and not consistent across all platforms. The frame address may not be available in release mode due to aggressive optimizations. 
+        \\ This function is only valid within function scope. 
+    },
+    .{
+        .name = "@frameSize",
+        .signature = "@frameSize() usize",
+        .snippet = "@frameSize()",
+        .documentation =
+        \\ This is the same as @sizeOf(@Frame(func)), where func may be runtime-known. 
+        \\ This function is typically used in conjunction with @asyncCall. 
+    },
+    .{
+        .name = "@hasDecl",
+        .signature = "@hasDecl(comptime Container: type, comptime name: []const u8) bool",
+        .snippet = "@hasDecl(${1:comptime Container: type}, ${2:comptime name: []const u8})",
+        .documentation =
+        \\ Returns whether or not a struct, enum, or union has a declaration matching name. 
+        \\test.zig
+        \\```zig
+        \\const std = @import("std");
+        \\const assert = std.debug.assert;
+        \\
+        \\const Foo = struct {
+        \\    nope: i32,
+        \\
+        \\    pub var blah = "xxx";
+        \\    const hi = 1;
+        \\};
+        \\
+        \\test "@hasDecl" {
+        \\    assert(@hasDecl(Foo, "blah"));
+        \\
+        \\    // Even though `hi` is private, @hasDecl returns true because this test is
+        \\    // in the same file scope as Foo. It would return false if Foo was declared
+        \\    // in a different file.
+        \\    assert(@hasDecl(Foo, "hi"));
+        \\
+        \\    // @hasDecl is for declarations; not fields.
+        \\    assert(!@hasDecl(Foo, "nope"));
+        \\    assert(!@hasDecl(Foo, "nope1234"));
+        \\}
+        \\```
+        \\```zig
+        \\$ zig test test.zig
+        \\1/1 test "@hasDecl"...OK
+        \\All 1 tests passed.
+        \\
+        \\```
+    },
+    .{
+        .name = "@hasField",
+        .signature = "@hasField(comptime Container: type, comptime name: []const u8) bool",
+        .snippet = "@hasField(${1:comptime Container: type}, ${2:comptime name: []const u8})",
+        .documentation =
+        \\Returns whether the field name of a struct, union, or enum exists.
+        \\ The result is a compile time constant. 
+        \\ It does not include functions, variables, or constants. 
+    },
+    .{
+        .name = "@import",
+        .signature = "@import(comptime path: []u8) type",
+        .snippet = "@import(${1:comptime path: []u8})",
+        .documentation =
+        \\ This function finds a zig file corresponding to path and adds it to the build, if it is not already added. 
+        \\ Zig source files are implicitly structs, with a name equal to the file's basename with the extension truncated. @import returns the struct type corresponding to the file. 
+        \\ Declarations which have the pub keyword may be referenced from a different source file than the one they are declared in. 
+        \\ path can be a relative or absolute path, or it can be the name of a package. If it is a relative path, it is relative to the file that contains the @import function call. 
+        \\ The following packages are always available: 
+    },
+    .{
+        .name = "@intCast",
+        .signature = "@intCast(comptime DestType: type, int: var) DestType",
+        .snippet = "@intCast(${1:comptime DestType: type}, ${2:int: var})",
+        .documentation =
+        \\ Converts an integer to another integer while keeping the same numerical value. Attempting to convert a number which is out of range of the destination type results in safety-protected Undefined Behavior. 
+        \\ If T is comptime_int, then this is semantically equivalent to Type Coercion. 
+    },
+    .{
+        .name = "@intToEnum",
+        .signature = "@intToEnum(comptime DestType: type, int_value: @TagType(DestType)) DestType",
+        .snippet = "@intToEnum(${1:comptime DestType: type}, ${2:int_value: @TagType(DestType)})",
+        .documentation =
+        \\ Converts an integer into an enum value. 
+        \\ Attempting to convert an integer which represents no value in the chosen enum type invokes safety-checked Undefined Behavior. 
+    },
+    .{
+        .name = "@intToError",
+        .signature = "@intToError(value: std.meta.IntType(false, @sizeOf(anyerror) * 8)) anyerror",
+        .snippet = "@intToError(${1:value: std.meta.IntType(false, @sizeOf(anyerror) * 8)})",
+        .documentation =
+        \\ Converts from the integer representation of an error into The Global Error Set type. 
+        \\ It is generally recommended to avoid this cast, as the integer representation of an error is not stable across source code changes. 
+        \\ Attempting to convert an integer that does not correspond to any error results in safety-protected Undefined Behavior. 
+    },
+    .{
+        .name = "@intToFloat",
+        .signature = "@intToFloat(comptime DestType: type, int: var) DestType",
+        .snippet = "@intToFloat(${1:comptime DestType: type}, ${2:int: var})",
+        .documentation =
+        \\ Converts an integer to the closest floating point representation. To convert the other way, use @floatToInt. This cast is always safe. 
+    },
+    .{
+        .name = "@intToPtr",
+        .signature = "@intToPtr(comptime DestType: type, address: usize) DestType",
+        .snippet = "@intToPtr(${1:comptime DestType: type}, ${2:address: usize})",
+        .documentation =
+        \\ Converts an integer to a pointer. To convert the other way, use @ptrToInt. 
+        \\ If the destination pointer type does not allow address zero and address is zero, this invokes safety-checked Undefined Behavior. 
+    },
+    .{
+        .name = "@memcpy",
+        .signature = "@memcpy(noalias dest: [*]u8, noalias source: [*]const u8, byte_count: usize)",
+        .snippet = "@memcpy(${1:noalias dest: [*]u8}, ${2:noalias source: [*]const u8}, ${3:byte_count: usize})",
+        .documentation =
+        \\ This function copies bytes from one region of memory to another. dest and source are both pointers and must not overlap. 
+        \\ This function is a low level intrinsic with no safety mechanisms. Most code should not use this function, instead using something like this: 
+        \\```zig
+        \\for (source[0..byte_count]) |b, i| dest[i] = b;
+        \\```
+        \\ The optimizer is intelligent enough to turn the above snippet into a memcpy. 
+        \\There is also a standard library function for this:
+        \\```zig
+        \\const mem = @import("std").mem;
+        \\mem.copy(u8, dest[0..byte_count], source[0..byte_count]);
+        \\```
+    },
+    .{
+        .name = "@memset",
+        .signature = "@memset(dest: [*]u8, c: u8, byte_count: usize)",
+        .snippet = "@memset(${1:dest: [*]u8}, ${2:c: u8}, ${3:byte_count: usize})",
+        .documentation =
+        \\ This function sets a region of memory to c. dest is a pointer. 
+        \\ This function is a low level intrinsic with no safety mechanisms. Most code should not use this function, instead using something like this: 
+        \\```zig
+        \\for (dest[0..byte_count]) |*b| b.* = c;
+        \\```
+        \\ The optimizer is intelligent enough to turn the above snippet into a memset. 
+        \\There is also a standard library function for this:
+        \\```zig
+        \\const mem = @import("std").mem;
+        \\mem.set(u8, dest, c);
+        \\```
+    },
+    .{
+        .name = "@mod",
+        .signature = "@mod(numerator: T, denominator: T) T",
+        .snippet = "@mod(${1:numerator: T}, ${2:denominator: T})",
+        .documentation =
+        \\ Modulus division. For unsigned integers this is the same as numerator % denominator. Caller guarantees denominator > 0. 
+    },
+    .{
+        .name = "@mulWithOverflow",
+        .signature = "@mulWithOverflow(comptime T: type, a: T, b: T, result: *T) bool",
+        .snippet = "@mulWithOverflow(${1:comptime T: type}, ${2:a: T}, ${3:b: T}, ${4:result: *T})",
+        .documentation =
+        \\ Performs result.* = a * b. If overflow or underflow occurs, stores the overflowed bits in result and returns true. If no overflow or underflow occurs, returns false. 
+    },
+    .{
+        .name = "@OpaqueType",
+        .signature = "@OpaqueType() type",
+        .snippet = "@OpaqueType()",
+        .documentation =
+        \\ Creates a new type with an unknown (but non-zero) size and alignment. 
+        \\ This is typically used for type safety when interacting with C code that does not expose struct details. Example: 
+        \\test.zig
+        \\```zig
+        \\const Derp = @OpaqueType();
+        \\const Wat = @OpaqueType();
+        \\
+        \\extern fn bar(d: *Derp) void;
+        \\fn foo(w: *Wat) callconv(.C) void {
+        \\    bar(w);
+        \\}
+        \\
+        \\test "call foo" {
+        \\    foo(undefined);
+        \\}
+        \\```
+        \\```zig
+        \\$ zig test test.zig
+        \\./docgen_tmp/test.zig:6:9: error: expected type '*Derp', found '*Wat'
+        \\    bar(w);
+        \\        ^
+        \\./docgen_tmp/test.zig:6:9: note: pointer type child 'Wat' cannot cast into pointer type child 'Derp'
+        \\    bar(w);
+        \\        ^
+        \\
+        \\```
+    },
+    .{
+        .name = "@panic",
+        .signature = "@panic(message: []const u8) noreturn",
+        .snippet = "@panic(${1:message: []const u8})",
+        .documentation =
+        \\ Invokes the panic handler function. By default the panic handler function calls the public panic function exposed in the root source file, or if there is not one specified, the std.builtin.default_panic function from std/builtin.zig. 
+        \\Generally it is better to use @import("std").debug.panic. However, @panic can be useful for 2 scenarios: 
+    },
+    .{
+        .name = "@popCount",
+        .signature = "@popCount(comptime T: type, integer: T)",
+        .snippet = "@popCount(${1:comptime T: type}, ${2:integer: T})",
+        .documentation =
+        \\Counts the number of bits set in an integer.
+        \\ If integer is known at comptime, the return type is comptime_int. Otherwise, the return type is an unsigned integer with the minimum number of bits that can represent the bit count of the integer type. 
+    },
+    .{
+        .name = "@ptrCast",
+        .signature = "@ptrCast(comptime DestType: type, value: var) DestType",
+        .snippet = "@ptrCast(${1:comptime DestType: type}, ${2:value: var})",
+        .documentation =
+        \\ Converts a pointer of one type to a pointer of another type. 
+        \\ Optional Pointers are allowed. Casting an optional pointer which is null to a non-optional pointer invokes safety-checked Undefined Behavior. 
+    },
+    .{
+        .name = "@ptrToInt",
+        .signature = "@ptrToInt(value: var) usize",
+        .snippet = "@ptrToInt(${1:value: var})",
+        .documentation =
+        \\ Converts value to a usize which is the address of the pointer. value can be one of these types: 
+    },
+    .{
+        .name = "@rem",
+        .signature = "@rem(numerator: T, denominator: T) T",
+        .snippet = "@rem(${1:numerator: T}, ${2:denominator: T})",
+        .documentation =
+        \\ Remainder division. For unsigned integers this is the same as numerator % denominator. Caller guarantees denominator > 0. 
+    },
+    .{
+        .name = "@returnAddress",
+        .signature = "@returnAddress() usize",
+        .snippet = "@returnAddress()",
+        .documentation =
+        \\ This function returns the address of the next machine code instruction that will be executed when the current function returns. 
+        \\ The implications of this are target specific and not consistent across all platforms. 
+        \\ This function is only valid within function scope. If the function gets inlined into a calling function, the returned address will apply to the calling function. 
+    },
+    .{
+        .name = "@setAlignStack",
+        .signature = "@setAlignStack(comptime alignment: u29)",
+        .snippet = "@setAlignStack(${1:comptime alignment: u29})",
+        .documentation =
+        \\ Ensures that a function will have a stack alignment of at least alignment bytes. 
+    },
+    .{
+        .name = "@setCold",
+        .signature = "@setCold(is_cold: bool)",
+        .snippet = "@setCold(${1:is_cold: bool})",
+        .documentation =
+        \\ Tells the optimizer that a function is rarely called. 
+    },
+    .{
+        .name = "@setEvalBranchQuota",
+        .signature = "@setEvalBranchQuota(new_quota: usize)",
+        .snippet = "@setEvalBranchQuota(${1:new_quota: usize})",
+        .documentation =
+        \\ Changes the maximum number of backwards branches that compile-time code execution can use before giving up and making a compile error. 
+        \\ If the new_quota is smaller than the default quota (1000) or a previously explicitly set quota, it is ignored. 
+        \\ Example: 
+        \\test.zig
+        \\```zig
+        \\test "foo" {
+        \\    comptime {
+        \\        var i = 0;
+        \\        while (i < 1001) : (i += 1) {}
+        \\    }
+        \\}
+        \\```
+        \\```zig
+        \\$ zig test test.zig
+        \\./docgen_tmp/test.zig:4:9: error: evaluation exceeded 1000 backwards branches
+        \\        while (i < 1001) : (i += 1) {}
+        \\        ^
+        \\./docgen_tmp/test.zig:1:12: note: referenced here
+        \\test "foo" {
+        \\           ^
+        \\
+        \\```
+        \\Now we use @setEvalBranchQuota:
+        \\test.zig
+        \\```zig
+        \\test "foo" {
+        \\    comptime {
+        \\        @setEvalBranchQuota(1001);
+        \\        var i = 0;
+        \\        while (i < 1001) : (i += 1) {}
+        \\    }
+        \\}
+        \\```
+        \\```zig
+        \\$ zig test test.zig
+        \\1/1 test "foo"...OK
+        \\All 1 tests passed.
+        \\
+        \\```
+    },
+    .{
+        .name = "@setFloatMode",
+        .signature = "@setFloatMode(mode: @import(\"builtin\").FloatMode)",
+        .snippet = "@setFloatMode(${1:mode: @import(\"builtin\").FloatMode})",
+        .documentation =
+        \\ Sets the floating point mode of the current scope. Possible values are: 
+        \\```zig
+        \\pub const FloatMode = enum {
+        \\    Strict,
+        \\    Optimized,
+        \\};
+        \\```
+    },
+    .{
+        .name = "@setRuntimeSafety",
+        .signature = "@setRuntimeSafety(safety_on: bool)",
+        .snippet = "@setRuntimeSafety(${1:safety_on: bool})",
+        .documentation =
+        \\ Sets whether runtime safety checks are enabled for the scope that contains the function call. 
+        \\test.zig
+        \\```zig
+        \\test "@setRuntimeSafety" {
+        \\    // The builtin applies to the scope that it is called in. So here, integer overflow
+        \\    // will not be caught in ReleaseFast and ReleaseSmall modes:
+        \\    // var x: u8 = 255;
+        \\    // x += 1; // undefined behavior in ReleaseFast/ReleaseSmall modes.
+        \\    {
+        \\        // However this block has safety enabled, so safety checks happen here,
+        \\        // even in ReleaseFast and ReleaseSmall modes.
+        \\        @setRuntimeSafety(true);
+        \\        var x: u8 = 255;
+        \\        x += 1;
+        \\
+        \\        {
+        \\            // The value can be overridden at any scope. So here integer overflow
+        \\            // would not be caught in any build mode.
+        \\            @setRuntimeSafety(false);
+        \\            // var x: u8 = 255;
+        \\            // x += 1; // undefined behavior in all build modes.
+        \\        }
+        \\    }
+        \\}
+        \\```
+        \\```zig
+        \\$ zig test test.zig --release-fast
+        \\1/1 test "@setRuntimeSafety"...integer overflow
+        \\
+        \\Tests failed. Use the following command to reproduce the failure:
+        \\/deps/zig/docgen_tmp/test
+        \\
+        \\```
+        \\Note: it is planned to replace @setRuntimeSafety with @optimizeFor
+    },
+    .{
+        .name = "@shlExact",
+        .signature = "@shlExact(value: T, shift_amt: Log2T) T",
+        .snippet = "@shlExact(${1:value: T}, ${2:shift_amt: Log2T})",
+        .documentation =
+        \\ Performs the left shift operation (<<). Caller guarantees that the shift will not shift any 1 bits out. 
+        \\ The type of shift_amt is an unsigned integer with log2(T.bit_count) bits. This is because shift_amt >= T.bit_count is undefined behavior. 
+    },
+    .{
+        .name = "@shlWithOverflow",
+        .signature = "@shlWithOverflow(comptime T: type, a: T, shift_amt: Log2T, result: *T) bool",
+        .snippet = "@shlWithOverflow(${1:comptime T: type}, ${2:a: T}, ${3:shift_amt: Log2T}, ${4:result: *T})",
+        .documentation =
+        \\ Performs result.* = a << b. If overflow or underflow occurs, stores the overflowed bits in result and returns true. If no overflow or underflow occurs, returns false. 
+        \\ The type of shift_amt is an unsigned integer with log2(T.bit_count) bits. This is because shift_amt >= T.bit_count is undefined behavior. 
+    },
+    .{
+        .name = "@shrExact",
+        .signature = "@shrExact(value: T, shift_amt: Log2T) T",
+        .snippet = "@shrExact(${1:value: T}, ${2:shift_amt: Log2T})",
+        .documentation =
+        \\ Performs the right shift operation (>>). Caller guarantees that the shift will not shift any 1 bits out. 
+        \\ The type of shift_amt is an unsigned integer with log2(T.bit_count) bits. This is because shift_amt >= T.bit_count is undefined behavior. 
+    },
+    .{
+        .name = "@shuffle",
+        .signature = "@shuffle(comptime E: type, a: @Vector(a_len, E), b: @Vector(b_len, E), comptime mask: @Vector(mask_len, i32)) @Vector(mask_len, E)",
+        .snippet = "@shuffle(${1:comptime E: type}, ${2:a: @Vector(a_len, E)}, ${3:b: @Vector(b_len, E)}, ${4:comptime mask: @Vector(mask_len, i32)})",
+        .documentation =
+        \\ Constructs a new vector by selecting elements from a and b based on mask. 
+        \\ Each element in mask selects an element from either a or b. Positive numbers select from a starting at 0. Negative values select from b, starting at -1 and going down. It is recommended to use the ~ operator from indexes from b so that both indexes can start from 0 (i.e. ~@as(i32, 0) is -1). 
+        \\ For each element of mask, if it or the selected value from a or b is undefined, then the resulting element is undefined. 
+        \\ a_len and b_len may differ in length. Out-of-bounds element indexes in mask result in compile errors. 
+        \\ If a or b is undefined, it is equivalent to a vector of all undefined with the same length as the other vector. If both vectors are undefined, @shuffle returns a vector with all elements undefined. 
+        \\ E must be an integer, float, pointer, or bool. The mask may be any vector length, and its length determines the result length. 
+    },
+    .{
+        .name = "@sizeOf",
+        .signature = "@sizeOf(comptime T: type) comptime_int",
+        .snippet = "@sizeOf(${1:comptime T: type})",
+        .documentation =
+        \\ This function returns the number of bytes it takes to store T in memory. The result is a target-specific compile time constant. 
+        \\ This size may contain padding bytes. If there were two consecutive T in memory, this would be the offset in bytes between element at index 0 and the element at index 1. For integer, consider whether you want to use @sizeOf(T) or @typeInfo(T).Int.bits. 
+        \\ This function measures the size at runtime. For types that are disallowed at runtime, such as comptime_int and type, the result is 0. 
+    },
+    .{
+        .name = "@splat",
+        .signature = "@splat(comptime len: u32, scalar: var) @Vector(len, @TypeOf(scalar))",
+        .snippet = "@splat(${1:comptime len: u32}, ${2:scalar: var})",
+        .documentation =
+        \\ Produces a vector of length len where each element is the value scalar: 
+        \\test.zig
+        \\```zig
+        \\const std = @import("std");
+        \\const assert = std.debug.assert;
+        \\
+        \\test "vector @splat" {
+        \\    const scalar: u32 = 5;
+        \\    const result = @splat(4, scalar);
+        \\    comptime assert(@TypeOf(result) == @Vector(4, u32));
+        \\    assert(std.mem.eql(u32, &@as([4]u32, result), &[_]u32{ 5, 5, 5, 5 }));
+        \\}
+        \\```
+        \\```zig
+        \\$ zig test test.zig
+        \\1/1 test "vector @splat"...OK
+        \\All 1 tests passed.
+        \\
+        \\```
+        \\ scalar must be an integer, bool, float, or pointer. 
+    },
+    .{
+        .name = "@sqrt",
+        .signature = "@sqrt(value: var) @TypeOf(value)",
+        .snippet = "@sqrt(${1:value: var})",
+        .documentation =
+        \\ Performs the square root of a floating point number. Uses a dedicated hardware instruction when available. 
+        \\ Supports Floats and Vectors of floats, with the caveat that some float operations are not yet implemented for all float types. 
+    },
+    .{
+        .name = "@sin",
+        .signature = "@sin(value: var) @TypeOf(value)",
+        .snippet = "@sin(${1:value: var})",
+        .documentation =
+        \\ Sine trigometric function on a floating point number. Uses a dedicated hardware instruction when available. 
+        \\ Supports Floats and Vectors of floats, with the caveat that some float operations are not yet implemented for all float types. 
+    },
+    .{
+        .name = "@cos",
+        .signature = "@cos(value: var) @TypeOf(value)",
+        .snippet = "@cos(${1:value: var})",
+        .documentation =
+        \\ Cosine trigometric function on a floating point number. Uses a dedicated hardware instruction when available. 
+        \\ Supports Floats and Vectors of floats, with the caveat that some float operations are not yet implemented for all float types. 
+    },
+    .{
+        .name = "@exp",
+        .signature = "@exp(value: var) @TypeOf(value)",
+        .snippet = "@exp(${1:value: var})",
+        .documentation =
+        \\ Base-e exponential function on a floating point number. Uses a dedicated hardware instruction when available. 
+        \\ Supports Floats and Vectors of floats, with the caveat that some float operations are not yet implemented for all float types. 
+    },
+    .{
+        .name = "@exp2",
+        .signature = "@exp2(value: var) @TypeOf(value)",
+        .snippet = "@exp2(${1:value: var})",
+        .documentation =
+        \\ Base-2 exponential function on a floating point number. Uses a dedicated hardware instruction when available. 
+        \\ Supports Floats and Vectors of floats, with the caveat that some float operations are not yet implemented for all float types. 
+    },
+    .{
+        .name = "@log",
+        .signature = "@log(value: var) @TypeOf(value)",
+        .snippet = "@log(${1:value: var})",
+        .documentation =
+        \\ Returns the natural logarithm of a floating point number. Uses a dedicated hardware instruction when available. 
+        \\ Supports Floats and Vectors of floats, with the caveat that some float operations are not yet implemented for all float types. 
+    },
+    .{
+        .name = "@log2",
+        .signature = "@log2(value: var) @TypeOf(value)",
+        .snippet = "@log2(${1:value: var})",
+        .documentation =
+        \\ Returns the logarithm to the base 2 of a floating point number. Uses a dedicated hardware instruction when available. 
+        \\ Supports Floats and Vectors of floats, with the caveat that some float operations are not yet implemented for all float types. 
+    },
+    .{
+        .name = "@log10",
+        .signature = "@log10(value: var) @TypeOf(value)",
+        .snippet = "@log10(${1:value: var})",
+        .documentation =
+        \\ Returns the logarithm to the base 10 of a floating point number. Uses a dedicated hardware instruction when available. 
+        \\ Supports Floats and Vectors of floats, with the caveat that some float operations are not yet implemented for all float types. 
+    },
+    .{
+        .name = "@fabs",
+        .signature = "@fabs(value: var) @TypeOf(value)",
+        .snippet = "@fabs(${1:value: var})",
+        .documentation =
+        \\ Returns the absolute value of a floating point number. Uses a dedicated hardware instruction when available. 
+        \\ Supports Floats and Vectors of floats, with the caveat that some float operations are not yet implemented for all float types. 
+    },
+    .{
+        .name = "@floor",
+        .signature = "@floor(value: var) @TypeOf(value)",
+        .snippet = "@floor(${1:value: var})",
+        .documentation =
+        \\ Returns the largest integral value not greater than the given floating point number. Uses a dedicated hardware instruction when available. 
+        \\ Supports Floats and Vectors of floats, with the caveat that some float operations are not yet implemented for all float types. 
+    },
+    .{
+        .name = "@ceil",
+        .signature = "@ceil(value: var) @TypeOf(value)",
+        .snippet = "@ceil(${1:value: var})",
+        .documentation =
+        \\ Returns the largest integral value not less than the given floating point number. Uses a dedicated hardware instruction when available. 
+        \\ Supports Floats and Vectors of floats, with the caveat that some float operations are not yet implemented for all float types. 
+    },
+    .{
+        .name = "@trunc",
+        .signature = "@trunc(value: var) @TypeOf(value)",
+        .snippet = "@trunc(${1:value: var})",
+        .documentation =
+        \\ Rounds the given floating point number to an integer, towards zero. Uses a dedicated hardware instruction when available. 
+        \\ Supports Floats and Vectors of floats, with the caveat that some float operations are not yet implemented for all float types. 
+    },
+    .{
+        .name = "@round",
+        .signature = "@round(value: var) @TypeOf(value)",
+        .snippet = "@round(${1:value: var})",
+        .documentation =
+        \\ Rounds the given floating point number to an integer, away from zero. Uses a dedicated hardware instruction when available. 
+        \\ Supports Floats and Vectors of floats, with the caveat that some float operations are not yet implemented for all float types. 
+    },
+    .{
+        .name = "@subWithOverflow",
+        .signature = "@subWithOverflow(comptime T: type, a: T, b: T, result: *T) bool",
+        .snippet = "@subWithOverflow(${1:comptime T: type}, ${2:a: T}, ${3:b: T}, ${4:result: *T})",
+        .documentation =
+        \\ Performs result.* = a - b. If overflow or underflow occurs, stores the overflowed bits in result and returns true. If no overflow or underflow occurs, returns false. 
+    },
+    .{
+        .name = "@tagName",
+        .signature = "@tagName(value: var) []const u8",
+        .snippet = "@tagName(${1:value: var})",
+        .documentation =
+        \\ Converts an enum value or union value to a slice of bytes representing the name.
+        \\If the enum is non-exhaustive and the tag value does not map to a name, it invokes safety-checked Undefined Behavior. 
+    },
+    .{
+        .name = "@TagType",
+        .signature = "@TagType(T: type) type",
+        .snippet = "@TagType(${1:T: type})",
+        .documentation =
+        \\ For an enum, returns the integer type that is used to store the enumeration value. 
+        \\ For a union, returns the enum type that is used to store the tag value. 
+    },
+    .{
+        .name = "@This",
+        .signature = "@This() type",
+        .snippet = "@This()",
+        .documentation =
+        \\ Returns the innermost struct or union that this function call is inside. This can be useful for an anonymous struct that needs to refer to itself: 
+        \\test.zig
+        \\```zig
+        \\const std = @import("std");
+        \\const assert = std.debug.assert;
+        \\
+        \\test "@This()" {
+        \\    var items = [_]i32{ 1, 2, 3, 4 };
+        \\    const list = List(i32){ .items = items[0..] };
+        \\    assert(list.length() == 4);
+        \\}
+        \\
+        \\fn List(comptime T: type) type {
+        \\    return struct {
+        \\        const Self = @This();
+        \\
+        \\        items: []T,
+        \\
+        \\        fn length(self: Self) usize {
+        \\            return self.items.len;
+        \\        }
+        \\    };
+        \\}
+        \\```
+        \\```zig
+        \\$ zig test test.zig
+        \\1/1 test "@This()"...OK
+        \\All 1 tests passed.
+        \\
+        \\```
+        \\ When @This() is used at global scope, it returns a reference to the current import. There is a proposal to remove the import type and use an empty struct type instead. See #1047 for details. 
+    },
+    .{
+        .name = "@truncate",
+        .signature = "@truncate(comptime T: type, integer: var) T",
+        .snippet = "@truncate(${1:comptime T: type}, ${2:integer: var})",
+        .documentation =
+        \\ This function truncates bits from an integer type, resulting in a smaller or same-sized integer type. 
+        \\ The following produces safety-checked Undefined Behavior: 
+        \\test.zig
+        \\```zig
+        \\test "integer cast panic" {
+        \\    var a: u16 = 0xabcd;
+        \\    var b: u8 = @intCast(u8, a);
+        \\}
+        \\```
+        \\```zig
+        \\$ zig test test.zig
+        \\1/1 test "integer cast panic"...integer cast truncated bits
+        \\/deps/zig/docgen_tmp/test.zig:3:17: 0x204bd5 in test "integer cast panic" (test)
+        \\    var b: u8 = @intCast(u8, a);
+        \\                ^
+        \\/deps/zig/lib/std/special/test_runner.zig:47:28: 0x22bade in std.special.main (test)
+        \\        } else test_fn.func();
+        \\                           ^
+        \\/deps/zig/lib/std/start.zig:253:37: 0x20560d in std.start.posixCallMainAndExit (test)
+        \\            const result = root.main() catch |err| {
+        \\                                    ^
+        \\/deps/zig/lib/std/start.zig:123:5: 0x20534f in std.start._start (test)
+        \\    @call(.{ .modifier = .never_inline }, posixCallMainAndExit, .{});
+        \\    ^
+        \\
+        \\Tests failed. Use the following command to reproduce the failure:
+        \\/deps/zig/docgen_tmp/test
+        \\
+        \\```
+        \\ However this is well defined and working code: 
+        \\truncate.zig
+        \\```zig
+        \\const std = @import("std");
+        \\const assert = std.debug.assert;
+        \\
+        \\test "integer truncation" {
+        \\    var a: u16 = 0xabcd;
+        \\    var b: u8 = @truncate(u8, a);
+        \\    assert(b == 0xcd);
+        \\}
+        \\```
+        \\```zig
+        \\$ zig test truncate.zig
+        \\1/1 test "integer truncation"...OK
+        \\All 1 tests passed.
+        \\
+        \\```
+        \\ This function always truncates the significant bits of the integer, regardless of endianness on the target platform. 
+    },
+    .{
+        .name = "@Type",
+        .signature = "@Type(comptime info: @import(\"builtin\").TypeInfo) type",
+        .snippet = "@Type(${1:comptime info: @import(\"builtin\").TypeInfo})",
+        .documentation =
+        \\ This function is the inverse of @typeInfo. It reifies type information into a type. 
+        \\ It is available for the following types: 
+    },
+    .{
+        .name = "@typeInfo",
+        .signature = "@typeInfo(comptime T: type) @import(\"std\").builtin.TypeInfo",
+        .snippet = "@typeInfo(${1:comptime T: type})",
+        .documentation =
+        \\ Provides type reflection. 
+        \\ For structs, unions, enums, and error sets, the fields are guaranteed to be in the same order as declared. For declarations, the order is unspecified. 
+    },
+    .{
+        .name = "@typeName",
+        .signature = "@typeName(T: type) [N]u8",
+        .snippet = "@typeName(${1:T: type})",
+        .documentation =
+        \\ This function returns the string representation of a type, as an array. It is equivalent to a string literal of the type name. 
+    },
+    .{
+        .name = "@TypeOf",
+        .signature = "@TypeOf(...) type",
+        .snippet = "@TypeOf(${1:...})",
+        .documentation =
+        \\ @TypeOf is a special builtin function that takes any (nonzero) number of expressions as parameters and returns the type of the result, using Peer Type Resolution. 
+        \\ The expressions are evaluated, however they are guaranteed to have no runtime side-effects: 
+        \\test.zig
+        \\```zig
+        \\const std = @import("std");
+        \\const assert = std.debug.assert;
+        \\
+        \\test "no runtime side effects" {
+        \\    var data: i32 = 0;
+        \\    const T = @TypeOf(foo(i32, &data));
+        \\    comptime assert(T == i32);
+        \\    assert(data == 0);
+        \\}
+        \\
+        \\fn foo(comptime T: type, ptr: *T) T {
+        \\    ptr.* += 1;
+        \\    return ptr.*;
+        \\}
+        \\```
+        \\```zig
+        \\$ zig test test.zig
+        \\1/1 test "no runtime side effects"...OK
+        \\All 1 tests passed.
+        \\
+        \\```
+    },
+    .{
+        .name = "@unionInit",
+        .signature = "@unionInit(comptime Union: type, comptime active_field_name: []const u8, init_expr) Union",
+        .snippet = "@unionInit(${1:comptime Union: type}, ${2:comptime active_field_name: []const u8}, ${3:init_expr})",
+        .documentation =
+        \\ This is the same thing as union initialization syntax, except that the field name is a comptime-known value rather than an identifier token. 
+        \\ @unionInit forwards its result location to init_expr. 
+    },
+    .{
+        .name = "@Vector",
+        .signature = "@Vector(comptime len: u32, comptime ElemType: type) type",
+        .snippet = "@Vector(${1:comptime len: u32}, ${2:comptime ElemType: type})",
+        .documentation =
+        \\ This function returns a vector type for SIMD. 
+        \\ ElemType must be an integer, a float, or a pointer. 
+    },
 };

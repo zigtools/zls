@@ -913,6 +913,42 @@ fn completeLabel(arena: *std.heap.ArenaAllocator, id: types.RequestId, pos_index
     });
 }
 
+var builtin_completions: ?[]types.CompletionItem = null;
+fn completeBuiltin(arena: *std.heap.ArenaAllocator, id: types.RequestId, config: Config) !void {
+    if (builtin_completions == null) {
+        builtin_completions = try allocator.alloc(types.CompletionItem, data.builtins.len);
+        for (data.builtins) |builtin, idx| {
+            builtin_completions.?[idx] = types.CompletionItem{
+                .label = builtin.name,
+                .kind = .Function,
+                .filterText = builtin.name[1..],
+                .detail = builtin.signature,
+                .documentation = .{
+                    .kind = .Markdown,
+                    .value = builtin.documentation,
+                },
+            };
+
+            if (config.enable_snippets) {
+                builtin_completions.?[idx].insertText = builtin.snippet[1..];
+                builtin_completions.?[idx].insertTextFormat = .Snippet;
+            } else {
+                builtin_completions.?[idx].insertText = builtin.name[1..];
+            }
+        }
+    }
+
+    try send(arena, types.Response{
+        .id = id,
+        .result = .{
+            .CompletionList = .{
+                .isIncomplete = false,
+                .items = builtin_completions.?,
+            },
+        },
+    });
+}
+
 fn completeGlobal(arena: *std.heap.ArenaAllocator, id: types.RequestId, pos_index: usize, handle: *DocumentStore.Handle, config: Config) !void {
     var completions = std.ArrayList(types.CompletionItem).init(&arena.allocator);
 
@@ -966,41 +1002,6 @@ fn documentSymbol(arena: *std.heap.ArenaAllocator, id: types.RequestId, handle: 
         .result = .{ .DocumentSymbols = try analysis.getDocumentSymbols(&arena.allocator, handle.tree, offset_encoding) },
     });
 }
-
-// Compute builtin completions at comptime.
-const builtin_completions = block: {
-    @setEvalBranchQuota(10_000);
-    const CompletionList = [data.builtins.len]types.CompletionItem;
-    var with_snippets: CompletionList = undefined;
-    var without_snippets: CompletionList = undefined;
-
-    for (data.builtins) |builtin, i| {
-        const cutoff = std.mem.indexOf(u8, builtin, "(") orelse builtin.len;
-
-        const base_completion = types.CompletionItem{
-            .label = builtin[0..cutoff],
-            .kind = .Function,
-
-            .filterText = builtin[1..cutoff],
-            .detail = data.builtin_details[i],
-            .documentation = .{
-                .kind = .Markdown,
-                .value = data.builtin_docs[i],
-            },
-        };
-
-        with_snippets[i] = base_completion;
-        with_snippets[i].insertText = builtin[1..];
-        with_snippets[i].insertTextFormat = .Snippet;
-
-        without_snippets[i] = base_completion;
-        without_snippets[i].insertText = builtin[1..cutoff];
-    }
-
-    break :block [2]CompletionList{
-        without_snippets, with_snippets,
-    };
-};
 
 fn loadConfig(folder_path: []const u8) ?Config {
     var folder = std.fs.cwd().openDir(folder_path, .{}) catch return null;
@@ -1206,15 +1207,7 @@ fn completionHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: 
         const this_config = configFromUriOr(req.params.textDocument.uri, config);
         const use_snippets = this_config.enable_snippets and client_capabilities.supports_snippets;
         switch (pos_context) {
-            .builtin => try send(arena, types.Response{
-                .id = id,
-                .result = .{
-                    .CompletionList = .{
-                        .isIncomplete = false,
-                        .items = builtin_completions[@boolToInt(use_snippets)][0..],
-                    },
-                },
-            }),
+            .builtin => try completeBuiltin(arena, id, this_config),
             .var_access, .empty => try completeGlobal(arena, id, doc_position.absolute_index, handle, this_config),
             .field_access => |range| try completeFieldAccess(arena, id, handle, doc_position, range, this_config),
             .global_error_set => try send(arena, types.Response{
@@ -1643,5 +1636,9 @@ pub fn main() anyerror!void {
         json_parser.reset();
         arena.deinit();
         arena.state = .{};
+    }
+
+    if (builtin_completions) |compls| {
+        allocator.free(compls);
     }
 }

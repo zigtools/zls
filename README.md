@@ -37,7 +37,7 @@ The `zls` executable will be saved to `zls\zig-cache\bin`.
 
 | Option | Type | Default Value | What it Does |
 | --- | --- | --- | --- |
-| `-Ddata_version` | `string` (master or 0.6.0) | 0.6.0 | The data file version. This selects the files in the `src/data` folder that correspond to the Zig version being served.|
+| `-Ddata_version` | `string` (master or 0.6.0) | master | The data file version. This selects the files in the `src/data` folder that correspond to the Zig version being served.|
 
 Then, you can use the `zls` executable in an editor of your choice that has a Zig language server client!
 

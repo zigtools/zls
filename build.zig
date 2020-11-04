@@ -139,7 +139,7 @@ pub fn build(b: *std.build.Builder) !void {
     exe.addBuildOption(
         []const u8,
         "data_version",
-        b.option([]const u8, "data_version", "The data version - either 0.6.0 or master.") orelse "0.6.0",
+        b.option([]const u8, "data_version", "The data version - either 0.6.0 or master.") orelse "master",
     );
 
     exe.addPackage(.{ .name = "known-folders", .path = "src/known-folders/known-folders.zig" });

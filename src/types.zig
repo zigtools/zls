@@ -193,7 +193,8 @@ pub const MarkupKind = enum(u1) {
 };
 
 pub const MarkupContent = struct {
-    kind: MarkupKind = MarkupKind.Markdown, value: String
+    kind: MarkupKind = MarkupKind.Markdown,
+    value: String,
 };
 
 // pub const TextDocumentIdentifier = struct {
