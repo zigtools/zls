@@ -668,6 +668,24 @@ fn hoverDefinitionLabel(arena: *std.heap.ArenaAllocator, id: types.RequestId, po
     return try hoverSymbol(id, arena, decl);
 }
 
+fn hoverDefinitionBuiltin(arena: *std.heap.ArenaAllocator, id: types.RequestId, pos_index: usize, handle: *DocumentStore.Handle) !void {
+    const name = identifierFromPosition(pos_index, handle.*);
+    if (name.len == 0) return try respondGeneric(id, null_result_response);
+
+    inline for (data.builtins) |builtin| {
+        if (std.mem.eql(u8, builtin.name[1..], name)) {
+            try send(arena, types.Response{
+                .id = id,
+                .result = .{
+                    .Hover = .{
+                        .contents = .{ .value = try std.fmt.allocPrint(&arena.allocator, "```zig\n{}\n```\n{}", .{ builtin.signature, builtin.documentation }) },
+                    },
+                },
+            });
+        }
+    }
+}
+
 fn hoverDefinitionGlobal(arena: *std.heap.ArenaAllocator, id: types.RequestId, pos_index: usize, handle: *DocumentStore.Handle, config: Config) !void {
     const decl = (try getSymbolGlobal(arena, pos_index, handle)) orelse return try respondGeneric(id, null_result_response);
     return try hoverSymbol(id, arena, decl);
@@ -1286,6 +1304,7 @@ fn hoverHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: reque
 
         const this_config = configFromUriOr(req.params.textDocument.uri, config);
         switch (pos_context) {
+            .builtin => try hoverDefinitionBuiltin(arena, id, doc_position.absolute_index, handle),
             .var_access => try hoverDefinitionGlobal(arena, id, doc_position.absolute_index, handle, this_config),
             .field_access => |range| try hoverDefinitionFieldAccess(arena, id, handle, doc_position, range, this_config),
             .label => try hoverDefinitionLabel(arena, id, doc_position.absolute_index, handle, this_config),
