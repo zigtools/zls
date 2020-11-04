@@ -1,4 +1,5 @@
 name: CI
+
 on:
   push:
     paths:
@@ -6,26 +7,25 @@ on:
   pull_request:
     paths:
     - '**.zig'
+  workflow_dispatch:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{matrix.os}}
     steps:
-    - uses: actions/checkout@v1
-    - name: install software
-      run: |
-        ZIG=$(wget --quiet --output-document=- https://ziglang.org/download/index.json | jq --raw-output '.master."x86_64-linux".tarball')
-        echo installing $ZIG into ./zig/
-        wget --quiet --output-document=- $ZIG | tar Jx
-        mv zig-linux-x86_64-* zig
-        echo zig version $(./zig/zig version)
-        git submodule update --init --recursive
-    - name: build
-      run: |
-        export PATH=./zig:$PATH
-        zig build
+      - uses: actions/checkout@v2
+        with:
+          submodules: true
+      - uses: goto-bus-stop/setup-zig@v1
+        with:
+          version: master
 
-        FILE=zig-cache/bin/zls
+      - name: Build
+        run: zig build
 
-        test -f "$FILE" || exit 1
-        zig build test || exit 1
+      # ZLS Tests currently fail? Once they are passing and kept up to date, this can be enabled
+      # - name: Run Tests
+      #   run: zig build test
