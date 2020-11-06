@@ -121,7 +121,7 @@ pub fn fromDynamicTree(arena: *std.heap.ArenaAllocator, comptime T: type, value:
 //! Note that the parameter types may be incomplete.
 //! We only define what we actually use.
 
-const MaybeStringArray = Default([]const types.String, &[0]types.String{});
+const MaybeStringArray = Default([]const []const u8, &[0][]const u8{});
 
 pub const Initialize = struct {
     pub const ClientCapabilities = struct {
@@ -161,14 +161,14 @@ pub const WorkspaceFoldersChange = struct {
 pub const OpenDocument = struct {
     params: struct {
         textDocument: struct {
-            uri: types.String,
-            text: types.String,
+            uri: []const u8,
+            text: []const u8,
         },
     },
 };
 
 const TextDocumentIdentifier = struct {
-    uri: types.String,
+    uri: []const u8,
 };
 
 pub const ChangeDocument = struct {
@@ -205,7 +205,7 @@ pub const Rename = struct {
     params: struct {
         textDocument: TextDocumentIdentifier,
         position: types.Position,
-        newName: types.String,
+        newName: []const u8,
     },
 };
 

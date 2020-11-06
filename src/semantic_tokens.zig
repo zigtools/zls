@@ -4,7 +4,7 @@ const DocumentStore = @import("document_store.zig");
 const analysis = @import("analysis.zig");
 const ast = std.zig.ast;
 
-const TokenType = enum(u32) {
+pub const TokenType = enum(u32) {
     namespace,
     type,
     @"struct",
@@ -27,7 +27,7 @@ const TokenType = enum(u32) {
     keywordLiteral,
 };
 
-const TokenModifiers = packed struct {
+pub const TokenModifiers = packed struct {
     definition: bool = false,
     @"async": bool = false,
     documentation: bool = false,
@@ -275,7 +275,12 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
                     try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, child });
                 }
             }
-            try gap_highlighter.end(node.lastToken());
+
+            if (node.tag == .Root) {
+                try gap_highlighter.end(handle.tree.token_ids.len - 1);
+            } else {
+                try gap_highlighter.end(node.lastToken());
+            }
         },
         .VarDecl => {
             const var_decl = node.cast(ast.Node.VarDecl).?;
@@ -734,11 +739,11 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
             const pointer_type = node.castTag(.PtrType).?;
             const tok_ids = builder.handle.tree.token_ids;
 
-            const ptr_info = switch(tok_ids[pointer_type.op_token]) {
+            const ptr_info = switch (tok_ids[pointer_type.op_token]) {
                 .AsteriskAsterisk => pointer_type.rhs.castTag(.PtrType).?.ptr_info,
                 else => pointer_type.ptr_info,
             };
-            const rhs = switch(tok_ids[pointer_type.op_token]) {
+            const rhs = switch (tok_ids[pointer_type.op_token]) {
                 .AsteriskAsterisk => pointer_type.rhs.castTag(.PtrType).?.rhs,
                 else => pointer_type.rhs,
             };

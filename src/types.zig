@@ -1,25 +1,10 @@
-// Collection of JSONRPC and LSP structs, enums, and unions
-
 const std = @import("std");
+// LSP types
 const json = std.json;
 
-// JSON Types
-
-pub const String = []const u8;
-pub const Integer = i64;
-pub const Float = f64;
-pub const Bool = bool;
-pub const Array = json.Array;
-pub const Object = json.ObjectMap;
-// pub const Any = @TypeOf(var);
-
-// Basic structures
-
-pub const DocumentUri = String;
-
 pub const Position = struct {
-    line: Integer,
-    character: Integer,
+    line: i64,
+    character: i64,
 };
 
 pub const Range = struct {
@@ -28,21 +13,15 @@ pub const Range = struct {
 };
 
 pub const Location = struct {
-    uri: DocumentUri, range: Range
+    uri: []const u8,
+    range: Range,
 };
 
 /// Id of a request
 pub const RequestId = union(enum) {
-    String: String,
-    Integer: Integer,
-    Float: Float,
-};
-
-/// Params of a request
-pub const RequestParams = void;
-
-pub const NotificationParams = union(enum) {
-    LogMessageParams: LogMessageParams, PublishDiagnosticsParams: PublishDiagnosticsParams, ShowMessageParams: ShowMessageParams
+    String: []const u8,
+    Integer: i64,
+    Float: f64,
 };
 
 /// Hover response
@@ -60,35 +39,40 @@ pub const ResponseParams = union(enum) {
     TextEdits: []TextEdit,
     Locations: []Location,
     WorkspaceEdit: WorkspaceEdit,
-};
-
-/// JSONRPC error
-pub const Error = struct {
-    code: Integer,
-    message: String,
-    data: String,
-};
-
-/// JSONRPC request
-pub const Request = struct {
-    jsonrpc: String = "2.0", method: String, id: ?RequestId = RequestId{ .Integer = 0 }, params: RequestParams
+    InitializeResult: InitializeResult,
 };
 
 /// JSONRPC notifications
 pub const Notification = struct {
-    jsonrpc: String = "2.0", method: String, params: NotificationParams
+    pub const Params = union(enum) {
+        LogMessage: struct {
+            type: MessageType,
+            message: []const u8,
+        },
+        PublishDiagnostics: struct {
+            uri: []const u8,
+            diagnostics: []Diagnostic,
+        },
+        ShowMessage: struct {
+            type: MessageType,
+            message: []const u8,
+        },
+    };
+
+    jsonrpc: []const u8 = "2.0",
+    method: []const u8,
+    params: Params,
 };
 
 /// JSONRPC response
 pub const Response = struct {
-    jsonrpc: String = "2.0",
-    // @"error": ?Error = null,
+    jsonrpc: []const u8 = "2.0",
     id: RequestId,
     result: ResponseParams,
 };
 
 /// Type of a debug message
-pub const MessageType = enum(Integer) {
+pub const MessageType = enum(i64) {
     Error = 1,
     Warning = 2,
     Info = 3,
@@ -103,12 +87,7 @@ pub const MessageType = enum(Integer) {
     }
 };
 
-/// Params for a LogMessage Notification (window/logMessage)
-pub const LogMessageParams = struct {
-    type: MessageType, message: String
-};
-
-pub const DiagnosticSeverity = enum(Integer) {
+pub const DiagnosticSeverity = enum(i64) {
     Error = 1,
     Warning = 2,
     Information = 3,
@@ -126,19 +105,15 @@ pub const DiagnosticSeverity = enum(Integer) {
 pub const Diagnostic = struct {
     range: Range,
     severity: DiagnosticSeverity,
-    code: String,
-    source: String,
-    message: String,
-};
-
-pub const PublishDiagnosticsParams = struct {
-    uri: DocumentUri, diagnostics: []Diagnostic
+    code: []const u8,
+    source: []const u8,
+    message: []const u8,
 };
 
 pub const TextDocument = struct {
-    uri: DocumentUri,
+    uri: []const u8,
     // This is a substring of mem starting at 0
-    text: String,
+    text: []const u8,
     // This holds the memory that we have actually allocated.
     mem: []u8,
 };
@@ -172,91 +147,37 @@ pub const WorkspaceEdit = struct {
 
 pub const TextEdit = struct {
     range: Range,
-    newText: String,
-};
-
-pub const MarkupKind = enum(u1) {
-    PlainText = 0, // plaintext
-    Markdown = 1, // markdown
-
-    pub fn jsonStringify(
-        value: MarkupKind,
-        options: json.StringifyOptions,
-        out_stream: anytype,
-    ) !void {
-        const str = switch (value) {
-            .PlainText => "plaintext",
-            .Markdown => "markdown",
-        };
-        try json.stringify(str, options, out_stream);
-    }
+    newText: []const u8,
 };
 
 pub const MarkupContent = struct {
-    kind: MarkupKind = MarkupKind.Markdown,
-    value: String,
+    pub const Kind = enum(u1) {
+        PlainText = 0,
+        Markdown = 1,
+
+        pub fn jsonStringify(
+            value: Kind,
+            options: json.StringifyOptions,
+            out_stream: anytype,
+        ) !void {
+            const str = switch (value) {
+                .PlainText => "plaintext",
+                .Markdown => "markdown",
+            };
+            try json.stringify(str, options, out_stream);
+        }
+    };
+
+    kind: Kind = .Markdown,
+    value: []const u8,
 };
 
-// pub const TextDocumentIdentifier = struct {
-//     uri: DocumentUri,
-// };
-
-// pub const CompletionTriggerKind = enum(Integer) {
-//     Invoked = 1,
-//     TriggerCharacter = 2,
-//     TriggerForIncompleteCompletions = 3,
-
-//     pub fn jsonStringify(
-//         value: CompletionTriggerKind,
-//         options: json.StringifyOptions,
-//         out_stream: var,
-//     ) !void {
-//         try json.stringify(@enumToInt(value), options, out_stream);
-//     }
-// };
-
 pub const CompletionList = struct {
-    isIncomplete: Bool,
+    isIncomplete: bool,
     items: []const CompletionItem,
 };
 
-pub const CompletionItemKind = enum(Integer) {
-    Text = 1,
-    Method = 2,
-    Function = 3,
-    Constructor = 4,
-    Field = 5,
-    Variable = 6,
-    Class = 7,
-    Interface = 8,
-    Module = 9,
-    Property = 10,
-    Unit = 11,
-    Value = 12,
-    Enum = 13,
-    Keyword = 14,
-    Snippet = 15,
-    Color = 16,
-    File = 17,
-    Reference = 18,
-    Folder = 19,
-    EnumMember = 20,
-    Constant = 21,
-    Struct = 22,
-    Event = 23,
-    Operator = 24,
-    TypeParameter = 25,
-
-    pub fn jsonStringify(
-        value: CompletionItemKind,
-        options: json.StringifyOptions,
-        out_stream: anytype,
-    ) !void {
-        try json.stringify(@enumToInt(value), options, out_stream);
-    }
-};
-
-pub const InsertTextFormat = enum(Integer) {
+pub const InsertTextFormat = enum(i64) {
     PlainText = 1,
     Snippet = 2,
 
@@ -270,70 +191,162 @@ pub const InsertTextFormat = enum(Integer) {
 };
 
 pub const CompletionItem = struct {
-    label: String,
-    kind: CompletionItemKind,
+    const Kind = enum(i64) {
+        Text = 1,
+        Method = 2,
+        Function = 3,
+        Constructor = 4,
+        Field = 5,
+        Variable = 6,
+        Class = 7,
+        Interface = 8,
+        Module = 9,
+        Property = 10,
+        Unit = 11,
+        Value = 12,
+        Enum = 13,
+        Keyword = 14,
+        Snippet = 15,
+        Color = 16,
+        File = 17,
+        Reference = 18,
+        Folder = 19,
+        EnumMember = 20,
+        Constant = 21,
+        Struct = 22,
+        Event = 23,
+        Operator = 24,
+        TypeParameter = 25,
+
+        pub fn jsonStringify(
+            value: Kind,
+            options: json.StringifyOptions,
+            out_stream: anytype,
+        ) !void {
+            try json.stringify(@enumToInt(value), options, out_stream);
+        }
+    };
+
+    label: []const u8,
+    kind: Kind,
     textEdit: ?TextEdit = null,
-    filterText: ?String = null,
-    insertText: ?String = null,
-    insertTextFormat: ?InsertTextFormat = InsertTextFormat.PlainText,
-    detail: ?String = null,
+    filterText: ?[]const u8 = null,
+    insertText: ?[]const u8 = null,
+    insertTextFormat: ?InsertTextFormat = .PlainText,
+    detail: ?[]const u8 = null,
     documentation: ?MarkupContent = null,
-    // filterText: String = .NotDefined,
-};
-
-const SymbolKind = enum {
-    File = 1,
-    Module = 2,
-    Namespace = 3,
-    Package = 4,
-    Class = 5,
-    Method = 6,
-    Property = 7,
-    Field = 8,
-    Constructor = 9,
-    Enum = 10,
-    Interface = 11,
-    Function = 12,
-    Variable = 13,
-    Constant = 14,
-    String = 15,
-    Number = 16,
-    Boolean = 17,
-    Array = 18,
-    Object = 19,
-    Key = 20,
-    Null = 21,
-    EnumMember = 22,
-    Struct = 23,
-    Event = 24,
-    Operator = 25,
-    TypeParameter = 26,
-
-    pub fn jsonStringify(
-        value: SymbolKind,
-        options: json.StringifyOptions,
-        out_stream: anytype,
-    ) !void {
-        try json.stringify(@enumToInt(value), options, out_stream);
-    }
 };
 
 pub const DocumentSymbol = struct {
-    name: String,
-    detail: ?String = null,
-    kind: SymbolKind,
+    const Kind = enum {
+        File = 1,
+        Module = 2,
+        Namespace = 3,
+        Package = 4,
+        Class = 5,
+        Method = 6,
+        Property = 7,
+        Field = 8,
+        Constructor = 9,
+        Enum = 10,
+        Interface = 11,
+        Function = 12,
+        Variable = 13,
+        Constant = 14,
+        String = 15,
+        Number = 16,
+        Boolean = 17,
+        Array = 18,
+        Object = 19,
+        Key = 20,
+        Null = 21,
+        EnumMember = 22,
+        Struct = 23,
+        Event = 24,
+        Operator = 25,
+        TypeParameter = 26,
+
+        pub fn jsonStringify(
+            value: Kind,
+            options: json.StringifyOptions,
+            out_stream: anytype,
+        ) !void {
+            try json.stringify(@enumToInt(value), options, out_stream);
+        }
+    };
+
+    name: []const u8,
+    detail: ?[]const u8 = null,
+    kind: Kind,
     deprecated: bool = false,
     range: Range,
     selectionRange: Range,
     children: []const DocumentSymbol = &[_]DocumentSymbol{},
 };
 
-pub const ShowMessageParams = struct {
-    type: MessageType,
-    message: String,
+pub const WorkspaceFolder = struct {
+    uri: []const u8,
+    name: []const u8,
 };
 
-pub const WorkspaceFolder = struct {
-    uri: DocumentUri,
-    name: String,
+// Only includes options we set in our initialize result.
+const InitializeResult = struct {
+    capabilities: struct {
+        signatureHelpProvider: struct {
+            triggerCharacters: []const []const u8,
+        },
+        textDocumentSync: enum {
+            None = 0,
+            Full = 1,
+            Incremental = 2,
+
+            pub fn jsonStringify(
+                value: @This(),
+                options: json.StringifyOptions,
+                out_stream: anytype,
+            ) !void {
+                try json.stringify(@enumToInt(value), options, out_stream);
+            }
+        },
+        renameProvider: bool,
+        completionProvider: struct {
+            resolveProvider: bool,
+            triggerCharacters: []const []const u8,
+        },
+        documentHighlightProvider: bool,
+        hoverProvider: bool,
+        codeActionProvider: bool,
+        declarationProvider: bool,
+        definitionProvider: bool,
+        typeDefinitionProvider: bool,
+        implementationProvider: bool,
+        referencesProvider: bool,
+        documentSymbolProvider: bool,
+        colorProvider: bool,
+        documentFormattingProvider: bool,
+        documentRangeFormattingProvider: bool,
+        foldingRangeProvider: bool,
+        selectionRangeProvider: bool,
+        workspaceSymbolProvider: bool,
+        rangeProvider: bool,
+        documentProvider: bool,
+        workspace: struct {
+            workspaceFolders: struct {
+                supported: bool,
+                changeNotifications: bool,
+            },
+        },
+        semanticTokensProvider: struct {
+            documentProvider: bool,
+            legend: struct {
+                tokenTypes: []const []const u8,
+                tokenModifiers: []const []const u8,
+            },
+        },
+    },
+    serverInfo: struct {
+        name: []const u8,
+        version: ?[]const u8 = null,
+    },
+    offsetEncoding: []const u8,
 };

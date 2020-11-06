@@ -12,6 +12,7 @@ const URI = @import("uri.zig");
 const references = @import("references.zig");
 const rename = @import("rename.zig");
 const offsets = @import("offsets.zig");
+const semantic_tokens = @import("semantic_tokens.zig");
 
 const logger = std.log.scoped(.main);
 
@@ -50,8 +51,8 @@ pub fn log(
         };
         send(&arena, types.Notification{
             .method = "window/showMessage",
-            .params = types.NotificationParams{
-                .ShowMessageParams = .{
+            .params = types.Notification.Params{
+                .ShowMessage = .{
                     .type = message_type,
                     .message = message,
                 },
@@ -67,8 +68,8 @@ pub fn log(
 
         send(&arena, types.Notification{
             .method = "window/logMessage",
-            .params = types.NotificationParams{
-                .LogMessageParams = .{
+            .params = types.Notification.Params{
+                .LogMessage = .{
                     .type = message_type,
                     .message = message,
                 },
@@ -96,12 +97,6 @@ const ClientCapabilities = struct {
 
 var client_capabilities = ClientCapabilities{};
 var offset_encoding = offsets.Encoding.utf16;
-
-const initialize_capabilities =
-    \\"capabilities": {"signatureHelpProvider": {"triggerCharacters": ["(",","]},"textDocumentSync": 1,"renameProvider":true,"completionProvider": {"resolveProvider": false,"triggerCharacters": [".",":","@"]},"documentHighlightProvider": false,"hoverProvider": true,"codeActionProvider": false,"declarationProvider": true,"definitionProvider": true,"typeDefinitionProvider": true,"implementationProvider": false,"referencesProvider": true,"documentSymbolProvider": true,"colorProvider": false,"documentFormattingProvider": true,"documentRangeFormattingProvider": false,"foldingRangeProvider": false,"selectionRangeProvider": false,"workspaceSymbolProvider": false,"rangeProvider": false,"documentProvider": true,"workspace": {"workspaceFolders": {"supported": true,"changeNotifications": true}},"semanticTokensProvider": {"documentProvider": true,"legend": {"tokenTypes": ["namespace","type","struct","enum","union","opaque","parameter","variable","tagField","field","errorTag","function","keyword","comment","string","number","operator","builtin","label","keywordLiteral"],"tokenModifiers": ["definition","async","documentation", "generic"]}}}}}
-;
-
-const initialize_response = ",\"result\": {" ++ initialize_capabilities;
 
 const not_implemented_response =
     \\,"error":{"code":-32601,"message":"NotImplemented"}}
@@ -259,7 +254,7 @@ fn publishDiagnostics(arena: *std.heap.ArenaAllocator, handle: DocumentStore.Han
     try send(arena, types.Notification{
         .method = "textDocument/publishDiagnostics",
         .params = .{
-            .PublishDiagnosticsParams = .{
+            .PublishDiagnostics = .{
                 .uri = handle.uri(),
                 .diagnostics = diagnostics.items,
             },
@@ -331,7 +326,11 @@ fn nodeToCompletion(
     const node = node_handle.node;
     const handle = node_handle.handle;
 
-    const doc_kind: types.MarkupKind = if (client_capabilities.completion_doc_supports_md) .Markdown else .PlainText;
+    const doc_kind: types.MarkupContent.Kind = if (client_capabilities.completion_doc_supports_md)
+        .Markdown
+    else
+        .PlainText;
+
     const doc = if (try analysis.getDocComments(
         list.allocator,
         handle.tree,
@@ -563,7 +562,7 @@ fn gotoDefinitionSymbol(id: types.RequestId, arena: *std.heap.ArenaAllocator, de
 fn hoverSymbol(id: types.RequestId, arena: *std.heap.ArenaAllocator, decl_handle: analysis.DeclWithHandle) (std.os.WriteError || error{OutOfMemory})!void {
     const handle = decl_handle.handle;
 
-    const hover_kind: types.MarkupKind = if (client_capabilities.hover_supports_md) .Markdown else .PlainText;
+    const hover_kind: types.MarkupContent.Kind = if (client_capabilities.hover_supports_md) .Markdown else .PlainText;
     const md_string = switch (decl_handle.decl.*) {
         .ast_node => |node| ast_node: {
             if (try analysis.resolveVarDeclAlias(&document_store, arena, .{ .node = node, .handle = handle })) |result| {
@@ -866,7 +865,7 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: analysis.Decl
     switch (decl_handle.decl.*) {
         .ast_node => |node| try nodeToCompletion(context.arena, context.completions, .{ .node = node, .handle = decl_handle.handle }, null, context.orig_handle, false, context.config.*),
         .param_decl => |param| {
-            const doc_kind: types.MarkupKind = if (client_capabilities.completion_doc_supports_md) .Markdown else .PlainText;
+            const doc_kind: types.MarkupContent.Kind = if (client_capabilities.completion_doc_supports_md) .Markdown else .PlainText;
             const doc = if (param.doc_comments) |doc_comments|
                 types.MarkupContent{
                     .kind = doc_kind,
@@ -1073,7 +1072,6 @@ fn configFromUriOr(uri: []const u8, default: Config) Config {
 }
 
 fn initializeHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.Initialize, config: Config) !void {
-    var send_encoding = req.params.capabilities.offsetEncoding.value.len != 0;
     for (req.params.capabilities.offsetEncoding.value) |encoding| {
         if (std.mem.eql(u8, encoding, "utf-8")) {
             offset_encoding = .utf8;
@@ -1117,15 +1115,77 @@ fn initializeHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: 
         try loadWorkspaceConfigs();
     }
 
-    if (!send_encoding) {
-        try respondGeneric(id, initialize_response);
-    } else {
-        const response_str = try std.fmt.allocPrint(&arena.allocator, ",\"result\": {{\"offsetEncoding\":\"{}\",{}", .{
-            if (offset_encoding == .utf8) @as([]const u8, "utf-8") else @as([]const u8, "utf-16"),
-            initialize_capabilities,
-        });
-        try respondGeneric(id, response_str);
-    }
+    try send(arena, types.Response{
+        .id = id,
+        .result = .{
+            .InitializeResult = .{
+                .offsetEncoding = if (offset_encoding == .utf8)
+                    @as([]const u8, "utf-8")
+                else
+                    "utf-16",
+                .serverInfo = .{
+                    .name = "zls",
+                    .version = "0.1.0",
+                },
+                .capabilities = .{
+                    .signatureHelpProvider = .{
+                        .triggerCharacters = &[_][]const u8{ "(", "," },
+                    },
+                    .textDocumentSync = .Full,
+                    .renameProvider = true,
+                    .completionProvider = .{
+                        .resolveProvider = false,
+                        .triggerCharacters = &[_][]const u8{ ".", ":", "@" },
+                    },
+                    .documentHighlightProvider = false,
+                    .hoverProvider = true,
+                    .codeActionProvider = false,
+                    .declarationProvider = true,
+                    .definitionProvider = true,
+                    .typeDefinitionProvider = true,
+                    .implementationProvider = false,
+                    .referencesProvider = true,
+                    .documentSymbolProvider = true,
+                    .colorProvider = false,
+                    .documentFormattingProvider = true,
+                    .documentRangeFormattingProvider = false,
+                    .foldingRangeProvider = false,
+                    .selectionRangeProvider = false,
+                    .workspaceSymbolProvider = false,
+                    .rangeProvider = false,
+                    .documentProvider = true,
+                    .workspace = .{
+                        .workspaceFolders = .{
+                            .supported = true,
+                            .changeNotifications = true,
+                        },
+                    },
+                    .semanticTokensProvider = .{
+                        .documentProvider = true,
+                        .legend = .{
+                            .tokenTypes = comptime block: {
+                                const tokTypeFields = std.meta.fields(semantic_tokens.TokenType);
+                                var names: [tokTypeFields.len][]const u8 = undefined;
+                                for (tokTypeFields) |field, i| {
+                                    names[i] = field.name;
+                                }
+                                break :block &names;
+                            },
+                            .tokenModifiers = comptime block: {
+                                const tokModFields = std.meta.fields(semantic_tokens.TokenModifiers);
+                                var names: [tokModFields.len][]const u8 = undefined;
+                                for (tokModFields) |field, i| {
+                                    names[i] = field.name;
+                                }
+                                break :block &names;
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    });
+
     logger.notice("zls initialized", .{});
     logger.info("{}\n", .{client_capabilities});
     logger.notice("Using offset encoding: {}\n", .{std.meta.tagName(offset_encoding)});
@@ -1201,7 +1261,6 @@ fn semanticTokensFullHandler(arena: *std.heap.ArenaAllocator, id: types.RequestI
             return try respondGeneric(id, no_semantic_tokens_response);
         };
 
-        const semantic_tokens = @import("semantic_tokens.zig");
         const token_array = try semantic_tokens.writeAllSemanticTokens(arena, &document_store, handle, offset_encoding);
         defer allocator.free(token_array);
 

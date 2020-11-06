@@ -19,12 +19,12 @@ fn tokenReference(
         .uri = handle.uri(),
         .range = .{
             .start = .{
-                .line = @intCast(types.Integer, loc.line),
-                .character = @intCast(types.Integer, loc.column),
+                .line = @intCast(i64, loc.line),
+                .character = @intCast(i64, loc.column),
             },
             .end = .{
-                .line = @intCast(types.Integer, loc.line),
-                .character = @intCast(types.Integer, loc.column + offsets.tokenLength(handle.tree, tok, encoding)),
+                .line = @intCast(i64, loc.line),
+                .character = @intCast(i64, loc.column + offsets.tokenLength(handle.tree, tok, encoding)),
             },
         },
     });
