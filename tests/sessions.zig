@@ -97,7 +97,7 @@ test "Open file, ask for semantic tokens" {
     try sendRequest(sem_toks_req, process);
     try sendRequest(shutdown_message, process);
     try consumeOutputAndWait(process, .{
-        \\{"jsonrpc":"2.0","id":2,"result":{"data":[0,0,5,12,0,0,6,3,0,1,0,4,1,16,0,0,2,7,17,0,0,8,5,14,0]}}
+        \\{"jsonrpc":"2.0","id":0,"result":{"data":[0,0,5,7,0,0,6,3,0,33,0,4,1,11,0,0,2,7,12,0,0,8,5,9,0]}}
     });
 }
 
@@ -143,6 +143,6 @@ test "Requesting utf-8 offset encoding" {
 
     try sendRequest(shutdown_message, process);
     try consumeOutputAndWait(process, .{
-        \\{"jsonrpc":"2.0","id":0,"result":{"offsetEncoding":"utf-8","capabilities":{"signatureHelpProvider":{"triggerCharacters":["(",","]},"textDocumentSync":1,"renameProvider":true,"completionProvider":{"resolveProvider":false,"triggerCharacters":[".",":","@"]},"documentHighlightProvider":false,"hoverProvider":true,"codeActionProvider":false,"declarationProvider":true,"definitionProvider":true,"typeDefinitionProvider":true,"implementationProvider":false,"referencesProvider":true,"documentSymbolProvider":true,"colorProvider":false,"documentFormattingProvider":true,"documentRangeFormattingProvider":false,"foldingRangeProvider":false,"selectionRangeProvider":false,"workspaceSymbolProvider":false,"rangeProvider":false,"documentProvider":true,"workspace":{"workspaceFolders":{"supported":true,"changeNotifications":true}},"semanticTokensProvider":{"documentProvider":true,"legend":{"tokenTypes":["namespace","type","struct","enum","union","opaque","parameter","variable","tagField","field","errorTag","function","keyword","comment","string","number","operator","builtin","label","keywordLiteral"],"tokenModifiers":["definition","async","documentation","generic"]}}},"serverInfo":{"name":"zls","version":"0.1.0"}}}
+        \\{"jsonrpc":"2.0","id":0,"result":{"offsetEncoding":"utf-8","capabilities":{"signatureHelpProvider":{"triggerCharacters":["(",","]},"textDocumentSync":1,"renameProvider":true,"completionProvider":{"resolveProvider":false,"triggerCharacters":[".",":","@"]},"documentHighlightProvider":false,"hoverProvider":true,"codeActionProvider":false,"declarationProvider":true,"definitionProvider":true,"typeDefinitionProvider":true,"implementationProvider":false,"referencesProvider":true,"documentSymbolProvider":true,"colorProvider":false,"documentFormattingProvider":true,"documentRangeFormattingProvider":false,"foldingRangeProvider":false,"selectionRangeProvider":false,"workspaceSymbolProvider":false,"rangeProvider":false,"documentProvider":true,"workspace":{"workspaceFolders":{"supported":true,"changeNotifications":true}},"semanticTokensProvider":{"documentProvider":true,"legend":{"tokenTypes":["type","parameter","variable","tagField","field","errorTag","function","keyword","comment","string","number","operator","builtin","label","keywordLiteral"],"tokenModifiers":["namespace","struct","enum","union","opaque","definition","async","documentation","generic"]}}},"serverInfo":{"name":"zls","version":"0.1.0"}}}
     });
 }

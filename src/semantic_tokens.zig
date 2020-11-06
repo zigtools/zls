@@ -5,12 +5,7 @@ const analysis = @import("analysis.zig");
 const ast = std.zig.ast;
 
 pub const TokenType = enum(u32) {
-    namespace,
     type,
-    @"struct",
-    @"enum",
-    @"union",
-    @"opaque",
     parameter,
     variable,
     tagField,
@@ -28,6 +23,11 @@ pub const TokenType = enum(u32) {
 };
 
 pub const TokenModifiers = packed struct {
+    namespace: bool = false,
+    @"struct": bool = false,
+    @"enum": bool = false,
+    @"union": bool = false,
+    @"opaque": bool = false,
     definition: bool = false,
     @"async": bool = false,
     documentation: bool = false,
@@ -35,14 +35,11 @@ pub const TokenModifiers = packed struct {
 
     fn toInt(self: TokenModifiers) u32 {
         var res: u32 = 0;
-        if (self.definition)
-            res |= 1 << 0;
-        if (self.@"async")
-            res |= 1 << 1;
-        if (self.documentation)
-            res |= 1 << 2;
-        if (self.generic)
-            res |= 1 << 3;
+        inline for (std.meta.fields(TokenModifiers)) |field, i| {
+            if (@field(self, field.name)) {
+                res |= 1 << i;
+            }
+        }
         return res;
     }
 
@@ -188,20 +185,19 @@ const GapHighlighter = struct {
 
 fn colorIdentifierBasedOnType(builder: *Builder, type_node: analysis.TypeWithHandle, target_tok: ast.TokenIndex, tok_mod: TokenModifiers) !void {
     if (type_node.type.is_type_val) {
-        const tok_type = if (type_node.isNamespace())
-            .namespace
+        var new_tok_mod = tok_mod;
+        if (type_node.isNamespace())
+            new_tok_mod.set("namespace")
         else if (type_node.isStructType())
-            .@"struct"
+            new_tok_mod.set("struct")
         else if (type_node.isEnumType())
-            .@"enum"
+            new_tok_mod.set("enum")
         else if (type_node.isUnionType())
-            .@"union"
+            new_tok_mod.set("union")
         else if (type_node.isOpaqueType())
-            .@"opaque"
-        else
-            TokenType.type;
+            new_tok_mod.set("opaque");
 
-        try writeTokenMod(builder, target_tok, tok_type, tok_mod);
+        try writeTokenMod(builder, target_tok, .type, new_tok_mod);
     } else if (type_node.isTypeFunc()) {
         try writeTokenMod(builder, target_tok, .type, tok_mod);
     } else if (type_node.isFunc()) {
