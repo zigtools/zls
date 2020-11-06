@@ -410,12 +410,15 @@ pub fn applyChanges(
     self: *DocumentStore,
     handle: *Handle,
     content_changes: std.json.Array,
+    offset_encoding: offsets.Encoding,
     zig_lib_path: ?[]const u8,
 ) !void {
     const document = &handle.document;
 
     for (content_changes.items) |change| {
         if (change.Object.get("range")) |range| {
+            std.debug.assert(document.text.ptr == document.mem.ptr);
+
             const start_pos = types.Position{
                 .line = range.Object.get("start").?.Object.get("line").?.Integer,
                 .character = range.Object.get("start").?.Object.get("character").?.Integer,
@@ -425,13 +428,13 @@ pub fn applyChanges(
                 .character = range.Object.get("end").?.Object.get("character").?.Integer,
             };
 
-            const change_text = change.Object.get("text").?.String;
 
-            const start_index = (try offsets.documentPosition(document.*, start_pos, .utf16)).absolute_index;
-            const end_index = (try offsets.documentPosition(document.*, end_pos, .utf16)).absolute_index;
+            const change_text = change.Object.get("text").?.String;
+            const start_index = (try offsets.documentPosition(document.*, start_pos, offset_encoding)).absolute_index;
+            const end_index = (try offsets.documentPosition(document.*, end_pos, offset_encoding)).absolute_index;
 
             const old_len = document.text.len;
-            const new_len = old_len + change_text.len;
+            const new_len = old_len - (end_index - start_index) + change_text.len;
             if (new_len > document.mem.len) {
                 // We need to reallocate memory.
                 // We reallocate twice the current filesize or the new length, if it's more than that
@@ -444,7 +447,11 @@ pub fn applyChanges(
             // The first part of the string, [0 .. start_index] need not be changed.
             // We then copy the last part of the string, [end_index ..] to its
             //    new position, [start_index + change_len .. ]
-            std.mem.copy(u8, document.mem[start_index + change_text.len ..][0 .. old_len - end_index], document.mem[end_index..old_len]);
+            if (new_len < old_len) {
+                std.mem.copy(u8, document.mem[start_index + change_text.len ..][0 .. old_len - end_index], document.mem[end_index..old_len]);
+            } else {
+                std.mem.copyBackwards(u8, document.mem[start_index + change_text.len ..][0 .. old_len - end_index], document.mem[end_index..old_len]);
+            }
             // Finally, we copy the changes over.
             std.mem.copy(u8, document.mem[start_index..][0..change_text.len], change_text);
 

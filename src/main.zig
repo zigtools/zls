@@ -1131,7 +1131,7 @@ fn initializeHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: 
                     .signatureHelpProvider = .{
                         .triggerCharacters = &[_][]const u8{ "(", "," },
                     },
-                    .textDocumentSync = .Full,
+                    .textDocumentSync = .Incremental,
                     .renameProvider = true,
                     .completionProvider = .{
                         .resolveProvider = false,
@@ -1237,7 +1237,7 @@ fn changeDocumentHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, r
     };
 
     const local_config = configFromUriOr(req.params.textDocument.uri, config);
-    try document_store.applyChanges(handle, req.params.contentChanges.Array, local_config.zig_lib_path);
+    try document_store.applyChanges(handle, req.params.contentChanges.Array, offset_encoding, local_config.zig_lib_path);
     try publishDiagnostics(arena, handle.*, local_config);
 }
 
