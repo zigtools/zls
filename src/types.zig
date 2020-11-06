@@ -338,7 +338,8 @@ const InitializeResult = struct {
             },
         },
         semanticTokensProvider: struct {
-            documentProvider: bool,
+            full: bool,
+            range: bool,
             legend: struct {
                 tokenTypes: []const []const u8,
                 tokenModifiers: []const []const u8,

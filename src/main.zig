@@ -1161,7 +1161,8 @@ fn initializeHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: 
                         },
                     },
                     .semanticTokensProvider = .{
-                        .documentProvider = true,
+                        .full = true,
+                        .range = false,
                         .legend = .{
                             .tokenTypes = comptime block: {
                                 const tokTypeFields = std.meta.fields(semantic_tokens.TokenType);
