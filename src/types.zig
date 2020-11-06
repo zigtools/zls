@@ -291,6 +291,7 @@ pub const WorkspaceFolder = struct {
 
 // Only includes options we set in our initialize result.
 const InitializeResult = struct {
+    offsetEncoding: []const u8,
     capabilities: struct {
         signatureHelpProvider: struct {
             triggerCharacters: []const []const u8,
@@ -348,5 +349,4 @@ const InitializeResult = struct {
         name: []const u8,
         version: ?[]const u8 = null,
     },
-    offsetEncoding: []const u8,
 };
