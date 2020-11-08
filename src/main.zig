@@ -16,7 +16,11 @@ const semantic_tokens = @import("semantic_tokens.zig");
 
 const logger = std.log.scoped(.main);
 
-pub const log_level: std.log.Level = switch (std.builtin.mode) {
+// Always set this to debug to make std.log call into our handler, then control the runtime
+// value in the definition below.
+pub const log_level = .debug;
+
+var actual_log_level: std.log.Level = switch (std.builtin.mode) {
     .Debug => .debug,
     else => .notice,
 };
@@ -27,6 +31,9 @@ pub fn log(
     comptime format: []const u8,
     args: anytype,
 ) void {
+    if (@enumToInt(message_level) > @enumToInt(actual_log_level)) {
+        return;
+    }
     // After shutdown, pipe output to stderr
     if (!keep_running) {
         std.debug.print("[{}-{}] " ++ format, .{ @tagName(message_level), @tagName(scope) } ++ args);
@@ -1579,6 +1586,24 @@ var gpa_state = std.heap.GeneralPurposeAllocator(.{}){};
 pub fn main() anyerror!void {
     defer _ = gpa_state.deinit();
     allocator = &gpa_state.allocator;
+
+    // Check arguments.
+    var args_it = std.process.args();
+    const prog_name = try args_it.next(allocator) orelse unreachable;
+    allocator.free(prog_name);
+
+    while (args_it.next(allocator)) |maybe_arg| {
+        const arg = try maybe_arg;
+        defer allocator.free(arg);
+        if (std.mem.eql(u8, arg, "--debug-log")) {
+            actual_log_level = .debug;
+            std.debug.print("Enabled debug logging\n", .{});
+        } else {
+            std.debug.print("Unrecognized argument {}\n", .{arg});
+            std.os.exit(1);
+        }
+    }
+    args_it.deinit();
 
     // Init global vars
     const reader = std.io.getStdIn().reader();
