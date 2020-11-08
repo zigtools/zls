@@ -26,7 +26,7 @@ Installing `zls` is pretty simple. You will need [a build of Zig master](https:/
 ```bash
 git clone --recurse-submodules https://github.com/zigtools/zls
 cd zls
-zig build
+zig build -Drelease-fast
 
 # To configure zls:
 zig build config

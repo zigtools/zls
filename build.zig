@@ -10,8 +10,6 @@ pub fn config(step: *std.build.Step) anyerror!void {
     @setEvalBranchQuota(2500);
     std.debug.warn("Welcome to the ZLS configuration wizard! (insert mage emoji here)\n", .{});
 
-    // std.debug.warn("{}", .{dir.});
-
     const lib_path = try zinput.askDirPath(builder.allocator, "What is your Zig lib path (path that contains the 'std' folder)?", 512);
     const snippets = try zinput.askBool("Do you want to enable snippets?");
     const style = try zinput.askBool("Do you want to enable style warnings?");
@@ -130,12 +128,9 @@ pub fn build(b: *std.build.Builder) !void {
     // for restricting supported target set are available.
     const target = b.standardTargetOptions(.{});
 
-    // Standard release options allow the person running `zig build` to select
-    // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall.
     const mode = b.standardReleaseOptions();
-
     const exe = b.addExecutable("zls", "src/main.zig");
-    
+
     exe.addBuildOption(
         []const u8,
         "data_version",
