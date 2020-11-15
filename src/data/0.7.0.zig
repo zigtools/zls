@@ -478,7 +478,7 @@ pub const builtins = [_]Builtin{
         .signature = "@errorReturnTrace() ?*builtin.StackTrace",
         .snippet = "@errorReturnTrace()",
         .documentation =
-        \\ If the binary is built with error return tracing, and this function is invoked in a function that calls a function with an error or error union return type, returns a stack trace object. Otherwise returns null.
+        \\ If the binary is built with error return tracing, and this function is invoked in a function that calls a function with an error or error union return type, returns a stack trace object. Otherwise returns `null`.
     },
     .{
         .name = "@errorToInt",
@@ -983,7 +983,7 @@ pub const builtins = [_]Builtin{
         \\$ zig test test.zig-OReleaseFast
         \\1/1 test "@setRuntimeSafety"... integer overflow
         \\error: the following test command crashed:
-        \\docgen_tmp/zig-cache/o/1dd5b9d2eb0c824ad8bb3cab3c173811/test
+        \\docgen_tmp/zig-cache/o/cb6de32279940f36da16caa4f64d8c67/test
         \\
         \\```
         \\Note: it is planned to replace @setRuntimeSafety with @optimizeFor
@@ -1064,7 +1064,7 @@ pub const builtins = [_]Builtin{
         .signature = "@reduce(comptime op: builtin.ReduceOp, value: anytype) std.meta.Child(value)",
         .snippet = "@reduce(${1:comptime op: builtin.ReduceOp}, ${2:value: anytype})",
         .documentation =
-        \\ Transforms a vector into a scalar value by performing a sequential horizontal reduction of its elements using the specified operator op.
+        \\ Transforms a vector into a scalar value by performing a sequential horizontal reduction of its elements using the specified specified operator op.
         \\ Not every operator is available for every vector element type:
     },
     .{
@@ -1279,20 +1279,20 @@ pub const builtins = [_]Builtin{
         \\```zig
         \\$ zig test test.zig
         \\1/1 test "integer cast panic"... integer cast truncated bits
-        \\/deps/zig/docgen_tmp/test.zig:3:17: 0x2059b5 in test "integer cast panic" (test)
+        \\/home/andy/Downloads/zig/docgen_tmp/test.zig:3:17: 0x205995 in test "integer cast panic" (test)
         \\    var b: u8 = @intCast(u8, a);
         \\                ^
-        \\/deps/zig/lib/std/special/test_runner.zig:61:28: 0x22d9b1 in std.special.main (test)
+        \\/home/andy/Downloads/zig/lib/std/special/test_runner.zig:61:28: 0x22d991 in std.special.main (test)
         \\        } else test_fn.func();
         \\                           ^
-        \\/deps/zig/lib/std/start.zig:334:37: 0x2072bd in std.start.posixCallMainAndExit (test)
+        \\/home/andy/Downloads/zig/lib/std/start.zig:334:37: 0x20729d in std.start.posixCallMainAndExit (test)
         \\            const result = root.main() catch |err| {
         \\                                    ^
-        \\/deps/zig/lib/std/start.zig:162:5: 0x206ff2 in std.start._start (test)
+        \\/home/andy/Downloads/zig/lib/std/start.zig:162:5: 0x206fd2 in std.start._start (test)
         \\    @call(.{ .modifier = .never_inline }, posixCallMainAndExit, .{});
         \\    ^
         \\error: the following test command crashed:
-        \\docgen_tmp/zig-cache/o/0ac59203e6cc7c69be59cafa47214a9f/test
+        \\docgen_tmp/zig-cache/o/2e7f715609483f0cd9100db66b70c1a0/test
         \\
         \\```
         \\ However this is well defined and working code:
