@@ -1031,20 +1031,20 @@ fn loadConfig(folder_path: []const u8) ?Config {
 
     const file_buf = folder.readFileAlloc(allocator, "zls.json", 0x1000000) catch |err| {
         if (err != error.FileNotFound)
-            logger.warn("Error while reading configuration file: {}\n", .{err});
+            logger.warn("Error while reading configuration file: {}", .{err});
         return null;
     };
     defer allocator.free(file_buf);
 
     // TODO: Better errors? Doesn't seem like std.json can provide us positions or context.
     var config = std.json.parse(Config, &std.json.TokenStream.init(file_buf), std.json.ParseOptions{ .allocator = allocator }) catch |err| {
-        logger.warn("Error while parsing configuration file: {}\n", .{err});
+        logger.warn("Error while parsing configuration file: {}", .{err});
         return null;
     };
 
     if (config.zig_lib_path) |zig_lib_path| {
         if (!std.fs.path.isAbsolute(zig_lib_path)) {
-            logger.warn("zig library path is not absolute, defaulting to null.\n", .{});
+            logger.warn("zig library path is not absolute, defaulting to null.", .{});
             allocator.free(zig_lib_path);
             config.zig_lib_path = null;
         }
@@ -1154,8 +1154,8 @@ fn initializeHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: 
     });
 
     logger.notice("zls initialized", .{});
-    logger.info("{}\n", .{client_capabilities});
-    logger.notice("Using offset encoding: {}\n", .{std.meta.tagName(offset_encoding)});
+    logger.info("{}", .{client_capabilities});
+    logger.notice("Using offset encoding: {}", .{std.meta.tagName(offset_encoding)});
 }
 
 var keep_running = true;
@@ -1334,7 +1334,7 @@ fn formattingHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: 
         process.stdout_behavior = .Pipe;
 
         process.spawn() catch |err| {
-            logger.warn("Failed to spawn zig fmt process, error: {}\n", .{err});
+            logger.warn("Failed to spawn zig fmt process, error: {}", .{err});
             return try respondGeneric(id, null_result_response);
         };
         try process.stdin.?.writeAll(handle.document.text);
@@ -1429,7 +1429,7 @@ fn processJsonRpc(arena: *std.heap.ArenaAllocator, parser: *std.json.Parser, jso
     const start_time = std.time.milliTimestamp();
     defer {
         const end_time = std.time.milliTimestamp();
-        logger.debug("Took {}ms to process method {}\n", .{ end_time - start_time, method });
+        logger.debug("Took {}ms to process method {}", .{ end_time - start_time, method });
     }
 
     const method_map = .{
@@ -1469,7 +1469,7 @@ fn processJsonRpc(arena: *std.heap.ArenaAllocator, parser: *std.json.Parser, jso
                     done = extractErr(method_info[2](arena, id, request_obj, config));
                 } else |err| {
                     if (err == error.MalformedJson) {
-                        logger.warn("Could not create request type {} from JSON {}\n", .{ @typeName(ReqT), json });
+                        logger.warn("Could not create request type {} from JSON {}", .{ @typeName(ReqT), json });
                     }
                     done = err;
                 }
@@ -1526,9 +1526,9 @@ pub fn main() anyerror!void {
         defer allocator.free(arg);
         if (std.mem.eql(u8, arg, "--debug-log")) {
             actual_log_level = .debug;
-            std.debug.print("Enabled debug logging\n", .{});
+            std.debug.print("Enabled debug logging", .{});
         } else {
-            std.debug.print("Unrecognized argument {}\n", .{arg});
+            std.debug.print("Unrecognized argument {}", .{arg});
             std.os.exit(1);
         }
     }
@@ -1582,12 +1582,12 @@ pub fn main() anyerror!void {
                 break :find_zig;
             }
 
-            logger.debug("zig path `{}` is not absolute, will look in path\n", .{exe_path});
+            logger.debug("zig path `{}` is not absolute, will look in path", .{exe_path});
         }
 
         const env_path = std.process.getEnvVarOwned(allocator, "PATH") catch |err| switch (err) {
             error.EnvironmentVariableNotFound => {
-                logger.warn("Could not get PATH.\n", .{});
+                logger.warn("Could not get PATH environmental variable", .{});
                 break :find_zig;
             },
             else => return err,
@@ -1608,22 +1608,61 @@ pub fn main() anyerror!void {
 
             var buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
             zig_exe_path = try std.mem.dupe(allocator, u8, std.os.realpath(full_path, &buf) catch continue);
-            logger.info("Found zig in PATH: {}\n", .{zig_exe_path});
+            logger.info("Found zig in PATH: {}", .{zig_exe_path});
             break :find_zig;
         }
     }
 
     if (zig_exe_path) |exe_path| {
         config.zig_exe_path = exe_path;
-        logger.info("Using zig executable {}\n", .{exe_path});
-        if (config.zig_lib_path == null) {
-            // Set the lib path relative to the executable path.
-            config.zig_lib_path = try std.fs.path.resolve(allocator, &[_][]const u8{
-                std.fs.path.dirname(exe_path).?, "./lib/zig",
+        logger.info("Using zig executable {}", .{exe_path});
+        if (config.zig_lib_path == null) find_lib_path: {
+            // Use `zig env` to find the lib path
+            const zig_env_result = try std.ChildProcess.exec(.{
+                .allocator = allocator,
+                .argv = &[_][]const u8{ exe_path, "env" },
             });
 
-            logger.info("Resolved standard library from executable: {}\n", .{config.zig_lib_path});
+            defer {
+                allocator.free(zig_env_result.stdout);
+                allocator.free(zig_env_result.stderr);
+            }
+
+            switch (zig_env_result.term) {
+                .Exited => |exit_code| {
+                    if (exit_code == 0) {
+                        const Env = struct {
+                            zig_exe: []const u8,
+                            lib_dir: ?[]const u8,
+                            std_dir: []const u8,
+                            global_cache_dir: []const u8,
+                            version: []const u8,
+                        };
+
+                        var json_env = std.json.parse(
+                            Env,
+                            &std.json.TokenStream.init(zig_env_result.stdout),
+                            .{ .allocator = allocator },
+                        ) catch {
+                            logger.alert("Failed to parse zig env JSON result", .{});
+                            break :find_lib_path;
+                        };
+                        defer std.json.parseFree(Env, json_env, .{ .allocator = allocator });
+                        // We know this is allocated with `allocator`, we just steal it!
+                        config.zig_lib_path = json_env.lib_dir.?;
+                        json_env.lib_dir = null;
+                        logger.notice("Using zig lib path '{}'", .{config.zig_lib_path});
+                    }
+                },
+                else => logger.alert("zig env invocation failed", .{}),
+            }
         }
+    } else {
+        logger.warn("Zig executable path not specified in zls.json and could not be found in PATH", .{});
+    }
+
+    if (config.zig_lib_path == null) {
+        logger.warn("Zig standard library path not specified in zls.json and could not be resolved from the zig executable", .{});
     }
 
     if (config.build_runner_path) |build_runner_path| {

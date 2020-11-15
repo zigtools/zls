@@ -813,7 +813,7 @@ pub fn resolveTypeOfNodeInternal(
 
             const import_str = handle.tree.tokenSlice(import_param.castTag(.StringLiteral).?.token);
             const new_handle = (store.resolveImport(handle, import_str[1 .. import_str.len - 1]) catch |err| {
-                log.debug("Error {} while processing import {}\n", .{ err, import_str });
+                log.debug("Error {} while processing import {}", .{ err, import_str });
                 return null;
             }) orelse return null;
 
@@ -1071,7 +1071,7 @@ pub fn getFieldAccessType(
                         current_type = (try resolveUnwrapOptionalType(store, arena, current_type, &bound_type_params)) orelse return null;
                     },
                     else => {
-                        log.debug("Unrecognized token {} after period.\n", .{after_period.id});
+                        log.debug("Unrecognized token {} after period.", .{after_period.id});
                         return null;
                     },
                 }
@@ -1122,7 +1122,7 @@ pub fn getFieldAccessType(
                 current_type = (try resolveBracketAccessType(store, arena, current_type, if (is_range) .Range else .Single, &bound_type_params)) orelse return null;
             },
             else => {
-                log.debug("Unimplemented token: {}\n", .{tok.id});
+                log.debug("Unimplemented token: {}", .{tok.id});
                 return null;
             },
         }
@@ -1169,7 +1169,7 @@ pub fn nodeToString(tree: *ast.Tree, node: *ast.Node) ?[]const u8 {
             }
         },
         else => {
-            log.debug("INVALID: {}\n", .{node.tag});
+            log.debug("INVALID: {}", .{node.tag});
         },
     }
 
