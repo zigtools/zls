@@ -19,7 +19,7 @@ warn_style: bool = false,
 build_runner_path: ?[]const u8 = null,
 
 /// Semantic token support
-enable_semantic_tokens: bool = false,
+enable_semantic_tokens: bool = true,
 
 /// Whether to enable `*` and `?` operators in completion lists
 operator_completions: bool = true,

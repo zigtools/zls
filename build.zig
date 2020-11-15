@@ -10,10 +10,46 @@ pub fn config(step: *std.build.Step) anyerror!void {
     @setEvalBranchQuota(2500);
     std.debug.warn("Welcome to the ZLS configuration wizard! (insert mage emoji here)\n", .{});
 
-    const lib_path = try zinput.askDirPath(builder.allocator, "What is your Zig lib path (path that contains the 'std' folder)?", 512);
+    var zig_exe_path: ?[]const u8 = null;
+    std.debug.print("Looking for 'zig' in PATH...\n", .{});
+    find_zig: {
+        const allocator = builder.allocator;
+        const env_path = std.process.getEnvVarOwned(allocator, "PATH") catch |err| switch (err) {
+            error.EnvironmentVariableNotFound => {
+                break :find_zig;
+            },
+            else => return err,
+        };
+        defer allocator.free(env_path);
+
+        const exe_extension = @as(std.zig.CrossTarget, .{}).exeFileExt();
+        const zig_exe = try std.fmt.allocPrint(allocator, "zig{}", .{exe_extension});
+        defer allocator.free(zig_exe);
+
+        var it = std.mem.tokenize(env_path, &[_]u8{std.fs.path.delimiter});
+        while (it.next()) |path| {
+            const full_path = try std.fs.path.join(allocator, &[_][]const u8{
+                path,
+                zig_exe,
+            });
+            defer allocator.free(full_path);
+
+            var buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+            zig_exe_path = try std.mem.dupe(allocator, u8, std.os.realpath(full_path, &buf) catch continue);
+            break :find_zig;
+        }
+    }
+
+    if (zig_exe_path == null) {
+        std.debug.print("Could not find 'zig' in PATH\n", .{});
+        zig_exe_path = try zinput.askString(builder.allocator, "What is the path to the 'zig' executable you would like to use?", 512);
+    } else {
+        std.debug.print("Found zig executable '{}'\n", .{zig_exe_path.?});
+    }
     const snippets = try zinput.askBool("Do you want to enable snippets?");
     const style = try zinput.askBool("Do you want to enable style warnings?");
     const semantic_tokens = try zinput.askBool("Do you want to enable semantic highlighting?");
+    const operator_completions = try zinput.askBool("Do you want to enable .* and .? completions");
 
     var dir = try std.fs.cwd().openDir(builder.exe_dir, .{});
     defer dir.close();
@@ -26,10 +62,11 @@ pub fn config(step: *std.build.Step) anyerror!void {
     std.debug.warn("Writing to config...\n", .{});
 
     const content = std.json.stringify(.{
-        .zig_lib_path = lib_path,
+        .zig_exe_path = zig_exe_path,
         .enable_snippets = snippets,
         .warn_style = style,
         .enable_semantic_tokens = semantic_tokens,
+        .operator_completions = operator_completions,
     }, std.json.StringifyOptions{}, out);
 
     std.debug.warn("Successfully saved configuration options!\n", .{});
