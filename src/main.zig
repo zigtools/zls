@@ -92,14 +92,12 @@ var stdout: std.io.BufferedOutStream(4096, std.fs.File.OutStream) = undefined;
 var allocator: *std.mem.Allocator = undefined;
 
 var document_store: DocumentStore = undefined;
-var workspace_folder_configs: std.StringHashMap(?Config) = undefined;
 
 const ClientCapabilities = struct {
     supports_snippets: bool = false,
     supports_semantic_tokens: bool = false,
     hover_supports_md: bool = false,
     completion_doc_supports_md: bool = false,
-    supports_workspace_folders: bool = false,
 };
 
 var client_capabilities = ClientCapabilities{};
@@ -1055,38 +1053,11 @@ fn loadConfig(folder_path: []const u8) ?Config {
     return config;
 }
 
-fn loadWorkspaceConfigs() !void {
-    var folder_config_it = workspace_folder_configs.iterator();
-    while (folder_config_it.next()) |entry| {
-        if (entry.value) |_| continue;
-
-        const folder_path = try URI.parse(allocator, entry.key);
-        defer allocator.free(folder_path);
-
-        entry.value = loadConfig(folder_path);
-    }
-}
-
-fn configFromUriOr(uri: []const u8, default: Config) Config {
-    var folder_config_it = workspace_folder_configs.iterator();
-    while (folder_config_it.next()) |entry| {
-        if (std.mem.startsWith(u8, uri, entry.key)) {
-            return entry.value orelse default;
-        }
-    }
-
-    return default;
-}
-
 fn initializeHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.Initialize, config: Config) !void {
     for (req.params.capabilities.offsetEncoding.value) |encoding| {
         if (std.mem.eql(u8, encoding, "utf-8")) {
             offset_encoding = .utf8;
         }
-    }
-
-    if (req.params.capabilities.workspace) |workspace| {
-        client_capabilities.supports_workspace_folders = workspace.workspaceFolders.value;
     }
 
     if (req.params.capabilities.textDocument) |textDocument| {
@@ -1108,18 +1079,6 @@ fn initializeHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: 
                 }
             }
         }
-    }
-
-    if (req.params.workspaceFolders) |workspaceFolders| {
-        if (workspaceFolders.len != 0) {
-            logger.debug("Got workspace folders in initialization.\n", .{});
-        }
-        for (workspaceFolders) |workspace_folder| {
-            logger.debug("Loaded folder {}\n", .{workspace_folder.uri});
-            const duped_uri = try std.mem.dupe(allocator, u8, workspace_folder.uri);
-            try workspace_folder_configs.putNoClobber(duped_uri, null);
-        }
-        try loadWorkspaceConfigs();
     }
 
     try send(arena, types.Response{
@@ -1163,8 +1122,8 @@ fn initializeHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: 
                     .documentProvider = true,
                     .workspace = .{
                         .workspaceFolders = .{
-                            .supported = true,
-                            .changeNotifications = true,
+                            .supported = false,
+                            .changeNotifications = false,
                         },
                     },
                     .semanticTokensProvider = .{
@@ -1208,32 +1167,9 @@ fn shutdownHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, config:
     try respondGeneric(id, null_result_response);
 }
 
-fn workspaceFoldersChangeHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.WorkspaceFoldersChange, config: Config) !void {
-    for (req.params.event.removed) |rem| {
-        if (workspace_folder_configs.remove(rem.uri)) |entry| {
-            allocator.free(entry.key);
-            if (entry.value) |c| {
-                std.json.parseFree(Config, c, std.json.ParseOptions{ .allocator = allocator });
-            }
-        }
-    }
-
-    for (req.params.event.added) |add| {
-        const duped_uri = try std.mem.dupe(allocator, u8, add.uri);
-        if (try workspace_folder_configs.fetchPut(duped_uri, null)) |old| {
-            allocator.free(old.key);
-            if (old.value) |c| {
-                std.json.parseFree(Config, c, std.json.ParseOptions{ .allocator = allocator });
-            }
-        }
-    }
-
-    try loadWorkspaceConfigs();
-}
-
 fn openDocumentHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.OpenDocument, config: Config) !void {
     const handle = try document_store.openDocument(req.params.textDocument.uri, req.params.textDocument.text);
-    try publishDiagnostics(arena, handle.*, configFromUriOr(req.params.textDocument.uri, config));
+    try publishDiagnostics(arena, handle.*, config);
 
     try semanticTokensFullHandler(arena, id, .{ .params = .{ .textDocument = .{ .uri = req.params.textDocument.uri } } }, config);
 }
@@ -1244,9 +1180,8 @@ fn changeDocumentHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, r
         return;
     };
 
-    const local_config = configFromUriOr(req.params.textDocument.uri, config);
-    try document_store.applyChanges(handle, req.params.contentChanges.Array, offset_encoding, local_config.zig_lib_path);
-    try publishDiagnostics(arena, handle.*, local_config);
+    try document_store.applyChanges(handle, req.params.contentChanges.Array, offset_encoding, config.zig_lib_path);
+    try publishDiagnostics(arena, handle.*, config);
 }
 
 fn saveDocumentHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.SaveDocument, config: Config) error{OutOfMemory}!void {
@@ -1262,8 +1197,7 @@ fn closeDocumentHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, re
 }
 
 fn semanticTokensFullHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.SemanticTokensFull, config: Config) (error{OutOfMemory} || std.fs.File.WriteError)!void {
-    const this_config = configFromUriOr(req.params.textDocument.uri, config);
-    if (this_config.enable_semantic_tokens) {
+    if (config.enable_semantic_tokens) {
         const handle = document_store.getHandle(req.params.textDocument.uri) orelse {
             logger.warn("Trying to get semantic tokens of non existent document {}", .{req.params.textDocument.uri});
             return try respondGeneric(id, no_semantic_tokens_response);
@@ -1289,12 +1223,11 @@ fn completionHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: 
         const doc_position = try offsets.documentPosition(handle.document, req.params.position, offset_encoding);
         const pos_context = try analysis.documentPositionContext(arena, handle.document, doc_position);
 
-        const this_config = configFromUriOr(req.params.textDocument.uri, config);
-        const use_snippets = this_config.enable_snippets and client_capabilities.supports_snippets;
+        const use_snippets = config.enable_snippets and client_capabilities.supports_snippets;
         switch (pos_context) {
-            .builtin => try completeBuiltin(arena, id, this_config),
-            .var_access, .empty => try completeGlobal(arena, id, doc_position.absolute_index, handle, this_config),
-            .field_access => |range| try completeFieldAccess(arena, id, handle, doc_position, range, this_config),
+            .builtin => try completeBuiltin(arena, id, config),
+            .var_access, .empty => try completeGlobal(arena, id, doc_position.absolute_index, handle, config),
+            .field_access => |range| try completeFieldAccess(arena, id, handle, doc_position, range, config),
             .global_error_set => try send(arena, types.Response{
                 .id = id,
                 .result = .{
@@ -1313,7 +1246,7 @@ fn completionHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: 
                     },
                 },
             }),
-            .label => try completeLabel(arena, id, doc_position.absolute_index, handle, this_config),
+            .label => try completeLabel(arena, id, doc_position.absolute_index, handle, config),
             else => try respondGeneric(id, no_completions_response),
         }
     } else {
@@ -1338,12 +1271,11 @@ fn gotoHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: reques
         const doc_position = try offsets.documentPosition(handle.document, req.params.position, offset_encoding);
         const pos_context = try analysis.documentPositionContext(arena, handle.document, doc_position);
 
-        const this_config = configFromUriOr(req.params.textDocument.uri, config);
         switch (pos_context) {
-            .var_access => try gotoDefinitionGlobal(arena, id, doc_position.absolute_index, handle, this_config, resolve_alias),
-            .field_access => |range| try gotoDefinitionFieldAccess(arena, id, handle, doc_position, range, this_config, resolve_alias),
+            .var_access => try gotoDefinitionGlobal(arena, id, doc_position.absolute_index, handle, config, resolve_alias),
+            .field_access => |range| try gotoDefinitionFieldAccess(arena, id, handle, doc_position, range, config, resolve_alias),
             .string_literal => try gotoDefinitionString(arena, id, doc_position.absolute_index, handle, config),
-            .label => try gotoDefinitionLabel(arena, id, doc_position.absolute_index, handle, this_config),
+            .label => try gotoDefinitionLabel(arena, id, doc_position.absolute_index, handle, config),
             else => try respondGeneric(id, null_result_response),
         }
     } else {
@@ -1369,12 +1301,11 @@ fn hoverHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: reque
         const doc_position = try offsets.documentPosition(handle.document, req.params.position, offset_encoding);
         const pos_context = try analysis.documentPositionContext(arena, handle.document, doc_position);
 
-        const this_config = configFromUriOr(req.params.textDocument.uri, config);
         switch (pos_context) {
             .builtin => try hoverDefinitionBuiltin(arena, id, doc_position.absolute_index, handle),
-            .var_access => try hoverDefinitionGlobal(arena, id, doc_position.absolute_index, handle, this_config),
-            .field_access => |range| try hoverDefinitionFieldAccess(arena, id, handle, doc_position, range, this_config),
-            .label => try hoverDefinitionLabel(arena, id, doc_position.absolute_index, handle, this_config),
+            .var_access => try hoverDefinitionGlobal(arena, id, doc_position.absolute_index, handle, config),
+            .field_access => |range| try hoverDefinitionFieldAccess(arena, id, handle, doc_position, range, config),
+            .label => try hoverDefinitionLabel(arena, id, doc_position.absolute_index, handle, config),
             else => try respondGeneric(id, null_result_response),
         }
     } else {
@@ -1443,10 +1374,9 @@ fn renameHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requ
         const doc_position = try offsets.documentPosition(handle.document, req.params.position, offset_encoding);
         const pos_context = try analysis.documentPositionContext(arena, handle.document, doc_position);
 
-        const this_config = configFromUriOr(req.params.textDocument.uri, config);
         switch (pos_context) {
             .var_access => try renameDefinitionGlobal(arena, id, handle, doc_position.absolute_index, req.params.newName),
-            .field_access => |range| try renameDefinitionFieldAccess(arena, id, handle, doc_position, range, req.params.newName, this_config),
+            .field_access => |range| try renameDefinitionFieldAccess(arena, id, handle, doc_position, range, req.params.newName, config),
             .label => try renameDefinitionLabel(arena, id, handle, doc_position.absolute_index, req.params.newName),
             else => try respondGeneric(id, null_result_response),
         }
@@ -1465,11 +1395,10 @@ fn referencesHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: 
         const doc_position = try offsets.documentPosition(handle.document, req.params.position, offset_encoding);
         const pos_context = try analysis.documentPositionContext(arena, handle.document, doc_position);
 
-        const this_config = configFromUriOr(req.params.textDocument.uri, config);
         const include_decl = req.params.context.includeDeclaration;
         switch (pos_context) {
             .var_access => try referencesDefinitionGlobal(arena, id, handle, doc_position.absolute_index, include_decl),
-            .field_access => |range| try referencesDefinitionFieldAccess(arena, id, handle, doc_position, range, include_decl, this_config),
+            .field_access => |range| try referencesDefinitionFieldAccess(arena, id, handle, doc_position, range, include_decl, config),
             .label => try referencesDefinitionLabel(arena, id, handle, doc_position.absolute_index, include_decl),
             else => try respondGeneric(id, null_result_response),
         }
@@ -1509,7 +1438,6 @@ fn processJsonRpc(arena: *std.heap.ArenaAllocator, parser: *std.json.Parser, jso
         .{"textDocument/willSave"},
         .{ "initialize", requests.Initialize, initializeHandler },
         .{ "shutdown", void, shutdownHandler },
-        .{ "workspace/didChangeWorkspaceFolders", requests.WorkspaceFoldersChange, workspaceFoldersChangeHandler },
         .{ "textDocument/didOpen", requests.OpenDocument, openDocumentHandler },
         .{ "textDocument/didChange", requests.ChangeDocument, changeDocumentHandler },
         .{ "textDocument/didSave", requests.SaveDocument, saveDocumentHandler },
@@ -1570,6 +1498,7 @@ fn processJsonRpc(arena: *std.heap.ArenaAllocator, parser: *std.json.Parser, jso
         .{"textDocument/foldingRange"},
         .{"textDocument/selectionRange"},
         .{"textDocument/semanticTokens/range"},
+        .{"workspace/didChangeWorkspaceFolders"},
     });
 
     if (unimplemented_map.has(method)) {
@@ -1707,18 +1636,6 @@ pub fn main() anyerror!void {
         try document_store.init(allocator, zig_exe_path, build_runner_path, config.zig_lib_path);
     }
     defer document_store.deinit();
-
-    workspace_folder_configs = std.StringHashMap(?Config).init(allocator);
-    defer {
-        var it = workspace_folder_configs.iterator();
-        while (it.next()) |entry| {
-            allocator.free(entry.key);
-            if (entry.value) |c| {
-                std.json.parseFree(Config, c, std.json.ParseOptions{ .allocator = allocator });
-            }
-        }
-        workspace_folder_configs.deinit();
-    }
 
     // This JSON parser is passed to processJsonRpc and reset.
     var json_parser = std.json.Parser.init(allocator, false);
