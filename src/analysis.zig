@@ -569,7 +569,13 @@ pub fn resolveTypeOfNodeInternal(
 
             if (try lookupSymbolGlobal(store, arena, handle, handle.tree.getNodeSource(node), handle.tree.token_locs[node.firstToken()].start)) |child| {
                 switch (child.decl.*) {
-                    .ast_node => |n| if (n == node) return null,
+                    .ast_node => |n| {
+                        if (n == node) return null;
+                        if (n.castTag(.VarDecl)) |var_decl| {
+                            if (var_decl.getInitNode()) |init_node|
+                                if (init_node == node) return null;
+                        }
+                    },
                     else => {},
                 }
                 return try child.resolveType(store, arena, bound_type_params);
