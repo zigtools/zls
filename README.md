@@ -21,7 +21,13 @@ Zig Language Server, or `zls`, is a language server for Zig. The Zig wiki states
 
 ## Installation
 
-Installing `zls` is pretty simple. You will need [a build of Zig master](https://ziglang.org/download/) to build zls.
+Installation starts with downloading an official release from the [Releases page](https://github.com/zigtools/zls/releases).
+
+See [Downloading and Building ZLS](https://github.com/zigtools/zls/wiki/Downloading-and-Building-ZLS) on the Wiki, or the page about [using ZLS with Visual Studio Code](https://github.com/zigtools/zls/wiki/Installing-for-Visual-Studio-Code) for a guide to help get `zls` running in your editor.
+
+### From Source
+
+Building `zls` is very easy. You will need [a build of Zig master](https://ziglang.org/download/) to build zls.
 
 ```bash
 git clone --recurse-submodules https://github.com/zigtools/zls
@@ -31,15 +37,16 @@ zig build -Drelease-fast
 # To configure zls:
 zig build config
 ```
-The `zls` executable will be saved to `zls\zig-cache\bin`. 
 
-### Build Options
+*For detailed building instructions, see the Wiki page about [Cloning With Git](https://github.com/zigtools/zls/wiki/Downloading-and-Building-ZLS#cloning-with-git).*
 
+#### Build Options
+
+<!-- When updating this table, be sure to copy changes to the Wiki page about building from source. -->
+<!-- If this table grows too large, then delete this one and move it all over to the Wiki page about building from source. -->
 | Option | Type | Default Value | What it Does |
 | --- | --- | --- | --- |
 | `-Ddata_version` | `string` (master or 0.7.0) | master | The data file version. This selects the files in the `src/data` folder that correspond to the Zig version being served.|
-
-Then, you can use the `zls` executable in an editor of your choice that has a Zig language server client!
 
 ### Configuration Options
 
