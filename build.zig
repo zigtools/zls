@@ -31,11 +31,17 @@ pub fn config(step: *std.build.Step) anyerror!void {
             const full_path = try std.fs.path.join(allocator, &[_][]const u8{
                 path,
                 zig_exe,
-            });
+            });            
             defer allocator.free(full_path);
+            
+            // Skip folders named zig
+            const file = std.fs.openFileAbsolute(full_path, .{}) catch continue;
+            const stat = file.stat() catch continue;
+            const is_dir = stat.kind == .Directory ;
+            if(is_dir) continue ;
 
             var buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
-            zig_exe_path = try std.mem.dupe(allocator, u8, std.os.realpath(full_path, &buf) catch continue);
+            zig_exe_path = try std.mem.dupe(allocator, u8, std.os.realpath(full_path, &buf) catch continue);                       
             break :find_zig;
         }
     }
