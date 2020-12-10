@@ -17,7 +17,7 @@ pub fn main() !void {
 
     const allocator = &arena.allocator;
 
-    const builder = try Builder.create(allocator, "", "", "");
+    const builder = try Builder.create(allocator, "", "", "", "");
     defer builder.destroy();
 
     try runBuild(builder);
