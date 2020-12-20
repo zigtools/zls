@@ -34,6 +34,7 @@ pub fn config(step: *std.build.Step) anyerror!void {
             });
             defer allocator.free(full_path);
 
+            if (!std.fs.path.isAbsolute(full_path)) continue;
             // Skip folders named zig
             const file = std.fs.openFileAbsolute(full_path, .{}) catch continue;
             const stat = file.stat() catch continue;
