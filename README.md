@@ -124,6 +124,7 @@ Install the `zls-vscode` extension from [here](https://github.com/zigtools/zls-v
 ```
 
 ### Neovim/Vim8
+#### CoC
 
 - Install the CoC engine from [here](https://github.com/neoclide/coc.nvim).
 - Issue `:CocConfig` from within your Vim editor, and the following snippet:
@@ -138,6 +139,44 @@ Install the `zls-vscode` extension from [here](https://github.com/zigtools/zls-v
    }
 }
 ```
+
+#### nvim-lspconfig
+Requires Nvim 0.5 (HEAD)!
+
+- Install nvim-lspconfig from [here](https://github.com/neovim/nvim-lspconfig).
+- Install zig.vim from [here](https://github.com/ziglang/zig.vim).
+
+nvim-lspconfig ships already a configuration for zls. A simple `init.vim` might look like this:
+```vim
+call plug#begin('~/.config/nvim/plugged')
+Plug 'neovim/nvim-lspconfig'
+Plug 'nvim-lua/completion-nvim'
+Plug 'ziglang/zig.vim'
+call plug#end()
+
+:lua << EOF
+    local lspconfig = require('lspconfig')
+
+    local on_attach = function(_, bufnr)
+        vim.api.nvim_buf_set_option(bufnr, 'omnifunc', 'v:lua.vim.lsp.omnifunc')
+        require('completion').on_attach()
+    end
+
+    local servers = {'zls'}
+    for _, lsp in ipairs(servers) do 
+        lspconfig[lsp].setup {
+            on_attach = on_attach,
+        }
+    end
+EOF
+
+" Set completeopt to have a better completion experience
+set completeopt=menuone,noinsert,noselect
+
+" Enable completions as you type
+let g:completion_enable_auto_popup = 1
+```
+
 
 ### Emacs
 
