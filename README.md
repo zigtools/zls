@@ -146,7 +146,7 @@ Requires Nvim 0.5 (HEAD)!
 - Install nvim-lspconfig from [here](https://github.com/neovim/nvim-lspconfig).
 - Install zig.vim from [here](https://github.com/ziglang/zig.vim).
 
-nvim-lspconfig ships already a configuration for zls. A simple `init.vim` might look like this:
+nvim-lspconfig already ships a configuration for zls. A simple `init.vim` might look like this:
 ```vim
 call plug#begin('~/.config/nvim/plugged')
 Plug 'neovim/nvim-lspconfig'
