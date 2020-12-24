@@ -1579,7 +1579,12 @@ pub fn main() anyerror!void {
         if (config.zig_exe_path) |exe_path| {
             if (std.fs.path.isAbsolute(exe_path)) {
                 zig_exe_path = try std.mem.dupe(allocator, u8, exe_path);
-                break :find_zig;
+                // make sure the path still exists
+                if (blk: {
+                    std.fs.cwd().access(zig_exe_path.?, .{}) catch break :blk false;
+                    break :blk true;
+                })
+                    break :find_zig;
             }
 
             logger.debug("zig path `{}` is not absolute, will look in path", .{exe_path});
