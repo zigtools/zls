@@ -893,8 +893,8 @@ pub const builtins = [_]Builtin{
     },
     .{
         .name = "@setEvalBranchQuota",
-        .signature = "@setEvalBranchQuota(new_quota: usize)",
-        .snippet = "@setEvalBranchQuota(${1:new_quota: usize})",
+        .signature = "@setEvalBranchQuota(new_quota: u32)",
+        .snippet = "@setEvalBranchQuota(${1:new_quota: u32})",
         .documentation =
         \\ Changes the maximum number of backwards branches that compile-time code execution can use before giving up and making a compile error.
         \\ If the new_quota is smaller than the default quota (1000) or a previously explicitly set quota, it is ignored.
