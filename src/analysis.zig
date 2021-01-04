@@ -813,7 +813,7 @@ pub fn resolveTypeOfNodeInternal(
 
             const import_str = handle.tree.tokenSlice(import_param.castTag(.StringLiteral).?.token);
             const new_handle = (store.resolveImport(handle, import_str[1 .. import_str.len - 1]) catch |err| {
-                log.debug("Error {} while processing import {}", .{ err, import_str });
+                log.debug("Error {} while processing import {s}", .{ err, import_str });
                 return null;
             }) orelse return null;
 
@@ -2005,8 +2005,8 @@ pub const DocumentScope = struct {
             var idx: usize = 0;
             while (decl_it.next()) |name_decl| : (idx += 1) {
                 if (idx != 0) log.debug(", ", .{});
-                log.debug("{}", .{name_decl.key});
             }
+                log.debug("{s}", .{name_decl.key});
             log.debug("\n--------------------------\n", .{});
         }
     }

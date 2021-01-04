@@ -43,7 +43,7 @@ pub fn log(
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
-    var message = std.fmt.allocPrint(&arena.allocator, "[{}-{}] " ++ format, .{ @tagName(message_level), @tagName(scope) } ++ args) catch |err| {
+    var message = std.fmt.allocPrint(&arena.allocator, "[{s}-{s}] " ++ format, .{ @tagName(message_level), @tagName(scope) } ++ args) catch |err| {
         std.debug.print("Failed to allocPrint message.", .{});
         return;
     };
@@ -159,7 +159,7 @@ fn respondGeneric(id: types.RequestId, response: []const u8) !void {
     try stdout_stream.print("Content-Length: {}\r\n\r\n" ++ json_fmt, .{response.len + id_len + json_fmt.len - 1});
     switch (id) {
         .Integer => |int| try stdout_stream.print("{}", .{int}),
-        .String => |str| try stdout_stream.print("\"{}\"", .{str}),
+        .String => |str| try stdout_stream.print("\"{s}\"", .{str}),
         else => unreachable,
     }
 
@@ -596,9 +596,9 @@ fn hoverSymbol(id: types.RequestId, arena: *std.heap.ArenaAllocator, decl_handle
             };
 
             break :ast_node if (hover_kind == .Markdown)
-                try std.fmt.allocPrint(&arena.allocator, "```zig\n{}\n```\n{}", .{ signature_str, doc_str })
+                try std.fmt.allocPrint(&arena.allocator, "```zig\n{s}\n```\n{s}", .{ signature_str, doc_str })
             else
-                try std.fmt.allocPrint(&arena.allocator, "{}\n{}", .{ signature_str, doc_str });
+                try std.fmt.allocPrint(&arena.allocator, "{s}\n{s}", .{ signature_str, doc_str });
         },
         .param_decl => |param| param_decl: {
             const doc_str = if (param.doc_comments) |doc_comments|
@@ -608,28 +608,28 @@ fn hoverSymbol(id: types.RequestId, arena: *std.heap.ArenaAllocator, decl_handle
 
             const signature_str = handle.tree.source[handle.tree.token_locs[param.firstToken()].start..handle.tree.token_locs[param.lastToken()].end];
             break :param_decl if (hover_kind == .Markdown)
-                try std.fmt.allocPrint(&arena.allocator, "```zig\n{}\n```\n{}", .{ signature_str, doc_str })
+                try std.fmt.allocPrint(&arena.allocator, "```zig\n{s}\n```\n{s}", .{ signature_str, doc_str })
             else
-                try std.fmt.allocPrint(&arena.allocator, "{}\n{}", .{ signature_str, doc_str });
+                try std.fmt.allocPrint(&arena.allocator, "{s}\n{s}", .{ signature_str, doc_str });
         },
         .pointer_payload => |payload| if (hover_kind == .Markdown)
-            try std.fmt.allocPrint(&arena.allocator, "```zig\n{}\n```", .{handle.tree.tokenSlice(payload.node.value_symbol.firstToken())})
+            try std.fmt.allocPrint(&arena.allocator, "```zig\n{s}\n```", .{handle.tree.tokenSlice(payload.node.value_symbol.firstToken())})
         else
-            try std.fmt.allocPrint(&arena.allocator, "{}", .{handle.tree.tokenSlice(payload.node.value_symbol.firstToken())}),
+            try std.fmt.allocPrint(&arena.allocator, "{s}", .{handle.tree.tokenSlice(payload.node.value_symbol.firstToken())}),
         .array_payload => |payload| if (hover_kind == .Markdown)
-            try std.fmt.allocPrint(&arena.allocator, "```zig\n{}\n```", .{handle.tree.tokenSlice(payload.identifier.firstToken())})
+            try std.fmt.allocPrint(&arena.allocator, "```zig\n{s}\n```", .{handle.tree.tokenSlice(payload.identifier.firstToken())})
         else
-            try std.fmt.allocPrint(&arena.allocator, "{}", .{handle.tree.tokenSlice(payload.identifier.firstToken())}),
+            try std.fmt.allocPrint(&arena.allocator, "{s}", .{handle.tree.tokenSlice(payload.identifier.firstToken())}),
         .switch_payload => |payload| if (hover_kind == .Markdown)
-            try std.fmt.allocPrint(&arena.allocator, "```zig\n{}\n```", .{handle.tree.tokenSlice(payload.node.value_symbol.firstToken())})
+            try std.fmt.allocPrint(&arena.allocator, "```zig\n{s}\n```", .{handle.tree.tokenSlice(payload.node.value_symbol.firstToken())})
         else
-            try std.fmt.allocPrint(&arena.allocator, "{}", .{handle.tree.tokenSlice(payload.node.value_symbol.firstToken())}),
+            try std.fmt.allocPrint(&arena.allocator, "{s}", .{handle.tree.tokenSlice(payload.node.value_symbol.firstToken())}),
         .label_decl => |label_decl| block: {
             const source = handle.tree.source[handle.tree.token_locs[label_decl.firstToken()].start..handle.tree.token_locs[label_decl.lastToken()].end];
             break :block if (hover_kind == .Markdown)
-                try std.fmt.allocPrint(&arena.allocator, "```zig\n{}\n```", .{source})
+                try std.fmt.allocPrint(&arena.allocator, "```zig\n{s}\n```", .{source})
             else
-                try std.fmt.allocPrint(&arena.allocator, "```{}```", .{source});
+                try std.fmt.allocPrint(&arena.allocator, "```{s}```", .{source});
         },
     };
 
@@ -682,7 +682,7 @@ fn hoverDefinitionBuiltin(arena: *std.heap.ArenaAllocator, id: types.RequestId, 
                 .id = id,
                 .result = .{
                     .Hover = .{
-                        .contents = .{ .value = try std.fmt.allocPrint(&arena.allocator, "```zig\n{}\n```\n{}", .{ builtin.signature, builtin.documentation }) },
+                        .contents = .{ .value = try std.fmt.allocPrint(&arena.allocator, "```zig\n{s}\n```\n{s}", .{ builtin.signature, builtin.documentation }) },
                     },
                 },
             });
@@ -1155,7 +1155,7 @@ fn initializeHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: 
 
     logger.notice("zls initialized", .{});
     logger.info("{}", .{client_capabilities});
-    logger.notice("Using offset encoding: {}", .{std.meta.tagName(offset_encoding)});
+    logger.notice("Using offset encoding: {s}", .{std.meta.tagName(offset_encoding)});
 }
 
 var keep_running = true;
@@ -1176,7 +1176,7 @@ fn openDocumentHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req
 
 fn changeDocumentHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.ChangeDocument, config: Config) !void {
     const handle = document_store.getHandle(req.params.textDocument.uri) orelse {
-        logger.debug("Trying to change non existent document {}", .{req.params.textDocument.uri});
+        logger.debug("Trying to change non existent document {s}", .{req.params.textDocument.uri});
         return;
     };
 
@@ -1186,7 +1186,7 @@ fn changeDocumentHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, r
 
 fn saveDocumentHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.SaveDocument, config: Config) error{OutOfMemory}!void {
     const handle = document_store.getHandle(req.params.textDocument.uri) orelse {
-        logger.warn("Trying to save non existent document {}", .{req.params.textDocument.uri});
+        logger.warn("Trying to save non existent document {s}", .{req.params.textDocument.uri});
         return;
     };
     try document_store.applySave(handle);
@@ -1199,7 +1199,7 @@ fn closeDocumentHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, re
 fn semanticTokensFullHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.SemanticTokensFull, config: Config) (error{OutOfMemory} || std.fs.File.WriteError)!void {
     if (config.enable_semantic_tokens) {
         const handle = document_store.getHandle(req.params.textDocument.uri) orelse {
-            logger.warn("Trying to get semantic tokens of non existent document {}", .{req.params.textDocument.uri});
+            logger.warn("Trying to get semantic tokens of non existent document {s}", .{req.params.textDocument.uri});
             return try respondGeneric(id, no_semantic_tokens_response);
         };
 
@@ -1215,7 +1215,7 @@ fn semanticTokensFullHandler(arena: *std.heap.ArenaAllocator, id: types.RequestI
 
 fn completionHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.Completion, config: Config) !void {
     const handle = document_store.getHandle(req.params.textDocument.uri) orelse {
-        logger.warn("Trying to complete in non existent document {}", .{req.params.textDocument.uri});
+        logger.warn("Trying to complete in non existent document {s}", .{req.params.textDocument.uri});
         return try respondGeneric(id, no_completions_response);
     };
 
@@ -1263,7 +1263,7 @@ fn signatureHelperHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, 
 
 fn gotoHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.GotoDefinition, config: Config, resolve_alias: bool) !void {
     const handle = document_store.getHandle(req.params.textDocument.uri) orelse {
-        logger.warn("Trying to go to definition in non existent document {}", .{req.params.textDocument.uri});
+        logger.warn("Trying to go to definition in non existent document {s}", .{req.params.textDocument.uri});
         return try respondGeneric(id, null_result_response);
     };
 
@@ -1293,7 +1293,7 @@ fn gotoDeclarationHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, 
 
 fn hoverHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.Hover, config: Config) !void {
     const handle = document_store.getHandle(req.params.textDocument.uri) orelse {
-        logger.warn("Trying to get hover in non existent document {}", .{req.params.textDocument.uri});
+        logger.warn("Trying to get hover in non existent document {s}", .{req.params.textDocument.uri});
         return try respondGeneric(id, null_result_response);
     };
 
@@ -1315,7 +1315,7 @@ fn hoverHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: reque
 
 fn documentSymbolsHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.DocumentSymbols, config: Config) !void {
     const handle = document_store.getHandle(req.params.textDocument.uri) orelse {
-        logger.warn("Trying to get document symbols in non existent document {}", .{req.params.textDocument.uri});
+        logger.warn("Trying to get document symbols in non existent document {s}", .{req.params.textDocument.uri});
         return try respondGeneric(id, null_result_response);
     };
     try documentSymbol(arena, id, handle);
@@ -1324,7 +1324,7 @@ fn documentSymbolsHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, 
 fn formattingHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.Formatting, config: Config) !void {
     if (config.zig_exe_path) |zig_exe_path| {
         const handle = document_store.getHandle(req.params.textDocument.uri) orelse {
-            logger.warn("Trying to got to definition in non existent document {}", .{req.params.textDocument.uri});
+            logger.warn("Trying to got to definition in non existent document {s}", .{req.params.textDocument.uri});
             return try respondGeneric(id, null_result_response);
         };
 
@@ -1366,7 +1366,7 @@ fn formattingHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: 
 
 fn renameHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.Rename, config: Config) !void {
     const handle = document_store.getHandle(req.params.textDocument.uri) orelse {
-        logger.warn("Trying to rename in non existent document {}", .{req.params.textDocument.uri});
+        logger.warn("Trying to rename in non existent document {s}", .{req.params.textDocument.uri});
         return try respondGeneric(id, null_result_response);
     };
 
@@ -1387,7 +1387,7 @@ fn renameHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requ
 
 fn referencesHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.References, config: Config) !void {
     const handle = document_store.getHandle(req.params.textDocument.uri) orelse {
-        logger.warn("Trying to get references in non existent document {}", .{req.params.textDocument.uri});
+        logger.warn("Trying to get references in non existent document {s}", .{req.params.textDocument.uri});
         return try respondGeneric(id, null_result_response);
     };
 
@@ -1429,7 +1429,7 @@ fn processJsonRpc(arena: *std.heap.ArenaAllocator, parser: *std.json.Parser, jso
     const start_time = std.time.milliTimestamp();
     defer {
         const end_time = std.time.milliTimestamp();
-        logger.debug("Took {}ms to process method {}", .{ end_time - start_time, method });
+        logger.debug("Took {}ms to process method {s}", .{ end_time - start_time, method });
     }
 
     const method_map = .{
@@ -1469,7 +1469,7 @@ fn processJsonRpc(arena: *std.heap.ArenaAllocator, parser: *std.json.Parser, jso
                     done = extractErr(method_info[2](arena, id, request_obj, config));
                 } else |err| {
                     if (err == error.MalformedJson) {
-                        logger.warn("Could not create request type {} from JSON {}", .{ @typeName(ReqT), json });
+                        logger.warn("Could not create request type {s} from JSON {s}", .{ @typeName(ReqT), json });
                     }
                     done = err;
                 }
@@ -1508,7 +1508,7 @@ fn processJsonRpc(arena: *std.heap.ArenaAllocator, parser: *std.json.Parser, jso
     if (tree.root.Object.get("id")) |_| {
         return try respondGeneric(id, not_implemented_response);
     }
-    logger.debug("Method without return value not implemented: {}", .{method});
+    logger.debug("Method without return value not implemented: {s}", .{method});
 }
 
 var gpa_state = std.heap.GeneralPurposeAllocator(.{}){};
@@ -1528,7 +1528,7 @@ pub fn main() anyerror!void {
             actual_log_level = .debug;
             std.debug.print("Enabled debug logging", .{});
         } else {
-            std.debug.print("Unrecognized argument {}", .{arg});
+            std.debug.print("Unrecognized argument {s}", .{arg});
             std.os.exit(1);
         }
     }
@@ -1587,7 +1587,7 @@ pub fn main() anyerror!void {
                     break :find_zig;
             }
 
-            logger.debug("zig path `{}` is not absolute, will look in path", .{exe_path});
+            logger.debug("zig path `{s}` is not absolute, will look in path", .{exe_path});
         }
 
         const env_path = std.process.getEnvVarOwned(allocator, "PATH") catch |err| switch (err) {
@@ -1600,7 +1600,7 @@ pub fn main() anyerror!void {
         defer allocator.free(env_path);
 
         const exe_extension = @as(std.zig.CrossTarget, .{}).exeFileExt();
-        const zig_exe = try std.fmt.allocPrint(allocator, "zig{}", .{exe_extension});
+        const zig_exe = try std.fmt.allocPrint(allocator, "zig{s}", .{exe_extension});
         defer allocator.free(zig_exe);
 
         var it = std.mem.tokenize(env_path, &[_]u8{std.fs.path.delimiter});
@@ -1613,14 +1613,14 @@ pub fn main() anyerror!void {
 
             var buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
             zig_exe_path = try std.mem.dupe(allocator, u8, std.os.realpath(full_path, &buf) catch continue);
-            logger.info("Found zig in PATH: {}", .{zig_exe_path});
+            logger.info("Found zig in PATH: {s}", .{zig_exe_path});
             break :find_zig;
         }
     }
 
     if (zig_exe_path) |exe_path| {
         config.zig_exe_path = exe_path;
-        logger.info("Using zig executable {}", .{exe_path});
+        logger.info("Using zig executable {s}", .{exe_path});
         if (config.zig_lib_path == null) find_lib_path: {
             // Use `zig env` to find the lib path
             const zig_env_result = try std.ChildProcess.exec(.{
@@ -1656,7 +1656,7 @@ pub fn main() anyerror!void {
                         // We know this is allocated with `allocator`, we just steal it!
                         config.zig_lib_path = json_env.lib_dir.?;
                         json_env.lib_dir = null;
-                        logger.notice("Using zig lib path '{}'", .{config.zig_lib_path});
+                        logger.notice("Using zig lib path '{s}'", .{config.zig_lib_path});
                     }
                 },
                 else => logger.alert("zig env invocation failed", .{}),
@@ -1691,7 +1691,7 @@ pub fn main() anyerror!void {
 
     while (keep_running) {
         const headers = readRequestHeader(&arena.allocator, reader) catch |err| {
-            logger.crit("{}; exiting!", .{@errorName(err)});
+            logger.crit("{s}; exiting!", .{@errorName(err)});
             return;
         };
         const buf = try arena.allocator.alloc(u8, headers.content_length);

@@ -39,13 +39,13 @@ fn readResponses(process: *std.ChildProcess, expected_responses: anytype) !void 
                 seen[idx] = true;
             }
         }
-        std.debug.print("GOT MESSAGE: {}\n", .{stdout_bytes});
+        std.debug.print("GOT MESSAGE: {s}\n", .{stdout_bytes});
     }
 
     comptime var idx = 0;
     inline while (idx < expected_responses.len) : (idx += 1) {
         if (!seen[idx]) {
-            std.debug.print("Response `{}` not received.", .{expected_responses[idx]});
+            std.debug.print("Response `{s}` not received.", .{expected_responses[idx]});
             return error.ExpectedResponse;
         }
     }
