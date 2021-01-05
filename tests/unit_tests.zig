@@ -43,7 +43,7 @@ fn testContext(comptime line: []const u8, comptime tag: anytype, comptime range:
 
     if (ctx.range()) |ctx_range| {
         if (range == null) {
-            std.debug.warn("Expected null range, got `{}`\n", .{
+            std.debug.warn("Expected null range, got `{s}`\n", .{
                 doc.text[ctx_range.start..ctx_range.end],
             });
         } else {
@@ -51,7 +51,7 @@ fn testContext(comptime line: []const u8, comptime tag: anytype, comptime range:
             const range_end = range_start + range.?.len;
 
             if (range_start != ctx_range.start or range_end != ctx_range.end) {
-                std.debug.warn("Expected range `{}` ({}..{}), got `{}` ({}..{})\n", .{
+                std.debug.warn("Expected range `{s}` ({}..{}), got `{s}` ({}..{})\n", .{
                     doc.text[range_start..range_end],         range_start,     range_end,
                     doc.text[ctx_range.start..ctx_range.end], ctx_range.start, ctx_range.end,
                 });

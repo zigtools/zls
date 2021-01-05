@@ -23,7 +23,7 @@ pub fn config(step: *std.build.Step) anyerror!void {
         defer allocator.free(env_path);
 
         const exe_extension = @as(std.zig.CrossTarget, .{}).exeFileExt();
-        const zig_exe = try std.fmt.allocPrint(allocator, "zig{}", .{exe_extension});
+        const zig_exe = try std.fmt.allocPrint(allocator, "zig{s}", .{exe_extension});
         defer allocator.free(zig_exe);
 
         var it = std.mem.tokenize(env_path, &[_]u8{std.fs.path.delimiter});
@@ -51,7 +51,7 @@ pub fn config(step: *std.build.Step) anyerror!void {
         std.debug.print("Could not find 'zig' in PATH\n", .{});
         zig_exe_path = try zinput.askString(builder.allocator, "What is the path to the 'zig' executable you would like to use?", 512);
     } else {
-        std.debug.print("Found zig executable '{}'\n", .{zig_exe_path.?});
+        std.debug.print("Found zig executable '{s}'\n", .{zig_exe_path.?});
     }
     const snippets = try zinput.askBool("Do you want to enable snippets?");
     const style = try zinput.askBool("Do you want to enable style warnings?");
