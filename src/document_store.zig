@@ -114,7 +114,7 @@ fn loadPackages(context: LoadPackagesContext) !void {
                     allocator.free(old_pkg.uri);
                 }
 
-                build_file.packages.shrink(allocator, 0);
+                build_file.packages.shrinkAndFree(allocator, 0);
                 var line_it = std.mem.split(zig_run_result.stdout, "\n");
                 while (line_it.next()) |line| {
                     if (std.mem.indexOfScalar(u8, line, '\x00')) |zero_byte_idx| {

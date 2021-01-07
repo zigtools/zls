@@ -36,7 +36,7 @@ pub fn log(
     }
     // After shutdown, pipe output to stderr
     if (!keep_running) {
-        std.debug.print("[{}-{}] " ++ format, .{ @tagName(message_level), @tagName(scope) } ++ args);
+        std.debug.print("[{s}-{s}] " ++ format, .{ @tagName(message_level), @tagName(scope) } ++ args);
         return;
     }
 
@@ -1097,7 +1097,7 @@ fn initializeHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: 
                     .signatureHelpProvider = .{
                         .triggerCharacters = &[_][]const u8{ "(", "," },
                     },
-                    .textDocumentSync = .Incremental,
+                    .textDocumentSync = .Full,
                     .renameProvider = true,
                     .completionProvider = .{
                         .resolveProvider = false,
