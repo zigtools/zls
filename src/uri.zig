@@ -14,7 +14,7 @@ pub fn fromPath(allocator: *std.mem.Allocator, path: []const u8) ![]const u8 {
     var buf = std.ArrayList(u8).init(allocator);
     try buf.appendSlice(prefix);
 
-    const out_stream = buf.outStream();
+    const out_stream = buf.writer();
 
     for (path) |char| {
         if (char == std.fs.path.sep) {
@@ -41,7 +41,7 @@ pub fn fromPath(allocator: *std.mem.Allocator, path: []const u8) ![]const u8 {
     return buf.toOwnedSlice();
 }
 
-pub const UriParseError = error {
+pub const UriParseError = error{
     UriBadScheme,
     UriBadHexChar,
     UriBadEscape,
