@@ -88,7 +88,7 @@ pub fn log(
 }
 
 // Code is largely based off of https://github.com/andersfr/zig-lsp/blob/master/server.zig
-var stdout: std.io.BufferedOutStream(4096, std.fs.File.OutStream) = undefined;
+var stdout: std.io.BufferedWriter(4096, std.fs.File.Writer) = undefined;
 var allocator: *std.mem.Allocator = undefined;
 
 var document_store: DocumentStore = undefined;
@@ -155,7 +155,7 @@ fn respondGeneric(id: types.RequestId, response: []const u8) !void {
     // Numbers of character that will be printed from this string: len - 1 brackets
     const json_fmt = "{{\"jsonrpc\":\"2.0\",\"id\":";
 
-    const stdout_stream = stdout.outStream();
+    const stdout_stream = stdout.writer();
     try stdout_stream.print("Content-Length: {}\r\n\r\n" ++ json_fmt, .{response.len + id_len + json_fmt.len - 1});
     switch (id) {
         .Integer => |int| try stdout_stream.print("{}", .{int}),
@@ -203,7 +203,7 @@ fn publishDiagnostics(arena: *std.heap.ArenaAllocator, handle: DocumentStore.Han
 
         var mem_buffer: [256]u8 = undefined;
         var fbs = std.io.fixedBufferStream(&mem_buffer);
-        try tree.renderError(err, fbs.outStream());
+        try tree.renderError(err, fbs.writer());
 
         try diagnostics.append(.{
             .range = astLocationToRange(loc),
@@ -1536,7 +1536,7 @@ pub fn main() anyerror!void {
 
     // Init global vars
     const reader = std.io.getStdIn().reader();
-    stdout = std.io.bufferedOutStream(std.io.getStdOut().outStream());
+    stdout = std.io.bufferedWriter(std.io.getStdOut().writer());
 
     // Read the configuration, if any.
     const config_parse_options = std.json.ParseOptions{ .allocator = allocator };

@@ -64,7 +64,7 @@ pub fn config(step: *std.build.Step) anyerror!void {
     var file = try dir.createFile("zls.json", .{});
     defer file.close();
 
-    const out = file.outStream();
+    const out = file.writer();
 
     std.debug.warn("Writing to config...\n", .{});
 

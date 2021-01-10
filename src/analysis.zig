@@ -64,9 +64,9 @@ pub fn collectDocComments(
 pub fn getFunctionSignature(tree: *ast.Tree, func: *ast.Node.FnProto) []const u8 {
     const start = tree.token_locs[func.firstToken()].start;
     const end = tree.token_locs[switch (func.return_type) {
-        .Explicit, .InferErrorSet => |node| node.lastToken(),
-        .Invalid => |r_paren| r_paren,
-    }].end;
+            .Explicit, .InferErrorSet => |node| node.lastToken(),
+            .Invalid => |r_paren| r_paren,
+        }].end;
     return tree.source[start..end];
 }
 
@@ -80,7 +80,7 @@ pub fn getFunctionSnippet(allocator: *std.mem.Allocator, tree: *ast.Tree, func: 
     try buffer.appendSlice(tree.tokenSlice(name_tok));
     try buffer.append('(');
 
-    var buf_stream = buffer.outStream();
+    var buf_stream = buffer.writer();
 
     for (func.paramsConst()) |param, param_num| {
         if (skip_self_param and param_num == 0) continue;
@@ -2006,7 +2006,7 @@ pub const DocumentScope = struct {
             while (decl_it.next()) |name_decl| : (idx += 1) {
                 if (idx != 0) log.debug(", ", .{});
             }
-                log.debug("{s}", .{name_decl.key});
+            log.debug("{s}", .{name_decl.key});
             log.debug("\n--------------------------\n", .{});
         }
     }
