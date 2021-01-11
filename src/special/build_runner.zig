@@ -22,7 +22,7 @@ pub fn main() !void {
 
     try runBuild(builder);
 
-    const stdout_stream = io.getStdOut().outStream();
+    const stdout_stream = io.getStdOut().writer();
 
     // TODO: We currently add packages from every LibExeObj step that the install step depends on.
     //       Should we error out or keep one step or something similar?
