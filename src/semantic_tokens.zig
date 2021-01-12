@@ -68,6 +68,10 @@ const Builder = struct {
             self.handle.tree.token_locs[current_token].start
         else
             0;
+
+        if (start_idx > self.handle.tree.token_locs[token].start)
+            return;
+
         const delta_loc = offsets.tokenRelativeLocation(self.handle.tree, start_idx, token, self.encoding) catch return;
         try self.arr.appendSlice(&[_]u32{
             @truncate(u32, delta_loc.line),
@@ -129,8 +133,8 @@ const GapHighlighter = struct {
         const tok_id = self.builder.handle.tree.token_ids[tok];
         if (tok_id == .LineComment) {
             try writeToken(self.builder, tok, .comment);
-        } else if (tok_id == .ContainerDocComment) {
-            try writeTokenMod(self.builder, tok, .comment, TokenModifiers{ .documentation = true });
+        } else if (tok_id == .ContainerDocComment or tok_id == .DocComment) {
+            try writeTokenMod(self.builder, tok, .comment, .{ .documentation = true });
         } else if (@enumToInt(tok_id) >= @enumToInt(std.zig.Token.Id.Keyword_align) and
             @enumToInt(tok_id) <= @enumToInt(std.zig.Token.Id.Keyword_while))
         {
