@@ -1,4 +1,4 @@
-const root = @import("build.zig");
+const root = @import("@build@");
 const std = @import("std");
 const io = std.io;
 const fmt = std.fmt;

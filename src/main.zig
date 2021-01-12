@@ -13,6 +13,7 @@ const references = @import("references.zig");
 const rename = @import("rename.zig");
 const offsets = @import("offsets.zig");
 const semantic_tokens = @import("semantic_tokens.zig");
+const known_folders = @import("known-folders");
 
 const logger = std.log.scoped(.main);
 
@@ -1553,8 +1554,6 @@ pub fn main() anyerror!void {
     }
 
     config_read: {
-        const known_folders = @import("known-folders");
-
         const res = try known_folders.getPath(allocator, .local_configuration);
         if (res) |local_config_path| {
             defer allocator.free(local_config_path);
@@ -1670,15 +1669,26 @@ pub fn main() anyerror!void {
         logger.warn("Zig standard library path not specified in zls.json and could not be resolved from the zig executable", .{});
     }
 
-    if (config.build_runner_path) |build_runner_path| {
-        try document_store.init(allocator, zig_exe_path, try std.mem.dupe(allocator, u8, build_runner_path), config.zig_lib_path);
-    } else {
+    const build_runner_path = if (config.build_runner_path) |p|
+        try allocator.dupe(u8, p)
+    else blk: {
         var exe_dir_bytes: [std.fs.MAX_PATH_BYTES]u8 = undefined;
         const exe_dir_path = try std.fs.selfExeDirPath(&exe_dir_bytes);
+        break :blk try std.fs.path.resolve(allocator, &[_][]const u8{ exe_dir_path, "build_runner.zig" });
+    };
 
-        const build_runner_path = try std.fs.path.resolve(allocator, &[_][]const u8{ exe_dir_path, "build_runner.zig" });
-        try document_store.init(allocator, zig_exe_path, build_runner_path, config.zig_lib_path);
-    }
+    const build_runner_cache_path = if (config.build_runner_path) |p|
+        try allocator.dupe(u8, p)
+    else blk: {
+        const cache_dir_path = (try known_folders.getPath(allocator, .cache)) orelse {
+            logger.warn("Known-folders could not fetch the cache path", .{});
+            return;
+        };
+        defer allocator.free(cache_dir_path);
+        break :blk try std.fs.path.resolve(allocator, &[_][]const u8{ cache_dir_path, "zls" });
+    };
+
+    try document_store.init(allocator, zig_exe_path, build_runner_path, build_runner_cache_path, config.zig_lib_path);
     defer document_store.deinit();
 
     // This JSON parser is passed to processJsonRpc and reset.

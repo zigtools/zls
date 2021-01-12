@@ -14,9 +14,11 @@ zig_exe_path: ?[]const u8 = null,
 /// guide explicitly states that the style info provided is a guideline only.
 warn_style: bool = false,
 
-/// Path to the build_runner.zig file. This option must be present in one of
-/// the global configuration directories to have any effect.
+/// Path to the build_runner.zig file.
 build_runner_path: ?[]const u8 = null,
+
+/// Path to a directory that will be used as cache when `zig run`ing the build runner
+build_runner_cache_path: ?[]const u8 = null,
 
 /// Semantic token support
 enable_semantic_tokens: bool = true,

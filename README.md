@@ -61,7 +61,8 @@ The following options are currently available.
 | `zig_lib_path` | `?[]const u8` | `null` | zig library path, e.g. `/path/to/zig/lib/zig`, used to analyze std library imports. |
 | `zig_exe_path` | `?[]const u8` | `null` | zig executable path, e.g. `/path/to/zig/zig`, used to run the custom build runner. If `null`, zig is looked up in `PATH`. Will be used to infer the zig standard library path if none is provided. |
 | `warn_style` | `bool` | `false` | Enables warnings for style *guideline* mismatches |
-| `build_runner_path` | `?[]const u8` | `null` | Path to the build_runner.zig file provided by zls. This option must be present in one of the global configuration files to have any effect. `null` is equivalent to `${executable_directory}/build_runner.zig` |
+| `build_runner_path` | `?[]const u8` | `null` | Path to the build_runner.zig file provided by zls. `null` is equivalent to `${executable_directory}/build_runner.zig` |
+| `build_runner_cache_path` | `?[]const u8` | `null` | Path to a directroy that will be used as zig's cache when running `zig run build_runner.zig ...`. `null` is equivalent to `${KnownFloders.Cache}/zls` |
 | `enable_semantic_tokens` | `bool` | `true` | Enables semantic token support when the client also supports it. |
 | `operator_completions` | `bool` | `true` | Enables `*` and `?` operators in completion lists. |
 

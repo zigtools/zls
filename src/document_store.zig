@@ -38,6 +38,7 @@ handles: std.StringHashMap(*Handle),
 zig_exe_path: ?[]const u8,
 build_files: std.ArrayListUnmanaged(*BuildFile),
 build_runner_path: []const u8,
+build_runner_cache_path: []const u8,
 std_uri: ?[]const u8,
 
 pub fn init(
@@ -45,6 +46,7 @@ pub fn init(
     allocator: *std.mem.Allocator,
     zig_exe_path: ?[]const u8,
     build_runner_path: []const u8,
+    build_runner_cache_path: []const u8,
     zig_lib_path: ?[]const u8,
 ) !void {
     self.allocator = allocator;
@@ -52,6 +54,7 @@ pub fn init(
     self.zig_exe_path = zig_exe_path;
     self.build_files = .{};
     self.build_runner_path = build_runner_path;
+    self.build_runner_cache_path = build_runner_cache_path;
     self.std_uri = try stdUriFromLibPath(allocator, zig_lib_path);
 }
 
@@ -59,6 +62,7 @@ const LoadPackagesContext = struct {
     build_file: *BuildFile,
     allocator: *std.mem.Allocator,
     build_runner_path: []const u8,
+    build_runner_cache_path: []const u8,
     zig_exe_path: []const u8,
 };
 
@@ -66,37 +70,26 @@ fn loadPackages(context: LoadPackagesContext) !void {
     const allocator = context.allocator;
     const build_file = context.build_file;
     const build_runner_path = context.build_runner_path;
+    const build_runner_cache_path = context.build_runner_cache_path;
     const zig_exe_path = context.zig_exe_path;
 
-    const directory_path = try URI.parse(allocator, build_file.uri[0 .. build_file.uri.len - "build.zig".len]);
-    defer allocator.free(directory_path);
-
-    const target_path = try std.fs.path.resolve(allocator, &[_][]const u8{ directory_path, "build_runner.zig" });
-    defer allocator.free(target_path);
-
-    // For example, instead of testing if a file exists and then opening it, just
-    // open it and handle the error for file not found.
-    var file_exists = true;
-    check_file_exists: {
-        var fhandle = std.fs.cwd().openFile(target_path, .{ .read = true, .write = false }) catch |err| switch (err) {
-            error.FileNotFound => {
-                file_exists = false;
-                break :check_file_exists;
-            },
-            else => break :check_file_exists,
-        };
-        fhandle.close();
-    }
-
-    if (file_exists) return error.BuildRunnerFileExists;
-
-    try std.fs.copyFileAbsolute(build_runner_path, target_path, .{});
-    defer std.fs.deleteFileAbsolute(target_path) catch {};
+    const build_file_path = try URI.parse(allocator, build_file.uri);
+    defer allocator.free(build_file_path);
+    const directory_path = build_file_path[0..build_file_path.len - "build.zig".len];
 
     const zig_run_result = try std.ChildProcess.exec(.{
         .allocator = allocator,
-        .argv = &[_][]const u8{ zig_exe_path, "run", "build_runner.zig" },
-        .cwd = directory_path,
+        .argv = &[_][]const u8{
+            zig_exe_path,
+            "run",
+            build_runner_path,
+            "--cache-dir",
+            build_runner_cache_path,
+            "--pkg-begin",
+            "@build@",
+            build_file_path,
+            "--pkg-end",
+        },
     });
 
     defer {
@@ -193,6 +186,7 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: []u8) anyerror!*Hand
             .build_file = build_file,
             .allocator = self.allocator,
             .build_runner_path = self.build_runner_path,
+            .build_runner_cache_path = self.build_runner_cache_path,
             .zig_exe_path = self.zig_exe_path.?,
         }) catch |err| {
             log.debug("Failed to load packages of build file {s} (error: {})", .{ build_file.uri, err });
@@ -399,6 +393,7 @@ pub fn applySave(self: *DocumentStore, handle: *Handle) !void {
             .build_file = build_file,
             .allocator = self.allocator,
             .build_runner_path = self.build_runner_path,
+            .build_runner_cache_path = self.build_runner_cache_path,
             .zig_exe_path = self.zig_exe_path.?,
         }) catch |err| {
             log.debug("Failed to load packages of build file {s} (error: {})", .{ build_file.uri, err });
@@ -427,7 +422,6 @@ pub fn applyChanges(
                 .line = range.Object.get("end").?.Object.get("line").?.Integer,
                 .character = range.Object.get("end").?.Object.get("character").?.Integer,
             };
-
 
             const change_text = change.Object.get("text").?.String;
             const start_index = (try offsets.documentPosition(document.*, start_pos, offset_encoding)).absolute_index;
@@ -624,6 +618,7 @@ pub fn deinit(self: *DocumentStore) void {
         self.allocator.free(std_uri);
     }
     self.allocator.free(self.build_runner_path);
+    self.allocator.free(self.build_runner_cache_path);
     self.build_files.deinit(self.allocator);
 }
 
