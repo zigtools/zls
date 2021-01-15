@@ -1,10 +1,12 @@
-# Zig Language Server
+![Zig Language Server](./assets/zls.svg)
+
+![CI](https://github.com/zigtools/zls/workflows/CI/badge.svg)
+![Zig Tools](./assets/zigtools.svg)
 
 Zig Language Server, or `zls`, is a language server for Zig. The Zig wiki states that "The Zig community is decentralized" and "There is no concept of 'official' or 'unofficial'", so instead of calling `zls` unofficial, and I'm going to call it a cool option, one of [many](https://github.com/search?q=zig+language+server).
 
 <!-- omit in toc -->
 ## Table Of Contents
-
 - [Installation](#installation)
   - [Build Options](#build-options)
   - [Configuration Options](#configuration-options)
@@ -140,7 +142,6 @@ Install the `zls-vscode` extension from [here](https://github.com/zigtools/zls-v
 ```
 
 #### nvim-lspconfig
-
 Requires Nvim 0.5 (HEAD)!
 
 - Install nvim-lspconfig from [here](https://github.com/neovim/nvim-lspconfig).
@@ -194,7 +195,6 @@ let g:completion_enable_auto_popup = 1
 ```
 
 ## Related Projects
-
 - [`sublime-zig-language` by @prime31](https://github.com/prime31/sublime-zig-language)
   - Supports basic language features
   - Uses data provided by `src/data` to perform builtin autocompletion
@@ -204,5 +204,4 @@ let g:completion_enable_auto_popup = 1
   - Provides API to access known folders on Linux, Windows and Mac OS
 
 ## License
-
 MIT
