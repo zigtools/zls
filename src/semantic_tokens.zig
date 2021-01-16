@@ -8,7 +8,7 @@ pub const TokenType = enum(u32) {
     type,
     parameter,
     variable,
-    tagField,
+    enumMember,
     field,
     errorTag,
     function,
@@ -117,7 +117,7 @@ fn fieldTokenType(container_decl: *ast.Node.ContainerDecl, handle: *DocumentStor
     if (container_decl.kind_token > handle.tree.token_ids.len) return null;
     return @as(?TokenType, switch (handle.tree.token_ids[container_decl.kind_token]) {
         .Keyword_struct => .field,
-        .Keyword_union, .Keyword_enum => .tagField,
+        .Keyword_union, .Keyword_enum => .enumMember,
         else => null,
     });
 }
@@ -615,8 +615,8 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
         },
         .EnumLiteral => {
             const enum_literal = node.cast(ast.Node.EnumLiteral).?;
-            try writeToken(builder, enum_literal.dot, .tagField);
-            try writeToken(builder, enum_literal.name, .tagField);
+            try writeToken(builder, enum_literal.dot, .enumMember);
+            try writeToken(builder, enum_literal.name, .enumMember);
         },
         .FloatLiteral => {
             try writeToken(builder, node.firstToken(), .number);
