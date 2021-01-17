@@ -8,7 +8,7 @@ pub const TokenType = enum(u32) {
     type,
     parameter,
     variable,
-    tagField,
+    enumMember,
     field,
     errorTag,
     function,
@@ -28,6 +28,7 @@ pub const TokenModifiers = packed struct {
     @"enum": bool = false,
     @"union": bool = false,
     @"opaque": bool = false,
+    declaration: bool = false,
     definition: bool = false,
     @"async": bool = false,
     documentation: bool = false,
@@ -116,7 +117,7 @@ fn fieldTokenType(container_decl: *ast.Node.ContainerDecl, handle: *DocumentStor
     if (container_decl.kind_token > handle.tree.token_ids.len) return null;
     return @as(?TokenType, switch (handle.tree.token_ids[container_decl.kind_token]) {
         .Keyword_struct => .field,
-        .Keyword_union, .Keyword_enum => .tagField,
+        .Keyword_union, .Keyword_enum => .enumMember,
         else => null,
     });
 }
@@ -291,9 +292,9 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
             try writeToken(builder, var_decl.getComptimeToken(), .keyword);
             try writeToken(builder, var_decl.mut_token, .keyword);
             if (try analysis.resolveTypeOfNode(store, arena, .{ .node = node, .handle = handle })) |decl_type| {
-                try colorIdentifierBasedOnType(builder, decl_type, var_decl.name_token, .{ .definition = true });
+                try colorIdentifierBasedOnType(builder, decl_type, var_decl.name_token, .{ .declaration = true });
             } else {
-                try writeTokenMod(builder, var_decl.name_token, .variable, .{ .definition = true });
+                try writeTokenMod(builder, var_decl.name_token, .variable, .{ .declaration = true });
             }
             try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, var_decl.getTypeNode() });
             try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, var_decl.getAlignNode() });
@@ -385,7 +386,7 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
                 if (param_decl.doc_comments) |docs| try writeDocComments(builder, handle.tree, docs);
                 try writeToken(builder, param_decl.noalias_token, .keyword);
                 try writeToken(builder, param_decl.comptime_token, .keyword);
-                try writeTokenMod(builder, param_decl.name_token, .parameter, .{ .definition = true });
+                try writeTokenMod(builder, param_decl.name_token, .parameter, .{ .declaration = true });
                 switch (param_decl.param_type) {
                     .any_type => |var_node| try writeToken(builder, var_node.firstToken(), .type),
                     .type_expr => |type_expr| try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, type_expr }),
@@ -614,8 +615,8 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
         },
         .EnumLiteral => {
             const enum_literal = node.cast(ast.Node.EnumLiteral).?;
-            try writeToken(builder, enum_literal.dot, .tagField);
-            try writeToken(builder, enum_literal.name, .tagField);
+            try writeToken(builder, enum_literal.dot, .enumMember);
+            try writeToken(builder, enum_literal.name, .enumMember);
         },
         .FloatLiteral => {
             try writeToken(builder, node.firstToken(), .number);
