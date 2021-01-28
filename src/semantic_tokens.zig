@@ -29,7 +29,6 @@ pub const TokenModifiers = packed struct {
     @"union": bool = false,
     @"opaque": bool = false,
     declaration: bool = false,
-    definition: bool = false,
     @"async": bool = false,
     documentation: bool = false,
     generic: bool = false,
