@@ -199,7 +199,7 @@ pub fn getDeclNameToken(tree: *ast.Tree, node: *ast.Node) ?ast.TokenIndex {
         },
         .TestDecl => {
             const decl = node.castTag(.TestDecl).?;
-            return (decl.name.castTag(.StringLiteral) orelse return null).token;
+            return ((decl.name orelse return null).castTag(.StringLiteral) orelse return null).token;
         },
         else => {},
     }
