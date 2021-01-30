@@ -177,6 +177,16 @@ set completeopt=menuone,noinsert,noselect
 let g:completion_enable_auto_popup = 1
 ```
 
+#### LanguageClient-neovim
+
+- Install the LanguageClient-neovim from [here](https://github.com/autozimu/LanguageClient-neovim)
+- Edit your neovim configuration and add `zls` for zig filetypes:
+
+```vim
+let g:LanguageClient_serverCommands = {
+       \ 'zig': ['~/code/zls/zig-cache/bin/zls'],
+       \ }
+```
 
 ### Emacs
 
