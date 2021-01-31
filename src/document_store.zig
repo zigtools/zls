@@ -192,15 +192,23 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: []u8) anyerror!*Hand
             log.debug("Failed to load packages of build file {s} (error: {})", .{ build_file.uri, err });
         };
     } else if (self.zig_exe_path != null and !in_std) {
-        // Look into build files to see if we already have one that lives in the directory structure
-        var candidate = for (self.build_files.items) |build_file| {
-            const build_file_base_uri = build_file.uri[0 .. std.mem.lastIndexOfScalar(u8, build_file.uri, '/').? + 1];
+        // Look into build files and keep the one that lives closest to the document in the directory structure
+        var candidate: ?*BuildFile = null;
+        {
+            var uri_chars_matched: usize = 0;
+            for (self.build_files.items) |build_file| {
+                const build_file_base_uri = build_file.uri[0 .. std.mem.lastIndexOfScalar(u8, build_file.uri, '/').? + 1];
 
-            if (std.mem.startsWith(u8, uri, build_file_base_uri)) {
-                log.debug("Found a candidate associated build file: {s}", .{build_file.uri});
-                break build_file;
+                if (build_file_base_uri.len > uri_chars_matched and std.mem.startsWith(u8, uri, build_file_base_uri)) {
+                    uri_chars_matched = build_file_base_uri.len;
+                    candidate = build_file;
+                }
             }
-        } else null;
+            if (candidate) |build_file| {
+                log.debug("Found a candidate associated build file: `{s}`", .{build_file.uri});
+            }
+        }
+
         // Then, try to find the closest build file.
         var curr_path = try URI.parse(self.allocator, uri);
         defer self.allocator.free(curr_path);
@@ -252,7 +260,7 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: []u8) anyerror!*Hand
         if (candidate) |build_file| {
             build_file.refs += 1;
             handle.associated_build_file = build_file;
-            log.debug("Associated build file `{s}` to document `{s}`", .{build_file.uri, handle.uri()});
+            log.debug("Associated build file `{s}` to document `{s}`", .{ build_file.uri, handle.uri() });
         }
     }
 
