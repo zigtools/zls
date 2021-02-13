@@ -23,7 +23,7 @@ fn Transform(comptime Original: type, comptime transform_fn: anytype) type {
     };
 }
 
-inline fn fromDynamicTreeInternal(arena: *std.heap.ArenaAllocator, value: std.json.Value, out: anytype) error{ MalformedJson, OutOfMemory }!void {
+fn fromDynamicTreeInternal(arena: *std.heap.ArenaAllocator, value: std.json.Value, out: anytype) callconv(.Inline) error{ MalformedJson, OutOfMemory }!void {
     const T = comptime std.meta.Child(@TypeOf(out));
 
     if (comptime std.meta.trait.is(.Struct)(T)) {
