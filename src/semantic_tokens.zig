@@ -43,7 +43,7 @@ pub const TokenModifiers = packed struct {
         return res;
     }
 
-    inline fn set(self: *TokenModifiers, comptime field: []const u8) void {
+    fn set(self: *TokenModifiers, comptime field: []const u8) callconv(.Inline) void {
         @field(self, field) = true;
     }
 };
@@ -88,11 +88,20 @@ const Builder = struct {
     }
 };
 
-inline fn writeToken(builder: *Builder, token_idx: ?ast.TokenIndex, tok_type: TokenType) !void {
+fn writeToken(
+    builder: *Builder,
+    token_idx: ?ast.TokenIndex,
+    tok_type: TokenType,
+) callconv(.Inline) !void {
     return try writeTokenMod(builder, token_idx, tok_type, .{});
 }
 
-inline fn writeTokenMod(builder: *Builder, token_idx: ?ast.TokenIndex, tok_type: TokenType, tok_mod: TokenModifiers) !void {
+fn writeTokenMod(
+    builder: *Builder,
+    token_idx: ?ast.TokenIndex,
+    tok_type: TokenType,
+    tok_mod: TokenModifiers,
+) callconv(.Inline) !void {
     if (token_idx) |ti| {
         try builder.add(ti, tok_type, tok_mod);
     }
