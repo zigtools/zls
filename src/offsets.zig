@@ -70,15 +70,15 @@ pub const TokenLocation = struct {
     }
 };
 
-pub fn tokenRelativeLocation(tree: *std.zig.ast.Tree, start_index: usize, token: std.zig.ast.TokenIndex, encoding: Encoding) !TokenLocation {
-    const token_loc = tree.token_locs[token];
+pub fn tokenRelativeLocation(tree: std.zig.ast.Tree, start_index: usize, token: std.zig.ast.TokenIndex, encoding: Encoding) !TokenLocation {
+    const token_loc = tree.tokenLocation(@truncate(u32, start_index), token);
 
     var loc = TokenLocation{
         .line = 0,
         .column = 0,
         .offset = 0,
     };
-    const token_start = token_loc.start;
+    const token_start = token_loc.line_start;
     const source = tree.source[start_index..];
     var i: usize = 0;
     while (i + start_index < token_start) {
@@ -108,10 +108,10 @@ pub fn tokenRelativeLocation(tree: *std.zig.ast.Tree, start_index: usize, token:
 }
 
 /// Asserts the token is comprised of valid utf8
-pub fn tokenLength(tree: *std.zig.ast.Tree, token: std.zig.ast.TokenIndex, encoding: Encoding) usize {
-    const token_loc = tree.token_locs[token];
+pub fn tokenLength(tree: std.zig.ast.Tree, token: std.zig.ast.TokenIndex, encoding: Encoding) usize {
+    const token_loc = tree.tokenLocation(0, token);
     if (encoding == .utf8)
-        return token_loc.end - token_loc.start;
+        return token_loc.line_end - token_loc.line_start;
 
     var i: usize = token_loc.start;
     var utf16_len: usize = 0;

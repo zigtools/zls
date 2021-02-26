@@ -199,8 +199,8 @@ fn publishDiagnostics(arena: *std.heap.ArenaAllocator, handle: DocumentStore.Han
 
     var diagnostics = std.ArrayList(types.Diagnostic).init(&arena.allocator);
 
-    for (tree.errors) |*err| {
-        const loc = tree.tokenLocation(0, err.loc());
+    for (tree.errors) |err| {
+        const loc = tree.tokenLocation(0, err.token);
 
         var mem_buffer: [256]u8 = undefined;
         var fbs = std.io.fixedBufferStream(&mem_buffer);
@@ -209,7 +209,7 @@ fn publishDiagnostics(arena: *std.heap.ArenaAllocator, handle: DocumentStore.Han
         try diagnostics.append(.{
             .range = astLocationToRange(loc),
             .severity = .Error,
-            .code = @tagName(err.*),
+            .code = @tagName(err.tag),
             .source = "zls",
             .message = try std.mem.dupe(&arena.allocator, u8, fbs.getWritten()),
             // .relatedInformation = undefined
@@ -217,16 +217,17 @@ fn publishDiagnostics(arena: *std.heap.ArenaAllocator, handle: DocumentStore.Han
     }
 
     if (tree.errors.len == 0) {
-        for (tree.root_node.decls()) |decl| {
-            switch (decl.tag) {
-                .FnProto => blk: {
-                    const func = decl.cast(std.zig.ast.Node.FnProto).?;
-                    const is_extern = func.getExternExportInlineToken() != null;
+        for (tree.rootDecls()) |decl_idx| {
+            const decl = tree.nodes.items(.tag)[decl_idx];
+            switch (decl) {
+                .fn_proto => blk: {
+                    const func = tree.fnProto(decl_idx);
+                    const is_extern = func.extern_export_token != null;
                     if (is_extern)
                         break :blk;
 
                     if (config.warn_style) {
-                        if (func.getNameToken()) |name_token| {
+                        if (func.name_token) |name_token| {
                             const loc = tree.tokenLocation(0, name_token);
 
                             const is_type_function = analysis.isTypeFunction(tree, func);
@@ -397,12 +398,10 @@ fn nodeToCompletion(
                             },
                             else => break :param_check false,
                         }
-                    } else
-                        false;
+                    } else false;
 
                     break :blk try analysis.getFunctionSnippet(&arena.allocator, handle.tree, func, skip_self_param);
-                } else
-                    null;
+                } else null;
 
                 const is_type_function = analysis.isTypeFunction(handle.tree, func);
 

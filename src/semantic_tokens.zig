@@ -65,11 +65,11 @@ const Builder = struct {
 
     fn add(self: *Builder, token: ast.TokenIndex, token_type: TokenType, token_modifiers: TokenModifiers) !void {
         const start_idx = if (self.current_token) |current_token|
-            self.handle.tree.token_locs[current_token].start
+            self.handle.tree.tokenLocation[current_token].line_start
         else
             0;
 
-        if (start_idx > self.handle.tree.token_locs[token].start)
+        if (start_idx > self.handle.tree.tokenLocation[token].line_start)
             return;
 
         const delta_loc = offsets.tokenRelativeLocation(self.handle.tree, start_idx, token, self.encoding) catch return;

@@ -6,7 +6,7 @@ const offsets = @import("offsets.zig");
 const log = std.log.scoped(.analysis);
 
 /// Get a declaration's doc comment node
-pub fn getDocCommentNode(tree: *ast.Tree, node: *ast.Node) ?*ast.Node.DocComment {
+pub fn getDocCommentNode(tree: ast.Tree, node: *ast.Node) ?*ast.Node.DocComment {
     if (node.castTag(.FnProto)) |func| {
         return func.getDocComments();
     } else if (node.castTag(.VarDecl)) |var_decl| {
@@ -27,7 +27,7 @@ pub fn getDocCommentNode(tree: *ast.Tree, node: *ast.Node) ?*ast.Node.DocComment
 ///```
 pub fn getDocComments(
     allocator: *std.mem.Allocator,
-    tree: *ast.Tree,
+    tree: ast.Tree,
     node: *ast.Node,
     format: types.MarkupContent.Kind,
 ) !?[]const u8 {
@@ -39,7 +39,7 @@ pub fn getDocComments(
 
 pub fn collectDocComments(
     allocator: *std.mem.Allocator,
-    tree: *ast.Tree,
+    tree: ast.Tree,
     doc_comments: *ast.Node.DocComment,
     format: types.MarkupContent.Kind,
 ) ![]const u8 {
@@ -61,17 +61,19 @@ pub fn collectDocComments(
 }
 
 /// Gets a function signature (keywords, name, return value)
-pub fn getFunctionSignature(tree: *ast.Tree, func: *ast.Node.FnProto) []const u8 {
+pub fn getFunctionSignature(tree: ast.Tree, func: *ast.Node.FnProto) []const u8 {
     const start = tree.token_locs[func.firstToken()].start;
-    const end = tree.token_locs[switch (func.return_type) {
+    const end = tree.token_locs[
+        switch (func.return_type) {
             .Explicit, .InferErrorSet => |node| node.lastToken(),
             .Invalid => |r_paren| r_paren,
-        }].end;
+        }
+    ].end;
     return tree.source[start..end];
 }
 
 /// Gets a function snippet insert text
-pub fn getFunctionSnippet(allocator: *std.mem.Allocator, tree: *ast.Tree, func: *ast.Node.FnProto, skip_self_param: bool) ![]const u8 {
+pub fn getFunctionSnippet(allocator: *std.mem.Allocator, tree: ast.Tree, func: *ast.Node.FnProto, skip_self_param: bool) ![]const u8 {
     const name_tok = func.getNameToken() orelse unreachable;
 
     var buffer = std.ArrayList(u8).init(allocator);
@@ -126,37 +128,36 @@ pub fn getFunctionSnippet(allocator: *std.mem.Allocator, tree: *ast.Tree, func: 
 }
 
 /// Gets a function signature (keywords, name, return value)
-pub fn getVariableSignature(tree: *ast.Tree, var_decl: *ast.Node.VarDecl) []const u8 {
+pub fn getVariableSignature(tree: ast.Tree, var_decl: *ast.Node.VarDecl) []const u8 {
     const start = tree.token_locs[var_decl.firstToken()].start;
     const end = tree.token_locs[var_decl.semicolon_token].start;
     return tree.source[start..end];
 }
 
 // analysis.getContainerFieldSignature(handle.tree, field)
-pub fn getContainerFieldSignature(tree: *ast.Tree, field: *ast.Node.ContainerField) []const u8 {
+pub fn getContainerFieldSignature(tree: ast.Tree, field: *ast.Node.ContainerField) []const u8 {
     const start = tree.token_locs[field.firstToken()].start;
     const end = tree.token_locs[field.lastToken()].end;
     return tree.source[start..end];
 }
 
 /// The type node is "type"
-fn typeIsType(tree: *ast.Tree, node: *ast.Node) bool {
-    if (node.castTag(.Identifier)) |ident| {
-        return std.mem.eql(u8, tree.tokenSlice(ident.token), "type");
+fn typeIsType(tree: ast.Tree, node: ast.Node.Index) bool {
+    if (tree.nodes.items(.tag)[node] == .identifier) {
+        return std.mem.eql(u8, tree.tokenSlice(node), "type");
     }
     return false;
 }
 
-pub fn isTypeFunction(tree: *ast.Tree, func: *ast.Node.FnProto) bool {
-    switch (func.return_type) {
-        .Explicit => |node| return typeIsType(tree, node),
-        .InferErrorSet, .Invalid => return false,
-    }
+pub fn isTypeFunction(tree: ast.Tree, func: ast.full.FnProto) bool {
+    return typeIsType(func.ast.return_type);
 }
 
-pub fn isGenericFunction(tree: *ast.Tree, func: *ast.Node.FnProto) bool {
-    for (func.paramsConst()) |param| {
-        if (param.param_type == .any_type or param.comptime_token != null) {
+pub fn isGenericFunction(tree: ast.Tree, func: *ast.full.FnProto) bool {
+    var it = func.iterate();
+    var slice = tree.nodes.items(.tag);
+    while (it.next()) |param| {
+        if (param.anytype_ellipsis3 != null or param.comptime_noalias != null) {
             return true;
         }
     }
@@ -174,43 +175,50 @@ pub fn isPascalCase(name: []const u8) bool {
 
 // ANALYSIS ENGINE
 
-pub fn getDeclNameToken(tree: *ast.Tree, node: *ast.Node) ?ast.TokenIndex {
-    switch (node.tag) {
-        .VarDecl => {
-            const vari = node.castTag(.VarDecl).?;
-            return vari.name_token;
+pub fn getDeclNameToken(tree: ast.Tree, node: ast.Node.Index) ?ast.TokenIndex {
+    const tags = tree.nodes.items(.tag);
+    switch (tags[node]) {
+        // regular declaration names. + 1 to mut token because name comes after 'const'/'var'
+        .local_var_decl => return tree.localVarDecl(node).ast.mut_token + 1,
+        .global_var_decl => return tree.globalVarDecl(node).ast.mut_token + 1,
+        .simple_var_decl => return tree.simpleVarDecl(node).ast.mut_token + 1,
+        .aligned_var_decl => return tree.alignedVarDecl(node).ast.mut_token + 1,
+
+        // function declaration names
+        .fn_proto => return tree.fnProto(node).name_token,
+        .fn_proto_simple => {
+            var params: [1]ast.Node.Index = undefined;
+            return tree.fnProtoSimple(&params, node).name_token;
         },
-        .FnProto => {
-            const func = node.castTag(.FnProto).?;
-            return func.getNameToken();
+        .fn_proto_one => {
+            var params: [1]ast.Node.Index = undefined;
+            return tree.fnProtoOne(&params, node).name_token;
         },
-        .ContainerField => {
-            const field = node.castTag(.ContainerField).?;
-            return field.name_token;
-        },
-        .ErrorTag => {
-            const tag = node.castTag(.ErrorTag).?;
-            return tag.name_token;
-        },
-        // We need identifier for captures and error set tags
-        .Identifier => {
-            const ident = node.castTag(.Identifier).?;
-            return ident.token;
-        },
-        .TestDecl => {
-            const decl = node.castTag(.TestDecl).?;
-            return ((decl.name orelse return null).castTag(.StringLiteral) orelse return null).token;
-        },
+        .fn_proto_multi => return tree.fnProtoMulti(node).name_token,
+
+        // containers
+        .container_field => return tree.containerField(node).ast.name_token,
+        .container_field_init => return tree.containerFieldInit(node).ast.name_token,
+        .container_field_align => return tree.containerFieldAlign(node).ast.name_token,
+
+        // @TODO: Errors
+        // .error_=> {
+        //     const tag = node.castTag(.ErrorTag).?;
+        //     return tag.name_token;
+        // },
+
+        // lhs of main token is name token, so use `node` - 1
+        .test_decl => return getDeclNameToken(tree, node - 1),
         else => {},
     }
 
     return null;
 }
 
-fn getDeclName(tree: *ast.Tree, node: *ast.Node) ?[]const u8 {
+fn getDeclName(tree: ast.Tree, node: ast.Node.Index) ?[]const u8 {
     const name = tree.tokenSlice(getDeclNameToken(tree, node) orelse return null);
-    return switch (node.tag) {
-        .TestDecl => name[1 .. name.len - 1],
+    return switch (tree.nodes.items(.tag)[node]) {
+        .test_decl => name[1 .. name.len - 1],
         else => name,
     };
 }
@@ -290,7 +298,7 @@ pub fn resolveVarDeclAlias(store: *DocumentStore, arena: *std.heap.ArenaAllocato
 }
 
 fn findReturnStatementInternal(
-    tree: *ast.Tree,
+    tree: ast.Tree,
     fn_decl: *ast.Node.FnProto,
     base_node: *ast.Node,
     already_found: *bool,
@@ -321,7 +329,7 @@ fn findReturnStatementInternal(
     return result;
 }
 
-fn findReturnStatement(tree: *ast.Tree, fn_decl: *ast.Node.FnProto) ?*ast.Node.ControlFlowExpression {
+fn findReturnStatement(tree: ast.Tree, fn_decl: *ast.Node.FnProto) ?*ast.Node.ControlFlowExpression {
     var already_found = false;
     return findReturnStatementInternal(tree, fn_decl, fn_decl.getBodyNode().?, &already_found);
 }
@@ -510,7 +518,7 @@ fn allDigits(str: []const u8) bool {
     return true;
 }
 
-pub fn isTypeIdent(tree: *ast.Tree, token_idx: ast.TokenIndex) bool {
+pub fn isTypeIdent(tree: ast.Tree, token_idx: ast.TokenIndex) bool {
     const PrimitiveTypes = std.ComptimeStringMap(void, .{
         .{"isize"},          .{"usize"},
         .{"c_short"},        .{"c_ushort"},
@@ -963,37 +971,49 @@ pub fn resolveTypeOfNode(store: *DocumentStore, arena: *std.heap.ArenaAllocator,
     return resolveTypeOfNodeInternal(store, arena, node_handle, &bound_type_params);
 }
 
-fn maybeCollectImport(tree: *ast.Tree, builtin_call: *ast.Node.BuiltinCall, arr: *std.ArrayList([]const u8)) !void {
-    if (!std.mem.eql(u8, tree.tokenSlice(builtin_call.builtin_token), "@import")) return;
-    if (builtin_call.params_len > 1) return;
+fn maybeCollectImport(tree: ast.Tree, builtin_call: ast.Node.Index, arr: *std.ArrayList([]const u8)) !void {
+    const tags = tree.nodes.items(.tag);
+    const datas = tree.nodes.items(.data);
 
-    const import_param = builtin_call.paramsConst()[0];
-    if (import_param.tag != .StringLiteral) return;
+    const builtin_tag = tags[builtin_call];
+    const builtin_data = datas[builtin_call];
 
-    const import_str = tree.tokenSlice(import_param.castTag(.StringLiteral).?.token);
+    std.debug.assert(builtin_tag == .builtin_call);
+    if (!std.mem.eql(u8, tree.tokenSlice(builtin_call), "@import")) return;
+    const params = tree.extra_data[builtin_data.lhs..builtin_data.rhs];
+    if (params.len > 1) return;
+
+    if (tags[params[0]] != .string_literal) return;
+
+    const import_str = tree.tokenSlice(params[0]);
     try arr.append(import_str[1 .. import_str.len - 1]);
 }
 
 /// Collects all imports we can find into a slice of import paths (without quotes).
 /// The import paths are valid as long as the tree is.
-pub fn collectImports(import_arr: *std.ArrayList([]const u8), tree: *ast.Tree) !void {
+pub fn collectImports(import_arr: *std.ArrayList([]const u8), tree: ast.Tree) !void {
     // TODO: Currently only detects `const smth = @import("string literal")<.SomeThing>;`
-    for (tree.root_node.decls()) |decl| {
-        if (decl.tag != .VarDecl) continue;
-        const var_decl = decl.castTag(.VarDecl).?;
-        const init_node = var_decl.getInitNode() orelse continue;
+    const tags = tree.nodes.items(.tag);
+    for (tree.rootDecls()) |decl_idx| {
+        const var_decl_maybe: ?ast.full.VarDecl = switch (tags[decl_idx]) {
+            .global_var_decl => tree.globalVarDecl(decl_idx),
+            .local_var_decl => tree.localVarDecl(decl_idx),
+            .simple_var_decl => tree.simpleVarDecl(decl_idx),
+            else => null,
+        };
+        const var_decl = var_decl_maybe orelse continue;
 
-        switch (init_node.tag) {
-            .BuiltinCall => {
-                const builtin_call = init_node.castTag(.BuiltinCall).?;
-                try maybeCollectImport(tree, builtin_call, import_arr);
-            },
-            .Period => {
-                const infix_op = init_node.cast(ast.Node.SimpleInfixOp).?;
+        const init_node = var_decl.ast.init_node;
+        const init_node_tag = tags[init_node];
+        switch (init_node_tag) {
+            .builtin_call => try maybeCollectImport(tree, init_node, import_arr),
+            // @TODO: FIX ME what is the syntax to support for imports using dot notation?
+            // .Period => {
+            //     const infix_op = init_node.cast(ast.Node.SimpleInfixOp).?;
 
-                if (infix_op.lhs.tag != .BuiltinCall) continue;
-                try maybeCollectImport(tree, infix_op.lhs.castTag(.BuiltinCall).?, import_arr);
-            },
+            //     if (infix_op.lhs.tag != .BuiltinCall) continue;
+            //     try maybeCollectImport(tree, infix_op.lhs.castTag(.BuiltinCall).?, import_arr);
+            // },
             else => {},
         }
     }
@@ -1134,7 +1154,7 @@ pub fn getFieldAccessType(
     };
 }
 
-pub fn isNodePublic(tree: *ast.Tree, node: *ast.Node) bool {
+pub fn isNodePublic(tree: ast.Tree, node: *ast.Node) bool {
     switch (node.tag) {
         .VarDecl => {
             const var_decl = node.castTag(.VarDecl).?;
@@ -1148,7 +1168,7 @@ pub fn isNodePublic(tree: *ast.Tree, node: *ast.Node) bool {
     }
 }
 
-pub fn nodeToString(tree: *ast.Tree, node: *ast.Node) ?[]const u8 {
+pub fn nodeToString(tree: ast.Tree, node: *ast.Node) ?[]const u8 {
     switch (node.tag) {
         .ContainerField => {
             const field = node.castTag(.ContainerField).?;
@@ -1176,13 +1196,13 @@ pub fn nodeToString(tree: *ast.Tree, node: *ast.Node) ?[]const u8 {
     return null;
 }
 
-fn nodeContainsSourceIndex(tree: *ast.Tree, node: *ast.Node, source_index: usize) bool {
+fn nodeContainsSourceIndex(tree: ast.Tree, node: *ast.Node, source_index: usize) bool {
     const first_token = tree.token_locs[node.firstToken()];
     const last_token = tree.token_locs[node.lastToken()];
     return source_index >= first_token.start and source_index <= last_token.end;
 }
 
-pub fn getImportStr(tree: *ast.Tree, source_index: usize) ?[]const u8 {
+pub fn getImportStr(tree: ast.Tree, source_index: usize) ?[]const u8 {
     var node = &tree.root_node.base;
 
     var child_idx: usize = 0;
@@ -1269,8 +1289,8 @@ pub fn documentPositionContext(arena: *std.heap.ArenaAllocator, document: types.
     while (true) {
         const tok = tokenizer.next();
         // Early exits.
-        switch (tok.id) {
-            .Invalid, .Invalid_ampersands => {
+        switch (tok.tag) {
+            .invalid, .invalid_ampersands => {
                 // Single '@' do not return a builtin token so we check this on our own.
                 if (line[doc_position.line_index - 1] == '@') {
                     return PositionContext{
@@ -1282,16 +1302,16 @@ pub fn documentPositionContext(arena: *std.heap.ArenaAllocator, document: types.
                 }
                 return .other;
             },
-            .LineComment, .DocComment, .ContainerDocComment => return .comment,
-            .Eof => break,
+            .line_comment, .doc_comment, .container_doc_comment => return .comment,
+            .eof => break,
             else => {},
         }
 
         // State changes
         var curr_ctx = try peek(&stack);
-        switch (tok.id) {
-            .StringLiteral, .MultilineStringLiteralLine => curr_ctx.ctx = .{ .string_literal = tok.loc },
-            .Identifier => switch (curr_ctx.ctx) {
+        switch (tok.tag) {
+            .string_literal, .multiline_string_literal_line => curr_ctx.ctx = .{ .string_literal = tok.loc },
+            .identifier => switch (curr_ctx.ctx) {
                 .empty, .pre_label => curr_ctx.ctx = .{ .var_access = tok.loc },
                 .label => |filled| if (!filled) {
                     curr_ctx.ctx = .{ .label = true };
@@ -1300,11 +1320,11 @@ pub fn documentPositionContext(arena: *std.heap.ArenaAllocator, document: types.
                 },
                 else => {},
             },
-            .Builtin => switch (curr_ctx.ctx) {
+            .builtin => switch (curr_ctx.ctx) {
                 .empty, .pre_label => curr_ctx.ctx = .{ .builtin = tok.loc },
                 else => {},
             },
-            .Period, .PeriodAsterisk => switch (curr_ctx.ctx) {
+            .period, .period_asterisk => switch (curr_ctx.ctx) {
                 .empty, .pre_label => curr_ctx.ctx = .enum_literal,
                 .enum_literal => curr_ctx.ctx = .empty,
                 .field_access => {},
@@ -1314,31 +1334,31 @@ pub fn documentPositionContext(arena: *std.heap.ArenaAllocator, document: types.
                     .field_access = tokenRangeAppend(curr_ctx.ctx.range().?, tok),
                 },
             },
-            .Keyword_break, .Keyword_continue => curr_ctx.ctx = .pre_label,
-            .Colon => if (curr_ctx.ctx == .pre_label) {
+            .keyword_break, .keyword_continue => curr_ctx.ctx = .pre_label,
+            .colon => if (curr_ctx.ctx == .pre_label) {
                 curr_ctx.ctx = .{ .label = false };
             } else {
                 curr_ctx.ctx = .empty;
             },
-            .QuestionMark => switch (curr_ctx.ctx) {
+            .question_mark => switch (curr_ctx.ctx) {
                 .field_access => {},
                 else => curr_ctx.ctx = .empty,
             },
-            .LParen => try stack.append(.{ .ctx = .empty, .stack_id = .Paren }),
-            .LBracket => try stack.append(.{ .ctx = .empty, .stack_id = .Bracket }),
-            .RParen => {
+            .l_paren => try stack.append(.{ .ctx = .empty, .stack_id = .Paren }),
+            .l_bracket => try stack.append(.{ .ctx = .empty, .stack_id = .Bracket }),
+            .r_paren => {
                 _ = stack.pop();
                 if (curr_ctx.stack_id != .Paren) {
                     (try peek(&stack)).ctx = .empty;
                 }
             },
-            .RBracket => {
+            .r_bracket => {
                 _ = stack.pop();
                 if (curr_ctx.stack_id != .Bracket) {
                     (try peek(&stack)).ctx = .empty;
                 }
             },
-            .Keyword_error => curr_ctx.ctx = .global_error_set,
+            .keyword_error => curr_ctx.ctx = .global_error_set,
             else => curr_ctx.ctx = .empty,
         }
 
@@ -1356,8 +1376,8 @@ pub fn documentPositionContext(arena: *std.heap.ArenaAllocator, document: types.
     };
 }
 
-fn addOutlineNodes(allocator: *std.mem.Allocator, tree: *ast.Tree, child: *ast.Node, context: *GetDocumentSymbolsContext) anyerror!void {
-    switch (child.tag) {
+fn addOutlineNodes(allocator: *std.mem.Allocator, tree: ast.Tree, parent: ast.Node.Index, context: *GetDocumentSymbolsContext) anyerror!void {
+    switch (tree.nodes.items(.tag)[parent]) {
         .StringLiteral,
         .IntegerLiteral,
         .BuiltinCall,
@@ -1471,13 +1491,13 @@ const GetDocumentSymbolsContext = struct {
     encoding: offsets.Encoding,
 };
 
-fn getDocumentSymbolsInternal(allocator: *std.mem.Allocator, tree: *ast.Tree, node: *ast.Node, context: *GetDocumentSymbolsContext) anyerror!void {
+fn getDocumentSymbolsInternal(allocator: *std.mem.Allocator, tree: ast.Tree, node: ast.Node.Index, context: *GetDocumentSymbolsContext) anyerror!void {
     const name = getDeclName(tree, node) orelse return;
     if (name.len == 0)
         return;
 
-    const start_loc = context.prev_loc.add(try offsets.tokenRelativeLocation(tree, context.prev_loc.offset, node.firstToken(), context.encoding));
-    const end_loc = start_loc.add(try offsets.tokenRelativeLocation(tree, start_loc.offset, node.lastToken(), context.encoding));
+    const start_loc = context.prev_loc.add(try offsets.tokenRelativeLocation(tree, context.prev_loc.offset, tree.firstToken(node), context.encoding));
+    const end_loc = start_loc.add(try offsets.tokenRelativeLocation(tree, start_loc.offset, tree.lastToken(node), context.encoding));
     context.prev_loc = end_loc;
     const range = types.Range{
         .start = .{
@@ -1490,12 +1510,24 @@ fn getDocumentSymbolsInternal(allocator: *std.mem.Allocator, tree: *ast.Tree, no
         },
     };
 
+    const tags = tree.nodes.items(.tag);
     (try context.symbols.addOne()).* = .{
         .name = name,
-        .kind = switch (node.tag) {
-            .FnProto => .Function,
-            .VarDecl => .Variable,
-            .ContainerField => .Field,
+        .kind = switch (tags[node]) {
+            .fn_proto,
+            .fn_proto_simple,
+            .fn_proto_multi,
+            .fn_proto_one,
+            => .Function,
+            .local_var_decl,
+            .global_var_decl,
+            .aligned_var_decl,
+            .simple_var_decl,
+            => .Variable,
+            .container_field,
+            .container_field_align,
+            .container_field_init,
+            => .Field,
             else => .Variable,
         },
         .range = range,
@@ -1511,43 +1543,45 @@ fn getDocumentSymbolsInternal(allocator: *std.mem.Allocator, tree: *ast.Tree, no
             };
 
             var index: usize = 0;
-            while (node.iterate(index)) |child| : (index += 1) {
-                try addOutlineNodes(allocator, tree, child, &child_context);
-            }
+            try addOutlineNodes(allocator, tree, node, &child_context);
+
+            // while (node.iterate(index)) |child| : (index += 1) {
+            //     try addOutlineNodes(allocator, tree, child, &child_context);
+            // }
 
             break :ch children.items;
         },
     };
 }
 
-pub fn getDocumentSymbols(allocator: *std.mem.Allocator, tree: *ast.Tree, encoding: offsets.Encoding) ![]types.DocumentSymbol {
-    var symbols = try std.ArrayList(types.DocumentSymbol).initCapacity(allocator, tree.root_node.decls_len);
+pub fn getDocumentSymbols(allocator: *std.mem.Allocator, tree: ast.Tree, encoding: offsets.Encoding) ![]types.DocumentSymbol {
+    var symbols = try std.ArrayList(types.DocumentSymbol).initCapacity(allocator, tree.rootDecls().len);
 
     var context = GetDocumentSymbolsContext{
         .symbols = &symbols,
         .encoding = encoding,
     };
 
-    for (tree.root_node.decls()) |node| {
-        try getDocumentSymbolsInternal(allocator, tree, node, &context);
+    for (tree.rootDecls()) |idx| {
+        try getDocumentSymbolsInternal(allocator, tree, idx, &context);
     }
 
     return symbols.items;
 }
 
 pub const Declaration = union(enum) {
-    ast_node: *ast.Node,
-    param_decl: *ast.Node.FnProto.ParamDecl,
+    ast_node: ast.Node,
+    param_decl: ast.full.FnProto.Param,
     pointer_payload: struct {
-        node: *ast.Node.PointerPayload,
+        node: ast.full.PtrType,
         condition: *ast.Node,
     },
     array_payload: struct {
         identifier: *ast.Node,
-        array_expr: *ast.Node,
+        array_expr: ast.full.ArrayType,
     },
     switch_payload: struct {
-        node: *ast.Node.PointerPayload,
+        node: ast.full.PtrType,
         switch_expr: *ast.Node,
         items: []const *ast.Node,
     },
@@ -1723,18 +1757,18 @@ fn iterateSymbolsContainerInternal(
             try callback(context, decl);
         }
 
-        for (container_scope.uses) |use| {
-            if (handle != orig_handle and use.visib_token == null) continue;
-            if (std.mem.indexOfScalar(*ast.Node.Use, use_trail.items, use) != null) continue;
-            try use_trail.append(use);
+        // for (container_scope.uses) |use| {
+        //     if (handle != orig_handle and use.visib_token == null) continue;
+        //     if (std.mem.indexOfScalar(*ast.Node.Use, use_trail.items, use) != null) continue;
+        //     try use_trail.append(use);
 
-            const use_expr = (try resolveTypeOfNode(store, arena, .{ .node = use.expr, .handle = handle })) orelse continue;
-            const use_expr_node = switch (use_expr.type.data) {
-                .other => |n| n,
-                else => continue,
-            };
-            try iterateSymbolsContainerInternal(store, arena, .{ .node = use_expr_node, .handle = use_expr.handle }, orig_handle, callback, context, false, use_trail);
-        }
+        //     const use_expr = (try resolveTypeOfNode(store, arena, .{ .node = use.expr, .handle = handle })) orelse continue;
+        //     const use_expr_node = switch (use_expr.type.data) {
+        //         .other => |n| n,
+        //         else => continue,
+        //     };
+        //     try iterateSymbolsContainerInternal(store, arena, .{ .node = use_expr_node, .handle = use_expr.handle }, orig_handle, callback, context, false, use_trail);
+        // }
     }
 }
 
@@ -1790,17 +1824,17 @@ fn iterateSymbolsGlobalInternal(
                 try callback(context, DeclWithHandle{ .decl = &entry.value, .handle = handle });
             }
 
-            for (scope.uses) |use| {
-                if (std.mem.indexOfScalar(*ast.Node.Use, use_trail.items, use) != null) continue;
-                try use_trail.append(use);
+            // for (scope.uses) |use| {
+            //     if (std.mem.indexOfScalar(*ast.Node.Use, use_trail.items, use) != null) continue;
+            //     try use_trail.append(use);
 
-                const use_expr = (try resolveTypeOfNode(store, arena, .{ .node = use.expr, .handle = handle })) orelse continue;
-                const use_expr_node = switch (use_expr.type.data) {
-                    .other => |n| n,
-                    else => continue,
-                };
-                try iterateSymbolsContainerInternal(store, arena, .{ .node = use_expr_node, .handle = use_expr.handle }, handle, callback, context, false, use_trail);
-            }
+            //     const use_expr = (try resolveTypeOfNode(store, arena, .{ .node = use.expr, .handle = handle })) orelse continue;
+            //     const use_expr_node = switch (use_expr.type.data) {
+            //         .other => |n| n,
+            //         else => continue,
+            //     };
+            //     try iterateSymbolsContainerInternal(store, arena, .{ .node = use_expr_node, .handle = use_expr.handle }, handle, callback, context, false, use_trail);
+            // }
         }
 
         if (scope.range.start >= source_index) return;
@@ -1838,27 +1872,27 @@ pub fn innermostContainer(handle: *DocumentStore.Handle, source_index: usize) Ty
 fn resolveUse(
     store: *DocumentStore,
     arena: *std.heap.ArenaAllocator,
-    uses: []const *ast.Node.Use,
+    // uses: []const *ast.Node.Use,
     symbol: []const u8,
     handle: *DocumentStore.Handle,
     use_trail: *std.ArrayList(*ast.Node.Use),
 ) error{OutOfMemory}!?DeclWithHandle {
-    for (uses) |use| {
-        if (std.mem.indexOfScalar(*ast.Node.Use, use_trail.items, use) != null) continue;
-        try use_trail.append(use);
+    // for (uses) |use| {
+    //     if (std.mem.indexOfScalar(*ast.Node.Use, use_trail.items, use) != null) continue;
+    //     try use_trail.append(use);
 
-        const use_expr = (try resolveTypeOfNode(store, arena, .{ .node = use.expr, .handle = handle })) orelse continue;
-        const use_expr_node = switch (use_expr.type.data) {
-            .other => |n| n,
-            else => continue,
-        };
-        if (try lookupSymbolContainerInternal(store, arena, .{ .node = use_expr_node, .handle = use_expr.handle }, symbol, false, use_trail)) |candidate| {
-            if (candidate.handle != handle and !candidate.isPublic()) {
-                continue;
-            }
-            return candidate;
-        }
-    }
+    //     const use_expr = (try resolveTypeOfNode(store, arena, .{ .node = use.expr, .handle = handle })) orelse continue;
+    //     const use_expr_node = switch (use_expr.type.data) {
+    //         .other => |n| n,
+    //         else => continue,
+    //     };
+    //     if (try lookupSymbolContainerInternal(store, arena, .{ .node = use_expr_node, .handle = use_expr.handle }, symbol, false, use_trail)) |candidate| {
+    //         if (candidate.handle != handle and !candidate.isPublic()) {
+    //             continue;
+    //         }
+    //         return candidate;
+    //     }
+    // }
     return null;
 }
 
@@ -1909,7 +1943,7 @@ fn lookupSymbolGlobalInternal(
                 };
             }
 
-            if (try resolveUse(store, arena, scope.uses, symbol, handle, use_trail)) |result| return result;
+            // if (try resolveUse(store, arena, scope.uses, symbol, handle, use_trail)) |result| return result;
         }
 
         if (scope.range.start > source_index) return null;
@@ -1962,7 +1996,7 @@ fn lookupSymbolContainerInternal(
             return DeclWithHandle{ .decl = &candidate.value, .handle = handle };
         }
 
-        if (try resolveUse(store, arena, container_scope.uses, symbol, handle, use_trail)) |result| return result;
+        // if (try resolveUse(store, arena, container_scope.uses, symbol, handle, use_trail)) |result| return result;
         return null;
     }
 
@@ -1998,7 +2032,8 @@ pub const DocumentScope = struct {
                 scope.data,
                 scope.range.start,
                 scope.range.end,
-                scope.uses.len,
+                {},
+                // scope.uses.len,
             });
 
             var decl_it = scope.decls.iterator();
@@ -2014,7 +2049,7 @@ pub const DocumentScope = struct {
     pub fn deinit(self: DocumentScope, allocator: *std.mem.Allocator) void {
         for (self.scopes) |*scope| {
             scope.decls.deinit();
-            allocator.free(scope.uses);
+            // allocator.free(scope.uses);
             allocator.free(scope.tests);
         }
         allocator.free(self.scopes);
@@ -2036,12 +2071,12 @@ pub const Scope = struct {
     range: SourceRange,
     decls: std.StringHashMap(Declaration),
     tests: []const *ast.Node,
-    uses: []const *ast.Node.Use,
+    // uses: []const *ast.Node.Data,
 
     data: Data,
 };
 
-pub fn makeDocumentScope(allocator: *std.mem.Allocator, tree: *ast.Tree) !DocumentScope {
+pub fn makeDocumentScope(allocator: *std.mem.Allocator, tree: ast.Tree) !DocumentScope {
     var scopes = std.ArrayListUnmanaged(Scope){};
     var error_completions = std.ArrayListUnmanaged(types.CompletionItem){};
     var enum_completions = std.ArrayListUnmanaged(types.CompletionItem){};
@@ -2054,7 +2089,7 @@ pub fn makeDocumentScope(allocator: *std.mem.Allocator, tree: *ast.Tree) !Docume
         enum_completions.deinit(allocator);
     }
 
-    try makeScopeInternal(allocator, &scopes, &error_completions, &enum_completions, tree, &tree.root_node.base);
+    try makeScopeInternal(allocator, &scopes, &error_completions, &enum_completions, tree);
     return DocumentScope{
         .scopes = scopes.toOwnedSlice(allocator),
         .error_completions = error_completions.toOwnedSlice(allocator),
@@ -2062,10 +2097,11 @@ pub fn makeDocumentScope(allocator: *std.mem.Allocator, tree: *ast.Tree) !Docume
     };
 }
 
-fn nodeSourceRange(tree: *ast.Tree, node: *ast.Node) SourceRange {
+fn nodeSourceRange(tree: ast.Tree, node: ast.Node.Index) SourceRange {
+    const loc = tree.tokenLocation(0, tree.firstToken(node));
     return SourceRange{
-        .start = tree.token_locs[node.firstToken()].start,
-        .end = tree.token_locs[node.lastToken()].end,
+        .start = loc.line_start,
+        .end = loc.line_end,
     };
 }
 
@@ -2076,39 +2112,42 @@ fn makeScopeInternal(
     scopes: *std.ArrayListUnmanaged(Scope),
     error_completions: *std.ArrayListUnmanaged(types.CompletionItem),
     enum_completions: *std.ArrayListUnmanaged(types.CompletionItem),
-    tree: *ast.Tree,
-    node: *ast.Node,
+    tree: ast.Tree,
+    node_idx: ast.Node.Index,
 ) error{OutOfMemory}!void {
-    if (node.tag == .Root or node.tag == .ContainerDecl or node.tag == .ErrorSetDecl) {
-        const ast_decls = switch (node.tag) {
-            .ContainerDecl => node.castTag(.ContainerDecl).?.fieldsAndDeclsConst(),
-            .Root => node.castTag(.Root).?.declsConst(),
-            .ErrorSetDecl => node.castTag(.ErrorSetDecl).?.declsConst(),
+    const nodes = tree.nodes.items(.tag);
+    const node = nodes[node_idx];
+    if (node == .root or node == .container_decl or node == .error_set_decl) {
+        const ast_decls = switch (node) {
+            .container_decl => tree.containerDecl(node_idx).ast.members,
+            .root => tree.rootDecls(),
+            // @TODO: Fix error set declarations
+            // .error_set_decl => node.castTag(.ErrorSetDecl).?.declsConst(),
             else => unreachable,
         };
 
         (try scopes.addOne(allocator)).* = .{
             .range = nodeSourceRange(tree, node),
             .decls = std.StringHashMap(Declaration).init(allocator),
-            .uses = &[0]*ast.Node.Use{},
+            // .uses = &[0]*ast.Node.Use{},
             .tests = &[0]*ast.Node{},
             .data = .{ .container = node },
         };
         const scope_idx = scopes.items.len - 1;
-        var uses = std.ArrayList(*ast.Node.Use).init(allocator);
+        // var uses = std.ArrayList(*ast.Node.Use).init(allocator);
         var tests = std.ArrayList(*ast.Node).init(allocator);
 
         errdefer {
             scopes.items[scope_idx].decls.deinit();
-            uses.deinit();
+            // uses.deinit();
             tests.deinit();
         }
 
         for (ast_decls) |decl| {
-            if (decl.castTag(.Use)) |use| {
-                try uses.append(use);
-                continue;
-            }
+            // if (decl.castTag(.Use)) |use| {
+            //     try uses.append(use);
+            //     continue;
+            // }
 
             try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, decl);
             const name = getDeclName(tree, decl) orelse continue;
@@ -2159,7 +2198,7 @@ fn makeScopeInternal(
         }
 
         scopes.items[scope_idx].tests = tests.toOwnedSlice();
-        scopes.items[scope_idx].uses = uses.toOwnedSlice();
+        // scopes.items[scope_idx].uses = uses.toOwnedSlice();
         return;
     }
 
@@ -2170,7 +2209,7 @@ fn makeScopeInternal(
             (try scopes.addOne(allocator)).* = .{
                 .range = nodeSourceRange(tree, node),
                 .decls = std.StringHashMap(Declaration).init(allocator),
-                .uses = &[0]*ast.Node.Use{},
+                // .uses = &[0]*ast.Node.Use{},
                 .tests = &[0]*ast.Node{},
                 .data = .{ .function = node },
             };
@@ -2204,7 +2243,7 @@ fn makeScopeInternal(
                     .end = tree.token_locs[block.rbrace].end,
                 },
                 .decls = std.StringHashMap(Declaration).init(allocator),
-                .uses = &[0]*ast.Node.Use{},
+                // .uses = &[0]*ast.Node.Use{},
                 .tests = &[0]*ast.Node{},
                 .data = .other,
             };
@@ -2217,24 +2256,24 @@ fn makeScopeInternal(
             (try scopes.addOne(allocator)).* = .{
                 .range = nodeSourceRange(tree, node),
                 .decls = std.StringHashMap(Declaration).init(allocator),
-                .uses = &[0]*ast.Node.Use{},
+                // .uses = &[0]*ast.Node.Use{},
                 .tests = &[0]*ast.Node{},
                 .data = .{ .block = node },
             };
             var scope_idx = scopes.items.len - 1;
-            var uses = std.ArrayList(*ast.Node.Use).init(allocator);
+            // var uses = std.ArrayList(*ast.Node.Use).init(allocator);
 
             errdefer {
                 scopes.items[scope_idx].decls.deinit();
-                uses.deinit();
+                // uses.deinit();
             }
 
             var child_idx: usize = 0;
             while (node.iterate(child_idx)) |child_node| : (child_idx += 1) {
-                if (child_node.castTag(.Use)) |use| {
-                    try uses.append(use);
-                    continue;
-                }
+                // if (child_node.castTag(.Use)) |use| {
+                // try uses.append(use);
+                // continue;
+                // }
 
                 try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, child_node);
                 if (child_node.castTag(.VarDecl)) |var_decl| {
@@ -2245,7 +2284,7 @@ fn makeScopeInternal(
                 }
             }
 
-            scopes.items[scope_idx].uses = uses.toOwnedSlice();
+            // scopes.items[scope_idx].uses = uses.toOwnedSlice();
             return;
         },
         .Block => {
@@ -2254,24 +2293,24 @@ fn makeScopeInternal(
             (try scopes.addOne(allocator)).* = .{
                 .range = nodeSourceRange(tree, node),
                 .decls = std.StringHashMap(Declaration).init(allocator),
-                .uses = &[0]*ast.Node.Use{},
+                // .uses = &[0]*ast.Node.Use{},
                 .tests = &[0]*ast.Node{},
                 .data = .{ .block = node },
             };
             var scope_idx = scopes.items.len - 1;
-            var uses = std.ArrayList(*ast.Node.Use).init(allocator);
+            // var uses = std.ArrayList(*ast.Node.Use).init(allocator);
 
             errdefer {
                 scopes.items[scope_idx].decls.deinit();
-                uses.deinit();
+                // uses.deinit();
             }
 
             var child_idx: usize = 0;
             while (node.iterate(child_idx)) |child_node| : (child_idx += 1) {
-                if (child_node.castTag(.Use)) |use| {
-                    try uses.append(use);
-                    continue;
-                }
+                // if (child_node.castTag(.Use)) |use| {
+                //     try uses.append(use);
+                //     continue;
+                // }
 
                 try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, child_node);
                 if (child_node.castTag(.VarDecl)) |var_decl| {
@@ -2282,7 +2321,7 @@ fn makeScopeInternal(
                 }
             }
 
-            scopes.items[scope_idx].uses = uses.toOwnedSlice();
+            // scopes.items[scope_idx].uses = uses.toOwnedSlice();
             return;
         },
         .Comptime => {
@@ -2300,7 +2339,7 @@ fn makeScopeInternal(
                         .end = tree.token_locs[if_node.body.lastToken()].end,
                     },
                     .decls = std.StringHashMap(Declaration).init(allocator),
-                    .uses = &[0]*ast.Node.Use{},
+                    // .uses = &[0]*ast.Node.Use{},
                     .tests = &[0]*ast.Node{},
                     .data = .other,
                 };
@@ -2328,7 +2367,7 @@ fn makeScopeInternal(
                             .end = tree.token_locs[else_node.body.lastToken()].end,
                         },
                         .decls = std.StringHashMap(Declaration).init(allocator),
-                        .uses = &[0]*ast.Node.Use{},
+                        // .uses = &[0]*ast.Node.Use{},
                         .tests = &[0]*ast.Node{},
                         .data = .other,
                     };
@@ -2353,7 +2392,7 @@ fn makeScopeInternal(
                         .end = tree.token_locs[while_node.lastToken()].end,
                     },
                     .decls = std.StringHashMap(Declaration).init(allocator),
-                    .uses = &[0]*ast.Node.Use{},
+                    // .uses = &[0]*ast.Node.Use{},
                     .tests = &[0]*ast.Node{},
                     .data = .other,
                 };
@@ -2373,7 +2412,7 @@ fn makeScopeInternal(
                         .end = tree.token_locs[while_node.body.lastToken()].end,
                     },
                     .decls = std.StringHashMap(Declaration).init(allocator),
-                    .uses = &[0]*ast.Node.Use{},
+                    // .uses = &[0]*ast.Node.Use{},
                     .tests = &[0]*ast.Node{},
                     .data = .other,
                 };
@@ -2401,7 +2440,7 @@ fn makeScopeInternal(
                             .end = tree.token_locs[else_node.body.lastToken()].end,
                         },
                         .decls = std.StringHashMap(Declaration).init(allocator),
-                        .uses = &[0]*ast.Node.Use{},
+                        // .uses = &[0]*ast.Node.Use{},
                         .tests = &[0]*ast.Node{},
                         .data = .other,
                     };
@@ -2426,7 +2465,7 @@ fn makeScopeInternal(
                         .end = tree.token_locs[for_node.lastToken()].end,
                     },
                     .decls = std.StringHashMap(Declaration).init(allocator),
-                    .uses = &[0]*ast.Node.Use{},
+                    // .uses = &[0]*ast.Node.Use{},
                     .tests = &[0]*ast.Node{},
                     .data = .other,
                 };
@@ -2448,7 +2487,7 @@ fn makeScopeInternal(
                     .end = tree.token_locs[for_node.body.lastToken()].end,
                 },
                 .decls = std.StringHashMap(Declaration).init(allocator),
-                .uses = &[0]*ast.Node.Use{},
+                // .uses = &[0]*ast.Node.Use{},
                 .tests = &[0]*ast.Node{},
                 .data = .other,
             };
@@ -2489,7 +2528,7 @@ fn makeScopeInternal(
                                 .end = tree.token_locs[case_node.expr.lastToken()].end,
                             },
                             .decls = std.StringHashMap(Declaration).init(allocator),
-                            .uses = &[0]*ast.Node.Use{},
+                            // .uses = &[0]*ast.Node.Use{},
                             .tests = &[0]*ast.Node{},
                             .data = .other,
                         };
