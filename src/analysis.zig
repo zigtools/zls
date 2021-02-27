@@ -5,17 +5,33 @@ const types = @import("types.zig");
 const offsets = @import("offsets.zig");
 const log = std.log.scoped(.analysis);
 
-/// Get a declaration's doc comment node
-pub fn getDocCommentNode(tree: ast.Tree, node: *ast.Node) ?*ast.Node.DocComment {
-    if (node.castTag(.FnProto)) |func| {
-        return func.getDocComments();
-    } else if (node.castTag(.VarDecl)) |var_decl| {
-        return var_decl.getDocComments();
-    } else if (node.castTag(.ContainerField)) |field| {
-        return field.doc_comments;
-    } else if (node.castTag(.ErrorTag)) |tag| {
-        return tag.doc_comments;
+/// Get a declaration's doc comment token index
+pub fn getDocCommentTokenIndex(tree: ast.Tree, node: ast.Node.Index) ?ast.TokenIndex {
+    const tags = tree.nodes.items(.tag);
+    const tokens = tree.tokens.items(.tag);
+    const current = tree.nodes.items(.main_token)[node];
+
+    switch (tags[node]) {
+        .fn_proto, .fn_proto_one, .fn_proto_simple, .fn_proto_multi => {
+            var idx = current - 1;
+            idx -= @boolToInt(tokens[idx] == .keyword_extern);
+            idx -= @boolToInt(tokens[idx] == .keyword_pub);
+            return if (tokens[idx] == .doc_comment) idx else null;
+        },
+        .local_var_decl, .global_var_decl, .aligned_var_decl, .simple_var_decl => {
+            return if (tokens[current - 1] == .doc_comment) current - 1 else null;
+        },
+        .container_field, .container_field_init, .container_field_align => {
+            var idx = current - 2; // skip '.'
+            return if (tokens[idx] == .doc_comment) idx else null;
+        },
+        else => return null,
     }
+
+    // @TODO: Implement doc comments for tags
+    // } else if (node.castTag(.ErrorTag)) |tag| {
+    //     return tag.doc_comments;
+    // }
     return null;
 }
 
@@ -28,11 +44,11 @@ pub fn getDocCommentNode(tree: ast.Tree, node: *ast.Node) ?*ast.Node.DocComment 
 pub fn getDocComments(
     allocator: *std.mem.Allocator,
     tree: ast.Tree,
-    node: *ast.Node,
+    node: ast.Node.Index,
     format: types.MarkupContent.Kind,
 ) !?[]const u8 {
-    if (getDocCommentNode(tree, node)) |doc_comment_node| {
-        return try collectDocComments(allocator, tree, doc_comment_node, format);
+    if (getDocCommentTokenIndex(tree, node)) |doc_comment_index| {
+        return try collectDocComments(allocator, tree, doc_comment_index, format);
     }
     return null;
 }
@@ -40,17 +56,19 @@ pub fn getDocComments(
 pub fn collectDocComments(
     allocator: *std.mem.Allocator,
     tree: ast.Tree,
-    doc_comments: *ast.Node.DocComment,
+    doc_comments: ast.TokenIndex,
     format: types.MarkupContent.Kind,
 ) ![]const u8 {
     var lines = std.ArrayList([]const u8).init(allocator);
     defer lines.deinit();
 
-    var curr_line_tok = doc_comments.first_line;
+    const token_tags = tree.tokens.items(.tag);
+    const loc = tree.tokenLocation(0, doc_comments);
+
+    var curr_line_tok = doc_comments;
     while (true) : (curr_line_tok += 1) {
-        switch (tree.token_ids[curr_line_tok]) {
-            .LineComment => continue,
-            .DocComment, .ContainerDocComment => {
+        switch (token_tags[curr_line_tok]) {
+            .doc_comment, .container_doc_comment => {
                 try lines.append(std.mem.trim(u8, tree.tokenSlice(curr_line_tok)[3..], &std.ascii.spaces));
             },
             else => break,
@@ -61,20 +79,15 @@ pub fn collectDocComments(
 }
 
 /// Gets a function signature (keywords, name, return value)
-pub fn getFunctionSignature(tree: ast.Tree, func: *ast.Node.FnProto) []const u8 {
-    const start = tree.token_locs[func.firstToken()].start;
-    const end = tree.token_locs[
-        switch (func.return_type) {
-            .Explicit, .InferErrorSet => |node| node.lastToken(),
-            .Invalid => |r_paren| r_paren,
-        }
-    ].end;
+pub fn getFunctionSignature(tree: ast.Tree, func: *ast.full.FnProto) []const u8 {
+    const start = tree.tokenLocation(func.ast.fn_token).line_start;
+    const end = tree.tokenLocation(func.ast.return_type).line_end;
     return tree.source[start..end];
 }
 
 /// Gets a function snippet insert text
-pub fn getFunctionSnippet(allocator: *std.mem.Allocator, tree: ast.Tree, func: *ast.Node.FnProto, skip_self_param: bool) ![]const u8 {
-    const name_tok = func.getNameToken() orelse unreachable;
+pub fn getFunctionSnippet(allocator: *std.mem.Allocator, tree: ast.Tree, func: *ast.full.FnProto, skip_self_param: bool) ![]const u8 {
+    const name_index = func.name_token orelse unreachable;
 
     var buffer = std.ArrayList(u8).init(allocator);
     try buffer.ensureCapacity(128);
@@ -84,18 +97,20 @@ pub fn getFunctionSnippet(allocator: *std.mem.Allocator, tree: ast.Tree, func: *
 
     var buf_stream = buffer.writer();
 
-    for (func.paramsConst()) |param, param_num| {
-        if (skip_self_param and param_num == 0) continue;
-        if (param_num != @boolToInt(skip_self_param)) try buffer.appendSlice(", ${") else try buffer.appendSlice("${");
+    const token_tags = tree.tokens.items(.tag);
 
-        try buf_stream.print("{}:", .{param_num + 1});
+    var it = func.iterate(tree);
+    while (it.next()) |param| {
+        if (skip_self_param and it.param_i == 0) continue;
+        if (it.param_i != @boolToInt(skip_self_param)) try buffer.appendSlice(", ${") else try buffer.appendSlice("${");
 
-        if (param.comptime_token) |_| {
-            try buffer.appendSlice("comptime ");
-        }
+        try buf_stream.print("{d}", .{it.param_i + 1});
 
-        if (param.noalias_token) |_| {
-            try buffer.appendSlice("noalias ");
+        if (param.comptime_noalias) |token_index| {
+            if (token_tags[token_index] == .keyword_comptime)
+                try buffer.appendSlice("comptime ")
+            else
+                try buffer.appendSlice("noalias ");
         }
 
         if (param.name_token) |name_token| {
@@ -103,23 +118,23 @@ pub fn getFunctionSnippet(allocator: *std.mem.Allocator, tree: ast.Tree, func: *
             try buffer.appendSlice(": ");
         }
 
-        switch (param.param_type) {
-            .any_type => try buffer.appendSlice("anytype"),
-            .type_expr => |type_expr| {
-                var curr_tok = type_expr.firstToken();
-                var end_tok = type_expr.lastToken();
-                while (curr_tok <= end_tok) : (curr_tok += 1) {
-                    const id = tree.token_ids[curr_tok];
-                    const is_comma = id == .Comma;
+        if (param.anytype_ellipsis3) |token_index| {
+            if (token_tags[token_index] == .keyword_anytype)
+                try buffer.appendSlice("anytype")
+            else
+                try buffer.appendSlice("...");
+        } else {
+            var curr_token = param.type_expr;
+            var end_token = tree.lastToken(func.ast.params[it.param_i]);
+            while (curr_token <= end_token) : (curr_token += 1) {
+                const tag = token_tags[curr_token];
+                const is_comma = tag == .comma;
 
-                    if (curr_tok == end_tok and is_comma) continue;
-
-                    try buffer.appendSlice(tree.tokenSlice(curr_tok));
-                    if (is_comma or id == .Keyword_const) try buffer.append(' ');
-                }
-            },
+                if (curr_token == end_token and is_comma) continue;
+                try buffer.appendSlice(tree.tokenSlice(curr_token));
+                if (is_comma or tag == .Keyword_const) try buffer.append(' ');
+            }
         }
-
         try buffer.append('}');
     }
     try buffer.append(')');
@@ -128,16 +143,16 @@ pub fn getFunctionSnippet(allocator: *std.mem.Allocator, tree: ast.Tree, func: *
 }
 
 /// Gets a function signature (keywords, name, return value)
-pub fn getVariableSignature(tree: ast.Tree, var_decl: *ast.Node.VarDecl) []const u8 {
-    const start = tree.token_locs[var_decl.firstToken()].start;
-    const end = tree.token_locs[var_decl.semicolon_token].start;
+pub fn getVariableSignature(tree: ast.Tree, var_decl: *ast.full.VarDecl) []const u8 {
+    const start = tree.tokenLocation(0, var_decl.ast.mut_token).line_start;
+    const end = tree.tokenLocation(@truncate(u32, start), tree.lastToken(var_decl.ast.init_node)).line_end;
     return tree.source[start..end];
 }
 
 // analysis.getContainerFieldSignature(handle.tree, field)
-pub fn getContainerFieldSignature(tree: ast.Tree, field: *ast.Node.ContainerField) []const u8 {
-    const start = tree.token_locs[field.firstToken()].start;
-    const end = tree.token_locs[field.lastToken()].end;
+pub fn getContainerFieldSignature(tree: ast.Tree, field: *ast.full.ContainerField) []const u8 {
+    const start = tree.tokenLocation(0, field.ast.name_token).line_start;
+    const end = tree.tokenLocation(@truncate(u32, start), tree.lastToken(field.ast.value_expr)).line_start;
     return tree.source[start..end];
 }
 
@@ -150,7 +165,7 @@ fn typeIsType(tree: ast.Tree, node: ast.Node.Index) bool {
 }
 
 pub fn isTypeFunction(tree: ast.Tree, func: ast.full.FnProto) bool {
-    return typeIsType(func.ast.return_type);
+    return typeIsType(tree, func.ast.return_type);
 }
 
 pub fn isGenericFunction(tree: ast.Tree, func: *ast.full.FnProto) bool {
@@ -1570,7 +1585,9 @@ pub fn getDocumentSymbols(allocator: *std.mem.Allocator, tree: ast.Tree, encodin
 }
 
 pub const Declaration = union(enum) {
-    ast_node: ast.Node,
+    /// Index of the ast node
+    ast_node: ast.Node.Index,
+    /// Function parameter
     param_decl: ast.full.FnProto.Param,
     pointer_payload: struct {
         node: ast.full.PtrType,
@@ -2062,15 +2079,15 @@ pub const DocumentScope = struct {
 
 pub const Scope = struct {
     pub const Data = union(enum) {
-        container: *ast.Node, // .id is ContainerDecl or Root or ErrorSetDecl
-        function: *ast.Node, // .id is FnProto
-        block: *ast.Node, // .id is Block
+        container: ast.Node.Index, // .tag is ContainerDecl or Root or ErrorSetDecl
+        function: ast.Node.Index, // .tag is FnProto
+        block: ast.Node.Index, // .tag is Block
         other,
     };
 
     range: SourceRange,
     decls: std.StringHashMap(Declaration),
-    tests: []const *ast.Node,
+    tests: []const ast.Node.Index,
     // uses: []const *ast.Node.Data,
 
     data: Data,
@@ -2088,8 +2105,8 @@ pub fn makeDocumentScope(allocator: *std.mem.Allocator, tree: ast.Tree) !Documen
         for (enum_completions.items) |item| if (item.documentation) |doc| allocator.free(doc.value);
         enum_completions.deinit(allocator);
     }
-
-    try makeScopeInternal(allocator, &scopes, &error_completions, &enum_completions, tree);
+    // pass root node index ('0')
+    try makeScopeInternal(allocator, &scopes, &error_completions, &enum_completions, tree, 0);
     return DocumentScope{
         .scopes = scopes.toOwnedSlice(allocator),
         .error_completions = error_completions.toOwnedSlice(allocator),
@@ -2105,6 +2122,51 @@ fn nodeSourceRange(tree: ast.Tree, node: ast.Node.Index) SourceRange {
     };
 }
 
+fn isContainer(tag: ast.Node.Tag) bool {
+    return switch (tag) {
+        .container_decl,
+        .container_decl_trailing,
+        .container_decl_arg,
+        .container_decl_arg_trailing,
+        .container_decl_two,
+        .container_decl_two_trailing,
+        .tagged_union,
+        .tagged_union_trailing,
+        .tagged_union_two,
+        .tagged_union_two_trailing,
+        .tagged_union_enum_tag,
+        .tagged_union_enum_tag_trailing,
+        .root,
+        .error_set_decl,
+        => true,
+        else => false,
+    };
+}
+
+/// Returns the member indices of a given declaration container.
+/// Asserts given `tag` is a container node
+fn declMembers(tree: ast.Tree, tag: ast.Node.Tag) []ast.Node.index {
+    std.debug.assert(isContainer(tag));
+    return switch (tag) {
+        .container_decl, .container_decl_trailing => tree.containerDecl(node_idx).ast.members,
+        .container_decl_arg, .container_decl_arg_trailing => tree.containerDeclArg(node_idx).ast.members,
+        .container_decl_two, .container_decl_two_trailing => blk: {
+            var buffer: [2]ast.Node.Index = undefined;
+            break :blk tree.containerDeclTwo(&buffer, node_idx).ast.members;
+        },
+        .tagged_union, .tagged_union_trailing => tree.taggedUnion(node_idx).ast.members,
+        .tagged_union_enum_tag, .tagged_union_enum_tag_trailing => tree.taggedUnionEnumTag(node_idx).ast.members,
+        .tagged_union_two, .tagged_union_two_trailing => blk: {
+            var buffer: [2]ast.Node.Index = undefined;
+            break :blk tree.taggedUnionTwo(&buffer, node_idx).ast.members;
+        },
+        .root => tree.rootDecls(),
+        // @TODO: Fix error set declarations
+        .error_set_decl => &[_]ast.Node.Index{},
+        else => unreachable,
+    };
+}
+
 // TODO Possibly collect all imports to diff them on changes
 //      as well
 fn makeScopeInternal(
@@ -2115,27 +2177,23 @@ fn makeScopeInternal(
     tree: ast.Tree,
     node_idx: ast.Node.Index,
 ) error{OutOfMemory}!void {
-    const nodes = tree.nodes.items(.tag);
-    const node = nodes[node_idx];
-    if (node == .root or node == .container_decl or node == .error_set_decl) {
-        const ast_decls = switch (node) {
-            .container_decl => tree.containerDecl(node_idx).ast.members,
-            .root => tree.rootDecls(),
-            // @TODO: Fix error set declarations
-            // .error_set_decl => node.castTag(.ErrorSetDecl).?.declsConst(),
-            else => unreachable,
-        };
+    const tags = tree.nodes.items(.tag);
+    const token_tags = tree.tokens.items(.tag);
+    const node = tags[node_idx];
+
+    if (isContainer(node)) {
+        const ast_decls = declMembers(tree, node);
 
         (try scopes.addOne(allocator)).* = .{
-            .range = nodeSourceRange(tree, node),
+            .range = nodeSourceRange(tree, node_idx),
             .decls = std.StringHashMap(Declaration).init(allocator),
             // .uses = &[0]*ast.Node.Use{},
             .tests = &[0]*ast.Node{},
-            .data = .{ .container = node },
+            .data = .{ .container = node_idx },
         };
         const scope_idx = scopes.items.len - 1;
         // var uses = std.ArrayList(*ast.Node.Use).init(allocator);
-        var tests = std.ArrayList(*ast.Node).init(allocator);
+        var tests = std.ArrayList(ast.Node.Index).init(allocator);
 
         errdefer {
             scopes.items[scope_idx].decls.deinit();
@@ -2144,6 +2202,7 @@ fn makeScopeInternal(
         }
 
         for (ast_decls) |decl| {
+            // @TODO: Implement using namespace
             // if (decl.castTag(.Use)) |use| {
             //     try uses.append(use);
             //     continue;
@@ -2151,12 +2210,13 @@ fn makeScopeInternal(
 
             try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, decl);
             const name = getDeclName(tree, decl) orelse continue;
-            if (decl.tag == .TestDecl) {
-                try tests.append(decl);
-                continue;
-            }
+            // @TODO: implement tests
+            // if (decl.tag == .TestDecl) {
+            //     try tests.append(decl);
+            //     continue;
+            // }
 
-            if (node.tag == .ErrorSetDecl) {
+            if (tags[decl] == .error_set_decl) {
                 (try error_completions.addOne(allocator)).* = .{
                     .label = name,
                     .kind = .Constant,
@@ -2167,15 +2227,39 @@ fn makeScopeInternal(
                 };
             }
 
-            if (decl.castTag(.ContainerField)) |field| {
-                const empty_field = field.type_expr == null and field.value_expr == null;
-                if (empty_field and node.tag == .Root) {
+            const container_field: ?ast.full.ContainerField = switch (decl) {
+                .container_field => tree.containerField(decl),
+                .container_field_align => tree.containerFieldAlign(decl),
+                .container_field_init => tree.containerFieldInit(decl),
+                else => null,
+            };
+
+            if (container_field) |field| {
+                const empty_field = field.type_expr == 0 and field.value_expr == 0;
+                if (empty_field and node == .root) {
                     continue;
                 }
 
-                if (node.castTag(.ContainerDecl)) |container| {
-                    const kind = tree.token_ids[container.kind_token];
-                    if (empty_field and (kind == .Keyword_struct or (kind == .Keyword_union and container.init_arg_expr == .None))) {
+                // @TODO: We can probably just use node_idx directly instead of first transforming to container
+                const container_decl: ?ast.full.ContainerDecl = switch (node) {
+                    .container_decl, .container_decl_trailing => tree.containerDecl(node_idx),
+                    .container_decl_arg, .container_decl_arg_trailing => tree.containerDeclArg(node_idx),
+                    .container_decl_two, .container_decl_two_trailing => blk: {
+                        var buffer: [2]ast.Node.Index = undefined;
+                        break :blk tree.containerDeclTwo(&buffer, node_idx);
+                    },
+                    .tagged_union, .tagged_union_trailing => tree.taggedUnion(node_idx),
+                    .tagged_union_enum_tag, .tagged_union_enum_tag_trailing => tree.taggedUnionEnumTag(node_idx),
+                    .tagged_union_enum_tag, .tagged_union_enum_tag_trailing => blk: {
+                        var buffer: [2]ast.Node.Index = undefined;
+                        break :blk tree.taggedUnionTwo(&buffer, node_idx);
+                    },
+                    else => null,
+                };
+
+                if (container_decl) |container| {
+                    const kind = token_tags[container.ast.main_token];
+                    if (empty_field and (kind == .keyword_struct or (kind == .keyword_union and container.ast.arg == 0))) {
                         continue;
                     }
 
@@ -2183,7 +2267,7 @@ fn makeScopeInternal(
                         (try enum_completions.addOne(allocator)).* = .{
                             .label = name,
                             .kind = .Constant,
-                            .documentation = if (try getDocComments(allocator, tree, decl, .Markdown)) |docs|
+                            .documentation = if (try getDocComments(allocator, tree, node_idx, .Markdown)) |docs|
                                 .{ .kind = .Markdown, .value = docs }
                             else
                                 null,
@@ -2202,7 +2286,7 @@ fn makeScopeInternal(
         return;
     }
 
-    switch (node.tag) {
+    switch (node) {
         .FnProto => {
             const func = node.castTag(.FnProto).?;
 
