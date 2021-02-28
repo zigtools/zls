@@ -353,42 +353,15 @@ fn findReturnStatement(tree: ast.Tree, fn_decl: *ast.Node.FnProto) ?*ast.Node.Co
 pub fn resolveReturnType(
     store: *DocumentStore,
     arena: *std.heap.ArenaAllocator,
-    fn_decl: *ast.Node.FnProto,
+    fn_decl: ast.full.FnProto,
     handle: *DocumentStore.Handle,
     bound_type_params: *BoundTypeParams,
 ) !?TypeWithHandle {
-    if (isTypeFunction(handle.tree, fn_decl) and fn_decl.getBodyNode() != null) {
-        // If this is a type function and it only contains a single return statement that returns
-        // a container declaration, we will return that declaration.
-        const ret = findReturnStatement(handle.tree, fn_decl) orelse return null;
-        if (ret.getRHS()) |rhs| {
-            return try resolveTypeOfNodeInternal(store, arena, .{
-                .node = rhs,
-                .handle = handle,
-            }, bound_type_params);
-        }
-
-        return null;
-    }
-
-    return switch (fn_decl.return_type) {
-        .InferErrorSet => |return_type| block: {
-            const child_type = (try resolveTypeOfNodeInternal(store, arena, .{
-                .node = return_type,
-                .handle = handle,
-            }, bound_type_params)) orelse return null;
-            const child_type_node = switch (child_type.type.data) {
-                .other => |n| n,
-                else => return null,
-            };
-            break :block TypeWithHandle{ .type = .{ .data = .{ .error_union = child_type_node }, .is_type_val = false }, .handle = child_type.handle };
-        },
-        .Explicit => |return_type| ((try resolveTypeOfNodeInternal(store, arena, .{
-            .node = return_type,
-            .handle = handle,
-        }, bound_type_params)) orelse return null).instanceTypeVal(),
-        .Invalid => null,
-    };
+    // @TODO: Confirm this can handle inferred error sets etc
+    return resolveTypeOfNodeInternal(store, arena, .{
+        .node = fn_decl.ast.return_type,
+        .handle = handle,
+    }, bound_type_params);
 }
 
 /// Resolves the child type of an optional type
@@ -397,6 +370,7 @@ fn resolveUnwrapOptionalType(
     arena: *std.heap.ArenaAllocator,
     opt: TypeWithHandle,
     bound_type_params: *BoundTypeParams,
+    tree: ast.Tree,
 ) !?TypeWithHandle {
     const opt_node = switch (opt.type.data) {
         .other => |n| n,
@@ -442,6 +416,17 @@ fn resolveUnwrapErrorType(
     return null;
 }
 
+fn isPtrType(tree: ast.Tree, node: ast.Node.Index) bool {
+    return switch (tree.nodes.items(.tag)[node]) {
+        .ptr_type,
+        .ptr_type_aligned,
+        .ptr_type_bit_range,
+        .ptr_type_sentinel,
+        => true,
+        else => false,
+    };
+}
+
 /// Resolves the child type of a deref type
 fn resolveDerefType(
     store: *DocumentStore,
@@ -453,16 +438,19 @@ fn resolveDerefType(
         .other => |n| n,
         else => return null,
     };
+    const tree = deref.handle.tree;
+    const main_token = tree.nodes.items(.main_token)[deref_node];
+    const token_tag = tree.tokens.items(.tag)[main_token];
 
-    if (deref_node.castTag(.PtrType)) |ptr_type| {
-        switch (deref.handle.tree.token_ids[ptr_type.op_token]) {
-            .Asterisk => {
+    if (isPtrType(deref_node)) {
+        switch (token_tag) {
+            .asterisk => {
                 return ((try resolveTypeOfNodeInternal(store, arena, .{
-                    .node = ptr_type.rhs,
+                    .node = tree.nodes.items(.data)[deref_node].rhs,
                     .handle = deref.handle,
                 }, bound_type_params)) orelse return null).instanceTypeVal();
             },
-            .LBracket, .AsteriskAsterisk => return null,
+            .l_bracket, .asterisk_asterisk => return null,
             else => unreachable,
         }
     }
@@ -524,7 +512,7 @@ pub fn resolveFieldAccessLhsType(
     return (try resolveDerefType(store, arena, lhs, bound_type_params)) orelse lhs;
 }
 
-pub const BoundTypeParams = std.AutoHashMap(*const ast.Node.FnProto.ParamDecl, TypeWithHandle);
+pub const BoundTypeParams = std.AutoHashMap(*const ast.full.FnProto.Param, TypeWithHandle);
 
 fn allDigits(str: []const u8) bool {
     for (str) |c| {
@@ -566,37 +554,44 @@ pub fn resolveTypeOfNodeInternal(
 ) error{OutOfMemory}!?TypeWithHandle {
     const node = node_handle.node;
     const handle = node_handle.handle;
+    const tree = handle.tree;
 
-    switch (node.tag) {
-        .VarDecl => {
-            const vari = node.castTag(.VarDecl).?;
-            if (vari.getTypeNode()) |type_node| block: {
+    const main_tokens = tree.nodes.items(.main_token);
+    const node_tags = tree.nodes.items(.tag);
+    const datas = tree.nodes.items(.data);
+    const token_tags = tree.tokens.items(.tag);
+    const starts = tree.tokens.items(.start);
+
+    switch (node_tags[node]) {
+        .global_var_decl, .local_var_decl, .simple_var_decl, .aligned_var_decl => {
+            const var_decl = varDecl(tree, node).?;
+            if (var_decl.ast.type_node != 0) block: {
                 return ((try resolveTypeOfNodeInternal(
                     store,
                     arena,
-                    .{ .node = type_node, .handle = handle },
+                    .{ .node = var_decl.ast.type_node, .handle = handle },
                     bound_type_params,
                 )) orelse break :block).instanceTypeVal();
             }
-            const init_node = vari.getInitNode() orelse return null;
-
-            return try resolveTypeOfNodeInternal(store, arena, .{ .node = init_node, .handle = handle }, bound_type_params);
+            return if (var_decl.ast.init_node != 0)
+                try resolveTypeOfNodeInternal(store, arena, .{ .node = var_decl.ast.init_node, .handle = handle }, bound_type_params)
+            else
+                null;
         },
-        .Identifier => {
-            if (isTypeIdent(handle.tree, node.firstToken())) {
+        .identifier => {
+            if (isTypeIdent(handle.tree, tree.firstToken(node))) {
                 return TypeWithHandle{
                     .type = .{ .data = .primitive, .is_type_val = true },
                     .handle = handle,
                 };
             }
 
-            if (try lookupSymbolGlobal(store, arena, handle, handle.tree.getNodeSource(node), handle.tree.token_locs[node.firstToken()].start)) |child| {
+            if (try lookupSymbolGlobal(store, arena, handle, handle.tree.getNodeSource(node), starts[tree.firstToken(node)])) |child| {
                 switch (child.decl.*) {
                     .ast_node => |n| {
                         if (n == node) return null;
-                        if (n.castTag(.VarDecl)) |var_decl| {
-                            if (var_decl.getInitNode()) |init_node|
-                                if (init_node == node) return null;
+                        if (varDecl(tree, n)) |var_decl| {
+                            if (var_decl.ast.init_node == node) return null;
                         }
                     },
                     else => {},
@@ -605,21 +600,42 @@ pub fn resolveTypeOfNodeInternal(
             }
             return null;
         },
-        .ContainerField => {
-            const field = node.castTag(.ContainerField).?;
+        .container_field, .container_field_init, .container_field_align => |c| {
+            const field: ast.full.ContainerField = switch (c) {
+                .container_field => tree.containerField(node),
+                .container_field_align => tree.containerFieldAlign(node),
+                .container_field_init => tree.containerFieldInit(node),
+                else => unreachable,
+            };
+
+            if (field.ast.type_expr == 0) return null;
             return ((try resolveTypeOfNodeInternal(
                 store,
                 arena,
-                .{ .node = field.type_expr orelse return null, .handle = handle },
+                .{ .node = field.ast.type_expr, .handle = handle },
                 bound_type_params,
             )) orelse return null).instanceTypeVal();
         },
-        .Call => {
-            const call = node.castTag(.Call).?;
+        .call,
+        .call_comma,
+        .async_call,
+        .async_call_comma,
+        .call_one,
+        .call_one_comma,
+        .async_call_one,
+        .async_call_one_comma,
+        => |c| {
+            var params: [1]ast.Node.Index = undefined;
+            const call: ast.full.Call = switch (c) {
+                .call, .call_comma, .async_call, .async_call_comma => tree.callFull(node),
+                .call_one, .call_one_comma, .async_call_one, .async_call_one_comma => tree.callOne(&params, node),
+                else => unreachable,
+            };
+
             const decl = (try resolveTypeOfNodeInternal(
                 store,
                 arena,
-                .{ .node = call.lhs, .handle = handle },
+                .{ .node = call.ast.fn_expr, .handle = handle },
                 bound_type_params,
             )) orelse return null;
 
@@ -628,28 +644,30 @@ pub fn resolveTypeOfNodeInternal(
                 .other => |n| n,
                 else => return null,
             };
-            if (decl_node.castTag(.FnProto)) |fn_decl| {
-                var has_self_param: u8 = 0;
-                if (call.lhs.cast(ast.Node.SimpleInfixOp)) |lhs_infix_op| {
-                    if (call.lhs.tag == .Period) {
-                        has_self_param = 1;
-                    }
-                }
 
-                // Bidn type params to the expressions passed in the calls.
-                const param_len = std.math.min(call.params_len + has_self_param, fn_decl.params_len);
-                for (fn_decl.paramsConst()) |*decl_param, param_idx| {
-                    if (param_idx < has_self_param) continue;
-                    if (param_idx >= param_len) break;
+            var buf: [1]ast.Node.Index = undefined;
+            const func_maybe: ?ast.full.FnProto = switch (node_tags[decl_node]) {
+                .fn_proto => tree.fnProto(decl_node),
+                .fn_proto_one => tree.fnProtoOne(&buf, decl_node),
+                .fn_proto_multi => tree.fnProtoMulti(decl_node),
+                .fn_proto_simple => tree.fnProtoSimple(&buf, decl_node),
+                else => null,
+            };
 
-                    const type_param = switch (decl_param.param_type) {
-                        .type_expr => |type_node| typeIsType(decl.handle.tree, type_node),
-                        else => false,
-                    };
-                    if (!type_param) continue;
+            if (func_maybe) |fn_decl| {
+                // check for x.y(..).  if '.' is found, it means first param should be skipped
+                const has_self_param = token_tags[call.ast.lparen - 2] == .period;
+                var it = fn_decl.iterate();
+
+                // Bind type params to the expressions passed in the calls.
+                const param_len = std.math.min(call.ast.params.len + @boolToInt(has_self_param), fn_decl.ast.params.len);
+                while (it.next()) |decl_param| {
+                    if (it.param_i == 0 and has_self_param) continue;
+                    if (it.param_i >= param_len) break;
+                    if (!typeIsType(decl_param.type_expr)) continue;
 
                     const call_param_type = (try resolveTypeOfNodeInternal(store, arena, .{
-                        .node = call.paramsConst()[param_idx - has_self_param],
+                        .node = call.ast.params[it.param_i - @boolToInt(has_self_param)],
                         .handle = handle,
                     }, bound_type_params)) orelse continue;
                     if (!call_param_type.type.is_type_val) continue;
@@ -870,10 +888,10 @@ pub fn resolveTypeOfNodeInternal(
 // TODO Make this better, nested levels of type vals
 pub const Type = struct {
     data: union(enum) {
-        pointer: *ast.Node,
-        slice: *ast.Node,
-        error_union: *ast.Node,
-        other: *ast.Node,
+        pointer: ast.Node.Index,
+        slice: ast.Node.Index,
+        error_union: ast.Node.Index,
+        other: ast.Node.Index,
         primitive,
     },
     /// If true, the type `type`, the attached data is the value of the type value.
@@ -1035,7 +1053,7 @@ pub fn collectImports(import_arr: *std.ArrayList([]const u8), tree: ast.Tree) !v
 }
 
 pub const NodeWithHandle = struct {
-    node: *ast.Node,
+    node: ast.Node.Index,
     handle: *DocumentStore.Handle,
 };
 
@@ -1061,17 +1079,17 @@ pub fn getFieldAccessType(
 
     while (true) {
         const tok = tokenizer.next();
-        switch (tok.id) {
-            .Eof => return FieldAccessReturn{
+        switch (tok.tag) {
+            .eof => return FieldAccessReturn{
                 .original = current_type,
                 .unwrapped = try resolveDerefType(store, arena, current_type, &bound_type_params),
             },
-            .Identifier => {
+            .identifier => {
                 if (try lookupSymbolGlobal(store, arena, current_type.handle, tokenizer.buffer[tok.loc.start..tok.loc.end], source_index)) |child| {
                     current_type = (try child.resolveType(store, arena, &bound_type_params)) orelse return null;
                 } else return null;
             },
-            .Period => {
+            .period => {
                 const after_period = tokenizer.next();
                 switch (after_period.id) {
                     .Eof => return FieldAccessReturn{
@@ -1111,10 +1129,10 @@ pub fn getFieldAccessType(
                     },
                 }
             },
-            .PeriodAsterisk => {
+            .period_asterisk => {
                 current_type = (try resolveDerefType(store, arena, current_type, &bound_type_params)) orelse return null;
             },
-            .LParen => {
+            .l_paren => {
                 const current_type_node = switch (current_type.type.data) {
                     .other => |n| n,
                     else => return null,
@@ -1139,7 +1157,7 @@ pub fn getFieldAccessType(
                     } else return null;
                 } else return null;
             },
-            .LBracket => {
+            .l_bracket => {
                 var brack_count: usize = 1;
                 var next = tokenizer.next();
                 var is_range = false;
@@ -1157,7 +1175,7 @@ pub fn getFieldAccessType(
                 current_type = (try resolveBracketAccessType(store, arena, current_type, if (is_range) .Range else .Single, &bound_type_params)) orelse return null;
             },
             else => {
-                log.debug("Unimplemented token: {}", .{tok.id});
+                log.debug("Unimplemented token: {}", .{tok.tag});
                 return null;
             },
         }
@@ -1169,39 +1187,43 @@ pub fn getFieldAccessType(
     };
 }
 
-pub fn isNodePublic(tree: ast.Tree, node: *ast.Node) bool {
-    switch (node.tag) {
-        .VarDecl => {
+pub fn isNodePublic(tree: ast.Tree, node: ast.Node.Index) bool {
+    switch (tree.nodes.items(.tag)[node]) {
+        .global_var_decl, .local_var_decl, .simple_var_decl, .aligned_var_decl => {
             const var_decl = node.castTag(.VarDecl).?;
-            return var_decl.getVisibToken() != null;
+            const var_decl = varDecl(tree, node).?;
+            return var_decl.visib_token != null;
         },
-        .FnProto => {
-            const func = node.castTag(.FnProto).?;
-            return func.getVisibToken() != null;
-        },
+        .fn_proto => tree.fnProto(node).visib_token != null,
+        .fn_proto_one => tree.fnProtoOne(node).visib_token != null,
+        .fn_proto_simple => tree.fnProtoSimple(node).visib_token != null,
+        .fn_proto_multi => tree.fnProtoMulti(node).visib_token != null,
         else => return true,
     }
 }
 
-pub fn nodeToString(tree: ast.Tree, node: *ast.Node) ?[]const u8 {
-    switch (node.tag) {
-        .ContainerField => {
-            const field = node.castTag(.ContainerField).?;
-            return tree.tokenSlice(field.name_token);
+pub fn nodeToString(tree: ast.Tree, node: ast.Node.Index) ?[]const u8 {
+    switch (tree.nodes.items(.tag)[node]) {
+        .container_field => return tree.tokenSlice(tree.containerField(node).ast.name_token),
+        .container_field_init => return tree.tokenSlice(tree.containerFieldInit(node).ast.name_token),
+        .container_field_align => return tree.tokenSlice(tree.containerFieldAlign(node).ast.name_token),
+        // @TODO: Error tag name
+        // .ErrorTag => {
+        //     const tag = node.castTag(.ErrorTag).?;
+        //     return tree.tokenSlice(tag.name_token);
+        // },
+        .identifier => return tree.tokenSlice(node),
+        .fn_proto => if (tree.fnProto(node).name_token) |name| {
+            return tree.tokenSlice(name);
         },
-        .ErrorTag => {
-            const tag = node.castTag(.ErrorTag).?;
-            return tree.tokenSlice(tag.name_token);
+        .fn_proto_one => if (tree.fnProtoOne(node).name_token) |name| {
+            return tree.tokenSlice(name);
         },
-        .Identifier => {
-            const field = node.castTag(.Identifier).?;
-            return tree.tokenSlice(field.token);
+        .fn_proto_multi => if (tree.fnProtoMulti(node).name_token) |name| {
+            return tree.tokenSlice(name);
         },
-        .FnProto => {
-            const func = node.castTag(.FnProto).?;
-            if (func.getNameToken()) |name_token| {
-                return tree.tokenSlice(name_token);
-            }
+        .fn_proto_simple => if (tree.fnProtoSimple(node).name_token) |name| {
+            return tree.tokenSlice(name);
         },
         else => {
             log.debug("INVALID: {}", .{node.tag});
@@ -1211,35 +1233,72 @@ pub fn nodeToString(tree: ast.Tree, node: *ast.Node) ?[]const u8 {
     return null;
 }
 
-fn nodeContainsSourceIndex(tree: ast.Tree, node: *ast.Node, source_index: usize) bool {
-    const first_token = tree.token_locs[node.firstToken()];
-    const last_token = tree.token_locs[node.lastToken()];
-    return source_index >= first_token.start and source_index <= last_token.end;
+fn nodeContainsSourceIndex(tree: ast.Tree, node: ast.Node.Index, source_index: usize) bool {
+    const first_token = tree.tokenLocation(0, tree.firstToken(node)).line_start;
+    const last_token = tree.tokenLocation(@truncate(u32, first_token), tree.lastToken(node)).line_end;
+    return source_index >= first_token and source_index <= last_token;
 }
 
-pub fn getImportStr(tree: ast.Tree, source_index: usize) ?[]const u8 {
-    var node = &tree.root_node.base;
+fn isBuiltinCall(tree: ast.Tree, node: ast.Node.Index) bool {
+    return switch (tree.nodes.items(.tag)[node]) {
+        .builtin_call,
+        .builtin_call_comma,
+        .builtin_call_two,
+        .builtin_call_two_comma,
+        => true,
+        else => false,
+    };
+}
 
-    var child_idx: usize = 0;
-    while (node.iterate(child_idx)) |child| {
-        if (!nodeContainsSourceIndex(tree, child, source_index)) {
-            child_idx += 1;
+fn builtinCallParams(tree: ast.Tree, node: ast.Node.Index) []const ast.Node.Index {
+    std.debug.assert(isBuiltinCall(tree, node));
+    const datas = tree.node.items(.data);
+
+    return switch (tree.nodes.items(.tag)[node]) {
+        .builtin_call, .builtin_call_comma => tree.extra_data[datas[node].lhs..datas[node].rhs],
+        .builtin_call_two, .builtin_call_two_comma => if (datas[node].lhs == 0)
+            &.{}
+        else if (datas[node].rhs == 0)
+            &.{datas[node].lhs}
+        else
+            &.{ datas[node].lhs, datas[node].rhs },
+        else => unreachable,
+    };
+}
+
+pub fn getImportStr(tree: ast.Tree, node: ast.Node.Index, source_index: usize) ?[]const u8 {
+    const node_tags = tree.nodes.items(.tag);
+    var buf: [2]ast.Node.Index = undefined;
+    const decls = switch (node_tags[node]) {
+        .root => tree.rootDecls(),
+        .container_decl => tree.containerDecl(node).ast.members,
+        .container_decl => tree.containerDeclArg(node).ast.members,
+        .container_decl => tree.containerDeclTwo(&buf, node).ast.members,
+        else => return null,
+    };
+
+    for (decls) |decl_idx| {
+        if (!nodeContainsSourceIndex(tree, decl_idx, source_index)) {
             continue;
         }
-        if (child.castTag(.BuiltinCall)) |builtin_call| blk: {
-            const call_name = tree.tokenSlice(builtin_call.builtin_token);
 
-            if (!std.mem.eql(u8, call_name, "@import")) break :blk;
-            if (builtin_call.params_len != 1) break :blk;
+        if (isBuiltinCall(tree, decl_idx)) {
+            const builtin_token = tree.nodes.items(.main_token)[decl_idx];
+            const call_name = tree.tokenSlice(builtin_token);
 
-            const import_param = builtin_call.paramsConst()[0];
-            const import_str_node = import_param.castTag(.StringLiteral) orelse break :blk;
-            const import_str = tree.tokenSlice(import_str_node.token);
+            if (!std.mem.eql(u8, call_name, "@import")) continue;
+            const params = builtinCallParams(tree, decl_idx);
+            if (params.len != 1) continue;
+
+            const import_str = tree.tokenSlice(tree.firstToken(params[0]));
             return import_str[1 .. import_str.len - 1];
         }
-        node = child;
-        child_idx = 0;
+
+        if (getImportStr(tree, decl_idx, source_index)) |name| {
+            return name;
+        }
     }
+
     return null;
 }
 
@@ -1317,7 +1376,7 @@ pub fn documentPositionContext(arena: *std.heap.ArenaAllocator, document: types.
                 }
                 return .other;
             },
-            .line_comment, .doc_comment, .container_doc_comment => return .comment,
+            .doc_comment, .container_doc_comment => return .comment,
             .eof => break,
             else => {},
         }
