@@ -442,7 +442,7 @@ fn resolveDerefType(
     const main_token = tree.nodes.items(.main_token)[deref_node];
     const token_tag = tree.tokens.items(.tag)[main_token];
 
-    if (isPtrType(deref_node)) {
+    if (isPtrType(tree, deref_node)) {
         switch (token_tag) {
             .asterisk => {
                 return ((try resolveTypeOfNodeInternal(store, arena, .{
@@ -679,63 +679,57 @@ pub fn resolveTypeOfNodeInternal(
             }
             return null;
         },
-        .Comptime => {
-            const ct = node.castTag(.Comptime).?;
-            return try resolveTypeOfNodeInternal(store, arena, .{ .node = ct.expr, .handle = handle }, bound_type_params);
+        .@"comptime", .@"nosuspend" => {
+            return try resolveTypeOfNodeInternal(store, arena, .{ .node = datas[node].lhs, .handle = handle }, bound_type_params);
         },
-        .GroupedExpression => {
-            const grouped = node.castTag(.GroupedExpression).?;
-            return try resolveTypeOfNodeInternal(store, arena, .{ .node = grouped.expr, .handle = handle }, bound_type_params);
+        .grouped_expression => {
+            return try resolveTypeOfNodeInternal(store, arena, .{ .node = datas[node].lhs, .handle = handle }, bound_type_params);
         },
-        .StructInitializer => {
+        .struct_init, .struct_init_comma, .struct_init_one, .struct_init_one_comma => {
             const struct_init = node.castTag(.StructInitializer).?;
             return ((try resolveTypeOfNodeInternal(
                 store,
                 arena,
-                .{ .node = struct_init.lhs, .handle = handle },
+                .{ .node = datas[node].lhs, .handle = handle },
                 bound_type_params,
             )) orelse return null).instanceTypeVal();
         },
-        .ErrorSetDecl => {
+        .error_set_decl => {
             return TypeWithHandle.typeVal(node_handle);
         },
-        .Slice => {
-            const slice = node.castTag(.Slice).?;
+        .slice, .slice_sentinel, .slice_open => {
             const left_type = (try resolveTypeOfNodeInternal(store, arena, .{
-                .node = slice.lhs,
+                .node = dates[node].lhs,
                 .handle = handle,
             }, bound_type_params)) orelse return null;
             return try resolveBracketAccessType(store, arena, left_type, .Range, bound_type_params);
         },
-        .Deref, .UnwrapOptional => {
-            const suffix = node.cast(ast.Node.SimpleSuffixOp).?;
+        .deref, .unwrap_optional => {
             const left_type = (try resolveTypeOfNodeInternal(store, arena, .{
-                .node = suffix.lhs,
+                .node = dates[node].lhs,
                 .handle = handle,
             }, bound_type_params)) orelse return null;
-            return switch (node.tag) {
-                .UnwrapOptional => try resolveUnwrapOptionalType(store, arena, left_type, bound_type_params),
-                .Deref => try resolveDerefType(store, arena, left_type, bound_type_params),
+            return switch (node_tags[node]) {
+                .unwrap_optional => try resolveUnwrapOptionalType(store, arena, left_type, bound_type_params),
+                .deref => try resolveDerefType(store, arena, left_type, bound_type_params),
                 else => unreachable,
             };
         },
-        .ArrayAccess => {
-            const arr_acc = node.castTag(.ArrayAccess).?;
+        .array_access => {
             const left_type = (try resolveTypeOfNodeInternal(store, arena, .{
-                .node = arr_acc.lhs,
+                .node = datas[node].lhs,
                 .handle = handle,
             }, bound_type_params)) orelse return null;
             return try resolveBracketAccessType(store, arena, left_type, .Single, bound_type_params);
         },
-        .Period => {
-            const infix_op = node.cast(ast.Node.SimpleInfixOp).?;
-            const rhs_str = nodeToString(handle.tree, infix_op.rhs) orelse return null;
+        .field_access => {
+            const rhs_str = nodeToString(handle.tree, datas[node].rhs) orelse return null;
             // If we are accessing a pointer type, remove one pointerness level :)
             const left_type = try resolveFieldAccessLhsType(
                 store,
                 arena,
                 (try resolveTypeOfNodeInternal(store, arena, .{
-                    .node = infix_op.lhs,
+                    .node = datas[node].lhs,
                     .handle = handle,
                 }, bound_type_params)) orelse return null,
                 bound_type_params,
@@ -756,40 +750,39 @@ pub fn resolveTypeOfNodeInternal(
                 return try child.resolveType(store, arena, bound_type_params);
             } else return null;
         },
-        .OrElse => {
-            const infix_op = node.cast(ast.Node.SimpleInfixOp).?;
+        .@"orelse" => {
             const left_type = (try resolveTypeOfNodeInternal(store, arena, .{
-                .node = infix_op.lhs,
+                .node = datas[node].lhs,
                 .handle = handle,
             }, bound_type_params)) orelse return null;
             return try resolveUnwrapOptionalType(store, arena, left_type, bound_type_params);
         },
-        .Catch => {
-            const infix_op = node.cast(ast.Node.Catch).?;
+        .@"catch" => {
             const left_type = (try resolveTypeOfNodeInternal(store, arena, .{
-                .node = infix_op.lhs,
+                .node = datas[node].lhs,
                 .handle = handle,
             }, bound_type_params)) orelse return null;
             return try resolveUnwrapErrorType(store, arena, left_type, bound_type_params);
         },
-        .ErrorUnion => return TypeWithHandle.typeVal(node_handle),
-        .SliceType,
-        .ArrayType,
-        .OptionalType,
-        .PtrType,
+        .error_union => return TypeWithHandle.typeVal(node_handle),
+        .array_type,
+        .array_type_sentinel,
+        .optional_type,
+        .ptr_type_aligned,
+        .ptr_type.aligned,
+        .ptr_type,
+        .ptr_type_bit_range,
         => return TypeWithHandle.typeVal(node_handle),
-        .Try => {
-            const prefix_op = node.cast(ast.Node.SimplePrefixOp).?;
+        .@"try" => {
             const rhs_type = (try resolveTypeOfNodeInternal(store, arena, .{
-                .node = prefix_op.rhs,
+                .node = datas[node].lhs,
                 .handle = handle,
             }, bound_type_params)) orelse return null;
             return try resolveUnwrapErrorType(store, arena, rhs_type, bound_type_params);
         },
-        .AddressOf => {
-            const prefix_op = node.cast(ast.Node.SimplePrefixOp).?;
+        .address_of => {
             const rhs_type = (try resolveTypeOfNodeInternal(store, arena, .{
-                .node = prefix_op.rhs,
+                .node = datas[node].lhs,
                 .handle = handle,
             }, bound_type_params)) orelse return null;
 
@@ -803,12 +796,13 @@ pub fn resolveTypeOfNodeInternal(
                 .handle = rhs_type.handle,
             };
         },
-        .BuiltinCall => {
-            const builtin_call = node.castTag(.BuiltinCall).?;
-            const call_name = handle.tree.tokenSlice(builtin_call.builtin_token);
+        .builtin_call, .builtin_call_comma, .builtin_call_two, .builtin_call_two_comma => {
+            const params = builtinCallParams(tree, node);
+
+            const call_name = tree.tokenSlice(main_tokens[node]);
             if (std.mem.eql(u8, call_name, "@This")) {
-                if (builtin_call.params_len != 0) return null;
-                return innermostContainer(handle, handle.tree.token_locs[builtin_call.firstToken()].start);
+                if (params.len != 0) return null;
+                return innermostContainer(handle, starts[tree.firstToken(node)]);
             }
 
             const cast_map = std.ComptimeStringMap(void, .{
@@ -825,9 +819,9 @@ pub fn resolveTypeOfNodeInternal(
                 .{"@ptrCast"},
             });
             if (cast_map.has(call_name)) {
-                if (builtin_call.params_len < 1) return null;
+                if (params.len < 1) return null;
                 return ((try resolveTypeOfNodeInternal(store, arena, .{
-                    .node = builtin_call.paramsConst()[0],
+                    .node = params[0],
                     .handle = handle,
                 }, bound_type_params)) orelse return null).instanceTypeVal();
             }
@@ -835,9 +829,9 @@ pub fn resolveTypeOfNodeInternal(
             // Almost the same as the above, return a type value though.
             // TODO Do peer type resolution, we just keep the first for now.
             if (std.mem.eql(u8, call_name, "@TypeOf")) {
-                if (builtin_call.params_len < 1) return null;
+                if (params.len < 1) return null;
                 var resolved_type = (try resolveTypeOfNodeInternal(store, arena, .{
-                    .node = builtin_call.paramsConst()[0],
+                    .node = params[0],
                     .handle = handle,
                 }, bound_type_params)) orelse return null;
 
@@ -847,35 +841,50 @@ pub fn resolveTypeOfNodeInternal(
             }
 
             if (!std.mem.eql(u8, call_name, "@import")) return null;
-            if (builtin_call.params_len < 1) return null;
+            if (params.len < 1) return null;
 
-            const import_param = builtin_call.paramsConst()[0];
-            if (import_param.tag != .StringLiteral) return null;
+            const import_param = params[0];
+            if (node_tags[import_param] != .string_literal) return null;
 
-            const import_str = handle.tree.tokenSlice(import_param.castTag(.StringLiteral).?.token);
+            const import_str = tree.tokenSlice(main_tokens[import_param]);
             const new_handle = (store.resolveImport(handle, import_str[1 .. import_str.len - 1]) catch |err| {
                 log.debug("Error {} while processing import {s}", .{ err, import_str });
                 return null;
             }) orelse return null;
 
-            return TypeWithHandle.typeVal(.{ .node = &new_handle.tree.root_node.base, .handle = new_handle });
+            // reference to node '0' which is root
+            return TypeWithHandle.typeVal(.{ .node = 0, .handle = new_handle });
         },
-        .ContainerDecl => {
-            const container = node.castTag(.ContainerDecl).?;
-            const kind = handle.tree.token_ids[container.kind_token];
+        .container_decl,
+        .container_decl_arg,
+        .container_decl_arg_trailing,
+        .container_decl_trailing,
+        .container_decl_two,
+        .container_decl_two_trailing,
+        => {
             return TypeWithHandle.typeVal(node_handle);
         },
-        .FnProto => {
+        .fn_proto, .fn_proto_multi, .fn_proto_one, .fn_proto_simple => {
+            var buf: [1]ast.Node.Index = undefined;
+            const fn_proto: ast.full.FnProto = switch (node_tags[node]) {
+                .fn_proto => tree.fnProto(node),
+                .fn_proto_multi => tree.fnProtoMulti(node),
+                .fn_proto_one => tree.fnProtoOne(&buf, node),
+                .fn_proto_simple => tree.fnProtoSimple(&buf, node),
+                else => unreachable,
+            };
+
             // This is a function type
-            if (node.castTag(.FnProto).?.getNameToken() == null) {
+            if (fn_proto.name_token == null) {
                 return TypeWithHandle.typeVal(node_handle);
             }
+
             return TypeWithHandle{
                 .type = .{ .data = .{ .other = node }, .is_type_val = false },
                 .handle = handle,
             };
         },
-        .MultilineStringLiteral, .StringLiteral => return TypeWithHandle{
+        .multiline_string_literal, .string_literal => return TypeWithHandle{
             .type = .{ .data = .{ .other = node }, .is_type_val = false },
             .handle = handle,
         },
