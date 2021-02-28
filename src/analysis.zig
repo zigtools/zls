@@ -132,7 +132,7 @@ pub fn getFunctionSnippet(allocator: *std.mem.Allocator, tree: ast.Tree, func: *
 
                 if (curr_token == end_token and is_comma) continue;
                 try buffer.appendSlice(tree.tokenSlice(curr_token));
-                if (is_comma or tag == .Keyword_const) try buffer.append(' ');
+                if (is_comma or tag == .keyword_const) try buffer.append(' ');
             }
         }
         try buffer.append('}');
@@ -240,7 +240,7 @@ fn getDeclName(tree: ast.Tree, node: ast.Node.Index) ?[]const u8 {
 
 fn isContainerDecl(decl_handle: DeclWithHandle) bool {
     return switch (decl_handle.decl.*) {
-        .ast_node => |inner_node| inner_node.tag == .ContainerDecl or inner_node.tag == .Root,
+        .ast_node => |inner_node| isContainer(decl_handle.handle.tree.nodes.items(.tag)[inner_node]) or inner_node == 0,
         else => false,
     };
 }
@@ -370,20 +370,17 @@ fn resolveUnwrapOptionalType(
     arena: *std.heap.ArenaAllocator,
     opt: TypeWithHandle,
     bound_type_params: *BoundTypeParams,
-    tree: ast.Tree,
 ) !?TypeWithHandle {
     const opt_node = switch (opt.type.data) {
         .other => |n| n,
         else => return null,
     };
 
-    if (opt_node.cast(ast.Node.SimplePrefixOp)) |prefix_op| {
-        if (opt_node.tag == .OptionalType) {
-            return ((try resolveTypeOfNodeInternal(store, arena, .{
-                .node = prefix_op.rhs,
-                .handle = opt.handle,
-            }, bound_type_params)) orelse return null).instanceTypeVal();
-        }
+    if (opt.handle.tree.nodes.items(.tag)[opt_node] == .optional_type) {
+        return ((try resolveTypeOfNodeInternal(store, arena, .{
+            .node = opt.handle.tree.nodes.items(.data)[opt_node].lhs,
+            .handle = opt.handle,
+        }, bound_type_params)) orelse return null).instanceTypeVal();
     }
 
     return null;
@@ -403,14 +400,11 @@ fn resolveUnwrapErrorType(
         },
         .primitive, .slice, .pointer => return null,
     };
-
-    if (rhs_node.cast(ast.Node.SimpleInfixOp)) |infix_op| {
-        if (rhs_node.tag == .ErrorUnion) {
-            return ((try resolveTypeOfNodeInternal(store, arena, .{
-                .node = infix_op.rhs,
-                .handle = rhs.handle,
-            }, bound_type_params)) orelse return null).instanceTypeVal();
-        }
+    if (rhs.handle.tree.nodes.items(.tag)[rhs_node] == .error_union) {
+        return ((try resolveTypeOfNodeInternal(store, arena, .{
+            .node = rhs.handle.tree.nodes.items(.data)[rhs_node].rhs,
+            .handle = rhs.handle,
+        }, bound_type_params)) orelse return null).instanceTypeVal();
     }
 
     return null;
@@ -470,32 +464,27 @@ fn resolveBracketAccessType(
         else => return null,
     };
 
-    if (lhs_node.castTag(.SliceType)) |slice_type| {
+    const tags = lhs.handle.tree.nodes.items(.tag);
+    const tag = tags[lhs_node];
+    const data = lhs.handle.tree.nodes.items(.data)[lhs_node];
+    if (tag == .array_type or tag == .array_type_sentinel) {
         if (rhs == .Single)
             return ((try resolveTypeOfNodeInternal(store, arena, .{
-                .node = slice_type.rhs,
-                .handle = lhs.handle,
-            }, bound_type_params)) orelse return null).instanceTypeVal();
-        return lhs;
-    } else if (lhs_node.castTag(.ArrayType)) |array_type| {
-        if (rhs == .Single)
-            return ((try resolveTypeOfNodeInternal(store, arena, .{
-                .node = array_type.rhs,
+                .node = data.rhs,
                 .handle = lhs.handle,
             }, bound_type_params)) orelse return null).instanceTypeVal();
         return TypeWithHandle{
-            .type = .{ .data = .{ .slice = array_type.rhs }, .is_type_val = false },
+            .type = .{ .data = .{ .slice = data.rhs }, .is_type_val = false },
             .handle = lhs.handle,
         };
-    } else if (lhs_node.castTag(.PtrType)) |ptr_type| {
-        if (ptr_type.rhs.castTag(.ArrayType)) |child_arr| {
+    } else if (isPtrType(tree, lhs_node)) {
+        if (tags[data.rhs] == .array_type or tags[data.rhs] == .array_type_sentinel) {
             if (rhs == .Single) {
                 return ((try resolveTypeOfNodeInternal(store, arena, .{
-                    .node = child_arr.rhs,
+                    .node = lhs.handle.tree.nodes.items(.data)[data.rhs].rhs,
                     .handle = lhs.handle,
                 }, bound_type_params)) orelse return null).instanceTypeVal();
             }
-            return lhs;
         }
     }
 
@@ -931,28 +920,26 @@ pub const TypeWithHandle = struct {
 
     fn isRoot(self: TypeWithHandle) bool {
         switch (self.type.data) {
-            .other => |n| return n.tag == .Root,
+            // root is always index 0
+            .other => |n| return n == 0,
             else => return false,
         }
     }
 
-    fn isContainer(self: TypeWithHandle, container_kind_tok: std.zig.Token.Id) bool {
+    fn isContainer(self: TypeWithHandle, container_kind_tok: std.zig.Token.Tag, tree: ast.Tree) bool {
+        const main_tokens = tree.nodes.items(.main_token);
+        const tags = tree.tokens.items(.tag);
         switch (self.type.data) {
-            .other => |n| {
-                if (n.castTag(.ContainerDecl)) |cont| {
-                    return self.handle.tree.token_ids[cont.kind_token] == container_kind_tok;
-                }
-                return false;
-            },
+            .other => |n| return tags[main_tokens[n]] == container_kind_tok,
             else => return false,
         }
     }
 
-    pub fn isStructType(self: TypeWithHandle) bool {
-        return self.isContainer(.Keyword_struct) or self.isRoot();
+    pub fn isStructType(self: TypeWithHandle, tree: ast.Tree) bool {
+        return self.isContainer(.keyword_struct, tree) or self.isRoot();
     }
 
-    pub fn isNamespace(self: TypeWithHandle) bool {
+    pub fn isNamespace(self: TypeWithHandle, tree: ast.Tree) bool {
         if (!self.isStructType()) return false;
         var idx: usize = 0;
         while (self.type.data.other.iterate(idx)) |child| : (idx += 1) {
@@ -962,46 +949,56 @@ pub const TypeWithHandle = struct {
         return true;
     }
 
-    pub fn isEnumType(self: TypeWithHandle) bool {
-        return self.isContainer(.Keyword_enum);
+    pub fn isEnumType(self: TypeWithHandle, tree: ast.Tree) bool {
+        return self.isContainer(.keyword_enum, tree);
     }
 
-    pub fn isUnionType(self: TypeWithHandle) bool {
-        return self.isContainer(.Keyword_union);
+    pub fn isUnionType(self: TypeWithHandle, tree: ast.Tree) bool {
+        return self.isContainer(.keyword_union, tree);
     }
 
-    pub fn isOpaqueType(self: TypeWithHandle) bool {
-        return self.isContainer(.Keyword_opaque);
+    pub fn isOpaqueType(self: TypeWithHandle, tree: ast.Tree) bool {
+        return self.isContainer(.keyword_opaque, tree);
     }
 
-    pub fn isTypeFunc(self: TypeWithHandle) bool {
+    pub fn isTypeFunc(self: TypeWithHandle, tree: ast.Tree) bool {
+        var buf: [1]ast.Node.Index = undefined;
         switch (self.type.data) {
-            .other => |n| {
-                if (n.castTag(.FnProto)) |fn_proto| {
-                    return isTypeFunction(self.handle.tree, fn_proto);
-                }
-                return false;
+            .other => |n| return switch (tree.nodes.items(.tag)[n]) {
+                .fn_proto => isTypeFunction(tree, tree.fnProto(n)),
+                .fn_proto_multi => isTypeFunction(tree, tree.fnProtoMulti(n)),
+                .fn_proto_one => isTypeFunction(tree, tree.fnProtoOne(&buf, n)),
+                .fn_proto_simple => isTypeFunction(tree, tree.fnProtoSimple(&buf, n)),
+                else => false,
             },
             else => return false,
         }
     }
 
-    pub fn isGenericFunc(self: TypeWithHandle) bool {
+    pub fn isGenericFunc(self: TypeWithHandle, tree: ast.Tree) bool {
+        var buf: [1]ast.Node.Index = undefined;
         switch (self.type.data) {
-            .other => |n| {
-                if (n.castTag(.FnProto)) |fn_proto| {
-                    return isGenericFunction(self.handle.tree, fn_proto);
-                }
-                return false;
+            .other => |n| return switch (tree.nodes.items(.tag)[n]) {
+                .fn_proto => isGenericFunction(tree, tree.fnProto(n)),
+                .fn_proto_multi => isGenericFunction(tree, tree.fnProtoMulti(n)),
+                .fn_proto_one => isGenericFunction(tree, tree.fnProtoOne(&buf, n)),
+                .fn_proto_simple => isGenericFunction(tree, tree.fnProtoSimple(&buf, n)),
+                else => false,
             },
             else => return false,
         }
     }
 
-    pub fn isFunc(self: TypeWithHandle) bool {
+    pub fn isFunc(self: TypeWithHandle, tree: ast.Tree) bool {
+        const tags = tree.nodes.items(.tag);
         switch (self.type.data) {
-            .other => |n| {
-                return n.tag == .FnProto;
+            .other => |n| return switch (tags[n]) {
+                .fn_proto,
+                .fn_proto_multi,
+                .fn_proto_one,
+                .fn_proto_simple,
+                => true,
+                else => false,
             },
             else => return false,
         }
@@ -1100,7 +1097,7 @@ pub fn getFieldAccessType(
             },
             .period => {
                 const after_period = tokenizer.next();
-                switch (after_period.id) {
+                switch (after_period.tag) {
                     .Eof => return FieldAccessReturn{
                         .original = current_type,
                         .unwrapped = try resolveDerefType(store, arena, current_type, &bound_type_params),
@@ -1133,7 +1130,7 @@ pub fn getFieldAccessType(
                         current_type = (try resolveUnwrapOptionalType(store, arena, current_type, &bound_type_params)) orelse return null;
                     },
                     else => {
-                        log.debug("Unrecognized token {} after period.", .{after_period.id});
+                        log.debug("Unrecognized token {} after period.", .{after_period.tag});
                         return null;
                     },
                 }
@@ -1155,11 +1152,11 @@ pub fn getFieldAccessType(
                         // Skip to the right paren
                         var paren_count: usize = 1;
                         var next = tokenizer.next();
-                        while (next.id != .Eof) : (next = tokenizer.next()) {
-                            if (next.id == .RParen) {
+                        while (next.tag != .Eof) : (next = tokenizer.next()) {
+                            if (next.tag == .RParen) {
                                 paren_count -= 1;
                                 if (paren_count == 0) break;
-                            } else if (next.id == .LParen) {
+                            } else if (next.tag == .LParen) {
                                 paren_count += 1;
                             }
                         } else return null;
@@ -1170,13 +1167,13 @@ pub fn getFieldAccessType(
                 var brack_count: usize = 1;
                 var next = tokenizer.next();
                 var is_range = false;
-                while (next.id != .Eof) : (next = tokenizer.next()) {
-                    if (next.id == .RBracket) {
+                while (next.tag != .Eof) : (next = tokenizer.next()) {
+                    if (next.tag == .RBracket) {
                         brack_count -= 1;
                         if (brack_count == 0) break;
-                    } else if (next.id == .LBracket) {
+                    } else if (next.tag == .LBracket) {
                         brack_count += 1;
-                    } else if (next.id == .Ellipsis2 and brack_count == 1) {
+                    } else if (next.tag == .Ellipsis2 and brack_count == 1) {
                         is_range = true;
                     }
                 } else return null;
@@ -1664,10 +1661,10 @@ pub const Declaration = union(enum) {
         name: ast.TokenIndex,
         condition: ast.Node.Index,
     },
-    array_payload: struct {
-        identifier: *ast.Node,
-        array_expr: ast.full.ArrayType,
-    },
+    // array_payload: struct {
+    //     identifier: *ast.Node,
+    //     array_expr: ast.full.ArrayType,
+    // },
     switch_payload: struct {
         node: ast.TokenIndex,
         switch_expr: ast.Node.Index,
@@ -1686,7 +1683,7 @@ pub const DeclWithHandle = struct {
             .ast_node => |n| getDeclNameToken(tree, n).?,
             .param_decl => |p| p.name_token.?,
             .pointer_payload => |pp| pp.node.value_symbol.firstToken(),
-            .array_payload => |ap| ap.identifier.firstToken(),
+            // .array_payload => |ap| ap.identifier.firstToken(),
             .switch_payload => |sp| sp.node.value_symbol.firstToken(),
             .label_decl => |ld| ld.firstToken(),
         };
@@ -1705,30 +1702,30 @@ pub const DeclWithHandle = struct {
     }
 
     pub fn resolveType(self: DeclWithHandle, store: *DocumentStore, arena: *std.heap.ArenaAllocator, bound_type_params: *BoundTypeParams) !?TypeWithHandle {
+        const tree = self.handle.tree;
+        const node_tags = tree.nodes.items(.tag);
+        const main_tokens = tree.nodes.items(.main_token);
         return switch (self.decl.*) {
             .ast_node => |node| try resolveTypeOfNodeInternal(store, arena, .{ .node = node, .handle = self.handle }, bound_type_params),
-            .param_decl => |param_decl| switch (param_decl.param_type) {
-                .type_expr => |type_node| {
-                    if (typeIsType(self.handle.tree, type_node)) {
-                        var bound_param_it = bound_type_params.iterator();
-                        while (bound_param_it.next()) |entry| {
-                            if (entry.key == param_decl) return entry.value;
-                        }
-                        return null;
-                    } else if (type_node.castTag(.Identifier)) |type_ident| {
-                        if (param_decl.name_token) |name_tok| {
-                            if (std.mem.eql(u8, self.handle.tree.tokenSlice(type_ident.firstToken()), self.handle.tree.tokenSlice(name_tok)))
-                                return null;
-                        }
+            .param_decl => |*param_decl| {
+                if (typeIsType(self.handle.tree, param_decl.type_expr)) {
+                    var bound_param_it = bound_type_params.iterator();
+                    while (bound_param_it.next()) |entry| {
+                        if (entry.key == param_decl) return entry.value;
                     }
-                    return ((try resolveTypeOfNodeInternal(
-                        store,
-                        arena,
-                        .{ .node = type_node, .handle = self.handle },
-                        bound_type_params,
-                    )) orelse return null).instanceTypeVal();
-                },
-                else => null,
+                    return null;
+                } else if (node_tags[param_decl.type_expr] == .identifier) {
+                    if (param_decl.name_token) |name_tok| {
+                        if (std.mem.eql(u8, tree.tokenSlice(tree.firstToken(param_decl.type_expr)), tree.tokenSlice(name_tok)))
+                            return null;
+                    }
+                }
+                return ((try resolveTypeOfNodeInternal(
+                    store,
+                    arena,
+                    .{ .node = param_decl.type_expr, .handle = self.handle },
+                    bound_type_params,
+                )) orelse return null).instanceTypeVal();
             },
             .pointer_payload => |pay| try resolveUnwrapOptionalType(
                 store,
@@ -1739,16 +1736,16 @@ pub const DeclWithHandle = struct {
                 }, bound_type_params)) orelse return null,
                 bound_type_params,
             ),
-            .array_payload => |pay| try resolveBracketAccessType(
-                store,
-                arena,
-                (try resolveTypeOfNodeInternal(store, arena, .{
-                    .node = pay.array_expr,
-                    .handle = self.handle,
-                }, bound_type_params)) orelse return null,
-                .Single,
-                bound_type_params,
-            ),
+            // .array_payload => |pay| try resolveBracketAccessType(
+            //     store,
+            //     arena,
+            //     (try resolveTypeOfNodeInternal(store, arena, .{
+            //         .node = pay.array_expr,
+            //         .handle = self.handle,
+            //     }, bound_type_params)) orelse return null,
+            //     .Single,
+            //     bound_type_params,
+            // ),
             .label_decl => return null,
             .switch_payload => |pay| {
                 if (pay.items.len == 0) return null;
@@ -1757,20 +1754,20 @@ pub const DeclWithHandle = struct {
                     .node = pay.switch_expr,
                     .handle = self.handle,
                 }, bound_type_params)) orelse return null;
-                if (!switch_expr_type.isUnionType())
+                if (!switch_expr_type.isUnionType(tree))
                     return null;
 
-                if (pay.items[0].castTag(.EnumLiteral)) |enum_lit| {
+                if (node_tags[pay.items[0]] == .enum_literal) {
                     const scope = findContainerScope(.{ .node = switch_expr_type.type.data.other, .handle = switch_expr_type.handle }) orelse return null;
-                    if (scope.decls.getEntry(self.handle.tree.tokenSlice(enum_lit.name))) |candidate| {
+                    if (scope.decls.getEntry(self.handle.tree.tokenSlice(main_tokens[pay.items[0]]))) |candidate| {
                         switch (candidate.value) {
                             .ast_node => |node| {
-                                if (node.castTag(.ContainerField)) |container_field| {
-                                    if (container_field.type_expr) |type_expr| {
+                                if (containerField(tree, node)) |container_field| {
+                                    if (container_field.ast.type_expr != 0) {
                                         return ((try resolveTypeOfNodeInternal(
                                             store,
                                             arena,
-                                            .{ .node = type_expr, .handle = switch_expr_type.handle },
+                                            .{ .node = container_field.ast.type_expr, .handle = switch_expr_type.handle },
                                             bound_type_params,
                                         )) orelse return null).instanceTypeVal();
                                     }
@@ -1786,6 +1783,15 @@ pub const DeclWithHandle = struct {
         };
     }
 };
+
+fn containerField(tree: ast.Tree, node: ast.Node.Index) ?ast.full.ContainerField {
+    return switch (tree.nodes.items(.tag)[node]) {
+        .container_field => tree.containerField(node),
+        .container_field_init => tree.containerFieldInit(node),
+        .container_field_align => tree.containerFieldAlign(node),
+        else => null,
+    };
+}
 
 fn findContainerScope(container_handle: NodeWithHandle) ?*Scope {
     const container = container_handle.node;
