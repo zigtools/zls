@@ -616,10 +616,10 @@ fn hoverSymbol(id: types.RequestId, arena: *std.heap.ArenaAllocator, decl_handle
             try std.fmt.allocPrint(&arena.allocator, "```zig\n{s}\n```", .{handle.tree.tokenSlice(payload.node.value_symbol.firstToken())})
         else
             try std.fmt.allocPrint(&arena.allocator, "{s}", .{handle.tree.tokenSlice(payload.node.value_symbol.firstToken())}),
-        .array_payload => |payload| if (hover_kind == .Markdown)
-            try std.fmt.allocPrint(&arena.allocator, "```zig\n{s}\n```", .{handle.tree.tokenSlice(payload.identifier.firstToken())})
-        else
-            try std.fmt.allocPrint(&arena.allocator, "{s}", .{handle.tree.tokenSlice(payload.identifier.firstToken())}),
+        // .array_payload => |payload| if (hover_kind == .Markdown)
+        //     try std.fmt.allocPrint(&arena.allocator, "```zig\n{s}\n```", .{handle.tree.tokenSlice(payload.identifier.firstToken())})
+        // else
+        //     try std.fmt.allocPrint(&arena.allocator, "{s}", .{handle.tree.tokenSlice(payload.identifier.firstToken())}),
         .switch_payload => |payload| if (hover_kind == .Markdown)
             try std.fmt.allocPrint(&arena.allocator, "```zig\n{s}\n```", .{handle.tree.tokenSlice(payload.node.value_symbol.firstToken())})
         else
@@ -751,7 +751,7 @@ fn hoverDefinitionFieldAccess(
 fn gotoDefinitionString(arena: *std.heap.ArenaAllocator, id: types.RequestId, pos_index: usize, handle: *DocumentStore.Handle, config: Config) !void {
     const tree = handle.tree;
 
-    const import_str = analysis.getImportStr(tree, pos_index) orelse return try respondGeneric(id, null_result_response);
+    const import_str = analysis.getImportStr(tree, 0, pos_index) orelse return try respondGeneric(id, null_result_response);
     const uri = (try document_store.uriFromImportStr(
         &arena.allocator,
         handle.*,
@@ -864,6 +864,15 @@ const DeclToCompletionContext = struct {
     orig_handle: *DocumentStore.Handle,
 };
 
+fn hasComment(tree: ast.Tree, start_token: ast.TokenIndex, end_token: ast.TokenIndex) bool {
+    const token_starts = tree.tokens.items(.start);
+
+    const start = token_starts[start_token];
+    const end = token_starts[end_token];
+
+    return std.mem.indexOf(u8, tree.source[start..end], "//") != null;
+}
+
 fn declToCompletion(context: DeclToCompletionContext, decl_handle: analysis.DeclWithHandle) !void {
     const tree = decl_handle.handle.tree;
 
@@ -871,7 +880,7 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: analysis.Decl
         .ast_node => |node| try nodeToCompletion(context.arena, context.completions, .{ .node = node, .handle = decl_handle.handle }, null, context.orig_handle, false, context.config.*),
         .param_decl => |param| {
             const doc_kind: types.MarkupContent.Kind = if (client_capabilities.completion_doc_supports_md) .Markdown else .PlainText;
-            const doc = if (param.doc_comments) |doc_comments|
+            const doc = if (param.first_doc_comment) |doc_comments|
                 types.MarkupContent{
                     .kind = doc_kind,
                     .value = try analysis.collectDocComments(&context.arena.allocator, tree, doc_comments, doc_kind),
@@ -879,34 +888,41 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: analysis.Decl
             else
                 null;
 
+            const first_token = param.first_doc_comment orelse
+                param.comptime_noalias orelse
+                param.name_token orelse
+                param.anytype_ellipsis3 orelse
+                tree.firstToken(param.type_expr);
+            const last_token = tree.lastToken(param.type_expr);
+
             try context.completions.append(.{
                 .label = tree.tokenSlice(param.name_token.?),
                 .kind = .Constant,
                 .documentation = doc,
-                .detail = tree.source[tree.token_locs[param.firstToken()].start..tree.token_locs[param.lastToken()].end],
+                .detail = tree.source[tree.tokenLocation(0, first_token).line_start..tree.tokenLocation(0, last_token).line_end],
             });
         },
         .pointer_payload => |payload| {
             try context.completions.append(.{
-                .label = tree.tokenSlice(payload.node.value_symbol.firstToken()),
+                .label = tree.tokenSlice(payload.name),
                 .kind = .Variable,
             });
         },
-        .array_payload => |payload| {
-            try context.completions.append(.{
-                .label = tree.tokenSlice(payload.identifier.firstToken()),
-                .kind = .Variable,
-            });
-        },
+        // .array_payload => |payload| {
+        //     try context.completions.append(.{
+        //         .label = tree.tokenSlice(payload.identifier.firstToken()),
+        //         .kind = .Variable,
+        //     });
+        // },
         .switch_payload => |payload| {
             try context.completions.append(.{
-                .label = tree.tokenSlice(payload.node.value_symbol.firstToken()),
+                .label = tree.tokenSlice(tree.firstToken(payload.node)),
                 .kind = .Variable,
             });
         },
         .label_decl => |label_decl| {
             try context.completions.append(.{
-                .label = tree.tokenSlice(label_decl.firstToken()),
+                .label = tree.tokenSlice(label_decl),
                 .kind = .Variable,
             });
         },

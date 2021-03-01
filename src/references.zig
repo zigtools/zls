@@ -40,11 +40,13 @@ pub fn labelReferences(
 ) !void {
     std.debug.assert(decl.decl.* == .label_decl);
     const handle = decl.handle;
+    const tree = handle.tree;
+    const token_tags = tree.tokens.items(.tag);
 
     // Find while / for / block from label -> iterate over children nodes, find break and continues, change their labels if they match.
     // This case can be implemented just by scanning tokens.
-    const first_tok = decl.decl.label_decl.firstToken();
-    const last_tok = decl.decl.label_decl.lastToken();
+    const first_tok = tree.firstToken(decl.decl.label_decl);
+    const last_tok = tree.firstToken(decl.decl.label_decl);
 
     if (include_decl) {
         // The first token is always going to be the label
@@ -53,11 +55,11 @@ pub fn labelReferences(
 
     var curr_tok = first_tok + 1;
     while (curr_tok < last_tok - 2) : (curr_tok += 1) {
-        const curr_id = handle.tree.token_ids[curr_tok];
-        if ((curr_id == .Keyword_break or curr_id == .Keyword_continue) and handle.tree.token_ids[curr_tok + 1] == .Colon and
-            handle.tree.token_ids[curr_tok + 2] == .Identifier)
+        const curr_id = token_tags[curr_tok];
+        if ((curr_id == .keyword_break or curr_id == .keyword_continue) and token_tags[curr_tok + 1] == .colon and
+            token_tags[curr_tok + 2] == .identifier)
         {
-            if (std.mem.eql(u8, handle.tree.tokenSlice(curr_tok + 2), handle.tree.tokenSlice(first_tok))) {
+            if (std.mem.eql(u8, tree.tokenSlice(curr_tok + 2), tree.tokenSlice(first_tok))) {
                 try tokenReference(handle, first_tok, encoding, context, handler);
             }
         }
@@ -388,7 +390,7 @@ pub fn symbolReferences(
                     try tokenReference(curr_handle, decl_handle.nameToken(), encoding, context, handler);
                 }
 
-                try symbolReferencesInternal(arena, store, .{ .node = &handle.tree.root_node.base, .handle = handle }, decl_handle, encoding, context, handler);
+                try symbolReferencesInternal(arena, store, .{ .node = 0, .handle = handle }, decl_handle, encoding, context, handler);
             }
         },
         .param_decl => |param| {
@@ -396,13 +398,27 @@ pub fn symbolReferences(
             if (include_decl) {
                 try tokenReference(curr_handle, decl_handle.nameToken(), encoding, context, handler);
             }
-            const fn_node = loop: for (curr_handle.document_scope.scopes) |scope| {
+            const fn_node: ast.full.FnProto = loop: for (curr_handle.document_scope.scopes) |scope| {
                 switch (scope.data) {
                     .function => |proto| {
-                        const fn_proto = proto.cast(std.zig.ast.Node.FnProto).?;
-                        for (fn_proto.paramsConst()) |*candidate| {
-                            if (candidate == param)
+                        var buf: [1]ast.Node.Index = undefined;
+                        const fn_proto = analysis.fnProto(curr_handle.tree, proto, &buf).?;
+                        var it = fn_proto.iterate(curr_handle.tree);
+                        while (it.next()) |candidate| {
+                            if (std.meta.eql(candidate, param)) {
+                                if (curr_handle.tree.nodes.items(.tag)[proto] == .fn_decl) {
+                                    try symbolReferencesInternal(
+                                        arena,
+                                        store,
+                                        .{ .node = curr_handle.tree.nodes.items(.data)[proto].rhs, .handle = curr_handle },
+                                        decl_handle,
+                                        encoding,
+                                        context,
+                                        handler,
+                                    );
+                                }
                                 break :loop fn_proto;
+                            }
                         }
                     },
                     else => {},
@@ -411,15 +427,12 @@ pub fn symbolReferences(
                 log.warn("Could not find param decl's function", .{});
                 return;
             };
-            if (fn_node.getBodyNode()) |body| {
-                try symbolReferencesInternal(arena, store, .{ .node = body, .handle = curr_handle }, decl_handle, encoding, context, handler);
-            }
         },
-        .pointer_payload, .array_payload, .switch_payload => {
+        .pointer_payload, .switch_payload => {
             if (include_decl) {
                 try tokenReference(curr_handle, decl_handle.nameToken(), encoding, context, handler);
             }
-            try symbolReferencesInternal(arena, store, .{ .node = &curr_handle.tree.root_node.base, .handle = curr_handle }, decl_handle, encoding, context, handler);
+            try symbolReferencesInternal(arena, store, .{ .node = 0, .handle = curr_handle }, decl_handle, encoding, context, handler);
         },
         .label_decl => unreachable,
     }
