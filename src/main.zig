@@ -368,7 +368,7 @@ fn nodeToCompletion(
     if (is_type_val) return;
 
     switch (node_tags[node]) {
-        .fn_proto, .fn_proto_multi, .fn_proto_one, .fn_proto_multi, .fn_decl => {
+        .fn_proto, .fn_proto_multi, .fn_proto_one, .fn_decl => {
             var buf: [1]std.zig.ast.Node.Index = undefined;
             const func = analysis.fnProto(tree, node, &buf).?;
             if (func.name_token) |name_token| {

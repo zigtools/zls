@@ -80,8 +80,8 @@ pub fn collectDocComments(
 
 /// Gets a function signature (keywords, name, return value)
 pub fn getFunctionSignature(tree: ast.Tree, func: ast.full.FnProto) []const u8 {
-    const start = tree.tokenLocation(func.ast.fn_token).line_start;
-    const end = tree.tokenLocation(func.ast.return_type).line_end;
+    const start = tree.tokenLocation(0, func.ast.fn_token).line_start;
+    const end = tree.tokenLocation(0, func.ast.return_type).line_end;
     return tree.source[start..end];
 }
 
@@ -92,7 +92,7 @@ pub fn getFunctionSnippet(allocator: *std.mem.Allocator, tree: ast.Tree, func: a
     var buffer = std.ArrayList(u8).init(allocator);
     try buffer.ensureCapacity(128);
 
-    try buffer.appendSlice(tree.tokenSlice(name_tok));
+    try buffer.appendSlice(tree.tokenSlice(name_index));
     try buffer.append('(');
 
     var buf_stream = buffer.writer();
@@ -1205,21 +1205,22 @@ pub fn getFieldAccessType(
 }
 
 pub fn isNodePublic(tree: ast.Tree, node: ast.Node.Index) bool {
-    switch (tree.nodes.items(.tag)[node]) {
+    var buf: [1]ast.Node.Index = undefined;
+    return switch (tree.nodes.items(.tag)[node]) {
         .global_var_decl, .local_var_decl, .simple_var_decl, .aligned_var_decl => {
-            const var_decl = node.castTag(.VarDecl).?;
             const var_decl = varDecl(tree, node).?;
             return var_decl.visib_token != null;
         },
         .fn_proto => tree.fnProto(node).visib_token != null,
-        .fn_proto_one => tree.fnProtoOne(node).visib_token != null,
-        .fn_proto_simple => tree.fnProtoSimple(node).visib_token != null,
+        .fn_proto_one => tree.fnProtoOne(&buf, node).visib_token != null,
+        .fn_proto_simple => tree.fnProtoSimple(&buf, node).visib_token != null,
         .fn_proto_multi => tree.fnProtoMulti(node).visib_token != null,
-        else => return true,
-    }
+        else => true,
+    };
 }
 
 pub fn nodeToString(tree: ast.Tree, node: ast.Node.Index) ?[]const u8 {
+    var buf: [1]ast.Node.Index = undefined;
     switch (tree.nodes.items(.tag)[node]) {
         .container_field => return tree.tokenSlice(tree.containerField(node).ast.name_token),
         .container_field_init => return tree.tokenSlice(tree.containerFieldInit(node).ast.name_token),
@@ -1233,17 +1234,17 @@ pub fn nodeToString(tree: ast.Tree, node: ast.Node.Index) ?[]const u8 {
         .fn_proto => if (tree.fnProto(node).name_token) |name| {
             return tree.tokenSlice(name);
         },
-        .fn_proto_one => if (tree.fnProtoOne(node).name_token) |name| {
+        .fn_proto_one => if (tree.fnProtoOne(&buf, node).name_token) |name| {
             return tree.tokenSlice(name);
         },
         .fn_proto_multi => if (tree.fnProtoMulti(node).name_token) |name| {
             return tree.tokenSlice(name);
         },
-        .fn_proto_simple => if (tree.fnProtoSimple(node).name_token) |name| {
+        .fn_proto_simple => if (tree.fnProtoSimple(&buf, node).name_token) |name| {
             return tree.tokenSlice(name);
         },
         else => {
-            log.debug("INVALID: {}", .{node.tag});
+            log.debug("INVALID: {}", .{tree.nodes.items(.tag)[node]});
         },
     }
 
@@ -1269,16 +1270,16 @@ fn isBuiltinCall(tree: ast.Tree, node: ast.Node.Index) bool {
 
 fn builtinCallParams(tree: ast.Tree, node: ast.Node.Index) []const ast.Node.Index {
     std.debug.assert(isBuiltinCall(tree, node));
-    const datas = tree.node.items(.data);
+    const datas = tree.nodes.items(.data);
 
     return switch (tree.nodes.items(.tag)[node]) {
         .builtin_call, .builtin_call_comma => tree.extra_data[datas[node].lhs..datas[node].rhs],
         .builtin_call_two, .builtin_call_two_comma => if (datas[node].lhs == 0)
-            &.{}
+            &[_]ast.Node.Index{}
         else if (datas[node].rhs == 0)
-            &.{datas[node].lhs}
+            &[_]ast.Node.Index{datas[node].lhs}
         else
-            &.{ datas[node].lhs, datas[node].rhs },
+            &[_]ast.Node.Index{ datas[node].lhs, datas[node].rhs },
         else => unreachable,
     };
 }
@@ -1852,13 +1853,18 @@ fn iterateSymbolsContainerInternal(
     comptime callback: anytype,
     context: anytype,
     instance_access: bool,
-    use_trail: *std.ArrayList(*ast.Node.Use),
+    use_trail: *std.ArrayList(ast.Node.Index),
 ) error{OutOfMemory}!void {
     const container = container_handle.node;
     const handle = container_handle.handle;
 
-    const is_enum = if (container.castTag(.ContainerDecl)) |cont_decl|
-        handle.tree.token_ids[cont_decl.kind_token] == .Keyword_enum
+    const tree = handle.tree;
+    const node_tags = tree.nodes.items(.tag);
+    const token_tags = tree.tokens.items(.tag);
+    const main_token = tree.nodes.items(.main_token)[container];
+
+    const is_enum = if (isContainer(node_tags[container]))
+        token_tags[main_token] == .keyword_enum
     else
         false;
 
@@ -1867,7 +1873,7 @@ fn iterateSymbolsContainerInternal(
         while (decl_it.next()) |entry| {
             switch (entry.value) {
                 .ast_node => |node| {
-                    if (node.tag == .ContainerField) {
+                    if (node_tags[node].isContainerField()) {
                         if (!instance_access and !is_enum) continue;
                         if (instance_access and is_enum) continue;
                     }
@@ -1904,7 +1910,7 @@ pub fn iterateSymbolsContainer(
     context: anytype,
     instance_access: bool,
 ) error{OutOfMemory}!void {
-    var use_trail = std.ArrayList(*ast.Node.Use).init(&arena.allocator);
+    var use_trail = std.ArrayList(ast.Node.Index).init(&arena.allocator);
     return try iterateSymbolsContainerInternal(store, arena, container_handle, orig_handle, callback, context, instance_access, &use_trail);
 }
 
@@ -1942,7 +1948,7 @@ fn iterateSymbolsGlobalInternal(
         if (source_index >= scope.range.start and source_index < scope.range.end) {
             var decl_it = scope.decls.iterator();
             while (decl_it.next()) |entry| {
-                if (entry.value == .ast_node and entry.value.ast_node.tag == .ContainerField) continue;
+                if (entry.value == .ast_node and handle.tree.nodes.items(.tag)[entry.value.ast_node].isContainerField()) continue;
                 if (entry.value == .label_decl) continue;
                 try callback(context, DeclWithHandle{ .decl = &entry.value, .handle = handle });
             }
@@ -2055,7 +2061,7 @@ fn lookupSymbolGlobalInternal(
             if (scope.decls.getEntry(symbol)) |candidate| {
                 switch (candidate.value) {
                     .ast_node => |node| {
-                        if (node.tag == .ContainerField) continue;
+                        if (handle.tree.nodes.items(.tag)[node].isContainerField()) continue;
                     },
                     .label_decl => continue,
                     else => {},
@@ -2098,9 +2104,13 @@ fn lookupSymbolContainerInternal(
 ) error{OutOfMemory}!?DeclWithHandle {
     const container = container_handle.node;
     const handle = container_handle.handle;
+    const tree = handle.tree;
+    const node_tags = tree.nodes.items(.tag);
+    const token_tags = tree.tokens.items(.tag);
+    const main_token = tree.nodes.items(.main_token)[container];
 
-    const is_enum = if (container.castTag(.ContainerDecl)) |cont_decl|
-        handle.tree.token_ids[cont_decl.kind_token] == .Keyword_enum
+    const is_enum = if (isContainer(node_tags[container]))
+        token_tags[main_token] == .keyword_enum
     else
         false;
 
@@ -2108,7 +2118,7 @@ fn lookupSymbolContainerInternal(
         if (container_scope.decls.getEntry(symbol)) |candidate| {
             switch (candidate.value) {
                 .ast_node => |node| {
-                    if (node.tag == .ContainerField) {
+                    if (node_tags[node].isContainerField()) {
                         if (!instance_access and !is_enum) return null;
                         if (instance_access and is_enum) return null;
                     }
