@@ -77,263 +77,326 @@ fn symbolReferencesInternal(
 ) error{OutOfMemory}!void {
     const node = node_handle.node;
     const handle = node_handle.handle;
+    const tree = handle.tree;
+    const node_tags = tree.nodes.items(.tag);
+    const datas = tree.nodes.items(.data);
+    const main_tokens = tree.nodes.items(.main_token);
+    const starts = tree.tokens.items(.start);
 
-    switch (handle.tree.nodes.items(.tag)[node]) {
-        .ContainerDecl, .Root, .Block => {
-            var idx: usize = 0;
-            while (node.iterate(idx)) |child| : (idx += 1) {
-                try symbolReferencesInternal(arena, store, .{ .node = child, .handle = handle }, decl, encoding, context, handler);
-            }
-        },
-        .VarDecl => {
-            const var_decl = node.cast(ast.Node.VarDecl).?;
-            if (var_decl.getTypeNode()) |type_node| {
-                try symbolReferencesInternal(arena, store, .{ .node = type_node, .handle = handle }, decl, encoding, context, handler);
-            }
-            if (var_decl.getInitNode()) |init_node| {
-                try symbolReferencesInternal(arena, store, .{ .node = init_node, .handle = handle }, decl, encoding, context, handler);
-            }
-        },
-        .Use => {
-            const use = node.cast(ast.Node.Use).?;
-            try symbolReferencesInternal(arena, store, .{ .node = use.expr, .handle = handle }, decl, encoding, context, handler);
-        },
-        .ContainerField => {
-            const field = node.cast(ast.Node.ContainerField).?;
-            if (field.type_expr) |type_node| {
-                try symbolReferencesInternal(arena, store, .{ .node = type_node, .handle = handle }, decl, encoding, context, handler);
-            }
-            if (field.value_expr) |init_node| {
-                try symbolReferencesInternal(arena, store, .{ .node = init_node, .handle = handle }, decl, encoding, context, handler);
-            }
-        },
-        .Identifier => {
-            if (try analysis.lookupSymbolGlobal(store, arena, handle, handle.tree.getNodeSource(node), handle.tree.token_locs[node.firstToken()].start)) |child| {
-                if (std.meta.eql(decl, child)) {
-                    try tokenReference(handle, node.firstToken(), encoding, context, handler);
-                }
-            }
-        },
-        .FnProto => {
-            const fn_proto = node.cast(ast.Node.FnProto).?;
-            for (fn_proto.paramsConst()) |param| {
-                switch (param.param_type) {
-                    .type_expr => |type_node| {
-                        try symbolReferencesInternal(arena, store, .{ .node = type_node, .handle = handle }, decl, encoding, context, handler);
-                    },
-                    else => {},
-                }
-            }
-            switch (fn_proto.return_type) {
-                .Explicit, .InferErrorSet => |type_node| {
-                    try symbolReferencesInternal(arena, store, .{ .node = type_node, .handle = handle }, decl, encoding, context, handler);
+    switch (node_tags[node]) {
+        .block, .block_semicolon, .block_two, .block_two_semicolon => {
+            const statements: []const ast.Node.Index = switch (node_tags[node]) {
+                .block, .block_semicolon => tree.extra_data[datas[node].lhs..datas[node].rhs],
+                .block_two, .block_two_semicolon => blk: {
+                    const statements = &[_]ast.Node.Index{ datas[node].lhs, datas[node].rhs };
+                    const len: usize = if (datas[node].lhs == 0)
+                        @as(usize, 0)
+                    else if (datas[node].rhs == 0)
+                        @as(usize, 1)
+                    else
+                        @as(usize, 2);
+                    break :blk statements[0..len];
                 },
-                else => {},
+                else => unreachable,
+            };
+            for (statements) |stmt|
+                try symbolReferencesInternal(arena, store, .{ .node = stmt, .handle = handle }, decl, encoding, context, handler);
+        },
+        .container_decl,
+        .container_decl_trailing,
+        .container_decl_arg,
+        .container_decl_arg_trailing,
+        .container_decl_two,
+        .container_decl_two_trailing,
+        .tagged_union,
+        .tagged_union_trailing,
+        .tagged_union_two,
+        .tagged_union_two_trailing,
+        .tagged_union_enum_tag,
+        .tagged_union_enum_tag_trailing,
+        .root,
+        .error_set_decl,
+        => {
+            var buf: [2]ast.Node.Index = undefined;
+            for (analysis.declMembers(tree, node_tags[node], node, &buf)) |member|
+                try symbolReferencesInternal(arena, store, .{ .node = member, .handle = handle }, decl, encoding, context, handler);
+        },
+        .global_var_decl, .local_var_decl, .simple_var_decl, .aligned_var_decl => {
+            const var_decl = analysis.varDecl(tree, node).?;
+            if (var_decl.ast.type_node != 0) {
+                try symbolReferencesInternal(arena, store, .{ .node = var_decl.ast.type_node, .handle = handle }, decl, encoding, context, handler);
             }
-            if (fn_proto.getAlignExpr()) |align_expr| {
-                try symbolReferencesInternal(arena, store, .{ .node = align_expr, .handle = handle }, decl, encoding, context, handler);
-            }
-            if (fn_proto.getSectionExpr()) |section_expr| {
-                try symbolReferencesInternal(arena, store, .{ .node = section_expr, .handle = handle }, decl, encoding, context, handler);
-            }
-            if (fn_proto.getCallconvExpr()) |callconv_expr| {
-                try symbolReferencesInternal(arena, store, .{ .node = callconv_expr, .handle = handle }, decl, encoding, context, handler);
-            }
-            if (fn_proto.getBodyNode()) |body| {
-                try symbolReferencesInternal(arena, store, .{ .node = body, .handle = handle }, decl, encoding, context, handler);
+            if (var_decl.ast.init_node != 0) {
+                try symbolReferencesInternal(arena, store, .{ .node = var_decl.ast.init_node, .handle = handle }, decl, encoding, context, handler);
             }
         },
-        .AnyFrameType => {
-            const anyframe_type = node.cast(ast.Node.AnyFrameType).?;
-            if (anyframe_type.result) |result| {
-                try symbolReferencesInternal(arena, store, .{ .node = result.return_type, .handle = handle }, decl, encoding, context, handler);
+        // @TODO: Usingnamespace
+        // .Use => {
+        //     const use = node.cast(ast.Node.Use).?;
+        //     try symbolReferencesInternal(arena, store, .{ .node = use.expr, .handle = handle }, decl, encoding, context, handler);
+        // },
+        .container_field, .container_field_align, .container_field_init => {
+            const field = analysis.containerField(node).?;
+            if (field.ast.type_expr != 0) {
+                try symbolReferencesInternal(arena, store, .{ .node = field.ast.type_expr, .handle = handle }, decl, encoding, context, handler);
+            }
+            if (field.ast.value_expr != 0) {
+                try symbolReferencesInternal(arena, store, .{ .node = field.ast.value_expr, .handle = handle }, decl, encoding, context, handler);
             }
         },
-        .Defer => {
-            const defer_node = node.cast(ast.Node.Defer).?;
-            try symbolReferencesInternal(arena, store, .{ .node = defer_node.expr, .handle = handle }, decl, encoding, context, handler);
-        },
-        .Comptime => {
-            const comptime_node = node.cast(ast.Node.Comptime).?;
-            try symbolReferencesInternal(arena, store, .{ .node = comptime_node.expr, .handle = handle }, decl, encoding, context, handler);
-        },
-        .Nosuspend => {
-            const nosuspend_node = node.cast(ast.Node.Nosuspend).?;
-            try symbolReferencesInternal(arena, store, .{ .node = nosuspend_node.expr, .handle = handle }, decl, encoding, context, handler);
-        },
-        .Switch => {
-            // TODO When renaming a union(enum) field, also rename switch items that refer to it.
-            const switch_node = node.cast(ast.Node.Switch).?;
-            try symbolReferencesInternal(arena, store, .{ .node = switch_node.expr, .handle = handle }, decl, encoding, context, handler);
-            for (switch_node.casesConst()) |case| {
-                if (case.*.cast(ast.Node.SwitchCase)) |case_node| {
-                    try symbolReferencesInternal(arena, store, .{ .node = case_node.expr, .handle = handle }, decl, encoding, context, handler);
+        .identifier => {
+            if (try analysis.lookupSymbolGlobal(store, arena, handle, tree.getNodeSource(node), starts[main_tokens[nodes]])) |child| {
+                if (std.meta.eql(decl, child)) {
+                    try tokenReference(handle, main_tokens[node], encoding, context, handler);
                 }
             }
         },
-        .While => {
-            const while_node = node.cast(ast.Node.While).?;
-            try symbolReferencesInternal(arena, store, .{ .node = while_node.condition, .handle = handle }, decl, encoding, context, handler);
-            if (while_node.continue_expr) |cont_expr| {
-                try symbolReferencesInternal(arena, store, .{ .node = cont_expr, .handle = handle }, decl, encoding, context, handler);
+        .fn_proto, .fn_proto_multi, .fn_proto_one, .fn_proto_simple, .fn_decl => {
+            var buf: [1]ast.Node.Index = undefined;
+            const fn_proto = analysis.fnProto(tree, node, &buf).?;
+            var it = fn_proto.iterate(tree);
+            while (it.next()) |param| {
+                if (param.type_expr != 0)
+                    try symbolReferencesInternal(arena, store, .{ .node = param.type_expr, .handle = handle }, decl, encoding, context, handler);
             }
-            try symbolReferencesInternal(arena, store, .{ .node = while_node.body, .handle = handle }, decl, encoding, context, handler);
-            if (while_node.@"else") |else_node| {
-                try symbolReferencesInternal(arena, store, .{ .node = else_node.body, .handle = handle }, decl, encoding, context, handler);
+
+            if (fn_proto.ast.return_type != 0) {
+                try symbolReferencesInternal(arena, store, .{ .node = fn_proto.ast.return_type, .handle = handle }, decl, encoding, context, handler);
             }
-        },
-        .For => {
-            const for_node = node.cast(ast.Node.For).?;
-            try symbolReferencesInternal(arena, store, .{ .node = for_node.array_expr, .handle = handle }, decl, encoding, context, handler);
-            try symbolReferencesInternal(arena, store, .{ .node = for_node.body, .handle = handle }, decl, encoding, context, handler);
-            if (for_node.@"else") |else_node| {
-                try symbolReferencesInternal(arena, store, .{ .node = else_node.body, .handle = handle }, decl, encoding, context, handler);
+            if (fn_proto.ast.align_expr != 0) {
+                try symbolReferencesInternal(arena, store, .{ .node = fn_proto.ast.align_expr, .handle = handle }, decl, encoding, context, handler);
             }
-        },
-        .If => {
-            const if_node = node.cast(ast.Node.If).?;
-            try symbolReferencesInternal(arena, store, .{ .node = if_node.condition, .handle = handle }, decl, encoding, context, handler);
-            try symbolReferencesInternal(arena, store, .{ .node = if_node.body, .handle = handle }, decl, encoding, context, handler);
-            if (if_node.@"else") |else_node| {
-                try symbolReferencesInternal(arena, store, .{ .node = else_node.body, .handle = handle }, decl, encoding, context, handler);
+            if (fn_proto.ast.section_expr != 0) {
+                try symbolReferencesInternal(arena, store, .{ .node = fn_proto.ast.section_expr, .handle = handle }, decl, encoding, context, handler);
+            }
+            if (fn_proto.ast.callconv_expr != 0) {
+                try symbolReferencesInternal(arena, store, .{ .node = fn_proto.ast.callconv_expr, .handle = handle }, decl, encoding, context, handler);
+            }
+            if (node_tags[node] == .fn_decl) {
+                try symbolReferencesInternal(arena, store, .{ .node = datas[node].rhs, .handle = handle }, decl, encoding, context, handler);
             }
         },
-        .ArrayType => {
-            const info = node.castTag(.ArrayType).?;
-            try symbolReferencesInternal(arena, store, .{ .node = info.len_expr, .handle = handle }, decl, encoding, context, handler);
-            try symbolReferencesInternal(arena, store, .{ .node = info.rhs, .handle = handle }, decl, encoding, context, handler);
+        .anyframe_type => {
+            try symbolReferencesInternal(arena, store, .{ .node = datas[node].rhs, .handle = handle }, decl, encoding, context, handler);
         },
-        .ArrayTypeSentinel => {
-            const info = node.castTag(.ArrayTypeSentinel).?;
-            try symbolReferencesInternal(arena, store, .{ .node = info.len_expr, .handle = handle }, decl, encoding, context, handler);
-            try symbolReferencesInternal(arena, store, .{ .node = info.sentinel, .handle = handle }, decl, encoding, context, handler);
-            try symbolReferencesInternal(arena, store, .{ .node = info.rhs, .handle = handle }, decl, encoding, context, handler);
+        .@"defer" => {
+            try symbolReferencesInternal(arena, store, .{ .node = datas[node].rhs, .handle = handle }, decl, encoding, context, handler);
         },
-        .PtrType, .SliceType => {
-            const info = switch (node.tag) {
-                .PtrType => node.castTag(.PtrType).?.ptr_info,
-                .SliceType => node.castTag(.SliceType).?.ptr_info,
+        .@"comptime" => {
+            try symbolReferencesInternal(arena, store, .{ .node = datas[node].lhs, .handle = handle }, decl, encoding, context, handler);
+        },
+        .@"nosuspend" => {
+            try symbolReferencesInternal(arena, store, .{ .node = datas[node].lhs, .handle = handle }, decl, encoding, context, handler);
+        },
+        .@"switch", .switch_comma => {
+            // TODO When renaming a union(enum) field, also rename switch items that refer to it.
+            try symbolReferencesInternal(arena, store, .{ .node = datas[node].lhs, .handle = handle }, decl, encoding, context, handler);
+            const extra = tree.extraData(datas[node].rhs, ast.Node.SubRange);
+            const cases = tree.extra_data[extra.start..extra.end];
+            for (cases) |case| {
+                try symbolReferencesInternal(arena, store, .{ .node = case, .handle = handle }, decl, encoding, context, handler);
+            }
+        },
+        .switch_case_one => {
+            const case_one = tree.switchCaseOne(node);
+            for (case_one.ast.values) |val|
+                try symbolReferencesInternal(arena, store, .{ .node = val, .handle = handle }, decl, encoding, context, handler);
+        },
+        .switch_case => {
+            const case = tree.switchCase(node);
+            for (case_one.ast.values) |val|
+                try symbolReferencesInternal(arena, store, .{ .node = val, .handle = handle }, decl, encoding, context, handler);
+        },
+        .@"while", .while_simple, .while_con, .for_simple, .@"for" => {
+            const loop: ast.full.While = switch (node_tags[node]) {
+                .@"while" => tree.whileFull(node),
+                .while_simple => tree.whileSimple(node),
+                .while_con => tree.whileCont(node),
+                .for_simple => tree.forSimple(node),
+                .@"for" => tree.forFull(node),
+                else => unreachable,
+            };
+            try symbolReferencesInternal(arena, store, .{ .node = loop.ast.cond_expr, .handle = handle }, decl, encoding, context, handler);
+            if (loop.ast.cont_expr != 0) {
+                try symbolReferencesInternal(arena, store, .{ .node = loop.ast.cont_expr, .handle = handle }, decl, encoding, context, handler);
+            }
+            try symbolReferencesInternal(arena, store, .{ .node = loop.ast.then_expr, .handle = handle }, decl, encoding, context, handler);
+            if (loop.ast.else_expr != 0) {
+                try symbolReferencesInternal(arena, store, .{ .node = loop.ast.else_expr, .handle = handle }, decl, encoding, context, handler);
+            }
+        },
+        .@"if", .if_simple => {
+            const if_node: ast.full.If = if (node_tags[node] == .@"if") tree.ifFull(node) else tree.ifSimple(node);
+
+            try symbolReferencesInternal(arena, store, .{ .node = if_node.ast.cond_expr, .handle = handle }, decl, encoding, context, handler);
+            try symbolReferencesInternal(arena, store, .{ .node = if_node.ast.then_expr, .handle = handle }, decl, encoding, context, handler);
+            if (if_node.ast.else_expr != 0) {
+                try symbolReferencesInternal(arena, store, .{ .node = if_node.ast.else_expr, .handle = handle }, decl, encoding, context, handler);
+            }
+        },
+        .array_type, .array_type_sentinel => {
+            try symbolReferencesInternal(arena, store, .{ .node = datas[node].lhs, .handle = handle }, decl, encoding, context, handler);
+            try symbolReferencesInternal(arena, store, .{ .node = datas[node].rhs, .handle = handle }, decl, encoding, context, handler);
+        },
+        .ptr_type, .ptr_type_aligned, .ptr_type_bit_range, .ptr_type_sentinel => {
+            const ptr_type = analysis.ptrType(tree, node).?;
+
+            if (ptr_type.ast.align_node != 0) {
+                try symbolReferencesInternal(arena, store, .{ .node = ptr_type.ast.align_node, .handle = handle }, decl, encoding, context, handler);
+                if (node_tags[node] == .ptr_type_bit_range) {
+                    try symbolReferencesInternal(arena, store, .{
+                        .node = ptr_type.ast.bit_range_start,
+                        .handle = handle,
+                    }, decl, encoding, context, handler);
+                    try symbolReferencesInternal(arena, store, .{
+                        .node = ptr_type.ast.bit_range_end,
+                        .handle = handle,
+                    }, decl, encoding, context, handler);
+                }
+            }
+            if (ptr_type.ast.sentinel != 0) {
+                try symbolReferencesInternal(arena, store, .{ .node = ptr_type.ast.sentinel, .handle = handle }, decl, encoding, context, handler);
+            }
+
+            try symbolReferencesInternal(arena, store, .{ .node = ptr_type.ast.child_type, .handle = handle }, decl, encoding, context, handler);
+        },
+        .address_of, .@"await", .bit_not, .bool_not, .optional_type, .negation, .negation_wrap, .@"resume", .@"try" => {
+            try symbolReferencesInternal(arena, store, .{ .node = datas[node].lhs, .handle = handle }, decl, encoding, context, handler);
+        },
+        .array_init,
+        .array_init_comma,
+        .array_init_dot,
+        .array_init_dot_comma,
+        .array_init_one,
+        .array_init_one_comma,
+        .array_init_dot_two,
+        .array_init_dot_two_comma,
+        => |n| {
+            var buf: [2]ast.Node.Index = undefined;
+            const array_init = switch (n) {
+                .array_init, .array_init_comma => tree.arrayInit(node),
+                .array_init_dot, .array_init_dot_comma => tree.arrayInitDot(node),
+                .array_init_one, .array_init_one_comma => tree.arrayInitOne(&buf[0..1], node),
+                .array_init_dot_two, .array_init_dot_two_comma => tree.arrayInitDotTwo(&buf, node),
+                else => unreachable,
+            };
+            if (array_init.ast.type_expr != 0)
+                try symbolReferencesInternal(arena, store, .{ .node = array_init.ast.type_expr, .handle = handle }, decl, encoding, context, handler);
+            for (array_init.ast.elements) |e|
+                try symbolReferencesInternal(arena, store, .{ .node = e, .handle = handle }, decl, encoding, context, handler);
+        },
+        .struct_init,
+        .struct_init_comma,
+        .struct_init_dot,
+        .struct_init_dot_comma,
+        .struct_init_dot_two,
+        .struct_init_dot_two_comma,
+        .struct_init_one,
+        .struct_init_one_comma,
+        => |n| {
+            var buf: [2]ast.Node.Index = undefined;
+            const struct_init: ast.full.StructInit = switch (n) {
+                .struct_init, .struct_init_comma => tree.structInit(node),
+                .struct_init_dot, .struct_init_dot_comma => tree.structInitDot(node),
+                .struct_init_one, .struct_init_one_comma => tree.structInitOne(&buf[0..1], node),
+                .struct_init_dot_two, .struct_init_dot_two_comma => tree.structInitDotTwo(&buf, node),
+                else => unreachable,
+            };
+            if (struct_init.ast.type_expr != 0)
+                try symbolReferencesInternal(arena, store, .{ .node = struct_init.ast.type_expr, .handle = handle }, decl, encoding, context, handler);
+            for (struct_init.ast.fields) |field|
+                try symbolReferencesInternal(arena, store, .{ .node = field, .handle = handle }, decl, encoding, context, handler);
+        },
+        .call,
+        .call_comma,
+        .call_one,
+        .call_one_comma,
+        .async_call,
+        .async_call_comma,
+        .async_call_one,
+        .async_call_one_comma,
+        => |c| {
+            var buf: [1]ast.Node.Index = undefined;
+            const call: ast.full.Call = switch (c) {
+                .call, .call_comma, .async_call, .async_call_comma => tree.callFull(node),
+                .call_one, .call_one_comma, .async_call_one, .async_call_one_comma => tree.callOne(&buf, node),
+                else => unreachable,
+            };
+            if (call.ast.fn_expr != 0)
+                try symbolReferencesInternal(arena, store, .{ .node = call.ast.fn_expr, .handle = handle }, decl, encoding, context, handler);
+
+            for (call.ast.params) |param| {
+                try symbolReferencesInternal(arena, store, .{ .node = param, .handle = handle }, decl, encoding, context, handler);
+            }
+        },
+        .slice, .slice_sentinel, .slice_open => |s| {
+            const slice: ast.full.Slice = switch (s) {
+                .slice => tree.slice(node),
+                .slice_open => tree.sliceOpen(node),
+                .slice_sentinel => tree.sliceSentinel(node),
                 else => unreachable,
             };
 
-            if (info.align_info) |align_info| {
-                try symbolReferencesInternal(arena, store, .{ .node = align_info.node, .handle = handle }, decl, encoding, context, handler);
-                if (align_info.bit_range) |range| {
-                    try symbolReferencesInternal(arena, store, .{ .node = range.start, .handle = handle }, decl, encoding, context, handler);
-                    try symbolReferencesInternal(arena, store, .{ .node = range.end, .handle = handle }, decl, encoding, context, handler);
-                }
-            }
-            if (info.sentinel) |sentinel| {
-                try symbolReferencesInternal(arena, store, .{ .node = sentinel, .handle = handle }, decl, encoding, context, handler);
-            }
-            switch (node.tag) {
-                .PtrType => try symbolReferencesInternal(arena, store, .{ .node = node.castTag(.PtrType).?.rhs, .handle = handle }, decl, encoding, context, handler),
-                .SliceType => try symbolReferencesInternal(arena, store, .{ .node = node.castTag(.SliceType).?.rhs, .handle = handle }, decl, encoding, context, handler),
-                else => unreachable,
-            }
+            try symbolReferencesInternal(arena, store, .{ .node = slice.ast.sliced, .handle = handle }, decl, encoding, context, handler);
+            try symbolReferencesInternal(arena, store, .{ .node = slice.ast.start, .handle = handle }, decl, encoding, context, handler);
+            if (slice.ast.end != 0)
+                try symbolReferencesInternal(arena, store, .{ .node = slice.ast.end, .handle = handle }, decl, encoding, context, handler);
+            if (slice.ast.sentinel != 0)
+                try symbolReferencesInternal(arena, store, .{ .node = slice.ast.sentinel, .handle = handle }, decl, encoding, context, handler);
         },
-        .AddressOf, .Await, .BitNot, .BoolNot, .OptionalType, .Negation, .NegationWrap, .Resume, .Try => {
-            const prefix_op = node.cast(ast.Node.SimplePrefixOp).?;
-            try symbolReferencesInternal(arena, store, .{ .node = prefix_op.rhs, .handle = handle }, decl, encoding, context, handler);
+        .array_access => {
+            try symbolReferencesInternal(arena, store, .{ .node = datas[node].lhs, .handle = handle }, decl, encoding, context, handler);
+            try symbolReferencesInternal(arena, store, .{ .node = datas[node].rhs, .handle = handle }, decl, encoding, context, handler);
         },
-        .FieldInitializer => {
-            // TODO Rename field initializer names when needed
-            const field_init = node.cast(ast.Node.FieldInitializer).?;
-            try symbolReferencesInternal(arena, store, .{ .node = field_init.expr, .handle = handle }, decl, encoding, context, handler);
+        .deref, .unwrap_optional => {
+            try symbolReferencesInternal(arena, store, .{ .node = datas[node].lhs, .handle = handle }, decl, encoding, context, handler);
         },
-        .ArrayInitializer => {
-            const array_init = node.cast(ast.Node.ArrayInitializer).?;
-            try symbolReferencesInternal(arena, store, .{ .node = array_init.lhs, .handle = handle }, decl, encoding, context, handler);
-            for (array_init.listConst()) |child| {
-                try symbolReferencesInternal(arena, store, .{ .node = child, .handle = handle }, decl, encoding, context, handler);
+        .grouped_expression => {
+            try symbolReferencesInternal(arena, store, .{ .node = datas[node].lhs, .handle = handle }, decl, encoding, context, handler);
+        },
+        .@"return", .@"break", .@"continue" => {
+            if (datas[node].lhs != 0) {
+                try symbolReferencesInternal(arena, store, .{ .node = datas[node].lhs, .handle = handle }, decl, encoding, context, handler);
             }
         },
-        .ArrayInitializerDot => {
-            const array_init = node.cast(ast.Node.ArrayInitializerDot).?;
-            for (array_init.listConst()) |child| {
-                try symbolReferencesInternal(arena, store, .{ .node = child, .handle = handle }, decl, encoding, context, handler);
+        .@"suspend" => {
+            if (datas[node].lhs != 0) {
+                try symbolReferencesInternal(arena, store, .{ .node = datas[node].lhs, .handle = handle }, decl, encoding, context, handler);
             }
         },
-        .StructInitializer => {
-            // TODO Rename field initializer names when needed
-            const struct_init = node.cast(ast.Node.StructInitializer).?;
-            try symbolReferencesInternal(arena, store, .{ .node = struct_init.lhs, .handle = handle }, decl, encoding, context, handler);
-            for (struct_init.listConst()) |child| {
-                try symbolReferencesInternal(arena, store, .{ .node = child, .handle = handle }, decl, encoding, context, handler);
-            }
-        },
-        .StructInitializerDot => {
-            const struct_init = node.cast(ast.Node.StructInitializerDot).?;
-            for (struct_init.listConst()) |child| {
-                try symbolReferencesInternal(arena, store, .{ .node = child, .handle = handle }, decl, encoding, context, handler);
-            }
-        },
-        .Call => {
-            const call = node.cast(ast.Node.Call).?;
-            try symbolReferencesInternal(arena, store, .{ .node = call.lhs, .handle = handle }, decl, encoding, context, handler);
-            for (call.paramsConst()) |param| {
+        .builtin_call,
+        .builtin_call_comma,
+        .builtin_call_two,
+        .builtin_call_two_comma,
+        => {
+            const builtin_call = analysis.builtinCallParams();
+            for (analysis.builtinCallParams()) |param|
                 try symbolReferencesInternal(arena, store, .{ .node = param, .handle = handle }, decl, encoding, context, handler);
-            }
         },
-        .Slice => {
-            const slice = node.castTag(.Slice).?;
-            try symbolReferencesInternal(arena, store, .{ .node = slice.lhs, .handle = handle }, decl, encoding, context, handler);
-            try symbolReferencesInternal(arena, store, .{ .node = slice.start, .handle = handle }, decl, encoding, context, handler);
-            if (slice.end) |end| {
-                try symbolReferencesInternal(arena, store, .{ .node = end, .handle = handle }, decl, encoding, context, handler);
-            }
-            if (slice.sentinel) |sentinel| {
-                try symbolReferencesInternal(arena, store, .{ .node = sentinel, .handle = handle }, decl, encoding, context, handler);
-            }
-        },
-        .ArrayAccess => {
-            const arr_acc = node.castTag(.ArrayAccess).?;
-            try symbolReferencesInternal(arena, store, .{ .node = arr_acc.lhs, .handle = handle }, decl, encoding, context, handler);
-            try symbolReferencesInternal(arena, store, .{ .node = arr_acc.index_expr, .handle = handle }, decl, encoding, context, handler);
-        },
-        .Deref, .UnwrapOptional => {
-            const suffix = node.cast(ast.Node.SimpleSuffixOp).?;
-            try symbolReferencesInternal(arena, store, .{ .node = suffix.lhs, .handle = handle }, decl, encoding, context, handler);
-        },
-        .GroupedExpression => {
-            const grouped = node.cast(ast.Node.GroupedExpression).?;
-            try symbolReferencesInternal(arena, store, .{ .node = grouped.expr, .handle = handle }, decl, encoding, context, handler);
-        },
-        .Return, .Break, .Continue => {
-            const cfe = node.cast(ast.Node.ControlFlowExpression).?;
-            if (cfe.getRHS()) |rhs| {
-                try symbolReferencesInternal(arena, store, .{ .node = rhs, .handle = handle }, decl, encoding, context, handler);
-            }
-        },
-        .Suspend => {
-            const suspend_node = node.cast(ast.Node.Suspend).?;
-            if (suspend_node.body) |body| {
-                try symbolReferencesInternal(arena, store, .{ .node = body, .handle = handle }, decl, encoding, context, handler);
-            }
-        },
-        .BuiltinCall => {
-            const builtin_call = node.cast(ast.Node.BuiltinCall).?;
-            for (builtin_call.paramsConst()) |param| {
-                try symbolReferencesInternal(arena, store, .{ .node = param, .handle = handle }, decl, encoding, context, handler);
-            }
-        },
-        // TODO Inline asm expr
-        .TestDecl => {
-            const test_decl = node.cast(ast.Node.TestDecl).?;
-            try symbolReferencesInternal(arena, store, .{ .node = test_decl.body_node, .handle = handle }, decl, encoding, context, handler);
-        },
-        .Period => {
-            const infix_op = node.cast(ast.Node.SimpleInfixOp).?;
+        .@"asm", .asm_simple => |a| {
+            const _asm: ast.full.Asm = if (a == .@"asm") tree.asmFull(node) else tree.asmSimple(node);
+            if (_asm.ast.items.len == 0)
+                try symbolReferencesInternal(arena, store, .{ .node = _asm.ast.template, .handle = handle }, decl, encoding, context, handler);
 
-            try symbolReferencesInternal(arena, store, .{ .node = infix_op.lhs, .handle = handle }, decl, encoding, context, handler);
+            for (_asm.inputs) |input|
+                try symbolReferencesInternal(arena, store, .{ .node = input, .handle = handle }, decl, encoding, context, handler);
 
-            const rhs_str = analysis.nodeToString(handle.tree, infix_op.rhs) orelse return;
+            for (_asm.outputs) |output|
+                try symbolReferencesInternal(arena, store, .{ .node = output, .handle = handle }, decl, encoding, context, handler);
+        },
+        .test_decl => {
+            try symbolReferencesInternal(arena, store, .{ .node = datas[node].rhs, .handle = handle }, decl, encoding, context, handler);
+        },
+        .field_access => {
+            try symbolReferencesInternal(arena, store, .{ .node = datas[node].lhs, .handle = handle }, decl, encoding, context, handler);
+
+            const rhs_str = analysis.nodeToString(handle.tree, datas[node].rhs) orelse return;
             var bound_type_params = analysis.BoundTypeParams.init(&arena.allocator);
             const left_type = try analysis.resolveFieldAccessLhsType(
                 store,
                 arena,
                 (try analysis.resolveTypeOfNodeInternal(store, arena, .{
-                    .node = infix_op.lhs,
+                    .node = datas[node].lhs,
                     .handle = handle,
                 }, &bound_type_params)) orelse return,
                 &bound_type_params,
@@ -352,15 +415,53 @@ fn symbolReferencesInternal(
                 !left_type.type.is_type_val,
             )) |child| {
                 if (std.meta.eql(child, decl)) {
-                    try tokenReference(handle, infix_op.rhs.firstToken(), encoding, context, handler);
+                    try tokenReference(handle, tree.firstToken(datas[node].rhs), encoding, context, handler);
                 }
             }
         },
-        .Add, .AddWrap, .ArrayCat, .ArrayMult, .Assign, .AssignBitAnd, .AssignBitOr, .AssignBitShiftLeft, .AssignBitShiftRight, .AssignBitXor, .AssignDiv, .AssignSub, .AssignSubWrap, .AssignMod, .AssignAdd, .AssignAddWrap, .AssignMul, .AssignMulWrap, .BangEqual, .BitAnd, .BitOr, .BitShiftLeft, .BitShiftRight, .BitXor, .BoolOr, .Div, .EqualEqual, .ErrorUnion, .GreaterOrEqual, .GreaterThan, .LessOrEqual, .LessThan, .MergeErrorSets, .Mod, .Mul, .MulWrap, .Range, .Sub, .SubWrap, .OrElse => {
-            const infix_op = node.cast(ast.Node.SimpleInfixOp).?;
-
-            try symbolReferencesInternal(arena, store, .{ .node = infix_op.lhs, .handle = handle }, decl, encoding, context, handler);
-            try symbolReferencesInternal(arena, store, .{ .node = infix_op.rhs, .handle = handle }, decl, encoding, context, handler);
+        .add,
+        .add_wrap,
+        .array_cat,
+        .array_mult,
+        .assign,
+        .assign_bit_and,
+        .assign_bit_or,
+        .assign_bit_shift_left,
+        .assign_bit_shift_right,
+        .assign_bit_xor,
+        .assign_div,
+        .assign_sub,
+        .assign_sub_wrap,
+        .assign_mod,
+        .assign_add,
+        .assign_add_wrap,
+        .assign_mul,
+        .assign_mul_wrap,
+        .bang_equal,
+        .bit_and,
+        .bit_or,
+        .bit_shift_left,
+        .bit_shift_right,
+        .bit_xor,
+        .bool_or,
+        .div,
+        .equal_equal,
+        .error_union,
+        .greater_or_equal,
+        .greater_than,
+        .less_or_equal,
+        .less_than,
+        .merge_error_sets,
+        .mod,
+        .mul,
+        .mul_wrap,
+        .range,
+        .sub,
+        .sub_wrap,
+        .@"orelse",
+        => {
+            try symbolReferencesInternal(arena, store, .{ .node = datas[node].lhs, .handle = handle }, decl, encoding, context, handler);
+            try symbolReferencesInternal(arena, store, .{ .node = datas[node].rhs, .handle = handle }, decl, encoding, context, handler);
         },
         else => {},
     }

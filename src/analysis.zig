@@ -2261,21 +2261,15 @@ pub fn isContainer(tag: ast.Node.Tag) bool {
 
 /// Returns the member indices of a given declaration container.
 /// Asserts given `tag` is a container node
-fn declMembers(tree: ast.Tree, tag: ast.Node.Tag, node_idx: ast.Node.Index) []const ast.Node.Index {
+pub fn declMembers(tree: ast.Tree, tag: ast.Node.Tag, node_idx: ast.Node.Index, buffer: *[2]ast.Node.Index) []const ast.Node.Index {
     std.debug.assert(isContainer(tag));
     return switch (tag) {
         .container_decl, .container_decl_trailing => tree.containerDecl(node_idx).ast.members,
         .container_decl_arg, .container_decl_arg_trailing => tree.containerDeclArg(node_idx).ast.members,
-        .container_decl_two, .container_decl_two_trailing => blk: {
-            var buffer: [2]ast.Node.Index = undefined;
-            break :blk tree.containerDeclTwo(&buffer, node_idx).ast.members;
-        },
+        .container_decl_two, .container_decl_two_trailing => tree.containerDeclTwo(&buffer, node_idx).ast.members,
         .tagged_union, .tagged_union_trailing => tree.taggedUnion(node_idx).ast.members,
         .tagged_union_enum_tag, .tagged_union_enum_tag_trailing => tree.taggedUnionEnumTag(node_idx).ast.members,
-        .tagged_union_two, .tagged_union_two_trailing => blk: {
-            var buffer: [2]ast.Node.Index = undefined;
-            break :blk tree.taggedUnionTwo(&buffer, node_idx).ast.members;
-        },
+        .tagged_union_two, .tagged_union_two_trailing => tree.taggedUnionTwo(&buffer, node_idx).ast.members,
         .root => tree.rootDecls(),
         // @TODO: Fix error set declarations
         .error_set_decl => &[_]ast.Node.Index{},
@@ -2312,6 +2306,7 @@ fn makeScopeInternal(
     const node = tags[node_idx];
 
     if (isContainer(node)) {
+        var buf: [2]ast.Node.Index = undefined;
         const ast_decls = declMembers(tree, node, node_idx);
 
         (try scopes.addOne(allocator)).* = .{
