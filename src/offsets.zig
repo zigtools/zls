@@ -113,9 +113,9 @@ pub fn tokenLength(tree: std.zig.ast.Tree, token: std.zig.ast.TokenIndex, encodi
     if (encoding == .utf8)
         return token_loc.line_end - token_loc.line_start;
 
-    var i: usize = token_loc.start;
+    var i: usize = token_loc.line_start;
     var utf16_len: usize = 0;
-    while (i < token_loc.end) {
+    while (i < token_loc.line_end) {
         const n = std.unicode.utf8ByteSequenceLength(tree.source[i]) catch unreachable;
         const codepoint = std.unicode.utf8Decode(tree.source[i .. i + n]) catch unreachable;
         if (codepoint < 0x10000) {

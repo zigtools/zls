@@ -79,14 +79,14 @@ pub fn collectDocComments(
 }
 
 /// Gets a function signature (keywords, name, return value)
-pub fn getFunctionSignature(tree: ast.Tree, func: *ast.full.FnProto) []const u8 {
+pub fn getFunctionSignature(tree: ast.Tree, func: ast.full.FnProto) []const u8 {
     const start = tree.tokenLocation(func.ast.fn_token).line_start;
     const end = tree.tokenLocation(func.ast.return_type).line_end;
     return tree.source[start..end];
 }
 
 /// Gets a function snippet insert text
-pub fn getFunctionSnippet(allocator: *std.mem.Allocator, tree: ast.Tree, func: *ast.full.FnProto, skip_self_param: bool) ![]const u8 {
+pub fn getFunctionSnippet(allocator: *std.mem.Allocator, tree: ast.Tree, func: ast.full.FnProto, skip_self_param: bool) ![]const u8 {
     const name_index = func.name_token orelse unreachable;
 
     var buffer = std.ArrayList(u8).init(allocator);
@@ -143,14 +143,14 @@ pub fn getFunctionSnippet(allocator: *std.mem.Allocator, tree: ast.Tree, func: *
 }
 
 /// Gets a function signature (keywords, name, return value)
-pub fn getVariableSignature(tree: ast.Tree, var_decl: *ast.full.VarDecl) []const u8 {
+pub fn getVariableSignature(tree: ast.Tree, var_decl: ast.full.VarDecl) []const u8 {
     const start = tree.tokenLocation(0, var_decl.ast.mut_token).line_start;
     const end = tree.tokenLocation(@truncate(u32, start), tree.lastToken(var_decl.ast.init_node)).line_end;
     return tree.source[start..end];
 }
 
 // analysis.getContainerFieldSignature(handle.tree, field)
-pub fn getContainerFieldSignature(tree: ast.Tree, field: *ast.full.ContainerField) []const u8 {
+pub fn getContainerFieldSignature(tree: ast.Tree, field: ast.full.ContainerField) []const u8 {
     const start = tree.tokenLocation(0, field.ast.name_token).line_start;
     const end = tree.tokenLocation(@truncate(u32, start), tree.lastToken(field.ast.value_expr)).line_start;
     return tree.source[start..end];
@@ -430,7 +430,7 @@ fn resolveUnwrapErrorType(
     return null;
 }
 
-fn isPtrType(tree: ast.Tree, node: ast.Node.Index) bool {
+pub fn isPtrType(tree: ast.Tree, node: ast.Node.Index) bool {
     return switch (tree.nodes.items(.tag)[node]) {
         .ptr_type,
         .ptr_type_aligned,
@@ -1807,11 +1807,21 @@ pub const DeclWithHandle = struct {
     }
 };
 
-fn containerField(tree: ast.Tree, node: ast.Node.Index) ?ast.full.ContainerField {
+pub fn containerField(tree: ast.Tree, node: ast.Node.Index) ?ast.full.ContainerField {
     return switch (tree.nodes.items(.tag)[node]) {
         .container_field => tree.containerField(node),
         .container_field_init => tree.containerFieldInit(node),
         .container_field_align => tree.containerFieldAlign(node),
+        else => null,
+    };
+}
+
+pub fn ptrType(tree: ast.Tree, node: ast.Node.Index) ?ast.full.PtrType {
+    return switch (tree.nodes.items(.tag)[node]) {
+        .ptr_type => tree.ptrType(node),
+        .ptr_type_aligned => tree.ptrTypeAligned(node),
+        .ptr_type_bit_range => tree.ptrTypeBitRange(node),
+        .ptr_type_sentinel => tree.ptrTypeSentinel(node),
         else => null,
     };
 }
@@ -2218,7 +2228,7 @@ fn nodeSourceRange(tree: ast.Tree, node: ast.Node.Index) SourceRange {
     };
 }
 
-fn isContainer(tag: ast.Node.Tag) bool {
+pub fn isContainer(tag: ast.Node.Tag) bool {
     return switch (tag) {
         .container_decl,
         .container_decl_trailing,
@@ -2265,7 +2275,7 @@ fn declMembers(tree: ast.Tree, tag: ast.Node.Tag, node_idx: ast.Node.Index) []co
 
 /// Returns an `ast.full.VarDecl` for a given node index.
 /// Returns null if the tag doesn't match
-fn varDecl(tree: ast.Tree, node_idx: ast.Node.Index) ?ast.full.VarDecl {
+pub fn varDecl(tree: ast.Tree, node_idx: ast.Node.Index) ?ast.full.VarDecl {
     return switch (tree.nodes.items(.tag)[node_idx]) {
         .global_var_decl => tree.globalVarDecl(node_idx),
         .local_var_decl => tree.localVarDecl(node_idx),
