@@ -1055,13 +1055,12 @@ pub fn collectImports(import_arr: *std.ArrayList([]const u8), tree: ast.Tree) !v
         const init_node_tag = tags[init_node];
         switch (init_node_tag) {
             .builtin_call => try maybeCollectImport(tree, init_node, import_arr),
-            // @TODO: FIX ME what is the syntax to support for imports using dot notation?
-            // .Period => {
-            //     const infix_op = init_node.cast(ast.Node.SimpleInfixOp).?;
-
-            //     if (infix_op.lhs.tag != .BuiltinCall) continue;
-            //     try maybeCollectImport(tree, infix_op.lhs.castTag(.BuiltinCall).?, import_arr);
-            // },
+            .field_access => {
+                const lhs = tree.nodes.items(.data)[init_node].lhs;
+                if (isBuiltinCall(tree, lhs)) {
+                    try maybeCollectImport(tree, lhs, import_arr);
+                }
+            },
             else => {},
         }
     }
@@ -1268,7 +1267,7 @@ fn isBuiltinCall(tree: ast.Tree, node: ast.Node.Index) bool {
     };
 }
 
-fn builtinCallParams(tree: ast.Tree, node: ast.Node.Index) []const ast.Node.Index {
+pub fn builtinCallParams(tree: ast.Tree, node: ast.Node.Index) []const ast.Node.Index {
     std.debug.assert(isBuiltinCall(tree, node));
     const datas = tree.nodes.items(.data);
 
@@ -1290,7 +1289,7 @@ pub fn fnProto(tree: ast.Tree, node: ast.Node.Index, buf: *[1]ast.Node.Index) ?a
         .fn_proto_multi => tree.fnProtoMulti(node),
         .fn_proto_one => tree.fnProtoOne(buf, node),
         .fn_proto_simple => tree.fnProtoSimple(buf, node),
-        .fn_decl => tree.fnProto(tree.nodes.items(.data)[node].lhs),
+        // .fn_decl => tree.fnProto(tree.nodes.items(.data)[node].lhs),
         else => null,
     };
 }
@@ -1479,107 +1478,147 @@ pub fn documentPositionContext(arena: *std.heap.ArenaAllocator, document: types.
     };
 }
 
-fn addOutlineNodes(allocator: *std.mem.Allocator, tree: ast.Tree, parent: ast.Node.Index, context: *GetDocumentSymbolsContext) anyerror!void {
-    switch (tree.nodes.items(.tag)[parent]) {
-        .StringLiteral,
-        .IntegerLiteral,
-        .BuiltinCall,
-        .Call,
-        .Identifier,
-        .Add,
-        .AddWrap,
-        .ArrayCat,
-        .ArrayMult,
-        .Assign,
-        .AssignBitAnd,
-        .AssignBitOr,
-        .AssignBitShiftLeft,
-        .AssignBitShiftRight,
-        .AssignBitXor,
-        .AssignDiv,
-        .AssignSub,
-        .AssignSubWrap,
-        .AssignMod,
-        .AssignAdd,
-        .AssignAddWrap,
-        .AssignMul,
-        .AssignMulWrap,
-        .BangEqual,
-        .BitAnd,
-        .BitOr,
-        .BitShiftLeft,
-        .BitShiftRight,
-        .BitXor,
-        .BoolAnd,
-        .BoolOr,
-        .Div,
-        .EqualEqual,
-        .ErrorUnion,
-        .GreaterOrEqual,
-        .GreaterThan,
-        .LessOrEqual,
-        .LessThan,
-        .MergeErrorSets,
-        .Mod,
-        .Mul,
-        .MulWrap,
-        .Period,
-        .Range,
-        .Sub,
-        .SubWrap,
-        .OrElse,
-        .AddressOf,
-        .Await,
-        .BitNot,
-        .BoolNot,
-        .OptionalType,
-        .Negation,
-        .NegationWrap,
-        .Resume,
-        .Try,
-        .ArrayType,
-        .ArrayTypeSentinel,
-        .PtrType,
-        .SliceType,
-        .Slice,
-        .Deref,
-        .UnwrapOptional,
-        .ArrayAccess,
-        .Return,
-        .Break,
-        .Continue,
-        .ArrayInitializerDot,
-        .SwitchElse,
-        .SwitchCase,
-        .For,
-        .EnumLiteral,
-        .PointerIndexPayload,
-        .StructInitializerDot,
-        .PointerPayload,
-        .While,
-        .Switch,
-        .Else,
-        .BoolLiteral,
-        .NullLiteral,
-        .Defer,
-        .StructInitializer,
-        .FieldInitializer,
-        .If,
-        .MultilineStringLiteral,
-        .UndefinedLiteral,
-        .AnyType,
-        .Block,
-        .ErrorSetDecl,
+fn addOutlineNodes(allocator: *std.mem.Allocator, tree: ast.Tree, child: ast.Node.Index, context: *GetDocumentSymbolsContext) anyerror!void {
+    switch (tree.nodes.items(.tag)[child]) {
+        .string_literal,
+        .integer_literal,
+        .builtin_call,
+        .builtin_call_comma,
+        .builtin_call_two,
+        .builtin_call_two_comma,
+        .call,
+        .call_comma,
+        .call_one,
+        .call_one_comma,
+        .async_call,
+        .async_call_comma,
+        .async_call_one,
+        .async_call_one_comma,
+        .identifier,
+        .add,
+        .add_wrap,
+        .array_cat,
+        .array_mult,
+        .assign,
+        .assign_bit_and,
+        .assign_bit_or,
+        .assign_bit_shift_left,
+        .assign_bit_shift_right,
+        .assign_bit_xor,
+        .assign_div,
+        .assign_sub,
+        .assign_sub_wrap,
+        .assign_mod,
+        .assign_add,
+        .assign_add_wrap,
+        .assign_mul,
+        .assign_mul_wrap,
+        .bang_equal,
+        .bit_and,
+        .bit_or,
+        .bit_shift_left,
+        .bit_shift_right,
+        .bit_xor,
+        .bool_and,
+        .bool_or,
+        .div,
+        .equal_equal,
+        .error_union,
+        .greater_or_equal,
+        .greater_than,
+        .less_or_equal,
+        .less_than,
+        .merge_error_sets,
+        .mod,
+        .mul,
+        .mul_wrap,
+        .field_access,
+        .switch_range,
+        .sub,
+        .sub_wrap,
+        .@"orelse",
+        .address_of,
+        .@"await",
+        .bit_not,
+        .bool_not,
+        .optional_type,
+        .negation,
+        .negation_wrap,
+        .@"resume",
+        .@"try",
+        .array_type,
+        .array_type_sentinel,
+        .ptr_type,
+        .ptr_type_aligned,
+        .ptr_type_bit_range,
+        .ptr_type_sentinel,
+        .slice_open,
+        .slice_sentinel,
+        .deref,
+        .unwrap_optional,
+        .array_access,
+        .@"return",
+        .@"break",
+        .@"continue",
+        .array_init,
+        .array_init_comma,
+        .array_init_dot,
+        .array_init_dot_comma,
+        .array_init_dot_two,
+        .array_init_dot_two_comma,
+        .array_init_one,
+        .array_init_one_comma,
+        .@"switch",
+        .switch_comma,
+        .switch_case,
+        .switch_case_one,
+        .@"for",
+        .for_simple,
+        .enum_literal,
+        .struct_init,
+        .struct_init_comma,
+        .struct_init_dot,
+        .struct_init_dot_comma,
+        .struct_init_dot_two,
+        .struct_init_dot_two_comma,
+        .struct_init_one,
+        .struct_init_one_comma,
+        .@"while",
+        .while_simple,
+        .while_cont,
+        .true_literal,
+        .false_literal,
+        .null_literal,
+        .@"defer",
+        .@"if",
+        .if_simple,
+        .multiline_string_literal,
+        .undefined_literal,
+        .@"anytype",
+        .block,
+        .block_semicolon,
+        .block_two,
+        .block_two_semicolon,
+        .error_set_decl,
         => return,
-
-        .ContainerDecl => {
-            const decl = child.castTag(.ContainerDecl).?;
-
-            for (decl.fieldsAndDecls()) |cchild|
-                try addOutlineNodes(allocator, tree, cchild, context);
+        .container_decl,
+        .container_decl_arg,
+        .container_decl_arg_trailing,
+        .container_decl_two,
+        .container_decl_two_trailing,
+        .tagged_union,
+        .tagged_union_trailing,
+        .tagged_union_enum_tag,
+        .tagged_union_enum_tag_trailing,
+        .tagged_union_two,
+        .tagged_union_two_trailing,
+        => {
+            var buf: [2]ast.Node.Index = undefined;
+            for (declMembers(tree, tree.nodes.items(.tag)[child], child, &buf)) |member|
+                try addOutlineNodes(allocator, tree, member, context);
             return;
         },
-        else => {},
+        else => |t| {},
     }
     try getDocumentSymbolsInternal(allocator, tree, child, context);
 }
@@ -1614,6 +1653,7 @@ fn getDocumentSymbolsInternal(allocator: *std.mem.Allocator, tree: ast.Tree, nod
     };
 
     const tags = tree.nodes.items(.tag);
+    log.debug("{s} - {s}", .{ name, tags[node] });
     (try context.symbols.addOne()).* = .{
         .name = name,
         .kind = switch (tags[node]) {
@@ -1621,6 +1661,7 @@ fn getDocumentSymbolsInternal(allocator: *std.mem.Allocator, tree: ast.Tree, nod
             .fn_proto_simple,
             .fn_proto_multi,
             .fn_proto_one,
+            .fn_decl,
             => .Function,
             .local_var_decl,
             .global_var_decl,
@@ -1632,6 +1673,10 @@ fn getDocumentSymbolsInternal(allocator: *std.mem.Allocator, tree: ast.Tree, nod
             .container_field_init,
             .tagged_union_enum_tag,
             .tagged_union_enum_tag_trailing,
+            .tagged_union,
+            .tagged_union_trailing,
+            .tagged_union_two,
+            .tagged_union_two_trailing,
             => .Field,
             else => .Variable,
         },
@@ -1647,14 +1692,16 @@ fn getDocumentSymbolsInternal(allocator: *std.mem.Allocator, tree: ast.Tree, nod
                 .encoding = context.encoding,
             };
 
-            var index: usize = 0;
-            if (true) @panic("FIX: addOutlineNodes");
-            // try addOutlineNodes(allocator, tree, node, &child_context);
+            if (isContainer(tags[node])) {
+                var buf: [2]ast.Node.Index = undefined;
+                for (declMembers(tree, tags[node], node, &buf)) |child|
+                    try addOutlineNodes(allocator, tree, child, &child_context);
+            }
 
-            // while (node.iterate(index)) |child| : (index += 1) {
-            //     try addOutlineNodes(allocator, tree, child, &child_context);
-            // }
-
+            if (varDecl(tree, node)) |var_decl| {
+                if (var_decl.ast.init_node != 0)
+                    try addOutlineNodes(allocator, tree, var_decl.ast.init_node, &child_context);
+            }
             break :ch children.items;
         },
     };
@@ -2056,7 +2103,7 @@ fn lookupSymbolGlobalInternal(
     source_index: usize,
     use_trail: *std.ArrayList(ast.Node.Index),
 ) error{OutOfMemory}!?DeclWithHandle {
-    for (handle.document_scope.scopes) |scope| {
+    for (handle.document_scope.scopes) |scope, i| {
         if (source_index >= scope.range.start and source_index < scope.range.end) {
             if (scope.decls.getEntry(symbol)) |candidate| {
                 switch (candidate.value) {
@@ -2266,10 +2313,10 @@ pub fn declMembers(tree: ast.Tree, tag: ast.Node.Tag, node_idx: ast.Node.Index, 
     return switch (tag) {
         .container_decl, .container_decl_trailing => tree.containerDecl(node_idx).ast.members,
         .container_decl_arg, .container_decl_arg_trailing => tree.containerDeclArg(node_idx).ast.members,
-        .container_decl_two, .container_decl_two_trailing => tree.containerDeclTwo(&buffer, node_idx).ast.members,
+        .container_decl_two, .container_decl_two_trailing => tree.containerDeclTwo(buffer, node_idx).ast.members,
         .tagged_union, .tagged_union_trailing => tree.taggedUnion(node_idx).ast.members,
         .tagged_union_enum_tag, .tagged_union_enum_tag_trailing => tree.taggedUnionEnumTag(node_idx).ast.members,
-        .tagged_union_two, .tagged_union_two_trailing => tree.taggedUnionTwo(&buffer, node_idx).ast.members,
+        .tagged_union_two, .tagged_union_two_trailing => tree.taggedUnionTwo(buffer, node_idx).ast.members,
         .root => tree.rootDecls(),
         // @TODO: Fix error set declarations
         .error_set_decl => &[_]ast.Node.Index{},
@@ -2307,7 +2354,7 @@ fn makeScopeInternal(
 
     if (isContainer(node)) {
         var buf: [2]ast.Node.Index = undefined;
-        const ast_decls = declMembers(tree, node, node_idx);
+        const ast_decls = declMembers(tree, node, node_idx, &buf);
 
         (try scopes.addOne(allocator)).* = .{
             .range = nodeSourceRange(tree, node_idx),
@@ -2412,7 +2459,10 @@ fn makeScopeInternal(
     }
 
     switch (node) {
-        .fn_proto, .fn_proto_one, .fn_proto_simple, .fn_proto_multi, .fn_decl => {
+        .fn_decl => {
+            try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, data[node_idx].rhs);
+        },
+        .fn_proto, .fn_proto_one, .fn_proto_simple, .fn_proto_multi => {
             var buf: [1]ast.Node.Index = undefined;
             const func = fnProto(tree, node_idx, &buf).?;
 
@@ -2433,10 +2483,6 @@ fn makeScopeInternal(
                         // TODO record a redefinition error
                     }
                 }
-            }
-
-            if (node == .fn_decl) {
-                try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, data[node_idx].rhs);
             }
 
             return;

@@ -71,14 +71,14 @@ pub const TokenLocation = struct {
 };
 
 pub fn tokenRelativeLocation(tree: std.zig.ast.Tree, start_index: usize, token: std.zig.ast.TokenIndex, encoding: Encoding) !TokenLocation {
-    const token_loc = tree.tokenLocation(@truncate(u32, start_index), token);
+    const start = tree.tokens.items(.start)[token];
 
     var loc = TokenLocation{
         .line = 0,
         .column = 0,
         .offset = 0,
     };
-    const token_start = token_loc.line_start;
+    const token_start = start;
     const source = tree.source[start_index..];
     var i: usize = 0;
     while (i + start_index < token_start) {

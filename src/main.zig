@@ -650,6 +650,7 @@ fn getLabelGlobal(pos_index: usize, handle: *DocumentStore.Handle) !?analysis.De
 
 fn getSymbolGlobal(arena: *std.heap.ArenaAllocator, pos_index: usize, handle: *DocumentStore.Handle) !?analysis.DeclWithHandle {
     const name = identifierFromPosition(pos_index, handle.*);
+    logger.debug("Name: {s}", .{name});
     if (name.len == 0) return null;
 
     return try analysis.lookupSymbolGlobal(&document_store, arena, handle, name, pos_index);
@@ -1314,7 +1315,6 @@ fn hoverHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: reque
     if (req.params.position.character >= 0) {
         const doc_position = try offsets.documentPosition(handle.document, req.params.position, offset_encoding);
         const pos_context = try analysis.documentPositionContext(arena, handle.document, doc_position);
-
         switch (pos_context) {
             .builtin => try hoverDefinitionBuiltin(arena, id, doc_position.absolute_index, handle),
             .var_access => try hoverDefinitionGlobal(arena, id, doc_position.absolute_index, handle, config),

@@ -136,7 +136,7 @@ fn symbolReferencesInternal(
         //     try symbolReferencesInternal(arena, store, .{ .node = use.expr, .handle = handle }, decl, encoding, context, handler);
         // },
         .container_field, .container_field_align, .container_field_init => {
-            const field = analysis.containerField(node).?;
+            const field = analysis.containerField(tree, node).?;
             if (field.ast.type_expr != 0) {
                 try symbolReferencesInternal(arena, store, .{ .node = field.ast.type_expr, .handle = handle }, decl, encoding, context, handler);
             }
@@ -145,7 +145,7 @@ fn symbolReferencesInternal(
             }
         },
         .identifier => {
-            if (try analysis.lookupSymbolGlobal(store, arena, handle, tree.getNodeSource(node), starts[main_tokens[nodes]])) |child| {
+            if (try analysis.lookupSymbolGlobal(store, arena, handle, tree.getNodeSource(node), starts[main_tokens[node]])) |child| {
                 if (std.meta.eql(decl, child)) {
                     try tokenReference(handle, main_tokens[node], encoding, context, handler);
                 }
@@ -204,14 +204,14 @@ fn symbolReferencesInternal(
         },
         .switch_case => {
             const case = tree.switchCase(node);
-            for (case_one.ast.values) |val|
+            for (case.ast.values) |val|
                 try symbolReferencesInternal(arena, store, .{ .node = val, .handle = handle }, decl, encoding, context, handler);
         },
-        .@"while", .while_simple, .while_con, .for_simple, .@"for" => {
+        .@"while", .while_simple, .while_cont, .for_simple, .@"for" => {
             const loop: ast.full.While = switch (node_tags[node]) {
                 .@"while" => tree.whileFull(node),
                 .while_simple => tree.whileSimple(node),
-                .while_con => tree.whileCont(node),
+                .while_cont => tree.whileCont(node),
                 .for_simple => tree.forSimple(node),
                 .@"for" => tree.forFull(node),
                 else => unreachable,
@@ -276,7 +276,7 @@ fn symbolReferencesInternal(
             const array_init = switch (n) {
                 .array_init, .array_init_comma => tree.arrayInit(node),
                 .array_init_dot, .array_init_dot_comma => tree.arrayInitDot(node),
-                .array_init_one, .array_init_one_comma => tree.arrayInitOne(&buf[0..1], node),
+                .array_init_one, .array_init_one_comma => tree.arrayInitOne(buf[0..1], node),
                 .array_init_dot_two, .array_init_dot_two_comma => tree.arrayInitDotTwo(&buf, node),
                 else => unreachable,
             };
@@ -298,7 +298,7 @@ fn symbolReferencesInternal(
             const struct_init: ast.full.StructInit = switch (n) {
                 .struct_init, .struct_init_comma => tree.structInit(node),
                 .struct_init_dot, .struct_init_dot_comma => tree.structInitDot(node),
-                .struct_init_one, .struct_init_one_comma => tree.structInitOne(&buf[0..1], node),
+                .struct_init_one, .struct_init_one_comma => tree.structInitOne(buf[0..1], node),
                 .struct_init_dot_two, .struct_init_dot_two_comma => tree.structInitDotTwo(&buf, node),
                 else => unreachable,
             };
@@ -369,8 +369,7 @@ fn symbolReferencesInternal(
         .builtin_call_two,
         .builtin_call_two_comma,
         => {
-            const builtin_call = analysis.builtinCallParams();
-            for (analysis.builtinCallParams()) |param|
+            for (analysis.builtinCallParams(tree, node)) |param|
                 try symbolReferencesInternal(arena, store, .{ .node = param, .handle = handle }, decl, encoding, context, handler);
         },
         .@"asm", .asm_simple => |a| {
@@ -455,7 +454,7 @@ fn symbolReferencesInternal(
         .mod,
         .mul,
         .mul_wrap,
-        .range,
+        .switch_range,
         .sub,
         .sub_wrap,
         .@"orelse",
