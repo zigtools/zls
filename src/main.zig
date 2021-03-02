@@ -220,11 +220,10 @@ fn publishDiagnostics(arena: *std.heap.ArenaAllocator, handle: DocumentStore.Han
         for (tree.rootDecls()) |decl_idx| {
             const decl = tree.nodes.items(.tag)[decl_idx];
             switch (decl) {
-                .fn_proto => blk: {
-                    const func = tree.fnProto(decl_idx);
-                    const is_extern = func.extern_export_token != null;
-                    if (is_extern)
-                        break :blk;
+                .fn_proto, .fn_proto_multi, .fn_proto_one, .fn_proto_simple, .fn_decl => blk: {
+                    var buf: [1]std.zig.ast.Node.Index = undefined;
+                    const func = analysis.fnProto(tree, decl_idx, &buf).?;
+                    if (func.extern_export_token != null) break :blk;
 
                     if (config.warn_style) {
                         if (func.name_token) |name_token| {
@@ -362,7 +361,7 @@ fn nodeToCompletion(
             .arena = arena,
             .orig_handle = orig_handle,
         };
-        try analysis.iterateSymbolsContainer(&document_store, arena, node_handle, orig_handle, declToCompletion, context, !is_type_val);
+        try analysis.iterateSymbolsContainer(&document_store, arena, node_handle, orig_handle, declToCompletion, context, is_type_val);
     }
 
     if (is_type_val) return;
@@ -873,7 +872,6 @@ fn hasComment(tree: ast.Tree, start_token: ast.TokenIndex, end_token: ast.TokenI
 
 fn declToCompletion(context: DeclToCompletionContext, decl_handle: analysis.DeclWithHandle) !void {
     const tree = decl_handle.handle.tree;
-
     switch (decl_handle.decl.*) {
         .ast_node => |node| try nodeToCompletion(context.arena, context.completions, .{ .node = node, .handle = decl_handle.handle }, null, context.orig_handle, false, context.config.*),
         .param_decl => |param| {
@@ -1236,7 +1234,6 @@ fn completionHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: 
     if (req.params.position.character >= 0) {
         const doc_position = try offsets.documentPosition(handle.document, req.params.position, offset_encoding);
         const pos_context = try analysis.documentPositionContext(arena, handle.document, doc_position);
-
         const use_snippets = config.enable_snippets and client_capabilities.supports_snippets;
         switch (pos_context) {
             .builtin => try completeBuiltin(arena, id, config),

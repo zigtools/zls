@@ -12,32 +12,37 @@ pub fn getDocCommentTokenIndex(tree: ast.Tree, node: ast.Node.Index) ?ast.TokenI
     const current = tree.nodes.items(.main_token)[node];
 
     var idx = current;
+    if (idx == 0) return null;
     switch (tags[node]) {
         .fn_proto, .fn_proto_one, .fn_proto_simple, .fn_proto_multi, .fn_decl => {
             idx -= 1;
-            idx -= @boolToInt(tokens[idx] == .keyword_extern);
-            idx -= @boolToInt(tokens[idx] == .keyword_pub);
+            if (tokens[idx] == .keyword_extern and idx > 0)
+                idx -= 1;
+            if (tokens[idx] == .keyword_pub and idx < 0)
+                idx -= 1;
         },
         .local_var_decl, .global_var_decl, .aligned_var_decl, .simple_var_decl => {
             idx -= 1;
-            idx -= @boolToInt(tokens[idx] == .keyword_pub);
+            if (tokens[idx] == .keyword_pub and idx > 0)
+                idx -= 1;
         },
         .container_field, .container_field_init, .container_field_align => {
-            idx -= 2;
+            idx -= 2; // skip '.' token
         },
         else => {
             if (isContainer(tags[node])) {
-                idx -= 2; // go to '='
+                idx -= 1; // go to '='
                 idx -= 1; // mutability
                 idx -= 1; // possible 'pub'
-                idx -= @boolToInt(tokens[idx] == .keyword_pub); // doc comment
+                if (tokens[idx] == .keyword_pub and idx > 0)
+                    idx -= 1;
             }
         },
     }
 
     // Find first doc comment token
     if (tokens[idx] == .doc_comment or tokens[idx] == .container_doc_comment) {
-        while (tokens[idx] == .doc_comment or tokens[idx] == .container_doc_comment) : (idx -= 1) {}
+        while ((tokens[idx] == .doc_comment or tokens[idx] == .container_doc_comment) and idx > 0) : (idx -= 1) {}
         return idx + 1;
     }
 
@@ -164,14 +169,15 @@ pub fn getVariableSignature(tree: ast.Tree, var_decl: ast.full.VarDecl) []const 
 // analysis.getContainerFieldSignature(handle.tree, field)
 pub fn getContainerFieldSignature(tree: ast.Tree, field: ast.full.ContainerField) []const u8 {
     const start = tree.tokenLocation(0, field.ast.name_token).line_start;
-    const end = tree.tokenLocation(@truncate(u32, start), tree.lastToken(field.ast.value_expr)).line_start;
-    return tree.source[start..end];
+    const end_node = if (field.ast.value_expr != 0) field.ast.value_expr else field.ast.type_expr;
+    const end = tree.tokenLocation(@truncate(u32, start), tree.lastToken(end_node)).line_end;
+    return tree.source[start .. end - 1];
 }
 
 /// The type node is "type"
 fn typeIsType(tree: ast.Tree, node: ast.Node.Index) bool {
     if (tree.nodes.items(.tag)[node] == .identifier) {
-        return std.mem.eql(u8, tree.tokenSlice(node), "type");
+        return std.mem.eql(u8, tree.tokenSlice(tree.nodes.items(.main_token)[node]), "type");
     }
     return false;
 }
@@ -182,7 +188,6 @@ pub fn isTypeFunction(tree: ast.Tree, func: ast.full.FnProto) bool {
 
 pub fn isGenericFunction(tree: ast.Tree, func: *ast.full.FnProto) bool {
     var it = func.iterate();
-    var slice = tree.nodes.items(.tag);
     while (it.next()) |param| {
         if (param.anytype_ellipsis3 != null or param.comptime_noalias != null) {
             return true;
@@ -204,12 +209,13 @@ pub fn isPascalCase(name: []const u8) bool {
 
 pub fn getDeclNameToken(tree: ast.Tree, node: ast.Node.Index) ?ast.TokenIndex {
     const tags = tree.nodes.items(.tag);
-    switch (tags[node]) {
+    const main_token = tree.nodes.items(.main_token)[node];
+    return switch (tags[node]) {
         // regular declaration names. + 1 to mut token because name comes after 'const'/'var'
-        .local_var_decl => return tree.localVarDecl(node).ast.mut_token + 1,
-        .global_var_decl => return tree.globalVarDecl(node).ast.mut_token + 1,
-        .simple_var_decl => return tree.simpleVarDecl(node).ast.mut_token + 1,
-        .aligned_var_decl => return tree.alignedVarDecl(node).ast.mut_token + 1,
+        .local_var_decl => tree.localVarDecl(node).ast.mut_token + 1,
+        .global_var_decl => tree.globalVarDecl(node).ast.mut_token + 1,
+        .simple_var_decl => tree.simpleVarDecl(node).ast.mut_token + 1,
+        .aligned_var_decl => tree.alignedVarDecl(node).ast.mut_token + 1,
 
         // function declaration names
         .fn_proto,
@@ -217,15 +223,17 @@ pub fn getDeclNameToken(tree: ast.Tree, node: ast.Node.Index) ?ast.TokenIndex {
         .fn_proto_one,
         .fn_proto_simple,
         .fn_decl,
-        => {
+        => blk: {
             var params: [1]ast.Node.Index = undefined;
-            return fnProto(tree, node, &params).?.name_token;
+            break :blk fnProto(tree, node, &params).?.name_token;
         },
 
         // containers
-        .container_field => return tree.containerField(node).ast.name_token,
-        .container_field_init => return tree.containerFieldInit(node).ast.name_token,
-        .container_field_align => return tree.containerFieldAlign(node).ast.name_token,
+        .container_field => tree.containerField(node).ast.name_token,
+        .container_field_init => tree.containerFieldInit(node).ast.name_token,
+        .container_field_align => tree.containerFieldAlign(node).ast.name_token,
+
+        .identifier => main_token,
 
         // @TODO: Errors
         // .error_=> {
@@ -234,11 +242,12 @@ pub fn getDeclNameToken(tree: ast.Tree, node: ast.Node.Index) ?ast.TokenIndex {
         // },
 
         // lhs of main token is name token, so use `node` - 1
-        .test_decl => return getDeclNameToken(tree, node - 1),
-        else => {},
-    }
-
-    return null;
+        .test_decl => if (tree.tokens.items(.tag)[main_token + 1] == .string_literal)
+            return main_token + 1
+        else
+            null,
+        else => null,
+    };
 }
 
 fn getDeclName(tree: ast.Tree, node: ast.Node.Index) ?[]const u8 {
@@ -251,7 +260,7 @@ fn getDeclName(tree: ast.Tree, node: ast.Node.Index) ?[]const u8 {
 
 fn isContainerDecl(decl_handle: DeclWithHandle) bool {
     return switch (decl_handle.decl.*) {
-        .ast_node => |inner_node| isContainer(decl_handle.handle.tree.nodes.items(.tag)[inner_node]) or inner_node == 0,
+        .ast_node => |inner_node| isContainer(decl_handle.handle.tree.nodes.items(.tag)[inner_node]),
         else => false,
     };
 }
@@ -748,9 +757,8 @@ pub fn resolveTypeOfNodeInternal(
         },
         .field_access => {
             const field_access = datas[node];
-            log.debug("Rhs: {s}", .{node_tags[field_access.rhs]});
-            const rhs_str = nodeToString(handle.tree, field_access.rhs) orelse return null;
-            log.debug("Acces string: {s}", .{rhs_str});
+            const rhs_str = nodeToString(handle.tree, node) orelse return null;
+
             // If we are accessing a pointer type, remove one pointerness level :)
             const left_type = try resolveFieldAccessLhsType(
                 store,
@@ -918,7 +926,9 @@ pub fn resolveTypeOfNodeInternal(
             .type = .{ .data = .{ .other = node }, .is_type_val = false },
             .handle = handle,
         },
-        else => {},
+        else => {
+            log.debug("TODO: implement type resolving for ast tag: {s}", .{node_tags[node]});
+        },
     }
     return null;
 }
@@ -1267,7 +1277,7 @@ pub fn isNodePublic(tree: ast.Tree, node: ast.Node.Index) bool {
 
 pub fn nodeToString(tree: ast.Tree, node: ast.Node.Index) ?[]const u8 {
     const data = tree.nodes.items(.data);
-    const main_tokens = tree.nodes.items(.main_token);
+    const main_token = tree.nodes.items(.main_token)[node];
     var buf: [1]ast.Node.Index = undefined;
     switch (tree.nodes.items(.tag)[node]) {
         .container_field => return tree.tokenSlice(tree.containerField(node).ast.name_token),
@@ -1291,6 +1301,16 @@ pub fn nodeToString(tree: ast.Tree, node: ast.Node.Index) ?[]const u8 {
         .fn_proto_simple => if (tree.fnProtoSimple(&buf, node).name_token) |name| {
             return tree.tokenSlice(name);
         },
+        // .call,
+        // .call_comma,
+        // .call_one,
+        // .call_one_comma,
+        // .async_call,
+        // .async_call_comma,
+        // .async_call_one,
+        // .async_call_one_comma,
+        // => return tree.tokenSlice(main_token - 1),
+        .field_access => return tree.tokenSlice(data[node].rhs),
         else => {
             log.debug("INVALID: {}", .{tree.nodes.items(.tag)[node]});
         },
@@ -1820,6 +1840,7 @@ pub const DeclWithHandle = struct {
         const tree = self.handle.tree;
         const node_tags = tree.nodes.items(.tag);
         const main_tokens = tree.nodes.items(.main_token);
+
         return switch (self.decl.*) {
             .ast_node => |node| try resolveTypeOfNodeInternal(store, arena, .{ .node = node, .handle = self.handle }, bound_type_params),
             .param_decl => |*param_decl| {
@@ -1925,11 +1946,10 @@ fn findContainerScope(container_handle: NodeWithHandle) ?*Scope {
     if (!isContainer(handle.tree.nodes.items(.tag)[container])) return null;
 
     // Find the container scope.
-    var container_scope: ?*Scope = null;
     return for (handle.document_scope.scopes) |*scope| {
-        switch (scope.*.data) {
+        switch (scope.data) {
             .container => |node| if (node == container) {
-                break container_scope;
+                break scope;
             },
             else => {},
         }
@@ -2148,6 +2168,7 @@ fn lookupSymbolGlobalInternal(
     use_trail: *std.ArrayList(ast.Node.Index),
 ) error{OutOfMemory}!?DeclWithHandle {
     for (handle.document_scope.scopes) |scope, i| {
+        // @TODO: Fix scope positions
         // if (source_index >= scope.range.start and source_index < scope.range.end) {
         if (scope.decls.getEntry(symbol)) |candidate| {
             switch (candidate.value) {
