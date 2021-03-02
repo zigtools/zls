@@ -650,7 +650,6 @@ fn getLabelGlobal(pos_index: usize, handle: *DocumentStore.Handle) !?analysis.De
 
 fn getSymbolGlobal(arena: *std.heap.ArenaAllocator, pos_index: usize, handle: *DocumentStore.Handle) !?analysis.DeclWithHandle {
     const name = identifierFromPosition(pos_index, handle.*);
-    logger.debug("Name: {s}", .{name});
     if (name.len == 0) return null;
 
     return try analysis.lookupSymbolGlobal(&document_store, arena, handle, name, pos_index);

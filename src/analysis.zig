@@ -11,21 +11,34 @@ pub fn getDocCommentTokenIndex(tree: ast.Tree, node: ast.Node.Index) ?ast.TokenI
     const tokens = tree.tokens.items(.tag);
     const current = tree.nodes.items(.main_token)[node];
 
+    var idx = current;
     switch (tags[node]) {
-        .fn_proto, .fn_proto_one, .fn_proto_simple, .fn_proto_multi => {
-            var idx = current - 1;
+        .fn_proto, .fn_proto_one, .fn_proto_simple, .fn_proto_multi, .fn_decl => {
+            idx -= 1;
             idx -= @boolToInt(tokens[idx] == .keyword_extern);
             idx -= @boolToInt(tokens[idx] == .keyword_pub);
-            return if (tokens[idx] == .doc_comment) idx else null;
         },
         .local_var_decl, .global_var_decl, .aligned_var_decl, .simple_var_decl => {
-            return if (tokens[current - 1] == .doc_comment) current - 1 else null;
+            idx -= 1;
+            idx -= @boolToInt(tokens[idx] == .keyword_pub);
         },
         .container_field, .container_field_init, .container_field_align => {
-            var idx = current - 2; // skip '.'
-            return if (tokens[idx] == .doc_comment) idx else null;
+            idx -= 2;
         },
-        else => return null,
+        else => {
+            if (isContainer(tags[node])) {
+                idx -= 2; // go to '='
+                idx -= 1; // mutability
+                idx -= 1; // possible 'pub'
+                idx -= @boolToInt(tokens[idx] == .keyword_pub); // doc comment
+            }
+        },
+    }
+
+    // Find first doc comment token
+    if (tokens[idx] == .doc_comment or tokens[idx] == .container_doc_comment) {
+        while (tokens[idx] == .doc_comment or tokens[idx] == .container_doc_comment) : (idx -= 1) {}
+        return idx + 1;
     }
 
     // @TODO: Implement doc comments for tags
@@ -63,7 +76,6 @@ pub fn collectDocComments(
     defer lines.deinit();
 
     const token_tags = tree.tokens.items(.tag);
-    const loc = tree.tokenLocation(0, doc_comments);
 
     var curr_line_tok = doc_comments;
     while (true) : (curr_line_tok += 1) {
@@ -81,8 +93,8 @@ pub fn collectDocComments(
 /// Gets a function signature (keywords, name, return value)
 pub fn getFunctionSignature(tree: ast.Tree, func: ast.full.FnProto) []const u8 {
     const start = tree.tokenLocation(0, func.ast.fn_token).line_start;
-    const end = tree.tokenLocation(0, func.ast.return_type).line_end;
-    return tree.source[start..end];
+    const end = tree.tokenLocation(0, tree.nodes.items(.main_token)[func.ast.return_type]).line_end;
+    return tree.source[start .. end - 1];
 }
 
 /// Gets a function snippet insert text
@@ -200,16 +212,15 @@ pub fn getDeclNameToken(tree: ast.Tree, node: ast.Node.Index) ?ast.TokenIndex {
         .aligned_var_decl => return tree.alignedVarDecl(node).ast.mut_token + 1,
 
         // function declaration names
-        .fn_proto => return tree.fnProto(node).name_token,
-        .fn_proto_simple => {
+        .fn_proto,
+        .fn_proto_multi,
+        .fn_proto_one,
+        .fn_proto_simple,
+        .fn_decl,
+        => {
             var params: [1]ast.Node.Index = undefined;
-            return tree.fnProtoSimple(&params, node).name_token;
+            return fnProto(tree, node, &params).?.name_token;
         },
-        .fn_proto_one => {
-            var params: [1]ast.Node.Index = undefined;
-            return tree.fnProtoOne(&params, node).name_token;
-        },
-        .fn_proto_multi => return tree.fnProtoMulti(node).name_token,
 
         // containers
         .container_field => return tree.containerField(node).ast.name_token,
@@ -272,7 +283,17 @@ fn resolveVarDeclAliasInternal(
         const lhs = datas[node_handle.node].lhs;
 
         const container_node = if (isBuiltinCall(tree, lhs)) block: {
-            const builtin = builtinCallParams(tree, lhs);
+            const data = datas[lhs];
+            const builtin = switch (node_tags[lhs]) {
+                .builtin_call, .builtin_call_comma => tree.extra_data[data.lhs..data.rhs],
+                .builtin_call_two, .builtin_call_two_comma => if (data.lhs == 0)
+                    &[_]ast.Node.Index{}
+                else if (data.rhs == 0)
+                    &[_]ast.Node.Index{data.lhs}
+                else
+                    &[_]ast.Node.Index{ data.lhs, data.rhs },
+                else => unreachable,
+            };
             if (!std.mem.eql(u8, tree.tokenSlice(main_tokens[lhs]), "@import"))
                 return null;
 
@@ -726,13 +747,16 @@ pub fn resolveTypeOfNodeInternal(
             return try resolveBracketAccessType(store, arena, left_type, .Single, bound_type_params);
         },
         .field_access => {
-            const rhs_str = nodeToString(handle.tree, datas[node].rhs) orelse return null;
+            const field_access = datas[node];
+            log.debug("Rhs: {s}", .{node_tags[field_access.rhs]});
+            const rhs_str = nodeToString(handle.tree, field_access.rhs) orelse return null;
+            log.debug("Acces string: {s}", .{rhs_str});
             // If we are accessing a pointer type, remove one pointerness level :)
             const left_type = try resolveFieldAccessLhsType(
                 store,
                 arena,
                 (try resolveTypeOfNodeInternal(store, arena, .{
-                    .node = datas[node].lhs,
+                    .node = field_access.lhs,
                     .handle = handle,
                 }, bound_type_params)) orelse return null,
                 bound_type_params,
@@ -799,7 +823,17 @@ pub fn resolveTypeOfNodeInternal(
             };
         },
         .builtin_call, .builtin_call_comma, .builtin_call_two, .builtin_call_two_comma => {
-            const params = builtinCallParams(tree, node);
+            const data = datas[node];
+            const params = switch (node_tags[node]) {
+                .builtin_call, .builtin_call_comma => tree.extra_data[data.lhs..data.rhs],
+                .builtin_call_two, .builtin_call_two_comma => if (data.lhs == 0)
+                    &[_]ast.Node.Index{}
+                else if (data.rhs == 0)
+                    &[_]ast.Node.Index{data.lhs}
+                else
+                    &[_]ast.Node.Index{ data.lhs, data.rhs },
+                else => unreachable,
+            };
 
             const call_name = tree.tokenSlice(main_tokens[node]);
             if (std.mem.eql(u8, call_name, "@This")) {
@@ -843,7 +877,7 @@ pub fn resolveTypeOfNodeInternal(
             }
 
             if (!std.mem.eql(u8, call_name, "@import")) return null;
-            if (params.len < 1) return null;
+            if (params.len == 0) return null;
 
             const import_param = params[0];
             if (node_tags[import_param] != .string_literal) return null;
@@ -866,7 +900,7 @@ pub fn resolveTypeOfNodeInternal(
         => {
             return TypeWithHandle.typeVal(node_handle);
         },
-        .fn_proto, .fn_proto_multi, .fn_proto_one, .fn_proto_simple => {
+        .fn_proto, .fn_proto_multi, .fn_proto_one, .fn_proto_simple, .fn_decl => {
             var buf: [1]ast.Node.Index = undefined;
             const fn_proto = fnProto(tree, node, &buf).?;
 
@@ -976,6 +1010,7 @@ pub const TypeWithHandle = struct {
                 .fn_proto_multi,
                 .fn_proto_one,
                 .fn_proto_simple,
+                .fn_decl,
                 => isTypeFunction(fnProto(tree, n, &buf).?),
                 else => false,
             },
@@ -991,6 +1026,7 @@ pub const TypeWithHandle = struct {
                 .fn_proto_multi,
                 .fn_proto_one,
                 .fn_proto_simple,
+                .fn_decl,
                 => isGenericFunction(fnProto(tree, n, &buf).?),
                 else => false,
             },
@@ -1006,6 +1042,7 @@ pub const TypeWithHandle = struct {
                 .fn_proto_multi,
                 .fn_proto_one,
                 .fn_proto_simple,
+                .fn_decl,
                 => true,
                 else => false,
             },
@@ -1024,16 +1061,26 @@ fn maybeCollectImport(tree: ast.Tree, builtin_call: ast.Node.Index, arr: *std.Ar
     const datas = tree.nodes.items(.data);
 
     const builtin_tag = tags[builtin_call];
-    const builtin_data = datas[builtin_call];
+    const data = datas[builtin_call];
 
-    std.debug.assert(builtin_tag == .builtin_call);
+    std.debug.assert(isBuiltinCall(tree, builtin_call));
     if (!std.mem.eql(u8, tree.tokenSlice(builtin_call), "@import")) return;
-    const params = tree.extra_data[builtin_data.lhs..builtin_data.rhs];
+
+    const params = switch (builtin_tag) {
+        .builtin_call, .builtin_call_comma => tree.extra_data[data.lhs..data.rhs],
+        .builtin_call_two, .builtin_call_two_comma => if (data.lhs == 0)
+            &[_]ast.Node.Index{}
+        else if (data.rhs == 0)
+            &[_]ast.Node.Index{data.lhs}
+        else
+            &[_]ast.Node.Index{ data.lhs, data.rhs },
+        else => unreachable,
+    };
     if (params.len > 1) return;
 
     if (tags[params[0]] != .string_literal) return;
 
-    const import_str = tree.tokenSlice(params[0]);
+    const import_str = tree.tokenSlice(tree.nodes.items(.main_token)[params[0]]);
     try arr.append(import_str[1 .. import_str.len - 1]);
 }
 
@@ -1219,6 +1266,8 @@ pub fn isNodePublic(tree: ast.Tree, node: ast.Node.Index) bool {
 }
 
 pub fn nodeToString(tree: ast.Tree, node: ast.Node.Index) ?[]const u8 {
+    const data = tree.nodes.items(.data);
+    const main_tokens = tree.nodes.items(.main_token);
     var buf: [1]ast.Node.Index = undefined;
     switch (tree.nodes.items(.tag)[node]) {
         .container_field => return tree.tokenSlice(tree.containerField(node).ast.name_token),
@@ -1267,29 +1316,13 @@ fn isBuiltinCall(tree: ast.Tree, node: ast.Node.Index) bool {
     };
 }
 
-pub fn builtinCallParams(tree: ast.Tree, node: ast.Node.Index) []const ast.Node.Index {
-    std.debug.assert(isBuiltinCall(tree, node));
-    const datas = tree.nodes.items(.data);
-
-    return switch (tree.nodes.items(.tag)[node]) {
-        .builtin_call, .builtin_call_comma => tree.extra_data[datas[node].lhs..datas[node].rhs],
-        .builtin_call_two, .builtin_call_two_comma => if (datas[node].lhs == 0)
-            &[_]ast.Node.Index{}
-        else if (datas[node].rhs == 0)
-            &[_]ast.Node.Index{datas[node].lhs}
-        else
-            &[_]ast.Node.Index{ datas[node].lhs, datas[node].rhs },
-        else => unreachable,
-    };
-}
-
 pub fn fnProto(tree: ast.Tree, node: ast.Node.Index, buf: *[1]ast.Node.Index) ?ast.full.FnProto {
     return switch (tree.nodes.items(.tag)[node]) {
         .fn_proto => tree.fnProto(node),
         .fn_proto_multi => tree.fnProtoMulti(node),
         .fn_proto_one => tree.fnProtoOne(buf, node),
         .fn_proto_simple => tree.fnProtoSimple(buf, node),
-        // .fn_decl => tree.fnProto(tree.nodes.items(.data)[node].lhs),
+        .fn_decl => fnProto(tree, tree.nodes.items(.data)[node].lhs, buf),
         else => null,
     };
 }
@@ -1315,10 +1348,21 @@ pub fn getImportStr(tree: ast.Tree, node: ast.Node.Index, source_index: usize) ?
             const call_name = tree.tokenSlice(builtin_token);
 
             if (!std.mem.eql(u8, call_name, "@import")) continue;
-            const params = builtinCallParams(tree, decl_idx);
+            const data = tree.nodes.items(.data)[decl_idx];
+            const params = switch (node_tags[decl_idx]) {
+                .builtin_call, .builtin_call_comma => tree.extra_data[data.lhs..data.rhs],
+                .builtin_call_two, .builtin_call_two_comma => if (data.lhs == 0)
+                    &[_]ast.Node.Index{}
+                else if (data.rhs == 0)
+                    &[_]ast.Node.Index{data.lhs}
+                else
+                    &[_]ast.Node.Index{ data.lhs, data.rhs },
+                else => unreachable,
+            };
+
             if (params.len != 1) continue;
 
-            const import_str = tree.tokenSlice(tree.firstToken(params[0]));
+            const import_str = tree.tokenSlice(tree.nodes.items(.main_token)[params[0]]);
             return import_str[1 .. import_str.len - 1];
         }
 
@@ -1653,7 +1697,7 @@ fn getDocumentSymbolsInternal(allocator: *std.mem.Allocator, tree: ast.Tree, nod
     };
 
     const tags = tree.nodes.items(.tag);
-    log.debug("{s} - {s}", .{ name, tags[node] });
+    // log.debug("{s} - {s}", .{ name, tags[node] });
     (try context.symbols.addOne()).* = .{
         .name = name,
         .kind = switch (tags[node]) {
@@ -2104,23 +2148,23 @@ fn lookupSymbolGlobalInternal(
     use_trail: *std.ArrayList(ast.Node.Index),
 ) error{OutOfMemory}!?DeclWithHandle {
     for (handle.document_scope.scopes) |scope, i| {
-        if (source_index >= scope.range.start and source_index < scope.range.end) {
-            if (scope.decls.getEntry(symbol)) |candidate| {
-                switch (candidate.value) {
-                    .ast_node => |node| {
-                        if (handle.tree.nodes.items(.tag)[node].isContainerField()) continue;
-                    },
-                    .label_decl => continue,
-                    else => {},
-                }
-                return DeclWithHandle{
-                    .decl = &candidate.value,
-                    .handle = handle,
-                };
+        // if (source_index >= scope.range.start and source_index < scope.range.end) {
+        if (scope.decls.getEntry(symbol)) |candidate| {
+            switch (candidate.value) {
+                .ast_node => |node| {
+                    if (handle.tree.nodes.items(.tag)[node].isContainerField()) continue;
+                },
+                .label_decl => continue,
+                else => {},
             }
-
-            // if (try resolveUse(store, arena, scope.uses, symbol, handle, use_trail)) |result| return result;
+            return DeclWithHandle{
+                .decl = &candidate.value,
+                .handle = handle,
+            };
         }
+
+        // if (try resolveUse(store, arena, scope.uses, symbol, handle, use_trail)) |result| return result;
+        // }
 
         if (scope.range.start > source_index) return null;
     }
@@ -2459,10 +2503,7 @@ fn makeScopeInternal(
     }
 
     switch (node) {
-        .fn_decl => {
-            try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, data[node_idx].rhs);
-        },
-        .fn_proto, .fn_proto_one, .fn_proto_simple, .fn_proto_multi => {
+        .fn_proto, .fn_proto_one, .fn_proto_simple, .fn_proto_multi, .fn_decl => |fn_tag| {
             var buf: [1]ast.Node.Index = undefined;
             const func = fnProto(tree, node_idx, &buf).?;
 
@@ -2483,6 +2524,10 @@ fn makeScopeInternal(
                         // TODO record a redefinition error
                     }
                 }
+            }
+
+            if (fn_tag == .fn_decl) {
+                try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, data[node_idx].rhs);
             }
 
             return;
@@ -2543,7 +2588,6 @@ fn makeScopeInternal(
 
             for (statements) |idx| {
                 try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, idx);
-                // if (tags[
                 if (varDecl(tree, idx)) |var_decl| {
                     const name = tree.tokenSlice(var_decl.ast.mut_token + 1);
                     if (try scopes.items[scope_idx].decls.fetchPut(name, .{ .ast_node = idx })) |existing| {
@@ -2624,7 +2668,7 @@ fn makeScopeInternal(
                 else => unreachable,
             };
             if (while_node.label_token) |label| {
-                std.debug.assert(tags[label] == .identifier);
+                std.debug.assert(token_tags[label] == .identifier);
                 var scope = try scopes.addOne(allocator);
                 scope.* = .{
                     .range = .{

@@ -368,8 +368,20 @@ fn symbolReferencesInternal(
         .builtin_call_comma,
         .builtin_call_two,
         .builtin_call_two_comma,
-        => {
-            for (analysis.builtinCallParams(tree, node)) |param|
+        => |builtin_tag| {
+            const data = datas[node];
+            const params = switch (builtin_tag) {
+                .builtin_call, .builtin_call_comma => tree.extra_data[data.lhs..data.rhs],
+                .builtin_call_two, .builtin_call_two_comma => if (data.lhs == 0)
+                    &[_]ast.Node.Index{}
+                else if (data.rhs == 0)
+                    &[_]ast.Node.Index{data.lhs}
+                else
+                    &[_]ast.Node.Index{ data.lhs, data.rhs },
+                else => unreachable,
+            };
+
+            for (params) |param|
                 try symbolReferencesInternal(arena, store, .{ .node = param, .handle = handle }, decl, encoding, context, handler);
         },
         .@"asm", .asm_simple => |a| {
