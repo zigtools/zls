@@ -76,7 +76,7 @@ pub const builtins = [_]Builtin{
         \\```
         \\```zig
         \\$ zig test test.zig
-        \\1/1 test "async fn pointer in a struct field"... OK
+        \\Test [1/1] test "async fn pointer in a struct field"...
         \\All 1 tests passed.
         \\
         \\```
@@ -202,7 +202,7 @@ pub const builtins = [_]Builtin{
         \\```
         \\```zig
         \\$ zig test call.zig
-        \\1/1 test "noinline function call"... OK
+        \\Test [1/1] test "noinline function call"...
         \\All 1 tests passed.
         \\
         \\```
@@ -405,8 +405,8 @@ pub const builtins = [_]Builtin{
         \\```
         \\```zig
         \\$ zig test test.zig
-        \\1/1 test "main"... Runtime in main, num1 = 100.
-        \\OK
+        \\Test [1/1] test "main"... Runtime in main, num1 = 100.
+        \\
         \\All 1 tests passed.
         \\
         \\```
@@ -482,7 +482,7 @@ pub const builtins = [_]Builtin{
     },
     .{
         .name = "@errorToInt",
-        .signature = "@errorToInt(err: anytype) std.meta.IntType(false, @sizeOf(anyerror) * 8)",
+        .signature = "@errorToInt(err: anytype) std.meta.Int(.unsigned, @sizeOf(anyerror) * 8)",
         .snippet = "@errorToInt(${1:err: anytype})",
         .documentation =
         \\ Supports the following types:
@@ -546,19 +546,21 @@ pub const builtins = [_]Builtin{
         .signature = "@field(lhs: anytype, comptime field_name: []const u8) (field)",
         .snippet = "@field(${1:lhs: anytype}, ${2:comptime field_name: []const u8})",
         .documentation =
-        \\Performs field access by a compile-time string.
+        \\Performs field access by a compile-time string. Works on both fields and declarations.
         \\test.zig
         \\```zig
         \\const std = @import("std");
         \\
         \\const Point = struct {
         \\    x: u32,
-        \\    y: u32
+        \\    y: u32,
+        \\
+        \\    pub var z: u32 = 1;
         \\};
         \\
         \\test "field access by string" {
         \\    const expect = std.testing.expect;
-        \\    var p = Point {.x = 0, .y = 0};
+        \\    var p = Point{ .x = 0, .y = 0 };
         \\
         \\    @field(p, "x") = 4;
         \\    @field(p, "y") = @field(p, "x") + 1;
@@ -566,11 +568,21 @@ pub const builtins = [_]Builtin{
         \\    expect(@field(p, "x") == 4);
         \\    expect(@field(p, "y") == 5);
         \\}
+        \\
+        \\test "decl access by string" {
+        \\    const expect = std.testing.expect;
+        \\
+        \\    expect(@field(Point, "z") == 1);
+        \\
+        \\    @field(Point, "z") = 2;
+        \\    expect(@field(Point, "z") == 2);
+        \\}
         \\```
         \\```zig
         \\$ zig test test.zig
-        \\1/1 test "field access by string"... OK
-        \\All 1 tests passed.
+        \\Test [1/2] test "field access by string"...
+        \\Test [2/2] test "decl access by string"...
+        \\All 2 tests passed.
         \\
         \\```
     },
@@ -626,7 +638,7 @@ pub const builtins = [_]Builtin{
         \\```
         \\```zig
         \\$ zig test test.zig
-        \\1/1 test "heap allocated frame"... OK
+        \\Test [1/1] test "heap allocated frame"...
         \\All 1 tests passed.
         \\
         \\```
@@ -681,7 +693,7 @@ pub const builtins = [_]Builtin{
         \\```
         \\```zig
         \\$ zig test test.zig
-        \\1/1 test "@hasDecl"... OK
+        \\Test [1/1] test "@hasDecl"...
         \\All 1 tests passed.
         \\
         \\```
@@ -716,16 +728,16 @@ pub const builtins = [_]Builtin{
     },
     .{
         .name = "@intToEnum",
-        .signature = "@intToEnum(comptime DestType: type, int_value: @TagType(DestType)) DestType",
-        .snippet = "@intToEnum(${1:comptime DestType: type}, ${2:int_value: @TagType(DestType)})",
+        .signature = "@intToEnum(comptime DestType: type, int_value: std.meta.Tag(DestType)) DestType",
+        .snippet = "@intToEnum(${1:comptime DestType: type}, ${2:int_value: std.meta.Tag(DestType)})",
         .documentation =
         \\ Converts an integer into an enum value.
         \\ Attempting to convert an integer which represents no value in the chosen enum type invokes safety-checked Undefined Behavior.
     },
     .{
         .name = "@intToError",
-        .signature = "@intToError(value: std.meta.IntType(false, @sizeOf(anyerror) * 8)) anyerror",
-        .snippet = "@intToError(${1:value: std.meta.IntType(false, @sizeOf(anyerror) * 8)})",
+        .signature = "@intToError(value: std.meta.Int(.unsigned, @sizeOf(anyerror) * 8)) anyerror",
+        .snippet = "@intToError(${1:value: std.meta.Int(.unsigned, @sizeOf(anyerror) * 8)})",
         .documentation =
         \\ Converts from the integer representation of an error into The Global Error Set type.
         \\ It is generally recommended to avoid this cast, as the integer representation of an error is not stable across source code changes.
@@ -811,7 +823,8 @@ pub const builtins = [_]Builtin{
         \\```
         \\```zig
         \\$ zig test test.zig
-        \\1/1 test "@wasmMemoryGrow"... SKIP
+        \\Test [1/1] test "@wasmMemoryGrow"...
+        \\Test [2/1] test "@wasmMemoryGrow"...SKIP
         \\0 passed; 1 skipped.
         \\
         \\```
@@ -931,7 +944,7 @@ pub const builtins = [_]Builtin{
         \\```
         \\```zig
         \\$ zig test test.zig
-        \\1/1 test "foo"... OK
+        \\Test [1/1] test "foo"...
         \\All 1 tests passed.
         \\
         \\```
@@ -981,9 +994,9 @@ pub const builtins = [_]Builtin{
         \\```
         \\```zig
         \\$ zig test test.zig-OReleaseFast
-        \\1/1 test "@setRuntimeSafety"... integer overflow
+        \\Test [1/1] test "@setRuntimeSafety"... thread 5843 panic: integer overflow
         \\error: the following test command crashed:
-        \\docgen_tmp/zig-cache/o/1dd5b9d2eb0c824ad8bb3cab3c173811/test
+        \\docgen_tmp/zig-cache/o/0113d94df454707487cd279be234ac64/test /home/vsts/work/1/s/build/release/bin/zig
         \\
         \\```
         \\Note: it is planned to replace @setRuntimeSafety with @optimizeFor
@@ -1053,7 +1066,7 @@ pub const builtins = [_]Builtin{
         \\```
         \\```zig
         \\$ zig test test.zig
-        \\1/1 test "vector @splat"... OK
+        \\Test [1/1] test "vector @splat"...
         \\All 1 tests passed.
         \\
         \\```
@@ -1093,7 +1106,7 @@ pub const builtins = [_]Builtin{
         \\```
         \\```zig
         \\$ zig test test.zig
-        \\1/1 test "@src"... OK
+        \\Test [1/1] test "@src"...
         \\All 1 tests passed.
         \\
         \\```
@@ -1218,14 +1231,6 @@ pub const builtins = [_]Builtin{
         \\If the enum is non-exhaustive and the tag value does not map to a name, it invokes safety-checked Undefined Behavior.
     },
     .{
-        .name = "@TagType",
-        .signature = "@TagType(T: type) type",
-        .snippet = "@TagType(${1:T: type})",
-        .documentation =
-        \\ For an enum, returns the integer type that is used to store the enumeration value.
-        \\ For a union, returns the enum type that is used to store the tag value.
-    },
-    .{
         .name = "@This",
         .signature = "@This() type",
         .snippet = "@This()",
@@ -1256,7 +1261,7 @@ pub const builtins = [_]Builtin{
         \\```
         \\```zig
         \\$ zig test test.zig
-        \\1/1 test "@This()"... OK
+        \\Test [1/1] test "@This()"...
         \\All 1 tests passed.
         \\
         \\```
@@ -1278,21 +1283,21 @@ pub const builtins = [_]Builtin{
         \\```
         \\```zig
         \\$ zig test test.zig
-        \\1/1 test "integer cast panic"... integer cast truncated bits
-        \\/deps/zig/docgen_tmp/test.zig:3:17: 0x2059b5 in test "integer cast panic" (test)
+        \\Test [1/1] test "integer cast panic"... thread 5889 panic: integer cast truncated bits
+        \\/home/vsts/work/1/s/docgen_tmp/test.zig:3:17: 0x206635 in test "integer cast panic" (test)
         \\    var b: u8 = @intCast(u8, a);
         \\                ^
-        \\/deps/zig/lib/std/special/test_runner.zig:61:28: 0x22d9b1 in std.special.main (test)
+        \\/home/vsts/work/1/s/build/release/lib/zig/std/special/test_runner.zig:69:28: 0x2302c8 in std.special.main (test)
         \\        } else test_fn.func();
         \\                           ^
-        \\/deps/zig/lib/std/start.zig:334:37: 0x2072bd in std.start.posixCallMainAndExit (test)
+        \\/home/vsts/work/1/s/build/release/lib/zig/std/start.zig:345:37: 0x207e24 in std.start.posixCallMainAndExit (test)
         \\            const result = root.main() catch |err| {
         \\                                    ^
-        \\/deps/zig/lib/std/start.zig:162:5: 0x206ff2 in std.start._start (test)
+        \\/home/vsts/work/1/s/build/release/lib/zig/std/start.zig:163:5: 0x207cc2 in std.start._start (test)
         \\    @call(.{ .modifier = .never_inline }, posixCallMainAndExit, .{});
         \\    ^
         \\error: the following test command crashed:
-        \\docgen_tmp/zig-cache/o/0ac59203e6cc7c69be59cafa47214a9f/test
+        \\docgen_tmp/zig-cache/o/9112468a201333e2bc31a6908092ae05/test /home/vsts/work/1/s/build/release/bin/zig
         \\
         \\```
         \\ However this is well defined and working code:
@@ -1309,7 +1314,7 @@ pub const builtins = [_]Builtin{
         \\```
         \\```zig
         \\$ zig test truncate.zig
-        \\1/1 test "integer truncation"... OK
+        \\Test [1/1] test "integer truncation"...
         \\All 1 tests passed.
         \\
         \\```
@@ -1364,7 +1369,7 @@ pub const builtins = [_]Builtin{
         \\```
         \\```zig
         \\$ zig test test.zig
-        \\1/1 test "no runtime side effects"... OK
+        \\Test [1/1] test "no runtime side effects"...
         \\All 1 tests passed.
         \\
         \\```
