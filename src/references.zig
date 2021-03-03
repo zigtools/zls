@@ -78,6 +78,7 @@ fn symbolReferencesInternal(
     const node = node_handle.node;
     const handle = node_handle.handle;
     const tree = handle.tree;
+    if (node > tree.nodes.len) return;
     const node_tags = tree.nodes.items(.tag);
     const datas = tree.nodes.items(.data);
     const main_tokens = tree.nodes.items(.main_token);
@@ -405,7 +406,7 @@ fn symbolReferencesInternal(
         .field_access => {
             try symbolReferencesInternal(arena, store, .{ .node = datas[node].lhs, .handle = handle }, decl, encoding, context, handler);
 
-            const rhs_str = analysis.nodeToString(handle.tree, node) orelse return;
+            const rhs_str = tree.tokenSlice(datas[node].rhs);
             var bound_type_params = analysis.BoundTypeParams.init(&arena.allocator);
             const left_type = try analysis.resolveFieldAccessLhsType(
                 store,
@@ -504,9 +505,11 @@ pub fn symbolReferences(
             for (handles.items) |handle| {
                 if (include_decl and handle == curr_handle) {
                     try tokenReference(curr_handle, decl_handle.nameToken(), encoding, context, handler);
+                    try symbolReferencesInternal(arena, store, .{ .node = 0, .handle = handle }, decl_handle, encoding, context, handler);
                 }
 
-                try symbolReferencesInternal(arena, store, .{ .node = 0, .handle = handle }, decl_handle, encoding, context, handler);
+                // @TODO: make references across files working
+                // try symbolReferencesInternal(arena, store, .{ .node = 0, .handle = handle }, decl_handle, encoding, context, handler);
             }
         },
         .param_decl => |param| {

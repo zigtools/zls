@@ -413,7 +413,6 @@ pub fn resolveReturnType(
     }
 
     if (fn_decl.ast.return_type == 0) return null;
-    log.debug("Ret type: '{s}'", .{tree.nodes.items(.tag)[fn_decl.ast.return_type]});
     return resolveTypeOfNodeInternal(store, arena, .{
         .node = fn_decl.ast.return_type,
         .handle = handle,
@@ -639,12 +638,11 @@ pub fn resolveTypeOfNodeInternal(
                     .ast_node => |n| {
                         if (n == node) return null;
                         if (varDecl(tree, n)) |var_decl| {
-                            if (var_decl.ast.init_node == node) return null;
+                            if (var_decl.ast.init_node != 0 and var_decl.ast.init_node == node) return null;
                         }
                     },
                     else => {},
                 }
-                log.debug("Resolving child: {s}", .{tree.tokenSlice(child.nameToken())});
                 return try child.resolveType(store, arena, bound_type_params);
             }
             return null;
@@ -681,7 +679,6 @@ pub fn resolveTypeOfNodeInternal(
                 else => unreachable,
             };
 
-            log.debug("Call fn expr: {s}", .{node_tags[call.ast.fn_expr]});
             const decl = (try resolveTypeOfNodeInternal(
                 store,
                 arena,
@@ -694,41 +691,37 @@ pub fn resolveTypeOfNodeInternal(
                 .other => |n| n,
                 else => return null,
             };
-            log.debug("CALL: {d} - {d}", .{ call.ast.fn_expr, decl_node });
             var buf: [1]ast.Node.Index = undefined;
-            const func_maybe = fnProto(tree, decl_node, &buf);
+            const func_maybe = fnProto(decl.handle.tree, decl_node, &buf);
 
             if (func_maybe) |fn_decl| {
                 // check for x.y(..).  if '.' is found, it means first param should be skipped
                 const has_self_param = token_tags[call.ast.lparen - 2] == .period;
-                var it = fn_decl.iterate(tree);
+                var it = fn_decl.iterate(decl.handle.tree);
 
                 // Bind type params to the expressions passed in the calls.
                 const param_len = std.math.min(call.ast.params.len + @boolToInt(has_self_param), fn_decl.ast.params.len);
                 while (it.next()) |decl_param| {
                     if (it.param_i == 0 and has_self_param) continue;
                     if (it.param_i >= param_len) break;
-                    if (!typeIsType(tree, decl_param.type_expr)) continue;
+                    if (!typeIsType(decl.handle.tree, decl_param.type_expr)) continue;
 
                     const call_param_type = (try resolveTypeOfNodeInternal(store, arena, .{
                         .node = call.ast.params[it.param_i - @boolToInt(has_self_param)],
-                        .handle = handle,
+                        .handle = decl.handle,
                     }, bound_type_params)) orelse continue;
                     if (!call_param_type.type.is_type_val) continue;
 
                     _ = try bound_type_params.put(decl_param, call_param_type);
                 }
 
-                const has_body = node_tags[decl_node] == .fn_decl;
-                const body = datas[decl_node].rhs;
+                const has_body = decl.handle.tree.nodes.items(.tag)[decl_node] == .fn_decl;
+                const body = decl.handle.tree.nodes.items(.data)[decl_node].rhs;
                 return try resolveReturnType(store, arena, fn_decl, decl.handle, bound_type_params, if (has_body) body else null);
             }
             return null;
         },
-        .@"comptime", .@"nosuspend" => {
-            return try resolveTypeOfNodeInternal(store, arena, .{ .node = datas[node].lhs, .handle = handle }, bound_type_params);
-        },
-        .grouped_expression => {
+        .@"comptime", .@"nosuspend", .grouped_expression => {
             return try resolveTypeOfNodeInternal(store, arena, .{ .node = datas[node].lhs, .handle = handle }, bound_type_params);
         },
         .struct_init, .struct_init_comma, .struct_init_one, .struct_init_one_comma => {
@@ -769,8 +762,9 @@ pub fn resolveTypeOfNodeInternal(
         },
         .field_access => {
             const field_access = datas[node];
-            const rhs_str = nodeToString(handle.tree, node) orelse return null;
 
+            if (datas[node].rhs == 0) return null;
+            const rhs_str = tree.tokenSlice(datas[node].rhs);
             // If we are accessing a pointer type, remove one pointerness level :)
             const left_type = try resolveFieldAccessLhsType(
                 store,
@@ -786,7 +780,6 @@ pub fn resolveTypeOfNodeInternal(
                 .other => |n| n,
                 else => return null,
             };
-            log.debug("Left_type_node: '{s}' for rhs: '{s}'", .{ node_tags[left_type_node], rhs_str });
             if (try lookupSymbolContainer(
                 store,
                 arena,
@@ -794,7 +787,6 @@ pub fn resolveTypeOfNodeInternal(
                 rhs_str,
                 left_type.type.is_type_val,
             )) |child| {
-                log.debug("Found child: '{s}'", .{tree.tokenSlice(child.nameToken())});
                 return try child.resolveType(store, arena, bound_type_params);
             } else return null;
         },
@@ -939,8 +931,9 @@ pub fn resolveTypeOfNodeInternal(
             .type = .{ .data = .{ .other = node }, .is_type_val = false },
             .handle = handle,
         },
+        .root => return TypeWithHandle.typeVal(node_handle),
         else => {
-            log.debug("TODO: implement type resolving for ast tag: {s}", .{node_tags[node]});
+            // log.debug("TODO: implement type resolving for ast tag: {s}", .{node_tags[node]});
         },
     }
     return null;
@@ -1309,6 +1302,16 @@ pub fn nodeToString(tree: ast.Tree, node: ast.Node.Index) ?[]const u8 {
         => if (fnProto(tree, node, &buf).?.name_token) |name|
             return tree.tokenSlice(name),
         .field_access => return tree.tokenSlice(data[node].rhs),
+        .call,
+        .call_comma,
+        .async_call,
+        .async_call_comma,
+        => return tree.tokenSlice(tree.callFull(node).ast.lparen - 1),
+        .call_one,
+        .call_one_comma,
+        .async_call_one,
+        .async_call_one_comma,
+        => return tree.tokenSlice(tree.callOne(&buf, node).ast.lparen - 1),
         else => |tag| log.debug("INVALID: {}", .{tag}),
     }
 
