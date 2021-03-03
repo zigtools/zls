@@ -199,11 +199,15 @@ fn symbolReferencesInternal(
         },
         .switch_case_one => {
             const case_one = tree.switchCaseOne(node);
+            if (case_one.ast.target_expr != 0)
+                try symbolReferencesInternal(arena, store, .{ .node = case_one.ast.target_expr, .handle = handle }, decl, encoding, context, handler);
             for (case_one.ast.values) |val|
                 try symbolReferencesInternal(arena, store, .{ .node = val, .handle = handle }, decl, encoding, context, handler);
         },
         .switch_case => {
             const case = tree.switchCase(node);
+            if (case.ast.target_expr != 0)
+                try symbolReferencesInternal(arena, store, .{ .node = case.ast.target_expr, .handle = handle }, decl, encoding, context, handler);
             for (case.ast.values) |val|
                 try symbolReferencesInternal(arena, store, .{ .node = val, .handle = handle }, decl, encoding, context, handler);
         },
@@ -401,7 +405,7 @@ fn symbolReferencesInternal(
         .field_access => {
             try symbolReferencesInternal(arena, store, .{ .node = datas[node].lhs, .handle = handle }, decl, encoding, context, handler);
 
-            const rhs_str = analysis.nodeToString(handle.tree, datas[node].rhs) orelse return;
+            const rhs_str = analysis.nodeToString(handle.tree, node) orelse return;
             var bound_type_params = analysis.BoundTypeParams.init(&arena.allocator);
             const left_type = try analysis.resolveFieldAccessLhsType(
                 store,
@@ -426,7 +430,7 @@ fn symbolReferencesInternal(
                 !left_type.type.is_type_val,
             )) |child| {
                 if (std.meta.eql(child, decl)) {
-                    try tokenReference(handle, tree.firstToken(datas[node].rhs), encoding, context, handler);
+                    try tokenReference(handle, datas[node].rhs, encoding, context, handler);
                 }
             }
         },

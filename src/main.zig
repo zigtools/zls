@@ -361,7 +361,7 @@ fn nodeToCompletion(
             .arena = arena,
             .orig_handle = orig_handle,
         };
-        try analysis.iterateSymbolsContainer(&document_store, arena, node_handle, orig_handle, declToCompletion, context, is_type_val);
+        try analysis.iterateSymbolsContainer(&document_store, arena, node_handle, orig_handle, declToCompletion, context, !is_type_val);
     }
 
     if (is_type_val) return;
