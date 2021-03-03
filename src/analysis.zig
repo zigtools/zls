@@ -2056,7 +2056,7 @@ fn iterateSymbolsGlobalInternal(
                 try callback(context, DeclWithHandle{ .decl = &entry.value, .handle = handle });
             }
 
-            // for (scope.uses) |use| {
+            // for (Index) |use| {
             //     if (std.mem.indexOfScalar(*ast.Node.Use, use_trail.items, use) != null) continue;
             //     try use_trail.append(use);
 
@@ -2270,7 +2270,7 @@ pub const DocumentScope = struct {
                 scope.range.start,
                 scope.range.end,
                 {},
-                // scope.uses.len,
+                scope.uses.len,
             });
 
             var decl_it = scope.decls.iterator();
@@ -2286,7 +2286,7 @@ pub const DocumentScope = struct {
     pub fn deinit(self: DocumentScope, allocator: *std.mem.Allocator) void {
         for (self.scopes) |*scope| {
             scope.decls.deinit();
-            // allocator.free(scope.uses);
+            allocator.free(scope.uses);
             allocator.free(scope.tests);
         }
         allocator.free(self.scopes);
@@ -2308,7 +2308,7 @@ pub const Scope = struct {
     range: SourceRange,
     decls: std.StringHashMap(Declaration),
     tests: []const ast.Node.Index,
-    // uses: []const *ast.Node.Data,
+    uses: []const ast.Node.Index,
 
     data: Data,
 };
@@ -2417,26 +2417,25 @@ fn makeScopeInternal(
         (try scopes.addOne(allocator)).* = .{
             .range = nodeSourceRange(tree, node_idx),
             .decls = std.StringHashMap(Declaration).init(allocator),
-            // .uses = &[0]*ast.Node.Use{},
+            .uses = &.{},
             .tests = &.{},
             .data = .{ .container = node_idx },
         };
         const scope_idx = scopes.items.len - 1;
-        // var uses = std.ArrayList(*ast.Node.Use).init(allocator);
+        var uses = std.ArrayList(ast.Node.Index).init(allocator);
         var tests = std.ArrayList(ast.Node.Index).init(allocator);
 
         errdefer {
             scopes.items[scope_idx].decls.deinit();
-            // uses.deinit();
+            uses.deinit();
             tests.deinit();
         }
 
         for (ast_decls) |decl| {
-            // @TODO: Implement using namespace
-            // if (decl.castTag(.Use)) |use| {
-            //     try uses.append(use);
-            //     continue;
-            // }
+            if (tags[decl] == .@"usingnamespace") {
+                try uses.append(decl);
+                continue;
+            }
 
             try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, decl);
             const name = getDeclName(tree, decl) orelse continue;
@@ -2512,7 +2511,7 @@ fn makeScopeInternal(
         }
 
         scopes.items[scope_idx].tests = tests.toOwnedSlice();
-        // scopes.items[scope_idx].uses = uses.toOwnedSlice();
+        scopes.items[scope_idx].uses = uses.toOwnedSlice();
         return;
     }
 
@@ -2524,7 +2523,7 @@ fn makeScopeInternal(
             (try scopes.addOne(allocator)).* = .{
                 .range = nodeSourceRange(tree, node_idx),
                 .decls = std.StringHashMap(Declaration).init(allocator),
-                // .uses = &[0]*ast.Node.Use{},
+                .uses = &.{},
                 .tests = &.{},
                 .data = .{ .function = node_idx },
             };
@@ -2562,7 +2561,7 @@ fn makeScopeInternal(
                         .end = tree.tokenLocation(0, last_token).line_start,
                     },
                     .decls = std.StringHashMap(Declaration).init(allocator),
-                    // .uses = &[0]*ast.Node.Use{},
+                    .uses = &.{},
                     .tests = &.{},
                     .data = .other,
                 };
@@ -2573,16 +2572,16 @@ fn makeScopeInternal(
             (try scopes.addOne(allocator)).* = .{
                 .range = nodeSourceRange(tree, node_idx),
                 .decls = std.StringHashMap(Declaration).init(allocator),
-                // .uses = &[0]*ast.Node.Use{},
+                .uses = &.{},
                 .tests = &.{},
                 .data = .{ .block = node_idx },
             };
             var scope_idx = scopes.items.len - 1;
-            // var uses = std.ArrayList(*ast.Node.Use).init(allocator);
+            var uses = std.ArrayList(ast.Node.Index).init(allocator);
 
             errdefer {
                 scopes.items[scope_idx].decls.deinit();
-                // uses.deinit();
+                uses.deinit();
             }
 
             const statements: []const ast.Node.Index = switch (node) {
@@ -2601,6 +2600,11 @@ fn makeScopeInternal(
             };
 
             for (statements) |idx| {
+                if (tags[idx] == .@"usingnamespace") {
+                    try uses.append(idx);
+                    continue;
+                }
+
                 try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, idx);
                 if (varDecl(tree, idx)) |var_decl| {
                     const name = tree.tokenSlice(var_decl.ast.mut_token + 1);
@@ -2610,7 +2614,7 @@ fn makeScopeInternal(
                 }
             }
 
-            // scopes.items[scope_idx].uses = uses.toOwnedSlice();
+            scopes.items[scope_idx].uses = uses.toOwnedSlice();
             return;
         },
         .@"comptime", .@"nosuspend" => {
@@ -2630,7 +2634,7 @@ fn makeScopeInternal(
                         .end = tree.tokenLocation(0, tree.lastToken(if_node.ast.then_expr)).line_end,
                     },
                     .decls = std.StringHashMap(Declaration).init(allocator),
-                    // .uses = &[0]*ast.Node.Use{},
+                    .uses = &.{},
                     .tests = &.{},
                     .data = .other,
                 };
@@ -2660,7 +2664,7 @@ fn makeScopeInternal(
                             .end = tree.tokenLocation(0, tree.lastToken(if_node.ast.else_expr)).line_end,
                         },
                         .decls = std.StringHashMap(Declaration).init(allocator),
-                        // .uses = &[0]*ast.Node.Use{},
+                        .uses = &.{},
                         .tests = &.{},
                         .data = .other,
                     };
@@ -2690,7 +2694,7 @@ fn makeScopeInternal(
                         .end = tree.tokenLocation(0, tree.lastToken(node_idx)).line_end,
                     },
                     .decls = std.StringHashMap(Declaration).init(allocator),
-                    // .uses = &[0]*ast.Node.Use{},
+                    .uses = &.{},
                     .tests = &.{},
                     .data = .other,
                 };
@@ -2707,7 +2711,7 @@ fn makeScopeInternal(
                         .end = tree.tokenLocation(0, tree.lastToken(while_node.ast.then_expr)).line_end,
                     },
                     .decls = std.StringHashMap(Declaration).init(allocator),
-                    // .uses = &[0]*ast.Node.Use{},
+                    .uses = &.{},
                     .tests = &.{},
                     .data = .other,
                 };
@@ -2736,7 +2740,7 @@ fn makeScopeInternal(
                             .end = tree.tokenLocation(0, tree.lastToken(while_node.ast.else_expr)).line_end,
                         },
                         .decls = std.StringHashMap(Declaration).init(allocator),
-                        // .uses = &[0]*ast.Node.Use{},
+                        .uses = &.{},
                         .tests = &.{},
                         .data = .other,
                     };
@@ -2763,7 +2767,7 @@ fn makeScopeInternal(
                         .end = tree.tokenLocation(0, tree.lastToken(switch_case.ast.target_expr)).line_end,
                     },
                     .decls = std.StringHashMap(Declaration).init(allocator),
-                    // .uses = &[0]*ast.Node.Use{},
+                    .uses = &.{},
                     .tests = &.{},
                     .data = .other,
                 };
