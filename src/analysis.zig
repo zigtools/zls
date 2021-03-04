@@ -30,13 +30,13 @@ pub fn getDocCommentTokenIndex(tree: ast.Tree, node: ast.Node.Index) ?ast.TokenI
             idx -= 2; // skip '.' token
         },
         else => {
-            // if (isContainer(tags[node])) {
-            //     idx -= 1; // go to '='
-            //     idx -= 1; // mutability
-            //     idx -= 1; // possible 'pub'
-            //     if (tokens[idx] == .keyword_pub and idx > 0)
-            //         idx -= 1;
-            // }
+            if (isContainer(tags[node])) {
+                idx -= 1; // go to '='
+                idx -= 1; // mutability
+                idx -= 1; // possible 'pub'
+                if (tokens[idx] == .keyword_pub and idx > 0)
+                    idx -= 1;
+            } else log.debug("Doc comment check for tag: {s}", .{tags[node]});
         },
     }
 
@@ -187,7 +187,7 @@ pub fn isTypeFunction(tree: ast.Tree, func: ast.full.FnProto) bool {
 }
 
 pub fn isGenericFunction(tree: ast.Tree, func: ast.full.FnProto) bool {
-    var it = func.iterate();
+    var it = func.iterate(tree);
     while (it.next()) |param| {
         if (param.anytype_ellipsis3 != null or param.comptime_noalias != null) {
             return true;
@@ -983,7 +983,7 @@ pub const TypeWithHandle = struct {
         }
     }
 
-    fn isContainer(self: TypeWithHandle, container_kind_tok: std.zig.Token.Tag, tree: ast.Tree) bool {
+    fn isContainerKind(self: TypeWithHandle, container_kind_tok: std.zig.Token.Tag, tree: ast.Tree) bool {
         const main_tokens = tree.nodes.items(.main_token);
         const tags = tree.tokens.items(.tag);
         switch (self.type.data) {
@@ -993,30 +993,33 @@ pub const TypeWithHandle = struct {
     }
 
     pub fn isStructType(self: TypeWithHandle, tree: ast.Tree) bool {
-        return self.isContainer(.keyword_struct, tree) or self.isRoot();
+        return self.isContainerKind(.keyword_struct, tree) or self.isRoot();
     }
 
     pub fn isNamespace(self: TypeWithHandle, tree: ast.Tree) bool {
-        if (!self.isStructType()) return false;
-        var idx: usize = 0;
-        // @TODO: FIX ME
-        while (self.type.data.other.iterate(idx)) |child| : (idx += 1) {
-            if (child.tag == .ContainerField)
-                return false;
+        if (!self.isStructType(tree)) return false;
+
+        const node = self.type.data.other;
+        const tags = tree.nodes.items(.tag);
+        if (isContainer(tags[node])) {
+            var buf: [2]ast.Node.Index = undefined;
+            for (declMembers(tree, tags[node], node, &buf)) |child| {
+                if (tags[child].isContainerField()) return false;
+            }
         }
         return true;
     }
 
     pub fn isEnumType(self: TypeWithHandle, tree: ast.Tree) bool {
-        return self.isContainer(.keyword_enum, tree);
+        return self.isContainerKind(.keyword_enum, tree);
     }
 
     pub fn isUnionType(self: TypeWithHandle, tree: ast.Tree) bool {
-        return self.isContainer(.keyword_union, tree);
+        return self.isContainerKind(.keyword_union, tree);
     }
 
     pub fn isOpaqueType(self: TypeWithHandle, tree: ast.Tree) bool {
-        return self.isContainer(.keyword_opaque, tree);
+        return self.isContainerKind(.keyword_opaque, tree);
     }
 
     pub fn isTypeFunc(self: TypeWithHandle, tree: ast.Tree) bool {
