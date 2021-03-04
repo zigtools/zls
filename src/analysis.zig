@@ -18,7 +18,7 @@ pub fn getDocCommentTokenIndex(tree: ast.Tree, node: ast.Node.Index) ?ast.TokenI
             idx -= 1;
             if (tokens[idx] == .keyword_extern and idx > 0)
                 idx -= 1;
-            if (tokens[idx] == .keyword_pub and idx < 0)
+            if (tokens[idx] == .keyword_pub and idx > 0)
                 idx -= 1;
         },
         .local_var_decl, .global_var_decl, .aligned_var_decl, .simple_var_decl => {
@@ -118,10 +118,10 @@ pub fn getFunctionSnippet(allocator: *std.mem.Allocator, tree: ast.Tree, func: a
 
     var it = func.iterate(tree);
     while (it.next()) |param| {
-        if (skip_self_param and it.param_i == 0) continue;
-        if (it.param_i != @boolToInt(skip_self_param)) try buffer.appendSlice(", ${") else try buffer.appendSlice("${");
+        if (skip_self_param and it.param_i -1 == 0) continue;
+        if (it.param_i -1 != @boolToInt(skip_self_param)) try buffer.appendSlice(", ${") else try buffer.appendSlice("${");
 
-        try buf_stream.print("{d}", .{it.param_i + 1});
+        try buf_stream.print("{d}:", .{it.param_i});
 
         if (param.comptime_noalias) |token_index| {
             if (token_tags[token_index] == .keyword_comptime)
@@ -141,8 +141,8 @@ pub fn getFunctionSnippet(allocator: *std.mem.Allocator, tree: ast.Tree, func: a
             else
                 try buffer.appendSlice("...");
         } else {
-            var curr_token = param.type_expr;
-            var end_token = tree.lastToken(func.ast.params[it.param_i]);
+            var curr_token = tree.firstToken(param.type_expr);
+            var end_token = tree.lastToken(param.type_expr);
             while (curr_token <= end_token) : (curr_token += 1) {
                 const tag = token_tags[curr_token];
                 const is_comma = tag == .comma;
@@ -1989,18 +1989,20 @@ fn iterateSymbolsContainerInternal(
             try callback(context, decl);
         }
 
-        // for (container_scope.uses) |use| {
-        //     if (handle != orig_handle and use.visib_token == null) continue;
-        //     if (std.mem.indexOfScalar(*ast.Node.Use, use_trail.items, use) != null) continue;
-        //     try use_trail.append(use);
+        for (container_scope.uses) |use| {
+            const use_token = tree.nodes.items(.main_token)[use];
+            const is_pub = use_token > 0 and token_tags[use_token - 1] == .keyword_pub;
+            if (handle != orig_handle and !is_pub) continue;
+            if (std.mem.indexOfScalar(ast.Node.Index, use_trail.items, use) != null) continue;
+            try use_trail.append(use);
 
-        //     const use_expr = (try resolveTypeOfNode(store, arena, .{ .node = use.expr, .handle = handle })) orelse continue;
-        //     const use_expr_node = switch (use_expr.type.data) {
-        //         .other => |n| n,
-        //         else => continue,
-        //     };
-        //     try iterateSymbolsContainerInternal(store, arena, .{ .node = use_expr_node, .handle = use_expr.handle }, orig_handle, callback, context, false, use_trail);
-        // }
+            const use_expr = (try resolveTypeOfNode(store, arena, .{ .node = tree.nodes.items(.data)[use].rhs, .handle = handle })) orelse continue;
+            const use_expr_node = switch (use_expr.type.data) {
+                .other => |n| n,
+                else => continue,
+            };
+            try iterateSymbolsContainerInternal(store, arena, .{ .node = use_expr_node, .handle = use_expr.handle }, orig_handle, callback, context, false, use_trail);
+        }
     }
 }
 
@@ -2056,17 +2058,17 @@ fn iterateSymbolsGlobalInternal(
                 try callback(context, DeclWithHandle{ .decl = &entry.value, .handle = handle });
             }
 
-            // for (Index) |use| {
-            //     if (std.mem.indexOfScalar(*ast.Node.Use, use_trail.items, use) != null) continue;
-            //     try use_trail.append(use);
+            for (scope.uses) |use| {
+                if (std.mem.indexOfScalar(ast.Node.Index, use_trail.items, use) != null) continue;
+                try use_trail.append(use);
 
-            //     const use_expr = (try resolveTypeOfNode(store, arena, .{ .node = use.expr, .handle = handle })) orelse continue;
-            //     const use_expr_node = switch (use_expr.type.data) {
-            //         .other => |n| n,
-            //         else => continue,
-            //     };
-            //     try iterateSymbolsContainerInternal(store, arena, .{ .node = use_expr_node, .handle = use_expr.handle }, handle, callback, context, false, use_trail);
-            // }
+                const use_expr = (try resolveTypeOfNode(store, arena, .{ .node = handle.tree.nodes.items(.data)[use].lhs, .handle = handle })) orelse continue;
+                const use_expr_node = switch (use_expr.type.data) {
+                    .other => |n| n,
+                    else => continue,
+                };
+                try iterateSymbolsContainerInternal(store, arena, .{ .node = use_expr_node, .handle = use_expr.handle }, handle, callback, context, false, use_trail);
+            }
         }
 
         if (scope.range.start >= source_index) return;
@@ -2104,27 +2106,27 @@ pub fn innermostContainer(handle: *DocumentStore.Handle, source_index: usize) Ty
 fn resolveUse(
     store: *DocumentStore,
     arena: *std.heap.ArenaAllocator,
-    // uses: []const *ast.Node.Use,
+    uses: []const ast.Node.Index,
     symbol: []const u8,
     handle: *DocumentStore.Handle,
-    use_trail: *std.ArrayList(*ast.Node.Use),
+    use_trail: *std.ArrayList(ast.Node.Index),
 ) error{OutOfMemory}!?DeclWithHandle {
-    // for (uses) |use| {
-    //     if (std.mem.indexOfScalar(*ast.Node.Use, use_trail.items, use) != null) continue;
-    //     try use_trail.append(use);
+    for (uses) |use| {
+        if (std.mem.indexOfScalar(ast.Node.Index, use_trail.items, use) != null) continue;
+        try use_trail.append(use);
 
-    //     const use_expr = (try resolveTypeOfNode(store, arena, .{ .node = use.expr, .handle = handle })) orelse continue;
-    //     const use_expr_node = switch (use_expr.type.data) {
-    //         .other => |n| n,
-    //         else => continue,
-    //     };
-    //     if (try lookupSymbolContainerInternal(store, arena, .{ .node = use_expr_node, .handle = use_expr.handle }, symbol, false, use_trail)) |candidate| {
-    //         if (candidate.handle != handle and !candidate.isPublic()) {
-    //             continue;
-    //         }
-    //         return candidate;
-    //     }
-    // }
+        const use_expr = (try resolveTypeOfNode(store, arena, .{ .node = handle.tree.nodes.items(.data)[use].lhs, .handle = handle })) orelse continue;
+        const use_expr_node = switch (use_expr.type.data) {
+            .other => |n| n,
+            else => continue,
+        };
+        if (try lookupSymbolContainerInternal(store, arena, .{ .node = use_expr_node, .handle = use_expr.handle }, symbol, false, use_trail)) |candidate| {
+            if (candidate.handle != handle and !candidate.isPublic()) {
+                continue;
+            }
+            return candidate;
+        }
+    }
     return null;
 }
 
@@ -2160,7 +2162,6 @@ fn lookupSymbolGlobalInternal(
     use_trail: *std.ArrayList(ast.Node.Index),
 ) error{OutOfMemory}!?DeclWithHandle {
     for (handle.document_scope.scopes) |scope| {
-        // @TODO: Fix scope positions
         if (source_index >= scope.range.start and source_index < scope.range.end) {
             if (scope.decls.getEntry(symbol)) |candidate| {
                 switch (candidate.value) {
@@ -2176,7 +2177,7 @@ fn lookupSymbolGlobalInternal(
                 };
             }
 
-            // if (try resolveUse(store, arena, scope.uses, symbol, handle, use_trail)) |result| return result;
+            if (try resolveUse(store, arena, scope.uses, symbol, handle, use_trail)) |result| return result;
         }
 
         if (scope.range.start > source_index) return null;
@@ -2233,7 +2234,7 @@ fn lookupSymbolContainerInternal(
             return DeclWithHandle{ .decl = &candidate.value, .handle = handle };
         }
 
-        // if (try resolveUse(store, arena, container_scope.uses, symbol, handle, use_trail)) |result| return result;
+        if (try resolveUse(store, arena, container_scope.uses, symbol, handle, use_trail)) |result| return result;
         return null;
     }
 
@@ -2262,14 +2263,13 @@ pub const DocumentScope = struct {
         for (self.scopes) |scope| {
             log.debug(
                 \\--------------------------
-                \\Scope {}, range: [{}, {})
-                \\ {} usingnamespaces
+                \\Scope {}, range: [{d}, {d})
+                \\ {d} usingnamespaces
                 \\Decls: 
             , .{
                 scope.data,
                 scope.range.start,
                 scope.range.end,
-                {},
                 scope.uses.len,
             });
 
