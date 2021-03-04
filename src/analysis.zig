@@ -118,8 +118,8 @@ pub fn getFunctionSnippet(allocator: *std.mem.Allocator, tree: ast.Tree, func: a
 
     var it = func.iterate(tree);
     while (it.next()) |param| {
-        if (skip_self_param and it.param_i -1 == 0) continue;
-        if (it.param_i -1 != @boolToInt(skip_self_param)) try buffer.appendSlice(", ${") else try buffer.appendSlice("${");
+        if (skip_self_param and it.param_i - 1 == 0) continue;
+        if (it.param_i - 1 != @boolToInt(skip_self_param)) try buffer.appendSlice(", ${") else try buffer.appendSlice("${");
 
         try buf_stream.print("{d}:", .{it.param_i});
 
@@ -186,7 +186,7 @@ pub fn isTypeFunction(tree: ast.Tree, func: ast.full.FnProto) bool {
     return typeIsType(tree, func.ast.return_type);
 }
 
-pub fn isGenericFunction(tree: ast.Tree, func: *ast.full.FnProto) bool {
+pub fn isGenericFunction(tree: ast.Tree, func: ast.full.FnProto) bool {
     var it = func.iterate();
     while (it.next()) |param| {
         if (param.anytype_ellipsis3 != null or param.comptime_noalias != null) {
@@ -699,15 +699,15 @@ pub fn resolveTypeOfNodeInternal(
                 const has_self_param = token_tags[call.ast.lparen - 2] == .period;
                 var it = fn_decl.iterate(decl.handle.tree);
 
-                // Bind type params to the expressions passed in the calls.
+                // Bind type params to the expressions passed in txhe calls.
                 const param_len = std.math.min(call.ast.params.len + @boolToInt(has_self_param), fn_decl.ast.params.len);
                 while (it.next()) |decl_param| {
-                    if (it.param_i == 0 and has_self_param) continue;
-                    if (it.param_i >= param_len) break;
+                    if (it.param_i - 1 == 0 and has_self_param) continue;
+                    if (it.param_i - 1 >= param_len) break;
                     if (!typeIsType(decl.handle.tree, decl_param.type_expr)) continue;
 
                     const call_param_type = (try resolveTypeOfNodeInternal(store, arena, .{
-                        .node = call.ast.params[it.param_i - @boolToInt(has_self_param)],
+                        .node = call.ast.params[it.param_i - 1 - @boolToInt(has_self_param)],
                         .handle = decl.handle,
                     }, bound_type_params)) orelse continue;
                     if (!call_param_type.type.is_type_val) continue;
