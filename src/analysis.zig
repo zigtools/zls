@@ -983,7 +983,8 @@ pub const TypeWithHandle = struct {
         }
     }
 
-    fn isContainerKind(self: TypeWithHandle, container_kind_tok: std.zig.Token.Tag, tree: ast.Tree) bool {
+    fn isContainerKind(self: TypeWithHandle, container_kind_tok: std.zig.Token.Tag) bool {
+        const tree = self.handle.tree;
         const main_tokens = tree.nodes.items(.main_token);
         const tags = tree.tokens.items(.tag);
         switch (self.type.data) {
@@ -992,13 +993,13 @@ pub const TypeWithHandle = struct {
         }
     }
 
-    pub fn isStructType(self: TypeWithHandle, tree: ast.Tree) bool {
-        return self.isContainerKind(.keyword_struct, tree) or self.isRoot();
+    pub fn isStructType(self: TypeWithHandle) bool {
+        return self.isContainerKind(.keyword_struct) or self.isRoot();
     }
 
-    pub fn isNamespace(self: TypeWithHandle, tree: ast.Tree) bool {
-        if (!self.isStructType(tree)) return false;
-
+    pub fn isNamespace(self: TypeWithHandle) bool {
+        if (!self.isStructType()) return false;
+        const tree = self.handle.tree;
         const node = self.type.data.other;
         const tags = tree.nodes.items(.tag);
         if (isContainer(tags[node])) {
@@ -1010,20 +1011,21 @@ pub const TypeWithHandle = struct {
         return true;
     }
 
-    pub fn isEnumType(self: TypeWithHandle, tree: ast.Tree) bool {
-        return self.isContainerKind(.keyword_enum, tree);
+    pub fn isEnumType(self: TypeWithHandle) bool {
+        return self.isContainerKind(.keyword_enum);
     }
 
-    pub fn isUnionType(self: TypeWithHandle, tree: ast.Tree) bool {
-        return self.isContainerKind(.keyword_union, tree);
+    pub fn isUnionType(self: TypeWithHandle) bool {
+        return self.isContainerKind(.keyword_union);
     }
 
-    pub fn isOpaqueType(self: TypeWithHandle, tree: ast.Tree) bool {
-        return self.isContainerKind(.keyword_opaque, tree);
+    pub fn isOpaqueType(self: TypeWithHandle) bool {
+        return self.isContainerKind(.keyword_opaque);
     }
 
-    pub fn isTypeFunc(self: TypeWithHandle, tree: ast.Tree) bool {
+    pub fn isTypeFunc(self: TypeWithHandle) bool {
         var buf: [1]ast.Node.Index = undefined;
+        const tree = self.handle.tree;
         return switch (self.type.data) {
             .other => |n| if (fnProto(tree, n, &buf)) |fn_proto| blk: {
                 break :blk isTypeFunction(tree, fn_proto);
@@ -1032,8 +1034,9 @@ pub const TypeWithHandle = struct {
         };
     }
 
-    pub fn isGenericFunc(self: TypeWithHandle, tree: ast.Tree) bool {
+    pub fn isGenericFunc(self: TypeWithHandle) bool {
         var buf: [1]ast.Node.Index = undefined;
+        const tree = self.handle.tree;
         return switch (self.type.data) {
             .other => |n| if (fnProto(tree, n, &buf)) |fn_proto| blk: {
                 break :blk isGenericFunction(tree, fn_proto);
@@ -1042,7 +1045,8 @@ pub const TypeWithHandle = struct {
         };
     }
 
-    pub fn isFunc(self: TypeWithHandle, tree: ast.Tree) bool {
+    pub fn isFunc(self: TypeWithHandle) bool {
+        const tree = self.handle.tree;
         const tags = tree.nodes.items(.tag);
         return switch (self.type.data) {
             .other => |n| switch (tags[n]) {
@@ -1867,16 +1871,6 @@ pub const DeclWithHandle = struct {
                 }, bound_type_params)) orelse return null,
                 bound_type_params,
             ),
-            // .array_payload => |pay| try resolveBracketAccessType(
-            //     store,
-            //     arena,
-            //     (try resolveTypeOfNodeInternal(store, arena, .{
-            //         .node = pay.array_expr,
-            //         .handle = self.handle,
-            //     }, bound_type_params)) orelse return null,
-            //     .Single,
-            //     bound_type_params,
-            // ),
             .label_decl => return null,
             .switch_payload => |pay| {
                 if (pay.items.len == 0) return null;
@@ -1885,7 +1879,7 @@ pub const DeclWithHandle = struct {
                     .node = pay.switch_expr,
                     .handle = self.handle,
                 }, bound_type_params)) orelse return null;
-                if (!switch_expr_type.isUnionType(tree))
+                if (!switch_expr_type.isUnionType())
                     return null;
 
                 if (node_tags[pay.items[0]] == .enum_literal) {

@@ -199,23 +199,23 @@ fn colorIdentifierBasedOnType(builder: *Builder, type_node: analysis.TypeWithHan
     const tree = builder.handle.tree;
     if (type_node.type.is_type_val) {
         var new_tok_mod = tok_mod;
-        if (type_node.isNamespace(tree))
+        if (type_node.isNamespace())
             new_tok_mod.set("namespace")
-        else if (type_node.isStructType(tree))
+        else if (type_node.isStructType())
             new_tok_mod.set("struct")
-        else if (type_node.isEnumType(tree))
+        else if (type_node.isEnumType())
             new_tok_mod.set("enum")
-        else if (type_node.isUnionType(tree))
+        else if (type_node.isUnionType())
             new_tok_mod.set("union")
-        else if (type_node.isOpaqueType(tree))
+        else if (type_node.isOpaqueType())
             new_tok_mod.set("opaque");
 
         try writeTokenMod(builder, target_tok, .type, new_tok_mod);
-    } else if (type_node.isTypeFunc(tree)) {
+    } else if (type_node.isTypeFunc()) {
         try writeTokenMod(builder, target_tok, .type, tok_mod);
-    } else if (type_node.isFunc(tree)) {
+    } else if (type_node.isFunc()) {
         var new_tok_mod = tok_mod;
-        if (type_node.isGenericFunc(tree)) {
+        if (type_node.isGenericFunc()) {
             new_tok_mod.set("generic");
         }
         try writeTokenMod(builder, target_tok, .function, new_tok_mod);
@@ -277,6 +277,7 @@ fn writeNodeTokens(
     const main_tokens = tree.nodes.items(.main_token);
 
     const node = maybe_node.?;
+    if (node > node_tags.len) return;
     const tag = node_tags[node];
     const main_token = main_tokens[node];
 
