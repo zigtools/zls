@@ -64,12 +64,13 @@ const Builder = struct {
     }
 
     fn add(self: *Builder, token: ast.TokenIndex, token_type: TokenType, token_modifiers: TokenModifiers) !void {
+        const starts = self.handle.tree.tokens.items(.start);
         const start_idx = if (self.current_token) |current_token|
-            self.handle.tree.tokenLocation(0, current_token).line_start
+            starts[current_token]
         else
             0;
 
-        if (start_idx > self.handle.tree.tokenLocation(0, token).line_start)
+        if (start_idx > starts[token])
             return;
 
         const delta_loc = offsets.tokenRelativeLocation(self.handle.tree, start_idx, token, self.encoding) catch return;
@@ -268,6 +269,8 @@ fn writeNodeTokens(
     maybe_node: ?ast.Node.Index,
 ) error{OutOfMemory}!void {
     if (maybe_node == null) return;
+    const node = maybe_node.?;
+    if (node == 0) return;
 
     const handle = builder.handle;
     const tree = handle.tree;
@@ -275,9 +278,8 @@ fn writeNodeTokens(
     const token_tags = tree.tokens.items(.tag);
     const datas = tree.nodes.items(.data);
     const main_tokens = tree.nodes.items(.main_token);
+    if (node > datas.len) return;
 
-    const node = maybe_node.?;
-    if (node > node_tags.len) return;
     const tag = node_tags[node];
     const main_token = main_tokens[node];
 
@@ -286,18 +288,16 @@ fn writeNodeTokens(
     defer arena.child_allocator.free(child_frame);
 
     switch (tag) {
-        .root => {
-            var gap_highlighter = GapHighlighter.init(builder, 0);
-            var buf: [2]ast.Node.Index = undefined;
-            for (analysis.declMembers(tree, .root, 0, &buf)) |child| {
-                try gap_highlighter.next(child);
-                if (node_tags[child].isContainerField()) {
-                    try writeContainerField(builder, arena, store, child, .field, child_frame);
-                } else {
-                    try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, child });
-                }
-            }
-            try gap_highlighter.end(@truncate(u32, tree.tokens.len) - 1);
+        .root => unreachable,
+        .container_field,
+        .container_field_align,
+        .container_field_init,
+        => try writeContainerField(builder, arena, store, node, .field, child_frame),
+        .@"errdefer" => {
+            if (datas[node].lhs != 0)
+                try writeToken(builder, datas[node].lhs, .variable);
+
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, datas[node].rhs });
         },
         .block,
         .block_semicolon,
@@ -381,12 +381,21 @@ fn writeNodeTokens(
         .container_decl_two_trailing,
         .container_decl_arg,
         .container_decl_arg_trailing,
+        .tagged_union,
+        .tagged_union_trailing,
+        .tagged_union_enum_tag,
+        .tagged_union_enum_tag_trailing,
+        .tagged_union_two,
+        .tagged_union_two_trailing,
         => {
             var buf: [2]ast.Node.Index = undefined;
             const decl: ast.full.ContainerDecl = switch (tag) {
                 .container_decl, .container_decl_trailing => tree.containerDecl(node),
                 .container_decl_two, .container_decl_two_trailing => tree.containerDeclTwo(&buf, node),
                 .container_decl_arg, .container_decl_arg_trailing => tree.containerDeclArg(node),
+                .tagged_union, .tagged_union_trailing => tree.taggedUnion(node),
+                .tagged_union_enum_tag, .tagged_union_enum_tag_trailing => tree.taggedUnionEnumTag(node),
+                .tagged_union_two, .tagged_union_two_trailing => tree.taggedUnionTwo(&buf, node),
                 else => unreachable,
             };
 
@@ -632,7 +641,7 @@ fn writeNodeTokens(
                     .handle = handle,
                 })) |struct_type| switch (struct_type.type.data) {
                     .other => |type_node| if (analysis.isContainer(struct_type.handle.tree.nodes.items(.tag)[type_node]))
-                        fieldTokenType(type_node, handle)
+                        fieldTokenType(type_node, struct_type.handle)
                     else
                         null,
                     else => null,
@@ -644,11 +653,9 @@ fn writeNodeTokens(
                 try gap_highlighter.next(field_init);
 
                 const init_token = tree.firstToken(field_init);
-                if (field_token_type) |tok_type| {
-                    try writeToken(builder, init_token - 3, tok_type);
-                    try writeToken(builder, init_token - 2, tok_type);
-                }
-                try writeToken(builder, init_token - 1, .operator);
+                try writeToken(builder, init_token - 3, field_token_type orelse .field); // '.'
+                try writeToken(builder, init_token - 2, field_token_type orelse .field); // name
+                try writeToken(builder, init_token - 1, .operator); // '='
                 try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, field_init });
             }
             try gap_highlighter.end(tree.lastToken(node));
@@ -712,7 +719,6 @@ fn writeNodeTokens(
         .grouped_expression => {
             try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, datas[node].lhs });
         },
-        .@"return",
         .@"break",
         .@"continue",
         => {
@@ -722,7 +728,7 @@ fn writeNodeTokens(
             if (datas[node].rhs != 0)
                 try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, datas[node].rhs });
         },
-        .@"suspend" => {
+        .@"suspend", .@"return" => {
             try writeToken(builder, main_token, .keyword);
             if (datas[node].lhs != 0)
                 try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, datas[node].lhs });
@@ -872,6 +878,8 @@ fn writeNodeTokens(
             if (data.rhs == 0) return;
             const rhs_str = tree.tokenSlice(data.rhs);
 
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, data.lhs });
+
             // TODO This is basically exactly the same as what is done in analysis.resolveTypeOfNode, with the added
             //      writeToken code.
             // Maybe we can hook into it insead? Also applies to Identifier and VarDecl
@@ -935,7 +943,7 @@ fn writeNodeTokens(
                 });
             }
 
-            try writeToken(builder, main_token, .operator);
+            if (ptr_type.size == .One) try writeToken(builder, main_token, .operator);
             if (ptr_type.ast.sentinel != 0) {
                 return try await @asyncCall(child_frame, {}, writeNodeTokens, .{
                     builder,
@@ -995,7 +1003,7 @@ fn writeNodeTokens(
             try writeToken(builder, main_token, .keyword);
             try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, datas[node].lhs });
         },
-        else => std.log.scoped(.semantic_tokens).debug("TODO: {s}", .{tag}),
+        .anyframe_literal => try writeToken(builder, main_token, .keyword),
     }
 }
 
@@ -1003,7 +1011,16 @@ fn writeNodeTokens(
 pub fn writeAllSemanticTokens(arena: *std.heap.ArenaAllocator, store: *DocumentStore, handle: *DocumentStore.Handle, encoding: offsets.Encoding) ![]u32 {
     var builder = Builder.init(arena.child_allocator, handle, encoding);
 
+    // reverse the ast from the root declarations
+    var gap_highlighter = GapHighlighter.init(&builder, 0);
+    var buf: [2]ast.Node.Index = undefined;
+    for (analysis.declMembers(handle.tree, .root, 0, &buf)) |child| {
+        try gap_highlighter.next(child);
+        try writeNodeTokens(&builder, arena, store, child);
+    }
+
+    try gap_highlighter.end(@truncate(u32, handle.tree.tokens.len) - 1);
     // pass root node, which always has index '0'
-    try writeNodeTokens(&builder, arena, store, 0);
+    // try writeNodeTokens(&builder, arena, store, 0);
     return builder.toOwnedSlice();
 }

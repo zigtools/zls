@@ -1,5 +1,6 @@
 const std = @import("std");
 const types = @import("types.zig");
+const ast = std.zig.ast;
 
 pub const Encoding = enum {
     utf8,
@@ -70,7 +71,7 @@ pub const TokenLocation = struct {
     }
 };
 
-pub fn tokenRelativeLocation(tree: std.zig.ast.Tree, start_index: usize, token: std.zig.ast.TokenIndex, encoding: Encoding) !TokenLocation {
+pub fn tokenRelativeLocation(tree: ast.Tree, start_index: usize, token: ast.TokenIndex, encoding: Encoding) !TokenLocation {
     const start = tree.tokens.items(.start)[token];
 
     var loc = TokenLocation{
@@ -108,14 +109,14 @@ pub fn tokenRelativeLocation(tree: std.zig.ast.Tree, start_index: usize, token: 
 }
 
 /// Asserts the token is comprised of valid utf8
-pub fn tokenLength(tree: std.zig.ast.Tree, token: std.zig.ast.TokenIndex, encoding: Encoding) usize {
-    const token_loc = tree.tokenLocation(0, token);
+pub fn tokenLength(tree: ast.Tree, token: ast.TokenIndex, encoding: Encoding) usize {
+    const token_loc = tokenLocation(tree, token);
     if (encoding == .utf8)
-        return token_loc.line_end - token_loc.line_start;
+        return token_loc.end - token_loc.start;
 
-    var i: usize = token_loc.line_start;
+    var i: usize = token_loc.start;
     var utf16_len: usize = 0;
-    while (i < token_loc.line_end) {
+    while (i < token_loc.end) {
         const n = std.unicode.utf8ByteSequenceLength(tree.source[i]) catch unreachable;
         const codepoint = std.unicode.utf8Decode(tree.source[i .. i + n]) catch unreachable;
         if (codepoint < 0x10000) {
@@ -126,6 +127,28 @@ pub fn tokenLength(tree: std.zig.ast.Tree, token: std.zig.ast.TokenIndex, encodi
         i += n;
     }
     return utf16_len;
+}
+
+/// Token location inside source
+pub const Loc = struct {
+    start: usize,
+    end: usize,
+};
+
+pub fn tokenLocation(tree: ast.Tree, token_index: ast.TokenIndex) Loc {
+    const start = tree.tokens.items(.start)[token_index];
+    const tag = tree.tokens.items(.tag)[token_index];
+
+    // For some tokens, re-tokenization is needed to find the end.
+    var tokenizer: std.zig.Tokenizer = .{
+        .buffer = tree.source,
+        .index = start,
+        .pending_invalid_token = null,
+    };
+
+    const token = tokenizer.next();
+    std.debug.assert(token.tag == tag);
+    return .{ .start = token.loc.start, .end = token.loc.end };
 }
 
 pub fn documentRange(doc: types.TextDocument, encoding: Encoding) !types.Range {

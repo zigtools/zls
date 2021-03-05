@@ -14,42 +14,48 @@ pub fn getDocCommentTokenIndex(tree: ast.Tree, node: ast.Node.Index) ?ast.TokenI
     var idx = current;
     if (idx == 0) return null;
     switch (tags[node]) {
-        .fn_proto, .fn_proto_one, .fn_proto_simple, .fn_proto_multi, .fn_decl => {
+        .fn_proto,
+        .fn_proto_one,
+        .fn_proto_simple,
+        .fn_proto_multi,
+        .fn_decl,
+        => {
             idx -= 1;
             if (tokens[idx] == .keyword_extern and idx > 0)
                 idx -= 1;
             if (tokens[idx] == .keyword_pub and idx > 0)
                 idx -= 1;
         },
-        .local_var_decl, .global_var_decl, .aligned_var_decl, .simple_var_decl => {
+        .local_var_decl,
+        .global_var_decl,
+        .aligned_var_decl,
+        .simple_var_decl,
+        => {
             idx -= 1;
             if (tokens[idx] == .keyword_pub and idx > 0)
                 idx -= 1;
         },
-        .container_field, .container_field_init, .container_field_align => {
-            idx -= 2; // skip '.' token
-        },
+        .error_value => idx -= 1,
+        .container_field,
+        .container_field_init,
+        .container_field_align,
+        => idx -= 1,
+        .test_decl => idx -= 1,
         else => {
-            if (isContainer(tags[node])) {
-                idx -= 1; // go to '='
-                idx -= 1; // mutability
-                idx -= 1; // possible 'pub'
-                if (tokens[idx] == .keyword_pub and idx > 0)
-                    idx -= 1;
-            } else log.debug("Doc comment check for tag: {s}", .{tags[node]});
+            log.debug("Doc comment check for tag: {s}", .{tags[node]});
         },
     }
 
     // Find first doc comment token
     if (tokens[idx] == .doc_comment or tokens[idx] == .container_doc_comment) {
-        while ((tokens[idx] == .doc_comment or tokens[idx] == .container_doc_comment) and idx > 0) : (idx -= 1) {}
-        return idx + 1;
+        while (idx > 0 and
+            (tokens[idx] == .doc_comment or tokens[idx] == .container_doc_comment))
+        {
+            idx -= 1;
+        }
+        return idx + @boolToInt(tokens[idx] != .doc_comment and tokens[idx] != .container_doc_comment);
     }
 
-    // @TODO: Implement doc comments for tags
-    // } else if (node.castTag(.ErrorTag)) |tag| {
-    //     return tag.doc_comments;
-    // }
     return null;
 }
 
@@ -97,9 +103,9 @@ pub fn collectDocComments(
 
 /// Gets a function signature (keywords, name, return value)
 pub fn getFunctionSignature(tree: ast.Tree, func: ast.full.FnProto) []const u8 {
-    const start = tree.tokenLocation(0, func.ast.fn_token).line_start;
-    const end = tree.tokenLocation(0, tree.nodes.items(.main_token)[func.ast.return_type]).line_end;
-    return tree.source[start .. end - 1];
+    const start = offsets.tokenLocation(tree, func.ast.fn_token).start;
+    const end = offsets.tokenLocation(tree, tree.nodes.items(.main_token)[func.ast.return_type]).end;
+    return tree.source[start..end];
 }
 
 /// Gets a function snippet insert text
@@ -161,17 +167,17 @@ pub fn getFunctionSnippet(allocator: *std.mem.Allocator, tree: ast.Tree, func: a
 
 /// Gets a function signature (keywords, name, return value)
 pub fn getVariableSignature(tree: ast.Tree, var_decl: ast.full.VarDecl) []const u8 {
-    const start = tree.tokenLocation(0, var_decl.ast.mut_token).line_start;
-    const end = tree.tokenLocation(@truncate(u32, start), tree.lastToken(var_decl.ast.init_node)).line_end;
+    const start = offsets.tokenLocation(tree, var_decl.ast.mut_token).start;
+    const end = offsets.tokenLocation(tree, tree.lastToken(var_decl.ast.init_node)).end;
     return tree.source[start..end];
 }
 
 // analysis.getContainerFieldSignature(handle.tree, field)
 pub fn getContainerFieldSignature(tree: ast.Tree, field: ast.full.ContainerField) []const u8 {
-    const start = tree.tokenLocation(0, field.ast.name_token).line_start;
+    const start = offsets.tokenLocation(tree, field.ast.name_token).start;
     const end_node = if (field.ast.value_expr != 0) field.ast.value_expr else field.ast.type_expr;
-    const end = tree.tokenLocation(@truncate(u32, start), tree.lastToken(end_node)).line_end;
-    return tree.source[start .. end - 1];
+    const end = offsets.tokenLocation(tree, tree.lastToken(end_node)).end;
+    return tree.source[start..end];
 }
 
 /// The type node is "type"
@@ -610,7 +616,11 @@ pub fn resolveTypeOfNodeInternal(
     const starts = tree.tokens.items(.start);
 
     switch (node_tags[node]) {
-        .global_var_decl, .local_var_decl, .simple_var_decl, .aligned_var_decl => {
+        .global_var_decl,
+        .local_var_decl,
+        .simple_var_decl,
+        .aligned_var_decl,
+        => {
             const var_decl = varDecl(tree, node).?;
             if (var_decl.ast.type_node != 0) block: {
                 return ((try resolveTypeOfNodeInternal(
@@ -647,7 +657,10 @@ pub fn resolveTypeOfNodeInternal(
             }
             return null;
         },
-        .container_field, .container_field_init, .container_field_align => |c| {
+        .container_field,
+        .container_field_init,
+        .container_field_align,
+        => |c| {
             const field: ast.full.ContainerField = switch (c) {
                 .container_field => tree.containerField(node),
                 .container_field_align => tree.containerFieldAlign(node),
@@ -721,10 +734,17 @@ pub fn resolveTypeOfNodeInternal(
             }
             return null;
         },
-        .@"comptime", .@"nosuspend", .grouped_expression => {
+        .@"comptime",
+        .@"nosuspend",
+        .grouped_expression,
+        => {
             return try resolveTypeOfNodeInternal(store, arena, .{ .node = datas[node].lhs, .handle = handle }, bound_type_params);
         },
-        .struct_init, .struct_init_comma, .struct_init_one, .struct_init_one_comma => {
+        .struct_init,
+        .struct_init_comma,
+        .struct_init_one,
+        .struct_init_one_comma,
+        => {
             return ((try resolveTypeOfNodeInternal(
                 store,
                 arena,
@@ -735,14 +755,19 @@ pub fn resolveTypeOfNodeInternal(
         .error_set_decl => {
             return TypeWithHandle.typeVal(node_handle);
         },
-        .slice, .slice_sentinel, .slice_open => {
+        .slice,
+        .slice_sentinel,
+        .slice_open,
+        => {
             const left_type = (try resolveTypeOfNodeInternal(store, arena, .{
                 .node = datas[node].lhs,
                 .handle = handle,
             }, bound_type_params)) orelse return null;
             return try resolveBracketAccessType(store, arena, left_type, .Range, bound_type_params);
         },
-        .deref, .unwrap_optional => {
+        .deref,
+        .unwrap_optional,
+        => {
             const left_type = (try resolveTypeOfNodeInternal(store, arena, .{
                 .node = datas[node].lhs,
                 .handle = handle,
@@ -931,10 +956,7 @@ pub fn resolveTypeOfNodeInternal(
             .type = .{ .data = .{ .other = node }, .is_type_val = false },
             .handle = handle,
         },
-        .root => return TypeWithHandle.typeVal(node_handle),
-        else => {
-            // log.debug("TODO: implement type resolving for ast tag: {s}", .{node_tags[node]});
-        },
+        else => {},
     }
     return null;
 }
@@ -1319,6 +1341,8 @@ pub fn nodeToString(tree: ast.Tree, node: ast.Node.Index) ?[]const u8 {
         .async_call_one,
         .async_call_one_comma,
         => return tree.tokenSlice(tree.callOne(&buf, node).ast.lparen - 1),
+        .test_decl => if (data[node].lhs != 0)
+            return tree.tokenSlice(data[node].lhs),
         else => |tag| log.debug("INVALID: {}", .{tag}),
     }
 
@@ -1326,8 +1350,8 @@ pub fn nodeToString(tree: ast.Tree, node: ast.Node.Index) ?[]const u8 {
 }
 
 fn nodeContainsSourceIndex(tree: ast.Tree, node: ast.Node.Index, source_index: usize) bool {
-    const first_token = tree.tokenLocation(0, tree.firstToken(node)).line_start;
-    const last_token = tree.tokenLocation(@truncate(u32, first_token), tree.lastToken(node)).line_end;
+    const first_token = offsets.tokenLocation(tree, tree.firstToken(node)).start;
+    const last_token = offsets.tokenLocation(tree, tree.lastToken(node)).end;
     return source_index >= first_token and source_index <= last_token;
 }
 
@@ -2332,11 +2356,11 @@ pub fn makeDocumentScope(allocator: *std.mem.Allocator, tree: ast.Tree) !Documen
 }
 
 fn nodeSourceRange(tree: ast.Tree, node: ast.Node.Index) SourceRange {
-    const loc_start = tree.tokenLocation(0, tree.firstToken(node));
-    const loc_end = tree.tokenLocation(@truncate(u32, loc_start.line_start), tree.lastToken(node));
+    const loc_start = offsets.tokenLocation(tree, tree.firstToken(node));
+    const loc_end = offsets.tokenLocation(tree, tree.lastToken(node));
     return SourceRange{
-        .start = loc_start.line_start,
-        .end = loc_end.line_end,
+        .start = loc_start.start,
+        .end = loc_end.end,
     };
 }
 
@@ -2554,8 +2578,8 @@ fn makeScopeInternal(
                 const scope = try scopes.addOne(allocator);
                 scope.* = .{
                     .range = .{
-                        .start = tree.tokenLocation(0, main_tokens[node_idx]).line_start,
-                        .end = tree.tokenLocation(0, last_token).line_start,
+                        .start = offsets.tokenLocation(tree, main_tokens[node_idx]).start,
+                        .end = offsets.tokenLocation(tree, last_token).start,
                     },
                     .decls = std.StringHashMap(Declaration).init(allocator),
                     .uses = &.{},
@@ -2627,8 +2651,8 @@ fn makeScopeInternal(
                 var scope = try scopes.addOne(allocator);
                 scope.* = .{
                     .range = .{
-                        .start = tree.tokenLocation(0, payload).line_start,
-                        .end = tree.tokenLocation(0, tree.lastToken(if_node.ast.then_expr)).line_end,
+                        .start = offsets.tokenLocation(tree, payload).start,
+                        .end = offsets.tokenLocation(tree, tree.lastToken(if_node.ast.then_expr)).end,
                     },
                     .decls = std.StringHashMap(Declaration).init(allocator),
                     .uses = &.{},
@@ -2657,8 +2681,8 @@ fn makeScopeInternal(
                     var scope = try scopes.addOne(allocator);
                     scope.* = .{
                         .range = .{
-                            .start = tree.tokenLocation(0, err_token).line_start,
-                            .end = tree.tokenLocation(0, tree.lastToken(if_node.ast.else_expr)).line_end,
+                            .start = offsets.tokenLocation(tree, err_token).start,
+                            .end = offsets.tokenLocation(tree, tree.lastToken(if_node.ast.else_expr)).end,
                         },
                         .decls = std.StringHashMap(Declaration).init(allocator),
                         .uses = &.{},
@@ -2687,8 +2711,8 @@ fn makeScopeInternal(
                 var scope = try scopes.addOne(allocator);
                 scope.* = .{
                     .range = .{
-                        .start = tree.tokenLocation(0, while_node.ast.while_token).line_start,
-                        .end = tree.tokenLocation(0, tree.lastToken(node_idx)).line_end,
+                        .start = offsets.tokenLocation(tree, while_node.ast.while_token).start,
+                        .end = offsets.tokenLocation(tree, tree.lastToken(node_idx)).end,
                     },
                     .decls = std.StringHashMap(Declaration).init(allocator),
                     .uses = &.{},
@@ -2704,8 +2728,8 @@ fn makeScopeInternal(
                 var scope = try scopes.addOne(allocator);
                 scope.* = .{
                     .range = .{
-                        .start = tree.tokenLocation(0, payload).line_start,
-                        .end = tree.tokenLocation(0, tree.lastToken(while_node.ast.then_expr)).line_end,
+                        .start = offsets.tokenLocation(tree, payload).start,
+                        .end = offsets.tokenLocation(tree, tree.lastToken(while_node.ast.then_expr)).end,
                     },
                     .decls = std.StringHashMap(Declaration).init(allocator),
                     .uses = &.{},
@@ -2733,8 +2757,8 @@ fn makeScopeInternal(
                     var scope = try scopes.addOne(allocator);
                     scope.* = .{
                         .range = .{
-                            .start = tree.tokenLocation(0, err_token).line_start,
-                            .end = tree.tokenLocation(0, tree.lastToken(while_node.ast.else_expr)).line_end,
+                            .start = offsets.tokenLocation(tree, err_token).start,
+                            .end = offsets.tokenLocation(tree, tree.lastToken(while_node.ast.else_expr)).end,
                         },
                         .decls = std.StringHashMap(Declaration).init(allocator),
                         .uses = &.{},
@@ -2760,8 +2784,8 @@ fn makeScopeInternal(
                 var scope = try scopes.addOne(allocator);
                 scope.* = .{
                     .range = .{
-                        .start = tree.tokenLocation(0, payload).line_start,
-                        .end = tree.tokenLocation(0, tree.lastToken(switch_case.ast.target_expr)).line_end,
+                        .start = offsets.tokenLocation(tree, payload).start,
+                        .end = offsets.tokenLocation(tree, tree.lastToken(switch_case.ast.target_expr)).end,
                     },
                     .decls = std.StringHashMap(Declaration).init(allocator),
                     .uses = &.{},

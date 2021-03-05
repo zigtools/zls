@@ -220,7 +220,12 @@ fn publishDiagnostics(arena: *std.heap.ArenaAllocator, handle: DocumentStore.Han
         for (tree.rootDecls()) |decl_idx| {
             const decl = tree.nodes.items(.tag)[decl_idx];
             switch (decl) {
-                .fn_proto, .fn_proto_multi, .fn_proto_one, .fn_proto_simple, .fn_decl => blk: {
+                .fn_proto,
+                .fn_proto_multi,
+                .fn_proto_one,
+                .fn_proto_simple,
+                .fn_decl,
+                => blk: {
                     var buf: [1]std.zig.ast.Node.Index = undefined;
                     const func = analysis.fnProto(tree, decl_idx, &buf).?;
                     if (func.extern_export_token != null) break :blk;
@@ -367,7 +372,12 @@ fn nodeToCompletion(
     if (is_type_val) return;
 
     switch (node_tags[node]) {
-        .fn_proto, .fn_proto_multi, .fn_proto_one, .fn_decl => {
+        .fn_proto,
+        .fn_proto_multi,
+        .fn_proto_one,
+        .fn_proto_simple,
+        .fn_decl,
+        => {
             var buf: [1]std.zig.ast.Node.Index = undefined;
             const func = analysis.fnProto(tree, node, &buf).?;
             if (func.name_token) |name_token| {
@@ -376,7 +386,7 @@ fn nodeToCompletion(
                 const insert_text = if (use_snippets) blk: {
                     // TODO Also check if we are dot accessing from a type val and dont skip in that case.
                     const skip_self_param = if (func.ast.params.len > 0) param_check: {
-                        const in_container = analysis.innermostContainer(handle, tree.tokenLocation(0, func.ast.fn_token).line_start);
+                        const in_container = analysis.innermostContainer(handle, tree.tokens.items(.start)[func.ast.fn_token]);
 
                         var it = func.iterate(tree);
                         const param = it.next().?;
@@ -603,7 +613,9 @@ fn hoverSymbol(
                 tree.firstToken(param.type_expr);
             const last_token = tree.lastToken(param.type_expr);
 
-            const signature_str = tree.source[tree.tokenLocation(0, first_token).line_start..tree.tokenLocation(0, last_token).line_end];
+            const start = offsets.tokenLocation(tree, first_token).start;
+            const end = offsets.tokenLocation(tree, last_token).end;
+            const signature_str = tree.source[start..end];
             break :param_decl if (hover_kind == .Markdown)
                 try std.fmt.allocPrint(&arena.allocator, "```zig\n{s}\n```\n{s}", .{ signature_str, doc_str })
             else
@@ -895,7 +907,7 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: analysis.Decl
                 .label = tree.tokenSlice(param.name_token.?),
                 .kind = .Constant,
                 .documentation = doc,
-                .detail = tree.source[tree.tokenLocation(0, first_token).line_start..tree.tokenLocation(0, last_token).line_end],
+                .detail = tree.source[offsets.tokenLocation(tree, first_token).start..offsets.tokenLocation(tree, last_token).end],
             });
         },
         .pointer_payload => |payload| {
