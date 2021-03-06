@@ -25,3 +25,7 @@ enable_semantic_tokens: bool = true,
 
 /// Whether to enable `*` and `?` operators in completion lists
 operator_completions: bool = true,
+
+/// Skips references to std. This will improve lookup speeds.
+/// Going to definition however will continue to work
+skip_std_references: bool = true,

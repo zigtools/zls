@@ -40,7 +40,7 @@ pub fn renameSymbol(
         .edits = edits,
         .allocator = &arena.allocator,
         .new_name = new_name,
-    }, refHandler);
+    }, refHandler, true);
 }
 
 pub fn renameLabel(

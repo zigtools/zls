@@ -35,15 +35,7 @@ pub fn getDocCommentTokenIndex(tree: ast.Tree, node: ast.Node.Index) ?ast.TokenI
             if (tokens[idx] == .keyword_pub and idx > 0)
                 idx -= 1;
         },
-        .error_value => idx -= 1,
-        .container_field,
-        .container_field_init,
-        .container_field_align,
-        => idx -= 1,
-        .test_decl => idx -= 1,
-        else => {
-            log.debug("Doc comment check for tag: {s}", .{tags[node]});
-        },
+        else => idx -= 1,
     }
 
     // Find first doc comment token
@@ -103,9 +95,12 @@ pub fn collectDocComments(
 
 /// Gets a function signature (keywords, name, return value)
 pub fn getFunctionSignature(tree: ast.Tree, func: ast.full.FnProto) []const u8 {
-    const start = offsets.tokenLocation(tree, func.ast.fn_token).start;
-    const end = offsets.tokenLocation(tree, tree.nodes.items(.main_token)[func.ast.return_type]).end;
-    return tree.source[start..end];
+    const start = offsets.tokenLocation(tree, func.ast.fn_token);
+    // return type can be 0 when user wrote incorrect fn signature
+    // to ensure we don't break, just end the signature at end of fn token
+    if (func.ast.return_type == 0) return tree.source[start.start..start.end];
+    const end = offsets.tokenLocation(tree, tree.lastToken(func.ast.return_type)).end;
+    return tree.source[start.start..end];
 }
 
 /// Gets a function snippet insert text
@@ -240,12 +235,7 @@ pub fn getDeclNameToken(tree: ast.Tree, node: ast.Node.Index) ?ast.TokenIndex {
         .container_field_align => tree.containerFieldAlign(node).ast.name_token,
 
         .identifier => main_token,
-
-        // @TODO: Errors
-        // .error_=> {
-        //     const tag = node.castTag(.ErrorTag).?;
-        //     return tag.name_token;
-        // },
+        .error_value => main_token + 2, // 'error'.<main_token +2>
 
         // lhs of main token is name token, so use `node` - 1
         .test_decl => if (tree.tokens.items(.tag)[main_token + 1] == .string_literal)
@@ -328,9 +318,7 @@ fn resolveVarDeclAliasInternal(
             break :block NodeWithHandle{ .node = resolved_node, .handle = resolved.handle };
         } else return null;
 
-        if (try lookupSymbolContainer(store, arena, container_node, tree.tokenSlice(datas[node_handle.node].rhs), false)) |inner_decl| {
-            return inner_decl;
-        }
+        return try lookupSymbolContainer(store, arena, container_node, tree.tokenSlice(datas[node_handle.node].rhs), false);
     }
     return null;
 }
@@ -366,22 +354,70 @@ pub fn resolveVarDeclAlias(store: *DocumentStore, arena: *std.heap.ArenaAllocato
     return null;
 }
 
+/// Returns `true` when the given `node` is one of the block tags
+fn isBlock(tree: ast.Tree, node: ast.Node.Index) bool {
+    return switch (tree.nodes.items(.tag)[node]) {
+        .block,
+        .block_semicolon,
+        .block_two,
+        .block_two_semicolon,
+        => true,
+        else => false,
+    };
+}
+
+/// Returns `true` when the given `node` is one of the call tags
+fn isCall(tree: ast.Tree, node: ast.Node.Index) bool {
+    return switch (tree.nodes.items(.tag)[node]) {
+        .call,
+        .call_comma,
+        .call_one,
+        .call_one_comma,
+        .async_call,
+        .async_call_comma,
+        .async_call_one,
+        .async_call_one_comma,
+        => true,
+        else => false,
+    };
+}
+
 fn findReturnStatementInternal(
     tree: ast.Tree,
-    fn_decl: *ast.Node.FnProto,
-    base_node: *ast.Node,
+    fn_decl: ast.full.FnProto,
+    body: ast.Node.Index,
     already_found: *bool,
-) ?*ast.Node.ControlFlowExpression {
-    var result: ?*ast.Node.ControlFlowExpression = null;
-    var child_idx: usize = 0;
+) ?ast.Node.Index {
+    var result: ?ast.Node.Index = null;
 
-    while (base_node.iterate(child_idx)) |child_node| : (child_idx += 1) {
-        if (child_node.castTag(.Return)) |cfe| {
-            // If we are calling ourselves recursively, ignore this return.
-            if (cfe.getRHS()) |rhs| {
-                if (rhs.castTag(.Call)) |call_node| {
-                    if (call_node.lhs.tag == .Identifier) {
-                        if (std.mem.eql(u8, getDeclName(tree, call_node.lhs).?, getDeclName(tree, &fn_decl.base).?)) {
+    const node_tags = tree.nodes.items(.tag);
+    const datas = tree.nodes.items(.data);
+
+    if (!isBlock(tree, body)) return null;
+
+    const statements: []const ast.Node.Index = switch (node_tags[body]) {
+        .block, .block_semicolon => tree.extra_data[datas[body].lhs..datas[body].rhs],
+        .block_two, .block_two_semicolon => blk: {
+            const statements = &[_]ast.Node.Index{ datas[body].lhs, datas[body].rhs };
+            const len: usize = if (datas[body].lhs == 0)
+                @as(usize, 0)
+            else if (datas[body].rhs == 0)
+                @as(usize, 1)
+            else
+                @as(usize, 2);
+            break :blk statements[0..len];
+        },
+        else => unreachable,
+    };
+
+    for (statements) |child_idx| {
+        if (node_tags[child_idx] == .@"return") {
+            if (datas[child_idx].lhs != 0) {
+                const lhs = datas[child_idx].lhs;
+                if (isCall(tree, lhs)) {
+                    const call_name = getDeclName(tree, datas[lhs].lhs);
+                    if (call_name) |name| {
+                        if (std.mem.eql(u8, name, tree.tokenSlice(fn_decl.name_token.?))) {
                             continue;
                         }
                     }
@@ -390,18 +426,19 @@ fn findReturnStatementInternal(
 
             if (already_found.*) return null;
             already_found.* = true;
-            result = cfe;
+            result = child_idx;
             continue;
         }
 
-        result = findReturnStatementInternal(tree, fn_decl, child_node, already_found);
+        result = findReturnStatementInternal(tree, fn_decl, child_idx, already_found);
     }
+
     return result;
 }
 
-fn findReturnStatement(tree: ast.Tree, fn_decl: *ast.Node.FnProto) ?*ast.Node.ControlFlowExpression {
+fn findReturnStatement(tree: ast.Tree, fn_decl: ast.full.FnProto, body: ast.Node.Index) ?ast.Node.Index {
     var already_found = false;
-    return findReturnStatementInternal(tree, fn_decl, fn_decl.getBodyNode().?, &already_found);
+    return findReturnStatementInternal(tree, fn_decl, body, &already_found);
 }
 
 /// Resolves the return type of a function
@@ -415,14 +452,25 @@ pub fn resolveReturnType(
 ) !?TypeWithHandle {
     const tree = handle.tree;
     if (isTypeFunction(tree, fn_decl) and fn_body != null) {
-        // @TODO: find return statement inside fn body of `type` (generic) functions
+        // If this is a type function and it only contains a single return statement that returns
+        // a container declaration, we will return that declaration.
+        const ret = findReturnStatement(tree, fn_decl, fn_body.?) orelse return null;
+        const data = tree.nodes.items(.data)[ret];
+        if (data.lhs != 0) {
+            return try resolveTypeOfNodeInternal(store, arena, .{
+                .node = data.lhs,
+                .handle = handle,
+            }, bound_type_params);
+        }
+
+        return null;
     }
 
     if (fn_decl.ast.return_type == 0) return null;
-    return resolveTypeOfNodeInternal(store, arena, .{
+    return ((try resolveTypeOfNodeInternal(store, arena, .{
         .node = fn_decl.ast.return_type,
         .handle = handle,
-    }, bound_type_params);
+    }, bound_type_params)) orelse return null).instanceTypeVal();
 }
 
 /// Resolves the child type of an optional type
@@ -647,7 +695,7 @@ pub fn resolveTypeOfNodeInternal(
                 switch (child.decl.*) {
                     .ast_node => |n| {
                         if (n == node) return null;
-                        if (varDecl(tree, n)) |var_decl| {
+                        if (varDecl(child.handle.tree, n)) |var_decl| {
                             if (var_decl.ast.init_node != 0 and var_decl.ast.init_node == node) return null;
                         }
                     },
@@ -721,7 +769,7 @@ pub fn resolveTypeOfNodeInternal(
 
                     const call_param_type = (try resolveTypeOfNodeInternal(store, arena, .{
                         .node = call.ast.params[it.param_i - 1 - @boolToInt(has_self_param)],
-                        .handle = decl.handle,
+                        .handle = handle,
                     }, bound_type_params)) orelse continue;
                     if (!call_param_type.type.is_type_val) continue;
 
@@ -810,7 +858,7 @@ pub fn resolveTypeOfNodeInternal(
                 arena,
                 .{ .node = left_type_node, .handle = left_type.handle },
                 rhs_str,
-                left_type.type.is_type_val,
+                !left_type.type.is_type_val,
             )) |child| {
                 return try child.resolveType(store, arena, bound_type_params);
             } else return null;
@@ -829,13 +877,13 @@ pub fn resolveTypeOfNodeInternal(
             }, bound_type_params)) orelse return null;
             return try resolveUnwrapErrorType(store, arena, left_type, bound_type_params);
         },
-        .error_union => return TypeWithHandle.typeVal(node_handle),
         .array_type,
         .array_type_sentinel,
         .optional_type,
         .ptr_type_aligned,
         .ptr_type,
         .ptr_type_bit_range,
+        .error_union,
         => return TypeWithHandle.typeVal(node_handle),
         .@"try" => {
             const rhs_type = (try resolveTypeOfNodeInternal(store, arena, .{
@@ -860,7 +908,11 @@ pub fn resolveTypeOfNodeInternal(
                 .handle = rhs_type.handle,
             };
         },
-        .builtin_call, .builtin_call_comma, .builtin_call_two, .builtin_call_two_comma => {
+        .builtin_call,
+        .builtin_call_comma,
+        .builtin_call_two,
+        .builtin_call_two_comma,
+        => {
             const data = datas[node];
             const params = switch (node_tags[node]) {
                 .builtin_call, .builtin_call_comma => tree.extra_data[data.lhs..data.rhs],
@@ -935,15 +987,24 @@ pub fn resolveTypeOfNodeInternal(
         .container_decl_trailing,
         .container_decl_two,
         .container_decl_two_trailing,
+        .tagged_union,
+        .tagged_union_trailing,
+        .tagged_union_two,
+        .tagged_union_two_trailing,
+        .tagged_union_enum_tag,
+        .tagged_union_enum_tag_trailing,
         => {
             return TypeWithHandle.typeVal(node_handle);
         },
-        .fn_proto, .fn_proto_multi, .fn_proto_one, .fn_proto_simple, .fn_decl => {
+        .fn_proto,
+        .fn_proto_multi,
+        .fn_proto_one,
+        .fn_proto_simple,
+        .fn_decl,
+        => {
             var buf: [1]ast.Node.Index = undefined;
-            const fn_proto = fnProto(tree, node, &buf).?;
-
             // This is a function type
-            if (fn_proto.name_token == null) {
+            if (fnProto(tree, node, &buf).?.name_token == null) {
                 return TypeWithHandle.typeVal(node_handle);
             }
 
@@ -952,7 +1013,9 @@ pub fn resolveTypeOfNodeInternal(
                 .handle = handle,
             };
         },
-        .multiline_string_literal, .string_literal => return TypeWithHandle{
+        .multiline_string_literal,
+        .string_literal,
+        => return TypeWithHandle{
             .type = .{ .data = .{ .other = node }, .is_type_val = false },
             .handle = handle,
         },
@@ -1317,11 +1380,7 @@ pub fn nodeToString(tree: ast.Tree, node: ast.Node.Index) ?[]const u8 {
         .container_field => return tree.tokenSlice(tree.containerField(node).ast.name_token),
         .container_field_init => return tree.tokenSlice(tree.containerFieldInit(node).ast.name_token),
         .container_field_align => return tree.tokenSlice(tree.containerFieldAlign(node).ast.name_token),
-        // @TODO: Error tag name
-        // .ErrorTag => {
-        //     const tag = node.castTag(.ErrorTag).?;
-        //     return tree.tokenSlice(tag.name_token);
-        // },
+        .error_value => return tree.tokenSlice(data[node].rhs),
         .identifier => return tree.tokenSlice(main_token),
         .fn_proto,
         .fn_proto_multi,
@@ -2005,6 +2064,7 @@ fn iterateSymbolsContainerInternal(
                 .label_decl => continue,
                 else => {},
             }
+
             const decl = DeclWithHandle{ .decl = &entry.value, .handle = handle };
             if (handle != orig_handle and !decl.isPublic()) continue;
             try callback(context, decl);
@@ -2136,12 +2196,24 @@ fn resolveUse(
         if (std.mem.indexOfScalar(ast.Node.Index, use_trail.items, use) != null) continue;
         try use_trail.append(use);
 
-        const use_expr = (try resolveTypeOfNode(store, arena, .{ .node = handle.tree.nodes.items(.data)[use].lhs, .handle = handle })) orelse continue;
+        const use_expr = (try resolveTypeOfNode(
+            store,
+            arena,
+            .{ .node = handle.tree.nodes.items(.data)[use].lhs, .handle = handle },
+        )) orelse continue;
+
         const use_expr_node = switch (use_expr.type.data) {
             .other => |n| n,
             else => continue,
         };
-        if (try lookupSymbolContainerInternal(store, arena, .{ .node = use_expr_node, .handle = use_expr.handle }, symbol, false, use_trail)) |candidate| {
+        if (try lookupSymbolContainerInternal(
+            store,
+            arena,
+            .{ .node = use_expr_node, .handle = use_expr.handle },
+            symbol,
+            false,
+            use_trail,
+        )) |candidate| {
             if (candidate.handle != handle and !candidate.isPublic()) {
                 continue;
             }
@@ -2183,23 +2255,23 @@ fn lookupSymbolGlobalInternal(
     use_trail: *std.ArrayList(ast.Node.Index),
 ) error{OutOfMemory}!?DeclWithHandle {
     for (handle.document_scope.scopes) |scope| {
-        if (source_index >= scope.range.start and source_index < scope.range.end) {
-            if (scope.decls.getEntry(symbol)) |candidate| {
-                switch (candidate.value) {
-                    .ast_node => |node| {
-                        if (handle.tree.nodes.items(.tag)[node].isContainerField()) continue;
-                    },
-                    .label_decl => continue,
-                    else => {},
-                }
-                return DeclWithHandle{
-                    .decl = &candidate.value,
-                    .handle = handle,
-                };
+        // if (source_index >= scope.range.start and source_index < scope.range.end) {
+        if (scope.decls.getEntry(symbol)) |candidate| {
+            switch (candidate.value) {
+                .ast_node => |node| {
+                    if (handle.tree.nodes.items(.tag)[node].isContainerField()) continue;
+                },
+                .label_decl => continue,
+                else => {},
             }
-
-            if (try resolveUse(store, arena, scope.uses, symbol, handle, use_trail)) |result| return result;
+            return DeclWithHandle{
+                .decl = &candidate.value,
+                .handle = handle,
+            };
         }
+
+        if (try resolveUse(store, arena, scope.uses, symbol, handle, use_trail)) |result| return result;
+        // }
 
         if (scope.range.start > source_index) return null;
     }
@@ -2235,7 +2307,7 @@ fn lookupSymbolContainerInternal(
     const token_tags = tree.tokens.items(.tag);
     const main_token = tree.nodes.items(.main_token)[container];
 
-    const is_enum = if (isContainer(node_tags[container]) and node_tags[container] != .root)
+    const is_enum = if (container != 0 and isContainer(node_tags[container]))
         token_tags[main_token] == .keyword_enum
     else
         false;
@@ -2397,7 +2469,6 @@ pub fn declMembers(tree: ast.Tree, tag: ast.Node.Tag, node_idx: ast.Node.Index, 
         .tagged_union_enum_tag, .tagged_union_enum_tag_trailing => tree.taggedUnionEnumTag(node_idx).ast.members,
         .tagged_union_two, .tagged_union_two_trailing => tree.taggedUnionTwo(buffer, node_idx).ast.members,
         .root => tree.rootDecls(),
-        // @TODO: Fix error set declarations
         .error_set_decl => &[_]ast.Node.Index{},
         else => unreachable,
     };
@@ -2425,6 +2496,7 @@ fn makeScopeInternal(
     tree: ast.Tree,
     node_idx: ast.Node.Index,
 ) error{OutOfMemory}!void {
+    // if (node_idx > tree.nodes.len) return;
     const tags = tree.nodes.items(.tag);
     const token_tags = tree.tokens.items(.tag);
     const data = tree.nodes.items(.data);
@@ -2460,13 +2532,12 @@ fn makeScopeInternal(
 
             try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, decl);
             const name = getDeclName(tree, decl) orelse continue;
-            // @TODO: implement tests
-            // if (decl.tag == .TestDecl) {
-            //     try tests.append(decl);
-            //     continue;
-            // }
+            if (tags[decl] == .test_decl) {
+                try tests.append(decl);
+                continue;
+            }
 
-            if (tags[decl] == .error_set_decl) {
+            if (node == .error_set_decl) {
                 (try error_completions.addOne(allocator)).* = .{
                     .label = name,
                     .kind = .Constant,
@@ -2490,7 +2561,6 @@ fn makeScopeInternal(
                     continue;
                 }
 
-                // @TODO: We can probably just use node_idx directly instead of first transforming to container
                 const container_decl: ?ast.full.ContainerDecl = switch (node) {
                     .container_decl, .container_decl_trailing => tree.containerDecl(node_idx),
                     .container_decl_arg, .container_decl_arg_trailing => tree.containerDeclArg(node_idx),
@@ -2537,7 +2607,12 @@ fn makeScopeInternal(
     }
 
     switch (node) {
-        .fn_proto, .fn_proto_one, .fn_proto_simple, .fn_proto_multi, .fn_decl => |fn_tag| {
+        .fn_proto,
+        .fn_proto_one,
+        .fn_proto_simple,
+        .fn_proto_multi,
+        .fn_decl,
+        => |fn_tag| {
             var buf: [1]ast.Node.Index = undefined;
             const func = fnProto(tree, node_idx, &buf).?;
 
@@ -2569,7 +2644,11 @@ fn makeScopeInternal(
         .test_decl => {
             return try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, data[node_idx].rhs);
         },
-        .block, .block_semicolon, .block_two, .block_two_semicolon => {
+        .block,
+        .block_semicolon,
+        .block_two,
+        .block_two_semicolon,
+        => {
             const first_token = tree.firstToken(node_idx);
             const last_token = tree.lastToken(node_idx);
 
@@ -2638,10 +2717,9 @@ fn makeScopeInternal(
             scopes.items[scope_idx].uses = uses.toOwnedSlice();
             return;
         },
-        .@"comptime", .@"nosuspend" => {
-            return try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, data[node_idx].lhs);
-        },
-        .@"if", .if_simple => {
+        .@"if",
+        .if_simple,
+        => {
             const if_node: ast.full.If = if (node == .@"if")
                 tree.ifFull(node_idx)
             else
@@ -2697,7 +2775,12 @@ fn makeScopeInternal(
                 try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, if_node.ast.else_expr);
             }
         },
-        .@"while", .while_simple, .while_cont, .@"for", .for_simple => {
+        .@"while",
+        .while_simple,
+        .while_cont,
+        .@"for",
+        .for_simple,
+        => {
             const while_node: ast.full.While = switch (node) {
                 .@"while" => tree.whileFull(node_idx),
                 .while_simple => tree.whileSimple(node_idx),
@@ -2773,7 +2856,9 @@ fn makeScopeInternal(
                 try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, while_node.ast.else_expr);
             }
         },
-        .switch_case, .switch_case_one => {
+        .switch_case,
+        .switch_case_one,
+        => {
             const switch_case: ast.full.SwitchCase = switch (node) {
                 .switch_case => tree.switchCase(node_idx),
                 .switch_case_one => tree.switchCaseOne(node_idx),
@@ -2809,7 +2894,11 @@ fn makeScopeInternal(
 
             try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, switch_case.ast.target_expr);
         },
-        .global_var_decl, .local_var_decl, .aligned_var_decl, .simple_var_decl => {
+        .global_var_decl,
+        .local_var_decl,
+        .aligned_var_decl,
+        .simple_var_decl,
+        => {
             const var_decl = varDecl(tree, node_idx).?;
             if (var_decl.ast.type_node != 0) {
                 try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, var_decl.ast.type_node);
@@ -2819,13 +2908,206 @@ fn makeScopeInternal(
                 try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, var_decl.ast.init_node);
             }
         },
+        .call,
+        .call_comma,
+        .call_one,
+        .call_one_comma,
+        .async_call,
+        .async_call_comma,
+        .async_call_one,
+        .async_call_one_comma,
+        => {
+            var buf: [1]ast.Node.Index = undefined;
+            const call: ast.full.Call = switch (node) {
+                .async_call,
+                .async_call_comma,
+                .call,
+                .call_comma,
+                => tree.callFull(node_idx),
+                .async_call_one,
+                .async_call_one_comma,
+                .call_one,
+                .call_one_comma,
+                => tree.callOne(&buf, node_idx),
+                else => unreachable,
+            };
+
+            try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, call.ast.fn_expr);
+            for (call.ast.params) |param|
+                try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, param);
+        },
+        .struct_init,
+        .struct_init_comma,
+        .struct_init_dot,
+        .struct_init_dot_comma,
+        .struct_init_dot_two,
+        .struct_init_dot_two_comma,
+        .struct_init_one,
+        .struct_init_one_comma,
+        => {
+            var buf: [2]ast.Node.Index = undefined;
+            const struct_init: ast.full.StructInit = switch (node) {
+                .struct_init, .struct_init_comma => tree.structInit(node_idx),
+                .struct_init_dot, .struct_init_dot_comma => tree.structInitDot(node_idx),
+                .struct_init_dot_two, .struct_init_dot_two_comma => tree.structInitDotTwo(&buf, node_idx),
+                .struct_init_one, .struct_init_one_comma => tree.structInitOne(buf[0..1], node_idx),
+                else => unreachable,
+            };
+
+            if (struct_init.ast.type_expr != 0)
+                try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, struct_init.ast.type_expr);
+
+            for (struct_init.ast.fields) |field| {
+                try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, field);
+            }
+        },
+        .array_init,
+        .array_init_comma,
+        .array_init_dot,
+        .array_init_dot_comma,
+        .array_init_dot_two,
+        .array_init_dot_two_comma,
+        .array_init_one,
+        .array_init_one_comma,
+        => {
+            var buf: [2]ast.Node.Index = undefined;
+            const array_init: ast.full.ArrayInit = switch (node) {
+                .array_init, .array_init_comma => tree.arrayInit(node_idx),
+                .array_init_dot, .array_init_dot_comma => tree.arrayInitDot(node_idx),
+                .array_init_dot_two, .array_init_dot_two_comma => tree.arrayInitDotTwo(&buf, node_idx),
+                .array_init_one, .array_init_one_comma => tree.arrayInitOne(buf[0..1], node_idx),
+                else => unreachable,
+            };
+
+            if (array_init.ast.type_expr != 0)
+                try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, array_init.ast.type_expr);
+            for (array_init.ast.elements) |elem| {
+                try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, elem);
+            }
+        },
+        .container_field,
+        .container_field_align,
+        .container_field_init,
+        => {
+            const field = containerField(tree, node_idx).?;
+
+            if (field.ast.type_expr != 0)
+                try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, field.ast.type_expr);
+            if (field.ast.align_expr != 0)
+                try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, field.ast.align_expr);
+            if (field.ast.value_expr != 0)
+                try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, field.ast.value_expr);
+        },
+        .builtin_call,
+        .builtin_call_comma,
+        .builtin_call_two,
+        .builtin_call_two_comma,
+        => {
+            const b_data = data[node_idx];
+            const params = switch (node) {
+                .builtin_call, .builtin_call_comma => tree.extra_data[b_data.lhs..b_data.rhs],
+                .builtin_call_two, .builtin_call_two_comma => if (b_data.lhs == 0)
+                    &[_]ast.Node.Index{}
+                else if (b_data.rhs == 0)
+                    &[_]ast.Node.Index{b_data.lhs}
+                else
+                    &[_]ast.Node.Index{ b_data.lhs, b_data.rhs },
+                else => unreachable,
+            };
+
+            for (params) |param| {
+                try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, param);
+            }
+        },
+        .ptr_type,
+        .ptr_type_aligned,
+        .ptr_type_bit_range,
+        .ptr_type_sentinel,
+        => {
+            const ptr_type: ast.full.PtrType = ptrType(tree, node_idx).?;
+            if (ptr_type.ast.sentinel != 0)
+                try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, ptr_type.ast.sentinel);
+            if (ptr_type.ast.align_node != 0)
+                try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, ptr_type.ast.align_node);
+            if (ptr_type.ast.child_type != 0)
+                try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, ptr_type.ast.child_type);
+        },
+        .slice,
+        .slice_open,
+        .slice_sentinel,
+        => {
+            const slice: ast.full.Slice = switch (node) {
+                .slice => tree.slice(node_idx),
+                .slice_open => tree.sliceOpen(node_idx),
+                .slice_sentinel => tree.sliceSentinel(node_idx),
+                else => unreachable,
+            };
+
+            if (slice.ast.sliced != 0)
+                try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, slice.ast.sliced);
+            if (slice.ast.start != 0)
+                try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, slice.ast.start);
+            if (slice.ast.end != 0)
+                try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, slice.ast.end);
+            if (slice.ast.sentinel != 0)
+                try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, slice.ast.sentinel);
+        },
+
+        // no scope
+        .@"asm",
+        .asm_simple,
+        .asm_output,
+        .asm_input,
+        .error_value,
+        .@"anytype",
+        .multiline_string_literal,
+        .string_literal,
+        .enum_literal,
+        .identifier,
+        .anyframe_type,
+        .anyframe_literal,
+        .char_literal,
+        .integer_literal,
+        .float_literal,
+        .false_literal,
+        .true_literal,
+        .null_literal,
+        .undefined_literal,
+        .unreachable_literal,
+        .@"continue",
+        => {},
+        .@"break", .@"defer" => {
+            if (data[node_idx].rhs != 0)
+                try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, data[node_idx].rhs);
+        },
+        // all lhs kind of nodes
+        .@"return",
+        .@"resume",
+        .field_access,
+        .@"suspend",
+        .deref,
+        .@"try",
+        .@"await",
+        .optional_type,
+        .@"comptime",
+        .@"nosuspend",
+        .bool_not,
+        .negation,
+        .bit_not,
+        .negation_wrap,
+        .address_of,
+        .grouped_expression,
+        .unwrap_optional,
+        => {
+            if (data[node_idx].lhs != 0) {
+                try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, data[node_idx].lhs);
+            }
+        },
         else => {
-            // log.debug("Implement makeScopeInternal for node type: '{s}'", .{node});
-            // @TODO: Could we just do node_idx + 1 here?
-            // var child_idx: usize = 0;
-            // while (node.iterate(child_idx)) |child_node| : (child_idx += 1) {
-            //     try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, child_node);
-            // }
+            if (data[node_idx].lhs != 0)
+                try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, data[node_idx].lhs);
+            if (data[node_idx].rhs != 0)
+                try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, data[node_idx].rhs);
         },
     }
 }

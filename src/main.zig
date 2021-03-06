@@ -366,6 +366,7 @@ fn nodeToCompletion(
             .arena = arena,
             .orig_handle = orig_handle,
         };
+        logger.debug("eklafgaef", .{});
         try analysis.iterateSymbolsContainer(&document_store, arena, node_handle, orig_handle, declToCompletion, context, !is_type_val);
     }
 
@@ -427,7 +428,11 @@ fn nodeToCompletion(
                 });
             }
         },
-        .global_var_decl, .local_var_decl, .aligned_var_decl, .simple_var_decl => {
+        .global_var_decl,
+        .local_var_decl,
+        .aligned_var_decl,
+        .simple_var_decl,
+        => {
             const var_decl = analysis.varDecl(tree, node).?;
             const is_const = token_tags[var_decl.ast.mut_token] == .keyword_const;
 
@@ -448,7 +453,10 @@ fn nodeToCompletion(
                 .detail = analysis.getVariableSignature(tree, var_decl),
             });
         },
-        .container_field, .container_field_align, .container_field_init => {
+        .container_field,
+        .container_field_align,
+        .container_field_init,
+        => {
             const field = analysis.containerField(tree, node).?;
             try list.append(.{
                 .label = handle.tree.tokenSlice(field.ast.name_token),
@@ -457,13 +465,19 @@ fn nodeToCompletion(
                 .detail = analysis.getContainerFieldSignature(handle.tree, field),
             });
         },
-        .array_type, .array_type_sentinel => {
+        .array_type,
+        .array_type_sentinel,
+        => {
             try list.append(.{
                 .label = "len",
                 .kind = .Field,
             });
         },
-        .ptr_type, .ptr_type_aligned, .ptr_type_bit_range, .ptr_type_sentinel => {
+        .ptr_type,
+        .ptr_type_aligned,
+        .ptr_type_bit_range,
+        .ptr_type_sentinel,
+        => {
             const ptr_type = analysis.ptrType(tree, node).?;
 
             switch (ptr_type.size) {
@@ -496,7 +510,7 @@ fn nodeToCompletion(
                 .kind = .Field,
             });
         },
-        else => if (analysis.nodeToString(handle.tree, node)) |string| {
+        else => if (analysis.nodeToString(tree, node)) |string| {
             try list.append(.{
                 .label = string,
                 .kind = .Field,
@@ -828,10 +842,26 @@ fn renameDefinitionLabel(arena: *std.heap.ArenaAllocator, id: types.RequestId, h
     });
 }
 
-fn referencesDefinitionGlobal(arena: *std.heap.ArenaAllocator, id: types.RequestId, handle: *DocumentStore.Handle, pos_index: usize, include_decl: bool) !void {
+fn referencesDefinitionGlobal(
+    arena: *std.heap.ArenaAllocator,
+    id: types.RequestId,
+    handle: *DocumentStore.Handle,
+    pos_index: usize,
+    include_decl: bool,
+    skip_std_references: bool,
+) !void {
     const decl = (try getSymbolGlobal(arena, pos_index, handle)) orelse return try respondGeneric(id, null_result_response);
     var locs = std.ArrayList(types.Location).init(&arena.allocator);
-    try references.symbolReferences(arena, &document_store, decl, offset_encoding, include_decl, &locs, std.ArrayList(types.Location).append);
+    try references.symbolReferences(
+        arena,
+        &document_store,
+        decl,
+        offset_encoding,
+        include_decl,
+        &locs,
+        std.ArrayList(types.Location).append,
+        skip_std_references,
+    );
     try send(arena, types.Response{
         .id = id,
         .result = .{ .Locations = locs.items },
@@ -849,7 +879,7 @@ fn referencesDefinitionFieldAccess(
 ) !void {
     const decl = (try getSymbolFieldAccess(handle, arena, position, range, config)) orelse return try respondGeneric(id, null_result_response);
     var locs = std.ArrayList(types.Location).init(&arena.allocator);
-    try references.symbolReferences(arena, &document_store, decl, offset_encoding, include_decl, &locs, std.ArrayList(types.Location).append);
+    try references.symbolReferences(arena, &document_store, decl, offset_encoding, include_decl, &locs, std.ArrayList(types.Location).append, config.skip_std_references);
     try send(arena, types.Response{
         .id = id,
         .result = .{ .Locations = locs.items },
@@ -885,7 +915,15 @@ fn hasComment(tree: ast.Tree, start_token: ast.TokenIndex, end_token: ast.TokenI
 fn declToCompletion(context: DeclToCompletionContext, decl_handle: analysis.DeclWithHandle) !void {
     const tree = decl_handle.handle.tree;
     switch (decl_handle.decl.*) {
-        .ast_node => |node| try nodeToCompletion(context.arena, context.completions, .{ .node = node, .handle = decl_handle.handle }, null, context.orig_handle, false, context.config.*),
+        .ast_node => |node| try nodeToCompletion(
+            context.arena,
+            context.completions,
+            .{ .node = node, .handle = decl_handle.handle },
+            null,
+            context.orig_handle,
+            false,
+            context.config.*,
+        ),
         .param_decl => |param| {
             const doc_kind: types.MarkupContent.Kind = if (client_capabilities.completion_doc_supports_md) .Markdown else .PlainText;
             const doc = if (param.first_doc_comment) |doc_comments|
@@ -1419,7 +1457,7 @@ fn referencesHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: 
 
         const include_decl = req.params.context.includeDeclaration;
         switch (pos_context) {
-            .var_access => try referencesDefinitionGlobal(arena, id, handle, doc_position.absolute_index, include_decl),
+            .var_access => try referencesDefinitionGlobal(arena, id, handle, doc_position.absolute_index, include_decl, config.skip_std_references),
             .field_access => |range| try referencesDefinitionFieldAccess(arena, id, handle, doc_position, range, include_decl, config),
             .label => try referencesDefinitionLabel(arena, id, handle, doc_position.absolute_index, include_decl),
             else => try respondGeneric(id, null_result_response),
