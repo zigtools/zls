@@ -76,7 +76,7 @@ const Builder = struct {
 
     fn add(self: *Builder, token: ast.TokenIndex, token_type: TokenType, token_modifiers: TokenModifiers) !void {
         const starts = self.handle.tree.tokens.items(.start);
-        const start_idx = if (self.current_token) |current_token|
+        var start_idx = if (self.current_token) |current_token|
             starts[current_token]
         else
             0;
@@ -84,7 +84,7 @@ const Builder = struct {
         if (start_idx > starts[token])
             return;
 
-        const delta_loc = if (self.findCommentBetween(start_idx, starts[token])) |comment| blk: {
+        const delta_loc = while (self.findCommentBetween(start_idx, starts[token])) |comment| {
             const old_loc = self.handle.tree.tokenLocation(0, self.current_token orelse 0);
             const comment_delta = offsets.tokenRelativeLocation(self.handle.tree, start_idx, comment.start, self.encoding) catch return;
 
@@ -96,7 +96,7 @@ const Builder = struct {
                 0,
             });
 
-            break :blk offsets.tokenRelativeLocation(self.handle.tree, comment.start, starts[token], self.encoding) catch return;
+            start_idx = comment.start;
         } else offsets.tokenRelativeLocation(self.handle.tree, start_idx, starts[token], self.encoding) catch return;
 
         try self.arr.appendSlice(&[_]u32{
