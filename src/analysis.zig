@@ -1456,39 +1456,45 @@ pub fn fnProto(tree: ast.Tree, node: ast.Node.Index, buf: *[1]ast.Node.Index) ?a
 pub fn getImportStr(tree: ast.Tree, node: ast.Node.Index, source_index: usize) ?[]const u8 {
     const node_tags = tree.nodes.items(.tag);
     var buf: [2]ast.Node.Index = undefined;
-    const decls = declMembers(tree, node_tags[node], node, &buf);
-
-    for (decls) |decl_idx| {
-        if (!nodeContainsSourceIndex(tree, decl_idx, source_index)) {
-            continue;
+    if (isContainer(node_tags[node])) {
+        const decls = declMembers(tree, node_tags[node], node, &buf);
+        for (decls) |decl_idx| {
+            if (getImportStr(tree, decl_idx, source_index)) |name| {
+                return name;
+            }
         }
+        return null;
+    } else if (varDecl(tree, node)) |var_decl| {
+        return getImportStr(tree, var_decl.ast.init_node, source_index);
+    } else if (node_tags[node] == .@"usingnamespace") {
+        return getImportStr(tree, tree.nodes.items(.data)[node].lhs, source_index);
+    }
 
-        if (isBuiltinCall(tree, decl_idx)) {
-            const builtin_token = tree.nodes.items(.main_token)[decl_idx];
-            const call_name = tree.tokenSlice(builtin_token);
+    if (!nodeContainsSourceIndex(tree, node, source_index)) {
+        return null;
+    }
 
-            if (!std.mem.eql(u8, call_name, "@import")) continue;
-            const data = tree.nodes.items(.data)[decl_idx];
-            const params = switch (node_tags[decl_idx]) {
-                .builtin_call, .builtin_call_comma => tree.extra_data[data.lhs..data.rhs],
-                .builtin_call_two, .builtin_call_two_comma => if (data.lhs == 0)
-                    &[_]ast.Node.Index{}
-                else if (data.rhs == 0)
-                    &[_]ast.Node.Index{data.lhs}
-                else
-                    &[_]ast.Node.Index{ data.lhs, data.rhs },
-                else => unreachable,
-            };
+    if (isBuiltinCall(tree, node)) {
+        const builtin_token = tree.nodes.items(.main_token)[node];
+        const call_name = tree.tokenSlice(builtin_token);
 
-            if (params.len != 1) continue;
+        if (!std.mem.eql(u8, call_name, "@import")) return null;
+        const data = tree.nodes.items(.data)[node];
+        const params = switch (node_tags[node]) {
+            .builtin_call, .builtin_call_comma => tree.extra_data[data.lhs..data.rhs],
+            .builtin_call_two, .builtin_call_two_comma => if (data.lhs == 0)
+                &[_]ast.Node.Index{}
+            else if (data.rhs == 0)
+                &[_]ast.Node.Index{data.lhs}
+            else
+                &[_]ast.Node.Index{ data.lhs, data.rhs },
+            else => unreachable,
+        };
 
-            const import_str = tree.tokenSlice(tree.nodes.items(.main_token)[params[0]]);
-            return import_str[1 .. import_str.len - 1];
-        }
+        if (params.len != 1) return null;
 
-        if (getImportStr(tree, decl_idx, source_index)) |name| {
-            return name;
-        }
+        const import_str = tree.tokenSlice(tree.nodes.items(.main_token)[params[0]]);
+        return import_str[1 .. import_str.len - 1];
     }
 
     return null;
@@ -2105,12 +2111,30 @@ fn iterateSymbolsContainerInternal(
             if (std.mem.indexOfScalar(ast.Node.Index, use_trail.items, use) != null) continue;
             try use_trail.append(use);
 
-            const use_expr = (try resolveTypeOfNode(store, arena, .{ .node = tree.nodes.items(.data)[use].rhs, .handle = handle })) orelse continue;
+            const rhs = tree.nodes.items(.data)[use].rhs;
+            // rhs can be invalid so apply the following check to ensure
+            // we do not go out of bounds when resolving the type
+            if (rhs == 0 or rhs > tree.nodes.len) continue;
+            const use_expr = (try resolveTypeOfNode(store, arena, .{
+                .node = tree.nodes.items(.data)[use].rhs,
+                .handle = orig_handle,
+            })) orelse continue;
+
             const use_expr_node = switch (use_expr.type.data) {
                 .other => |n| n,
                 else => continue,
             };
-            try iterateSymbolsContainerInternal(store, arena, .{ .node = use_expr_node, .handle = use_expr.handle }, orig_handle, callback, context, false, use_trail);
+
+            try iterateSymbolsContainerInternal(
+                store,
+                arena,
+                .{ .node = use_expr_node, .handle = use_expr.handle },
+                orig_handle,
+                callback,
+                context,
+                false,
+                use_trail,
+            );
         }
     }
 }
@@ -2283,23 +2307,23 @@ fn lookupSymbolGlobalInternal(
     use_trail: *std.ArrayList(ast.Node.Index),
 ) error{OutOfMemory}!?DeclWithHandle {
     for (handle.document_scope.scopes) |scope| {
-        // if (source_index >= scope.range.start and source_index < scope.range.end) {
-        if (scope.decls.getEntry(symbol)) |candidate| {
-            switch (candidate.value) {
-                .ast_node => |node| {
-                    if (handle.tree.nodes.items(.tag)[node].isContainerField()) continue;
-                },
-                .label_decl => continue,
-                else => {},
+        if (source_index >= scope.range.start and source_index < scope.range.end) {
+            if (scope.decls.getEntry(symbol)) |candidate| {
+                switch (candidate.value) {
+                    .ast_node => |node| {
+                        if (handle.tree.nodes.items(.tag)[node].isContainerField()) continue;
+                    },
+                    .label_decl => continue,
+                    else => {},
+                }
+                return DeclWithHandle{
+                    .decl = &candidate.value,
+                    .handle = handle,
+                };
             }
-            return DeclWithHandle{
-                .decl = &candidate.value,
-                .handle = handle,
-            };
-        }
 
-        if (try resolveUse(store, arena, scope.uses, symbol, handle, use_trail)) |result| return result;
-        // }
+            if (try resolveUse(store, arena, scope.uses, symbol, handle, use_trail)) |result| return result;
+        }
 
         if (scope.range.start > source_index) return null;
     }

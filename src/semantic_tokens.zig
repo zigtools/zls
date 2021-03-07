@@ -598,6 +598,7 @@ fn writeNodeTokens(
 
             try writeToken(builder, while_node.label_token, .label);
             try writeToken(builder, while_node.inline_token, .keyword);
+            try writeToken(builder, while_node.ast.while_token, .keyword);
             try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, while_node.ast.cond_expr });
             try writeToken(builder, while_node.payload_token, .variable);
             if (while_node.ast.cont_expr != 0)
@@ -607,8 +608,10 @@ fn writeNodeTokens(
 
             try writeToken(builder, while_node.error_token, .variable);
 
-            if (while_node.ast.else_expr != 0)
+            if (while_node.ast.else_expr != 0) {
+                try writeToken(builder, while_node.else_token, .keyword);
                 try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, while_node.ast.else_expr });
+            }
         },
         .@"if",
         .if_simple,
@@ -622,8 +625,10 @@ fn writeNodeTokens(
             try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, if_node.ast.then_expr });
 
             try writeToken(builder, if_node.error_token, .variable);
-            if (if_node.ast.else_expr != 0)
+            if (if_node.ast.else_expr != 0) {
+                try writeToken(builder, if_node.else_token, .keyword);
                 try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, if_node.ast.else_expr });
+            }
         },
         .array_init,
         .array_init_comma,

@@ -622,8 +622,8 @@ fn hoverSymbol(
             const first_token = param.first_doc_comment orelse
                 param.comptime_noalias orelse
                 param.name_token orelse
-                tree.firstToken(param.type_expr);
-            const last_token = tree.lastToken(param.anytype_ellipsis3 orelse param.type_expr);
+                tree.firstToken(param.type_expr); // extern fn
+            const last_token = param.anytype_ellipsis3 orelse tree.lastToken(param.type_expr);
 
             const start = offsets.tokenLocation(tree, first_token).start;
             const end = offsets.tokenLocation(tree, last_token).end;
