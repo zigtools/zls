@@ -14,7 +14,7 @@ fn tokenReference(
     context: anytype,
     comptime handler: anytype,
 ) !void {
-    const loc = offsets.tokenRelativeLocation(handle.tree, 0, tok, encoding) catch return;
+    const loc = offsets.tokenRelativeLocation(handle.tree, 0, handle.tree.tokens.items(.start)[tok], encoding) catch return;
     try handler(context, types.Location{
         .uri = handle.uri(),
         .range = .{

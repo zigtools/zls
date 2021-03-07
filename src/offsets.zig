@@ -71,8 +71,8 @@ pub const TokenLocation = struct {
     }
 };
 
-pub fn tokenRelativeLocation(tree: ast.Tree, start_index: usize, token: ast.TokenIndex, encoding: Encoding) !TokenLocation {
-    const start = tree.tokens.items(.start)[token];
+pub fn tokenRelativeLocation(tree: ast.Tree, start_index: usize, next_token_index: usize, encoding: Encoding) !TokenLocation {
+    const start = next_token_index;
 
     var loc = TokenLocation{
         .line = 0,

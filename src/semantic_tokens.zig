@@ -48,11 +48,21 @@ pub const TokenModifiers = packed struct {
     }
 };
 
+const Comment = struct {
+    /// Length of the comment
+    length: u32,
+    /// Source index of the comment
+    start: u32,
+};
+
+const CommentList = std.ArrayList(Comment);
+
 const Builder = struct {
     handle: *DocumentStore.Handle,
     current_token: ?ast.TokenIndex,
     arr: std.ArrayList(u32),
     encoding: offsets.Encoding,
+    comments: CommentList,
 
     fn init(allocator: *std.mem.Allocator, handle: *DocumentStore.Handle, encoding: offsets.Encoding) Builder {
         return Builder{
@@ -60,6 +70,7 @@ const Builder = struct {
             .current_token = null,
             .arr = std.ArrayList(u32).init(allocator),
             .encoding = encoding,
+            .comments = CommentList.init(allocator),
         };
     }
 
@@ -73,7 +84,21 @@ const Builder = struct {
         if (start_idx > starts[token])
             return;
 
-        const delta_loc = offsets.tokenRelativeLocation(self.handle.tree, start_idx, token, self.encoding) catch return;
+        const delta_loc = if (self.findCommentBetween(start_idx, starts[token])) |comment| blk: {
+            const old_loc = self.handle.tree.tokenLocation(0, self.current_token orelse 0);
+            const comment_delta = offsets.tokenRelativeLocation(self.handle.tree, start_idx, comment.start, self.encoding) catch return;
+
+            try self.arr.appendSlice(&[_]u32{
+                @truncate(u32, comment_delta.line),
+                @truncate(u32, comment_delta.column),
+                comment.length,
+                @enumToInt(TokenType.comment),
+                0,
+            });
+
+            break :blk offsets.tokenRelativeLocation(self.handle.tree, comment.start, starts[token], self.encoding) catch return;
+        } else offsets.tokenRelativeLocation(self.handle.tree, start_idx, starts[token], self.encoding) catch return;
+
         try self.arr.appendSlice(&[_]u32{
             @truncate(u32, delta_loc.line),
             @truncate(u32, delta_loc.column),
@@ -86,6 +111,15 @@ const Builder = struct {
 
     fn toOwnedSlice(self: *Builder) []u32 {
         return self.arr.toOwnedSlice();
+    }
+
+    /// Based on a given start and end index, returns a `Comment` between the positions
+    /// Returns `null` if none was fone
+    fn findCommentBetween(self: Builder, from: u32, to: u32) ?Comment {
+        return for (self.comments.items) |comment| {
+            if (comment.start > from and comment.start < to)
+                break comment;
+        } else null;
     }
 };
 
@@ -1011,8 +1045,12 @@ fn writeNodeTokens(
 pub fn writeAllSemanticTokens(arena: *std.heap.ArenaAllocator, store: *DocumentStore, handle: *DocumentStore.Handle, encoding: offsets.Encoding) ![]u32 {
     var builder = Builder.init(arena.child_allocator, handle, encoding);
 
+    // as line comments are not nodes, we parse the text then generate the tokens for them
+    try findComments(&builder, handle.tree.source, encoding);
+
     // reverse the ast from the root declarations
     var gap_highlighter = GapHighlighter.init(&builder, 0);
+
     var buf: [2]ast.Node.Index = undefined;
     for (analysis.declMembers(handle.tree, .root, 0, &buf)) |child| {
         try gap_highlighter.next(child);
@@ -1020,7 +1058,57 @@ pub fn writeAllSemanticTokens(arena: *std.heap.ArenaAllocator, store: *DocumentS
     }
 
     try gap_highlighter.end(@truncate(u32, handle.tree.tokens.len) - 1);
-    // pass root node, which always has index '0'
-    // try writeNodeTokens(&builder, arena, store, 0);
+
     return builder.toOwnedSlice();
+}
+
+/// As the AST does not contain nodes for comments
+/// this will parse through the entire file to search for comments
+/// and generate semantic tokens for them
+fn findComments(builder: *Builder, source: []const u8, encoding: offsets.Encoding) !void {
+    var state: enum { none, comment, doc_comment } = .none;
+
+    var prev: u8 = 0;
+    var start: usize = 0;
+    for (source) |c, i| {
+        if (state == .comment and c == '/') {
+            state = .none;
+            continue;
+        }
+
+        if (state == .none and c == '/' and prev == '/') {
+            state = .comment;
+            start = i - 1;
+        }
+
+        if (c == '\n') {
+            if (state == .comment) {
+                state = .none;
+
+                const len = if (encoding == .utf8)
+                    i - start
+                else blk: {
+                    var index: usize = start;
+                    var utf16_len: usize = 0;
+                    while (index < i) {
+                        const n = std.unicode.utf8ByteSequenceLength(source[index]) catch unreachable;
+                        const codepoint = std.unicode.utf8Decode(source[index .. index + n]) catch unreachable;
+                        if (codepoint < 0x10000) {
+                            utf16_len += 1;
+                        } else {
+                            utf16_len += 2;
+                        }
+                        index += n;
+                    }
+                    break :blk utf16_len;
+                };
+
+                try builder.comments.append(.{
+                    .length = @truncate(u32, len),
+                    .start = @truncate(u32, start),
+                });
+            }
+        }
+        prev = c;
+    }
 }

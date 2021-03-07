@@ -554,7 +554,7 @@ fn gotoDefinitionSymbol(id: types.RequestId, arena: *std.heap.ArenaAllocator, de
 
             const name_token = analysis.getDeclNameToken(handle.tree, node) orelse
                 return try respondGeneric(id, null_result_response);
-            break :block offsets.tokenRelativeLocation(handle.tree, 0, name_token, offset_encoding) catch return;
+            break :block offsets.tokenRelativeLocation(handle.tree, 0, handle.tree.tokens.items(.start)[name_token], offset_encoding) catch return;
         },
         else => decl_handle.location(offset_encoding) catch return,
     };

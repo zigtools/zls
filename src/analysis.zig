@@ -1785,8 +1785,19 @@ fn getDocumentSymbolsInternal(allocator: *std.mem.Allocator, tree: ast.Tree, nod
     if (name.len == 0)
         return;
 
-    const start_loc = context.prev_loc.add(try offsets.tokenRelativeLocation(tree, context.prev_loc.offset, tree.firstToken(node), context.encoding));
-    const end_loc = start_loc.add(try offsets.tokenRelativeLocation(tree, start_loc.offset, tree.lastToken(node), context.encoding));
+    const starts = tree.tokens.items(.start);
+    const start_loc = context.prev_loc.add(try offsets.tokenRelativeLocation(
+        tree,
+        context.prev_loc.offset,
+        starts[tree.firstToken(node)],
+        context.encoding,
+    ));
+    const end_loc = start_loc.add(try offsets.tokenRelativeLocation(
+        tree,
+        start_loc.offset,
+        starts[tree.lastToken(node)],
+        context.encoding,
+    ));
     context.prev_loc = end_loc;
     const range = types.Range{
         .start = .{
@@ -1908,7 +1919,7 @@ pub const DeclWithHandle = struct {
 
     pub fn location(self: DeclWithHandle, encoding: offsets.Encoding) !offsets.TokenLocation {
         const tree = self.handle.tree;
-        return try offsets.tokenRelativeLocation(tree, 0, self.nameToken(), encoding);
+        return try offsets.tokenRelativeLocation(tree, 0, tree.tokens.items(.start)[self.nameToken()], encoding);
     }
 
     fn isPublic(self: DeclWithHandle) bool {

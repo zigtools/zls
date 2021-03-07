@@ -28,4 +28,4 @@ operator_completions: bool = true,
 
 /// Skips references to std. This will improve lookup speeds.
 /// Going to definition however will continue to work
-skip_std_references: bool = true,
+skip_std_references: bool = false,
