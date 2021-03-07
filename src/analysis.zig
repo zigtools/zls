@@ -467,8 +467,24 @@ pub fn resolveReturnType(
     }
 
     if (fn_decl.ast.return_type == 0) return null;
-    return ((try resolveTypeOfNodeInternal(store, arena, .{
-        .node = fn_decl.ast.return_type,
+    const return_type = fn_decl.ast.return_type;
+
+    const is_inferred_error = tree.tokens.items(.tag)[tree.firstToken(return_type) - 1] == .bang;
+    return if (is_inferred_error) block: {
+        const child_type = (try resolveTypeOfNodeInternal(store, arena, .{
+            .node = return_type,
+            .handle = handle,
+        }, bound_type_params)) orelse return null;
+        const child_type_node = switch (child_type.type.data) {
+            .other => |n| n,
+            else => return null,
+        };
+        break :block TypeWithHandle{
+            .type = .{ .data = .{ .error_union = child_type_node }, .is_type_val = false },
+            .handle = child_type.handle,
+        };
+    } else ((try resolveTypeOfNodeInternal(store, arena, .{
+        .node = return_type,
         .handle = handle,
     }, bound_type_params)) orelse return null).instanceTypeVal();
 }
@@ -509,6 +525,7 @@ fn resolveUnwrapErrorType(
         },
         .primitive, .slice, .pointer => return null,
     };
+
     if (rhs.handle.tree.nodes.items(.tag)[rhs_node] == .error_union) {
         return ((try resolveTypeOfNodeInternal(store, arena, .{
             .node = rhs.handle.tree.nodes.items(.data)[rhs_node].rhs,
