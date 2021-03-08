@@ -637,10 +637,10 @@ fn hoverSymbol(
             try std.fmt.allocPrint(&arena.allocator, "```zig\n{s}\n```", .{tree.tokenSlice(payload.name)})
         else
             try std.fmt.allocPrint(&arena.allocator, "{s}", .{tree.tokenSlice(payload.name)}),
-        // .array_payload => |payload| if (hover_kind == .Markdown)
-        //     try std.fmt.allocPrint(&arena.allocator, "```zig\n{s}\n```", .{handle.tree.tokenSlice(payload.identifier.firstToken())})
-        // else
-        //     try std.fmt.allocPrint(&arena.allocator, "{s}", .{handle.tree.tokenSlice(payload.identifier.firstToken())}),
+        .array_payload => |payload| if (hover_kind == .Markdown)
+            try std.fmt.allocPrint(&arena.allocator, "```zig\n{s}\n```", .{handle.tree.tokenSlice(payload.identifier)})
+        else
+            try std.fmt.allocPrint(&arena.allocator, "{s}", .{handle.tree.tokenSlice(payload.identifier)}),
         .switch_payload => |payload| if (hover_kind == .Markdown)
             try std.fmt.allocPrint(&arena.allocator, "```zig\n{s}\n```", .{tree.tokenSlice(payload.node)})
         else
@@ -935,9 +935,8 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: analysis.Decl
             const first_token = param.first_doc_comment orelse
                 param.comptime_noalias orelse
                 param.name_token orelse
-                param.anytype_ellipsis3 orelse
                 tree.firstToken(param.type_expr);
-            const last_token = tree.lastToken(param.type_expr);
+            const last_token = param.anytype_ellipsis3 orelse tree.lastToken(param.type_expr);
 
             try context.completions.append(.{
                 .label = tree.tokenSlice(param.name_token.?),
@@ -952,12 +951,12 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: analysis.Decl
                 .kind = .Variable,
             });
         },
-        // .array_payload => |payload| {
-        //     try context.completions.append(.{
-        //         .label = tree.tokenSlice(payload.identifier.firstToken()),
-        //         .kind = .Variable,
-        //     });
-        // },
+        .array_payload => |payload| {
+            try context.completions.append(.{
+                .label = tree.tokenSlice(payload.identifier),
+                .kind = .Variable,
+            });
+        },
         .switch_payload => |payload| {
             try context.completions.append(.{
                 .label = tree.tokenSlice(tree.firstToken(payload.node)),

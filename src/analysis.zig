@@ -595,6 +595,7 @@ fn resolveBracketAccessType(
     const tags = tree.nodes.items(.tag);
     const tag = tags[lhs_node];
     const data = tree.nodes.items(.data)[lhs_node];
+
     if (tag == .array_type or tag == .array_type_sentinel) {
         if (rhs == .Single)
             return ((try resolveTypeOfNodeInternal(store, arena, .{
@@ -605,11 +606,11 @@ fn resolveBracketAccessType(
             .type = .{ .data = .{ .slice = data.rhs }, .is_type_val = false },
             .handle = lhs.handle,
         };
-    } else if (isPtrType(tree, lhs_node)) {
-        if (tags[data.rhs] == .array_type or tags[data.rhs] == .array_type_sentinel) {
+    } else if (ptrType(tree, lhs_node)) |ptr_type| {
+        if (ptr_type.size == .Slice) {
             if (rhs == .Single) {
                 return ((try resolveTypeOfNodeInternal(store, arena, .{
-                    .node = tree.nodes.items(.data)[data.rhs].rhs,
+                    .node = ptr_type.ast.child_type,
                     .handle = lhs.handle,
                 }, bound_type_params)) orelse return null).instanceTypeVal();
             }
@@ -1321,10 +1322,15 @@ pub fn getFieldAccessType(
 
                 // Can't call a function type, we need a function type instance.
                 if (current_type.type.is_type_val) return null;
+                const cur_tree = current_type.handle.tree;
                 var buf: [1]ast.Node.Index = undefined;
-                if (fnProto(tree, current_type_node, &buf)) |func| {
-                    const has_body = tree.nodes.items(.tag)[current_type_node] == .fn_decl;
-                    const body = tree.nodes.items(.data)[current_type_node].rhs;
+                if (fnProto(cur_tree, current_type_node, &buf)) |func| {
+                    // Check if the function has a body and if so, pass it
+                    // so the type can be resolved if it's a generic function returning
+                    // an anonymous struct
+                    const has_body = cur_tree.nodes.items(.tag)[current_type_node] == .fn_decl;
+                    const body = cur_tree.nodes.items(.data)[current_type_node].rhs;
+
                     if (try resolveReturnType(store, arena, func, current_type.handle, &bound_type_params, if (has_body) body else null)) |ret| {
                         current_type = ret;
                         // Skip to the right paren
@@ -1911,16 +1917,16 @@ pub const Declaration = union(enum) {
         name: ast.TokenIndex,
         condition: ast.Node.Index,
     },
-    // array_payload: struct {
-    //     identifier: *ast.Node,
-    //     array_expr: ast.full.ArrayType,
-    // },
+    array_payload: struct {
+        identifier: ast.TokenIndex,
+        array_expr: ast.Node.Index,
+    },
     switch_payload: struct {
         node: ast.TokenIndex,
         switch_expr: ast.Node.Index,
         items: []const ast.Node.Index,
     },
-    label_decl: ast.TokenIndex, // .id is While, For or Block (firstToken will be the label)
+    label_decl: ast.TokenIndex,
 };
 
 pub const DeclWithHandle = struct {
@@ -1934,7 +1940,7 @@ pub const DeclWithHandle = struct {
             .ast_node => |n| getDeclNameToken(tree, n).?,
             .param_decl => |p| p.name_token.?,
             .pointer_payload => |pp| pp.name,
-            // .array_payload => |ap| ap.identifier.firstToken(),
+            .array_payload => |ap| ap.identifier,
             .switch_payload => |sp| sp.node + @boolToInt(token_tags[sp.node] == .asterisk),
             .label_decl => |ld| ld,
         };
@@ -1956,9 +1962,13 @@ pub const DeclWithHandle = struct {
         const tree = self.handle.tree;
         const node_tags = tree.nodes.items(.tag);
         const main_tokens = tree.nodes.items(.main_token);
-
         return switch (self.decl.*) {
-            .ast_node => |node| try resolveTypeOfNodeInternal(store, arena, .{ .node = node, .handle = self.handle }, bound_type_params),
+            .ast_node => |node| try resolveTypeOfNodeInternal(
+                store,
+                arena,
+                .{ .node = node, .handle = self.handle },
+                bound_type_params,
+            ),
             .param_decl => |param_decl| {
                 if (typeIsType(self.handle.tree, param_decl.type_expr)) {
                     var bound_param_it = bound_type_params.iterator();
@@ -1986,6 +1996,16 @@ pub const DeclWithHandle = struct {
                     .node = pay.condition,
                     .handle = self.handle,
                 }, bound_type_params)) orelse return null,
+                bound_type_params,
+            ),
+            .array_payload => |pay| try resolveBracketAccessType(
+                store,
+                arena,
+                (try resolveTypeOfNodeInternal(store, arena, .{
+                    .node = pay.array_expr,
+                    .handle = self.handle,
+                }, bound_type_params)) orelse return null,
+                .Single,
                 bound_type_params,
             ),
             .label_decl => return null,
@@ -2832,7 +2852,7 @@ fn makeScopeInternal(
         .while_cont,
         .@"for",
         .for_simple,
-        => {
+        => |tag| {
             const while_node: ast.full.While = switch (node) {
                 .@"while" => tree.whileFull(node_idx),
                 .while_simple => tree.whileSimple(node_idx),
@@ -2841,6 +2861,9 @@ fn makeScopeInternal(
                 .for_simple => tree.forSimple(node_idx),
                 else => unreachable,
             };
+
+            const is_for = tag == .@"for" or tag == .for_simple;
+
             if (while_node.label_token) |label| {
                 std.debug.assert(token_tags[label] == .identifier);
                 var scope = try scopes.addOne(allocator);
@@ -2877,12 +2900,29 @@ fn makeScopeInternal(
                 std.debug.assert(token_tags[name_token] == .identifier);
 
                 const name = tree.tokenSlice(name_token);
-                try scope.decls.putNoClobber(name, .{
-                    .pointer_payload = .{
-                        .name = name_token,
-                        .condition = while_node.ast.cond_expr,
-                    },
-                });
+                try scope.decls.putNoClobber(name, if (is_for)
+                    .{
+                        .array_payload = .{
+                            .identifier = name_token,
+                            .array_expr = while_node.ast.cond_expr,
+                        },
+                    }
+                else
+                    .{
+                        .pointer_payload = .{
+                            .name = name_token,
+                            .condition = while_node.ast.cond_expr,
+                        },
+                    });
+
+                // for loop with index as well
+                if (token_tags[name_token + 1] == .comma) {
+                    const index_token = name_token + 2;
+                    std.debug.assert(token_tags[index_token] == .identifier);
+                    if (try scope.decls.fetchPut(tree.tokenSlice(index_token), .{ .label_decl = index_token })) |existing| {
+                        // TODO Record a redefinition error
+                    }
+                }
             }
             try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, while_node.ast.then_expr);
 
