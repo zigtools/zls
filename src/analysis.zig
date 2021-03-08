@@ -2802,7 +2802,7 @@ fn makeScopeInternal(
                 scope.* = .{
                     .range = .{
                         .start = offsets.tokenLocation(tree, payload).start,
-                        .end = offsets.tokenLocation(tree, tree.lastToken(if_node.ast.then_expr)).end,
+                        .end = offsets.tokenLocation(tree, tree.lastToken(if_node.ast.then_expr)).end + 1,
                     },
                     .decls = std.StringHashMap(Declaration).init(allocator),
                     .uses = &.{},
@@ -2887,7 +2887,7 @@ fn makeScopeInternal(
                 scope.* = .{
                     .range = .{
                         .start = offsets.tokenLocation(tree, payload).start,
-                        .end = offsets.tokenLocation(tree, tree.lastToken(while_node.ast.then_expr)).end,
+                        .end = offsets.tokenLocation(tree, tree.lastToken(while_node.ast.then_expr)).end + 1,
                     },
                     .decls = std.StringHashMap(Declaration).init(allocator),
                     .uses = &.{},
