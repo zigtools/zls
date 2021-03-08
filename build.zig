@@ -8,7 +8,7 @@ var builder: *std.build.Builder = undefined;
 
 pub fn config(step: *std.build.Step) anyerror!void {
     @setEvalBranchQuota(2500);
-    std.debug.warn("Welcome to the ZLS configuration wizard! (insert mage emoji here)\n", .{});
+    std.debug.warn("Welcome to the ZLS configuration wizard! 🧙‍♂️\n", .{});
 
     var zig_exe_path: ?[]const u8 = null;
     std.debug.print("Looking for 'zig' in PATH...\n", .{});
