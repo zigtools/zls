@@ -959,7 +959,7 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: analysis.Decl
         },
         .switch_payload => |payload| {
             try context.completions.append(.{
-                .label = tree.tokenSlice(tree.firstToken(payload.node)),
+                .label = tree.tokenSlice(payload.node),
                 .kind = .Variable,
             });
         },

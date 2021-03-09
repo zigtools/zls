@@ -1941,7 +1941,7 @@ pub const DeclWithHandle = struct {
             .param_decl => |p| p.name_token.?,
             .pointer_payload => |pp| pp.name,
             .array_payload => |ap| ap.identifier,
-            .switch_payload => |sp| sp.node + @boolToInt(token_tags[sp.node] == .asterisk),
+            .switch_payload => |sp| sp.node,
             .label_decl => |ld| ld,
         };
     }
@@ -2948,43 +2948,49 @@ fn makeScopeInternal(
                 try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, while_node.ast.else_expr);
             }
         },
-        .switch_case,
-        .switch_case_one,
+        .@"switch",
+        .switch_comma,
         => {
-            const switch_case: ast.full.SwitchCase = switch (node) {
-                .switch_case => tree.switchCase(node_idx),
-                .switch_case_one => tree.switchCaseOne(node_idx),
-                else => unreachable,
-            };
+            const cond = data[node_idx].lhs;
+            const extra = tree.extraData(data[node_idx].rhs, ast.Node.SubRange);
+            const cases = tree.extra_data[extra.start..extra.end];
 
-            if (switch_case.payload_token) |payload| {
-                var scope = try scopes.addOne(allocator);
-                scope.* = .{
-                    .range = .{
-                        .start = offsets.tokenLocation(tree, payload).start,
-                        .end = offsets.tokenLocation(tree, tree.lastToken(switch_case.ast.target_expr)).end,
-                    },
-                    .decls = std.StringHashMap(Declaration).init(allocator),
-                    .uses = &.{},
-                    .tests = &.{},
-                    .data = .other,
+            for(cases)|case| {
+                const switch_case: ast.full.SwitchCase = switch (tags[case]) {
+                    .switch_case => tree.switchCase(case),
+                    .switch_case_one => tree.switchCaseOne(case),
+                    else => continue,
                 };
-                errdefer scope.decls.deinit();
 
-                // if payload is *name than get next token
-                const name_token = payload + @boolToInt(token_tags[payload] == .asterisk);
-                const name = tree.tokenSlice(name_token);
+                if (switch_case.payload_token) |payload| {
+                    var scope = try scopes.addOne(allocator);
+                    scope.* = .{
+                        .range = .{
+                            .start = offsets.tokenLocation(tree, payload).start,
+                            .end = offsets.tokenLocation(tree, tree.lastToken(switch_case.ast.target_expr)).end + 1,
+                        },
+                        .decls = std.StringHashMap(Declaration).init(allocator),
+                        .uses = &.{},
+                        .tests = &.{},
+                        .data = .other,
+                    };
+                    errdefer scope.decls.deinit();
 
-                try scope.decls.putNoClobber(name, .{
-                    .switch_payload = .{
-                        .node = payload,
-                        .switch_expr = switch_case.ast.target_expr,
-                        .items = switch_case.ast.values,
-                    },
-                });
+                    // if payload is *name than get next token
+                    const name_token = payload + @boolToInt(token_tags[payload] == .asterisk);
+                    const name = tree.tokenSlice(name_token);
+
+                    try scope.decls.putNoClobber(name, .{
+                        .switch_payload = .{
+                            .node = name_token,
+                            .switch_expr = cond,
+                            .items = switch_case.ast.values,
+                        },
+                    });
+                }
+
+                try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, switch_case.ast.target_expr);
             }
-
-            try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, switch_case.ast.target_expr);
         },
         .global_var_decl,
         .local_var_decl,
