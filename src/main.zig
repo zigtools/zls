@@ -391,6 +391,8 @@ fn nodeToCompletion(
                         var it = func.iterate(tree);
                         const param = it.next().?;
 
+                        if (param.type_expr == 0) break :param_check false;
+
                         if (try analysis.resolveTypeOfNode(&document_store, arena, .{
                             .node = param.type_expr,
                             .handle = handle,
@@ -641,6 +643,10 @@ fn hoverSymbol(
             try std.fmt.allocPrint(&arena.allocator, "```zig\n{s}\n```", .{handle.tree.tokenSlice(payload.identifier)})
         else
             try std.fmt.allocPrint(&arena.allocator, "{s}", .{handle.tree.tokenSlice(payload.identifier)}),
+        .array_index => |payload| if (hover_kind == .Markdown)
+            try std.fmt.allocPrint(&arena.allocator, "```zig\n{s}\n```", .{handle.tree.tokenSlice(payload)})
+        else
+            try std.fmt.allocPrint(&arena.allocator, "{s}", .{handle.tree.tokenSlice(payload)}),
         .switch_payload => |payload| if (hover_kind == .Markdown)
             try std.fmt.allocPrint(&arena.allocator, "```zig\n{s}\n```", .{tree.tokenSlice(payload.node)})
         else
@@ -954,6 +960,12 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: analysis.Decl
         .array_payload => |payload| {
             try context.completions.append(.{
                 .label = tree.tokenSlice(payload.identifier),
+                .kind = .Variable,
+            });
+        },
+        .array_index => |payload| {
+            try context.completions.append(.{
+                .label = tree.tokenSlice(payload),
                 .kind = .Variable,
             });
         },

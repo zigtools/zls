@@ -104,7 +104,12 @@ pub fn getFunctionSignature(tree: ast.Tree, func: ast.full.FnProto) []const u8 {
 }
 
 /// Gets a function snippet insert text
-pub fn getFunctionSnippet(allocator: *std.mem.Allocator, tree: ast.Tree, func: ast.full.FnProto, skip_self_param: bool) ![]const u8 {
+pub fn getFunctionSnippet(
+    allocator: *std.mem.Allocator,
+    tree: ast.Tree,
+    func: ast.full.FnProto,
+    skip_self_param: bool,
+) ![]const u8 {
     const name_index = func.name_token orelse unreachable;
 
     var buffer = std.ArrayList(u8).init(allocator);
@@ -118,11 +123,15 @@ pub fn getFunctionSnippet(allocator: *std.mem.Allocator, tree: ast.Tree, func: a
     const token_tags = tree.tokens.items(.tag);
 
     var it = func.iterate(tree);
-    while (it.next()) |param| {
-        if (skip_self_param and it.param_i - 1 == 0) continue;
-        if (it.param_i - 1 != @boolToInt(skip_self_param)) try buffer.appendSlice(", ${") else try buffer.appendSlice("${");
+    var i: usize = 0;
+    while (it.next()) |param| : (i += 1) {
+        if (skip_self_param and i == 0) continue;
+        if (i != @boolToInt(skip_self_param))
+            try buffer.appendSlice(", ${")
+        else
+            try buffer.appendSlice("${");
 
-        try buf_stream.print("{d}:", .{it.param_i});
+        try buf_stream.print("{d}:", .{i + 1});
 
         if (param.comptime_noalias) |token_index| {
             if (token_tags[token_index] == .keyword_comptime)
@@ -141,7 +150,7 @@ pub fn getFunctionSnippet(allocator: *std.mem.Allocator, tree: ast.Tree, func: a
                 try buffer.appendSlice("anytype")
             else
                 try buffer.appendSlice("...");
-        } else {
+        } else if (param.type_expr != 0) {
             var curr_token = tree.firstToken(param.type_expr);
             var end_token = tree.lastToken(param.type_expr);
             while (curr_token <= end_token) : (curr_token += 1) {
@@ -152,7 +161,8 @@ pub fn getFunctionSnippet(allocator: *std.mem.Allocator, tree: ast.Tree, func: a
                 try buffer.appendSlice(tree.tokenSlice(curr_token));
                 if (is_comma or tag == .keyword_const) try buffer.append(' ');
             }
-        }
+        } else unreachable;
+
         try buffer.append('}');
     }
     try buffer.append(')');
@@ -780,13 +790,14 @@ pub fn resolveTypeOfNodeInternal(
 
                 // Bind type params to the expressions passed in txhe calls.
                 const param_len = std.math.min(call.ast.params.len + @boolToInt(has_self_param), fn_decl.ast.params.len);
-                while (it.next()) |decl_param| {
-                    if (it.param_i - 1 == 0 and has_self_param) continue;
-                    if (it.param_i - 1 >= param_len) break;
+                var i: usize = 0;
+                while (it.next()) |decl_param| : (i += 1) {
+                    if (i == 0 and has_self_param) continue;
+                    if (i >= param_len) break;
                     if (!typeIsType(decl.handle.tree, decl_param.type_expr)) continue;
 
                     const call_param_type = (try resolveTypeOfNodeInternal(store, arena, .{
-                        .node = call.ast.params[it.param_i - 1 - @boolToInt(has_self_param)],
+                        .node = call.ast.params[i - @boolToInt(has_self_param)],
                         .handle = handle,
                     }, bound_type_params)) orelse continue;
                     if (!call_param_type.type.is_type_val) continue;
@@ -1921,6 +1932,7 @@ pub const Declaration = union(enum) {
         identifier: ast.TokenIndex,
         array_expr: ast.Node.Index,
     },
+    array_index: ast.TokenIndex,
     switch_payload: struct {
         node: ast.TokenIndex,
         switch_expr: ast.Node.Index,
@@ -1941,6 +1953,7 @@ pub const DeclWithHandle = struct {
             .param_decl => |p| p.name_token.?,
             .pointer_payload => |pp| pp.name,
             .array_payload => |ap| ap.identifier,
+            .array_index => |ai| ai,
             .switch_payload => |sp| sp.node,
             .label_decl => |ld| ld,
         };
@@ -2008,6 +2021,10 @@ pub const DeclWithHandle = struct {
                 .Single,
                 bound_type_params,
             ),
+            .array_index => TypeWithHandle{
+                .type = .{ .data = .primitive, .is_type_val = true },
+                .handle = self.handle,
+            },
             .label_decl => return null,
             .switch_payload => |pay| {
                 if (pay.items.len == 0) return null;
@@ -2024,7 +2041,7 @@ pub const DeclWithHandle = struct {
                     if (scope.decls.getEntry(tree.tokenSlice(main_tokens[pay.items[0]]))) |candidate| {
                         switch (candidate.value) {
                             .ast_node => |node| {
-                                if (containerField(tree, node)) |container_field| {
+                                if (containerField(switch_expr_type.handle.tree, node)) |container_field| {
                                     if (container_field.ast.type_expr != 0) {
                                         return ((try resolveTypeOfNodeInternal(
                                             store,
@@ -2919,7 +2936,7 @@ fn makeScopeInternal(
                 if (token_tags[name_token + 1] == .comma) {
                     const index_token = name_token + 2;
                     std.debug.assert(token_tags[index_token] == .identifier);
-                    if (try scope.decls.fetchPut(tree.tokenSlice(index_token), .{ .label_decl = index_token })) |existing| {
+                    if (try scope.decls.fetchPut(tree.tokenSlice(index_token), .{ .array_index = index_token })) |existing| {
                         // TODO Record a redefinition error
                     }
                 }
@@ -2955,7 +2972,7 @@ fn makeScopeInternal(
             const extra = tree.extraData(data[node_idx].rhs, ast.Node.SubRange);
             const cases = tree.extra_data[extra.start..extra.end];
 
-            for(cases)|case| {
+            for (cases) |case| {
                 const switch_case: ast.full.SwitchCase = switch (tags[case]) {
                     .switch_case => tree.switchCase(case),
                     .switch_case_one => tree.switchCaseOne(case),

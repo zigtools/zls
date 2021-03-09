@@ -585,7 +585,7 @@ pub fn symbolReferences(
                 return;
             };
         },
-        .pointer_payload, .switch_payload, .array_payload => {
+        .pointer_payload, .switch_payload, .array_payload, .array_index => {
             if (include_decl) {
                 try tokenReference(curr_handle, decl_handle.nameToken(), encoding, context, handler);
             }
