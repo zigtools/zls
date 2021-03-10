@@ -2117,62 +2117,55 @@ fn iterateSymbolsContainerInternal(
     const token_tags = tree.tokens.items(.tag);
     const main_token = tree.nodes.items(.main_token)[container];
 
-    const is_enum = if (isContainer(node_tags[container]) and node_tags[container] != .root)
-        token_tags[main_token] == .keyword_enum
-    else
-        false;
+    const is_enum = token_tags[main_token] == .keyword_enum;
 
-    if (findContainerScope(container_handle)) |container_scope| {
-        var decl_it = container_scope.decls.iterator();
-        while (decl_it.next()) |entry| {
-            switch (entry.value) {
-                .ast_node => |node| {
-                    if (node_tags[node].isContainerField()) {
-                        if (!instance_access and !is_enum) continue;
-                        if (instance_access and is_enum) continue;
-                    }
-                },
-                .label_decl => continue,
-                else => {},
-            }
+    const container_scope = findContainerScope(container_handle) orelse return;
 
-            const decl = DeclWithHandle{ .decl = &entry.value, .handle = handle };
-            if (handle != orig_handle and !decl.isPublic()) continue;
-            try callback(context, decl);
+    var decl_it = container_scope.decls.iterator();
+    while (decl_it.next()) |entry| {
+        switch (entry.value) {
+            .ast_node => |node| {
+                if (node_tags[node].isContainerField()) {
+                    if (!instance_access and !is_enum) continue;
+                    if (instance_access and is_enum) continue;
+                }
+            },
+            .label_decl => continue,
+            else => {},
         }
 
-        for (container_scope.uses) |use| {
-            const use_token = tree.nodes.items(.main_token)[use];
-            const is_pub = use_token > 0 and token_tags[use_token - 1] == .keyword_pub;
-            if (handle != orig_handle and !is_pub) continue;
-            if (std.mem.indexOfScalar(ast.Node.Index, use_trail.items, use) != null) continue;
-            try use_trail.append(use);
+        const decl = DeclWithHandle{ .decl = &entry.value, .handle = handle };
+        if (handle != orig_handle and !decl.isPublic()) continue;
+        try callback(context, decl);
+    }
 
-            const rhs = tree.nodes.items(.data)[use].rhs;
-            // rhs can be invalid so apply the following check to ensure
-            // we do not go out of bounds when resolving the type
-            if (rhs == 0 or rhs > tree.nodes.len) continue;
-            const use_expr = (try resolveTypeOfNode(store, arena, .{
-                .node = tree.nodes.items(.data)[use].rhs,
-                .handle = orig_handle,
-            })) orelse continue;
+    for (container_scope.uses) |use| {
+        const use_token = tree.nodes.items(.main_token)[use];
+        const is_pub = use_token > 0 and token_tags[use_token - 1] == .keyword_pub;
+        if (handle != orig_handle and !is_pub) continue;
+        if (std.mem.indexOfScalar(ast.Node.Index, use_trail.items, use) != null) continue;
+        try use_trail.append(use);
 
-            const use_expr_node = switch (use_expr.type.data) {
-                .other => |n| n,
-                else => continue,
-            };
+        const lhs = tree.nodes.items(.data)[use].lhs;
+        const use_expr = (try resolveTypeOfNode(store, arena, .{
+            .node = lhs,
+            .handle = handle,
+        })) orelse continue;
 
-            try iterateSymbolsContainerInternal(
-                store,
-                arena,
-                .{ .node = use_expr_node, .handle = use_expr.handle },
-                orig_handle,
-                callback,
-                context,
-                false,
-                use_trail,
-            );
-        }
+        const use_expr_node = switch (use_expr.type.data) {
+            .other => |n| n,
+            else => continue,
+        };
+        try iterateSymbolsContainerInternal(
+            store,
+            arena,
+            .{ .node = use_expr_node, .handle = use_expr.handle },
+            orig_handle,
+            callback,
+            context,
+            false,
+            use_trail,
+        );
     }
 }
 
@@ -2232,12 +2225,25 @@ fn iterateSymbolsGlobalInternal(
                 if (std.mem.indexOfScalar(ast.Node.Index, use_trail.items, use) != null) continue;
                 try use_trail.append(use);
 
-                const use_expr = (try resolveTypeOfNode(store, arena, .{ .node = handle.tree.nodes.items(.data)[use].lhs, .handle = handle })) orelse continue;
+                const use_expr = (try resolveTypeOfNode(
+                    store,
+                    arena,
+                    .{ .node = handle.tree.nodes.items(.data)[use].lhs, .handle = handle },
+                )) orelse continue;
                 const use_expr_node = switch (use_expr.type.data) {
                     .other => |n| n,
                     else => continue,
                 };
-                try iterateSymbolsContainerInternal(store, arena, .{ .node = use_expr_node, .handle = use_expr.handle }, handle, callback, context, false, use_trail);
+                try iterateSymbolsContainerInternal(
+                    store,
+                    arena,
+                    .{ .node = use_expr_node, .handle = use_expr.handle },
+                    handle,
+                    callback,
+                    context,
+                    false,
+                    use_trail,
+                );
             }
         }
 
