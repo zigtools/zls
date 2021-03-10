@@ -600,16 +600,30 @@ fn writeNodeTokens(
             try writeToken(builder, while_node.inline_token, .keyword);
             try writeToken(builder, while_node.ast.while_token, .keyword);
             try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, while_node.ast.cond_expr });
-            try writeToken(builder, while_node.payload_token, .variable);
+            if (while_node.payload_token) |payload| {
+                try writeToken(builder, payload - 1, .operator);
+                try writeToken(builder, payload, .variable);
+                var r_pipe = payload + 1;
+                if (token_tags[r_pipe] == .comma) {
+                    r_pipe += 1;
+                    try writeToken(builder, r_pipe, .variable);
+                    r_pipe += 1;
+                }
+                try writeToken(builder, r_pipe, .operator);
+            }
             if (while_node.ast.cont_expr != 0)
                 try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, while_node.ast.cont_expr });
 
             try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, while_node.ast.then_expr });
 
-            try writeToken(builder, while_node.error_token, .variable);
-
             if (while_node.ast.else_expr != 0) {
                 try writeToken(builder, while_node.else_token, .keyword);
+
+                if (while_node.error_token) |err_token| {
+                    try writeToken(builder, err_token - 1, .operator);
+                    try writeToken(builder, err_token, .variable);
+                    try writeToken(builder, err_token + 1, .operator);
+                }
                 try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, while_node.ast.else_expr });
             }
         },

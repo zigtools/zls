@@ -2022,7 +2022,7 @@ pub const DeclWithHandle = struct {
                 bound_type_params,
             ),
             .array_index => TypeWithHandle{
-                .type = .{ .data = .primitive, .is_type_val = true },
+                .type = .{ .data = .primitive, .is_type_val = false },
                 .handle = self.handle,
             },
             .label_decl => return null,
@@ -2220,7 +2220,7 @@ fn iterateSymbolsGlobalInternal(
     use_trail: *std.ArrayList(ast.Node.Index),
 ) error{OutOfMemory}!void {
     for (handle.document_scope.scopes) |scope| {
-        if (source_index >= scope.range.start and source_index < scope.range.end) {
+        if (source_index >= scope.range.start and source_index <= scope.range.end) {
             var decl_it = scope.decls.iterator();
             while (decl_it.next()) |entry| {
                 if (entry.value == .ast_node and handle.tree.nodes.items(.tag)[entry.value.ast_node].isContainerField()) continue;
@@ -2262,7 +2262,7 @@ pub fn innermostContainer(handle: *DocumentStore.Handle, source_index: usize) Ty
     if (handle.document_scope.scopes.len == 1) return TypeWithHandle.typeVal(.{ .node = current, .handle = handle });
 
     for (handle.document_scope.scopes[1..]) |scope| {
-        if (source_index >= scope.range.start and source_index < scope.range.end) {
+        if (source_index >= scope.range.start and source_index <= scope.range.end) {
             switch (scope.data) {
                 .container => |node| current = node,
                 else => {},
@@ -2344,7 +2344,7 @@ fn lookupSymbolGlobalInternal(
     use_trail: *std.ArrayList(ast.Node.Index),
 ) error{OutOfMemory}!?DeclWithHandle {
     for (handle.document_scope.scopes) |scope| {
-        if (source_index >= scope.range.start and source_index < scope.range.end) {
+        if (source_index >= scope.range.start and source_index <= scope.range.end) {
             if (scope.decls.getEntry(symbol)) |candidate| {
                 switch (candidate.value) {
                     .ast_node => |node| {
@@ -2585,7 +2585,6 @@ fn makeScopeInternal(
     tree: ast.Tree,
     node_idx: ast.Node.Index,
 ) error{OutOfMemory}!void {
-    // if (node_idx > tree.nodes.len) return;
     const tags = tree.nodes.items(.tag);
     const token_tags = tree.tokens.items(.tag);
     const data = tree.nodes.items(.data);
@@ -2819,7 +2818,7 @@ fn makeScopeInternal(
                 scope.* = .{
                     .range = .{
                         .start = offsets.tokenLocation(tree, payload).start,
-                        .end = offsets.tokenLocation(tree, tree.lastToken(if_node.ast.then_expr)).end + 1,
+                        .end = offsets.tokenLocation(tree, tree.lastToken(if_node.ast.then_expr)).end,
                     },
                     .decls = std.StringHashMap(Declaration).init(allocator),
                     .uses = &.{},
@@ -2904,7 +2903,7 @@ fn makeScopeInternal(
                 scope.* = .{
                     .range = .{
                         .start = offsets.tokenLocation(tree, payload).start,
-                        .end = offsets.tokenLocation(tree, tree.lastToken(while_node.ast.then_expr)).end + 1,
+                        .end = offsets.tokenLocation(tree, tree.lastToken(while_node.ast.then_expr)).end,
                     },
                     .decls = std.StringHashMap(Declaration).init(allocator),
                     .uses = &.{},
@@ -2984,7 +2983,7 @@ fn makeScopeInternal(
                     scope.* = .{
                         .range = .{
                             .start = offsets.tokenLocation(tree, payload).start,
-                            .end = offsets.tokenLocation(tree, tree.lastToken(switch_case.ast.target_expr)).end + 1,
+                            .end = offsets.tokenLocation(tree, tree.lastToken(switch_case.ast.target_expr)).end,
                         },
                         .decls = std.StringHashMap(Declaration).init(allocator),
                         .uses = &.{},
