@@ -1202,7 +1202,7 @@ fn maybeCollectImport(tree: ast.Tree, builtin_call: ast.Node.Index, arr: *std.Ar
             &[_]ast.Node.Index{ data.lhs, data.rhs },
         else => unreachable,
     };
-    if (params.len > 1) return;
+    if (params.len != 1) return;
 
     if (tags[params[0]] != .string_literal) return;
 
@@ -3170,6 +3170,29 @@ fn makeScopeInternal(
                 try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, slice.ast.end);
             if (slice.ast.sentinel != 0)
                 try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, slice.ast.sentinel);
+        },
+        .@"errdefer" => {
+            const expr = data[node_idx].rhs;
+            if (data[node_idx].lhs != 0) {
+                const payload_token = data[node_idx].lhs;
+                var scope = try scopes.addOne(allocator);
+                scope.* = .{
+                    .range = .{
+                        .start = offsets.tokenLocation(tree, payload_token).start,
+                        .end = offsets.tokenLocation(tree, tree.lastToken(expr)).end,
+                    },
+                    .decls = std.StringHashMap(Declaration).init(allocator),
+                    .uses = &.{},
+                    .tests = &.{},
+                    .data = .other,
+                };
+                errdefer scope.decls.deinit();
+
+                const name = tree.tokenSlice(payload_token);
+                try scope.decls.putNoClobber(name, .{ .ast_node = expr });
+            }
+
+            try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, expr);
         },
 
         // no scope

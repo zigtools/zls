@@ -328,8 +328,14 @@ fn writeNodeTokens(
         .container_field_init,
         => try writeContainerField(builder, arena, store, node, .field, child_frame),
         .@"errdefer" => {
-            if (datas[node].lhs != 0)
-                try writeToken(builder, datas[node].lhs, .variable);
+            try writeToken(builder, main_token, .keyword);
+
+            if (datas[node].lhs != 0) {
+                const payload_tok = datas[node].lhs;
+                try writeToken(builder, payload_tok - 1, .operator);
+                try writeToken(builder, payload_tok, .variable);
+                try writeToken(builder, payload_tok + 1, .operator);
+            }
 
             try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, datas[node].rhs });
         },
@@ -635,12 +641,22 @@ fn writeNodeTokens(
             try writeToken(builder, if_node.ast.if_token, .keyword);
             try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, if_node.ast.cond_expr });
 
-            try writeToken(builder, if_node.payload_token, .variable);
+            if (if_node.payload_token) |payload| {
+                // if (?x) |x|
+                try writeToken(builder, payload - 1, .operator); // |
+                try writeToken(builder, payload, .variable); // 	x
+                try writeToken(builder, payload + 1, .operator); // |
+            }
             try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, if_node.ast.then_expr });
 
-            try writeToken(builder, if_node.error_token, .variable);
             if (if_node.ast.else_expr != 0) {
                 try writeToken(builder, if_node.else_token, .keyword);
+                if (if_node.error_token) |err_token| {
+                    // else |err|
+                    try writeToken(builder, err_token - 1, .operator); // |
+                    try writeToken(builder, err_token, .variable); // 	  err
+                    try writeToken(builder, err_token + 1, .operator); // |
+                }
                 try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, if_node.ast.else_expr });
             }
         },
@@ -763,11 +779,13 @@ fn writeNodeTokens(
             try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, datas[node].lhs });
             try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, datas[node].rhs });
         },
-        .deref,
-        .unwrap_optional,
-        => {
+        .deref => {
             try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, datas[node].lhs });
             try writeToken(builder, main_token, .operator);
+        },
+        .unwrap_optional => {
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, datas[node].lhs });
+            try writeToken(builder, main_token + 1, .operator);
         },
         .grouped_expression => {
             try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, datas[node].lhs });
