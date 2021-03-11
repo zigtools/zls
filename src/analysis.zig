@@ -2107,7 +2107,7 @@ fn iterateSymbolsContainerInternal(
     comptime callback: anytype,
     context: anytype,
     instance_access: bool,
-    use_trail: *std.ArrayList(ast.Node.Index),
+    use_trail: *std.ArrayList(*const ast.Node.Index),
 ) error{OutOfMemory}!void {
     const container = container_handle.node;
     const handle = container_handle.handle;
@@ -2140,13 +2140,13 @@ fn iterateSymbolsContainerInternal(
     }
 
     for (container_scope.uses) |use| {
-        const use_token = tree.nodes.items(.main_token)[use];
+        const use_token = tree.nodes.items(.main_token)[use.*];
         const is_pub = use_token > 0 and token_tags[use_token - 1] == .keyword_pub;
         if (handle != orig_handle and !is_pub) continue;
-        if (std.mem.indexOfScalar(ast.Node.Index, use_trail.items, use) != null) continue;
+        if (std.mem.indexOfScalar(*const ast.Node.Index, use_trail.items, use) != null) continue;
         try use_trail.append(use);
 
-        const lhs = tree.nodes.items(.data)[use].lhs;
+        const lhs = tree.nodes.items(.data)[use.*].lhs;
         const use_expr = (try resolveTypeOfNode(store, arena, .{
             .node = lhs,
             .handle = handle,
@@ -2178,7 +2178,7 @@ pub fn iterateSymbolsContainer(
     context: anytype,
     instance_access: bool,
 ) error{OutOfMemory}!void {
-    var use_trail = std.ArrayList(ast.Node.Index).init(&arena.allocator);
+    var use_trail = std.ArrayList(*const ast.Node.Index).init(&arena.allocator);
     return try iterateSymbolsContainerInternal(store, arena, container_handle, orig_handle, callback, context, instance_access, &use_trail);
 }
 
@@ -2210,7 +2210,7 @@ fn iterateSymbolsGlobalInternal(
     source_index: usize,
     comptime callback: anytype,
     context: anytype,
-    use_trail: *std.ArrayList(ast.Node.Index),
+    use_trail: *std.ArrayList(*const ast.Node.Index),
 ) error{OutOfMemory}!void {
     for (handle.document_scope.scopes) |scope| {
         if (source_index >= scope.range.start and source_index <= scope.range.end) {
@@ -2222,13 +2222,13 @@ fn iterateSymbolsGlobalInternal(
             }
 
             for (scope.uses) |use| {
-                if (std.mem.indexOfScalar(ast.Node.Index, use_trail.items, use) != null) continue;
+                if (std.mem.indexOfScalar(*const ast.Node.Index, use_trail.items, use) != null) continue;
                 try use_trail.append(use);
 
                 const use_expr = (try resolveTypeOfNode(
                     store,
                     arena,
-                    .{ .node = handle.tree.nodes.items(.data)[use].lhs, .handle = handle },
+                    .{ .node = handle.tree.nodes.items(.data)[use.*].lhs, .handle = handle },
                 )) orelse continue;
                 const use_expr_node = switch (use_expr.type.data) {
                     .other => |n| n,
@@ -2259,7 +2259,7 @@ pub fn iterateSymbolsGlobal(
     comptime callback: anytype,
     context: anytype,
 ) error{OutOfMemory}!void {
-    var use_trail = std.ArrayList(ast.Node.Index).init(&arena.allocator);
+    var use_trail = std.ArrayList(*const ast.Node.Index).init(&arena.allocator);
     return try iterateSymbolsGlobalInternal(store, arena, handle, source_index, callback, context, &use_trail);
 }
 
@@ -2282,19 +2282,19 @@ pub fn innermostContainer(handle: *DocumentStore.Handle, source_index: usize) Ty
 fn resolveUse(
     store: *DocumentStore,
     arena: *std.heap.ArenaAllocator,
-    uses: []const ast.Node.Index,
+    uses: []const *const ast.Node.Index,
     symbol: []const u8,
     handle: *DocumentStore.Handle,
-    use_trail: *std.ArrayList(ast.Node.Index),
+    use_trail: *std.ArrayList(*const ast.Node.Index),
 ) error{OutOfMemory}!?DeclWithHandle {
     for (uses) |use| {
-        if (std.mem.indexOfScalar(ast.Node.Index, use_trail.items, use) != null) continue;
+        if (std.mem.indexOfScalar(*const ast.Node.Index, use_trail.items, use) != null) continue;
         try use_trail.append(use);
 
         const use_expr = (try resolveTypeOfNode(
             store,
             arena,
-            .{ .node = handle.tree.nodes.items(.data)[use].lhs, .handle = handle },
+            .{ .node = handle.tree.nodes.items(.data)[use.*].lhs, .handle = handle },
         )) orelse continue;
 
         const use_expr_node = switch (use_expr.type.data) {
@@ -2347,7 +2347,7 @@ fn lookupSymbolGlobalInternal(
     handle: *DocumentStore.Handle,
     symbol: []const u8,
     source_index: usize,
-    use_trail: *std.ArrayList(ast.Node.Index),
+    use_trail: *std.ArrayList(*const ast.Node.Index),
 ) error{OutOfMemory}!?DeclWithHandle {
     for (handle.document_scope.scopes) |scope| {
         if (source_index >= scope.range.start and source_index <= scope.range.end) {
@@ -2381,7 +2381,7 @@ pub fn lookupSymbolGlobal(
     symbol: []const u8,
     source_index: usize,
 ) error{OutOfMemory}!?DeclWithHandle {
-    var use_trail = std.ArrayList(ast.Node.Index).init(&arena.allocator);
+    var use_trail = std.ArrayList(*const ast.Node.Index).init(&arena.allocator);
     return try lookupSymbolGlobalInternal(store, arena, handle, symbol, source_index, &use_trail);
 }
 
@@ -2393,7 +2393,7 @@ fn lookupSymbolContainerInternal(
     /// If true, we are looking up the symbol like we are accessing through a field access
     /// of an instance of the type, otherwise as a field access of the type value itself.
     instance_access: bool,
-    use_trail: *std.ArrayList(ast.Node.Index),
+    use_trail: *std.ArrayList(*const ast.Node.Index),
 ) error{OutOfMemory}!?DeclWithHandle {
     const container = container_handle.node;
     const handle = container_handle.handle;
@@ -2402,10 +2402,7 @@ fn lookupSymbolContainerInternal(
     const token_tags = tree.tokens.items(.tag);
     const main_token = tree.nodes.items(.main_token)[container];
 
-    const is_enum = if (container != 0 and isContainer(node_tags[container]))
-        token_tags[main_token] == .keyword_enum
-    else
-        false;
+    const is_enum = token_tags[main_token] == .keyword_enum;
 
     if (findContainerScope(container_handle)) |container_scope| {
         if (container_scope.decls.getEntry(symbol)) |candidate| {
@@ -2438,7 +2435,7 @@ pub fn lookupSymbolContainer(
     /// of an instance of the type, otherwise as a field access of the type value itself.
     instance_access: bool,
 ) error{OutOfMemory}!?DeclWithHandle {
-    var use_trail = std.ArrayList(ast.Node.Index).init(&arena.allocator);
+    var use_trail = std.ArrayList(*const ast.Node.Index).init(&arena.allocator);
     return try lookupSymbolContainerInternal(store, arena, container_handle, symbol, instance_access, &use_trail);
 }
 
@@ -2496,7 +2493,7 @@ pub const Scope = struct {
     range: SourceRange,
     decls: std.StringHashMap(Declaration),
     tests: []const ast.Node.Index,
-    uses: []const ast.Node.Index,
+    uses: []const *const ast.Node.Index,
 
     data: Data,
 };
@@ -2609,7 +2606,7 @@ fn makeScopeInternal(
             .data = .{ .container = node_idx },
         };
         const scope_idx = scopes.items.len - 1;
-        var uses = std.ArrayList(ast.Node.Index).init(allocator);
+        var uses = std.ArrayList(*const ast.Node.Index).init(allocator);
         var tests = std.ArrayList(ast.Node.Index).init(allocator);
 
         errdefer {
@@ -2618,9 +2615,10 @@ fn makeScopeInternal(
             tests.deinit();
         }
 
-        for (ast_decls) |decl| {
+        for (ast_decls) |*ptr_decl| {
+            const decl = ptr_decl.*;
             if (tags[decl] == .@"usingnamespace") {
-                try uses.append(decl);
+                try uses.append(ptr_decl);
                 continue;
             }
 
@@ -2771,7 +2769,7 @@ fn makeScopeInternal(
                 .data = .{ .block = node_idx },
             };
             var scope_idx = scopes.items.len - 1;
-            var uses = std.ArrayList(ast.Node.Index).init(allocator);
+            var uses = std.ArrayList(*const ast.Node.Index).init(allocator);
 
             errdefer {
                 scopes.items[scope_idx].decls.deinit();
@@ -2793,9 +2791,10 @@ fn makeScopeInternal(
                 else => unreachable,
             };
 
-            for (statements) |idx| {
+            for (statements) |*ptr_stmt| {
+                const idx = ptr_stmt.*;
                 if (tags[idx] == .@"usingnamespace") {
-                    try uses.append(idx);
+                    try uses.append(ptr_stmt);
                     continue;
                 }
 
@@ -3218,6 +3217,7 @@ fn makeScopeInternal(
         .address_of,
         .grouped_expression,
         .unwrap_optional,
+        .@"usingnamespace",
         => {
             if (data[node_idx].lhs != 0) {
                 try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, data[node_idx].lhs);

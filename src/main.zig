@@ -482,13 +482,17 @@ fn nodeToCompletion(
             const ptr_type = analysis.ptrType(tree, node).?;
 
             switch (ptr_type.size) {
-                .One, .C => if (config.operator_completions) {
+                .One, .C, .Many => if (config.operator_completions) {
                     try list.append(.{
                         .label = "*",
                         .kind = .Operator,
                     });
                 },
-                .Many, .Slice => return list.append(.{ .label = "len", .kind = .Field }),
+                .Slice => {
+                    try list.append(.{ .label = "ptr", .kind = .Field });
+                    try list.append(.{ .label = "len", .kind = .Field });
+                    return;
+                },
             }
 
             if (unwrapped) |actual_type| {
