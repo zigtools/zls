@@ -1285,9 +1285,13 @@ pub fn getFieldAccessType(
             .period => {
                 const after_period = tokenizer.next();
                 switch (after_period.tag) {
-                    .eof => return FieldAccessReturn{
-                        .original = current_type,
-                        .unwrapped = try resolveDerefType(store, arena, current_type, &bound_type_params),
+                    .eof => {
+                        // function labels cannot be dot accessed
+                        if (current_type.isFunc()) return null;
+                        return FieldAccessReturn{
+                            .original = current_type,
+                            .unwrapped = try resolveDerefType(store, arena, current_type, &bound_type_params),
+                        };
                     },
                     .identifier => {
                         if (after_period.loc.end == tokenizer.buffer.len) {
