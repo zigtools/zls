@@ -45,7 +45,7 @@ pub fn log(
     defer arena.deinit();
 
     var message = std.fmt.allocPrint(&arena.allocator, "[{s}-{s}] " ++ format, .{ @tagName(message_level), @tagName(scope) } ++ args) catch |err| {
-        std.debug.print("Failed to allocPrint message.", .{});
+        std.debug.print("Failed to allocPrint message.\n", .{});
         return;
     };
 
@@ -66,7 +66,7 @@ pub fn log(
                 },
             },
         }) catch |err| {
-            std.debug.print("Failed to send show message notification (error: {}).", .{err});
+            std.debug.print("Failed to send show message notification (error: {}).\n", .{err});
         };
     } else {
         const message_type: types.MessageType = if (message_level == .debug)
@@ -83,7 +83,7 @@ pub fn log(
                 },
             },
         }) catch |err| {
-            std.debug.print("Failed to send show message notification (error: {}).", .{err});
+            std.debug.print("Failed to send show message notification (error: {}).\n", .{err});
         };
     }
 }
@@ -1599,9 +1599,9 @@ pub fn main() anyerror!void {
         defer allocator.free(arg);
         if (std.mem.eql(u8, arg, "--debug-log")) {
             actual_log_level = .debug;
-            std.debug.print("Enabled debug logging", .{});
+            std.debug.print("Enabled debug logging\n", .{});
         } else {
-            std.debug.print("Unrecognized argument {s}", .{arg});
+            std.debug.print("Unrecognized argument {s}\n", .{arg});
             std.os.exit(1);
         }
     }
