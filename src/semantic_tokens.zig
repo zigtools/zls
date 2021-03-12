@@ -48,11 +48,21 @@ pub const TokenModifiers = packed struct {
     }
 };
 
+const Comment = struct {
+    /// Length of the comment
+    length: u32,
+    /// Source index of the comment
+    start: u32,
+};
+
+const CommentList = std.ArrayList(Comment);
+
 const Builder = struct {
     handle: *DocumentStore.Handle,
     current_token: ?ast.TokenIndex,
     arr: std.ArrayList(u32),
     encoding: offsets.Encoding,
+    comments: CommentList,
 
     fn init(allocator: *std.mem.Allocator, handle: *DocumentStore.Handle, encoding: offsets.Encoding) Builder {
         return Builder{
@@ -60,19 +70,35 @@ const Builder = struct {
             .current_token = null,
             .arr = std.ArrayList(u32).init(allocator),
             .encoding = encoding,
+            .comments = CommentList.init(allocator),
         };
     }
 
     fn add(self: *Builder, token: ast.TokenIndex, token_type: TokenType, token_modifiers: TokenModifiers) !void {
-        const start_idx = if (self.current_token) |current_token|
-            self.handle.tree.token_locs[current_token].start
+        const starts = self.handle.tree.tokens.items(.start);
+        var start_idx = if (self.current_token) |current_token|
+            starts[current_token]
         else
             0;
 
-        if (start_idx > self.handle.tree.token_locs[token].start)
+        if (start_idx > starts[token])
             return;
 
-        const delta_loc = offsets.tokenRelativeLocation(self.handle.tree, start_idx, token, self.encoding) catch return;
+        const delta_loc = while (self.findCommentBetween(start_idx, starts[token])) |comment| {
+            const old_loc = self.handle.tree.tokenLocation(0, self.current_token orelse 0);
+            const comment_delta = offsets.tokenRelativeLocation(self.handle.tree, start_idx, comment.start, self.encoding) catch return;
+
+            try self.arr.appendSlice(&[_]u32{
+                @truncate(u32, comment_delta.line),
+                @truncate(u32, comment_delta.column),
+                comment.length,
+                @enumToInt(TokenType.comment),
+                0,
+            });
+
+            start_idx = comment.start;
+        } else offsets.tokenRelativeLocation(self.handle.tree, start_idx, starts[token], self.encoding) catch return;
+
         try self.arr.appendSlice(&[_]u32{
             @truncate(u32, delta_loc.line),
             @truncate(u32, delta_loc.column),
@@ -85,6 +111,15 @@ const Builder = struct {
 
     fn toOwnedSlice(self: *Builder) []u32 {
         return self.arr.toOwnedSlice();
+    }
+
+    /// Based on a given start and end index, returns a `Comment` between the positions
+    /// Returns `null` if none was fone
+    fn findCommentBetween(self: Builder, from: u32, to: u32) ?Comment {
+        return for (self.comments.items) |comment| {
+            if (comment.start > from and comment.start < to)
+                break comment;
+        } else null;
     }
 };
 
@@ -107,25 +142,25 @@ fn writeTokenMod(
     }
 }
 
-fn writeDocComments(builder: *Builder, tree: *ast.Tree, doc: *ast.Node.DocComment) !void {
-    var tok_idx = doc.first_line;
-    while (tree.token_ids[tok_idx] == .DocComment or
-        tree.token_ids[tok_idx] == .ContainerDocComment or
-        tree.token_ids[tok_idx] == .LineComment) : (tok_idx += 1)
+fn writeDocComments(builder: *Builder, tree: ast.Tree, doc: ast.TokenIndex) !void {
+    const token_tags = tree.tokens.items(.tag);
+    var tok_idx = doc;
+    while (token_tags[tok_idx] == .doc_comment or
+        token_tags[tok_idx] == .container_doc_comment) : (tok_idx += 1)
     {
         var tok_mod = TokenModifiers{};
-        if (tree.token_ids[tok_idx] == .DocComment or tree.token_ids[tok_idx] == .ContainerDocComment)
-            tok_mod.set("documentation");
+        tok_mod.set("documentation");
 
         try builder.add(tok_idx, .comment, tok_mod);
     }
 }
 
-fn fieldTokenType(container_decl: *ast.Node.ContainerDecl, handle: *DocumentStore.Handle) ?TokenType {
-    if (container_decl.kind_token > handle.tree.token_ids.len) return null;
-    return @as(?TokenType, switch (handle.tree.token_ids[container_decl.kind_token]) {
-        .Keyword_struct => .field,
-        .Keyword_union, .Keyword_enum => .enumMember,
+fn fieldTokenType(container_decl: ast.Node.Index, handle: *DocumentStore.Handle) ?TokenType {
+    const main_token = handle.tree.nodes.items(.main_token)[container_decl];
+    if (main_token > handle.tree.tokens.len) return null;
+    return @as(?TokenType, switch (handle.tree.tokens.items(.tag)[main_token]) {
+        .keyword_struct => .field,
+        .keyword_union, .keyword_enum => .enumMember,
         else => null,
     });
 }
@@ -139,35 +174,33 @@ const GapHighlighter = struct {
 
     // TODO More highlighting here
     fn handleTok(self: *GapHighlighter, tok: ast.TokenIndex) !void {
-        const tok_id = self.builder.handle.tree.token_ids[tok];
-        if (tok_id == .LineComment) {
-            try writeToken(self.builder, tok, .comment);
-        } else if (tok_id == .ContainerDocComment or tok_id == .DocComment) {
+        const tok_id = self.builder.handle.tree.tokens.items(.tag)[tok];
+        if (tok_id == .container_doc_comment or tok_id == .doc_comment) {
             try writeTokenMod(self.builder, tok, .comment, .{ .documentation = true });
-        } else if (@enumToInt(tok_id) >= @enumToInt(std.zig.Token.Id.Keyword_align) and
-            @enumToInt(tok_id) <= @enumToInt(std.zig.Token.Id.Keyword_while))
+        } else if (@enumToInt(tok_id) >= @enumToInt(std.zig.Token.Tag.keyword_align) and
+            @enumToInt(tok_id) <= @enumToInt(std.zig.Token.Tag.keyword_while))
         {
             const tok_type: TokenType = switch (tok_id) {
-                .Keyword_true,
-                .Keyword_false,
-                .Keyword_null,
-                .Keyword_undefined,
-                .Keyword_unreachable,
+                .keyword_true,
+                .keyword_false,
+                .keyword_null,
+                .keyword_undefined,
+                .keyword_unreachable,
                 => .keywordLiteral,
                 else => .keyword,
             };
 
             try writeToken(self.builder, tok, tok_type);
-        } else if (@enumToInt(tok_id) >= @enumToInt(std.zig.Token.Id.Bang) and
-            @enumToInt(tok_id) <= @enumToInt(std.zig.Token.Id.Tilde) and
-            tok_id != .Period and tok_id != .Comma and tok_id != .RParen and
-            tok_id != .LParen and tok_id != .RBrace and tok_id != .LBrace and
-            tok_id != .Semicolon and tok_id != .Colon)
+        } else if (@enumToInt(tok_id) >= @enumToInt(std.zig.Token.Tag.bang) and
+            @enumToInt(tok_id) <= @enumToInt(std.zig.Token.Tag.tilde) and
+            tok_id != .period and tok_id != .comma and tok_id != .r_paren and
+            tok_id != .l_paren and tok_id != .r_brace and tok_id != .l_brace and
+            tok_id != .semicolon and tok_id != .colon)
         {
             try writeToken(self.builder, tok, .operator);
-        } else if (tok_id == .IntegerLiteral or tok_id == .FloatLiteral) {
+        } else if (tok_id == .integer_literal or tok_id == .float_literal) {
             try writeToken(self.builder, tok, .number);
-        } else if (tok_id == .StringLiteral or tok_id == .MultilineStringLiteralLine or tok_id == .CharLiteral) {
+        } else if (tok_id == .string_literal or tok_id == .multiline_string_literal_line or tok_id == .char_literal) {
             try writeToken(self.builder, tok, .string);
         }
     }
@@ -176,16 +209,17 @@ const GapHighlighter = struct {
         return .{ .builder = builder, .current_idx = start };
     }
 
-    fn next(self: *GapHighlighter, node: *ast.Node) !void {
-        if (self.current_idx > 0 and self.builder.handle.tree.token_ids[self.current_idx - 1] == .ContainerDocComment) {
+    fn next(self: *GapHighlighter, node: ast.Node.Index) !void {
+        const tree = self.builder.handle.tree;
+        if (self.current_idx > 0 and tree.tokens.items(.tag)[self.current_idx - 1] == .container_doc_comment) {
             try self.handleTok(self.current_idx - 1);
         }
 
         var i = self.current_idx;
-        while (i < node.firstToken()) : (i += 1) {
+        while (i < tree.firstToken(node)) : (i += 1) {
             try self.handleTok(i);
         }
-        self.current_idx = node.lastToken() + 1;
+        self.current_idx = tree.lastToken(node) + 1;
     }
 
     fn end(self: *GapHighlighter, last: ast.TokenIndex) !void {
@@ -197,6 +231,7 @@ const GapHighlighter = struct {
 };
 
 fn colorIdentifierBasedOnType(builder: *Builder, type_node: analysis.TypeWithHandle, target_tok: ast.TokenIndex, tok_mod: TokenModifiers) !void {
+    const tree = builder.handle.tree;
     if (type_node.type.is_type_val) {
         var new_tok_mod = tok_mod;
         if (type_node.isNamespace())
@@ -228,155 +263,245 @@ fn writeContainerField(
     builder: *Builder,
     arena: *std.heap.ArenaAllocator,
     store: *DocumentStore,
-    container_field: *ast.Node.ContainerField,
+    node: ast.Node.Index,
     field_token_type: ?TokenType,
     child_frame: anytype,
 ) !void {
-    if (container_field.doc_comments) |docs| try writeDocComments(builder, builder.handle.tree, docs);
+    const container_field = analysis.containerField(builder.handle.tree, node).?;
+    if (analysis.getDocCommentTokenIndex(builder.handle.tree, node)) |docs|
+        try writeDocComments(builder, builder.handle.tree, docs);
+
     try writeToken(builder, container_field.comptime_token, .keyword);
-    if (field_token_type) |tok_type| try writeToken(builder, container_field.name_token, tok_type);
-    try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, container_field.type_expr });
-    if (container_field.align_expr) |n| {
-        try writeToken(builder, n.firstToken() - 2, .keyword);
-        try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, n });
+    if (field_token_type) |tok_type| try writeToken(builder, container_field.ast.name_token, tok_type);
+
+    if (container_field.ast.type_expr != 0) {
+        if (container_field.ast.align_expr != 0) {
+            try writeToken(builder, builder.handle.tree.firstToken(container_field.ast.align_expr) - 2, .keyword);
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, container_field.ast.align_expr });
+        }
+        try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, container_field.ast.type_expr });
     }
 
-    if (container_field.value_expr) |value_expr| block: {
-        const eq_tok: ast.TokenIndex = if (container_field.type_expr) |type_expr|
-            type_expr.lastToken() + 1
-        else if (container_field.align_expr) |align_expr|
-            align_expr.lastToken() + 1
+    if (container_field.ast.value_expr != 0) block: {
+        const eq_tok: ast.TokenIndex = if (container_field.ast.type_expr != 0)
+            builder.handle.tree.lastToken(container_field.ast.type_expr) + 1
+        else if (container_field.ast.align_expr != 0)
+            builder.handle.tree.lastToken(container_field.ast.align_expr) + 1
         else
             break :block; // Check this, I believe it is correct.
 
         try writeToken(builder, eq_tok, .operator);
-        try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, value_expr });
+        try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, container_field.ast.value_expr });
     }
 }
 
 // TODO This is very slow and does a lot of extra work, improve in the future.
-fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *DocumentStore, maybe_node: ?*ast.Node) error{OutOfMemory}!void {
+fn writeNodeTokens(
+    builder: *Builder,
+    arena: *std.heap.ArenaAllocator,
+    store: *DocumentStore,
+    maybe_node: ?ast.Node.Index,
+) error{OutOfMemory}!void {
     if (maybe_node == null) return;
     const node = maybe_node.?;
+    if (node == 0) return;
+
     const handle = builder.handle;
+    const tree = handle.tree;
+    const node_tags = tree.nodes.items(.tag);
+    const token_tags = tree.tokens.items(.tag);
+    const datas = tree.nodes.items(.data);
+    const main_tokens = tree.nodes.items(.main_token);
+    if (node > datas.len) return;
+
+    const tag = node_tags[node];
+    const main_token = main_tokens[node];
 
     const FrameSize = @sizeOf(@Frame(writeNodeTokens));
     var child_frame = try arena.child_allocator.alignedAlloc(u8, std.Target.stack_align, FrameSize);
     defer arena.child_allocator.free(child_frame);
 
-    switch (node.tag) {
-        .Root, .Block, .LabeledBlock => {
-            const first_tok = if (node.castTag(.LabeledBlock)) |block_node| block: {
-                try writeToken(builder, block_node.label, .label);
-                break :block block_node.lbrace + 1;
-            } else if (node.castTag(.Block)) |block_node|
-                block_node.lbrace + 1
-            else
-                0;
+    switch (tag) {
+        .root => unreachable,
+        .container_field,
+        .container_field_align,
+        .container_field_init,
+        => try writeContainerField(builder, arena, store, node, .field, child_frame),
+        .@"errdefer" => {
+            try writeToken(builder, main_token, .keyword);
+
+            if (datas[node].lhs != 0) {
+                const payload_tok = datas[node].lhs;
+                try writeToken(builder, payload_tok - 1, .operator);
+                try writeToken(builder, payload_tok, .variable);
+                try writeToken(builder, payload_tok + 1, .operator);
+            }
+
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, datas[node].rhs });
+        },
+        .block,
+        .block_semicolon,
+        .block_two,
+        .block_two_semicolon,
+        => {
+            const first_tok = if (token_tags[main_token - 1] == .colon and token_tags[main_token - 2] == .identifier) block: {
+                try writeToken(builder, main_token - 2, .label);
+                break :block main_token + 1;
+            } else 0;
 
             var gap_highlighter = GapHighlighter.init(builder, first_tok);
-            var child_idx: usize = 0;
-            while (node.iterate(child_idx)) |child| : (child_idx += 1) {
+            const statements: []const ast.Node.Index = switch (tag) {
+                .block, .block_semicolon => tree.extra_data[datas[node].lhs..datas[node].rhs],
+                .block_two, .block_two_semicolon => blk: {
+                    const statements = &[_]ast.Node.Index{ datas[node].lhs, datas[node].rhs };
+                    const len: usize = if (datas[node].lhs == 0)
+                        @as(usize, 0)
+                    else if (datas[node].rhs == 0)
+                        @as(usize, 1)
+                    else
+                        @as(usize, 2);
+                    break :blk statements[0..len];
+                },
+                else => unreachable,
+            };
+
+            for (statements) |child| {
                 try gap_highlighter.next(child);
-                if (child.cast(ast.Node.ContainerField)) |container_field| {
-                    try writeContainerField(builder, arena, store, container_field, .field, child_frame);
+                if (node_tags[child].isContainerField()) {
+                    try writeContainerField(builder, arena, store, child, .field, child_frame);
                 } else {
                     try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, child });
                 }
             }
 
-            if (node.tag == .Root) {
-                try gap_highlighter.end(handle.tree.token_ids.len - 1);
-            } else {
-                try gap_highlighter.end(node.lastToken());
-            }
+            try gap_highlighter.end(tree.lastToken(node));
         },
-        .VarDecl => {
-            const var_decl = node.cast(ast.Node.VarDecl).?;
-            if (var_decl.getDocComments()) |doc| try writeDocComments(builder, handle.tree, doc);
-            try writeToken(builder, var_decl.getVisibToken(), .keyword);
-            try writeToken(builder, var_decl.getExternExportToken(), .keyword);
-            try writeToken(builder, var_decl.getThreadLocalToken(), .keyword);
-            try writeToken(builder, var_decl.getComptimeToken(), .keyword);
-            try writeToken(builder, var_decl.mut_token, .keyword);
+        .global_var_decl,
+        .local_var_decl,
+        .simple_var_decl,
+        .aligned_var_decl,
+        => {
+            const var_decl = analysis.varDecl(tree, node).?;
+            if (analysis.getDocCommentTokenIndex(tree, node)) |comment_idx|
+                try writeDocComments(builder, handle.tree, comment_idx);
+
+            try writeToken(builder, var_decl.visib_token, .keyword);
+            try writeToken(builder, var_decl.extern_export_token, .keyword);
+            try writeToken(builder, var_decl.threadlocal_token, .keyword);
+            try writeToken(builder, var_decl.comptime_token, .keyword);
+            try writeToken(builder, var_decl.ast.mut_token, .keyword);
+
             if (try analysis.resolveTypeOfNode(store, arena, .{ .node = node, .handle = handle })) |decl_type| {
-                try colorIdentifierBasedOnType(builder, decl_type, var_decl.name_token, .{ .declaration = true });
+                try colorIdentifierBasedOnType(builder, decl_type, var_decl.ast.mut_token + 1, .{ .declaration = true });
             } else {
-                try writeTokenMod(builder, var_decl.name_token, .variable, .{ .declaration = true });
-            }
-            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, var_decl.getTypeNode() });
-            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, var_decl.getAlignNode() });
-            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, var_decl.getSectionNode() });
-            try writeToken(builder, var_decl.getEqToken(), .operator);
-            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, var_decl.getInitNode() });
-        },
-        .Use => {
-            const use = node.cast(ast.Node.Use).?;
-            if (use.doc_comments) |docs| try writeDocComments(builder, builder.handle.tree, docs);
-            try writeToken(builder, use.visib_token, .keyword);
-            try writeToken(builder, use.use_token, .keyword);
-            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, use.expr });
-        },
-        .ErrorSetDecl => {
-            const error_set = node.cast(ast.Node.ErrorSetDecl).?;
-            try writeToken(builder, error_set.error_token, .keyword);
-            for (error_set.declsConst()) |decl|
-                try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, decl });
-        },
-        .ContainerDecl => {
-            const container_decl = node.cast(ast.Node.ContainerDecl).?;
-            try writeToken(builder, container_decl.layout_token, .keyword);
-            try writeToken(builder, container_decl.kind_token, .keyword);
-            switch (container_decl.init_arg_expr) {
-                .None => {},
-                .Enum => |enum_expr| if (enum_expr) |expr|
-                    try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, expr })
-                else
-                    try writeToken(builder, container_decl.kind_token + 2, .keyword),
-                .Type => |type_node| try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, type_node }),
+                try writeTokenMod(builder, var_decl.ast.mut_token + 1, .variable, .{ .declaration = true });
             }
 
-            var gap_highlighter = GapHighlighter.init(builder, container_decl.lbrace_token + 1);
-            const field_token_type = fieldTokenType(container_decl, handle);
-            for (container_decl.fieldsAndDeclsConst()) |child| {
+            if (var_decl.ast.type_node != 0)
+                try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, var_decl.ast.type_node });
+            if (var_decl.ast.align_node != 0)
+                try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, var_decl.ast.align_node });
+            if (var_decl.ast.section_node != 0)
+                try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, var_decl.ast.section_node });
+
+            try writeToken(builder, var_decl.ast.mut_token + 2, .operator);
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, var_decl.ast.init_node });
+        },
+        .@"usingnamespace" => {
+            const first_tok = tree.firstToken(node);
+            if (first_tok > 0 and token_tags[first_tok - 1] == .doc_comment)
+                try writeDocComments(builder, builder.handle.tree, first_tok - 1);
+            try writeToken(builder, if (token_tags[first_tok] == .keyword_pub) first_tok else null, .keyword);
+            try writeToken(builder, main_token, .keyword);
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, datas[node].lhs });
+        },
+        .container_decl,
+        .container_decl_trailing,
+        .container_decl_two,
+        .container_decl_two_trailing,
+        .container_decl_arg,
+        .container_decl_arg_trailing,
+        .tagged_union,
+        .tagged_union_trailing,
+        .tagged_union_enum_tag,
+        .tagged_union_enum_tag_trailing,
+        .tagged_union_two,
+        .tagged_union_two_trailing,
+        => {
+            var buf: [2]ast.Node.Index = undefined;
+            const decl: ast.full.ContainerDecl = switch (tag) {
+                .container_decl, .container_decl_trailing => tree.containerDecl(node),
+                .container_decl_two, .container_decl_two_trailing => tree.containerDeclTwo(&buf, node),
+                .container_decl_arg, .container_decl_arg_trailing => tree.containerDeclArg(node),
+                .tagged_union, .tagged_union_trailing => tree.taggedUnion(node),
+                .tagged_union_enum_tag, .tagged_union_enum_tag_trailing => tree.taggedUnionEnumTag(node),
+                .tagged_union_two, .tagged_union_two_trailing => tree.taggedUnionTwo(&buf, node),
+                else => unreachable,
+            };
+
+            try writeToken(builder, decl.layout_token, .keyword);
+            try writeToken(builder, decl.ast.main_token, .keyword);
+            if (decl.ast.enum_token) |enum_token| {
+                if (decl.ast.arg != 0)
+                    try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, decl.ast.arg })
+                else
+                    try writeToken(builder, enum_token, .keyword);
+            } else if (decl.ast.arg != 0) try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, decl.ast.arg });
+
+            var gap_highlighter = GapHighlighter.init(builder, main_token + 1);
+            const field_token_type = fieldTokenType(node, handle);
+            for (decl.ast.members) |child| {
                 try gap_highlighter.next(child);
-                if (child.cast(ast.Node.ContainerField)) |container_field| {
-                    try writeContainerField(builder, arena, store, container_field, field_token_type, child_frame);
+                if (node_tags[child].isContainerField()) {
+                    try writeContainerField(builder, arena, store, child, field_token_type, child_frame);
                 } else {
                     try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, child });
                 }
             }
-            try gap_highlighter.end(node.lastToken());
+            try gap_highlighter.end(tree.lastToken(node));
         },
-        .ErrorTag => {
-            const error_tag = node.cast(ast.Node.ErrorTag).?;
-            if (error_tag.doc_comments) |docs| try writeDocComments(builder, handle.tree, docs);
-            try writeToken(builder, error_tag.firstToken(), .errorTag);
+        .error_value => {
+            // if (error_tag.doc_comments) |docs| try writeDocComments(builder, handle.tree, docs);
+            try writeToken(builder, datas[node].rhs, .errorTag);
         },
-        .Identifier => {
-            if (analysis.isTypeIdent(handle.tree, node.firstToken())) {
-                return try writeToken(builder, node.firstToken(), .type);
+        .identifier => {
+            if (analysis.isTypeIdent(handle.tree, main_token)) {
+                return try writeToken(builder, main_token, .type);
             }
 
-            if (try analysis.lookupSymbolGlobal(store, arena, handle, handle.tree.getNodeSource(node), handle.tree.token_locs[node.firstToken()].start)) |child| {
+            if (try analysis.lookupSymbolGlobal(
+                store,
+                arena,
+                handle,
+                handle.tree.getNodeSource(node),
+                handle.tree.tokens.items(.start)[main_token],
+            )) |child| {
                 if (child.decl.* == .param_decl) {
-                    return try writeToken(builder, node.firstToken(), .parameter);
+                    return try writeToken(builder, main_token, .parameter);
                 }
                 var bound_type_params = analysis.BoundTypeParams.init(&arena.allocator);
                 if (try child.resolveType(store, arena, &bound_type_params)) |decl_type| {
-                    try colorIdentifierBasedOnType(builder, decl_type, node.firstToken(), .{});
+                    try colorIdentifierBasedOnType(builder, decl_type, main_token, .{});
                 } else {
-                    try writeTokenMod(builder, node.firstToken(), .variable, .{});
+                    try writeTokenMod(builder, main_token, .variable, .{});
                 }
             }
         },
-        .FnProto => {
-            const fn_proto = node.cast(ast.Node.FnProto).?;
-            if (fn_proto.getDocComments()) |docs| try writeDocComments(builder, handle.tree, docs);
-            try writeToken(builder, fn_proto.getVisibToken(), .keyword);
-            try writeToken(builder, fn_proto.getExternExportInlineToken(), .keyword);
-            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, fn_proto.getLibName() });
-            try writeToken(builder, fn_proto.fn_token, .keyword);
+        .fn_proto,
+        .fn_proto_one,
+        .fn_proto_simple,
+        .fn_proto_multi,
+        .fn_decl,
+        => {
+            var buf: [1]ast.Node.Index = undefined;
+            const fn_proto: ast.full.FnProto = analysis.fnProto(tree, node, &buf).?;
+            if (analysis.getDocCommentTokenIndex(tree, node)) |docs|
+                try writeDocComments(builder, handle.tree, docs);
+
+            try writeToken(builder, fn_proto.visib_token, .keyword);
+            try writeToken(builder, fn_proto.extern_export_token, .keyword);
+            try writeToken(builder, fn_proto.lib_name, .string);
+            try writeToken(builder, fn_proto.ast.fn_token, .keyword);
 
             const func_name_tok_type: TokenType = if (analysis.isTypeFunction(handle.tree, fn_proto))
                 .type
@@ -388,434 +513,639 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
             else
                 TokenModifiers{};
 
-            try writeTokenMod(builder, fn_proto.getNameToken(), func_name_tok_type, tok_mod);
+            try writeTokenMod(builder, fn_proto.name_token, func_name_tok_type, tok_mod);
 
-            for (fn_proto.paramsConst()) |param_decl| {
-                if (param_decl.doc_comments) |docs| try writeDocComments(builder, handle.tree, docs);
-                try writeToken(builder, param_decl.noalias_token, .keyword);
-                try writeToken(builder, param_decl.comptime_token, .keyword);
+            var it = fn_proto.iterate(tree);
+            while (it.next()) |param_decl| {
+                if (param_decl.first_doc_comment) |docs| try writeDocComments(builder, handle.tree, docs);
+
+                try writeToken(builder, param_decl.comptime_noalias, .keyword);
                 try writeTokenMod(builder, param_decl.name_token, .parameter, .{ .declaration = true });
-                switch (param_decl.param_type) {
-                    .any_type => |var_node| try writeToken(builder, var_node.firstToken(), .type),
-                    .type_expr => |type_expr| try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, type_expr }),
-                }
+                if (param_decl.anytype_ellipsis3) |any_token| {
+                    try writeToken(builder, any_token, .type);
+                } else if (param_decl.type_expr != 0) try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, param_decl.type_expr });
             }
-            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, fn_proto.getAlignExpr() });
-            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, fn_proto.getSectionExpr() });
-            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, fn_proto.getCallconvExpr() });
 
-            switch (fn_proto.return_type) {
-                .Explicit => |type_expr| try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, type_expr }),
-                .InferErrorSet => |type_expr| {
-                    try writeToken(builder, type_expr.firstToken() - 1, .operator);
-                    try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, type_expr });
-                },
-                .Invalid => {},
-            }
-            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, fn_proto.getBodyNode() });
-        },
-        .AnyFrameType => {
-            const any_frame_type = node.cast(ast.Node.AnyFrameType).?;
-            try writeToken(builder, any_frame_type.anyframe_token, .type);
-            if (any_frame_type.result) |any_frame_result| {
-                try writeToken(builder, any_frame_result.arrow_token, .type);
-                try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, any_frame_result.return_type });
-            }
-        },
-        .Defer => {
-            const defer_node = node.cast(ast.Node.Defer).?;
-            try writeToken(builder, defer_node.defer_token, .keyword);
-            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, defer_node.payload });
-            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, defer_node.expr });
-        },
-        .Comptime => {
-            const comptime_node = node.cast(ast.Node.Comptime).?;
-            if (comptime_node.doc_comments) |docs| try writeDocComments(builder, handle.tree, docs);
-            try writeToken(builder, comptime_node.comptime_token, .keyword);
-            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, comptime_node.expr });
-        },
-        .Nosuspend => {
-            const nosuspend_node = node.cast(ast.Node.Nosuspend).?;
-            try writeToken(builder, nosuspend_node.nosuspend_token, .keyword);
-            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, nosuspend_node.expr });
-        },
-        .Payload => {
-            const payload = node.cast(ast.Node.Payload).?;
-            try writeToken(builder, payload.lpipe, .operator);
-            try writeToken(builder, payload.error_symbol.firstToken(), .variable);
-            try writeToken(builder, payload.rpipe, .operator);
-        },
-        .PointerPayload => {
-            const payload = node.cast(ast.Node.PointerPayload).?;
-            try writeToken(builder, payload.lpipe, .operator);
-            try writeToken(builder, payload.ptr_token, .operator);
-            try writeToken(builder, payload.value_symbol.firstToken(), .variable);
-            try writeToken(builder, payload.rpipe, .operator);
-        },
-        .PointerIndexPayload => {
-            const payload = node.cast(ast.Node.PointerIndexPayload).?;
-            try writeToken(builder, payload.lpipe, .operator);
-            try writeToken(builder, payload.ptr_token, .operator);
-            try writeToken(builder, payload.value_symbol.firstToken(), .variable);
-            if (payload.index_symbol) |index_symbol| try writeToken(builder, index_symbol.firstToken(), .variable);
-            try writeToken(builder, payload.rpipe, .operator);
-        },
-        .Else => {
-            const else_node = node.cast(ast.Node.Else).?;
-            try writeToken(builder, else_node.else_token, .keyword);
-            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, else_node.payload });
-            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, else_node.body });
-        },
-        .Switch => {
-            const switch_node = node.cast(ast.Node.Switch).?;
-            try writeToken(builder, switch_node.switch_token, .keyword);
-            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, switch_node.expr });
+            if (fn_proto.ast.align_expr != 0)
+                try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, fn_proto.ast.align_expr });
+            if (fn_proto.ast.section_expr != 0)
+                try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, fn_proto.ast.section_expr });
+            if (fn_proto.ast.callconv_expr != 0)
+                try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, fn_proto.ast.callconv_expr });
 
-            var gap_highlighter = GapHighlighter.init(builder, switch_node.expr.lastToken() + 3);
-            for (switch_node.casesConst()) |case_node| {
+            if (fn_proto.ast.return_type != 0)
+                try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, fn_proto.ast.return_type });
+
+            if (tag == .fn_decl)
+                try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, datas[node].rhs });
+        },
+        .anyframe_type => {
+            try writeToken(builder, main_token, .type);
+            if (datas[node].rhs != 0) {
+                try writeToken(builder, datas[node].lhs, .type);
+                try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, datas[node].rhs });
+            }
+        },
+        .@"defer" => {
+            try writeToken(builder, main_token, .keyword);
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, datas[node].rhs });
+        },
+        .@"comptime",
+        .@"nosuspend",
+        => {
+            if (analysis.getDocCommentTokenIndex(tree, node)) |doc|
+                try writeDocComments(builder, handle.tree, doc);
+            try writeToken(builder, main_token, .keyword);
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, datas[node].lhs });
+        },
+        .@"switch",
+        .switch_comma,
+        => {
+            try writeToken(builder, main_token, .keyword);
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, datas[node].lhs });
+            const extra = tree.extraData(datas[node].rhs, ast.Node.SubRange);
+            const cases = tree.extra_data[extra.start..extra.end];
+
+            var gap_highlighter = GapHighlighter.init(builder, tree.lastToken(datas[node].lhs) + 1);
+            for (cases) |case_node| {
                 try gap_highlighter.next(case_node);
                 try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, case_node });
             }
-            try gap_highlighter.end(node.lastToken());
+            try gap_highlighter.end(tree.lastToken(node));
         },
-        .SwitchCase => {
-            const switch_case = node.cast(ast.Node.SwitchCase).?;
-            for (switch_case.itemsConst()) |item_node| try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, item_node });
-            try writeToken(builder, switch_case.arrow_token, .operator);
-            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, switch_case.payload });
-            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, switch_case.expr });
+        .switch_case_one,
+        .switch_case,
+        => {
+            const switch_case = if (tag == .switch_case) tree.switchCase(node) else tree.switchCaseOne(node);
+            for (switch_case.ast.values) |item_node| try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, item_node });
+            // check it it's 'else'
+            if (switch_case.ast.values.len == 0) try writeToken(builder, switch_case.ast.arrow_token - 1, .keyword);
+            try writeToken(builder, switch_case.ast.arrow_token, .operator);
+            if (switch_case.payload_token) |payload_token| {
+                const p_token = @boolToInt(token_tags[payload_token] == .asterisk);
+                try writeToken(builder, p_token, .variable);
+            }
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, switch_case.ast.target_expr });
         },
-        .SwitchElse => {
-            const switch_else = node.cast(ast.Node.SwitchElse).?;
-            try writeToken(builder, switch_else.token, .keyword);
-        },
-        .While => {
-            const while_node = node.cast(ast.Node.While).?;
-            try writeToken(builder, while_node.label, .label);
+        .@"while",
+        .while_simple,
+        .while_cont,
+        .for_simple,
+        .@"for",
+        => {
+            const while_node: ast.full.While = switch (tag) {
+                .@"while" => tree.whileFull(node),
+                .while_simple => tree.whileSimple(node),
+                .while_cont => tree.whileCont(node),
+                .@"for" => tree.forFull(node),
+                .for_simple => tree.forSimple(node),
+                else => unreachable,
+            };
+
+            try writeToken(builder, while_node.label_token, .label);
             try writeToken(builder, while_node.inline_token, .keyword);
-            try writeToken(builder, while_node.while_token, .keyword);
-            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, while_node.condition });
-            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, while_node.payload });
-            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, while_node.continue_expr });
-            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, while_node.body });
-            if (while_node.@"else") |else_node|
-                try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, &else_node.base });
-        },
-        .For => {
-            const for_node = node.cast(ast.Node.For).?;
-            try writeToken(builder, for_node.label, .label);
-            try writeToken(builder, for_node.inline_token, .keyword);
-            try writeToken(builder, for_node.for_token, .keyword);
-            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, for_node.array_expr });
-            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, for_node.payload });
-            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, for_node.body });
-            if (for_node.@"else") |else_node|
-                try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, &else_node.base });
-        },
-        .If => {
-            const if_node = node.cast(ast.Node.If).?;
-            try writeToken(builder, if_node.if_token, .keyword);
-            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, if_node.condition });
-            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, if_node.payload });
-            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, if_node.body });
-            if (if_node.@"else") |else_node|
-                try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, &else_node.base });
-        },
-        .ArrayInitializer => {
-            const array_initializer = node.cast(ast.Node.ArrayInitializer).?;
-            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, array_initializer.lhs });
-            for (array_initializer.listConst()) |elem| try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, elem });
-        },
-        .ArrayInitializerDot => {
-            const array_initializer = node.cast(ast.Node.ArrayInitializerDot).?;
-            for (array_initializer.listConst()) |elem| try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, elem });
-        },
-        .StructInitializer => {
-            const struct_initializer = node.cast(ast.Node.StructInitializer).?;
-            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, struct_initializer.lhs });
-            const field_token_type = if (try analysis.resolveTypeOfNode(store, arena, .{ .node = struct_initializer.lhs, .handle = handle })) |struct_type| switch (struct_type.type.data) {
-                .other => |type_node| if (type_node.cast(ast.Node.ContainerDecl)) |container_decl|
-                    fieldTokenType(container_decl, handle)
-                else
-                    null,
-                else => null,
-            } else null;
-
-            var gap_highlighter = GapHighlighter.init(builder, struct_initializer.lhs.lastToken() + 1);
-            for (struct_initializer.listConst()) |field_init_node| {
-                try gap_highlighter.next(field_init_node);
-                std.debug.assert(field_init_node.tag == .FieldInitializer);
-                const field_init = field_init_node.cast(ast.Node.FieldInitializer).?;
-                if (field_token_type) |tok_type| {
-                    try writeToken(builder, field_init.period_token, tok_type);
-                    try writeToken(builder, field_init.name_token, tok_type);
+            try writeToken(builder, while_node.ast.while_token, .keyword);
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, while_node.ast.cond_expr });
+            if (while_node.payload_token) |payload| {
+                try writeToken(builder, payload - 1, .operator);
+                try writeToken(builder, payload, .variable);
+                var r_pipe = payload + 1;
+                if (token_tags[r_pipe] == .comma) {
+                    r_pipe += 1;
+                    try writeToken(builder, r_pipe, .variable);
+                    r_pipe += 1;
                 }
-                try writeToken(builder, field_init.name_token + 1, .operator);
-                try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, field_init.expr });
+                try writeToken(builder, r_pipe, .operator);
             }
-            try gap_highlighter.end(struct_initializer.rtoken);
-        },
-        .StructInitializerDot => {
-            const struct_initializer = node.castTag(.StructInitializerDot).?;
+            if (while_node.ast.cont_expr != 0)
+                try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, while_node.ast.cont_expr });
 
-            var gap_highlighter = GapHighlighter.init(builder, struct_initializer.dot + 1);
-            for (struct_initializer.listConst()) |field_init_node| {
-                try gap_highlighter.next(field_init_node);
-                std.debug.assert(field_init_node.tag == .FieldInitializer);
-                const field_init = field_init_node.castTag(.FieldInitializer).?;
-                try writeToken(builder, field_init.period_token, .field);
-                try writeToken(builder, field_init.name_token, .field);
-                try writeToken(builder, field_init.name_token + 1, .operator);
-                try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, field_init.expr });
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, while_node.ast.then_expr });
+
+            if (while_node.ast.else_expr != 0) {
+                try writeToken(builder, while_node.else_token, .keyword);
+
+                if (while_node.error_token) |err_token| {
+                    try writeToken(builder, err_token - 1, .operator);
+                    try writeToken(builder, err_token, .variable);
+                    try writeToken(builder, err_token + 1, .operator);
+                }
+                try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, while_node.ast.else_expr });
             }
-            try gap_highlighter.end(struct_initializer.rtoken);
         },
-        .Call => {
-            const call = node.cast(ast.Node.Call).?;
+        .@"if",
+        .if_simple,
+        => {
+            const if_node: ast.full.If = if (tag == .@"if") tree.ifFull(node) else tree.ifSimple(node);
+
+            try writeToken(builder, if_node.ast.if_token, .keyword);
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, if_node.ast.cond_expr });
+
+            if (if_node.payload_token) |payload| {
+                // if (?x) |x|
+                try writeToken(builder, payload - 1, .operator); // |
+                try writeToken(builder, payload, .variable); // 	x
+                try writeToken(builder, payload + 1, .operator); // |
+            }
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, if_node.ast.then_expr });
+
+            if (if_node.ast.else_expr != 0) {
+                try writeToken(builder, if_node.else_token, .keyword);
+                if (if_node.error_token) |err_token| {
+                    // else |err|
+                    try writeToken(builder, err_token - 1, .operator); // |
+                    try writeToken(builder, err_token, .variable); // 	  err
+                    try writeToken(builder, err_token + 1, .operator); // |
+                }
+                try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, if_node.ast.else_expr });
+            }
+        },
+        .array_init,
+        .array_init_comma,
+        .array_init_one,
+        .array_init_one_comma,
+        .array_init_dot,
+        .array_init_dot_comma,
+        .array_init_dot_two,
+        .array_init_dot_two_comma,
+        => {
+            var buf: [2]ast.Node.Index = undefined;
+            const array_init: ast.full.ArrayInit = switch (tag) {
+                .array_init, .array_init_comma => tree.arrayInit(node),
+                .array_init_one, .array_init_one_comma => tree.arrayInitOne(buf[0..1], node),
+                .array_init_dot, .array_init_dot_comma => tree.arrayInitDot(node),
+                .array_init_dot_two, .array_init_dot_two_comma => tree.arrayInitDotTwo(&buf, node),
+                else => unreachable,
+            };
+
+            if (array_init.ast.type_expr != 0)
+                try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, array_init.ast.type_expr });
+            for (array_init.ast.elements) |elem| try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, elem });
+        },
+        .struct_init,
+        .struct_init_comma,
+        .struct_init_dot,
+        .struct_init_dot_comma,
+        .struct_init_one,
+        .struct_init_one_comma,
+        .struct_init_dot_two,
+        .struct_init_dot_two_comma,
+        => {
+            var buf: [2]ast.Node.Index = undefined;
+            const struct_init: ast.full.StructInit = switch (tag) {
+                .struct_init, .struct_init_comma => tree.structInit(node),
+                .struct_init_dot, .struct_init_dot_comma => tree.structInitDot(node),
+                .struct_init_one, .struct_init_one_comma => tree.structInitOne(buf[0..1], node),
+                .struct_init_dot_two, .struct_init_dot_two_comma => tree.structInitDotTwo(&buf, node),
+                else => unreachable,
+            };
+
+            var field_token_type: ?TokenType = null;
+
+            if (struct_init.ast.type_expr != 0) {
+                try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, struct_init.ast.type_expr });
+
+                field_token_type = if (try analysis.resolveTypeOfNode(store, arena, .{
+                    .node = struct_init.ast.type_expr,
+                    .handle = handle,
+                })) |struct_type| switch (struct_type.type.data) {
+                    .other => |type_node| if (analysis.isContainer(struct_type.handle.tree.nodes.items(.tag)[type_node]))
+                        fieldTokenType(type_node, struct_type.handle)
+                    else
+                        null,
+                    else => null,
+                } else null;
+            }
+
+            var gap_highlighter = GapHighlighter.init(builder, struct_init.ast.lbrace);
+            for (struct_init.ast.fields) |field_init| {
+                try gap_highlighter.next(field_init);
+
+                const init_token = tree.firstToken(field_init);
+                try writeToken(builder, init_token - 3, field_token_type orelse .field); // '.'
+                try writeToken(builder, init_token - 2, field_token_type orelse .field); // name
+                try writeToken(builder, init_token - 1, .operator); // '='
+                try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, field_init });
+            }
+            try gap_highlighter.end(tree.lastToken(node));
+        },
+        .call,
+        .call_comma,
+        .async_call,
+        .async_call_comma,
+        .call_one,
+        .call_one_comma,
+        .async_call_one,
+        .async_call_one_comma,
+        => {
+            var params: [1]ast.Node.Index = undefined;
+            const call: ast.full.Call = switch (tag) {
+                .call, .call_comma, .async_call, .async_call_comma => tree.callFull(node),
+                .call_one, .call_one_comma, .async_call_one, .async_call_one_comma => tree.callOne(&params, node),
+                else => unreachable,
+            };
+
             try writeToken(builder, call.async_token, .keyword);
-            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, call.lhs });
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, call.ast.fn_expr });
+
             if (builder.current_token) |curr_tok| {
-                if (curr_tok != call.lhs.lastToken() and handle.tree.token_ids[call.lhs.lastToken()] == .Identifier) {
-                    try writeToken(builder, call.lhs.lastToken(), .function);
+                if (curr_tok != tree.lastToken(call.ast.fn_expr) and token_tags[tree.lastToken(call.ast.fn_expr)] == .identifier) {
+                    try writeToken(builder, tree.lastToken(call.ast.fn_expr), .function);
                 }
             }
-            for (call.paramsConst()) |param| try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, param });
+            for (call.ast.params) |param| try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, param });
         },
-        .Slice => {
-            const slice = node.castTag(.Slice).?;
-            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, slice.lhs });
-            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, slice.start });
-            try writeToken(builder, slice.start.lastToken() + 1, .operator);
-            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, slice.end });
-            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, slice.sentinel });
+        .slice,
+        .slice_open,
+        .slice_sentinel,
+        => {
+            const slice: ast.full.Slice = switch (tag) {
+                .slice => tree.slice(node),
+                .slice_open => tree.sliceOpen(node),
+                .slice_sentinel => tree.sliceSentinel(node),
+                else => unreachable,
+            };
+
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, slice.ast.sliced });
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, slice.ast.start });
+            try writeToken(builder, tree.lastToken(slice.ast.start) + 1, .operator);
+
+            if (slice.ast.end != 0)
+                try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, slice.ast.end });
+            if (slice.ast.sentinel != 0)
+                try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, slice.ast.sentinel });
         },
-        .ArrayAccess => {
-            const arr_acc = node.castTag(.ArrayAccess).?;
-            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, arr_acc.lhs });
-            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, arr_acc.index_expr });
+        .array_access => {
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, datas[node].lhs });
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, datas[node].rhs });
         },
-        .Deref, .UnwrapOptional => {
-            const suffix = node.cast(ast.Node.SimpleSuffixOp).?;
-            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, suffix.lhs });
-            try writeToken(builder, suffix.rtoken, .operator);
+        .deref => {
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, datas[node].lhs });
+            try writeToken(builder, main_token, .operator);
         },
-        .GroupedExpression => {
-            const grouped_expr = node.cast(ast.Node.GroupedExpression).?;
-            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, grouped_expr.expr });
+        .unwrap_optional => {
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, datas[node].lhs });
+            try writeToken(builder, main_token + 1, .operator);
         },
-        .Return, .Break, .Continue => {
-            const cfe = node.cast(ast.Node.ControlFlowExpression).?;
-            try writeToken(builder, cfe.ltoken, .keyword);
-            switch (node.tag) {
-                .Break => if (cfe.getLabel()) |n| try writeToken(builder, n, .label),
-                .Continue => if (cfe.getLabel()) |n| try writeToken(builder, n, .label),
-                else => {},
-            }
-            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, cfe.getRHS() });
+        .grouped_expression => {
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, datas[node].lhs });
         },
-        .Suspend => {
-            const suspend_node = node.cast(ast.Node.Suspend).?;
-            try writeToken(builder, suspend_node.suspend_token, .keyword);
-            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, suspend_node.body });
+        .@"break",
+        .@"continue",
+        => {
+            try writeToken(builder, main_token, .keyword);
+            if (datas[node].lhs != 0)
+                try writeToken(builder, datas[node].lhs, .label);
+            if (datas[node].rhs != 0)
+                try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, datas[node].rhs });
         },
-        .IntegerLiteral => {
-            try writeToken(builder, node.firstToken(), .number);
+        .@"suspend", .@"return" => {
+            try writeToken(builder, main_token, .keyword);
+            if (datas[node].lhs != 0)
+                try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, datas[node].lhs });
         },
-        .EnumLiteral => {
-            const enum_literal = node.cast(ast.Node.EnumLiteral).?;
-            try writeToken(builder, enum_literal.dot, .enumMember);
-            try writeToken(builder, enum_literal.name, .enumMember);
+        .integer_literal,
+        .float_literal,
+        => {
+            try writeToken(builder, main_token, .number);
         },
-        .FloatLiteral => {
-            try writeToken(builder, node.firstToken(), .number);
+        .enum_literal => {
+            try writeToken(builder, main_token - 1, .enumMember);
+            try writeToken(builder, main_token, .enumMember);
         },
-        .BuiltinCall => {
-            const builtin_call = node.cast(ast.Node.BuiltinCall).?;
-            try writeToken(builder, builtin_call.builtin_token, .builtin);
-            for (builtin_call.paramsConst()) |param|
+        .builtin_call,
+        .builtin_call_comma,
+        .builtin_call_two,
+        .builtin_call_two_comma,
+        => {
+            const data = datas[node];
+            const params = switch (tag) {
+                .builtin_call, .builtin_call_comma => tree.extra_data[data.lhs..data.rhs],
+                .builtin_call_two, .builtin_call_two_comma => if (data.lhs == 0)
+                    &[_]ast.Node.Index{}
+                else if (data.rhs == 0)
+                    &[_]ast.Node.Index{data.lhs}
+                else
+                    &[_]ast.Node.Index{ data.lhs, data.rhs },
+                else => unreachable,
+            };
+
+            try writeToken(builder, main_token, .builtin);
+            for (params) |param|
                 try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, param });
         },
-        .StringLiteral, .CharLiteral => {
-            try writeToken(builder, node.firstToken(), .string);
+        .string_literal,
+        .char_literal,
+        => {
+            try writeToken(builder, main_token, .string);
         },
-        .MultilineStringLiteral => {
-            const multi_line = node.cast(ast.Node.MultilineStringLiteral).?;
-            for (multi_line.linesConst()) |line| try writeToken(builder, line, .string);
+        .multiline_string_literal => {
+            var cur_tok = main_token;
+            const last_tok = datas[node].rhs;
+
+            while (cur_tok <= last_tok) : (cur_tok += 1) try writeToken(builder, cur_tok, .string);
         },
-        .BoolLiteral, .NullLiteral, .UndefinedLiteral, .Unreachable => {
-            try writeToken(builder, node.firstToken(), .keywordLiteral);
+        .true_literal,
+        .false_literal,
+        .null_literal,
+        .undefined_literal,
+        .unreachable_literal,
+        => {
+            try writeToken(builder, main_token, .keywordLiteral);
         },
-        .ErrorType => {
-            try writeToken(builder, node.firstToken(), .keyword);
+        .error_set_decl => {
+            try writeToken(builder, main_token, .keyword);
         },
-        .Asm => {
-            const asm_expr = node.cast(ast.Node.Asm).?;
-            try writeToken(builder, asm_expr.asm_token, .keyword);
-            try writeToken(builder, asm_expr.volatile_token, .keyword);
-            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, asm_expr.template });
+        .@"asm",
+        .asm_output,
+        .asm_input,
+        .asm_simple,
+        => {
+            const asm_node: ast.full.Asm = switch (tag) {
+                .@"asm" => tree.asmFull(node),
+                .asm_simple => tree.asmSimple(node),
+                else => return, // TODO Inputs, outputs
+            };
+
+            try writeToken(builder, main_token, .keyword);
+            try writeToken(builder, asm_node.volatile_token, .keyword);
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, asm_node.ast.template });
             // TODO Inputs, outputs.
         },
-        .AnyType => {
-            try writeToken(builder, node.firstToken(), .type);
+        .@"anytype" => {
+            try writeToken(builder, main_token, .type);
         },
-        .TestDecl => {
-            const test_decl = node.cast(ast.Node.TestDecl).?;
-            if (test_decl.doc_comments) |doc| try writeDocComments(builder, handle.tree, doc);
-            try writeToken(builder, test_decl.test_token, .keyword);
-            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, test_decl.name });
-            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, test_decl.body_node });
+        .test_decl => {
+            if (analysis.getDocCommentTokenIndex(handle.tree, node)) |doc|
+                try writeDocComments(builder, handle.tree, doc);
+
+            try writeToken(builder, main_token, .keyword);
+            if (token_tags[main_token + 1] == .string_literal)
+                try writeToken(builder, main_token + 1, .string);
+
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, datas[node].rhs });
         },
-        .Catch => {
-            const catch_expr = node.cast(ast.Node.Catch).?;
-            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, catch_expr.lhs });
-            try writeToken(builder, catch_expr.op_token, .keyword);
-            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, catch_expr.rhs });
+        .@"catch" => {
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, datas[node].lhs });
+            try writeToken(builder, main_token, .keyword);
+            if (token_tags[main_token + 1] == .pipe)
+                try writeToken(builder, main_token + 1, .variable);
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, datas[node].rhs });
         },
-        .Add, .AddWrap, .ArrayCat, .ArrayMult, .Assign, .AssignBitAnd, .AssignBitOr, .AssignBitShiftLeft, .AssignBitShiftRight, .AssignBitXor, .AssignDiv, .AssignSub, .AssignSubWrap, .AssignMod, .AssignAdd, .AssignAddWrap, .AssignMul, .AssignMulWrap, .BangEqual, .BitAnd, .BitOr, .BitShiftLeft, .BitShiftRight, .BitXor, .BoolAnd, .BoolOr, .Div, .EqualEqual, .ErrorUnion, .GreaterOrEqual, .GreaterThan, .LessOrEqual, .LessThan, .MergeErrorSets, .Mod, .Mul, .MulWrap, .Period, .Range, .Sub, .SubWrap, .OrElse => {
-            const infix_op = node.cast(ast.Node.SimpleInfixOp).?;
-            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, infix_op.lhs });
-            if (node.tag != .Period) {
-                const token_type: TokenType = switch (node.tag) {
-                    .BoolAnd, .BoolOr, .OrElse => .keyword,
-                    else => .operator,
-                };
-
-                try writeToken(builder, infix_op.op_token, token_type);
-                try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, infix_op.rhs });
-            }
-            switch (node.tag) {
-                .Period => {
-                    const rhs_str = handle.tree.tokenSlice(infix_op.rhs.firstToken());
-
-                    // TODO This is basically exactly the same as what is done in analysis.resolveTypeOfNode, with the added
-                    //      writeToken code.
-                    // Maybe we can hook into it insead? Also applies to Identifier and VarDecl
-                    var bound_type_params = analysis.BoundTypeParams.init(&arena.allocator);
-                    const lhs_type = try analysis.resolveFieldAccessLhsType(
-                        store,
-                        arena,
-                        (try analysis.resolveTypeOfNodeInternal(store, arena, .{
-                            .node = infix_op.lhs,
-                            .handle = handle,
-                        }, &bound_type_params)) orelse return,
-                        &bound_type_params,
-                    );
-                    const left_type_node = switch (lhs_type.type.data) {
-                        .other => |n| n,
-                        else => return,
-                    };
-                    if (try analysis.lookupSymbolContainer(store, arena, .{ .node = left_type_node, .handle = lhs_type.handle }, rhs_str, !lhs_type.type.is_type_val)) |decl_type| {
-                        switch (decl_type.decl.*) {
-                            .ast_node => |decl_node| {
-                                if (decl_node.tag == .ContainerField) {
-                                    const tok_type: ?TokenType = if (left_type_node.cast(ast.Node.ContainerDecl)) |container_decl|
-                                        fieldTokenType(container_decl, lhs_type.handle)
-                                    else if (left_type_node.tag == .Root)
-                                        TokenType.field
-                                    else
-                                        null;
-
-                                    if (tok_type) |tt| try writeToken(builder, infix_op.rhs.firstToken(), tt);
-                                    return;
-                                } else if (decl_node.tag == .ErrorTag) {
-                                    try writeToken(builder, infix_op.rhs.firstToken(), .errorTag);
-                                }
-                            },
-                            else => {},
-                        }
-
-                        if (try decl_type.resolveType(store, arena, &bound_type_params)) |resolved_type| {
-                            try colorIdentifierBasedOnType(builder, resolved_type, infix_op.rhs.firstToken(), .{});
-                        }
-                    }
-                },
-                else => {},
-            }
-        },
-        .SliceType => {
-            const slice_type = node.castTag(.SliceType).?;
-            const ptr_info = slice_type.ptr_info;
-            if (ptr_info.align_info) |align_info| {
-                try writeToken(builder, slice_type.op_token + 2, .keyword);
-                try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, align_info.node });
-            }
-            try writeToken(builder, ptr_info.const_token, .keyword);
-            try writeToken(builder, ptr_info.volatile_token, .keyword);
-            try writeToken(builder, ptr_info.allowzero_token, .keyword);
-            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, slice_type.rhs });
-        },
-        .PtrType => {
-            const pointer_type = node.castTag(.PtrType).?;
-            const tok_ids = builder.handle.tree.token_ids;
-
-            const ptr_info = switch (tok_ids[pointer_type.op_token]) {
-                .AsteriskAsterisk => pointer_type.rhs.castTag(.PtrType).?.ptr_info,
-                else => pointer_type.ptr_info,
-            };
-            const rhs = switch (tok_ids[pointer_type.op_token]) {
-                .AsteriskAsterisk => pointer_type.rhs.castTag(.PtrType).?.rhs,
-                else => pointer_type.rhs,
-            };
-
-            const off = switch (tok_ids[pointer_type.op_token]) {
-                .Asterisk, .AsteriskAsterisk => blk: {
-                    try writeToken(builder, pointer_type.op_token, .operator);
-                    break :blk pointer_type.op_token + 1;
-                },
-                .LBracket => blk: {
-                    try writeToken(builder, pointer_type.op_token + 1, .operator);
-                    const is_c_ptr = tok_ids[pointer_type.op_token + 2] == .Identifier;
-
-                    if (is_c_ptr) {
-                        try writeToken(builder, pointer_type.op_token + 2, .operator);
-                    }
-
-                    if (ptr_info.sentinel) |sentinel| {
-                        try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, sentinel });
-                        break :blk sentinel.lastToken() + 2;
-                    }
-
-                    break :blk pointer_type.op_token + 3 + @boolToInt(is_c_ptr);
-                },
-                else => 0,
-            };
-
-            if (ptr_info.align_info) |align_info| {
-                try writeToken(builder, off, .keyword);
-                try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, align_info.node });
-            }
-            try writeToken(builder, ptr_info.const_token, .keyword);
-            try writeToken(builder, ptr_info.volatile_token, .keyword);
-            try writeToken(builder, ptr_info.allowzero_token, .keyword);
-            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, rhs });
-        },
-        .ArrayType => {
-            const array_type = node.castTag(.ArrayType).?;
-            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, array_type.len_expr });
-            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, array_type.rhs });
-        },
-        .ArrayTypeSentinel => {
-            const array_type = node.castTag(.ArrayTypeSentinel).?;
-            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, array_type.len_expr });
-            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, array_type.sentinel });
-            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, array_type.rhs });
-        },
-        .AddressOf, .Await, .BitNot, .BoolNot, .OptionalType, .Negation, .NegationWrap, .Resume, .Try => {
-            const prefix_op = node.cast(ast.Node.SimplePrefixOp).?;
-            const tok_type: TokenType = switch (node.tag) {
-                .Try, .Await, .Resume => .keyword,
+        .add,
+        .add_wrap,
+        .array_cat,
+        .array_mult,
+        .assign,
+        .assign_bit_and,
+        .assign_bit_or,
+        .assign_bit_shift_left,
+        .assign_bit_shift_right,
+        .assign_bit_xor,
+        .assign_div,
+        .assign_sub,
+        .assign_sub_wrap,
+        .assign_mod,
+        .assign_add,
+        .assign_add_wrap,
+        .assign_mul,
+        .assign_mul_wrap,
+        .bang_equal,
+        .bit_and,
+        .bit_or,
+        .bit_shift_left,
+        .bit_shift_right,
+        .bit_xor,
+        .bool_and,
+        .bool_or,
+        .div,
+        .equal_equal,
+        .error_union,
+        .greater_or_equal,
+        .greater_than,
+        .less_or_equal,
+        .less_than,
+        .merge_error_sets,
+        .mod,
+        .mul,
+        .mul_wrap,
+        .switch_range,
+        .sub,
+        .sub_wrap,
+        .@"orelse",
+        => {
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, datas[node].lhs });
+            const token_type: TokenType = switch (tag) {
+                .bool_and, .bool_or => .keyword,
                 else => .operator,
             };
-            try writeToken(builder, prefix_op.op_token, tok_type);
-            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, prefix_op.rhs });
+
+            try writeToken(builder, main_token, token_type);
+            if (datas[node].rhs != 0)
+                try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, datas[node].rhs });
         },
-        else => {},
+        .field_access => {
+            const data = datas[node];
+            if (data.rhs == 0) return;
+            const rhs_str = tree.tokenSlice(data.rhs);
+
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, data.lhs });
+
+            // TODO This is basically exactly the same as what is done in analysis.resolveTypeOfNode, with the added
+            //      writeToken code.
+            // Maybe we can hook into it insead? Also applies to Identifier and VarDecl
+            var bound_type_params = analysis.BoundTypeParams.init(&arena.allocator);
+            const lhs_type = try analysis.resolveFieldAccessLhsType(
+                store,
+                arena,
+                (try analysis.resolveTypeOfNodeInternal(store, arena, .{
+                    .node = data.lhs,
+                    .handle = handle,
+                }, &bound_type_params)) orelse return,
+                &bound_type_params,
+            );
+            const left_type_node = switch (lhs_type.type.data) {
+                .other => |n| n,
+                else => return,
+            };
+            if (try analysis.lookupSymbolContainer(store, arena, .{
+                .node = left_type_node,
+                .handle = lhs_type.handle,
+            }, rhs_str, !lhs_type.type.is_type_val)) |decl_type| {
+                switch (decl_type.decl.*) {
+                    .ast_node => |decl_node| {
+                        if (decl_type.handle.tree.nodes.items(.tag)[decl_node].isContainerField()) {
+                            const tok_type: ?TokenType = if (analysis.isContainer(lhs_type.handle.tree.nodes.items(.tag)[left_type_node]))
+                                fieldTokenType(decl_node, lhs_type.handle)
+                            else if (left_type_node == 0)
+                                TokenType.field
+                            else
+                                null;
+
+                            if (tok_type) |tt| try writeToken(builder, data.rhs, tt);
+                            return;
+                        } else if (decl_type.handle.tree.nodes.items(.tag)[decl_node] == .error_value) {
+                            try writeToken(builder, data.rhs, .errorTag);
+                        }
+                    },
+                    else => {},
+                }
+
+                if (try decl_type.resolveType(store, arena, &bound_type_params)) |resolved_type| {
+                    try colorIdentifierBasedOnType(builder, resolved_type, data.rhs, .{});
+                }
+            }
+        },
+        .ptr_type,
+        .ptr_type_aligned,
+        .ptr_type_bit_range,
+        .ptr_type_sentinel,
+        => {
+            const ptr_type = analysis.ptrType(tree, node).?;
+
+            if (ptr_type.size == .One and token_tags[main_token] == .asterisk_asterisk and
+                main_token == main_tokens[ptr_type.ast.child_type])
+            {
+                return try await @asyncCall(child_frame, {}, writeNodeTokens, .{
+                    builder,
+                    arena,
+                    store,
+                    ptr_type.ast.child_type,
+                });
+            }
+
+            if (ptr_type.size == .One) try writeToken(builder, main_token, .operator);
+            if (ptr_type.ast.sentinel != 0) {
+                return try await @asyncCall(child_frame, {}, writeNodeTokens, .{
+                    builder,
+                    arena,
+                    store,
+                    ptr_type.ast.sentinel,
+                });
+            }
+
+            try writeToken(builder, ptr_type.allowzero_token, .keyword);
+
+            if (ptr_type.ast.align_node != 0) {
+                const first_tok = tree.firstToken(ptr_type.ast.align_node);
+                try writeToken(builder, first_tok - 2, .keyword);
+                try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, ptr_type.ast.align_node });
+
+                if (ptr_type.ast.bit_range_start != 0) {
+                    try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, ptr_type.ast.bit_range_start });
+                    try writeToken(builder, tree.firstToken(ptr_type.ast.bit_range_end - 1), .operator);
+                    try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, ptr_type.ast.bit_range_end });
+                }
+            }
+
+            try writeToken(builder, ptr_type.const_token, .keyword);
+            try writeToken(builder, ptr_type.volatile_token, .keyword);
+
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, ptr_type.ast.child_type });
+        },
+        .array_type,
+        .array_type_sentinel,
+        => {
+            const array_type: ast.full.ArrayType = if (tag == .array_type)
+                tree.arrayType(node)
+            else
+                tree.arrayTypeSentinel(node);
+
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, array_type.ast.elem_count });
+            if (array_type.ast.sentinel) |sentinel|
+                try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, sentinel });
+
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, array_type.ast.elem_type });
+        },
+        .address_of,
+        .bit_not,
+        .bool_not,
+        .optional_type,
+        .negation,
+        .negation_wrap,
+        => {
+            try writeToken(builder, main_token, .operator);
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, datas[node].lhs });
+        },
+        .@"try",
+        .@"resume",
+        .@"await",
+        => {
+            try writeToken(builder, main_token, .keyword);
+            try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, datas[node].lhs });
+        },
+        .anyframe_literal => try writeToken(builder, main_token, .keyword),
     }
 }
 
 // TODO Range version, edit version.
 pub fn writeAllSemanticTokens(arena: *std.heap.ArenaAllocator, store: *DocumentStore, handle: *DocumentStore.Handle, encoding: offsets.Encoding) ![]u32 {
     var builder = Builder.init(arena.child_allocator, handle, encoding);
-    try writeNodeTokens(&builder, arena, store, &handle.tree.root_node.base);
+
+    // as line comments are not nodes, we parse the text then generate the tokens for them
+    try findComments(&builder, handle.tree.source, encoding);
+
+    // reverse the ast from the root declarations
+    var gap_highlighter = GapHighlighter.init(&builder, 0);
+
+    var buf: [2]ast.Node.Index = undefined;
+    for (analysis.declMembers(handle.tree, .root, 0, &buf)) |child| {
+        try gap_highlighter.next(child);
+        try writeNodeTokens(&builder, arena, store, child);
+    }
+
+    try gap_highlighter.end(@truncate(u32, handle.tree.tokens.len) - 1);
+
     return builder.toOwnedSlice();
+}
+
+/// As the AST does not contain nodes for comments
+/// this will parse through the entire file to search for comments
+/// and generate semantic tokens for them
+fn findComments(builder: *Builder, source: []const u8, encoding: offsets.Encoding) !void {
+    var state: enum { none, comment, doc_comment } = .none;
+
+    var prev: u8 = 0;
+    var start: usize = 0;
+    for (source) |c, i| {
+        if (state == .comment and c == '/') {
+            state = .none;
+            continue;
+        }
+
+        if (state == .none and c == '/' and prev == '/') {
+            state = .comment;
+            start = i - 1;
+        }
+
+        if (c == '\n') {
+            if (state == .comment) {
+                state = .none;
+
+                const len = if (encoding == .utf8)
+                    i - start
+                else blk: {
+                    var index: usize = start;
+                    var utf16_len: usize = 0;
+                    while (index < i) {
+                        const n = std.unicode.utf8ByteSequenceLength(source[index]) catch unreachable;
+                        const codepoint = std.unicode.utf8Decode(source[index .. index + n]) catch unreachable;
+                        if (codepoint < 0x10000) {
+                            utf16_len += 1;
+                        } else {
+                            utf16_len += 2;
+                        }
+                        index += n;
+                    }
+                    break :blk utf16_len;
+                };
+
+                try builder.comments.append(.{
+                    .length = @truncate(u32, len),
+                    .start = @truncate(u32, start),
+                });
+            }
+        }
+        prev = c;
+    }
 }

@@ -22,7 +22,7 @@ pub const Handle = struct {
     document: types.TextDocument,
     count: usize,
     import_uris: std.ArrayList([]const u8),
-    tree: *std.zig.ast.Tree,
+    tree: std.zig.ast.Tree,
     document_scope: analysis.DocumentScope,
 
     associated_build_file: ?*BuildFile,
@@ -143,8 +143,8 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: []u8) anyerror!*Hand
     var handle = try self.allocator.create(Handle);
     errdefer self.allocator.destroy(handle);
 
-    const tree = try std.zig.parse(self.allocator, text);
-    errdefer tree.deinit();
+    var tree = try std.zig.parse(self.allocator, text);
+    errdefer tree.deinit(self.allocator);
 
     const document_scope = try analysis.makeDocumentScope(self.allocator, tree);
     errdefer document_scope.deinit(self.allocator);
@@ -326,7 +326,7 @@ fn decrementCount(self: *DocumentStore, uri: []const u8) void {
             self.decrementBuildFileRefs(build_file);
         }
 
-        entry.value.tree.deinit();
+        entry.value.tree.deinit(self.allocator);
         self.allocator.free(entry.value.document.mem);
 
         for (entry.value.import_uris.items) |import_uri| {
@@ -354,7 +354,7 @@ pub fn getHandle(self: *DocumentStore, uri: []const u8) ?*Handle {
 // Check if the document text is now sane, move it to sane_text if so.
 fn refreshDocument(self: *DocumentStore, handle: *Handle, zig_lib_path: ?[]const u8) !void {
     log.debug("New text for document {s}", .{handle.uri()});
-    handle.tree.deinit();
+    handle.tree.deinit(self.allocator);
     handle.tree = try std.zig.parse(self.allocator, handle.document.text);
 
     handle.document_scope.deinit(self.allocator);
@@ -613,7 +613,7 @@ pub fn deinit(self: *DocumentStore) void {
     var entry_iterator = self.handles.iterator();
     while (entry_iterator.next()) |entry| {
         entry.value.document_scope.deinit(self.allocator);
-        entry.value.tree.deinit();
+        entry.value.tree.deinit(self.allocator);
         self.allocator.free(entry.value.document.mem);
 
         for (entry.value.import_uris.items) |uri| {

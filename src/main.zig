@@ -199,8 +199,8 @@ fn publishDiagnostics(arena: *std.heap.ArenaAllocator, handle: DocumentStore.Han
 
     var diagnostics = std.ArrayList(types.Diagnostic).init(&arena.allocator);
 
-    for (tree.errors) |*err| {
-        const loc = tree.tokenLocation(0, err.loc());
+    for (tree.errors) |err| {
+        const loc = tree.tokenLocation(0, err.token);
 
         var mem_buffer: [256]u8 = undefined;
         var fbs = std.io.fixedBufferStream(&mem_buffer);
@@ -209,7 +209,7 @@ fn publishDiagnostics(arena: *std.heap.ArenaAllocator, handle: DocumentStore.Han
         try diagnostics.append(.{
             .range = astLocationToRange(loc),
             .severity = .Error,
-            .code = @tagName(err.*),
+            .code = @tagName(err.tag),
             .source = "zls",
             .message = try std.mem.dupe(&arena.allocator, u8, fbs.getWritten()),
             // .relatedInformation = undefined
@@ -217,16 +217,21 @@ fn publishDiagnostics(arena: *std.heap.ArenaAllocator, handle: DocumentStore.Han
     }
 
     if (tree.errors.len == 0) {
-        for (tree.root_node.decls()) |decl| {
-            switch (decl.tag) {
-                .FnProto => blk: {
-                    const func = decl.cast(std.zig.ast.Node.FnProto).?;
-                    const is_extern = func.getExternExportInlineToken() != null;
-                    if (is_extern)
-                        break :blk;
+        for (tree.rootDecls()) |decl_idx| {
+            const decl = tree.nodes.items(.tag)[decl_idx];
+            switch (decl) {
+                .fn_proto,
+                .fn_proto_multi,
+                .fn_proto_one,
+                .fn_proto_simple,
+                .fn_decl,
+                => blk: {
+                    var buf: [1]std.zig.ast.Node.Index = undefined;
+                    const func = analysis.fnProto(tree, decl_idx, &buf).?;
+                    if (func.extern_export_token != null) break :blk;
 
                     if (config.warn_style) {
-                        if (func.getNameToken()) |name_token| {
+                        if (func.name_token) |name_token| {
                             const loc = tree.tokenLocation(0, name_token);
 
                             const is_type_function = analysis.isTypeFunction(tree, func);
@@ -331,6 +336,10 @@ fn nodeToCompletion(
 ) error{OutOfMemory}!void {
     const node = node_handle.node;
     const handle = node_handle.handle;
+    const tree = handle.tree;
+    const node_tags = tree.nodes.items(.tag);
+    const datas = tree.nodes.items(.data);
+    const token_tags = tree.tokens.items(.tag);
 
     const doc_kind: types.MarkupContent.Kind = if (client_capabilities.completion_doc_supports_md)
         .Markdown
@@ -350,7 +359,7 @@ fn nodeToCompletion(
     else
         null;
 
-    if (node.tag == .ErrorSetDecl or node.tag == .Root or node.tag == .ContainerDecl) {
+    if (analysis.isContainer(node_tags[node])) {
         const context = DeclToCompletionContext{
             .completions = list,
             .config = &config,
@@ -362,47 +371,51 @@ fn nodeToCompletion(
 
     if (is_type_val) return;
 
-    switch (node.tag) {
-        .FnProto => {
-            const func = node.cast(std.zig.ast.Node.FnProto).?;
-            if (func.getNameToken()) |name_token| {
+    switch (node_tags[node]) {
+        .fn_proto,
+        .fn_proto_multi,
+        .fn_proto_one,
+        .fn_proto_simple,
+        .fn_decl,
+        => {
+            var buf: [1]std.zig.ast.Node.Index = undefined;
+            const func = analysis.fnProto(tree, node, &buf).?;
+            if (func.name_token) |name_token| {
                 const use_snippets = config.enable_snippets and client_capabilities.supports_snippets;
 
                 const insert_text = if (use_snippets) blk: {
                     // TODO Also check if we are dot accessing from a type val and dont skip in that case.
-                    const skip_self_param = if (func.params_len > 0) param_check: {
-                        const in_container = analysis.innermostContainer(handle, handle.tree.token_locs[func.firstToken()].start);
+                    const skip_self_param = if (func.ast.params.len > 0) param_check: {
+                        const in_container = analysis.innermostContainer(handle, tree.tokens.items(.start)[func.ast.fn_token]);
 
-                        switch (func.paramsConst()[0].param_type) {
-                            .type_expr => |type_node| {
-                                if (try analysis.resolveTypeOfNode(&document_store, arena, .{
-                                    .node = type_node,
-                                    .handle = handle,
-                                })) |resolved_type| {
-                                    if (std.meta.eql(in_container, resolved_type))
-                                        break :param_check true;
-                                }
+                        var it = func.iterate(tree);
+                        const param = it.next().?;
 
-                                if (type_node.castTag(.PtrType)) |ptr_type| {
-                                    if (try analysis.resolveTypeOfNode(&document_store, arena, .{
-                                        .node = ptr_type.rhs,
-                                        .handle = handle,
-                                    })) |resolved_prefix_op| {
-                                        if (std.meta.eql(in_container, resolved_prefix_op))
-                                            break :param_check true;
-                                    }
-                                }
+                        if (param.type_expr == 0) break :param_check false;
 
-                                break :param_check false;
-                            },
-                            else => break :param_check false,
+                        if (try analysis.resolveTypeOfNode(&document_store, arena, .{
+                            .node = param.type_expr,
+                            .handle = handle,
+                        })) |resolved_type| {
+                            if (std.meta.eql(in_container, resolved_type))
+                                break :param_check true;
                         }
-                    } else
-                        false;
 
-                    break :blk try analysis.getFunctionSnippet(&arena.allocator, handle.tree, func, skip_self_param);
-                } else
-                    null;
+                        if (analysis.isPtrType(tree, param.type_expr)) {
+                            if (try analysis.resolveTypeOfNode(&document_store, arena, .{
+                                .node = datas[param.type_expr].rhs,
+                                .handle = handle,
+                            })) |resolved_prefix_op| {
+                                if (std.meta.eql(in_container, resolved_prefix_op))
+                                    break :param_check true;
+                            }
+                        }
+
+                        break :param_check false;
+                    } else false;
+
+                    break :blk try analysis.getFunctionSnippet(&arena.allocator, tree, func, skip_self_param);
+                } else null;
 
                 const is_type_function = analysis.isTypeFunction(handle.tree, func);
 
@@ -416,9 +429,13 @@ fn nodeToCompletion(
                 });
             }
         },
-        .VarDecl => {
-            const var_decl = node.cast(std.zig.ast.Node.VarDecl).?;
-            const is_const = handle.tree.token_ids[var_decl.mut_token] == .Keyword_const;
+        .global_var_decl,
+        .local_var_decl,
+        .aligned_var_decl,
+        .simple_var_decl,
+        => {
+            const var_decl = analysis.varDecl(tree, node).?;
+            const is_const = token_tags[var_decl.ast.mut_token] == .keyword_const;
 
             if (try analysis.resolveVarDeclAlias(&document_store, arena, node_handle)) |result| {
                 const context = DeclToCompletionContext{
@@ -431,57 +448,59 @@ fn nodeToCompletion(
             }
 
             try list.append(.{
-                .label = handle.tree.tokenSlice(var_decl.name_token),
+                .label = handle.tree.tokenSlice(var_decl.ast.mut_token + 1),
                 .kind = if (is_const) .Constant else .Variable,
                 .documentation = doc,
-                .detail = analysis.getVariableSignature(handle.tree, var_decl),
+                .detail = analysis.getVariableSignature(tree, var_decl),
             });
         },
-        .ContainerField => {
-            const field = node.cast(std.zig.ast.Node.ContainerField).?;
+        .container_field,
+        .container_field_align,
+        .container_field_init,
+        => {
+            const field = analysis.containerField(tree, node).?;
             try list.append(.{
-                .label = handle.tree.tokenSlice(field.name_token),
+                .label = handle.tree.tokenSlice(field.ast.name_token),
                 .kind = .Field,
                 .documentation = doc,
                 .detail = analysis.getContainerFieldSignature(handle.tree, field),
             });
         },
-        .SliceType => {
-            try list.append(.{
-                .label = "len",
-                .kind = .Field,
-            });
-            try list.append(.{
-                .label = "ptr",
-                .kind = .Field,
-            });
-        },
-        .ArrayType => {
+        .array_type,
+        .array_type_sentinel,
+        => {
             try list.append(.{
                 .label = "len",
                 .kind = .Field,
             });
         },
-        .PtrType => {
-            if (config.operator_completions) {
-                try list.append(.{
-                    .label = "*",
-                    .kind = .Operator,
-                });
+        .ptr_type,
+        .ptr_type_aligned,
+        .ptr_type_bit_range,
+        .ptr_type_sentinel,
+        => {
+            const ptr_type = analysis.ptrType(tree, node).?;
+
+            switch (ptr_type.size) {
+                .One, .C, .Many => if (config.operator_completions) {
+                    try list.append(.{
+                        .label = "*",
+                        .kind = .Operator,
+                    });
+                },
+                .Slice => {
+                    try list.append(.{ .label = "ptr", .kind = .Field });
+                    try list.append(.{ .label = "len", .kind = .Field });
+                    return;
+                },
             }
 
-            const ptr_type = node.castTag(.PtrType).?;
-            if (ptr_type.rhs.castTag(.ArrayType) != null) {
-                try list.append(.{
-                    .label = "len",
-                    .kind = .Field,
-                });
-            } else if (unwrapped) |actual_type| {
+            if (unwrapped) |actual_type| {
                 try typeToCompletion(arena, list, .{ .original = actual_type }, orig_handle, config);
             }
             return;
         },
-        .OptionalType => {
+        .optional_type => {
             if (config.operator_completions) {
                 try list.append(.{
                     .label = "?",
@@ -490,18 +509,18 @@ fn nodeToCompletion(
             }
             return;
         },
-        .StringLiteral => {
+        .string_literal => {
             try list.append(.{
                 .label = "len",
                 .kind = .Field,
             });
         },
-        else => if (analysis.nodeToString(handle.tree, node)) |string| {
+        else => if (analysis.nodeToString(tree, node)) |string| {
             try list.append(.{
                 .label = string,
                 .kind = .Field,
                 .documentation = doc,
-                .detail = handle.tree.getNodeSource(node),
+                .detail = tree.getNodeSource(node),
             });
         },
     }
@@ -540,7 +559,7 @@ fn gotoDefinitionSymbol(id: types.RequestId, arena: *std.heap.ArenaAllocator, de
 
             const name_token = analysis.getDeclNameToken(handle.tree, node) orelse
                 return try respondGeneric(id, null_result_response);
-            break :block offsets.tokenRelativeLocation(handle.tree, 0, name_token, offset_encoding) catch return;
+            break :block offsets.tokenRelativeLocation(handle.tree, 0, handle.tree.tokens.items(.start)[name_token], offset_encoding) catch return;
         },
         else => decl_handle.location(offset_encoding) catch return,
     };
@@ -565,8 +584,13 @@ fn gotoDefinitionSymbol(id: types.RequestId, arena: *std.heap.ArenaAllocator, de
     });
 }
 
-fn hoverSymbol(id: types.RequestId, arena: *std.heap.ArenaAllocator, decl_handle: analysis.DeclWithHandle) (std.os.WriteError || error{OutOfMemory})!void {
+fn hoverSymbol(
+    id: types.RequestId,
+    arena: *std.heap.ArenaAllocator,
+    decl_handle: analysis.DeclWithHandle,
+) (std.os.WriteError || error{OutOfMemory})!void {
     const handle = decl_handle.handle;
+    const tree = handle.tree;
 
     const hover_kind: types.MarkupContent.Kind = if (client_capabilities.hover_supports_md) .Markdown else .PlainText;
     const md_string = switch (decl_handle.decl.*) {
@@ -575,26 +599,20 @@ fn hoverSymbol(id: types.RequestId, arena: *std.heap.ArenaAllocator, decl_handle
                 return try hoverSymbol(id, arena, result);
             }
 
-            const doc_str = if (try analysis.getDocComments(&arena.allocator, handle.tree, node, hover_kind)) |str|
+            const doc_str = if (try analysis.getDocComments(&arena.allocator, tree, node, hover_kind)) |str|
                 str
             else
                 "";
 
-            const signature_str = switch (node.tag) {
-                .VarDecl => blk: {
-                    const var_decl = node.cast(std.zig.ast.Node.VarDecl).?;
-                    break :blk analysis.getVariableSignature(handle.tree, var_decl);
-                },
-                .FnProto => blk: {
-                    const fn_decl = node.cast(std.zig.ast.Node.FnProto).?;
-                    break :blk analysis.getFunctionSignature(handle.tree, fn_decl);
-                },
-                .ContainerField => blk: {
-                    const field = node.cast(std.zig.ast.Node.ContainerField).?;
-                    break :blk analysis.getContainerFieldSignature(handle.tree, field);
-                },
-                else => analysis.nodeToString(handle.tree, node) orelse return try respondGeneric(id, null_result_response),
-            };
+            var buf: [1]std.zig.ast.Node.Index = undefined;
+            const signature_str = if (analysis.varDecl(tree, node)) |var_decl| blk: {
+                break :blk analysis.getVariableSignature(tree, var_decl);
+            } else if (analysis.fnProto(tree, node, &buf)) |fn_proto| blk: {
+                break :blk analysis.getFunctionSignature(tree, fn_proto);
+            } else if (analysis.containerField(tree, node)) |field| blk: {
+                break :blk analysis.getContainerFieldSignature(tree, field);
+            } else analysis.nodeToString(tree, node) orelse
+                return try respondGeneric(id, null_result_response);
 
             break :ast_node if (hover_kind == .Markdown)
                 try std.fmt.allocPrint(&arena.allocator, "```zig\n{s}\n```\n{s}", .{ signature_str, doc_str })
@@ -602,31 +620,43 @@ fn hoverSymbol(id: types.RequestId, arena: *std.heap.ArenaAllocator, decl_handle
                 try std.fmt.allocPrint(&arena.allocator, "{s}\n{s}", .{ signature_str, doc_str });
         },
         .param_decl => |param| param_decl: {
-            const doc_str = if (param.doc_comments) |doc_comments|
+            const doc_str = if (param.first_doc_comment) |doc_comments|
                 try analysis.collectDocComments(&arena.allocator, handle.tree, doc_comments, hover_kind)
             else
                 "";
 
-            const signature_str = handle.tree.source[handle.tree.token_locs[param.firstToken()].start..handle.tree.token_locs[param.lastToken()].end];
+            const first_token = param.first_doc_comment orelse
+                param.comptime_noalias orelse
+                param.name_token orelse
+                tree.firstToken(param.type_expr); // extern fn
+            const last_token = param.anytype_ellipsis3 orelse tree.lastToken(param.type_expr);
+
+            const start = offsets.tokenLocation(tree, first_token).start;
+            const end = offsets.tokenLocation(tree, last_token).end;
+            const signature_str = tree.source[start..end];
             break :param_decl if (hover_kind == .Markdown)
                 try std.fmt.allocPrint(&arena.allocator, "```zig\n{s}\n```\n{s}", .{ signature_str, doc_str })
             else
                 try std.fmt.allocPrint(&arena.allocator, "{s}\n{s}", .{ signature_str, doc_str });
         },
         .pointer_payload => |payload| if (hover_kind == .Markdown)
-            try std.fmt.allocPrint(&arena.allocator, "```zig\n{s}\n```", .{handle.tree.tokenSlice(payload.node.value_symbol.firstToken())})
+            try std.fmt.allocPrint(&arena.allocator, "```zig\n{s}\n```", .{tree.tokenSlice(payload.name)})
         else
-            try std.fmt.allocPrint(&arena.allocator, "{s}", .{handle.tree.tokenSlice(payload.node.value_symbol.firstToken())}),
+            try std.fmt.allocPrint(&arena.allocator, "{s}", .{tree.tokenSlice(payload.name)}),
         .array_payload => |payload| if (hover_kind == .Markdown)
-            try std.fmt.allocPrint(&arena.allocator, "```zig\n{s}\n```", .{handle.tree.tokenSlice(payload.identifier.firstToken())})
+            try std.fmt.allocPrint(&arena.allocator, "```zig\n{s}\n```", .{handle.tree.tokenSlice(payload.identifier)})
         else
-            try std.fmt.allocPrint(&arena.allocator, "{s}", .{handle.tree.tokenSlice(payload.identifier.firstToken())}),
+            try std.fmt.allocPrint(&arena.allocator, "{s}", .{handle.tree.tokenSlice(payload.identifier)}),
+        .array_index => |payload| if (hover_kind == .Markdown)
+            try std.fmt.allocPrint(&arena.allocator, "```zig\n{s}\n```", .{handle.tree.tokenSlice(payload)})
+        else
+            try std.fmt.allocPrint(&arena.allocator, "{s}", .{handle.tree.tokenSlice(payload)}),
         .switch_payload => |payload| if (hover_kind == .Markdown)
-            try std.fmt.allocPrint(&arena.allocator, "```zig\n{s}\n```", .{handle.tree.tokenSlice(payload.node.value_symbol.firstToken())})
+            try std.fmt.allocPrint(&arena.allocator, "```zig\n{s}\n```", .{tree.tokenSlice(payload.node)})
         else
-            try std.fmt.allocPrint(&arena.allocator, "{s}", .{handle.tree.tokenSlice(payload.node.value_symbol.firstToken())}),
+            try std.fmt.allocPrint(&arena.allocator, "{s}", .{tree.tokenSlice(payload.node)}),
         .label_decl => |label_decl| block: {
-            const source = handle.tree.source[handle.tree.token_locs[label_decl.firstToken()].start..handle.tree.token_locs[label_decl.lastToken()].end];
+            const source = tree.tokenSlice(label_decl);
             break :block if (hover_kind == .Markdown)
                 try std.fmt.allocPrint(&arena.allocator, "```zig\n{s}\n```", .{source})
             else
@@ -752,7 +782,7 @@ fn hoverDefinitionFieldAccess(
 fn gotoDefinitionString(arena: *std.heap.ArenaAllocator, id: types.RequestId, pos_index: usize, handle: *DocumentStore.Handle, config: Config) !void {
     const tree = handle.tree;
 
-    const import_str = analysis.getImportStr(tree, pos_index) orelse return try respondGeneric(id, null_result_response);
+    const import_str = analysis.getImportStr(tree, 0, pos_index) orelse return try respondGeneric(id, null_result_response);
     const uri = (try document_store.uriFromImportStr(
         &arena.allocator,
         handle.*,
@@ -820,10 +850,26 @@ fn renameDefinitionLabel(arena: *std.heap.ArenaAllocator, id: types.RequestId, h
     });
 }
 
-fn referencesDefinitionGlobal(arena: *std.heap.ArenaAllocator, id: types.RequestId, handle: *DocumentStore.Handle, pos_index: usize, include_decl: bool) !void {
+fn referencesDefinitionGlobal(
+    arena: *std.heap.ArenaAllocator,
+    id: types.RequestId,
+    handle: *DocumentStore.Handle,
+    pos_index: usize,
+    include_decl: bool,
+    skip_std_references: bool,
+) !void {
     const decl = (try getSymbolGlobal(arena, pos_index, handle)) orelse return try respondGeneric(id, null_result_response);
     var locs = std.ArrayList(types.Location).init(&arena.allocator);
-    try references.symbolReferences(arena, &document_store, decl, offset_encoding, include_decl, &locs, std.ArrayList(types.Location).append);
+    try references.symbolReferences(
+        arena,
+        &document_store,
+        decl,
+        offset_encoding,
+        include_decl,
+        &locs,
+        std.ArrayList(types.Location).append,
+        skip_std_references,
+    );
     try send(arena, types.Response{
         .id = id,
         .result = .{ .Locations = locs.items },
@@ -841,7 +887,7 @@ fn referencesDefinitionFieldAccess(
 ) !void {
     const decl = (try getSymbolFieldAccess(handle, arena, position, range, config)) orelse return try respondGeneric(id, null_result_response);
     var locs = std.ArrayList(types.Location).init(&arena.allocator);
-    try references.symbolReferences(arena, &document_store, decl, offset_encoding, include_decl, &locs, std.ArrayList(types.Location).append);
+    try references.symbolReferences(arena, &document_store, decl, offset_encoding, include_decl, &locs, std.ArrayList(types.Location).append, config.skip_std_references);
     try send(arena, types.Response{
         .id = id,
         .result = .{ .Locations = locs.items },
@@ -865,14 +911,30 @@ const DeclToCompletionContext = struct {
     orig_handle: *DocumentStore.Handle,
 };
 
+fn hasComment(tree: ast.Tree, start_token: ast.TokenIndex, end_token: ast.TokenIndex) bool {
+    const token_starts = tree.tokens.items(.start);
+
+    const start = token_starts[start_token];
+    const end = token_starts[end_token];
+
+    return std.mem.indexOf(u8, tree.source[start..end], "//") != null;
+}
+
 fn declToCompletion(context: DeclToCompletionContext, decl_handle: analysis.DeclWithHandle) !void {
     const tree = decl_handle.handle.tree;
-
     switch (decl_handle.decl.*) {
-        .ast_node => |node| try nodeToCompletion(context.arena, context.completions, .{ .node = node, .handle = decl_handle.handle }, null, context.orig_handle, false, context.config.*),
+        .ast_node => |node| try nodeToCompletion(
+            context.arena,
+            context.completions,
+            .{ .node = node, .handle = decl_handle.handle },
+            null,
+            context.orig_handle,
+            false,
+            context.config.*,
+        ),
         .param_decl => |param| {
             const doc_kind: types.MarkupContent.Kind = if (client_capabilities.completion_doc_supports_md) .Markdown else .PlainText;
-            const doc = if (param.doc_comments) |doc_comments|
+            const doc = if (param.first_doc_comment) |doc_comments|
                 types.MarkupContent{
                     .kind = doc_kind,
                     .value = try analysis.collectDocComments(&context.arena.allocator, tree, doc_comments, doc_kind),
@@ -880,34 +942,46 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: analysis.Decl
             else
                 null;
 
+            const first_token = param.first_doc_comment orelse
+                param.comptime_noalias orelse
+                param.name_token orelse
+                tree.firstToken(param.type_expr);
+            const last_token = param.anytype_ellipsis3 orelse tree.lastToken(param.type_expr);
+
             try context.completions.append(.{
                 .label = tree.tokenSlice(param.name_token.?),
                 .kind = .Constant,
                 .documentation = doc,
-                .detail = tree.source[tree.token_locs[param.firstToken()].start..tree.token_locs[param.lastToken()].end],
+                .detail = tree.source[offsets.tokenLocation(tree, first_token).start..offsets.tokenLocation(tree, last_token).end],
             });
         },
         .pointer_payload => |payload| {
             try context.completions.append(.{
-                .label = tree.tokenSlice(payload.node.value_symbol.firstToken()),
+                .label = tree.tokenSlice(payload.name),
                 .kind = .Variable,
             });
         },
         .array_payload => |payload| {
             try context.completions.append(.{
-                .label = tree.tokenSlice(payload.identifier.firstToken()),
+                .label = tree.tokenSlice(payload.identifier),
+                .kind = .Variable,
+            });
+        },
+        .array_index => |payload| {
+            try context.completions.append(.{
+                .label = tree.tokenSlice(payload),
                 .kind = .Variable,
             });
         },
         .switch_payload => |payload| {
             try context.completions.append(.{
-                .label = tree.tokenSlice(payload.node.value_symbol.firstToken()),
+                .label = tree.tokenSlice(payload.node),
                 .kind = .Variable,
             });
         },
         .label_decl => |label_decl| {
             try context.completions.append(.{
-                .label = tree.tokenSlice(label_decl.firstToken()),
+                .label = tree.tokenSlice(label_decl),
                 .kind = .Variable,
             });
         },
@@ -1223,7 +1297,6 @@ fn completionHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: 
     if (req.params.position.character >= 0) {
         const doc_position = try offsets.documentPosition(handle.document, req.params.position, offset_encoding);
         const pos_context = try analysis.documentPositionContext(arena, handle.document, doc_position);
-
         const use_snippets = config.enable_snippets and client_capabilities.supports_snippets;
         switch (pos_context) {
             .builtin => try completeBuiltin(arena, id, config),
@@ -1301,7 +1374,6 @@ fn hoverHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: reque
     if (req.params.position.character >= 0) {
         const doc_position = try offsets.documentPosition(handle.document, req.params.position, offset_encoding);
         const pos_context = try analysis.documentPositionContext(arena, handle.document, doc_position);
-
         switch (pos_context) {
             .builtin => try hoverDefinitionBuiltin(arena, id, doc_position.absolute_index, handle),
             .var_access => try hoverDefinitionGlobal(arena, id, doc_position.absolute_index, handle, config),
@@ -1398,7 +1470,7 @@ fn referencesHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: 
 
         const include_decl = req.params.context.includeDeclaration;
         switch (pos_context) {
-            .var_access => try referencesDefinitionGlobal(arena, id, handle, doc_position.absolute_index, include_decl),
+            .var_access => try referencesDefinitionGlobal(arena, id, handle, doc_position.absolute_index, include_decl, config.skip_std_references),
             .field_access => |range| try referencesDefinitionFieldAccess(arena, id, handle, doc_position, range, include_decl, config),
             .label => try referencesDefinitionLabel(arena, id, handle, doc_position.absolute_index, include_decl),
             else => try respondGeneric(id, null_result_response),

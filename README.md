@@ -63,6 +63,7 @@ The following options are currently available.
 | `build_runner_cache_path` | `?[]const u8` | `null` | Path to a directroy that will be used as zig's cache when running `zig run build_runner.zig ...`. `null` is equivalent to `${KnownFloders.Cache}/zls` |
 | `enable_semantic_tokens` | `bool` | `true` | Enables semantic token support when the client also supports it. |
 | `operator_completions` | `bool` | `true` | Enables `*` and `?` operators in completion lists. |
+| `skip_std_references` | `bool` | `false` | When true, skips searching for references in std. Improves lookup speed for functions in user's code. Renaming and go-to-definition will continue to work as is.
 
 ## Features
 
