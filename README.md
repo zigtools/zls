@@ -23,6 +23,26 @@ Installation starts with downloading an official release from the [Releases page
 
 See [Downloading and Building ZLS](https://github.com/zigtools/zls/wiki/Downloading-and-Building-ZLS) on the Wiki, or the page about [using ZLS with Visual Studio Code](https://github.com/zigtools/zls/wiki/Installing-for-Visual-Studio-Code) for a guide to help get `zls` running in your editor.
 
+### Installing binaries
+
+#### MacOS
+
+You can install the latest release into `$HOME/zls` using e.g.:
+
+```sh
+brew install xz
+mkdir $HOME/zls && cd $HOME/zls && curl -L https://github.com/zigtools/zls/releases/download/0.1.0/x86_64-macos.tar.xz | tar -xJ --strip-components=1 -C .
+```
+
+#### Linux
+
+You can install the latest release into `$HOME/zls` using e.g.:
+
+```
+sudo apt install xz-utils
+mkdir $HOME/zls && cd $HOME/zls && curl -L https://github.com/zigtools/zls/releases/download/0.1.0/x86_64-linux.tar.xz | tar -xJ --strip-components=1 -C .
+```
+
 ### From Source
 
 Building `zls` is very easy. You will need [a build of Zig master](https://ziglang.org/download/) to build zls.
