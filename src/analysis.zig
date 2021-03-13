@@ -4,6 +4,7 @@ const ast = std.zig.ast;
 const types = @import("types.zig");
 const offsets = @import("offsets.zig");
 const log = std.log.scoped(.analysis);
+const lastToken = offsets.lastToken;
 
 /// Get a declaration's doc comment token index
 pub fn getDocCommentTokenIndex(tree: ast.Tree, node: ast.Node.Index) ?ast.TokenIndex {
@@ -99,7 +100,7 @@ pub fn getFunctionSignature(tree: ast.Tree, func: ast.full.FnProto) []const u8 {
     // return type can be 0 when user wrote incorrect fn signature
     // to ensure we don't break, just end the signature at end of fn token
     if (func.ast.return_type == 0) return tree.source[start.start..start.end];
-    const end = offsets.tokenLocation(tree, tree.lastToken(func.ast.return_type)).end;
+    const end = offsets.tokenLocation(tree, lastToken(tree, func.ast.return_type)).end;
     return tree.source[start.start..end];
 }
 
@@ -152,7 +153,7 @@ pub fn getFunctionSnippet(
                 try buffer.appendSlice("...");
         } else if (param.type_expr != 0) {
             var curr_token = tree.firstToken(param.type_expr);
-            var end_token = tree.lastToken(param.type_expr);
+            var end_token = lastToken(tree, param.type_expr);
             while (curr_token <= end_token) : (curr_token += 1) {
                 const tag = token_tags[curr_token];
                 const is_comma = tag == .comma;
@@ -173,7 +174,7 @@ pub fn getFunctionSnippet(
 /// Gets a function signature (keywords, name, return value)
 pub fn getVariableSignature(tree: ast.Tree, var_decl: ast.full.VarDecl) []const u8 {
     const start = offsets.tokenLocation(tree, var_decl.ast.mut_token).start;
-    const end = offsets.tokenLocation(tree, tree.lastToken(var_decl.ast.init_node)).end;
+    const end = offsets.tokenLocation(tree, lastToken(tree, var_decl.ast.init_node)).end;
     return tree.source[start..end];
 }
 
@@ -181,7 +182,7 @@ pub fn getVariableSignature(tree: ast.Tree, var_decl: ast.full.VarDecl) []const 
 pub fn getContainerFieldSignature(tree: ast.Tree, field: ast.full.ContainerField) []const u8 {
     const start = offsets.tokenLocation(tree, field.ast.name_token).start;
     const end_node = if (field.ast.value_expr != 0) field.ast.value_expr else field.ast.type_expr;
-    const end = offsets.tokenLocation(tree, tree.lastToken(end_node)).end;
+    const end = offsets.tokenLocation(tree, lastToken(tree, end_node)).end;
     return tree.source[start..end];
 }
 
@@ -1448,7 +1449,7 @@ pub fn nodeToString(tree: ast.Tree, node: ast.Node.Index) ?[]const u8 {
 
 fn nodeContainsSourceIndex(tree: ast.Tree, node: ast.Node.Index, source_index: usize) bool {
     const first_token = offsets.tokenLocation(tree, tree.firstToken(node)).start;
-    const last_token = offsets.tokenLocation(tree, tree.lastToken(node)).end;
+    const last_token = offsets.tokenLocation(tree, lastToken(tree, node)).end;
     return source_index >= first_token and source_index <= last_token;
 }
 
@@ -1839,7 +1840,7 @@ fn getDocumentSymbolsInternal(allocator: *std.mem.Allocator, tree: ast.Tree, nod
     const end_loc = start_loc.add(try offsets.tokenRelativeLocation(
         tree,
         start_loc.offset,
-        starts[tree.lastToken(node)],
+        starts[lastToken(tree, node)],
         context.encoding,
     ));
     context.prev_loc = end_loc;
@@ -2525,7 +2526,8 @@ pub fn makeDocumentScope(allocator: *std.mem.Allocator, tree: ast.Tree) !Documen
 
 fn nodeSourceRange(tree: ast.Tree, node: ast.Node.Index) SourceRange {
     const loc_start = offsets.tokenLocation(tree, tree.firstToken(node));
-    const loc_end = offsets.tokenLocation(tree, tree.lastToken(node));
+    const loc_end = offsets.tokenLocation(tree, lastToken(tree, node));
+
     return SourceRange{
         .start = loc_start.start,
         .end = loc_end.end,
@@ -2746,7 +2748,7 @@ fn makeScopeInternal(
         .block_two_semicolon,
         => {
             const first_token = tree.firstToken(node_idx);
-            const last_token = tree.lastToken(node_idx);
+            const last_token = lastToken(tree, node_idx);
 
             // if labeled block
             if (token_tags[first_token] == .identifier) {
@@ -2827,7 +2829,7 @@ fn makeScopeInternal(
                 scope.* = .{
                     .range = .{
                         .start = offsets.tokenLocation(tree, payload).start,
-                        .end = offsets.tokenLocation(tree, tree.lastToken(if_node.ast.then_expr)).end,
+                        .end = offsets.tokenLocation(tree, lastToken(tree, if_node.ast.then_expr)).end,
                     },
                     .decls = std.StringHashMap(Declaration).init(allocator),
                     .uses = &.{},
@@ -2857,7 +2859,7 @@ fn makeScopeInternal(
                     scope.* = .{
                         .range = .{
                             .start = offsets.tokenLocation(tree, err_token).start,
-                            .end = offsets.tokenLocation(tree, tree.lastToken(if_node.ast.else_expr)).end,
+                            .end = offsets.tokenLocation(tree, lastToken(tree, if_node.ast.else_expr)).end,
                         },
                         .decls = std.StringHashMap(Declaration).init(allocator),
                         .uses = &.{},
@@ -2895,7 +2897,7 @@ fn makeScopeInternal(
                 scope.* = .{
                     .range = .{
                         .start = offsets.tokenLocation(tree, while_node.ast.while_token).start,
-                        .end = offsets.tokenLocation(tree, tree.lastToken(node_idx)).end,
+                        .end = offsets.tokenLocation(tree, lastToken(tree, node_idx)).end,
                     },
                     .decls = std.StringHashMap(Declaration).init(allocator),
                     .uses = &.{},
@@ -2912,7 +2914,7 @@ fn makeScopeInternal(
                 scope.* = .{
                     .range = .{
                         .start = offsets.tokenLocation(tree, payload).start,
-                        .end = offsets.tokenLocation(tree, tree.lastToken(while_node.ast.then_expr)).end,
+                        .end = offsets.tokenLocation(tree, lastToken(tree, while_node.ast.then_expr)).end,
                     },
                     .decls = std.StringHashMap(Declaration).init(allocator),
                     .uses = &.{},
@@ -2958,7 +2960,7 @@ fn makeScopeInternal(
                     scope.* = .{
                         .range = .{
                             .start = offsets.tokenLocation(tree, err_token).start,
-                            .end = offsets.tokenLocation(tree, tree.lastToken(while_node.ast.else_expr)).end,
+                            .end = offsets.tokenLocation(tree, lastToken(tree, while_node.ast.else_expr)).end,
                         },
                         .decls = std.StringHashMap(Declaration).init(allocator),
                         .uses = &.{},
@@ -2992,7 +2994,7 @@ fn makeScopeInternal(
                     scope.* = .{
                         .range = .{
                             .start = offsets.tokenLocation(tree, payload).start,
-                            .end = offsets.tokenLocation(tree, tree.lastToken(switch_case.ast.target_expr)).end,
+                            .end = offsets.tokenLocation(tree, lastToken(tree, switch_case.ast.target_expr)).end,
                         },
                         .decls = std.StringHashMap(Declaration).init(allocator),
                         .uses = &.{},
@@ -3183,7 +3185,7 @@ fn makeScopeInternal(
                 scope.* = .{
                     .range = .{
                         .start = offsets.tokenLocation(tree, payload_token).start,
-                        .end = offsets.tokenLocation(tree, tree.lastToken(expr)).end,
+                        .end = offsets.tokenLocation(tree, lastToken(tree, expr)).end,
                     },
                     .decls = std.StringHashMap(Declaration).init(allocator),
                     .uses = &.{},
