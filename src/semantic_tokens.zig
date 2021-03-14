@@ -3,6 +3,7 @@ const offsets = @import("offsets.zig");
 const DocumentStore = @import("document_store.zig");
 const analysis = @import("analysis.zig");
 const ast = std.zig.ast;
+const lastToken = offsets.lastToken;
 
 pub const TokenType = enum(u32) {
     type,
@@ -219,7 +220,7 @@ const GapHighlighter = struct {
         while (i < tree.firstToken(node)) : (i += 1) {
             try self.handleTok(i);
         }
-        self.current_idx = tree.lastToken(node) + 1;
+        self.current_idx = lastToken(tree, node) + 1;
     }
 
     fn end(self: *GapHighlighter, last: ast.TokenIndex) !void {
@@ -284,9 +285,9 @@ fn writeContainerField(
 
     if (container_field.ast.value_expr != 0) block: {
         const eq_tok: ast.TokenIndex = if (container_field.ast.type_expr != 0)
-            builder.handle.tree.lastToken(container_field.ast.type_expr) + 1
+            lastToken(builder.handle.tree, container_field.ast.type_expr) + 1
         else if (container_field.ast.align_expr != 0)
-            builder.handle.tree.lastToken(container_field.ast.align_expr) + 1
+            lastToken(builder.handle.tree, container_field.ast.align_expr) + 1
         else
             break :block; // Check this, I believe it is correct.
 
@@ -374,7 +375,7 @@ fn writeNodeTokens(
                 }
             }
 
-            try gap_highlighter.end(tree.lastToken(node));
+            try gap_highlighter.end(lastToken(tree, node));
         },
         .global_var_decl,
         .local_var_decl,
@@ -458,7 +459,7 @@ fn writeNodeTokens(
                     try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, child });
                 }
             }
-            try gap_highlighter.end(tree.lastToken(node));
+            try gap_highlighter.end(lastToken(tree, node));
         },
         .error_value => {
             // if (error_tag.doc_comments) |docs| try writeDocComments(builder, handle.tree, docs);
@@ -566,12 +567,12 @@ fn writeNodeTokens(
             const extra = tree.extraData(datas[node].rhs, ast.Node.SubRange);
             const cases = tree.extra_data[extra.start..extra.end];
 
-            var gap_highlighter = GapHighlighter.init(builder, tree.lastToken(datas[node].lhs) + 1);
+            var gap_highlighter = GapHighlighter.init(builder, lastToken(tree, datas[node].lhs) + 1);
             for (cases) |case_node| {
                 try gap_highlighter.next(case_node);
                 try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, case_node });
             }
-            try gap_highlighter.end(tree.lastToken(node));
+            try gap_highlighter.end(lastToken(tree, node));
         },
         .switch_case_one,
         .switch_case,
@@ -727,7 +728,7 @@ fn writeNodeTokens(
                 try writeToken(builder, init_token - 1, .operator); // '='
                 try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, field_init });
             }
-            try gap_highlighter.end(tree.lastToken(node));
+            try gap_highlighter.end(lastToken(tree, node));
         },
         .call,
         .call_comma,
@@ -749,8 +750,8 @@ fn writeNodeTokens(
             try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, call.ast.fn_expr });
 
             if (builder.current_token) |curr_tok| {
-                if (curr_tok != tree.lastToken(call.ast.fn_expr) and token_tags[tree.lastToken(call.ast.fn_expr)] == .identifier) {
-                    try writeToken(builder, tree.lastToken(call.ast.fn_expr), .function);
+                if (curr_tok != lastToken(tree, call.ast.fn_expr) and token_tags[lastToken(tree, call.ast.fn_expr)] == .identifier) {
+                    try writeToken(builder, lastToken(tree, call.ast.fn_expr), .function);
                 }
             }
             for (call.ast.params) |param| try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, param });
@@ -768,7 +769,7 @@ fn writeNodeTokens(
 
             try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, slice.ast.sliced });
             try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, slice.ast.start });
-            try writeToken(builder, tree.lastToken(slice.ast.start) + 1, .operator);
+            try writeToken(builder, lastToken(tree, slice.ast.start) + 1, .operator);
 
             if (slice.ast.end != 0)
                 try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, slice.ast.end });
