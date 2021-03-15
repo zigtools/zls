@@ -415,7 +415,7 @@ fn nodeToCompletion(
                     } else false;
 
                     break :blk try analysis.getFunctionSnippet(&arena.allocator, tree, func, skip_self_param);
-                } else null;
+                } else "";
 
                 const is_type_function = analysis.isTypeFunction(handle.tree, func);
 
