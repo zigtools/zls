@@ -28,8 +28,10 @@ pub fn config(step: *std.build.Step) anyerror!void {
 
         var it = std.mem.tokenize(env_path, &[_]u8{std.fs.path.delimiter});
         while (it.next()) |path| {
+            const resolved_path = try std.fs.path.resolve(allocator, &[_][]const u8{path});
+            defer allocator.free(resolved_path);
             const full_path = try std.fs.path.join(allocator, &[_][]const u8{
-                path,
+                resolved_path,
                 zig_exe,
             });
             defer allocator.free(full_path);
