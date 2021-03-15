@@ -138,7 +138,7 @@ test "Requesting a completion with no trailing whitespace" {
     try sendRequest(completion_req, process);
     try sendRequest(shutdown_message, process);
     try consumeOutputAndWait(process, .{
-        \\{"jsonrpc":"2.0","id":2,"result":{"isIncomplete":false,"items":[{"label":"std","kind":21,"textEdit":null,"filterText":null,"insertText":null,"insertTextFormat":1,"detail":"const std = @import(\"std\")","documentation":null}]}}
+        \\{"jsonrpc":"2.0","id":2,"result":{"isIncomplete":false,"items":[{"label":"std","kind":21,"textEdit":null,"filterText":"","insertText":"","insertTextFormat":1,"detail":"const std = @import(\"std\")","documentation":null}]}}
     });
 }
 
