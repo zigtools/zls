@@ -14,6 +14,7 @@ Zig Language Server, or `zls`, is a language server for Zig. The Zig wiki states
   - [Kate](#kate)
   - [Neovim/Vim8](#neovimvim8)
   - [Emacs](#emacs)
+  - [Doom Emacs](#doom-emacs)
 - [Related Projects](#related-projects)
 - [License](#license)
 
@@ -222,6 +223,25 @@ let g:LanguageClient_serverCommands = {
     :new-connection (lsp-stdio-connection "<path to zls>")
     :major-modes '(zig-mode)
     :server-id 'zls))
+```
+
+### Doom Emacs
+
+- Enable the `lsp` module
+- Install the [zig-mode](https://github.com/zigland/zig-mode) package (add `(package! zig-mode)` to your `packages.el` file
+
+```elisp
+(require 'lsp)
+(use-package! zig-mode
+  :hook ((zig-mode . lsp))
+  :custom (zig-format-on-save nil)
+  :init
+  (add-to-list 'lsp-language-id-configuration '(zig-mode . "zig"))
+  (lsp-register-client
+   (make-lsp-client
+    :new-connection (lsp-stdio-connection "zls")
+    :major-modes '(zig-mode)
+    :server-id 'zls)))
 ```
 
 ## Related Projects
