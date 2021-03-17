@@ -228,7 +228,7 @@ let g:LanguageClient_serverCommands = {
 ### Doom Emacs
 
 - Enable the `lsp` module
-- Install the [zig-mode](https://github.com/zigland/zig-mode) package (add `(package! zig-mode)` to your `packages.el` file
+- Install the [zig-mode](https://github.com/ziglang/zig-mode) package (add `(package! zig-mode)` to your `packages.el` file
 
 ```elisp
 (require 'lsp)
