@@ -325,7 +325,7 @@ fn resolveVarDeclAliasInternal(
                 else => return null,
             };
 
-            if (!isContainer(node_tags[resolved_node])) return null;
+            if (resolved_node >= node_tags.len or !isContainer(node_tags[resolved_node])) return null;
             break :block NodeWithHandle{ .node = resolved_node, .handle = resolved.handle };
         } else return null;
 
