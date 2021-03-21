@@ -216,13 +216,12 @@ let g:LanguageClient_serverCommands = {
 - [zig mode](https://github.com/ziglang/zig-mode) is also useful
 
 ```elisp
-(require 'lsp)
-(add-to-list 'lsp-language-id-configuration '(zig-mode . "zig"))
-(lsp-register-client
-  (make-lsp-client
-    :new-connection (lsp-stdio-connection "<path to zls>")
-    :major-modes '(zig-mode)
-    :server-id 'zls))
+;; Setup lsp-mode as desired.
+;; See https://emacs-lsp.github.io/lsp-mode/page/installation/ for more information.
+(require 'lsp-mode)
+
+;; Either place zls in your PATH or add the following:
+(setq lsp-zig-zls-executable "<path to zls>")
 ```
 
 ### Doom Emacs
@@ -231,17 +230,17 @@ let g:LanguageClient_serverCommands = {
 - Install the [zig-mode](https://github.com/ziglang/zig-mode) package (add `(package! zig-mode)` to your `packages.el` file
 
 ```elisp
-(require 'lsp)
 (use-package! zig-mode
-  :hook ((zig-mode . lsp))
+  :hook ((zig-mode . lsp-deferred))
   :custom (zig-format-on-save nil)
-  :init
-  (add-to-list 'lsp-language-id-configuration '(zig-mode . "zig"))
-  (lsp-register-client
-   (make-lsp-client
-    :new-connection (lsp-stdio-connection "<path to zls>")
-    :major-modes '(zig-mode)
-    :server-id 'zls)))
+  :config
+  (after! lsp-mode
+    (add-to-list 'lsp-language-id-configuration '(zig-mode . "zig"))
+    (lsp-register-client
+      (make-lsp-client
+        :new-connection (lsp-stdio-connection "<path to zls>")
+        :major-modes '(zig-mode)
+        :server-id 'zls))))
 ```
 
 ## Related Projects

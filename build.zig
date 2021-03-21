@@ -146,31 +146,26 @@ pub fn config(step: *std.build.Step) anyerror!void {
                 \\Zig mode (https://github.com/ziglang/zig-mode) is also useful!
                 \\Then, add the following to your emacs config:
                 \\
-                \\(require 'lsp)
-                \\(add-to-list 'lsp-language-id-configuration '(zig-mode . "zig"))
-                \\(lsp-register-client
-                \\  (make-lsp-client
-                \\    :new-connection (lsp-stdio-connection "<path to zls>")
-                \\    :major-modes '(zig-mode)
-                \\    :server-id 'zls))
+                \\(require 'lsp-mode)
+                \\(setq lsp-zig-zls-executable "<path to zls>")
             , .{});
         },
         .Doom => {
             std.debug.warn(
                 \\To use ZLS in Doom Emacs, enable the lsp module
-                \\And install the zig mode (https://github.com/ziglang/zig-mode) package by adding `(package! zig-mode)` to your packages.el file.
+                \\And install the `zig-mode` (https://github.com/ziglang/zig-mode) package by adding `(package! zig-mode)` to your packages.el file.
                 \\
-                \\(require 'lsp)
                 \\(use-package! zig-mode
-                \\  :hook ((zig-mode . lsp))
+                \\  :hook ((zig-mode . lsp-deferred))
                 \\  :custom (zig-format-on-save nil)
-                \\  :init
-                \\  (add-to-list 'lsp-language-id-configuration '(zig-mode . "zig"))
-                \\  (lsp-register-client
-                \\   (make-lsp-client
-                \\    :new-connection (lsp-stdio-connection "<path to zls>")
-                \\    :major-modes '(zig-mode)
-                \\    :server-id 'zls)))
+                \\  :config
+                \\  (after! lsp-mode
+                \\    (add-to-list 'lsp-language-id-configuration '(zig-mode . "zig"))
+                \\    (lsp-register-client
+                \\      (make-lsp-client
+                \\        :new-connection (lsp-stdio-connection "<path to zls>")
+                \\        :major-modes '(zig-mode)
+                \\        :server-id 'zls))))
             , .{});
         },
         .Other => {
