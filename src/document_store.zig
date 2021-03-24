@@ -381,27 +381,27 @@ fn refreshDocument(self: *DocumentStore, handle: *Handle, zig_lib_path: ?[]const
     const std_uri = try stdUriFromLibPath(&arena.allocator, zig_lib_path);
     for (import_strs.items) |str| {
         const uri = (try self.uriFromImportStr(&arena.allocator, handle.*, str)) orelse continue;
+        
+        exists_loop: for (still_exist) |*does_still_exist, i| {
+            if (does_still_exist.*) continue;
 
-        var idx: usize = 0;
-        exists_loop: while (idx < still_exist.len) : (idx += 1) {
-            if (still_exist[idx]) continue;
-
-            if (std.mem.eql(u8, handle.import_uris.items[idx], uri)) {
-                still_exist[idx] = true;
+            if (std.mem.eql(u8, handle.import_uris.items[i], uri)) {
+                does_still_exist.* = true;
                 break :exists_loop;
             }
         }
     }
 
     // Go through still_exist, remove the items that are false and decrement their handle counts.
-    var offset: usize = 0;
     var idx: usize = 0;
-    while (idx < still_exist.len) : (idx += 1) {
-        if (still_exist[idx]) continue;
+    for (still_exist) |does_still_exist| {
+        if (does_still_exist) {
+            idx += 1;
+            continue;
+        }
 
-        log.debug("Import removed: {s}", .{handle.import_uris.items[idx - offset]});
-        const uri = handle.import_uris.orderedRemove(idx - offset);
-        offset += 1;
+        log.debug("Import removed: {s}", .{handle.import_uris.items[idx]});
+        const uri = handle.import_uris.orderedRemove(idx);
 
         self.decrementCount(uri);
         self.allocator.free(uri);
