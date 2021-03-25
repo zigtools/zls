@@ -1027,10 +1027,10 @@ fn completeBuiltin(arena: *std.heap.ArenaAllocator, id: types.RequestId, config:
             };
 
             if (config.enable_snippets) {
-                builtin_completions.?[idx].insertText = builtin.snippet[1..];
+                builtin_completions.?[idx].insertText = builtin.snippet;
                 builtin_completions.?[idx].insertTextFormat = .Snippet;
             } else {
-                builtin_completions.?[idx].insertText = builtin.name[1..];
+                builtin_completions.?[idx].insertText = builtin.name;
             }
         }
     }
