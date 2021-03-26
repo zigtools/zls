@@ -359,7 +359,7 @@ fn nodeToCompletion(
     else
         null;
 
-    if (analysis.isContainer(node_tags[node])) {
+    if (analysis.isContainer(handle.tree, node)) {
         const context = DeclToCompletionContext{
             .completions = list,
             .config = &config,

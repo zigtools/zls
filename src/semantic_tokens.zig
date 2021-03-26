@@ -75,6 +75,36 @@ const Builder = struct {
         };
     }
 
+    fn highlightComment(
+        self: *Builder,
+        prev_end: usize,
+        comment_start: usize,
+        comment_end: usize,
+        token_modifiers: TokenModifiers,
+    ) !void {
+        const comment_delta = offsets.tokenRelativeLocation(
+            self.handle.tree,
+            prev_end,
+            comment_start,
+            self.encoding,
+        ) catch return;
+
+        const comment_length = offsets.lineSectionLength(
+            self.handle.tree,
+            comment_start,
+            comment_end,
+            self.encoding,
+        ) catch return;
+
+        try self.arr.appendSlice(&.{
+            @truncate(u32, comment_delta.line),
+            @truncate(u32, comment_delta.column),
+            @truncate(u32, comment_length),
+            @enumToInt(TokenType.comment),
+            token_modifiers.toInt(),
+        });
+    }
+
     fn add(self: *Builder, token: ast.TokenIndex, token_type: TokenType, token_modifiers: TokenModifiers) !void {
         const starts = self.handle.tree.tokens.items(.start);
         var start_idx = if (self.current_token) |current_token|
@@ -85,24 +115,67 @@ const Builder = struct {
         if (start_idx > starts[token])
             return;
 
-        const delta_loc = while (self.findCommentBetween(start_idx, starts[token])) |comment| {
-            const old_loc = self.handle.tree.tokenLocation(0, self.current_token orelse 0);
-            const comment_delta = offsets.tokenRelativeLocation(self.handle.tree, start_idx, comment.start, self.encoding) catch return;
+        var comments_end: usize = start_idx;
+        var comments_start: usize = start_idx;
+        // Highlight comments in the gap
+        {
+            const source = self.handle.tree.source;
+            var state: enum { none, comment, doc_comment, comment_start } = .none;
+            var prev_byte = source[start_idx];
+            var i: usize = start_idx + 1;
+            while (i < starts[token]) : ({
+                prev_byte = source[i];
+                i += 1;
+            }) {
+                if (prev_byte == '/' and source[i] == '/') {
+                    switch (state) {
+                        .none => {
+                            comments_start = i - 1;
+                            state = .comment_start;
+                        },
+                        .comment_start => state = .doc_comment,
+                        else => {},
+                    }
+                    continue;
+                } else if (prev_byte == '/' and source[i] == '!' and state == .comment_start) {
+                    state = .doc_comment;
+                    continue;
+                }
 
-            try self.arr.appendSlice(&[_]u32{
-                @truncate(u32, comment_delta.line),
-                @truncate(u32, comment_delta.column),
-                comment.length,
-                @enumToInt(TokenType.comment),
-                0,
-            });
+                if (source[i] == '\n' and state != .none) {
+                    try self.highlightComment(comments_end, comments_start, i, switch (state) {
+                        .comment, .comment_start => .{},
+                        .doc_comment => .{ .documentation = true },
+                        else => unreachable,
+                    });
+                    comments_end = i;
+                    state = .none;
+                } else if (state == .comment_start) {
+                    state = .comment;
+                }
+            }
+            if (state != .none) {
+                try self.highlightComment(comments_end, comments_start, i, switch (state) {
+                    .comment, .comment_start => .{},
+                    .doc_comment => .{ .documentation = true },
+                    else => unreachable,
+                });
+                // @@@
+                // comments_end = i;
+            }
+        }
 
-            start_idx = comment.start;
-        } else offsets.tokenRelativeLocation(self.handle.tree, start_idx, starts[token], self.encoding) catch return;
+        std.debug.print("DELTA:\n```\n{s}\n```\n(LEN: {})\n", .{self.handle.tree.source[comments_end..starts[token]], starts[token] - comments_end});
+        const delta = offsets.tokenRelativeLocation(
+            self.handle.tree,
+            comments_start,
+            starts[token],
+            self.encoding,
+        ) catch return;
 
-        try self.arr.appendSlice(&[_]u32{
-            @truncate(u32, delta_loc.line),
-            @truncate(u32, delta_loc.column),
+        try self.arr.appendSlice(&.{
+            @truncate(u32, delta.line),
+            @truncate(u32, delta.column),
             @truncate(u32, offsets.tokenLength(self.handle.tree, token, self.encoding)),
             @enumToInt(token_type),
             token_modifiers.toInt(),
@@ -112,15 +185,6 @@ const Builder = struct {
 
     fn toOwnedSlice(self: *Builder) []u32 {
         return self.arr.toOwnedSlice();
-    }
-
-    /// Based on a given start and end index, returns a `Comment` between the positions
-    /// Returns `null` if none was fone
-    fn findCommentBetween(self: Builder, from: u32, to: u32) ?Comment {
-        return for (self.comments.items) |comment| {
-            if (comment.start > from and comment.start < to)
-                break comment;
-        } else null;
     }
 };
 
@@ -710,7 +774,7 @@ fn writeNodeTokens(
                     .node = struct_init.ast.type_expr,
                     .handle = handle,
                 })) |struct_type| switch (struct_type.type.data) {
-                    .other => |type_node| if (analysis.isContainer(struct_type.handle.tree.nodes.items(.tag)[type_node]))
+                    .other => |type_node| if (analysis.isContainer(struct_type.handle.tree, type_node))
                         fieldTokenType(type_node, struct_type.handle)
                     else
                         null,
@@ -976,7 +1040,7 @@ fn writeNodeTokens(
                 switch (decl_type.decl.*) {
                     .ast_node => |decl_node| {
                         if (decl_type.handle.tree.nodes.items(.tag)[decl_node].isContainerField()) {
-                            const tok_type: ?TokenType = if (analysis.isContainer(lhs_type.handle.tree.nodes.items(.tag)[left_type_node]))
+                            const tok_type: ?TokenType = if (analysis.isContainer(lhs_type.handle.tree, left_type_node))
                                 fieldTokenType(decl_node, lhs_type.handle)
                             else if (left_type_node == 0)
                                 TokenType.field
@@ -1083,14 +1147,11 @@ fn writeNodeTokens(
 pub fn writeAllSemanticTokens(arena: *std.heap.ArenaAllocator, store: *DocumentStore, handle: *DocumentStore.Handle, encoding: offsets.Encoding) ![]u32 {
     var builder = Builder.init(arena.child_allocator, handle, encoding);
 
-    // as line comments are not nodes, we parse the text then generate the tokens for them
-    try findComments(&builder, handle.tree.source, encoding);
-
     // reverse the ast from the root declarations
     var gap_highlighter = GapHighlighter.init(&builder, 0);
 
     var buf: [2]ast.Node.Index = undefined;
-    for (analysis.declMembers(handle.tree, .root, 0, &buf)) |child| {
+    for (analysis.declMembers(handle.tree, 0, &buf)) |child| {
         try gap_highlighter.next(child);
         try writeNodeTokens(&builder, arena, store, child);
     }
@@ -1098,55 +1159,4 @@ pub fn writeAllSemanticTokens(arena: *std.heap.ArenaAllocator, store: *DocumentS
     try gap_highlighter.end(@truncate(u32, handle.tree.tokens.len) - 1);
 
     return builder.toOwnedSlice();
-}
-
-/// As the AST does not contain nodes for comments
-/// this will parse through the entire file to search for comments
-/// and generate semantic tokens for them
-fn findComments(builder: *Builder, source: []const u8, encoding: offsets.Encoding) !void {
-    var state: enum { none, comment, doc_comment } = .none;
-
-    var prev: u8 = 0;
-    var start: usize = 0;
-    for (source) |c, i| {
-        if (state == .comment and c == '/') {
-            state = .none;
-            continue;
-        }
-
-        if (state == .none and c == '/' and prev == '/') {
-            state = .comment;
-            start = i - 1;
-        }
-
-        if (c == '\n') {
-            if (state == .comment) {
-                state = .none;
-
-                const len = if (encoding == .utf8)
-                    i - start
-                else blk: {
-                    var index: usize = start;
-                    var utf16_len: usize = 0;
-                    while (index < i) {
-                        const n = std.unicode.utf8ByteSequenceLength(source[index]) catch unreachable;
-                        const codepoint = std.unicode.utf8Decode(source[index .. index + n]) catch unreachable;
-                        if (codepoint < 0x10000) {
-                            utf16_len += 1;
-                        } else {
-                            utf16_len += 2;
-                        }
-                        index += n;
-                    }
-                    break :blk utf16_len;
-                };
-
-                try builder.comments.append(.{
-                    .length = @truncate(u32, len),
-                    .start = @truncate(u32, start),
-                });
-            }
-        }
-        prev = c;
-    }
 }

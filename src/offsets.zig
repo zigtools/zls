@@ -54,6 +54,30 @@ pub fn documentPosition(doc: types.TextDocument, position: types.Position, encod
     }
 }
 
+pub fn lineSectionLength(tree: ast.Tree, start_index: usize, end_index: usize, encoding: Encoding) !usize {
+    const source = tree.source[start_index..];
+    std.debug.assert(end_index >= start_index and source.len >= end_index - start_index);
+    if (encoding == .utf8) {
+        return end_index - start_index;
+    }
+
+    var result: usize = 0;
+    var i: usize = 0;
+    while (i + start_index < end_index) {
+        std.debug.assert(source[i] != '\n');
+
+        const n = try std.unicode.utf8ByteSequenceLength(source[i]);
+        if (i + n >= source.len)
+            return error.CodepointTooLong;
+
+        const codepoint = try std.unicode.utf8Decode(source[i .. i + n]);
+
+        result += 1 + @as(usize, @boolToInt(codepoint >= 0x10000));
+        i += n;
+    }
+    return result;
+}
+
 pub const TokenLocation = struct {
     line: usize,
     column: usize,
@@ -71,15 +95,14 @@ pub const TokenLocation = struct {
     }
 };
 
-pub fn tokenRelativeLocation(tree: ast.Tree, start_index: usize, next_token_index: usize, encoding: Encoding) !TokenLocation {
-    const start = next_token_index;
-
+pub fn tokenRelativeLocation(tree: ast.Tree, start_index: usize, token_start: usize, encoding: Encoding) !TokenLocation {
+    std.debug.assert(token_start >= start_index);
     var loc = TokenLocation{
         .line = 0,
         .column = 0,
         .offset = 0,
     };
-    const token_start = start;
+
     const source = tree.source[start_index..];
     var i: usize = 0;
     while (i + start_index < token_start) {
@@ -91,12 +114,11 @@ pub fn tokenRelativeLocation(tree: ast.Tree, start_index: usize, next_token_inde
         } else {
             if (encoding == .utf16) {
                 const n = try std.unicode.utf8ByteSequenceLength(c);
+                if (i + n >= source.len)
+                    return error.CodepointTooLong;
+
                 const codepoint = try std.unicode.utf8Decode(source[i .. i + n]);
-                if (codepoint < 0x10000) {
-                    loc.column += 1;
-                } else {
-                    loc.column += 2;
-                }
+                loc.column += 1 + @as(usize, @boolToInt(codepoint >= 0x10000));
                 i += n;
             } else {
                 loc.column += 1;

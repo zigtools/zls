@@ -228,7 +228,6 @@ pub fn getDeclNameToken(tree: ast.Tree, node: ast.Node.Index) ?ast.TokenIndex {
         .global_var_decl => tree.globalVarDecl(node).ast.mut_token + 1,
         .simple_var_decl => tree.simpleVarDecl(node).ast.mut_token + 1,
         .aligned_var_decl => tree.alignedVarDecl(node).ast.mut_token + 1,
-
         // function declaration names
         .fn_proto,
         .fn_proto_multi,
@@ -324,8 +323,8 @@ fn resolveVarDeclAliasInternal(
                 .other => |n| n,
                 else => return null,
             };
-
-            if (resolved_node >= node_tags.len or !isContainer(node_tags[resolved_node])) return null;
+            const resolved_tree_tags = resolved.handle.tree.nodes.items(.tag);
+            if (!isContainer(resolved.handle.tree, resolved_node)) return null;
             break :block NodeWithHandle{ .node = resolved_node, .handle = resolved.handle };
         } else return null;
 
@@ -1117,9 +1116,9 @@ pub const TypeWithHandle = struct {
         const tree = self.handle.tree;
         const node = self.type.data.other;
         const tags = tree.nodes.items(.tag);
-        if (isContainer(tags[node])) {
+        if (isContainer(tree, node)) {
             var buf: [2]ast.Node.Index = undefined;
-            for (declMembers(tree, tags[node], node, &buf)) |child| {
+            for (declMembers(tree, node, &buf)) |child| {
                 if (tags[child].isContainerField()) return false;
             }
         }
@@ -1478,8 +1477,8 @@ pub fn fnProto(tree: ast.Tree, node: ast.Node.Index, buf: *[1]ast.Node.Index) ?a
 pub fn getImportStr(tree: ast.Tree, node: ast.Node.Index, source_index: usize) ?[]const u8 {
     const node_tags = tree.nodes.items(.tag);
     var buf: [2]ast.Node.Index = undefined;
-    if (isContainer(node_tags[node])) {
-        const decls = declMembers(tree, node_tags[node], node, &buf);
+    if (isContainer(tree, node)) {
+        const decls = declMembers(tree, node, &buf);
         for (decls) |decl_idx| {
             if (getImportStr(tree, decl_idx, source_index)) |name| {
                 return name;
@@ -1806,7 +1805,7 @@ fn addOutlineNodes(allocator: *std.mem.Allocator, tree: ast.Tree, child: ast.Nod
         .tagged_union_two_trailing,
         => {
             var buf: [2]ast.Node.Index = undefined;
-            for (declMembers(tree, tree.nodes.items(.tag)[child], child, &buf)) |member|
+            for (declMembers(tree, child, &buf)) |member|
                 try addOutlineNodes(allocator, tree, member, context);
             return;
         },
@@ -1894,9 +1893,9 @@ fn getDocumentSymbolsInternal(allocator: *std.mem.Allocator, tree: ast.Tree, nod
                 .encoding = context.encoding,
             };
 
-            if (isContainer(tags[node])) {
+            if (isContainer(tree, node)) {
                 var buf: [2]ast.Node.Index = undefined;
-                for (declMembers(tree, tags[node], node, &buf)) |child|
+                for (declMembers(tree, node, &buf)) |child|
                     try addOutlineNodes(allocator, tree, child, &child_context);
             }
 
@@ -2091,7 +2090,7 @@ fn findContainerScope(container_handle: NodeWithHandle) ?*Scope {
     const container = container_handle.node;
     const handle = container_handle.handle;
 
-    if (!isContainer(handle.tree.nodes.items(.tag)[container])) return null;
+    if (!isContainer(handle.tree, container)) return null;
 
     // Find the container scope.
     return for (handle.document_scope.scopes) |*scope| {
@@ -2534,8 +2533,8 @@ fn nodeSourceRange(tree: ast.Tree, node: ast.Node.Index) SourceRange {
     };
 }
 
-pub fn isContainer(tag: ast.Node.Tag) bool {
-    return switch (tag) {
+pub fn isContainer(tree: ast.Tree, node: ast.Node.Index) bool {
+    return switch (tree.nodes.items(.tag)[node]) {
         .container_decl,
         .container_decl_trailing,
         .container_decl_arg,
@@ -2557,9 +2556,9 @@ pub fn isContainer(tag: ast.Node.Tag) bool {
 
 /// Returns the member indices of a given declaration container.
 /// Asserts given `tag` is a container node
-pub fn declMembers(tree: ast.Tree, tag: ast.Node.Tag, node_idx: ast.Node.Index, buffer: *[2]ast.Node.Index) []const ast.Node.Index {
-    std.debug.assert(isContainer(tag));
-    return switch (tag) {
+pub fn declMembers(tree: ast.Tree, node_idx: ast.Node.Index, buffer: *[2]ast.Node.Index) []const ast.Node.Index {
+    std.debug.assert(isContainer(tree, node_idx));
+    return switch (tree.nodes.items(.tag)[node_idx]) {
         .container_decl, .container_decl_trailing => tree.containerDecl(node_idx).ast.members,
         .container_decl_arg, .container_decl_arg_trailing => tree.containerDeclArg(node_idx).ast.members,
         .container_decl_two, .container_decl_two_trailing => tree.containerDeclTwo(buffer, node_idx).ast.members,
@@ -2598,11 +2597,11 @@ fn makeScopeInternal(
     const token_tags = tree.tokens.items(.tag);
     const data = tree.nodes.items(.data);
     const main_tokens = tree.nodes.items(.main_token);
-    const node = tags[node_idx];
+    const node_tag = tags[node_idx];
 
-    if (isContainer(node)) {
+    if (isContainer(tree, node_idx)) {
         var buf: [2]ast.Node.Index = undefined;
-        const ast_decls = declMembers(tree, node, node_idx, &buf);
+        const ast_decls = declMembers(tree,node_idx, &buf);
 
         (try scopes.addOne(allocator)).* = .{
             .range = nodeSourceRange(tree, node_idx),
@@ -2635,7 +2634,7 @@ fn makeScopeInternal(
                 continue;
             }
 
-            if (node == .error_set_decl) {
+            if (node_tag == .error_set_decl) {
                 (try error_completions.addOne(allocator)).* = .{
                     .label = name,
                     .kind = .Constant,
@@ -2655,11 +2654,11 @@ fn makeScopeInternal(
 
             if (container_field) |field| {
                 const empty_field = field.ast.type_expr == 0 and field.ast.value_expr == 0;
-                if (empty_field and node == .root) {
+                if (empty_field and node_tag == .root) {
                     continue;
                 }
 
-                const container_decl: ?ast.full.ContainerDecl = switch (node) {
+                const container_decl: ?ast.full.ContainerDecl = switch (node_tag) {
                     .container_decl, .container_decl_trailing => tree.containerDecl(node_idx),
                     .container_decl_arg, .container_decl_arg_trailing => tree.containerDeclArg(node_idx),
                     .container_decl_two, .container_decl_two_trailing => blk: {
@@ -2704,7 +2703,7 @@ fn makeScopeInternal(
         return;
     }
 
-    switch (node) {
+    switch (node_tag) {
         .fn_proto,
         .fn_proto_one,
         .fn_proto_simple,
@@ -2782,7 +2781,7 @@ fn makeScopeInternal(
                 uses.deinit();
             }
 
-            const statements: []const ast.Node.Index = switch (node) {
+            const statements: []const ast.Node.Index = switch (node_tag) {
                 .block, .block_semicolon => tree.extra_data[data[node_idx].lhs..data[node_idx].rhs],
                 .block_two, .block_two_semicolon => blk: {
                     const statements = &[_]ast.Node.Index{ data[node_idx].lhs, data[node_idx].rhs };
@@ -2819,7 +2818,7 @@ fn makeScopeInternal(
         .@"if",
         .if_simple,
         => {
-            const if_node: ast.full.If = if (node == .@"if")
+            const if_node: ast.full.If = if (node_tag == .@"if")
                 tree.ifFull(node_idx)
             else
                 tree.ifSimple(node_idx);
@@ -2879,8 +2878,8 @@ fn makeScopeInternal(
         .while_cont,
         .@"for",
         .for_simple,
-        => |tag| {
-            const while_node: ast.full.While = switch (node) {
+        => {
+            const while_node: ast.full.While = switch (node_tag) {
                 .@"while" => tree.whileFull(node_idx),
                 .while_simple => tree.whileSimple(node_idx),
                 .while_cont => tree.whileCont(node_idx),
@@ -2889,7 +2888,7 @@ fn makeScopeInternal(
                 else => unreachable,
             };
 
-            const is_for = tag == .@"for" or tag == .for_simple;
+            const is_for = node_tag == .@"for" or node_tag == .for_simple;
 
             if (while_node.label_token) |label| {
                 std.debug.assert(token_tags[label] == .identifier);
@@ -3043,7 +3042,7 @@ fn makeScopeInternal(
         .async_call_one_comma,
         => {
             var buf: [1]ast.Node.Index = undefined;
-            const call: ast.full.Call = switch (node) {
+            const call: ast.full.Call = switch (node_tag) {
                 .async_call,
                 .async_call_comma,
                 .call,
@@ -3071,7 +3070,7 @@ fn makeScopeInternal(
         .struct_init_one_comma,
         => {
             var buf: [2]ast.Node.Index = undefined;
-            const struct_init: ast.full.StructInit = switch (node) {
+            const struct_init: ast.full.StructInit = switch (node_tag) {
                 .struct_init, .struct_init_comma => tree.structInit(node_idx),
                 .struct_init_dot, .struct_init_dot_comma => tree.structInitDot(node_idx),
                 .struct_init_dot_two, .struct_init_dot_two_comma => tree.structInitDotTwo(&buf, node_idx),
@@ -3096,7 +3095,7 @@ fn makeScopeInternal(
         .array_init_one_comma,
         => {
             var buf: [2]ast.Node.Index = undefined;
-            const array_init: ast.full.ArrayInit = switch (node) {
+            const array_init: ast.full.ArrayInit = switch (node_tag) {
                 .array_init, .array_init_comma => tree.arrayInit(node_idx),
                 .array_init_dot, .array_init_dot_comma => tree.arrayInitDot(node_idx),
                 .array_init_dot_two, .array_init_dot_two_comma => tree.arrayInitDotTwo(&buf, node_idx),
@@ -3129,7 +3128,7 @@ fn makeScopeInternal(
         .builtin_call_two_comma,
         => {
             const b_data = data[node_idx];
-            const params = switch (node) {
+            const params = switch (node_tag) {
                 .builtin_call, .builtin_call_comma => tree.extra_data[b_data.lhs..b_data.rhs],
                 .builtin_call_two, .builtin_call_two_comma => if (b_data.lhs == 0)
                     &[_]ast.Node.Index{}
@@ -3161,7 +3160,7 @@ fn makeScopeInternal(
         .slice_open,
         .slice_sentinel,
         => {
-            const slice: ast.full.Slice = switch (node) {
+            const slice: ast.full.Slice = switch (node_tag) {
                 .slice => tree.slice(node_idx),
                 .slice_open => tree.sliceOpen(node_idx),
                 .slice_sentinel => tree.sliceSentinel(node_idx),

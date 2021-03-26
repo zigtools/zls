@@ -119,7 +119,7 @@ fn symbolReferencesInternal(
         .error_set_decl,
         => {
             var buf: [2]ast.Node.Index = undefined;
-            for (analysis.declMembers(tree, node_tags[node], node, &buf)) |member|
+            for (analysis.declMembers(tree, node, &buf)) |member|
                 try symbolReferencesInternal(arena, store, .{ .node = member, .handle = handle }, decl, encoding, context, handler);
         },
         .global_var_decl,
