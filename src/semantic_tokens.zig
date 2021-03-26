@@ -523,7 +523,9 @@ fn writeNodeTokens(
             try gap_highlighter.end(lastToken(tree, node));
         },
         .error_value => {
-            try writeToken(builder, datas[node].lhs - 1, .keyword);
+            if (datas[node].lhs != 0) {
+                try writeToken(builder, datas[node].lhs - 1, .keyword);
+            }
             try writeToken(builder, datas[node].rhs, .errorTag);
         },
         .identifier => {
