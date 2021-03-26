@@ -1026,15 +1026,21 @@ fn completeBuiltin(arena: *std.heap.ArenaAllocator, id: types.RequestId, config:
                 },
             };
 
+            var insert_text: []const u8 = undefined;
             if (config.enable_snippets) {
-                builtin_completions.?[idx].insertText = builtin.snippet[1..];
+                insert_text = builtin.snippet;
                 builtin_completions.?[idx].insertTextFormat = .Snippet;
             } else {
-                builtin_completions.?[idx].insertText = builtin.name[1..];
+                insert_text = builtin.name;
             }
+            builtin_completions.?[idx].insertText = 
+                if (config.include_at_in_builtins)
+                    insert_text
+                else
+                    insert_text[1..];
         }
     }
-
+    
     try send(arena, types.Response{
         .id = id,
         .result = .{
