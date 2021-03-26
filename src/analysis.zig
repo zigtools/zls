@@ -4,7 +4,7 @@ const ast = std.zig.ast;
 const types = @import("types.zig");
 const offsets = @import("offsets.zig");
 const log = std.log.scoped(.analysis);
-const lastToken = offsets.lastToken;
+usingnamespace @import("ast.zig");
 
 /// Get a declaration's doc comment token index
 pub fn getDocCommentTokenIndex(tree: ast.Tree, node: ast.Node.Index) ?ast.TokenIndex {
@@ -2819,7 +2819,7 @@ fn makeScopeInternal(
         .if_simple,
         => {
             const if_node: ast.full.If = if (node_tag == .@"if")
-                tree.ifFull(node_idx)
+                ifFull(tree, node_idx)
             else
                 tree.ifSimple(node_idx);
 

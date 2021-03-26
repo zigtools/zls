@@ -4,6 +4,7 @@ const analysis = @import("analysis.zig");
 const types = @import("types.zig");
 const offsets = @import("offsets.zig");
 const log = std.log.scoped(.references);
+usingnamespace @import("ast.zig");
 
 const ast = std.zig.ast;
 
@@ -250,7 +251,7 @@ fn symbolReferencesInternal(
         .@"if",
         .if_simple,
         => {
-            const if_node: ast.full.If = if (node_tags[node] == .@"if") tree.ifFull(node) else tree.ifSimple(node);
+            const if_node: ast.full.If = if (node_tags[node] == .@"if") ifFull(tree, node) else tree.ifSimple(node);
 
             try symbolReferencesInternal(arena, store, .{ .node = if_node.ast.cond_expr, .handle = handle }, decl, encoding, context, handler);
             try symbolReferencesInternal(arena, store, .{ .node = if_node.ast.then_expr, .handle = handle }, decl, encoding, context, handler);

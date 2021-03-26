@@ -3,7 +3,7 @@ const offsets = @import("offsets.zig");
 const DocumentStore = @import("document_store.zig");
 const analysis = @import("analysis.zig");
 const ast = std.zig.ast;
-const lastToken = offsets.lastToken;
+usingnamespace @import("ast.zig");
 
 pub const TokenType = enum(u32) {
     type,
@@ -700,7 +700,7 @@ fn writeNodeTokens(
         .@"if",
         .if_simple,
         => {
-            const if_node: ast.full.If = if (tag == .@"if") tree.ifFull(node) else tree.ifSimple(node);
+            const if_node: ast.full.If = if (tag == .@"if") ifFull(tree, node) else tree.ifSimple(node);
 
             try writeToken(builder, if_node.ast.if_token, .keyword);
             try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, if_node.ast.cond_expr });
