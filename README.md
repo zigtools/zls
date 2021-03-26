@@ -161,6 +161,24 @@ Install the `zls-vscode` extension from [here](https://github.com/zigtools/zls-v
 }
 ```
 
+#### YouCompleteMe
+- Install YouCompleteMeFrom [here](https://github.com/ycm-core/YouCompleteMe.git).
+- Add these lines to your vimrc:
+
+```vim
+"ensure zig is a recognized filetype
+autocmd BufNewFile,BufRead *.zig set filetype=zig
+
+let g:ycm_language_server = 
+  \ [ 
+  \{
+  \     'name': 'zls',
+  \     'filetypes': [ 'zig' ],
+  \     'cmdline': [ '/path/to/zls_executable' ]
+  \    }
+  \ ]
+```
+
 #### nvim-lspconfig
 
 Requires Nvim 0.5 (HEAD)!
