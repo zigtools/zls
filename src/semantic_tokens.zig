@@ -160,12 +160,9 @@ const Builder = struct {
                     .doc_comment => .{ .documentation = true },
                     else => unreachable,
                 });
-                // @@@
-                // comments_end = i;
             }
         }
 
-        std.debug.print("DELTA:\n```\n{s}\n```\n(LEN: {})\n", .{self.handle.tree.source[comments_end..starts[token]], starts[token] - comments_end});
         const delta = offsets.tokenRelativeLocation(
             self.handle.tree,
             comments_start,
@@ -526,7 +523,7 @@ fn writeNodeTokens(
             try gap_highlighter.end(lastToken(tree, node));
         },
         .error_value => {
-            // if (error_tag.doc_comments) |docs| try writeDocComments(builder, handle.tree, docs);
+            try writeToken(builder, datas[node].lhs - 1, .keyword);
             try writeToken(builder, datas[node].rhs, .errorTag);
         },
         .identifier => {
