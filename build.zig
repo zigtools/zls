@@ -55,11 +55,26 @@ pub fn config(step: *std.build.Step) anyerror!void {
     } else {
         std.debug.print("Found zig executable '{s}'\n", .{zig_exe_path.?});
     }
+
+    const editor = try zinput.askSelectOne("Which code editor do you use?", enum { VSCode, Sublime, Kate, Neovim, Vim8, Emacs, Doom, Other });
     const snippets = try zinput.askBool("Do you want to enable snippets?");
     const style = try zinput.askBool("Do you want to enable style warnings?");
     const semantic_tokens = try zinput.askBool("Do you want to enable semantic highlighting?");
-    const operator_completions = try zinput.askBool("Do you want to enable .* and .? completions");
-
+    const operator_completions = try zinput.askBool("Do you want to enable .* and .? completions?");
+    const include_at_in_builtins = switch (editor) {
+        .Sublime =>
+            true,
+        .VSCode,
+        .Kate,
+        .Neovim,
+        .Vim8,
+        .Emacs,
+        .Doom =>
+            false,
+        else =>
+            try zinput.askBool("Should the @ sign be included in completions of builtin functions?\nChange this later if `@inc` completes to `include` or `@@include`")
+    };
+    
     var dir = try std.fs.cwd().openDir(builder.exe_dir, .{});
     defer dir.close();
 
@@ -76,11 +91,10 @@ pub fn config(step: *std.build.Step) anyerror!void {
         .warn_style = style,
         .enable_semantic_tokens = semantic_tokens,
         .operator_completions = operator_completions,
+        .include_at_in_builtins = include_at_in_builtins,
     }, std.json.StringifyOptions{}, out);
 
     std.debug.warn("Successfully saved configuration options!\n", .{});
-
-    const editor = try zinput.askSelectOne("Which code editor do you use?", enum { VSCode, Sublime, Kate, Neovim, Vim8, Emacs, Doom, Other });
     std.debug.warn("\n", .{});
 
     switch (editor) {
