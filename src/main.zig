@@ -138,6 +138,16 @@ fn send(arena: *std.heap.ArenaAllocator, reqOrRes: anytype) !void {
     try stdout.flush();
 }
 
+fn truncateCompletions(list: []types.CompletionItem, max_detail_length: usize) void {
+    for (list) |*item| {
+        if (item.detail) |det| {
+            if (det.len > max_detail_length) {
+                item.detail = det[0..max_detail_length];
+            }
+        }
+    }
+}
+
 fn respondGeneric(id: types.RequestId, response: []const u8) !void {
     const id_len = switch (id) {
         .Integer => |id_val| blk: {
@@ -998,6 +1008,7 @@ fn completeLabel(arena: *std.heap.ArenaAllocator, id: types.RequestId, pos_index
         .orig_handle = handle,
     };
     try analysis.iterateLabels(handle, pos_index, declToCompletion, context);
+    truncateCompletions(completions.items, config.max_detail_length);
 
     try send(arena, types.Response{
         .id = id,
@@ -1039,6 +1050,7 @@ fn completeBuiltin(arena: *std.heap.ArenaAllocator, id: types.RequestId, config:
                 else
                     insert_text[1..];
         }
+        truncateCompletions(builtin_completions.?, config.max_detail_length);
     }
     
     try send(arena, types.Response{
@@ -1062,6 +1074,7 @@ fn completeGlobal(arena: *std.heap.ArenaAllocator, id: types.RequestId, pos_inde
         .orig_handle = handle,
     };
     try analysis.iterateSymbolsGlobal(&document_store, arena, handle, pos_index, declToCompletion, context);
+    truncateCompletions(completions.items, config.max_detail_length);
 
     try send(arena, types.Response{
         .id = id,
@@ -1087,6 +1100,7 @@ fn completeFieldAccess(
     if (try analysis.getFieldAccessType(&document_store, arena, handle, position.absolute_index, &tokenizer)) |result| {
         try typeToCompletion(arena, &completions, result, handle, config);
     }
+    truncateCompletions(completions.items, config.max_detail_length);
 
     try send(arena, types.Response{
         .id = id,
@@ -1094,6 +1108,46 @@ fn completeFieldAccess(
             .CompletionList = .{
                 .isIncomplete = false,
                 .items = completions.items,
+            },
+        },
+    });
+}
+
+fn completeError(
+    arena: *std.heap.ArenaAllocator,
+    id: types.RequestId, 
+    handle: *DocumentStore.Handle,
+    config: Config
+) !void {
+    const completions = try document_store.errorCompletionItems(arena, handle);
+    truncateCompletions(completions, config.max_detail_length);
+
+    try send(arena, types.Response{
+        .id = id,
+        .result = .{
+            .CompletionList = .{
+                .isIncomplete = false,
+                .items = completions,
+            },
+        },
+    });
+}
+
+fn completeDot(
+    arena: *std.heap.ArenaAllocator,
+    id: types.RequestId, 
+    handle: *DocumentStore.Handle,
+    config: Config
+) !void {
+    var completions = try document_store.enumCompletionItems(arena, handle);
+    truncateCompletions(completions, config.max_detail_length);
+    
+    try send(arena, types.Response{
+        .id = id,
+        .result = .{
+            .CompletionList = .{
+                .isIncomplete = false,
+                .items = completions,
             },
         },
     });
@@ -1117,6 +1171,9 @@ fn loadConfig(folder_path: []const u8) ?Config {
     };
     defer allocator.free(file_buf);
 
+    // TODO: Uh oh. Profile the actual build time impact
+    // of adding config options and consider alternatives (TOML?)
+    @setEvalBranchQuota(2000);
     // TODO: Better errors? Doesn't seem like std.json can provide us positions or context.
     var config = std.json.parse(Config, &std.json.TokenStream.init(file_buf), std.json.ParseOptions{ .allocator = allocator }) catch |err| {
         logger.warn("Error while parsing configuration file: {}", .{err});
@@ -1304,28 +1361,13 @@ fn completionHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: 
         const doc_position = try offsets.documentPosition(handle.document, req.params.position, offset_encoding);
         const pos_context = try analysis.documentPositionContext(arena, handle.document, doc_position);
         const use_snippets = config.enable_snippets and client_capabilities.supports_snippets;
+
         switch (pos_context) {
             .builtin => try completeBuiltin(arena, id, config),
             .var_access, .empty => try completeGlobal(arena, id, doc_position.absolute_index, handle, config),
             .field_access => |range| try completeFieldAccess(arena, id, handle, doc_position, range, config),
-            .global_error_set => try send(arena, types.Response{
-                .id = id,
-                .result = .{
-                    .CompletionList = .{
-                        .isIncomplete = false,
-                        .items = try document_store.errorCompletionItems(arena, handle),
-                    },
-                },
-            }),
-            .enum_literal => try send(arena, types.Response{
-                .id = id,
-                .result = .{
-                    .CompletionList = .{
-                        .isIncomplete = false,
-                        .items = try document_store.enumCompletionItems(arena, handle),
-                    },
-                },
-            }),
+            .global_error_set => try completeError(arena, id, handle, config),
+            .enum_literal => try completeDot(arena, id, handle, config),
             .label => try completeLabel(arena, id, doc_position.absolute_index, handle, config),
             else => try respondGeneric(id, no_completions_response),
         }
