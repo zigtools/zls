@@ -74,6 +74,12 @@ pub fn config(step: *std.build.Step) anyerror!void {
         else =>
             try zinput.askBool("Should the @ sign be included in completions of builtin functions?\nChange this later if `@inc` completes to `include` or `@@include`")
     };
+    const max_detail_length: usize = switch (editor) {
+        .Sublime =>
+            256,
+        else =>
+            1024 * 1024
+    };
     
     var dir = try std.fs.cwd().openDir(builder.exe_dir, .{});
     defer dir.close();
@@ -92,6 +98,7 @@ pub fn config(step: *std.build.Step) anyerror!void {
         .enable_semantic_tokens = semantic_tokens,
         .operator_completions = operator_completions,
         .include_at_in_builtins = include_at_in_builtins,
+        .max_detail_length = max_detail_length,
     }, std.json.StringifyOptions{}, out);
 
     std.debug.warn("Successfully saved configuration options!\n", .{});

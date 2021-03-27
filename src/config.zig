@@ -17,7 +17,7 @@ warn_style: bool = false,
 /// Path to the build_runner.zig file.
 build_runner_path: ?[]const u8 = null,
 
-/// Path to a directory that will be used as cache when `zig run`ing the build runner
+/// Path to a directory that will be used as cache when `zig run`ning the build runner
 build_runner_cache_path: ?[]const u8 = null,
 
 /// Semantic token support
@@ -28,6 +28,9 @@ operator_completions: bool = true,
 
 /// Whether the @ sign should be part of the completion of builtins
 include_at_in_builtins: bool = false,
+
+/// The detail field of completions is truncated to be no longer than this (in bytes).
+max_detail_length: usize = 1024 * 1024,
 
 /// Skips references to std. This will improve lookup speeds.
 /// Going to definition however will continue to work
