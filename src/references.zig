@@ -531,31 +531,53 @@ pub fn symbolReferences(
 ) !void {
     std.debug.assert(decl_handle.decl.* != .label_decl);
     const curr_handle = decl_handle.handle;
+    if (include_decl) {
+        try tokenReference(curr_handle, decl_handle.nameToken(), encoding, context, handler);
+    }
 
     switch (decl_handle.decl.*) {
         .ast_node => |decl_node| {
-            var handles = std.ArrayList(*DocumentStore.Handle).init(&arena.allocator);
+            try symbolReferencesInternal(arena, store, .{ .node = 0, .handle = curr_handle }, decl_handle, encoding, context, handler);
+            
+            var imports = std.ArrayList(*DocumentStore.Handle).init(&arena.allocator);
+
             var handle_it = store.handles.iterator();
             while (handle_it.next()) |entry| {
                 if (skip_std_references and std.mem.indexOf(u8, entry.key, "std") != null) {
                     if (!include_decl or entry.value != curr_handle)
                         continue;
                 }
-                try handles.append(entry.value);
-            }
-            for (handles.items) |handle| {
-                if (include_decl and handle == curr_handle) {
-                    try tokenReference(curr_handle, decl_handle.nameToken(), encoding, context, handler);
-                }
 
-                try symbolReferencesInternal(arena, store, .{ .node = 0, .handle = handle }, decl_handle, encoding, context, handler);
+                // Check entry's transitive imports
+                try imports.append(entry.value);
+                var i: usize = 0;
+                blk: while (i < imports.items.len) : (i += 1) {
+                    const import = imports.items[i];
+                    for (import.import_uris.items) |uri| {
+                        const h = store.getHandle(uri) orelse break;
+
+                        if (h == curr_handle) {
+                            // entry does import curr_handle
+                            try symbolReferencesInternal(arena, store, .{ .node = 0, .handle = entry.value }, decl_handle, encoding, context, handler);
+                            break :blk;
+                        }
+
+                        select: {
+                            for (imports.items) |item| {
+                                if (item == h) {
+                                    // already checked this import
+                                    break :select;
+                                }
+                            }
+                            try imports.append(h);
+                        }
+                    }
+                }
+                try imports.resize(0);
             }
         },
         .param_decl => |param| {
             // Rename the param tok.
-            if (include_decl) {
-                try tokenReference(curr_handle, decl_handle.nameToken(), encoding, context, handler);
-            }
             const fn_node: ast.full.FnProto = loop: for (curr_handle.document_scope.scopes) |scope| {
                 switch (scope.data) {
                     .function => |proto| {
@@ -587,9 +609,6 @@ pub fn symbolReferences(
             };
         },
         .pointer_payload, .switch_payload, .array_payload, .array_index => {
-            if (include_decl) {
-                try tokenReference(curr_handle, decl_handle.nameToken(), encoding, context, handler);
-            }
             try symbolReferencesInternal(arena, store, .{ .node = 0, .handle = curr_handle }, decl_handle, encoding, context, handler);
         },
         .label_decl => unreachable,
