@@ -111,7 +111,7 @@ pub fn getFunctionSnippet(
     func: ast.full.FnProto,
     skip_self_param: bool,
 ) ![]const u8 {
-    const name_index = func.name_token orelse unreachable;
+    const name_index = func.name_token.?;
 
     var buffer = std.ArrayList(u8).init(allocator);
     try buffer.ensureCapacity(128);
@@ -2601,7 +2601,7 @@ fn makeScopeInternal(
 
     if (isContainer(tree, node_idx)) {
         var buf: [2]ast.Node.Index = undefined;
-        const ast_decls = declMembers(tree,node_idx, &buf);
+        const ast_decls = declMembers(tree, node_idx, &buf);
 
         (try scopes.addOne(allocator)).* = .{
             .range = nodeSourceRange(tree, node_idx),
@@ -2638,10 +2638,10 @@ fn makeScopeInternal(
                 (try error_completions.addOne(allocator)).* = .{
                     .label = name,
                     .kind = .Constant,
-                    .documentation = if (try getDocComments(allocator, tree, decl, .Markdown)) |docs|
-                        .{ .kind = .Markdown, .value = docs }
-                    else
-                        null,
+                    .documentation = if (try getDocComments(allocator, tree, decl, .Markdown)) |docs| .{
+                        .kind = .Markdown,
+                        .value = docs,
+                    } else null,
                 };
             }
 
@@ -2676,7 +2676,9 @@ fn makeScopeInternal(
 
                 if (container_decl) |container| {
                     const kind = token_tags[container.ast.main_token];
-                    if (empty_field and (kind == .keyword_struct or (kind == .keyword_union and container.ast.arg == 0))) {
+                    if (empty_field and
+                        (kind == .keyword_struct or (kind == .keyword_union and container.ast.arg == 0)))
+                    {
                         continue;
                     }
 
@@ -2684,10 +2686,10 @@ fn makeScopeInternal(
                         (try enum_completions.addOne(allocator)).* = .{
                             .label = name,
                             .kind = .Constant,
-                            .documentation = if (try getDocComments(allocator, tree, decl, .Markdown)) |docs|
-                                .{ .kind = .Markdown, .value = docs }
-                            else
-                                null,
+                            .documentation = if (try getDocComments(allocator, tree, decl, .Markdown)) |docs| .{
+                                .kind = .Markdown,
+                                .value = docs,
+                            } else null,
                         };
                     }
                 }
@@ -2926,20 +2928,17 @@ fn makeScopeInternal(
                 std.debug.assert(token_tags[name_token] == .identifier);
 
                 const name = tree.tokenSlice(name_token);
-                try scope.decls.putNoClobber(name, if (is_for)
-                    .{
-                        .array_payload = .{
-                            .identifier = name_token,
-                            .array_expr = while_node.ast.cond_expr,
-                        },
-                    }
-                else
-                    .{
-                        .pointer_payload = .{
-                            .name = name_token,
-                            .condition = while_node.ast.cond_expr,
-                        },
-                    });
+                try scope.decls.putNoClobber(name, if (is_for) .{
+                    .array_payload = .{
+                        .identifier = name_token,
+                        .array_expr = while_node.ast.cond_expr,
+                    },
+                } else .{
+                    .pointer_payload = .{
+                        .name = name_token,
+                        .condition = while_node.ast.cond_expr,
+                    },
+                });
 
                 // for loop with index as well
                 if (token_tags[name_token + 1] == .comma) {

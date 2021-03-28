@@ -297,10 +297,14 @@ fn typeToCompletion(
                 try list.append(.{
                     .label = "len",
                     .kind = .Field,
+                    .insertText = "len",
+                    .insertTextFormat = .PlainText,
                 });
                 try list.append(.{
                     .label = "ptr",
                     .kind = .Field,
+                    .insertText = "ptr",
+                    .insertTextFormat = .PlainText,
                 });
             }
         },
@@ -310,6 +314,8 @@ fn typeToCompletion(
                 try list.append(.{
                     .label = "*",
                     .kind = .Operator,
+                    .insertText = "*",
+                    .insertTextFormat = .PlainText,
                 });
             }
             try nodeToCompletion(
@@ -425,7 +431,7 @@ fn nodeToCompletion(
                     } else false;
 
                     break :blk try analysis.getFunctionSnippet(&arena.allocator, tree, func, skip_self_param);
-                } else "";
+                } else tree.tokenSlice(func.name_token.?);
 
                 const is_type_function = analysis.isTypeFunction(handle.tree, func);
 
@@ -462,6 +468,8 @@ fn nodeToCompletion(
                 .kind = if (is_const) .Constant else .Variable,
                 .documentation = doc,
                 .detail = analysis.getVariableSignature(tree, var_decl),
+                .insertText = tree.tokenSlice(var_decl.ast.mut_token + 1),
+                .insertTextFormat = .PlainText,
             });
         },
         .container_field,
@@ -474,6 +482,8 @@ fn nodeToCompletion(
                 .kind = .Field,
                 .documentation = doc,
                 .detail = analysis.getContainerFieldSignature(handle.tree, field),
+                .insertText = tree.tokenSlice(field.ast.name_token),
+                .insertTextFormat = .PlainText,
             });
         },
         .array_type,
@@ -482,6 +492,8 @@ fn nodeToCompletion(
             try list.append(.{
                 .label = "len",
                 .kind = .Field,
+                .insertText = "len",
+                .insertTextFormat = .PlainText,
             });
         },
         .ptr_type,
@@ -496,11 +508,23 @@ fn nodeToCompletion(
                     try list.append(.{
                         .label = "*",
                         .kind = .Operator,
+                        .insertText = "*",
+                        .insertTextFormat = .PlainText,
                     });
                 },
                 .Slice => {
-                    try list.append(.{ .label = "ptr", .kind = .Field });
-                    try list.append(.{ .label = "len", .kind = .Field });
+                    try list.append(.{
+                        .label = "ptr",
+                        .kind = .Field,
+                        .insertText = "ptr",
+                        .insertTextFormat = .PlainText,
+                    });
+                    try list.append(.{
+                        .label = "len",
+                        .kind = .Field,
+                        .insertText = "len",
+                        .insertTextFormat = .PlainText,
+                    });
                     return;
                 },
             }
@@ -515,6 +539,8 @@ fn nodeToCompletion(
                 try list.append(.{
                     .label = "?",
                     .kind = .Operator,
+                    .insertText = "?",
+                    .insertTextFormat = .PlainText,
                 });
             }
             return;
@@ -523,6 +549,8 @@ fn nodeToCompletion(
             try list.append(.{
                 .label = "len",
                 .kind = .Field,
+                .insertText = "len",
+                .insertTextFormat = .PlainText,
             });
         },
         else => if (analysis.nodeToString(tree, node)) |string| {
@@ -531,6 +559,8 @@ fn nodeToCompletion(
                 .kind = .Field,
                 .documentation = doc,
                 .detail = tree.getNodeSource(node),
+                .insertText = string,
+                .insertTextFormat = .PlainText,
             });
         },
     }
@@ -963,36 +993,48 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: analysis.Decl
                 .kind = .Constant,
                 .documentation = doc,
                 .detail = tree.source[offsets.tokenLocation(tree, first_token).start..offsets.tokenLocation(tree, last_token).end],
+                .insertText = tree.tokenSlice(param.name_token.?),
+                .insertTextFormat = .PlainText,
             });
         },
         .pointer_payload => |payload| {
             try context.completions.append(.{
                 .label = tree.tokenSlice(payload.name),
                 .kind = .Variable,
+                .insertText = tree.tokenSlice(payload.name),
+                .insertTextFormat = .PlainText,
             });
         },
         .array_payload => |payload| {
             try context.completions.append(.{
                 .label = tree.tokenSlice(payload.identifier),
                 .kind = .Variable,
+                .insertText = tree.tokenSlice(payload.identifier),
+                .insertTextFormat = .PlainText,
             });
         },
         .array_index => |payload| {
             try context.completions.append(.{
                 .label = tree.tokenSlice(payload),
                 .kind = .Variable,
+                .insertText = tree.tokenSlice(payload),
+                .insertTextFormat = .PlainText,
             });
         },
         .switch_payload => |payload| {
             try context.completions.append(.{
                 .label = tree.tokenSlice(payload.node),
                 .kind = .Variable,
+                .insertText = tree.tokenSlice(payload.node),
+                .insertTextFormat = .PlainText,
             });
         },
         .label_decl => |label_decl| {
             try context.completions.append(.{
                 .label = tree.tokenSlice(label_decl),
                 .kind = .Variable,
+                .insertText = tree.tokenSlice(label_decl),
+                .insertTextFormat = .PlainText,
             });
         },
     }
@@ -1044,15 +1086,15 @@ fn completeBuiltin(arena: *std.heap.ArenaAllocator, id: types.RequestId, config:
             } else {
                 insert_text = builtin.name;
             }
-            builtin_completions.?[idx].insertText = 
+            builtin_completions.?[idx].insertText =
                 if (config.include_at_in_builtins)
-                    insert_text
-                else
-                    insert_text[1..];
+                insert_text
+            else
+                insert_text[1..];
         }
         truncateCompletions(builtin_completions.?, config.max_detail_length);
     }
-    
+
     try send(arena, types.Response{
         .id = id,
         .result = .{
@@ -1115,9 +1157,9 @@ fn completeFieldAccess(
 
 fn completeError(
     arena: *std.heap.ArenaAllocator,
-    id: types.RequestId, 
+    id: types.RequestId,
     handle: *DocumentStore.Handle,
-    config: Config
+    config: Config,
 ) !void {
     const completions = try document_store.errorCompletionItems(arena, handle);
     truncateCompletions(completions, config.max_detail_length);
@@ -1135,13 +1177,13 @@ fn completeError(
 
 fn completeDot(
     arena: *std.heap.ArenaAllocator,
-    id: types.RequestId, 
+    id: types.RequestId,
     handle: *DocumentStore.Handle,
-    config: Config
+    config: Config,
 ) !void {
     var completions = try document_store.enumCompletionItems(arena, handle);
     truncateCompletions(completions, config.max_detail_length);
-    
+
     try send(arena, types.Response{
         .id = id,
         .result = .{
