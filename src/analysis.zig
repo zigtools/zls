@@ -2749,7 +2749,7 @@ fn makeScopeInternal(
                 }
                 // Visit parameter types to pick up any error sets and enum
                 //   completions
-                try makeScopeInternal(
+                if (param.type_expr != 0) try makeScopeInternal(
                     allocator,
                     scopes,
                     error_completions,
