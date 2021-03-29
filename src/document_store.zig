@@ -383,14 +383,14 @@ fn refreshDocument(self: *DocumentStore, handle: *Handle, zig_lib_path: ?[]const
     // Remove all old_imports that do not exist anymore
     for (old_imports.items) |old| {
         still_exists: {
-            for (new_imports) |new| {
+            for (new_imports.items) |new| {
                 if (std.mem.eql(u8, new, old)) {
                     break :still_exists;
                 }
             }
             log.debug("Import removed: {s}", .{old});
-            self.decrementCount(uri);
-            self.allocator.free(uri);
+            self.decrementCount(old);
+            self.allocator.free(old);
         }
     }
 }
@@ -500,18 +500,14 @@ pub fn uriFromImportStr(
         }
         return null;
     } else {
-        // Find relative uri
-        const path = try URI.parse(allocator, handle.uri());
-        defer allocator.free(path);
-
-        const dir_path = std.fs.path.dirname(path) orelse "";
-        const import_path = try std.fs.path.resolve(allocator, &[_][]const u8{
-            dir_path, import_str,
-        });
-
-        defer allocator.free(import_path);
-
-        return try URI.fromPath(allocator, import_path);
+        const base = handle.uri();
+        var base_len = base.len;
+        while (base[base_len - 1] != '/' and base_len > 0) { base_len -= 1; }
+        base_len -= 1;
+        if (base_len <= 0) {
+            return error.UriBadScheme;
+        }
+        return try URI.pathRelative(allocator, base[0..base_len], import_str);
     }
 }
 

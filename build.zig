@@ -237,14 +237,12 @@ pub fn build(b: *std.build.Builder) !void {
     const test_step = b.step("test", "Run all the tests");
     test_step.dependOn(builder.getInstallStep());
 
-    var unit_tests = b.addTest("tests/unit_tests.zig");
-    unit_tests.addPackage(.{ .name = "analysis", .path = "src/analysis.zig" });
-    unit_tests.addPackage(.{ .name = "types", .path = "src/types.zig" });
+    var unit_tests = b.addTest("src/unit_tests.zig");
     unit_tests.setBuildMode(.Debug);
+    test_step.dependOn(&unit_tests.step);
 
     var session_tests = b.addTest("tests/sessions.zig");
     session_tests.addPackage(.{ .name = "header", .path = "src/header.zig" });
     session_tests.setBuildMode(.Debug);
-
     test_step.dependOn(&session_tests.step);
 }
