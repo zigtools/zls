@@ -2702,14 +2702,14 @@ fn makeScopeInternal(
             );
             const name = getDeclName(tree, decl) orelse continue;
 
-            if (try scopes.items[scope_idx].decls.fetchPut(name, .{ .ast_node = decl })) |existing| {
-                // TODO Record a redefinition error.
-            }
-
             if (tags[decl] == .test_decl) {
                 try tests.append(allocator, decl);
                 continue;
             }
+            if (try scopes.items[scope_idx].decls.fetchPut(name, .{ .ast_node = decl })) |existing| {
+                // TODO Record a redefinition error.
+            }
+
             if (!can_have_enum_completions)
                 continue;
 
