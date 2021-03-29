@@ -1213,8 +1213,6 @@ fn loadConfig(folder_path: []const u8) ?Config {
     };
     defer allocator.free(file_buf);
 
-    // TODO: Uh oh. Profile the actual build time impact
-    // of adding config options and consider alternatives (TOML?)
     @setEvalBranchQuota(2000);
     // TODO: Better errors? Doesn't seem like std.json can provide us positions or context.
     var config = std.json.parse(Config, &std.json.TokenStream.init(file_buf), std.json.ParseOptions{ .allocator = allocator }) catch |err| {

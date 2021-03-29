@@ -359,52 +359,39 @@ fn refreshDocument(self: *DocumentStore, handle: *Handle, zig_lib_path: ?[]const
 
     handle.document_scope.deinit(self.allocator);
     handle.document_scope = try analysis.makeDocumentScope(self.allocator, handle.tree);
+    
+    var new_imports = std.ArrayList([]const u8).init(self.allocator);
+    errdefer new_imports.deinit();
+    try analysis.collectImports(&new_imports, handle.tree);
 
-    // TODO: Better algorithm or data structure?
-    // Removing the imports is costly since they live in an array list
-    // Perhaps we should use an AutoHashMap([]const u8, {}) ?
-
-    // Try to detect removed imports and decrement their counts.
-    if (handle.import_uris.items.len == 0) return;
-
-    var arena = std.heap.ArenaAllocator.init(self.allocator);
-    defer arena.deinit();
-
-    var import_strs = std.ArrayList([]const u8).init(&arena.allocator);
-    try analysis.collectImports(&import_strs, handle.tree);
-
-    const still_exist = try arena.allocator.alloc(bool, handle.import_uris.items.len);
-    for (still_exist) |*ex| {
-        ex.* = false;
+    // Convert to URIs
+    var i: usize = 0;
+    while (i < new_imports.items.len) {
+        if (try self.uriFromImportStr(self.allocator, handle.*, new_imports.items[i])) |uri| {
+            // The raw import strings are owned by the document and do not need to be freed here.
+            new_imports.items[i] = uri;
+            i += 1;
+        } else {
+            _ = new_imports.swapRemove(i);
+        }
     }
 
-    const std_uri = try stdUriFromLibPath(&arena.allocator, zig_lib_path);
-    for (import_strs.items) |str| {
-        const uri = (try self.uriFromImportStr(&arena.allocator, handle.*, str)) orelse continue;
+    const old_imports = handle.import_uris;
+    handle.import_uris = new_imports;
+    defer old_imports.deinit();
 
-        exists_loop: for (still_exist) |*does_still_exist, i| {
-            if (does_still_exist.*) continue;
-
-            if (std.mem.eql(u8, handle.import_uris.items[i], uri)) {
-                does_still_exist.* = true;
-                break :exists_loop;
+    // Remove all old_imports that do not exist anymore
+    for (old_imports.items) |old| {
+        still_exists: {
+            for (new_imports) |new| {
+                if (std.mem.eql(u8, new, old)) {
+                    break :still_exists;
+                }
             }
+            log.debug("Import removed: {s}", .{old});
+            self.decrementCount(uri);
+            self.allocator.free(uri);
         }
-    }
-
-    // Go through still_exist, remove the items that are false and decrement their handle counts.
-    var idx: usize = 0;
-    for (still_exist) |does_still_exist| {
-        if (does_still_exist) {
-            idx += 1;
-            continue;
-        }
-
-        log.debug("Import removed: {s}", .{handle.import_uris.items[idx]});
-        const uri = handle.import_uris.orderedRemove(idx);
-
-        self.decrementCount(uri);
-        self.allocator.free(uri);
     }
 }
 
