@@ -1,5 +1,7 @@
-const analysis = @import("analysis");
-const types = @import("types");
+const analysis = @import("analysis.zig");
+const types = @import("types.zig");
+const offsets = @import("offsets.zig");
+const URI = @import("uri.zig");
 
 const std = @import("std");
 
@@ -30,11 +32,11 @@ fn testContext(comptime line: []const u8, comptime tag: anytype, comptime range:
 
     const doc = try makeUnnamedDocument(final_line);
     defer freeDocument(doc);
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
 
-    const ctx = try analysis.documentPositionContext(allocator, doc, types.Position{
-        .line = 0,
-        .character = @intCast(i64, cursor_idx),
-    });
+    const p = try offsets.documentPosition(doc, .{ .line = 0, .character = @intCast(i64, cursor_idx) }, .utf8);
+    const ctx = try analysis.documentPositionContext(&arena, doc, p);
 
     if (std.meta.activeTag(ctx) != tag) {
         std.debug.warn("Expected tag {}, got {}\n", .{ tag, std.meta.activeTag(ctx) });
@@ -100,3 +102,15 @@ test "documentPositionContext" {
         "Se",
     );
 }
+
+
+test "pathRelative and escapes" {
+    const join1 = try URI.pathRelative(allocator, "file://project/zig", "/src/main+.zig");
+    defer allocator.free(join1);
+    std.testing.expectEqualStrings("file://project/zig/src/main%2B.zig", join1);
+
+    const join2 = try URI.pathRelative(allocator, "file://project/zig/wow", "../]src]/]main.zig");
+    defer allocator.free(join2);
+    std.testing.expectEqualStrings("file://project/zig/%5Dsrc%5D/%5Dmain.zig", join2);
+}
+
