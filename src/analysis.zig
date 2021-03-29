@@ -2904,7 +2904,14 @@ fn makeScopeInternal(
                 });
             }
 
-            try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, if_node.ast.then_expr);
+            try makeScopeInternal(
+                allocator,
+                scopes,
+                error_completions,
+                enum_completions,
+                tree,
+                if_node.ast.then_expr,
+            );
 
             if (if_node.ast.else_expr != 0) {
                 if (if_node.error_token) |err_token| {
@@ -2925,7 +2932,14 @@ fn makeScopeInternal(
                     const name = tree.tokenSlice(err_token);
                     try scope.decls.putNoClobber(name, .{ .ast_node = if_node.ast.else_expr });
                 }
-                try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, if_node.ast.else_expr);
+                try makeScopeInternal(
+                    allocator,
+                    scopes,
+                    error_completions,
+                    enum_completions,
+                    tree,
+                    if_node.ast.else_expr,
+                );
             }
         },
         .@"while",
@@ -2997,12 +3011,22 @@ fn makeScopeInternal(
                 if (token_tags[name_token + 1] == .comma) {
                     const index_token = name_token + 2;
                     std.debug.assert(token_tags[index_token] == .identifier);
-                    if (try scope.decls.fetchPut(tree.tokenSlice(index_token), .{ .array_index = index_token })) |existing| {
+                    if (try scope.decls.fetchPut(
+                        tree.tokenSlice(index_token),
+                        .{ .array_index = index_token },
+                    )) |existing| {
                         // TODO Record a redefinition error
                     }
                 }
             }
-            try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, while_node.ast.then_expr);
+            try makeScopeInternal(
+                allocator,
+                scopes,
+                error_completions,
+                enum_completions,
+                tree,
+                while_node.ast.then_expr,
+            );
 
             if (while_node.ast.else_expr != 0) {
                 if (while_node.error_token) |err_token| {
@@ -3023,7 +3047,14 @@ fn makeScopeInternal(
                     const name = tree.tokenSlice(err_token);
                     try scope.decls.putNoClobber(name, .{ .ast_node = while_node.ast.else_expr });
                 }
-                try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, while_node.ast.else_expr);
+                try makeScopeInternal(
+                    allocator,
+                    scopes,
+                    error_completions,
+                    enum_completions,
+                    tree,
+                    while_node.ast.else_expr,
+                );
             }
         },
         .@"switch",
@@ -3067,7 +3098,14 @@ fn makeScopeInternal(
                     });
                 }
 
-                try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, switch_case.ast.target_expr);
+                try makeScopeInternal(
+                    allocator,
+                    scopes,
+                    error_completions,
+                    enum_completions,
+                    tree,
+                    switch_case.ast.target_expr,
+                );
             }
         },
         .global_var_decl,
@@ -3077,11 +3115,25 @@ fn makeScopeInternal(
         => {
             const var_decl = varDecl(tree, node_idx).?;
             if (var_decl.ast.type_node != 0) {
-                try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, var_decl.ast.type_node);
+                try makeScopeInternal(
+                    allocator,
+                    scopes,
+                    error_completions,
+                    enum_completions,
+                    tree,
+                    var_decl.ast.type_node,
+                );
             }
 
             if (var_decl.ast.init_node != 0) {
-                try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, var_decl.ast.init_node);
+                try makeScopeInternal(
+                    allocator,
+                    scopes,
+                    error_completions,
+                    enum_completions,
+                    tree,
+                    var_decl.ast.init_node,
+                );
             }
         },
         .call,
@@ -3131,7 +3183,14 @@ fn makeScopeInternal(
             };
 
             if (struct_init.ast.type_expr != 0)
-                try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, struct_init.ast.type_expr);
+                try makeScopeInternal(
+                    allocator,
+                    scopes,
+                    error_completions,
+                    enum_completions,
+                    tree,
+                    struct_init.ast.type_expr,
+                );
 
             for (struct_init.ast.fields) |field| {
                 try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, field);
@@ -3156,7 +3215,14 @@ fn makeScopeInternal(
             };
 
             if (array_init.ast.type_expr != 0)
-                try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, array_init.ast.type_expr);
+                try makeScopeInternal(
+                    allocator,
+                    scopes,
+                    error_completions,
+                    enum_completions,
+                    tree,
+                    array_init.ast.type_expr,
+                );
             for (array_init.ast.elements) |elem| {
                 try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, elem);
             }
@@ -3168,11 +3234,32 @@ fn makeScopeInternal(
             const field = containerField(tree, node_idx).?;
 
             if (field.ast.type_expr != 0)
-                try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, field.ast.type_expr);
+                try makeScopeInternal(
+                    allocator,
+                    scopes,
+                    error_completions,
+                    enum_completions,
+                    tree,
+                    field.ast.type_expr,
+                );
             if (field.ast.align_expr != 0)
-                try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, field.ast.align_expr);
+                try makeScopeInternal(
+                    allocator,
+                    scopes,
+                    error_completions,
+                    enum_completions,
+                    tree,
+                    field.ast.align_expr,
+                );
             if (field.ast.value_expr != 0)
-                try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, field.ast.value_expr);
+                try makeScopeInternal(
+                    allocator,
+                    scopes,
+                    error_completions,
+                    enum_completions,
+                    tree,
+                    field.ast.value_expr,
+                );
         },
         .builtin_call,
         .builtin_call_comma,
@@ -3202,11 +3289,32 @@ fn makeScopeInternal(
         => {
             const ptr_type: ast.full.PtrType = ptrType(tree, node_idx).?;
             if (ptr_type.ast.sentinel != 0)
-                try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, ptr_type.ast.sentinel);
+                try makeScopeInternal(
+                    allocator,
+                    scopes,
+                    error_completions,
+                    enum_completions,
+                    tree,
+                    ptr_type.ast.sentinel,
+                );
             if (ptr_type.ast.align_node != 0)
-                try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, ptr_type.ast.align_node);
+                try makeScopeInternal(
+                    allocator,
+                    scopes,
+                    error_completions,
+                    enum_completions,
+                    tree,
+                    ptr_type.ast.align_node,
+                );
             if (ptr_type.ast.child_type != 0)
-                try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, ptr_type.ast.child_type);
+                try makeScopeInternal(
+                    allocator,
+                    scopes,
+                    error_completions,
+                    enum_completions,
+                    tree,
+                    ptr_type.ast.child_type,
+                );
         },
         .slice,
         .slice_open,
@@ -3220,13 +3328,41 @@ fn makeScopeInternal(
             };
 
             if (slice.ast.sliced != 0)
-                try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, slice.ast.sliced);
+                try makeScopeInternal(
+                    allocator,
+                    scopes,
+                    error_completions,
+                    enum_completions,
+                    tree,
+                    slice.ast.sliced,
+                );
             if (slice.ast.start != 0)
-                try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, slice.ast.start);
+                try makeScopeInternal(
+                    allocator,
+                    scopes,
+                    error_completions,
+                    enum_completions,
+                    tree,
+                    slice.ast.start,
+                );
             if (slice.ast.end != 0)
-                try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, slice.ast.end);
+                try makeScopeInternal(
+                    allocator,
+                    scopes,
+                    error_completions,
+                    enum_completions,
+                    tree,
+                    slice.ast.end,
+                );
             if (slice.ast.sentinel != 0)
-                try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, slice.ast.sentinel);
+                try makeScopeInternal(
+                    allocator,
+                    scopes,
+                    error_completions,
+                    enum_completions,
+                    tree,
+                    slice.ast.sentinel,
+                );
         },
         .@"errdefer" => {
             const expr = data[node_idx].rhs;
@@ -3277,7 +3413,14 @@ fn makeScopeInternal(
         => {},
         .@"break", .@"defer" => {
             if (data[node_idx].rhs != 0)
-                try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, data[node_idx].rhs);
+                try makeScopeInternal(
+                    allocator,
+                    scopes,
+                    error_completions,
+                    enum_completions,
+                    tree,
+                    data[node_idx].rhs,
+                );
         },
         // all lhs kind of nodes
         .@"return",
@@ -3300,14 +3443,35 @@ fn makeScopeInternal(
         .@"usingnamespace",
         => {
             if (data[node_idx].lhs != 0) {
-                try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, data[node_idx].lhs);
+                try makeScopeInternal(
+                    allocator,
+                    scopes,
+                    error_completions,
+                    enum_completions,
+                    tree,
+                    data[node_idx].lhs,
+                );
             }
         },
         else => {
             if (data[node_idx].lhs != 0)
-                try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, data[node_idx].lhs);
+                try makeScopeInternal(
+                    allocator,
+                    scopes,
+                    error_completions,
+                    enum_completions,
+                    tree,
+                    data[node_idx].lhs,
+                );
             if (data[node_idx].rhs != 0)
-                try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, data[node_idx].rhs);
+                try makeScopeInternal(
+                    allocator,
+                    scopes,
+                    error_completions,
+                    enum_completions,
+                    tree,
+                    data[node_idx].rhs,
+                );
         },
     }
 }
