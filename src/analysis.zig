@@ -2662,6 +2662,29 @@ fn makeScopeInternal(
             }
         }
 
+        const container_decl = switch (node_tag) {
+            .container_decl, .container_decl_trailing => tree.containerDecl(node_idx),
+            .container_decl_arg, .container_decl_arg_trailing => tree.containerDeclArg(node_idx),
+            .container_decl_two, .container_decl_two_trailing => blk: {
+                var buffer: [2]ast.Node.Index = undefined;
+                break :blk tree.containerDeclTwo(&buffer, node_idx);
+            },
+            .tagged_union, .tagged_union_trailing => tree.taggedUnion(node_idx),
+            .tagged_union_enum_tag, .tagged_union_enum_tag_trailing => tree.taggedUnionEnumTag(node_idx),
+            .tagged_union_two, .tagged_union_two_trailing => blk: {
+                var buffer: [2]ast.Node.Index = undefined;
+                break :blk tree.taggedUnionTwo(&buffer, node_idx);
+            },
+            else => null,
+        };
+
+        // Only tagged unions and enums should pass this
+        const can_have_enum_completions = if (container_decl) |container| blk: {
+            const kind = token_tags[container.ast.main_token];
+            break :blk kind != .keyword_struct and
+                (kind != .keyword_union or container.ast.enum_token != null or container.ast.arg != 0);
+        } else false;
+
         for (ast_decls) |*ptr_decl| {
             const decl = ptr_decl.*;
             if (tags[decl] == .@"usingnamespace") {
@@ -2682,6 +2705,8 @@ fn makeScopeInternal(
                 try tests.append(allocator, decl);
                 continue;
             }
+            if (!can_have_enum_completions)
+                continue;
 
             const container_field = switch (tags[decl]) {
                 .container_field => tree.containerField(decl),
@@ -2691,45 +2716,15 @@ fn makeScopeInternal(
             };
 
             if (container_field) |field| {
-                const empty_field = field.ast.type_expr == 0 and field.ast.value_expr == 0;
-                if (empty_field and node_tag == .root) {
-                    continue;
-                }
-
-                const container_decl = switch (node_tag) {
-                    .container_decl, .container_decl_trailing => tree.containerDecl(node_idx),
-                    .container_decl_arg, .container_decl_arg_trailing => tree.containerDeclArg(node_idx),
-                    .container_decl_two, .container_decl_two_trailing => blk: {
-                        var buffer: [2]ast.Node.Index = undefined;
-                        break :blk tree.containerDeclTwo(&buffer, node_idx);
-                    },
-                    .tagged_union, .tagged_union_trailing => tree.taggedUnion(node_idx),
-                    .tagged_union_enum_tag, .tagged_union_enum_tag_trailing => tree.taggedUnionEnumTag(node_idx),
-                    .tagged_union_two, .tagged_union_two_trailing => blk: {
-                        var buffer: [2]ast.Node.Index = undefined;
-                        break :blk tree.taggedUnionTwo(&buffer, node_idx);
-                    },
-                    else => null,
-                };
-
-                if (container_decl) |container| {
-                    const kind = token_tags[container.ast.main_token];
-                    if (empty_field and
-                        (kind == .keyword_struct or (kind == .keyword_union and container.ast.arg == 0)))
-                    {
-                        continue;
-                    }
-
-                    if (!std.mem.eql(u8, name, "_")) {
-                        try enum_completions.put(allocator, .{
-                            .label = name,
-                            .kind = .Constant,
-                            .documentation = if (try getDocComments(allocator, tree, decl, .Markdown)) |docs| .{
-                                .kind = .Markdown,
-                                .value = docs,
-                            } else null,
-                        }, {});
-                    }
+                if (!std.mem.eql(u8, name, "_")) {
+                    try enum_completions.put(allocator, .{
+                        .label = name,
+                        .kind = .Constant,
+                        .documentation = if (try getDocComments(allocator, tree, decl, .Markdown)) |docs| .{
+                            .kind = .Markdown,
+                            .value = docs,
+                        } else null,
+                    }, {});
                 }
             }
 
