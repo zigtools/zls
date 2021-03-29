@@ -331,8 +331,8 @@ const InitializeResult = struct {
         workspaceSymbolProvider: bool,
         rangeProvider: bool,
         documentProvider: bool,
-        workspace: struct {
-            workspaceFolders: struct {
+        workspace: ?struct {
+            workspaceFolders: ?struct {
                 supported: bool,
                 changeNotifications: bool,
             },

@@ -2611,41 +2611,52 @@ fn makeScopeInternal(
             .data = .{ .container = node_idx },
         };
         const scope_idx = scopes.items.len - 1;
-        var uses = std.ArrayList(*const ast.Node.Index).init(allocator);
-        var tests = std.ArrayList(ast.Node.Index).init(allocator);
+        var uses = std.ArrayListUnmanaged(*const ast.Node.Index){};
+        var tests = std.ArrayListUnmanaged(ast.Node.Index){};
 
         errdefer {
             scopes.items[scope_idx].decls.deinit();
-            uses.deinit();
-            tests.deinit();
+            uses.deinit(allocator);
+            tests.deinit(allocator);
+        }
+
+        if (node_tag == .error_set_decl) {
+            // All identifiers in main_token..data.lhs are error fields.
+            var i = main_tokens[node_idx];
+            while (i < data[node_idx].rhs) : (i += 1) {
+                if (token_tags[i] == .identifier) {
+                    (try error_completions.addOne(allocator)).* = .{
+                        .label = tree.tokenSlice(i),
+                        .kind = .Constant,
+                        .insertTextFormat = .PlainText,
+                        .insertText = tree.tokenSlice(i),
+                    };
+                }
+            }
         }
 
         for (ast_decls) |*ptr_decl| {
             const decl = ptr_decl.*;
             if (tags[decl] == .@"usingnamespace") {
-                try uses.append(ptr_decl);
+                try uses.append(allocator, ptr_decl);
                 continue;
             }
 
-            try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, decl);
+            try makeScopeInternal(
+                allocator,
+                scopes,
+                error_completions,
+                enum_completions,
+                tree,
+                decl,
+            );
             const name = getDeclName(tree, decl) orelse continue;
             if (tags[decl] == .test_decl) {
-                try tests.append(decl);
+                try tests.append(allocator, decl);
                 continue;
             }
 
-            if (node_tag == .error_set_decl) {
-                (try error_completions.addOne(allocator)).* = .{
-                    .label = name,
-                    .kind = .Constant,
-                    .documentation = if (try getDocComments(allocator, tree, decl, .Markdown)) |docs| .{
-                        .kind = .Markdown,
-                        .value = docs,
-                    } else null,
-                };
-            }
-
-            const container_field: ?ast.full.ContainerField = switch (tags[decl]) {
+            const container_field = switch (tags[decl]) {
                 .container_field => tree.containerField(decl),
                 .container_field_align => tree.containerFieldAlign(decl),
                 .container_field_init => tree.containerFieldInit(decl),
@@ -2658,7 +2669,7 @@ fn makeScopeInternal(
                     continue;
                 }
 
-                const container_decl: ?ast.full.ContainerDecl = switch (node_tag) {
+                const container_decl = switch (node_tag) {
                     .container_decl, .container_decl_trailing => tree.containerDecl(node_idx),
                     .container_decl_arg, .container_decl_arg_trailing => tree.containerDeclArg(node_idx),
                     .container_decl_two, .container_decl_two_trailing => blk: {
@@ -2700,8 +2711,8 @@ fn makeScopeInternal(
             }
         }
 
-        scopes.items[scope_idx].tests = tests.toOwnedSlice();
-        scopes.items[scope_idx].uses = uses.toOwnedSlice();
+        scopes.items[scope_idx].tests = tests.toOwnedSlice(allocator);
+        scopes.items[scope_idx].uses = uses.toOwnedSlice(allocator);
         return;
     }
 
@@ -2727,21 +2738,63 @@ fn makeScopeInternal(
 
             var it = func.iterate(tree);
             while (it.next()) |param| {
+                // Add parameter decls
                 if (param.name_token) |name_token| {
-                    if (try scopes.items[scope_idx].decls.fetchPut(tree.tokenSlice(name_token), .{ .param_decl = param })) |existing| {
+                    if (try scopes.items[scope_idx].decls.fetchPut(
+                        tree.tokenSlice(name_token),
+                        .{ .param_decl = param },
+                    )) |existing| {
                         // TODO record a redefinition error
                     }
                 }
+                // Visit parameter types to pick up any error sets and enum
+                //   completions
+                try makeScopeInternal(
+                    allocator,
+                    scopes,
+                    error_completions,
+                    enum_completions,
+                    tree,
+                    param.type_expr,
+                );
             }
 
+            // Visit the return type
+            try makeScopeInternal(
+                allocator,
+                scopes,
+                error_completions,
+                enum_completions,
+                tree,
+                // TODO: This should be the proto
+                if (fn_tag == .fn_decl)
+                    data[data[node_idx].lhs].rhs
+                else
+                    data[node_idx].rhs,
+            );
+            // Visit the function body
             if (fn_tag == .fn_decl) {
-                try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, data[node_idx].rhs);
+                try makeScopeInternal(
+                    allocator,
+                    scopes,
+                    error_completions,
+                    enum_completions,
+                    tree,
+                    data[node_idx].rhs,
+                );
             }
 
             return;
         },
         .test_decl => {
-            return try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, data[node_idx].rhs);
+            return try makeScopeInternal(
+                allocator,
+                scopes,
+                error_completions,
+                enum_completions,
+                tree,
+                data[node_idx].rhs,
+            );
         },
         .block,
         .block_semicolon,

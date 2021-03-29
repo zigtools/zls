@@ -1,3 +1,7 @@
+//! This file contains request types zls handles.
+//! Note that the parameter types may be incomplete.
+//! We only define what we actually use.
+
 const std = @import("std");
 const types = @import("types.zig");
 
@@ -37,8 +41,14 @@ fn fromDynamicTreeInternal(arena: *std.heap.ArenaAllocator, value: std.json.Valu
             const actual_type = if (is_optional) std.meta.Child(field.field_type) else field.field_type;
 
             const is_struct = comptime std.meta.trait.is(.Struct)(actual_type);
-            const is_default = comptime if (is_struct) std.meta.trait.hasDecls(actual_type, .{ "default", "value_type" }) else false;
-            const is_transform = comptime if (is_struct) std.meta.trait.hasDecls(actual_type, .{ "original_type", "transform" }) else false;
+            const is_default = comptime if (is_struct) std.meta.trait.hasDecls(actual_type, .{
+                "default",
+                "value_type",
+            }) else false;
+            const is_transform = comptime if (is_struct) std.meta.trait.hasDecls(actual_type, .{
+                "original_type",
+                "transform",
+            }) else false;
 
             if (value.Object.get(field.name)) |json_field| {
                 if (is_exists) {
@@ -46,7 +56,10 @@ fn fromDynamicTreeInternal(arena: *std.heap.ArenaAllocator, value: std.json.Valu
                 } else if (is_transform) {
                     var original_value: actual_type.original_type = undefined;
                     try fromDynamicTreeInternal(arena, json_field, &original_value);
-                    @field(out, field.name) = actual_type{ .value = actual_type.transform(original_value) catch return error.MalformedJson };
+                    @field(out, field.name) = actual_type{
+                        .value = actual_type.transform(original_value) catch
+                            return error.MalformedJson,
+                    };
                 } else if (is_default) {
                     try fromDynamicTreeInternal(arena, json_field, &@field(out, field.name).value);
                 } else if (is_optional) {
@@ -117,11 +130,7 @@ pub fn fromDynamicTree(arena: *std.heap.ArenaAllocator, comptime T: type, value:
     return out;
 }
 
-//! This file contains request types zls handles.
-//! Note that the parameter types may be incomplete.
-//! We only define what we actually use.
-
-const MaybeStringArray = Default([]const []const u8, &[0][]const u8{});
+const MaybeStringArray = Default([]const []const u8, &.{});
 
 pub const Initialize = struct {
     pub const ClientCapabilities = struct {
