@@ -1,12 +1,10 @@
-![Zig Language Server](./assets/zls.svg)
-
-![CI](https://github.com/zigtools/zls/workflows/CI/badge.svg)
-![Zig Tools](./assets/zigtools.svg)
+# Zig Language Server
 
 Zig Language Server, or `zls`, is a language server for Zig. The Zig wiki states that "The Zig community is decentralized" and "There is no concept of 'official' or 'unofficial'", so instead of calling `zls` unofficial, and I'm going to call it a cool option, one of [many](https://github.com/search?q=zig+language+server).
 
 <!-- omit in toc -->
 ## Table Of Contents
+
 - [Installation](#installation)
   - [Build Options](#build-options)
   - [Configuration Options](#configuration-options)
@@ -16,6 +14,7 @@ Zig Language Server, or `zls`, is a language server for Zig. The Zig wiki states
   - [Kate](#kate)
   - [Neovim/Vim8](#neovimvim8)
   - [Emacs](#emacs)
+  - [Doom Emacs](#doom-emacs)
 - [Related Projects](#related-projects)
 - [License](#license)
 
@@ -24,6 +23,26 @@ Zig Language Server, or `zls`, is a language server for Zig. The Zig wiki states
 Installation starts with downloading an official release from the [Releases page](https://github.com/zigtools/zls/releases).
 
 See [Downloading and Building ZLS](https://github.com/zigtools/zls/wiki/Downloading-and-Building-ZLS) on the Wiki, or the page about [using ZLS with Visual Studio Code](https://github.com/zigtools/zls/wiki/Installing-for-Visual-Studio-Code) for a guide to help get `zls` running in your editor.
+
+### Installing binaries
+
+#### MacOS
+
+You can install the latest release into `$HOME/zls` using e.g.:
+
+```sh
+brew install xz
+mkdir $HOME/zls && cd $HOME/zls && curl -L https://github.com/zigtools/zls/releases/download/0.1.0/x86_64-macos.tar.xz | tar -xJ --strip-components=1 -C .
+```
+
+#### Linux
+
+You can install the latest release into `$HOME/zls` using e.g.:
+
+```
+sudo apt install xz-utils
+mkdir $HOME/zls && cd $HOME/zls && curl -L https://github.com/zigtools/zls/releases/download/0.1.0/x86_64-linux.tar.xz | tar -xJ --strip-components=1 -C .
+```
 
 ### From Source
 
@@ -65,6 +84,7 @@ The following options are currently available.
 | `build_runner_cache_path` | `?[]const u8` | `null` | Path to a directroy that will be used as zig's cache when running `zig run build_runner.zig ...`. `null` is equivalent to `${KnownFloders.Cache}/zls` |
 | `enable_semantic_tokens` | `bool` | `true` | Enables semantic token support when the client also supports it. |
 | `operator_completions` | `bool` | `true` | Enables `*` and `?` operators in completion lists. |
+| `skip_std_references` | `bool` | `false` | When true, skips searching for references in std. Improves lookup speed for functions in user's code. Renaming and go-to-definition will continue to work as is.
 
 ## Features
 
@@ -141,7 +161,26 @@ Install the `zls-vscode` extension from [here](https://github.com/zigtools/zls-v
 }
 ```
 
+#### YouCompleteMe
+- Install YouCompleteMeFrom [here](https://github.com/ycm-core/YouCompleteMe.git).
+- Add these lines to your vimrc:
+
+```vim
+"ensure zig is a recognized filetype
+autocmd BufNewFile,BufRead *.zig set filetype=zig
+
+let g:ycm_language_server = 
+  \ [ 
+  \{
+  \     'name': 'zls',
+  \     'filetypes': [ 'zig' ],
+  \     'cmdline': [ '/path/to/zls_executable' ]
+  \    }
+  \ ]
+```
+
 #### nvim-lspconfig
+
 Requires Nvim 0.5 (HEAD)!
 
 - Install nvim-lspconfig from [here](https://github.com/neovim/nvim-lspconfig).
@@ -178,6 +217,16 @@ set completeopt=menuone,noinsert,noselect
 let g:completion_enable_auto_popup = 1
 ```
 
+#### LanguageClient-neovim
+
+- Install the LanguageClient-neovim from [here](https://github.com/autozimu/LanguageClient-neovim)
+- Edit your neovim configuration and add `zls` for zig filetypes:
+
+```vim
+let g:LanguageClient_serverCommands = {
+       \ 'zig': ['~/code/zls/zig-cache/bin/zls'],
+       \ }
+```
 
 ### Emacs
 
@@ -185,16 +234,35 @@ let g:completion_enable_auto_popup = 1
 - [zig mode](https://github.com/ziglang/zig-mode) is also useful
 
 ```elisp
-(require 'lsp)
-(add-to-list 'lsp-language-id-configuration '(zig-mode . "zig"))
-(lsp-register-client
-  (make-lsp-client
-    :new-connection (lsp-stdio-connection "<path to zls>")
-    :major-modes '(zig-mode)
-    :server-id 'zls))
+;; Setup lsp-mode as desired.
+;; See https://emacs-lsp.github.io/lsp-mode/page/installation/ for more information.
+(require 'lsp-mode)
+
+;; Either place zls in your PATH or add the following:
+(setq lsp-zig-zls-executable "<path to zls>")
+```
+
+### Doom Emacs
+
+- Enable the `lsp` module
+- Install the [zig-mode](https://github.com/ziglang/zig-mode) package (add `(package! zig-mode)` to your `packages.el` file
+
+```elisp
+(use-package! zig-mode
+  :hook ((zig-mode . lsp-deferred))
+  :custom (zig-format-on-save nil)
+  :config
+  (after! lsp-mode
+    (add-to-list 'lsp-language-id-configuration '(zig-mode . "zig"))
+    (lsp-register-client
+      (make-lsp-client
+        :new-connection (lsp-stdio-connection "<path to zls>")
+        :major-modes '(zig-mode)
+        :server-id 'zls))))
 ```
 
 ## Related Projects
+
 - [`sublime-zig-language` by @prime31](https://github.com/prime31/sublime-zig-language)
   - Supports basic language features
   - Uses data provided by `src/data` to perform builtin autocompletion
@@ -204,4 +272,5 @@ let g:completion_enable_auto_popup = 1
   - Provides API to access known folders on Linux, Windows and Mac OS
 
 ## License
+
 MIT
