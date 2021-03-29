@@ -2443,10 +2443,29 @@ pub fn lookupSymbolContainer(
     return try lookupSymbolContainerInternal(store, arena, container_handle, symbol, instance_access, &use_trail);
 }
 
+fn eqlCompletionItem(a: types.CompletionItem, b: types.CompletionItem) bool {
+    return std.mem.eql(u8, a.label, b.label);
+}
+
+fn hashCompletionItem(completion_item: types.CompletionItem) u32 {
+    return @truncate(u32, std.hash.Wyhash.hash(0, completion_item.label));
+}
+
+pub const CompletionSet = std.ArrayHashMapUnmanaged(
+    types.CompletionItem,
+    void,
+    hashCompletionItem,
+    eqlCompletionItem,
+    false,
+);
+comptime {
+    std.debug.assert(@sizeOf(types.CompletionItem) == @sizeOf(CompletionSet.Entry));
+}
+
 pub const DocumentScope = struct {
     scopes: []Scope,
-    error_completions: []types.CompletionItem,
-    enum_completions: []types.CompletionItem,
+    error_completions: CompletionSet,
+    enum_completions: CompletionSet,
 
     pub fn debugPrint(self: DocumentScope) void {
         for (self.scopes) |scope| {
@@ -2472,17 +2491,21 @@ pub const DocumentScope = struct {
         }
     }
 
-    pub fn deinit(self: DocumentScope, allocator: *std.mem.Allocator) void {
+    pub fn deinit(self: *DocumentScope, allocator: *std.mem.Allocator) void {
         for (self.scopes) |*scope| {
             scope.decls.deinit();
             allocator.free(scope.uses);
             allocator.free(scope.tests);
         }
         allocator.free(self.scopes);
-        for (self.error_completions) |item| if (item.documentation) |doc| allocator.free(doc.value);
-        allocator.free(self.error_completions);
-        for (self.enum_completions) |item| if (item.documentation) |doc| allocator.free(doc.value);
-        allocator.free(self.enum_completions);
+        for (self.error_completions.entries.items) |entry| {
+            if (entry.key.documentation) |doc| allocator.free(doc.value);
+        }
+        self.error_completions.deinit(allocator);
+        for (self.enum_completions.entries.items) |entry| {
+            if (entry.key.documentation) |doc| allocator.free(doc.value);
+        }
+        self.enum_completions.deinit(allocator);
     }
 };
 
@@ -2504,22 +2527,26 @@ pub const Scope = struct {
 
 pub fn makeDocumentScope(allocator: *std.mem.Allocator, tree: ast.Tree) !DocumentScope {
     var scopes = std.ArrayListUnmanaged(Scope){};
-    var error_completions = std.ArrayListUnmanaged(types.CompletionItem){};
-    var enum_completions = std.ArrayListUnmanaged(types.CompletionItem){};
+    var error_completions = CompletionSet{};
+    var enum_completions = CompletionSet{};
 
     errdefer {
         scopes.deinit(allocator);
-        for (error_completions.items) |item| if (item.documentation) |doc| allocator.free(doc.value);
+        for (error_completions.entries.items) |entry| {
+            if (entry.key.documentation) |doc| allocator.free(doc.value);
+        }
         error_completions.deinit(allocator);
-        for (enum_completions.items) |item| if (item.documentation) |doc| allocator.free(doc.value);
+        for (enum_completions.entries.items) |entry| {
+            if (entry.key.documentation) |doc| allocator.free(doc.value);
+        }
         enum_completions.deinit(allocator);
     }
     // pass root node index ('0')
     try makeScopeInternal(allocator, &scopes, &error_completions, &enum_completions, tree, 0);
     return DocumentScope{
         .scopes = scopes.toOwnedSlice(allocator),
-        .error_completions = error_completions.toOwnedSlice(allocator),
-        .enum_completions = enum_completions.toOwnedSlice(allocator),
+        .error_completions = error_completions,
+        .enum_completions = enum_completions,
     };
 }
 
@@ -2588,8 +2615,8 @@ pub fn varDecl(tree: ast.Tree, node_idx: ast.Node.Index) ?ast.full.VarDecl {
 fn makeScopeInternal(
     allocator: *std.mem.Allocator,
     scopes: *std.ArrayListUnmanaged(Scope),
-    error_completions: *std.ArrayListUnmanaged(types.CompletionItem),
-    enum_completions: *std.ArrayListUnmanaged(types.CompletionItem),
+    error_completions: *CompletionSet,
+    enum_completions: *CompletionSet,
     tree: ast.Tree,
     node_idx: ast.Node.Index,
 ) error{OutOfMemory}!void {
@@ -2625,12 +2652,12 @@ fn makeScopeInternal(
             var i = main_tokens[node_idx];
             while (i < data[node_idx].rhs) : (i += 1) {
                 if (token_tags[i] == .identifier) {
-                    (try error_completions.addOne(allocator)).* = .{
+                    try error_completions.put(allocator, .{
                         .label = tree.tokenSlice(i),
                         .kind = .Constant,
                         .insertTextFormat = .PlainText,
                         .insertText = tree.tokenSlice(i),
-                    };
+                    }, {});
                 }
             }
         }
@@ -2694,14 +2721,14 @@ fn makeScopeInternal(
                     }
 
                     if (!std.mem.eql(u8, name, "_")) {
-                        (try enum_completions.addOne(allocator)).* = .{
+                        try enum_completions.put(allocator, .{
                             .label = name,
                             .kind = .Constant,
                             .documentation = if (try getDocComments(allocator, tree, decl, .Markdown)) |docs| .{
                                 .kind = .Markdown,
                                 .value = docs,
                             } else null,
-                        };
+                        }, {});
                     }
                 }
             }

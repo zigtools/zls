@@ -146,7 +146,7 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: []u8) anyerror!*Hand
     var tree = try std.zig.parse(self.allocator, text);
     errdefer tree.deinit(self.allocator);
 
-    const document_scope = try analysis.makeDocumentScope(self.allocator, tree);
+    var document_scope = try analysis.makeDocumentScope(self.allocator, tree);
     errdefer document_scope.deinit(self.allocator);
 
     handle.* = Handle{
@@ -381,7 +381,7 @@ fn refreshDocument(self: *DocumentStore, handle: *Handle, zig_lib_path: ?[]const
     const std_uri = try stdUriFromLibPath(&arena.allocator, zig_lib_path);
     for (import_strs.items) |str| {
         const uri = (try self.uriFromImportStr(&arena.allocator, handle.*, str)) orelse continue;
-        
+
         exists_loop: for (still_exist) |*does_still_exist, i| {
             if (does_still_exist.*) continue;
 
@@ -643,31 +643,45 @@ pub fn deinit(self: *DocumentStore) void {
     self.build_files.deinit(self.allocator);
 }
 
-fn tagStoreCompletionItems(self: DocumentStore, arena: *std.heap.ArenaAllocator, base: *DocumentStore.Handle, comptime name: []const u8) ![]types.CompletionItem {
+fn tagStoreCompletionItems(
+    self: DocumentStore,
+    arena: *std.heap.ArenaAllocator,
+    base: *DocumentStore.Handle,
+    comptime name: []const u8,
+) ![]types.CompletionItem {
     // TODO Better solution for deciding what tags to include
-    var handle_arr = try arena.allocator.alloc(*DocumentStore.Handle, base.import_uris.items.len + 1);
-    handle_arr[0] = base;
-    var len: usize = @field(base.document_scope, name).len;
-    for (base.import_uris.items) |uri, idx| {
-        handle_arr[idx + 1] = self.handles.get(uri).?;
-        len += @field(handle_arr[idx + 1].document_scope, name).len;
+    var max_len: usize = @field(base.document_scope, name).count();
+    for (base.import_uris.items) |uri| {
+        max_len += @field(self.handles.get(uri).?.document_scope, name).count();
     }
 
-    var result = try arena.allocator.alloc(types.CompletionItem, len);
-    var res_idx: usize = 0;
-    for (handle_arr) |handle| {
-        for (@field(handle.document_scope, name)) |item| {
-            result[res_idx] = item;
-            res_idx += 1;
+    var result_set = analysis.CompletionSet{};
+    try result_set.ensureCapacity(&arena.allocator, max_len);
+    result_set.entries.appendSliceAssumeCapacity(@field(base.document_scope, name).entries.items);
+    try result_set.reIndex(&arena.allocator);
+
+    for (base.import_uris.items) |uri| {
+        const curr_set = &@field(self.handles.get(uri).?.document_scope, name);
+        for (curr_set.entries.items) |entry| {
+            result_set.putAssumeCapacity(entry.key, {});
         }
     }
-    return result;
+    // This is safe to do because CompletionSet.Entry == struct { value: types.CompletionItem }
+    return std.mem.bytesAsSlice(types.CompletionItem, std.mem.sliceAsBytes(result_set.entries.items));
 }
 
-pub fn errorCompletionItems(self: DocumentStore, arena: *std.heap.ArenaAllocator, base: *DocumentStore.Handle) ![]types.CompletionItem {
+pub fn errorCompletionItems(
+    self: DocumentStore,
+    arena: *std.heap.ArenaAllocator,
+    base: *DocumentStore.Handle,
+) ![]types.CompletionItem {
     return try self.tagStoreCompletionItems(arena, base, "error_completions");
 }
 
-pub fn enumCompletionItems(self: DocumentStore, arena: *std.heap.ArenaAllocator, base: *DocumentStore.Handle) ![]types.CompletionItem {
+pub fn enumCompletionItems(
+    self: DocumentStore,
+    arena: *std.heap.ArenaAllocator,
+    base: *DocumentStore.Handle,
+) ![]types.CompletionItem {
     return try self.tagStoreCompletionItems(arena, base, "enum_completions");
 }
