@@ -390,8 +390,8 @@ fn refreshDocument(self: *DocumentStore, handle: *Handle, zig_lib_path: ?[]const
             }
             log.debug("Import removed: {s}", .{old});
             self.decrementCount(old);
-            self.allocator.free(old);
         }
+        self.allocator.free(old);
     }
 }
 
