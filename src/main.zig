@@ -1375,7 +1375,7 @@ fn closeDocumentHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, re
 }
 
 fn semanticTokensFullHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.SemanticTokensFull, config: Config) (error{OutOfMemory} || std.fs.File.WriteError)!void {
-    if (config.enable_semantic_tokens) {
+    if (config.enable_semantic_tokens and client_capabilities.supports_semantic_tokens) {
         const handle = document_store.getHandle(req.params.textDocument.uri) orelse {
             logger.warn("Trying to get semantic tokens of non existent document {s}", .{req.params.textDocument.uri});
             return try respondGeneric(id, no_semantic_tokens_response);
