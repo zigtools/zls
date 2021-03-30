@@ -1549,7 +1549,11 @@ fn tokenRangeAppend(prev: SourceRange, token: std.zig.Token) SourceRange {
 
 const DocumentPosition = @import("offsets.zig").DocumentPosition;
 
-pub fn documentPositionContext(arena: *std.heap.ArenaAllocator, document: types.TextDocument, doc_position: DocumentPosition) !PositionContext {
+pub fn documentPositionContext(
+    arena: *std.heap.ArenaAllocator,
+    document: types.TextDocument,
+    doc_position: DocumentPosition,
+) !PositionContext {
     const line = doc_position.line;
     var tokenizer = std.zig.Tokenizer.init(line[0..doc_position.line_index]);
     var stack = try std.ArrayList(StackState).initCapacity(&arena.allocator, 8);
@@ -1639,7 +1643,30 @@ pub fn documentPositionContext(arena: *std.heap.ArenaAllocator, document: types.
     }
 
     return block: {
-        if (stack.popOrNull()) |state| break :block state.ctx;
+        if (stack.popOrNull()) |state| {
+            switch (state.ctx) {
+                .empty => {},
+                .label => |filled| {
+                    // We need to check this because the state could be a filled
+                    // label if only a space follows it
+                    const last_char = line[doc_position.line_index - 1];
+                    if (!filled or last_char != ' ') {
+                        break :block state.ctx;
+                    }
+                },
+                else => break :block state.ctx,
+            }
+        }
+        if (doc_position.line_index < line.len) {
+            switch (line[doc_position.line_index]) {
+                'a'...'z', 'A'...'Z', '_', '@' => {},
+                else => break :block .empty,
+            }
+            tokenizer = std.zig.Tokenizer.init(line[doc_position.line_index..]);
+            const tok = tokenizer.next();
+            if (tok.tag == .identifier)
+                break :block PositionContext{ .var_access = tok.loc };
+        }
         break :block .empty;
     };
 }

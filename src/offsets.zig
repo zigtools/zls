@@ -30,7 +30,11 @@ pub fn documentPosition(doc: types.TextDocument, position: types.Position, encod
         if (index < 0 or index > @intCast(i64, doc.text.len)) {
             return error.InvalidParams;
         }
-        return DocumentPosition{ .line = line, .absolute_index = @intCast(usize, index), .line_index = @intCast(usize, position.character) };
+        return DocumentPosition{
+            .line = line,
+            .absolute_index = @intCast(usize, index),
+            .line_index = @intCast(usize, position.character),
+        };
     } else {
         const utf8 = doc.text[line_start_idx..];
         var utf8_idx: usize = 0;
@@ -50,7 +54,11 @@ pub fn documentPosition(doc: types.TextDocument, position: types.Position, encod
             }
             utf8_idx = next_utf8_idx;
         }
-        return DocumentPosition{ .line = line, .absolute_index = line_start_idx + utf8_idx, .line_index = utf8_idx };
+        return DocumentPosition{
+            .line = line,
+            .absolute_index = line_start_idx + utf8_idx,
+            .line_index = utf8_idx,
+        };
     }
 }
 

@@ -357,8 +357,6 @@ fn nodeToCompletion(
     const node_tags = tree.nodes.items(.tag);
     const datas = tree.nodes.items(.data);
     const token_tags = tree.tokens.items(.tag);
-    if (tree.errors.len > 0)
-        return;
 
     const doc_kind: types.MarkupContent.Kind = if (client_capabilities.completion_doc_supports_md)
         .Markdown
@@ -1681,17 +1679,17 @@ fn processJsonRpc(arena: *std.heap.ArenaAllocator, parser: *std.json.Parser, jso
     logger.debug("Method without return value not implemented: {s}", .{method});
 }
 
-
 fn launchWizard() !void {
     const dest =
-        (try known_folders.getPath(allocator, .local_configuration))
-            orelse (try known_folders.getPath(allocator, .executable_dir))
-                orelse return error.NoConfigPathFound;
+        (try known_folders.getPath(allocator, .local_configuration)) orelse (try known_folders.getPath(allocator, .executable_dir)) orelse return error.NoConfigPathFound;
     defer allocator.free(dest);
     try setup.wizard(allocator, dest);
 }
 
-const stack_frames = switch (std.builtin.mode) { .Debug => 10, else => 0 };
+const stack_frames = switch (std.builtin.mode) {
+    .Debug => 10,
+    else => 0,
+};
 var gpa_state = std.heap.GeneralPurposeAllocator(.{ .stack_trace_frames = stack_frames }){};
 
 pub fn main() anyerror!void {
@@ -1711,7 +1709,7 @@ pub fn main() anyerror!void {
             std.debug.print("Enabled debug logging\n", .{});
         } else if (std.mem.eql(u8, arg, "config")) {
             try launchWizard();
-            args_it.deinit();            
+            args_it.deinit();
             return;
         } else {
             std.debug.print("Unrecognized argument {s}\n", .{arg});
