@@ -268,6 +268,14 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: []u8) anyerror!*Hand
         }
     }
 
+    handle.import_uris = try self.collectImportUris(handle);
+    errdefer {
+        for (handle.import_uris) |imp_uri| {
+            self.allocator.free(imp_uri);
+        }
+        self.allocator.free(handle.import_uris);
+    }
+
     try self.handles.putNoClobber(uri, handle);
     return handle;
 }
@@ -359,16 +367,14 @@ pub fn getHandle(self: *DocumentStore, uri: []const u8) ?*Handle {
     return self.handles.get(uri);
 }
 
-fn refreshDocument(self: *DocumentStore, handle: *Handle, zig_lib_path: ?[]const u8) !void {
-    log.debug("New text for document {s}", .{handle.uri()});
-    handle.tree.deinit(self.allocator);
-    handle.tree = try std.zig.parse(self.allocator, handle.document.text);
-
-    handle.document_scope.deinit(self.allocator);
-    handle.document_scope = try analysis.makeDocumentScope(self.allocator, handle.tree);
-
+fn collectImportUris(self: *DocumentStore, handle: *Handle) ![]const []const u8 {
     var new_imports = std.ArrayList([]const u8).init(self.allocator);
-    errdefer new_imports.deinit();
+    errdefer {
+        for (new_imports.items) |imp| {
+            self.allocator.free(imp);
+        }
+        new_imports.deinit();
+    }
     try analysis.collectImports(&new_imports, handle.tree);
 
     // Convert to URIs
@@ -382,9 +388,27 @@ fn refreshDocument(self: *DocumentStore, handle: *Handle, zig_lib_path: ?[]const
             _ = new_imports.swapRemove(i);
         }
     }
+    return new_imports.toOwnedSlice();
+}
+
+fn refreshDocument(self: *DocumentStore, handle: *Handle) !void {
+    log.debug("New text for document {s}", .{handle.uri()});
+    handle.tree.deinit(self.allocator);
+    handle.tree = try std.zig.parse(self.allocator, handle.document.text);
+
+    handle.document_scope.deinit(self.allocator);
+    handle.document_scope = try analysis.makeDocumentScope(self.allocator, handle.tree);
+
+    const new_imports = try self.collectImportUris(handle);
+    errdefer {
+        for (new_imports) |imp| {
+            self.allocator.free(imp);
+        }
+        self.allocator.free(new_imports);
+    }
 
     const old_imports = handle.import_uris;
-    handle.import_uris = new_imports.toOwnedSlice();
+    handle.import_uris = new_imports;
     defer {
         for (old_imports) |uri| {
             self.allocator.free(uri);
@@ -392,11 +416,11 @@ fn refreshDocument(self: *DocumentStore, handle: *Handle, zig_lib_path: ?[]const
         self.allocator.free(old_imports);
     }
 
-    i = 0;
+    var i: usize = 0;
     while (i < handle.imports_used.items.len) {
         const old = handle.imports_used.items[i];
         still_exists: {
-            for (new_imports.items) |new| {
+            for (new_imports) |new| {
                 if (std.mem.eql(u8, new, old)) {
                     break :still_exists;
                 }
@@ -429,7 +453,6 @@ pub fn applyChanges(
     handle: *Handle,
     content_changes: std.json.Array,
     offset_encoding: offsets.Encoding,
-    zig_lib_path: ?[]const u8,
 ) !void {
     const document = &handle.document;
 
@@ -492,7 +515,7 @@ pub fn applyChanges(
         }
     }
 
-    try self.refreshDocument(handle, zig_lib_path);
+    try self.refreshDocument(handle);
 }
 
 pub fn uriFromImportStr(

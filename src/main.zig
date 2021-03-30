@@ -1364,7 +1364,7 @@ fn changeDocumentHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, r
         return;
     };
 
-    try document_store.applyChanges(handle, req.params.contentChanges.Array, offset_encoding, config.zig_lib_path);
+    try document_store.applyChanges(handle, req.params.contentChanges.Array, offset_encoding);
     try publishDiagnostics(arena, handle.*, config);
 }
 
