@@ -1672,7 +1672,9 @@ fn processJsonRpc(arena: *std.heap.ArenaAllocator, parser: *std.json.Parser, jso
     logger.debug("Method without return value not implemented: {s}", .{method});
 }
 
-var gpa_state = std.heap.GeneralPurposeAllocator(.{}){};
+const stack_frames = switch (std.builtin.mode) { .Debug => 10, else => 0 };
+var gpa_state = std.heap.GeneralPurposeAllocator(.{ .stack_trace_frames = stack_frames }){};
+
 pub fn main() anyerror!void {
     defer _ = gpa_state.deinit();
     allocator = &gpa_state.allocator;
@@ -1703,15 +1705,7 @@ pub fn main() anyerror!void {
     const config_parse_options = std.json.ParseOptions{ .allocator = allocator };
     var config = Config{};
     var config_had_null_zig_path = config.zig_exe_path == null;
-    defer {
-        if (config_had_null_zig_path) {
-            if (config.zig_exe_path) |exe_path| {
-                allocator.free(exe_path);
-                config.zig_exe_path = null;
-            }
-        }
-        std.json.parseFree(Config, config, config_parse_options);
-    }
+    defer std.json.parseFree(Config, config, config_parse_options);
 
     config_read: {
         const res = try known_folders.getPath(allocator, .local_configuration);
@@ -1736,17 +1730,12 @@ pub fn main() anyerror!void {
 
     find_zig: {
         if (config.zig_exe_path) |exe_path| {
-            if (std.fs.path.isAbsolute(exe_path)) {
-                zig_exe_path = try std.mem.dupe(allocator, u8, exe_path);
-                // make sure the path still exists
-                if (blk: {
-                    std.fs.cwd().access(zig_exe_path.?, .{}) catch break :blk false;
-                    break :blk true;
-                })
-                    break :find_zig;
+            if (std.fs.path.isAbsolute(exe_path)) not_valid: {
+                std.fs.cwd().access(exe_path, .{}) catch break :not_valid;
+                break :find_zig;
             }
-
             logger.debug("zig path `{s}` is not absolute, will look in path", .{exe_path});
+            allocator.free(exe_path);
         }
 
         const env_path = std.process.getEnvVarOwned(allocator, "PATH") catch |err| switch (err) {
@@ -1758,7 +1747,7 @@ pub fn main() anyerror!void {
         };
         defer allocator.free(env_path);
 
-        const exe_extension = @as(std.zig.CrossTarget, .{}).exeFileExt();
+        const exe_extension = std.Target.current.exeFileExt();
         const zig_exe = try std.fmt.allocPrint(allocator, "zig{s}", .{exe_extension});
         defer allocator.free(zig_exe);
 
@@ -1771,15 +1760,15 @@ pub fn main() anyerror!void {
             defer allocator.free(full_path);
 
             var buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
-            zig_exe_path = try std.mem.dupe(allocator, u8, std.os.realpath(full_path, &buf) catch continue);
-            logger.info("Found zig in PATH: {s}", .{zig_exe_path});
+            config.zig_exe_path = try std.mem.dupe(allocator, u8, std.os.realpath(full_path, &buf) catch continue);
+            logger.info("Found zig in PATH: {s}", .{config.zig_exe_path});
             break :find_zig;
         }
     }
 
-    if (zig_exe_path) |exe_path| {
-        config.zig_exe_path = exe_path;
+    if (config.zig_exe_path) |exe_path| {
         logger.info("Using zig executable {s}", .{exe_path});
+
         if (config.zig_lib_path == null) find_lib_path: {
             // Use `zig env` to find the lib path
             const zig_env_result = try std.ChildProcess.exec(.{
