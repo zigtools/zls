@@ -222,8 +222,6 @@ pub fn isPascalCase(name: []const u8) bool {
 pub fn getDeclNameToken(tree: ast.Tree, node: ast.Node.Index) ?ast.TokenIndex {
     const tags = tree.nodes.items(.tag);
     const main_token = tree.nodes.items(.main_token)[node];
-    if (tree.errors.len > 0)
-        return null;
     return switch (tags[node]) {
         // regular declaration names. + 1 to mut token because name comes after 'const'/'var'
         .local_var_decl => tree.localVarDecl(node).ast.mut_token + 1,
@@ -348,8 +346,6 @@ pub fn resolveVarDeclAlias(store: *DocumentStore, arena: *std.heap.ArenaAllocato
     const token_tags = tree.tokens.items(.tag);
     const main_tokes = tree.nodes.items(.main_token);
     const node_tags = tree.nodes.items(.tag);
-    if (tree.errors.len > 0)
-        return null;
 
     if (varDecl(handle.tree, decl)) |var_decl| {
         if (var_decl.ast.init_node == 0) return null;
@@ -1234,8 +1230,6 @@ pub fn getFieldAccessType(
         .node = undefined,
         .handle = handle,
     });
-    if (handle.tree.errors.len > 0)
-        return null;
 
     // TODO Actually bind params here when calling functions instead of just skipping args.
     var bound_type_params = BoundTypeParams.init(&arena.allocator);
@@ -1881,8 +1875,6 @@ fn getDocumentSymbolsInternal(allocator: *std.mem.Allocator, tree: ast.Tree, nod
 
 pub fn getDocumentSymbols(allocator: *std.mem.Allocator, tree: ast.Tree, encoding: offsets.Encoding) ![]types.DocumentSymbol {
     var symbols = try std.ArrayList(types.DocumentSymbol).initCapacity(allocator, tree.rootDecls().len);
-    if (tree.errors.len > 0)
-        return symbols.items;
 
     var context = GetDocumentSymbolsContext{
         .symbols = &symbols,
@@ -2440,12 +2432,6 @@ pub const DocumentScope = struct {
     error_completions: CompletionSet,
     enum_completions: CompletionSet,
 
-    pub const none = DocumentScope{
-        .scopes = &[0]Scope{},
-        .error_completions = CompletionSet{},
-        .enum_completions = CompletionSet{},
-    };
-
     pub fn debugPrint(self: DocumentScope) void {
         for (self.scopes) |scope| {
             log.debug(
@@ -2508,9 +2494,6 @@ pub fn makeDocumentScope(allocator: *std.mem.Allocator, tree: ast.Tree) !Documen
     var scopes = std.ArrayListUnmanaged(Scope){};
     var error_completions = CompletionSet{};
     var enum_completions = CompletionSet{};
-
-    if (tree.errors.len > 0)
-        return DocumentScope.none;
 
     errdefer {
         scopes.deinit(allocator);
@@ -2763,10 +2746,7 @@ fn makeScopeInternal(
                     param.type_expr,
                 );
             }
-            const a = data[node_idx];
-            const left = data[a.lhs];
-            const right = data[a.rhs];
-            // log.debug("Alive 3.2 - {}- {}- {}-{} {}- {}-{}", .{tags[node_idx], tags[a.lhs], tags[left.lhs], tags[left.rhs], tags[a.rhs], tags[right.lhs], tags[right.rhs]});
+
             // Visit the return type
             try makeScopeInternal(
                 allocator,
