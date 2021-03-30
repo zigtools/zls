@@ -85,6 +85,9 @@ fn symbolReferencesInternal(
     const main_tokens = tree.nodes.items(.main_token);
     const starts = tree.tokens.items(.start);
 
+    if (tree.errors.len > 0)
+        return;
+
     switch (node_tags[node]) {
         .block, .block_semicolon, .block_two, .block_two_semicolon => {
             const statements: []const ast.Node.Index = switch (node_tags[node]) {

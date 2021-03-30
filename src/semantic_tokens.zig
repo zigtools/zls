@@ -1145,6 +1145,9 @@ fn writeNodeTokens(
 // TODO Range version, edit version.
 pub fn writeAllSemanticTokens(arena: *std.heap.ArenaAllocator, store: *DocumentStore, handle: *DocumentStore.Handle, encoding: offsets.Encoding) ![]u32 {
     var builder = Builder.init(arena.child_allocator, handle, encoding);
+    if (handle.tree.errors.len > 0) {
+        return builder.toOwnedSlice();
+    }
 
     // reverse the ast from the root declarations
     var gap_highlighter = GapHighlighter.init(&builder, 0);

@@ -222,6 +222,8 @@ pub fn isPascalCase(name: []const u8) bool {
 pub fn getDeclNameToken(tree: ast.Tree, node: ast.Node.Index) ?ast.TokenIndex {
     const tags = tree.nodes.items(.tag);
     const main_token = tree.nodes.items(.main_token)[node];
+    if (tree.errors.len > 0)
+        return null;
     return switch (tags[node]) {
         // regular declaration names. + 1 to mut token because name comes after 'const'/'var'
         .local_var_decl => tree.localVarDecl(node).ast.mut_token + 1,
@@ -346,6 +348,8 @@ pub fn resolveVarDeclAlias(store: *DocumentStore, arena: *std.heap.ArenaAllocato
     const token_tags = tree.tokens.items(.tag);
     const main_tokes = tree.nodes.items(.main_token);
     const node_tags = tree.nodes.items(.tag);
+    if (tree.errors.len > 0)
+        return null;
 
     if (varDecl(handle.tree, decl)) |var_decl| {
         if (var_decl.ast.init_node == 0) return null;
@@ -1182,64 +1186,29 @@ pub fn resolveTypeOfNode(store: *DocumentStore, arena: *std.heap.ArenaAllocator,
     return resolveTypeOfNodeInternal(store, arena, node_handle, &bound_type_params);
 }
 
-fn maybeCollectImport(tree: ast.Tree, builtin_call: ast.Node.Index, arr: *std.ArrayList([]const u8)) !void {
-    const tags = tree.nodes.items(.tag);
-    const datas = tree.nodes.items(.data);
-
-    const builtin_tag = tags[builtin_call];
-    const data = datas[builtin_call];
-
-    std.debug.assert(isBuiltinCall(tree, builtin_call));
-    if (!std.mem.eql(u8, tree.tokenSlice(builtin_call), "@import")) return;
-
-    const params = switch (builtin_tag) {
-        .builtin_call, .builtin_call_comma => tree.extra_data[data.lhs..data.rhs],
-        .builtin_call_two, .builtin_call_two_comma => if (data.lhs == 0)
-            &[_]ast.Node.Index{}
-        else if (data.rhs == 0)
-            &[_]ast.Node.Index{data.lhs}
-        else
-            &[_]ast.Node.Index{ data.lhs, data.rhs },
-        else => unreachable,
-    };
-    if (params.len != 1) return;
-
-    if (tags[params[0]] != .string_literal) return;
-
-    const import_str = tree.tokenSlice(tree.nodes.items(.main_token)[params[0]]);
-    try arr.append(import_str[1 .. import_str.len - 1]);
-}
-
 /// Collects all imports we can find into a slice of import paths (without quotes).
-/// The import paths are valid as long as the tree is.
 pub fn collectImports(import_arr: *std.ArrayList([]const u8), tree: ast.Tree) !void {
-    // TODO: Currently only detects `const smth = @import("string literal")<.SomeThing>;`
-    const tags = tree.nodes.items(.tag);
-    for (tree.rootDecls()) |decl_idx| {
-        const var_decl_maybe: ?ast.full.VarDecl = switch (tags[decl_idx]) {
-            .global_var_decl => tree.globalVarDecl(decl_idx),
-            .local_var_decl => tree.localVarDecl(decl_idx),
-            .simple_var_decl => tree.simpleVarDecl(decl_idx),
-            else => null,
-        };
-        const var_decl = var_decl_maybe orelse continue;
-        if (var_decl.ast.init_node == 0) continue;
+    const tags = tree.tokens.items(.tag);
 
-        const init_node = var_decl.ast.init_node;
-        const init_node_tag = tags[init_node];
-        switch (init_node_tag) {
-            .builtin_call,
-            .builtin_call_comma,
-            .builtin_call_two,
-            .builtin_call_two_comma,
-            => try maybeCollectImport(tree, init_node, import_arr),
-            .field_access => {
-                const lhs = tree.nodes.items(.data)[init_node].lhs;
-                if (isBuiltinCall(tree, lhs)) {
-                    try maybeCollectImport(tree, lhs, import_arr);
-                }
-            },
-            else => {},
+    while (i < tags.len) : (i += 1) {
+        if (tags[i] != .builtin)
+            continue;
+        const text = tree.tokenSlice(i);
+        log.debug("Found {}", .{ text });
+        
+        if (std.mem.eql(u8, text, "@import")) {
+            if (i + 3 >= tags.len)
+                break;
+            if (tags[i + 1] != .l_paren)
+                continue;
+            if (tags[i + 2] != .string_literal)
+                continue;
+            if (tags[i + 3] != .r_paren)
+                continue;
+
+
+            const str = tree.tokenSlice(i + 2);
+            try import_arr.append(str[1..str.len-1]);
         }
     }
 }
@@ -1265,6 +1234,8 @@ pub fn getFieldAccessType(
         .node = undefined,
         .handle = handle,
     });
+    if (handle.tree.errors > 0)
+        return null;
 
     // TODO Actually bind params here when calling functions instead of just skipping args.
     var bound_type_params = BoundTypeParams.init(&arena.allocator);
@@ -1910,6 +1881,8 @@ fn getDocumentSymbolsInternal(allocator: *std.mem.Allocator, tree: ast.Tree, nod
 
 pub fn getDocumentSymbols(allocator: *std.mem.Allocator, tree: ast.Tree, encoding: offsets.Encoding) ![]types.DocumentSymbol {
     var symbols = try std.ArrayList(types.DocumentSymbol).initCapacity(allocator, tree.rootDecls().len);
+    if (tree.errors.len > 0)
+        return 0;
 
     var context = GetDocumentSymbolsContext{
         .symbols = &symbols,
@@ -2467,6 +2440,12 @@ pub const DocumentScope = struct {
     error_completions: CompletionSet,
     enum_completions: CompletionSet,
 
+    pub const none = DocumentScope{
+        .scopes = &[0]Scope{},
+        .error_completions = CompletionSet{},
+        .enum_completions = CompletionSet{},
+    };
+
     pub fn debugPrint(self: DocumentScope) void {
         for (self.scopes) |scope| {
             log.debug(
@@ -2529,6 +2508,9 @@ pub fn makeDocumentScope(allocator: *std.mem.Allocator, tree: ast.Tree) !Documen
     var scopes = std.ArrayListUnmanaged(Scope){};
     var error_completions = CompletionSet{};
     var enum_completions = CompletionSet{};
+
+    if (tree.errors.len > 0)
+        return DocumentScope.none;
 
     errdefer {
         scopes.deinit(allocator);
@@ -2748,6 +2730,7 @@ fn makeScopeInternal(
         => |fn_tag| {
             var buf: [1]ast.Node.Index = undefined;
             const func = fnProto(tree, node_idx, &buf).?;
+            // log.debug("Alive 3.1", .{});
 
             (try scopes.addOne(allocator)).* = .{
                 .range = nodeSourceRange(tree, node_idx),
@@ -2781,7 +2764,10 @@ fn makeScopeInternal(
                     param.type_expr,
                 );
             }
-
+            const a = data[node_idx];
+            const left = data[a.lhs];
+            const right = data[a.rhs];
+            // log.debug("Alive 3.2 - {}- {}- {}-{} {}- {}-{}", .{tags[node_idx], tags[a.lhs], tags[left.lhs], tags[left.rhs], tags[a.rhs], tags[right.lhs], tags[right.rhs]});
             // Visit the return type
             try makeScopeInternal(
                 allocator,
@@ -2795,6 +2781,7 @@ fn makeScopeInternal(
                 else
                     data[node_idx].rhs,
             );
+            log.debug("Alive 3.3", .{});
             // Visit the function body
             if (fn_tag == .fn_decl) {
                 try makeScopeInternal(
@@ -3256,7 +3243,7 @@ fn makeScopeInternal(
         => {
             const field = containerField(tree, node_idx).?;
 
-            if (field.ast.type_expr != 0)
+            if (field.ast.type_expr != 0) {
                 try makeScopeInternal(
                     allocator,
                     scopes,
@@ -3265,7 +3252,8 @@ fn makeScopeInternal(
                     tree,
                     field.ast.type_expr,
                 );
-            if (field.ast.align_expr != 0)
+            }
+            if (field.ast.align_expr != 0) {
                 try makeScopeInternal(
                     allocator,
                     scopes,
@@ -3274,7 +3262,8 @@ fn makeScopeInternal(
                     tree,
                     field.ast.align_expr,
                 );
-            if (field.ast.value_expr != 0)
+            }
+            if (field.ast.value_expr != 0) {
                 try makeScopeInternal(
                     allocator,
                     scopes,
@@ -3283,6 +3272,7 @@ fn makeScopeInternal(
                     tree,
                     field.ast.value_expr,
                 );
+            }
         },
         .builtin_call,
         .builtin_call_comma,

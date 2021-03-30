@@ -356,6 +356,8 @@ fn nodeToCompletion(
     const node_tags = tree.nodes.items(.tag);
     const datas = tree.nodes.items(.data);
     const token_tags = tree.tokens.items(.tag);
+    if (tree.errors.len > 0)
+        return;
 
     const doc_kind: types.MarkupContent.Kind = if (client_capabilities.completion_doc_supports_md)
         .Markdown
