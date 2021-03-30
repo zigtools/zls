@@ -21,7 +21,10 @@ const BuildFile = struct {
 pub const Handle = struct {
     document: types.TextDocument,
     count: usize,
-    import_uris: std.ArrayList([]const u8),
+    /// Contains one entry for every import in the document
+    import_uris: []const []const u8,
+    /// Items in thsi array list come from `import_uris`
+    imports_used: std.ArrayListUnmanaged([]const u8),
     tree: std.zig.ast.Tree,
     document_scope: analysis.DocumentScope,
 
@@ -151,7 +154,8 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: []u8) anyerror!*Hand
 
     handle.* = Handle{
         .count = 1,
-        .import_uris = std.ArrayList([]const u8).init(self.allocator),
+        .import_uris = &.{},
+        .imports_used = .{},
         .document = .{
             .uri = uri,
             .text = text,
@@ -329,13 +333,17 @@ fn decrementCount(self: *DocumentStore, uri: []const u8) void {
         entry.value.tree.deinit(self.allocator);
         self.allocator.free(entry.value.document.mem);
 
-        for (entry.value.import_uris.items) |import_uri| {
+        for (entry.value.imports_used.items) |import_uri| {
             self.decrementCount(import_uri);
+        }
+
+        for (entry.value.import_uris) |import_uri| {
             self.allocator.free(import_uri);
         }
 
         entry.value.document_scope.deinit(self.allocator);
-        entry.value.import_uris.deinit();
+        entry.value.imports_used.deinit(self.allocator);
+        self.allocator.free(entry.value.import_uris);
         self.allocator.destroy(entry.value);
         const uri_key = entry.key;
         self.handles.removeAssertDiscard(uri);
@@ -351,7 +359,6 @@ pub fn getHandle(self: *DocumentStore, uri: []const u8) ?*Handle {
     return self.handles.get(uri);
 }
 
-// Check if the document text is now sane, move it to sane_text if so.
 fn refreshDocument(self: *DocumentStore, handle: *Handle, zig_lib_path: ?[]const u8) !void {
     log.debug("New text for document {s}", .{handle.uri()});
     handle.tree.deinit(self.allocator);
@@ -359,7 +366,7 @@ fn refreshDocument(self: *DocumentStore, handle: *Handle, zig_lib_path: ?[]const
 
     handle.document_scope.deinit(self.allocator);
     handle.document_scope = try analysis.makeDocumentScope(self.allocator, handle.tree);
-    
+
     var new_imports = std.ArrayList([]const u8).init(self.allocator);
     errdefer new_imports.deinit();
     try analysis.collectImports(&new_imports, handle.tree);
@@ -377,11 +384,17 @@ fn refreshDocument(self: *DocumentStore, handle: *Handle, zig_lib_path: ?[]const
     }
 
     const old_imports = handle.import_uris;
-    handle.import_uris = new_imports;
-    defer old_imports.deinit();
+    handle.import_uris = new_imports.toOwnedSlice();
+    defer {
+        for (old_imports) |uri| {
+            self.allocator.free(uri);
+        }
+        self.allocator.free(old_imports);
+    }
 
-    // Remove all old_imports that do not exist anymore
-    for (old_imports.items) |old| {
+    i = 0;
+    while (i < handle.imports_used.items.len) {
+        const old = handle.imports_used.items[i];
         still_exists: {
             for (new_imports.items) |new| {
                 if (std.mem.eql(u8, new, old)) {
@@ -390,8 +403,10 @@ fn refreshDocument(self: *DocumentStore, handle: *Handle, zig_lib_path: ?[]const
             }
             log.debug("Import removed: {s}", .{old});
             self.decrementCount(old);
+            _ = handle.imports_used.swapRemove(i);
+            continue;
         }
-        self.allocator.free(old);
+        i += 1;
     }
 }
 
@@ -505,7 +520,9 @@ pub fn uriFromImportStr(
     } else {
         const base = handle.uri();
         var base_len = base.len;
-        while (base[base_len - 1] != '/' and base_len > 0) { base_len -= 1; }
+        while (base[base_len - 1] != '/' and base_len > 0) {
+            base_len -= 1;
+        }
         base_len -= 1;
         if (base_len <= 0) {
             return error.UriBadScheme;
@@ -515,21 +532,19 @@ pub fn uriFromImportStr(
 }
 
 pub fn resolveImport(self: *DocumentStore, handle: *Handle, import_str: []const u8) !?*Handle {
+    std.debug.print("RESOLVING IMPORT STR: {s}\n", .{import_str});
     const allocator = self.allocator;
     const final_uri = (try self.uriFromImportStr(
         self.allocator,
         handle.*,
         import_str,
     )) orelse return null;
-
     var consumed_final_uri = false;
     defer if (!consumed_final_uri) allocator.free(final_uri);
 
-    // Check if we already imported this.
-    for (handle.import_uris.items) |uri| {
-        // If we did, set our new handle and return the parsed tree root node.
+    for (handle.imports_used.items) |uri| {
         if (std.mem.eql(u8, uri, final_uri)) {
-            return self.getHandle(final_uri);
+            return self.getHandle(final_uri).?;
         }
     }
 
@@ -538,7 +553,7 @@ pub fn resolveImport(self: *DocumentStore, handle: *Handle, import_str: []const 
     if (self.getHandle(final_uri)) |new_handle| {
         // If it is, append it to our imports, increment the count, set our new handle
         // and return the parsed tree root node.
-        try handle.import_uris.append(final_uri);
+        try handle.imports_used.append(self.allocator, final_uri);
         consumed_final_uri = true;
 
         new_handle.count += 1;
@@ -567,7 +582,7 @@ pub fn resolveImport(self: *DocumentStore, handle: *Handle, import_str: []const 
         };
 
         // Add to import table of current handle.
-        try handle.import_uris.append(final_uri);
+        try handle.imports_used.append(self.allocator, final_uri);
         consumed_final_uri = true;
 
         // Swap handles.
@@ -601,12 +616,11 @@ pub fn deinit(self: *DocumentStore) void {
         entry.value.document_scope.deinit(self.allocator);
         entry.value.tree.deinit(self.allocator);
         self.allocator.free(entry.value.document.mem);
-
-        for (entry.value.import_uris.items) |uri| {
+        for (entry.value.import_uris) |uri| {
             self.allocator.free(uri);
         }
-
-        entry.value.import_uris.deinit();
+        self.allocator.free(entry.value.import_uris);
+        entry.value.imports_used.deinit(self.allocator);
         self.allocator.free(entry.key);
         self.allocator.destroy(entry.value);
     }
@@ -637,7 +651,7 @@ fn tagStoreCompletionItems(
 ) ![]types.CompletionItem {
     // TODO Better solution for deciding what tags to include
     var max_len: usize = @field(base.document_scope, name).count();
-    for (base.import_uris.items) |uri| {
+    for (base.imports_used.items) |uri| {
         max_len += @field(self.handles.get(uri).?.document_scope, name).count();
     }
 
@@ -646,7 +660,7 @@ fn tagStoreCompletionItems(
     result_set.entries.appendSliceAssumeCapacity(@field(base.document_scope, name).entries.items);
     try result_set.reIndex(&arena.allocator);
 
-    for (base.import_uris.items) |uri| {
+    for (base.imports_used.items) |uri| {
         const curr_set = &@field(self.handles.get(uri).?.document_scope, name);
         for (curr_set.entries.items) |entry| {
             result_set.putAssumeCapacity(entry.key, {});

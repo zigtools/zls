@@ -538,7 +538,7 @@ pub fn symbolReferences(
     switch (decl_handle.decl.*) {
         .ast_node => |decl_node| {
             try symbolReferencesInternal(arena, store, .{ .node = 0, .handle = curr_handle }, decl_handle, encoding, context, handler);
-            
+
             var imports = std.ArrayList(*DocumentStore.Handle).init(&arena.allocator);
 
             var handle_it = store.handles.iterator();
@@ -553,7 +553,7 @@ pub fn symbolReferences(
                 var i: usize = 0;
                 blk: while (i < imports.items.len) : (i += 1) {
                     const import = imports.items[i];
-                    for (import.import_uris.items) |uri| {
+                    for (import.imports_used.items) |uri| {
                         const h = store.getHandle(uri) orelse break;
 
                         if (h == curr_handle) {

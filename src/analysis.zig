@@ -1191,7 +1191,7 @@ pub fn collectImports(import_arr: *std.ArrayList([]const u8), tree: ast.Tree) !v
         if (tags[i] != .builtin)
             continue;
         const text = tree.tokenSlice(@intCast(u32, i));
-        
+
         if (std.mem.eql(u8, text, "@import")) {
             if (i + 3 >= tags.len)
                 break;
@@ -1202,9 +1202,8 @@ pub fn collectImports(import_arr: *std.ArrayList([]const u8), tree: ast.Tree) !v
             if (tags[i + 3] != .r_paren)
                 continue;
 
-
             const str = tree.tokenSlice(@intCast(u32, i + 2));
-            try import_arr.append(str[1..str.len-1]);
+            try import_arr.append(str[1 .. str.len - 1]);
         }
     }
 }

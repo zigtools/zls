@@ -1672,7 +1672,10 @@ fn processJsonRpc(arena: *std.heap.ArenaAllocator, parser: *std.json.Parser, jso
     logger.debug("Method without return value not implemented: {s}", .{method});
 }
 
-const stack_frames = switch (std.builtin.mode) { .Debug => 10, else => 0 };
+const stack_frames = switch (std.builtin.mode) {
+    .Debug => 10,
+    else => 0,
+};
 var gpa_state = std.heap.GeneralPurposeAllocator(.{ .stack_trace_frames = stack_frames }){};
 
 pub fn main() anyerror!void {
