@@ -1106,7 +1106,13 @@ fn completeBuiltin(arena: *std.heap.ArenaAllocator, id: types.RequestId, config:
     });
 }
 
-fn completeGlobal(arena: *std.heap.ArenaAllocator, id: types.RequestId, pos_index: usize, handle: *DocumentStore.Handle, config: Config) !void {
+fn completeGlobal(
+    arena: *std.heap.ArenaAllocator,
+    id: types.RequestId,
+    pos_index: usize,
+    handle: *DocumentStore.Handle,
+    config: Config,
+) !void {
     var completions = std.ArrayList(types.CompletionItem).init(&arena.allocator);
 
     const context = DeclToCompletionContext{

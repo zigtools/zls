@@ -329,7 +329,7 @@ fn writeContainerField(
     field_token_type: ?TokenType,
     child_frame: anytype,
 ) !void {
-    const container_field = analysis.containerField(builder.handle.tree, node).?;
+    const container_field = containerField(builder.handle.tree, node).?;
     if (analysis.getDocCommentTokenIndex(builder.handle.tree, node)) |docs|
         try writeDocComments(builder, builder.handle.tree, docs);
 
@@ -443,7 +443,7 @@ fn writeNodeTokens(
         .simple_var_decl,
         .aligned_var_decl,
         => {
-            const var_decl = analysis.varDecl(tree, node).?;
+            const var_decl = varDecl(tree, node).?;
             if (analysis.getDocCommentTokenIndex(tree, node)) |comment_idx|
                 try writeDocComments(builder, handle.tree, comment_idx);
 
@@ -558,7 +558,7 @@ fn writeNodeTokens(
         .fn_decl,
         => {
             var buf: [1]ast.Node.Index = undefined;
-            const fn_proto: ast.full.FnProto = analysis.fnProto(tree, node, &buf).?;
+            const fn_proto: ast.full.FnProto = fnProto(tree, node, &buf).?;
             if (analysis.getDocCommentTokenIndex(tree, node)) |docs|
                 try writeDocComments(builder, handle.tree, docs);
 
@@ -657,15 +657,7 @@ fn writeNodeTokens(
         .for_simple,
         .@"for",
         => {
-            const while_node: ast.full.While = switch (tag) {
-                .@"while" => tree.whileFull(node),
-                .while_simple => tree.whileSimple(node),
-                .while_cont => tree.whileCont(node),
-                .@"for" => tree.forFull(node),
-                .for_simple => tree.forSimple(node),
-                else => unreachable,
-            };
-
+            const while_node = whileAst(tree, node).?;
             try writeToken(builder, while_node.label_token, .label);
             try writeToken(builder, while_node.inline_token, .keyword);
             try writeToken(builder, while_node.ast.while_token, .keyword);
@@ -700,7 +692,7 @@ fn writeNodeTokens(
         .@"if",
         .if_simple,
         => {
-            const if_node: ast.full.If = if (tag == .@"if") ifFull(tree, node) else tree.ifSimple(node);
+            const if_node: ast.full.If = if (tag == .@"if") ifFull(tree, node) else ifSimple(tree, node);
 
             try writeToken(builder, if_node.ast.if_token, .keyword);
             try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, if_node.ast.cond_expr });
@@ -773,7 +765,7 @@ fn writeNodeTokens(
                     .node = struct_init.ast.type_expr,
                     .handle = handle,
                 })) |struct_type| switch (struct_type.type.data) {
-                    .other => |type_node| if (analysis.isContainer(struct_type.handle.tree, type_node))
+                    .other => |type_node| if (isContainer(struct_type.handle.tree, type_node))
                         fieldTokenType(type_node, struct_type.handle)
                     else
                         null,
@@ -1039,7 +1031,7 @@ fn writeNodeTokens(
                 switch (decl_type.decl.*) {
                     .ast_node => |decl_node| {
                         if (decl_type.handle.tree.nodes.items(.tag)[decl_node].isContainerField()) {
-                            const tok_type: ?TokenType = if (analysis.isContainer(lhs_type.handle.tree, left_type_node))
+                            const tok_type: ?TokenType = if (isContainer(lhs_type.handle.tree, left_type_node))
                                 fieldTokenType(decl_node, lhs_type.handle)
                             else if (left_type_node == 0)
                                 TokenType.field
@@ -1065,7 +1057,7 @@ fn writeNodeTokens(
         .ptr_type_bit_range,
         .ptr_type_sentinel,
         => {
-            const ptr_type = analysis.ptrType(tree, node).?;
+            const ptr_type = ptrType(tree, node).?;
 
             if (ptr_type.size == .One and token_tags[main_token] == .asterisk_asterisk and
                 main_token == main_tokens[ptr_type.ast.child_type])
@@ -1150,7 +1142,7 @@ pub fn writeAllSemanticTokens(arena: *std.heap.ArenaAllocator, store: *DocumentS
     var gap_highlighter = GapHighlighter.init(&builder, 0);
 
     var buf: [2]ast.Node.Index = undefined;
-    for (analysis.declMembers(handle.tree, 0, &buf)) |child| {
+    for (declMembers(handle.tree, 0, &buf)) |child| {
         try gap_highlighter.next(child);
         try writeNodeTokens(&builder, arena, store, child);
     }

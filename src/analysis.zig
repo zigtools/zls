@@ -726,7 +726,13 @@ pub fn resolveTypeOfNodeInternal(
                 };
             }
 
-            if (try lookupSymbolGlobal(store, arena, handle, tree.getNodeSource(node), starts[main_tokens[node]])) |child| {
+            if (try lookupSymbolGlobal(
+                store,
+                arena,
+                handle,
+                tree.getNodeSource(node),
+                starts[main_tokens[node]],
+            )) |child| {
                 switch (child.decl.*) {
                     .ast_node => |n| {
                         if (n == node) return null;
@@ -1443,28 +1449,6 @@ fn nodeContainsSourceIndex(tree: ast.Tree, node: ast.Node.Index, source_index: u
     return source_index >= first_token and source_index <= last_token;
 }
 
-fn isBuiltinCall(tree: ast.Tree, node: ast.Node.Index) bool {
-    return switch (tree.nodes.items(.tag)[node]) {
-        .builtin_call,
-        .builtin_call_comma,
-        .builtin_call_two,
-        .builtin_call_two_comma,
-        => true,
-        else => false,
-    };
-}
-
-pub fn fnProto(tree: ast.Tree, node: ast.Node.Index, buf: *[1]ast.Node.Index) ?ast.full.FnProto {
-    return switch (tree.nodes.items(.tag)[node]) {
-        .fn_proto => tree.fnProto(node),
-        .fn_proto_multi => tree.fnProtoMulti(node),
-        .fn_proto_one => tree.fnProtoOne(buf, node),
-        .fn_proto_simple => tree.fnProtoSimple(buf, node),
-        .fn_decl => fnProto(tree, tree.nodes.items(.data)[node].lhs, buf),
-        else => null,
-    };
-}
-
 pub fn getImportStr(tree: ast.Tree, node: ast.Node.Index, source_index: usize) ?[]const u8 {
     const node_tags = tree.nodes.items(.tag);
     var buf: [2]ast.Node.Index = undefined;
@@ -2058,25 +2042,6 @@ pub const DeclWithHandle = struct {
     }
 };
 
-pub fn containerField(tree: ast.Tree, node: ast.Node.Index) ?ast.full.ContainerField {
-    return switch (tree.nodes.items(.tag)[node]) {
-        .container_field => tree.containerField(node),
-        .container_field_init => tree.containerFieldInit(node),
-        .container_field_align => tree.containerFieldAlign(node),
-        else => null,
-    };
-}
-
-pub fn ptrType(tree: ast.Tree, node: ast.Node.Index) ?ast.full.PtrType {
-    return switch (tree.nodes.items(.tag)[node]) {
-        .ptr_type => tree.ptrType(node),
-        .ptr_type_aligned => tree.ptrTypeAligned(node),
-        .ptr_type_bit_range => tree.ptrTypeBitRange(node),
-        .ptr_type_sentinel => tree.ptrTypeSentinel(node),
-        else => null,
-    };
-}
-
 fn findContainerScope(container_handle: NodeWithHandle) ?*Scope {
     const container = container_handle.node;
     const handle = container_handle.handle;
@@ -2551,56 +2516,6 @@ fn nodeSourceRange(tree: ast.Tree, node: ast.Node.Index) SourceRange {
     };
 }
 
-pub fn isContainer(tree: ast.Tree, node: ast.Node.Index) bool {
-    return switch (tree.nodes.items(.tag)[node]) {
-        .container_decl,
-        .container_decl_trailing,
-        .container_decl_arg,
-        .container_decl_arg_trailing,
-        .container_decl_two,
-        .container_decl_two_trailing,
-        .tagged_union,
-        .tagged_union_trailing,
-        .tagged_union_two,
-        .tagged_union_two_trailing,
-        .tagged_union_enum_tag,
-        .tagged_union_enum_tag_trailing,
-        .root,
-        .error_set_decl,
-        => true,
-        else => false,
-    };
-}
-
-/// Returns the member indices of a given declaration container.
-/// Asserts given `tag` is a container node
-pub fn declMembers(tree: ast.Tree, node_idx: ast.Node.Index, buffer: *[2]ast.Node.Index) []const ast.Node.Index {
-    std.debug.assert(isContainer(tree, node_idx));
-    return switch (tree.nodes.items(.tag)[node_idx]) {
-        .container_decl, .container_decl_trailing => tree.containerDecl(node_idx).ast.members,
-        .container_decl_arg, .container_decl_arg_trailing => tree.containerDeclArg(node_idx).ast.members,
-        .container_decl_two, .container_decl_two_trailing => tree.containerDeclTwo(buffer, node_idx).ast.members,
-        .tagged_union, .tagged_union_trailing => tree.taggedUnion(node_idx).ast.members,
-        .tagged_union_enum_tag, .tagged_union_enum_tag_trailing => tree.taggedUnionEnumTag(node_idx).ast.members,
-        .tagged_union_two, .tagged_union_two_trailing => tree.taggedUnionTwo(buffer, node_idx).ast.members,
-        .root => tree.rootDecls(),
-        .error_set_decl => &[_]ast.Node.Index{},
-        else => unreachable,
-    };
-}
-
-/// Returns an `ast.full.VarDecl` for a given node index.
-/// Returns null if the tag doesn't match
-pub fn varDecl(tree: ast.Tree, node_idx: ast.Node.Index) ?ast.full.VarDecl {
-    return switch (tree.nodes.items(.tag)[node_idx]) {
-        .global_var_decl => tree.globalVarDecl(node_idx),
-        .local_var_decl => tree.localVarDecl(node_idx),
-        .aligned_var_decl => tree.alignedVarDecl(node_idx),
-        .simple_var_decl => tree.simpleVarDecl(node_idx),
-        else => null,
-    };
-}
-
 // TODO Possibly collect all imports to diff them on changes
 //      as well
 fn makeScopeInternal(
@@ -2890,7 +2805,7 @@ fn makeScopeInternal(
             const if_node: ast.full.If = if (node_tag == .@"if")
                 ifFull(tree, node_idx)
             else
-                tree.ifSimple(node_idx);
+                ifSimple(tree, node_idx);
 
             if (if_node.payload_token) |payload| {
                 var scope = try scopes.addOne(allocator);
@@ -2962,15 +2877,7 @@ fn makeScopeInternal(
         .@"for",
         .for_simple,
         => {
-            const while_node: ast.full.While = switch (node_tag) {
-                .@"while" => tree.whileFull(node_idx),
-                .while_simple => tree.whileSimple(node_idx),
-                .while_cont => tree.whileCont(node_idx),
-                .@"for" => tree.forFull(node_idx),
-                .for_simple => tree.forSimple(node_idx),
-                else => unreachable,
-            };
-
+            const while_node = whileAst(tree, node_idx).?;
             const is_for = node_tag == .@"for" or node_tag == .for_simple;
 
             if (while_node.label_token) |label| {

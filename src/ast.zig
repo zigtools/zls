@@ -9,6 +9,109 @@ const Node = ast.Node;
 const full = ast.full;
 const assert = std.debug.assert;
 
+fn fullPtrType(tree: Tree, info: full.PtrType.Ast) full.PtrType {
+    const token_tags = tree.tokens.items(.tag);
+    // TODO: looks like stage1 isn't quite smart enough to handle enum
+    // literals in some places here
+    const Size = std.builtin.TypeInfo.Pointer.Size;
+    const size: Size = switch (token_tags[info.main_token]) {
+        .asterisk,
+        .asterisk_asterisk,
+        => switch (token_tags[info.main_token + 1]) {
+            .r_bracket, .colon => .Many,
+            .identifier => if (token_tags[info.main_token - 1] == .l_bracket) Size.C else .One,
+            else => .One,
+        },
+        .l_bracket => Size.Slice,
+        else => unreachable,
+    };
+    var result: full.PtrType = .{
+        .size = size,
+        .allowzero_token = null,
+        .const_token = null,
+        .volatile_token = null,
+        .ast = info,
+    };
+    // We need to be careful that we don't iterate over any sub-expressions
+    // here while looking for modifiers as that could result in false
+    // positives. Therefore, start after a sentinel if there is one and
+    // skip over any align node and bit range nodes.
+    var i = if (info.sentinel != 0) lastToken(tree, info.sentinel) + 1 else info.main_token;
+    const end = tree.firstToken(info.child_type);
+    while (i < end) : (i += 1) {
+        switch (token_tags[i]) {
+            .keyword_allowzero => result.allowzero_token = i,
+            .keyword_const => result.const_token = i,
+            .keyword_volatile => result.volatile_token = i,
+            .keyword_align => {
+                assert(info.align_node != 0);
+                if (info.bit_range_end != 0) {
+                    assert(info.bit_range_start != 0);
+                    i = lastToken(tree, info.bit_range_end) + 1;
+                } else {
+                    i = lastToken(tree, info.align_node) + 1;
+                }
+            },
+            else => {},
+        }
+    }
+    return result;
+}
+
+pub fn ptrTypeSimple(tree: Tree, node: Node.Index) full.PtrType {
+    assert(tree.nodes.items(.tag)[node] == .ptr_type);
+    const data = tree.nodes.items(.data)[node];
+    const extra = tree.extraData(data.lhs, Node.PtrType);
+    return fullPtrType(tree, .{
+        .main_token = tree.nodes.items(.main_token)[node],
+        .align_node = extra.align_node,
+        .sentinel = extra.sentinel,
+        .bit_range_start = 0,
+        .bit_range_end = 0,
+        .child_type = data.rhs,
+    });
+}
+
+pub fn ptrTypeSentinel(tree: Tree, node: Node.Index) full.PtrType {
+    assert(tree.nodes.items(.tag)[node] == .ptr_type_sentinel);
+    const data = tree.nodes.items(.data)[node];
+    return fullPtrType(tree, .{
+        .main_token = tree.nodes.items(.main_token)[node],
+        .align_node = 0,
+        .sentinel = data.lhs,
+        .bit_range_start = 0,
+        .bit_range_end = 0,
+        .child_type = data.rhs,
+    });
+}
+
+pub fn ptrTypeAligned(tree: Tree, node: Node.Index) full.PtrType {
+    assert(tree.nodes.items(.tag)[node] == .ptr_type_aligned);
+    const data = tree.nodes.items(.data)[node];
+    return fullPtrType(tree, .{
+        .main_token = tree.nodes.items(.main_token)[node],
+        .align_node = data.lhs,
+        .sentinel = 0,
+        .bit_range_start = 0,
+        .bit_range_end = 0,
+        .child_type = data.rhs,
+    });
+}
+
+pub fn ptrTypeBitRange(tree: Tree, node: Node.Index) full.PtrType {
+    assert(tree.nodes.items(.tag)[node] == .ptr_type_bit_range);
+    const data = tree.nodes.items(.data)[node];
+    const extra = tree.extraData(data.lhs, Node.PtrTypeBitRange);
+    return fullPtrType(tree, .{
+        .main_token = tree.nodes.items(.main_token)[node],
+        .align_node = extra.align_node,
+        .sentinel = extra.sentinel,
+        .bit_range_start = extra.bit_range_start,
+        .bit_range_end = extra.bit_range_end,
+        .child_type = data.rhs,
+    });
+}
+
 fn fullIf(tree: Tree, info: full.If.Ast) full.If {
     const token_tags = tree.tokens.items(.tag);
     var result: full.If = .{
@@ -43,6 +146,110 @@ pub fn ifFull(tree: Tree, node: Node.Index) full.If {
         .then_expr = extra.then_expr,
         .else_expr = extra.else_expr,
         .if_token = tree.nodes.items(.main_token)[node],
+    });
+}
+
+pub fn ifSimple(tree: Tree, node: Node.Index) full.If {
+    assert(tree.nodes.items(.tag)[node] == .if_simple);
+    const data = tree.nodes.items(.data)[node];
+    return fullIf(tree, .{
+        .cond_expr = data.lhs,
+        .then_expr = data.rhs,
+        .else_expr = 0,
+        .if_token = tree.nodes.items(.main_token)[node],
+    });
+}
+
+fn fullWhile(tree: Tree, info: full.While.Ast) full.While {
+    const token_tags = tree.tokens.items(.tag);
+    var result: full.While = .{
+        .ast = info,
+        .inline_token = null,
+        .label_token = null,
+        .payload_token = null,
+        .else_token = undefined,
+        .error_token = null,
+    };
+    var tok_i = info.while_token - 1;
+    if (token_tags[tok_i] == .keyword_inline) {
+        result.inline_token = tok_i;
+        tok_i -= 1;
+    }
+    if (token_tags[tok_i] == .colon and
+        token_tags[tok_i - 1] == .identifier)
+    {
+        result.label_token = tok_i - 1;
+    }
+    const last_cond_token = lastToken(tree, info.cond_expr);
+    if (token_tags[last_cond_token + 2] == .pipe) {
+        result.payload_token = last_cond_token + 3;
+    }
+    if (info.else_expr != 0) {
+        // then_expr else |x|
+        //           ^    ^
+        result.else_token = lastToken(tree, info.then_expr) + 1;
+        if (token_tags[result.else_token + 1] == .pipe) {
+            result.error_token = result.else_token + 2;
+        }
+    }
+    return result;
+}
+
+pub fn whileSimple(tree: Tree, node: Node.Index) full.While {
+    const data = tree.nodes.items(.data)[node];
+    return fullWhile(tree, .{
+        .while_token = tree.nodes.items(.main_token)[node],
+        .cond_expr = data.lhs,
+        .cont_expr = 0,
+        .then_expr = data.rhs,
+        .else_expr = 0,
+    });
+}
+
+pub fn whileCont(tree: Tree, node: Node.Index) full.While {
+    const data = tree.nodes.items(.data)[node];
+    const extra = tree.extraData(data.rhs, Node.WhileCont);
+    return fullWhile(tree, .{
+        .while_token = tree.nodes.items(.main_token)[node],
+        .cond_expr = data.lhs,
+        .cont_expr = extra.cont_expr,
+        .then_expr = extra.then_expr,
+        .else_expr = 0,
+    });
+}
+
+pub fn whileFull(tree: Tree, node: Node.Index) full.While {
+    const data = tree.nodes.items(.data)[node];
+    const extra = tree.extraData(data.rhs, Node.While);
+    return fullWhile(tree, .{
+        .while_token = tree.nodes.items(.main_token)[node],
+        .cond_expr = data.lhs,
+        .cont_expr = extra.cont_expr,
+        .then_expr = extra.then_expr,
+        .else_expr = extra.else_expr,
+    });
+}
+
+pub fn forSimple(tree: Tree, node: Node.Index) full.While {
+    const data = tree.nodes.items(.data)[node];
+    return fullWhile(tree, .{
+        .while_token = tree.nodes.items(.main_token)[node],
+        .cond_expr = data.lhs,
+        .cont_expr = 0,
+        .then_expr = data.rhs,
+        .else_expr = 0,
+    });
+}
+
+pub fn forFull(tree: Tree, node: Node.Index) full.While {
+    const data = tree.nodes.items(.data)[node];
+    const extra = tree.extraData(data.rhs, Node.If);
+    return fullWhile(tree, .{
+        .while_token = tree.nodes.items(.main_token)[node],
+        .cond_expr = data.lhs,
+        .cont_expr = 0,
+        .then_expr = extra.then_expr,
+        .else_expr = extra.else_expr,
     });
 }
 
@@ -556,5 +763,107 @@ pub fn lastToken(tree: ast.Tree, node: ast.Node.Index) ast.TokenIndex {
             const extra = tree.extraData(datas[n].rhs, Node.ArrayTypeSentinel);
             n = extra.elem_type;
         },
+    };
+}
+
+pub fn containerField(tree: ast.Tree, node: ast.Node.Index) ?ast.full.ContainerField {
+    return switch (tree.nodes.items(.tag)[node]) {
+        .container_field => tree.containerField(node),
+        .container_field_init => tree.containerFieldInit(node),
+        .container_field_align => tree.containerFieldAlign(node),
+        else => null,
+    };
+}
+
+pub fn ptrType(tree: ast.Tree, node: ast.Node.Index) ?ast.full.PtrType {
+    return switch (tree.nodes.items(.tag)[node]) {
+        .ptr_type => ptrTypeSimple(tree, node),
+        .ptr_type_aligned => ptrTypeAligned(tree, node),
+        .ptr_type_bit_range => ptrTypeBitRange(tree, node),
+        .ptr_type_sentinel => ptrTypeSentinel(tree, node),
+        else => null,
+    };
+}
+
+pub fn whileAst(tree: ast.Tree, node: ast.Node.Index) ?ast.full.While {
+    return switch (tree.nodes.items(.tag)[node]) {
+        .@"while" => whileFull(tree, node),
+        .while_simple => whileSimple(tree, node),
+        .while_cont => whileCont(tree, node),
+        .@"for" => forFull(tree, node),
+        .for_simple => forSimple(tree, node),
+        else => null,
+    };
+}
+
+pub fn isContainer(tree: ast.Tree, node: ast.Node.Index) bool {
+    return switch (tree.nodes.items(.tag)[node]) {
+        .container_decl,
+        .container_decl_trailing,
+        .container_decl_arg,
+        .container_decl_arg_trailing,
+        .container_decl_two,
+        .container_decl_two_trailing,
+        .tagged_union,
+        .tagged_union_trailing,
+        .tagged_union_two,
+        .tagged_union_two_trailing,
+        .tagged_union_enum_tag,
+        .tagged_union_enum_tag_trailing,
+        .root,
+        .error_set_decl,
+        => true,
+        else => false,
+    };
+}
+
+/// Returns the member indices of a given declaration container.
+/// Asserts given `tag` is a container node
+pub fn declMembers(tree: ast.Tree, node_idx: ast.Node.Index, buffer: *[2]ast.Node.Index) []const ast.Node.Index {
+    std.debug.assert(isContainer(tree, node_idx));
+    return switch (tree.nodes.items(.tag)[node_idx]) {
+        .container_decl, .container_decl_trailing => tree.containerDecl(node_idx).ast.members,
+        .container_decl_arg, .container_decl_arg_trailing => tree.containerDeclArg(node_idx).ast.members,
+        .container_decl_two, .container_decl_two_trailing => tree.containerDeclTwo(buffer, node_idx).ast.members,
+        .tagged_union, .tagged_union_trailing => tree.taggedUnion(node_idx).ast.members,
+        .tagged_union_enum_tag, .tagged_union_enum_tag_trailing => tree.taggedUnionEnumTag(node_idx).ast.members,
+        .tagged_union_two, .tagged_union_two_trailing => tree.taggedUnionTwo(buffer, node_idx).ast.members,
+        .root => tree.rootDecls(),
+        .error_set_decl => &[_]ast.Node.Index{},
+        else => unreachable,
+    };
+}
+
+/// Returns an `ast.full.VarDecl` for a given node index.
+/// Returns null if the tag doesn't match
+pub fn varDecl(tree: ast.Tree, node_idx: ast.Node.Index) ?ast.full.VarDecl {
+    return switch (tree.nodes.items(.tag)[node_idx]) {
+        .global_var_decl => tree.globalVarDecl(node_idx),
+        .local_var_decl => tree.localVarDecl(node_idx),
+        .aligned_var_decl => tree.alignedVarDecl(node_idx),
+        .simple_var_decl => tree.simpleVarDecl(node_idx),
+        else => null,
+    };
+}
+
+pub fn isBuiltinCall(tree: ast.Tree, node: ast.Node.Index) bool {
+    return switch (tree.nodes.items(.tag)[node]) {
+        .builtin_call,
+        .builtin_call_comma,
+        .builtin_call_two,
+        .builtin_call_two_comma,
+        => true,
+        else => false,
+    };
+}
+
+pub fn fnProto(tree: ast.Tree, node: ast.Node.Index, buf: *[1]ast.Node.Index) ?ast.full.FnProto {
+    return switch (tree.nodes.items(.tag)[node]) {
+        .fn_proto => tree.fnProto(node),
+        .fn_proto_multi => tree.fnProtoMulti(node),
+        .fn_proto_one => tree.fnProtoOne(buf, node),
+        .fn_proto_simple => tree.fnProtoSimple(buf, node),
+        .fn_decl => fnProto(tree, tree.nodes.items(.data)[node].lhs, buf),
+        else => null,
     };
 }
