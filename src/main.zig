@@ -1141,8 +1141,8 @@ fn completeFieldAccess(
     var tokenizer = std.zig.Tokenizer.init(position.line[range.start..range.end]);
     if (try analysis.getFieldAccessType(&document_store, arena, handle, position.absolute_index, &tokenizer)) |result| {
         try typeToCompletion(arena, &completions, result, handle, config);
+        truncateCompletions(completions.items, config.max_detail_length);
     }
-    truncateCompletions(completions.items, config.max_detail_length);
 
     try send(arena, types.Response{
         .id = id,

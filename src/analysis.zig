@@ -566,6 +566,13 @@ fn resolveDerefType(
 ) !?TypeWithHandle {
     const deref_node = switch (deref.type.data) {
         .other => |n| n,
+        .pointer => |n| return TypeWithHandle{
+            .type = .{
+                .is_type_val = false,
+                .data = .{ .other = n },
+            },
+            .handle = deref.handle,
+        },
         else => return null,
     };
     const tree = deref.handle.tree;
@@ -1242,7 +1249,13 @@ pub fn getFieldAccessType(
                 .unwrapped = try resolveDerefType(store, arena, current_type, &bound_type_params),
             },
             .identifier => {
-                if (try lookupSymbolGlobal(store, arena, current_type.handle, tokenizer.buffer[tok.loc.start..tok.loc.end], source_index)) |child| {
+                if (try lookupSymbolGlobal(
+                    store,
+                    arena,
+                    current_type.handle,
+                    tokenizer.buffer[tok.loc.start..tok.loc.end],
+                    source_index,
+                )) |child| {
                     current_type = (try child.resolveType(store, arena, &bound_type_params)) orelse return null;
                 } else return null;
             },
@@ -1278,11 +1291,20 @@ pub fn getFieldAccessType(
                             tokenizer.buffer[after_period.loc.start..after_period.loc.end],
                             !current_type.type.is_type_val,
                         )) |child| {
-                            current_type = (try child.resolveType(store, arena, &bound_type_params)) orelse return null;
+                            current_type = (try child.resolveType(
+                                store,
+                                arena,
+                                &bound_type_params,
+                            )) orelse return null;
                         } else return null;
                     },
                     .question_mark => {
-                        current_type = (try resolveUnwrapOptionalType(store, arena, current_type, &bound_type_params)) orelse return null;
+                        current_type = (try resolveUnwrapOptionalType(
+                            store,
+                            arena,
+                            current_type,
+                            &bound_type_params,
+                        )) orelse return null;
                     },
                     else => {
                         log.debug("Unrecognized token {} after period.", .{after_period.tag});
@@ -1291,7 +1313,12 @@ pub fn getFieldAccessType(
                 }
             },
             .period_asterisk => {
-                current_type = (try resolveDerefType(store, arena, current_type, &bound_type_params)) orelse return null;
+                current_type = (try resolveDerefType(
+                    store,
+                    arena,
+                    current_type,
+                    &bound_type_params,
+                )) orelse return null;
             },
             .l_paren => {
                 const current_type_node = switch (current_type.type.data) {
