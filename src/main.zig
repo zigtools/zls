@@ -12,6 +12,7 @@ const URI = @import("uri.zig");
 const references = @import("references.zig");
 const rename = @import("rename.zig");
 const offsets = @import("offsets.zig");
+const setup = @import("setup.zig");
 const semantic_tokens = @import("semantic_tokens.zig");
 const known_folders = @import("known-folders");
 
@@ -356,6 +357,8 @@ fn nodeToCompletion(
     const node_tags = tree.nodes.items(.tag);
     const datas = tree.nodes.items(.data);
     const token_tags = tree.tokens.items(.tag);
+    if (tree.errors.len > 0)
+        return;
 
     const doc_kind: types.MarkupContent.Kind = if (client_capabilities.completion_doc_supports_md)
         .Markdown
@@ -1678,10 +1681,17 @@ fn processJsonRpc(arena: *std.heap.ArenaAllocator, parser: *std.json.Parser, jso
     logger.debug("Method without return value not implemented: {s}", .{method});
 }
 
-const stack_frames = switch (std.builtin.mode) {
-    .Debug => 10,
-    else => 0,
-};
+
+fn launchWizard() !void {
+    const dest =
+        (try known_folders.getPath(allocator, .local_configuration))
+            orelse (try known_folders.getPath(allocator, .executable_dir))
+                orelse return error.NoConfigPathFound;
+    defer allocator.free(dest);
+    try setup.wizard(allocator, dest);
+}
+
+const stack_frames = switch (std.builtin.mode) { .Debug => 10, else => 0 };
 var gpa_state = std.heap.GeneralPurposeAllocator(.{ .stack_trace_frames = stack_frames }){};
 
 pub fn main() anyerror!void {
@@ -1699,6 +1709,10 @@ pub fn main() anyerror!void {
         if (std.mem.eql(u8, arg, "--debug-log")) {
             actual_log_level = .debug;
             std.debug.print("Enabled debug logging\n", .{});
+        } else if (std.mem.eql(u8, arg, "config")) {
+            try launchWizard();
+            args_it.deinit();            
+            return;
         } else {
             std.debug.print("Unrecognized argument {s}\n", .{arg});
             std.os.exit(1);
@@ -1746,33 +1760,7 @@ pub fn main() anyerror!void {
             logger.debug("zig path `{s}` is not absolute, will look in path", .{exe_path});
             allocator.free(exe_path);
         }
-
-        const env_path = std.process.getEnvVarOwned(allocator, "PATH") catch |err| switch (err) {
-            error.EnvironmentVariableNotFound => {
-                logger.warn("Could not get PATH environmental variable", .{});
-                break :find_zig;
-            },
-            else => return err,
-        };
-        defer allocator.free(env_path);
-
-        const exe_extension = std.Target.current.exeFileExt();
-        const zig_exe = try std.fmt.allocPrint(allocator, "zig{s}", .{exe_extension});
-        defer allocator.free(zig_exe);
-
-        var it = std.mem.tokenize(env_path, &[_]u8{std.fs.path.delimiter});
-        while (it.next()) |path| {
-            const full_path = try std.fs.path.join(allocator, &[_][]const u8{
-                path,
-                zig_exe,
-            });
-            defer allocator.free(full_path);
-
-            var buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
-            config.zig_exe_path = try std.mem.dupe(allocator, u8, std.os.realpath(full_path, &buf) catch continue);
-            logger.info("Found zig in PATH: {s}", .{config.zig_exe_path});
-            break :find_zig;
-        }
+        config.zig_exe_path = try setup.findZig(allocator);
     }
 
     if (config.zig_exe_path) |exe_path| {

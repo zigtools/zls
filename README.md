@@ -85,6 +85,8 @@ The following options are currently available.
 | `enable_semantic_tokens` | `bool` | `true` | Enables semantic token support when the client also supports it. |
 | `operator_completions` | `bool` | `true` | Enables `*` and `?` operators in completion lists. |
 | `skip_std_references` | `bool` | `false` | When true, skips searching for references in std. Improves lookup speed for functions in user's code. Renaming and go-to-definition will continue to work as is.
+| `include_at_in_builtins` | `bool` | `false` | Most editors (except Sublime Text, it seems) generate a duplicate @ if a completion starts with it.
+| `max_detail_length` | `usize` | `1048576` | Completion detail fields are truncated to this length. Decrease if previews lag your editor.
 
 ## Features
 
