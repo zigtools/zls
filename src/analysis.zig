@@ -1190,11 +1190,11 @@ pub fn resolveTypeOfNode(store: *DocumentStore, arena: *std.heap.ArenaAllocator,
 pub fn collectImports(import_arr: *std.ArrayList([]const u8), tree: ast.Tree) !void {
     const tags = tree.tokens.items(.tag);
 
+    var i: usize = 0;
     while (i < tags.len) : (i += 1) {
         if (tags[i] != .builtin)
             continue;
-        const text = tree.tokenSlice(i);
-        log.debug("Found {}", .{ text });
+        const text = tree.tokenSlice(@intCast(u32, i));
         
         if (std.mem.eql(u8, text, "@import")) {
             if (i + 3 >= tags.len)
@@ -1207,7 +1207,7 @@ pub fn collectImports(import_arr: *std.ArrayList([]const u8), tree: ast.Tree) !v
                 continue;
 
 
-            const str = tree.tokenSlice(i + 2);
+            const str = tree.tokenSlice(@intCast(u32, i + 2));
             try import_arr.append(str[1..str.len-1]);
         }
     }
@@ -1234,7 +1234,7 @@ pub fn getFieldAccessType(
         .node = undefined,
         .handle = handle,
     });
-    if (handle.tree.errors > 0)
+    if (handle.tree.errors.len > 0)
         return null;
 
     // TODO Actually bind params here when calling functions instead of just skipping args.
@@ -1882,7 +1882,7 @@ fn getDocumentSymbolsInternal(allocator: *std.mem.Allocator, tree: ast.Tree, nod
 pub fn getDocumentSymbols(allocator: *std.mem.Allocator, tree: ast.Tree, encoding: offsets.Encoding) ![]types.DocumentSymbol {
     var symbols = try std.ArrayList(types.DocumentSymbol).initCapacity(allocator, tree.rootDecls().len);
     if (tree.errors.len > 0)
-        return 0;
+        return symbols.items;
 
     var context = GetDocumentSymbolsContext{
         .symbols = &symbols,
@@ -2730,7 +2730,6 @@ fn makeScopeInternal(
         => |fn_tag| {
             var buf: [1]ast.Node.Index = undefined;
             const func = fnProto(tree, node_idx, &buf).?;
-            // log.debug("Alive 3.1", .{});
 
             (try scopes.addOne(allocator)).* = .{
                 .range = nodeSourceRange(tree, node_idx),
@@ -2781,7 +2780,6 @@ fn makeScopeInternal(
                 else
                     data[node_idx].rhs,
             );
-            log.debug("Alive 3.3", .{});
             // Visit the function body
             if (fn_tag == .fn_decl) {
                 try makeScopeInternal(
@@ -3243,7 +3241,7 @@ fn makeScopeInternal(
         => {
             const field = containerField(tree, node_idx).?;
 
-            if (field.ast.type_expr != 0) {
+            if (field.ast.type_expr != 0)
                 try makeScopeInternal(
                     allocator,
                     scopes,
@@ -3252,8 +3250,7 @@ fn makeScopeInternal(
                     tree,
                     field.ast.type_expr,
                 );
-            }
-            if (field.ast.align_expr != 0) {
+            if (field.ast.align_expr != 0)
                 try makeScopeInternal(
                     allocator,
                     scopes,
@@ -3262,8 +3259,7 @@ fn makeScopeInternal(
                     tree,
                     field.ast.align_expr,
                 );
-            }
-            if (field.ast.value_expr != 0) {
+            if (field.ast.value_expr != 0)
                 try makeScopeInternal(
                     allocator,
                     scopes,
@@ -3272,7 +3268,6 @@ fn makeScopeInternal(
                     tree,
                     field.ast.value_expr,
                 );
-            }
         },
         .builtin_call,
         .builtin_call_comma,
