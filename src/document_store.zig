@@ -422,6 +422,7 @@ fn refreshDocument(self: *DocumentStore, handle: *Handle) !void {
         still_exists: {
             for (new_imports) |new| {
                 if (std.mem.eql(u8, new, old)) {
+                    handle.imports_used.items[i] = new;
                     break :still_exists;
                 }
             }
