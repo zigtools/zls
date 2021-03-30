@@ -2,20 +2,10 @@ const std = @import("std");
 const builtin = @import("builtin");
 // const build_options = @import("build_options")
 
-const setup = @import("src/setup.zig");
-
 var builder: *std.build.Builder = undefined;
-
-pub fn config(step: *std.build.Step) anyerror!void {
-    try setup.wizard(builder.allocator, builder.exe_dir);
-}
 
 pub fn build(b: *std.build.Builder) !void {
     builder = b;
-    // Standard target options allows the person running `zig build` to choose
-    // what target to build for. Here we do not override the defaults, which
-    // means any target is allowed, and the default is native. Other options
-    // for restricting supported target set are available.
     const target = b.standardTargetOptions(.{});
 
     const mode = b.standardReleaseOptions();
@@ -34,15 +24,6 @@ pub fn build(b: *std.build.Builder) !void {
     exe.install();
 
     b.installFile("src/special/build_runner.zig", "bin/build_runner.zig");
-
-    const run_cmd = exe.run();
-    run_cmd.step.dependOn(b.getInstallStep());
-
-    const run_step = b.step("run", "Run the app");
-    run_step.dependOn(&run_cmd.step);
-
-    const configure_step = b.step("config", "Configure zls");
-    configure_step.makeFn = config;
 
     const test_step = b.step("test", "Run all the tests");
     test_step.dependOn(builder.getInstallStep());

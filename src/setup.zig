@@ -175,14 +175,7 @@ pub fn wizard(allocator: *std.mem.Allocator, exe_dir: []const u8) !void {
         },
     }
 
-    std.debug.warn(
-        \\
-        \\You can find the ZLS executable in the "zig-cache/bin" by default.
-        \\NOTE: Make sure that if you move the ZLS executable, you move the `zls.json` config file with it as well!
-        \\And finally: Thanks for choosing ZLS!
-        \\
-        \\
-        , .{});
+    std.debug.warn("\n\nThank you for choosing ZLS!\n", .{});
 }
 
 

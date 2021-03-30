@@ -67,7 +67,7 @@ zig build config # Configure ZLS
 
 ### Configuration Options
 
-You can configure zls by providing a zls.json file.  
+You can configure zls by running `zls config`.  
 zls will look for a zls.json configuration file in multiple locations with the following priority:  
 - In the local configuration folder of your OS (as provided by [known-folders](https://github.com/ziglibs/known-folders#folder-list))  
 - In the same directory as the executable  
