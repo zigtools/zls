@@ -532,15 +532,13 @@ pub fn uriFromImportStr(
 }
 
 pub fn resolveImport(self: *DocumentStore, handle: *Handle, import_str: []const u8) !?*Handle {
-    std.debug.print("RESOLVING IMPORT STR: {s}\n", .{import_str});
     const allocator = self.allocator;
     const final_uri = (try self.uriFromImportStr(
         self.allocator,
         handle.*,
         import_str,
     )) orelse return null;
-    var consumed_final_uri = false;
-    defer if (!consumed_final_uri) allocator.free(final_uri);
+    defer allocator.free(final_uri);
 
     for (handle.imports_used.items) |uri| {
         if (std.mem.eql(u8, uri, final_uri)) {
@@ -548,14 +546,19 @@ pub fn resolveImport(self: *DocumentStore, handle: *Handle, import_str: []const 
         }
     }
 
+    // The URI must be somewhere in the import_uris
+    const handle_uri = for (handle.import_uris) |uri| {
+        if (std.mem.eql(u8, uri, final_uri)) {
+            break uri;
+        }
+    } else return null;
+
     // New import.
     // Check if the import is already opened by others.
     if (self.getHandle(final_uri)) |new_handle| {
         // If it is, append it to our imports, increment the count, set our new handle
         // and return the parsed tree root node.
-        try handle.imports_used.append(self.allocator, final_uri);
-        consumed_final_uri = true;
-
+        try handle.imports_used.append(self.allocator, handle_uri);
         new_handle.count += 1;
         return new_handle;
     }
@@ -582,9 +585,7 @@ pub fn resolveImport(self: *DocumentStore, handle: *Handle, import_str: []const 
         };
 
         // Add to import table of current handle.
-        try handle.imports_used.append(self.allocator, final_uri);
-        consumed_final_uri = true;
-
+        try handle.imports_used.append(self.allocator, handle_uri);
         // Swap handles.
         // This takes ownership of the passed uri and text.
         const duped_final_uri = try std.mem.dupe(allocator, u8, final_uri);
