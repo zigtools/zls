@@ -422,13 +422,16 @@ pub fn applyChanges(
         if (change.Object.get("range")) |range| {
             std.debug.assert(document.text.ptr == document.mem.ptr);
 
+            // TODO: add tests and validate the JSON
+            const start_obj = range.Object.get("start").?.Object;
             const start_pos = types.Position{
-                .line = range.Object.get("start").?.Object.get("line").?.Integer,
-                .character = range.Object.get("start").?.Object.get("character").?.Integer,
+                .line = start_obj.get("line").?.Integer,
+                .character = start_obj.get("character").?.Integer,
             };
+            const end_obj = range.Object.get("end").?.Object;
             const end_pos = types.Position{
-                .line = range.Object.get("end").?.Object.get("line").?.Integer,
-                .character = range.Object.get("end").?.Object.get("character").?.Integer,
+                .line = end_obj.get("line").?.Integer,
+                .character = end_obj.get("character").?.Integer,
             };
 
             const change_text = change.Object.get("text").?.String;
