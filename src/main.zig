@@ -1719,7 +1719,6 @@ pub fn main() anyerror!void {
     // Read the configuration, if any.
     const config_parse_options = std.json.ParseOptions{ .allocator = allocator };
     var config = Config{};
-    var config_had_null_zig_path = config.zig_exe_path == null;
     defer std.json.parseFree(Config, config, config_parse_options);
 
     config_read: {
@@ -1742,8 +1741,6 @@ pub fn main() anyerror!void {
     }
 
     // Find the zig executable in PATH
-    var zig_exe_path: ?[]const u8 = null;
-
     find_zig: {
         if (config.zig_exe_path) |exe_path| {
             if (std.fs.path.isAbsolute(exe_path)) not_valid: {
@@ -1827,7 +1824,13 @@ pub fn main() anyerror!void {
         break :blk try std.fs.path.resolve(allocator, &[_][]const u8{ cache_dir_path, "zls" });
     };
 
-    try document_store.init(allocator, zig_exe_path, build_runner_path, build_runner_cache_path, config.zig_lib_path);
+    try document_store.init(
+        allocator,
+        config.zig_exe_path,
+        build_runner_path,
+        build_runner_cache_path,
+        config.zig_lib_path,
+    );
     defer document_store.deinit();
 
     // This JSON parser is passed to processJsonRpc and reset.

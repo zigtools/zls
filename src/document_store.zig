@@ -237,7 +237,7 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: []u8) anyerror!*Hand
                 defer build_file.close();
 
                 // Calculate build file's URI
-                var candidate_path = try std.mem.concat(self.allocator, u8, &[_][]const u8{ curr_path, "build.zig" });
+                var candidate_path = try std.mem.concat(self.allocator, u8, &.{ curr_path, "build.zig" });
                 defer self.allocator.free(candidate_path);
                 const build_file_uri = try URI.fromPath(self.allocator, candidate_path);
                 errdefer self.allocator.free(build_file_uri);
@@ -569,13 +569,22 @@ pub fn resolveImport(self: *DocumentStore, handle: *Handle, import_str: []const 
             return self.getHandle(final_uri).?;
         }
     }
-
-    // The URI must be somewhere in the import_uris
-    const handle_uri = for (handle.import_uris) |uri| {
-        if (std.mem.eql(u8, uri, final_uri)) {
-            break uri;
+    // The URI must be somewhere in the import_uris or the package uris
+    const handle_uri = find_uri: {
+        for (handle.import_uris) |uri| {
+            if (std.mem.eql(u8, uri, final_uri)) {
+                break :find_uri uri;
+            }
         }
-    } else return null;
+        if (handle.associated_build_file) |bf| {
+            for (bf.packages.items) |pkg| {
+                if (std.mem.eql(u8, pkg.uri, final_uri)) {
+                    break :find_uri pkg.uri;
+                }
+            }
+        }
+        return null;
+    };
 
     // New import.
     // Check if the import is already opened by others.
@@ -597,16 +606,15 @@ pub fn resolveImport(self: *DocumentStore, handle: *Handle, import_str: []const 
     };
 
     defer file.close();
-    const size = std.math.cast(usize, try file.getEndPos()) catch std.math.maxInt(usize);
-
     {
-        const file_contents = try allocator.alloc(u8, size);
-        errdefer allocator.free(file_contents);
-
-        file.reader().readNoEof(file_contents) catch {
-            log.debug("Could not read from file {s}", .{file_path});
-            return null;
+        const file_contents = file.readToEndAlloc(allocator, std.math.maxInt(usize)) catch |err| switch (err) {
+            error.OutOfMemory => return error.OutOfMemory,
+            else => {
+                log.debug("Could not read from file {s}", .{file_path});
+                return null;
+            },
         };
+        errdefer allocator.free(file_contents);
 
         // Add to import table of current handle.
         try handle.imports_used.append(self.allocator, handle_uri);
