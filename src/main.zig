@@ -1691,6 +1691,7 @@ pub fn main() anyerror!void {
 
     // Check arguments.
     var args_it = std.process.args();
+    defer args_it.deinit();
     const prog_name = try args_it.next(allocator) orelse unreachable;
     allocator.free(prog_name);
 
@@ -1703,14 +1704,12 @@ pub fn main() anyerror!void {
         } else if (std.mem.eql(u8, arg, "config")) {
             keep_running = false;
             try setup.wizard(allocator);
-            args_it.deinit();
             return;
         } else {
             std.debug.print("Unrecognized argument {s}\n", .{arg});
             std.os.exit(1);
         }
     }
-    args_it.deinit();
 
     // Init global vars
     const reader = std.io.getStdIn().reader();
@@ -1722,22 +1721,21 @@ pub fn main() anyerror!void {
     defer std.json.parseFree(Config, config, config_parse_options);
 
     config_read: {
-        const res = try known_folders.getPath(allocator, .local_configuration);
-
-        if (res) |local_config_path| {
-            defer allocator.free(local_config_path);
-            if (loadConfig(local_config_path)) |conf| {
+        if (try known_folders.getPath(allocator, .local_configuration)) |path| {
+            defer allocator.free(path);
+            if (loadConfig(path)) |conf| {
                 config = conf;
                 break :config_read;
             }
         }
-
-        var exe_dir_bytes: [std.fs.MAX_PATH_BYTES]u8 = undefined;
-        const exe_dir_path = std.fs.selfExeDirPath(&exe_dir_bytes) catch break :config_read;
-
-        if (loadConfig(exe_dir_path)) |conf| {
-            config = conf;
+        if (try known_folders.getPath(allocator, .global_configuration)) |path| {
+            defer allocator.free(path);
+            if (loadConfig(path)) |conf| {
+                config = conf;
+                break :config_read;
+            }
         }
+        logger.info("No config file zls.json found.", .{});
     }
 
     // Find the zig executable in PATH

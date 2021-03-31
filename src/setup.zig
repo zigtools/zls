@@ -2,9 +2,19 @@ const std = @import("std");
 const zinput = @import("zinput/src/main.zig");
 const known_folders = @import("known-folders");
 
+fn print(comptime fmt: []const u8, args: anytype) void {
+    const stdout = std.io.getStdOut().writer();
+    stdout.print(fmt, args) catch @panic("Could not write to stdout");
+}
+
+fn write(text: []const u8) void {
+    const stdout = std.io.getStdOut().writer();
+    stdout.writeAll(text) catch @panic("Could not write to stdout");
+}
+
 pub fn wizard(allocator: *std.mem.Allocator) !void {
     @setEvalBranchQuota(2500);
-    std.debug.warn(
+    write(
         \\Welcome to the ZLS configuration wizard!
         \\      *
         \\       |\
@@ -16,15 +26,52 @@ pub fn wizard(allocator: *std.mem.Allocator) !void {
         \\      \__-/   /
         \\
         \\
-    , .{});
+        );
+
+    var local_path = known_folders.getPath(allocator, .local_configuration) catch null;
+    var global_path = known_folders.getPath(allocator, .global_configuration) catch null;
+    defer if (local_path) |d| allocator.free(d);
+    defer if (global_path) |d| allocator.free(d);
+
+    if (global_path == null and local_path == null) {
+        write("Could not open a global or local config directory.\n");
+        return;
+    }
+    var config_path: []const u8 = undefined;
+    if (try zinput.askBool("Should this configuration be system-wide?")) {
+        if (global_path) |p| {
+            config_path = p;
+        } else {
+            write("Could not find a global config directory.\n");
+            return;
+        }
+    } else {
+        if (local_path) |p| {
+            config_path = p;
+        } else {
+            write("Could not find a local config directory.\n");
+            return;
+        }
+    }
+    var dir = std.fs.cwd().openDir(config_path, .{}) catch |err| {
+        print("Could not open {s}: {}.\n", .{config_path, err});
+        return;
+    };
+    defer dir.close();
+    var file = dir.createFile("zls.json", .{}) catch |err| {
+        print("Could not create {s}/zls.json: {}.\n", .{config_path, err});
+        return;
+    };
+    defer file.close();
+    const out = file.writer();
 
     var zig_exe_path = try findZig(allocator);
     defer if (zig_exe_path) |p| allocator.free(p);
 
     if (zig_exe_path) |path| {
-        std.debug.print("Found zig executable '{s}' in PATH.\n", .{path});
+        print("Found zig executable '{s}' in PATH.\n", .{path});
     } else {
-        std.debug.print("Could not find 'zig' in PATH\n", .{});
+        write("Could not find 'zig' in PATH\n");
         zig_exe_path = try zinput.askString(allocator, "What is the path to the 'zig' executable you would like to use?", std.fs.MAX_PATH_BYTES);
     }
 
@@ -43,53 +90,9 @@ pub fn wizard(allocator: *std.mem.Allocator) !void {
         else => 1024 * 1024,
     };
 
-    var file: std.fs.File = undefined;
-    var dir_path: []const u8 = &.{};
-    defer allocator.free(dir_path);
+    std.debug.warn("Writing config to {s}/zls.json ... ", .{config_path});
 
-    try_config_open: {
-        if (try known_folders.getPath(allocator, .local_configuration)) |path| local_conf: {
-            var dir = std.fs.cwd().openDir(path, .{}) catch |err| switch (err) {
-                error.FileNotFound => {
-                    break :local_conf;
-                },
-                else => |e| {
-                    std.debug.print("Failed to open directory `{s}`. Error: {}\n", .{ path, err });
-                    return;
-                },
-            };
-            defer dir.close();
-            file = dir.createFile("zls.json", .{}) catch |err| {
-                std.debug.print("Failed to create file `{s}/zls.json`. Error: {}\n", .{ path, err });
-                return;
-            };
-            dir_path = path;
-            break :try_config_open;
-        }
-        if (try known_folders.getPath(allocator, .executable_dir)) |path| exe_dir: {
-            var dir = std.fs.cwd().openDir(path, .{}) catch |err| switch (err) {
-                error.FileNotFound => {
-                    break :exe_dir;
-                },
-                else => |e| {
-                    std.debug.print("Failed to open directory `{s}`. Error: {}\n", .{ path, err });
-                    return;
-                },
-            };
-            defer dir.close();
-            file = dir.createFile("zls.json", .{}) catch |err| {
-                std.debug.print("Failed to create file `{s}/zls.json`. Error: {}\n", .{ path, err });
-                return;
-            };
-            dir_path = path;
-            break :try_config_open;
-        }
-        std.debug.print("Could not open the local configuration directory nor the executable directory, aborting.\n", .{});
-        return;
-    }
-    defer file.close();
-    std.debug.print("Writing config to {s}/zls.json ... ", .{dir_path});
-    try std.json.stringify(.{
+    const content = std.json.stringify(.{
         .zig_exe_path = zig_exe_path,
         .enable_snippets = snippets,
         .warn_style = style,
@@ -97,84 +100,86 @@ pub fn wizard(allocator: *std.mem.Allocator) !void {
         .operator_completions = operator_completions,
         .include_at_in_builtins = include_at_in_builtins,
         .max_detail_length = max_detail_length,
-    }, std.json.StringifyOptions{}, file.writer());
-    std.debug.print("successful.\n\n\n\n", .{});
+    }, std.json.StringifyOptions{}, out);
+
+    write("successful.\n\n\n\n");
+
 
     // Keep synced with README.md
     switch (editor) {
         .VSCode => {
-            std.debug.warn(
+            write(
                 \\To use ZLS in Visual Studio Code, install the 'ZLS for VSCode' extension from 
                 \\'https://github.com/zigtools/zls-vscode/releases' or via the extensions menu.
                 \\Then, open VSCode's 'settings.json' file, and add:
                 \\
                 \\"zigLanguageClient.path": "[command_or_path_to_zls]"
-            , .{});
+            );
         },
         .Sublime => {
-            std.debug.warn(
+            write(
                 \\To use ZLS in Sublime, install the `LSP` package from 
                 \\https://github.com/sublimelsp/LSP/releases or via Package Control.
                 \\Then, add the following snippet to LSP's user settings:
                 \\
-                \\{{
-                \\  "clients": {{
-                \\    "zig": {{
+                \\{
+                \\  "clients": {
+                \\    "zig": {
                 \\      "command": ["zls"],
                 \\      "enabled": true,
                 \\      "languageId": "zig",
                 \\      "scopes": ["source.zig"],
                 \\      "syntaxes": ["Packages/Zig/Syntaxes/Zig.tmLanguage"]
-                \\    }}
-                \\  }}
-                \\}}
-            , .{});
+                \\    }
+                \\  }
+                \\}
+            );
         },
         .Kate => {
-            std.debug.warn(
+            write(
                 \\To use ZLS in Kate, enable `LSP client` plugin in Kate settings.
                 \\Then, add the following snippet to `LSP client's` user settings:
                 \\(or paste it in `LSP client's` GUI settings)
                 \\
-                \\{{
-                \\    "servers": {{
-                \\        "zig": {{
+                \\{
+                \\    "servers": {
+                \\        "zig": {
                 \\            "command": ["zls"],
                 \\            "url": "https://github.com/zigtools/zls",
                 \\            "highlightingModeRegex": "^Zig$"
-                \\        }}
-                \\    }}
-                \\}}
-            , .{});
+                \\        }
+                \\    }
+                \\}
+            );
         },
         .Neovim, .Vim8 => {
-            std.debug.warn(
+            write(
                 \\To use ZLS in Neovim/Vim8, we recommend using CoC engine.
                 \\You can get it from https://github.com/neoclide/coc.nvim.
                 \\Then, simply issue cmd from Neovim/Vim8 `:CocConfig`, and add this to your CoC config:
                 \\
-                \\{{
-                \\  "languageserver": {{
-                \\    "zls" : {{
+                \\{
+                \\  "languageserver": {
+                \\    "zls" : {
                 \\      "command": "command_or_path_to_zls",
                 \\      "filetypes": ["zig"]
-                \\    }}
-                \\  }}
-                \\}}
-            , .{});
+                \\    }
+                \\  }
+                \\}
+            );
         },
         .Emacs => {
-            std.debug.warn(
+            write(
                 \\To use ZLS in Emacs, install lsp-mode (https://github.com/emacs-lsp/lsp-mode) from melpa.
                 \\Zig mode (https://github.com/ziglang/zig-mode) is also useful!
                 \\Then, add the following to your emacs config:
                 \\
                 \\(require 'lsp-mode)
                 \\(setq lsp-zig-zls-executable "<path to zls>")
-            , .{});
+            );
         },
         .Doom => {
-            std.debug.warn(
+            write(
                 \\To use ZLS in Doom Emacs, enable the lsp module
                 \\And install the `zig-mode` (https://github.com/ziglang/zig-mode)
                 \\package by adding `(package! zig-mode)` to your packages.el file.
@@ -190,17 +195,17 @@ pub fn wizard(allocator: *std.mem.Allocator) !void {
                 \\        :new-connection (lsp-stdio-connection "<path to zls>")
                 \\        :major-modes '(zig-mode)
                 \\        :server-id 'zls))))
-            , .{});
+            );
         },
         .Other => {
-            std.debug.warn(
+            write(
                 \\We might not *officially* support your editor, but you can definitely still use ZLS!
                 \\Simply configure your editor for use with language servers and point it to the ZLS executable!
-            , .{});
+            );
         },
     }
 
-    std.debug.warn("\n\nThank you for choosing ZLS!\n", .{});
+    write("\n\nThank you for choosing ZLS!\n");
 }
 
 pub fn findZig(allocator: *std.mem.Allocator) !?[]const u8 {
