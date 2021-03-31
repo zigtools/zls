@@ -1679,13 +1679,6 @@ fn processJsonRpc(arena: *std.heap.ArenaAllocator, parser: *std.json.Parser, jso
     logger.debug("Method without return value not implemented: {s}", .{method});
 }
 
-fn launchWizard() !void {
-    const dest =
-        (try known_folders.getPath(allocator, .local_configuration)) orelse (try known_folders.getPath(allocator, .executable_dir)) orelse return error.NoConfigPathFound;
-    defer allocator.free(dest);
-    try setup.wizard(allocator, dest);
-}
-
 const stack_frames = switch (std.builtin.mode) {
     .Debug => 10,
     else => 0,
@@ -1708,7 +1701,8 @@ pub fn main() anyerror!void {
             actual_log_level = .debug;
             std.debug.print("Enabled debug logging\n", .{});
         } else if (std.mem.eql(u8, arg, "config")) {
-            try launchWizard();
+            keep_running = false;
+            try setup.wizard(allocator);
             args_it.deinit();
             return;
         } else {
@@ -1730,6 +1724,7 @@ pub fn main() anyerror!void {
 
     config_read: {
         const res = try known_folders.getPath(allocator, .local_configuration);
+
         if (res) |local_config_path| {
             defer allocator.free(local_config_path);
             if (loadConfig(local_config_path)) |conf| {

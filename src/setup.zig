@@ -1,7 +1,8 @@
 const std = @import("std");
 const zinput = @import("zinput/src/main.zig");
+const known_folders = @import("known-folders");
 
-pub fn wizard(allocator: *std.mem.Allocator, exe_dir: []const u8) !void {
+pub fn wizard(allocator: *std.mem.Allocator) !void {
     @setEvalBranchQuota(2500);
     std.debug.warn(
         \\Welcome to the ZLS configuration wizard!
@@ -15,10 +16,10 @@ pub fn wizard(allocator: *std.mem.Allocator, exe_dir: []const u8) !void {
         \\      \__-/   /
         \\
         \\
-        , .{});
+    , .{});
 
     var zig_exe_path = try findZig(allocator);
-    defer if(zig_exe_path) |p| allocator.free(p);
+    defer if (zig_exe_path) |p| allocator.free(p);
 
     if (zig_exe_path) |path| {
         std.debug.print("Found zig executable '{s}' in PATH.\n", .{path});
@@ -33,36 +34,62 @@ pub fn wizard(allocator: *std.mem.Allocator, exe_dir: []const u8) !void {
     const semantic_tokens = try zinput.askBool("Do you want to enable semantic highlighting?");
     const operator_completions = try zinput.askBool("Do you want to enable .* and .? completions?");
     const include_at_in_builtins = switch (editor) {
-        .Sublime =>
-            true,
-        .VSCode,
-        .Kate,
-        .Neovim,
-        .Vim8,
-        .Emacs,
-        .Doom =>
-            false,
-        else =>
-            try zinput.askBool("Should the @ sign be included in completions of builtin functions?\nChange this later if `@inc` completes to `include` or `@@include`")
+        .Sublime => true,
+        .VSCode, .Kate, .Neovim, .Vim8, .Emacs, .Doom => false,
+        else => try zinput.askBool("Should the @ sign be included in completions of builtin functions?\nChange this later if `@inc` completes to `include` or `@@include`"),
     };
     const max_detail_length: usize = switch (editor) {
-        .Sublime =>
-            256,
-        else =>
-            1024 * 1024
+        .Sublime => 256,
+        else => 1024 * 1024,
     };
-    
-    var dir = try std.fs.cwd().openDir(exe_dir, .{});
-    defer dir.close();
 
-    var file = try dir.createFile("zls.json", .{});
+    var file: std.fs.File = undefined;
+    var dir_path: []const u8 = &.{};
+    defer allocator.free(dir_path);
+
+    try_config_open: {
+        if (try known_folders.getPath(allocator, .local_configuration)) |path| local_conf: {
+            var dir = std.fs.cwd().openDir(path, .{}) catch |err| switch (err) {
+                error.FileNotFound => {
+                    break :local_conf;
+                },
+                else => |e| {
+                    std.debug.print("Failed to open directory `{s}`. Error: {}\n", .{ path, err });
+                    return;
+                },
+            };
+            defer dir.close();
+            file = dir.createFile("zls.json", .{}) catch |err| {
+                std.debug.print("Failed to create file `{s}/zls.json`. Error: {}\n", .{ path, err });
+                return;
+            };
+            dir_path = path;
+            break :try_config_open;
+        }
+        if (try known_folders.getPath(allocator, .executable_dir)) |path| exe_dir: {
+            var dir = std.fs.cwd().openDir(path, .{}) catch |err| switch (err) {
+                error.FileNotFound => {
+                    break :exe_dir;
+                },
+                else => |e| {
+                    std.debug.print("Failed to open directory `{s}`. Error: {}\n", .{ path, err });
+                    return;
+                },
+            };
+            defer dir.close();
+            file = dir.createFile("zls.json", .{}) catch |err| {
+                std.debug.print("Failed to create file `{s}/zls.json`. Error: {}\n", .{ path, err });
+                return;
+            };
+            dir_path = path;
+            break :try_config_open;
+        }
+        std.debug.print("Could not open the local configuration directory nor the executable directory, aborting.\n", .{});
+        return;
+    }
     defer file.close();
-
-    const out = file.writer();
-
-    std.debug.warn("Writing config to {s}/zls.json ... ", .{exe_dir});
-
-    const content = std.json.stringify(.{
+    std.debug.print("Writing config to {s}/zls.json ... ", .{dir_path});
+    try std.json.stringify(.{
         .zig_exe_path = zig_exe_path,
         .enable_snippets = snippets,
         .warn_style = style,
@@ -70,10 +97,8 @@ pub fn wizard(allocator: *std.mem.Allocator, exe_dir: []const u8) !void {
         .operator_completions = operator_completions,
         .include_at_in_builtins = include_at_in_builtins,
         .max_detail_length = max_detail_length,
-    }, std.json.StringifyOptions{}, out);
-
-    std.debug.warn("successful.\n\n\n\n", .{});
-
+    }, std.json.StringifyOptions{}, file.writer());
+    std.debug.print("successful.\n\n\n\n", .{});
 
     // Keep synced with README.md
     switch (editor) {
@@ -178,7 +203,6 @@ pub fn wizard(allocator: *std.mem.Allocator, exe_dir: []const u8) !void {
     std.debug.warn("\n\nThank you for choosing ZLS!\n", .{});
 }
 
-
 pub fn findZig(allocator: *std.mem.Allocator) !?[]const u8 {
     const env_path = std.process.getEnvVarOwned(allocator, "PATH") catch |err| switch (err) {
         error.EnvironmentVariableNotFound => {
@@ -207,7 +231,7 @@ pub fn findZig(allocator: *std.mem.Allocator) !?[]const u8 {
         defer file.close();
         const stat = file.stat() catch continue;
         if (stat.kind == .Directory) continue;
-        
+
         return try allocator.dupe(u8, full_path);
     }
     return null;
