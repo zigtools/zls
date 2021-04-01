@@ -1108,8 +1108,8 @@ fn writeNodeTokens(
                 tree.arrayTypeSentinel(node);
 
             try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, array_type.ast.elem_count });
-            if (array_type.ast.sentinel) |sentinel|
-                try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, sentinel });
+            if (array_type.ast.sentinel != 0)
+                try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, array_type.ast.sentinel });
 
             try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, array_type.ast.elem_type });
         },
