@@ -10,7 +10,6 @@ pub fn build(b: *std.build.Builder) !void {
 
     const mode = b.standardReleaseOptions();
     const exe = b.addExecutable("zls", "src/main.zig");
-
     exe.addBuildOption(
         []const u8,
         "data_version",

@@ -289,12 +289,32 @@ pub const WorkspaceFolder = struct {
     name: []const u8,
 };
 
+pub const SignatureInformation = struct {
+    pub const ParameterInformation = struct {
+        // TODO Can also send a pair of encoded offsets
+        label: []const u8,
+        documentation: ?MarkupContent,
+    };
+
+    label: []const u8,
+    documentation: ?MarkupContent,
+    parameters: ?[]const ParameterInformation,
+    activeParameter: ?u32,
+};
+
+pub const SignatureHelp = struct {
+    signatures: ?[]const SignatureInformation,
+    activeSignature: ?u32,
+    activeParameter: ?u32,
+};
+
 // Only includes options we set in our initialize result.
 const InitializeResult = struct {
     offsetEncoding: []const u8,
     capabilities: struct {
         signatureHelpProvider: struct {
             triggerCharacters: []const []const u8,
+            retriggerCharacters: []const []const u8,
         },
         textDocumentSync: enum {
             None = 0,

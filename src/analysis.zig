@@ -376,22 +376,6 @@ fn isBlock(tree: ast.Tree, node: ast.Node.Index) bool {
     };
 }
 
-/// Returns `true` when the given `node` is one of the call tags
-fn isCall(tree: ast.Tree, node: ast.Node.Index) bool {
-    return switch (tree.nodes.items(.tag)[node]) {
-        .call,
-        .call_comma,
-        .call_one,
-        .call_one_comma,
-        .async_call,
-        .async_call_comma,
-        .async_call_one,
-        .async_call_one_comma,
-        => true,
-        else => false,
-    };
-}
-
 fn findReturnStatementInternal(
     tree: ast.Tree,
     fn_decl: ast.full.FnProto,
@@ -3094,19 +3078,7 @@ fn makeScopeInternal(
         .async_call_one_comma,
         => {
             var buf: [1]ast.Node.Index = undefined;
-            const call: ast.full.Call = switch (node_tag) {
-                .async_call,
-                .async_call_comma,
-                .call,
-                .call_comma,
-                => tree.callFull(node_idx),
-                .async_call_one,
-                .async_call_one_comma,
-                .call_one,
-                .call_one_comma,
-                => tree.callOne(&buf, node_idx),
-                else => unreachable,
-            };
+            const call = callFull(tree, node_idx, &buf).?;
 
             try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, call.ast.fn_expr);
             for (call.ast.params) |param|

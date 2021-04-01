@@ -124,6 +124,9 @@ const edit_not_applied_response =
 const no_completions_response =
     \\,"result":{"isIncomplete":false,"items":[]}}
 ;
+const no_signatures_response =
+    \\,"result":{"signatures":[]}
+;
 const no_semantic_tokens_response =
     \\,"result":{"data":[]}}
 ;
@@ -1280,7 +1283,8 @@ fn initializeHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: 
                 },
                 .capabilities = .{
                     .signatureHelpProvider = .{
-                        .triggerCharacters = &[_][]const u8{ "(", "," },
+                        .triggerCharacters = &.{"("},
+                        .retriggerCharacters = &.{","},
                     },
                     .textDocumentSync = .Full,
                     .renameProvider = true,
@@ -1398,39 +1402,85 @@ fn semanticTokensFullHandler(arena: *std.heap.ArenaAllocator, id: types.RequestI
     }
 }
 
-fn completionHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.Completion, config: Config) !void {
+fn completionHandler(
+    arena: *std.heap.ArenaAllocator,
+    id: types.RequestId,
+    req: requests.Completion,
+    config: Config,
+) !void {
     const handle = document_store.getHandle(req.params.textDocument.uri) orelse {
         logger.warn("Trying to complete in non existent document {s}", .{req.params.textDocument.uri});
         return try respondGeneric(id, no_completions_response);
     };
 
-    if (req.params.position.character >= 0) {
-        const doc_position = try offsets.documentPosition(handle.document, req.params.position, offset_encoding);
-        const pos_context = try analysis.documentPositionContext(arena, handle.document, doc_position);
-        const use_snippets = config.enable_snippets and client_capabilities.supports_snippets;
+    if (req.params.position.character == 0)
+        return try respondGeneric(id, no_completions_response);
 
-        switch (pos_context) {
-            .builtin => try completeBuiltin(arena, id, config),
-            .var_access, .empty => try completeGlobal(arena, id, doc_position.absolute_index, handle, config),
-            .field_access => |range| try completeFieldAccess(arena, id, handle, doc_position, range, config),
-            .global_error_set => try completeError(arena, id, handle, config),
-            .enum_literal => try completeDot(arena, id, handle, config),
-            .label => try completeLabel(arena, id, doc_position.absolute_index, handle, config),
-            else => try respondGeneric(id, no_completions_response),
-        }
-    } else {
-        try respondGeneric(id, no_completions_response);
+    const doc_position = try offsets.documentPosition(handle.document, req.params.position, offset_encoding);
+    const pos_context = try analysis.documentPositionContext(arena, handle.document, doc_position);
+    const use_snippets = config.enable_snippets and client_capabilities.supports_snippets;
+
+    switch (pos_context) {
+        .builtin => try completeBuiltin(arena, id, config),
+        .var_access, .empty => try completeGlobal(arena, id, doc_position.absolute_index, handle, config),
+        .field_access => |range| try completeFieldAccess(arena, id, handle, doc_position, range, config),
+        .global_error_set => try completeError(arena, id, handle, config),
+        .enum_literal => try completeDot(arena, id, handle, config),
+        .label => try completeLabel(arena, id, doc_position.absolute_index, handle, config),
+        else => try respondGeneric(id, no_completions_response),
     }
 }
 
-fn signatureHelperHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, config: Config) !void {
+fn signatureHelperHandler(
+    arena: *std.heap.ArenaAllocator,
+    id: types.RequestId,
+    req: requests.SignatureHelp,
+    config: Config,
+) !void {
+    const handle = document_store.getHandle(req.params.textDocument.uri) orelse {
+        logger.warn("Trying to get signature help in non existent document {s}", .{req.params.textDocument.uri});
+        return try respondGeneric(id, no_signatures_response);
+    };
+
+    if (req.params.position.character == 0)
+        return try respondGeneric(id, no_signatures_response);
+
+    const doc_position = try offsets.documentPosition(handle.document, req.params.position, offset_encoding);
+
+    const last_idx = doc_position.absolute_index;
+    const source = handle.document.text[0..last_idx];
+
+    // We use a text based method since we cannot rely on a valid call node being here
+    //   or even that it is the innermost call if it is.
+    const trigger = source[last_idx - 1];
+    // Check for comment, multiline string literal lines and skip
+    // Tokenize line forwards, pull in previous line if we need it etc.
+    switch (trigger) {
+        '(' => {
+            // go backwards while char in 'a'...'z','A'...'Z','0'...'9', '_', check for keywords
+            // resolve function, send result
+            // then add support for @"..." in the identifiers
+        },
+        ',' => {
+            // Go backwards, keep a stack for (), [], {}, "" (with \" support)
+            // first ( to be hit when
+        },
+        else => {},
+    }
+
     // TODO Implement this
     try respondGeneric(id,
         \\,"result":{"signatures":[]}}
     );
 }
 
-fn gotoHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.GotoDefinition, config: Config, resolve_alias: bool) !void {
+fn gotoHandler(
+    arena: *std.heap.ArenaAllocator,
+    id: types.RequestId,
+    req: requests.GotoDefinition,
+    config: Config,
+    resolve_alias: bool,
+) !void {
     const handle = document_store.getHandle(req.params.textDocument.uri) orelse {
         logger.warn("Trying to go to definition in non existent document {s}", .{req.params.textDocument.uri});
         return try respondGeneric(id, null_result_response);
@@ -1612,7 +1662,7 @@ fn processJsonRpc(arena: *std.heap.ArenaAllocator, parser: *std.json.Parser, jso
         .{ "textDocument/didClose", requests.CloseDocument, closeDocumentHandler },
         .{ "textDocument/semanticTokens/full", requests.SemanticTokensFull, semanticTokensFullHandler },
         .{ "textDocument/completion", requests.Completion, completionHandler },
-        .{ "textDocument/signatureHelp", void, signatureHelperHandler },
+        .{ "textDocument/signatureHelp", requests.SignatureHelp, signatureHelperHandler },
         .{ "textDocument/definition", requests.GotoDefinition, gotoDefinitionHandler },
         .{ "textDocument/typeDefinition", requests.GotoDefinition, gotoDefinitionHandler },
         .{ "textDocument/implementation", requests.GotoDefinition, gotoDefinitionHandler },
