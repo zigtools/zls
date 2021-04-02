@@ -8,23 +8,24 @@ const Token = std.zig.Token;
 const identifierFromPosition = @import("main.zig").identifierFromPosition;
 usingnamespace @import("ast.zig");
 
-fn fnProtoToSignatureHelp(
+fn fnProtoToSignatureInfo(
     arena: *std.heap.ArenaAllocator,
     is_self_call: bool,
     commas: u32,
     tree: ast.Tree,
+    fn_node: ast.Node.Index,
     proto: ast.full.FnProto,
 ) !types.SignatureInformation {
     const ParameterInformation = types.SignatureInformation.ParameterInformation;
 
-    const token_starts = tree.tokens.items(.start);
+    const token_tags = tree.tokens.items(.tag);
     const alloc = &arena.allocator;
     const arg_idx = commas + @boolToInt(is_self_call);
     const label = analysis.getFunctionSignature(tree, proto);
     const proto_comments = types.MarkupContent{ .value = if (try analysis.getDocComments(
         alloc,
         tree,
-        proto.ast.fn_token,
+        fn_node,
         .Markdown,
     )) |dc|
         dc
@@ -44,32 +45,43 @@ fn fnProtoToSignatureHelp(
         else
             null;
 
-        var param_label_start: usize = 0;
-        var param_label_end: usize = 0;
+        var param_start_token: ast.TokenIndex = 0;
+        var param_end_token: ast.TokenIndex = 0;
         if (param.comptime_noalias) |cn| {
-            param_label_start = token_starts[cn];
-            param_label_end = param_label_start + tree.tokenSlice(cn).len;
+            param_start_token = cn;
+            param_end_token = cn;
         }
         if (param.name_token) |nt| {
-            if (param_label_start == 0)
-                param_label_start = token_starts[nt];
-            param_label_end = token_starts[nt] + tree.tokenSlice(nt).len;
+            if (param_start_token == 0)
+                param_start_token = nt;
+            param_end_token = nt;
         }
         if (param.anytype_ellipsis3) |ae| {
-            if (param_label_start == 0)
-                param_label_start = token_starts[ae];
-            param_label_end = token_starts[ae] + tree.tokenSlice(ae).len;
+            if (param_start_token == 0)
+                param_start_token = ae;
+            param_end_token = ae;
         }
         if (param.type_expr != 0) {
-            if (param_label_start == 0)
-                param_label_start = token_starts[tree.firstToken(param.type_expr)];
-
-            const last_param_tok = lastToken(tree, param.type_expr);
-            param_label_end = token_starts[last_param_tok] + tree.tokenSlice(last_param_tok).len;
+            if (param_start_token == 0)
+                param_start_token = tree.firstToken(param.type_expr);
+            param_end_token = lastToken(tree, param.type_expr);
         }
-        const param_label = tree.source[param_label_start..param_label_end];
+
+        var param_label_buf = std.ArrayListUnmanaged(u8){};
+        var first_inserted = false;
+        var i: ast.TokenIndex = param_start_token;
+        while (i <= param_end_token) : (i += 1) {
+            switch (token_tags[i]) {
+                .doc_comment => continue,
+                else => {},
+            }
+            if (first_inserted) {
+                try param_label_buf.append(alloc, ' ');
+            } else first_inserted = true;
+            try param_label_buf.appendSlice(alloc, tree.tokenSlice(i));
+        }
         try params.append(alloc, .{
-            .label = param_label,
+            .label = param_label_buf.items,
             .documentation = param_comments,
         });
     }
@@ -93,7 +105,10 @@ pub fn getSignatureInfo(
     const token_tags = tree.tokens.items(.tag);
     const token_starts = tree.tokens.items(.start);
 
+    // Use the innermost scope to determine the earliest token we would need
+    //   to scan up to find a function or buitin call
     const first_token = tree.firstToken(innermost_block);
+    // We start by finding the token that includes the current cursor position
     const last_token = blk: {
         if (token_starts[0] >= absolute_index)
             return null;
@@ -107,6 +122,15 @@ pub fn getSignatureInfo(
         break :blk @truncate(u32, token_tags.len - 1);
     };
 
+    // We scan the tokens from last to first, adding and removing open and close
+    //   delimiter tokens to a stack, while keeping track of commas corresponding
+    //   to each of the blocks in a stack.
+    // When we encounter a dangling left parenthesis token, we continue scanning
+    //   backwards for a compatible possible function call lhs expression or a
+    //   single builtin token.
+    // When a function call expression is detected, it is resolved to a declaration
+    //   or a function type and the resulting function prototype is converted into
+    //   a signature information object.
     const StackSymbol = enum {
         l_paren,
         r_paren,
@@ -132,7 +156,7 @@ pub fn getSignatureInfo(
     var curr_commas: u32 = 0;
     var comma_stack = try std.ArrayListUnmanaged(u32).initCapacity(alloc, 4);
     var curr_token = last_token;
-    while (curr_token >= first_token) : (curr_token -= 1) {
+    while (curr_token >= first_token and curr_token != 0) : (curr_token -= 1) {
         switch (token_tags[curr_token]) {
             .comma => curr_commas += 1,
             .l_brace => {
@@ -187,12 +211,12 @@ pub fn getSignatureInfo(
                 }
 
                 // Try to find a function expression or a builtin identifier
-                //   and send a response if found
                 if (curr_token == first_token)
                     return null;
 
                 const expr_last_token = curr_token - 1;
                 if (token_tags[expr_last_token] == .builtin) {
+                    // Builtin token, find the builtin and construct signature information.
                     for (data.builtins) |builtin| {
                         if (std.mem.eql(u8, builtin.name, tree.tokenSlice(expr_last_token))) {
                             const param_infos = try alloc.alloc(
@@ -217,6 +241,7 @@ pub fn getSignatureInfo(
                     }
                     return null;
                 }
+                // Scan for a function call lhs expression.
                 var state: union(enum) {
                     any,
                     in_bracket: u32,
@@ -258,7 +283,7 @@ pub fn getSignatureInfo(
                 const last_token_slice = tree.tokenSlice(expr_last_token);
                 const expr_end = token_starts[expr_last_token] + last_token_slice.len;
                 const expr_source = tree.source[expr_start..expr_end];
-
+                // Resolve the expression.
                 var tokenizer = std.zig.Tokenizer.init(expr_source);
                 if (try analysis.getFieldAccessType(
                     document_store,
@@ -272,7 +297,6 @@ pub fn getSignatureInfo(
                         .other => |n| n,
                         else => return null,
                     };
-                    // @@@ TODO Resolve alias
                     // TODO Better detection
                     var is_self_call = expr_last_token > expr_first_token and
                         token_tags[expr_last_token] == .identifier and
@@ -280,35 +304,52 @@ pub fn getSignatureInfo(
 
                     var buf: [1]ast.Node.Index = undefined;
                     if (fnProto(type_handle.handle.tree, node, &buf)) |proto| {
-                        return try fnProtoToSignatureHelp(
+                        return try fnProtoToSignatureInfo(
                             arena,
                             is_self_call,
                             paren_commas,
                             type_handle.handle.tree,
+                            node,
                             proto,
                         );
                     }
 
                     const name = identifierFromPosition(expr_end - 1, handle.*);
                     if (name.len == 0) return null;
-                    const decl_handle = (try analysis.lookupSymbolContainer(
+                    var decl_handle = (try analysis.lookupSymbolContainer(
                         document_store,
                         arena,
                         .{ .node = node, .handle = type_handle.handle },
                         name,
                         true,
                     )) orelse return null;
+                    var res_handle = decl_handle.handle;
                     node = switch (decl_handle.decl.*) {
                         .ast_node => |n| n,
                         else => return null,
                     };
 
-                    if (fnProto(type_handle.handle.tree, node, &buf)) |proto| {
-                        return try fnProtoToSignatureHelp(
+                    if (try analysis.resolveVarDeclAlias(
+                        document_store,
+                        arena,
+                        .{ .node = node, .handle = decl_handle.handle },
+                    )) |resolved| {
+                        switch (resolved.decl.*) {
+                            .ast_node => |n| {
+                                res_handle = resolved.handle;
+                                node = n;
+                            },
+                            else => {},
+                        }
+                    }
+
+                    if (fnProto(res_handle.tree, node, &buf)) |proto| {
+                        return try fnProtoToSignatureInfo(
                             arena,
                             is_self_call,
                             paren_commas,
-                            type_handle.handle.tree,
+                            res_handle.tree,
+                            node,
                             proto,
                         );
                     }
