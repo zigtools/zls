@@ -1,6 +1,5 @@
 const std = @import("std");
 const builtin = @import("builtin");
-// const build_options = @import("build_options")
 
 var builder: *std.build.Builder = undefined;
 
@@ -13,7 +12,7 @@ pub fn build(b: *std.build.Builder) !void {
     exe.addBuildOption(
         []const u8,
         "data_version",
-        b.option([]const u8, "data_version", "The data version - either 0.7.0 or master.") orelse "master",
+        b.option([]const u8, "data_version", "The data version - 0.7.0, 0.7.1 or master.") orelse "master",
     );
 
     exe.addPackage(.{ .name = "known-folders", .path = "src/known-folders/known-folders.zig" });

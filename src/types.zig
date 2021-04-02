@@ -31,6 +31,7 @@ pub const Hover = struct {
 
 /// Params of a response (result)
 pub const ResponseParams = union(enum) {
+    SignatureHelp: SignatureHelp,
     CompletionList: CompletionList,
     Location: Location,
     Hover: Hover,

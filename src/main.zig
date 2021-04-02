@@ -125,7 +125,7 @@ const no_completions_response =
     \\,"result":{"isIncomplete":false,"items":[]}}
 ;
 const no_signatures_response =
-    \\,"result":{"signatures":[]}
+    \\,"result":{"signatures":[]}}
 ;
 const no_semantic_tokens_response =
     \\,"result":{"data":[]}}
@@ -570,7 +570,7 @@ fn nodeToCompletion(
     }
 }
 
-fn identifierFromPosition(pos_index: usize, handle: DocumentStore.Handle) []const u8 {
+pub fn identifierFromPosition(pos_index: usize, handle: DocumentStore.Handle) []const u8 {
     const text = handle.document.text;
 
     if (pos_index + 1 >= text.len) return &[0]u8{};
@@ -757,7 +757,11 @@ fn hoverDefinitionBuiltin(arena: *std.heap.ArenaAllocator, id: types.RequestId, 
                 .id = id,
                 .result = .{
                     .Hover = .{
-                        .contents = .{ .value = try std.fmt.allocPrint(&arena.allocator, "```zig\n{s}\n```\n{s}", .{ builtin.signature, builtin.documentation }) },
+                        .contents = .{ .value = try std.fmt.allocPrint(
+                            &arena.allocator,
+                            "```zig\n{s}\n```\n{s}",
+                            .{ builtin.signature, builtin.documentation },
+                        ) },
                     },
                 },
             });
@@ -1431,12 +1435,13 @@ fn completionHandler(
     }
 }
 
-fn signatureHelperHandler(
+fn signatureHelpHandler(
     arena: *std.heap.ArenaAllocator,
     id: types.RequestId,
     req: requests.SignatureHelp,
     config: Config,
 ) !void {
+    const getSignatureInfo = @import("signature_help.zig").getSignatureInfo;
     const handle = document_store.getHandle(req.params.textDocument.uri) orelse {
         logger.warn("Trying to get signature help in non existent document {s}", .{req.params.textDocument.uri});
         return try respondGeneric(id, no_signatures_response);
@@ -1446,32 +1451,23 @@ fn signatureHelperHandler(
         return try respondGeneric(id, no_signatures_response);
 
     const doc_position = try offsets.documentPosition(handle.document, req.params.position, offset_encoding);
-
-    const last_idx = doc_position.absolute_index;
-    const source = handle.document.text[0..last_idx];
-
-    // We use a text based method since we cannot rely on a valid call node being here
-    //   or even that it is the innermost call if it is.
-    const trigger = source[last_idx - 1];
-    // Check for comment, multiline string literal lines and skip
-    // Tokenize line forwards, pull in previous line if we need it etc.
-    switch (trigger) {
-        '(' => {
-            // go backwards while char in 'a'...'z','A'...'Z','0'...'9', '_', check for keywords
-            // resolve function, send result
-            // then add support for @"..." in the identifiers
-        },
-        ',' => {
-            // Go backwards, keep a stack for (), [], {}, "" (with \" support)
-            // first ( to be hit when
-        },
-        else => {},
+    if (try getSignatureInfo(
+        &document_store,
+        arena,
+        handle,
+        doc_position.absolute_index,
+        data,
+    )) |sig_info| {
+        return try send(arena, types.Response{
+            .id = id,
+            .result = .{ .SignatureHelp = .{
+                .signatures = &[1]types.SignatureInformation{sig_info},
+                .activeSignature = 0,
+                .activeParameter = sig_info.activeParameter,
+            } },
+        });
     }
-
-    // TODO Implement this
-    try respondGeneric(id,
-        \\,"result":{"signatures":[]}}
-    );
+    return try respondGeneric(id, no_signatures_response);
 }
 
 fn gotoHandler(
@@ -1662,7 +1658,7 @@ fn processJsonRpc(arena: *std.heap.ArenaAllocator, parser: *std.json.Parser, jso
         .{ "textDocument/didClose", requests.CloseDocument, closeDocumentHandler },
         .{ "textDocument/semanticTokens/full", requests.SemanticTokensFull, semanticTokensFullHandler },
         .{ "textDocument/completion", requests.Completion, completionHandler },
-        .{ "textDocument/signatureHelp", requests.SignatureHelp, signatureHelperHandler },
+        .{ "textDocument/signatureHelp", requests.SignatureHelp, signatureHelpHandler },
         .{ "textDocument/definition", requests.GotoDefinition, gotoDefinitionHandler },
         .{ "textDocument/typeDefinition", requests.GotoDefinition, gotoDefinitionHandler },
         .{ "textDocument/implementation", requests.GotoDefinition, gotoDefinitionHandler },

@@ -2234,6 +2234,21 @@ pub fn iterateSymbolsGlobal(
     return try iterateSymbolsGlobalInternal(store, arena, handle, source_index, callback, context, &use_trail);
 }
 
+pub fn innermostScope(handle: DocumentStore.Handle, source_index: usize) ast.Node.Index {
+    var current = handle.document_scope.scopes[0].data.container;
+    if (handle.document_scope.scopes.len == 1) return current;
+
+    for (handle.document_scope.scopes[1..]) |scope| {
+        if (source_index >= scope.range.start and source_index <= scope.range.end) {
+            switch (scope.data) {
+                .container, .function, .block => |node| current = node,
+                else => {},
+            }
+        }
+    }
+    return current;
+}
+
 pub fn innermostContainer(handle: *DocumentStore.Handle, source_index: usize) TypeWithHandle {
     var current = handle.document_scope.scopes[0].data.container;
     if (handle.document_scope.scopes.len == 1) return TypeWithHandle.typeVal(.{ .node = current, .handle = handle });

@@ -41,6 +41,7 @@ console.log(
     signature: []const u8,
     snippet: []const u8,
     documentation: []const u8,
+    arguments: []const []const u8,
 };
 
 pub const builtins = [_]Builtin{` +
@@ -49,11 +50,13 @@ pub const builtins = [_]Builtin{` +
         const first_paren_idx = builtin.code.indexOf('(');
         var snippet = builtin.code.substr(0, first_paren_idx + 1);
         var rest = builtin.code.substr(first_paren_idx + 1);
+        var args = [];
 
         if (rest[0] == ')') {
             snippet += ')';
         } else {
             snippet += "${1:"
+            args.push("");
 
             var arg_idx = 2;
             var paren_depth = 1;
@@ -69,10 +72,12 @@ pub const builtins = [_]Builtin{` +
                     }
                 } else if (char == '"') {
                     snippet += "\\\"";
+                    args[args.length - 1] += "\\\"";
                     continue;
                 } else if (char == ',' && paren_depth == 1) {
                     snippet += "}, ${" + arg_idx + ':';
                     arg_idx += 1;
+                    args.push("");
                     skip_space = true;
                     continue;
                 } else if (char == ' ' && skip_space) {
@@ -80,6 +85,7 @@ pub const builtins = [_]Builtin{` +
                 }
 
                 snippet += char;
+                args[args.length - 1] += char;
                 skip_space = false;
             }
         }
@@ -89,6 +95,9 @@ pub const builtins = [_]Builtin{` +
         .signature = "${builtin.code.replaceAll('"', "\\\"")}",
         .snippet = "${snippet}",
         .documentation =
-        \\\\${builtin.documentation.split('\n').join("\n        \\\\") + '\n'}    },`;
+        \\\\${builtin.documentation.split('\n').join("\n        \\\\")}
+        ,
+        .arguments = &.{${args.map(x => "\n            \"" + x + "\"").join(",") + ((args.length > 0) ? ",\n        " : "")}},
+    },`;
     }).join('\n') + "\n};\n"
 );
