@@ -171,6 +171,46 @@ pub fn getFunctionSnippet(
     return buffer.toOwnedSlice();
 }
 
+/// Returns true if a function has a `self` parameter
+pub fn hasSelfParam(
+    arena: *std.heap.ArenaAllocator,
+    document_store: *DocumentStore,
+    handle: *DocumentStore.Handle,
+    func: ast.full.FnProto,
+) !bool {
+    // Non-decl prototypes cannot have a self parameter.
+    if (func.name_token == null) return false;
+    if (func.ast.params.len == 0) return false;
+
+    const tree = handle.tree;
+    var it = func.iterate(tree);
+    const param = it.next().?;
+    if (param.type_expr == 0) return false;
+
+    const token_starts = tree.tokens.items(.start);
+    const token_data = tree.nodes.items(.data);
+    const in_container = innermostContainer(handle, token_starts[func.ast.fn_token]);
+
+    if (try resolveTypeOfNode(document_store, arena, .{
+        .node = param.type_expr,
+        .handle = handle,
+    })) |resolved_type| {
+        if (std.meta.eql(in_container, resolved_type))
+            return true;
+    }
+
+    if (isPtrType(tree, param.type_expr)) {
+        if (try resolveTypeOfNode(document_store, arena, .{
+            .node = token_data[param.type_expr].rhs,
+            .handle = handle,
+        })) |resolved_prefix_op| {
+            if (std.meta.eql(in_container, resolved_prefix_op))
+                return true;
+        }
+    }
+    return false;
+}
+
 /// Gets a function signature (keywords, name, return value)
 pub fn getVariableSignature(tree: ast.Tree, var_decl: ast.full.VarDecl) []const u8 {
     const start = offsets.tokenLocation(tree, var_decl.ast.mut_token).start;
@@ -930,7 +970,7 @@ pub fn resolveTypeOfNodeInternal(
             };
 
             return TypeWithHandle{
-                .type = .{ .data = .{ .pointer = rhs_node }, .is_type_val = false },
+                .type = .{ .data = .{ .pointer = rhs_node }, .is_type_val = rhs_type.type.is_type_val },
                 .handle = rhs_type.handle,
             };
         },

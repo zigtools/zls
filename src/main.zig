@@ -329,6 +329,7 @@ fn typeToCompletion(
                 null,
                 orig_handle,
                 type_handle.type.is_type_val,
+                null,
                 config,
             );
         },
@@ -339,6 +340,7 @@ fn typeToCompletion(
             field_access.unwrapped,
             orig_handle,
             type_handle.type.is_type_val,
+            null,
             config,
         ),
         .primitive => {},
@@ -352,13 +354,13 @@ fn nodeToCompletion(
     unwrapped: ?analysis.TypeWithHandle,
     orig_handle: *DocumentStore.Handle,
     is_type_val: bool,
+    parent_is_type_val: ?bool,
     config: Config,
 ) error{OutOfMemory}!void {
     const node = node_handle.node;
     const handle = node_handle.handle;
     const tree = handle.tree;
     const node_tags = tree.nodes.items(.tag);
-    const datas = tree.nodes.items(.data);
     const token_tags = tree.tokens.items(.tag);
 
     const doc_kind: types.MarkupContent.Kind = if (client_capabilities.completion_doc_supports_md)
@@ -385,8 +387,17 @@ fn nodeToCompletion(
             .config = &config,
             .arena = arena,
             .orig_handle = orig_handle,
+            .parent_is_type_val = is_type_val,
         };
-        try analysis.iterateSymbolsContainer(&document_store, arena, node_handle, orig_handle, declToCompletion, context, !is_type_val);
+        try analysis.iterateSymbolsContainer(
+            &document_store,
+            arena,
+            node_handle,
+            orig_handle,
+            declToCompletion,
+            context,
+            !is_type_val,
+        );
     }
 
     if (is_type_val) return;
@@ -402,38 +413,9 @@ fn nodeToCompletion(
             const func = analysis.fnProto(tree, node, &buf).?;
             if (func.name_token) |name_token| {
                 const use_snippets = config.enable_snippets and client_capabilities.supports_snippets;
-
                 const insert_text = if (use_snippets) blk: {
-                    // TODO Also check if we are dot accessing from a type val and dont skip in that case.
-                    const skip_self_param = if (func.ast.params.len > 0) param_check: {
-                        const in_container = analysis.innermostContainer(handle, tree.tokens.items(.start)[func.ast.fn_token]);
-
-                        var it = func.iterate(tree);
-                        const param = it.next().?;
-
-                        if (param.type_expr == 0) break :param_check false;
-
-                        if (try analysis.resolveTypeOfNode(&document_store, arena, .{
-                            .node = param.type_expr,
-                            .handle = handle,
-                        })) |resolved_type| {
-                            if (std.meta.eql(in_container, resolved_type))
-                                break :param_check true;
-                        }
-
-                        if (analysis.isPtrType(tree, param.type_expr)) {
-                            if (try analysis.resolveTypeOfNode(&document_store, arena, .{
-                                .node = datas[param.type_expr].rhs,
-                                .handle = handle,
-                            })) |resolved_prefix_op| {
-                                if (std.meta.eql(in_container, resolved_prefix_op))
-                                    break :param_check true;
-                            }
-                        }
-
-                        break :param_check false;
-                    } else false;
-
+                    const skip_self_param = !(parent_is_type_val orelse true) and
+                        try analysis.hasSelfParam(arena, &document_store, handle, func);
                     break :blk try analysis.getFunctionSnippet(&arena.allocator, tree, func, skip_self_param);
                 } else tree.tokenSlice(func.name_token.?);
 
@@ -952,13 +934,6 @@ fn referencesDefinitionLabel(arena: *std.heap.ArenaAllocator, id: types.RequestI
     });
 }
 
-const DeclToCompletionContext = struct {
-    completions: *std.ArrayList(types.CompletionItem),
-    config: *const Config,
-    arena: *std.heap.ArenaAllocator,
-    orig_handle: *DocumentStore.Handle,
-};
-
 fn hasComment(tree: ast.Tree, start_token: ast.TokenIndex, end_token: ast.TokenIndex) bool {
     const token_starts = tree.tokens.items(.start);
 
@@ -967,6 +942,14 @@ fn hasComment(tree: ast.Tree, start_token: ast.TokenIndex, end_token: ast.TokenI
 
     return std.mem.indexOf(u8, tree.source[start..end], "//") != null;
 }
+
+const DeclToCompletionContext = struct {
+    completions: *std.ArrayList(types.CompletionItem),
+    config: *const Config,
+    arena: *std.heap.ArenaAllocator,
+    orig_handle: *DocumentStore.Handle,
+    parent_is_type_val: ?bool = null,
+};
 
 fn declToCompletion(context: DeclToCompletionContext, decl_handle: analysis.DeclWithHandle) !void {
     const tree = decl_handle.handle.tree;
@@ -978,6 +961,7 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: analysis.Decl
             null,
             context.orig_handle,
             false,
+            context.parent_is_type_val,
             context.config.*,
         ),
         .param_decl => |param| {
