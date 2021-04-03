@@ -2728,33 +2728,39 @@ fn makeScopeInternal(
                     param.type_expr,
                 );
             }
+            const a = data[node_idx];
+            const left = data[a.lhs];
+            const right = data[a.rhs];
+            // log.debug("Alive 3.2 - {}- {}- {}-{} {}- {}-{}", .{tags[node_idx], tags[a.lhs], tags[left.lhs], tags[left.rhs], tags[a.rhs], tags[right.lhs], tags[right.rhs]});
 
-            // Visit the return type
-            try makeScopeInternal(
-                allocator,
-                scopes,
-                error_completions,
-                enum_completions,
-                tree,
                 // TODO: This should be the proto
-                if (fn_tag == .fn_decl)
-                    data[data[node_idx].lhs].rhs
-                else
-                    data[node_idx].rhs,
-            );
-            // Visit the function body
-            if (fn_tag == .fn_decl) {
+                
+            if (fn_tag == .fn_decl) blk: {
+                if (data[node_idx].lhs == 0) break :blk;
+                const return_type_node = data[data[node_idx].lhs].rhs;
+                if (return_type_node == 0) break :blk;
+
+                // Visit the return type
                 try makeScopeInternal(
                     allocator,
                     scopes,
                     error_completions,
                     enum_completions,
                     tree,
-                    data[node_idx].rhs,
+                    return_type_node,
                 );
             }
 
-            return;
+            if (data[node_idx].rhs == 0) return;
+            // Visit the function body
+            try makeScopeInternal(
+                allocator,
+                scopes,
+                error_completions,
+                enum_completions,
+                tree,
+                data[node_idx].rhs,
+            );
         },
         .test_decl => {
             return try makeScopeInternal(
