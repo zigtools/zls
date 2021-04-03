@@ -857,6 +857,21 @@ pub fn isBuiltinCall(tree: ast.Tree, node: ast.Node.Index) bool {
     };
 }
 
+pub fn isCall(tree: ast.Tree, node: ast.Node.Index) bool {
+    return switch (tree.nodes.items(.tag)[node]) {
+        .call,
+        .call_comma,
+        .call_one,
+        .call_one_comma,
+        .async_call,
+        .async_call_comma,
+        .async_call_one,
+        .async_call_one_comma,
+        => true,
+        else => false,
+    };
+}
+
 pub fn fnProto(tree: ast.Tree, node: ast.Node.Index, buf: *[1]ast.Node.Index) ?ast.full.FnProto {
     return switch (tree.nodes.items(.tag)[node]) {
         .fn_proto => tree.fnProto(node),
@@ -864,6 +879,22 @@ pub fn fnProto(tree: ast.Tree, node: ast.Node.Index, buf: *[1]ast.Node.Index) ?a
         .fn_proto_one => tree.fnProtoOne(buf, node),
         .fn_proto_simple => tree.fnProtoSimple(buf, node),
         .fn_decl => fnProto(tree, tree.nodes.items(.data)[node].lhs, buf),
+        else => null,
+    };
+}
+
+pub fn callFull(tree: ast.Tree, node: ast.Node.Index, buf: *[1]ast.Node.Index) ?ast.full.Call {
+    return switch (tree.nodes.items(.tag)[node]) {
+        .async_call,
+        .async_call_comma,
+        .call,
+        .call_comma,
+        => tree.callFull(node),
+        .async_call_one,
+        .async_call_one_comma,
+        .call_one,
+        .call_one_comma,
+        => tree.callOne(buf, node),
         else => null,
     };
 }

@@ -124,6 +124,9 @@ const edit_not_applied_response =
 const no_completions_response =
     \\,"result":{"isIncomplete":false,"items":[]}}
 ;
+const no_signatures_response =
+    \\,"result":{"signatures":[]}}
+;
 const no_semantic_tokens_response =
     \\,"result":{"data":[]}}
 ;
@@ -326,6 +329,7 @@ fn typeToCompletion(
                 null,
                 orig_handle,
                 type_handle.type.is_type_val,
+                null,
                 config,
             );
         },
@@ -336,6 +340,7 @@ fn typeToCompletion(
             field_access.unwrapped,
             orig_handle,
             type_handle.type.is_type_val,
+            null,
             config,
         ),
         .primitive => {},
@@ -349,13 +354,13 @@ fn nodeToCompletion(
     unwrapped: ?analysis.TypeWithHandle,
     orig_handle: *DocumentStore.Handle,
     is_type_val: bool,
+    parent_is_type_val: ?bool,
     config: Config,
 ) error{OutOfMemory}!void {
     const node = node_handle.node;
     const handle = node_handle.handle;
     const tree = handle.tree;
     const node_tags = tree.nodes.items(.tag);
-    const datas = tree.nodes.items(.data);
     const token_tags = tree.tokens.items(.tag);
 
     const doc_kind: types.MarkupContent.Kind = if (client_capabilities.completion_doc_supports_md)
@@ -382,8 +387,17 @@ fn nodeToCompletion(
             .config = &config,
             .arena = arena,
             .orig_handle = orig_handle,
+            .parent_is_type_val = is_type_val,
         };
-        try analysis.iterateSymbolsContainer(&document_store, arena, node_handle, orig_handle, declToCompletion, context, !is_type_val);
+        try analysis.iterateSymbolsContainer(
+            &document_store,
+            arena,
+            node_handle,
+            orig_handle,
+            declToCompletion,
+            context,
+            !is_type_val,
+        );
     }
 
     if (is_type_val) return;
@@ -399,38 +413,9 @@ fn nodeToCompletion(
             const func = analysis.fnProto(tree, node, &buf).?;
             if (func.name_token) |name_token| {
                 const use_snippets = config.enable_snippets and client_capabilities.supports_snippets;
-
                 const insert_text = if (use_snippets) blk: {
-                    // TODO Also check if we are dot accessing from a type val and dont skip in that case.
-                    const skip_self_param = if (func.ast.params.len > 0) param_check: {
-                        const in_container = analysis.innermostContainer(handle, tree.tokens.items(.start)[func.ast.fn_token]);
-
-                        var it = func.iterate(tree);
-                        const param = it.next().?;
-
-                        if (param.type_expr == 0) break :param_check false;
-
-                        if (try analysis.resolveTypeOfNode(&document_store, arena, .{
-                            .node = param.type_expr,
-                            .handle = handle,
-                        })) |resolved_type| {
-                            if (std.meta.eql(in_container, resolved_type))
-                                break :param_check true;
-                        }
-
-                        if (analysis.isPtrType(tree, param.type_expr)) {
-                            if (try analysis.resolveTypeOfNode(&document_store, arena, .{
-                                .node = datas[param.type_expr].rhs,
-                                .handle = handle,
-                            })) |resolved_prefix_op| {
-                                if (std.meta.eql(in_container, resolved_prefix_op))
-                                    break :param_check true;
-                            }
-                        }
-
-                        break :param_check false;
-                    } else false;
-
+                    const skip_self_param = !(parent_is_type_val orelse true) and
+                        try analysis.hasSelfParam(arena, &document_store, handle, func);
                     break :blk try analysis.getFunctionSnippet(&arena.allocator, tree, func, skip_self_param);
                 } else tree.tokenSlice(func.name_token.?);
 
@@ -567,7 +552,7 @@ fn nodeToCompletion(
     }
 }
 
-fn identifierFromPosition(pos_index: usize, handle: DocumentStore.Handle) []const u8 {
+pub fn identifierFromPosition(pos_index: usize, handle: DocumentStore.Handle) []const u8 {
     const text = handle.document.text;
 
     if (pos_index + 1 >= text.len) return &[0]u8{};
@@ -754,7 +739,11 @@ fn hoverDefinitionBuiltin(arena: *std.heap.ArenaAllocator, id: types.RequestId, 
                 .id = id,
                 .result = .{
                     .Hover = .{
-                        .contents = .{ .value = try std.fmt.allocPrint(&arena.allocator, "```zig\n{s}\n```\n{s}", .{ builtin.signature, builtin.documentation }) },
+                        .contents = .{ .value = try std.fmt.allocPrint(
+                            &arena.allocator,
+                            "```zig\n{s}\n```\n{s}",
+                            .{ builtin.signature, builtin.documentation },
+                        ) },
                     },
                 },
             });
@@ -945,13 +934,6 @@ fn referencesDefinitionLabel(arena: *std.heap.ArenaAllocator, id: types.RequestI
     });
 }
 
-const DeclToCompletionContext = struct {
-    completions: *std.ArrayList(types.CompletionItem),
-    config: *const Config,
-    arena: *std.heap.ArenaAllocator,
-    orig_handle: *DocumentStore.Handle,
-};
-
 fn hasComment(tree: ast.Tree, start_token: ast.TokenIndex, end_token: ast.TokenIndex) bool {
     const token_starts = tree.tokens.items(.start);
 
@@ -960,6 +942,14 @@ fn hasComment(tree: ast.Tree, start_token: ast.TokenIndex, end_token: ast.TokenI
 
     return std.mem.indexOf(u8, tree.source[start..end], "//") != null;
 }
+
+const DeclToCompletionContext = struct {
+    completions: *std.ArrayList(types.CompletionItem),
+    config: *const Config,
+    arena: *std.heap.ArenaAllocator,
+    orig_handle: *DocumentStore.Handle,
+    parent_is_type_val: ?bool = null,
+};
 
 fn declToCompletion(context: DeclToCompletionContext, decl_handle: analysis.DeclWithHandle) !void {
     const tree = decl_handle.handle.tree;
@@ -971,6 +961,7 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: analysis.Decl
             null,
             context.orig_handle,
             false,
+            context.parent_is_type_val,
             context.config.*,
         ),
         .param_decl => |param| {
@@ -1280,7 +1271,8 @@ fn initializeHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: 
                 },
                 .capabilities = .{
                     .signatureHelpProvider = .{
-                        .triggerCharacters = &[_][]const u8{ "(", "," },
+                        .triggerCharacters = &.{"("},
+                        .retriggerCharacters = &.{","},
                     },
                     .textDocumentSync = .Full,
                     .renameProvider = true,
@@ -1398,39 +1390,77 @@ fn semanticTokensFullHandler(arena: *std.heap.ArenaAllocator, id: types.RequestI
     }
 }
 
-fn completionHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.Completion, config: Config) !void {
+fn completionHandler(
+    arena: *std.heap.ArenaAllocator,
+    id: types.RequestId,
+    req: requests.Completion,
+    config: Config,
+) !void {
     const handle = document_store.getHandle(req.params.textDocument.uri) orelse {
         logger.warn("Trying to complete in non existent document {s}", .{req.params.textDocument.uri});
         return try respondGeneric(id, no_completions_response);
     };
 
-    if (req.params.position.character >= 0) {
-        const doc_position = try offsets.documentPosition(handle.document, req.params.position, offset_encoding);
-        const pos_context = try analysis.documentPositionContext(arena, handle.document, doc_position);
-        const use_snippets = config.enable_snippets and client_capabilities.supports_snippets;
+    if (req.params.position.character == 0)
+        return try respondGeneric(id, no_completions_response);
 
-        switch (pos_context) {
-            .builtin => try completeBuiltin(arena, id, config),
-            .var_access, .empty => try completeGlobal(arena, id, doc_position.absolute_index, handle, config),
-            .field_access => |range| try completeFieldAccess(arena, id, handle, doc_position, range, config),
-            .global_error_set => try completeError(arena, id, handle, config),
-            .enum_literal => try completeDot(arena, id, handle, config),
-            .label => try completeLabel(arena, id, doc_position.absolute_index, handle, config),
-            else => try respondGeneric(id, no_completions_response),
-        }
-    } else {
-        try respondGeneric(id, no_completions_response);
+    const doc_position = try offsets.documentPosition(handle.document, req.params.position, offset_encoding);
+    const pos_context = try analysis.documentPositionContext(arena, handle.document, doc_position);
+    const use_snippets = config.enable_snippets and client_capabilities.supports_snippets;
+
+    switch (pos_context) {
+        .builtin => try completeBuiltin(arena, id, config),
+        .var_access, .empty => try completeGlobal(arena, id, doc_position.absolute_index, handle, config),
+        .field_access => |range| try completeFieldAccess(arena, id, handle, doc_position, range, config),
+        .global_error_set => try completeError(arena, id, handle, config),
+        .enum_literal => try completeDot(arena, id, handle, config),
+        .label => try completeLabel(arena, id, doc_position.absolute_index, handle, config),
+        else => try respondGeneric(id, no_completions_response),
     }
 }
 
-fn signatureHelperHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, config: Config) !void {
-    // TODO Implement this
-    try respondGeneric(id,
-        \\,"result":{"signatures":[]}}
-    );
+fn signatureHelpHandler(
+    arena: *std.heap.ArenaAllocator,
+    id: types.RequestId,
+    req: requests.SignatureHelp,
+    config: Config,
+) !void {
+    const getSignatureInfo = @import("signature_help.zig").getSignatureInfo;
+    const handle = document_store.getHandle(req.params.textDocument.uri) orelse {
+        logger.warn("Trying to get signature help in non existent document {s}", .{req.params.textDocument.uri});
+        return try respondGeneric(id, no_signatures_response);
+    };
+
+    if (req.params.position.character == 0)
+        return try respondGeneric(id, no_signatures_response);
+
+    const doc_position = try offsets.documentPosition(handle.document, req.params.position, offset_encoding);
+    if (try getSignatureInfo(
+        &document_store,
+        arena,
+        handle,
+        doc_position.absolute_index,
+        data,
+    )) |sig_info| {
+        return try send(arena, types.Response{
+            .id = id,
+            .result = .{ .SignatureHelp = .{
+                .signatures = &[1]types.SignatureInformation{sig_info},
+                .activeSignature = 0,
+                .activeParameter = sig_info.activeParameter,
+            } },
+        });
+    }
+    return try respondGeneric(id, no_signatures_response);
 }
 
-fn gotoHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.GotoDefinition, config: Config, resolve_alias: bool) !void {
+fn gotoHandler(
+    arena: *std.heap.ArenaAllocator,
+    id: types.RequestId,
+    req: requests.GotoDefinition,
+    config: Config,
+    resolve_alias: bool,
+) !void {
     const handle = document_store.getHandle(req.params.textDocument.uri) orelse {
         logger.warn("Trying to go to definition in non existent document {s}", .{req.params.textDocument.uri});
         return try respondGeneric(id, null_result_response);
@@ -1612,7 +1642,7 @@ fn processJsonRpc(arena: *std.heap.ArenaAllocator, parser: *std.json.Parser, jso
         .{ "textDocument/didClose", requests.CloseDocument, closeDocumentHandler },
         .{ "textDocument/semanticTokens/full", requests.SemanticTokensFull, semanticTokensFullHandler },
         .{ "textDocument/completion", requests.Completion, completionHandler },
-        .{ "textDocument/signatureHelp", void, signatureHelperHandler },
+        .{ "textDocument/signatureHelp", requests.SignatureHelp, signatureHelpHandler },
         .{ "textDocument/definition", requests.GotoDefinition, gotoDefinitionHandler },
         .{ "textDocument/typeDefinition", requests.GotoDefinition, gotoDefinitionHandler },
         .{ "textDocument/implementation", requests.GotoDefinition, gotoDefinitionHandler },
