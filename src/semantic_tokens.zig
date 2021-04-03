@@ -329,16 +329,20 @@ fn writeContainerField(
     field_token_type: ?TokenType,
     child_frame: anytype,
 ) !void {
-    const container_field = containerField(builder.handle.tree, node).?;
-    if (analysis.getDocCommentTokenIndex(builder.handle.tree, node)) |docs|
-        try writeDocComments(builder, builder.handle.tree, docs);
+    const tree = builder.handle.tree;
+    const container_field = containerField(tree, node).?;
+    const base = tree.nodes.items(.main_token)[node];
+    const tokens = tree.tokens.items(.tag);
+
+    if (analysis.getDocCommentTokenIndex(tokens, base)) |docs|
+        try writeDocComments(builder, tree, docs);
 
     try writeToken(builder, container_field.comptime_token, .keyword);
     if (field_token_type) |tok_type| try writeToken(builder, container_field.ast.name_token, tok_type);
 
     if (container_field.ast.type_expr != 0) {
         if (container_field.ast.align_expr != 0) {
-            try writeToken(builder, builder.handle.tree.firstToken(container_field.ast.align_expr) - 2, .keyword);
+            try writeToken(builder, tree.firstToken(container_field.ast.align_expr) - 2, .keyword);
             try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, container_field.ast.align_expr });
         }
         try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, container_field.ast.type_expr });
@@ -346,9 +350,9 @@ fn writeContainerField(
 
     if (container_field.ast.value_expr != 0) block: {
         const eq_tok: ast.TokenIndex = if (container_field.ast.type_expr != 0)
-            lastToken(builder.handle.tree, container_field.ast.type_expr) + 1
+            lastToken(tree, container_field.ast.type_expr) + 1
         else if (container_field.ast.align_expr != 0)
-            lastToken(builder.handle.tree, container_field.ast.align_expr) + 1
+            lastToken(tree, container_field.ast.align_expr) + 1
         else
             break :block; // Check this, I believe it is correct.
 
@@ -444,7 +448,7 @@ fn writeNodeTokens(
         .aligned_var_decl,
         => {
             const var_decl = varDecl(tree, node).?;
-            if (analysis.getDocCommentTokenIndex(tree, node)) |comment_idx|
+            if (analysis.getDocCommentTokenIndex(token_tags, main_token)) |comment_idx|
                 try writeDocComments(builder, handle.tree, comment_idx);
 
             try writeToken(builder, var_decl.visib_token, .keyword);
@@ -559,7 +563,7 @@ fn writeNodeTokens(
         => {
             var buf: [1]ast.Node.Index = undefined;
             const fn_proto: ast.full.FnProto = fnProto(tree, node, &buf).?;
-            if (analysis.getDocCommentTokenIndex(tree, node)) |docs|
+            if (analysis.getDocCommentTokenIndex(token_tags, main_token)) |docs|
                 try writeDocComments(builder, handle.tree, docs);
 
             try writeToken(builder, fn_proto.visib_token, .keyword);
@@ -617,7 +621,7 @@ fn writeNodeTokens(
         .@"comptime",
         .@"nosuspend",
         => {
-            if (analysis.getDocCommentTokenIndex(tree, node)) |doc|
+            if (analysis.getDocCommentTokenIndex(token_tags, main_token)) |doc|
                 try writeDocComments(builder, handle.tree, doc);
             try writeToken(builder, main_token, .keyword);
             try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, datas[node].lhs });
@@ -932,7 +936,7 @@ fn writeNodeTokens(
             try writeToken(builder, main_token, .type);
         },
         .test_decl => {
-            if (analysis.getDocCommentTokenIndex(handle.tree, node)) |doc|
+            if (analysis.getDocCommentTokenIndex(token_tags, main_token)) |doc|
                 try writeDocComments(builder, handle.tree, doc);
 
             try writeToken(builder, main_token, .keyword);

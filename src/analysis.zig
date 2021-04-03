@@ -6,52 +6,6 @@ const offsets = @import("offsets.zig");
 const log = std.log.scoped(.analysis);
 usingnamespace @import("ast.zig");
 
-/// Get a declaration's doc comment token index
-pub fn getDocCommentTokenIndex(tree: ast.Tree, node: ast.Node.Index) ?ast.TokenIndex {
-    const tags = tree.nodes.items(.tag);
-    const tokens = tree.tokens.items(.tag);
-    const current = tree.nodes.items(.main_token)[node];
-
-    var idx = current;
-    if (idx == 0) return null;
-    switch (tags[node]) {
-        .fn_proto,
-        .fn_proto_one,
-        .fn_proto_simple,
-        .fn_proto_multi,
-        .fn_decl,
-        => {
-            idx -= 1;
-            if (tokens[idx] == .keyword_extern and idx > 0)
-                idx -= 1;
-            if (tokens[idx] == .keyword_pub and idx > 0)
-                idx -= 1;
-        },
-        .local_var_decl,
-        .global_var_decl,
-        .aligned_var_decl,
-        .simple_var_decl,
-        => {
-            idx -= 1;
-            if (tokens[idx] == .keyword_pub and idx > 0)
-                idx -= 1;
-        },
-        else => idx -= 1,
-    }
-
-    // Find first doc comment token
-    if (tokens[idx] == .doc_comment or tokens[idx] == .container_doc_comment) {
-        while (idx > 0 and
-            (tokens[idx] == .doc_comment or tokens[idx] == .container_doc_comment))
-        {
-            idx -= 1;
-        }
-        return idx + @boolToInt(tokens[idx] != .doc_comment and tokens[idx] != .container_doc_comment);
-    }
-
-    return null;
-}
-
 /// Gets a declaration's doc comments, caller must free memory when a value is returned
 /// Like:
 ///```zig
@@ -64,10 +18,34 @@ pub fn getDocComments(
     node: ast.Node.Index,
     format: types.MarkupContent.Kind,
 ) !?[]const u8 {
-    if (getDocCommentTokenIndex(tree, node)) |doc_comment_index| {
+    const base = tree.nodes.items(.main_token)[node];
+    const tokens = tree.tokens.items(.tag);
+
+    if (getDocCommentTokenIndex(tokens, base)) |doc_comment_index| {
         return try collectDocComments(allocator, tree, doc_comment_index, format);
     }
     return null;
+}
+
+/// Get a declaration's doc comment token index
+pub fn getDocCommentTokenIndex(tokens: []std.zig.Token.Tag, base_token: ast.TokenIndex) ?ast.TokenIndex {
+    var idx = base_token;
+    if (idx == 0) return null;
+    idx -= 1;
+    if (tokens[idx] == .keyword_threadlocal and idx > 0) idx -= 1;
+    if (tokens[idx] == .string_literal and idx > 1 and tokens[idx-1] == .keyword_extern) idx -= 1;
+    if (tokens[idx] == .keyword_extern and idx > 0) idx -= 1;
+    if (tokens[idx] == .keyword_export and idx > 0) idx -= 1;
+    if (tokens[idx] == .keyword_pub and idx > 0) idx -= 1;
+
+    // Find first doc comment token
+    if (!(tokens[idx] == .doc_comment or tokens[idx] == .container_doc_comment))
+        return null;
+    while (tokens[idx] == .doc_comment or tokens[idx] == .container_doc_comment) {
+        idx -= 1;
+        if (idx < 0) break;
+    }
+    return idx + 1;
 }
 
 pub fn collectDocComments(
@@ -78,12 +56,11 @@ pub fn collectDocComments(
 ) ![]const u8 {
     var lines = std.ArrayList([]const u8).init(allocator);
     defer lines.deinit();
-
-    const token_tags = tree.tokens.items(.tag);
+    const tokens = tree.tokens.items(.tag);
 
     var curr_line_tok = doc_comments;
     while (true) : (curr_line_tok += 1) {
-        switch (token_tags[curr_line_tok]) {
+        switch (tokens[curr_line_tok]) {
             .doc_comment, .container_doc_comment => {
                 try lines.append(std.mem.trim(u8, tree.tokenSlice(curr_line_tok)[3..], &std.ascii.spaces));
             },
@@ -2582,8 +2559,6 @@ fn nodeSourceRange(tree: ast.Tree, node: ast.Node.Index) SourceRange {
     };
 }
 
-// TODO Possibly collect all imports to diff them on changes
-//      as well
 fn makeScopeInternal(
     allocator: *std.mem.Allocator,
     scopes: *std.ArrayListUnmanaged(Scope),
@@ -2753,33 +2728,39 @@ fn makeScopeInternal(
                     param.type_expr,
                 );
             }
+            const a = data[node_idx];
+            const left = data[a.lhs];
+            const right = data[a.rhs];
+            // log.debug("Alive 3.2 - {}- {}- {}-{} {}- {}-{}", .{tags[node_idx], tags[a.lhs], tags[left.lhs], tags[left.rhs], tags[a.rhs], tags[right.lhs], tags[right.rhs]});
 
-            // Visit the return type
-            try makeScopeInternal(
-                allocator,
-                scopes,
-                error_completions,
-                enum_completions,
-                tree,
                 // TODO: This should be the proto
-                if (fn_tag == .fn_decl)
-                    data[data[node_idx].lhs].rhs
-                else
-                    data[node_idx].rhs,
-            );
-            // Visit the function body
-            if (fn_tag == .fn_decl) {
+                
+            if (fn_tag == .fn_decl) blk: {
+                if (data[node_idx].lhs == 0) break :blk;
+                const return_type_node = data[data[node_idx].lhs].rhs;
+                if (return_type_node == 0) break :blk;
+
+                // Visit the return type
                 try makeScopeInternal(
                     allocator,
                     scopes,
                     error_completions,
                     enum_completions,
                     tree,
-                    data[node_idx].rhs,
+                    return_type_node,
                 );
             }
 
-            return;
+            if (data[node_idx].rhs == 0) return;
+            // Visit the function body
+            try makeScopeInternal(
+                allocator,
+                scopes,
+                error_completions,
+                enum_completions,
+                tree,
+                data[node_idx].rhs,
+            );
         },
         .test_decl => {
             return try makeScopeInternal(
