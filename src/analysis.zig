@@ -171,6 +171,46 @@ pub fn getFunctionSnippet(
     return buffer.toOwnedSlice();
 }
 
+/// Returns true if a function has a `self` parameter
+pub fn hasSelfParam(
+    arena: *std.heap.ArenaAllocator,
+    document_store: *DocumentStore,
+    handle: *DocumentStore.Handle,
+    func: ast.full.FnProto,
+) !bool {
+    // Non-decl prototypes cannot have a self parameter.
+    if (func.name_token == null) return false;
+    if (func.ast.params.len == 0) return false;
+
+    const tree = handle.tree;
+    var it = func.iterate(tree);
+    const param = it.next().?;
+    if (param.type_expr == 0) return false;
+
+    const token_starts = tree.tokens.items(.start);
+    const token_data = tree.nodes.items(.data);
+    const in_container = innermostContainer(handle, token_starts[func.ast.fn_token]);
+
+    if (try resolveTypeOfNode(document_store, arena, .{
+        .node = param.type_expr,
+        .handle = handle,
+    })) |resolved_type| {
+        if (std.meta.eql(in_container, resolved_type))
+            return true;
+    }
+
+    if (isPtrType(tree, param.type_expr)) {
+        if (try resolveTypeOfNode(document_store, arena, .{
+            .node = token_data[param.type_expr].rhs,
+            .handle = handle,
+        })) |resolved_prefix_op| {
+            if (std.meta.eql(in_container, resolved_prefix_op))
+                return true;
+        }
+    }
+    return false;
+}
+
 /// Gets a function signature (keywords, name, return value)
 pub fn getVariableSignature(tree: ast.Tree, var_decl: ast.full.VarDecl) []const u8 {
     const start = offsets.tokenLocation(tree, var_decl.ast.mut_token).start;
@@ -371,22 +411,6 @@ fn isBlock(tree: ast.Tree, node: ast.Node.Index) bool {
         .block_semicolon,
         .block_two,
         .block_two_semicolon,
-        => true,
-        else => false,
-    };
-}
-
-/// Returns `true` when the given `node` is one of the call tags
-fn isCall(tree: ast.Tree, node: ast.Node.Index) bool {
-    return switch (tree.nodes.items(.tag)[node]) {
-        .call,
-        .call_comma,
-        .call_one,
-        .call_one_comma,
-        .async_call,
-        .async_call_comma,
-        .async_call_one,
-        .async_call_one_comma,
         => true,
         else => false,
     };
@@ -946,7 +970,7 @@ pub fn resolveTypeOfNodeInternal(
             };
 
             return TypeWithHandle{
-                .type = .{ .data = .{ .pointer = rhs_node }, .is_type_val = false },
+                .type = .{ .data = .{ .pointer = rhs_node }, .is_type_val = rhs_type.type.is_type_val },
                 .handle = rhs_type.handle,
             };
         },
@@ -2250,6 +2274,21 @@ pub fn iterateSymbolsGlobal(
     return try iterateSymbolsGlobalInternal(store, arena, handle, source_index, callback, context, &use_trail);
 }
 
+pub fn innermostScope(handle: DocumentStore.Handle, source_index: usize) ast.Node.Index {
+    var current = handle.document_scope.scopes[0].data.container;
+    if (handle.document_scope.scopes.len == 1) return current;
+
+    for (handle.document_scope.scopes[1..]) |scope| {
+        if (source_index >= scope.range.start and source_index <= scope.range.end) {
+            switch (scope.data) {
+                .container, .function, .block => |node| current = node,
+                else => {},
+            }
+        }
+    }
+    return current;
+}
+
 pub fn innermostContainer(handle: *DocumentStore.Handle, source_index: usize) TypeWithHandle {
     var current = handle.document_scope.scopes[0].data.container;
     if (handle.document_scope.scopes.len == 1) return TypeWithHandle.typeVal(.{ .node = current, .handle = handle });
@@ -3094,19 +3133,7 @@ fn makeScopeInternal(
         .async_call_one_comma,
         => {
             var buf: [1]ast.Node.Index = undefined;
-            const call: ast.full.Call = switch (node_tag) {
-                .async_call,
-                .async_call_comma,
-                .call,
-                .call_comma,
-                => tree.callFull(node_idx),
-                .async_call_one,
-                .async_call_one_comma,
-                .call_one,
-                .call_one_comma,
-                => tree.callOne(&buf, node_idx),
-                else => unreachable,
-            };
+            const call = callFull(tree, node_idx, &buf).?;
 
             try makeScopeInternal(allocator, scopes, error_completions, enum_completions, tree, call.ast.fn_expr);
             for (call.ast.params) |param|

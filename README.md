@@ -64,14 +64,14 @@ zls config # Configure ZLS
 <!-- If this table grows too large, then delete this one and move it all over to the Wiki page about building from source. -->
 | Option | Type | Default Value | What it Does |
 | --- | --- | --- | --- |
-| `-Ddata_version` | `string` (master or 0.7.0) | master | The data file version. This selects the files in the `src/data` folder that correspond to the Zig version being served.|
+| `-Ddata_version` | `string` (master, 0.7.0 or 0.7.1) | master | The data file version. This selects the files in the `src/data` folder that correspond to the Zig version being served.|
 
 ### Configuration Options
 
 You can configure zls by running `zls config`.  
 zls will look for a zls.json configuration file in multiple locations with the following priority:  
 - In the local configuration folder of your OS (as provided by [known-folders](https://github.com/ziglibs/known-folders#folder-list))  
-- In the same directory as the executable  
+- In the global configuration folder of your OS (as provided by [known-folders](https://github.com/ziglibs/known-folders#folder-list))
 
 The following options are currently available.  
 

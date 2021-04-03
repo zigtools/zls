@@ -18,12 +18,22 @@ fn Default(comptime T: type, comptime default_value: T) type {
     };
 }
 
+pub fn ErrorUnwrappedReturnOf(comptime func: anytype) type {
+    return switch (@typeInfo(@TypeOf(func))) {
+        .Fn, .BoundFn => |fn_info| switch (@typeInfo(fn_info.return_type.?)) {
+            .ErrorUnion => |err_union| err_union.payload,
+            else => |T| return T,
+        },
+        else => unreachable,
+    };
+}
+
 fn Transform(comptime Original: type, comptime transform_fn: anytype) type {
     return struct {
         pub const original_type = Original;
         pub const transform = transform_fn;
 
-        value: @TypeOf(transform(@as(Original, undefined))),
+        value: ErrorUnwrappedReturnOf(transform_fn),
     };
 }
 
@@ -101,26 +111,34 @@ fn fromDynamicTreeInternal(arena: *std.heap.ArenaAllocator, value: std.json.Valu
         }
     } else if (T == std.json.Value) {
         out.* = value;
-    } else {
-        switch (T) {
-            bool => {
-                if (value != .Bool) return error.MalformedJson;
-                out.* = value.Bool;
-            },
-            i64 => {
-                if (value != .Integer) return error.MalformedJson;
-                out.* = value.Integer;
-            },
-            f64 => {
-                if (value != .Float) return error.MalformedJson;
-                out.* = value.Float;
-            },
-            []const u8 => {
-                if (value != .String) return error.MalformedJson;
-                out.* = value.String;
-            },
-            else => @compileError("Invalid type " ++ @typeName(T)),
-        }
+    } else if (comptime std.meta.trait.is(.Enum)(T)) {
+        const info = @typeInfo(T).Enum;
+        if (info.layout != .Auto)
+            @compileError("Only auto layout enums are allowed");
+
+        const TagType = info.tag_type;
+        if (value != .Integer) return error.MalformedJson;
+        out.* = std.meta.intToEnum(
+            T,
+            std.math.cast(TagType, value.Integer) catch return error.MalformedJson,
+        ) catch return error.MalformedJson;
+    } else if (comptime std.meta.trait.is(.Int)(T)) {
+        if (value != .Integer) return error.MalformedJson;
+        out.* = std.math.cast(T, value.Integer) catch return error.MalformedJson;
+    } else switch (T) {
+        bool => {
+            if (value != .Bool) return error.MalformedJson;
+            out.* = value.Bool;
+        },
+        f64 => {
+            if (value != .Float) return error.MalformedJson;
+            out.* = value.Float;
+        },
+        []const u8 => {
+            if (value != .String) return error.MalformedJson;
+            out.* = value.String;
+        },
+        else => @compileError("Invalid type " ++ @typeName(T)),
     }
 }
 
@@ -201,6 +219,23 @@ const TextDocumentIdentifierPositionRequest = struct {
     params: struct {
         textDocument: TextDocumentIdentifier,
         position: types.Position,
+    },
+};
+
+pub const SignatureHelp = struct {
+    params: struct {
+        textDocument: TextDocumentIdentifier,
+        position: types.Position,
+        context: ?struct {
+            triggerKind: enum {
+                invoked = 1,
+                trigger_character = 2,
+                content_change = 3,
+            },
+            triggerCharacter: ?[]const u8,
+            isRetrigger: bool,
+            activeSignatureHelp: ?types.SignatureHelp,
+        },
     },
 };
 
