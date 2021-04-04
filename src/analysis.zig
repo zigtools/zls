@@ -33,7 +33,7 @@ pub fn getDocCommentTokenIndex(tokens: []std.zig.Token.Tag, base_token: ast.Toke
     if (idx == 0) return null;
     idx -= 1;
     if (tokens[idx] == .keyword_threadlocal and idx > 0) idx -= 1;
-    if (tokens[idx] == .string_literal and idx > 1 and tokens[idx-1] == .keyword_extern) idx -= 1;
+    if (tokens[idx] == .string_literal and idx > 1 and tokens[idx - 1] == .keyword_extern) idx -= 1;
     if (tokens[idx] == .keyword_extern and idx > 0) idx -= 1;
     if (tokens[idx] == .keyword_export and idx > 0) idx -= 1;
     if (tokens[idx] == .keyword_pub and idx > 0) idx -= 1;
@@ -41,11 +41,10 @@ pub fn getDocCommentTokenIndex(tokens: []std.zig.Token.Tag, base_token: ast.Toke
     // Find first doc comment token
     if (!(tokens[idx] == .doc_comment or tokens[idx] == .container_doc_comment))
         return null;
-    while (tokens[idx] == .doc_comment or tokens[idx] == .container_doc_comment) {
+    return while (tokens[idx] == .doc_comment or tokens[idx] == .container_doc_comment) {
+        if (idx == 0) break 0;
         idx -= 1;
-        if (idx < 0) break;
-    }
-    return idx + 1;
+    } else idx + 1;
 }
 
 pub fn collectDocComments(
@@ -2728,13 +2727,7 @@ fn makeScopeInternal(
                     param.type_expr,
                 );
             }
-            const a = data[node_idx];
-            const left = data[a.lhs];
-            const right = data[a.rhs];
-            // log.debug("Alive 3.2 - {}- {}- {}-{} {}- {}-{}", .{tags[node_idx], tags[a.lhs], tags[left.lhs], tags[left.rhs], tags[a.rhs], tags[right.lhs], tags[right.rhs]});
 
-                // TODO: This should be the proto
-                
             if (fn_tag == .fn_decl) blk: {
                 if (data[node_idx].lhs == 0) break :blk;
                 const return_type_node = data[data[node_idx].lhs].rhs;
