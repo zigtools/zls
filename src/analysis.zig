@@ -2250,19 +2250,24 @@ pub fn iterateSymbolsGlobal(
     return try iterateSymbolsGlobalInternal(store, arena, handle, source_index, callback, context, &use_trail);
 }
 
-pub fn innermostScope(handle: DocumentStore.Handle, source_index: usize) ast.Node.Index {
-    var current = handle.document_scope.scopes[0].data.container;
-    if (handle.document_scope.scopes.len == 1) return current;
+pub fn innermostBlockScopeIndex(handle: DocumentStore.Handle, source_index: usize) usize {
+    if (handle.document_scope.scopes.len == 1) return 0;
 
-    for (handle.document_scope.scopes[1..]) |scope| {
+    var current: usize = 0;
+    for (handle.document_scope.scopes[1..]) |*scope, idx| {
         if (source_index >= scope.range.start and source_index <= scope.range.end) {
             switch (scope.data) {
-                .container, .function, .block => |node| current = node,
+                .container, .function, .block => |node| current = idx + 1,
                 else => {},
             }
         }
+        if (scope.range.start > source_index) break;
     }
     return current;
+}
+
+pub fn innermostBlockScope(handle: DocumentStore.Handle, source_index: usize) ast.Node.Index {
+    return handle.document_scope.scopes[innermostBlockScopeIndex(handle, source_index)].toNodeIndex().?;
 }
 
 pub fn innermostContainer(handle: *DocumentStore.Handle, source_index: usize) TypeWithHandle {
@@ -2351,7 +2356,11 @@ fn lookupSymbolGlobalInternal(
     source_index: usize,
     use_trail: *std.ArrayList(*const ast.Node.Index),
 ) error{OutOfMemory}!?DeclWithHandle {
-    for (handle.document_scope.scopes) |scope| {
+    const innermost_scope_idx = innermostBlockScopeIndex(handle.*, source_index);
+
+    var curr = innermost_scope_idx;
+    while (curr >= 0) : (curr -= 1) {
+        const scope = &handle.document_scope.scopes[curr];
         if (source_index >= scope.range.start and source_index <= scope.range.end) {
             if (scope.decls.getEntry(symbol)) |candidate| {
                 switch (candidate.value) {
@@ -2366,13 +2375,10 @@ fn lookupSymbolGlobalInternal(
                     .handle = handle,
                 };
             }
-
             if (try resolveUse(store, arena, scope.uses, symbol, handle, use_trail)) |result| return result;
         }
-
-        if (scope.range.start > source_index) return null;
+        if (curr == 0) break;
     }
-
     return null;
 }
 
@@ -2521,6 +2527,13 @@ pub const Scope = struct {
     uses: []const *const ast.Node.Index,
 
     data: Data,
+
+    pub fn toNodeIndex(self: Scope) ?ast.Node.Index {
+        return switch (self.data) {
+            .container, .function, .block => |idx| idx,
+            else => null,
+        };
+    }
 };
 
 pub fn makeDocumentScope(allocator: *std.mem.Allocator, tree: ast.Tree) !DocumentScope {
