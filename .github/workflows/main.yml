@@ -39,15 +39,16 @@ jobs:
           declare -a targets=("x86_64-windows" "x86_64-linux" "x86_64-macos" "i386-windows" "i386-linux")
           mkdir -p "artifacts/"
 
-          cd artifacts/
           for target in "${targets[@]}"; do
-            mkdir -p $target
-            cd $target
+            mkdir -p artifacts/$target
             echo "Building target ${target}..."
-            zig build -Dtarget=${target} -Drelease-safe --cache-dir ./
-            tar cfJ ${target}.tar.xz "./*.md" "bin/*"
-            cp ${target}.tar.xz ../
-            cd ..
+            zig build -Dtarget=${target} -Drelease-safe --cache-dir artifacts/${target}/
+            cp README.md artifacts/${target}/
+            cp LICENSE.md artifacts/${target}/
+            cd artifacts/${target}/
+            tar cfJ ${target}.tar.xz *.md bin/*
+            mv ${target}.tar.xz ../
+            cd ../..
           done
 
       - name: Upload artifacts
