@@ -49,11 +49,11 @@ jobs:
             cd ..
           done
 
-        -name: Upload artifacts
-          if: ${{ matrix.os == 'ubuntu-latest' }}
-          uses: alexellis/upload-assets@0.2.2
-          env:
-            GITHUB_TOKEN: ${{ github.token }}
-          with:
-            asset_paths: '["./artifacts/*.tar.xz"]'
+      - name: Upload artifacts
+        if: ${{ matrix.os == 'ubuntu-latest' }}
+        uses: alexellis/upload-assets@0.2.2
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          asset_paths: '["./artifacts/*.tar.xz"]'
 
