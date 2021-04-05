@@ -23,7 +23,7 @@ pub const Handle = struct {
     count: usize,
     /// Contains one entry for every import in the document
     import_uris: []const []const u8,
-    /// Items in thsi array list come from `import_uris`
+    /// Items in this array list come from `import_uris`
     imports_used: std.ArrayListUnmanaged([]const u8),
     tree: std.zig.ast.Tree,
     document_scope: analysis.DocumentScope,
