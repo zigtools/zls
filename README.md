@@ -1,4 +1,7 @@
-# Zig Language Server
+![Zig Language Server](./.github/assets/zls.svg)
+
+![CI](https://github.com/zigtools/zls/workflows/CI/badge.svg)
+![Zig Tools](./.github/assets/zigtools.svg)
 
 Zig Language Server, or `zls`, is a language server for Zig. The Zig wiki states that "The Zig community is decentralized" and "There is no concept of 'official' or 'unofficial'", so instead of calling `zls` unofficial, and I'm going to call it a cool option, one of [many](https://github.com/search?q=zig+language+server).
 
@@ -52,8 +55,7 @@ Building `zls` is very easy. You will need [a build of Zig master](https://zigla
 git clone --recurse-submodules https://github.com/zigtools/zls
 cd zls
 zig build -Drelease-safe
-cd zig-cache\bin
-zls config # Configure ZLS
+zig build config # Configure ZLS
 ```
 
 *For detailed building instructions, see the Wiki page about [Cloning With Git](https://github.com/zigtools/zls/wiki/Downloading-and-Building-ZLS#cloning-with-git).*
@@ -68,7 +70,7 @@ zls config # Configure ZLS
 
 ### Configuration Options
 
-You can configure zls by running `zls config`.  
+You can configure zls by providing a zls.json file.  
 zls will look for a zls.json configuration file in multiple locations with the following priority:  
 - In the local configuration folder of your OS (as provided by [known-folders](https://github.com/ziglibs/known-folders#folder-list))  
 - In the global configuration folder of your OS (as provided by [known-folders](https://github.com/ziglibs/known-folders#folder-list))
@@ -86,8 +88,6 @@ The following options are currently available.
 | `enable_semantic_tokens` | `bool` | `true` | Enables semantic token support when the client also supports it. |
 | `operator_completions` | `bool` | `true` | Enables `*` and `?` operators in completion lists. |
 | `skip_std_references` | `bool` | `false` | When true, skips searching for references in std. Improves lookup speed for functions in user's code. Renaming and go-to-definition will continue to work as is.
-| `include_at_in_builtins` | `bool` | `false` | Most editors (except Sublime Text, it seems) generate a duplicate @ if a completion starts with it.
-| `max_detail_length` | `usize` | `1048576` | Completion detail fields are truncated to this length. Decrease if previews lag your editor.
 
 ## Features
 

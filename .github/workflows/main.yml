@@ -43,7 +43,7 @@ jobs:
             mkdir -p artifacts/$target
             echo "Building target ${target}..."
             zig build -Dtarget=${target} -Drelease-safe --cache-dir artifacts/${target}/
-            cp README.md artifacts/${target}/
+            sed -e '1,5d' < README.md > artifacts/${target}/
             cp LICENSE.md artifacts/${target}/
             cd artifacts/${target}/
             tar cfJ ${target}.tar.xz *.md bin/*
