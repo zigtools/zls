@@ -56,7 +56,7 @@ Building `zls` is very easy. You will need [a build of Zig master](https://zigla
 git clone --recurse-submodules https://github.com/zigtools/zls
 cd zls
 zig build -Drelease-safe
-zig build config # Configure ZLS
+./zig-cache/bin/zls config # Configure ZLS
 ```
 
 *For detailed building instructions, see the Wiki page about [Cloning With Git](https://github.com/zigtools/zls/wiki/Downloading-and-Building-ZLS#cloning-with-git).*
