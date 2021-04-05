@@ -53,9 +53,8 @@ jobs:
 
       - name: Upload artifacts
         if: ${{ matrix.os == 'ubuntu-latest' }}
-        uses: alexellis/upload-assets@0.2.2
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
+        uses: actions/upload-artifact@v2
         with:
-          asset_paths: '["./artifacts/*.tar.xz"]'
+          name: builds
+          path: artifacts/*.tar.xz
 
