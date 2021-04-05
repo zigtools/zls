@@ -42,7 +42,8 @@ jobs:
           cd artifacts/
           for target in "${targets[@]}"; do
             mkdir -p $target
-            cd $artifact_build_path
+            cd $target
+            echo "Building target ${target}..."
             zig build -Dtarget=${target} -Drelease-safe --cache-dir ./
             tar cfJ ${target}.tar.xz "./*.md" "bin/*"
             cp ${target}.tar.xz ../
