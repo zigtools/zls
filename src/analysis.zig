@@ -2672,6 +2672,8 @@ fn makeScopeInternal(
                     try enum_completions.put(allocator, .{
                         .label = name,
                         .kind = .Constant,
+                        .insertText = name,
+                        .insertTextFormat = .PlainText,
                         .documentation = if (try getDocComments(allocator, tree, decl, .Markdown)) |docs| .{
                             .kind = .Markdown,
                             .value = docs,
