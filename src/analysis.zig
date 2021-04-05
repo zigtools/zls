@@ -687,7 +687,7 @@ pub fn resolveTypeOfNodeInternal(
     const node = node_handle.node;
     const handle = node_handle.handle;
     const tree = handle.tree;
-    
+
     const state = struct {
         var resolve_trail = std.ArrayListUnmanaged(NodeWithHandle){};
     };
@@ -701,7 +701,6 @@ pub fn resolveTypeOfNodeInternal(
     // allocated memory to persist while it is empty.
     try state.resolve_trail.append(arena.child_allocator, node_handle);
     defer _ = state.resolve_trail.pop();
-
 
     const main_tokens = tree.nodes.items(.main_token);
     const node_tags = tree.nodes.items(.tag);
@@ -770,8 +769,8 @@ pub fn resolveTypeOfNodeInternal(
             if (field.ast.type_expr == 0) return null;
             const field_type = .{ .node = field.ast.type_expr, .handle = handle };
 
-            const typ = (try resolveTypeOfNodeInternal(store, arena, field_type, bound_type_params))
-                orelse return null;
+            const typ = (try resolveTypeOfNodeInternal(store, arena, field_type, bound_type_params)) orelse
+                return null;
             return typ.instanceTypeVal();
         },
         .call,
@@ -787,9 +786,8 @@ pub fn resolveTypeOfNodeInternal(
             const call = callFull(tree, node, &params) orelse unreachable;
 
             const callee = .{ .node = call.ast.fn_expr, .handle = handle };
-            const decl =
-                (try resolveTypeOfNodeInternal(store, arena, callee, bound_type_params))
-                    orelse return null;
+            const decl = (try resolveTypeOfNodeInternal(store, arena, callee, bound_type_params)) orelse
+                return null;
 
             if (decl.type.is_type_val) return null;
             const decl_node = switch (decl.type.data) {
@@ -805,7 +803,7 @@ pub fn resolveTypeOfNodeInternal(
                 // TODO: Back-parse to extract the self argument?
                 var it = fn_decl.iterate(decl.handle.tree);
                 if (token_tags[call.ast.lparen - 2] == .period) {
-                    if (try hasSelfParam(arena, store, handle, fn_decl)) {
+                    if (try hasSelfParam(arena, store, decl.handle, fn_decl)) {
                         _ = it.next();
                         expected_params -= 1;
                     }
@@ -819,10 +817,14 @@ pub fn resolveTypeOfNodeInternal(
                     if (!isMetaType(decl.handle.tree, decl_param.type_expr))
                         continue;
 
-                    const argument = .{.node = call.ast.params[i], .handle = handle};
-                    const argument_type =
-                        (try resolveTypeOfNodeInternal(store, arena, argument, bound_type_params))
-                            orelse continue;
+                    const argument = .{ .node = call.ast.params[i], .handle = handle };
+                    const argument_type = (try resolveTypeOfNodeInternal(
+                        store,
+                        arena,
+                        argument,
+                        bound_type_params,
+                    )) orelse
+                        continue;
                     if (!argument_type.type.is_type_val) continue;
 
                     _ = try bound_type_params.put(decl_param, argument_type);
@@ -2317,15 +2319,15 @@ fn resolveUse(
 
     for (uses) |use| {
         const expr = .{ .node = handle.tree.nodes.items(.data)[use.*].lhs, .handle = handle };
-        const expr_type_node = (try resolveTypeOfNode(store, arena, expr))
-            orelse continue;
+        const expr_type_node = (try resolveTypeOfNode(store, arena, expr)) orelse
+            continue;
 
         const expr_type = .{
             .node = switch (expr_type_node.type.data) {
-                    .other => |n| n,
-                    else => continue,
-                },
-            .handle = expr_type_node.handle
+                .other => |n| n,
+                else => continue,
+            },
+            .handle = expr_type_node.handle,
         };
 
         if (try lookupSymbolContainer(store, arena, expr_type, symbol, false)) |candidate| {
