@@ -138,26 +138,24 @@ fn fullIf(tree: Tree, info: full.If.Ast) full.If {
 }
 
 pub fn ifFull(tree: Tree, node: Node.Index) full.If {
-    assert(tree.nodes.items(.tag)[node] == .@"if");
     const data = tree.nodes.items(.data)[node];
-    const extra = tree.extraData(data.rhs, Node.If);
-    return fullIf(tree, .{
-        .cond_expr = data.lhs,
-        .then_expr = extra.then_expr,
-        .else_expr = extra.else_expr,
-        .if_token = tree.nodes.items(.main_token)[node],
-    });
-}
-
-pub fn ifSimple(tree: Tree, node: Node.Index) full.If {
-    assert(tree.nodes.items(.tag)[node] == .if_simple);
-    const data = tree.nodes.items(.data)[node];
-    return fullIf(tree, .{
-        .cond_expr = data.lhs,
-        .then_expr = data.rhs,
-        .else_expr = 0,
-        .if_token = tree.nodes.items(.main_token)[node],
-    });
+    if (tree.nodes.items(.tag)[node] == .@"if") {
+        const extra = tree.extraData(data.rhs, Node.If);
+        return fullIf(tree, .{
+            .cond_expr = data.lhs,
+            .then_expr = extra.then_expr,
+            .else_expr = extra.else_expr,
+            .if_token = tree.nodes.items(.main_token)[node],
+        });
+    } else {
+        assert(tree.nodes.items(.tag)[node] == .if_simple);
+        return fullIf(tree, .{
+            .cond_expr = data.lhs,
+            .then_expr = data.rhs,
+            .else_expr = 0,
+            .if_token = tree.nodes.items(.main_token)[node],
+        });
+    }
 }
 
 fn fullWhile(tree: Tree, info: full.While.Ast) full.While {
