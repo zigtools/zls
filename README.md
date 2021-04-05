@@ -23,7 +23,8 @@ Zig Language Server, or `zls`, is a language server for Zig. The Zig wiki states
 
 ## Installation
 
-Installation starts with downloading an official release from the [Releases page](https://github.com/zigtools/zls/releases).
+Installation starts with downloading an official release from the [Releases page](https://github.com/zigtools/zls/releases).  
+Up to date builds from master branch are also available in the latest successful CI run, contained in the `builds` artifact.
 
 See [Downloading and Building ZLS](https://github.com/zigtools/zls/wiki/Downloading-and-Building-ZLS) on the Wiki, or the page about [using ZLS with Visual Studio Code](https://github.com/zigtools/zls/wiki/Installing-for-Visual-Studio-Code) for a guide to help get `zls` running in your editor.
 
