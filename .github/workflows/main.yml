@@ -32,3 +32,28 @@ jobs:
       - name: Run Tests
         if: ${{ matrix.os == 'ubuntu-latest' }}
         run: zig build test
+
+      - name: Build artifacts
+        if: ${{ matrix.os == 'ubuntu-latest' }}
+        run: |
+          declare -a targets=("x86_64-windows" "x86_64-linux" "x86_64-macos" "i386-windows" "i386-linux")
+          mkdir -p "artifacts/"
+
+          cd artifacts/
+          for target in "${targets[@]}"; do
+            mkdir -p $target
+            cd $artifact_build_path
+            zig build -Dtarget=${target} -Drelease-safe --cache-dir ./
+            tar cfJ ${target}.tar.xz "./*.md" "bin/*"
+            cp ${target}.tar.xz ../
+            cd ..
+          done
+
+        -name: Upload artifacts
+          if: ${{ matrix.os == 'ubuntu-latest' }}
+          uses: alexellis/upload-assets@0.2.2
+          env:
+            GITHUB_TOKEN: ${{ github.token }}
+          with:
+            asset_paths: '["./artifacts/*.tar.xz"]'
+
