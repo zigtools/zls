@@ -674,7 +674,7 @@ pub fn lastToken(tree: ast.Tree, node: ast.Node.Index) ast.TokenIndex {
                 n = datas[n].rhs;
             } else {
                 // Use the last argument and skip right paren
-                n = extra.end;
+                n = tree.extra_data[extra.end - 1];
                 end_offset += 1;
             }
         },
