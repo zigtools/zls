@@ -885,15 +885,15 @@ pub fn fnProto(tree: ast.Tree, node: ast.Node.Index, buf: *[1]ast.Node.Index) ?a
 
 pub fn callFull(tree: ast.Tree, node: ast.Node.Index, buf: *[1]ast.Node.Index) ?ast.full.Call {
     return switch (tree.nodes.items(.tag)[node]) {
-        .async_call,
-        .async_call_comma,
         .call,
         .call_comma,
+        .async_call,
+        .async_call_comma,
         => tree.callFull(node),
-        .async_call_one,
-        .async_call_one_comma,
         .call_one,
         .call_one_comma,
+        .async_call_one,
+        .async_call_one_comma,
         => tree.callOne(buf, node),
         else => null,
     };
