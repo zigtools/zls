@@ -2602,8 +2602,8 @@ fn makeScopeInternal(
                     try error_completions.put(allocator, .{
                         .label = tree.tokenSlice(i),
                         .kind = .Constant,
-                        .insertTextFormat = .PlainText,
                         .insertText = tree.tokenSlice(i),
+                        .insertTextFormat = .PlainText,
                     }, {});
                 }
             }
