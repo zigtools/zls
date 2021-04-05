@@ -327,8 +327,6 @@ pub fn lastToken(tree: ast.Tree, node: ast.Node.Index) ast.TokenIndex {
         .if_simple,
         .while_simple,
         .for_simple,
-        .fn_proto_simple,
-        .fn_proto_multi,
         .ptr_type_aligned,
         .ptr_type_sentinel,
         .ptr_type,
@@ -669,12 +667,43 @@ pub fn lastToken(tree: ast.Tree, node: ast.Node.Index) ast.TokenIndex {
                 n = datas[n].lhs;
             }
         },
+        .fn_proto_multi => {
+            const extra = tree.extraData(datas[n].lhs, Node.SubRange);
+            // rhs can be 0 when no return type is provided
+            if (datas[n].rhs != 0) {
+                n = datas[n].rhs;
+            } else {
+                // Use the last argument and skip right paren
+                n = extra.end;
+                end_offset += 1;
+            }
+        },
+        .fn_proto_simple => {
+            // rhs can be 0 when no return type is provided
+            // lhs can be 0 when no parameter is provided
+            if (datas[n].rhs != 0) {
+                n = datas[n].rhs;
+            } else if (datas[n].lhs != 0) {
+                n = datas[n].lhs;
+                // Skip right paren
+                end_offset += 1;
+            } else {
+                // Skip left and right paren
+                return main_tokens[n] + end_offset + 2;
+            }
+        },
         .fn_proto_one => {
             const extra = tree.extraData(datas[n].lhs, Node.FnProtoOne);
             // linksection, callconv, align can appear in any order, so we
             // find the last one here.
-            var max_node: Node.Index = datas[n].rhs;
-            var max_start = token_starts[main_tokens[max_node]];
+            // rhs can be zero if no return type is provided
+            var max_node: Node.Index = 0;
+            var max_start: u32 = 0;
+            if (datas[n].rhs != 0) {
+                max_node = datas[n].rhs;
+                max_start = token_starts[main_tokens[max_node]];
+            }
+
             var max_offset: TokenIndex = 0;
             if (extra.align_expr != 0) {
                 const start = token_starts[main_tokens[extra.align_expr]];
@@ -700,15 +729,34 @@ pub fn lastToken(tree: ast.Tree, node: ast.Node.Index) ast.TokenIndex {
                     max_offset = 1; // for the rparen
                 }
             }
-            n = max_node;
-            end_offset += max_offset;
+
+            if (max_node == 0) {
+                std.debug.assert(max_offset == 0);
+                // No linksection, callconv, align, return type
+                if (extra.param != 0) {
+                    n = extra.param;
+                    end_offset += 1;
+                } else {
+                    // Skip left and right parens
+                    return main_tokens[n] + end_offset + 2;
+                }
+            } else {
+                n = max_node;
+                end_offset += max_offset;
+            }
         },
         .fn_proto => {
             const extra = tree.extraData(datas[n].lhs, Node.FnProto);
             // linksection, callconv, align can appear in any order, so we
             // find the last one here.
-            var max_node: Node.Index = datas[n].rhs;
-            var max_start = token_starts[main_tokens[max_node]];
+            // rhs can be zero if no return type is provided
+            var max_node: Node.Index = 0;
+            var max_start: u32 = 0;
+            if (datas[n].rhs != 0) {
+                max_node = datas[n].rhs;
+                max_start = token_starts[main_tokens[max_node]];
+            }
+
             var max_offset: TokenIndex = 0;
             if (extra.align_expr != 0) {
                 const start = token_starts[main_tokens[extra.align_expr]];
@@ -734,8 +782,16 @@ pub fn lastToken(tree: ast.Tree, node: ast.Node.Index) ast.TokenIndex {
                     max_offset = 1; // for the rparen
                 }
             }
-            n = max_node;
-            end_offset += max_offset;
+            if (max_node == 0) {
+                std.debug.assert(max_offset == 0);
+                // No linksection, callconv, align, return type
+                // Use the last parameter and skip one extra token for the right paren
+                n = extra.params_end;
+                end_offset += 1;
+            } else {
+                n = max_node;
+                end_offset += max_offset;
+            }
         },
         .while_cont => {
             const extra = tree.extraData(datas[n].rhs, Node.WhileCont);

@@ -1838,7 +1838,12 @@ const GetDocumentSymbolsContext = struct {
     encoding: offsets.Encoding,
 };
 
-fn getDocumentSymbolsInternal(allocator: *std.mem.Allocator, tree: ast.Tree, node: ast.Node.Index, context: *GetDocumentSymbolsContext) anyerror!void {
+fn getDocumentSymbolsInternal(
+    allocator: *std.mem.Allocator,
+    tree: ast.Tree,
+    node: ast.Node.Index,
+    context: *GetDocumentSymbolsContext,
+) anyerror!void {
     const name = getDeclName(tree, node) orelse return;
     if (name.len == 0)
         return;
