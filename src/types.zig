@@ -231,7 +231,7 @@ pub const CompletionItem = struct {
     label: []const u8,
     kind: Kind,
     textEdit: ?TextEdit = null,
-    filterText: []const u8 = "",
+    filterText: ?[]const u8 = null,
     insertText: []const u8 = "",
     insertTextFormat: ?InsertTextFormat = .PlainText,
     detail: ?[]const u8 = null,
