@@ -264,8 +264,106 @@ pub fn lastToken(tree: ast.Tree, node: ast.Node.Index) ast.TokenIndex {
     var end_offset: TokenIndex = 0;
     while (true) switch (tags[n]) {
         .root => return @intCast(TokenIndex, tree.tokens.len - 1),
+        .@"usingnamespace" => {
+            // lhs is the expression
+            if (datas[n].lhs == 0) {
+                return main_tokens[n] + end_offset;
+            } else {
+                n = datas[n].lhs;
+            }
+        },
+        .test_decl => {
+            // rhs is the block
+            // lhs is the name
+            if (datas[n].rhs != 0) {
+                n = datas[n].rhs;
+            } else if (datas[n].lhs != 0) {
+                n = datas[n].lhs;
+            } else {
+                return main_tokens[n] + end_offset;
+            }
+        },
+        .global_var_decl => {
+            // rhs is init node
+            if (datas[n].rhs != 0) {
+                n = datas[n].rhs;
+            } else {
+                const extra = tree.extraData(datas[n].lhs, Node.GlobalVarDecl);
+                if (extra.section_node != 0) {
+                    end_offset += 1; // for the rparen
+                    n = extra.section_node;
+                } else if (extra.align_node != 0) {
+                    end_offset += 1; // for the rparen
+                    n = extra.align_node;
+                } else if (extra.type_node != 0) {
+                    n = extra.type_node;
+                } else {
+                    end_offset += 1; // from mut token to name
+                    return main_tokens[n] + end_offset;
+                }
+            }
+        },
+        .local_var_decl => {
+            // rhs is init node
+            if (datas[n].rhs != 0) {
+                n = datas[n].rhs;
+            } else {
+                const extra = tree.extraData(datas[n].lhs, Node.LocalVarDecl);
+                if (extra.align_node != 0) {
+                    end_offset += 1; // for the rparen
+                    n = extra.align_node;
+                } else if (extra.type_node != 0) {
+                    n = extra.type_node;
+                } else {
+                    end_offset += 1; // from mut token to name
+                    return main_tokens[n] + end_offset;
+                }
+            }
+        },
+        .simple_var_decl => {
+            // rhs is init node
+            if (datas[n].rhs != 0) {
+                n = datas[n].rhs;
+            } else if (datas[n].lhs != 0) {
+                n = datas[n].lhs;
+            } else {
+                end_offset += 1; // from mut token to name
+                return main_tokens[n] + end_offset;
+            }
+        },
+        .aligned_var_decl => {
+            // rhs is init node, lhs is align node
+            if (datas[n].rhs != 0) {
+                n = datas[n].rhs;
+            } else if (datas[n].lhs != 0) {
+                end_offset += 1; // for the rparen
+                n = datas[n].lhs;
+            } else {
+                end_offset += 1; // from mut token to name
+                return main_tokens[n] + end_offset;
+            }
+        },
+        .@"errdefer" => {
+            // lhs is the token payload, rhs is the expression
+            if (datas[n].rhs != 0) {
+                n = datas[n].rhs;
+            } else if (datas[n].lhs != 0) {
+                // right pipe
+                end_offset += 1;
+                n = datas[n].lhs;
+            } else {
+                return main_tokens[n] + end_offset;
+            }
+        },
+        .@"defer" => {
+            // rhs is the defered expr
+            if (datas[n].rhs != 0) {
+                n = datas[n].rhs;
+            } else {
+                return main_tokens[n] + end_offset;
+            }
+        },
 
-        .@"usingnamespace",
         .bool_not,
         .negation,
         .bit_not,
@@ -279,9 +377,6 @@ pub fn lastToken(tree: ast.Tree, node: ast.Node.Index) ast.TokenIndex {
         .@"comptime",
         => n = datas[n].lhs,
 
-        .test_decl,
-        .@"errdefer",
-        .@"defer",
         .@"catch",
         .equal_equal,
         .bang_equal,
@@ -522,62 +617,6 @@ pub fn lastToken(tree: ast.Tree, node: ast.Node.Index) ast.TokenIndex {
                 return main_tokens[n] + end_offset; // returns { }
             }
         },
-        .simple_var_decl => {
-            if (datas[n].rhs != 0) {
-                n = datas[n].rhs;
-            } else if (datas[n].lhs != 0) {
-                n = datas[n].lhs;
-            } else {
-                end_offset += 1; // from mut token to name
-                return main_tokens[n] + end_offset;
-            }
-        },
-        .aligned_var_decl => {
-            if (datas[n].rhs != 0) {
-                n = datas[n].rhs;
-            } else if (datas[n].lhs != 0) {
-                end_offset += 1; // for the rparen
-                n = datas[n].lhs;
-            } else {
-                end_offset += 1; // from mut token to name
-                return main_tokens[n] + end_offset;
-            }
-        },
-        .global_var_decl => {
-            if (datas[n].rhs != 0) {
-                n = datas[n].rhs;
-            } else {
-                const extra = tree.extraData(datas[n].lhs, Node.GlobalVarDecl);
-                if (extra.section_node != 0) {
-                    end_offset += 1; // for the rparen
-                    n = extra.section_node;
-                } else if (extra.align_node != 0) {
-                    end_offset += 1; // for the rparen
-                    n = extra.align_node;
-                } else if (extra.type_node != 0) {
-                    n = extra.type_node;
-                } else {
-                    end_offset += 1; // from mut token to name
-                    return main_tokens[n] + end_offset;
-                }
-            }
-        },
-        .local_var_decl => {
-            if (datas[n].rhs != 0) {
-                n = datas[n].rhs;
-            } else {
-                const extra = tree.extraData(datas[n].lhs, Node.LocalVarDecl);
-                if (extra.align_node != 0) {
-                    end_offset += 1; // for the rparen
-                    n = extra.align_node;
-                } else if (extra.type_node != 0) {
-                    n = extra.type_node;
-                } else {
-                    end_offset += 1; // from mut token to name
-                    return main_tokens[n] + end_offset;
-                }
-            }
-        },
         .container_field_init => {
             if (datas[n].rhs != 0) {
                 n = datas[n].rhs;
@@ -639,9 +678,17 @@ pub fn lastToken(tree: ast.Tree, node: ast.Node.Index) ast.TokenIndex {
         },
         .slice_sentinel => {
             const extra = tree.extraData(datas[n].rhs, Node.SliceSentinel);
-            std.debug.assert(extra.sentinel != 0); // should have used slice
-            end_offset += 1; // rbracket
-            n = extra.sentinel;
+            if (extra.sentinel != 0) {
+                end_offset += 1; // right bracket
+                n = extra.sentinel;
+            } else if (extra.end != 0) {
+                end_offset += 2; // colon, right bracket
+                n = extra.end;
+            } else {
+                // Assume both sentinel and end are completely devoid of tokens
+                end_offset += 3; // ellipsis, colon, right bracket
+                n = extra.start;
+            }
         },
 
         .@"continue" => {
