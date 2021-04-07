@@ -2877,7 +2877,10 @@ fn makeScopeInternal(
             };
             errdefer scope.decls.deinit();
 
-            if (token_tags[catch_token + 1] == .pipe and token_tags[catch_token + 2] == .identifier) {
+            if (token_tags.len > catch_token + 2 and
+                token_tags[catch_token + 1] == .pipe and
+                token_tags[catch_token + 2] == .identifier)
+            {
                 const name = tree.tokenSlice(catch_token + 2);
                 try scope.decls.putNoClobber(name, .{ .ast_node = catch_expr });
             }
