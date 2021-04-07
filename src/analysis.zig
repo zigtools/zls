@@ -2470,8 +2470,8 @@ pub const Scope = struct {
 
     range: SourceRange,
     decls: std.StringHashMap(Declaration),
-    tests: []const ast.Node.Index,
-    uses: []const *const ast.Node.Index,
+    tests: []const ast.Node.Index = &.{},
+    uses: []const *const ast.Node.Index = &.{},
 
     data: Data,
 
@@ -2550,8 +2550,6 @@ fn makeInnerScope(
     (try scopes.addOne(allocator)).* = .{
         .range = nodeSourceRange(tree, node_idx),
         .decls = std.StringHashMap(Declaration).init(allocator),
-        .uses = &.{},
-        .tests = &.{},
         .data = .{ .container = node_idx },
     };
     const scope_idx = scopes.items.len - 1;
@@ -2706,8 +2704,6 @@ fn makeScopeInternal(
             (try scopes.addOne(allocator)).* = .{
                 .range = nodeSourceRange(tree, node_idx),
                 .decls = std.StringHashMap(Declaration).init(allocator),
-                .uses = &.{},
-                .tests = &.{},
                 .data = .{ .function = node_idx },
             };
             var scope_idx = scopes.items.len - 1;
@@ -2760,8 +2756,6 @@ fn makeScopeInternal(
                         .end = offsets.tokenLocation(tree, last_token).start,
                     },
                     .decls = std.StringHashMap(Declaration).init(allocator),
-                    .uses = &.{},
-                    .tests = &.{},
                     .data = .other,
                 };
                 errdefer scope.decls.deinit();
@@ -2771,8 +2765,6 @@ fn makeScopeInternal(
             (try scopes.addOne(allocator)).* = .{
                 .range = nodeSourceRange(tree, node_idx),
                 .decls = std.StringHashMap(Declaration).init(allocator),
-                .uses = &.{},
-                .tests = &.{},
                 .data = .{ .block = node_idx },
             };
             var scope_idx = scopes.items.len - 1;
@@ -2830,8 +2822,6 @@ fn makeScopeInternal(
                         .end = offsets.tokenLocation(tree, lastToken(tree, if_node.ast.then_expr)).end,
                     },
                     .decls = std.StringHashMap(Declaration).init(allocator),
-                    .uses = &.{},
-                    .tests = &.{},
                     .data = .other,
                 };
                 errdefer scope.decls.deinit();
@@ -2860,8 +2850,6 @@ fn makeScopeInternal(
                             .end = offsets.tokenLocation(tree, lastToken(tree, if_node.ast.else_expr)).end,
                         },
                         .decls = std.StringHashMap(Declaration).init(allocator),
-                        .uses = &.{},
-                        .tests = &.{},
                         .data = .other,
                     };
                     errdefer scope.decls.deinit();
@@ -2873,8 +2861,27 @@ fn makeScopeInternal(
             }
         },
         .@"catch" => {
-            // TODO: ???
-            return;
+            try makeScopeInternal(allocator, context, data[node_idx].lhs);
+
+            const catch_token = main_tokens[node_idx];
+            const catch_expr = data[node_idx].rhs;
+
+            var scope = try scopes.addOne(allocator);
+            scope.* = .{
+                .range = .{
+                    .start = offsets.tokenLocation(tree, tree.firstToken(catch_expr)).start,
+                    .end = offsets.tokenLocation(tree, lastToken(tree, catch_expr)).end,
+                },
+                .decls = std.StringHashMap(Declaration).init(allocator),
+                .data = .other,
+            };
+            errdefer scope.decls.deinit();
+
+            if (token_tags[catch_token + 1] == .pipe and token_tags[catch_token + 2] == .identifier) {
+                const name = tree.tokenSlice(catch_token + 2);
+                try scope.decls.putNoClobber(name, .{ .ast_node = catch_expr });
+            }
+            try makeScopeInternal(allocator, context, catch_expr);
         },
         .@"while",
         .while_simple,
@@ -2894,8 +2901,6 @@ fn makeScopeInternal(
                         .end = offsets.tokenLocation(tree, lastToken(tree, node_idx)).end,
                     },
                     .decls = std.StringHashMap(Declaration).init(allocator),
-                    .uses = &.{},
-                    .tests = &.{},
                     .data = .other,
                 };
                 errdefer scope.decls.deinit();
@@ -2911,8 +2916,6 @@ fn makeScopeInternal(
                         .end = offsets.tokenLocation(tree, lastToken(tree, while_node.ast.then_expr)).end,
                     },
                     .decls = std.StringHashMap(Declaration).init(allocator),
-                    .uses = &.{},
-                    .tests = &.{},
                     .data = .other,
                 };
                 errdefer scope.decls.deinit();
@@ -2960,8 +2963,6 @@ fn makeScopeInternal(
                             .end = offsets.tokenLocation(tree, lastToken(tree, while_node.ast.else_expr)).end,
                         },
                         .decls = std.StringHashMap(Declaration).init(allocator),
-                        .uses = &.{},
-                        .tests = &.{},
                         .data = .other,
                     };
                     errdefer scope.decls.deinit();
@@ -2994,8 +2995,6 @@ fn makeScopeInternal(
                             .end = offsets.tokenLocation(tree, lastToken(tree, switch_case.ast.target_expr)).end,
                         },
                         .decls = std.StringHashMap(Declaration).init(allocator),
-                        .uses = &.{},
-                        .tests = &.{},
                         .data = .other,
                     };
                     errdefer scope.decls.deinit();
@@ -3169,8 +3168,6 @@ fn makeScopeInternal(
                         .end = offsets.tokenLocation(tree, lastToken(tree, expr)).end,
                     },
                     .decls = std.StringHashMap(Declaration).init(allocator),
-                    .uses = &.{},
-                    .tests = &.{},
                     .data = .other,
                 };
                 errdefer scope.decls.deinit();
