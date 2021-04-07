@@ -6,6 +6,17 @@ const offsets = @import("offsets.zig");
 const log = std.log.scoped(.analysis);
 usingnamespace @import("ast.zig");
 
+var using_trail: std.ArrayList([*]const u8) = undefined;
+var resolve_trail: std.ArrayList(NodeWithHandle) = undefined;
+pub fn init(allocator: *std.mem.Allocator) void {
+    using_trail = std.ArrayList([*]const u8).init(allocator);
+    resolve_trail = std.ArrayList(NodeWithHandle).init(allocator);
+}
+pub fn deinit() void {
+    using_trail.deinit();
+    resolve_trail.deinit();
+}
+
 /// Gets a declaration's doc comments, caller must free memory when a value is returned
 /// Like:
 ///```zig
@@ -681,19 +692,16 @@ pub fn resolveTypeOfNodeInternal(
     node_handle: NodeWithHandle,
     bound_type_params: *BoundTypeParams,
 ) error{OutOfMemory}!?TypeWithHandle {
-    const state = struct {
-        var resolve_trail = std.ArrayListUnmanaged(NodeWithHandle){};
-    };
     // If we were asked to resolve this node before,
     // it is self-referential and we cannot resolve it.
-    for (state.resolve_trail.items) |i| {
+    for (resolve_trail.items) |i| {
         if (std.meta.eql(i, node_handle))
             return null;
     }
     // We use the backing allocator here because the ArrayList expects its
     // allocated memory to persist while it is empty.
-    try state.resolve_trail.append(arena.child_allocator, node_handle);
-    defer _ = state.resolve_trail.pop();
+    try resolve_trail.append(node_handle);
+    defer _ = resolve_trail.pop();
 
     const node = node_handle.node;
     const handle = node_handle.handle;
@@ -2259,17 +2267,14 @@ fn resolveUse(
     symbol: []const u8,
     handle: *DocumentStore.Handle,
 ) error{OutOfMemory}!?DeclWithHandle {
-    const state = struct {
-        var using_trail = std.ArrayListUnmanaged([*]const u8){};
-    };
     // If we were asked to resolve this symbol before,
     // it is self-referential and we cannot resolve it.
-    if (std.mem.indexOfScalar([*]const u8, state.using_trail.items, symbol.ptr) != null)
+    if (std.mem.indexOfScalar([*]const u8, using_trail.items, symbol.ptr) != null)
         return null;
     // We use the backing allocator here because the ArrayList expects its
     // allocated memory to persist while it is empty.
-    try state.using_trail.append(arena.child_allocator, symbol.ptr);
-    defer _ = state.using_trail.pop();
+    try using_trail.append(symbol.ptr);
+    defer _ = using_trail.pop();
 
     for (uses) |use| {
         const expr = .{ .node = handle.tree.nodes.items(.data)[use.*].lhs, .handle = handle };
