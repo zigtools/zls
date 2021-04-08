@@ -38,7 +38,7 @@ pub fn log(
     }
     // After shutdown, pipe output to stderr
     if (!keep_running) {
-        std.debug.print("[{s}-{s}] " ++ format, .{ @tagName(message_level), @tagName(scope) } ++ args);
+        std.debug.print("[{s}-{s}] " ++ format ++ "\n", .{ @tagName(message_level), @tagName(scope) } ++ args);
         return;
     }
 
@@ -619,37 +619,32 @@ fn hoverSymbol(
     const tree = handle.tree;
 
     const hover_kind: types.MarkupContent.Kind = if (client_capabilities.hover_supports_md) .Markdown else .PlainText;
-    const md_string = switch (decl_handle.decl.*) {
-        .ast_node => |node| ast_node: {
+    var doc_str: ?[]const u8 = null;
+
+    const def_str = switch (decl_handle.decl.*) {
+        .ast_node => |node| def: {
             if (try analysis.resolveVarDeclAlias(&document_store, arena, .{ .node = node, .handle = handle })) |result| {
                 return try hoverSymbol(id, arena, result);
             }
-
-            const doc_str = if (try analysis.getDocComments(&arena.allocator, tree, node, hover_kind)) |str|
-                str
-            else
-                "";
+            doc_str = try analysis.getDocComments(&arena.allocator, tree, node, hover_kind);
 
             var buf: [1]std.zig.ast.Node.Index = undefined;
-            const signature_str = if (analysis.varDecl(tree, node)) |var_decl| blk: {
-                break :blk analysis.getVariableSignature(tree, var_decl);
-            } else if (analysis.fnProto(tree, node, &buf)) |fn_proto| blk: {
-                break :blk analysis.getFunctionSignature(tree, fn_proto);
-            } else if (analysis.containerField(tree, node)) |field| blk: {
-                break :blk analysis.getContainerFieldSignature(tree, field);
-            } else analysis.nodeToString(tree, node) orelse
-                return try respondGeneric(id, null_result_response);
 
-            break :ast_node if (hover_kind == .Markdown)
-                try std.fmt.allocPrint(&arena.allocator, "```zig\n{s}\n```\n{s}", .{ signature_str, doc_str })
-            else
-                try std.fmt.allocPrint(&arena.allocator, "{s}\n{s}", .{ signature_str, doc_str });
+            if (analysis.varDecl(tree, node)) |var_decl| {
+                break :def analysis.getVariableSignature(tree, var_decl);
+            } else if (analysis.fnProto(tree, node, &buf)) |fn_proto| {
+                break :def analysis.getFunctionSignature(tree, fn_proto);
+            } else if (analysis.containerField(tree, node)) |field| {
+                break :def analysis.getContainerFieldSignature(tree, field);
+            } else {
+                break :def analysis.nodeToString(tree, node) orelse
+                    return try respondGeneric(id, null_result_response);
+            }
         },
-        .param_decl => |param| param_decl: {
-            const doc_str = if (param.first_doc_comment) |doc_comments|
-                try analysis.collectDocComments(&arena.allocator, handle.tree, doc_comments, hover_kind)
-            else
-                "";
+        .param_decl => |param| def: {
+            if (param.first_doc_comment) |doc_comments| {
+                doc_str = try analysis.collectDocComments(&arena.allocator, handle.tree, doc_comments, hover_kind);
+            }
 
             const first_token = param.first_doc_comment orelse
                 param.comptime_noalias orelse
@@ -659,42 +654,35 @@ fn hoverSymbol(
 
             const start = offsets.tokenLocation(tree, first_token).start;
             const end = offsets.tokenLocation(tree, last_token).end;
-            const signature_str = tree.source[start..end];
-            break :param_decl if (hover_kind == .Markdown)
-                try std.fmt.allocPrint(&arena.allocator, "```zig\n{s}\n```\n{s}", .{ signature_str, doc_str })
-            else
-                try std.fmt.allocPrint(&arena.allocator, "{s}\n{s}", .{ signature_str, doc_str });
+            break :def tree.source[start..end];
         },
-        .pointer_payload => |payload| if (hover_kind == .Markdown)
-            try std.fmt.allocPrint(&arena.allocator, "```zig\n{s}\n```", .{tree.tokenSlice(payload.name)})
-        else
-            try std.fmt.allocPrint(&arena.allocator, "{s}", .{tree.tokenSlice(payload.name)}),
-        .array_payload => |payload| if (hover_kind == .Markdown)
-            try std.fmt.allocPrint(&arena.allocator, "```zig\n{s}\n```", .{handle.tree.tokenSlice(payload.identifier)})
-        else
-            try std.fmt.allocPrint(&arena.allocator, "{s}", .{handle.tree.tokenSlice(payload.identifier)}),
-        .array_index => |payload| if (hover_kind == .Markdown)
-            try std.fmt.allocPrint(&arena.allocator, "```zig\n{s}\n```", .{handle.tree.tokenSlice(payload)})
-        else
-            try std.fmt.allocPrint(&arena.allocator, "{s}", .{handle.tree.tokenSlice(payload)}),
-        .switch_payload => |payload| if (hover_kind == .Markdown)
-            try std.fmt.allocPrint(&arena.allocator, "```zig\n{s}\n```", .{tree.tokenSlice(payload.node)})
-        else
-            try std.fmt.allocPrint(&arena.allocator, "{s}", .{tree.tokenSlice(payload.node)}),
-        .label_decl => |label_decl| block: {
-            const source = tree.tokenSlice(label_decl);
-            break :block if (hover_kind == .Markdown)
-                try std.fmt.allocPrint(&arena.allocator, "```zig\n{s}\n```", .{source})
-            else
-                try std.fmt.allocPrint(&arena.allocator, "```{s}```", .{source});
-        },
+        .pointer_payload => |payload| tree.tokenSlice(payload.name),
+        .array_payload => |payload| handle.tree.tokenSlice(payload.identifier),
+        .array_index => |payload| handle.tree.tokenSlice(payload),
+        .switch_payload => |payload| tree.tokenSlice(payload.node),
+        .label_decl => |label_decl| tree.tokenSlice(label_decl),
     };
+
+    var hover_text: []const u8 = undefined;
+    if (hover_kind == .Markdown) {
+        hover_text =
+            if (doc_str) |doc|
+            try std.fmt.allocPrint(&arena.allocator, "```zig\n{s}\n```\n{s}", .{ def_str, doc })
+        else
+            try std.fmt.allocPrint(&arena.allocator, "```zig\n{s}\n```", .{def_str});
+    } else {
+        hover_text =
+            if (doc_str) |doc|
+            try std.fmt.allocPrint(&arena.allocator, "{s}\n{s}", .{ def_str, doc })
+        else
+            def_str;
+    }
 
     try send(arena, types.Response{
         .id = id,
         .result = .{
             .Hover = .{
-                .contents = .{ .value = md_string },
+                .contents = .{ .value = hover_text },
             },
         },
     });
@@ -739,11 +727,13 @@ fn hoverDefinitionBuiltin(arena: *std.heap.ArenaAllocator, id: types.RequestId, 
                 .id = id,
                 .result = .{
                     .Hover = .{
-                        .contents = .{ .value = try std.fmt.allocPrint(
-                            &arena.allocator,
-                            "```zig\n{s}\n```\n{s}",
-                            .{ builtin.signature, builtin.documentation },
-                        ) },
+                        .contents = .{
+                            .value = try std.fmt.allocPrint(
+                                &arena.allocator,
+                                "```zig\n{s}\n```\n{s}",
+                                .{ builtin.signature, builtin.documentation },
+                            ),
+                        },
                     },
                 },
             });
@@ -1161,6 +1151,7 @@ fn completeError(
 ) !void {
     const completions = try document_store.errorCompletionItems(arena, handle);
     truncateCompletions(completions, config.max_detail_length);
+    logger.debug("Completing error:", .{});
 
     try send(arena, types.Response{
         .id = id,
@@ -1348,7 +1339,8 @@ fn openDocumentHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req
     const handle = try document_store.openDocument(req.params.textDocument.uri, req.params.textDocument.text);
     try publishDiagnostics(arena, handle.*, config);
 
-    try semanticTokensFullHandler(arena, id, .{ .params = .{ .textDocument = .{ .uri = req.params.textDocument.uri } } }, config);
+    if (client_capabilities.supports_semantic_tokens)
+        try semanticTokensFullHandler(arena, id, .{ .params = .{ .textDocument = .{ .uri = req.params.textDocument.uri } } }, config);
 }
 
 fn changeDocumentHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.ChangeDocument, config: Config) !void {
@@ -1374,10 +1366,10 @@ fn closeDocumentHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, re
 }
 
 fn semanticTokensFullHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.SemanticTokensFull, config: Config) (error{OutOfMemory} || std.fs.File.WriteError)!void {
-    if (config.enable_semantic_tokens and client_capabilities.supports_semantic_tokens) {
+    if (config.enable_semantic_tokens) blk: {
         const handle = document_store.getHandle(req.params.textDocument.uri) orelse {
             logger.warn("Trying to get semantic tokens of non existent document {s}", .{req.params.textDocument.uri});
-            return try respondGeneric(id, no_semantic_tokens_response);
+            break :blk;
         };
 
         const token_array = try semantic_tokens.writeAllSemanticTokens(arena, &document_store, handle, offset_encoding);
@@ -1388,6 +1380,7 @@ fn semanticTokensFullHandler(arena: *std.heap.ArenaAllocator, id: types.RequestI
             .result = .{ .SemanticTokensFull = .{ .data = token_array } },
         });
     }
+    return try respondGeneric(id, no_semantic_tokens_response);
 }
 
 fn completionHandler(
@@ -1444,11 +1437,13 @@ fn signatureHelpHandler(
     )) |sig_info| {
         return try send(arena, types.Response{
             .id = id,
-            .result = .{ .SignatureHelp = .{
-                .signatures = &[1]types.SignatureInformation{sig_info},
-                .activeSignature = 0,
-                .activeParameter = sig_info.activeParameter,
-            } },
+            .result = .{
+                .SignatureHelp = .{
+                    .signatures = &[1]types.SignatureInformation{sig_info},
+                    .activeSignature = 0,
+                    .activeParameter = sig_info.activeParameter,
+                },
+            },
         });
     }
     return try respondGeneric(id, no_signatures_response);
@@ -1717,12 +1712,16 @@ var gpa_state = std.heap.GeneralPurposeAllocator(.{ .stack_trace_frames = stack_
 
 pub fn main() anyerror!void {
     defer _ = gpa_state.deinit();
+    defer keep_running = false;
     allocator = &gpa_state.allocator;
+
+    analysis.init(allocator);
+    defer analysis.deinit();
 
     // Check arguments.
     var args_it = std.process.args();
     defer args_it.deinit();
-    const prog_name = try args_it.next(allocator) orelse unreachable;
+    const prog_name = try args_it.next(allocator) orelse @panic("Could not find self argument");
     allocator.free(prog_name);
 
     while (args_it.next(allocator)) |maybe_arg| {
@@ -1732,7 +1731,6 @@ pub fn main() anyerror!void {
             actual_log_level = .debug;
             std.debug.print("Enabled debug logging\n", .{});
         } else if (std.mem.eql(u8, arg, "config")) {
-            keep_running = false;
             try setup.wizard(allocator);
             return;
         } else {

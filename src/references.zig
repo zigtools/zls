@@ -244,7 +244,7 @@ fn symbolReferencesInternal(
         .@"if",
         .if_simple,
         => {
-            const if_node: ast.full.If = if (node_tags[node] == .@"if") ifFull(tree, node) else ifSimple(tree, node);
+            const if_node = ifFull(tree, node);
 
             try symbolReferencesInternal(arena, store, .{ .node = if_node.ast.cond_expr, .handle = handle }, decl, encoding, context, handler);
             try symbolReferencesInternal(arena, store, .{ .node = if_node.ast.then_expr, .handle = handle }, decl, encoding, context, handler);

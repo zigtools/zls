@@ -696,7 +696,7 @@ fn writeNodeTokens(
         .@"if",
         .if_simple,
         => {
-            const if_node: ast.full.If = if (tag == .@"if") ifFull(tree, node) else ifSimple(tree, node);
+            const if_node = ifFull(tree, node);
 
             try writeToken(builder, if_node.ast.if_token, .keyword);
             try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, if_node.ast.cond_expr });
