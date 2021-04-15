@@ -17,12 +17,7 @@ pub fn deinit() void {
     resolve_trail.deinit();
 }
 
-/// Gets a declaration's doc comments, caller must free memory when a value is returned
-/// Like:
-///```zig
-///var comments = getFunctionDocComments(allocator, tree, func);
-///defer if (comments) |comments_pointer| allocator.free(comments_pointer);
-///```
+/// Gets a declaration's doc comments. Caller owns returned memory.
 pub fn getDocComments(
     allocator: *std.mem.Allocator,
     tree: ast.Tree,
@@ -30,15 +25,30 @@ pub fn getDocComments(
     format: types.MarkupContent.Kind,
 ) !?[]const u8 {
     const base = tree.nodes.items(.main_token)[node];
+    const base_kind = tree.nodes.items(.tag)[node];
     const tokens = tree.tokens.items(.tag);
 
-    if (getDocCommentTokenIndex(tokens, base)) |doc_comment_index| {
-        return try collectDocComments(allocator, tree, doc_comment_index, format);
+    switch (base_kind) {
+        // As far as I know, this does not actually happen yet, but it may come in useful.
+        .root =>
+            return try collectDocComments(allocator, tree, 0, format, true),
+        .fn_proto,
+        .fn_proto_one,
+        .fn_proto_simple,
+        .fn_proto_multi,
+        .fn_decl,
+        .local_var_decl,
+        .global_var_decl,
+        .aligned_var_decl,
+        .simple_var_decl =>
+            if (getDocCommentTokenIndex(tokens, base)) |doc_comment_index|
+                return try collectDocComments(allocator, tree, doc_comment_index, format, false),
+        else => {}
     }
     return null;
 }
 
-/// Get a declaration's doc comment token index
+/// Get the first doc comment of a declaration.
 pub fn getDocCommentTokenIndex(tokens: []std.zig.Token.Tag, base_token: ast.TokenIndex) ?ast.TokenIndex {
     var idx = base_token;
     if (idx == 0) return null;
@@ -50,9 +60,9 @@ pub fn getDocCommentTokenIndex(tokens: []std.zig.Token.Tag, base_token: ast.Toke
     if (tokens[idx] == .keyword_pub and idx > 0) idx -= 1;
 
     // Find first doc comment token
-    if (!(tokens[idx] == .doc_comment or tokens[idx] == .container_doc_comment))
+    if (!(tokens[idx] == .doc_comment))
         return null;
-    return while (tokens[idx] == .doc_comment or tokens[idx] == .container_doc_comment) {
+    return while (tokens[idx] == .doc_comment) {
         if (idx == 0) break 0;
         idx -= 1;
     } else idx + 1;
@@ -63,6 +73,7 @@ pub fn collectDocComments(
     tree: ast.Tree,
     doc_comments: ast.TokenIndex,
     format: types.MarkupContent.Kind,
+    container_doc: bool,
 ) ![]const u8 {
     var lines = std.ArrayList([]const u8).init(allocator);
     defer lines.deinit();
@@ -70,28 +81,27 @@ pub fn collectDocComments(
 
     var curr_line_tok = doc_comments;
     while (true) : (curr_line_tok += 1) {
-        switch (tokens[curr_line_tok]) {
-            .doc_comment, .container_doc_comment => {
+        const comm = tokens[curr_line_tok];
+        if ((container_doc and comm == .container_doc_comment)
+            or (!container_doc and comm == .doc_comment)) {
                 try lines.append(std.mem.trim(u8, tree.tokenSlice(curr_line_tok)[3..], &std.ascii.spaces));
-            },
-            else => break,
-        }
+        } else break;
     }
 
     return try std.mem.join(allocator, if (format == .Markdown) "  \n" else "\n", lines.items);
 }
 
-/// Gets a function signature (keywords, name, return value)
+/// Gets a function's keyword, name, arguments and return value.
 pub fn getFunctionSignature(tree: ast.Tree, func: ast.full.FnProto) []const u8 {
     const start = offsets.tokenLocation(tree, func.ast.fn_token);
-    // return type can be 0 when user wrote incorrect fn signature
-    // to ensure we don't break, just end the signature at end of fn token
-    if (func.ast.return_type == 0) return tree.source[start.start..start.end];
-    const end = offsets.tokenLocation(tree, lastToken(tree, func.ast.return_type)).end;
-    return tree.source[start.start..end];
+
+    const end = if (func.ast.return_type != 0)
+            offsets.tokenLocation(tree, lastToken(tree, func.ast.return_type))
+        else start;
+    return tree.source[start.start..end.end];
 }
 
-/// Gets a function snippet insert text
+/// Creates snippet insert text for a function. Caller owns returned memory.
 pub fn getFunctionSnippet(
     allocator: *std.mem.Allocator,
     tree: ast.Tree,
@@ -197,7 +207,6 @@ pub fn hasSelfParam(
     return false;
 }
 
-/// Gets a function signature (keywords, name, return value)
 pub fn getVariableSignature(tree: ast.Tree, var_decl: ast.full.VarDecl) []const u8 {
     const start = offsets.tokenLocation(tree, var_decl.ast.mut_token).start;
     const end = offsets.tokenLocation(tree, lastToken(tree, var_decl.ast.init_node)).end;
@@ -232,14 +241,19 @@ pub fn isGenericFunction(tree: ast.Tree, func: ast.full.FnProto) bool {
     }
     return false;
 }
+
 // STYLE
 
 pub fn isCamelCase(name: []const u8) bool {
-    return !std.ascii.isUpper(name[0]) and std.mem.indexOf(u8, name[0..(name.len - 1)], "_") == null;
+    return !std.ascii.isUpper(name[0]) and !isSnakeCase(name);
 }
 
 pub fn isPascalCase(name: []const u8) bool {
-    return std.ascii.isUpper(name[0]) and std.mem.indexOf(u8, name[0..(name.len - 1)], "_") == null;
+    return std.ascii.isUpper(name[0]) and !isSnakeCase(name);
+}
+
+pub fn isSnakeCase(name: []const u8) bool {
+    return std.mem.indexOf(u8, name, "_") != null;
 }
 
 // ANALYSIS ENGINE
@@ -698,8 +712,6 @@ pub fn resolveTypeOfNodeInternal(
         if (std.meta.eql(i, node_handle))
             return null;
     }
-    // We use the backing allocator here because the ArrayList expects its
-    // allocated memory to persist while it is empty.
     try resolve_trail.append(node_handle);
     defer _ = resolve_trail.pop();
 
@@ -2271,8 +2283,6 @@ fn resolveUse(
     // it is self-referential and we cannot resolve it.
     if (std.mem.indexOfScalar([*]const u8, using_trail.items, symbol.ptr) != null)
         return null;
-    // We use the backing allocator here because the ArrayList expects its
-    // allocated memory to persist while it is empty.
     try using_trail.append(symbol.ptr);
     defer _ = using_trail.pop();
 
