@@ -224,7 +224,7 @@ test "Missing return type" {
     try server.request("textDocument/completion",
         \\{"textDocument":{"uri":"file:///test.zig"}, "position":{"line":1,"character":1}}
     ,
-        \\{"isIncomplete":false,"items":[{"label":"w","kind":3,"textEdit":null,"filterText":null,"insertText":"w()","insertTextFormat":2,"detail":"fn","documentation":null}]}
+        \\{"isIncomplete":false,"items":[{"label":"w","kind":3,"textEdit":null,"filterText":null,"insertText":"w","insertTextFormat":1,"detail":"fn","documentation":null}]}
     );
 }
 

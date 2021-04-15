@@ -29,9 +29,9 @@ pub fn getDocComments(
     const tokens = tree.tokens.items(.tag);
 
     switch (base_kind) {
-        // As far as I know, this does not actually happen yet, but it may come in useful.
-        .root =>
-            return try collectDocComments(allocator, tree, 0, format, true),
+        // As far as I know, this does not actually happen yet, but it
+        // may come in useful.
+        .root => return try collectDocComments(allocator, tree, 0, format, true),
         .fn_proto,
         .fn_proto_one,
         .fn_proto_simple,
@@ -40,10 +40,12 @@ pub fn getDocComments(
         .local_var_decl,
         .global_var_decl,
         .aligned_var_decl,
-        .simple_var_decl =>
+        .simple_var_decl,
+        => {
             if (getDocCommentTokenIndex(tokens, base)) |doc_comment_index|
-                return try collectDocComments(allocator, tree, doc_comment_index, format, false),
-        else => {}
+                return try collectDocComments(allocator, tree, doc_comment_index, format, false);
+        },
+        else => {},
     }
     return null;
 }
@@ -82,9 +84,8 @@ pub fn collectDocComments(
     var curr_line_tok = doc_comments;
     while (true) : (curr_line_tok += 1) {
         const comm = tokens[curr_line_tok];
-        if ((container_doc and comm == .container_doc_comment)
-            or (!container_doc and comm == .doc_comment)) {
-                try lines.append(std.mem.trim(u8, tree.tokenSlice(curr_line_tok)[3..], &std.ascii.spaces));
+        if ((container_doc and comm == .container_doc_comment) or (!container_doc and comm == .doc_comment)) {
+            try lines.append(std.mem.trim(u8, tree.tokenSlice(curr_line_tok)[3..], &std.ascii.spaces));
         } else break;
     }
 
@@ -96,8 +97,9 @@ pub fn getFunctionSignature(tree: ast.Tree, func: ast.full.FnProto) []const u8 {
     const start = offsets.tokenLocation(tree, func.ast.fn_token);
 
     const end = if (func.ast.return_type != 0)
-            offsets.tokenLocation(tree, lastToken(tree, func.ast.return_type))
-        else start;
+        offsets.tokenLocation(tree, lastToken(tree, func.ast.return_type))
+    else
+        start;
     return tree.source[start.start..end.end];
 }
 
@@ -513,8 +515,7 @@ pub fn resolveReturnType(
             .type = .{ .data = .{ .error_union = child_type_node }, .is_type_val = false },
             .handle = child_type.handle,
         };
-    } else
-        return child_type.instanceTypeVal();
+    } else return child_type.instanceTypeVal();
 }
 
 /// Resolves the child type of an optional type
@@ -2646,7 +2647,7 @@ fn makeInnerScope(
                     .insertText = name,
                     .insertTextFormat = .PlainText,
                     .documentation = if (try getDocComments(allocator, tree, decl, .Markdown)) |docs|
-                        .{ .kind = .Markdown, .value = docs }
+                        types.MarkupContent{ .kind = .Markdown, .value = docs }
                     else
                         null,
                 }, {});
@@ -2937,20 +2938,17 @@ fn makeScopeInternal(
                 std.debug.assert(token_tags[name_token] == .identifier);
 
                 const name = tree.tokenSlice(name_token);
-                try scope.decls.putNoClobber(name, if (is_for)
-                    .{
-                        .array_payload = .{
-                            .identifier = name_token,
-                            .array_expr = while_node.ast.cond_expr,
-                        },
-                    }
-                else
-                    .{
-                        .pointer_payload = .{
-                            .name = name_token,
-                            .condition = while_node.ast.cond_expr,
-                        },
-                    });
+                try scope.decls.putNoClobber(name, if (is_for) .{
+                    .array_payload = .{
+                        .identifier = name_token,
+                        .array_expr = while_node.ast.cond_expr,
+                    },
+                } else .{
+                    .pointer_payload = .{
+                        .name = name_token,
+                        .condition = while_node.ast.cond_expr,
+                    },
+                });
 
                 // for loop with index as well
                 if (token_tags[name_token + 1] == .comma) {

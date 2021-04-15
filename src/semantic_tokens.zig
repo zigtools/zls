@@ -337,7 +337,6 @@ fn writeNodeTokens(
     const main_tokens = tree.nodes.items(.main_token);
     if (start_node > node_data.len) return;
 
-
     var stack = std.ArrayList(ast.Node.Index).init(arena.child_allocator);
     defer stack.deinit();
 
@@ -1129,7 +1128,6 @@ fn writeContainerField(
         try stack.append(container_field.ast.value_expr);
     }
 }
-
 
 // TODO Range version, edit version.
 pub fn writeAllSemanticTokens(arena: *std.heap.ArenaAllocator, store: *DocumentStore, handle: *DocumentStore.Handle, encoding: offsets.Encoding) ![]u32 {
