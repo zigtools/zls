@@ -23,15 +23,7 @@ fn fnProtoToSignatureInfo(
     const token_starts = tree.tokens.items(.start);
     const alloc = &arena.allocator;
     const label = analysis.getFunctionSignature(tree, proto);
-    const proto_comments = types.MarkupContent{ .value = if (try analysis.getDocComments(
-        alloc,
-        tree,
-        fn_node,
-        .Markdown,
-    )) |dc|
-        dc
-    else
-        "" };
+    const proto_comments = (try analysis.getDocComments(alloc, tree, fn_node, .Markdown)) orelse "";
 
     const arg_idx = if (skip_self_param) blk: {
         const has_self_param = try analysis.hasSelfParam(arena, document_store, handle, proto);
@@ -42,14 +34,9 @@ fn fnProtoToSignatureInfo(
     var param_it = proto.iterate(tree);
     while (param_it.next()) |param| {
         const param_comments = if (param.first_doc_comment) |dc|
-            types.MarkupContent{ .value = try analysis.collectDocComments(
-                alloc,
-                tree,
-                dc,
-                .Markdown,
-            ) }
+            try analysis.collectDocComments(alloc, tree, dc, .Markdown, false)
         else
-            null;
+            "";
 
         var param_label_start: usize = 0;
         var param_label_end: usize = 0;
@@ -77,12 +64,12 @@ fn fnProtoToSignatureInfo(
         const param_label = tree.source[param_label_start..param_label_end];
         try params.append(alloc, .{
             .label = param_label,
-            .documentation = param_comments,
+            .documentation = types.MarkupContent{ .value = param_comments },
         });
     }
     return types.SignatureInformation{
         .label = label,
-        .documentation = proto_comments,
+        .documentation = types.MarkupContent{ .value = proto_comments },
         .parameters = params.items,
         .activeParameter = arg_idx,
     };

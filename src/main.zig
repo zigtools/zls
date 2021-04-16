@@ -230,6 +230,7 @@ fn publishDiagnostics(arena: *std.heap.ArenaAllocator, handle: DocumentStore.Han
         });
     }
 
+    // TODO: style warnings for types, values and declarations below root scope
     if (tree.errors.len == 0) {
         for (tree.rootDecls()) |decl_idx| {
             const decl = tree.nodes.items(.tag)[decl_idx];
@@ -643,7 +644,7 @@ fn hoverSymbol(
         },
         .param_decl => |param| def: {
             if (param.first_doc_comment) |doc_comments| {
-                doc_str = try analysis.collectDocComments(&arena.allocator, handle.tree, doc_comments, hover_kind);
+                doc_str = try analysis.collectDocComments(&arena.allocator, handle.tree, doc_comments, hover_kind, false);
             }
 
             const first_token = param.first_doc_comment orelse
@@ -959,7 +960,7 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: analysis.Decl
             const doc = if (param.first_doc_comment) |doc_comments|
                 types.MarkupContent{
                     .kind = doc_kind,
-                    .value = try analysis.collectDocComments(&context.arena.allocator, tree, doc_comments, doc_kind),
+                    .value = try analysis.collectDocComments(&context.arena.allocator, tree, doc_comments, doc_kind, false),
                 }
             else
                 null;
