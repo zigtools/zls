@@ -1864,7 +1864,7 @@ pub fn main() anyerror!void {
     var json_parser = std.json.Parser.init(allocator, false);
     defer json_parser.deinit();
 
-    // Arena used for temporary allocations while handlign a request
+    // Arena used for temporary allocations while handling a request
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
