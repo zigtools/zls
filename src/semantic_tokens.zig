@@ -72,22 +72,24 @@ const Builder = struct {
         const next_start = starts[token];
 
         if (next_start < self.previous_position) {
-            log.err("Moved backwards from {} at position {} to {} at {}.",
-                .{ tags[self.previous_token orelse 0], self.previous_position, tags[token], next_start });
-                return;
+            log.err(
+                "Moved backwards from {} at position {} to {} at {}.",
+                .{ tags[self.previous_token orelse 0], self.previous_position, tags[token], next_start },
+            );
+            return;
         }
 
         if (self.previous_token) |prev| {
             // Highlight gaps between AST nodes. These can contain comments or malformed code.
             var i = prev + 1;
             while (i < token) : (i += 1) {
-                try handleComments(self, starts[i-1], starts[i]);
+                try handleComments(self, starts[i - 1], starts[i]);
                 try handleToken(self, i);
             }
         }
         self.previous_token = token;
         if (token > 0) {
-            try handleComments(self, starts[token-1], next_start);
+            try handleComments(self, starts[token - 1], next_start);
         }
 
         const length = offsets.tokenLength(tree, token, self.encoding);
@@ -100,30 +102,22 @@ const Builder = struct {
         // TODO More highlighting here
         const tok_id = tree.tokens.items(.tag)[tok];
         const tok_type: TokenType = switch (tok_id) {
-            .keyword_true,
-            .keyword_false,
-            .keyword_null,
-            .keyword_undefined,
-            .keyword_unreachable,
-            => .keywordLiteral,
-            .integer_literal, .float_literal,
-            => .number,
-            .string_literal, .multiline_string_literal_line, .char_literal,
-            => .string,
-            .period, .comma, .r_paren, .l_paren, .r_brace, .l_brace, .semicolon, .colon,
-            => return,
+            .keyword_true, .keyword_false, .keyword_null, .keyword_undefined, .keyword_unreachable => .keywordLiteral,
+            .integer_literal, .float_literal => .number,
+            .string_literal, .multiline_string_literal_line, .char_literal => .string,
+            .period, .comma, .r_paren, .l_paren, .r_brace, .l_brace, .semicolon, .colon => return,
 
             else => blk: {
                 const id = @enumToInt(tok_id);
                 if (id >= @enumToInt(std.zig.Token.Tag.keyword_align) and
                     id <= @enumToInt(std.zig.Token.Tag.keyword_while))
-                        break :blk TokenType.keyword;
+                    break :blk TokenType.keyword;
                 if (id >= @enumToInt(std.zig.Token.Tag.bang) and
                     id <= @enumToInt(std.zig.Token.Tag.tilde))
                     break :blk TokenType.operator;
 
                 return;
-            }
+            },
         };
         const start = tree.tokens.items(.start)[tok];
         const length = offsets.tokenLength(tree, tok, self.encoding);
@@ -136,15 +130,15 @@ const Builder = struct {
 
         var i: usize = from;
         while (i < to - 1) : (i += 1) {
-
-            if (source[i] != '/' or source[i+1] != '/')
+            if (source[i] != '/' or source[i + 1] != '/')
                 continue;
+
             const comment_start = i;
             var mods = TokenModifiers{};
-            if (i+2 < to and (source[i+2] == '!' or source[i+2] == '/'))
+            if (i + 2 < to and (source[i + 2] == '!' or source[i + 2] == '/'))
                 mods.documentation = true;
 
-            while (i < to and source[i] != '\n') { i += 1; }
+            while (i < to and source[i] != '\n') : (i += 1) {}
 
             const length = try offsets.lineSectionLength(self.handle.tree, comment_start, i, self.encoding);
             try self.addDirect(TokenType.comment, mods, comment_start, length);
@@ -215,7 +209,6 @@ fn fieldTokenType(container_decl: ast.Node.Index, handle: *DocumentStore.Handle)
         else => null,
     });
 }
-
 
 fn colorIdentifierBasedOnType(builder: *Builder, type_node: analysis.TypeWithHandle, target_tok: ast.TokenIndex, tok_mod: TokenModifiers) !void {
     const tree = builder.handle.tree;
@@ -1036,7 +1029,7 @@ pub fn writeAllSemanticTokens(
     arena: *std.heap.ArenaAllocator,
     store: *DocumentStore,
     handle: *DocumentStore.Handle,
-    encoding: offsets.Encoding
+    encoding: offsets.Encoding,
 ) ![]u32 {
     var builder = Builder.init(arena.child_allocator, handle, encoding);
     errdefer builder.arr.deinit();
