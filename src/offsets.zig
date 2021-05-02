@@ -80,7 +80,7 @@ pub fn lineSectionLength(tree: ast.Tree, start_index: usize, end_index: usize, e
 
         const codepoint = try std.unicode.utf8Decode(source[i .. i + n]);
 
-        result += 1 + @as(usize, @boolToInt(codepoint >= 0x10000));
+        result += 1 + @boolToInt(codepoint >= 0x10000);
         i += n;
     }
     return result;

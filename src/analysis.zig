@@ -2435,7 +2435,7 @@ pub const DocumentScope = struct {
                 \\--------------------------
                 \\Scope {}, range: [{d}, {d})
                 \\ {d} usingnamespaces
-                \\Decls: 
+                \\Decls:
             , .{
                 scope.data,
                 scope.range.start,

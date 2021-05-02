@@ -559,17 +559,20 @@ pub fn identifierFromPosition(pos_index: usize, handle: DocumentStore.Handle) []
     if (pos_index + 1 >= text.len) return &[0]u8{};
     var start_idx = pos_index;
 
-    while (start_idx > 0 and
-        (std.ascii.isAlNum(text[start_idx]) or text[start_idx] == '_')) : (start_idx -= 1)
-    {}
+    while (start_idx > 0 and isSymbolChar(text[start_idx-1])) {
+        start_idx -= 1;
+    }
 
     var end_idx = pos_index;
-    while (end_idx < handle.document.text.len and
-        (std.ascii.isAlNum(text[end_idx]) or text[end_idx] == '_')) : (end_idx += 1)
-    {}
+    while (end_idx < handle.document.text.len and isSymbolChar(text[end_idx])) {
+        end_idx += 1;
+    }
 
     if (end_idx <= start_idx) return &[0]u8{};
-    return text[start_idx + 1 .. end_idx];
+    return text[start_idx .. end_idx];
+}
+fn isSymbolChar(char: u8) bool {
+    return std.ascii.isAlNum(char) or char == '_';
 }
 
 fn gotoDefinitionSymbol(id: types.RequestId, arena: *std.heap.ArenaAllocator, decl_handle: analysis.DeclWithHandle, resolve_alias: bool) !void {
@@ -1366,7 +1369,7 @@ fn closeDocumentHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, re
     document_store.closeDocument(req.params.textDocument.uri);
 }
 
-fn semanticTokensFullHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.SemanticTokensFull, config: Config) (error{OutOfMemory} || std.fs.File.WriteError)!void {
+fn semanticTokensFullHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.SemanticTokensFull, config: Config) !void {
     if (config.enable_semantic_tokens) blk: {
         const handle = document_store.getHandle(req.params.textDocument.uri) orelse {
             logger.warn("Trying to get semantic tokens of non existent document {s}", .{req.params.textDocument.uri});
