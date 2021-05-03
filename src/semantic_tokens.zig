@@ -88,12 +88,22 @@ const Builder = struct {
             }
         }
         self.previous_token = token;
-        if (token > 0) {
-            try handleComments(self, starts[token - 1], next_start);
-        }
+        try self.handleComments(if (token > 0) starts[token - 1] else 0, next_start);
 
         const length = offsets.tokenLength(tree, token, self.encoding);
         try self.addDirect(token_type, token_modifiers, next_start, length);
+    }
+
+    fn finish(self: *Builder) !void {
+        const starts = self.handle.tree.tokens.items(.start);
+
+        const last_token = self.previous_token orelse 0;
+        var i = last_token + 1;
+        while (i < starts.len) : (i += 1) {
+            try handleComments(self, starts[i - 1], starts[i]);
+            try handleToken(self, i);
+        }
+        try self.handleComments(starts[starts.len - 1], self.handle.tree.source.len);
     }
 
     /// Highlight a token without semantic context.
@@ -138,7 +148,7 @@ const Builder = struct {
             if (i + 2 < to and (source[i + 2] == '!' or source[i + 2] == '/'))
                 mods.documentation = true;
 
-            while (i < to and source[i] != '\n') : (i += 1) {}
+            while (i < to - 1 and source[i] != '\n') : (i += 1) {}
 
             const length = try offsets.lineSectionLength(self.handle.tree, comment_start, i, self.encoding);
             try self.addDirect(TokenType.comment, mods, comment_start, length);
@@ -1039,6 +1049,6 @@ pub fn writeAllSemanticTokens(
     for (declMembers(handle.tree, 0, &buf)) |child| {
         try writeNodeTokens(&builder, arena, store, child);
     }
-
+    try builder.finish();
     return builder.toOwnedSlice();
 }
