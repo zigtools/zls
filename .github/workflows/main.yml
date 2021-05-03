@@ -41,8 +41,8 @@ jobs:
 
           for target in "${targets[@]}"; do
             mkdir -p artifacts/$target
-            echo "Building target ${target}..."
-            zig build -Dtarget=${target} -Drelease-safe --cache-dir artifacts/${target}/
+            echo "Building target ${target}..."	    
+            zig build -Dtarget=${target} -Drelease-safe --prefix artifacts/${target}/
             sed -e '1,5d' < README.md > artifacts/${target}/README.md
             cp LICENSE.md artifacts/${target}/
             cd artifacts/${target}/
