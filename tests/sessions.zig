@@ -40,7 +40,6 @@ const Server = struct {
 
         const expected = expect orelse return;
         var from_server = self.process.stdout.?.reader();
-
         while (true) {
             const header = headerPkg.readRequestHeader(allocator, from_server) catch |err| {
                 switch (err) {
@@ -48,21 +47,22 @@ const Server = struct {
                     else => return err,
                 }
             };
+
             defer header.deinit(allocator);
-            var resonse_bytes = try allocator.alloc(u8, header.content_length);
-            defer allocator.free(resonse_bytes);
-            if ((try from_server.readAll(resonse_bytes)) != header.content_length) {
+            var response_bytes = try allocator.alloc(u8, header.content_length);
+            defer allocator.free(response_bytes);
+            if ((try from_server.readAll(response_bytes)) != header.content_length) {
                 return error.InvalidResponse;
             }
             // std.debug.print("{s}\n", .{resonse_bytes});
 
             const json_fmt = "{\"jsonrpc\":\"2.0\",\"id\":";
-            if (!std.mem.startsWith(u8, resonse_bytes, json_fmt)) {
-                try extractError(resonse_bytes);
+            if (!std.mem.startsWith(u8, response_bytes, json_fmt)) {
+                try extractError(response_bytes);
                 continue;
             }
 
-            const rest = resonse_bytes[json_fmt.len..];
+            const rest = response_bytes[json_fmt.len..];
             const id_end = std.mem.indexOfScalar(u8, rest, ',') orelse return error.InvalidResponse;
 
             const id = try std.fmt.parseInt(u32, rest[0..id_end], 10);
@@ -107,7 +107,7 @@ const Server = struct {
 fn startZls() !*std.ChildProcess {
     std.debug.print("\n", .{});
 
-    var process = try std.ChildProcess.init(&[_][]const u8{"zig-cache/bin/zls" ++ suffix}, allocator);
+    var process = try std.ChildProcess.init(&[_][]const u8{"zig-out/bin/zls" ++ suffix}, allocator);
     process.stdin_behavior = .Pipe;
     process.stdout_behavior = .Pipe;
     process.stderr_behavior = .Pipe; //std.ChildProcess.StdIo.Inherit;
