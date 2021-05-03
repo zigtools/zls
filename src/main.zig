@@ -1195,17 +1195,17 @@ fn documentSymbol(arena: *std.heap.ArenaAllocator, id: types.RequestId, handle: 
     });
 }
 
-fn loadConfig(folder_path: []const u8) ?Config {
-    var folder = std.fs.cwd().openDir(folder_path, .{}) catch return null;
-    defer folder.close();
-
-    const file_buf = folder.readFileAlloc(allocator, "zls.json", 0x1000000) catch |err| {
+fn loadConfigFile(file_path: []const u8) ?Config {
+    var file = std.fs.cwd().openFile(file_path, .{}) catch |err| {
         if (err != error.FileNotFound)
             logger.warn("Error while reading configuration file: {}", .{err});
         return null;
     };
-    defer allocator.free(file_buf);
 
+    defer file.close();
+
+    const file_buf = file.readToEndAlloc(allocator, 0x1000000) catch return null;
+    defer allocator.free(file_buf);
     @setEvalBranchQuota(2000);
     // TODO: Better errors? Doesn't seem like std.json can provide us positions or context.
     var config = std.json.parse(Config, &std.json.TokenStream.init(file_buf), std.json.ParseOptions{ .allocator = allocator }) catch |err| {
@@ -1222,6 +1222,15 @@ fn loadConfig(folder_path: []const u8) ?Config {
     }
 
     return config;
+}
+
+fn loadConfigInFolder(folder_path: []const u8) ?Config {
+    const full_path = std.fs.path.resolve(allocator, &.{
+        folder_path,
+        "zls.json",
+    }) catch return null;
+    defer allocator.free(full_path);
+    return loadConfigFile(full_path);
 }
 
 fn initializeHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.Initialize, config: Config) !void {
@@ -1728,19 +1737,35 @@ pub fn main() anyerror!void {
     const prog_name = try args_it.next(allocator) orelse @panic("Could not find self argument");
     allocator.free(prog_name);
 
+    var config_path: ?[]const u8 = null;
+    var next_arg_config_path = false;
     while (args_it.next(allocator)) |maybe_arg| {
         const arg = try maybe_arg;
         defer allocator.free(arg);
+
+        if (next_arg_config_path) {
+            config_path = try allocator.dupe(u8, arg);
+            next_arg_config_path = false;
+            continue;
+        }
+
         if (std.mem.eql(u8, arg, "--debug-log")) {
             actual_log_level = .debug;
             std.debug.print("Enabled debug logging\n", .{});
-        } else if (std.mem.eql(u8, arg, "config")) {
+        } else if (std.mem.eql(u8, arg, "--config-path")) {
+            next_arg_config_path = true;
+            continue;
+        } else if (std.mem.eql(u8, arg, "config") or std.mem.eql(u8, arg, "configure")) {
             try setup.wizard(allocator);
             return;
         } else {
             std.debug.print("Unrecognized argument {s}\n", .{arg});
             std.os.exit(1);
         }
+    }
+    if (next_arg_config_path) {
+        std.debug.print("Expected configuration file path after --config-path argument\n", .{});
+        return;
     }
 
     // Init global vars
@@ -1753,16 +1778,25 @@ pub fn main() anyerror!void {
     defer std.json.parseFree(Config, config, config_parse_options);
 
     config_read: {
+        if (config_path) |path| {
+            defer allocator.free(path);
+            if (loadConfigFile(path)) |conf| {
+                config = conf;
+                break :config_read;
+            }
+            std.debug.print("Could not open configuration file '{s}'\n", .{path});
+            std.debug.print("Falling back to a lookup in the local and global configuration folders\n", .{});
+        }
         if (try known_folders.getPath(allocator, .local_configuration)) |path| {
             defer allocator.free(path);
-            if (loadConfig(path)) |conf| {
+            if (loadConfigInFolder(path)) |conf| {
                 config = conf;
                 break :config_read;
             }
         }
         if (try known_folders.getPath(allocator, .global_configuration)) |path| {
             defer allocator.free(path);
-            if (loadConfig(path)) |conf| {
+            if (loadConfigInFolder(path)) |conf| {
                 config = conf;
                 break :config_read;
             }
