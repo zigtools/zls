@@ -559,7 +559,7 @@ pub fn identifierFromPosition(pos_index: usize, handle: DocumentStore.Handle) []
     if (pos_index + 1 >= text.len) return &[0]u8{};
     var start_idx = pos_index;
 
-    while (start_idx > 0 and isSymbolChar(text[start_idx-1])) {
+    while (start_idx > 0 and isSymbolChar(text[start_idx - 1])) {
         start_idx -= 1;
     }
 
@@ -569,7 +569,7 @@ pub fn identifierFromPosition(pos_index: usize, handle: DocumentStore.Handle) []
     }
 
     if (end_idx <= start_idx) return &[0]u8{};
-    return text[start_idx .. end_idx];
+    return text[start_idx..end_idx];
 }
 fn isSymbolChar(char: u8) bool {
     return std.ascii.isAlNum(char) or char == '_';

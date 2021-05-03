@@ -136,6 +136,9 @@ const Builder = struct {
 
     /// Highlight normal comments and doc comments.
     fn handleComments(self: *Builder, from: usize, to: usize) !void {
+        if (from == to) return;
+        std.debug.assert(from < to);
+
         const source = self.handle.tree.source;
 
         var i: usize = from;

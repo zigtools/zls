@@ -73,7 +73,6 @@ const Server = struct {
 
             const result = ",\"result\":";
             const msg = rest[id_end + result.len .. rest.len - 1];
-
             if (std.mem.eql(u8, msg, expected)) {
                 return;
             } else {
@@ -108,7 +107,7 @@ const Server = struct {
 fn startZls() !*std.ChildProcess {
     std.debug.print("\n", .{});
 
-    var process = try std.ChildProcess.init(&[_][]const u8{"zig-out/bin/zls" ++ suffix}, allocator);
+    var process = try std.ChildProcess.init(&[_][]const u8{"zig-cache/bin/zls" ++ suffix}, allocator);
     process.stdin_behavior = .Pipe;
     process.stdout_behavior = .Pipe;
     process.stderr_behavior = .Pipe; //std.ChildProcess.StdIo.Inherit;
