@@ -1,6 +1,6 @@
 ![Zig Language Server](./.github/assets/zls.svg)
 
-![CI](https://github.com/zigtools/zls/workflows/CI/badge.svg)
+[![CI](https://github.com/zigtools/zls/workflows/CI/badge.svg)](https://github.com/zigtools/zls/actions)
 ![Zig Tools](./.github/assets/zigtools.svg)
 
 Zig Language Server, or `zls`, is a language server for Zig. The Zig wiki states that "The Zig community is decentralized" and "There is no concept of 'official' or 'unofficial'", so instead of calling `zls` unofficial, and I'm going to call it a cool option, one of [many](https://github.com/search?q=zig+language+server).
@@ -24,7 +24,7 @@ Zig Language Server, or `zls`, is a language server for Zig. The Zig wiki states
 ## Installation
 
 Installation starts with downloading an official release from the [Releases page](https://github.com/zigtools/zls/releases).  
-Up to date builds from master branch are also available in the latest successful CI run, contained in the `builds` artifact.
+Up to date builds from master branch are also available in the [latest successful CI run](https://github.com/zigtools/zls/actions), contained in the `builds` artifact.
 
 See [Downloading and Building ZLS](https://github.com/zigtools/zls/wiki/Downloading-and-Building-ZLS) on the Wiki, or the page about [using ZLS with Visual Studio Code](https://github.com/zigtools/zls/wiki/Installing-for-Visual-Studio-Code) for a guide to help get `zls` running in your editor.
 
