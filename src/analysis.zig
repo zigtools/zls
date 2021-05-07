@@ -41,6 +41,7 @@ pub fn getDocComments(
         .global_var_decl,
         .aligned_var_decl,
         .simple_var_decl,
+        .container_field_init,
         => {
             if (getDocCommentTokenIndex(tokens, base)) |doc_comment_index|
                 return try collectDocComments(allocator, tree, doc_comment_index, format, false);
