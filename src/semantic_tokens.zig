@@ -1017,20 +1017,20 @@ fn writeContainerField(
     if (field_token_type) |tok_type| try writeToken(builder, container_field.ast.name_token, tok_type);
 
     if (container_field.ast.type_expr != 0) {
+        try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, container_field.ast.type_expr });
         if (container_field.ast.align_expr != 0) {
             try writeToken(builder, tree.firstToken(container_field.ast.align_expr) - 2, .keyword);
             try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, container_field.ast.align_expr });
         }
-        try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, container_field.ast.type_expr });
     }
 
     if (container_field.ast.value_expr != 0) block: {
-        const eq_tok: ast.TokenIndex = if (container_field.ast.type_expr != 0)
+        const eq_tok: ast.TokenIndex = if (container_field.ast.align_expr != 0)
+            lastToken(tree, container_field.ast.align_expr) + 2
+        else if (container_field.ast.type_expr != 0)
             lastToken(tree, container_field.ast.type_expr) + 1
-        else if (container_field.ast.align_expr != 0)
-            lastToken(tree, container_field.ast.align_expr) + 1
         else
-            break :block; // Check this, I believe it is correct.
+            break :block;
 
         try writeToken(builder, eq_tok, .operator);
         try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, container_field.ast.value_expr });
