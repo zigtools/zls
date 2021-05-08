@@ -2103,6 +2103,11 @@ fn iterateSymbolsContainerInternal(
                 if (node_tags[node].isContainerField()) {
                     if (!instance_access and !is_enum) continue;
                     if (instance_access and is_enum) continue;
+                } else if (node_tags[node] == .global_var_decl or
+                    node_tags[node] == .local_var_decl or
+                    node_tags[node] == .simple_var_decl or
+                    node_tags[node] == .aligned_var_decl) {
+                        if (instance_access) continue;
                 }
             },
             .label_decl => continue,
