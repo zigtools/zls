@@ -1877,7 +1877,7 @@ pub fn main() anyerror!void {
         break :blk try std.fs.path.resolve(allocator, &[_][]const u8{ exe_dir_path, "build_runner.zig" });
     };
 
-    const build_runner_cache_path = if (config.build_runner_path) |p|
+    const build_runner_cache_path = if (config.build_runner_cache_path) |p|
         try allocator.dupe(u8, p)
     else blk: {
         const cache_dir_path = (try known_folders.getPath(allocator, .cache)) orelse {
