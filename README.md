@@ -23,7 +23,7 @@ Zig Language Server, or `zls`, is a language server for Zig. The Zig wiki states
 
 ## Installation
 
-Installation starts with downloading an official release from the [Releases page](https://github.com/zigtools/zls/releases).  
+Installation starts with downloading an official release from the [Releases page](https://github.com/zigtools/zls/releases).
 Up to date builds from master branch are also available in the [latest successful CI run](https://github.com/zigtools/zls/actions), contained in the `builds` artifact.
 
 See [Downloading and Building ZLS](https://github.com/zigtools/zls/wiki/Downloading-and-Building-ZLS) on the Wiki, or the page about [using ZLS with Visual Studio Code](https://github.com/zigtools/zls/wiki/Installing-for-Visual-Studio-Code) for a guide to help get `zls` running in your editor.
@@ -56,7 +56,7 @@ Building `zls` is very easy. You will need [a build of Zig master](https://zigla
 git clone --recurse-submodules https://github.com/zigtools/zls
 cd zls
 zig build -Drelease-safe
-./zig-cache/bin/zls config # Configure ZLS
+./zig-out/bin/zls config # Configure ZLS
 ```
 
 *For detailed building instructions, see the Wiki page about [Cloning With Git](https://github.com/zigtools/zls/wiki/Downloading-and-Building-ZLS#cloning-with-git).*
@@ -71,12 +71,12 @@ zig build -Drelease-safe
 
 ### Configuration Options
 
-You can configure zls by running `zls config` or manually creating your own `zls.json` configuration file.  
-zls will look for a zls.json configuration file in multiple locations with the following priority:  
-- In the local configuration folder of your OS (as provided by [known-folders](https://github.com/ziglibs/known-folders#folder-list))  
+You can configure zls by running `zls config` or manually creating your own `zls.json` configuration file.
+zls will look for a zls.json configuration file in multiple locations with the following priority:
+- In the local configuration folder of your OS (as provided by [known-folders](https://github.com/ziglibs/known-folders#folder-list))
 - In the global configuration folder of your OS (as provided by [known-folders](https://github.com/ziglibs/known-folders#folder-list))
 
-The following options are currently available.  
+The following options are currently available.
 
 | Option | Type | Default value | What it Does |
 | --- | --- | --- | --- |
@@ -92,10 +92,10 @@ The following options are currently available.
 
 ## Features
 
-`zls` supports most language features, including simple type function support, usingnamespace, payload capture type resolution, custom packages and others. 
-Notable language features that are not currently implemented include `@cImport` as well as most forms of compile time evaluation.  
+`zls` supports most language features, including simple type function support, usingnamespace, payload capture type resolution, custom packages and others.
+Notable language features that are not currently implemented include `@cImport` as well as most forms of compile time evaluation.
 
-The following LSP features are supported:  
+The following LSP features are supported:
 - Completions
 - Hover
 - Goto definition/declaration
@@ -105,7 +105,7 @@ The following LSP features are supported:
 - Formatting using `zig fmt`
 - Semantic token highlighting (LSP 3.16 proposed feature, implemented by a few clients including VSCode, kak and emacs lsp-mode)
 
-You can install `zls` using the instuctions for your text editor below:  
+You can install `zls` using the instuctions for your text editor below:
 
 ### VSCode
 
@@ -173,8 +173,8 @@ Install the `zls-vscode` extension from [here](https://github.com/zigtools/zls-v
 "ensure zig is a recognized filetype
 autocmd BufNewFile,BufRead *.zig set filetype=zig
 
-let g:ycm_language_server = 
-  \ [ 
+let g:ycm_language_server =
+  \ [
   \{
   \     'name': 'zls',
   \     'filetypes': [ 'zig' ],
@@ -207,7 +207,7 @@ call plug#end()
     end
 
     local servers = {'zls'}
-    for _, lsp in ipairs(servers) do 
+    for _, lsp in ipairs(servers) do
         lspconfig[lsp].setup {
             on_attach = on_attach,
         }
@@ -228,7 +228,7 @@ let g:completion_enable_auto_popup = 1
 
 ```vim
 let g:LanguageClient_serverCommands = {
-       \ 'zig': ['~/code/zls/zig-cache/bin/zls'],
+       \ 'zig': ['~/code/zls/zig-out/bin/zls'],
        \ }
 ```
 
