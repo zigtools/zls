@@ -243,7 +243,7 @@ fn publishDiagnostics(arena: *std.heap.ArenaAllocator, handle: DocumentStore.Han
                 => blk: {
                     var buf: [1]std.zig.ast.Node.Index = undefined;
                     const func = analysis.fnProto(tree, decl_idx, &buf).?;
-                    if (func.extern_export_token != null) break :blk;
+                    if (func.extern_export_inline_token != null) break :blk;
 
                     if (config.warn_style) {
                         if (func.name_token) |name_token| {
