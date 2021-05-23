@@ -455,7 +455,7 @@ fn writeNodeTokens(
                 try writeDocComments(builder, tree, docs);
 
             try writeToken(builder, fn_proto.visib_token, .keyword);
-            try writeToken(builder, fn_proto.extern_export_token, .keyword);
+            try writeToken(builder, fn_proto.extern_export_inline_token, .keyword);
             try writeToken(builder, fn_proto.lib_name, .string);
             try writeToken(builder, fn_proto.ast.fn_token, .keyword);
 
