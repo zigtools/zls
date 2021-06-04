@@ -136,9 +136,9 @@ pub const WorkspaceEdit = struct {
                 if (idx != 0) try writer.writeAll(", ");
 
                 try writer.writeByte('"');
-                try writer.writeAll(entry.key);
+                try writer.writeAll(entry.key_ptr.*);
                 try writer.writeAll("\":");
-                try std.json.stringify(entry.value, options, writer);
+                try std.json.stringify(entry.value_ptr.*, options, writer);
             }
             try writer.writeByte('}');
         }

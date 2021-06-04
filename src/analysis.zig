@@ -1980,7 +1980,7 @@ pub const DeclWithHandle = struct {
                 if (isMetaType(self.handle.tree, param_decl.type_expr)) {
                     var bound_param_it = bound_type_params.iterator();
                     while (bound_param_it.next()) |entry| {
-                        if (std.meta.eql(entry.key, param_decl)) return entry.value;
+                        if (std.meta.eql(entry.key_ptr.*, param_decl)) return entry.value_ptr.*;
                     }
                     return null;
                 } else if (node_tags[param_decl.type_expr] == .identifier) {
@@ -2033,7 +2033,7 @@ pub const DeclWithHandle = struct {
                 if (node_tags[pay.items[0]] == .enum_literal) {
                     const scope = findContainerScope(.{ .node = switch_expr_type.type.data.other, .handle = switch_expr_type.handle }) orelse return null;
                     if (scope.decls.getEntry(tree.tokenSlice(main_tokens[pay.items[0]]))) |candidate| {
-                        switch (candidate.value) {
+                        switch (candidate.value_ptr.*) {
                             .ast_node => |node| {
                                 if (containerField(switch_expr_type.handle.tree, node)) |container_field| {
                                     if (container_field.ast.type_expr != 0) {
@@ -2098,7 +2098,7 @@ fn iterateSymbolsContainerInternal(
 
     var decl_it = container_scope.decls.iterator();
     while (decl_it.next()) |entry| {
-        switch (entry.value) {
+        switch (entry.value_ptr.*) {
             .ast_node => |node| {
                 if (node_tags[node].isContainerField()) {
                     if (!instance_access and !is_enum) continue;
@@ -2106,15 +2106,16 @@ fn iterateSymbolsContainerInternal(
                 } else if (node_tags[node] == .global_var_decl or
                     node_tags[node] == .local_var_decl or
                     node_tags[node] == .simple_var_decl or
-                    node_tags[node] == .aligned_var_decl) {
-                        if (instance_access) continue;
+                    node_tags[node] == .aligned_var_decl)
+                {
+                    if (instance_access) continue;
                 }
             },
             .label_decl => continue,
             else => {},
         }
 
-        const decl = DeclWithHandle{ .decl = &entry.value, .handle = handle };
+        const decl = DeclWithHandle{ .decl = entry.value_ptr, .handle = handle };
         if (handle != orig_handle and !decl.isPublic()) continue;
         try callback(context, decl);
     }
@@ -2172,11 +2173,11 @@ pub fn iterateLabels(
         if (source_index >= scope.range.start and source_index < scope.range.end) {
             var decl_it = scope.decls.iterator();
             while (decl_it.next()) |entry| {
-                switch (entry.value) {
+                switch (entry.value_ptr.*) {
                     .label_decl => {},
                     else => continue,
                 }
-                try callback(context, DeclWithHandle{ .decl = &entry.value, .handle = handle });
+                try callback(context, DeclWithHandle{ .decl = entry.value_ptr, .handle = handle });
             }
         }
         if (scope.range.start >= source_index) return;
@@ -2196,9 +2197,10 @@ fn iterateSymbolsGlobalInternal(
         if (source_index >= scope.range.start and source_index <= scope.range.end) {
             var decl_it = scope.decls.iterator();
             while (decl_it.next()) |entry| {
-                if (entry.value == .ast_node and handle.tree.nodes.items(.tag)[entry.value.ast_node].isContainerField()) continue;
-                if (entry.value == .label_decl) continue;
-                try callback(context, DeclWithHandle{ .decl = &entry.value, .handle = handle });
+                if (entry.value_ptr.* == .ast_node and
+                    handle.tree.nodes.items(.tag)[entry.value_ptr.*.ast_node].isContainerField()) continue;
+                if (entry.value_ptr.* == .label_decl) continue;
+                try callback(context, DeclWithHandle{ .decl = entry.value_ptr, .handle = handle });
             }
 
             for (scope.uses) |use| {
@@ -2323,12 +2325,12 @@ pub fn lookupLabel(
     for (handle.document_scope.scopes) |scope| {
         if (source_index >= scope.range.start and source_index < scope.range.end) {
             if (scope.decls.getEntry(symbol)) |candidate| {
-                switch (candidate.value) {
+                switch (candidate.value_ptr.*) {
                     .label_decl => {},
                     else => continue,
                 }
                 return DeclWithHandle{
-                    .decl = &candidate.value,
+                    .decl = candidate.value_ptr,
                     .handle = handle,
                 };
             }
@@ -2352,7 +2354,7 @@ pub fn lookupSymbolGlobal(
         const scope = &handle.document_scope.scopes[curr];
         if (source_index >= scope.range.start and source_index <= scope.range.end) blk: {
             if (scope.decls.getEntry(symbol)) |candidate| {
-                switch (candidate.value) {
+                switch (candidate.value_ptr.*) {
                     .ast_node => |node| {
                         if (handle.tree.nodes.items(.tag)[node].isContainerField()) break :blk;
                     },
@@ -2360,7 +2362,7 @@ pub fn lookupSymbolGlobal(
                     else => {},
                 }
                 return DeclWithHandle{
-                    .decl = &candidate.value,
+                    .decl = candidate.value_ptr,
                     .handle = handle,
                 };
             }
@@ -2391,7 +2393,7 @@ pub fn lookupSymbolContainer(
 
     if (findContainerScope(container_handle)) |container_scope| {
         if (container_scope.decls.getEntry(symbol)) |candidate| {
-            switch (candidate.value) {
+            switch (candidate.value_ptr.*) {
                 .ast_node => |node| {
                     if (node_tags[node].isContainerField()) {
                         if (!instance_access and !is_enum) return null;
@@ -2401,7 +2403,7 @@ pub fn lookupSymbolContainer(
                 .label_decl => unreachable,
                 else => {},
             }
-            return DeclWithHandle{ .decl = &candidate.value, .handle = handle };
+            return DeclWithHandle{ .decl = candidate.value_ptr, .handle = handle };
         }
 
         if (try resolveUse(store, arena, container_scope.uses, symbol, handle)) |result| return result;
@@ -2411,23 +2413,24 @@ pub fn lookupSymbolContainer(
     return null;
 }
 
-fn eqlCompletionItem(a: types.CompletionItem, b: types.CompletionItem) bool {
-    return std.mem.eql(u8, a.label, b.label);
-}
+const CompletionContext = struct {
+    pub fn hash(self: @This(), item: types.CompletionItem) u32 {
+        return @truncate(u32, std.hash.Wyhash.hash(0, item.label));
+    }
 
-fn hashCompletionItem(completion_item: types.CompletionItem) u32 {
-    return @truncate(u32, std.hash.Wyhash.hash(0, completion_item.label));
-}
+    pub fn eql(self: @This(), a: types.CompletionItem, b: types.CompletionItem) bool {
+        return std.mem.eql(u8, a.label, b.label);
+    }
+};
 
 pub const CompletionSet = std.ArrayHashMapUnmanaged(
     types.CompletionItem,
     void,
-    hashCompletionItem,
-    eqlCompletionItem,
+    CompletionContext,
     false,
 );
 comptime {
-    std.debug.assert(@sizeOf(types.CompletionItem) == @sizeOf(CompletionSet.Entry));
+    std.debug.assert(@sizeOf(types.CompletionItem) == @sizeOf(CompletionSet.Data));
 }
 
 pub const DocumentScope = struct {
@@ -2466,12 +2469,12 @@ pub const DocumentScope = struct {
             allocator.free(scope.tests);
         }
         allocator.free(self.scopes);
-        for (self.error_completions.entries.items) |entry| {
-            if (entry.key.documentation) |doc| allocator.free(doc.value);
+        for (self.error_completions.entries.items(.key)) |item| {
+            if (item.documentation) |doc| allocator.free(doc.value);
         }
         self.error_completions.deinit(allocator);
-        for (self.enum_completions.entries.items) |entry| {
-            if (entry.key.documentation) |doc| allocator.free(doc.value);
+        for (self.enum_completions.entries.items(.key)) |item| {
+            if (item.documentation) |doc| allocator.free(doc.value);
         }
         self.enum_completions.deinit(allocator);
     }
@@ -2507,12 +2510,12 @@ pub fn makeDocumentScope(allocator: *std.mem.Allocator, tree: ast.Tree) !Documen
 
     errdefer {
         scopes.deinit(allocator);
-        for (error_completions.entries.items) |entry| {
-            if (entry.key.documentation) |doc| allocator.free(doc.value);
+        for (error_completions.entries.items(.key)) |completion| {
+            if (completion.documentation) |doc| allocator.free(doc.value);
         }
         error_completions.deinit(allocator);
-        for (enum_completions.entries.items) |entry| {
-            if (entry.key.documentation) |doc| allocator.free(doc.value);
+        for (enum_completions.entries.items(.key)) |completion| {
+            if (completion.documentation) |doc| allocator.free(doc.value);
         }
         enum_completions.deinit(allocator);
     }

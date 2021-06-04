@@ -283,12 +283,12 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: []u8) anyerror!*Hand
 pub fn openDocument(self: *DocumentStore, uri: []const u8, text: []const u8) !*Handle {
     if (self.handles.getEntry(uri)) |entry| {
         log.debug("Document already open: {s}, incrementing count", .{uri});
-        entry.value.count += 1;
-        if (entry.value.is_build_file) |build_file| {
+        entry.value_ptr.*.count += 1;
+        if (entry.value_ptr.*.is_build_file) |build_file| {
             build_file.refs += 1;
         }
-        log.debug("New count: {}", .{entry.value.count});
-        return entry.value;
+        log.debug("New count: {}", .{entry.value_ptr.*.count});
+        return entry.value_ptr.*;
     }
 
     const duped_text = try std.mem.dupe(self.allocator, u8, text);
@@ -322,39 +322,40 @@ fn decrementBuildFileRefs(self: *DocumentStore, build_file: *BuildFile) void {
 
 fn decrementCount(self: *DocumentStore, uri: []const u8) void {
     if (self.handles.getEntry(uri)) |entry| {
-        if (entry.value.count == 0) return;
-        entry.value.count -= 1;
+        const handle = entry.value_ptr.*;
+        if (handle.count == 0) return;
+        handle.count -= 1;
 
-        if (entry.value.count > 0)
+        if (handle.count > 0)
             return;
 
         log.debug("Freeing document: {s}", .{uri});
 
-        if (entry.value.associated_build_file) |build_file| {
+        if (handle.associated_build_file) |build_file| {
             self.decrementBuildFileRefs(build_file);
         }
 
-        if (entry.value.is_build_file) |build_file| {
+        if (handle.is_build_file) |build_file| {
             self.decrementBuildFileRefs(build_file);
         }
 
-        entry.value.tree.deinit(self.allocator);
-        self.allocator.free(entry.value.document.mem);
+        handle.tree.deinit(self.allocator);
+        self.allocator.free(handle.document.mem);
 
-        for (entry.value.imports_used.items) |import_uri| {
+        for (handle.imports_used.items) |import_uri| {
             self.decrementCount(import_uri);
         }
 
-        for (entry.value.import_uris) |import_uri| {
+        for (handle.import_uris) |import_uri| {
             self.allocator.free(import_uri);
         }
 
-        entry.value.document_scope.deinit(self.allocator);
-        entry.value.imports_used.deinit(self.allocator);
-        self.allocator.free(entry.value.import_uris);
-        self.allocator.destroy(entry.value);
-        const uri_key = entry.key;
-        self.handles.removeAssertDiscard(uri);
+        handle.document_scope.deinit(self.allocator);
+        handle.imports_used.deinit(self.allocator);
+        self.allocator.free(handle.import_uris);
+        self.allocator.destroy(handle);
+        const uri_key = entry.key_ptr.*;
+        std.debug.assert(self.handles.remove(uri));
         self.allocator.free(uri_key);
     }
 }
@@ -646,16 +647,16 @@ fn stdUriFromLibPath(allocator: *std.mem.Allocator, zig_lib_path: ?[]const u8) !
 pub fn deinit(self: *DocumentStore) void {
     var entry_iterator = self.handles.iterator();
     while (entry_iterator.next()) |entry| {
-        entry.value.document_scope.deinit(self.allocator);
-        entry.value.tree.deinit(self.allocator);
-        self.allocator.free(entry.value.document.mem);
-        for (entry.value.import_uris) |uri| {
+        entry.value_ptr.*.document_scope.deinit(self.allocator);
+        entry.value_ptr.*.tree.deinit(self.allocator);
+        self.allocator.free(entry.value_ptr.*.document.mem);
+        for (entry.value_ptr.*.import_uris) |uri| {
             self.allocator.free(uri);
         }
-        self.allocator.free(entry.value.import_uris);
-        entry.value.imports_used.deinit(self.allocator);
-        self.allocator.free(entry.key);
-        self.allocator.destroy(entry.value);
+        self.allocator.free(entry.value_ptr.*.import_uris);
+        entry.value_ptr.*.imports_used.deinit(self.allocator);
+        self.allocator.free(entry.key_ptr.*);
+        self.allocator.destroy(entry.value_ptr.*);
     }
 
     self.handles.deinit();
@@ -690,17 +691,17 @@ fn tagStoreCompletionItems(
 
     var result_set = analysis.CompletionSet{};
     try result_set.ensureCapacity(&arena.allocator, max_len);
-    result_set.entries.appendSliceAssumeCapacity(@field(base.document_scope, name).entries.items);
-    try result_set.reIndex(&arena.allocator);
+    for (@field(base.document_scope, name).entries.items(.key)) |completion| {
+        result_set.putAssumeCapacityNoClobber(completion, {});
+    }
 
     for (base.imports_used.items) |uri| {
         const curr_set = &@field(self.handles.get(uri).?.document_scope, name);
-        for (curr_set.entries.items) |entry| {
-            result_set.putAssumeCapacity(entry.key, {});
+        for (curr_set.entries.items(.key)) |completion| {
+            result_set.putAssumeCapacity(completion, {});
         }
     }
-    // This is safe to do because CompletionSet.Entry == struct { value: types.CompletionItem }
-    return std.mem.bytesAsSlice(types.CompletionItem, std.mem.sliceAsBytes(result_set.entries.items));
+    return result_set.entries.items(.key);
 }
 
 pub fn errorCompletionItems(

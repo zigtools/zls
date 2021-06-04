@@ -536,13 +536,13 @@ pub fn symbolReferences(
 
             var handle_it = store.handles.iterator();
             while (handle_it.next()) |entry| {
-                if (skip_std_references and std.mem.indexOf(u8, entry.key, "std") != null) {
-                    if (!include_decl or entry.value != curr_handle)
+                if (skip_std_references and std.mem.indexOf(u8, entry.key_ptr.*, "std") != null) {
+                    if (!include_decl or entry.value_ptr.* != curr_handle)
                         continue;
                 }
 
                 // Check entry's transitive imports
-                try imports.append(entry.value);
+                try imports.append(entry.value_ptr.*);
                 var i: usize = 0;
                 blk: while (i < imports.items.len) : (i += 1) {
                     const import = imports.items[i];
@@ -551,7 +551,7 @@ pub fn symbolReferences(
 
                         if (h == curr_handle) {
                             // entry does import curr_handle
-                            try symbolReferencesInternal(arena, store, .{ .node = 0, .handle = entry.value }, decl_handle, encoding, context, handler);
+                            try symbolReferencesInternal(arena, store, .{ .node = 0, .handle = entry.value_ptr.* }, decl_handle, encoding, context, handler);
                             break :blk;
                         }
 
