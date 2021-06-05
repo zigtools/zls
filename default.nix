@@ -1,4 +1,5 @@
-{ pkgs ? import <nixpkgs> {} }:
+{ pkgs ? import <nixpkgs> {},
+  system ? builtins.currentSystem }:
 
 let
   zig-overlay = pkgs.fetchFromGitHub {
@@ -14,7 +15,7 @@ let
     sha256 = "1npnx0h6bd0d7ql93ka7azhj40zgjp815fw2r6smg8ch9p7mzdlx";
   };
   inherit (import gitignoreSrc { inherit (pkgs) lib; }) gitignoreSource;
-  zig = (import zig-overlay { inherit pkgs; }).master.latest;
+  zig = (import zig-overlay { inherit pkgs system; }).master.latest;
 in
 pkgs.stdenvNoCC.mkDerivation {
   name = "zls";
