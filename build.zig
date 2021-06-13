@@ -15,7 +15,7 @@ pub fn build(b: *std.build.Builder) !void {
         b.option([]const u8, "data_version", "The data version - 0.7.0, 0.7.1 or master.") orelse "master",
     );
 
-    exe.addPackage(.{ .name = "known-folders", .path = "src/known-folders/known-folders.zig" });
+    exe.addPackage(.{ .name = "known-folders", .path = .{ .path = "src/known-folders/known-folders.zig" } });
 
     exe.setTarget(target);
     exe.setBuildMode(mode);
@@ -31,7 +31,7 @@ pub fn build(b: *std.build.Builder) !void {
     test_step.dependOn(&unit_tests.step);
 
     var session_tests = b.addTest("tests/sessions.zig");
-    session_tests.addPackage(.{ .name = "header", .path = "src/header.zig" });
+    session_tests.addPackage(.{ .name = "header", .path = .{ .path = "src/header.zig" } });
     session_tests.setBuildMode(.Debug);
     test_step.dependOn(&session_tests.step);
 }

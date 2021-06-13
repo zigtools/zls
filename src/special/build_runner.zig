@@ -52,7 +52,11 @@ fn processStep(stdout_stream: anytype, step: *std.build.Step) anyerror!void {
 }
 
 fn processPackage(out_stream: anytype, pkg: Pkg) anyerror!void {
-    try out_stream.print("{s}\x00{s}\n", .{ pkg.name, pkg.path });
+    switch (pkg.path) {
+        .path => |path| try out_stream.print("{s}\x00{s}\n", .{ pkg.name, path }),
+        .generated => |generated| try out_stream.print("{s}\x00{s}\n", .{ pkg.name, generated.getPath() }),
+    }
+    
     if (pkg.dependencies) |dependencies| {
         for (dependencies) |dep| {
             try processPackage(out_stream, dep);
