@@ -20,7 +20,7 @@ pub fn main() !void {
     const builder = try Builder.create(allocator, "", "", "", "");
     defer builder.destroy();
 
-    builder.resolveInstallPrefix(null);
+    builder.resolveInstallPrefix(null, Builder.DirList{});
     try runBuild(builder);
 
     const stdout_stream = io.getStdOut().writer();
