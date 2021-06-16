@@ -54,7 +54,7 @@ fn processStep(stdout_stream: anytype, step: *std.build.Step) anyerror!void {
 fn processPackage(out_stream: anytype, pkg: Pkg) anyerror!void {
     switch (pkg.path) {
         .path => |path| try out_stream.print("{s}\x00{s}\n", .{ pkg.name, path }),
-        .generated => |generated| try out_stream.print("{s}\x00{s}\n", .{ pkg.name, generated.getPath() }),
+        .generated => |generated| if (generated.path != null) try out_stream.print("{s}\x00{s}\n", .{ pkg.name, generated.path.? }),
     }
     
     if (pkg.dependencies) |dependencies| {
