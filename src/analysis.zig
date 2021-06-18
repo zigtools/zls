@@ -2296,7 +2296,11 @@ fn resolveUse(
     defer _ = using_trail.pop();
 
     for (uses) |use| {
-        const expr = .{ .node = handle.tree.nodes.items(.data)[use.*].lhs, .handle = handle };
+        const index = use.*;
+
+        if (handle.tree.nodes.items(.data).len <= index) continue;
+
+        const expr = .{ .node = handle.tree.nodes.items(.data)[index].lhs, .handle = handle };
         const expr_type_node = (try resolveTypeOfNode(store, arena, expr)) orelse
             continue;
 
