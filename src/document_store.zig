@@ -4,6 +4,7 @@ const URI = @import("uri.zig");
 const analysis = @import("analysis.zig");
 const offsets = @import("offsets.zig");
 const log = std.log.scoped(.doc_store);
+const BuildAssociatedConfig = @import("build_associated_config.zig");
 
 const DocumentStore = @This();
 
@@ -16,6 +17,13 @@ const BuildFile = struct {
     refs: usize,
     uri: []const u8,
     packages: std.ArrayListUnmanaged(Pkg),
+
+    builtin_uri: ?[]const u8 = null,
+
+    pub fn destroy(self: *BuildFile, allocator: *std.mem.Allocator) void {
+        if (self.builtin_uri) |builtin_uri| allocator.free(builtin_uri);
+        allocator.destroy(self);
+    }
 };
 
 pub const Handle = struct {
@@ -61,12 +69,41 @@ pub fn init(
     self.std_uri = try stdUriFromLibPath(allocator, zig_lib_path);
 }
 
+fn loadBuildAssociatedConfiguration(allocator: *std.mem.Allocator, build_file: *BuildFile, build_file_path: []const u8) !void {
+    const directory_path = build_file_path[0 .. build_file_path.len - "build.zig".len];
+
+    const options = std.json.ParseOptions{ .allocator = allocator };
+    const build_associated_config = blk: {
+        const config_file_path = try std.fs.path.join(allocator, &[_][]const u8{ directory_path, "zls.build.json" });
+        defer allocator.free(config_file_path);
+
+        var config_file = std.fs.cwd().openFile(config_file_path, .{}) catch |err| {
+            if (err == error.FileNotFound) return;
+            return err;
+        };
+        defer config_file.close();
+
+        const file_buf = try config_file.readToEndAlloc(allocator, 0x1000000);
+        defer allocator.free(file_buf);
+
+        break :blk try std.json.parse(BuildAssociatedConfig, &std.json.TokenStream.init(file_buf), options);
+    };
+    defer std.json.parseFree(BuildAssociatedConfig, build_associated_config, options);
+
+    if (build_associated_config.relative_builtin_path) |relative_builtin_path| {
+        var absolute_builtin_path = try std.mem.concat(allocator, u8, &.{ directory_path, relative_builtin_path });
+        defer allocator.free(absolute_builtin_path);
+        build_file.builtin_uri = try URI.fromPath(allocator, absolute_builtin_path);
+    }
+}
+
 const LoadPackagesContext = struct {
     build_file: *BuildFile,
     allocator: *std.mem.Allocator,
     build_runner_path: []const u8,
     build_runner_cache_path: []const u8,
     zig_exe_path: []const u8,
+    build_file_path: ?[]const u8 = null,
 };
 
 fn loadPackages(context: LoadPackagesContext) !void {
@@ -76,8 +113,8 @@ fn loadPackages(context: LoadPackagesContext) !void {
     const build_runner_cache_path = context.build_runner_cache_path;
     const zig_exe_path = context.zig_exe_path;
 
-    const build_file_path = try URI.parse(allocator, build_file.uri);
-    defer allocator.free(build_file_path);
+    const build_file_path = context.build_file_path orelse try URI.parse(allocator, build_file.uri);
+    defer if (context.build_file_path == null) allocator.free(build_file_path);
     const directory_path = build_file_path[0 .. build_file_path.len - "build.zig".len];
 
     const zig_run_result = try std.ChildProcess.exec(.{
@@ -173,7 +210,7 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: []u8) anyerror!*Hand
         log.debug("Document is a build file, extracting packages...", .{});
         // This is a build file.
         var build_file = try self.allocator.create(BuildFile);
-        errdefer self.allocator.destroy(build_file);
+        errdefer build_file.destroy(self.allocator);
 
         build_file.* = .{
             .refs = 1,
@@ -181,8 +218,12 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: []u8) anyerror!*Hand
             .packages = .{},
         };
 
-        try self.build_files.append(self.allocator, build_file);
-        handle.is_build_file = build_file;
+        const build_file_path = try URI.parse(self.allocator, build_file.uri);
+        defer self.allocator.free(build_file_path);
+
+        loadBuildAssociatedConfiguration(self.allocator, build_file, build_file_path) catch |err| {
+            log.debug("Failed to load config associated with build file {s} (error: {})", .{ build_file.uri, err });
+        };
 
         // TODO: Do this in a separate thread?
         // It can take quite long.
@@ -192,9 +233,13 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: []u8) anyerror!*Hand
             .build_runner_path = self.build_runner_path,
             .build_runner_cache_path = self.build_runner_cache_path,
             .zig_exe_path = self.zig_exe_path.?,
+            .build_file_path = build_file_path,
         }) catch |err| {
             log.debug("Failed to load packages of build file {s} (error: {})", .{ build_file.uri, err });
         };
+
+        try self.build_files.append(self.allocator, build_file);
+        handle.is_build_file = build_file;
     } else if (self.zig_exe_path != null and !in_std) {
         // Look into build files and keep the one that lives closest to the document in the directory structure
         var candidate: ?*BuildFile = null;
@@ -316,7 +361,7 @@ fn decrementBuildFileRefs(self: *DocumentStore, build_file: *BuildFile) void {
 
         // Remove the build file from the array list
         _ = self.build_files.swapRemove(std.mem.indexOfScalar(*BuildFile, self.build_files.items, build_file).?);
-        self.allocator.destroy(build_file);
+        build_file.destroy(self.allocator);
     }
 }
 
@@ -532,6 +577,11 @@ pub fn uriFromImportStr(
             return null;
         }
     } else if (std.mem.eql(u8, import_str, "builtin")) {
+        if (handle.associated_build_file) |build_file| {
+            if (build_file.builtin_uri) |builtin_uri| {
+                return try std.mem.dupe(allocator, u8, builtin_uri);
+            }
+        }
         return null; // TODO find the correct zig-cache folder
     } else if (!std.mem.endsWith(u8, import_str, ".zig")) {
         if (handle.associated_build_file) |build_file| {
@@ -667,7 +717,7 @@ pub fn deinit(self: *DocumentStore) void {
         }
         build_file.packages.deinit(self.allocator);
         self.allocator.free(build_file.uri);
-        self.allocator.destroy(build_file);
+        build_file.destroy(self.allocator);
     }
     if (self.std_uri) |std_uri| {
         self.allocator.free(std_uri);
