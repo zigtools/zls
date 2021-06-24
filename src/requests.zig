@@ -227,7 +227,7 @@ pub const SignatureHelp = struct {
         textDocument: TextDocumentIdentifier,
         position: types.Position,
         context: ?struct {
-            triggerKind: enum {
+            triggerKind: enum(u32) {
                 invoked = 1,
                 trigger_character = 2,
                 content_change = 3,

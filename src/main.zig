@@ -4,7 +4,6 @@ const build_options = @import("build_options");
 const Config = @import("config.zig");
 const DocumentStore = @import("document_store.zig");
 const readRequestHeader = @import("header.zig").readRequestHeader;
-const data = @import("data/" ++ build_options.data_version ++ ".zig");
 const requests = @import("requests.zig");
 const types = @import("types.zig");
 const analysis = @import("analysis.zig");
@@ -15,6 +14,12 @@ const offsets = @import("offsets.zig");
 const setup = @import("setup.zig");
 const semantic_tokens = @import("semantic_tokens.zig");
 const known_folders = @import("known-folders");
+const data = blk: {
+    if (std.mem.eql(u8, build_options.data_version, "0.7.0")) break :blk @import("data/0.7.0.zig");
+    if (std.mem.eql(u8, build_options.data_version, "0.7.1")) break :blk @import("data/0.7.1.zig");
+    if (std.mem.eql(u8, build_options.data_version, "master")) break :blk @import("data/master.zig");
+    @compileError("invalid data_version provided");
+};
 
 const logger = std.log.scoped(.main);
 
@@ -45,7 +50,7 @@ pub fn log(
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
-    var message = std.fmt.allocPrint(&arena.allocator, "[{s}-{s}] " ++ format, .{ @tagName(message_level), @tagName(scope) } ++ args) catch |err| {
+    var message = std.fmt.allocPrint(&arena.allocator, "[{s}-{s}] " ++ format, .{ @tagName(message_level), @tagName(scope) } ++ args) catch {
         std.debug.print("Failed to allocPrint message.\n", .{});
         return;
     };
@@ -182,12 +187,12 @@ fn respondGeneric(id: types.RequestId, response: []const u8) !void {
     try stdout.flush();
 }
 
-fn showMessage(@"type": types.MessageType, message: []const u8) !void {
+fn showMessage(message_type: types.MessageType, message: []const u8) !void {
     try send(types.Notification{
         .method = "window/showMessage",
         .params = .{
             .ShowMessageParams = .{
-                .@"type" = @"type",
+                .type = message_type,
                 .message = message,
             },
         },
@@ -707,16 +712,22 @@ fn getSymbolGlobal(arena: *std.heap.ArenaAllocator, pos_index: usize, handle: *D
 }
 
 fn gotoDefinitionLabel(arena: *std.heap.ArenaAllocator, id: types.RequestId, pos_index: usize, handle: *DocumentStore.Handle, config: Config) !void {
+    _ = config;
+
     const decl = (try getLabelGlobal(pos_index, handle)) orelse return try respondGeneric(id, null_result_response);
     return try gotoDefinitionSymbol(id, arena, decl, false);
 }
 
 fn gotoDefinitionGlobal(arena: *std.heap.ArenaAllocator, id: types.RequestId, pos_index: usize, handle: *DocumentStore.Handle, config: Config, resolve_alias: bool) !void {
+    _ = config;
+
     const decl = (try getSymbolGlobal(arena, pos_index, handle)) orelse return try respondGeneric(id, null_result_response);
     return try gotoDefinitionSymbol(id, arena, decl, resolve_alias);
 }
 
 fn hoverDefinitionLabel(arena: *std.heap.ArenaAllocator, id: types.RequestId, pos_index: usize, handle: *DocumentStore.Handle, config: Config) !void {
+    _ = config;
+
     const decl = (try getLabelGlobal(pos_index, handle)) orelse return try respondGeneric(id, null_result_response);
     return try hoverSymbol(id, arena, decl);
 }
@@ -746,6 +757,8 @@ fn hoverDefinitionBuiltin(arena: *std.heap.ArenaAllocator, id: types.RequestId, 
 }
 
 fn hoverDefinitionGlobal(arena: *std.heap.ArenaAllocator, id: types.RequestId, pos_index: usize, handle: *DocumentStore.Handle, config: Config) !void {
+    _ = config;
+
     const decl = (try getSymbolGlobal(arena, pos_index, handle)) orelse return try respondGeneric(id, null_result_response);
     return try hoverSymbol(id, arena, decl);
 }
@@ -757,6 +770,8 @@ fn getSymbolFieldAccess(
     range: analysis.SourceRange,
     config: Config,
 ) !?analysis.DeclWithHandle {
+    _ = config;
+
     const name = identifierFromPosition(position.absolute_index, handle.*);
     if (name.len == 0) return null;
     var tokenizer = std.zig.Tokenizer.init(position.line[range.start..range.end]);
@@ -804,6 +819,8 @@ fn hoverDefinitionFieldAccess(
 }
 
 fn gotoDefinitionString(arena: *std.heap.ArenaAllocator, id: types.RequestId, pos_index: usize, handle: *DocumentStore.Handle, config: Config) !void {
+    _ = config;
+
     const tree = handle.tree;
 
     const import_str = analysis.getImportStr(tree, 0, pos_index) orelse return try respondGeneric(id, null_result_response);
@@ -1234,6 +1251,8 @@ fn loadConfigInFolder(folder_path: []const u8) ?Config {
 }
 
 fn initializeHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.Initialize, config: Config) !void {
+    _ = config;
+
     for (req.params.capabilities.offsetEncoding.value) |encoding| {
         if (std.mem.eql(u8, encoding, "utf-8")) {
             offset_encoding = .utf8;
@@ -1341,6 +1360,9 @@ fn initializeHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: 
 
 var keep_running = true;
 fn shutdownHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, config: Config) !void {
+    _ = config;
+    _ = arena;
+
     logger.notice("Server closing...", .{});
 
     keep_running = false;
@@ -1357,6 +1379,8 @@ fn openDocumentHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req
 }
 
 fn changeDocumentHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.ChangeDocument, config: Config) !void {
+    _ = id;
+
     const handle = document_store.getHandle(req.params.textDocument.uri) orelse {
         logger.debug("Trying to change non existent document {s}", .{req.params.textDocument.uri});
         return;
@@ -1367,6 +1391,9 @@ fn changeDocumentHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, r
 }
 
 fn saveDocumentHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.SaveDocument, config: Config) error{OutOfMemory}!void {
+    _ = config;
+    _ = id;
+    _ = arena;
     const handle = document_store.getHandle(req.params.textDocument.uri) orelse {
         logger.warn("Trying to save non existent document {s}", .{req.params.textDocument.uri});
         return;
@@ -1375,6 +1402,9 @@ fn saveDocumentHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req
 }
 
 fn closeDocumentHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.CloseDocument, config: Config) error{}!void {
+    _ = config;
+    _ = id;
+    _ = arena;
     document_store.closeDocument(req.params.textDocument.uri);
 }
 
@@ -1412,7 +1442,6 @@ fn completionHandler(
 
     const doc_position = try offsets.documentPosition(handle.document, req.params.position, offset_encoding);
     const pos_context = try analysis.documentPositionContext(arena, handle.document, doc_position);
-    const use_snippets = config.enable_snippets and client_capabilities.supports_snippets;
 
     switch (pos_context) {
         .builtin => try completeBuiltin(arena, id, config),
@@ -1431,6 +1460,8 @@ fn signatureHelpHandler(
     req: requests.SignatureHelp,
     config: Config,
 ) !void {
+    _ = config;
+
     const getSignatureInfo = @import("signature_help.zig").getSignatureInfo;
     const handle = document_store.getHandle(req.params.textDocument.uri) orelse {
         logger.warn("Trying to get signature help in non existent document {s}", .{req.params.textDocument.uri});
@@ -1520,6 +1551,8 @@ fn hoverHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: reque
 }
 
 fn documentSymbolsHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.DocumentSymbols, config: Config) !void {
+    _ = config;
+
     const handle = document_store.getHandle(req.params.textDocument.uri) orelse {
         logger.warn("Trying to get document symbols in non existent document {s}", .{req.params.textDocument.uri});
         return try respondGeneric(id, null_result_response);

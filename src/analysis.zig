@@ -319,6 +319,7 @@ fn resolveVarDeclAliasInternal(
     node_handle: NodeWithHandle,
     root: bool,
 ) error{OutOfMemory}!?DeclWithHandle {
+    _ = root;
     const handle = node_handle.handle;
     const tree = handle.tree;
     const node_tags = tree.nodes.items(.tag);
@@ -340,17 +341,6 @@ fn resolveVarDeclAliasInternal(
         const lhs = datas[node_handle.node].lhs;
 
         const container_node = if (isBuiltinCall(tree, lhs)) block: {
-            const data = datas[lhs];
-            const builtin = switch (node_tags[lhs]) {
-                .builtin_call, .builtin_call_comma => tree.extra_data[data.lhs..data.rhs],
-                .builtin_call_two, .builtin_call_two_comma => if (data.lhs == 0)
-                    &[_]ast.Node.Index{}
-                else if (data.rhs == 0)
-                    &[_]ast.Node.Index{data.lhs}
-                else
-                    &[_]ast.Node.Index{ data.lhs, data.rhs },
-                else => unreachable,
-            };
             if (!std.mem.eql(u8, tree.tokenSlice(main_tokens[lhs]), "@import"))
                 return null;
 
@@ -365,7 +355,6 @@ fn resolveVarDeclAliasInternal(
                 .other => |n| n,
                 else => return null,
             };
-            const resolved_tree_tags = resolved.handle.tree.nodes.items(.tag);
             if (!isContainer(resolved.handle.tree, resolved_node)) return null;
             break :block NodeWithHandle{ .node = resolved_node, .handle = resolved.handle };
         } else return null;
@@ -386,7 +375,6 @@ pub fn resolveVarDeclAlias(store: *DocumentStore, arena: *std.heap.ArenaAllocato
     const handle = decl_handle.handle;
     const tree = handle.tree;
     const token_tags = tree.tokens.items(.tag);
-    const main_tokes = tree.nodes.items(.main_token);
     const node_tags = tree.nodes.items(.tag);
 
     if (varDecl(handle.tree, decl)) |var_decl| {
@@ -782,7 +770,7 @@ pub fn resolveTypeOfNodeInternal(
         .call_one_comma,
         .async_call_one,
         .async_call_one_comma,
-        => |c| {
+        => {
             var params: [1]ast.Node.Index = undefined;
             const call = callFull(tree, node, &params) orelse unreachable;
 
@@ -898,8 +886,6 @@ pub fn resolveTypeOfNodeInternal(
             };
         },
         .field_access => {
-            const field_access = datas[node];
-
             if (datas[node].rhs == 0) return null;
             const rhs_str = tree.tokenSlice(datas[node].rhs);
             // If we are accessing a pointer type, remove one pointerness level :)
@@ -1227,7 +1213,6 @@ pub fn getFieldAccessType(
     });
 
     var bound_type_params = BoundTypeParams.init(&arena.allocator);
-    const tree = handle.tree;
 
     while (true) {
         const tok = tokenizer.next();
@@ -1537,6 +1522,8 @@ pub fn documentPositionContext(
     document: types.TextDocument,
     doc_position: DocumentPosition,
 ) !PositionContext {
+    _ = document;
+
     const line = doc_position.line;
     var tokenizer = std.zig.Tokenizer.init(line[0..doc_position.line_index]);
     var stack = try std.ArrayList(StackState).initCapacity(&arena.allocator, 8);
@@ -1545,7 +1532,7 @@ pub fn documentPositionContext(
         const tok = tokenizer.next();
         // Early exits.
         switch (tok.tag) {
-            .invalid, .invalid_ampersands => {
+            .invalid => {
                 // Single '@' do not return a builtin token so we check this on our own.
                 if (line[doc_position.line_index - 1] == '@') {
                     return PositionContext{
@@ -1794,7 +1781,7 @@ fn addOutlineNodes(allocator: *std.mem.Allocator, tree: ast.Tree, child: ast.Nod
                 try addOutlineNodes(allocator, tree, member, context);
             return;
         },
-        else => |t| {},
+        else => {},
     }
     try getDocumentSymbolsInternal(allocator, tree, child, context);
 }
@@ -1941,7 +1928,6 @@ pub const DeclWithHandle = struct {
 
     pub fn nameToken(self: DeclWithHandle) ast.TokenIndex {
         const tree = self.handle.tree;
-        const token_tags = tree.tokens.items(.tag);
         return switch (self.decl.*) {
             .ast_node => |n| getDeclNameToken(tree, n).?,
             .param_decl => |p| p.name_token.?,
@@ -2252,7 +2238,7 @@ pub fn innermostBlockScopeIndex(handle: DocumentStore.Handle, source_index: usiz
     for (handle.document_scope.scopes[1..]) |*scope, idx| {
         if (source_index >= scope.range.start and source_index <= scope.range.end) {
             switch (scope.data) {
-                .container, .function, .block => |node| current = idx + 1,
+                .container, .function, .block => current = idx + 1,
                 else => {},
             }
         }
@@ -2419,10 +2405,12 @@ pub fn lookupSymbolContainer(
 
 const CompletionContext = struct {
     pub fn hash(self: @This(), item: types.CompletionItem) u32 {
+        _ = self;
         return @truncate(u32, std.hash.Wyhash.hash(0, item.label));
     }
 
     pub fn eql(self: @This(), a: types.CompletionItem, b: types.CompletionItem) bool {
+        _ = self;
         return std.mem.eql(u8, a.label, b.label);
     }
 };
@@ -2458,7 +2446,7 @@ pub const DocumentScope = struct {
 
             var decl_it = scope.decls.iterator();
             var idx: usize = 0;
-            while (decl_it.next()) |name_decl| : (idx += 1) {
+            while (decl_it.next()) |_| : (idx += 1) {
                 if (idx != 0) log.debug(", ", .{});
             }
             log.debug("{s}", .{name_decl.key});
@@ -2639,6 +2627,7 @@ fn makeInnerScope(
             continue;
         }
         if (try scopes.items[scope_idx].decls.fetchPut(name, .{ .ast_node = decl })) |existing| {
+            _ = existing;
             // TODO Record a redefinition error.
         }
 
@@ -2652,7 +2641,7 @@ fn makeInnerScope(
             else => null,
         };
 
-        if (container_field) |field| {
+        if (container_field) |_| {
             if (!std.mem.eql(u8, name, "_")) {
                 try context.enums.put(allocator, .{
                     .label = name,
@@ -2741,6 +2730,7 @@ fn makeScopeInternal(
                         tree.tokenSlice(name_token),
                         .{ .param_decl = param },
                     )) |existing| {
+                        _ = existing;
                         // TODO record a redefinition error
                     }
                 }
@@ -2825,6 +2815,7 @@ fn makeScopeInternal(
                 if (varDecl(tree, idx)) |var_decl| {
                     const name = tree.tokenSlice(var_decl.ast.mut_token + 1);
                     if (try scopes.items[scope_idx].decls.fetchPut(name, .{ .ast_node = idx })) |existing| {
+                        _ = existing;
                         // TODO record a redefinition error.
                     }
                 }
@@ -2971,6 +2962,7 @@ fn makeScopeInternal(
                         tree.tokenSlice(index_token),
                         .{ .array_index = index_token },
                     )) |existing| {
+                        _ = existing;
                         // TODO Record a redefinition error
                     }
                 }

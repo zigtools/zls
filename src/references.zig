@@ -39,6 +39,8 @@ pub fn labelReferences(
     context: anytype,
     comptime handler: anytype,
 ) !void {
+    _ = arena;
+
     std.debug.assert(decl.decl.* == .label_decl);
     const handle = decl.handle;
     const tree = handle.tree;
@@ -529,7 +531,7 @@ pub fn symbolReferences(
     }
 
     switch (decl_handle.decl.*) {
-        .ast_node => |decl_node| {
+        .ast_node => {
             try symbolReferencesInternal(arena, store, .{ .node = 0, .handle = curr_handle }, decl_handle, encoding, context, handler);
 
             var imports = std.ArrayList(*DocumentStore.Handle).init(&arena.allocator);
@@ -600,6 +602,7 @@ pub fn symbolReferences(
                 log.warn("Could not find param decl's function", .{});
                 return;
             };
+            _ = fn_node;
         },
         .pointer_payload, .switch_payload, .array_payload, .array_index => {
             try symbolReferencesInternal(arena, store, .{ .node = 0, .handle = curr_handle }, decl_handle, encoding, context, handler);

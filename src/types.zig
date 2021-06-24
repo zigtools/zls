@@ -239,7 +239,7 @@ pub const CompletionItem = struct {
 };
 
 pub const DocumentSymbol = struct {
-    const Kind = enum {
+    const Kind = enum(u32) {
         File = 1,
         Module = 2,
         Namespace = 3,
@@ -317,7 +317,7 @@ const InitializeResult = struct {
             triggerCharacters: []const []const u8,
             retriggerCharacters: []const []const u8,
         },
-        textDocumentSync: enum {
+        textDocumentSync: enum(u32) {
             None = 0,
             Full = 1,
             Incremental = 2,
