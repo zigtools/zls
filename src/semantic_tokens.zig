@@ -45,7 +45,7 @@ pub const TokenModifiers = packed struct {
         return res;
     }
 
-    fn set(self: *TokenModifiers, comptime field: []const u8) callconv(.Inline) void {
+    inline fn set(self: *TokenModifiers, comptime field: []const u8) void {
         @field(self, field) = true;
     }
 };
@@ -181,20 +181,20 @@ const Builder = struct {
     }
 };
 
-fn writeToken(
+inline fn writeToken(
     builder: *Builder,
     token_idx: ?ast.TokenIndex,
     tok_type: TokenType,
-) callconv(.Inline) !void {
+) !void {
     return try writeTokenMod(builder, token_idx, tok_type, .{});
 }
 
-fn writeTokenMod(
+inline fn writeTokenMod(
     builder: *Builder,
     token_idx: ?ast.TokenIndex,
     tok_type: TokenType,
     tok_mod: TokenModifiers,
-) callconv(.Inline) !void {
+) !void {
     if (token_idx) |ti| {
         try builder.add(ti, tok_type, tok_mod);
     }
@@ -224,7 +224,6 @@ fn fieldTokenType(container_decl: ast.Node.Index, handle: *DocumentStore.Handle)
 }
 
 fn colorIdentifierBasedOnType(builder: *Builder, type_node: analysis.TypeWithHandle, target_tok: ast.TokenIndex, tok_mod: TokenModifiers) !void {
-    const tree = builder.handle.tree;
     if (type_node.type.is_type_val) {
         var new_tok_mod = tok_mod;
         if (type_node.isNamespace())
@@ -308,10 +307,9 @@ fn writeNodeTokens(
         .block_two,
         .block_two_semicolon,
         => {
-            const first_tok = if (token_tags[main_token - 1] == .colon and token_tags[main_token - 2] == .identifier) block: {
+            if (token_tags[main_token - 1] == .colon and token_tags[main_token - 2] == .identifier) {
                 try writeToken(builder, main_token - 2, .label);
-                break :block main_token + 1;
-            } else 0;
+            }
 
             const statements: []const ast.Node.Index = switch (tag) {
                 .block, .block_semicolon => tree.extra_data[node_data[node].lhs..node_data[node].rhs],
