@@ -100,7 +100,7 @@ const Server = struct {
 
     fn shutdown(self: *Server) void {
         self.request("shutdown", "{}", null) catch @panic("Could not send shutdown request");
-        waitNoError(self.process) catch |err| @panic("Server error");
+        waitNoError(self.process) catch @panic("Server error");
         self.process.deinit();
     }
 };
