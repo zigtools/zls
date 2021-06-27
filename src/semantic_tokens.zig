@@ -68,15 +68,10 @@ const Builder = struct {
     fn add(self: *Builder, token: ast.TokenIndex, token_type: TokenType, token_modifiers: TokenModifiers) !void {
         const tree = self.handle.tree;
         const starts = tree.tokens.items(.start);
-        const tags = tree.tokens.items(.tag);
         const next_start = starts[token];
 
         if (next_start < self.previous_position) {
-            log.err(
-                "Moved backwards from {} at position {} to {} at {}.",
-                .{ tags[self.previous_token orelse 0], self.previous_position, tags[token], next_start },
-            );
-            return;
+            return error.MovedBackwards;
         }
 
         if (self.previous_token) |prev| {
@@ -259,6 +254,7 @@ const WriteTokensError = error{
     Utf8OverlongEncoding,
     Utf8EncodesSurrogateHalf,
     Utf8CodepointTooLarge,
+    MovedBackwards,
 };
 
 fn writeNodeTokens(
@@ -1048,7 +1044,10 @@ pub fn writeAllSemanticTokens(
     // reverse the ast from the root declarations
     var buf: [2]ast.Node.Index = undefined;
     for (declMembers(handle.tree, 0, &buf)) |child| {
-        try writeNodeTokens(&builder, arena, store, child);
+        writeNodeTokens(&builder, arena, store, child) catch |err| switch (err) {
+            error.MovedBackwards => break,
+            else => |e| return e,
+        };
     }
     try builder.finish();
     return builder.toOwnedSlice();
