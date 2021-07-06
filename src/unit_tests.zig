@@ -8,7 +8,7 @@ const std = @import("std");
 const allocator = std.testing.allocator;
 
 fn makeDocument(uri: []const u8, text: []const u8) !types.TextDocument {
-    const mem = try allocator.alloc(u8, text.len);
+    const mem = try allocator.allocSentinel(u8, text.len, 0);
     std.mem.copy(u8, mem, text);
 
     return types.TextDocument{

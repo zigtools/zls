@@ -1525,7 +1525,10 @@ pub fn documentPositionContext(
     _ = document;
 
     const line = doc_position.line;
-    var tokenizer = std.zig.Tokenizer.init(line[0..doc_position.line_index]);
+
+    var lineZ = try arena.allocator.dupeZ(u8, line[0..doc_position.line_index]);
+
+    var tokenizer = std.zig.Tokenizer.init(lineZ);
     var stack = try std.ArrayList(StackState).initCapacity(&arena.allocator, 8);
 
     while (true) {
@@ -1632,7 +1635,10 @@ pub fn documentPositionContext(
                 'a'...'z', 'A'...'Z', '_', '@' => {},
                 else => break :block .empty,
             }
-            tokenizer = std.zig.Tokenizer.init(line[doc_position.line_index..]);
+
+            lineZ = try arena.allocator.dupeZ(u8, line[doc_position.line_index..]);
+
+            tokenizer = std.zig.Tokenizer.init(lineZ);
             const tok = tokenizer.next();
             if (tok.tag == .identifier)
                 break :block PositionContext{ .var_access = tok.loc };

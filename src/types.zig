@@ -114,9 +114,9 @@ pub const Diagnostic = struct {
 pub const TextDocument = struct {
     uri: []const u8,
     // This is a substring of mem starting at 0
-    text: []const u8,
+    text: [:0]const u8,
     // This holds the memory that we have actually allocated.
-    mem: []u8,
+    mem: [:0]u8,
 };
 
 pub const WorkspaceEdit = struct {

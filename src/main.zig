@@ -774,7 +774,10 @@ fn getSymbolFieldAccess(
 
     const name = identifierFromPosition(position.absolute_index, handle.*);
     if (name.len == 0) return null;
-    var tokenizer = std.zig.Tokenizer.init(position.line[range.start..range.end]);
+
+    const spanZ = try arena.allocator.dupeZ(u8, position.line[range.start..range.end]);
+
+    var tokenizer = std.zig.Tokenizer.init(spanZ);
 
     if (try analysis.getFieldAccessType(&document_store, arena, handle, position.absolute_index, &tokenizer)) |result| {
         const container_handle = result.unwrapped orelse result.original;
@@ -1147,7 +1150,10 @@ fn completeFieldAccess(
     config: Config,
 ) !void {
     var completions = std.ArrayList(types.CompletionItem).init(&arena.allocator);
-    var tokenizer = std.zig.Tokenizer.init(position.line[range.start..range.end]);
+
+    const spanZ = try arena.allocator.dupeZ(u8, position.line[range.start..range.end]);
+
+    var tokenizer = std.zig.Tokenizer.init(spanZ);
     if (try analysis.getFieldAccessType(&document_store, arena, handle, position.absolute_index, &tokenizer)) |result| {
         try typeToCompletion(arena, &completions, result, handle, config);
         truncateCompletions(completions.items, config.max_detail_length);
