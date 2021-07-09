@@ -25,7 +25,11 @@ const builtins = $$("a#toc-Builtin-Functions+ul > li").map(element => {
             doc += "\n```";
         } else {
             curr_paragraph.childNodes.forEach(elem => {
-                doc += elem.textContent.replace(/(\s\s+)/gm, " ");
+                if (elem.nodeName == "CODE") {
+                    console.log(elem.innerHTML);
+                    doc += "`" + elem.innerHTML.replaceAll(/<span .+?>(.+?)<\/span>/gm, "$1") + "`";
+                } else
+                    doc += elem.textContent.replace(/(\s\s+)/gm, " ");
             });
         }
 
