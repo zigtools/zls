@@ -134,7 +134,7 @@ pub const TextDocument = struct {
     };
 
     pub fn borrowNullTerminatedSlice(self: *const @This(), start_idx: usize, end_idx: usize) Held {
-        std.debug.assert(end_idx >= start_idx and end_idx < self.text.len);
+        std.debug.assert(end_idx >= start_idx);
         const popped_char = self.mem[end_idx];
         self.mem[end_idx] = 0;
         return .{

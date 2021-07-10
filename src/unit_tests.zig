@@ -8,13 +8,14 @@ const std = @import("std");
 const allocator = std.testing.allocator;
 
 fn makeDocument(uri: []const u8, text: []const u8) !types.TextDocument {
-    const mem = try allocator.alloc(u8, text.len);
+    const mem = try allocator.alloc(u8, text.len + 1);
     std.mem.copy(u8, mem, text);
+    mem[text.len] = 0;
 
     return types.TextDocument{
         .uri = uri,
         .mem = mem,
-        .text = mem[0..],
+        .text = mem[0..text.len :0],
     };
 }
 
