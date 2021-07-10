@@ -250,6 +250,7 @@ let g:LanguageClient_serverCommands = {
 
 - Enable the `lsp` module
 - Install the [zig-mode](https://github.com/ziglang/zig-mode) package (add `(package! zig-mode)` to your `packages.el` file
+- Add the following to your `config.el`:
 
 ```elisp
 (use-package! zig-mode
