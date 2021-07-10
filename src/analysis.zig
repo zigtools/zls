@@ -1525,90 +1525,99 @@ pub fn documentPositionContext(
     _ = document;
 
     const line = doc_position.line;
-    var tokenizer = std.zig.Tokenizer.init(line[0..doc_position.line_index]);
+
+    const line_mem_start = @ptrToInt(line.ptr) - @ptrToInt(document.mem.ptr);
     var stack = try std.ArrayList(StackState).initCapacity(&arena.allocator, 8);
+    {
+        var held_line = document.borrowNullTerminatedSlice(
+            line_mem_start,
+            line_mem_start + doc_position.line_index,
+        );
+        defer held_line.release();
+        var tokenizer = std.zig.Tokenizer.init(held_line.data());
 
-    while (true) {
-        const tok = tokenizer.next();
-        // Early exits.
-        switch (tok.tag) {
-            .invalid => {
-                // Single '@' do not return a builtin token so we check this on our own.
-                if (line[doc_position.line_index - 1] == '@') {
-                    return PositionContext{
-                        .builtin = .{
-                            .start = doc_position.line_index - 1,
-                            .end = doc_position.line_index,
-                        },
-                    };
-                }
-                return .other;
-            },
-            .doc_comment, .container_doc_comment => return .comment,
-            .eof => break,
-            else => {},
-        }
+        while (true) {
+            const tok = tokenizer.next();
+            // Early exits.
+            switch (tok.tag) {
+                .invalid => {
+                    // Single '@' do not return a builtin token so we check this on our own.
+                    if (line[doc_position.line_index - 1] == '@') {
+                        return PositionContext{
+                            .builtin = .{
+                                .start = doc_position.line_index - 1,
+                                .end = doc_position.line_index,
+                            },
+                        };
+                    }
+                    return .other;
+                },
+                .doc_comment, .container_doc_comment => return .comment,
+                .eof => break,
+                else => {},
+            }
 
-        // State changes
-        var curr_ctx = try peek(&stack);
-        switch (tok.tag) {
-            .string_literal, .multiline_string_literal_line => curr_ctx.ctx = .{ .string_literal = tok.loc },
-            .identifier => switch (curr_ctx.ctx) {
-                .empty, .pre_label => curr_ctx.ctx = .{ .var_access = tok.loc },
-                .label => |filled| if (!filled) {
-                    curr_ctx.ctx = .{ .label = true };
+            // State changes
+            var curr_ctx = try peek(&stack);
+            switch (tok.tag) {
+                .string_literal, .multiline_string_literal_line => curr_ctx.ctx = .{ .string_literal = tok.loc },
+                .identifier => switch (curr_ctx.ctx) {
+                    .empty, .pre_label => curr_ctx.ctx = .{ .var_access = tok.loc },
+                    .label => |filled| if (!filled) {
+                        curr_ctx.ctx = .{ .label = true };
+                    } else {
+                        curr_ctx.ctx = .{ .var_access = tok.loc };
+                    },
+                    else => {},
+                },
+                .builtin => switch (curr_ctx.ctx) {
+                    .empty, .pre_label => curr_ctx.ctx = .{ .builtin = tok.loc },
+                    else => {},
+                },
+                .period, .period_asterisk => switch (curr_ctx.ctx) {
+                    .empty, .pre_label => curr_ctx.ctx = .enum_literal,
+                    .enum_literal => curr_ctx.ctx = .empty,
+                    .field_access => {},
+                    .other => {},
+                    .global_error_set => {},
+                    else => curr_ctx.ctx = .{
+                        .field_access = tokenRangeAppend(curr_ctx.ctx.range().?, tok),
+                    },
+                },
+                .keyword_break, .keyword_continue => curr_ctx.ctx = .pre_label,
+                .colon => if (curr_ctx.ctx == .pre_label) {
+                    curr_ctx.ctx = .{ .label = false };
                 } else {
-                    curr_ctx.ctx = .{ .var_access = tok.loc };
+                    curr_ctx.ctx = .empty;
                 },
-                else => {},
-            },
-            .builtin => switch (curr_ctx.ctx) {
-                .empty, .pre_label => curr_ctx.ctx = .{ .builtin = tok.loc },
-                else => {},
-            },
-            .period, .period_asterisk => switch (curr_ctx.ctx) {
-                .empty, .pre_label => curr_ctx.ctx = .enum_literal,
-                .enum_literal => curr_ctx.ctx = .empty,
-                .field_access => {},
-                .other => {},
-                .global_error_set => {},
-                else => curr_ctx.ctx = .{
-                    .field_access = tokenRangeAppend(curr_ctx.ctx.range().?, tok),
+                .question_mark => switch (curr_ctx.ctx) {
+                    .field_access => {},
+                    else => curr_ctx.ctx = .empty,
                 },
-            },
-            .keyword_break, .keyword_continue => curr_ctx.ctx = .pre_label,
-            .colon => if (curr_ctx.ctx == .pre_label) {
-                curr_ctx.ctx = .{ .label = false };
-            } else {
-                curr_ctx.ctx = .empty;
-            },
-            .question_mark => switch (curr_ctx.ctx) {
-                .field_access => {},
+                .l_paren => try stack.append(.{ .ctx = .empty, .stack_id = .Paren }),
+                .l_bracket => try stack.append(.{ .ctx = .empty, .stack_id = .Bracket }),
+                .r_paren => {
+                    _ = stack.pop();
+                    if (curr_ctx.stack_id != .Paren) {
+                        (try peek(&stack)).ctx = .empty;
+                    }
+                },
+                .r_bracket => {
+                    _ = stack.pop();
+                    if (curr_ctx.stack_id != .Bracket) {
+                        (try peek(&stack)).ctx = .empty;
+                    }
+                },
+                .keyword_error => curr_ctx.ctx = .global_error_set,
                 else => curr_ctx.ctx = .empty,
-            },
-            .l_paren => try stack.append(.{ .ctx = .empty, .stack_id = .Paren }),
-            .l_bracket => try stack.append(.{ .ctx = .empty, .stack_id = .Bracket }),
-            .r_paren => {
-                _ = stack.pop();
-                if (curr_ctx.stack_id != .Paren) {
-                    (try peek(&stack)).ctx = .empty;
-                }
-            },
-            .r_bracket => {
-                _ = stack.pop();
-                if (curr_ctx.stack_id != .Bracket) {
-                    (try peek(&stack)).ctx = .empty;
-                }
-            },
-            .keyword_error => curr_ctx.ctx = .global_error_set,
-            else => curr_ctx.ctx = .empty,
-        }
+            }
 
-        switch (curr_ctx.ctx) {
-            .field_access => |r| curr_ctx.ctx = .{
-                .field_access = tokenRangeAppend(r, tok),
-            },
-            else => {},
+            switch (curr_ctx.ctx) {
+                .field_access => |r| curr_ctx.ctx = .{
+                    .field_access = tokenRangeAppend(r, tok),
+                },
+                else => {},
+            }
         }
     }
 
@@ -1628,11 +1637,17 @@ pub fn documentPositionContext(
             }
         }
         if (doc_position.line_index < line.len) {
+            var held_line = document.borrowNullTerminatedSlice(
+                line_mem_start + doc_position.line_index,
+                line_mem_start + line.len,
+            );
+            defer held_line.release();
+
             switch (line[doc_position.line_index]) {
                 'a'...'z', 'A'...'Z', '_', '@' => {},
                 else => break :block .empty,
             }
-            tokenizer = std.zig.Tokenizer.init(line[doc_position.line_index..]);
+            var tokenizer = std.zig.Tokenizer.init(held_line.data());
             const tok = tokenizer.next();
             if (tok.tag == .identifier)
                 break :block PositionContext{ .var_access = tok.loc };

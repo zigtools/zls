@@ -264,9 +264,12 @@ pub fn getSignatureInfo(
                 const expr_start = token_starts[expr_first_token];
                 const last_token_slice = tree.tokenSlice(expr_last_token);
                 const expr_end = token_starts[expr_last_token] + last_token_slice.len;
-                const expr_source = tree.source[expr_start..expr_end];
+
+                var held_expr = handle.document.borrowNullTerminatedSlice(expr_start, expr_end);
+                defer held_expr.release();
+
                 // Resolve the expression.
-                var tokenizer = std.zig.Tokenizer.init(expr_source);
+                var tokenizer = std.zig.Tokenizer.init(held_expr.data());
                 if (try analysis.getFieldAccessType(
                     document_store,
                     arena,

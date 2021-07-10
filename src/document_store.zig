@@ -177,7 +177,7 @@ fn loadPackages(context: LoadPackagesContext) !void {
 
 /// This function asserts the document is not open yet and takes ownership
 /// of the uri and text passed in.
-fn newDocument(self: *DocumentStore, uri: []const u8, text: []u8) anyerror!*Handle {
+fn newDocument(self: *DocumentStore, uri: []const u8, text: [:0]u8) anyerror!*Handle {
     log.debug("Opened document: {s}", .{uri});
 
     var handle = try self.allocator.create(Handle);
@@ -297,7 +297,13 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: []u8) anyerror!*Hand
                 }
 
                 // Read the build file, create a new document, set the candidate to the new build file.
-                const build_file_text = try build_file.readToEndAlloc(self.allocator, std.math.maxInt(usize));
+                const build_file_text = try build_file.readToEndAllocOptions(
+                    self.allocator,
+                    std.math.maxInt(usize),
+                    null,
+                    @alignOf(u8),
+                    0,
+                );
                 errdefer self.allocator.free(build_file_text);
 
                 const build_file_handle = try self.newDocument(build_file_uri, build_file_text);
@@ -336,7 +342,7 @@ pub fn openDocument(self: *DocumentStore, uri: []const u8, text: []const u8) !*H
         return entry.value_ptr.*;
     }
 
-    const duped_text = try std.mem.dupe(self.allocator, u8, text);
+    const duped_text = try std.mem.dupeZ(self.allocator, u8, text);
     errdefer self.allocator.free(duped_text);
     const duped_uri = try std.mem.dupe(self.allocator, u8, uri);
     errdefer self.allocator.free(duped_uri);
@@ -505,7 +511,7 @@ pub fn applyChanges(
 
     for (content_changes.items) |change| {
         if (change.Object.get("range")) |range| {
-            std.debug.assert(document.text.ptr == document.mem.ptr);
+            std.debug.assert(@ptrCast([*]const u8, document.text.ptr) == document.mem.ptr);
 
             // TODO: add tests and validate the JSON
             const start_obj = range.Object.get("start").?.Object;
@@ -525,12 +531,12 @@ pub fn applyChanges(
 
             const old_len = document.text.len;
             const new_len = old_len - (end_index - start_index) + change_text.len;
-            if (new_len > document.mem.len) {
+            if (new_len >= document.mem.len) {
                 // We need to reallocate memory.
                 // We reallocate twice the current filesize or the new length, if it's more than that
                 // so that we can reduce the amount of realloc calls.
                 // We can tune this to find a better size if needed.
-                const realloc_len = std.math.max(2 * old_len, new_len);
+                const realloc_len = std.math.max(2 * old_len, new_len + 1);
                 document.mem = try self.allocator.realloc(document.mem, realloc_len);
             }
 
@@ -546,19 +552,21 @@ pub fn applyChanges(
             std.mem.copy(u8, document.mem[start_index..][0..change_text.len], change_text);
 
             // Reset the text substring.
-            document.text = document.mem[0..new_len];
+            document.mem[new_len] = 0;
+            document.text = document.mem[0..new_len :0];
         } else {
             const change_text = change.Object.get("text").?.String;
             const old_len = document.text.len;
 
-            if (change_text.len > document.mem.len) {
+            if (change_text.len >= document.mem.len) {
                 // Like above.
-                const realloc_len = std.math.max(2 * old_len, change_text.len);
+                const realloc_len = std.math.max(2 * old_len, change_text.len + 1);
                 document.mem = try self.allocator.realloc(document.mem, realloc_len);
             }
 
             std.mem.copy(u8, document.mem[0..change_text.len], change_text);
-            document.text = document.mem[0..change_text.len];
+            document.mem[change_text.len] = 0;
+            document.text = document.mem[0..change_text.len :0];
         }
     }
 
@@ -658,7 +666,13 @@ pub fn resolveImport(self: *DocumentStore, handle: *Handle, import_str: []const 
 
     defer file.close();
     {
-        const file_contents = file.readToEndAlloc(allocator, std.math.maxInt(usize)) catch |err| switch (err) {
+        const file_contents = file.readToEndAllocOptions(
+            allocator,
+            std.math.maxInt(usize),
+            null,
+            @alignOf(u8),
+            0,
+        ) catch |err| switch (err) {
             error.OutOfMemory => return error.OutOfMemory,
             else => {
                 log.debug("Could not read from file {s}", .{file_path});

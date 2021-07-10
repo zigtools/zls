@@ -774,9 +774,14 @@ fn getSymbolFieldAccess(
 
     const name = identifierFromPosition(position.absolute_index, handle.*);
     if (name.len == 0) return null;
-    var tokenizer = std.zig.Tokenizer.init(position.line[range.start..range.end]);
 
+    const line_mem_start = @ptrToInt(position.line.ptr) - @ptrToInt(handle.document.mem.ptr);
+    var held_range = handle.document.borrowNullTerminatedSlice(line_mem_start + range.start, line_mem_start + range.end);
+    var tokenizer = std.zig.Tokenizer.init(held_range.data());
+
+    errdefer held_range.release();
     if (try analysis.getFieldAccessType(&document_store, arena, handle, position.absolute_index, &tokenizer)) |result| {
+        held_range.release();
         const container_handle = result.unwrapped orelse result.original;
         const container_handle_node = switch (container_handle.type.data) {
             .other => |n| n,
@@ -1147,8 +1152,14 @@ fn completeFieldAccess(
     config: Config,
 ) !void {
     var completions = std.ArrayList(types.CompletionItem).init(&arena.allocator);
-    var tokenizer = std.zig.Tokenizer.init(position.line[range.start..range.end]);
+
+    const line_mem_start = @ptrToInt(position.line.ptr) - @ptrToInt(handle.document.mem.ptr);
+    var held_range = handle.document.borrowNullTerminatedSlice(line_mem_start + range.start, line_mem_start + range.end);
+    errdefer held_range.release();
+    var tokenizer = std.zig.Tokenizer.init(held_range.data());
+
     if (try analysis.getFieldAccessType(&document_store, arena, handle, position.absolute_index, &tokenizer)) |result| {
+        held_range.release();
         try typeToCompletion(arena, &completions, result, handle, config);
         truncateCompletions(completions.items, config.max_detail_length);
     }
@@ -1759,7 +1770,9 @@ var gpa_state = std.heap.GeneralPurposeAllocator(.{ .stack_trace_frames = stack_
 pub fn main() anyerror!void {
     defer _ = gpa_state.deinit();
     defer keep_running = false;
-    allocator = &gpa_state.allocator;
+    // allocator = &gpa_state.allocator;
+    // @TODO Using the GPA here, realloc calls hang currently for some reason
+    allocator = std.heap.page_allocator;
 
     analysis.init(allocator);
     defer analysis.deinit();
