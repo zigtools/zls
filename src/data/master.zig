@@ -12,7 +12,9 @@ pub const builtins = [_]Builtin{
         .signature = "@addWithOverflow(comptime T: type, a: T, b: T, result: *T) bool",
         .snippet = "@addWithOverflow(${1:comptime T: type}, ${2:a: T}, ${3:b: T}, ${4:result: *T})",
         .documentation =
-        \\Performs `result.* = a + b`. If overflow or underflow occurs, stores the overflowed bits in `result` and returns `true`. If no overflow or underflow occurs, returns `false`.
+        \\Performs `result.* = a + b`. If overflow or underflow occurs,
+        \\stores the overflowed bits in `result` and returns `true`.
+        \\If no overflow or underflow occurs, returns `false`.
         ,
         .arguments = &.{
             "comptime T: type",
@@ -26,9 +28,12 @@ pub const builtins = [_]Builtin{
         .signature = "@alignCast(comptime alignment: u29, ptr: anytype) anytype",
         .snippet = "@alignCast(${1:comptime alignment: u29}, ${2:ptr: anytype})",
         .documentation =
-        \\`ptr` can be `*T`, `fn()`, `?*T`, `?fn()`, or `[]T`. It returns the same type as `ptr` except with the alignment adjusted to the new value.
+        \\`ptr` can be `*T`, `fn()`, `?*T`,
+        \\`?fn()`, or `[]T`. It returns the same type as `ptr`
+        \\except with the alignment adjusted to the new value.
         \\
-        \\A [pointer alignment safety check](https://ziglang.org/documentation/master/#Incorrect-Pointer-Alignment) is added to the generated code to make sure the pointer is aligned as promised.
+        \\A [pointer alignment safety check](https://ziglang.org/documentation/master/#Incorrect-Pointer-Alignment) is added
+        \\to the generated code to make sure the pointer is aligned as promised.
         ,
         .arguments = &.{
             "comptime alignment: u29",
@@ -40,8 +45,9 @@ pub const builtins = [_]Builtin{
         .signature = "@alignOf(comptime T: type) comptime_int",
         .snippet = "@alignOf(${1:comptime T: type})",
         .documentation =
-        \\This function returns the number of bytes that this type should be aligned to for the current target to match the C ABI. When the child type of a pointer has this alignment, the alignment can be omitted from the type.
-        \\
+        \\This function returns the number of bytes that this type should be aligned to
+        \\for the current target to match the C ABI. When the child type of a pointer has
+        \\this alignment, the alignment can be omitted from the type.
         \\```zig
         \\const expect = @import("std").debug.assert;
         \\comptime {
@@ -49,7 +55,8 @@ pub const builtins = [_]Builtin{
         \\}
         \\```
         \\
-        \\The result is a target-specific compile time constant. It is guaranteed to be less than or equal to [@sizeOf(T)](https://ziglang.org/documentation/master/#@sizeOf).
+        \\The result is a target-specific compile time constant. It is guaranteed to be
+        \\less than or equal to [@sizeOf(T)](https://ziglang.org/documentation/master/#sizeOf).
         ,
         .arguments = &.{
             "comptime T: type",
@@ -60,7 +67,8 @@ pub const builtins = [_]Builtin{
         .signature = "@as(comptime T: type, expression) T",
         .snippet = "@as(${1:comptime T: type}, ${2:expression})",
         .documentation =
-        \\Performs [Type Coercion](https://ziglang.org/documentation/master/#Type-Coercion). This cast is allowed when the conversion is unambiguous and safe, and is the preferred way to convert between types, whenever possible.
+        \\Performs [Type Coercion](https://ziglang.org/documentation/master/#Type-Coercion). This cast is allowed when the conversion is unambiguous and safe,
+        \\and is the preferred way to convert between types, whenever possible.
         ,
         .arguments = &.{
             "comptime T: type",
@@ -72,12 +80,17 @@ pub const builtins = [_]Builtin{
         .signature = "@asyncCall(frame_buffer: []align(@alignOf(@Frame(anyAsyncFunction))) u8, result_ptr, function_ptr, args: anytype) anyframe->T",
         .snippet = "@asyncCall(${1:frame_buffer: []align(@alignOf(@Frame(anyAsyncFunction))) u8}, ${2:result_ptr}, ${3:function_ptr}, ${4:args: anytype})",
         .documentation =
-        \\`@asyncCall` performs an `async` call on a function pointer, which may or may not be an [async function](https://ziglang.org/documentation/master/#Async-Functions).
+        \\`@asyncCall` performs an `async` call on a function pointer,
+        \\which may or may not be an [async function](https://ziglang.org/documentation/master/#Async-Functions).
         \\
-        \\The provided `frame_buffer` must be large enough to fit the entire function frame. This size can be determined with [@frameSize](https://ziglang.org/documentation/master/#frameSize). To provide a too-small buffer invokes safety-checked [Undefined Behavior](https://ziglang.org/documentation/master/#Undefined-Behavior).
+        \\The provided `frame_buffer` must be large enough to fit the entire function frame.
+        \\This size can be determined with [@frameSize](https://ziglang.org/documentation/master/#frameSize). To provide a too-small buffer
+        \\invokes safety-checked [Undefined Behavior](https://ziglang.org/documentation/master/#Undefined-Behavior).
         \\
-        \\`result_ptr` is optional ([null](https://ziglang.org/documentation/master/#null) may be provided). If provided, the function call will write its result directly to the result pointer, which will be available to read after [await](https://ziglang.org/documentation/master/#Async-and-Await) completes. Any result location provided to `await` will copy the result from `result_ptr`.
-        \\
+        \\`result_ptr` is optional ([null](https://ziglang.org/documentation/master/#null) may be provided). If provided,
+        \\the function call will write its result directly to the result pointer, which will be available to
+        \\read after [await](https://ziglang.org/documentation/master/#Async-and-Await) completes. Any result location provided to
+        \\`await` will copy the result from `result_ptr`.
         \\```zig
         \\const std = @import("std");
         \\const expect = std.testing.expect;
@@ -116,7 +129,8 @@ pub const builtins = [_]Builtin{
         .documentation =
         \\This builtin function atomically dereferences a pointer and returns the value.
         \\
-        \\`T` must be a pointer, a `bool`, a float, an integer or an enum.
+        \\`T` must be a pointer, a `bool`, a float,
+        \\an integer or an enum.
         ,
         .arguments = &.{
             "comptime T: type",
@@ -131,18 +145,19 @@ pub const builtins = [_]Builtin{
         .documentation =
         \\This builtin function atomically modifies memory and then returns the previous value.
         \\
-        \\`T` must be a pointer, a `bool`, a float, an integer or an enum.
+        \\`T` must be a pointer, a `bool`, a float,
+        \\an integer or an enum.
         \\
         \\Supported operations:
-        \\  - `.Xchg` - stores the operand unmodified. Supports enums, integers and floats.
-        \\  - `.Add` - for integers, twos complement wraparound addition. Also supports [Floats](https://ziglang.org/documentation/master/#Floats).
-        \\  - `.Sub` - for integers, twos complement wraparound subtraction. Also supports [Floats](https://ziglang.org/documentation/master/#Floats).
-        \\  - `.And` - bitwise and
-        \\  - `.Nand` - bitwise nand
-        \\  - `.Or` - bitwise or
-        \\  - `.Xor` - bitwise xor
-        \\  - `.Max` - stores the operand if it is larger. Supports integers and floats.
-        \\  - `.Min` - stores the operand if it is smaller. Supports integers and floats.
+        \\- `.Xchg` - stores the operand unmodified. Supports enums, integers and floats.
+        \\- `.Add` - for integers, twos complement wraparound addition. Also supports [Floats](https://ziglang.org/documentation/master/#Floats).
+        \\- `.Sub` - for integers, twos complement wraparound subtraction. Also supports [Floats](https://ziglang.org/documentation/master/#Floats).
+        \\- `.And` - bitwise and
+        \\- `.Nand` - bitwise nand
+        \\- `.Or` - bitwise or
+        \\- `.Xor` - bitwise xor
+        \\- `.Max` - stores the operand if it is larger. Supports integers and floats.
+        \\- `.Min` - stores the operand if it is smaller. Supports integers and floats.
         ,
         .arguments = &.{
             "comptime T: type",
@@ -180,8 +195,8 @@ pub const builtins = [_]Builtin{
         \\Asserts that `@typeInfo(DestType) != .Pointer`. Use `@ptrCast` or `@intToPtr` if you need this.
         \\
         \\Can be used for these things for example:
-        \\  - Convert `f32` to `u32` bits
-        \\  - Convert `i32` to `u32` preserving twos complement
+        \\- Convert `f32` to `u32` bits
+        \\- Convert `i32` to `u32` preserving twos complement
         \\
         \\Works at compile-time if `value` is known at compile time. It's a compile error to bitcast a struct to a scalar type of the same size since structs have undefined layout. However if the struct is packed then it works.
         ,
@@ -197,7 +212,9 @@ pub const builtins = [_]Builtin{
         .documentation =
         \\Returns the bit offset of a field relative to its containing struct.
         \\
-        \\For non [packed structs](https://ziglang.org/documentation/master/#packed-struct), this will always be divisible by `8`. For packed structs, non-byte-aligned fields will share a byte offset, but they will have different bit offsets.
+        \\For non [packed structs](https://ziglang.org/documentation/master/#packed-struct), this will always be divisible by `8`.
+        \\For packed structs, non-byte-aligned fields will share a byte offset, but they will have different
+        \\bit offsets.
         ,
         .arguments = &.{
             "comptime T: type",
@@ -209,9 +226,11 @@ pub const builtins = [_]Builtin{
         .signature = "@boolToInt(value: bool) u1",
         .snippet = "@boolToInt(${1:value: bool})",
         .documentation =
-        \\Converts `true` to `u1(1)` and `false` to `u1(0)`.
+        \\Converts `true` to `u1(1)` and `false` to
+        \\`u1(0)`.
         \\
-        \\If the value is known at compile-time, the return type is `comptime_int` instead of `u1`.
+        \\If the value is known at compile-time, the return type is `comptime_int`
+        \\instead of `u1`.
         ,
         .arguments = &.{
             "value: bool",
@@ -222,9 +241,11 @@ pub const builtins = [_]Builtin{
         .signature = "@bitSizeOf(comptime T: type) comptime_int",
         .snippet = "@bitSizeOf(${1:comptime T: type})",
         .documentation =
-        \\This function returns the number of bits it takes to store `T` in memory. The result is a target-specific compile time constant.
+        \\This function returns the number of bits it takes to store `T` in memory.
+        \\The result is a target-specific compile time constant.
         \\
-        \\This function measures the size at runtime. For types that are disallowed at runtime, such as `comptime_int` and `type`, the result is `0`.
+        \\This function measures the size at runtime. For types that are disallowed at runtime, such as
+        \\`comptime_int` and `type`, the result is `0`.
         ,
         .arguments = &.{
             "comptime T: type",
@@ -235,7 +256,8 @@ pub const builtins = [_]Builtin{
         .signature = "@breakpoint()",
         .snippet = "@breakpoint()",
         .documentation =
-        \\This function inserts a platform-specific debug trap instruction which causes debuggers to break there.
+        \\This function inserts a platform-specific debug trap instruction which causes
+        \\debuggers to break there.
         \\
         \\This function is only valid within function scope.
         ,
@@ -246,7 +268,8 @@ pub const builtins = [_]Builtin{
         .signature = "@mulAdd(comptime T: type, a: T, b: T, c: T) T",
         .snippet = "@mulAdd(${1:comptime T: type}, ${2:a: T}, ${3:b: T}, ${4:c: T})",
         .documentation =
-        \\Fused multiply add, similar to `(a * b) + c`, except only rounds once, and is thus more accurate.
+        \\Fused multiply add, similar to `(a * b) + c`, except
+        \\only rounds once, and is thus more accurate.
         \\
         \\Supports Floats and Vectors of floats.
         ,
@@ -266,9 +289,15 @@ pub const builtins = [_]Builtin{
         \\
         \\`operand` may be an [integer](https://ziglang.org/documentation/master/#Integers) or [vector](https://ziglang.org/documentation/master/#Vectors).
         \\
-        \\Swaps the byte order of the integer. This converts a big endian integer to a little endian integer, and converts a little endian integer to a big endian integer.
+        \\Swaps the byte order of the integer. This converts a big endian integer to a little endian integer,
+        \\and converts a little endian integer to a big endian integer.
         \\
-        \\Note that for the purposes of memory layout with respect to endianness, the integer type should be related to the number of bytes reported by [@sizeOf](https://ziglang.org/documentation/master/#sizeOf) bytes. This is demonstrated with `u24`. `@sizeOf(u24) == 4`, which means that a `u24` stored in memory takes 4 bytes, and those 4 bytes are what are swapped on a little vs big endian system. On the other hand, if `T` is specified to be `u24`, then only 3 bytes are reversed.
+        \\Note that for the purposes of memory layout with respect to endianness, the integer type should be
+        \\related to the number of bytes reported by [@sizeOf](https://ziglang.org/documentation/master/#sizeOf) bytes. This is demonstrated with
+        \\`u24`. `@sizeOf(u24) == 4`, which means that a
+        \\`u24` stored in memory takes 4 bytes, and those 4 bytes are what are swapped on
+        \\a little vs big endian system. On the other hand, if `T` is specified to
+        \\be `u24`, then only 3 bytes are reversed.
         ,
         .arguments = &.{
             "comptime T: type",
@@ -284,7 +313,8 @@ pub const builtins = [_]Builtin{
         \\
         \\Reverses the bitpattern of an integer value, including the sign bit if applicable.
         \\
-        \\For example 0b10110110 (`u8 = 182`, `i8 = -74`) becomes 0b01101101 (`u8 = 109`, `i8 = 109`).
+        \\For example 0b10110110 (`u8 = 182`, `i8 = -74`)
+        \\becomes 0b01101101 (`u8 = 109`, `i8 = 109`).
         ,
         .arguments = &.{
             "comptime T: type",
@@ -309,7 +339,6 @@ pub const builtins = [_]Builtin{
         .snippet = "@call(${1:options: std.builtin.CallOptions}, ${2:function: anytype}, ${3:args: anytype})",
         .documentation =
         \\Calls a function, in the same way that invoking an expression with parentheses does:
-        \\
         \\```zig
         \\const expect = @import("std").testing.expect;
         \\
@@ -322,8 +351,8 @@ pub const builtins = [_]Builtin{
         \\}
         \\```
         \\
-        \\`@call` allows more flexibility than normal function call syntax does. The `CallOptions` struct is reproduced here:
-        \\
+        \\`@call` allows more flexibility than normal function call syntax does. The
+        \\`CallOptions` struct is reproduced here:
         \\```zig
         \\pub const CallOptions = struct {
         \\    modifier: Modifier = .auto,
@@ -378,12 +407,15 @@ pub const builtins = [_]Builtin{
         .documentation =
         \\This function can only occur inside `@cImport`.
         \\
-        \\This appends `#define $name $value` to the `@cImport` temporary buffer.
+        \\This appends `#define $name $value` to the `@cImport`
+        \\temporary buffer.
         \\
-        \\To define without a value, like this:`#define _GNU_SOURCE`
+        \\To define without a value, like this:
+        \\```
+        \\#define _GNU_SOURCE
+        \\```
         \\
         \\Use the void value, like this:
-        \\
         \\```zig
         \\@cDefine("_GNU_SOURCE", {})
         \\```
@@ -398,15 +430,20 @@ pub const builtins = [_]Builtin{
         .signature = "@cImport(expression) type",
         .snippet = "@cImport(${1:expression})",
         .documentation =
-        \\This function parses C code and imports the functions, types, variables, and compatible macro definitions into a new empty struct type, and then returns that type.
+        \\This function parses C code and imports the functions, types, variables,
+        \\and compatible macro definitions into a new empty struct type, and then
+        \\returns that type.
         \\
-        \\`expression` is interpreted at compile time. The builtin functions `@cInclude`, `@cDefine`, and `@cUndef` work within this expression, appending to a temporary buffer which is then parsed as C code.
+        \\`expression` is interpreted at compile time. The builtin functions
+        \\`@cInclude`, `@cDefine`, and `@cUndef` work
+        \\within this expression, appending to a temporary buffer which is then parsed as C code.
         \\
-        \\Usually you should only have one `@cImport` in your entire application, because it saves the compiler from invoking clang multiple times, and prevents inline functions from being duplicated.
+        \\Usually you should only have one `@cImport` in your entire application, because it saves the compiler
+        \\from invoking clang multiple times, and prevents inline functions from being duplicated.
         \\
         \\Reasons for having multiple `@cImport` expressions would be:
-        \\  - To avoid a symbol collision, for example if foo.h and bar.h both `#define CONNECTION_COUNT`
-        \\  - To analyze the C code with different preprocessor defines
+        \\- To avoid a symbol collision, for example if foo.h and bar.h both `#define CONNECTION_COUNT`
+        \\- To analyze the C code with different preprocessor defines
         ,
         .arguments = &.{
             "expression",
@@ -419,7 +456,8 @@ pub const builtins = [_]Builtin{
         .documentation =
         \\This function can only occur inside `@cImport`.
         \\
-        \\This appends `#include <$path>\n` to the `c_import` temporary buffer.
+        \\This appends `#include <$path>\n` to the `c_import`
+        \\temporary buffer.
         ,
         .arguments = &.{
             "comptime path: []u8",
@@ -432,9 +470,13 @@ pub const builtins = [_]Builtin{
         .documentation =
         \\This function counts the number of most-significant (leading in a big-Endian sense) zeroes in `integer`.
         \\
-        \\If `integer` is known at [comptime](https://ziglang.org/documentation/master/#comptime), the return type is `comptime_int`. Otherwise, the return type is an unsigned integer with the minimum number of bits that can represent the bit count of the integer type.
+        \\If `integer` is known at [comptime](https://ziglang.org/documentation/master/#comptime),
+        \\the return type is `comptime_int`.
+        \\Otherwise, the return type is an unsigned integer with the minimum number
+        \\of bits that can represent the bit count of the integer type.
         \\
-        \\If `integer` is zero, `@clz` returns the bit width of integer type `T`.
+        \\If `integer` is zero, `@clz` returns the bit width
+        \\of integer type `T`.
         ,
         .arguments = &.{
             "comptime T: type",
@@ -446,8 +488,8 @@ pub const builtins = [_]Builtin{
         .signature = "@cmpxchgStrong(comptime T: type, ptr: *T, expected_value: T, new_value: T, success_order: AtomicOrder, fail_order: AtomicOrder) ?T",
         .snippet = "@cmpxchgStrong(${1:comptime T: type}, ${2:ptr: *T}, ${3:expected_value: T}, ${4:new_value: T}, ${5:success_order: AtomicOrder}, ${6:fail_order: AtomicOrder})",
         .documentation =
-        \\This function performs a strong atomic compare exchange operation. It's the equivalent of this code, except atomic:
-        \\
+        \\This function performs a strong atomic compare exchange operation. It's the equivalent of this code,
+        \\except atomic:
         \\```zig
         \\fn cmpxchgStrongButNotAtomic(comptime T: type, ptr: *T, expected_value: T, new_value: T) ?T {
         \\    const old_value = ptr.*;
@@ -460,9 +502,11 @@ pub const builtins = [_]Builtin{
         \\}
         \\```
         \\
-        \\If you are using cmpxchg in a loop, [@cmpxchgWeak](https://ziglang.org/documentation/master/#cmpxchgWeak) is the better choice, because it can be implemented more efficiently in machine instructions.
+        \\If you are using cmpxchg in a loop, [@cmpxchgWeak](https://ziglang.org/documentation/master/#cmpxchgWeak) is the better choice, because it can be implemented
+        \\more efficiently in machine instructions.
         \\
-        \\`T` must be a pointer, a `bool`, a float, an integer or an enum.
+        \\`T` must be a pointer, a `bool`, a float,
+        \\an integer or an enum.
         \\
         \\`@typeInfo(@TypeOf(ptr)).Pointer.alignment` must be `>= @sizeOf(T).`
         ,
@@ -480,8 +524,8 @@ pub const builtins = [_]Builtin{
         .signature = "@cmpxchgWeak(comptime T: type, ptr: *T, expected_value: T, new_value: T, success_order: AtomicOrder, fail_order: AtomicOrder) ?T",
         .snippet = "@cmpxchgWeak(${1:comptime T: type}, ${2:ptr: *T}, ${3:expected_value: T}, ${4:new_value: T}, ${5:success_order: AtomicOrder}, ${6:fail_order: AtomicOrder})",
         .documentation =
-        \\This function performs a weak atomic compare exchange operation. It's the equivalent of this code, except atomic:
-        \\
+        \\This function performs a weak atomic compare exchange operation. It's the equivalent of this code,
+        \\except atomic:
         \\```zig
         \\fn cmpxchgWeakButNotAtomic(comptime T: type, ptr: *T, expected_value: T, new_value: T) ?T {
         \\    const old_value = ptr.*;
@@ -494,9 +538,12 @@ pub const builtins = [_]Builtin{
         \\}
         \\```
         \\
-        \\If you are using cmpxchg in a loop, the sporadic failure will be no problem, and `cmpxchgWeak` is the better choice, because it can be implemented more efficiently in machine instructions. However if you need a stronger guarantee, use [@cmpxchgStrong](https://ziglang.org/documentation/master/#cmpxchgStrong).
+        \\If you are using cmpxchg in a loop, the sporadic failure will be no problem, and `cmpxchgWeak`
+        \\is the better choice, because it can be implemented more efficiently in machine instructions.
+        \\However if you need a stronger guarantee, use [@cmpxchgStrong](https://ziglang.org/documentation/master/#cmpxchgStrong).
         \\
-        \\`T` must be a pointer, a `bool`, a float, an integer or an enum.
+        \\`T` must be a pointer, a `bool`, a float,
+        \\an integer or an enum.
         \\
         \\`@typeInfo(@TypeOf(ptr)).Pointer.alignment` must be `>= @sizeOf(T).`
         ,
@@ -514,9 +561,12 @@ pub const builtins = [_]Builtin{
         .signature = "@compileError(comptime msg: []u8)",
         .snippet = "@compileError(${1:comptime msg: []u8})",
         .documentation =
-        \\This function, when semantically analyzed, causes a compile error with the message `msg`.
+        \\This function, when semantically analyzed, causes a compile error with the
+        \\message `msg`.
         \\
-        \\There are several ways that code avoids being semantically checked, such as using `if` or `switch` with compile time constants, and `comptime` functions.
+        \\There are several ways that code avoids being semantically checked, such as
+        \\using `if` or `switch` with compile time constants,
+        \\and `comptime` functions.
         ,
         .arguments = &.{
             "comptime msg: []u8",
@@ -529,10 +579,13 @@ pub const builtins = [_]Builtin{
         .documentation =
         \\This function prints the arguments passed to it at compile-time.
         \\
-        \\To prevent accidentally leaving compile log statements in a codebase, a compilation error is added to the build, pointing to the compile log statement. This error prevents code from being generated, but does not otherwise interfere with analysis.
+        \\To prevent accidentally leaving compile log statements in a codebase,
+        \\a compilation error is added to the build, pointing to the compile
+        \\log statement. This error prevents code from being generated, but
+        \\does not otherwise interfere with analysis.
         \\
-        \\This function can be used to do "printf debugging" on compile-time executing code.
-        \\
+        \\This function can be used to do "printf debugging" on
+        \\compile-time executing code.
         \\```zig
         \\const print = @import("std").debug.print;
         \\
@@ -550,10 +603,9 @@ pub const builtins = [_]Builtin{
         \\}
         \\```
         \\
-        \\will ouput:
-        \\
-        \\If all `@compileLog` calls are removed or not encountered by analysis, the program compiles successfully and the generated executable prints:
-        \\
+        \\If all `@compileLog` calls are removed or
+        \\not encountered by analysis, the
+        \\program compiles successfully and the generated executable prints:
         \\```zig
         \\const print = @import("std").debug.print;
         \\
@@ -579,9 +631,13 @@ pub const builtins = [_]Builtin{
         .documentation =
         \\This function counts the number of least-significant (trailing in a big-Endian sense) zeroes in `integer`.
         \\
-        \\If `integer` is known at [comptime](https://ziglang.org/documentation/master/#comptime), the return type is `comptime_int`. Otherwise, the return type is an unsigned integer with the minimum number of bits that can represent the bit count of the integer type.
+        \\If `integer` is known at [comptime](https://ziglang.org/documentation/master/#comptime),
+        \\the return type is `comptime_int`.
+        \\Otherwise, the return type is an unsigned integer with the minimum number
+        \\of bits that can represent the bit count of the integer type.
         \\
-        \\If `integer` is zero, `@ctz` returns the bit width of integer type `T`.
+        \\If `integer` is zero, `@ctz` returns
+        \\the bit width of integer type `T`.
         ,
         .arguments = &.{
             "comptime T: type",
@@ -595,7 +651,8 @@ pub const builtins = [_]Builtin{
         .documentation =
         \\This function can only occur inside `@cImport`.
         \\
-        \\This appends `#undef $name` to the `@cImport` temporary buffer.
+        \\This appends `#undef $name` to the `@cImport`
+        \\temporary buffer.
         ,
         .arguments = &.{
             "comptime name: []u8",
@@ -606,9 +663,10 @@ pub const builtins = [_]Builtin{
         .signature = "@divExact(numerator: T, denominator: T) T",
         .snippet = "@divExact(${1:numerator: T}, ${2:denominator: T})",
         .documentation =
-        \\Exact division. Caller guarantees `denominator != 0` and `@divTrunc(numerator, denominator) * denominator == numerator`.
-        \\  - `@divExact(6, 3) == 2`
-        \\  - `@divExact(a, b) * b == a`
+        \\Exact division. Caller guarantees `denominator != 0` and
+        \\`@divTrunc(numerator, denominator) * denominator == numerator`.
+        \\- `@divExact(6, 3) == 2`
+        \\- `@divExact(a, b) * b == a`
         \\
         \\For a function that returns a possible error code, use `@import("std").math.divExact`.
         ,
@@ -622,9 +680,11 @@ pub const builtins = [_]Builtin{
         .signature = "@divFloor(numerator: T, denominator: T) T",
         .snippet = "@divFloor(${1:numerator: T}, ${2:denominator: T})",
         .documentation =
-        \\Floored division. Rounds toward negative infinity. For unsigned integers it is the same as `numerator / denominator`. Caller guarantees `denominator != 0` and `!(@typeInfo(T) == .Int and T.is_signed and numerator == std.math.minInt(T) and denominator == -1)`.
-        \\  - `@divFloor(-5, 3) == -2`
-        \\  - `(@divFloor(a, b) * b) + @mod(a, b) == a`
+        \\Floored division. Rounds toward negative infinity. For unsigned integers it is
+        \\the same as `numerator / denominator`. Caller guarantees `denominator != 0` and
+        \\`!(@typeInfo(T) == .Int and T.is_signed and numerator == std.math.minInt(T) and denominator == -1)`.
+        \\- `@divFloor(-5, 3) == -2`
+        \\- `(@divFloor(a, b) * b) + @mod(a, b) == a`
         \\
         \\For a function that returns a possible error code, use `@import("std").math.divFloor`.
         ,
@@ -638,9 +698,11 @@ pub const builtins = [_]Builtin{
         .signature = "@divTrunc(numerator: T, denominator: T) T",
         .snippet = "@divTrunc(${1:numerator: T}, ${2:denominator: T})",
         .documentation =
-        \\Truncated division. Rounds toward zero. For unsigned integers it is the same as `numerator / denominator`. Caller guarantees `denominator != 0` and `!(@typeInfo(T) == .Int and T.is_signed and numerator == std.math.minInt(T) and denominator == -1)`.
-        \\  - `@divTrunc(-5, 3) == -1`
-        \\  - `(@divTrunc(a, b) * b) + @rem(a, b) == a`
+        \\Truncated division. Rounds toward zero. For unsigned integers it is
+        \\the same as `numerator / denominator`. Caller guarantees `denominator != 0` and
+        \\`!(@typeInfo(T) == .Int and T.is_signed and numerator == std.math.minInt(T) and denominator == -1)`.
+        \\- `@divTrunc(-5, 3) == -1`
+        \\- `(@divTrunc(a, b) * b) + @rem(a, b) == a`
         \\
         \\For a function that returns a possible error code, use `@import("std").math.divTrunc`.
         ,
@@ -654,7 +716,11 @@ pub const builtins = [_]Builtin{
         .signature = "@embedFile(comptime path: []const u8) *const [N:0]u8",
         .snippet = "@embedFile(${1:comptime path: []const u8})",
         .documentation =
-        \\This function returns a compile time constant pointer to null-terminated, fixed-size array with length equal to the byte count of the file given by `path`. The contents of the array are the contents of the file. This is equivalent to a [string literal](https://ziglang.org/documentation/master/#String-Literals-and-Unicode-Code-Point-Literals) with the file contents.
+        \\This function returns a compile time constant pointer to null-terminated,
+        \\fixed-size array with length equal to the byte count of the file given by
+        \\`path`. The contents of the array are the contents of the file.
+        \\This is equivalent to a [string literal](https://ziglang.org/documentation/master/#String-Literals-and-Unicode-Code-Point-Literals)
+        \\with the file contents.
         \\
         \\`path` is absolute or relative to the current file, just like `@import`.
         ,
@@ -667,9 +733,11 @@ pub const builtins = [_]Builtin{
         .signature = "@enumToInt(enum_or_tagged_union: anytype) anytype",
         .snippet = "@enumToInt(${1:enum_or_tagged_union: anytype})",
         .documentation =
-        \\Converts an enumeration value into its integer tag type. When a tagged union is passed, the tag value is used as the enumeration value.
+        \\Converts an enumeration value into its integer tag type. When a tagged union is passed,
+        \\the tag value is used as the enumeration value.
         \\
-        \\If there is only one possible enum value, the resut is a `comptime_int` known at [comptime](https://ziglang.org/documentation/master/#comptime).
+        \\If there is only one possible enum value, the resut is a `comptime_int`
+        \\known at [comptime](https://ziglang.org/documentation/master/#comptime).
         ,
         .arguments = &.{
             "enum_or_tagged_union: anytype",
@@ -680,9 +748,12 @@ pub const builtins = [_]Builtin{
         .signature = "@errorName(err: anyerror) [:0]const u8",
         .snippet = "@errorName(${1:err: anyerror})",
         .documentation =
-        \\This function returns the string representation of an error. The string representation of `error.OutOfMem` is `"OutOfMem"`.
+        \\This function returns the string representation of an error. The string representation
+        \\of `error.OutOfMem` is `"OutOfMem"`.
         \\
-        \\If there are no calls to `@errorName` in an entire application, or all calls have a compile-time known value for `err`, then no error name table will be generated.
+        \\If there are no calls to `@errorName` in an entire application,
+        \\or all calls have a compile-time known value for `err`, then no
+        \\error name table will be generated.
         ,
         .arguments = &.{
             "err: anyerror",
@@ -693,7 +764,9 @@ pub const builtins = [_]Builtin{
         .signature = "@errorReturnTrace() ?*builtin.StackTrace",
         .snippet = "@errorReturnTrace()",
         .documentation =
-        \\If the binary is built with error return tracing, and this function is invoked in a function that calls a function with an error or error union return type, returns a stack trace object. Otherwise returns [null](https://ziglang.org/documentation/master/#null).
+        \\If the binary is built with error return tracing, and this function is invoked in a
+        \\function that calls a function with an error or error union return type, returns a
+        \\stack trace object. Otherwise returns [null](https://ziglang.org/documentation/master/#null).
         ,
         .arguments = &.{},
     },
@@ -703,13 +776,14 @@ pub const builtins = [_]Builtin{
         .snippet = "@errorToInt(${1:err: anytype})",
         .documentation =
         \\Supports the following types:
-        \\  - [The Global Error Set](https://ziglang.org/documentation/master/#The-Global-Error-Set)
-        \\  - [Error Set Type](https://ziglang.org/documentation/master/#Error-Set-Type)
-        \\  - [Error Union Type](https://ziglang.org/documentation/master/#Error-Union-Type)
+        \\- [The Global Error Set](https://ziglang.org/documentation/master/#The-Global-Error-Set)
+        \\- [Error Set Type](https://ziglang.org/documentation/master/#Error-Set-Type)
+        \\- [Error Union Type](https://ziglang.org/documentation/master/#Error-Union-Type)
         \\
         \\Converts an error to the integer representation of an error.
         \\
-        \\It is generally recommended to avoid this cast, as the integer representation of an error is not stable across source code changes.
+        \\It is generally recommended to avoid this
+        \\cast, as the integer representation of an error is not stable across source code changes.
         ,
         .arguments = &.{
             "err: anytype",
@@ -720,7 +794,8 @@ pub const builtins = [_]Builtin{
         .signature = "@errSetCast(comptime T: DestType, value: anytype) DestType",
         .snippet = "@errSetCast(${1:comptime T: DestType}, ${2:value: anytype})",
         .documentation =
-        \\Converts an error value from one error set to another error set. Attempting to convert an error which is not in the destination error set results in safety-protected [Undefined Behavior](https://ziglang.org/documentation/master/#Undefined-Behavior).
+        \\Converts an error value from one error set to another error set. Attempting to convert an error
+        \\which is not in the destination error set results in safety-protected [Undefined Behavior](https://ziglang.org/documentation/master/#Undefined-Behavior).
         ,
         .arguments = &.{
             "comptime T: DestType",
@@ -735,11 +810,13 @@ pub const builtins = [_]Builtin{
         \\Creates a symbol in the output object file.
         \\
         \\`declaration` must be one of two things:
-        \\  - An identifier (`x`) identifying a [function](https://ziglang.org/documentation/master/#Functions) or a [variable](https://ziglang.org/documentation/master/#Container-Level-Variables).
-        \\  - Field access (`x.y`) looking up a [function](https://ziglang.org/documentation/master/#Functions) or a [variable](https://ziglang.org/documentation/master/#Container-Level-Variables).
+        \\- An identifier (`x`) identifying a [function](https://ziglang.org/documentation/master/#Functions) or a [variable](https://ziglang.org/documentation/master/#Container-Level-Variables).
+        \\- Field access (`x.y`) looking up a [function](https://ziglang.org/documentation/master/#Functions) or a [variable](https://ziglang.org/documentation/master/#Container-Level-Variables).
         \\
-        \\This builtin can be called from a [comptime](https://ziglang.org/documentation/master/#comptime) block to conditionally export symbols. When `declaration` is a function with the C calling convention and `options.linkage` is `Strong`, this is equivalent to the `export` keyword used on a function:
-        \\
+        \\This builtin can be called from a [comptime](https://ziglang.org/documentation/master/#comptime) block to conditionally export symbols.
+        \\When `declaration` is a function with the C calling convention and
+        \\`options.linkage` is `Strong`, this is equivalent to
+        \\the `export` keyword used on a function:
         \\```zig
         \\comptime {
         \\    @export(internalName, .{ .name = "foo", .linkage = .Strong });
@@ -749,20 +826,18 @@ pub const builtins = [_]Builtin{
         \\```
         \\
         \\This is equivalent to:
-        \\
         \\```zig
         \\export fn foo() void {}
         \\```
         \\
-        \\Note that even when using `export`, `@"foo"` syntax can be used to choose any string for the symbol name:
-        \\
+        \\Note that even when using `export`, `@"foo"` syntax can
+        \\be used to choose any string for the symbol name:
         \\```zig
         \\export fn @"A function name that is a complete sentence."() void {}
         \\```
         \\
         \\When looking at the resulting object, you can see the symbol is used verbatim:
-        \\
-        \\```zig
+        \\```
         \\00000000000001f0 T A function name that is a complete sentence.
         \\```
         ,
@@ -802,7 +877,6 @@ pub const builtins = [_]Builtin{
         .snippet = "@field(${1:lhs: anytype}, ${2:comptime field_name: []const u8})",
         .documentation =
         \\Performs field access by a compile-time string. Works on both fields and declarations.
-        \\
         \\```zig
         \\const std = @import("std");
         \\
@@ -857,7 +931,8 @@ pub const builtins = [_]Builtin{
         .signature = "@floatCast(comptime DestType: type, value: anytype) DestType",
         .snippet = "@floatCast(${1:comptime DestType: type}, ${2:value: anytype})",
         .documentation =
-        \\Convert from one float type to another. This cast is safe, but may cause the numeric value to lose precision.
+        \\Convert from one float type to another. This cast is safe, but may cause the
+        \\numeric value to lose precision.
         ,
         .arguments = &.{
             "comptime DestType: type",
@@ -871,7 +946,8 @@ pub const builtins = [_]Builtin{
         .documentation =
         \\Converts the integer part of a floating point number to the destination type.
         \\
-        \\If the integer part of the floating point number cannot fit in the destination type, it invokes safety-checked [Undefined Behavior](https://ziglang.org/documentation/master/#Undefined-Behavior).
+        \\If the integer part of the floating point number cannot fit in the destination type,
+        \\it invokes safety-checked [Undefined Behavior](https://ziglang.org/documentation/master/#Undefined-Behavior).
         ,
         .arguments = &.{
             "comptime DestType: type",
@@ -883,9 +959,13 @@ pub const builtins = [_]Builtin{
         .signature = "@frame() *@Frame(func)",
         .snippet = "@frame()",
         .documentation =
-        \\This function returns a pointer to the frame for a given function. This type can be [coerced](https://ziglang.org/documentation/master/#Type-Coercion) to `anyframe->T` and to `anyframe`, where `T` is the return type of the function in scope.
+        \\This function returns a pointer to the frame for a given function. This type
+        \\can be [coerced](https://ziglang.org/documentation/master/#Type-Coercion) to `anyframe->T` and
+        \\to `anyframe`, where `T` is the return type
+        \\of the function in scope.
         \\
-        \\This function does not mark a suspension point, but it does cause the function in scope to become an [async function](https://ziglang.org/documentation/master/#Async-Functions).
+        \\This function does not mark a suspension point, but it does cause the function in scope
+        \\to become an [async function](https://ziglang.org/documentation/master/#Async-Functions).
         ,
         .arguments = &.{},
     },
@@ -894,10 +974,11 @@ pub const builtins = [_]Builtin{
         .signature = "@Frame(func: anytype) type",
         .snippet = "@Frame(${1:func: anytype})",
         .documentation =
-        \\This function returns the frame type of a function. This works for [Async Functions](https://ziglang.org/documentation/master/#Async-Functions) as well as any function without a specific calling convention.
+        \\This function returns the frame type of a function. This works for [Async Functions](https://ziglang.org/documentation/master/#Async-Functions)
+        \\as well as any function without a specific calling convention.
         \\
-        \\This type is suitable to be used as the return type of [async](https://ziglang.org/documentation/master/#Async-and-Await) which allows one to, for example, heap-allocate an async function frame:
-        \\
+        \\This type is suitable to be used as the return type of [async](https://ziglang.org/documentation/master/#Async-and-Await) which
+        \\allows one to, for example, heap-allocate an async function frame:
         \\```zig
         \\const std = @import("std");
         \\
@@ -922,7 +1003,9 @@ pub const builtins = [_]Builtin{
         .documentation =
         \\This function returns the base pointer of the current stack frame.
         \\
-        \\The implications of this are target specific and not consistent across all platforms. The frame address may not be available in release mode due to aggressive optimizations.
+        \\The implications of this are target specific and not consistent across all
+        \\platforms. The frame address may not be available in release mode due to
+        \\aggressive optimizations.
         \\
         \\This function is only valid within function scope.
         ,
@@ -933,7 +1016,8 @@ pub const builtins = [_]Builtin{
         .signature = "@frameSize() usize",
         .snippet = "@frameSize()",
         .documentation =
-        \\This is the same as `@sizeOf(@Frame(func))`, where `func` may be runtime-known.
+        \\This is the same as `@sizeOf(@Frame(func))`, where `func`
+        \\may be runtime-known.
         \\
         \\This function is typically used in conjunction with [@asyncCall](https://ziglang.org/documentation/master/#asyncCall).
         ,
@@ -944,8 +1028,8 @@ pub const builtins = [_]Builtin{
         .signature = "@hasDecl(comptime Container: type, comptime name: []const u8) bool",
         .snippet = "@hasDecl(${1:comptime Container: type}, ${2:comptime name: []const u8})",
         .documentation =
-        \\Returns whether or not a [struct](https://ziglang.org/documentation/master/#struct), [enum](https://ziglang.org/documentation/master/#enum), or [union](https://ziglang.org/documentation/master/#union) has a declaration matching `name`.
-        \\
+        \\Returns whether or not a [struct](https://ziglang.org/documentation/master/#struct), [enum](https://ziglang.org/documentation/master/#enum), or [union](https://ziglang.org/documentation/master/#union) has a declaration
+        \\matching `name`.
         \\```zig
         \\const std = @import("std");
         \\const expect = std.testing.expect;
@@ -997,17 +1081,22 @@ pub const builtins = [_]Builtin{
         .signature = "@import(comptime path: []u8) type",
         .snippet = "@import(${1:comptime path: []u8})",
         .documentation =
-        \\This function finds a zig file corresponding to `path` and adds it to the build, if it is not already added.
+        \\This function finds a zig file corresponding to `path` and adds it to the build,
+        \\if it is not already added.
         \\
-        \\Zig source files are implicitly structs, with a name equal to the file's basename with the extension truncated. `@import` returns the struct type corresponding to the file.
+        \\Zig source files are implicitly structs, with a name equal to the file's basename with the extension
+        \\truncated. `@import` returns the struct type corresponding to the file.
         \\
-        \\Declarations which have the `pub` keyword may be referenced from a different source file than the one they are declared in.
+        \\Declarations which have the `pub` keyword may be referenced from a different
+        \\source file than the one they are declared in.
         \\
-        \\`path` can be a relative path or it can be the name of a package. If it is a relative path, it is relative to the file that contains the `@import` function call.
+        \\`path` can be a relative path or it can be the name of a package.
+        \\If it is a relative path, it is relative to the file that contains the `@import`
+        \\function call.
         \\
         \\The following packages are always available:
-        \\  - `@import("std")` - Zig Standard Library
-        \\  - `@import("builtin")` - Target-specific information The command `zig build-exe --show-builtin` outputs the source to stdout for reference.
+        \\- `@import("std")` - Zig Standard Library
+        \\- `@import("builtin")` - Target-specific information. The command `zig build-exe --show-builtin` outputs the source to stdout for reference.
         ,
         .arguments = &.{
             "comptime path: []u8",
@@ -1018,9 +1107,12 @@ pub const builtins = [_]Builtin{
         .signature = "@intCast(comptime DestType: type, int: anytype) DestType",
         .snippet = "@intCast(${1:comptime DestType: type}, ${2:int: anytype})",
         .documentation =
-        \\Converts an integer to another integer while keeping the same numerical value. Attempting to convert a number which is out of range of the destination type results in safety-protected [Undefined Behavior](https://ziglang.org/documentation/master/#Undefined-Behavior).
+        \\Converts an integer to another integer while keeping the same numerical value.
+        \\Attempting to convert a number which is out of range of the destination type results in
+        \\safety-protected [Undefined Behavior](https://ziglang.org/documentation/master/#Undefined-Behavior).
         \\
-        \\If `T` is `comptime_int`, then this is semantically equivalent to [Type Coercion](https://ziglang.org/documentation/master/#Type-Coercion).
+        \\If `T` is `comptime_int`,
+        \\then this is semantically equivalent to [Type Coercion](https://ziglang.org/documentation/master/#Type-Coercion).
         ,
         .arguments = &.{
             "comptime DestType: type",
@@ -1034,7 +1126,8 @@ pub const builtins = [_]Builtin{
         .documentation =
         \\Converts an integer into an [enum](https://ziglang.org/documentation/master/#enum) value.
         \\
-        \\Attempting to convert an integer which represents no value in the chosen enum type invokes safety-checked [Undefined Behavior](https://ziglang.org/documentation/master/#Undefined-Behavior).
+        \\Attempting to convert an integer which represents no value in the chosen enum type invokes
+        \\safety-checked [Undefined Behavior](https://ziglang.org/documentation/master/#Undefined-Behavior).
         ,
         .arguments = &.{
             "comptime DestType: type",
@@ -1048,9 +1141,11 @@ pub const builtins = [_]Builtin{
         .documentation =
         \\Converts from the integer representation of an error into [The Global Error Set](https://ziglang.org/documentation/master/#The-Global-Error-Set) type.
         \\
-        \\It is generally recommended to avoid this cast, as the integer representation of an error is not stable across source code changes.
+        \\It is generally recommended to avoid this
+        \\cast, as the integer representation of an error is not stable across source code changes.
         \\
-        \\Attempting to convert an integer that does not correspond to any error results in safety-protected [Undefined Behavior](https://ziglang.org/documentation/master/#Undefined-Behavior).
+        \\Attempting to convert an integer that does not correspond to any error results in
+        \\safety-protected [Undefined Behavior](https://ziglang.org/documentation/master/#Undefined-Behavior).
         ,
         .arguments = &.{
             "value: std.meta.Int(.unsigned, @sizeOf(anyerror) * 8)",
@@ -1061,7 +1156,8 @@ pub const builtins = [_]Builtin{
         .signature = "@intToFloat(comptime DestType: type, int: anytype) DestType",
         .snippet = "@intToFloat(${1:comptime DestType: type}, ${2:int: anytype})",
         .documentation =
-        \\Converts an integer to the closest floating point representation. To convert the other way, use [@floatToInt](https://ziglang.org/documentation/master/#floatToInt). This cast is always safe.
+        \\Converts an integer to the closest floating point representation.
+        \\To convert the other way, use [@floatToInt](https://ziglang.org/documentation/master/#floatToInt). This cast is always safe.
         ,
         .arguments = &.{
             "comptime DestType: type",
@@ -1075,7 +1171,8 @@ pub const builtins = [_]Builtin{
         .documentation =
         \\Converts an integer to a [pointer](https://ziglang.org/documentation/master/#Pointers). To convert the other way, use [@ptrToInt](https://ziglang.org/documentation/master/#ptrToInt).
         \\
-        \\If the destination pointer type does not allow address zero and `address` is zero, this invokes safety-checked [Undefined Behavior](https://ziglang.org/documentation/master/#Undefined-Behavior).
+        \\If the destination pointer type does not allow address zero and `address`
+        \\is zero, this invokes safety-checked [Undefined Behavior](https://ziglang.org/documentation/master/#Undefined-Behavior).
         ,
         .arguments = &.{
             "comptime DestType: type",
@@ -1087,10 +1184,11 @@ pub const builtins = [_]Builtin{
         .signature = "@memcpy(noalias dest: [*]u8, noalias source: [*]const u8, byte_count: usize)",
         .snippet = "@memcpy(${1:noalias dest: [*]u8}, ${2:noalias source: [*]const u8}, ${3:byte_count: usize})",
         .documentation =
-        \\This function copies bytes from one region of memory to another. `dest` and `source` are both pointers and must not overlap.
+        \\This function copies bytes from one region of memory to another. `dest` and
+        \\          `source` are both pointers and must not overlap.
         \\
-        \\This function is a low level intrinsic with no safety mechanisms. Most code should not use this function, instead using something like this:
-        \\
+        \\This function is a low level intrinsic with no safety mechanisms. Most code
+        \\should not use this function, instead using something like this:
         \\```zig
         \\for (source[0..byte_count]) |b, i| dest[i] = b;
         \\```
@@ -1098,7 +1196,6 @@ pub const builtins = [_]Builtin{
         \\The optimizer is intelligent enough to turn the above snippet into a memcpy.
         \\
         \\There is also a standard library function for this:
-        \\
         \\```zig
         \\const mem = @import("std").mem;
         \\mem.copy(u8, dest[0..byte_count], source[0..byte_count]);
@@ -1117,8 +1214,8 @@ pub const builtins = [_]Builtin{
         .documentation =
         \\This function sets a region of memory to `c`. `dest` is a pointer.
         \\
-        \\This function is a low level intrinsic with no safety mechanisms. Most code should not use this function, instead using something like this:
-        \\
+        \\This function is a low level intrinsic with no safety mechanisms. Most
+        \\code should not use this function, instead using something like this:
         \\```zig
         \\for (dest[0..byte_count]) |*b| b.* = c;
         \\```
@@ -1126,7 +1223,6 @@ pub const builtins = [_]Builtin{
         \\The optimizer is intelligent enough to turn the above snippet into a memset.
         \\
         \\There is also a standard library function for this:
-        \\
         \\```zig
         \\const mem = @import("std").mem;
         \\mem.set(u8, dest, c);
@@ -1143,9 +1239,12 @@ pub const builtins = [_]Builtin{
         .signature = "@wasmMemorySize(index: u32) u32",
         .snippet = "@wasmMemorySize(${1:index: u32})",
         .documentation =
-        \\This function returns the size of the Wasm memory identified by `index` as an unsigned value in units of Wasm pages. Note that each Wasm page is 64KB in size.
+        \\This function returns the size of the Wasm memory identified by `index` as
+        \\an unsigned value in units of Wasm pages. Note that each Wasm page is 64KB in size.
         \\
-        \\This function is a low level intrinsic with no safety mechanisms usually useful for allocator designers targeting Wasm. So unless you are writing a new allocator from scratch, you should use something like `@import("std").heap.WasmPageAllocator`.
+        \\This function is a low level intrinsic with no safety mechanisms usually useful for allocator
+        \\designers targeting Wasm. So unless you are writing a new allocator from scratch, you should use
+        \\something like `@import("std").heap.WasmPageAllocator`.
         ,
         .arguments = &.{
             "index: u32",
@@ -1156,10 +1255,14 @@ pub const builtins = [_]Builtin{
         .signature = "@wasmMemoryGrow(index: u32, delta: u32) i32",
         .snippet = "@wasmMemoryGrow(${1:index: u32}, ${2:delta: u32})",
         .documentation =
-        \\This function increases the size of the Wasm memory identified by `index` by `delta` in units of unsigned number of Wasm pages. Note that each Wasm page is 64KB in size. On success, returns previous memory size; on failure, if the allocation fails, returns -1.
+        \\This function increases the size of the Wasm memory identified by `index` by
+        \\`delta` in units of unsigned number of Wasm pages. Note that each Wasm page
+        \\is 64KB in size. On success, returns previous memory size; on failure, if the allocation fails,
+        \\returns -1.
         \\
-        \\This function is a low level intrinsic with no safety mechanisms usually useful for allocator designers targeting Wasm. So unless you are writing a new allocator from scratch, you should use something like `@import("std").heap.WasmPageAllocator`.
-        \\
+        \\This function is a low level intrinsic with no safety mechanisms usually useful for allocator
+        \\designers targeting Wasm. So unless you are writing a new allocator from scratch, you should use
+        \\something like `@import("std").heap.WasmPageAllocator`.
         \\```zig
         \\const std = @import("std");
         \\const native_arch = @import("builtin").target.cpu.arch;
@@ -1184,9 +1287,10 @@ pub const builtins = [_]Builtin{
         .signature = "@mod(numerator: T, denominator: T) T",
         .snippet = "@mod(${1:numerator: T}, ${2:denominator: T})",
         .documentation =
-        \\Modulus division. For unsigned integers this is the same as `numerator % denominator`. Caller guarantees `denominator > 0`.
-        \\  - `@mod(-5, 3) == 1`
-        \\  - `(@divFloor(a, b) * b) + @mod(a, b) == a`
+        \\Modulus division. For unsigned integers this is the same as
+        \\`numerator % denominator`. Caller guarantees `denominator > 0`.
+        \\- `@mod(-5, 3) == 1`
+        \\- `(@divFloor(a, b) * b) + @mod(a, b) == a`
         \\
         \\For a function that returns an error code, see `@import("std").math.mod`.
         ,
@@ -1200,7 +1304,9 @@ pub const builtins = [_]Builtin{
         .signature = "@mulWithOverflow(comptime T: type, a: T, b: T, result: *T) bool",
         .snippet = "@mulWithOverflow(${1:comptime T: type}, ${2:a: T}, ${3:b: T}, ${4:result: *T})",
         .documentation =
-        \\Performs `result.* = a * b`. If overflow or underflow occurs, stores the overflowed bits in `result` and returns `true`. If no overflow or underflow occurs, returns `false`.
+        \\Performs `result.* = a * b`. If overflow or underflow occurs,
+        \\stores the overflowed bits in `result` and returns `true`.
+        \\If no overflow or underflow occurs, returns `false`.
         ,
         .arguments = &.{
             "comptime T: type",
@@ -1214,11 +1320,15 @@ pub const builtins = [_]Builtin{
         .signature = "@panic(message: []const u8) noreturn",
         .snippet = "@panic(${1:message: []const u8})",
         .documentation =
-        \\Invokes the panic handler function. By default the panic handler function calls the public `panic` function exposed in the root source file, or if there is not one specified, the `std.builtin.default_panic` function from `std/builtin.zig`.
+        \\Invokes the panic handler function. By default the panic handler function
+        \\calls the public `panic` function exposed in the root source file, or
+        \\if there is not one specified, the `std.builtin.default_panic`
+        \\function from `std/builtin.zig`.
         \\
-        \\Generally it is better to use `@import("std").debug.panic`. However, `@panic` can be useful for 2 scenarios:
-        \\  - From library code, calling the programmer's panic function if they exposed one in the root source file.
-        \\  - When mixing C and Zig code, calling the canonical panic implementation across multiple .o files.
+        \\Generally it is better to use `@import("std").debug.panic`.
+        \\However, `@panic` can be useful for 2 scenarios:
+        \\- From library code, calling the programmer's panic function if they exposed one in the root source file.
+        \\- When mixing C and Zig code, calling the canonical panic implementation across multiple .o files.
         ,
         .arguments = &.{
             "message: []const u8",
@@ -1231,7 +1341,10 @@ pub const builtins = [_]Builtin{
         .documentation =
         \\Counts the number of bits set in an integer.
         \\
-        \\If `integer` is known at [comptime](https://ziglang.org/documentation/master/#comptime), the return type is `comptime_int`. Otherwise, the return type is an unsigned integer with the minimum number of bits that can represent the bit count of the integer type.
+        \\If `integer` is known at [comptime](https://ziglang.org/documentation/master/#comptime),
+        \\the return type is `comptime_int`.
+        \\Otherwise, the return type is an unsigned integer with the minimum number
+        \\of bits that can represent the bit count of the integer type.
         ,
         .arguments = &.{
             "comptime T: type",
@@ -1245,7 +1358,8 @@ pub const builtins = [_]Builtin{
         .documentation =
         \\Converts a pointer of one type to a pointer of another type.
         \\
-        \\[Optional Pointers](https://ziglang.org/documentation/master/#Optional-Pointers) are allowed. Casting an optional pointer which is [null](https://ziglang.org/documentation/master/#null) to a non-optional pointer invokes safety-checked [Undefined Behavior](https://ziglang.org/documentation/master/#Undefined-Behavior).
+        \\[Optional Pointers](https://ziglang.org/documentation/master/#Optional-Pointers) are allowed. Casting an optional pointer which is [null](https://ziglang.org/documentation/master/#null)
+        \\to a non-optional pointer invokes safety-checked [Undefined Behavior](https://ziglang.org/documentation/master/#Undefined-Behavior).
         ,
         .arguments = &.{
             "comptime DestType: type",
@@ -1258,10 +1372,10 @@ pub const builtins = [_]Builtin{
         .snippet = "@ptrToInt(${1:value: anytype})",
         .documentation =
         \\Converts `value` to a `usize` which is the address of the pointer. `value` can be one of these types:
-        \\  - `*T`
-        \\  - `?*T`
-        \\  - `fn()`
-        \\  - `?fn()`
+        \\- `*T`
+        \\- `?*T`
+        \\- `fn()`
+        \\- `?fn()`
         \\
         \\To convert the other way, use [@intToPtr](https://ziglang.org/documentation/master/#intToPtr)
         ,
@@ -1274,9 +1388,10 @@ pub const builtins = [_]Builtin{
         .signature = "@rem(numerator: T, denominator: T) T",
         .snippet = "@rem(${1:numerator: T}, ${2:denominator: T})",
         .documentation =
-        \\Remainder division. For unsigned integers this is the same as `numerator % denominator`. Caller guarantees `denominator > 0`.
-        \\  - `@rem(-5, 3) == -2`
-        \\  - `(@divTrunc(a, b) * b) + @rem(a, b) == a`
+        \\Remainder division. For unsigned integers this is the same as
+        \\`numerator % denominator`. Caller guarantees `denominator > 0`.
+        \\- `@rem(-5, 3) == -2`
+        \\- `(@divTrunc(a, b) * b) + @rem(a, b) == a`
         \\
         \\For a function that returns an error code, see `@import("std").math.rem`.
         ,
@@ -1290,11 +1405,14 @@ pub const builtins = [_]Builtin{
         .signature = "@returnAddress() usize",
         .snippet = "@returnAddress()",
         .documentation =
-        \\This function returns the address of the next machine code instruction that will be executed when the current function returns.
+        \\This function returns the address of the next machine code instruction that will be executed
+        \\when the current function returns.
         \\
-        \\The implications of this are target specific and not consistent across all platforms.
+        \\The implications of this are target specific and not consistent across
+        \\all platforms.
         \\
-        \\This function is only valid within function scope. If the function gets inlined into a calling function, the returned address will apply to the calling function.
+        \\This function is only valid within function scope. If the function gets inlined into
+        \\a calling function, the returned address will apply to the calling function.
         ,
         .arguments = &.{},
     },
@@ -1325,12 +1443,13 @@ pub const builtins = [_]Builtin{
         .signature = "@setEvalBranchQuota(new_quota: u32)",
         .snippet = "@setEvalBranchQuota(${1:new_quota: u32})",
         .documentation =
-        \\Changes the maximum number of backwards branches that compile-time code execution can use before giving up and making a compile error.
+        \\Changes the maximum number of backwards branches that compile-time code
+        \\execution can use before giving up and making a compile error.
         \\
-        \\If the `new_quota` is smaller than the default quota (`1000`) or a previously explicitly set quota, it is ignored.
+        \\If the `new_quota` is smaller than the default quota (`1000`) or
+        \\a previously explicitly set quota, it is ignored.
         \\
         \\Example:
-        \\
         \\```zig
         \\test "foo" {
         \\    comptime {
@@ -1341,7 +1460,6 @@ pub const builtins = [_]Builtin{
         \\```
         \\
         \\Now we use `@setEvalBranchQuota`:
-        \\
         \\```zig
         \\test "foo" {
         \\    comptime {
@@ -1362,24 +1480,24 @@ pub const builtins = [_]Builtin{
         .snippet = "@setFloatMode(${1:mode: @import(\"std\").builtin.FloatMode})",
         .documentation =
         \\Sets the floating point mode of the current scope. Possible values are:
-        \\
         \\```zig
         \\pub const FloatMode = enum {
         \\    Strict,
         \\    Optimized,
         \\};
         \\```
-        \\
-        \\  - `Strict` (default) - Floating point operations follow strict IEEE compliance.
-        \\  - `Optimized` - Floating point operations may do all of the following: <ul>
+        \\- `Strict` (default) - Floating point operations follow strict IEEE compliance.
+        \\- `Optimized` - Floating point operations may do all of the following:
         \\  - Assume the arguments and result are not NaN. Optimizations are required to retain defined behavior over NaNs, but the value of the result is undefined.
         \\  - Assume the arguments and result are not +/-Inf. Optimizations are required to retain defined behavior over +/-Inf, but the value of the result is undefined.
         \\  - Treat the sign of a zero argument or result as insignificant.
         \\  - Use the reciprocal of an argument rather than perform division.
         \\  - Perform floating-point contraction (e.g. fusing a multiply followed by an addition into a fused multiply-and-add).
-        \\  - Perform algebraically equivalent transformations that may change results in floating point (e.g. reassociate). This is equivalent to `-ffast-math` in GCC.</ul>
+        \\  - Perform algebraically equivalent transformations that may change results in floating point (e.g. reassociate).
+        \\        This is equivalent to `-ffast-math` in GCC.
         \\
-        \\The floating point mode is inherited by child scopes, and can be overridden in any scope. You can set the floating point mode in a struct or module scope by using a comptime block.
+        \\The floating point mode is inherited by child scopes, and can be overridden in any scope.
+        \\You can set the floating point mode in a struct or module scope by using a comptime block.
         ,
         .arguments = &.{
             "mode: @import(\"std\").builtin.FloatMode",
@@ -1391,7 +1509,6 @@ pub const builtins = [_]Builtin{
         .snippet = "@setRuntimeSafety(${1:safety_on: bool})",
         .documentation =
         \\Sets whether runtime safety checks are enabled for the scope that contains the function call.
-        \\
         \\```zig
         \\test "@setRuntimeSafety" {
         \\    // The builtin applies to the scope that it is called in. So here, integer overflow
@@ -1416,7 +1533,8 @@ pub const builtins = [_]Builtin{
         \\}
         \\```
         \\
-        \\Note: it is [planned](https://github.com/ziglang/zig/issues/978) to replace `@setRuntimeSafety` with `@optimizeFor`
+        \\Note: it is [planned](https://github.com/ziglang/zig/issues/978) to replace
+        \\`@setRuntimeSafety` with `@optimizeFor`
         ,
         .arguments = &.{
             "safety_on: bool",
@@ -1427,9 +1545,11 @@ pub const builtins = [_]Builtin{
         .signature = "@shlExact(value: T, shift_amt: Log2T) T",
         .snippet = "@shlExact(${1:value: T}, ${2:shift_amt: Log2T})",
         .documentation =
-        \\Performs the left shift operation (`<<`). Caller guarantees that the shift will not shift any 1 bits out.
+        \\Performs the left shift operation (`<<`). Caller guarantees
+        \\that the shift will not shift any 1 bits out.
         \\
-        \\The type of `shift_amt` is an unsigned integer with `log2(T.bit_count)` bits. This is because `shift_amt >= T.bit_count` is undefined behavior.
+        \\The type of `shift_amt` is an unsigned integer with `log2(T.bit_count)` bits.
+        \\This is because `shift_amt >= T.bit_count` is undefined behavior.
         ,
         .arguments = &.{
             "value: T",
@@ -1441,9 +1561,12 @@ pub const builtins = [_]Builtin{
         .signature = "@shlWithOverflow(comptime T: type, a: T, shift_amt: Log2T, result: *T) bool",
         .snippet = "@shlWithOverflow(${1:comptime T: type}, ${2:a: T}, ${3:shift_amt: Log2T}, ${4:result: *T})",
         .documentation =
-        \\Performs `result.* = a << b`. If overflow or underflow occurs, stores the overflowed bits in `result` and returns `true`. If no overflow or underflow occurs, returns `false`.
+        \\Performs `result.* = a << b`. If overflow or underflow occurs,
+        \\stores the overflowed bits in `result` and returns `true`.
+        \\If no overflow or underflow occurs, returns `false`.
         \\
-        \\The type of `shift_amt` is an unsigned integer with `log2(T.bit_count)` bits. This is because `shift_amt >= T.bit_count` is undefined behavior.
+        \\The type of `shift_amt` is an unsigned integer with `log2(T.bit_count)` bits.
+        \\This is because `shift_amt >= T.bit_count` is undefined behavior.
         ,
         .arguments = &.{
             "comptime T: type",
@@ -1457,9 +1580,11 @@ pub const builtins = [_]Builtin{
         .signature = "@shrExact(value: T, shift_amt: Log2T) T",
         .snippet = "@shrExact(${1:value: T}, ${2:shift_amt: Log2T})",
         .documentation =
-        \\Performs the right shift operation (`>>`). Caller guarantees that the shift will not shift any 1 bits out.
+        \\Performs the right shift operation (`>>`). Caller guarantees
+        \\that the shift will not shift any 1 bits out.
         \\
-        \\The type of `shift_amt` is an unsigned integer with `log2(T.bit_count)` bits. This is because `shift_amt >= T.bit_count` is undefined behavior.
+        \\The type of `shift_amt` is an unsigned integer with `log2(T.bit_count)` bits.
+        \\This is because `shift_amt >= T.bit_count` is undefined behavior.
         ,
         .arguments = &.{
             "value: T",
@@ -1471,17 +1596,31 @@ pub const builtins = [_]Builtin{
         .signature = "@shuffle(comptime E: type, a: std.meta.Vector(a_len, E), b: std.meta.Vector(b_len, E), comptime mask: std.meta.Vector(mask_len, i32)) std.meta.Vector(mask_len, E)",
         .snippet = "@shuffle(${1:comptime E: type}, ${2:a: std.meta.Vector(a_len, E)}, ${3:b: std.meta.Vector(b_len, E)}, ${4:comptime mask: std.meta.Vector(mask_len, i32)})",
         .documentation =
-        \\Constructs a new [vector](https://ziglang.org/documentation/master/#Vectors) by selecting elements from `a` and `b` based on `mask`.
+        \\Constructs a new [vector](https://ziglang.org/documentation/master/#Vectors) by selecting elements from `a` and
+        \\`b` based on `mask`.
         \\
-        \\Each element in `mask` selects an element from either `a` or `b`. Positive numbers select from `a` starting at 0. Negative values select from `b`, starting at `-1` and going down. It is recommended to use the `~` operator from indexes from `b` so that both indexes can start from `0` (i.e. `~@as(i32, 0)` is `-1`).
+        \\Each element in `mask` selects an element from either `a` or
+        \\`b`. Positive numbers select from `a` starting at 0.
+        \\Negative values select from `b`, starting at `-1` and going down.
+        \\It is recommended to use the `~` operator from indexes from `b`
+        \\so that both indexes can start from `0` (i.e. `~@as(i32, 0)` is
+        \\`-1`).
         \\
-        \\For each element of `mask`, if it or the selected value from `a` or `b` is `undefined`, then the resulting element is `undefined`.
+        \\For each element of `mask`, if it or the selected value from
+        \\`a` or `b` is `undefined`,
+        \\then the resulting element is `undefined`.
         \\
-        \\`a_len` and `b_len` may differ in length. Out-of-bounds element indexes in `mask` result in compile errors.
+        \\`a_len` and `b_len` may differ in length. Out-of-bounds element
+        \\indexes in `mask` result in compile errors.
         \\
-        \\If `a` or `b` is `undefined`, it is equivalent to a vector of all `undefined` with the same length as the other vector. If both vectors are `undefined`, `@shuffle` returns a vector with all elements `undefined`.
+        \\If `a` or `b` is `undefined`, it
+        \\is equivalent to a vector of all `undefined` with the same length as the other vector.
+        \\If both vectors are `undefined`, `@shuffle` returns
+        \\a vector with all elements `undefined`.
         \\
-        \\`E` must be an [integer](https://ziglang.org/documentation/master/#Integers), [float](https://ziglang.org/documentation/master/#Floats), [pointer](https://ziglang.org/documentation/master/#Pointers), or `bool`. The mask may be any vector length, and its length determines the result length.
+        \\`E` must be an [integer](https://ziglang.org/documentation/master/#Integers), [float](https://ziglang.org/documentation/master/#Floats),
+        \\[pointer](https://ziglang.org/documentation/master/#Pointers), or `bool`. The mask may be any vector length, and its
+        \\length determines the result length.
         ,
         .arguments = &.{
             "comptime E: type",
@@ -1495,11 +1634,16 @@ pub const builtins = [_]Builtin{
         .signature = "@sizeOf(comptime T: type) comptime_int",
         .snippet = "@sizeOf(${1:comptime T: type})",
         .documentation =
-        \\This function returns the number of bytes it takes to store `T` in memory. The result is a target-specific compile time constant.
+        \\This function returns the number of bytes it takes to store `T` in memory.
+        \\The result is a target-specific compile time constant.
         \\
-        \\This size may contain padding bytes. If there were two consecutive T in memory, this would be the offset in bytes between element at index 0 and the element at index 1. For [integer](https://ziglang.org/documentation/master/#Integers), consider whether you want to use `@sizeOf(T)` or `@typeInfo(T).Int.bits`.
+        \\This size may contain padding bytes. If there were two consecutive T in memory, this would be the offset
+        \\in bytes between element at index 0 and the element at index 1. For [integer](https://ziglang.org/documentation/master/#Integers),
+        \\consider whether you want to use `@sizeOf(T)` or
+        \\`@typeInfo(T).Int.bits`.
         \\
-        \\This function measures the size at runtime. For types that are disallowed at runtime, such as `comptime_int` and `type`, the result is `0`.
+        \\This function measures the size at runtime. For types that are disallowed at runtime, such as
+        \\`comptime_int` and `type`, the result is `0`.
         ,
         .arguments = &.{
             "comptime T: type",
@@ -1510,8 +1654,8 @@ pub const builtins = [_]Builtin{
         .signature = "@splat(comptime len: u32, scalar: anytype) std.meta.Vector(len, @TypeOf(scalar))",
         .snippet = "@splat(${1:comptime len: u32}, ${2:scalar: anytype})",
         .documentation =
-        \\Produces a vector of length `len` where each element is the value `scalar`:
-        \\
+        \\Produces a vector of length `len` where each element is the value
+        \\`scalar`:
         \\```zig
         \\const std = @import("std");
         \\const expect = std.testing.expect;
@@ -1524,7 +1668,8 @@ pub const builtins = [_]Builtin{
         \\}
         \\```
         \\
-        \\`scalar` must be an [integer](https://ziglang.org/documentation/master/#Integers), [bool](https://ziglang.org/documentation/master/#Primitive-Types), [float](https://ziglang.org/documentation/master/#Floats), or [pointer](https://ziglang.org/documentation/master/#Pointers).
+        \\`scalar` must be an [integer](https://ziglang.org/documentation/master/#Integers), [bool](https://ziglang.org/documentation/master/#Primitive-Types),
+        \\[float](https://ziglang.org/documentation/master/#Floats), or [pointer](https://ziglang.org/documentation/master/#Pointers).
         ,
         .arguments = &.{
             "comptime len: u32",
@@ -1536,15 +1681,18 @@ pub const builtins = [_]Builtin{
         .signature = "@reduce(comptime op: std.builtin.ReduceOp, value: anytype) std.meta.Child(value)",
         .snippet = "@reduce(${1:comptime op: std.builtin.ReduceOp}, ${2:value: anytype})",
         .documentation =
-        \\Transforms a [vector](https://ziglang.org/documentation/master/#Vectors) into a scalar value by performing a sequential horizontal reduction of its elements using the specified operator `op`.
+        \\Transforms a [vector](https://ziglang.org/documentation/master/#Vectors) into a scalar value by performing a
+        \\sequential horizontal reduction of its elements using the specified operator `op`.
         \\
         \\Not every operator is available for every vector element type:
-        \\  - `.And`, `.Or`, `.Xor` are available for `bool` vectors,
-        \\  - `.Min`, `.Max`, `.Add`, `.Mul` are available for [floating point](https://ziglang.org/documentation/master/#Floats) vectors,
-        \\  - Every operator is available for [integer](https://ziglang.org/documentation/master/#Integers) vectors.
+        \\- `.And`, `.Or`, `.Xor` are available for `bool` vectors,
+        \\- `.Min`, `.Max`, `.Add`, `.Mul` are available for [floating point](https://ziglang.org/documentation/master/#Floats) vectors,
+        \\- Every operator is available for [integer](https://ziglang.org/documentation/master/#Integers) vectors.
         \\
-        \\Note that `.Add` and `.Mul` reductions on integral types are wrapping; when applied on floating point types the operation associativity is preserved, unless the float mode is set to `Optimized`.
-        \\
+        \\Note that `.Add` and `.Mul`
+        \\reductions on integral types are wrapping; when applied on floating point
+        \\types the operation associativity is preserved, unless the float mode is
+        \\set to `Optimized`.
         \\```zig
         \\const std = @import("std");
         \\const expect = std.testing.expect;
@@ -1570,8 +1718,8 @@ pub const builtins = [_]Builtin{
         .signature = "@src() std.builtin.SourceLocation",
         .snippet = "@src()",
         .documentation =
-        \\Returns a `SourceLocation` struct representing the function's name and location in the source code. This must be called in a function.
-        \\
+        \\Returns a `SourceLocation` struct representing the function's name and location in the source code.
+        \\This must be called in a function.
         \\```zig
         \\const std = @import("std");
         \\const expect = std.testing.expect;
@@ -1597,9 +1745,11 @@ pub const builtins = [_]Builtin{
         .signature = "@sqrt(value: anytype) @TypeOf(value)",
         .snippet = "@sqrt(${1:value: anytype})",
         .documentation =
-        \\Performs the square root of a floating point number. Uses a dedicated hardware instruction when available.
+        \\Performs the square root of a floating point number. Uses a dedicated hardware instruction
+        \\when available.
         \\
-        \\Supports [Floats](https://ziglang.org/documentation/master/#Floats) and [Vectors](https://ziglang.org/documentation/master/#Vectors) of floats, with the caveat that [some float operations are not yet implemented for all float types](https://github.com/ziglang/zig/issues/4026).
+        \\Supports [Floats](https://ziglang.org/documentation/master/#Floats) and [Vectors](https://ziglang.org/documentation/master/#Vectors) of floats, with the caveat that
+        \\[some float operations are not yet implemented for all float types](https://github.com/ziglang/zig/issues/4026).
         ,
         .arguments = &.{
             "value: anytype",
@@ -1610,9 +1760,11 @@ pub const builtins = [_]Builtin{
         .signature = "@sin(value: anytype) @TypeOf(value)",
         .snippet = "@sin(${1:value: anytype})",
         .documentation =
-        \\Sine trigometric function on a floating point number. Uses a dedicated hardware instruction when available.
+        \\Sine trigometric function on a floating point number. Uses a dedicated hardware instruction
+        \\when available.
         \\
-        \\Supports [Floats](https://ziglang.org/documentation/master/#Floats) and [Vectors](https://ziglang.org/documentation/master/#Vectors) of floats, with the caveat that [some float operations are not yet implemented for all float types](https://github.com/ziglang/zig/issues/4026).
+        \\Supports [Floats](https://ziglang.org/documentation/master/#Floats) and [Vectors](https://ziglang.org/documentation/master/#Vectors) of floats, with the caveat that
+        \\[some float operations are not yet implemented for all float types](https://github.com/ziglang/zig/issues/4026).
         ,
         .arguments = &.{
             "value: anytype",
@@ -1623,9 +1775,11 @@ pub const builtins = [_]Builtin{
         .signature = "@cos(value: anytype) @TypeOf(value)",
         .snippet = "@cos(${1:value: anytype})",
         .documentation =
-        \\Cosine trigometric function on a floating point number. Uses a dedicated hardware instruction when available.
+        \\Cosine trigometric function on a floating point number. Uses a dedicated hardware instruction
+        \\when available.
         \\
-        \\Supports [Floats](https://ziglang.org/documentation/master/#Floats) and [Vectors](https://ziglang.org/documentation/master/#Vectors) of floats, with the caveat that [some float operations are not yet implemented for all float types](https://github.com/ziglang/zig/issues/4026).
+        \\Supports [Floats](https://ziglang.org/documentation/master/#Floats) and [Vectors](https://ziglang.org/documentation/master/#Vectors) of floats, with the caveat that
+        \\[some float operations are not yet implemented for all float types](https://github.com/ziglang/zig/issues/4026).
         ,
         .arguments = &.{
             "value: anytype",
@@ -1636,9 +1790,11 @@ pub const builtins = [_]Builtin{
         .signature = "@exp(value: anytype) @TypeOf(value)",
         .snippet = "@exp(${1:value: anytype})",
         .documentation =
-        \\Base-e exponential function on a floating point number. Uses a dedicated hardware instruction when available.
+        \\Base-e exponential function on a floating point number. Uses a dedicated hardware instruction
+        \\when available.
         \\
-        \\Supports [Floats](https://ziglang.org/documentation/master/#Floats) and [Vectors](https://ziglang.org/documentation/master/#Vectors) of floats, with the caveat that [some float operations are not yet implemented for all float types](https://github.com/ziglang/zig/issues/4026).
+        \\Supports [Floats](https://ziglang.org/documentation/master/#Floats) and [Vectors](https://ziglang.org/documentation/master/#Vectors) of floats, with the caveat that
+        \\[some float operations are not yet implemented for all float types](https://github.com/ziglang/zig/issues/4026).
         ,
         .arguments = &.{
             "value: anytype",
@@ -1649,9 +1805,11 @@ pub const builtins = [_]Builtin{
         .signature = "@exp2(value: anytype) @TypeOf(value)",
         .snippet = "@exp2(${1:value: anytype})",
         .documentation =
-        \\Base-2 exponential function on a floating point number. Uses a dedicated hardware instruction when available.
+        \\Base-2 exponential function on a floating point number. Uses a dedicated hardware instruction
+        \\when available.
         \\
-        \\Supports [Floats](https://ziglang.org/documentation/master/#Floats) and [Vectors](https://ziglang.org/documentation/master/#Vectors) of floats, with the caveat that [some float operations are not yet implemented for all float types](https://github.com/ziglang/zig/issues/4026).
+        \\Supports [Floats](https://ziglang.org/documentation/master/#Floats) and [Vectors](https://ziglang.org/documentation/master/#Vectors) of floats, with the caveat that
+        \\[some float operations are not yet implemented for all float types](https://github.com/ziglang/zig/issues/4026).
         ,
         .arguments = &.{
             "value: anytype",
@@ -1662,9 +1820,11 @@ pub const builtins = [_]Builtin{
         .signature = "@log(value: anytype) @TypeOf(value)",
         .snippet = "@log(${1:value: anytype})",
         .documentation =
-        \\Returns the natural logarithm of a floating point number. Uses a dedicated hardware instruction when available.
+        \\Returns the natural logarithm of a floating point number. Uses a dedicated hardware instruction
+        \\when available.
         \\
-        \\Supports [Floats](https://ziglang.org/documentation/master/#Floats) and [Vectors](https://ziglang.org/documentation/master/#Vectors) of floats, with the caveat that [some float operations are not yet implemented for all float types](https://github.com/ziglang/zig/issues/4026).
+        \\Supports [Floats](https://ziglang.org/documentation/master/#Floats) and [Vectors](https://ziglang.org/documentation/master/#Vectors) of floats, with the caveat that
+        \\[some float operations are not yet implemented for all float types](https://github.com/ziglang/zig/issues/4026).
         ,
         .arguments = &.{
             "value: anytype",
@@ -1675,9 +1835,11 @@ pub const builtins = [_]Builtin{
         .signature = "@log2(value: anytype) @TypeOf(value)",
         .snippet = "@log2(${1:value: anytype})",
         .documentation =
-        \\Returns the logarithm to the base 2 of a floating point number. Uses a dedicated hardware instruction when available.
+        \\Returns the logarithm to the base 2 of a floating point number. Uses a dedicated hardware instruction
+        \\when available.
         \\
-        \\Supports [Floats](https://ziglang.org/documentation/master/#Floats) and [Vectors](https://ziglang.org/documentation/master/#Vectors) of floats, with the caveat that [some float operations are not yet implemented for all float types](https://github.com/ziglang/zig/issues/4026).
+        \\Supports [Floats](https://ziglang.org/documentation/master/#Floats) and [Vectors](https://ziglang.org/documentation/master/#Vectors) of floats, with the caveat that
+        \\[some float operations are not yet implemented for all float types](https://github.com/ziglang/zig/issues/4026).
         ,
         .arguments = &.{
             "value: anytype",
@@ -1688,9 +1850,11 @@ pub const builtins = [_]Builtin{
         .signature = "@log10(value: anytype) @TypeOf(value)",
         .snippet = "@log10(${1:value: anytype})",
         .documentation =
-        \\Returns the logarithm to the base 10 of a floating point number. Uses a dedicated hardware instruction when available.
+        \\Returns the logarithm to the base 10 of a floating point number. Uses a dedicated hardware instruction
+        \\when available.
         \\
-        \\Supports [Floats](https://ziglang.org/documentation/master/#Floats) and [Vectors](https://ziglang.org/documentation/master/#Vectors) of floats, with the caveat that [some float operations are not yet implemented for all float types](https://github.com/ziglang/zig/issues/4026).
+        \\Supports [Floats](https://ziglang.org/documentation/master/#Floats) and [Vectors](https://ziglang.org/documentation/master/#Vectors) of floats, with the caveat that
+        \\[some float operations are not yet implemented for all float types](https://github.com/ziglang/zig/issues/4026).
         ,
         .arguments = &.{
             "value: anytype",
@@ -1701,9 +1865,11 @@ pub const builtins = [_]Builtin{
         .signature = "@fabs(value: anytype) @TypeOf(value)",
         .snippet = "@fabs(${1:value: anytype})",
         .documentation =
-        \\Returns the absolute value of a floating point number. Uses a dedicated hardware instruction when available.
+        \\Returns the absolute value of a floating point number. Uses a dedicated hardware instruction
+        \\when available.
         \\
-        \\Supports [Floats](https://ziglang.org/documentation/master/#Floats) and [Vectors](https://ziglang.org/documentation/master/#Vectors) of floats, with the caveat that [some float operations are not yet implemented for all float types](https://github.com/ziglang/zig/issues/4026).
+        \\Supports [Floats](https://ziglang.org/documentation/master/#Floats) and [Vectors](https://ziglang.org/documentation/master/#Vectors) of floats, with the caveat that
+        \\[some float operations are not yet implemented for all float types](https://github.com/ziglang/zig/issues/4026).
         ,
         .arguments = &.{
             "value: anytype",
@@ -1714,9 +1880,11 @@ pub const builtins = [_]Builtin{
         .signature = "@floor(value: anytype) @TypeOf(value)",
         .snippet = "@floor(${1:value: anytype})",
         .documentation =
-        \\Returns the largest integral value not greater than the given floating point number. Uses a dedicated hardware instruction when available.
+        \\Returns the largest integral value not greater than the given floating point number.
+        \\Uses a dedicated hardware instruction when available.
         \\
-        \\Supports [Floats](https://ziglang.org/documentation/master/#Floats) and [Vectors](https://ziglang.org/documentation/master/#Vectors) of floats, with the caveat that [some float operations are not yet implemented for all float types](https://github.com/ziglang/zig/issues/4026).
+        \\Supports [Floats](https://ziglang.org/documentation/master/#Floats) and [Vectors](https://ziglang.org/documentation/master/#Vectors) of floats, with the caveat that
+        \\[some float operations are not yet implemented for all float types](https://github.com/ziglang/zig/issues/4026).
         ,
         .arguments = &.{
             "value: anytype",
@@ -1727,9 +1895,11 @@ pub const builtins = [_]Builtin{
         .signature = "@ceil(value: anytype) @TypeOf(value)",
         .snippet = "@ceil(${1:value: anytype})",
         .documentation =
-        \\Returns the largest integral value not less than the given floating point number. Uses a dedicated hardware instruction when available.
+        \\Returns the largest integral value not less than the given floating point number.
+        \\Uses a dedicated hardware instruction when available.
         \\
-        \\Supports [Floats](https://ziglang.org/documentation/master/#Floats) and [Vectors](https://ziglang.org/documentation/master/#Vectors) of floats, with the caveat that [some float operations are not yet implemented for all float types](https://github.com/ziglang/zig/issues/4026).
+        \\Supports [Floats](https://ziglang.org/documentation/master/#Floats) and [Vectors](https://ziglang.org/documentation/master/#Vectors) of floats, with the caveat that
+        \\[some float operations are not yet implemented for all float types](https://github.com/ziglang/zig/issues/4026).
         ,
         .arguments = &.{
             "value: anytype",
@@ -1740,9 +1910,11 @@ pub const builtins = [_]Builtin{
         .signature = "@trunc(value: anytype) @TypeOf(value)",
         .snippet = "@trunc(${1:value: anytype})",
         .documentation =
-        \\Rounds the given floating point number to an integer, towards zero. Uses a dedicated hardware instruction when available.
+        \\Rounds the given floating point number to an integer, towards zero.
+        \\Uses a dedicated hardware instruction when available.
         \\
-        \\Supports [Floats](https://ziglang.org/documentation/master/#Floats) and [Vectors](https://ziglang.org/documentation/master/#Vectors) of floats, with the caveat that [some float operations are not yet implemented for all float types](https://github.com/ziglang/zig/issues/4026).
+        \\Supports [Floats](https://ziglang.org/documentation/master/#Floats) and [Vectors](https://ziglang.org/documentation/master/#Vectors) of floats, with the caveat that
+        \\[some float operations are not yet implemented for all float types](https://github.com/ziglang/zig/issues/4026).
         ,
         .arguments = &.{
             "value: anytype",
@@ -1753,9 +1925,11 @@ pub const builtins = [_]Builtin{
         .signature = "@round(value: anytype) @TypeOf(value)",
         .snippet = "@round(${1:value: anytype})",
         .documentation =
-        \\Rounds the given floating point number to an integer, away from zero. Uses a dedicated hardware instruction when available.
+        \\Rounds the given floating point number to an integer, away from zero. Uses a dedicated hardware instruction
+        \\when available.
         \\
-        \\Supports [Floats](https://ziglang.org/documentation/master/#Floats) and [Vectors](https://ziglang.org/documentation/master/#Vectors) of floats, with the caveat that [some float operations are not yet implemented for all float types](https://github.com/ziglang/zig/issues/4026).
+        \\Supports [Floats](https://ziglang.org/documentation/master/#Floats) and [Vectors](https://ziglang.org/documentation/master/#Vectors) of floats, with the caveat that
+        \\[some float operations are not yet implemented for all float types](https://github.com/ziglang/zig/issues/4026).
         ,
         .arguments = &.{
             "value: anytype",
@@ -1766,7 +1940,9 @@ pub const builtins = [_]Builtin{
         .signature = "@subWithOverflow(comptime T: type, a: T, b: T, result: *T) bool",
         .snippet = "@subWithOverflow(${1:comptime T: type}, ${2:a: T}, ${3:b: T}, ${4:result: *T})",
         .documentation =
-        \\Performs `result.* = a - b`. If overflow or underflow occurs, stores the overflowed bits in `result` and returns `true`. If no overflow or underflow occurs, returns `false`.
+        \\Performs `result.* = a - b`. If overflow or underflow occurs,
+        \\stores the overflowed bits in `result` and returns `true`.
+        \\If no overflow or underflow occurs, returns `false`.
         ,
         .arguments = &.{
             "comptime T: type",
@@ -1793,8 +1969,8 @@ pub const builtins = [_]Builtin{
         .signature = "@This() type",
         .snippet = "@This()",
         .documentation =
-        \\Returns the innermost struct, enum, or union that this function call is inside. This can be useful for an anonymous struct that needs to refer to itself:
-        \\
+        \\Returns the innermost struct, enum, or union that this function call is inside.
+        \\This can be useful for an anonymous struct that needs to refer to itself:
         \\```zig
         \\const std = @import("std");
         \\const expect = std.testing.expect;
@@ -1818,7 +1994,8 @@ pub const builtins = [_]Builtin{
         \\}
         \\```
         \\
-        \\When `@This()` is used at file scope, it returns a reference to the struct that corresponds to the current file.
+        \\When `@This()` is used at file scope, it returns a reference to the
+        \\struct that corresponds to the current file.
         ,
         .arguments = &.{},
     },
@@ -1827,10 +2004,10 @@ pub const builtins = [_]Builtin{
         .signature = "@truncate(comptime T: type, integer: anytype) T",
         .snippet = "@truncate(${1:comptime T: type}, ${2:integer: anytype})",
         .documentation =
-        \\This function truncates bits from an integer type, resulting in a smaller or same-sized integer type.
+        \\This function truncates bits from an integer type, resulting in a smaller
+        \\or same-sized integer type.
         \\
         \\The following produces safety-checked [Undefined Behavior](https://ziglang.org/documentation/master/#Undefined-Behavior):
-        \\
         \\```zig
         \\test "integer cast panic" {
         \\    var a: u16 = 0xabcd;
@@ -1840,7 +2017,6 @@ pub const builtins = [_]Builtin{
         \\```
         \\
         \\However this is well defined and working code:
-        \\
         \\```zig
         \\const std = @import("std");
         \\const expect = std.testing.expect;
@@ -1852,7 +2028,8 @@ pub const builtins = [_]Builtin{
         \\}
         \\```
         \\
-        \\This function always truncates the significant bits of the integer, regardless of endianness on the target platform.
+        \\This function always truncates the significant bits of the integer, regardless
+        \\of endianness on the target platform.
         ,
         .arguments = &.{
             "comptime T: type",
@@ -1864,36 +2041,37 @@ pub const builtins = [_]Builtin{
         .signature = "@Type(comptime info: std.builtin.TypeInfo) type",
         .snippet = "@Type(${1:comptime info: std.builtin.TypeInfo})",
         .documentation =
-        \\This function is the inverse of [@typeInfo](https://ziglang.org/documentation/master/#typeInfo). It reifies type information into a `type`.
+        \\This function is the inverse of [@typeInfo](https://ziglang.org/documentation/master/#typeInfo). It reifies type information
+        \\into a `type`.
         \\
         \\It is available for the following types:
-        \\  - `type`
-        \\  - `noreturn`
-        \\  - `void`
-        \\  - `bool`
-        \\  - [Integers](https://ziglang.org/documentation/master/#Integers) - The maximum bit count for an integer type is `65535`.
-        \\  - [Floats](https://ziglang.org/documentation/master/#Floats)
-        \\  - [Pointers](https://ziglang.org/documentation/master/#Pointers)
-        \\  - `comptime_int`
-        \\  - `comptime_float`
-        \\  - `@TypeOf(undefined)`
-        \\  - `@TypeOf(null)`
-        \\  - [Arrays](https://ziglang.org/documentation/master/#Arrays)
-        \\  - [Optionals](https://ziglang.org/documentation/master/#Optionals)
-        \\  - [Error Set Type](https://ziglang.org/documentation/master/#Error-Set-Type)
-        \\  - [Error Union Type](https://ziglang.org/documentation/master/#Error-Union-Type)
-        \\  - [Vectors](https://ziglang.org/documentation/master/#Vectors)
-        \\  - [opaque](https://ziglang.org/documentation/master/#opaque)
-        \\  - [@Frame](https://ziglang.org/documentation/master/#Frame)
-        \\  - `anyframe`
-        \\  - [struct](https://ziglang.org/documentation/master/#struct)
-        \\  - [enum](https://ziglang.org/documentation/master/#enum)
-        \\  - [Enum Literals](https://ziglang.org/documentation/master/#Enum-Literals)
-        \\  - [union](https://ziglang.org/documentation/master/#union)
+        \\- `type`
+        \\- `noreturn`
+        \\- `void`
+        \\- `bool`
+        \\- [Integers](https://ziglang.org/documentation/master/#Integers) - The maximum bit count for an integer type is `65535`.
+        \\- [Floats](https://ziglang.org/documentation/master/#Floats)
+        \\- [Pointers](https://ziglang.org/documentation/master/#Pointers)
+        \\- `comptime_int`
+        \\- `comptime_float`
+        \\- `@TypeOf(undefined)`
+        \\- `@TypeOf(null)`
+        \\- [Arrays](https://ziglang.org/documentation/master/#Arrays)
+        \\- [Optionals](https://ziglang.org/documentation/master/#Optionals)
+        \\- [Error Set Type](https://ziglang.org/documentation/master/#Error-Set-Type)
+        \\- [Error Union Type](https://ziglang.org/documentation/master/#Error-Union-Type)
+        \\- [Vectors](https://ziglang.org/documentation/master/#Vectors)
+        \\- [opaque](https://ziglang.org/documentation/master/#opaque)
+        \\- [@Frame](https://ziglang.org/documentation/master/#Frame)
+        \\- `anyframe`
+        \\- [struct](https://ziglang.org/documentation/master/#struct)
+        \\- [enum](https://ziglang.org/documentation/master/#enum)
+        \\- [Enum Literals](https://ziglang.org/documentation/master/#Enum-Literals)
+        \\- [union](https://ziglang.org/documentation/master/#union)
         \\
         \\For these types, `@Type` is not available:
-        \\  - [Functions](https://ziglang.org/documentation/master/#Functions)
-        \\  - BoundFn
+        \\- [Functions](https://ziglang.org/documentation/master/#Functions)
+        \\- BoundFn
         ,
         .arguments = &.{
             "comptime info: std.builtin.TypeInfo",
@@ -1906,7 +2084,9 @@ pub const builtins = [_]Builtin{
         .documentation =
         \\Provides type reflection.
         \\
-        \\For [structs](https://ziglang.org/documentation/master/#struct), [unions](https://ziglang.org/documentation/master/#union), [enums](https://ziglang.org/documentation/master/#enum), and [error sets](https://ziglang.org/documentation/master/#Error-Set-Type), the fields are guaranteed to be in the same order as declared. For declarations, the order is unspecified.
+        \\For [structs](https://ziglang.org/documentation/master/#struct), [unions](https://ziglang.org/documentation/master/#union), [enums](https://ziglang.org/documentation/master/#enum), and
+        \\[error sets](https://ziglang.org/documentation/master/#Error-Set-Type), the fields are guaranteed to be in the same
+        \\order as declared. For declarations, the order is unspecified.
         ,
         .arguments = &.{
             "comptime T: type",
@@ -1917,7 +2097,8 @@ pub const builtins = [_]Builtin{
         .signature = "@typeName(T: type) *const [N:0]u8",
         .snippet = "@typeName(${1:T: type})",
         .documentation =
-        \\This function returns the string representation of a type, as an array. It is equivalent to a string literal of the type name.
+        \\This function returns the string representation of a type, as
+        \\an array. It is equivalent to a string literal of the type name.
         ,
         .arguments = &.{
             "T: type",
@@ -1928,10 +2109,10 @@ pub const builtins = [_]Builtin{
         .signature = "@TypeOf(...) type",
         .snippet = "@TypeOf(${1:...})",
         .documentation =
-        \\`@TypeOf` is a special builtin function that takes any (nonzero) number of expressions as parameters and returns the type of the result, using [Peer Type Resolution](https://ziglang.org/documentation/master/#Peer-Type-Resolution).
+        \\`@TypeOf` is a special builtin function that takes any (nonzero) number of expressions
+        \\as parameters and returns the type of the result, using [Peer Type Resolution](https://ziglang.org/documentation/master/#Peer-Type-Resolution).
         \\
         \\The expressions are evaluated, however they are guaranteed to have no *runtime* side-effects:
-        \\
         \\```zig
         \\const std = @import("std");
         \\const expect = std.testing.expect;
@@ -1958,7 +2139,8 @@ pub const builtins = [_]Builtin{
         .signature = "@unionInit(comptime Union: type, comptime active_field_name: []const u8, init_expr) Union",
         .snippet = "@unionInit(${1:comptime Union: type}, ${2:comptime active_field_name: []const u8}, ${3:init_expr})",
         .documentation =
-        \\This is the same thing as [union](https://ziglang.org/documentation/master/#union) initialization syntax, except that the field name is a [comptime](https://ziglang.org/documentation/master/#comptime)-known value rather than an identifier token.
+        \\This is the same thing as [union](https://ziglang.org/documentation/master/#union) initialization syntax, except that the field name is a
+        \\[comptime](https://ziglang.org/documentation/master/#comptime)-known value rather than an identifier token.
         \\
         \\`@unionInit` forwards its [result location](https://ziglang.org/documentation/master/#Result-Location-Semantics) to `init_expr`.
         ,
