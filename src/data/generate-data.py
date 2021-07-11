@@ -1,15 +1,13 @@
 #!/usr/bin/env python3
 import urllib.request
 import re
-import minify_html
 
 zig_version = 'master'
 
 
-def fix_ul(s):
-    l = s.split('<li>')
-    l.insert(0, '')
-    return '\n  - '.join(l)
+def make_link(name, anchor):
+    anchor = anchor.replace(" ", "-").replace("@", "")
+    return f'[{name}](https://ziglang.org/documentation/{zig_version}/#{anchor})'
 
 
 url = f'https://raw.githubusercontent.com/ziglang/zig/{zig_version}/doc/langref.html.in'
@@ -57,41 +55,72 @@ for match in re.finditer(pattern, page, re.M | re.S):
             snippet += f'{i}:{param}}}, ${{'
             i += 1
         snippet = snippet[:-4] + ')'
-    docs = re.sub(r'{#see_also\|[^#]+#}', '', blk)
-    docs = re.sub(
-        r'      {#code_begin\|(obj|syntax|(test(\|(call|truncate))?))#}\n', '      <pre>{#syntax#}', docs)
-    docs = re.sub(
-        r'      {#code_begin\|test_(err|safety)\|[^#]+#}\n', '      <pre>{#syntax#}', docs)
-    docs = docs.replace('      {#code_release_fast#}\n', '')
-    docs = docs.replace('      {#code_end#}', '{#endsyntax#}</pre>')
-    docs = docs.replace('\n{#endsyntax#}</pre>', '{#endsyntax#}</pre>')
-    docs = minify_html.minify(docs)
-    prefix = '</pre><p>'
-    docs = docs[docs.index(prefix)+len(prefix):]
-    docs = docs.replace('<p>', '\n\n')
-    docs = re.sub(r'{#(end)?syntax#}', '`', docs)
-    # @cDefine
-    docs = re.sub(r'<pre><code[^>]+>([^<]+)</code></pre>', '`\\1`', docs)
-    docs = re.sub(r'</?code>', '`', docs)
-    docs = docs.replace('<pre>`', '\n\n```zig\n')
-    docs = docs.replace('`</pre>', '\n```')
-    # @setFloatMode
-    docs = docs.replace('```<', '```\n<')
-    # @TypeOf
-    docs = re.sub(r'</?em>', '*', docs)
-    docs = re.sub(r'<a href=([^>]+)>([^<]+)</a>', '[\\2](\\1)', docs)
-    docs = re.sub(r'{#link\|([^|#]+)\|([^|#]+)#}',
-                  lambda m: f'[{m[1]}](https://ziglang.org/documentation/{zig_version}/#{m[2].replace(" ","-")})', docs)
-    docs = re.sub(
-        r'{#link\|([^|#]+)#}', lambda m: f'[{m[1]}](https://ziglang.org/documentation/{zig_version}/#{m[1].replace(" ","-").replace("@","")})', docs)
-    docs = re.sub(r'<ul><li>(.+?)</ul>', lambda m: fix_ul(m[1]), docs)
+    prefix = '</pre>'
+    blk = blk[blk.index(prefix) + len(prefix):].replace('    ', '\t')
+    l = []
+    for line in blk.splitlines():
+        if line.startswith('\t  '):
+            line = line[3:]
+        l.append(line)
+    docs = []
+    in_code = False
+    for line in l[2:]:
+        if line == '{#code_release_fast#}':
+            continue
+        elif line == '<p>':
+            docs.append('')
+        elif line == '{#code_end#}':
+            docs.append('```')
+            in_code = False
+        elif line.startswith('{#code_begin'):
+            docs.append('```zig')
+            in_code = True
+        elif not line.startswith('{#see_also|'):
+            if line.startswith('<pre>{#syntax#}'):
+                docs.append('```zig')
+                line = line[len('<pre>{#syntax#}'):]
+                in_code = True
+            if line.endswith('{#endsyntax#}</pre>'):
+                line = line[:-len('{#endsyntax#}</pre>')]
+                docs.append(line)
+                docs.append('```')
+                in_code = False
+                continue
+            line = line.replace('\t', '    ')
+            if in_code:
+                docs.append(line)
+            else:
+                # li
+                line = line.replace('  </li>', '').replace('</li>', '')
+                line = line.replace('  <li>', '- ').replace('      - ', '- ')
+                # entity
+                line = line.replace('&lt;', '<').replace('&gt;', '>')
+                # em
+                line = re.sub(r'</?em>', '*', line)
+                # code blocks
+                line = re.sub(r'<pre><code>(.+?)</code></pre>',
+                              '```\n\\1\n```', line)
+                line = re.sub(r'<code>(.+?)</code>', '`\\1`', line)
+                line = re.sub(r'{#(end)?syntax#}', '`', line)
+                # link
+                line = re.sub(r'<a href="(.+?)">(.+?)</a>', '[\\2](\\1)', line)
+                line = re.sub(r'{#link\|([^|#]+)\|([^|#]+)#}',
+                              lambda m: make_link(m[1], m[2]), line)
+                line = re.sub(r'{#link\|([^|#]+)#}',
+                              lambda m: make_link(m[1], m[1]), line)
+                line = line.rstrip()
+                if line != '' and (not '</p>' in line) and (not '<ul>' in line) and (not '</ul>' in line):
+                    if '\n' in line:
+                        docs += line.splitlines()
+                    else:
+                        docs.append(line)
 
     print('    .{')
     print(f'        .name = "{name}",')
     print(f'        .signature = "{signature}",')
     print(f'        .snippet = "{snippet}",')
     print('        .documentation =')
-    for line in docs.splitlines():
+    for line in docs:
         print(r'        \\' + line)
     print('        ,')
     if params is None:
