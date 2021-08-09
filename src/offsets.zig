@@ -14,7 +14,7 @@ pub const DocumentPosition = struct {
 };
 
 pub fn documentPosition(doc: types.TextDocument, position: types.Position, encoding: Encoding) !DocumentPosition {
-    var split_iterator = std.mem.split(doc.text, "\n");
+    var split_iterator = std.mem.split(u8, doc.text, "\n");
 
     var line_idx: i64 = 0;
     var line: []const u8 = "";
@@ -185,7 +185,7 @@ pub fn documentRange(doc: types.TextDocument, encoding: Encoding) !types.Range {
     var line_idx: i64 = 0;
     var curr_line: []const u8 = doc.text;
 
-    var split_iterator = std.mem.split(doc.text, "\n");
+    var split_iterator = std.mem.split(u8, doc.text, "\n");
     while (split_iterator.next()) |line| : (line_idx += 1) {
         curr_line = line;
     }
