@@ -57,7 +57,7 @@ pub fn pathRelative(allocator: *mem.Allocator, base: []const u8, rel: []const u8
     mem.copy(u8, result, base);
     var result_index: usize = base.len;
 
-    var it = mem.tokenize(rel, "/");
+    var it = mem.tokenize(u8, rel, "/");
     while (it.next()) |component| {
         if (mem.eql(u8, component, ".")) {
             continue;

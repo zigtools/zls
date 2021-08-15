@@ -225,7 +225,7 @@ pub fn findZig(allocator: *std.mem.Allocator) !?[]const u8 {
     const zig_exe = try std.fmt.allocPrint(allocator, "zig{s}", .{exe_extension});
     defer allocator.free(zig_exe);
 
-    var it = std.mem.tokenize(env_path, &[_]u8{std.fs.path.delimiter});
+    var it = std.mem.tokenize(u8, env_path, &[_]u8{std.fs.path.delimiter});
     while (it.next()) |path| {
         if (std.builtin.os.tag == .windows) {
             if (std.mem.indexOfScalar(u8, path, '/') != null) continue;
