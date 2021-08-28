@@ -9,7 +9,10 @@ pub fn build(b: *std.build.Builder) !void {
 
     const mode = b.standardReleaseOptions();
     const exe = b.addExecutable("zls", "src/main.zig");
-    exe.addBuildOption(
+    const exe_options = b.addOptions();
+    exe.addOptions("build_options", exe_options);
+
+    exe_options.addOption(
         []const u8,
         "data_version",
         b.option([]const u8, "data_version", "The data version - 0.7.0, 0.7.1 or master.") orelse "master",
