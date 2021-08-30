@@ -107,7 +107,7 @@ const Builder = struct {
         // TODO More highlighting here
         const tok_id = tree.tokens.items(.tag)[tok];
         const tok_type: TokenType = switch (tok_id) {
-            .keyword_true, .keyword_false, .keyword_null, .keyword_undefined, .keyword_unreachable => .keywordLiteral,
+            .keyword_unreachable => .keywordLiteral,
             .integer_literal, .float_literal => .number,
             .string_literal, .multiline_string_literal_line, .char_literal => .string,
             .period, .comma, .r_paren, .l_paren, .r_brace, .l_brace, .semicolon, .colon => return,
@@ -770,12 +770,7 @@ fn writeNodeTokens(
 
             while (cur_tok <= last_tok) : (cur_tok += 1) try writeToken(builder, cur_tok, .string);
         },
-        .true_literal,
-        .false_literal,
-        .null_literal,
-        .undefined_literal,
-        .unreachable_literal,
-        => {
+        .unreachable_literal => {
             try writeToken(builder, main_token, .keywordLiteral);
         },
         .error_set_decl => {
