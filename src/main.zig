@@ -1,6 +1,8 @@
 const std = @import("std");
 const build_options = @import("build_options");
 
+const ast = std.zig.ast;
+
 const Config = @import("config.zig");
 const DocumentStore = @import("document_store.zig");
 const readRequestHeader = @import("header.zig").readRequestHeader;
@@ -200,7 +202,7 @@ fn showMessage(message_type: types.MessageType, message: []const u8) !void {
 }
 
 // TODO: Is this correct or can we get a better end?
-fn astLocationToRange(loc: std.zig.ast.Tree.Location) types.Range {
+fn astLocationToRange(loc: ast.Tree.Location) types.Range {
     return .{
         .start = .{
             .line = @intCast(i64, loc.line),
@@ -246,7 +248,7 @@ fn publishDiagnostics(arena: *std.heap.ArenaAllocator, handle: DocumentStore.Han
                 .fn_proto_simple,
                 .fn_decl,
                 => blk: {
-                    var buf: [1]std.zig.ast.Node.Index = undefined;
+                    var buf: [1]ast.Node.Index = undefined;
                     const func = analysis.fnProto(tree, decl_idx, &buf).?;
                     if (func.extern_export_inline_token != null) break :blk;
 
@@ -415,7 +417,7 @@ fn nodeToCompletion(
         .fn_proto_simple,
         .fn_decl,
         => {
-            var buf: [1]std.zig.ast.Node.Index = undefined;
+            var buf: [1]ast.Node.Index = undefined;
             const func = analysis.fnProto(tree, node, &buf).?;
             if (func.name_token) |name_token| {
                 const use_snippets = config.enable_snippets and client_capabilities.supports_snippets;
@@ -637,7 +639,7 @@ fn hoverSymbol(
             }
             doc_str = try analysis.getDocComments(&arena.allocator, tree, node, hover_kind);
 
-            var buf: [1]std.zig.ast.Node.Index = undefined;
+            var buf: [1]ast.Node.Index = undefined;
 
             if (analysis.varDecl(tree, node)) |var_decl| {
                 break :def analysis.getVariableSignature(tree, var_decl);

@@ -3,8 +3,17 @@ const offsets = @import("offsets.zig");
 const DocumentStore = @import("document_store.zig");
 const analysis = @import("analysis.zig");
 const ast = std.zig.ast;
+const fnProto = ast.Tree.fnProto;
+const lastToken = ast.Tree.lastToken;
+const isContainer = std.meta.trait.isContainer;
 const log = std.log.scoped(.semantic_tokens);
-usingnamespace @import("ast.zig");
+
+const containerField = @import("ast.zig").containerField;
+const declMembers = @import("ast.zig").declMembers;
+const ifFull = @import("ast.zig").ifFull;
+const ptrType = @import("ast.zig").ptrType;
+const varDecl = @import("ast.zig").varDecl;
+const whileAst = @import("ast.zig").whileAst;
 
 pub const TokenType = enum(u32) {
     type,

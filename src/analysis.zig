@@ -1,10 +1,22 @@
 const std = @import("std");
 const DocumentStore = @import("document_store.zig");
 const ast = std.zig.ast;
+const fnProto = ast.Tree.fnProto;
+const lastToken = ast.Tree.lastToken;
 const types = @import("types.zig");
 const offsets = @import("offsets.zig");
+const isContainer = std.meta.trait.isContainer;
 const log = std.log.scoped(.analysis);
-usingnamespace @import("ast.zig");
+
+const callFull = @import("ast.zig").callFull;
+const containerField = @import("ast.zig").containerField;
+const declMembers = @import("ast.zig").declMembers;
+const ifFull = @import("ast.zig").ifFull;
+const isBuiltinCall = @import("ast.zig").isBuiltinCall;
+const isCall = @import("ast.zig").isCall;
+const ptrType = @import("ast.zig").ptrType;
+const varDecl = @import("ast.zig").varDecl;
+const whileAst = @import("ast.zig").whileAst;
 
 var using_trail: std.ArrayList([*]const u8) = undefined;
 var resolve_trail: std.ArrayList(NodeWithHandle) = undefined;
@@ -2460,7 +2472,7 @@ pub const DocumentScope = struct {
             while (decl_it.next()) |_| : (idx += 1) {
                 if (idx != 0) log.debug(", ", .{});
             }
-            log.debug("{s}", .{name_decl.key});
+            //log.debug("{s}", .{name_decl.key});
             log.debug("\n--------------------------\n", .{});
         }
     }

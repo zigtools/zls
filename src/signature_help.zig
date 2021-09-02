@@ -4,9 +4,10 @@ const offsets = @import("offsets.zig");
 const DocumentStore = @import("document_store.zig");
 const types = @import("types.zig");
 const ast = std.zig.ast;
+const fnProto = ast.Tree.fnProto;
+const lastToken = ast.Tree.lastToken;
 const Token = std.zig.Token;
 const identifierFromPosition = @import("main.zig").identifierFromPosition;
-usingnamespace @import("ast.zig");
 
 fn fnProtoToSignatureInfo(
     document_store: *DocumentStore,

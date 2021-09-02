@@ -3,10 +3,16 @@ const DocumentStore = @import("document_store.zig");
 const analysis = @import("analysis.zig");
 const types = @import("types.zig");
 const offsets = @import("offsets.zig");
-const log = std.log.scoped(.references);
-usingnamespace @import("ast.zig");
-
 const ast = std.zig.ast;
+const fnProto = ast.Tree.fnProto;
+const log = std.log.scoped(.references);
+
+const containerField = @import("ast.zig").containerField;
+const declMembers = @import("ast.zig").declMembers;
+const ifFull = @import("ast.zig").ifFull;
+const ptrType = @import("ast.zig").ptrType;
+const varDecl = @import("ast.zig").varDecl;
+const whileAst = @import("ast.zig").whileAst;
 
 fn tokenReference(
     handle: *DocumentStore.Handle,
