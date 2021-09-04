@@ -13,6 +13,7 @@ const rename = @import("rename.zig");
 const offsets = @import("offsets.zig");
 const setup = @import("setup.zig");
 const semantic_tokens = @import("semantic_tokens.zig");
+const ast = std.zig.Ast;
 const known_folders = @import("known-folders");
 const data = blk: {
     if (std.mem.eql(u8, build_options.data_version, "0.7.0")) break :blk @import("data/0.7.0.zig");
@@ -200,7 +201,7 @@ fn showMessage(message_type: types.MessageType, message: []const u8) !void {
 }
 
 // TODO: Is this correct or can we get a better end?
-fn astLocationToRange(loc: std.zig.ast.Tree.Location) types.Range {
+fn astLocationToRange(loc: ast.Location) types.Range {
     return .{
         .start = .{
             .line = @intCast(i64, loc.line),
@@ -246,7 +247,7 @@ fn publishDiagnostics(arena: *std.heap.ArenaAllocator, handle: DocumentStore.Han
                 .fn_proto_simple,
                 .fn_decl,
                 => blk: {
-                    var buf: [1]std.zig.ast.Node.Index = undefined;
+                    var buf: [1]ast.Node.Index = undefined;
                     const func = analysis.fnProto(tree, decl_idx, &buf).?;
                     if (func.extern_export_inline_token != null) break :blk;
 
@@ -415,7 +416,7 @@ fn nodeToCompletion(
         .fn_proto_simple,
         .fn_decl,
         => {
-            var buf: [1]std.zig.ast.Node.Index = undefined;
+            var buf: [1]ast.Node.Index = undefined;
             const func = analysis.fnProto(tree, node, &buf).?;
             if (func.name_token) |name_token| {
                 const use_snippets = config.enable_snippets and client_capabilities.supports_snippets;
@@ -637,7 +638,7 @@ fn hoverSymbol(
             }
             doc_str = try analysis.getDocComments(&arena.allocator, tree, node, hover_kind);
 
-            var buf: [1]std.zig.ast.Node.Index = undefined;
+            var buf: [1]ast.Node.Index = undefined;
 
             if (analysis.varDecl(tree, node)) |var_decl| {
                 break :def analysis.getVariableSignature(tree, var_decl);

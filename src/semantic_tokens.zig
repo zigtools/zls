@@ -2,8 +2,9 @@ const std = @import("std");
 const offsets = @import("offsets.zig");
 const DocumentStore = @import("document_store.zig");
 const analysis = @import("analysis.zig");
-const ast = std.zig.ast;
+const ast = std.zig.Ast;
 const log = std.log.scoped(.semantic_tokens);
+const SemanticToken = @This();
 usingnamespace @import("ast.zig");
 
 pub const TokenType = enum(u32) {
@@ -195,7 +196,7 @@ inline fn writeTokenMod(
     }
 }
 
-fn writeDocComments(builder: *Builder, tree: ast.Tree, doc: ast.TokenIndex) !void {
+fn writeDocComments(builder: *Builder, tree: SemanticToken.Tree, doc: ast.TokenIndex) !void {
     const token_tags = tree.tokens.items(.tag);
     var tok_idx = doc;
     while (token_tags[tok_idx] == .doc_comment or
@@ -335,7 +336,7 @@ fn writeNodeTokens(
         .simple_var_decl,
         .aligned_var_decl,
         => {
-            const var_decl = varDecl(tree, node).?;
+            const var_decl = SemanticToken.varDecl(tree, node).?;
             if (analysis.getDocCommentTokenIndex(token_tags, main_token)) |comment_idx|
                 try writeDocComments(builder, tree, comment_idx);
 
@@ -444,7 +445,7 @@ fn writeNodeTokens(
         .fn_decl,
         => {
             var buf: [1]ast.Node.Index = undefined;
-            const fn_proto: ast.full.FnProto = fnProto(tree, node, &buf).?;
+            const fn_proto: ast.full.FnProto = SemanticToken.fnProto(tree, node, &buf).?;
             if (analysis.getDocCommentTokenIndex(token_tags, main_token)) |docs|
                 try writeDocComments(builder, tree, docs);
 
@@ -536,7 +537,7 @@ fn writeNodeTokens(
         .for_simple,
         .@"for",
         => {
-            const while_node = whileAst(tree, node).?;
+            const while_node = SemanticToken.whileAst(tree, node).?;
             try writeToken(builder, while_node.label_token, .label);
             try writeToken(builder, while_node.inline_token, .keyword);
             try writeToken(builder, while_node.ast.while_token, .keyword);
@@ -570,7 +571,7 @@ fn writeNodeTokens(
         .@"if",
         .if_simple,
         => {
-            const if_node = ifFull(tree, node);
+            const if_node = SemanticToken.ifFull(tree, node);
 
             try writeToken(builder, if_node.ast.if_token, .keyword);
             try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, if_node.ast.cond_expr });
@@ -642,7 +643,7 @@ fn writeNodeTokens(
                     .node = struct_init.ast.type_expr,
                     .handle = handle,
                 })) |struct_type| switch (struct_type.type.data) {
-                    .other => |type_node| if (isContainer(struct_type.handle.tree, type_node))
+                    .other => |type_node| if (SemanticToken.isContainer(struct_type.handle.tree, type_node))
                         fieldTokenType(type_node, struct_type.handle)
                     else
                         null,
@@ -678,8 +679,8 @@ fn writeNodeTokens(
             try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, call.ast.fn_expr });
 
             if (builder.previous_token) |prev| {
-                if (prev != lastToken(tree, call.ast.fn_expr) and token_tags[lastToken(tree, call.ast.fn_expr)] == .identifier) {
-                    try writeToken(builder, lastToken(tree, call.ast.fn_expr), .function);
+                if (prev != SemanticToken.lastToken(tree, call.ast.fn_expr) and token_tags[SemanticToken.lastToken(tree, call.ast.fn_expr)] == .identifier) {
+                    try writeToken(builder, SemanticToken.lastToken(tree, call.ast.fn_expr), .function);
                 }
             }
             for (call.ast.params) |param| try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, param });
@@ -697,7 +698,7 @@ fn writeNodeTokens(
 
             try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, slice.ast.sliced });
             try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, slice.ast.start });
-            try writeToken(builder, lastToken(tree, slice.ast.start) + 1, .operator);
+            try writeToken(builder, SemanticToken.lastToken(tree, slice.ast.start) + 1, .operator);
 
             try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, slice.ast.end });
             try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, slice.ast.sentinel });
@@ -894,7 +895,7 @@ fn writeNodeTokens(
                 switch (decl_type.decl.*) {
                     .ast_node => |decl_node| {
                         if (decl_type.handle.tree.nodes.items(.tag)[decl_node].isContainerField()) {
-                            const tok_type: ?TokenType = if (isContainer(lhs_type.handle.tree, left_type_node))
+                            const tok_type: ?TokenType = if (SemanticToken.isContainer(lhs_type.handle.tree, left_type_node))
                                 fieldTokenType(decl_node, lhs_type.handle)
                             else if (left_type_node == 0)
                                 TokenType.field
@@ -920,7 +921,7 @@ fn writeNodeTokens(
         .ptr_type_bit_range,
         .ptr_type_sentinel,
         => {
-            const ptr_type = ptrType(tree, node).?;
+            const ptr_type = SemanticToken.ptrType(tree, node).?;
 
             if (ptr_type.size == .One and token_tags[main_token] == .asterisk_asterisk and
                 main_token == main_tokens[ptr_type.ast.child_type])
@@ -995,7 +996,7 @@ fn writeContainerField(
     child_frame: anytype,
 ) !void {
     const tree = builder.handle.tree;
-    const container_field = containerField(tree, node).?;
+    const container_field = SemanticToken.containerField(tree, node).?;
     const base = tree.nodes.items(.main_token)[node];
     const tokens = tree.tokens.items(.tag);
 
@@ -1015,9 +1016,9 @@ fn writeContainerField(
 
     if (container_field.ast.value_expr != 0) block: {
         const eq_tok: ast.TokenIndex = if (container_field.ast.align_expr != 0)
-            lastToken(tree, container_field.ast.align_expr) + 2
+            SemanticToken.lastToken(tree, container_field.ast.align_expr) + 2
         else if (container_field.ast.type_expr != 0)
-            lastToken(tree, container_field.ast.type_expr) + 1
+            SemanticToken.lastToken(tree, container_field.ast.type_expr) + 1
         else
             break :block;
 
@@ -1038,7 +1039,7 @@ pub fn writeAllSemanticTokens(
 
     // reverse the ast from the root declarations
     var buf: [2]ast.Node.Index = undefined;
-    for (declMembers(handle.tree, 0, &buf)) |child| {
+    for (SemanticToken.declMembers(handle.tree, 0, &buf)) |child| {
         writeNodeTokens(&builder, arena, store, child) catch |err| switch (err) {
             error.MovedBackwards => break,
             else => |e| return e,
