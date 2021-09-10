@@ -3,9 +3,10 @@ const analysis = @import("analysis.zig");
 const offsets = @import("offsets.zig");
 const DocumentStore = @import("document_store.zig");
 const types = @import("types.zig");
-const ast = std.zig.ast;
+const ast = std.zig.Ast;
 const Token = std.zig.Token;
 const identifierFromPosition = @import("main.zig").identifierFromPosition;
+const SignatureHelp = @This();
 usingnamespace @import("ast.zig");
 
 fn fnProtoToSignatureInfo(
@@ -58,7 +59,7 @@ fn fnProtoToSignatureInfo(
             if (param_label_start == 0)
                 param_label_start = token_starts[tree.firstToken(param.type_expr)];
 
-            const last_param_tok = lastToken(tree, param.type_expr);
+            const last_param_tok = SignatureHelp.lastToken(tree, param.type_expr);
             param_label_end = token_starts[last_param_tok] + tree.tokenSlice(last_param_tok).len;
         }
         const param_label = tree.source[param_label_start..param_label_end];
@@ -287,7 +288,7 @@ pub fn getSignatureInfo(
                     };
 
                     var buf: [1]ast.Node.Index = undefined;
-                    if (fnProto(type_handle.handle.tree, node, &buf)) |proto| {
+                    if (SignatureHelp.fnProto(type_handle.handle.tree, node, &buf)) |proto| {
                         return try fnProtoToSignatureInfo(
                             document_store,
                             arena,
@@ -339,7 +340,7 @@ pub fn getSignatureInfo(
                         }
                     }
 
-                    if (fnProto(res_handle.tree, node, &buf)) |proto| {
+                    if (SignatureHelp.fnProto(res_handle.tree, node, &buf)) |proto| {
                         return try fnProtoToSignatureInfo(
                             document_store,
                             arena,

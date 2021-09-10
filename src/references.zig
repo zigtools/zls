@@ -4,9 +4,10 @@ const analysis = @import("analysis.zig");
 const types = @import("types.zig");
 const offsets = @import("offsets.zig");
 const log = std.log.scoped(.references);
+const Reference = @This();
 usingnamespace @import("ast.zig");
 
-const ast = std.zig.ast;
+const ast = std.zig.Ast;
 
 fn tokenReference(
     handle: *DocumentStore.Handle,
@@ -122,7 +123,7 @@ fn symbolReferencesInternal(
         .error_set_decl,
         => {
             var buf: [2]ast.Node.Index = undefined;
-            for (declMembers(tree, node, &buf)) |member|
+            for (Reference.declMembers(tree, node, &buf)) |member|
                 try symbolReferencesInternal(arena, store, .{ .node = member, .handle = handle }, decl, encoding, context, handler);
         },
         .global_var_decl,
@@ -130,7 +131,7 @@ fn symbolReferencesInternal(
         .simple_var_decl,
         .aligned_var_decl,
         => {
-            const var_decl = varDecl(tree, node).?;
+            const var_decl = Reference.varDecl(tree, node).?;
             if (var_decl.ast.type_node != 0) {
                 try symbolReferencesInternal(arena, store, .{ .node = var_decl.ast.type_node, .handle = handle }, decl, encoding, context, handler);
             }
@@ -145,7 +146,7 @@ fn symbolReferencesInternal(
         .container_field_align,
         .container_field_init,
         => {
-            const field = containerField(tree, node).?;
+            const field = Reference.containerField(tree, node).?;
             if (field.ast.type_expr != 0) {
                 try symbolReferencesInternal(arena, store, .{ .node = field.ast.type_expr, .handle = handle }, decl, encoding, context, handler);
             }
@@ -167,7 +168,7 @@ fn symbolReferencesInternal(
         .fn_decl,
         => {
             var buf: [1]ast.Node.Index = undefined;
-            const fn_proto = fnProto(tree, node, &buf).?;
+            const fn_proto = Reference.fnProto(tree, node, &buf).?;
             var it = fn_proto.iterate(tree);
             while (it.next()) |param| {
                 if (param.type_expr != 0)
@@ -233,7 +234,7 @@ fn symbolReferencesInternal(
         .for_simple,
         .@"for",
         => {
-            const loop = whileAst(tree, node).?;
+            const loop = Reference.whileAst(tree, node).?;
             try symbolReferencesInternal(arena, store, .{ .node = loop.ast.cond_expr, .handle = handle }, decl, encoding, context, handler);
             if (loop.ast.cont_expr != 0) {
                 try symbolReferencesInternal(arena, store, .{ .node = loop.ast.cont_expr, .handle = handle }, decl, encoding, context, handler);
@@ -246,7 +247,7 @@ fn symbolReferencesInternal(
         .@"if",
         .if_simple,
         => {
-            const if_node = ifFull(tree, node);
+            const if_node = Reference.ifFull(tree, node);
 
             try symbolReferencesInternal(arena, store, .{ .node = if_node.ast.cond_expr, .handle = handle }, decl, encoding, context, handler);
             try symbolReferencesInternal(arena, store, .{ .node = if_node.ast.then_expr, .handle = handle }, decl, encoding, context, handler);
@@ -265,7 +266,7 @@ fn symbolReferencesInternal(
         .ptr_type_bit_range,
         .ptr_type_sentinel,
         => {
-            const ptr_type = ptrType(tree, node).?;
+            const ptr_type = Reference.ptrType(tree, node).?;
 
             if (ptr_type.ast.align_node != 0) {
                 try symbolReferencesInternal(arena, store, .{ .node = ptr_type.ast.align_node, .handle = handle }, decl, encoding, context, handler);
@@ -577,7 +578,7 @@ pub fn symbolReferences(
                 switch (scope.data) {
                     .function => |proto| {
                         var buf: [1]ast.Node.Index = undefined;
-                        const fn_proto = fnProto(curr_handle.tree, proto, &buf).?;
+                        const fn_proto = Reference.fnProto(curr_handle.tree, proto, &buf).?;
                         var it = fn_proto.iterate(curr_handle.tree);
                         while (it.next()) |candidate| {
                             if (std.meta.eql(candidate, param)) {
