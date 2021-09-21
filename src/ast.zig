@@ -65,6 +65,7 @@ pub fn ptrTypeSimple(tree: Tree, node: Node.Index) full.PtrType {
     return fullPtrType(tree, .{
         .main_token = tree.nodes.items(.main_token)[node],
         .align_node = extra.align_node,
+        .addrspace_node = extra.addrspace_node,
         .sentinel = extra.sentinel,
         .bit_range_start = 0,
         .bit_range_end = 0,
@@ -78,6 +79,7 @@ pub fn ptrTypeSentinel(tree: Tree, node: Node.Index) full.PtrType {
     return fullPtrType(tree, .{
         .main_token = tree.nodes.items(.main_token)[node],
         .align_node = 0,
+        .addrspace_node = 0,
         .sentinel = data.lhs,
         .bit_range_start = 0,
         .bit_range_end = 0,
@@ -91,6 +93,7 @@ pub fn ptrTypeAligned(tree: Tree, node: Node.Index) full.PtrType {
     return fullPtrType(tree, .{
         .main_token = tree.nodes.items(.main_token)[node],
         .align_node = data.lhs,
+        .addrspace_node = 0,
         .sentinel = 0,
         .bit_range_start = 0,
         .bit_range_end = 0,
@@ -105,6 +108,7 @@ pub fn ptrTypeBitRange(tree: Tree, node: Node.Index) full.PtrType {
     return fullPtrType(tree, .{
         .main_token = tree.nodes.items(.main_token)[node],
         .align_node = extra.align_node,
+        .addrspace_node = extra.addrspace_node,
         .sentinel = extra.sentinel,
         .bit_range_start = extra.bit_range_start,
         .bit_range_end = extra.bit_range_end,
