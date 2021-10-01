@@ -1,10 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-var builder: *std.build.Builder = undefined;
-
 pub fn build(b: *std.build.Builder) !void {
-    builder = b;
     const target = b.standardTargetOptions(.{});
 
     const mode = b.standardReleaseOptions();
@@ -27,7 +24,7 @@ pub fn build(b: *std.build.Builder) !void {
     b.installFile("src/special/build_runner.zig", "bin/build_runner.zig");
 
     const test_step = b.step("test", "Run all the tests");
-    test_step.dependOn(builder.getInstallStep());
+    test_step.dependOn(b.getInstallStep());
 
     var unit_tests = b.addTest("src/unit_tests.zig");
     unit_tests.setBuildMode(.Debug);
