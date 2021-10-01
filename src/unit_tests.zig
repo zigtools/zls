@@ -1,9 +1,8 @@
-const analysis = @import("analysis.zig");
-const types = @import("types.zig");
-const offsets = @import("offsets.zig");
-const URI = @import("uri.zig");
-
 const std = @import("std");
+const analysis = @import("./analysis.zig");
+const types = @import("./types.zig");
+const offsets = @import("./offsets.zig");
+const URI = @import("./uri.zig");
 
 const allocator = std.testing.allocator;
 

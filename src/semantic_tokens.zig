@@ -1,11 +1,11 @@
 const std = @import("std");
-const offsets = @import("offsets.zig");
-const DocumentStore = @import("document_store.zig");
-const analysis = @import("analysis.zig");
+const offsets = @import("./offsets.zig");
+const DocumentStore = @import("./document_store.zig");
+const analysis = @import("./analysis.zig");
 const ast = std.zig.Ast;
 const log = std.log.scoped(.semantic_tokens);
 const SemanticToken = @This();
-usingnamespace @import("ast.zig");
+usingnamespace @import("./ast.zig");
 
 pub const TokenType = enum(u32) {
     type,

@@ -1,11 +1,11 @@
 const std = @import("std");
-const DocumentStore = @import("document_store.zig");
+const DocumentStore = @import("./document_store.zig");
 const ast = std.zig.Ast;
-const types = @import("types.zig");
-const offsets = @import("offsets.zig");
+const types = @import("./types.zig");
+const offsets = @import("./offsets.zig");
 const log = std.log.scoped(.analysis);
 const Analysis = @This();
-usingnamespace @import("ast.zig");
+usingnamespace @import("./ast.zig");
 
 var using_trail: std.ArrayList([*]const u8) = undefined;
 var resolve_trail: std.ArrayList(NodeWithHandle) = undefined;
@@ -1516,7 +1516,7 @@ fn tokenRangeAppend(prev: SourceRange, token: std.zig.Token) SourceRange {
     };
 }
 
-const DocumentPosition = @import("offsets.zig").DocumentPosition;
+const DocumentPosition = offsets.DocumentPosition;
 
 pub fn documentPositionContext(
     arena: *std.heap.ArenaAllocator,

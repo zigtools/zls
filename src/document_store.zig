@@ -1,11 +1,11 @@
 const std = @import("std");
-const types = @import("types.zig");
-const URI = @import("uri.zig");
-const analysis = @import("analysis.zig");
-const offsets = @import("offsets.zig");
+const types = @import("./types.zig");
+const URI = @import("./uri.zig");
+const analysis = @import("./analysis.zig");
+const offsets = @import("./offsets.zig");
 const log = std.log.scoped(.doc_store);
 const Tree = std.zig.Ast;
-const BuildAssociatedConfig = @import("build_associated_config.zig");
+const BuildAssociatedConfig = @import("./build_associated_config.zig");
 
 const DocumentStore = @This();
 

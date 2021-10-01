@@ -6,6 +6,7 @@ const reserved_chars = &[_]u8{
     '(', ')', '*', '+', ',', ':',
     ';', '=', '?', '@', '[', ']',
 };
+
 const reserved_escapes = blk: {
     var escapes: [reserved_chars.len][3]u8 = [_][3]u8{[_]u8{undefined} ** 3} ** reserved_chars.len;
 

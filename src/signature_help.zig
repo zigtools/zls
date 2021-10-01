@@ -1,13 +1,13 @@
 const std = @import("std");
-const analysis = @import("analysis.zig");
-const offsets = @import("offsets.zig");
-const DocumentStore = @import("document_store.zig");
-const types = @import("types.zig");
+const analysis = @import("./analysis.zig");
+const offsets = @import("./offsets.zig");
+const DocumentStore = @import("./document_store.zig");
+const types = @import("./types.zig");
 const ast = std.zig.Ast;
 const Token = std.zig.Token;
-const identifierFromPosition = @import("main.zig").identifierFromPosition;
+const identifierFromPosition = @import("./main.zig").identifierFromPosition;
 const SignatureHelp = @This();
-usingnamespace @import("ast.zig");
+usingnamespace @import("./ast.zig");
 
 fn fnProtoToSignatureInfo(
     document_store: *DocumentStore,

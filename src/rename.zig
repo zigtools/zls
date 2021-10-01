@@ -1,11 +1,9 @@
 const std = @import("std");
-const DocumentStore = @import("document_store.zig");
-const analysis = @import("analysis.zig");
-const references = @import("references.zig");
-const types = @import("types.zig");
-const offsets = @import("offsets.zig");
-
-const ast = std.zig.ast;
+const DocumentStore = @import("./document_store.zig");
+const analysis = @import("./analysis.zig");
+const references = @import("./references.zig");
+const types = @import("./types.zig");
+const offsets = @import("./offsets.zig");
 
 // TODO Use a map to array lists and collect at the end instead?
 const RefHandlerContext = struct {

@@ -1,11 +1,11 @@
 const std = @import("std");
-const DocumentStore = @import("document_store.zig");
-const analysis = @import("analysis.zig");
-const types = @import("types.zig");
-const offsets = @import("offsets.zig");
+const DocumentStore = @import("./document_store.zig");
+const analysis = @import("./analysis.zig");
+const types = @import("./types.zig");
+const offsets = @import("./offsets.zig");
 const log = std.log.scoped(.references);
 const Reference = @This();
-usingnamespace @import("ast.zig");
+usingnamespace @import("./ast.zig");
 
 const ast = std.zig.Ast;
 

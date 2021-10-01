@@ -1,18 +1,18 @@
 const std = @import("std");
 const build_options = @import("build_options");
 
-const Config = @import("config.zig");
-const DocumentStore = @import("document_store.zig");
-const readRequestHeader = @import("header.zig").readRequestHeader;
-const requests = @import("requests.zig");
-const types = @import("types.zig");
-const analysis = @import("analysis.zig");
-const URI = @import("uri.zig");
-const references = @import("references.zig");
-const rename = @import("rename.zig");
-const offsets = @import("offsets.zig");
-const setup = @import("setup.zig");
-const semantic_tokens = @import("semantic_tokens.zig");
+const Config = @import("./config.zig");
+const DocumentStore = @import("./document_store.zig");
+const readRequestHeader = @import("./header.zig").readRequestHeader;
+const requests = @import("./requests.zig");
+const types = @import("./types.zig");
+const analysis = @import("./analysis.zig");
+const URI = @import("./uri.zig");
+const references = @import("./references.zig");
+const rename = @import("./rename.zig");
+const offsets = @import("./offsets.zig");
+const setup = @import("./setup.zig");
+const semantic_tokens = @import("./semantic_tokens.zig");
 const ast = std.zig.Ast;
 const known_folders = @import("known-folders");
 const data = blk: {
@@ -294,13 +294,7 @@ fn publishDiagnostics(arena: *std.heap.ArenaAllocator, handle: DocumentStore.Han
     });
 }
 
-fn typeToCompletion(
-    arena: *std.heap.ArenaAllocator,
-    list: *std.ArrayList(types.CompletionItem),
-    field_access: analysis.FieldAccessReturn,
-    orig_handle: *DocumentStore.Handle,
-    config: Config,
-) error{OutOfMemory}!void {
+fn typeToCompletion(arena: *std.heap.ArenaAllocator, list: *std.ArrayList(types.CompletionItem), field_access: analysis.FieldAccessReturn, orig_handle: *DocumentStore.Handle, config: Config) error{OutOfMemory}!void {
     const type_handle = field_access.original;
     switch (type_handle.type.data) {
         .slice => {

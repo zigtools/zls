@@ -1,5 +1,5 @@
 const std = @import("std");
-const types = @import("types.zig");
+const types = @import("./types.zig");
 const ast = std.zig.Ast;
 const Tree = ast;
 
