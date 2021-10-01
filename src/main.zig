@@ -35,12 +35,7 @@ var actual_log_level: std.log.Level = switch (std.builtin.mode) {
     else => .notice,
 };
 
-pub fn log(
-    comptime message_level: std.log.Level,
-    comptime scope: @Type(.EnumLiteral),
-    comptime format: []const u8,
-    args: anytype,
-) void {
+pub fn log(comptime message_level: std.log.Level, comptime scope: @Type(.EnumLiteral), comptime format: []const u8, args: anytype) void {
     if (@enumToInt(message_level) > @enumToInt(actual_log_level)) {
         return;
     }

@@ -68,13 +68,7 @@ fn fnProtoToSignatureInfo(document_store: *DocumentStore, arena: *std.heap.Arena
     };
 }
 
-pub fn getSignatureInfo(
-    document_store: *DocumentStore,
-    arena: *std.heap.ArenaAllocator,
-    handle: *DocumentStore.Handle,
-    absolute_index: usize,
-    comptime data: type,
-) !?types.SignatureInformation {
+pub fn getSignatureInfo(document_store: *DocumentStore, arena: *std.heap.ArenaAllocator, handle: *DocumentStore.Handle, absolute_index: usize, comptime data: type) !?types.SignatureInformation {
     const innermost_block = analysis.innermostBlockScope(handle.*, absolute_index);
     const tree = handle.tree;
     const token_tags = tree.tokens.items(.tag);

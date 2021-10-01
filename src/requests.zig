@@ -51,14 +51,8 @@ fn fromDynamicTreeInternal(arena: *std.heap.ArenaAllocator, value: std.json.Valu
             const actual_type = if (is_optional) std.meta.Child(field.field_type) else field.field_type;
 
             const is_struct = comptime std.meta.trait.is(.Struct)(actual_type);
-            const is_default = comptime if (is_struct) std.meta.trait.hasDecls(actual_type, .{
-                "default",
-                "value_type",
-            }) else false;
-            const is_transform = comptime if (is_struct) std.meta.trait.hasDecls(actual_type, .{
-                "original_type",
-                "transform",
-            }) else false;
+            const is_default = comptime if (is_struct) std.meta.trait.hasDecls(actual_type, .{ "default", "value_type" }) else false;
+            const is_transform = comptime if (is_struct) std.meta.trait.hasDecls(actual_type, .{ "original_type", "transform" }) else false;
 
             if (value.Object.get(field.name)) |json_field| {
                 if (is_exists) {

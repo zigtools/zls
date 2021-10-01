@@ -79,12 +79,8 @@ pub const MessageType = enum(i64) {
     Info = 3,
     Log = 4,
 
-    pub fn jsonStringify(
-        value: MessageType,
-        options: json.StringifyOptions,
-        out_stream: anytype,
-    ) !void {
-        try json.stringify(@enumToInt(value), options, out_stream);
+    pub fn jsonStringify(value: MessageType, options: std.json.StringifyOptions, out_stream: anytype) !void {
+        try std.json.stringify(@enumToInt(value), options, out_stream);
     }
 };
 
@@ -175,16 +171,12 @@ pub const MarkupContent = struct {
         PlainText = 0,
         Markdown = 1,
 
-        pub fn jsonStringify(
-            value: Kind,
-            options: json.StringifyOptions,
-            out_stream: anytype,
-        ) !void {
+        pub fn jsonStringify(value: Kind, options: std.json.StringifyOptions, out_stream: anytype) !void {
             const str = switch (value) {
                 .PlainText => "plaintext",
                 .Markdown => "markdown",
             };
-            try json.stringify(str, options, out_stream);
+            try std.json.stringify(str, options, out_stream);
         }
     };
 
@@ -329,12 +321,8 @@ const InitializeResult = struct {
             Full = 1,
             Incremental = 2,
 
-            pub fn jsonStringify(
-                value: @This(),
-                options: json.StringifyOptions,
-                out_stream: anytype,
-            ) !void {
-                try json.stringify(@enumToInt(value), options, out_stream);
+            pub fn jsonStringify(value: @This(), options: std.json.StringifyOptions, out_stream: anytype) !void {
+                try std.json.stringify(@enumToInt(value), options, out_stream);
             }
         },
         renameProvider: bool,
