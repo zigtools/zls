@@ -7,9 +7,9 @@ const log = std.log.scoped(.references);
 const Reference = @This();
 usingnamespace @import("./ast.zig");
 
-const ast = std.zig.Ast;
+const Ast = std.zig.Ast;
 
-fn tokenReference(handle: *DocumentStore.Handle, tok: ast.TokenIndex, encoding: offsets.Encoding, context: anytype, comptime handler: anytype) !void {
+fn tokenReference(handle: *DocumentStore.Handle, tok: Ast.TokenIndex, encoding: offsets.Encoding, context: anytype, comptime handler: anytype) !void {
     const loc = offsets.tokenRelativeLocation(handle.tree, 0, handle.tree.tokens.items(.start)[tok], encoding) catch return;
     try handler(context, types.Location{
         .uri = handle.uri(),
@@ -69,10 +69,10 @@ fn symbolReferencesInternal(arena: *std.heap.ArenaAllocator, store: *DocumentSto
 
     switch (node_tags[node]) {
         .block, .block_semicolon, .block_two, .block_two_semicolon => {
-            const statements: []const ast.Node.Index = switch (node_tags[node]) {
+            const statements: []const Ast.Node.Index = switch (node_tags[node]) {
                 .block, .block_semicolon => tree.extra_data[datas[node].lhs..datas[node].rhs],
                 .block_two, .block_two_semicolon => blk: {
-                    const statements = &[_]ast.Node.Index{ datas[node].lhs, datas[node].rhs };
+                    const statements = &[_]Ast.Node.Index{ datas[node].lhs, datas[node].rhs };
                     const len: usize = if (datas[node].lhs == 0)
                         @as(usize, 0)
                     else if (datas[node].rhs == 0)
@@ -101,7 +101,7 @@ fn symbolReferencesInternal(arena: *std.heap.ArenaAllocator, store: *DocumentSto
         .root,
         .error_set_decl,
         => {
-            var buf: [2]ast.Node.Index = undefined;
+            var buf: [2]Ast.Node.Index = undefined;
             for (Reference.declMembers(tree, node, &buf)) |member|
                 try symbolReferencesInternal(arena, store, .{ .node = member, .handle = handle }, decl, encoding, context, handler);
         },
@@ -146,7 +146,7 @@ fn symbolReferencesInternal(arena: *std.heap.ArenaAllocator, store: *DocumentSto
         .fn_proto_simple,
         .fn_decl,
         => {
-            var buf: [1]ast.Node.Index = undefined;
+            var buf: [1]Ast.Node.Index = undefined;
             const fn_proto = Reference.fnProto(tree, node, &buf).?;
             var it = fn_proto.iterate(tree);
             while (it.next()) |param| {
@@ -187,7 +187,7 @@ fn symbolReferencesInternal(arena: *std.heap.ArenaAllocator, store: *DocumentSto
         => {
             // TODO When renaming a union(enum) field, also rename switch items that refer to it.
             try symbolReferencesInternal(arena, store, .{ .node = datas[node].lhs, .handle = handle }, decl, encoding, context, handler);
-            const extra = tree.extraData(datas[node].rhs, ast.Node.SubRange);
+            const extra = tree.extraData(datas[node].rhs, Ast.Node.SubRange);
             const cases = tree.extra_data[extra.start..extra.end];
             for (cases) |case| {
                 try symbolReferencesInternal(arena, store, .{ .node = case, .handle = handle }, decl, encoding, context, handler);
@@ -278,7 +278,7 @@ fn symbolReferencesInternal(arena: *std.heap.ArenaAllocator, store: *DocumentSto
         .array_init_dot_two,
         .array_init_dot_two_comma,
         => |n| {
-            var buf: [2]ast.Node.Index = undefined;
+            var buf: [2]Ast.Node.Index = undefined;
             const array_init = switch (n) {
                 .array_init, .array_init_comma => tree.arrayInit(node),
                 .array_init_dot, .array_init_dot_comma => tree.arrayInitDot(node),
@@ -300,8 +300,8 @@ fn symbolReferencesInternal(arena: *std.heap.ArenaAllocator, store: *DocumentSto
         .struct_init_one,
         .struct_init_one_comma,
         => |n| {
-            var buf: [2]ast.Node.Index = undefined;
-            const struct_init: ast.full.StructInit = switch (n) {
+            var buf: [2]Ast.Node.Index = undefined;
+            const struct_init: Ast.full.StructInit = switch (n) {
                 .struct_init, .struct_init_comma => tree.structInit(node),
                 .struct_init_dot, .struct_init_dot_comma => tree.structInitDot(node),
                 .struct_init_one, .struct_init_one_comma => tree.structInitOne(buf[0..1], node),
@@ -322,8 +322,8 @@ fn symbolReferencesInternal(arena: *std.heap.ArenaAllocator, store: *DocumentSto
         .async_call_one,
         .async_call_one_comma,
         => |c| {
-            var buf: [1]ast.Node.Index = undefined;
-            const call: ast.full.Call = switch (c) {
+            var buf: [1]Ast.Node.Index = undefined;
+            const call: Ast.full.Call = switch (c) {
                 .call, .call_comma, .async_call, .async_call_comma => tree.callFull(node),
                 .call_one, .call_one_comma, .async_call_one, .async_call_one_comma => tree.callOne(&buf, node),
                 else => unreachable,
@@ -339,7 +339,7 @@ fn symbolReferencesInternal(arena: *std.heap.ArenaAllocator, store: *DocumentSto
         .slice_sentinel,
         .slice_open,
         => |s| {
-            const slice: ast.full.Slice = switch (s) {
+            const slice: Ast.full.Slice = switch (s) {
                 .slice => tree.slice(node),
                 .slice_open => tree.sliceOpen(node),
                 .slice_sentinel => tree.sliceSentinel(node),
@@ -387,11 +387,11 @@ fn symbolReferencesInternal(arena: *std.heap.ArenaAllocator, store: *DocumentSto
             const params = switch (builtin_tag) {
                 .builtin_call, .builtin_call_comma => tree.extra_data[data.lhs..data.rhs],
                 .builtin_call_two, .builtin_call_two_comma => if (data.lhs == 0)
-                    &[_]ast.Node.Index{}
+                    &[_]Ast.Node.Index{}
                 else if (data.rhs == 0)
-                    &[_]ast.Node.Index{data.lhs}
+                    &[_]Ast.Node.Index{data.lhs}
                 else
-                    &[_]ast.Node.Index{ data.lhs, data.rhs },
+                    &[_]Ast.Node.Index{ data.lhs, data.rhs },
                 else => unreachable,
             };
 
@@ -401,7 +401,7 @@ fn symbolReferencesInternal(arena: *std.heap.ArenaAllocator, store: *DocumentSto
         .@"asm",
         .asm_simple,
         => |a| {
-            const _asm: ast.full.Asm = if (a == .@"asm") tree.asmFull(node) else tree.asmSimple(node);
+            const _asm: Ast.full.Asm = if (a == .@"asm") tree.asmFull(node) else tree.asmSimple(node);
             if (_asm.ast.items.len == 0)
                 try symbolReferencesInternal(arena, store, .{ .node = _asm.ast.template, .handle = handle }, decl, encoding, context, handler);
 
@@ -544,10 +544,10 @@ pub fn symbolReferences(arena: *std.heap.ArenaAllocator, store: *DocumentStore, 
         },
         .param_decl => |param| {
             // Rename the param tok.
-            const fn_node: ast.full.FnProto = loop: for (curr_handle.document_scope.scopes) |scope| {
+            const fn_node: Ast.full.FnProto = loop: for (curr_handle.document_scope.scopes) |scope| {
                 switch (scope.data) {
                     .function => |proto| {
-                        var buf: [1]ast.Node.Index = undefined;
+                        var buf: [1]Ast.Node.Index = undefined;
                         const fn_proto = Reference.fnProto(curr_handle.tree, proto, &buf).?;
                         var it = fn_proto.iterate(curr_handle.tree);
                         while (it.next()) |candidate| {

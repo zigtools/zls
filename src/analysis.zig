@@ -1,6 +1,6 @@
 const std = @import("std");
 const DocumentStore = @import("./document_store.zig");
-const ast = std.zig.Ast;
+const Ast = std.zig.Ast;
 const types = @import("./types.zig");
 const offsets = @import("./offsets.zig");
 const log = std.log.scoped(.analysis);
@@ -19,7 +19,7 @@ pub fn deinit() void {
 }
 
 /// Gets a declaration's doc comments. Caller owns returned memory.
-pub fn getDocComments(allocator: *std.mem.Allocator, tree: Analysis.Tree, node: ast.Node.Index, format: types.MarkupContent.Kind) !?[]const u8 {
+pub fn getDocComments(allocator: *std.mem.Allocator, tree: Analysis.Tree, node: Ast.Node.Index, format: types.MarkupContent.Kind) !?[]const u8 {
     const base = tree.nodes.items(.main_token)[node];
     const base_kind = tree.nodes.items(.tag)[node];
     const tokens = tree.tokens.items(.tag);
@@ -48,7 +48,7 @@ pub fn getDocComments(allocator: *std.mem.Allocator, tree: Analysis.Tree, node: 
 }
 
 /// Get the first doc comment of a declaration.
-pub fn getDocCommentTokenIndex(tokens: []std.zig.Token.Tag, base_token: ast.TokenIndex) ?ast.TokenIndex {
+pub fn getDocCommentTokenIndex(tokens: []std.zig.Token.Tag, base_token: Ast.TokenIndex) ?Ast.TokenIndex {
     var idx = base_token;
     if (idx == 0) return null;
     idx -= 1;
@@ -67,7 +67,7 @@ pub fn getDocCommentTokenIndex(tokens: []std.zig.Token.Tag, base_token: ast.Toke
     } else idx + 1;
 }
 
-pub fn collectDocComments(allocator: *std.mem.Allocator, tree: Analysis.Tree, doc_comments: ast.TokenIndex, format: types.MarkupContent.Kind, container_doc: bool) ![]const u8 {
+pub fn collectDocComments(allocator: *std.mem.Allocator, tree: Analysis.Tree, doc_comments: Ast.TokenIndex, format: types.MarkupContent.Kind, container_doc: bool) ![]const u8 {
     var lines = std.ArrayList([]const u8).init(allocator);
     defer lines.deinit();
     const tokens = tree.tokens.items(.tag);
@@ -84,7 +84,7 @@ pub fn collectDocComments(allocator: *std.mem.Allocator, tree: Analysis.Tree, do
 }
 
 /// Gets a function's keyword, name, arguments and return value.
-pub fn getFunctionSignature(tree: Analysis.Tree, func: ast.full.FnProto) []const u8 {
+pub fn getFunctionSignature(tree: Analysis.Tree, func: Ast.full.FnProto) []const u8 {
     const start = offsets.tokenLocation(tree, func.ast.fn_token);
 
     const end = if (func.ast.return_type != 0)
@@ -95,7 +95,7 @@ pub fn getFunctionSignature(tree: Analysis.Tree, func: ast.full.FnProto) []const
 }
 
 /// Creates snippet insert text for a function. Caller owns returned memory.
-pub fn getFunctionSnippet(allocator: *std.mem.Allocator, tree: Analysis.Tree, func: ast.full.FnProto, skip_self_param: bool) ![]const u8 {
+pub fn getFunctionSnippet(allocator: *std.mem.Allocator, tree: Analysis.Tree, func: Ast.full.FnProto, skip_self_param: bool) ![]const u8 {
     const name_index = func.name_token.?;
 
     var buffer = std.ArrayList(u8).init(allocator);
@@ -156,7 +156,7 @@ pub fn getFunctionSnippet(allocator: *std.mem.Allocator, tree: Analysis.Tree, fu
     return buffer.toOwnedSlice();
 }
 
-pub fn hasSelfParam(arena: *std.heap.ArenaAllocator, document_store: *DocumentStore, handle: *DocumentStore.Handle, func: ast.full.FnProto) !bool {
+pub fn hasSelfParam(arena: *std.heap.ArenaAllocator, document_store: *DocumentStore, handle: *DocumentStore.Handle, func: Ast.full.FnProto) !bool {
     // Non-decl prototypes cannot have a self parameter.
     if (func.name_token == null) return false;
     if (func.ast.params.len == 0) return false;
@@ -190,13 +190,13 @@ pub fn hasSelfParam(arena: *std.heap.ArenaAllocator, document_store: *DocumentSt
     return false;
 }
 
-pub fn getVariableSignature(tree: Analysis.Tree, var_decl: ast.full.VarDecl) []const u8 {
+pub fn getVariableSignature(tree: Analysis.Tree, var_decl: Ast.full.VarDecl) []const u8 {
     const start = offsets.tokenLocation(tree, var_decl.ast.mut_token).start;
     const end = offsets.tokenLocation(tree, Analysis.lastToken(tree, var_decl.ast.init_node)).end;
     return tree.source[start..end];
 }
 
-pub fn getContainerFieldSignature(tree: Analysis.Tree, field: ast.full.ContainerField) []const u8 {
+pub fn getContainerFieldSignature(tree: Analysis.Tree, field: Ast.full.ContainerField) []const u8 {
     const start = offsets.tokenLocation(tree, field.ast.name_token).start;
     const end_node = if (field.ast.value_expr != 0) field.ast.value_expr else field.ast.type_expr;
     const end = offsets.tokenLocation(tree, Analysis.lastToken(tree, end_node)).end;
@@ -204,18 +204,18 @@ pub fn getContainerFieldSignature(tree: Analysis.Tree, field: ast.full.Container
 }
 
 /// The node is the meta-type `type`
-fn isMetaType(tree: Analysis.Tree, node: ast.Node.Index) bool {
+fn isMetaType(tree: Analysis.Tree, node: Ast.Node.Index) bool {
     if (tree.nodes.items(.tag)[node] == .identifier) {
         return std.mem.eql(u8, tree.tokenSlice(tree.nodes.items(.main_token)[node]), "type");
     }
     return false;
 }
 
-pub fn isTypeFunction(tree: Analysis.Tree, func: ast.full.FnProto) bool {
+pub fn isTypeFunction(tree: Analysis.Tree, func: Ast.full.FnProto) bool {
     return isMetaType(tree, func.ast.return_type);
 }
 
-pub fn isGenericFunction(tree: Analysis.Tree, func: ast.full.FnProto) bool {
+pub fn isGenericFunction(tree: Analysis.Tree, func: Ast.full.FnProto) bool {
     var it = func.iterate(tree);
     while (it.next()) |param| {
         if (param.anytype_ellipsis3 != null or param.comptime_noalias != null) {
@@ -241,7 +241,7 @@ pub fn isSnakeCase(name: []const u8) bool {
 
 // ANALYSIS ENGINE
 
-pub fn getDeclNameToken(tree: Analysis.Tree, node: ast.Node.Index) ?ast.TokenIndex {
+pub fn getDeclNameToken(tree: Analysis.Tree, node: Ast.Node.Index) ?Ast.TokenIndex {
     const tags = tree.nodes.items(.tag);
     const main_token = tree.nodes.items(.main_token)[node];
     return switch (tags[node]) {
@@ -257,7 +257,7 @@ pub fn getDeclNameToken(tree: Analysis.Tree, node: ast.Node.Index) ?ast.TokenInd
         .fn_proto_simple,
         .fn_decl,
         => blk: {
-            var params: [1]ast.Node.Index = undefined;
+            var params: [1]Ast.Node.Index = undefined;
             break :blk Analysis.fnProto(tree, node, &params).?.name_token;
         },
 
@@ -278,7 +278,7 @@ pub fn getDeclNameToken(tree: Analysis.Tree, node: ast.Node.Index) ?ast.TokenInd
     };
 }
 
-fn getDeclName(tree: Analysis.Tree, node: ast.Node.Index) ?[]const u8 {
+fn getDeclName(tree: Analysis.Tree, node: Ast.Node.Index) ?[]const u8 {
     const name = tree.tokenSlice(getDeclNameToken(tree, node) orelse return null);
     return switch (tree.nodes.items(.tag)[node]) {
         .test_decl => name[1 .. name.len - 1],
@@ -369,7 +369,7 @@ pub fn resolveVarDeclAlias(store: *DocumentStore, arena: *std.heap.ArenaAllocato
     return null;
 }
 
-fn isBlock(tree: Analysis.Tree, node: ast.Node.Index) bool {
+fn isBlock(tree: Analysis.Tree, node: Ast.Node.Index) bool {
     return switch (tree.nodes.items(.tag)[node]) {
         .block,
         .block_semicolon,
@@ -380,18 +380,18 @@ fn isBlock(tree: Analysis.Tree, node: ast.Node.Index) bool {
     };
 }
 
-fn findReturnStatementInternal(tree: Analysis.Tree, fn_decl: ast.full.FnProto, body: ast.Node.Index, already_found: *bool) ?ast.Node.Index {
-    var result: ?ast.Node.Index = null;
+fn findReturnStatementInternal(tree: Analysis.Tree, fn_decl: Ast.full.FnProto, body: Ast.Node.Index, already_found: *bool) ?Ast.Node.Index {
+    var result: ?Ast.Node.Index = null;
 
     const node_tags = tree.nodes.items(.tag);
     const datas = tree.nodes.items(.data);
 
     if (!isBlock(tree, body)) return null;
 
-    const statements: []const ast.Node.Index = switch (node_tags[body]) {
+    const statements: []const Ast.Node.Index = switch (node_tags[body]) {
         .block, .block_semicolon => tree.extra_data[datas[body].lhs..datas[body].rhs],
         .block_two, .block_two_semicolon => blk: {
-            const statements = &[_]ast.Node.Index{ datas[body].lhs, datas[body].rhs };
+            const statements = &[_]Ast.Node.Index{ datas[body].lhs, datas[body].rhs };
             const len: usize = if (datas[body].lhs == 0)
                 @as(usize, 0)
             else if (datas[body].rhs == 0)
@@ -429,12 +429,12 @@ fn findReturnStatementInternal(tree: Analysis.Tree, fn_decl: ast.full.FnProto, b
     return result;
 }
 
-fn findReturnStatement(tree: Analysis.Tree, fn_decl: ast.full.FnProto, body: ast.Node.Index) ?ast.Node.Index {
+fn findReturnStatement(tree: Analysis.Tree, fn_decl: Ast.full.FnProto, body: Ast.Node.Index) ?Ast.Node.Index {
     var already_found = false;
     return findReturnStatementInternal(tree, fn_decl, body, &already_found);
 }
 
-pub fn resolveReturnType(store: *DocumentStore, arena: *std.heap.ArenaAllocator, fn_decl: ast.full.FnProto, handle: *DocumentStore.Handle, bound_type_params: *BoundTypeParams, fn_body: ?ast.Node.Index) !?TypeWithHandle {
+pub fn resolveReturnType(store: *DocumentStore, arena: *std.heap.ArenaAllocator, fn_decl: Ast.full.FnProto, handle: *DocumentStore.Handle, bound_type_params: *BoundTypeParams, fn_body: ?Ast.Node.Index) !?TypeWithHandle {
     const tree = handle.tree;
     if (isTypeFunction(tree, fn_decl) and fn_body != null) {
         // If this is a type function and it only contains a single return statement that returns
@@ -507,7 +507,7 @@ fn resolveUnwrapErrorType(store: *DocumentStore, arena: *std.heap.ArenaAllocator
     return null;
 }
 
-pub fn isPtrType(tree: Analysis.Tree, node: ast.Node.Index) bool {
+pub fn isPtrType(tree: Analysis.Tree, node: Ast.Node.Index) bool {
     return switch (tree.nodes.items(.tag)[node]) {
         .ptr_type,
         .ptr_type_aligned,
@@ -593,7 +593,7 @@ pub fn resolveFieldAccessLhsType(store: *DocumentStore, arena: *std.heap.ArenaAl
     return (try resolveDerefType(store, arena, lhs, bound_type_params)) orelse lhs;
 }
 
-pub const BoundTypeParams = std.AutoHashMap(ast.full.FnProto.Param, TypeWithHandle);
+pub const BoundTypeParams = std.AutoHashMap(Ast.full.FnProto.Param, TypeWithHandle);
 
 fn allDigits(str: []const u8) bool {
     for (str) |c| {
@@ -602,7 +602,7 @@ fn allDigits(str: []const u8) bool {
     return true;
 }
 
-pub fn isTypeIdent(tree: Analysis.Tree, token_idx: ast.TokenIndex) bool {
+pub fn isTypeIdent(tree: Analysis.Tree, token_idx: Ast.TokenIndex) bool {
     const PrimitiveTypes = std.ComptimeStringMap(void, .{
         .{"isize"},          .{"usize"},
         .{"c_short"},        .{"c_ushort"},
@@ -703,7 +703,7 @@ pub fn resolveTypeOfNodeInternal(store: *DocumentStore, arena: *std.heap.ArenaAl
         .async_call_one,
         .async_call_one_comma,
         => {
-            var params: [1]ast.Node.Index = undefined;
+            var params: [1]Ast.Node.Index = undefined;
             const call = Analysis.callFull(tree, node, &params) orelse unreachable;
 
             const callee = .{ .node = call.ast.fn_expr, .handle = handle };
@@ -715,7 +715,7 @@ pub fn resolveTypeOfNodeInternal(store: *DocumentStore, arena: *std.heap.ArenaAl
                 .other => |n| n,
                 else => return null,
             };
-            var buf: [1]ast.Node.Index = undefined;
+            var buf: [1]Ast.Node.Index = undefined;
             const func_maybe = Analysis.fnProto(decl.handle.tree, decl_node, &buf);
 
             if (func_maybe) |fn_decl| {
@@ -875,11 +875,11 @@ pub fn resolveTypeOfNodeInternal(store: *DocumentStore, arena: *std.heap.ArenaAl
             const params = switch (node_tags[node]) {
                 .builtin_call, .builtin_call_comma => tree.extra_data[data.lhs..data.rhs],
                 .builtin_call_two, .builtin_call_two_comma => if (data.lhs == 0)
-                    &[_]ast.Node.Index{}
+                    &[_]Ast.Node.Index{}
                 else if (data.rhs == 0)
-                    &[_]ast.Node.Index{data.lhs}
+                    &[_]Ast.Node.Index{data.lhs}
                 else
-                    &[_]ast.Node.Index{ data.lhs, data.rhs },
+                    &[_]Ast.Node.Index{ data.lhs, data.rhs },
                 else => unreachable,
             };
 
@@ -945,7 +945,7 @@ pub fn resolveTypeOfNodeInternal(store: *DocumentStore, arena: *std.heap.ArenaAl
         .fn_proto_simple,
         .fn_decl,
         => {
-            var buf: [1]ast.Node.Index = undefined;
+            var buf: [1]Ast.Node.Index = undefined;
             // This is a function type
             if (Analysis.fnProto(tree, node, &buf).?.name_token == null) {
                 return TypeWithHandle.typeVal(node_handle);
@@ -971,10 +971,10 @@ pub fn resolveTypeOfNodeInternal(store: *DocumentStore, arena: *std.heap.ArenaAl
 // TODO Make this better, nested levels of type vals
 pub const Type = struct {
     data: union(enum) {
-        pointer: ast.Node.Index,
-        slice: ast.Node.Index,
-        error_union: ast.Node.Index,
-        other: ast.Node.Index,
+        pointer: Ast.Node.Index,
+        slice: Ast.Node.Index,
+        error_union: Ast.Node.Index,
+        other: Ast.Node.Index,
         primitive,
     },
     /// If true, the type `type`, the attached data is the value of the type value.
@@ -1031,7 +1031,7 @@ pub const TypeWithHandle = struct {
         const node = self.type.data.other;
         const tags = tree.nodes.items(.tag);
         if (Analysis.isContainer(tree, node)) {
-            var buf: [2]ast.Node.Index = undefined;
+            var buf: [2]Ast.Node.Index = undefined;
             for (Analysis.declMembers(tree, node, &buf)) |child| {
                 if (tags[child].isContainerField()) return false;
             }
@@ -1052,7 +1052,7 @@ pub const TypeWithHandle = struct {
     }
 
     pub fn isTypeFunc(self: TypeWithHandle) bool {
-        var buf: [1]ast.Node.Index = undefined;
+        var buf: [1]Ast.Node.Index = undefined;
         const tree = self.handle.tree;
         return switch (self.type.data) {
             .other => |n| if (Analysis.fnProto(tree, n, &buf)) |fn_proto| blk: {
@@ -1063,7 +1063,7 @@ pub const TypeWithHandle = struct {
     }
 
     pub fn isGenericFunc(self: TypeWithHandle) bool {
-        var buf: [1]ast.Node.Index = undefined;
+        var buf: [1]Ast.Node.Index = undefined;
         const tree = self.handle.tree;
         return switch (self.type.data) {
             .other => |n| if (Analysis.fnProto(tree, n, &buf)) |fn_proto| blk: {
@@ -1123,7 +1123,7 @@ pub fn collectImports(import_arr: *std.ArrayList([]const u8), tree: Analysis.Tre
 }
 
 pub const NodeWithHandle = struct {
-    node: ast.Node.Index,
+    node: Ast.Node.Index,
     handle: *DocumentStore.Handle,
 };
 
@@ -1228,7 +1228,7 @@ pub fn getFieldAccessType(store: *DocumentStore, arena: *std.heap.ArenaAllocator
                 // Can't call a function type, we need a function type instance.
                 if (current_type.type.is_type_val) return null;
                 const cur_tree = current_type.handle.tree;
-                var buf: [1]ast.Node.Index = undefined;
+                var buf: [1]Ast.Node.Index = undefined;
                 if (Analysis.fnProto(cur_tree, current_type_node, &buf)) |func| {
                     // Check if the function has a body and if so, pass it
                     // so the type can be resolved if it's a generic function returning
@@ -1283,8 +1283,8 @@ pub fn getFieldAccessType(store: *DocumentStore, arena: *std.heap.ArenaAllocator
     };
 }
 
-pub fn isNodePublic(tree: Analysis.Tree, node: ast.Node.Index) bool {
-    var buf: [1]ast.Node.Index = undefined;
+pub fn isNodePublic(tree: Analysis.Tree, node: Ast.Node.Index) bool {
+    var buf: [1]Ast.Node.Index = undefined;
     return switch (tree.nodes.items(.tag)[node]) {
         .global_var_decl,
         .local_var_decl,
@@ -1301,10 +1301,10 @@ pub fn isNodePublic(tree: Analysis.Tree, node: ast.Node.Index) bool {
     };
 }
 
-pub fn nodeToString(tree: Analysis.Tree, node: ast.Node.Index) ?[]const u8 {
+pub fn nodeToString(tree: Analysis.Tree, node: Ast.Node.Index) ?[]const u8 {
     const data = tree.nodes.items(.data);
     const main_token = tree.nodes.items(.main_token)[node];
-    var buf: [1]ast.Node.Index = undefined;
+    var buf: [1]Ast.Node.Index = undefined;
     switch (tree.nodes.items(.tag)[node]) {
         .container_field => return tree.tokenSlice(tree.containerField(node).ast.name_token),
         .container_field_init => return tree.tokenSlice(tree.containerFieldInit(node).ast.name_token),
@@ -1337,15 +1337,15 @@ pub fn nodeToString(tree: Analysis.Tree, node: ast.Node.Index) ?[]const u8 {
     return null;
 }
 
-fn nodeContainsSourceIndex(tree: Analysis.Tree, node: ast.Node.Index, source_index: usize) bool {
+fn nodeContainsSourceIndex(tree: Analysis.Tree, node: Ast.Node.Index, source_index: usize) bool {
     const first_token = offsets.tokenLocation(tree, tree.firstToken(node)).start;
     const last_token = offsets.tokenLocation(tree, Analysis.lastToken(tree, node)).end;
     return source_index >= first_token and source_index <= last_token;
 }
 
-pub fn getImportStr(tree: Analysis.Tree, node: ast.Node.Index, source_index: usize) ?[]const u8 {
+pub fn getImportStr(tree: Analysis.Tree, node: Ast.Node.Index, source_index: usize) ?[]const u8 {
     const node_tags = tree.nodes.items(.tag);
-    var buf: [2]ast.Node.Index = undefined;
+    var buf: [2]Ast.Node.Index = undefined;
     if (Analysis.isContainer(tree, node)) {
         const decls = Analysis.declMembers(tree, node, &buf);
         for (decls) |decl_idx| {
@@ -1373,11 +1373,11 @@ pub fn getImportStr(tree: Analysis.Tree, node: ast.Node.Index, source_index: usi
         const params = switch (node_tags[node]) {
             .builtin_call, .builtin_call_comma => tree.extra_data[data.lhs..data.rhs],
             .builtin_call_two, .builtin_call_two_comma => if (data.lhs == 0)
-                &[_]ast.Node.Index{}
+                &[_]Ast.Node.Index{}
             else if (data.rhs == 0)
-                &[_]ast.Node.Index{data.lhs}
+                &[_]Ast.Node.Index{data.lhs}
             else
-                &[_]ast.Node.Index{ data.lhs, data.rhs },
+                &[_]Ast.Node.Index{ data.lhs, data.rhs },
             else => unreachable,
         };
 
@@ -1578,7 +1578,7 @@ pub fn documentPositionContext(arena: *std.heap.ArenaAllocator, document: types.
     };
 }
 
-fn addOutlineNodes(allocator: *std.mem.Allocator, tree: Analysis.Tree, child: ast.Node.Index, context: *GetDocumentSymbolsContext) anyerror!void {
+fn addOutlineNodes(allocator: *std.mem.Allocator, tree: Analysis.Tree, child: Ast.Node.Index, context: *GetDocumentSymbolsContext) anyerror!void {
     switch (tree.nodes.items(.tag)[child]) {
         .string_literal,
         .integer_literal,
@@ -1709,7 +1709,7 @@ fn addOutlineNodes(allocator: *std.mem.Allocator, tree: Analysis.Tree, child: as
         .tagged_union_two,
         .tagged_union_two_trailing,
         => {
-            var buf: [2]ast.Node.Index = undefined;
+            var buf: [2]Ast.Node.Index = undefined;
             for (Analysis.declMembers(tree, child, &buf)) |member|
                 try addOutlineNodes(allocator, tree, member, context);
             return;
@@ -1729,7 +1729,7 @@ const GetDocumentSymbolsContext = struct {
     encoding: offsets.Encoding,
 };
 
-fn getDocumentSymbolsInternal(allocator: *std.mem.Allocator, tree: Analysis.Tree, node: ast.Node.Index, context: *GetDocumentSymbolsContext) anyerror!void {
+fn getDocumentSymbolsInternal(allocator: *std.mem.Allocator, tree: Analysis.Tree, node: Ast.Node.Index, context: *GetDocumentSymbolsContext) anyerror!void {
     const name = getDeclName(tree, node) orelse return;
     if (name.len == 0)
         return;
@@ -1799,7 +1799,7 @@ fn getDocumentSymbolsInternal(allocator: *std.mem.Allocator, tree: Analysis.Tree
             };
 
             if (Analysis.isContainer(tree, node)) {
-                var buf: [2]ast.Node.Index = undefined;
+                var buf: [2]Ast.Node.Index = undefined;
                 for (Analysis.declMembers(tree, node, &buf)) |child|
                     try addOutlineNodes(allocator, tree, child, &child_context);
             }
@@ -1830,31 +1830,31 @@ pub fn getDocumentSymbols(allocator: *std.mem.Allocator, tree: Analysis.Tree, en
 
 pub const Declaration = union(enum) {
     /// Index of the ast node
-    ast_node: ast.Node.Index,
+    ast_node: Ast.Node.Index,
     /// Function parameter
-    param_decl: ast.full.FnProto.Param,
+    param_decl: Ast.full.FnProto.Param,
     pointer_payload: struct {
-        name: ast.TokenIndex,
-        condition: ast.Node.Index,
+        name: Ast.TokenIndex,
+        condition: Ast.Node.Index,
     },
     array_payload: struct {
-        identifier: ast.TokenIndex,
-        array_expr: ast.Node.Index,
+        identifier: Ast.TokenIndex,
+        array_expr: Ast.Node.Index,
     },
-    array_index: ast.TokenIndex,
+    array_index: Ast.TokenIndex,
     switch_payload: struct {
-        node: ast.TokenIndex,
-        switch_expr: ast.Node.Index,
-        items: []const ast.Node.Index,
+        node: Ast.TokenIndex,
+        switch_expr: Ast.Node.Index,
+        items: []const Ast.Node.Index,
     },
-    label_decl: ast.TokenIndex,
+    label_decl: Ast.TokenIndex,
 };
 
 pub const DeclWithHandle = struct {
     decl: *Declaration,
     handle: *DocumentStore.Handle,
 
-    pub fn nameToken(self: DeclWithHandle) ast.TokenIndex {
+    pub fn nameToken(self: DeclWithHandle) Ast.TokenIndex {
         const tree = self.handle.tree;
         return switch (self.decl.*) {
             .ast_node => |n| getDeclNameToken(tree, n).?,
@@ -1988,7 +1988,7 @@ fn findContainerScope(container_handle: NodeWithHandle) ?*Scope {
     } else null;
 }
 
-fn iterateSymbolsContainerInternal(store: *DocumentStore, arena: *std.heap.ArenaAllocator, container_handle: NodeWithHandle, orig_handle: *DocumentStore.Handle, comptime callback: anytype, context: anytype, instance_access: bool, use_trail: *std.ArrayList(*const ast.Node.Index)) error{OutOfMemory}!void {
+fn iterateSymbolsContainerInternal(store: *DocumentStore, arena: *std.heap.ArenaAllocator, container_handle: NodeWithHandle, orig_handle: *DocumentStore.Handle, comptime callback: anytype, context: anytype, instance_access: bool, use_trail: *std.ArrayList(*const Ast.Node.Index)) error{OutOfMemory}!void {
     const container = container_handle.node;
     const handle = container_handle.handle;
 
@@ -2029,7 +2029,7 @@ fn iterateSymbolsContainerInternal(store: *DocumentStore, arena: *std.heap.Arena
         const use_token = tree.nodes.items(.main_token)[use.*];
         const is_pub = use_token > 0 and token_tags[use_token - 1] == .keyword_pub;
         if (handle != orig_handle and !is_pub) continue;
-        if (std.mem.indexOfScalar(*const ast.Node.Index, use_trail.items, use) != null) continue;
+        if (std.mem.indexOfScalar(*const Ast.Node.Index, use_trail.items, use) != null) continue;
         try use_trail.append(use);
 
         const lhs = tree.nodes.items(.data)[use.*].lhs;
@@ -2056,7 +2056,7 @@ fn iterateSymbolsContainerInternal(store: *DocumentStore, arena: *std.heap.Arena
 }
 
 pub fn iterateSymbolsContainer(store: *DocumentStore, arena: *std.heap.ArenaAllocator, container_handle: NodeWithHandle, orig_handle: *DocumentStore.Handle, comptime callback: anytype, context: anytype, instance_access: bool) error{OutOfMemory}!void {
-    var use_trail = std.ArrayList(*const ast.Node.Index).init(&arena.allocator);
+    var use_trail = std.ArrayList(*const Ast.Node.Index).init(&arena.allocator);
     return try iterateSymbolsContainerInternal(store, arena, container_handle, orig_handle, callback, context, instance_access, &use_trail);
 }
 
@@ -2076,7 +2076,7 @@ pub fn iterateLabels(handle: *DocumentStore.Handle, source_index: usize, comptim
     }
 }
 
-fn iterateSymbolsGlobalInternal(store: *DocumentStore, arena: *std.heap.ArenaAllocator, handle: *DocumentStore.Handle, source_index: usize, comptime callback: anytype, context: anytype, use_trail: *std.ArrayList(*const ast.Node.Index)) error{OutOfMemory}!void {
+fn iterateSymbolsGlobalInternal(store: *DocumentStore, arena: *std.heap.ArenaAllocator, handle: *DocumentStore.Handle, source_index: usize, comptime callback: anytype, context: anytype, use_trail: *std.ArrayList(*const Ast.Node.Index)) error{OutOfMemory}!void {
     for (handle.document_scope.scopes) |scope| {
         if (source_index >= scope.range.start and source_index <= scope.range.end) {
             var decl_it = scope.decls.iterator();
@@ -2088,7 +2088,7 @@ fn iterateSymbolsGlobalInternal(store: *DocumentStore, arena: *std.heap.ArenaAll
             }
 
             for (scope.uses) |use| {
-                if (std.mem.indexOfScalar(*const ast.Node.Index, use_trail.items, use) != null) continue;
+                if (std.mem.indexOfScalar(*const Ast.Node.Index, use_trail.items, use) != null) continue;
                 try use_trail.append(use);
 
                 const use_expr = (try resolveTypeOfNode(
@@ -2118,7 +2118,7 @@ fn iterateSymbolsGlobalInternal(store: *DocumentStore, arena: *std.heap.ArenaAll
 }
 
 pub fn iterateSymbolsGlobal(store: *DocumentStore, arena: *std.heap.ArenaAllocator, handle: *DocumentStore.Handle, source_index: usize, comptime callback: anytype, context: anytype) error{OutOfMemory}!void {
-    var use_trail = std.ArrayList(*const ast.Node.Index).init(&arena.allocator);
+    var use_trail = std.ArrayList(*const Ast.Node.Index).init(&arena.allocator);
     return try iterateSymbolsGlobalInternal(store, arena, handle, source_index, callback, context, &use_trail);
 }
 
@@ -2138,7 +2138,7 @@ pub fn innermostBlockScopeIndex(handle: DocumentStore.Handle, source_index: usiz
     return current;
 }
 
-pub fn innermostBlockScope(handle: DocumentStore.Handle, source_index: usize) ast.Node.Index {
+pub fn innermostBlockScope(handle: DocumentStore.Handle, source_index: usize) Ast.Node.Index {
     return handle.document_scope.scopes[innermostBlockScopeIndex(handle, source_index)].toNodeIndex().?;
 }
 
@@ -2158,7 +2158,7 @@ pub fn innermostContainer(handle: *DocumentStore.Handle, source_index: usize) Ty
     return TypeWithHandle.typeVal(.{ .node = current, .handle = handle });
 }
 
-fn resolveUse(store: *DocumentStore, arena: *std.heap.ArenaAllocator, uses: []const *const ast.Node.Index, symbol: []const u8, handle: *DocumentStore.Handle) error{OutOfMemory}!?DeclWithHandle {
+fn resolveUse(store: *DocumentStore, arena: *std.heap.ArenaAllocator, uses: []const *const Ast.Node.Index, symbol: []const u8, handle: *DocumentStore.Handle) error{OutOfMemory}!?DeclWithHandle {
     // If we were asked to resolve this symbol before,
     // it is self-referential and we cannot resolve it.
     if (std.mem.indexOfScalar([*]const u8, using_trail.items, symbol.ptr) != null)
@@ -2349,20 +2349,20 @@ pub const DocumentScope = struct {
 
 pub const Scope = struct {
     pub const Data = union(enum) {
-        container: ast.Node.Index, // .tag is ContainerDecl or Root or ErrorSetDecl
-        function: ast.Node.Index, // .tag is FnProto
-        block: ast.Node.Index, // .tag is Block
+        container: Ast.Node.Index, // .tag is ContainerDecl or Root or ErrorSetDecl
+        function: Ast.Node.Index, // .tag is FnProto
+        block: Ast.Node.Index, // .tag is Block
         other,
     };
 
     range: SourceRange,
     decls: std.StringHashMap(Declaration),
-    tests: []const ast.Node.Index = &.{},
-    uses: []const *const ast.Node.Index = &.{},
+    tests: []const Ast.Node.Index = &.{},
+    uses: []const *const Ast.Node.Index = &.{},
 
     data: Data,
 
-    pub fn toNodeIndex(self: Scope) ?ast.Node.Index {
+    pub fn toNodeIndex(self: Scope) ?Ast.Node.Index {
         return switch (self.data) {
             .container, .function, .block => |idx| idx,
             else => null,
@@ -2401,7 +2401,7 @@ pub fn makeDocumentScope(allocator: *std.mem.Allocator, tree: Analysis.Tree) !Do
     };
 }
 
-fn nodeSourceRange(tree: Analysis.Tree, node: ast.Node.Index) SourceRange {
+fn nodeSourceRange(tree: Analysis.Tree, node: Ast.Node.Index) SourceRange {
     const loc_start = offsets.tokenLocation(tree, tree.firstToken(node));
     const loc_end = offsets.tokenLocation(tree, Analysis.lastToken(tree, node));
 
@@ -2418,7 +2418,7 @@ const ScopeContext = struct {
     tree: Analysis.Tree,
 };
 
-fn makeInnerScope(allocator: *std.mem.Allocator, context: ScopeContext, node_idx: ast.Node.Index) error{OutOfMemory}!void {
+fn makeInnerScope(allocator: *std.mem.Allocator, context: ScopeContext, node_idx: Ast.Node.Index) error{OutOfMemory}!void {
     const scopes = context.scopes;
     const tree = context.tree;
     const tags = tree.nodes.items(.tag);
@@ -2427,7 +2427,7 @@ fn makeInnerScope(allocator: *std.mem.Allocator, context: ScopeContext, node_idx
     const main_tokens = tree.nodes.items(.main_token);
     const node_tag = tags[node_idx];
 
-    var buf: [2]ast.Node.Index = undefined;
+    var buf: [2]Ast.Node.Index = undefined;
     const ast_decls = Analysis.declMembers(tree, node_idx, &buf);
 
     (try scopes.addOne(allocator)).* = .{
@@ -2436,8 +2436,8 @@ fn makeInnerScope(allocator: *std.mem.Allocator, context: ScopeContext, node_idx
         .data = .{ .container = node_idx },
     };
     const scope_idx = scopes.items.len - 1;
-    var uses = std.ArrayListUnmanaged(*const ast.Node.Index){};
-    var tests = std.ArrayListUnmanaged(ast.Node.Index){};
+    var uses = std.ArrayListUnmanaged(*const Ast.Node.Index){};
+    var tests = std.ArrayListUnmanaged(Ast.Node.Index){};
 
     errdefer {
         scopes.items[scope_idx].decls.deinit();
@@ -2464,13 +2464,13 @@ fn makeInnerScope(allocator: *std.mem.Allocator, context: ScopeContext, node_idx
         .container_decl, .container_decl_trailing => tree.containerDecl(node_idx),
         .container_decl_arg, .container_decl_arg_trailing => tree.containerDeclArg(node_idx),
         .container_decl_two, .container_decl_two_trailing => blk: {
-            var buffer: [2]ast.Node.Index = undefined;
+            var buffer: [2]Ast.Node.Index = undefined;
             break :blk tree.containerDeclTwo(&buffer, node_idx);
         },
         .tagged_union, .tagged_union_trailing => tree.taggedUnion(node_idx),
         .tagged_union_enum_tag, .tagged_union_enum_tag_trailing => tree.taggedUnionEnumTag(node_idx),
         .tagged_union_two, .tagged_union_two_trailing => blk: {
-            var buffer: [2]ast.Node.Index = undefined;
+            var buffer: [2]Ast.Node.Index = undefined;
             break :blk tree.taggedUnionTwo(&buffer, node_idx);
         },
         else => null,
@@ -2534,7 +2534,7 @@ fn makeInnerScope(allocator: *std.mem.Allocator, context: ScopeContext, node_idx
 
 // Whether we have already visited the root node.
 var had_root = true;
-fn makeScopeInternal(allocator: *std.mem.Allocator, context: ScopeContext, node_idx: ast.Node.Index) error{OutOfMemory}!void {
+fn makeScopeInternal(allocator: *std.mem.Allocator, context: ScopeContext, node_idx: Ast.Node.Index) error{OutOfMemory}!void {
     const scopes = context.scopes;
     const tree = context.tree;
     const tags = tree.nodes.items(.tag);
@@ -2578,7 +2578,7 @@ fn makeScopeInternal(allocator: *std.mem.Allocator, context: ScopeContext, node_
         .fn_proto_multi,
         .fn_decl,
         => |fn_tag| {
-            var buf: [1]ast.Node.Index = undefined;
+            var buf: [1]Ast.Node.Index = undefined;
             const func = Analysis.fnProto(tree, node_idx, &buf).?;
 
             (try scopes.addOne(allocator)).* = .{
@@ -2649,17 +2649,17 @@ fn makeScopeInternal(allocator: *std.mem.Allocator, context: ScopeContext, node_
                 .data = .{ .block = node_idx },
             };
             var scope_idx = scopes.items.len - 1;
-            var uses = std.ArrayList(*const ast.Node.Index).init(allocator);
+            var uses = std.ArrayList(*const Ast.Node.Index).init(allocator);
 
             errdefer {
                 scopes.items[scope_idx].decls.deinit();
                 uses.deinit();
             }
 
-            const statements: []const ast.Node.Index = switch (node_tag) {
+            const statements: []const Ast.Node.Index = switch (node_tag) {
                 .block, .block_semicolon => tree.extra_data[data[node_idx].lhs..data[node_idx].rhs],
                 .block_two, .block_two_semicolon => blk: {
-                    const statements = &[_]ast.Node.Index{ data[node_idx].lhs, data[node_idx].rhs };
+                    const statements = &[_]Ast.Node.Index{ data[node_idx].lhs, data[node_idx].rhs };
                     const len: usize = if (data[node_idx].lhs == 0)
                         @as(usize, 0)
                     else if (data[node_idx].rhs == 0)
@@ -2860,11 +2860,11 @@ fn makeScopeInternal(allocator: *std.mem.Allocator, context: ScopeContext, node_
         .switch_comma,
         => {
             const cond = data[node_idx].lhs;
-            const extra = tree.extraData(data[node_idx].rhs, ast.Node.SubRange);
+            const extra = tree.extraData(data[node_idx].rhs, Ast.Node.SubRange);
             const cases = tree.extra_data[extra.start..extra.end];
 
             for (cases) |case| {
-                const switch_case: ast.full.SwitchCase = switch (tags[case]) {
+                const switch_case: Ast.full.SwitchCase = switch (tags[case]) {
                     .switch_case => tree.switchCase(case),
                     .switch_case_one => tree.switchCaseOne(case),
                     else => continue,
@@ -2927,7 +2927,7 @@ fn makeScopeInternal(allocator: *std.mem.Allocator, context: ScopeContext, node_
         .async_call_one,
         .async_call_one_comma,
         => {
-            var buf: [1]ast.Node.Index = undefined;
+            var buf: [1]Ast.Node.Index = undefined;
             const call = Analysis.callFull(tree, node_idx, &buf).?;
 
             try makeScopeInternal(allocator, context, call.ast.fn_expr);
@@ -2943,8 +2943,8 @@ fn makeScopeInternal(allocator: *std.mem.Allocator, context: ScopeContext, node_
         .struct_init_one,
         .struct_init_one_comma,
         => {
-            var buf: [2]ast.Node.Index = undefined;
-            const struct_init: ast.full.StructInit = switch (node_tag) {
+            var buf: [2]Ast.Node.Index = undefined;
+            const struct_init: Ast.full.StructInit = switch (node_tag) {
                 .struct_init, .struct_init_comma => tree.structInit(node_idx),
                 .struct_init_dot, .struct_init_dot_comma => tree.structInitDot(node_idx),
                 .struct_init_dot_two, .struct_init_dot_two_comma => tree.structInitDotTwo(&buf, node_idx),
@@ -2968,8 +2968,8 @@ fn makeScopeInternal(allocator: *std.mem.Allocator, context: ScopeContext, node_
         .array_init_one,
         .array_init_one_comma,
         => {
-            var buf: [2]ast.Node.Index = undefined;
-            const array_init: ast.full.ArrayInit = switch (node_tag) {
+            var buf: [2]Ast.Node.Index = undefined;
+            const array_init: Ast.full.ArrayInit = switch (node_tag) {
                 .array_init, .array_init_comma => tree.arrayInit(node_idx),
                 .array_init_dot, .array_init_dot_comma => tree.arrayInitDot(node_idx),
                 .array_init_dot_two, .array_init_dot_two_comma => tree.arrayInitDotTwo(&buf, node_idx),
@@ -3002,11 +3002,11 @@ fn makeScopeInternal(allocator: *std.mem.Allocator, context: ScopeContext, node_
             const params = switch (node_tag) {
                 .builtin_call, .builtin_call_comma => tree.extra_data[b_data.lhs..b_data.rhs],
                 .builtin_call_two, .builtin_call_two_comma => if (b_data.lhs == 0)
-                    &[_]ast.Node.Index{}
+                    &[_]Ast.Node.Index{}
                 else if (b_data.rhs == 0)
-                    &[_]ast.Node.Index{b_data.lhs}
+                    &[_]Ast.Node.Index{b_data.lhs}
                 else
-                    &[_]ast.Node.Index{ b_data.lhs, b_data.rhs },
+                    &[_]Ast.Node.Index{ b_data.lhs, b_data.rhs },
                 else => unreachable,
             };
 
@@ -3019,7 +3019,7 @@ fn makeScopeInternal(allocator: *std.mem.Allocator, context: ScopeContext, node_
         .ptr_type_bit_range,
         .ptr_type_sentinel,
         => {
-            const ptr_type: ast.full.PtrType = Analysis.ptrType(tree, node_idx).?;
+            const ptr_type: Ast.full.PtrType = Analysis.ptrType(tree, node_idx).?;
 
             try makeScopeInternal(allocator, context, ptr_type.ast.sentinel);
             try makeScopeInternal(allocator, context, ptr_type.ast.align_node);
@@ -3029,7 +3029,7 @@ fn makeScopeInternal(allocator: *std.mem.Allocator, context: ScopeContext, node_
         .slice_open,
         .slice_sentinel,
         => {
-            const slice: ast.full.Slice = switch (node_tag) {
+            const slice: Ast.full.Slice = switch (node_tag) {
                 .slice => tree.slice(node_idx),
                 .slice_open => tree.sliceOpen(node_idx),
                 .slice_sentinel => tree.sliceSentinel(node_idx),

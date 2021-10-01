@@ -1,7 +1,7 @@
 const std = @import("std");
 const types = @import("./types.zig");
-const ast = std.zig.Ast;
-const Tree = ast;
+const Ast = std.zig.Ast;
+const Tree = Ast;
 
 pub const Encoding = enum {
     utf8,
@@ -140,7 +140,7 @@ pub fn tokenRelativeLocation(tree: Tree, start_index: usize, token_start: usize,
 }
 
 /// Asserts the token is comprised of valid utf8
-pub fn tokenLength(tree: Tree, token: ast.TokenIndex, encoding: Encoding) usize {
+pub fn tokenLength(tree: Tree, token: Ast.TokenIndex, encoding: Encoding) usize {
     const token_loc = tokenLocation(tree, token);
     if (encoding == .utf8)
         return token_loc.end - token_loc.start;
@@ -166,7 +166,7 @@ pub const Loc = struct {
     end: usize,
 };
 
-pub fn tokenLocation(tree: Tree, token_index: ast.TokenIndex) Loc {
+pub fn tokenLocation(tree: Tree, token_index: Ast.TokenIndex) Loc {
     const start = tree.tokens.items(.start)[token_index];
     const tag = tree.tokens.items(.tag)[token_index];
 

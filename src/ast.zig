@@ -3,10 +3,10 @@
 //! when there are parser errors.
 
 const std = @import("std");
-const ast = std.zig.Ast;
-pub const Tree = ast;
-const Node = ast.Node;
-const full = ast.full;
+const Ast = std.zig.Ast;
+pub const Tree = Ast;
+const Node = Ast.Node;
+const full = Ast.full;
 const assert = std.debug.assert;
 
 fn fullPtrType(tree: Tree, info: full.PtrType.Components) full.PtrType {
@@ -255,8 +255,8 @@ pub fn forFull(tree: Tree, node: Node.Index) full.While {
     });
 }
 
-pub fn lastToken(tree: Tree, node: ast.Node.Index) ast.TokenIndex {
-    const TokenIndex = ast.TokenIndex;
+pub fn lastToken(tree: Tree, node: Ast.Node.Index) Ast.TokenIndex {
+    const TokenIndex = Ast.TokenIndex;
     const tags = tree.nodes.items(.tag);
     const datas = tree.nodes.items(.data);
     const main_tokens = tree.nodes.items(.main_token);
@@ -875,7 +875,7 @@ pub fn lastToken(tree: Tree, node: ast.Node.Index) ast.TokenIndex {
     };
 }
 
-pub fn containerField(tree: Tree, node: ast.Node.Index) ?ast.full.ContainerField {
+pub fn containerField(tree: Tree, node: Ast.Node.Index) ?Ast.full.ContainerField {
     return switch (tree.nodes.items(.tag)[node]) {
         .container_field => tree.containerField(node),
         .container_field_init => tree.containerFieldInit(node),
@@ -884,7 +884,7 @@ pub fn containerField(tree: Tree, node: ast.Node.Index) ?ast.full.ContainerField
     };
 }
 
-pub fn ptrType(tree: Tree, node: ast.Node.Index) ?ast.full.PtrType {
+pub fn ptrType(tree: Tree, node: Ast.Node.Index) ?Ast.full.PtrType {
     return switch (tree.nodes.items(.tag)[node]) {
         .ptr_type => ptrTypeSimple(tree, node),
         .ptr_type_aligned => ptrTypeAligned(tree, node),
@@ -894,7 +894,7 @@ pub fn ptrType(tree: Tree, node: ast.Node.Index) ?ast.full.PtrType {
     };
 }
 
-pub fn whileAst(tree: Tree, node: ast.Node.Index) ?ast.full.While {
+pub fn whileAst(tree: Tree, node: Ast.Node.Index) ?Ast.full.While {
     return switch (tree.nodes.items(.tag)[node]) {
         .@"while" => whileFull(tree, node),
         .while_simple => whileSimple(tree, node),
@@ -905,7 +905,7 @@ pub fn whileAst(tree: Tree, node: ast.Node.Index) ?ast.full.While {
     };
 }
 
-pub fn isContainer(tree: Tree, node: ast.Node.Index) bool {
+pub fn isContainer(tree: Tree, node: Ast.Node.Index) bool {
     return switch (tree.nodes.items(.tag)[node]) {
         .container_decl,
         .container_decl_trailing,
@@ -928,7 +928,7 @@ pub fn isContainer(tree: Tree, node: ast.Node.Index) bool {
 
 /// Returns the member indices of a given declaration container.
 /// Asserts given `tag` is a container node
-pub fn declMembers(tree: Tree, node_idx: ast.Node.Index, buffer: *[2]ast.Node.Index) []const ast.Node.Index {
+pub fn declMembers(tree: Tree, node_idx: Ast.Node.Index, buffer: *[2]Ast.Node.Index) []const Ast.Node.Index {
     std.debug.assert(isContainer(tree, node_idx));
     return switch (tree.nodes.items(.tag)[node_idx]) {
         .container_decl, .container_decl_trailing => tree.containerDecl(node_idx).ast.members,
@@ -938,14 +938,14 @@ pub fn declMembers(tree: Tree, node_idx: ast.Node.Index, buffer: *[2]ast.Node.In
         .tagged_union_enum_tag, .tagged_union_enum_tag_trailing => tree.taggedUnionEnumTag(node_idx).ast.members,
         .tagged_union_two, .tagged_union_two_trailing => tree.taggedUnionTwo(buffer, node_idx).ast.members,
         .root => tree.rootDecls(),
-        .error_set_decl => &[_]ast.Node.Index{},
+        .error_set_decl => &[_]Ast.Node.Index{},
         else => unreachable,
     };
 }
 
 /// Returns an `ast.full.VarDecl` for a given node index.
 /// Returns null if the tag doesn't match
-pub fn varDecl(tree: Tree, node_idx: ast.Node.Index) ?ast.full.VarDecl {
+pub fn varDecl(tree: Tree, node_idx: Ast.Node.Index) ?Ast.full.VarDecl {
     return switch (tree.nodes.items(.tag)[node_idx]) {
         .global_var_decl => tree.globalVarDecl(node_idx),
         .local_var_decl => tree.localVarDecl(node_idx),
@@ -955,7 +955,7 @@ pub fn varDecl(tree: Tree, node_idx: ast.Node.Index) ?ast.full.VarDecl {
     };
 }
 
-pub fn isBuiltinCall(tree: Tree, node: ast.Node.Index) bool {
+pub fn isBuiltinCall(tree: Tree, node: Ast.Node.Index) bool {
     return switch (tree.nodes.items(.tag)[node]) {
         .builtin_call,
         .builtin_call_comma,
@@ -966,7 +966,7 @@ pub fn isBuiltinCall(tree: Tree, node: ast.Node.Index) bool {
     };
 }
 
-pub fn isCall(tree: Tree, node: ast.Node.Index) bool {
+pub fn isCall(tree: Tree, node: Ast.Node.Index) bool {
     return switch (tree.nodes.items(.tag)[node]) {
         .call,
         .call_comma,
@@ -981,7 +981,7 @@ pub fn isCall(tree: Tree, node: ast.Node.Index) bool {
     };
 }
 
-pub fn fnProto(tree: Tree, node: ast.Node.Index, buf: *[1]ast.Node.Index) ?ast.full.FnProto {
+pub fn fnProto(tree: Tree, node: Ast.Node.Index, buf: *[1]Ast.Node.Index) ?Ast.full.FnProto {
     return switch (tree.nodes.items(.tag)[node]) {
         .fn_proto => tree.fnProto(node),
         .fn_proto_multi => tree.fnProtoMulti(node),
@@ -992,7 +992,7 @@ pub fn fnProto(tree: Tree, node: ast.Node.Index, buf: *[1]ast.Node.Index) ?ast.f
     };
 }
 
-pub fn callFull(tree: Tree, node: ast.Node.Index, buf: *[1]ast.Node.Index) ?ast.full.Call {
+pub fn callFull(tree: Tree, node: Ast.Node.Index, buf: *[1]Ast.Node.Index) ?Ast.full.Call {
     return switch (tree.nodes.items(.tag)[node]) {
         .call,
         .call_comma,

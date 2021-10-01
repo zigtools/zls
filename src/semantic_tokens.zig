@@ -2,7 +2,7 @@ const std = @import("std");
 const offsets = @import("./offsets.zig");
 const DocumentStore = @import("./document_store.zig");
 const analysis = @import("./analysis.zig");
-const ast = std.zig.Ast;
+const Ast = std.zig.Ast;
 const log = std.log.scoped(.semantic_tokens);
 const SemanticToken = @This();
 usingnamespace @import("./ast.zig");
@@ -54,7 +54,7 @@ pub const TokenModifiers = packed struct {
 const Builder = struct {
     handle: *DocumentStore.Handle,
     previous_position: usize = 0,
-    previous_token: ?ast.TokenIndex = null,
+    previous_token: ?Ast.TokenIndex = null,
     arr: std.ArrayList(u32),
     encoding: offsets.Encoding,
 
@@ -66,7 +66,7 @@ const Builder = struct {
         };
     }
 
-    fn add(self: *Builder, token: ast.TokenIndex, token_type: TokenType, token_modifiers: TokenModifiers) !void {
+    fn add(self: *Builder, token: Ast.TokenIndex, token_type: TokenType, token_modifiers: TokenModifiers) !void {
         const tree = self.handle.tree;
         const starts = tree.tokens.items(.start);
         const next_start = starts[token];
@@ -103,7 +103,7 @@ const Builder = struct {
     }
 
     /// Highlight a token without semantic context.
-    fn handleToken(self: *Builder, tok: ast.TokenIndex) !void {
+    fn handleToken(self: *Builder, tok: Ast.TokenIndex) !void {
         const tree = self.handle.tree;
         // TODO More highlighting here
         const tok_id = tree.tokens.items(.tag)[tok];
@@ -177,17 +177,17 @@ const Builder = struct {
     }
 };
 
-inline fn writeToken(builder: *Builder, token_idx: ?ast.TokenIndex, tok_type: TokenType) !void {
+inline fn writeToken(builder: *Builder, token_idx: ?Ast.TokenIndex, tok_type: TokenType) !void {
     return try writeTokenMod(builder, token_idx, tok_type, .{});
 }
 
-inline fn writeTokenMod(builder: *Builder, token_idx: ?ast.TokenIndex, tok_type: TokenType, tok_mod: TokenModifiers) !void {
+inline fn writeTokenMod(builder: *Builder, token_idx: ?Ast.TokenIndex, tok_type: TokenType, tok_mod: TokenModifiers) !void {
     if (token_idx) |ti| {
         try builder.add(ti, tok_type, tok_mod);
     }
 }
 
-fn writeDocComments(builder: *Builder, tree: SemanticToken.Tree, doc: ast.TokenIndex) !void {
+fn writeDocComments(builder: *Builder, tree: SemanticToken.Tree, doc: Ast.TokenIndex) !void {
     const token_tags = tree.tokens.items(.tag);
     var tok_idx = doc;
     while (token_tags[tok_idx] == .doc_comment or
@@ -200,7 +200,7 @@ fn writeDocComments(builder: *Builder, tree: SemanticToken.Tree, doc: ast.TokenI
     }
 }
 
-fn fieldTokenType(container_decl: ast.Node.Index, handle: *DocumentStore.Handle) ?TokenType {
+fn fieldTokenType(container_decl: Ast.Node.Index, handle: *DocumentStore.Handle) ?TokenType {
     const main_token = handle.tree.nodes.items(.main_token)[container_decl];
     if (main_token > handle.tree.tokens.len) return null;
     return @as(?TokenType, switch (handle.tree.tokens.items(.tag)[main_token]) {
@@ -210,7 +210,7 @@ fn fieldTokenType(container_decl: ast.Node.Index, handle: *DocumentStore.Handle)
     });
 }
 
-fn colorIdentifierBasedOnType(builder: *Builder, type_node: analysis.TypeWithHandle, target_tok: ast.TokenIndex, tok_mod: TokenModifiers) !void {
+fn colorIdentifierBasedOnType(builder: *Builder, type_node: analysis.TypeWithHandle, target_tok: Ast.TokenIndex, tok_mod: TokenModifiers) !void {
     if (type_node.type.is_type_val) {
         var new_tok_mod = tok_mod;
         if (type_node.isNamespace())
@@ -249,7 +249,7 @@ const WriteTokensError = error{
     MovedBackwards,
 };
 
-fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *DocumentStore, maybe_node: ?ast.Node.Index) WriteTokensError!void {
+fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *DocumentStore, maybe_node: ?Ast.Node.Index) WriteTokensError!void {
     const node = maybe_node orelse return;
 
     const handle = builder.handle;
@@ -294,10 +294,10 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
                 try writeToken(builder, main_token - 2, .label);
             }
 
-            const statements: []const ast.Node.Index = switch (tag) {
+            const statements: []const Ast.Node.Index = switch (tag) {
                 .block, .block_semicolon => tree.extra_data[node_data[node].lhs..node_data[node].rhs],
                 .block_two, .block_two_semicolon => blk: {
-                    const statements = &[_]ast.Node.Index{ node_data[node].lhs, node_data[node].rhs };
+                    const statements = &[_]Ast.Node.Index{ node_data[node].lhs, node_data[node].rhs };
                     const len: usize = if (node_data[node].lhs == 0)
                         @as(usize, 0)
                     else if (node_data[node].rhs == 0)
@@ -366,8 +366,8 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
         .tagged_union_two,
         .tagged_union_two_trailing,
         => {
-            var buf: [2]ast.Node.Index = undefined;
-            const decl: ast.full.ContainerDecl = switch (tag) {
+            var buf: [2]Ast.Node.Index = undefined;
+            const decl: Ast.full.ContainerDecl = switch (tag) {
                 .container_decl, .container_decl_trailing => tree.containerDecl(node),
                 .container_decl_two, .container_decl_two_trailing => tree.containerDeclTwo(&buf, node),
                 .container_decl_arg, .container_decl_arg_trailing => tree.containerDeclArg(node),
@@ -430,8 +430,8 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
         .fn_proto_multi,
         .fn_decl,
         => {
-            var buf: [1]ast.Node.Index = undefined;
-            const fn_proto: ast.full.FnProto = SemanticToken.fnProto(tree, node, &buf).?;
+            var buf: [1]Ast.Node.Index = undefined;
+            const fn_proto: Ast.full.FnProto = SemanticToken.fnProto(tree, node, &buf).?;
             if (analysis.getDocCommentTokenIndex(token_tags, main_token)) |docs|
                 try writeDocComments(builder, tree, docs);
 
@@ -496,7 +496,7 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
         => {
             try writeToken(builder, main_token, .keyword);
             try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, node_data[node].lhs });
-            const extra = tree.extraData(node_data[node].rhs, ast.Node.SubRange);
+            const extra = tree.extraData(node_data[node].rhs, Ast.Node.SubRange);
             const cases = tree.extra_data[extra.start..extra.end];
 
             for (cases) |case_node| {
@@ -590,8 +590,8 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
         .array_init_dot_two,
         .array_init_dot_two_comma,
         => {
-            var buf: [2]ast.Node.Index = undefined;
-            const array_init: ast.full.ArrayInit = switch (tag) {
+            var buf: [2]Ast.Node.Index = undefined;
+            const array_init: Ast.full.ArrayInit = switch (tag) {
                 .array_init, .array_init_comma => tree.arrayInit(node),
                 .array_init_one, .array_init_one_comma => tree.arrayInitOne(buf[0..1], node),
                 .array_init_dot, .array_init_dot_comma => tree.arrayInitDot(node),
@@ -611,8 +611,8 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
         .struct_init_dot_two,
         .struct_init_dot_two_comma,
         => {
-            var buf: [2]ast.Node.Index = undefined;
-            const struct_init: ast.full.StructInit = switch (tag) {
+            var buf: [2]Ast.Node.Index = undefined;
+            const struct_init: Ast.full.StructInit = switch (tag) {
                 .struct_init, .struct_init_comma => tree.structInit(node),
                 .struct_init_dot, .struct_init_dot_comma => tree.structInitDot(node),
                 .struct_init_one, .struct_init_one_comma => tree.structInitOne(buf[0..1], node),
@@ -654,8 +654,8 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
         .async_call_one,
         .async_call_one_comma,
         => {
-            var params: [1]ast.Node.Index = undefined;
-            const call: ast.full.Call = switch (tag) {
+            var params: [1]Ast.Node.Index = undefined;
+            const call: Ast.full.Call = switch (tag) {
                 .call, .call_comma, .async_call, .async_call_comma => tree.callFull(node),
                 .call_one, .call_one_comma, .async_call_one, .async_call_one_comma => tree.callOne(&params, node),
                 else => unreachable,
@@ -675,7 +675,7 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
         .slice_open,
         .slice_sentinel,
         => {
-            const slice: ast.full.Slice = switch (tag) {
+            const slice: Ast.full.Slice = switch (tag) {
                 .slice => tree.slice(node),
                 .slice_open => tree.sliceOpen(node),
                 .slice_sentinel => tree.sliceSentinel(node),
@@ -734,11 +734,11 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
             const params = switch (tag) {
                 .builtin_call, .builtin_call_comma => tree.extra_data[data.lhs..data.rhs],
                 .builtin_call_two, .builtin_call_two_comma => if (data.lhs == 0)
-                    &[_]ast.Node.Index{}
+                    &[_]Ast.Node.Index{}
                 else if (data.rhs == 0)
-                    &[_]ast.Node.Index{data.lhs}
+                    &[_]Ast.Node.Index{data.lhs}
                 else
-                    &[_]ast.Node.Index{ data.lhs, data.rhs },
+                    &[_]Ast.Node.Index{ data.lhs, data.rhs },
                 else => unreachable,
             };
 
@@ -768,7 +768,7 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
         .asm_input,
         .asm_simple,
         => {
-            const asm_node: ast.full.Asm = switch (tag) {
+            const asm_node: Ast.full.Asm = switch (tag) {
                 .@"asm" => tree.asmFull(node),
                 .asm_simple => tree.asmSimple(node),
                 else => return, // TODO Inputs, outputs
@@ -950,7 +950,7 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
         .array_type,
         .array_type_sentinel,
         => {
-            const array_type: ast.full.ArrayType = if (tag == .array_type)
+            const array_type: Ast.full.ArrayType = if (tag == .array_type)
                 tree.arrayType(node)
             else
                 tree.arrayTypeSentinel(node);
@@ -981,7 +981,7 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
     }
 }
 
-fn writeContainerField(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *DocumentStore, node: ast.Node.Index, field_token_type: ?TokenType, child_frame: anytype) !void {
+fn writeContainerField(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *DocumentStore, node: Ast.Node.Index, field_token_type: ?TokenType, child_frame: anytype) !void {
     const tree = builder.handle.tree;
     const container_field = SemanticToken.containerField(tree, node).?;
     const base = tree.nodes.items(.main_token)[node];
@@ -1002,7 +1002,7 @@ fn writeContainerField(builder: *Builder, arena: *std.heap.ArenaAllocator, store
     }
 
     if (container_field.ast.value_expr != 0) block: {
-        const eq_tok: ast.TokenIndex = if (container_field.ast.align_expr != 0)
+        const eq_tok: Ast.TokenIndex = if (container_field.ast.align_expr != 0)
             SemanticToken.lastToken(tree, container_field.ast.align_expr) + 2
         else if (container_field.ast.type_expr != 0)
             SemanticToken.lastToken(tree, container_field.ast.type_expr) + 1
@@ -1020,7 +1020,7 @@ pub fn writeAllSemanticTokens(arena: *std.heap.ArenaAllocator, store: *DocumentS
     errdefer builder.arr.deinit();
 
     // reverse the ast from the root declarations
-    var buf: [2]ast.Node.Index = undefined;
+    var buf: [2]Ast.Node.Index = undefined;
     for (SemanticToken.declMembers(handle.tree, 0, &buf)) |child| {
         writeNodeTokens(&builder, arena, store, child) catch |err| switch (err) {
             error.MovedBackwards => break,

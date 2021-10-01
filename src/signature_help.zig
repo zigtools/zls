@@ -3,21 +3,13 @@ const analysis = @import("./analysis.zig");
 const offsets = @import("./offsets.zig");
 const DocumentStore = @import("./document_store.zig");
 const types = @import("./types.zig");
-const ast = std.zig.Ast;
+const Ast = std.zig.Ast;
 const Token = std.zig.Token;
 const identifierFromPosition = @import("./main.zig").identifierFromPosition;
 const SignatureHelp = @This();
 usingnamespace @import("./ast.zig");
 
-fn fnProtoToSignatureInfo(
-    document_store: *DocumentStore,
-    arena: *std.heap.ArenaAllocator,
-    commas: u32,
-    skip_self_param: bool,
-    handle: *DocumentStore.Handle,
-    fn_node: ast.Node.Index,
-    proto: ast.full.FnProto,
-) !types.SignatureInformation {
+fn fnProtoToSignatureInfo(document_store: *DocumentStore, arena: *std.heap.ArenaAllocator, commas: u32, skip_self_param: bool, handle: *DocumentStore.Handle, fn_node: Ast.Node.Index, proto: Ast.full.FnProto) !types.SignatureInformation {
     const ParameterInformation = types.SignatureInformation.ParameterInformation;
 
     const tree = handle.tree;
@@ -287,7 +279,7 @@ pub fn getSignatureInfo(
                         },
                     };
 
-                    var buf: [1]ast.Node.Index = undefined;
+                    var buf: [1]Ast.Node.Index = undefined;
                     if (SignatureHelp.fnProto(type_handle.handle.tree, node, &buf)) |proto| {
                         return try fnProtoToSignatureInfo(
                             document_store,
