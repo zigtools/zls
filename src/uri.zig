@@ -1,5 +1,4 @@
 const std = @import("std");
-const mem = std.mem;
 
 // http://tools.ietf.org/html/rfc3986#section-2.2
 const reserved_chars = &[_]u8{
@@ -19,7 +18,7 @@ const reserved_escapes = blk: {
 };
 
 /// Returns a URI from a path, caller owns the memory allocated with `allocator`
-pub fn fromPath(allocator: *mem.Allocator, path: []const u8) ![]const u8 {
+pub fn fromPath(allocator: *std.mem.Allocator, path: []const u8) ![]const u8 {
     if (path.len == 0) return "";
     const prefix = if (std.builtin.os.tag == .windows) "file:///" else "file://";
 
@@ -29,7 +28,7 @@ pub fn fromPath(allocator: *mem.Allocator, path: []const u8) ![]const u8 {
     for (path) |char| {
         if (char == std.fs.path.sep) {
             try buf.append('/');
-        } else if (mem.indexOfScalar(u8, reserved_chars, char)) |reserved| {
+        } else if (std.mem.indexOfScalar(u8, reserved_chars, char)) |reserved| {
             try buf.appendSlice(&reserved_escapes[reserved]);
         } else {
             try buf.append(char);
@@ -40,7 +39,7 @@ pub fn fromPath(allocator: *mem.Allocator, path: []const u8) ![]const u8 {
     if (std.builtin.os.tag == .windows) {
         if (buf.items.len > prefix.len + 1 and
             std.ascii.isAlpha(buf.items[prefix.len]) and
-            mem.startsWith(u8, buf.items[prefix.len + 1 ..], "%3A"))
+            std.mem.startsWith(u8, buf.items[prefix.len + 1 ..], "%3A"))
         {
             buf.items[prefix.len] = std.ascii.toLower(buf.items[prefix.len]);
         }
@@ -51,19 +50,19 @@ pub fn fromPath(allocator: *mem.Allocator, path: []const u8) ![]const u8 {
 
 /// Move along `rel` from `base` with a single allocation.
 /// `base` is a URI of a folder, `rel` is a raw relative path.
-pub fn pathRelative(allocator: *mem.Allocator, base: []const u8, rel: []const u8) ![]const u8 {
+pub fn pathRelative(allocator: *std.mem.Allocator, base: []const u8, rel: []const u8) ![]const u8 {
     const max_size = base.len + rel.len * 3 + 1;
 
     var result = try allocator.alloc(u8, max_size);
     errdefer allocator.free(result);
-    mem.copy(u8, result, base);
+    std.mem.copy(u8, result, base);
     var result_index: usize = base.len;
 
-    var it = mem.tokenize(u8, rel, "/");
+    var it = std.mem.tokenize(u8, rel, "/");
     while (it.next()) |component| {
-        if (mem.eql(u8, component, ".")) {
+        if (std.mem.eql(u8, component, ".")) {
             continue;
-        } else if (mem.eql(u8, component, "..")) {
+        } else if (std.mem.eql(u8, component, "..")) {
             while (true) {
                 if (result_index == 0)
                     return error.UriBadScheme;
@@ -75,9 +74,9 @@ pub fn pathRelative(allocator: *mem.Allocator, base: []const u8, rel: []const u8
             result[result_index] = '/';
             result_index += 1;
             for (component) |char| {
-                if (mem.indexOfScalar(u8, reserved_chars, char)) |reserved| {
+                if (std.mem.indexOfScalar(u8, reserved_chars, char)) |reserved| {
                     const escape = &reserved_escapes[reserved];
-                    mem.copy(u8, result[result_index..], escape);
+                    std.mem.copy(u8, result[result_index..], escape);
                     result_index += escape.len;
                 } else {
                     result[result_index] = char;
@@ -108,8 +107,8 @@ fn parseHex(c: u8) !u8 {
 }
 
 /// Caller should free memory
-pub fn parse(allocator: *mem.Allocator, str: []const u8) ![]u8 {
-    if (str.len < 7 or !mem.eql(u8, "file://", str[0..7])) return error.UriBadScheme;
+pub fn parse(allocator: *std.mem.Allocator, str: []const u8) ![]u8 {
+    if (str.len < 7 or !std.mem.eql(u8, "file://", str[0..7])) return error.UriBadScheme;
 
     const uri = try allocator.alloc(u8, str.len - (if (std.fs.path.sep == '\\') 8 else 7));
     errdefer allocator.free(uri);

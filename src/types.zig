@@ -1,6 +1,5 @@
 const std = @import("std");
 // LSP types
-const json = std.json;
 
 pub const Position = struct {
     line: i64,
@@ -90,8 +89,8 @@ pub const DiagnosticSeverity = enum(i64) {
     Information = 3,
     Hint = 4,
 
-    pub fn jsonStringify(value: DiagnosticSeverity, options: json.StringifyOptions, out_stream: anytype) !void {
-        try json.stringify(@enumToInt(value), options, out_stream);
+    pub fn jsonStringify(value: DiagnosticSeverity, options: std.json.StringifyOptions, out_stream: anytype) !void {
+        try std.json.stringify(@enumToInt(value), options, out_stream);
     }
 };
 
@@ -193,8 +192,8 @@ pub const InsertTextFormat = enum(i64) {
     PlainText = 1,
     Snippet = 2,
 
-    pub fn jsonStringify(value: InsertTextFormat, options: json.StringifyOptions, out_stream: anytype) !void {
-        try json.stringify(@enumToInt(value), options, out_stream);
+    pub fn jsonStringify(value: InsertTextFormat, options: std.json.StringifyOptions, out_stream: anytype) !void {
+        try std.json.stringify(@enumToInt(value), options, out_stream);
     }
 };
 
@@ -226,8 +225,8 @@ pub const CompletionItem = struct {
         Operator = 24,
         TypeParameter = 25,
 
-        pub fn jsonStringify(value: Kind, options: json.StringifyOptions, out_stream: anytype) !void {
-            try json.stringify(@enumToInt(value), options, out_stream);
+        pub fn jsonStringify(value: Kind, options: std.json.StringifyOptions, out_stream: anytype) !void {
+            try std.json.stringify(@enumToInt(value), options, out_stream);
         }
     };
 
@@ -270,8 +269,8 @@ pub const DocumentSymbol = struct {
         Operator = 25,
         TypeParameter = 26,
 
-        pub fn jsonStringify(value: Kind, options: json.StringifyOptions, out_stream: anytype) !void {
-            try json.stringify(@enumToInt(value), options, out_stream);
+        pub fn jsonStringify(value: Kind, options: std.json.StringifyOptions, out_stream: anytype) !void {
+            try std.json.stringify(@enumToInt(value), options, out_stream);
         }
     };
 
