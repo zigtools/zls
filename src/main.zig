@@ -544,7 +544,7 @@ fn nodeToCompletion(arena: *std.heap.ArenaAllocator, list: *std.ArrayList(types.
 pub fn identifierFromPosition(pos_index: usize, handle: DocumentStore.Handle) []const u8 {
     const text = handle.document.text;
 
-    if (pos_index + 1 >= text.len) return &[0]u8{};
+    if (pos_index + 1 >= text.len) return "";
     var start_idx = pos_index;
 
     while (start_idx > 0 and isSymbolChar(text[start_idx - 1])) {
@@ -556,7 +556,7 @@ pub fn identifierFromPosition(pos_index: usize, handle: DocumentStore.Handle) []
         end_idx += 1;
     }
 
-    if (end_idx <= start_idx) return &[0]u8{};
+    if (end_idx <= start_idx) return "";
     return text[start_idx..end_idx];
 }
 
