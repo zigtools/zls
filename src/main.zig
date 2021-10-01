@@ -18,6 +18,8 @@ const known_folders = @import("known-folders");
 const data = blk: {
     if (std.mem.eql(u8, build_options.data_version, "0.7.0")) break :blk @import("data/0.7.0.zig");
     if (std.mem.eql(u8, build_options.data_version, "0.7.1")) break :blk @import("data/0.7.1.zig");
+    if (std.mem.eql(u8, build_options.data_version, "0.8.0")) break :blk @import("data/0.8.0.zig");
+    if (std.mem.eql(u8, build_options.data_version, "0.8.1")) break :blk @import("data/0.8.1.zig");
     if (std.mem.eql(u8, build_options.data_version, "master")) break :blk @import("data/master.zig");
     @compileError("invalid data_version provided");
 };
@@ -562,6 +564,7 @@ pub fn identifierFromPosition(pos_index: usize, handle: DocumentStore.Handle) []
     if (end_idx <= start_idx) return &[0]u8{};
     return text[start_idx..end_idx];
 }
+
 fn isSymbolChar(char: u8) bool {
     return std.ascii.isAlNum(char) or char == '_';
 }
