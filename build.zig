@@ -16,6 +16,7 @@ pub fn build(b: *std.build.Builder) !void {
     );
 
     exe.addPackage(.{ .name = "known-folders", .path = .{ .path = "src/known-folders/known-folders.zig" } });
+    exe.addPackage(.{ .name = "zinput", .path = .{ .path = "src/zinput/src/main.zig" } });
 
     exe.setTarget(target);
     exe.setBuildMode(mode);

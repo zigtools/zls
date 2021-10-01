@@ -1,5 +1,5 @@
 const std = @import("std");
-const zinput = @import("zinput/src/main.zig");
+const zinput = @import("zinput");
 const known_folders = @import("known-folders");
 
 fn print(comptime fmt: []const u8, args: anytype) void {
