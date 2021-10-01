@@ -19,12 +19,7 @@ pub fn deinit() void {
 }
 
 /// Gets a declaration's doc comments. Caller owns returned memory.
-pub fn getDocComments(
-    allocator: *std.mem.Allocator,
-    tree: Analysis.Tree,
-    node: ast.Node.Index,
-    format: types.MarkupContent.Kind,
-) !?[]const u8 {
+pub fn getDocComments(allocator: *std.mem.Allocator, tree: Analysis.Tree, node: ast.Node.Index, format: types.MarkupContent.Kind) !?[]const u8 {
     const base = tree.nodes.items(.main_token)[node];
     const base_kind = tree.nodes.items(.tag)[node];
     const tokens = tree.tokens.items(.tag);
@@ -72,13 +67,7 @@ pub fn getDocCommentTokenIndex(tokens: []std.zig.Token.Tag, base_token: ast.Toke
     } else idx + 1;
 }
 
-pub fn collectDocComments(
-    allocator: *std.mem.Allocator,
-    tree: Analysis.Tree,
-    doc_comments: ast.TokenIndex,
-    format: types.MarkupContent.Kind,
-    container_doc: bool,
-) ![]const u8 {
+pub fn collectDocComments(allocator: *std.mem.Allocator, tree: Analysis.Tree, doc_comments: ast.TokenIndex, format: types.MarkupContent.Kind, container_doc: bool) ![]const u8 {
     var lines = std.ArrayList([]const u8).init(allocator);
     defer lines.deinit();
     const tokens = tree.tokens.items(.tag);
@@ -106,12 +95,7 @@ pub fn getFunctionSignature(tree: Analysis.Tree, func: ast.full.FnProto) []const
 }
 
 /// Creates snippet insert text for a function. Caller owns returned memory.
-pub fn getFunctionSnippet(
-    allocator: *std.mem.Allocator,
-    tree: Analysis.Tree,
-    func: ast.full.FnProto,
-    skip_self_param: bool,
-) ![]const u8 {
+pub fn getFunctionSnippet(allocator: *std.mem.Allocator, tree: Analysis.Tree, func: ast.full.FnProto, skip_self_param: bool) ![]const u8 {
     const name_index = func.name_token.?;
 
     var buffer = std.ArrayList(u8).init(allocator);
@@ -172,12 +156,7 @@ pub fn getFunctionSnippet(
     return buffer.toOwnedSlice();
 }
 
-pub fn hasSelfParam(
-    arena: *std.heap.ArenaAllocator,
-    document_store: *DocumentStore,
-    handle: *DocumentStore.Handle,
-    func: ast.full.FnProto,
-) !bool {
+pub fn hasSelfParam(arena: *std.heap.ArenaAllocator, document_store: *DocumentStore, handle: *DocumentStore.Handle, func: ast.full.FnProto) !bool {
     // Non-decl prototypes cannot have a self parameter.
     if (func.name_token == null) return false;
     if (func.ast.params.len == 0) return false;
@@ -314,12 +293,7 @@ fn isContainerDecl(decl_handle: DeclWithHandle) bool {
     };
 }
 
-fn resolveVarDeclAliasInternal(
-    store: *DocumentStore,
-    arena: *std.heap.ArenaAllocator,
-    node_handle: NodeWithHandle,
-    root: bool,
-) error{OutOfMemory}!?DeclWithHandle {
+fn resolveVarDeclAliasInternal(store: *DocumentStore, arena: *std.heap.ArenaAllocator, node_handle: NodeWithHandle, root: bool) error{OutOfMemory}!?DeclWithHandle {
     _ = root;
     const handle = node_handle.handle;
     const tree = handle.tree;
@@ -406,12 +380,7 @@ fn isBlock(tree: Analysis.Tree, node: ast.Node.Index) bool {
     };
 }
 
-fn findReturnStatementInternal(
-    tree: Analysis.Tree,
-    fn_decl: ast.full.FnProto,
-    body: ast.Node.Index,
-    already_found: *bool,
-) ?ast.Node.Index {
+fn findReturnStatementInternal(tree: Analysis.Tree, fn_decl: ast.full.FnProto, body: ast.Node.Index, already_found: *bool) ?ast.Node.Index {
     var result: ?ast.Node.Index = null;
 
     const node_tags = tree.nodes.items(.tag);
@@ -465,14 +434,7 @@ fn findReturnStatement(tree: Analysis.Tree, fn_decl: ast.full.FnProto, body: ast
     return findReturnStatementInternal(tree, fn_decl, body, &already_found);
 }
 
-pub fn resolveReturnType(
-    store: *DocumentStore,
-    arena: *std.heap.ArenaAllocator,
-    fn_decl: ast.full.FnProto,
-    handle: *DocumentStore.Handle,
-    bound_type_params: *BoundTypeParams,
-    fn_body: ?ast.Node.Index,
-) !?TypeWithHandle {
+pub fn resolveReturnType(store: *DocumentStore, arena: *std.heap.ArenaAllocator, fn_decl: ast.full.FnProto, handle: *DocumentStore.Handle, bound_type_params: *BoundTypeParams, fn_body: ?ast.Node.Index) !?TypeWithHandle {
     const tree = handle.tree;
     if (isTypeFunction(tree, fn_decl) and fn_body != null) {
         // If this is a type function and it only contains a single return statement that returns
@@ -509,12 +471,7 @@ pub fn resolveReturnType(
 }
 
 /// Resolves the child type of an optional type
-fn resolveUnwrapOptionalType(
-    store: *DocumentStore,
-    arena: *std.heap.ArenaAllocator,
-    opt: TypeWithHandle,
-    bound_type_params: *BoundTypeParams,
-) !?TypeWithHandle {
+fn resolveUnwrapOptionalType(store: *DocumentStore, arena: *std.heap.ArenaAllocator, opt: TypeWithHandle, bound_type_params: *BoundTypeParams) !?TypeWithHandle {
     const opt_node = switch (opt.type.data) {
         .other => |n| n,
         else => return null,
@@ -530,12 +487,7 @@ fn resolveUnwrapOptionalType(
     return null;
 }
 
-fn resolveUnwrapErrorType(
-    store: *DocumentStore,
-    arena: *std.heap.ArenaAllocator,
-    rhs: TypeWithHandle,
-    bound_type_params: *BoundTypeParams,
-) !?TypeWithHandle {
+fn resolveUnwrapErrorType(store: *DocumentStore, arena: *std.heap.ArenaAllocator, rhs: TypeWithHandle, bound_type_params: *BoundTypeParams) !?TypeWithHandle {
     const rhs_node = switch (rhs.type.data) {
         .other => |n| n,
         .error_union => |n| return TypeWithHandle{
@@ -567,12 +519,7 @@ pub fn isPtrType(tree: Analysis.Tree, node: ast.Node.Index) bool {
 }
 
 /// Resolves the child type of a deref type
-fn resolveDerefType(
-    store: *DocumentStore,
-    arena: *std.heap.ArenaAllocator,
-    deref: TypeWithHandle,
-    bound_type_params: *BoundTypeParams,
-) !?TypeWithHandle {
+fn resolveDerefType(store: *DocumentStore, arena: *std.heap.ArenaAllocator, deref: TypeWithHandle, bound_type_params: *BoundTypeParams) !?TypeWithHandle {
     const deref_node = switch (deref.type.data) {
         .other => |n| n,
         .pointer => |n| return TypeWithHandle{
@@ -605,13 +552,7 @@ fn resolveDerefType(
 }
 
 /// Resolves slicing and array access
-fn resolveBracketAccessType(
-    store: *DocumentStore,
-    arena: *std.heap.ArenaAllocator,
-    lhs: TypeWithHandle,
-    rhs: enum { Single, Range },
-    bound_type_params: *BoundTypeParams,
-) !?TypeWithHandle {
+fn resolveBracketAccessType(store: *DocumentStore, arena: *std.heap.ArenaAllocator, lhs: TypeWithHandle, rhs: enum { Single, Range }, bound_type_params: *BoundTypeParams) !?TypeWithHandle {
     const lhs_node = switch (lhs.type.data) {
         .other => |n| n,
         else => return null,
@@ -648,12 +589,7 @@ fn resolveBracketAccessType(
 }
 
 /// Called to remove one level of pointerness before a field access
-pub fn resolveFieldAccessLhsType(
-    store: *DocumentStore,
-    arena: *std.heap.ArenaAllocator,
-    lhs: TypeWithHandle,
-    bound_type_params: *BoundTypeParams,
-) !TypeWithHandle {
+pub fn resolveFieldAccessLhsType(store: *DocumentStore, arena: *std.heap.ArenaAllocator, lhs: TypeWithHandle, bound_type_params: *BoundTypeParams) !TypeWithHandle {
     return (try resolveDerefType(store, arena, lhs, bound_type_params)) orelse lhs;
 }
 
@@ -691,12 +627,7 @@ pub fn isTypeIdent(tree: Analysis.Tree, token_idx: ast.TokenIndex) bool {
 }
 
 /// Resolves the type of a node
-pub fn resolveTypeOfNodeInternal(
-    store: *DocumentStore,
-    arena: *std.heap.ArenaAllocator,
-    node_handle: NodeWithHandle,
-    bound_type_params: *BoundTypeParams,
-) error{OutOfMemory}!?TypeWithHandle {
+pub fn resolveTypeOfNodeInternal(store: *DocumentStore, arena: *std.heap.ArenaAllocator, node_handle: NodeWithHandle, bound_type_params: *BoundTypeParams) error{OutOfMemory}!?TypeWithHandle {
     // If we were asked to resolve this node before,
     // it is self-referential and we cannot resolve it.
     for (resolve_trail.items) |i| {
@@ -1201,13 +1132,7 @@ pub const FieldAccessReturn = struct {
     unwrapped: ?TypeWithHandle = null,
 };
 
-pub fn getFieldAccessType(
-    store: *DocumentStore,
-    arena: *std.heap.ArenaAllocator,
-    handle: *DocumentStore.Handle,
-    source_index: usize,
-    tokenizer: *std.zig.Tokenizer,
-) !?FieldAccessReturn {
+pub fn getFieldAccessType(store: *DocumentStore, arena: *std.heap.ArenaAllocator, handle: *DocumentStore.Handle, source_index: usize, tokenizer: *std.zig.Tokenizer) !?FieldAccessReturn {
     var current_type = TypeWithHandle.typeVal(.{
         .node = undefined,
         .handle = handle,
@@ -1518,11 +1443,7 @@ fn tokenRangeAppend(prev: SourceRange, token: std.zig.Token) SourceRange {
 
 const DocumentPosition = offsets.DocumentPosition;
 
-pub fn documentPositionContext(
-    arena: *std.heap.ArenaAllocator,
-    document: types.TextDocument,
-    doc_position: DocumentPosition,
-) !PositionContext {
+pub fn documentPositionContext(arena: *std.heap.ArenaAllocator, document: types.TextDocument, doc_position: DocumentPosition) !PositionContext {
     _ = document;
 
     const line = doc_position.line;
@@ -1808,12 +1729,7 @@ const GetDocumentSymbolsContext = struct {
     encoding: offsets.Encoding,
 };
 
-fn getDocumentSymbolsInternal(
-    allocator: *std.mem.Allocator,
-    tree: Analysis.Tree,
-    node: ast.Node.Index,
-    context: *GetDocumentSymbolsContext,
-) anyerror!void {
+fn getDocumentSymbolsInternal(allocator: *std.mem.Allocator, tree: Analysis.Tree, node: ast.Node.Index, context: *GetDocumentSymbolsContext) anyerror!void {
     const name = getDeclName(tree, node) orelse return;
     if (name.len == 0)
         return;
@@ -2072,16 +1988,7 @@ fn findContainerScope(container_handle: NodeWithHandle) ?*Scope {
     } else null;
 }
 
-fn iterateSymbolsContainerInternal(
-    store: *DocumentStore,
-    arena: *std.heap.ArenaAllocator,
-    container_handle: NodeWithHandle,
-    orig_handle: *DocumentStore.Handle,
-    comptime callback: anytype,
-    context: anytype,
-    instance_access: bool,
-    use_trail: *std.ArrayList(*const ast.Node.Index),
-) error{OutOfMemory}!void {
+fn iterateSymbolsContainerInternal(store: *DocumentStore, arena: *std.heap.ArenaAllocator, container_handle: NodeWithHandle, orig_handle: *DocumentStore.Handle, comptime callback: anytype, context: anytype, instance_access: bool, use_trail: *std.ArrayList(*const ast.Node.Index)) error{OutOfMemory}!void {
     const container = container_handle.node;
     const handle = container_handle.handle;
 
@@ -2148,25 +2055,12 @@ fn iterateSymbolsContainerInternal(
     }
 }
 
-pub fn iterateSymbolsContainer(
-    store: *DocumentStore,
-    arena: *std.heap.ArenaAllocator,
-    container_handle: NodeWithHandle,
-    orig_handle: *DocumentStore.Handle,
-    comptime callback: anytype,
-    context: anytype,
-    instance_access: bool,
-) error{OutOfMemory}!void {
+pub fn iterateSymbolsContainer(store: *DocumentStore, arena: *std.heap.ArenaAllocator, container_handle: NodeWithHandle, orig_handle: *DocumentStore.Handle, comptime callback: anytype, context: anytype, instance_access: bool) error{OutOfMemory}!void {
     var use_trail = std.ArrayList(*const ast.Node.Index).init(&arena.allocator);
     return try iterateSymbolsContainerInternal(store, arena, container_handle, orig_handle, callback, context, instance_access, &use_trail);
 }
 
-pub fn iterateLabels(
-    handle: *DocumentStore.Handle,
-    source_index: usize,
-    comptime callback: anytype,
-    context: anytype,
-) error{OutOfMemory}!void {
+pub fn iterateLabels(handle: *DocumentStore.Handle, source_index: usize, comptime callback: anytype, context: anytype) error{OutOfMemory}!void {
     for (handle.document_scope.scopes) |scope| {
         if (source_index >= scope.range.start and source_index < scope.range.end) {
             var decl_it = scope.decls.iterator();
@@ -2182,15 +2076,7 @@ pub fn iterateLabels(
     }
 }
 
-fn iterateSymbolsGlobalInternal(
-    store: *DocumentStore,
-    arena: *std.heap.ArenaAllocator,
-    handle: *DocumentStore.Handle,
-    source_index: usize,
-    comptime callback: anytype,
-    context: anytype,
-    use_trail: *std.ArrayList(*const ast.Node.Index),
-) error{OutOfMemory}!void {
+fn iterateSymbolsGlobalInternal(store: *DocumentStore, arena: *std.heap.ArenaAllocator, handle: *DocumentStore.Handle, source_index: usize, comptime callback: anytype, context: anytype, use_trail: *std.ArrayList(*const ast.Node.Index)) error{OutOfMemory}!void {
     for (handle.document_scope.scopes) |scope| {
         if (source_index >= scope.range.start and source_index <= scope.range.end) {
             var decl_it = scope.decls.iterator();
@@ -2231,14 +2117,7 @@ fn iterateSymbolsGlobalInternal(
     }
 }
 
-pub fn iterateSymbolsGlobal(
-    store: *DocumentStore,
-    arena: *std.heap.ArenaAllocator,
-    handle: *DocumentStore.Handle,
-    source_index: usize,
-    comptime callback: anytype,
-    context: anytype,
-) error{OutOfMemory}!void {
+pub fn iterateSymbolsGlobal(store: *DocumentStore, arena: *std.heap.ArenaAllocator, handle: *DocumentStore.Handle, source_index: usize, comptime callback: anytype, context: anytype) error{OutOfMemory}!void {
     var use_trail = std.ArrayList(*const ast.Node.Index).init(&arena.allocator);
     return try iterateSymbolsGlobalInternal(store, arena, handle, source_index, callback, context, &use_trail);
 }
@@ -2279,13 +2158,7 @@ pub fn innermostContainer(handle: *DocumentStore.Handle, source_index: usize) Ty
     return TypeWithHandle.typeVal(.{ .node = current, .handle = handle });
 }
 
-fn resolveUse(
-    store: *DocumentStore,
-    arena: *std.heap.ArenaAllocator,
-    uses: []const *const ast.Node.Index,
-    symbol: []const u8,
-    handle: *DocumentStore.Handle,
-) error{OutOfMemory}!?DeclWithHandle {
+fn resolveUse(store: *DocumentStore, arena: *std.heap.ArenaAllocator, uses: []const *const ast.Node.Index, symbol: []const u8, handle: *DocumentStore.Handle) error{OutOfMemory}!?DeclWithHandle {
     // If we were asked to resolve this symbol before,
     // it is self-referential and we cannot resolve it.
     if (std.mem.indexOfScalar([*]const u8, using_trail.items, symbol.ptr) != null)
@@ -2319,11 +2192,7 @@ fn resolveUse(
     return null;
 }
 
-pub fn lookupLabel(
-    handle: *DocumentStore.Handle,
-    symbol: []const u8,
-    source_index: usize,
-) error{OutOfMemory}!?DeclWithHandle {
+pub fn lookupLabel(handle: *DocumentStore.Handle, symbol: []const u8, source_index: usize) error{OutOfMemory}!?DeclWithHandle {
     for (handle.document_scope.scopes) |scope| {
         if (source_index >= scope.range.start and source_index < scope.range.end) {
             if (scope.decls.getEntry(symbol)) |candidate| {
@@ -2342,13 +2211,7 @@ pub fn lookupLabel(
     return null;
 }
 
-pub fn lookupSymbolGlobal(
-    store: *DocumentStore,
-    arena: *std.heap.ArenaAllocator,
-    handle: *DocumentStore.Handle,
-    symbol: []const u8,
-    source_index: usize,
-) error{OutOfMemory}!?DeclWithHandle {
+pub fn lookupSymbolGlobal(store: *DocumentStore, arena: *std.heap.ArenaAllocator, handle: *DocumentStore.Handle, symbol: []const u8, source_index: usize) error{OutOfMemory}!?DeclWithHandle {
     const innermost_scope_idx = innermostBlockScopeIndex(handle.*, source_index);
 
     var curr = innermost_scope_idx;
@@ -2555,11 +2418,7 @@ const ScopeContext = struct {
     tree: Analysis.Tree,
 };
 
-fn makeInnerScope(
-    allocator: *std.mem.Allocator,
-    context: ScopeContext,
-    node_idx: ast.Node.Index,
-) error{OutOfMemory}!void {
+fn makeInnerScope(allocator: *std.mem.Allocator, context: ScopeContext, node_idx: ast.Node.Index) error{OutOfMemory}!void {
     const scopes = context.scopes;
     const tree = context.tree;
     const tags = tree.nodes.items(.tag);
@@ -2675,11 +2534,7 @@ fn makeInnerScope(
 
 // Whether we have already visited the root node.
 var had_root = true;
-fn makeScopeInternal(
-    allocator: *std.mem.Allocator,
-    context: ScopeContext,
-    node_idx: ast.Node.Index,
-) error{OutOfMemory}!void {
+fn makeScopeInternal(allocator: *std.mem.Allocator, context: ScopeContext, node_idx: ast.Node.Index) error{OutOfMemory}!void {
     const scopes = context.scopes;
     const tree = context.tree;
     const tags = tree.nodes.items(.tag);

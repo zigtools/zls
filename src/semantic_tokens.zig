@@ -177,20 +177,11 @@ const Builder = struct {
     }
 };
 
-inline fn writeToken(
-    builder: *Builder,
-    token_idx: ?ast.TokenIndex,
-    tok_type: TokenType,
-) !void {
+inline fn writeToken(builder: *Builder, token_idx: ?ast.TokenIndex, tok_type: TokenType) !void {
     return try writeTokenMod(builder, token_idx, tok_type, .{});
 }
 
-inline fn writeTokenMod(
-    builder: *Builder,
-    token_idx: ?ast.TokenIndex,
-    tok_type: TokenType,
-    tok_mod: TokenModifiers,
-) !void {
+inline fn writeTokenMod(builder: *Builder, token_idx: ?ast.TokenIndex, tok_type: TokenType, tok_mod: TokenModifiers) !void {
     if (token_idx) |ti| {
         try builder.add(ti, tok_type, tok_mod);
     }
@@ -258,12 +249,7 @@ const WriteTokensError = error{
     MovedBackwards,
 };
 
-fn writeNodeTokens(
-    builder: *Builder,
-    arena: *std.heap.ArenaAllocator,
-    store: *DocumentStore,
-    maybe_node: ?ast.Node.Index,
-) WriteTokensError!void {
+fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *DocumentStore, maybe_node: ?ast.Node.Index) WriteTokensError!void {
     const node = maybe_node orelse return;
 
     const handle = builder.handle;
@@ -995,14 +981,7 @@ fn writeNodeTokens(
     }
 }
 
-fn writeContainerField(
-    builder: *Builder,
-    arena: *std.heap.ArenaAllocator,
-    store: *DocumentStore,
-    node: ast.Node.Index,
-    field_token_type: ?TokenType,
-    child_frame: anytype,
-) !void {
+fn writeContainerField(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *DocumentStore, node: ast.Node.Index, field_token_type: ?TokenType, child_frame: anytype) !void {
     const tree = builder.handle.tree;
     const container_field = SemanticToken.containerField(tree, node).?;
     const base = tree.nodes.items(.main_token)[node];
@@ -1036,12 +1015,7 @@ fn writeContainerField(
 }
 
 // TODO Range version, edit version.
-pub fn writeAllSemanticTokens(
-    arena: *std.heap.ArenaAllocator,
-    store: *DocumentStore,
-    handle: *DocumentStore.Handle,
-    encoding: offsets.Encoding,
-) ![]u32 {
+pub fn writeAllSemanticTokens(arena: *std.heap.ArenaAllocator, store: *DocumentStore, handle: *DocumentStore.Handle, encoding: offsets.Encoding) ![]u32 {
     var builder = Builder.init(arena.child_allocator, handle, encoding);
     errdefer builder.arr.deinit();
 

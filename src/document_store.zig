@@ -53,14 +53,7 @@ build_runner_path: []const u8,
 build_runner_cache_path: []const u8,
 std_uri: ?[]const u8,
 
-pub fn init(
-    self: *DocumentStore,
-    allocator: *std.mem.Allocator,
-    zig_exe_path: ?[]const u8,
-    build_runner_path: []const u8,
-    build_runner_cache_path: []const u8,
-    zig_lib_path: ?[]const u8,
-) !void {
+pub fn init(self: *DocumentStore, allocator: *std.mem.Allocator, zig_exe_path: ?[]const u8, build_runner_path: []const u8, build_runner_cache_path: []const u8, zig_lib_path: ?[]const u8) !void {
     self.allocator = allocator;
     self.handles = std.StringHashMap(*Handle).init(allocator);
     self.zig_exe_path = zig_exe_path;
@@ -502,12 +495,7 @@ pub fn applySave(self: *DocumentStore, handle: *Handle) !void {
     }
 }
 
-pub fn applyChanges(
-    self: *DocumentStore,
-    handle: *Handle,
-    content_changes: std.json.Array,
-    offset_encoding: offsets.Encoding,
-) !void {
+pub fn applyChanges(self: *DocumentStore, handle: *Handle, content_changes: std.json.Array, offset_encoding: offsets.Encoding) !void {
     const document = &handle.document;
 
     for (content_changes.items) |change| {
@@ -574,12 +562,7 @@ pub fn applyChanges(
     try self.refreshDocument(handle);
 }
 
-pub fn uriFromImportStr(
-    self: *DocumentStore,
-    allocator: *std.mem.Allocator,
-    handle: Handle,
-    import_str: []const u8,
-) !?[]const u8 {
+pub fn uriFromImportStr(self: *DocumentStore, allocator: *std.mem.Allocator, handle: Handle, import_str: []const u8) !?[]const u8 {
     if (std.mem.eql(u8, import_str, "std")) {
         if (self.std_uri) |uri| return try std.mem.dupe(allocator, u8, uri) else {
             log.debug("Cannot resolve std library import, path is null.", .{});
@@ -742,12 +725,7 @@ pub fn deinit(self: *DocumentStore) void {
     self.build_files.deinit(self.allocator);
 }
 
-fn tagStoreCompletionItems(
-    self: DocumentStore,
-    arena: *std.heap.ArenaAllocator,
-    base: *DocumentStore.Handle,
-    comptime name: []const u8,
-) ![]types.CompletionItem {
+fn tagStoreCompletionItems(self: DocumentStore, arena: *std.heap.ArenaAllocator, base: *DocumentStore.Handle, comptime name: []const u8) ![]types.CompletionItem {
     // TODO Better solution for deciding what tags to include
     var max_len: usize = @field(base.document_scope, name).count();
     for (base.imports_used.items) |uri| {
@@ -769,18 +747,10 @@ fn tagStoreCompletionItems(
     return result_set.entries.items(.key);
 }
 
-pub fn errorCompletionItems(
-    self: DocumentStore,
-    arena: *std.heap.ArenaAllocator,
-    base: *DocumentStore.Handle,
-) ![]types.CompletionItem {
+pub fn errorCompletionItems(self: DocumentStore, arena: *std.heap.ArenaAllocator, base: *DocumentStore.Handle) ![]types.CompletionItem {
     return try self.tagStoreCompletionItems(arena, base, "error_completions");
 }
 
-pub fn enumCompletionItems(
-    self: DocumentStore,
-    arena: *std.heap.ArenaAllocator,
-    base: *DocumentStore.Handle,
-) ![]types.CompletionItem {
+pub fn enumCompletionItems(self: DocumentStore, arena: *std.heap.ArenaAllocator, base: *DocumentStore.Handle) ![]types.CompletionItem {
     return try self.tagStoreCompletionItems(arena, base, "enum_completions");
 }

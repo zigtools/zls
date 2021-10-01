@@ -25,14 +25,7 @@ fn refHandler(context: RefHandlerContext, loc: types.Location) !void {
     try context.edits.put(loc.uri, text_edits.toOwnedSlice());
 }
 
-pub fn renameSymbol(
-    arena: *std.heap.ArenaAllocator,
-    store: *DocumentStore,
-    decl_handle: analysis.DeclWithHandle,
-    new_name: []const u8,
-    edits: *std.StringHashMap([]types.TextEdit),
-    encoding: offsets.Encoding,
-) !void {
+pub fn renameSymbol(arena: *std.heap.ArenaAllocator, store: *DocumentStore, decl_handle: analysis.DeclWithHandle, new_name: []const u8, edits: *std.StringHashMap([]types.TextEdit), encoding: offsets.Encoding) !void {
     std.debug.assert(decl_handle.decl.* != .label_decl);
     try references.symbolReferences(arena, store, decl_handle, encoding, true, RefHandlerContext{
         .edits = edits,
@@ -41,13 +34,7 @@ pub fn renameSymbol(
     }, refHandler, true);
 }
 
-pub fn renameLabel(
-    arena: *std.heap.ArenaAllocator,
-    decl_handle: analysis.DeclWithHandle,
-    new_name: []const u8,
-    edits: *std.StringHashMap([]types.TextEdit),
-    encoding: offsets.Encoding,
-) !void {
+pub fn renameLabel(arena: *std.heap.ArenaAllocator, decl_handle: analysis.DeclWithHandle, new_name: []const u8, edits: *std.StringHashMap([]types.TextEdit), encoding: offsets.Encoding) !void {
     std.debug.assert(decl_handle.decl.* == .label_decl);
     try references.labelReferences(arena, decl_handle, encoding, true, RefHandlerContext{
         .edits = edits,

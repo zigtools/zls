@@ -348,16 +348,7 @@ fn typeToCompletion(arena: *std.heap.ArenaAllocator, list: *std.ArrayList(types.
     }
 }
 
-fn nodeToCompletion(
-    arena: *std.heap.ArenaAllocator,
-    list: *std.ArrayList(types.CompletionItem),
-    node_handle: analysis.NodeWithHandle,
-    unwrapped: ?analysis.TypeWithHandle,
-    orig_handle: *DocumentStore.Handle,
-    is_type_val: bool,
-    parent_is_type_val: ?bool,
-    config: Config,
-) error{OutOfMemory}!void {
+fn nodeToCompletion(arena: *std.heap.ArenaAllocator, list: *std.ArrayList(types.CompletionItem), node_handle: analysis.NodeWithHandle, unwrapped: ?analysis.TypeWithHandle, orig_handle: *DocumentStore.Handle, is_type_val: bool, parent_is_type_val: ?bool, config: Config) error{OutOfMemory}!void {
     const node = node_handle.node;
     const handle = node_handle.handle;
     const tree = handle.tree;
@@ -614,11 +605,7 @@ fn gotoDefinitionSymbol(id: types.RequestId, arena: *std.heap.ArenaAllocator, de
     });
 }
 
-fn hoverSymbol(
-    id: types.RequestId,
-    arena: *std.heap.ArenaAllocator,
-    decl_handle: analysis.DeclWithHandle,
-) (std.os.WriteError || error{OutOfMemory})!void {
+fn hoverSymbol(id: types.RequestId, arena: *std.heap.ArenaAllocator, decl_handle: analysis.DeclWithHandle) (std.os.WriteError || error{OutOfMemory})!void {
     const handle = decl_handle.handle;
     const tree = handle.tree;
 
@@ -758,13 +745,7 @@ fn hoverDefinitionGlobal(arena: *std.heap.ArenaAllocator, id: types.RequestId, p
     return try hoverSymbol(id, arena, decl);
 }
 
-fn getSymbolFieldAccess(
-    handle: *DocumentStore.Handle,
-    arena: *std.heap.ArenaAllocator,
-    position: offsets.DocumentPosition,
-    range: analysis.SourceRange,
-    config: Config,
-) !?analysis.DeclWithHandle {
+fn getSymbolFieldAccess(handle: *DocumentStore.Handle, arena: *std.heap.ArenaAllocator, position: offsets.DocumentPosition, range: analysis.SourceRange, config: Config) !?analysis.DeclWithHandle {
     _ = config;
 
     const name = identifierFromPosition(position.absolute_index, handle.*);
@@ -793,27 +774,12 @@ fn getSymbolFieldAccess(
     return null;
 }
 
-fn gotoDefinitionFieldAccess(
-    arena: *std.heap.ArenaAllocator,
-    id: types.RequestId,
-    handle: *DocumentStore.Handle,
-    position: offsets.DocumentPosition,
-    range: analysis.SourceRange,
-    config: Config,
-    resolve_alias: bool,
-) !void {
+fn gotoDefinitionFieldAccess(arena: *std.heap.ArenaAllocator, id: types.RequestId, handle: *DocumentStore.Handle, position: offsets.DocumentPosition, range: analysis.SourceRange, config: Config, resolve_alias: bool) !void {
     const decl = (try getSymbolFieldAccess(handle, arena, position, range, config)) orelse return try respondGeneric(id, null_result_response);
     return try gotoDefinitionSymbol(id, arena, decl, resolve_alias);
 }
 
-fn hoverDefinitionFieldAccess(
-    arena: *std.heap.ArenaAllocator,
-    id: types.RequestId,
-    handle: *DocumentStore.Handle,
-    position: offsets.DocumentPosition,
-    range: analysis.SourceRange,
-    config: Config,
-) !void {
+fn hoverDefinitionFieldAccess(arena: *std.heap.ArenaAllocator, id: types.RequestId, handle: *DocumentStore.Handle, position: offsets.DocumentPosition, range: analysis.SourceRange, config: Config) !void {
     const decl = (try getSymbolFieldAccess(handle, arena, position, range, config)) orelse return try respondGeneric(id, null_result_response);
     return try hoverSymbol(id, arena, decl);
 }
@@ -857,15 +823,7 @@ fn renameDefinitionGlobal(arena: *std.heap.ArenaAllocator, id: types.RequestId, 
     });
 }
 
-fn renameDefinitionFieldAccess(
-    arena: *std.heap.ArenaAllocator,
-    id: types.RequestId,
-    handle: *DocumentStore.Handle,
-    position: offsets.DocumentPosition,
-    range: analysis.SourceRange,
-    new_name: []const u8,
-    config: Config,
-) !void {
+fn renameDefinitionFieldAccess(arena: *std.heap.ArenaAllocator, id: types.RequestId, handle: *DocumentStore.Handle, position: offsets.DocumentPosition, range: analysis.SourceRange, new_name: []const u8, config: Config) !void {
     const decl = (try getSymbolFieldAccess(handle, arena, position, range, config)) orelse return try respondGeneric(id, null_result_response);
 
     var workspace_edit = types.WorkspaceEdit{
@@ -891,14 +849,7 @@ fn renameDefinitionLabel(arena: *std.heap.ArenaAllocator, id: types.RequestId, h
     });
 }
 
-fn referencesDefinitionGlobal(
-    arena: *std.heap.ArenaAllocator,
-    id: types.RequestId,
-    handle: *DocumentStore.Handle,
-    pos_index: usize,
-    include_decl: bool,
-    skip_std_references: bool,
-) !void {
+fn referencesDefinitionGlobal(arena: *std.heap.ArenaAllocator, id: types.RequestId, handle: *DocumentStore.Handle, pos_index: usize, include_decl: bool, skip_std_references: bool) !void {
     const decl = (try getSymbolGlobal(arena, pos_index, handle)) orelse return try respondGeneric(id, null_result_response);
     var locs = std.ArrayList(types.Location).init(&arena.allocator);
     try references.symbolReferences(
@@ -917,15 +868,7 @@ fn referencesDefinitionGlobal(
     });
 }
 
-fn referencesDefinitionFieldAccess(
-    arena: *std.heap.ArenaAllocator,
-    id: types.RequestId,
-    handle: *DocumentStore.Handle,
-    position: offsets.DocumentPosition,
-    range: analysis.SourceRange,
-    include_decl: bool,
-    config: Config,
-) !void {
+fn referencesDefinitionFieldAccess(arena: *std.heap.ArenaAllocator, id: types.RequestId, handle: *DocumentStore.Handle, position: offsets.DocumentPosition, range: analysis.SourceRange, include_decl: bool, config: Config) !void {
     const decl = (try getSymbolFieldAccess(handle, arena, position, range, config)) orelse return try respondGeneric(id, null_result_response);
     var locs = std.ArrayList(types.Location).init(&arena.allocator);
     try references.symbolReferences(arena, &document_store, decl, offset_encoding, include_decl, &locs, std.ArrayList(types.Location).append, config.skip_std_references);
@@ -1109,13 +1052,7 @@ fn completeBuiltin(arena: *std.heap.ArenaAllocator, id: types.RequestId, config:
     });
 }
 
-fn completeGlobal(
-    arena: *std.heap.ArenaAllocator,
-    id: types.RequestId,
-    pos_index: usize,
-    handle: *DocumentStore.Handle,
-    config: Config,
-) !void {
+fn completeGlobal(arena: *std.heap.ArenaAllocator, id: types.RequestId, pos_index: usize, handle: *DocumentStore.Handle, config: Config) !void {
     var completions = std.ArrayList(types.CompletionItem).init(&arena.allocator);
 
     const context = DeclToCompletionContext{
@@ -1138,14 +1075,7 @@ fn completeGlobal(
     });
 }
 
-fn completeFieldAccess(
-    arena: *std.heap.ArenaAllocator,
-    id: types.RequestId,
-    handle: *DocumentStore.Handle,
-    position: offsets.DocumentPosition,
-    range: analysis.SourceRange,
-    config: Config,
-) !void {
+fn completeFieldAccess(arena: *std.heap.ArenaAllocator, id: types.RequestId, handle: *DocumentStore.Handle, position: offsets.DocumentPosition, range: analysis.SourceRange, config: Config) !void {
     var completions = std.ArrayList(types.CompletionItem).init(&arena.allocator);
 
     const line_mem_start = @ptrToInt(position.line.ptr) - @ptrToInt(handle.document.mem.ptr);
@@ -1170,12 +1100,7 @@ fn completeFieldAccess(
     });
 }
 
-fn completeError(
-    arena: *std.heap.ArenaAllocator,
-    id: types.RequestId,
-    handle: *DocumentStore.Handle,
-    config: Config,
-) !void {
+fn completeError(arena: *std.heap.ArenaAllocator, id: types.RequestId, handle: *DocumentStore.Handle, config: Config) !void {
     const completions = try document_store.errorCompletionItems(arena, handle);
     truncateCompletions(completions, config.max_detail_length);
     logger.debug("Completing error:", .{});
@@ -1191,12 +1116,7 @@ fn completeError(
     });
 }
 
-fn completeDot(
-    arena: *std.heap.ArenaAllocator,
-    id: types.RequestId,
-    handle: *DocumentStore.Handle,
-    config: Config,
-) !void {
+fn completeDot(arena: *std.heap.ArenaAllocator, id: types.RequestId, handle: *DocumentStore.Handle, config: Config) !void {
     var completions = try document_store.enumCompletionItems(arena, handle);
     truncateCompletions(completions, config.max_detail_length);
 
@@ -1432,12 +1352,7 @@ fn semanticTokensFullHandler(arena: *std.heap.ArenaAllocator, id: types.RequestI
     return try respondGeneric(id, no_semantic_tokens_response);
 }
 
-fn completionHandler(
-    arena: *std.heap.ArenaAllocator,
-    id: types.RequestId,
-    req: requests.Completion,
-    config: Config,
-) !void {
+fn completionHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.Completion, config: Config) !void {
     const handle = document_store.getHandle(req.params.textDocument.uri) orelse {
         logger.warn("Trying to complete in non existent document {s}", .{req.params.textDocument.uri});
         return try respondGeneric(id, no_completions_response);
@@ -1460,12 +1375,7 @@ fn completionHandler(
     }
 }
 
-fn signatureHelpHandler(
-    arena: *std.heap.ArenaAllocator,
-    id: types.RequestId,
-    req: requests.SignatureHelp,
-    config: Config,
-) !void {
+fn signatureHelpHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.SignatureHelp, config: Config) !void {
     _ = config;
 
     const getSignatureInfo = @import("signature_help.zig").getSignatureInfo;
@@ -1499,13 +1409,7 @@ fn signatureHelpHandler(
     return try respondGeneric(id, no_signatures_response);
 }
 
-fn gotoHandler(
-    arena: *std.heap.ArenaAllocator,
-    id: types.RequestId,
-    req: requests.GotoDefinition,
-    config: Config,
-    resolve_alias: bool,
-) !void {
+fn gotoHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.GotoDefinition, config: Config, resolve_alias: bool) !void {
     const handle = document_store.getHandle(req.params.textDocument.uri) orelse {
         logger.warn("Trying to go to definition in non existent document {s}", .{req.params.textDocument.uri});
         return try respondGeneric(id, null_result_response);

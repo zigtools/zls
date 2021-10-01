@@ -94,11 +94,7 @@ pub const DiagnosticSeverity = enum(i64) {
     Information = 3,
     Hint = 4,
 
-    pub fn jsonStringify(
-        value: DiagnosticSeverity,
-        options: json.StringifyOptions,
-        out_stream: anytype,
-    ) !void {
+    pub fn jsonStringify(value: DiagnosticSeverity, options: json.StringifyOptions, out_stream: anytype) !void {
         try json.stringify(@enumToInt(value), options, out_stream);
     }
 };
@@ -149,11 +145,7 @@ pub const TextDocument = struct {
 pub const WorkspaceEdit = struct {
     changes: ?std.StringHashMap([]TextEdit),
 
-    pub fn jsonStringify(
-        self: WorkspaceEdit,
-        options: std.json.StringifyOptions,
-        writer: anytype,
-    ) @TypeOf(writer).Error!void {
+    pub fn jsonStringify(self: WorkspaceEdit, options: std.json.StringifyOptions, writer: anytype) @TypeOf(writer).Error!void {
         try writer.writeByte('{');
         if (self.changes) |changes| {
             try writer.writeAll("\"changes\": {");
@@ -209,11 +201,7 @@ pub const InsertTextFormat = enum(i64) {
     PlainText = 1,
     Snippet = 2,
 
-    pub fn jsonStringify(
-        value: InsertTextFormat,
-        options: json.StringifyOptions,
-        out_stream: anytype,
-    ) !void {
+    pub fn jsonStringify(value: InsertTextFormat, options: json.StringifyOptions, out_stream: anytype) !void {
         try json.stringify(@enumToInt(value), options, out_stream);
     }
 };
@@ -246,11 +234,7 @@ pub const CompletionItem = struct {
         Operator = 24,
         TypeParameter = 25,
 
-        pub fn jsonStringify(
-            value: Kind,
-            options: json.StringifyOptions,
-            out_stream: anytype,
-        ) !void {
+        pub fn jsonStringify(value: Kind, options: json.StringifyOptions, out_stream: anytype) !void {
             try json.stringify(@enumToInt(value), options, out_stream);
         }
     };
@@ -294,11 +278,7 @@ pub const DocumentSymbol = struct {
         Operator = 25,
         TypeParameter = 26,
 
-        pub fn jsonStringify(
-            value: Kind,
-            options: json.StringifyOptions,
-            out_stream: anytype,
-        ) !void {
+        pub fn jsonStringify(value: Kind, options: json.StringifyOptions, out_stream: anytype) !void {
             try json.stringify(@enumToInt(value), options, out_stream);
         }
     };

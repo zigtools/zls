@@ -9,13 +9,7 @@ usingnamespace @import("./ast.zig");
 
 const ast = std.zig.Ast;
 
-fn tokenReference(
-    handle: *DocumentStore.Handle,
-    tok: ast.TokenIndex,
-    encoding: offsets.Encoding,
-    context: anytype,
-    comptime handler: anytype,
-) !void {
+fn tokenReference(handle: *DocumentStore.Handle, tok: ast.TokenIndex, encoding: offsets.Encoding, context: anytype, comptime handler: anytype) !void {
     const loc = offsets.tokenRelativeLocation(handle.tree, 0, handle.tree.tokens.items(.start)[tok], encoding) catch return;
     try handler(context, types.Location{
         .uri = handle.uri(),
@@ -32,14 +26,7 @@ fn tokenReference(
     });
 }
 
-pub fn labelReferences(
-    arena: *std.heap.ArenaAllocator,
-    decl: analysis.DeclWithHandle,
-    encoding: offsets.Encoding,
-    include_decl: bool,
-    context: anytype,
-    comptime handler: anytype,
-) !void {
+pub fn labelReferences(arena: *std.heap.ArenaAllocator, decl: analysis.DeclWithHandle, encoding: offsets.Encoding, include_decl: bool, context: anytype, comptime handler: anytype) !void {
     _ = arena;
 
     std.debug.assert(decl.decl.* == .label_decl);
@@ -70,15 +57,7 @@ pub fn labelReferences(
     }
 }
 
-fn symbolReferencesInternal(
-    arena: *std.heap.ArenaAllocator,
-    store: *DocumentStore,
-    node_handle: analysis.NodeWithHandle,
-    decl: analysis.DeclWithHandle,
-    encoding: offsets.Encoding,
-    context: anytype,
-    comptime handler: anytype,
-) error{OutOfMemory}!void {
+fn symbolReferencesInternal(arena: *std.heap.ArenaAllocator, store: *DocumentStore, node_handle: analysis.NodeWithHandle, decl: analysis.DeclWithHandle, encoding: offsets.Encoding, context: anytype, comptime handler: anytype) error{OutOfMemory}!void {
     const node = node_handle.node;
     const handle = node_handle.handle;
     const tree = handle.tree;
@@ -515,16 +494,7 @@ fn symbolReferencesInternal(
     }
 }
 
-pub fn symbolReferences(
-    arena: *std.heap.ArenaAllocator,
-    store: *DocumentStore,
-    decl_handle: analysis.DeclWithHandle,
-    encoding: offsets.Encoding,
-    include_decl: bool,
-    context: anytype,
-    comptime handler: anytype,
-    skip_std_references: bool,
-) !void {
+pub fn symbolReferences(arena: *std.heap.ArenaAllocator, store: *DocumentStore, decl_handle: analysis.DeclWithHandle, encoding: offsets.Encoding, include_decl: bool, context: anytype, comptime handler: anytype, skip_std_references: bool) !void {
     std.debug.assert(decl_handle.decl.* != .label_decl);
     const curr_handle = decl_handle.handle;
     if (include_decl) {
