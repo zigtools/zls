@@ -1,4 +1,5 @@
 const std = @import("std");
+const Ast = std.zig.Ast;
 const DocumentStore = @import("./document_store.zig");
 const analysis = @import("./analysis.zig");
 const types = @import("./types.zig");
@@ -6,8 +7,6 @@ const offsets = @import("./offsets.zig");
 const log = std.log.scoped(.references);
 const Reference = @This();
 usingnamespace @import("./ast.zig");
-
-const Ast = std.zig.Ast;
 
 fn tokenReference(handle: *DocumentStore.Handle, tok: Ast.TokenIndex, encoding: offsets.Encoding, context: anytype, comptime handler: anytype) !void {
     const loc = offsets.tokenRelativeLocation(handle.tree, 0, handle.tree.tokens.items(.start)[tok], encoding) catch return;

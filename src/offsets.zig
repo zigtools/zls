@@ -1,7 +1,6 @@
 const std = @import("std");
 const types = @import("./types.zig");
 const Ast = std.zig.Ast;
-const Tree = Ast;
 
 pub const Encoding = enum {
     utf8,
@@ -63,7 +62,7 @@ pub fn documentPosition(doc: types.TextDocument, position: types.Position, encod
     }
 }
 
-pub fn lineSectionLength(tree: Tree, start_index: usize, end_index: usize, encoding: Encoding) !usize {
+pub fn lineSectionLength(tree: Ast, start_index: usize, end_index: usize, encoding: Encoding) !usize {
     const source = tree.source[start_index..];
     std.debug.assert(end_index >= start_index and source.len >= end_index - start_index);
     if (encoding == .utf8) {
@@ -104,7 +103,7 @@ pub const TokenLocation = struct {
     }
 };
 
-pub fn tokenRelativeLocation(tree: Tree, start_index: usize, token_start: usize, encoding: Encoding) !TokenLocation {
+pub fn tokenRelativeLocation(tree: Ast, start_index: usize, token_start: usize, encoding: Encoding) !TokenLocation {
     std.debug.assert(token_start >= start_index);
     var loc = TokenLocation{
         .line = 0,
@@ -140,7 +139,7 @@ pub fn tokenRelativeLocation(tree: Tree, start_index: usize, token_start: usize,
 }
 
 /// Asserts the token is comprised of valid utf8
-pub fn tokenLength(tree: Tree, token: Ast.TokenIndex, encoding: Encoding) usize {
+pub fn tokenLength(tree: Ast, token: Ast.TokenIndex, encoding: Encoding) usize {
     const token_loc = tokenLocation(tree, token);
     if (encoding == .utf8)
         return token_loc.end - token_loc.start;
@@ -166,7 +165,7 @@ pub const Loc = struct {
     end: usize,
 };
 
-pub fn tokenLocation(tree: Tree, token_index: Ast.TokenIndex) Loc {
+pub fn tokenLocation(tree: Ast, token_index: Ast.TokenIndex) Loc {
     const start = tree.tokens.items(.start)[token_index];
     const tag = tree.tokens.items(.tag)[token_index];
 

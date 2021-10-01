@@ -4,7 +4,7 @@ const URI = @import("./uri.zig");
 const analysis = @import("./analysis.zig");
 const offsets = @import("./offsets.zig");
 const log = std.log.scoped(.doc_store);
-const Tree = std.zig.Ast;
+const Ast = std.zig.Ast;
 const BuildAssociatedConfig = @import("./build_associated_config.zig");
 
 const DocumentStore = @This();
@@ -34,7 +34,7 @@ pub const Handle = struct {
     import_uris: []const []const u8,
     /// Items in this array list come from `import_uris`
     imports_used: std.ArrayListUnmanaged([]const u8),
-    tree: Tree,
+    tree: Ast,
     document_scope: analysis.DocumentScope,
 
     associated_build_file: ?*BuildFile,

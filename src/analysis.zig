@@ -19,7 +19,7 @@ pub fn deinit() void {
 }
 
 /// Gets a declaration's doc comments. Caller owns returned memory.
-pub fn getDocComments(allocator: *std.mem.Allocator, tree: Analysis.Tree, node: Ast.Node.Index, format: types.MarkupContent.Kind) !?[]const u8 {
+pub fn getDocComments(allocator: *std.mem.Allocator, tree: Ast, node: Ast.Node.Index, format: types.MarkupContent.Kind) !?[]const u8 {
     const base = tree.nodes.items(.main_token)[node];
     const base_kind = tree.nodes.items(.tag)[node];
     const tokens = tree.tokens.items(.tag);
@@ -67,7 +67,7 @@ pub fn getDocCommentTokenIndex(tokens: []std.zig.Token.Tag, base_token: Ast.Toke
     } else idx + 1;
 }
 
-pub fn collectDocComments(allocator: *std.mem.Allocator, tree: Analysis.Tree, doc_comments: Ast.TokenIndex, format: types.MarkupContent.Kind, container_doc: bool) ![]const u8 {
+pub fn collectDocComments(allocator: *std.mem.Allocator, tree: Ast, doc_comments: Ast.TokenIndex, format: types.MarkupContent.Kind, container_doc: bool) ![]const u8 {
     var lines = std.ArrayList([]const u8).init(allocator);
     defer lines.deinit();
     const tokens = tree.tokens.items(.tag);
@@ -84,7 +84,7 @@ pub fn collectDocComments(allocator: *std.mem.Allocator, tree: Analysis.Tree, do
 }
 
 /// Gets a function's keyword, name, arguments and return value.
-pub fn getFunctionSignature(tree: Analysis.Tree, func: Ast.full.FnProto) []const u8 {
+pub fn getFunctionSignature(tree: Ast, func: Ast.full.FnProto) []const u8 {
     const start = offsets.tokenLocation(tree, func.ast.fn_token);
 
     const end = if (func.ast.return_type != 0)
@@ -95,7 +95,7 @@ pub fn getFunctionSignature(tree: Analysis.Tree, func: Ast.full.FnProto) []const
 }
 
 /// Creates snippet insert text for a function. Caller owns returned memory.
-pub fn getFunctionSnippet(allocator: *std.mem.Allocator, tree: Analysis.Tree, func: Ast.full.FnProto, skip_self_param: bool) ![]const u8 {
+pub fn getFunctionSnippet(allocator: *std.mem.Allocator, tree: Ast, func: Ast.full.FnProto, skip_self_param: bool) ![]const u8 {
     const name_index = func.name_token.?;
 
     var buffer = std.ArrayList(u8).init(allocator);
@@ -190,13 +190,13 @@ pub fn hasSelfParam(arena: *std.heap.ArenaAllocator, document_store: *DocumentSt
     return false;
 }
 
-pub fn getVariableSignature(tree: Analysis.Tree, var_decl: Ast.full.VarDecl) []const u8 {
+pub fn getVariableSignature(tree: Ast, var_decl: Ast.full.VarDecl) []const u8 {
     const start = offsets.tokenLocation(tree, var_decl.ast.mut_token).start;
     const end = offsets.tokenLocation(tree, Analysis.lastToken(tree, var_decl.ast.init_node)).end;
     return tree.source[start..end];
 }
 
-pub fn getContainerFieldSignature(tree: Analysis.Tree, field: Ast.full.ContainerField) []const u8 {
+pub fn getContainerFieldSignature(tree: Ast, field: Ast.full.ContainerField) []const u8 {
     const start = offsets.tokenLocation(tree, field.ast.name_token).start;
     const end_node = if (field.ast.value_expr != 0) field.ast.value_expr else field.ast.type_expr;
     const end = offsets.tokenLocation(tree, Analysis.lastToken(tree, end_node)).end;
@@ -204,18 +204,18 @@ pub fn getContainerFieldSignature(tree: Analysis.Tree, field: Ast.full.Container
 }
 
 /// The node is the meta-type `type`
-fn isMetaType(tree: Analysis.Tree, node: Ast.Node.Index) bool {
+fn isMetaType(tree: Ast, node: Ast.Node.Index) bool {
     if (tree.nodes.items(.tag)[node] == .identifier) {
         return std.mem.eql(u8, tree.tokenSlice(tree.nodes.items(.main_token)[node]), "type");
     }
     return false;
 }
 
-pub fn isTypeFunction(tree: Analysis.Tree, func: Ast.full.FnProto) bool {
+pub fn isTypeFunction(tree: Ast, func: Ast.full.FnProto) bool {
     return isMetaType(tree, func.ast.return_type);
 }
 
-pub fn isGenericFunction(tree: Analysis.Tree, func: Ast.full.FnProto) bool {
+pub fn isGenericFunction(tree: Ast, func: Ast.full.FnProto) bool {
     var it = func.iterate(tree);
     while (it.next()) |param| {
         if (param.anytype_ellipsis3 != null or param.comptime_noalias != null) {
@@ -241,7 +241,7 @@ pub fn isSnakeCase(name: []const u8) bool {
 
 // ANALYSIS ENGINE
 
-pub fn getDeclNameToken(tree: Analysis.Tree, node: Ast.Node.Index) ?Ast.TokenIndex {
+pub fn getDeclNameToken(tree: Ast, node: Ast.Node.Index) ?Ast.TokenIndex {
     const tags = tree.nodes.items(.tag);
     const main_token = tree.nodes.items(.main_token)[node];
     return switch (tags[node]) {
@@ -278,7 +278,7 @@ pub fn getDeclNameToken(tree: Analysis.Tree, node: Ast.Node.Index) ?Ast.TokenInd
     };
 }
 
-fn getDeclName(tree: Analysis.Tree, node: Ast.Node.Index) ?[]const u8 {
+fn getDeclName(tree: Ast, node: Ast.Node.Index) ?[]const u8 {
     const name = tree.tokenSlice(getDeclNameToken(tree, node) orelse return null);
     return switch (tree.nodes.items(.tag)[node]) {
         .test_decl => name[1 .. name.len - 1],
@@ -369,7 +369,7 @@ pub fn resolveVarDeclAlias(store: *DocumentStore, arena: *std.heap.ArenaAllocato
     return null;
 }
 
-fn isBlock(tree: Analysis.Tree, node: Ast.Node.Index) bool {
+fn isBlock(tree: Ast, node: Ast.Node.Index) bool {
     return switch (tree.nodes.items(.tag)[node]) {
         .block,
         .block_semicolon,
@@ -380,7 +380,7 @@ fn isBlock(tree: Analysis.Tree, node: Ast.Node.Index) bool {
     };
 }
 
-fn findReturnStatementInternal(tree: Analysis.Tree, fn_decl: Ast.full.FnProto, body: Ast.Node.Index, already_found: *bool) ?Ast.Node.Index {
+fn findReturnStatementInternal(tree: Ast, fn_decl: Ast.full.FnProto, body: Ast.Node.Index, already_found: *bool) ?Ast.Node.Index {
     var result: ?Ast.Node.Index = null;
 
     const node_tags = tree.nodes.items(.tag);
@@ -429,7 +429,7 @@ fn findReturnStatementInternal(tree: Analysis.Tree, fn_decl: Ast.full.FnProto, b
     return result;
 }
 
-fn findReturnStatement(tree: Analysis.Tree, fn_decl: Ast.full.FnProto, body: Ast.Node.Index) ?Ast.Node.Index {
+fn findReturnStatement(tree: Ast, fn_decl: Ast.full.FnProto, body: Ast.Node.Index) ?Ast.Node.Index {
     var already_found = false;
     return findReturnStatementInternal(tree, fn_decl, body, &already_found);
 }
@@ -507,7 +507,7 @@ fn resolveUnwrapErrorType(store: *DocumentStore, arena: *std.heap.ArenaAllocator
     return null;
 }
 
-pub fn isPtrType(tree: Analysis.Tree, node: Ast.Node.Index) bool {
+pub fn isPtrType(tree: Ast, node: Ast.Node.Index) bool {
     return switch (tree.nodes.items(.tag)[node]) {
         .ptr_type,
         .ptr_type_aligned,
@@ -602,7 +602,7 @@ fn allDigits(str: []const u8) bool {
     return true;
 }
 
-pub fn isTypeIdent(tree: Analysis.Tree, token_idx: Ast.TokenIndex) bool {
+pub fn isTypeIdent(tree: Ast, token_idx: Ast.TokenIndex) bool {
     const PrimitiveTypes = std.ComptimeStringMap(void, .{
         .{"isize"},          .{"usize"},
         .{"c_short"},        .{"c_ushort"},
@@ -1099,7 +1099,7 @@ pub fn resolveTypeOfNode(store: *DocumentStore, arena: *std.heap.ArenaAllocator,
 }
 
 /// Collects all imports we can find into a slice of import paths (without quotes).
-pub fn collectImports(import_arr: *std.ArrayList([]const u8), tree: Analysis.Tree) !void {
+pub fn collectImports(import_arr: *std.ArrayList([]const u8), tree: Ast) !void {
     const tags = tree.tokens.items(.tag);
 
     var i: usize = 0;
@@ -1285,7 +1285,7 @@ pub fn getFieldAccessType(store: *DocumentStore, arena: *std.heap.ArenaAllocator
     };
 }
 
-pub fn isNodePublic(tree: Analysis.Tree, node: Ast.Node.Index) bool {
+pub fn isNodePublic(tree: Ast, node: Ast.Node.Index) bool {
     var buf: [1]Ast.Node.Index = undefined;
     return switch (tree.nodes.items(.tag)[node]) {
         .global_var_decl,
@@ -1303,7 +1303,7 @@ pub fn isNodePublic(tree: Analysis.Tree, node: Ast.Node.Index) bool {
     };
 }
 
-pub fn nodeToString(tree: Analysis.Tree, node: Ast.Node.Index) ?[]const u8 {
+pub fn nodeToString(tree: Ast, node: Ast.Node.Index) ?[]const u8 {
     const data = tree.nodes.items(.data);
     const main_token = tree.nodes.items(.main_token)[node];
     var buf: [1]Ast.Node.Index = undefined;
@@ -1339,13 +1339,13 @@ pub fn nodeToString(tree: Analysis.Tree, node: Ast.Node.Index) ?[]const u8 {
     return null;
 }
 
-fn nodeContainsSourceIndex(tree: Analysis.Tree, node: Ast.Node.Index, source_index: usize) bool {
+fn nodeContainsSourceIndex(tree: Ast, node: Ast.Node.Index, source_index: usize) bool {
     const first_token = offsets.tokenLocation(tree, tree.firstToken(node)).start;
     const last_token = offsets.tokenLocation(tree, Analysis.lastToken(tree, node)).end;
     return source_index >= first_token and source_index <= last_token;
 }
 
-pub fn getImportStr(tree: Analysis.Tree, node: Ast.Node.Index, source_index: usize) ?[]const u8 {
+pub fn getImportStr(tree: Ast, node: Ast.Node.Index, source_index: usize) ?[]const u8 {
     const node_tags = tree.nodes.items(.tag);
     var buf: [2]Ast.Node.Index = undefined;
     if (Analysis.isContainer(tree, node)) {
@@ -1580,7 +1580,7 @@ pub fn documentPositionContext(arena: *std.heap.ArenaAllocator, document: types.
     };
 }
 
-fn addOutlineNodes(allocator: *std.mem.Allocator, tree: Analysis.Tree, child: Ast.Node.Index, context: *GetDocumentSymbolsContext) anyerror!void {
+fn addOutlineNodes(allocator: *std.mem.Allocator, tree: Ast, child: Ast.Node.Index, context: *GetDocumentSymbolsContext) anyerror!void {
     switch (tree.nodes.items(.tag)[child]) {
         .string_literal,
         .integer_literal,
@@ -1731,7 +1731,7 @@ const GetDocumentSymbolsContext = struct {
     encoding: offsets.Encoding,
 };
 
-fn getDocumentSymbolsInternal(allocator: *std.mem.Allocator, tree: Analysis.Tree, node: Ast.Node.Index, context: *GetDocumentSymbolsContext) anyerror!void {
+fn getDocumentSymbolsInternal(allocator: *std.mem.Allocator, tree: Ast, node: Ast.Node.Index, context: *GetDocumentSymbolsContext) anyerror!void {
     const name = getDeclName(tree, node) orelse return;
     if (name.len == 0)
         return;
@@ -1815,7 +1815,7 @@ fn getDocumentSymbolsInternal(allocator: *std.mem.Allocator, tree: Analysis.Tree
     };
 }
 
-pub fn getDocumentSymbols(allocator: *std.mem.Allocator, tree: Analysis.Tree, encoding: offsets.Encoding) ![]types.DocumentSymbol {
+pub fn getDocumentSymbols(allocator: *std.mem.Allocator, tree: Ast, encoding: offsets.Encoding) ![]types.DocumentSymbol {
     var symbols = try std.ArrayList(types.DocumentSymbol).initCapacity(allocator, tree.rootDecls().len);
 
     var context = GetDocumentSymbolsContext{
@@ -2372,7 +2372,7 @@ pub const Scope = struct {
     }
 };
 
-pub fn makeDocumentScope(allocator: *std.mem.Allocator, tree: Analysis.Tree) !DocumentScope {
+pub fn makeDocumentScope(allocator: *std.mem.Allocator, tree: Ast) !DocumentScope {
     var scopes = std.ArrayListUnmanaged(Scope){};
     var error_completions = CompletionSet{};
     var enum_completions = CompletionSet{};
@@ -2403,7 +2403,7 @@ pub fn makeDocumentScope(allocator: *std.mem.Allocator, tree: Analysis.Tree) !Do
     };
 }
 
-fn nodeSourceRange(tree: Analysis.Tree, node: Ast.Node.Index) SourceRange {
+fn nodeSourceRange(tree: Ast, node: Ast.Node.Index) SourceRange {
     const loc_start = offsets.tokenLocation(tree, tree.firstToken(node));
     const loc_end = offsets.tokenLocation(tree, Analysis.lastToken(tree, node));
 
@@ -2417,7 +2417,7 @@ const ScopeContext = struct {
     scopes: *std.ArrayListUnmanaged(Scope),
     enums: *CompletionSet,
     errors: *CompletionSet,
-    tree: Analysis.Tree,
+    tree: Ast,
 };
 
 fn makeInnerScope(allocator: *std.mem.Allocator, context: ScopeContext, node_idx: Ast.Node.Index) error{OutOfMemory}!void {

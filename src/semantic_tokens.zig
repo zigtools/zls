@@ -187,7 +187,7 @@ inline fn writeTokenMod(builder: *Builder, token_idx: ?Ast.TokenIndex, tok_type:
     }
 }
 
-fn writeDocComments(builder: *Builder, tree: SemanticToken.Tree, doc: Ast.TokenIndex) !void {
+fn writeDocComments(builder: *Builder, tree: Ast, doc: Ast.TokenIndex) !void {
     const token_tags = tree.tokens.items(.tag);
     var tok_idx = doc;
     while (token_tags[tok_idx] == .doc_comment or
