@@ -623,6 +623,7 @@ pub fn isTypeIdent(tree: Analysis.Tree, token_idx: Ast.TokenIndex) bool {
     if (text.len == 1) return false;
     if (!(text[0] == 'u' or text[0] == 'i')) return false;
     if (!allDigits(text[1..])) return false;
+    _ = std.fmt.parseUnsigned(u16, text[1..], 10) catch return false;
     return true;
 }
 
