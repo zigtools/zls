@@ -105,7 +105,7 @@ pub fn wizard(allocator: *std.mem.Allocator) !void {
         .operator_completions = operator_completions,
         .include_at_in_builtins = include_at_in_builtins,
         .max_detail_length = max_detail_length,
-    }, std.json.StringifyOptions{}, out);
+    }, .{}, out);
 
     write("successful.\n\n\n\n");
 
@@ -230,10 +230,7 @@ pub fn findZig(allocator: *std.mem.Allocator) !?[]const u8 {
         if (std.builtin.os.tag == .windows) {
             if (std.mem.indexOfScalar(u8, path, '/') != null) continue;
         }
-        const full_path = try std.fs.path.join(allocator, &[_][]const u8{
-            path,
-            zig_exe,
-        });
+        const full_path = try std.fs.path.join(allocator, &[_][]const u8{ path, zig_exe });
         defer allocator.free(full_path);
 
         if (!std.fs.path.isAbsolute(full_path)) continue;

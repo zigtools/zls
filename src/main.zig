@@ -1168,10 +1168,7 @@ fn loadConfigFile(file_path: []const u8) ?Config {
 }
 
 fn loadConfigInFolder(folder_path: []const u8) ?Config {
-    const full_path = std.fs.path.resolve(allocator, &.{
-        folder_path,
-        "zls.json",
-    }) catch return null;
+    const full_path = std.fs.path.resolve(allocator, &.{ folder_path, "zls.json" }) catch return null;
     defer allocator.free(full_path);
     return loadConfigFile(full_path);
 }
