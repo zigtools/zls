@@ -1,6 +1,7 @@
 const std = @import("std");
 const mem = std.mem;
 
+// http://tools.ietf.org/html/rfc3986#section-2.2
 const reserved_chars = &[_]u8{
     '!', '#', '$', '%', '&', '\'',
     '(', ')', '*', '+', ',', ':',
