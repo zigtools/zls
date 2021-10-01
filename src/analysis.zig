@@ -620,10 +620,10 @@ pub fn isTypeIdent(tree: Analysis.Tree, token_idx: Ast.TokenIndex) bool {
 
     const text = tree.tokenSlice(token_idx);
     if (PrimitiveTypes.has(text)) return true;
-    if (text.len > 1 and (text[0] == 'u' or text[0] == 'i') and allDigits(text[1..]))
-        return true;
-
-    return false;
+    if (text.len == 1) return false;
+    if (!(text[0] == 'u' or text[0] == 'i')) return false;
+    if (!allDigits(text[1..])) return false;
+    return true;
 }
 
 /// Resolves the type of a node
