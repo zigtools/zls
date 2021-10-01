@@ -616,6 +616,7 @@ pub fn isTypeIdent(tree: Analysis.Tree, token_idx: Ast.TokenIndex) bool {
         .{"noreturn"},       .{"type"},
         .{"anyerror"},       .{"comptime_int"},
         .{"comptime_float"}, .{"anyframe"},
+        .{"anytype"},
     });
 
     const text = tree.tokenSlice(token_idx);
