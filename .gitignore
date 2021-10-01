@@ -1,5 +1,4 @@
 # Zig magic stuff
-/zig-cache
-/zig-out
+zig-*
 debug
 release
