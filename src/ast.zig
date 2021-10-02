@@ -6,7 +6,6 @@ const std = @import("std");
 const Ast = std.zig.Ast;
 const Node = Ast.Node;
 const full = Ast.full;
-const assert = std.debug.assert;
 
 fn fullPtrType(tree: Ast, info: full.PtrType.Components) full.PtrType {
     const token_tags = tree.tokens.items(.tag);
@@ -43,9 +42,9 @@ fn fullPtrType(tree: Ast, info: full.PtrType.Components) full.PtrType {
             .keyword_const => result.const_token = i,
             .keyword_volatile => result.volatile_token = i,
             .keyword_align => {
-                assert(info.align_node != 0);
+                std.debug.assert(info.align_node != 0);
                 if (info.bit_range_end != 0) {
-                    assert(info.bit_range_start != 0);
+                    std.debug.assert(info.bit_range_start != 0);
                     i = lastToken(tree, info.bit_range_end) + 1;
                 } else {
                     i = lastToken(tree, info.align_node) + 1;
@@ -58,7 +57,7 @@ fn fullPtrType(tree: Ast, info: full.PtrType.Components) full.PtrType {
 }
 
 pub fn ptrTypeSimple(tree: Ast, node: Node.Index) full.PtrType {
-    assert(tree.nodes.items(.tag)[node] == .ptr_type);
+    std.debug.assert(tree.nodes.items(.tag)[node] == .ptr_type);
     const data = tree.nodes.items(.data)[node];
     const extra = tree.extraData(data.lhs, Node.PtrType);
     return fullPtrType(tree, .{
@@ -73,7 +72,7 @@ pub fn ptrTypeSimple(tree: Ast, node: Node.Index) full.PtrType {
 }
 
 pub fn ptrTypeSentinel(tree: Ast, node: Node.Index) full.PtrType {
-    assert(tree.nodes.items(.tag)[node] == .ptr_type_sentinel);
+    std.debug.assert(tree.nodes.items(.tag)[node] == .ptr_type_sentinel);
     const data = tree.nodes.items(.data)[node];
     return fullPtrType(tree, .{
         .main_token = tree.nodes.items(.main_token)[node],
@@ -87,7 +86,7 @@ pub fn ptrTypeSentinel(tree: Ast, node: Node.Index) full.PtrType {
 }
 
 pub fn ptrTypeAligned(tree: Ast, node: Node.Index) full.PtrType {
-    assert(tree.nodes.items(.tag)[node] == .ptr_type_aligned);
+    std.debug.assert(tree.nodes.items(.tag)[node] == .ptr_type_aligned);
     const data = tree.nodes.items(.data)[node];
     return fullPtrType(tree, .{
         .main_token = tree.nodes.items(.main_token)[node],
@@ -101,7 +100,7 @@ pub fn ptrTypeAligned(tree: Ast, node: Node.Index) full.PtrType {
 }
 
 pub fn ptrTypeBitRange(tree: Ast, node: Node.Index) full.PtrType {
-    assert(tree.nodes.items(.tag)[node] == .ptr_type_bit_range);
+    std.debug.assert(tree.nodes.items(.tag)[node] == .ptr_type_bit_range);
     const data = tree.nodes.items(.data)[node];
     const extra = tree.extraData(data.lhs, Node.PtrTypeBitRange);
     return fullPtrType(tree, .{
@@ -151,7 +150,7 @@ pub fn ifFull(tree: Ast, node: Node.Index) full.If {
             .if_token = tree.nodes.items(.main_token)[node],
         });
     } else {
-        assert(tree.nodes.items(.tag)[node] == .if_simple);
+        std.debug.assert(tree.nodes.items(.tag)[node] == .if_simple);
         return fullIf(tree, .{
             .cond_expr = data.lhs,
             .then_expr = data.rhs,
@@ -525,7 +524,7 @@ pub fn lastToken(tree: Ast, node: Ast.Node.Index) Ast.TokenIndex {
         .struct_init,
         => {
             const elements = tree.extraData(datas[n].rhs, Node.SubRange);
-            std.debug.assert(elements.end - elements.start > 0);
+            std.debug.std.debug.assert(elements.end - elements.start > 0);
             end_offset += 1; // for the rbrace
             n = tree.extra_data[elements.end - 1]; // last element
         },
@@ -535,7 +534,7 @@ pub fn lastToken(tree: Ast, node: Ast.Node.Index) Ast.TokenIndex {
         .switch_comma,
         => {
             const members = tree.extraData(datas[n].rhs, Node.SubRange);
-            std.debug.assert(members.end - members.start > 0);
+            std.debug.std.debug.assert(members.end - members.start > 0);
             end_offset += 2; // for the comma + rbrace
             n = tree.extra_data[members.end - 1]; // last parameter
         },
@@ -546,7 +545,7 @@ pub fn lastToken(tree: Ast, node: Ast.Node.Index) Ast.TokenIndex {
         .tagged_union,
         .builtin_call,
         => {
-            std.debug.assert(datas[n].rhs - datas[n].lhs > 0);
+            std.debug.std.debug.assert(datas[n].rhs - datas[n].lhs > 0);
             end_offset += 1; // for the rbrace
             n = tree.extra_data[datas[n].rhs - 1]; // last statement
         },
@@ -557,7 +556,7 @@ pub fn lastToken(tree: Ast, node: Ast.Node.Index) Ast.TokenIndex {
         .tagged_union_trailing,
         .builtin_call_comma,
         => {
-            std.debug.assert(datas[n].rhs - datas[n].lhs > 0);
+            std.debug.std.debug.assert(datas[n].rhs - datas[n].lhs > 0);
             end_offset += 2; // for the comma/semicolon + rbrace/rparen
             n = tree.extra_data[datas[n].rhs - 1]; // last member
         },
@@ -673,11 +672,11 @@ pub fn lastToken(tree: Ast, node: Ast.Node.Index) Ast.TokenIndex {
         => {
             end_offset += 2; // ellipsis2 + rbracket, or comma + rparen
             n = datas[n].rhs;
-            std.debug.assert(n != 0);
+            std.debug.std.debug.assert(n != 0);
         },
         .slice => {
             const extra = tree.extraData(datas[n].rhs, Node.Slice);
-            std.debug.assert(extra.end != 0); // should have used slice_open
+            std.debug.std.debug.assert(extra.end != 0); // should have used slice_open
             end_offset += 1; // rbracket
             n = extra.end;
         },
@@ -783,7 +782,7 @@ pub fn lastToken(tree: Ast, node: Ast.Node.Index) Ast.TokenIndex {
             }
 
             if (max_node == 0) {
-                std.debug.assert(max_offset == 0);
+                std.debug.std.debug.assert(max_offset == 0);
                 // No linksection, callconv, align, return type
                 if (extra.param != 0) {
                     n = extra.param;
@@ -835,7 +834,7 @@ pub fn lastToken(tree: Ast, node: Ast.Node.Index) Ast.TokenIndex {
                 }
             }
             if (max_node == 0) {
-                std.debug.assert(max_offset == 0);
+                std.debug.std.debug.assert(max_offset == 0);
                 // No linksection, callconv, align, return type
                 // Use the last parameter and skip one extra token for the right paren
                 n = extra.params_end;
@@ -847,17 +846,17 @@ pub fn lastToken(tree: Ast, node: Ast.Node.Index) Ast.TokenIndex {
         },
         .while_cont => {
             const extra = tree.extraData(datas[n].rhs, Node.WhileCont);
-            std.debug.assert(extra.then_expr != 0);
+            std.debug.std.debug.assert(extra.then_expr != 0);
             n = extra.then_expr;
         },
         .@"while" => {
             const extra = tree.extraData(datas[n].rhs, Node.While);
-            std.debug.assert(extra.else_expr != 0);
+            std.debug.std.debug.assert(extra.else_expr != 0);
             n = extra.else_expr;
         },
         .@"if", .@"for" => {
             const extra = tree.extraData(datas[n].rhs, Node.If);
-            std.debug.assert(extra.else_expr != 0);
+            std.debug.std.debug.assert(extra.else_expr != 0);
             n = extra.else_expr;
         },
         .@"suspend" => {
