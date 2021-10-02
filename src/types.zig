@@ -1,4 +1,5 @@
 const std = @import("std");
+const string = []const u8;
 
 // LSP types
 // https://microsoft.github.io/language-server-protocol/specifications/specification-3-16/
@@ -14,13 +15,13 @@ pub const Range = struct {
 };
 
 pub const Location = struct {
-    uri: []const u8,
+    uri: string,
     range: Range,
 };
 
 /// Id of a request
 pub const RequestId = union(enum) {
-    String: []const u8,
+    String: string,
     Integer: i64,
     Float: f64,
 };
@@ -49,26 +50,26 @@ pub const Notification = struct {
     pub const Params = union(enum) {
         LogMessage: struct {
             type: MessageType,
-            message: []const u8,
+            message: string,
         },
         PublishDiagnostics: struct {
-            uri: []const u8,
+            uri: string,
             diagnostics: []Diagnostic,
         },
         ShowMessage: struct {
             type: MessageType,
-            message: []const u8,
+            message: string,
         },
     };
 
-    jsonrpc: []const u8 = "2.0",
-    method: []const u8,
+    jsonrpc: string = "2.0",
+    method: string,
     params: Params,
 };
 
 /// JSONRPC response
 pub const Response = struct {
-    jsonrpc: []const u8 = "2.0",
+    jsonrpc: string = "2.0",
     id: RequestId,
     result: ResponseParams,
 };
@@ -99,13 +100,13 @@ pub const DiagnosticSeverity = enum(i64) {
 pub const Diagnostic = struct {
     range: Range,
     severity: DiagnosticSeverity,
-    code: []const u8,
-    source: []const u8,
-    message: []const u8,
+    code: string,
+    source: string,
+    message: string,
 };
 
 pub const TextDocument = struct {
-    uri: []const u8,
+    uri: string,
     // This is a substring of mem starting at 0
     text: [:0]const u8,
     // This holds the memory that we have actually allocated.
@@ -164,7 +165,7 @@ pub const WorkspaceEdit = struct {
 
 pub const TextEdit = struct {
     range: Range,
-    newText: []const u8,
+    newText: string,
 };
 
 pub const MarkupContent = struct {
@@ -182,7 +183,7 @@ pub const MarkupContent = struct {
     };
 
     kind: Kind = .Markdown,
-    value: []const u8,
+    value: string,
 };
 
 pub const CompletionList = struct {
@@ -232,13 +233,13 @@ pub const CompletionItem = struct {
         }
     };
 
-    label: []const u8,
+    label: string,
     kind: Kind,
     textEdit: ?TextEdit = null,
-    filterText: ?[]const u8 = null,
-    insertText: []const u8 = "",
+    filterText: ?string = null,
+    insertText: string = "",
     insertTextFormat: ?InsertTextFormat = .PlainText,
-    detail: ?[]const u8 = null,
+    detail: ?string = null,
     documentation: ?MarkupContent = null,
 };
 
@@ -276,8 +277,8 @@ pub const DocumentSymbol = struct {
         }
     };
 
-    name: []const u8,
-    detail: ?[]const u8 = null,
+    name: string,
+    detail: ?string = null,
     kind: Kind,
     deprecated: bool = false,
     range: Range,
@@ -286,18 +287,18 @@ pub const DocumentSymbol = struct {
 };
 
 pub const WorkspaceFolder = struct {
-    uri: []const u8,
-    name: []const u8,
+    uri: string,
+    name: string,
 };
 
 pub const SignatureInformation = struct {
     pub const ParameterInformation = struct {
         // TODO Can also send a pair of encoded offsets
-        label: []const u8,
+        label: string,
         documentation: ?MarkupContent,
     };
 
-    label: []const u8,
+    label: string,
     documentation: ?MarkupContent,
     parameters: ?[]const ParameterInformation,
     activeParameter: ?u32,
@@ -311,11 +312,11 @@ pub const SignatureHelp = struct {
 
 // Only includes options we set in our initialize result.
 const InitializeResult = struct {
-    offsetEncoding: []const u8,
+    offsetEncoding: string,
     capabilities: struct {
         signatureHelpProvider: struct {
-            triggerCharacters: []const []const u8,
-            retriggerCharacters: []const []const u8,
+            triggerCharacters: []const string,
+            retriggerCharacters: []const string,
         },
         textDocumentSync: enum(u32) {
             None = 0,
@@ -329,7 +330,7 @@ const InitializeResult = struct {
         renameProvider: bool,
         completionProvider: struct {
             resolveProvider: bool,
-            triggerCharacters: []const []const u8,
+            triggerCharacters: []const string,
         },
         documentHighlightProvider: bool,
         hoverProvider: bool,
@@ -358,13 +359,13 @@ const InitializeResult = struct {
             full: bool,
             range: bool,
             legend: struct {
-                tokenTypes: []const []const u8,
-                tokenModifiers: []const []const u8,
+                tokenTypes: []const string,
+                tokenModifiers: []const string,
             },
         },
     },
     serverInfo: struct {
-        name: []const u8,
-        version: ?[]const u8 = null,
+        name: string,
+        version: ?string = null,
     },
 };
