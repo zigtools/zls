@@ -1,6 +1,6 @@
 const std = @import("std");
 const Ast = std.zig.Ast;
-const DocumentStore = @import("./document_store.zig");
+const DocumentStore = @import("./DocumentStore.zig");
 const analysis = @import("./analysis.zig");
 const types = @import("./types.zig");
 const offsets = @import("./offsets.zig");

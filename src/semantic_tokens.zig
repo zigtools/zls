@@ -1,6 +1,6 @@
 const std = @import("std");
 const offsets = @import("./offsets.zig");
-const DocumentStore = @import("./document_store.zig");
+const DocumentStore = @import("./DocumentStore.zig");
 const analysis = @import("./analysis.zig");
 const Ast = std.zig.Ast;
 const log = std.log.scoped(.semantic_tokens);

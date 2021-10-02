@@ -5,7 +5,7 @@ const analysis = @import("./analysis.zig");
 const offsets = @import("./offsets.zig");
 const log = std.log.scoped(.doc_store);
 const Ast = std.zig.Ast;
-const BuildAssociatedConfig = @import("./build_associated_config.zig");
+const BuildAssociatedConfig = @import("./BuildAssociatedConfig.zig");
 
 const DocumentStore = @This();
 
