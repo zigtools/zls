@@ -5,8 +5,7 @@ const analysis = @import("./analysis.zig");
 const types = @import("./types.zig");
 const offsets = @import("./offsets.zig");
 const log = std.log.scoped(.references);
-const Reference = @This();
-usingnamespace @import("./ast.zig");
+const ast = @import("./ast.zig");
 
 fn tokenReference(handle: *DocumentStore.Handle, tok: Ast.TokenIndex, encoding: offsets.Encoding, context: anytype, comptime handler: anytype) !void {
     const loc = offsets.tokenRelativeLocation(handle.tree, 0, handle.tree.tokens.items(.start)[tok], encoding) catch return;
@@ -101,7 +100,7 @@ fn symbolReferencesInternal(arena: *std.heap.ArenaAllocator, store: *DocumentSto
         .error_set_decl,
         => {
             var buf: [2]Ast.Node.Index = undefined;
-            for (Reference.declMembers(tree, node, &buf)) |member|
+            for (ast.declMembers(tree, node, &buf)) |member|
                 try symbolReferencesInternal(arena, store, .{ .node = member, .handle = handle }, decl, encoding, context, handler);
         },
         .global_var_decl,
@@ -109,7 +108,7 @@ fn symbolReferencesInternal(arena: *std.heap.ArenaAllocator, store: *DocumentSto
         .simple_var_decl,
         .aligned_var_decl,
         => {
-            const var_decl = Reference.varDecl(tree, node).?;
+            const var_decl = ast.varDecl(tree, node).?;
             if (var_decl.ast.type_node != 0) {
                 try symbolReferencesInternal(arena, store, .{ .node = var_decl.ast.type_node, .handle = handle }, decl, encoding, context, handler);
             }
@@ -124,7 +123,7 @@ fn symbolReferencesInternal(arena: *std.heap.ArenaAllocator, store: *DocumentSto
         .container_field_align,
         .container_field_init,
         => {
-            const field = Reference.containerField(tree, node).?;
+            const field = ast.containerField(tree, node).?;
             if (field.ast.type_expr != 0) {
                 try symbolReferencesInternal(arena, store, .{ .node = field.ast.type_expr, .handle = handle }, decl, encoding, context, handler);
             }
@@ -146,7 +145,7 @@ fn symbolReferencesInternal(arena: *std.heap.ArenaAllocator, store: *DocumentSto
         .fn_decl,
         => {
             var buf: [1]Ast.Node.Index = undefined;
-            const fn_proto = Reference.fnProto(tree, node, &buf).?;
+            const fn_proto = ast.fnProto(tree, node, &buf).?;
             var it = fn_proto.iterate(tree);
             while (it.next()) |param| {
                 if (param.type_expr != 0)
@@ -212,7 +211,7 @@ fn symbolReferencesInternal(arena: *std.heap.ArenaAllocator, store: *DocumentSto
         .for_simple,
         .@"for",
         => {
-            const loop = Reference.whileAst(tree, node).?;
+            const loop = ast.whileAst(tree, node).?;
             try symbolReferencesInternal(arena, store, .{ .node = loop.ast.cond_expr, .handle = handle }, decl, encoding, context, handler);
             if (loop.ast.cont_expr != 0) {
                 try symbolReferencesInternal(arena, store, .{ .node = loop.ast.cont_expr, .handle = handle }, decl, encoding, context, handler);
@@ -225,7 +224,7 @@ fn symbolReferencesInternal(arena: *std.heap.ArenaAllocator, store: *DocumentSto
         .@"if",
         .if_simple,
         => {
-            const if_node = Reference.ifFull(tree, node);
+            const if_node = ast.ifFull(tree, node);
 
             try symbolReferencesInternal(arena, store, .{ .node = if_node.ast.cond_expr, .handle = handle }, decl, encoding, context, handler);
             try symbolReferencesInternal(arena, store, .{ .node = if_node.ast.then_expr, .handle = handle }, decl, encoding, context, handler);
@@ -244,7 +243,7 @@ fn symbolReferencesInternal(arena: *std.heap.ArenaAllocator, store: *DocumentSto
         .ptr_type_bit_range,
         .ptr_type_sentinel,
         => {
-            const ptr_type = Reference.ptrType(tree, node).?;
+            const ptr_type = ast.ptrType(tree, node).?;
 
             if (ptr_type.ast.align_node != 0) {
                 try symbolReferencesInternal(arena, store, .{ .node = ptr_type.ast.align_node, .handle = handle }, decl, encoding, context, handler);
@@ -547,7 +546,7 @@ pub fn symbolReferences(arena: *std.heap.ArenaAllocator, store: *DocumentStore, 
                 switch (scope.data) {
                     .function => |proto| {
                         var buf: [1]Ast.Node.Index = undefined;
-                        const fn_proto = Reference.fnProto(curr_handle.tree, proto, &buf).?;
+                        const fn_proto = ast.fnProto(curr_handle.tree, proto, &buf).?;
                         var it = fn_proto.iterate(curr_handle.tree);
                         while (it.next()) |candidate| {
                             if (std.meta.eql(candidate, param)) {

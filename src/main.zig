@@ -7,6 +7,7 @@ const readRequestHeader = @import("./header.zig").readRequestHeader;
 const requests = @import("./requests.zig");
 const types = @import("./types.zig");
 const analysis = @import("./analysis.zig");
+const ast = @import("./ast.zig");
 const references = @import("./references.zig");
 const rename = @import("./rename.zig");
 const offsets = @import("./offsets.zig");
@@ -245,7 +246,7 @@ fn publishDiagnostics(arena: *std.heap.ArenaAllocator, handle: DocumentStore.Han
                 .fn_decl,
                 => blk: {
                     var buf: [1]Ast.Node.Index = undefined;
-                    const func = analysis.fnProto(tree, decl_idx, &buf).?;
+                    const func = ast.fnProto(tree, decl_idx, &buf).?;
                     if (func.extern_export_inline_token != null) break :blk;
 
                     if (config.warn_style) {
@@ -370,7 +371,7 @@ fn nodeToCompletion(arena: *std.heap.ArenaAllocator, list: *std.ArrayList(types.
     else
         null;
 
-    if (analysis.isContainer(handle.tree, node)) {
+    if (ast.isContainer(handle.tree, node)) {
         const context = DeclToCompletionContext{
             .completions = list,
             .config = &config,
@@ -399,7 +400,7 @@ fn nodeToCompletion(arena: *std.heap.ArenaAllocator, list: *std.ArrayList(types.
         .fn_decl,
         => {
             var buf: [1]Ast.Node.Index = undefined;
-            const func = analysis.fnProto(tree, node, &buf).?;
+            const func = ast.fnProto(tree, node, &buf).?;
             if (func.name_token) |name_token| {
                 const use_snippets = config.enable_snippets and client_capabilities.supports_snippets;
                 const insert_text = if (use_snippets) blk: {
@@ -425,7 +426,7 @@ fn nodeToCompletion(arena: *std.heap.ArenaAllocator, list: *std.ArrayList(types.
         .aligned_var_decl,
         .simple_var_decl,
         => {
-            const var_decl = analysis.varDecl(tree, node).?;
+            const var_decl = ast.varDecl(tree, node).?;
             const is_const = token_tags[var_decl.ast.mut_token] == .keyword_const;
 
             if (try analysis.resolveVarDeclAlias(&document_store, arena, node_handle)) |result| {
@@ -451,7 +452,7 @@ fn nodeToCompletion(arena: *std.heap.ArenaAllocator, list: *std.ArrayList(types.
         .container_field_align,
         .container_field_init,
         => {
-            const field = analysis.containerField(tree, node).?;
+            const field = ast.containerField(tree, node).?;
             try list.append(.{
                 .label = handle.tree.tokenSlice(field.ast.name_token),
                 .kind = .Field,
@@ -476,7 +477,7 @@ fn nodeToCompletion(arena: *std.heap.ArenaAllocator, list: *std.ArrayList(types.
         .ptr_type_bit_range,
         .ptr_type_sentinel,
         => {
-            const ptr_type = analysis.ptrType(tree, node).?;
+            const ptr_type = ast.ptrType(tree, node).?;
 
             switch (ptr_type.size) {
                 .One, .C, .Many => if (config.operator_completions) {
@@ -619,11 +620,11 @@ fn hoverSymbol(id: types.RequestId, arena: *std.heap.ArenaAllocator, decl_handle
 
             var buf: [1]Ast.Node.Index = undefined;
 
-            if (analysis.varDecl(tree, node)) |var_decl| {
+            if (ast.varDecl(tree, node)) |var_decl| {
                 break :def analysis.getVariableSignature(tree, var_decl);
-            } else if (analysis.fnProto(tree, node, &buf)) |fn_proto| {
+            } else if (ast.fnProto(tree, node, &buf)) |fn_proto| {
                 break :def analysis.getFunctionSignature(tree, fn_proto);
-            } else if (analysis.containerField(tree, node)) |field| {
+            } else if (ast.containerField(tree, node)) |field| {
                 break :def analysis.getContainerFieldSignature(tree, field);
             } else {
                 break :def analysis.nodeToString(tree, node) orelse

@@ -4,8 +4,7 @@ const DocumentStore = @import("./DocumentStore.zig");
 const analysis = @import("./analysis.zig");
 const Ast = std.zig.Ast;
 const log = std.log.scoped(.semantic_tokens);
-const SemanticToken = @This();
-usingnamespace @import("./ast.zig");
+const ast = @import("./ast.zig");
 
 pub const TokenType = enum(u32) {
     type,
@@ -322,7 +321,7 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
         .simple_var_decl,
         .aligned_var_decl,
         => {
-            const var_decl = SemanticToken.varDecl(tree, node).?;
+            const var_decl = ast.varDecl(tree, node).?;
             if (analysis.getDocCommentTokenIndex(token_tags, main_token)) |comment_idx|
                 try writeDocComments(builder, tree, comment_idx);
 
@@ -431,7 +430,7 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
         .fn_decl,
         => {
             var buf: [1]Ast.Node.Index = undefined;
-            const fn_proto: Ast.full.FnProto = SemanticToken.fnProto(tree, node, &buf).?;
+            const fn_proto: Ast.full.FnProto = ast.fnProto(tree, node, &buf).?;
             if (analysis.getDocCommentTokenIndex(token_tags, main_token)) |docs|
                 try writeDocComments(builder, tree, docs);
 
@@ -523,7 +522,7 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
         .for_simple,
         .@"for",
         => {
-            const while_node = SemanticToken.whileAst(tree, node).?;
+            const while_node = ast.whileAst(tree, node).?;
             try writeToken(builder, while_node.label_token, .label);
             try writeToken(builder, while_node.inline_token, .keyword);
             try writeToken(builder, while_node.ast.while_token, .keyword);
@@ -557,7 +556,7 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
         .@"if",
         .if_simple,
         => {
-            const if_node = SemanticToken.ifFull(tree, node);
+            const if_node = ast.ifFull(tree, node);
 
             try writeToken(builder, if_node.ast.if_token, .keyword);
             try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, if_node.ast.cond_expr });
@@ -629,7 +628,7 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
                     .node = struct_init.ast.type_expr,
                     .handle = handle,
                 })) |struct_type| switch (struct_type.type.data) {
-                    .other => |type_node| if (SemanticToken.isContainer(struct_type.handle.tree, type_node))
+                    .other => |type_node| if (ast.isContainer(struct_type.handle.tree, type_node))
                         fieldTokenType(type_node, struct_type.handle)
                     else
                         null,
@@ -665,8 +664,8 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
             try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, call.ast.fn_expr });
 
             if (builder.previous_token) |prev| {
-                if (prev != SemanticToken.lastToken(tree, call.ast.fn_expr) and token_tags[SemanticToken.lastToken(tree, call.ast.fn_expr)] == .identifier) {
-                    try writeToken(builder, SemanticToken.lastToken(tree, call.ast.fn_expr), .function);
+                if (prev != ast.lastToken(tree, call.ast.fn_expr) and token_tags[ast.lastToken(tree, call.ast.fn_expr)] == .identifier) {
+                    try writeToken(builder, ast.lastToken(tree, call.ast.fn_expr), .function);
                 }
             }
             for (call.ast.params) |param| try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, param });
@@ -684,7 +683,7 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
 
             try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, slice.ast.sliced });
             try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, slice.ast.start });
-            try writeToken(builder, SemanticToken.lastToken(tree, slice.ast.start) + 1, .operator);
+            try writeToken(builder, ast.lastToken(tree, slice.ast.start) + 1, .operator);
 
             try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, slice.ast.end });
             try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, slice.ast.sentinel });
@@ -889,7 +888,7 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
                 switch (decl_type.decl.*) {
                     .ast_node => |decl_node| {
                         if (decl_type.handle.tree.nodes.items(.tag)[decl_node].isContainerField()) {
-                            const tok_type: ?TokenType = if (SemanticToken.isContainer(lhs_type.handle.tree, left_type_node))
+                            const tok_type: ?TokenType = if (ast.isContainer(lhs_type.handle.tree, left_type_node))
                                 fieldTokenType(decl_node, lhs_type.handle)
                             else if (left_type_node == 0)
                                 TokenType.field
@@ -915,7 +914,7 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
         .ptr_type_bit_range,
         .ptr_type_sentinel,
         => {
-            const ptr_type = SemanticToken.ptrType(tree, node).?;
+            const ptr_type = ast.ptrType(tree, node).?;
 
             if (ptr_type.size == .One and token_tags[main_token] == .asterisk_asterisk and
                 main_token == main_tokens[ptr_type.ast.child_type])
@@ -983,7 +982,7 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
 
 fn writeContainerField(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *DocumentStore, node: Ast.Node.Index, field_token_type: ?TokenType, child_frame: anytype) !void {
     const tree = builder.handle.tree;
-    const container_field = SemanticToken.containerField(tree, node).?;
+    const container_field = ast.containerField(tree, node).?;
     const base = tree.nodes.items(.main_token)[node];
     const tokens = tree.tokens.items(.tag);
 
@@ -1003,9 +1002,9 @@ fn writeContainerField(builder: *Builder, arena: *std.heap.ArenaAllocator, store
 
     if (container_field.ast.value_expr != 0) block: {
         const eq_tok: Ast.TokenIndex = if (container_field.ast.align_expr != 0)
-            SemanticToken.lastToken(tree, container_field.ast.align_expr) + 2
+            ast.lastToken(tree, container_field.ast.align_expr) + 2
         else if (container_field.ast.type_expr != 0)
-            SemanticToken.lastToken(tree, container_field.ast.type_expr) + 1
+            ast.lastToken(tree, container_field.ast.type_expr) + 1
         else
             break :block;
 
@@ -1021,7 +1020,7 @@ pub fn writeAllSemanticTokens(arena: *std.heap.ArenaAllocator, store: *DocumentS
 
     // reverse the ast from the root declarations
     var buf: [2]Ast.Node.Index = undefined;
-    for (SemanticToken.declMembers(handle.tree, 0, &buf)) |child| {
+    for (ast.declMembers(handle.tree, 0, &buf)) |child| {
         writeNodeTokens(&builder, arena, store, child) catch |err| switch (err) {
             error.MovedBackwards => break,
             else => |e| return e,

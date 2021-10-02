@@ -6,8 +6,7 @@ const types = @import("./types.zig");
 const Ast = std.zig.Ast;
 const Token = std.zig.Token;
 const identifierFromPosition = @import("./main.zig").identifierFromPosition;
-const SignatureHelp = @This();
-usingnamespace @import("./ast.zig");
+const ast = @import("./ast.zig");
 
 fn fnProtoToSignatureInfo(document_store: *DocumentStore, arena: *std.heap.ArenaAllocator, commas: u32, skip_self_param: bool, handle: *DocumentStore.Handle, fn_node: Ast.Node.Index, proto: Ast.full.FnProto) !types.SignatureInformation {
     const ParameterInformation = types.SignatureInformation.ParameterInformation;
@@ -51,7 +50,7 @@ fn fnProtoToSignatureInfo(document_store: *DocumentStore, arena: *std.heap.Arena
             if (param_label_start == 0)
                 param_label_start = token_starts[tree.firstToken(param.type_expr)];
 
-            const last_param_tok = SignatureHelp.lastToken(tree, param.type_expr);
+            const last_param_tok = ast.lastToken(tree, param.type_expr);
             param_label_end = token_starts[last_param_tok] + tree.tokenSlice(last_param_tok).len;
         }
         const param_label = tree.source[param_label_start..param_label_end];
@@ -274,7 +273,7 @@ pub fn getSignatureInfo(document_store: *DocumentStore, arena: *std.heap.ArenaAl
                     };
 
                     var buf: [1]Ast.Node.Index = undefined;
-                    if (SignatureHelp.fnProto(type_handle.handle.tree, node, &buf)) |proto| {
+                    if (ast.fnProto(type_handle.handle.tree, node, &buf)) |proto| {
                         return try fnProtoToSignatureInfo(
                             document_store,
                             arena,
@@ -326,7 +325,7 @@ pub fn getSignatureInfo(document_store: *DocumentStore, arena: *std.heap.ArenaAl
                         }
                     }
 
-                    if (SignatureHelp.fnProto(res_handle.tree, node, &buf)) |proto| {
+                    if (ast.fnProto(res_handle.tree, node, &buf)) |proto| {
                         return try fnProtoToSignatureInfo(
                             document_store,
                             arena,
