@@ -7,7 +7,6 @@ const readRequestHeader = @import("./header.zig").readRequestHeader;
 const requests = @import("./requests.zig");
 const types = @import("./types.zig");
 const analysis = @import("./analysis.zig");
-const URI = @import("./uri.zig");
 const references = @import("./references.zig");
 const rename = @import("./rename.zig");
 const offsets = @import("./offsets.zig");

@@ -90,13 +90,6 @@ pub fn pathRelative(allocator: *std.mem.Allocator, base: []const u8, rel: []cons
     return allocator.resize(result, result_index);
 }
 
-pub const UriParseError = error{
-    UriBadScheme,
-    UriBadHexChar,
-    UriBadEscape,
-    OutOfMemory,
-};
-
 // Original code: https://github.com/andersfr/zig-lsp/blob/master/uri.zig
 fn parseHex(c: u8) !u8 {
     return switch (c) {
