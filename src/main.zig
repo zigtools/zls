@@ -13,15 +13,16 @@ const rename = @import("./rename.zig");
 const offsets = @import("./offsets.zig");
 const setup = @import("./setup.zig");
 const semantic_tokens = @import("./semantic_tokens.zig");
+const shared = @import("./shared.zig");
 const Ast = std.zig.Ast;
 const known_folders = @import("known-folders");
-const data = blk: {
-    if (std.mem.eql(u8, build_options.data_version, "0.7.0")) break :blk @import("data/0.7.0.zig");
-    if (std.mem.eql(u8, build_options.data_version, "0.7.1")) break :blk @import("data/0.7.1.zig");
-    if (std.mem.eql(u8, build_options.data_version, "0.8.0")) break :blk @import("data/0.8.0.zig");
-    if (std.mem.eql(u8, build_options.data_version, "0.8.1")) break :blk @import("data/0.8.1.zig");
-    if (std.mem.eql(u8, build_options.data_version, "master")) break :blk @import("data/master.zig");
-    @compileError("invalid data_version provided");
+
+const data = switch (build_options.data_version) {
+    .master => @import("data/master.zig"),
+    .@"0.7.0" => @import("data/0.7.0.zig"),
+    .@"0.7.1" => @import("data/0.7.1.zig"),
+    .@"0.8.0" => @import("data/0.8.0.zig"),
+    .@"0.8.1" => @import("data/0.8.1.zig"),
 };
 
 const logger = std.log.scoped(.main);

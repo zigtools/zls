@@ -1,5 +1,6 @@
 const std = @import("std");
 const builtin = std.builtin;
+const shared = @import("./src/shared.zig");
 
 pub fn build(b: *std.build.Builder) !void {
     const target = b.standardTargetOptions(.{});
@@ -10,9 +11,9 @@ pub fn build(b: *std.build.Builder) !void {
     exe.addOptions("build_options", exe_options);
 
     exe_options.addOption(
-        []const u8,
+        shared.ZigVersion,
         "data_version",
-        b.option([]const u8, "data_version", "The Zig version your compiler is.") orelse "master",
+        b.option(shared.ZigVersion, "data_version", "The Zig version your compiler is.") orelse .master,
     );
 
     exe.addPackage(.{ .name = "known-folders", .path = .{ .path = "src/known-folders/known-folders.zig" } });
