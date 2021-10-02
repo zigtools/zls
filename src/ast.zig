@@ -524,7 +524,7 @@ pub fn lastToken(tree: Ast, node: Ast.Node.Index) Ast.TokenIndex {
         .struct_init,
         => {
             const elements = tree.extraData(datas[n].rhs, Node.SubRange);
-            std.debug.std.debug.assert(elements.end - elements.start > 0);
+            std.debug.assert(elements.end - elements.start > 0);
             end_offset += 1; // for the rbrace
             n = tree.extra_data[elements.end - 1]; // last element
         },
@@ -534,7 +534,7 @@ pub fn lastToken(tree: Ast, node: Ast.Node.Index) Ast.TokenIndex {
         .switch_comma,
         => {
             const members = tree.extraData(datas[n].rhs, Node.SubRange);
-            std.debug.std.debug.assert(members.end - members.start > 0);
+            std.debug.assert(members.end - members.start > 0);
             end_offset += 2; // for the comma + rbrace
             n = tree.extra_data[members.end - 1]; // last parameter
         },
@@ -545,7 +545,7 @@ pub fn lastToken(tree: Ast, node: Ast.Node.Index) Ast.TokenIndex {
         .tagged_union,
         .builtin_call,
         => {
-            std.debug.std.debug.assert(datas[n].rhs - datas[n].lhs > 0);
+            std.debug.assert(datas[n].rhs - datas[n].lhs > 0);
             end_offset += 1; // for the rbrace
             n = tree.extra_data[datas[n].rhs - 1]; // last statement
         },
@@ -556,7 +556,7 @@ pub fn lastToken(tree: Ast, node: Ast.Node.Index) Ast.TokenIndex {
         .tagged_union_trailing,
         .builtin_call_comma,
         => {
-            std.debug.std.debug.assert(datas[n].rhs - datas[n].lhs > 0);
+            std.debug.assert(datas[n].rhs - datas[n].lhs > 0);
             end_offset += 2; // for the comma/semicolon + rbrace/rparen
             n = tree.extra_data[datas[n].rhs - 1]; // last member
         },
@@ -672,11 +672,11 @@ pub fn lastToken(tree: Ast, node: Ast.Node.Index) Ast.TokenIndex {
         => {
             end_offset += 2; // ellipsis2 + rbracket, or comma + rparen
             n = datas[n].rhs;
-            std.debug.std.debug.assert(n != 0);
+            std.debug.assert(n != 0);
         },
         .slice => {
             const extra = tree.extraData(datas[n].rhs, Node.Slice);
-            std.debug.std.debug.assert(extra.end != 0); // should have used slice_open
+            std.debug.assert(extra.end != 0); // should have used slice_open
             end_offset += 1; // rbracket
             n = extra.end;
         },
@@ -782,7 +782,7 @@ pub fn lastToken(tree: Ast, node: Ast.Node.Index) Ast.TokenIndex {
             }
 
             if (max_node == 0) {
-                std.debug.std.debug.assert(max_offset == 0);
+                std.debug.assert(max_offset == 0);
                 // No linksection, callconv, align, return type
                 if (extra.param != 0) {
                     n = extra.param;
@@ -834,7 +834,7 @@ pub fn lastToken(tree: Ast, node: Ast.Node.Index) Ast.TokenIndex {
                 }
             }
             if (max_node == 0) {
-                std.debug.std.debug.assert(max_offset == 0);
+                std.debug.assert(max_offset == 0);
                 // No linksection, callconv, align, return type
                 // Use the last parameter and skip one extra token for the right paren
                 n = extra.params_end;
@@ -846,17 +846,17 @@ pub fn lastToken(tree: Ast, node: Ast.Node.Index) Ast.TokenIndex {
         },
         .while_cont => {
             const extra = tree.extraData(datas[n].rhs, Node.WhileCont);
-            std.debug.std.debug.assert(extra.then_expr != 0);
+            std.debug.assert(extra.then_expr != 0);
             n = extra.then_expr;
         },
         .@"while" => {
             const extra = tree.extraData(datas[n].rhs, Node.While);
-            std.debug.std.debug.assert(extra.else_expr != 0);
+            std.debug.assert(extra.else_expr != 0);
             n = extra.else_expr;
         },
         .@"if", .@"for" => {
             const extra = tree.extraData(datas[n].rhs, Node.If);
-            std.debug.std.debug.assert(extra.else_expr != 0);
+            std.debug.assert(extra.else_expr != 0);
             n = extra.else_expr;
         },
         .@"suspend" => {
