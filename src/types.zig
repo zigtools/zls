@@ -1,5 +1,7 @@
 const std = @import("std");
+
 // LSP types
+// https://microsoft.github.io/language-server-protocol/specifications/specification-3-16/
 
 pub const Position = struct {
     line: i64,
