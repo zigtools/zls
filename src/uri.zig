@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
 // http://tools.ietf.org/html/rfc3986#section-2.2
 const reserved_chars = &[_]u8{
@@ -20,7 +21,7 @@ const reserved_escapes = blk: {
 /// Returns a URI from a path, caller owns the memory allocated with `allocator`
 pub fn fromPath(allocator: *std.mem.Allocator, path: []const u8) ![]const u8 {
     if (path.len == 0) return "";
-    const prefix = if (std.builtin.os.tag == .windows) "file:///" else "file://";
+    const prefix = if (builtin.os.tag == .windows) "file:///" else "file://";
 
     var buf = std.ArrayList(u8).init(allocator);
     try buf.appendSlice(prefix);
@@ -36,7 +37,7 @@ pub fn fromPath(allocator: *std.mem.Allocator, path: []const u8) ![]const u8 {
     }
 
     // On windows, we need to lowercase the drive name.
-    if (std.builtin.os.tag == .windows) {
+    if (builtin.os.tag == .windows) {
         if (buf.items.len > prefix.len + 1 and
             std.ascii.isAlpha(buf.items[prefix.len]) and
             std.mem.startsWith(u8, buf.items[prefix.len + 1 ..], "%3A"))

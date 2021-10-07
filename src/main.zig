@@ -1,4 +1,5 @@
 const std = @import("std");
+const zig_builtin = @import("builtin");
 const build_options = @import("build_options");
 const Config = @import("./config.zig");
 const DocumentStore = @import("./document_store.zig");
@@ -29,7 +30,7 @@ const logger = std.log.scoped(.main);
 // value in the definition below.
 pub const log_level = .debug;
 
-var actual_log_level: std.log.Level = switch (std.builtin.mode) {
+var actual_log_level: std.log.Level = switch (zig_builtin.mode) {
     .Debug => .debug,
     else => .notice,
 };
@@ -1654,7 +1655,7 @@ fn processJsonRpc(arena: *std.heap.ArenaAllocator, parser: *std.json.Parser, jso
     logger.debug("Method without return value not implemented: {s}", .{method});
 }
 
-const stack_frames = switch (std.builtin.mode) {
+const stack_frames = switch (zig_builtin.mode) {
     .Debug => 10,
     else => 0,
 };

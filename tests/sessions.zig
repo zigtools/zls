@@ -1,7 +1,8 @@
 const std = @import("std");
 const headerPkg = @import("header");
+const builtin = @import("builtin");
 
-const suffix = if (std.builtin.os.tag == .windows) ".exe" else "";
+const suffix = if (builtin.os.tag == .windows) ".exe" else "";
 const allocator = std.heap.page_allocator;
 
 const initialize_msg =

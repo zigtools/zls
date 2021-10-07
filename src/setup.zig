@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const zinput = @import("zinput");
 const known_folders = @import("known-folders");
 
@@ -72,7 +73,7 @@ pub fn wizard(allocator: *std.mem.Allocator) !void {
         print("Found zig executable '{s}' in PATH.\n", .{path});
     } else {
         write("Could not find 'zig' in PATH\n");
-        zig_exe_path = try zinput.askString(allocator, if (std.builtin.os.tag == .windows)
+        zig_exe_path = try zinput.askString(allocator, if (builtin.os.tag == .windows)
             \\What is the path to the 'zig' executable you would like to use?
             \\Note that due to a bug in zig (https://github.com/ziglang/zig/issues/6044),
             \\your zig directory cannot contain the '/' character.
@@ -221,13 +222,13 @@ pub fn findZig(allocator: *std.mem.Allocator) !?[]const u8 {
     };
     defer allocator.free(env_path);
 
-    const exe_extension = std.Target.current.exeFileExt();
+    const exe_extension = builtin.target.exeFileExt();
     const zig_exe = try std.fmt.allocPrint(allocator, "zig{s}", .{exe_extension});
     defer allocator.free(zig_exe);
 
     var it = std.mem.tokenize(u8, env_path, &[_]u8{std.fs.path.delimiter});
     while (it.next()) |path| {
-        if (std.builtin.os.tag == .windows) {
+        if (builtin.os.tag == .windows) {
             if (std.mem.indexOfScalar(u8, path, '/') != null) continue;
         }
         const full_path = try std.fs.path.join(allocator, &[_][]const u8{ path, zig_exe });
