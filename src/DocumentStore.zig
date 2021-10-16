@@ -290,6 +290,12 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: [:0]u8) anyerror!*Ha
                     }
                 }
 
+                // Check if the build file already exists
+                if (self.handles.get(build_file_uri)) |build_file_handle| {
+                    candidate = build_file_handle.is_build_file.?;
+                    break;
+                }
+
                 // Read the build file, create a new document, set the candidate to the new build file.
                 const build_file_text = try build_file.readToEndAllocOptions(
                     self.allocator,
