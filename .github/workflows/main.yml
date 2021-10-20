@@ -44,7 +44,7 @@ jobs:
             echo "Building target ${target}..."	    
             zig build -Dtarget=${target} -Drelease-safe --prefix artifacts/${target}/
             sed -e '1,5d' < README.md > artifacts/${target}/README.md
-            cp LICENSE.md artifacts/${target}/
+            cp LICENSE artifacts/${target}/
             cd artifacts/${target}/
             tar cfJ ${target}.tar.xz *.md bin/*
             mv ${target}.tar.xz ../
@@ -57,4 +57,3 @@ jobs:
         with:
           name: builds
           path: artifacts/*.tar.xz
-
