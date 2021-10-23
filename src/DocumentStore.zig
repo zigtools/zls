@@ -190,7 +190,8 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: [:0]u8) anyerror!*Ha
         .document = .{
             .uri = uri,
             .text = text,
-            .mem = text,
+            // Extra +1 to include the null terminator
+            .mem = text.ptr[0 .. text.len + 1],
         },
         .tree = tree,
         .document_scope = document_scope,
