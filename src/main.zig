@@ -33,7 +33,7 @@ pub const log_level = .debug;
 
 var actual_log_level: std.log.Level = switch (zig_builtin.mode) {
     .Debug => .debug,
-    else => .notice,
+    else => .info,
 };
 
 pub fn log(comptime message_level: std.log.Level, comptime scope: @Type(.EnumLiteral), comptime format: []const u8, args: anytype) void {
@@ -54,43 +54,23 @@ pub fn log(comptime message_level: std.log.Level, comptime scope: @Type(.EnumLit
         return;
     };
 
-    if (@enumToInt(message_level) <= @enumToInt(std.log.Level.notice)) {
-        const message_type: types.MessageType = switch (message_level) {
-            .info => .Log,
-            .notice => .Info,
-            .warn => .Warning,
-            .err => .Error,
-            else => .Error,
-        };
-        send(&arena, types.Notification{
-            .method = "window/showMessage",
-            .params = types.Notification.Params{
-                .ShowMessage = .{
-                    .type = message_type,
-                    .message = message,
-                },
+    const message_type: types.MessageType = switch (message_level) {
+        .debug => .Log,
+        .info => .Info,
+        .warn => .Warning,
+        .err => .Error,
+    };
+    send(&arena, types.Notification{
+        .method = "window/showMessage",
+        .params = types.Notification.Params{
+            .ShowMessage = .{
+                .type = message_type,
+                .message = message,
             },
-        }) catch |err| {
-            std.debug.print("Failed to send show message notification (error: {}).\n", .{err});
-        };
-    } else {
-        const message_type: types.MessageType = if (message_level == .debug)
-            .Log
-        else
-            .Info;
-
-        send(&arena, types.Notification{
-            .method = "window/logMessage",
-            .params = types.Notification.Params{
-                .LogMessage = .{
-                    .type = message_type,
-                    .message = message,
-                },
-            },
-        }) catch |err| {
-            std.debug.print("Failed to send show message notification (error: {}).\n", .{err});
-        };
-    }
+        },
+    }) catch |err| {
+        std.debug.print("Failed to send show message notification (error: {}).\n", .{err});
+    };
 }
 
 // Code is largely based off of https://github.com/andersfr/zig-lsp/blob/master/server.zig
@@ -1275,9 +1255,9 @@ fn initializeHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: 
         },
     });
 
-    logger.notice("zls initialized", .{});
+    logger.info("zls initialized", .{});
     logger.info("{}", .{client_capabilities});
-    logger.notice("Using offset encoding: {s}", .{std.meta.tagName(offset_encoding)});
+    logger.info("Using offset encoding: {s}", .{std.meta.tagName(offset_encoding)});
 }
 
 var keep_running = true;
@@ -1285,7 +1265,7 @@ fn shutdownHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, config:
     _ = config;
     _ = arena;
 
-    logger.notice("Server closing...", .{});
+    logger.info("Server closing...", .{});
 
     keep_running = false;
     // Technically we should deinitialize first and send possible errors to the client
@@ -1796,7 +1776,7 @@ pub fn main() anyerror!void {
                         // We know this is allocated with `allocator`, we just steal it!
                         config.zig_lib_path = json_env.lib_dir.?;
                         json_env.lib_dir = null;
-                        logger.notice("Using zig lib path '{s}'", .{config.zig_lib_path});
+                        logger.info("Using zig lib path '{s}'", .{config.zig_lib_path});
                     }
                 },
                 else => logger.alert("zig env invocation failed", .{}),
