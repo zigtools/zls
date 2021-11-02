@@ -16,6 +16,12 @@ pub fn build(b: *std.build.Builder) !void {
         b.option(shared.ZigVersion, "data_version", "The Zig version your compiler is.") orelse .master,
     );
 
+    exe_options.addOption(
+        std.log.Level,
+        "log_level",
+        b.option(std.log.Level, "log_level", "The Log Level to be used.") orelse .warn,
+    );
+
     exe.addPackage(.{ .name = "known-folders", .path = .{ .path = "src/known-folders/known-folders.zig" } });
     exe.addPackage(.{ .name = "zinput", .path = .{ .path = "src/zinput/src/main.zig" } });
 
