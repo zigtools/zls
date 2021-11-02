@@ -19,7 +19,7 @@ pub fn build(b: *std.build.Builder) !void {
     exe_options.addOption(
         std.log.Level,
         "log_level",
-        b.option(std.log.Level, "log_level", "The Log Level to be used.") orelse .warn,
+        b.option(std.log.Level, "log_level", "The Log Level to be used.") orelse .info,
     );
 
     exe.addPackage(.{ .name = "known-folders", .path = .{ .path = "src/known-folders/known-folders.zig" } });
