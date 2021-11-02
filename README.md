@@ -118,20 +118,36 @@ You can install `zls` using the instuctions for your text editor below:
 
 Install the `zls-vscode` extension from [here](https://github.com/zigtools/zls-vscode/releases) and provide a path to the build `zls` executable.
 
-### Sublime Text 3
+### Sublime Text
 
 - Install the `LSP` package from [here](https://github.com/sublimelsp/LSP/releases) or via Package Control.
 - Add this snippet to `LSP's` user settings:
 
+#### For Sublime Text 3:
+
 ```json
 {
     "clients": {
-        "zig":{
+        "zig": {
             "command": ["zls"],
             "enabled": true,
             "languageId": "zig",
             "scopes": ["source.zig"],
             "syntaxes": ["Packages/Zig Language/Syntaxes/Zig.tmLanguage"]
+        }
+    }
+}
+```
+
+#### For Sublime Text 4:
+
+```json
+{
+    "clients": {
+        "zig": {
+            "command": ["zls"],
+            "enabled": true,
+            "selector": "source.zig"
         }
     }
 }

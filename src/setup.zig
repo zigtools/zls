@@ -127,6 +127,8 @@ pub fn wizard(allocator: *std.mem.Allocator) !void {
                 \\https://github.com/sublimelsp/LSP/releases or via Package Control.
                 \\Then, add the following snippet to LSP's user settings:
                 \\
+                \\For Sublime Text 3:
+                \\
                 \\{
                 \\  "clients": {
                 \\    "zig": {
@@ -134,7 +136,19 @@ pub fn wizard(allocator: *std.mem.Allocator) !void {
                 \\      "enabled": true,
                 \\      "languageId": "zig",
                 \\      "scopes": ["source.zig"],
-                \\      "syntaxes": ["Packages/Zig/Syntaxes/Zig.tmLanguage"]
+                \\      "syntaxes": ["Packages/Zig Language/Syntaxes/Zig.tmLanguage"]
+                \\    }
+                \\  }
+                \\}
+                \\
+                \\For Sublime Text 4:
+                \\
+                \\{
+                \\  "clients": {
+                \\    "zig": {
+                \\      "command": ["zls"],
+                \\      "enabled": true,
+                \\      "selector": "source.zig"
                 \\    }
                 \\  }
                 \\}
