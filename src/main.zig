@@ -126,14 +126,16 @@ fn send(arena: *std.heap.ArenaAllocator, reqOrRes: anytype) !void {
     try stdout.flush();
 }
 
-fn truncateCompletions(list: []types.CompletionItem, max_detail_length: usize) void {
-    for (list) |*item| {
+fn truncateCompletions(list: []types.CompletionItem, config: Config) []const types.CompletionItem {
+    const fit_list = list[0..if(list.len > 128) 128 else list.len];
+    for (fit_list) |*item| {
         if (item.detail) |det| {
-            if (det.len > max_detail_length) {
-                item.detail = det[0..max_detail_length];
+            if (det.len > config.max_detail_length) {
+                item.detail = det[0..config.max_detail_length];
             }
         }
     }
+    return fit_list;
 }
 
 fn respondGeneric(id: types.RequestId, response: []const u8) !void {
@@ -975,14 +977,13 @@ fn completeLabel(arena: *std.heap.ArenaAllocator, id: types.RequestId, pos_index
         .orig_handle = handle,
     };
     try analysis.iterateLabels(handle, pos_index, declToCompletion, context);
-    truncateCompletions(completions.items, config.max_detail_length);
 
     try send(arena, types.Response{
         .id = id,
         .result = .{
             .CompletionList = .{
                 .isIncomplete = false,
-                .items = completions.items,
+                .items = truncateCompletions(completions.items, config),
             },
         },
     });
@@ -1017,7 +1018,6 @@ fn completeBuiltin(arena: *std.heap.ArenaAllocator, id: types.RequestId, config:
             else
                 insert_text[1..];
         }
-        truncateCompletions(builtin_completions.?, config.max_detail_length);
     }
 
     try send(arena, types.Response{
@@ -1025,7 +1025,7 @@ fn completeBuiltin(arena: *std.heap.ArenaAllocator, id: types.RequestId, config:
         .result = .{
             .CompletionList = .{
                 .isIncomplete = false,
-                .items = builtin_completions.?,
+                .items = truncateCompletions(builtin_completions.?, config),
             },
         },
     });
@@ -1041,14 +1041,13 @@ fn completeGlobal(arena: *std.heap.ArenaAllocator, id: types.RequestId, pos_inde
         .orig_handle = handle,
     };
     try analysis.iterateSymbolsGlobal(&document_store, arena, handle, pos_index, declToCompletion, context);
-    truncateCompletions(completions.items, config.max_detail_length);
 
     try send(arena, types.Response{
         .id = id,
         .result = .{
             .CompletionList = .{
                 .isIncomplete = false,
-                .items = completions.items,
+                .items = truncateCompletions(completions.items, config),
             },
         },
     });
@@ -1065,7 +1064,6 @@ fn completeFieldAccess(arena: *std.heap.ArenaAllocator, id: types.RequestId, han
     if (try analysis.getFieldAccessType(&document_store, arena, handle, position.absolute_index, &tokenizer)) |result| {
         held_range.release();
         try typeToCompletion(arena, &completions, result, handle, config);
-        truncateCompletions(completions.items, config.max_detail_length);
     }
 
     try send(arena, types.Response{
@@ -1073,7 +1071,7 @@ fn completeFieldAccess(arena: *std.heap.ArenaAllocator, id: types.RequestId, han
         .result = .{
             .CompletionList = .{
                 .isIncomplete = false,
-                .items = completions.items,
+                .items = truncateCompletions(completions.items, config),
             },
         },
     });
@@ -1081,15 +1079,13 @@ fn completeFieldAccess(arena: *std.heap.ArenaAllocator, id: types.RequestId, han
 
 fn completeError(arena: *std.heap.ArenaAllocator, id: types.RequestId, handle: *DocumentStore.Handle, config: Config) !void {
     const completions = try document_store.errorCompletionItems(arena, handle);
-    truncateCompletions(completions, config.max_detail_length);
-    logger.debug("Completing error:", .{});
 
     try send(arena, types.Response{
         .id = id,
         .result = .{
             .CompletionList = .{
                 .isIncomplete = false,
-                .items = completions,
+                .items = truncateCompletions(completions, config),
             },
         },
     });
@@ -1097,14 +1093,13 @@ fn completeError(arena: *std.heap.ArenaAllocator, id: types.RequestId, handle: *
 
 fn completeDot(arena: *std.heap.ArenaAllocator, id: types.RequestId, handle: *DocumentStore.Handle, config: Config) !void {
     var completions = try document_store.enumCompletionItems(arena, handle);
-    truncateCompletions(completions, config.max_detail_length);
 
     try send(arena, types.Response{
         .id = id,
         .result = .{
             .CompletionList = .{
                 .isIncomplete = false,
-                .items = completions,
+                .items = truncateCompletions(completions, config),
             },
         },
     });
