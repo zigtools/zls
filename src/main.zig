@@ -61,9 +61,9 @@ pub fn log(comptime message_level: std.log.Level, comptime scope: @Type(.EnumLit
         .err => .Error,
     };
     send(&arena, types.Notification{
-        .method = "window/showMessage",
+        .method = "window/logMessage",
         .params = types.Notification.Params{
-            .ShowMessage = .{
+            .LogMessage = .{
                 .type = message_type,
                 .message = message,
             },
