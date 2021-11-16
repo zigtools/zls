@@ -1650,6 +1650,8 @@ fn formattingHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: 
 
         switch (try process.wait()) {
             .Exited => |code| if (code == 0) {
+                if (std.mem.eql(u8, handle.document.text, stdout_bytes)) return try respondGeneric(id, null_result_response);
+
                 return try send(arena, types.Response{
                     .id = id,
                     .result = .{
