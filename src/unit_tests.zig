@@ -39,13 +39,13 @@ fn testContext(comptime line: []const u8, comptime tag: anytype, comptime range:
     const ctx = try analysis.documentPositionContext(&arena, doc, p);
 
     if (std.meta.activeTag(ctx) != tag) {
-        std.debug.warn("Expected tag {}, got {}\n", .{ tag, std.meta.activeTag(ctx) });
+        std.debug.print("Expected tag {}, got {}\n", .{ tag, std.meta.activeTag(ctx) });
         return error.DifferentTag;
     }
 
     if (ctx.range()) |ctx_range| {
         if (range == null) {
-            std.debug.warn("Expected null range, got `{s}`\n", .{
+            std.debug.print("Expected null range, got `{s}`\n", .{
                 doc.text[ctx_range.start..ctx_range.end],
             });
         } else {
@@ -53,7 +53,7 @@ fn testContext(comptime line: []const u8, comptime tag: anytype, comptime range:
             const range_end = range_start + range.?.len;
 
             if (range_start != ctx_range.start or range_end != ctx_range.end) {
-                std.debug.warn("Expected range `{s}` ({}..{}), got `{s}` ({}..{})\n", .{
+                std.debug.print("Expected range `{s}` ({}..{}), got `{s}` ({}..{})\n", .{
                     doc.text[range_start..range_end],         range_start,     range_end,
                     doc.text[ctx_range.start..ctx_range.end], ctx_range.start, ctx_range.end,
                 });
@@ -61,7 +61,7 @@ fn testContext(comptime line: []const u8, comptime tag: anytype, comptime range:
             }
         }
     } else if (range != null) {
-        std.debug.warn("Unexpected null range\n", .{});
+        std.debug.print("Unexpected null range\n", .{});
         return error.DifferentRange;
     }
 }

@@ -32,7 +32,7 @@ pub fn readRequestHeader(allocator: *std.mem.Allocator, instream: anytype) !Requ
             r.content_length = std.fmt.parseInt(usize, header_value, 10) catch return error.InvalidContentLength;
             has_content_length = true;
         } else if (std.mem.eql(u8, header_name, "Content-Type")) {
-            r.content_type = try std.mem.dupe(allocator, u8, header_value);
+            r.content_type = try allocator.dupe(u8, header_value);
         } else {
             return error.UnknownHeader;
         }
