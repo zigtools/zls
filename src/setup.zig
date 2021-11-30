@@ -96,7 +96,7 @@ pub fn wizard(allocator: *std.mem.Allocator) !void {
         else => 1024 * 1024,
     };
 
-    std.debug.warn("Writing config to {s}/zls.json ... ", .{config_path});
+    std.debug.print("Writing config to {s}/zls.json ... \n", .{config_path});
 
     try std.json.stringify(.{
         .zig_exe_path = zig_exe_path,

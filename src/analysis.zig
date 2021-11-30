@@ -98,7 +98,7 @@ pub fn getFunctionSnippet(allocator: *std.mem.Allocator, tree: Ast, func: Ast.fu
     const name_index = func.name_token.?;
 
     var buffer = std.ArrayList(u8).init(allocator);
-    try buffer.ensureCapacity(128);
+    try buffer.ensureTotalCapacity(128);
 
     try buffer.appendSlice(tree.tokenSlice(name_index));
     try buffer.append('(');

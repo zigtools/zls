@@ -209,7 +209,7 @@ fn publishDiagnostics(arena: *std.heap.ArenaAllocator, handle: DocumentStore.Han
             .severity = .Error,
             .code = @tagName(err.tag),
             .source = "zls",
-            .message = try std.mem.dupe(&arena.allocator, u8, fbs.getWritten()),
+            .message = try arena.allocator.dupe(u8, fbs.getWritten()),
             // .relatedInformation = undefined
         });
     }
@@ -1769,7 +1769,7 @@ pub fn main() anyerror!void {
                             &std.json.TokenStream.init(zig_env_result.stdout),
                             .{ .allocator = allocator },
                         ) catch {
-                            logger.alert("Failed to parse zig env JSON result", .{});
+                            logger.err("Failed to parse zig env JSON result", .{});
                             break :find_lib_path;
                         };
                         defer std.json.parseFree(Env, json_env, .{ .allocator = allocator });
@@ -1779,7 +1779,7 @@ pub fn main() anyerror!void {
                         logger.info("Using zig lib path '{s}'", .{config.zig_lib_path});
                     }
                 },
-                else => logger.alert("zig env invocation failed", .{}),
+                else => logger.err("zig env invocation failed", .{}),
             }
         }
     } else {
@@ -1828,7 +1828,7 @@ pub fn main() anyerror!void {
 
     while (keep_running) {
         const headers = readRequestHeader(&arena.allocator, reader) catch |err| {
-            logger.crit("{s}; exiting!", .{@errorName(err)});
+            logger.err("{s}; exiting!", .{@errorName(err)});
             return;
         };
         const buf = try arena.allocator.alloc(u8, headers.content_length);
