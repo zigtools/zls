@@ -19,7 +19,7 @@ const reserved_escapes = blk: {
 };
 
 /// Returns a URI from a path, caller owns the memory allocated with `allocator`
-pub fn fromPath(allocator: *std.mem.Allocator, path: []const u8) ![]const u8 {
+pub fn fromPath(allocator: std.mem.Allocator, path: []const u8) ![]const u8 {
     if (path.len == 0) return "";
     const prefix = if (builtin.os.tag == .windows) "file:///" else "file://";
 
@@ -51,14 +51,14 @@ pub fn fromPath(allocator: *std.mem.Allocator, path: []const u8) ![]const u8 {
 
 /// Move along `rel` from `base` with a single allocation.
 /// `base` is a URI of a folder, `rel` is a raw relative path.
-pub fn pathRelative(allocator: *std.mem.Allocator, base: []const u8, rel: []const u8) ![]const u8 {
+pub fn pathRelative(allocator: std.mem.Allocator, base: []const u8, rel: []const u8) ![]const u8 {
     const max_size = base.len + rel.len * 3 + 1;
 
     var result = try allocator.alloc(u8, max_size);
     errdefer allocator.free(result);
+
     std.mem.copy(u8, result, base);
     var result_index: usize = base.len;
-
     var it = std.mem.tokenize(u8, rel, "/");
     while (it.next()) |component| {
         if (std.mem.eql(u8, component, ".")) {
@@ -87,7 +87,7 @@ pub fn pathRelative(allocator: *std.mem.Allocator, base: []const u8, rel: []cons
         }
     }
 
-    return allocator.resize(result, result_index);
+    return allocator.resize(result, result_index) orelse error.FailedResize;
 }
 
 // Original code: https://github.com/andersfr/zig-lsp/blob/master/uri.zig
@@ -101,7 +101,7 @@ fn parseHex(c: u8) !u8 {
 }
 
 /// Caller should free memory
-pub fn parse(allocator: *std.mem.Allocator, str: []const u8) ![]u8 {
+pub fn parse(allocator: std.mem.Allocator, str: []const u8) ![]u8 {
     if (str.len < 7 or !std.mem.eql(u8, "file://", str[0..7])) return error.UriBadScheme;
 
     const uri = try allocator.alloc(u8, str.len - (if (std.fs.path.sep == '\\') 8 else 7));

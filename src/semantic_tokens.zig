@@ -57,7 +57,7 @@ const Builder = struct {
     arr: std.ArrayList(u32),
     encoding: offsets.Encoding,
 
-    fn init(allocator: *std.mem.Allocator, handle: *DocumentStore.Handle, encoding: offsets.Encoding) Builder {
+    fn init(allocator: std.mem.Allocator, handle: *DocumentStore.Handle, encoding: offsets.Encoding) Builder {
         return Builder{
             .handle = handle,
             .arr = std.ArrayList(u32).init(allocator),
@@ -415,7 +415,7 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
                 if (child.decl.* == .param_decl) {
                     return try writeToken(builder, main_token, .parameter);
                 }
-                var bound_type_params = analysis.BoundTypeParams.init(&arena.allocator);
+                var bound_type_params = analysis.BoundTypeParams.init(arena.allocator());
                 if (try child.resolveType(store, arena, &bound_type_params)) |decl_type| {
                     try colorIdentifierBasedOnType(builder, decl_type, main_token, .{});
                 } else {
@@ -867,7 +867,7 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
             // TODO This is basically exactly the same as what is done in analysis.resolveTypeOfNode, with the added
             //      writeToken code.
             // Maybe we can hook into it insead? Also applies to Identifier and VarDecl
-            var bound_type_params = analysis.BoundTypeParams.init(&arena.allocator);
+            var bound_type_params = analysis.BoundTypeParams.init(arena.allocator());
             const lhs_type = try analysis.resolveFieldAccessLhsType(
                 store,
                 arena,

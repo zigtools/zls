@@ -8,7 +8,7 @@ const ast = @import("./ast.zig");
 
 var using_trail: std.ArrayList([*]const u8) = undefined;
 var resolve_trail: std.ArrayList(NodeWithHandle) = undefined;
-pub fn init(allocator: *std.mem.Allocator) void {
+pub fn init(allocator: std.mem.Allocator) void {
     using_trail = std.ArrayList([*]const u8).init(allocator);
     resolve_trail = std.ArrayList(NodeWithHandle).init(allocator);
 }
@@ -18,7 +18,7 @@ pub fn deinit() void {
 }
 
 /// Gets a declaration's doc comments. Caller owns returned memory.
-pub fn getDocComments(allocator: *std.mem.Allocator, tree: Ast, node: Ast.Node.Index, format: types.MarkupContent.Kind) !?[]const u8 {
+pub fn getDocComments(allocator: std.mem.Allocator, tree: Ast, node: Ast.Node.Index, format: types.MarkupContent.Kind) !?[]const u8 {
     const base = tree.nodes.items(.main_token)[node];
     const base_kind = tree.nodes.items(.tag)[node];
     const tokens = tree.tokens.items(.tag);
@@ -66,7 +66,7 @@ pub fn getDocCommentTokenIndex(tokens: []std.zig.Token.Tag, base_token: Ast.Toke
     } else idx + 1;
 }
 
-pub fn collectDocComments(allocator: *std.mem.Allocator, tree: Ast, doc_comments: Ast.TokenIndex, format: types.MarkupContent.Kind, container_doc: bool) ![]const u8 {
+pub fn collectDocComments(allocator: std.mem.Allocator, tree: Ast, doc_comments: Ast.TokenIndex, format: types.MarkupContent.Kind, container_doc: bool) ![]const u8 {
     var lines = std.ArrayList([]const u8).init(allocator);
     defer lines.deinit();
     const tokens = tree.tokens.items(.tag);
@@ -94,7 +94,7 @@ pub fn getFunctionSignature(tree: Ast, func: Ast.full.FnProto) []const u8 {
 }
 
 /// Creates snippet insert text for a function. Caller owns returned memory.
-pub fn getFunctionSnippet(allocator: *std.mem.Allocator, tree: Ast, func: Ast.full.FnProto, skip_self_param: bool) ![]const u8 {
+pub fn getFunctionSnippet(allocator: std.mem.Allocator, tree: Ast, func: Ast.full.FnProto, skip_self_param: bool) ![]const u8 {
     const name_index = func.name_token.?;
 
     var buffer = std.ArrayList(u8).init(allocator);
@@ -1093,7 +1093,7 @@ pub const TypeWithHandle = struct {
 };
 
 pub fn resolveTypeOfNode(store: *DocumentStore, arena: *std.heap.ArenaAllocator, node_handle: NodeWithHandle) error{OutOfMemory}!?TypeWithHandle {
-    var bound_type_params = BoundTypeParams.init(&arena.allocator);
+    var bound_type_params = BoundTypeParams.init(arena.allocator());
     return resolveTypeOfNodeInternal(store, arena, node_handle, &bound_type_params);
 }
 
@@ -1139,7 +1139,7 @@ pub fn getFieldAccessType(store: *DocumentStore, arena: *std.heap.ArenaAllocator
         .handle = handle,
     });
 
-    var bound_type_params = BoundTypeParams.init(&arena.allocator);
+    var bound_type_params = BoundTypeParams.init(arena.allocator());
 
     while (true) {
         const tok = tokenizer.next();
@@ -1450,7 +1450,7 @@ pub fn documentPositionContext(arena: *std.heap.ArenaAllocator, document: types.
     const line = doc_position.line;
 
     const line_mem_start = @ptrToInt(line.ptr) - @ptrToInt(document.mem.ptr);
-    var stack = try std.ArrayList(StackState).initCapacity(&arena.allocator, 8);
+    var stack = try std.ArrayList(StackState).initCapacity(arena.allocator(), 8);
     {
         var held_line = document.borrowNullTerminatedSlice(
             line_mem_start,
@@ -1579,7 +1579,7 @@ pub fn documentPositionContext(arena: *std.heap.ArenaAllocator, document: types.
     };
 }
 
-fn addOutlineNodes(allocator: *std.mem.Allocator, tree: Ast, child: Ast.Node.Index, context: *GetDocumentSymbolsContext) anyerror!void {
+fn addOutlineNodes(allocator: std.mem.Allocator, tree: Ast, child: Ast.Node.Index, context: *GetDocumentSymbolsContext) anyerror!void {
     switch (tree.nodes.items(.tag)[child]) {
         .string_literal,
         .integer_literal,
@@ -1730,7 +1730,7 @@ const GetDocumentSymbolsContext = struct {
     encoding: offsets.Encoding,
 };
 
-fn getDocumentSymbolsInternal(allocator: *std.mem.Allocator, tree: Ast, node: Ast.Node.Index, context: *GetDocumentSymbolsContext) anyerror!void {
+fn getDocumentSymbolsInternal(allocator: std.mem.Allocator, tree: Ast, node: Ast.Node.Index, context: *GetDocumentSymbolsContext) anyerror!void {
     const name = getDeclName(tree, node) orelse return;
     if (name.len == 0)
         return;
@@ -1814,7 +1814,7 @@ fn getDocumentSymbolsInternal(allocator: *std.mem.Allocator, tree: Ast, node: As
     };
 }
 
-pub fn getDocumentSymbols(allocator: *std.mem.Allocator, tree: Ast, encoding: offsets.Encoding) ![]types.DocumentSymbol {
+pub fn getDocumentSymbols(allocator: std.mem.Allocator, tree: Ast, encoding: offsets.Encoding) ![]types.DocumentSymbol {
     var symbols = try std.ArrayList(types.DocumentSymbol).initCapacity(allocator, tree.rootDecls().len);
 
     var context = GetDocumentSymbolsContext{
@@ -2057,7 +2057,7 @@ fn iterateSymbolsContainerInternal(store: *DocumentStore, arena: *std.heap.Arena
 }
 
 pub fn iterateSymbolsContainer(store: *DocumentStore, arena: *std.heap.ArenaAllocator, container_handle: NodeWithHandle, orig_handle: *DocumentStore.Handle, comptime callback: anytype, context: anytype, instance_access: bool) error{OutOfMemory}!void {
-    var use_trail = std.ArrayList(*const Ast.Node.Index).init(&arena.allocator);
+    var use_trail = std.ArrayList(*const Ast.Node.Index).init(arena.allocator());
     return try iterateSymbolsContainerInternal(store, arena, container_handle, orig_handle, callback, context, instance_access, &use_trail);
 }
 
@@ -2119,7 +2119,7 @@ fn iterateSymbolsGlobalInternal(store: *DocumentStore, arena: *std.heap.ArenaAll
 }
 
 pub fn iterateSymbolsGlobal(store: *DocumentStore, arena: *std.heap.ArenaAllocator, handle: *DocumentStore.Handle, source_index: usize, comptime callback: anytype, context: anytype) error{OutOfMemory}!void {
-    var use_trail = std.ArrayList(*const Ast.Node.Index).init(&arena.allocator);
+    var use_trail = std.ArrayList(*const Ast.Node.Index).init(arena.allocator());
     return try iterateSymbolsGlobalInternal(store, arena, handle, source_index, callback, context, &use_trail);
 }
 
@@ -2330,7 +2330,7 @@ pub const DocumentScope = struct {
         }
     }
 
-    pub fn deinit(self: *DocumentScope, allocator: *std.mem.Allocator) void {
+    pub fn deinit(self: *DocumentScope, allocator: std.mem.Allocator) void {
         for (self.scopes) |*scope| {
             scope.decls.deinit();
             allocator.free(scope.uses);
@@ -2371,7 +2371,7 @@ pub const Scope = struct {
     }
 };
 
-pub fn makeDocumentScope(allocator: *std.mem.Allocator, tree: Ast) !DocumentScope {
+pub fn makeDocumentScope(allocator: std.mem.Allocator, tree: Ast) !DocumentScope {
     var scopes = std.ArrayListUnmanaged(Scope){};
     var error_completions = CompletionSet{};
     var enum_completions = CompletionSet{};
@@ -2419,7 +2419,7 @@ const ScopeContext = struct {
     tree: Ast,
 };
 
-fn makeInnerScope(allocator: *std.mem.Allocator, context: ScopeContext, node_idx: Ast.Node.Index) error{OutOfMemory}!void {
+fn makeInnerScope(allocator: std.mem.Allocator, context: ScopeContext, node_idx: Ast.Node.Index) error{OutOfMemory}!void {
     const scopes = context.scopes;
     const tree = context.tree;
     const tags = tree.nodes.items(.tag);
@@ -2535,7 +2535,7 @@ fn makeInnerScope(allocator: *std.mem.Allocator, context: ScopeContext, node_idx
 
 // Whether we have already visited the root node.
 var had_root = true;
-fn makeScopeInternal(allocator: *std.mem.Allocator, context: ScopeContext, node_idx: Ast.Node.Index) error{OutOfMemory}!void {
+fn makeScopeInternal(allocator: std.mem.Allocator, context: ScopeContext, node_idx: Ast.Node.Index) error{OutOfMemory}!void {
     const scopes = context.scopes;
     const tree = context.tree;
     const tags = tree.nodes.items(.tag);

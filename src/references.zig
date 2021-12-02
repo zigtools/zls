@@ -416,7 +416,7 @@ fn symbolReferencesInternal(arena: *std.heap.ArenaAllocator, store: *DocumentSto
             try symbolReferencesInternal(arena, store, .{ .node = datas[node].lhs, .handle = handle }, decl, encoding, context, handler);
 
             const rhs_str = tree.tokenSlice(datas[node].rhs);
-            var bound_type_params = analysis.BoundTypeParams.init(&arena.allocator);
+            var bound_type_params = analysis.BoundTypeParams.init(arena.allocator());
             const left_type = try analysis.resolveFieldAccessLhsType(
                 store,
                 arena,
@@ -503,7 +503,7 @@ pub fn symbolReferences(arena: *std.heap.ArenaAllocator, store: *DocumentStore, 
         .ast_node => {
             try symbolReferencesInternal(arena, store, .{ .node = 0, .handle = curr_handle }, decl_handle, encoding, context, handler);
 
-            var imports = std.ArrayList(*DocumentStore.Handle).init(&arena.allocator);
+            var imports = std.ArrayList(*DocumentStore.Handle).init(arena.allocator());
 
             var handle_it = store.handles.iterator();
             while (handle_it.next()) |entry| {

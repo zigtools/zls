@@ -15,7 +15,7 @@ pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
 
-    const allocator = &arena.allocator;
+    const allocator = arena.allocator();
 
     const builder = try Builder.create(allocator, "", "", "", "");
     defer builder.destroy();
