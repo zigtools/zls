@@ -97,7 +97,7 @@ fn fromDynamicTreeInternal(arena: *std.heap.ArenaAllocator, value: std.json.Valu
         if (value.Array.items.len == 0) {
             out.* = &[0]Child{};
         } else {
-            var slice = try arena.allocator.alloc(Child, value.Array.items.len);
+            var slice = try arena.allocator().alloc(Child, value.Array.items.len);
             for (value.Array.items) |arr_item, idx| {
                 try fromDynamicTreeInternal(arena, arr_item, &slice[idx]);
             }

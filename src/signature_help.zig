@@ -13,7 +13,7 @@ fn fnProtoToSignatureInfo(document_store: *DocumentStore, arena: *std.heap.Arena
 
     const tree = handle.tree;
     const token_starts = tree.tokens.items(.start);
-    const alloc = &arena.allocator;
+    const alloc = arena.allocator();
     const label = analysis.getFunctionSignature(tree, proto);
     const proto_comments = (try analysis.getDocComments(alloc, tree, fn_node, .Markdown)) orelse "";
 
@@ -119,7 +119,7 @@ pub fn getSignatureInfo(document_store: *DocumentStore, arena: *std.heap.ArenaAl
             };
         }
     };
-    const alloc = &arena.allocator;
+    const alloc = arena.allocator();
     var symbol_stack = try std.ArrayListUnmanaged(StackSymbol).initCapacity(alloc, 8);
     var curr_commas: u32 = 0;
     var comma_stack = try std.ArrayListUnmanaged(u32).initCapacity(alloc, 4);

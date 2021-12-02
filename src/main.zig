@@ -49,7 +49,7 @@ pub fn log(comptime message_level: std.log.Level, comptime scope: @Type(.EnumLit
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
-    var message = std.fmt.allocPrint(&arena.allocator, "[{s}-{s}] " ++ format, .{ @tagName(message_level), @tagName(scope) } ++ args) catch {
+    var message = std.fmt.allocPrint(arena.allocator(), "[{s}-{s}] " ++ format, .{ @tagName(message_level), @tagName(scope) } ++ args) catch {
         std.debug.print("Failed to allocPrint message.\n", .{});
         return;
     };
@@ -75,7 +75,7 @@ pub fn log(comptime message_level: std.log.Level, comptime scope: @Type(.EnumLit
 
 // Code is largely based off of https://github.com/andersfr/zig-lsp/blob/master/server.zig
 var stdout: std.io.BufferedWriter(4096, std.fs.File.Writer) = undefined;
-var allocator: *std.mem.Allocator = undefined;
+var allocator: std.mem.Allocator = undefined;
 
 var document_store: DocumentStore = undefined;
 
@@ -117,7 +117,7 @@ const no_semantic_tokens_response =
 
 /// Sends a request or response
 fn send(arena: *std.heap.ArenaAllocator, reqOrRes: anytype) !void {
-    var arr = std.ArrayList(u8).init(&arena.allocator);
+    var arr = std.ArrayList(u8).init(arena.allocator());
     try std.json.stringify(reqOrRes, .{}, arr.writer());
 
     const stdout_stream = stdout.writer();
@@ -195,7 +195,7 @@ fn astLocationToRange(loc: Ast.Location) types.Range {
 fn publishDiagnostics(arena: *std.heap.ArenaAllocator, handle: DocumentStore.Handle, config: Config) !void {
     const tree = handle.tree;
 
-    var diagnostics = std.ArrayList(types.Diagnostic).init(&arena.allocator);
+    var diagnostics = std.ArrayList(types.Diagnostic).init(arena.allocator());
 
     for (tree.errors) |err| {
         const loc = tree.tokenLocation(0, err.token);
@@ -209,7 +209,7 @@ fn publishDiagnostics(arena: *std.heap.ArenaAllocator, handle: DocumentStore.Han
             .severity = .Error,
             .code = @tagName(err.tag),
             .source = "zls",
-            .message = try arena.allocator.dupe(u8, fbs.getWritten()),
+            .message = try arena.allocator().dupe(u8, fbs.getWritten()),
             // .relatedInformation = undefined
         });
     }
@@ -386,7 +386,7 @@ fn nodeToCompletion(arena: *std.heap.ArenaAllocator, list: *std.ArrayList(types.
                 const insert_text = if (use_snippets) blk: {
                     const skip_self_param = !(parent_is_type_val orelse true) and
                         try analysis.hasSelfParam(arena, &document_store, handle, func);
-                    break :blk try analysis.getFunctionSnippet(&arena.allocator, tree, func, skip_self_param);
+                    break :blk try analysis.getFunctionSnippet(arena.allocator(), tree, func, skip_self_param);
                 } else tree.tokenSlice(func.name_token.?);
 
                 const is_type_function = analysis.isTypeFunction(handle.tree, func);
@@ -596,7 +596,7 @@ fn hoverSymbol(id: types.RequestId, arena: *std.heap.ArenaAllocator, decl_handle
             if (try analysis.resolveVarDeclAlias(&document_store, arena, .{ .node = node, .handle = handle })) |result| {
                 return try hoverSymbol(id, arena, result);
             }
-            doc_str = try analysis.getDocComments(&arena.allocator, tree, node, hover_kind);
+            doc_str = try analysis.getDocComments(arena.allocator(), tree, node, hover_kind);
 
             var buf: [1]Ast.Node.Index = undefined;
 
@@ -613,7 +613,7 @@ fn hoverSymbol(id: types.RequestId, arena: *std.heap.ArenaAllocator, decl_handle
         },
         .param_decl => |param| def: {
             if (param.first_doc_comment) |doc_comments| {
-                doc_str = try analysis.collectDocComments(&arena.allocator, handle.tree, doc_comments, hover_kind, false);
+                doc_str = try analysis.collectDocComments(arena.allocator(), handle.tree, doc_comments, hover_kind, false);
             }
 
             const first_token = param.first_doc_comment orelse
@@ -637,13 +637,13 @@ fn hoverSymbol(id: types.RequestId, arena: *std.heap.ArenaAllocator, decl_handle
     if (hover_kind == .Markdown) {
         hover_text =
             if (doc_str) |doc|
-            try std.fmt.allocPrint(&arena.allocator, "```zig\n{s}\n```\n{s}", .{ def_str, doc })
+            try std.fmt.allocPrint(arena.allocator(), "```zig\n{s}\n```\n{s}", .{ def_str, doc })
         else
-            try std.fmt.allocPrint(&arena.allocator, "```zig\n{s}\n```", .{def_str});
+            try std.fmt.allocPrint(arena.allocator(), "```zig\n{s}\n```", .{def_str});
     } else {
         hover_text =
             if (doc_str) |doc|
-            try std.fmt.allocPrint(&arena.allocator, "{s}\n{s}", .{ def_str, doc })
+            try std.fmt.allocPrint(arena.allocator(), "{s}\n{s}", .{ def_str, doc })
         else
             def_str;
     }
@@ -705,7 +705,7 @@ fn hoverDefinitionBuiltin(arena: *std.heap.ArenaAllocator, id: types.RequestId, 
                     .Hover = .{
                         .contents = .{
                             .value = try std.fmt.allocPrint(
-                                &arena.allocator,
+                                arena.allocator(),
                                 "```zig\n{s}\n```\n{s}",
                                 .{ builtin.signature, builtin.documentation },
                             ),
@@ -770,7 +770,7 @@ fn gotoDefinitionString(arena: *std.heap.ArenaAllocator, id: types.RequestId, po
 
     const import_str = analysis.getImportStr(tree, 0, pos_index) orelse return try respondGeneric(id, null_result_response);
     const uri = (try document_store.uriFromImportStr(
-        &arena.allocator,
+        arena.allocator(),
         handle.*,
         import_str,
     )) orelse return try respondGeneric(id, null_result_response);
@@ -793,7 +793,7 @@ fn renameDefinitionGlobal(arena: *std.heap.ArenaAllocator, id: types.RequestId, 
     const decl = (try getSymbolGlobal(arena, pos_index, handle)) orelse return try respondGeneric(id, null_result_response);
 
     var workspace_edit = types.WorkspaceEdit{
-        .changes = std.StringHashMap([]types.TextEdit).init(&arena.allocator),
+        .changes = std.StringHashMap([]types.TextEdit).init(arena.allocator()),
     };
     try rename.renameSymbol(arena, &document_store, decl, new_name, &workspace_edit.changes.?, offset_encoding);
     try send(arena, types.Response{
@@ -806,7 +806,7 @@ fn renameDefinitionFieldAccess(arena: *std.heap.ArenaAllocator, id: types.Reques
     const decl = (try getSymbolFieldAccess(handle, arena, position, range, config)) orelse return try respondGeneric(id, null_result_response);
 
     var workspace_edit = types.WorkspaceEdit{
-        .changes = std.StringHashMap([]types.TextEdit).init(&arena.allocator),
+        .changes = std.StringHashMap([]types.TextEdit).init(arena.allocator()),
     };
     try rename.renameSymbol(arena, &document_store, decl, new_name, &workspace_edit.changes.?, offset_encoding);
     try send(arena, types.Response{
@@ -819,7 +819,7 @@ fn renameDefinitionLabel(arena: *std.heap.ArenaAllocator, id: types.RequestId, h
     const decl = (try getLabelGlobal(pos_index, handle)) orelse return try respondGeneric(id, null_result_response);
 
     var workspace_edit = types.WorkspaceEdit{
-        .changes = std.StringHashMap([]types.TextEdit).init(&arena.allocator),
+        .changes = std.StringHashMap([]types.TextEdit).init(arena.allocator()),
     };
     try rename.renameLabel(arena, decl, new_name, &workspace_edit.changes.?, offset_encoding);
     try send(arena, types.Response{
@@ -830,7 +830,7 @@ fn renameDefinitionLabel(arena: *std.heap.ArenaAllocator, id: types.RequestId, h
 
 fn referencesDefinitionGlobal(arena: *std.heap.ArenaAllocator, id: types.RequestId, handle: *DocumentStore.Handle, pos_index: usize, include_decl: bool, skip_std_references: bool) !void {
     const decl = (try getSymbolGlobal(arena, pos_index, handle)) orelse return try respondGeneric(id, null_result_response);
-    var locs = std.ArrayList(types.Location).init(&arena.allocator);
+    var locs = std.ArrayList(types.Location).init(arena.allocator());
     try references.symbolReferences(
         arena,
         &document_store,
@@ -849,7 +849,7 @@ fn referencesDefinitionGlobal(arena: *std.heap.ArenaAllocator, id: types.Request
 
 fn referencesDefinitionFieldAccess(arena: *std.heap.ArenaAllocator, id: types.RequestId, handle: *DocumentStore.Handle, position: offsets.DocumentPosition, range: analysis.SourceRange, include_decl: bool, config: Config) !void {
     const decl = (try getSymbolFieldAccess(handle, arena, position, range, config)) orelse return try respondGeneric(id, null_result_response);
-    var locs = std.ArrayList(types.Location).init(&arena.allocator);
+    var locs = std.ArrayList(types.Location).init(arena.allocator());
     try references.symbolReferences(arena, &document_store, decl, offset_encoding, include_decl, &locs, std.ArrayList(types.Location).append, config.skip_std_references);
     try send(arena, types.Response{
         .id = id,
@@ -859,7 +859,7 @@ fn referencesDefinitionFieldAccess(arena: *std.heap.ArenaAllocator, id: types.Re
 
 fn referencesDefinitionLabel(arena: *std.heap.ArenaAllocator, id: types.RequestId, handle: *DocumentStore.Handle, pos_index: usize, include_decl: bool) !void {
     const decl = (try getLabelGlobal(pos_index, handle)) orelse return try respondGeneric(id, null_result_response);
-    var locs = std.ArrayList(types.Location).init(&arena.allocator);
+    var locs = std.ArrayList(types.Location).init(arena.allocator());
     try references.labelReferences(arena, decl, offset_encoding, include_decl, &locs, std.ArrayList(types.Location).append);
     try send(arena, types.Response{
         .id = id,
@@ -902,7 +902,7 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: analysis.Decl
             const doc = if (param.first_doc_comment) |doc_comments|
                 types.MarkupContent{
                     .kind = doc_kind,
-                    .value = try analysis.collectDocComments(&context.arena.allocator, tree, doc_comments, doc_kind, false),
+                    .value = try analysis.collectDocComments(context.arena.allocator(), tree, doc_comments, doc_kind, false),
                 }
             else
                 null;
@@ -966,7 +966,7 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: analysis.Decl
 }
 
 fn completeLabel(arena: *std.heap.ArenaAllocator, id: types.RequestId, pos_index: usize, handle: *DocumentStore.Handle, config: Config) !void {
-    var completions = std.ArrayList(types.CompletionItem).init(&arena.allocator);
+    var completions = std.ArrayList(types.CompletionItem).init(arena.allocator());
 
     const context = DeclToCompletionContext{
         .completions = &completions,
@@ -1032,7 +1032,7 @@ fn completeBuiltin(arena: *std.heap.ArenaAllocator, id: types.RequestId, config:
 }
 
 fn completeGlobal(arena: *std.heap.ArenaAllocator, id: types.RequestId, pos_index: usize, handle: *DocumentStore.Handle, config: Config) !void {
-    var completions = std.ArrayList(types.CompletionItem).init(&arena.allocator);
+    var completions = std.ArrayList(types.CompletionItem).init(arena.allocator());
 
     const context = DeclToCompletionContext{
         .completions = &completions,
@@ -1055,7 +1055,7 @@ fn completeGlobal(arena: *std.heap.ArenaAllocator, id: types.RequestId, pos_inde
 }
 
 fn completeFieldAccess(arena: *std.heap.ArenaAllocator, id: types.RequestId, handle: *DocumentStore.Handle, position: offsets.DocumentPosition, range: analysis.SourceRange, config: Config) !void {
-    var completions = std.ArrayList(types.CompletionItem).init(&arena.allocator);
+    var completions = std.ArrayList(types.CompletionItem).init(arena.allocator());
 
     const line_mem_start = @ptrToInt(position.line.ptr) - @ptrToInt(handle.document.mem.ptr);
     var held_range = handle.document.borrowNullTerminatedSlice(line_mem_start + range.start, line_mem_start + range.end);
@@ -1113,7 +1113,7 @@ fn completeDot(arena: *std.heap.ArenaAllocator, id: types.RequestId, handle: *Do
 fn documentSymbol(arena: *std.heap.ArenaAllocator, id: types.RequestId, handle: *DocumentStore.Handle) !void {
     try send(arena, types.Response{
         .id = id,
-        .result = .{ .DocumentSymbols = try analysis.getDocumentSymbols(&arena.allocator, handle.tree, offset_encoding) },
+        .result = .{ .DocumentSymbols = try analysis.getDocumentSymbols(arena.allocator(), handle.tree, offset_encoding) },
     });
 }
 
@@ -1827,11 +1827,11 @@ pub fn main() anyerror!void {
     defer arena.deinit();
 
     while (keep_running) {
-        const headers = readRequestHeader(&arena.allocator, reader) catch |err| {
+        const headers = readRequestHeader(arena.allocator(), reader) catch |err| {
             logger.err("{s}; exiting!", .{@errorName(err)});
             return;
         };
-        const buf = try arena.allocator.alloc(u8, headers.content_length);
+        const buf = try arena.allocator().alloc(u8, headers.content_length);
         try reader.readNoEof(buf);
 
         try processJsonRpc(&arena, &json_parser, buf, config);

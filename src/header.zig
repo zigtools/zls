@@ -6,12 +6,12 @@ const RequestHeader = struct {
     /// null implies "application/vscode-jsonrpc; charset=utf-8"
     content_type: ?[]const u8,
 
-    pub fn deinit(self: @This(), allocator: *std.mem.Allocator) void {
+    pub fn deinit(self: @This(), allocator: std.mem.Allocator) void {
         if (self.content_type) |ct| allocator.free(ct);
     }
 };
 
-pub fn readRequestHeader(allocator: *std.mem.Allocator, instream: anytype) !RequestHeader {
+pub fn readRequestHeader(allocator: std.mem.Allocator, instream: anytype) !RequestHeader {
     var r = RequestHeader{
         .content_length = undefined,
         .content_type = null,

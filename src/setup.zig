@@ -13,7 +13,7 @@ fn write(text: []const u8) void {
     stdout.writeAll(text) catch @panic("Could not write to stdout");
 }
 
-pub fn wizard(allocator: *std.mem.Allocator) !void {
+pub fn wizard(allocator: std.mem.Allocator) !void {
     @setEvalBranchQuota(2500);
     write(
         \\Welcome to the ZLS configuration wizard!
@@ -227,7 +227,7 @@ pub fn wizard(allocator: *std.mem.Allocator) !void {
     write("\n\nThank you for choosing ZLS!\n");
 }
 
-pub fn findZig(allocator: *std.mem.Allocator) !?[]const u8 {
+pub fn findZig(allocator: std.mem.Allocator) !?[]const u8 {
     const env_path = std.process.getEnvVarOwned(allocator, "PATH") catch |err| switch (err) {
         error.EnvironmentVariableNotFound => {
             return null;

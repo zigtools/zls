@@ -8,7 +8,7 @@ const offsets = @import("./offsets.zig");
 // TODO Use a map to array lists and collect at the end instead?
 const RefHandlerContext = struct {
     edits: *std.StringHashMap([]types.TextEdit),
-    allocator: *std.mem.Allocator,
+    allocator: std.mem.Allocator,
     new_name: []const u8,
 };
 
@@ -29,7 +29,7 @@ pub fn renameSymbol(arena: *std.heap.ArenaAllocator, store: *DocumentStore, decl
     std.debug.assert(decl_handle.decl.* != .label_decl);
     try references.symbolReferences(arena, store, decl_handle, encoding, true, RefHandlerContext{
         .edits = edits,
-        .allocator = &arena.allocator,
+        .allocator = arena.allocator(),
         .new_name = new_name,
     }, refHandler, true);
 }
@@ -38,7 +38,7 @@ pub fn renameLabel(arena: *std.heap.ArenaAllocator, decl_handle: analysis.DeclWi
     std.debug.assert(decl_handle.decl.* == .label_decl);
     try references.labelReferences(arena, decl_handle, encoding, true, RefHandlerContext{
         .edits = edits,
-        .allocator = &arena.allocator,
+        .allocator = arena.allocator(),
         .new_name = new_name,
     }, refHandler);
 }
