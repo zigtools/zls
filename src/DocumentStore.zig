@@ -52,8 +52,19 @@ build_files: std.ArrayListUnmanaged(*BuildFile),
 build_runner_path: []const u8,
 build_runner_cache_path: []const u8,
 std_uri: ?[]const u8,
+zig_cache_root: []const u8,
+zig_global_cache_root: []const u8,
 
-pub fn init(self: *DocumentStore, allocator: std.mem.Allocator, zig_exe_path: ?[]const u8, build_runner_path: []const u8, build_runner_cache_path: []const u8, zig_lib_path: ?[]const u8) !void {
+pub fn init(
+    self: *DocumentStore,
+    allocator: std.mem.Allocator,
+    zig_exe_path: ?[]const u8,
+    build_runner_path: []const u8,
+    build_runner_cache_path: []const u8,
+    zig_lib_path: ?[]const u8,
+    zig_cache_root: []const u8,
+    zig_global_cache_root: []const u8,
+) !void {
     self.allocator = allocator;
     self.handles = std.StringHashMap(*Handle).init(allocator);
     self.zig_exe_path = zig_exe_path;
@@ -61,6 +72,8 @@ pub fn init(self: *DocumentStore, allocator: std.mem.Allocator, zig_exe_path: ?[
     self.build_runner_path = build_runner_path;
     self.build_runner_cache_path = build_runner_cache_path;
     self.std_uri = try stdUriFromLibPath(allocator, zig_lib_path);
+    self.zig_cache_root = zig_cache_root;
+    self.zig_global_cache_root = zig_global_cache_root;
 }
 
 fn loadBuildAssociatedConfiguration(allocator: std.mem.Allocator, build_file: *BuildFile, build_file_path: []const u8) !void {
@@ -98,6 +111,8 @@ const LoadPackagesContext = struct {
     build_runner_cache_path: []const u8,
     zig_exe_path: []const u8,
     build_file_path: ?[]const u8 = null,
+    cache_root: []const u8,
+    global_cache_root: []const u8,
 };
 
 fn loadPackages(context: LoadPackagesContext) !void {
@@ -123,6 +138,11 @@ fn loadPackages(context: LoadPackagesContext) !void {
             "@build@",
             build_file_path,
             "--pkg-end",
+            "--",
+            zig_exe_path,
+            directory_path,
+            context.cache_root,
+            context.global_cache_root,
         },
     });
 
@@ -229,6 +249,8 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: [:0]u8) anyerror!*Ha
             .build_runner_cache_path = self.build_runner_cache_path,
             .zig_exe_path = self.zig_exe_path.?,
             .build_file_path = build_file_path,
+            .cache_root = self.zig_cache_root,
+            .global_cache_root = self.zig_global_cache_root,
         }) catch |err| {
             log.debug("Failed to load packages of build file {s} (error: {})", .{ build_file.uri, err });
         };
@@ -496,6 +518,8 @@ pub fn applySave(self: *DocumentStore, handle: *Handle) !void {
             .build_runner_path = self.build_runner_path,
             .build_runner_cache_path = self.build_runner_cache_path,
             .zig_exe_path = self.zig_exe_path.?,
+            .cache_root = self.zig_cache_root,
+            .global_cache_root = self.zig_global_cache_root,
         }) catch |err| {
             log.debug("Failed to load packages of build file {s} (error: {})", .{ build_file.uri, err });
         };

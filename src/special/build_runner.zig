@@ -1,7 +1,9 @@
 const root = @import("@build@");
 const std = @import("std");
-const io = std.io;
 const fmt = std.fmt;
+const io = std.io;
+const log = std.log;
+const process = std.process;
 const Builder = std.build.Builder;
 const Pkg = std.build.Pkg;
 const InstallArtifactStep = std.build.InstallArtifactStep;
@@ -17,7 +19,37 @@ pub fn main() !void {
 
     const allocator = arena.allocator();
 
-    const builder = try Builder.create(allocator, "", "", "", "");
+    var args = try process.argsAlloc(allocator);
+    defer process.argsFree(allocator, args);
+
+    // skip my own exe name
+    var arg_idx: usize = 1;
+
+    const zig_exe = nextArg(args, &arg_idx) orelse {
+        log.warn("Expected first argument to be path to zig compiler\n", .{});
+        return error.InvalidArgs;
+    };
+    const build_root = nextArg(args, &arg_idx) orelse {
+        log.warn("Expected second argument to be build root directory path\n", .{});
+        return error.InvalidArgs;
+    };
+    const cache_root = nextArg(args, &arg_idx) orelse {
+        log.warn("Expected third argument to be cache root directory path\n", .{});
+        return error.InvalidArgs;
+    };
+    const global_cache_root = nextArg(args, &arg_idx) orelse {
+        log.warn("Expected third argument to be global cache root directory path\n", .{});
+        return error.InvalidArgs;
+    };
+
+    const builder = try Builder.create(
+        allocator,
+        zig_exe,
+        build_root,
+        cache_root,
+        global_cache_root,
+    );
+
     defer builder.destroy();
 
     builder.resolveInstallPrefix(null, Builder.DirList{});
@@ -56,7 +88,7 @@ fn processPackage(out_stream: anytype, pkg: Pkg) anyerror!void {
         .path => |path| try out_stream.print("{s}\x00{s}\n", .{ pkg.name, path }),
         .generated => |generated| if (generated.path != null) try out_stream.print("{s}\x00{s}\n", .{ pkg.name, generated.path.? }),
     }
-    
+
     if (pkg.dependencies) |dependencies| {
         for (dependencies) |dep| {
             try processPackage(out_stream, dep);
@@ -70,4 +102,10 @@ fn runBuild(builder: *Builder) anyerror!void {
         .ErrorUnion => try root.build(builder),
         else => @compileError("expected return type of build to be 'void' or '!void'"),
     }
+}
+
+fn nextArg(args: [][]const u8, idx: *usize) ?[]const u8 {
+    if (idx.* >= args.len) return null;
+    defer idx.* += 1;
+    return args[idx.*];
 }
