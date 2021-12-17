@@ -43,6 +43,7 @@ pub const ResponseParams = union(enum) {
     Locations: []Location,
     WorkspaceEdit: WorkspaceEdit,
     InitializeResult: InitializeResult,
+    ConfigurationParams: ConfigurationParams,
 };
 
 /// JSONRPC notifications
@@ -72,6 +73,12 @@ pub const Response = struct {
     jsonrpc: string = "2.0",
     id: RequestId,
     result: ResponseParams,
+};
+
+pub const Request = struct {
+    jsonrpc: string = "2.0",
+    method: []const u8,
+    params: ?ResponseParams,
 };
 
 /// Type of a debug message
@@ -368,4 +375,13 @@ const InitializeResult = struct {
         name: string,
         version: ?string = null,
     },
+};
+
+pub const ConfigurationParams = struct {
+    items: []const ConfigurationItem,
+
+    pub const ConfigurationItem = struct {
+        scopeUri: ?[]const u8,
+        section: ?[]const u8,
+    };
 };

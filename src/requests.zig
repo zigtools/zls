@@ -147,6 +147,7 @@ const MaybeStringArray = Default([]const []const u8, &.{});
 pub const Initialize = struct {
     pub const ClientCapabilities = struct {
         workspace: ?struct {
+            configuration: Default(bool, false),
             workspaceFolders: Default(bool, false),
         },
         textDocument: ?struct {
@@ -253,6 +254,24 @@ pub const References = struct {
         position: types.Position,
         context: struct {
             includeDeclaration: bool,
+        },
+    },
+};
+
+pub const Configuration = struct {
+    params: struct {
+        settings: struct {
+            enable_snippets: ?bool,
+            zig_lib_path: ?[]const u8,
+            zig_exe_path: ?[]const u8,
+            warn_style: ?bool,
+            build_runner_path: ?[]const u8,
+            build_runner_cache_path: ?[]const u8,
+            enable_semantic_tokens: ?bool,
+            operator_completions: ?bool,
+            include_at_in_builtins: ?bool,
+            max_detail_length: ?usize,
+            skip_std_references: ?bool,
         },
     },
 };
