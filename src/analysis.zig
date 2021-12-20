@@ -608,7 +608,7 @@ pub fn isTypeIdent(tree: Ast, token_idx: Ast.TokenIndex) bool {
         .{"c_int"},          .{"c_uint"},
         .{"c_long"},         .{"c_ulong"},
         .{"c_longlong"},     .{"c_ulonglong"},
-        .{"c_longdouble"},   .{"c_void"},
+        .{"c_longdouble"},   .{"anyopaque"},
         .{"f16"},            .{"f32"},
         .{"f64"},            .{"f128"},
         .{"bool"},           .{"void"},
