@@ -1655,13 +1655,12 @@ pub fn main() anyerror!void {
     // Check arguments.
     var args_it = std.process.args();
     defer args_it.deinit();
-    const prog_name = try args_it.next(allocator) orelse @panic("Could not find self argument");
+    const prog_name = (try args_it.next(allocator)) orelse @panic("Could not find self argument");
     allocator.free(prog_name);
 
     var config_path: ?[]const u8 = null;
     var next_arg_config_path = false;
-    while (args_it.next(allocator)) |maybe_arg| {
-        const arg = try maybe_arg;
+    while (try args_it.next(allocator)) |arg| {
         defer allocator.free(arg);
 
         if (next_arg_config_path) {
