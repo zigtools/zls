@@ -100,6 +100,7 @@ const Server = struct {
     }
 
     fn shutdown(self: *Server) void {
+        _ = self;
         // FIXME this shutdown request fails with a broken pipe on stdin on the CI
         // self.request("shutdown", "{}", null) catch @panic("Could not send shutdown request");
         // waitNoError(self.process) catch @panic("Server error");
