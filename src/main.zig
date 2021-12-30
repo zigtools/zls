@@ -1128,7 +1128,7 @@ fn loadConfigFile(file_path: []const u8) ?Config {
 
     const file_buf = file.readToEndAlloc(allocator, 0x1000000) catch return null;
     defer allocator.free(file_buf);
-    @setEvalBranchQuota(2000);
+    @setEvalBranchQuota(3000);
     // TODO: Better errors? Doesn't seem like std.json can provide us positions or context.
     var config = std.json.parse(Config, &std.json.TokenStream.init(file_buf), std.json.ParseOptions{ .allocator = allocator }) catch |err| {
         logger.warn("Error while parsing configuration file: {}", .{err});
@@ -1708,14 +1708,14 @@ pub fn main() anyerror!void {
             std.debug.print("Falling back to a lookup in the local and global configuration folders\n", .{});
         }
         if (try known_folders.getPath(allocator, .local_configuration)) |path| {
-            defer allocator.free(path);
+            config_path = path;
             if (loadConfigInFolder(path)) |conf| {
                 config = conf;
                 break :config_read;
             }
         }
         if (try known_folders.getPath(allocator, .global_configuration)) |path| {
-            defer allocator.free(path);
+            config_path = path;
             if (loadConfigInFolder(path)) |conf| {
                 config = conf;
                 break :config_read;
@@ -1789,6 +1789,30 @@ pub fn main() anyerror!void {
         logger.warn("Zig standard library path not specified in zls.json and could not be resolved from the zig executable", .{});
     }
 
+    if (config.builtin_path == null and config.zig_exe_path != null and config_path != null) {
+        const result = try std.ChildProcess.exec(.{
+            .allocator = allocator,
+            .argv = &.{
+                config.zig_exe_path.?,
+                "build-exe",
+                "--show-builtin",
+            },
+            .max_output_bytes = 1024 * 1024 * 50,
+        });
+        defer allocator.free(result.stdout);
+        defer allocator.free(result.stderr);
+
+        var d = try std.fs.cwd().openDir(config_path.?, .{});
+        defer d.close();
+
+        const f = try d.createFile("builtin.zig", .{});
+        defer f.close();
+
+        try f.writer().writeAll(result.stdout);
+
+        config.builtin_path = try std.fs.path.join(allocator, &.{ config_path.?, "builtin.zig" });
+    }
+
     const build_runner_path = if (config.build_runner_path) |p|
         try allocator.dupe(u8, p)
     else blk: {
@@ -1821,6 +1845,7 @@ pub fn main() anyerror!void {
         // Since we don't compile anything and no packages should put their
         // files there this path can be ignored
         "ZLS_DONT_CARE",
+        config.builtin_path,
     );
     defer document_store.deinit();
 
