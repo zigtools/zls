@@ -111,7 +111,7 @@ fn startZls() !*std.ChildProcess {
     var process = try std.ChildProcess.init(&[_][]const u8{"zig-out/bin/zls" ++ suffix}, allocator);
     process.stdin_behavior = .Pipe;
     process.stdout_behavior = .Pipe;
-    process.stderr_behavior = .Inherit; //std.ChildProcess.StdIo.Inherit;
+    process.stderr_behavior = .Inherit;
 
     process.spawn() catch |err| {
         std.debug.print("Failed to spawn zls process, error: {}\n", .{err});

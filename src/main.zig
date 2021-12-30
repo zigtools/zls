@@ -1789,7 +1789,7 @@ pub fn main() anyerror!void {
         logger.warn("Zig standard library path not specified in zls.json and could not be resolved from the zig executable", .{});
     }
 
-    if (config.builtin_path == null and config.zig_exe_path != null and config_path != null) {
+    if (config.builtin_path == null and config.zig_exe_path != null and config_path != null) blk: {
         const result = try std.ChildProcess.exec(.{
             .allocator = allocator,
             .argv = &.{
@@ -1805,7 +1805,10 @@ pub fn main() anyerror!void {
         var d = try std.fs.cwd().openDir(config_path.?, .{});
         defer d.close();
 
-        const f = try d.createFile("builtin.zig", .{});
+        const f = d.createFile("builtin.zig", .{}) catch |err| switch (err) {
+            error.AccessDenied => break :blk,
+            else => |e| return e,
+        };
         defer f.close();
 
         try f.writer().writeAll(result.stdout);
