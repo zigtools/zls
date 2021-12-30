@@ -614,7 +614,10 @@ pub fn uriFromImportStr(self: *DocumentStore, allocator: std.mem.Allocator, hand
                 return try allocator.dupe(u8, builtin_uri);
             }
         }
-        return try URI.fromPath(allocator, self.builtin_path.?);
+        if (self.builtin_path) |_| {
+            return try URI.fromPath(allocator, self.builtin_path.?);
+        }
+        return null;
     } else if (!std.mem.endsWith(u8, import_str, ".zig")) {
         if (handle.associated_build_file) |build_file| {
             for (build_file.packages.items) |pkg| {
