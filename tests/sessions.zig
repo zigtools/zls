@@ -100,19 +100,18 @@ const Server = struct {
     }
 
     fn shutdown(self: *Server) void {
-        _ = self;
         // FIXME this shutdown request fails with a broken pipe on stdin on the CI
-        // self.request("shutdown", "{}", null) catch @panic("Could not send shutdown request");
-        // waitNoError(self.process) catch @panic("Server error");
-        // self.process.deinit();
+        self.request("shutdown", "{}", null) catch @panic("Could not send shutdown request");
+        waitNoError(self.process) catch @panic("Server error");
+        self.process.deinit();
     }
 };
 
 fn startZls() !*std.ChildProcess {
     var process = try std.ChildProcess.init(&[_][]const u8{"zig-out/bin/zls" ++ suffix}, allocator);
     process.stdin_behavior = .Pipe;
-    process.stdout_behavior = .Pipe;
-    process.stderr_behavior = .Pipe; //std.ChildProcess.StdIo.Inherit;
+    process.stdout_behavior = .Inherit;
+    process.stderr_behavior = .Inherit; //std.ChildProcess.StdIo.Inherit;
 
     process.spawn() catch |err| {
         std.debug.print("Failed to spawn zls process, error: {}\n", .{err});

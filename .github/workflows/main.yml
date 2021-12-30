@@ -21,6 +21,9 @@ jobs:
         with:
           version: master
 
+      - run: zig version
+      - run: zig env
+
       - name: Build
         run: zig build
 
