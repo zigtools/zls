@@ -1107,6 +1107,22 @@ pub const builtins = [_]Builtin{
         },
     },
     .{
+        .name = "@prefetch",
+        .signature = "@prefetch(ptr: anytype, comptime options: std.builtin.PrefetchOptions)",
+        .snippet = "@prefetch(${1:ptr: anytype}, ${2:comptime options: std.builtin.PrefetchOptions})",
+        .documentation =
+        \\This builtin tells the compiler to emit a prefetch instruction if supported by the target CPU. If the target CPU does not support the requested prefetch instruction, this builtin is a noop. This function has no effect on the behavior of the program, only on the performance characteristics.
+        \\
+        \\The `ptr` argument may be any pointer type and determines the memory address to prefetch. This function does not dereference the pointer, it is perfectly legal to pass a pointer to invalid memory to this function and no illegal behavior will result.
+        \\
+        \\The `options` argument is the following struct:</p> {#code_begin|syntax|builtin#} /// This data structure is used by the Zig language code generation and /// therefore must be kept in sync with the compiler implementation. pub const PrefetchOptions = struct { /// Whether the prefetch should prepare for a read or a write. rw: Rw = .read, /// 0 means no temporal locality. That is, the data can be immediately /// dropped from the cache after it is accessed. /// /// 3 means high temporal locality. That is, the data should be kept in /// the cache as it is likely to be accessed again soon. locality: u2 = 3, /// The cache that the prefetch should be preformed on. cache: Cache = .data, pub const Rw = enum { read, write, }; pub const Cache = enum { instruction, data, }; };`<pre>
+        ,
+        .arguments = &.{
+            "ptr: anytype",
+            "comptime options: std.builtin.PrefetchOptions",
+        },
+    },
+    .{
         .name = "@ptrCast",
         .signature = "@ptrCast(comptime DestType: type, value: anytype) DestType",
         .snippet = "@ptrCast(${1:comptime DestType: type}, ${2:value: anytype})",
@@ -1355,7 +1371,8 @@ pub const builtins = [_]Builtin{
         \\
         \\If `a` or `b` is `undefined`, it is equivalent to a vector of all `undefined` with the same length as the other vector. If both vectors are `undefined`, `@shuffle` returns a vector with all elements `undefined`.
         \\
-        \\`E` must be an [integer](https://ziglang.org/documentation/master/#Integers), [float](https://ziglang.org/documentation/master/#Floats), [pointer](https://ziglang.org/documentation/master/#Pointers), or `bool`. The mask may be any vector length, and its length determines the result length.
+        \\`E` must be an [integer](https://ziglang.org/documentation/master/#Integers), [float](https://ziglang.org/documentation/master/#Floats), [pointer](https://ziglang.org/documentation/master/#Pointers), or `bool`. The mask may be any vector length, and its length determines the result length.</p> {#code_begin|test|vector_shuffle#} const std = @import("std"); const Vector = std.meta.Vector; const expect = std.testing.expect; test "vector @shuffle" { const a: Vector(7, u8) = [_]u8{ 'o', 'l', 'h', 'e', 'r', 'z', 'w' }; const b: Vector(4, u8) = [_]u8{ 'w', 'd', '!', 'x' }; // To shuffle within a single vector, pass undefined as the second argument. // Notice that we can re-order, duplicate, or omit elements of the input vector const mask1: Vector(5, i32) = [_]i32{ 2, 3, 1, 1, 0 }; const res1: Vector(5, u8) = @shuffle(u8, a, undefined, mask1); try expect(std.mem.eql(u8, &@as([5]u8, res1), "hello")); // Combining two vectors const mask2: Vector(6, i32) = [_]i32{ -1, 0, 4, 1, -2, -3 }; const res2: Vector(6, u8) = @shuffle(u8, a, b, mask2); try expect(std.mem.eql(u8, &@as([6]u8, res2), "world!")); }`<pre>
+        \\      
         ,
         .arguments = &.{
             "comptime E: type",
@@ -1562,7 +1579,7 @@ pub const builtins = [_]Builtin{
         .signature = "@ceil(value: anytype) @TypeOf(value)",
         .snippet = "@ceil(${1:value: anytype})",
         .documentation =
-        \\Returns the largest integral value not less than the given floating point number. Uses a dedicated hardware instruction when available.
+        \\Returns the smallest integral value not less than the given floating point number. Uses a dedicated hardware instruction when available.
         \\
         \\Supports [Floats](https://ziglang.org/documentation/master/#Floats) and [Vectors](https://ziglang.org/documentation/master/#Vectors) of floats, with the caveat that [some float operations are not yet implemented for all float types](https://github.com/ziglang/zig/issues/4026).
         ,
