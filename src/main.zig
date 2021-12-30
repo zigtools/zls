@@ -23,6 +23,7 @@ const data = switch (build_options.data_version) {
     .@"0.7.1" => @import("data/0.7.1.zig"),
     .@"0.8.0" => @import("data/0.8.0.zig"),
     .@"0.8.1" => @import("data/0.8.1.zig"),
+    .@"0.9.0" => @import("data/0.9.0.zig"),
 };
 
 const logger = std.log.scoped(.main);
