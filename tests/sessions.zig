@@ -102,12 +102,11 @@ const Server = struct {
     fn shutdown(self: *Server) void {
         self.request("shutdown", "{}", null) catch @panic("Could not send shutdown request");
         waitNoError(self.process) catch @panic("Server error");
-        self.process.deinit();
+        // FIXME: this triggers `SIGPIPE`
+        // self.process.deinit();
     }
 };
 fn startZls() !*std.ChildProcess {
-    std.debug.print("\n", .{});
-
     var process = try std.ChildProcess.init(&[_][]const u8{"zig-out/bin/zls" ++ suffix}, allocator);
     process.stdin_behavior = .Pipe;
     process.stdout_behavior = .Pipe;
@@ -151,9 +150,7 @@ fn waitNoError(process: *std.ChildProcess) !void {
 
 test "Open file, ask for semantic tokens" {
     var server = try Server.start(initialize_msg, null);
-    // FIXME: The last `server.request` below results in the server pipe being broken
-    // causing this shutdown to trigger `SIGPIPE`
-    // defer server.shutdown();
+    defer server.shutdown();
 
     try server.request("textDocument/didOpen",
         \\{"textDocument":{"uri":"file://./tests/test.zig","languageId":"zig","version":420,"text":"const std = @import(\"std\");"}}
@@ -167,9 +164,7 @@ test "Open file, ask for semantic tokens" {
 
 test "Request completion in an empty file" {
     var server = try Server.start(initialize_msg, null);
-    // FIXME: The last `server.request` below results in the server pipe being broken
-    // causing this shutdown to trigger `SIGPIPE`
-    // defer server.shutdown();
+    defer server.shutdown();
 
     try server.request("textDocument/didOpen",
         \\{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file:///test.zig","languageId":"zig","version":420,"text":""}}}
@@ -181,9 +176,7 @@ test "Request completion in an empty file" {
 
 test "Request completion with no trailing whitespace" {
     var server = try Server.start(initialize_msg, null);
-    // FIXME: The last `server.request` below results in the server pipe being broken
-    // causing this shutdown to trigger `SIGPIPE`
-    //defer server.shutdown();
+    defer server.shutdown();
 
     try server.request("textDocument/didOpen",
         \\{"textDocument":{"uri":"file:///test.zig","languageId":"zig","version":420,"text":"const std = @import(\"std\");\nc"}}
@@ -198,9 +191,7 @@ test "Request completion with no trailing whitespace" {
 
 test "Encoded space in file name and usingnamespace on non-existing symbol" {
     var server = try Server.start(initialize_msg, null);
-    // FIXME: The last `server.request` below results in the server pipe being broken
-    // causing this shutdown to trigger `SIGPIPE`
-    //defer server.shutdown();
+    defer server.shutdown();
 
     try server.request("textDocument/didOpen",
         \\{"textDocument":{"uri":"file:///%20test.zig","languageId":"zig","version":420,"text":"usingnamespace a.b;\nb."}}
@@ -214,9 +205,7 @@ test "Encoded space in file name and usingnamespace on non-existing symbol" {
 
 test "Self-referential definition" {
     var server = try Server.start(initialize_msg, null);
-    // FIXME: The last `server.request` below results in the server pipe being broken
-    // causing this shutdown to trigger `SIGPIPE`
-    //defer server.shutdown();
+    defer server.shutdown();
 
     try server.request("textDocument/didOpen",
         \\{"textDocument":{"uri":"file:///test.zig","languageId":"zig","version":420,"text":"const h = h(0);\nc"}}
@@ -229,9 +218,7 @@ test "Self-referential definition" {
 }
 test "Missing return type" {
     var server = try Server.start(initialize_msg, null);
-    // FIXME: The last `server.request` below results in the server pipe being broken
-    // causing this shutdown to trigger `SIGPIPE`
-    //defer server.shutdown();
+    defer server.shutdown();
 
     try server.request("textDocument/didOpen",
         \\{"textDocument":{"uri":"file:///test.zig","languageId":"zig","version":420,"text":"fn w() {}\nc"}}
@@ -245,9 +232,7 @@ test "Missing return type" {
 
 test "Pointer and optional deref" {
     var server = try Server.start(initialize_msg, null);
-    // FIXME: The last `server.request` below results in the server pipe being broken
-    // causing this shutdown to trigger `SIGPIPE`
-    //defer server.shutdown();
+    defer server.shutdown();
 
     try server.request("textDocument/didOpen",
         \\{"textDocument":{"uri":"file:///test.zig","languageId":"zig","version":420,"text":"var value: ?struct { data: i32 = 5 } = null;const ptr = &value;\nconst a = ptr.*.?."}}
@@ -263,7 +248,7 @@ test "Request utf-8 offset encoding" {
     var server = try Server.start(initialize_msg_offs,
         \\{"offsetEncoding":"utf-8","capabilities":{"signatureHelpProvider":{"triggerCharacters":["("],"retriggerCharacters":[","]},"textDocumentSync":1,"renameProvider":true,"completionProvider":{"resolveProvider":false,"triggerCharacters":[".",":","@"]},"documentHighlightProvider":false,"hoverProvider":true,"codeActionProvider":false,"declarationProvider":true,"definitionProvider":true,"typeDefinitionProvider":true,"implementationProvider":false,"referencesProvider":true,"documentSymbolProvider":true,"colorProvider":false,"documentFormattingProvider":true,"documentRangeFormattingProvider":false,"foldingRangeProvider":false,"selectionRangeProvider":false,"workspaceSymbolProvider":false,"rangeProvider":false,"documentProvider":true,"workspace":{"workspaceFolders":{"supported":false,"changeNotifications":false}},"semanticTokensProvider":{"full":true,"range":false,"legend":{"tokenTypes":["type","parameter","variable","enumMember","field","errorTag","function","keyword","comment","string","number","operator","builtin","label","keywordLiteral"],"tokenModifiers":["namespace","struct","enum","union","opaque","declaration","async","documentation","generic"]}}},"serverInfo":{"name":"zls","version":"0.1.0"}}
     );
-    server.shutdown();
+    defer server.shutdown();
 }
 
 // not fixed yet!
