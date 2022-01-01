@@ -35,3 +35,5 @@ max_detail_length: usize = 1024 * 1024,
 /// Skips references to std. This will improve lookup speeds.
 /// Going to definition however will continue to work
 skip_std_references: bool = false,
+
+builtin_path: ?[]const u8 = null,

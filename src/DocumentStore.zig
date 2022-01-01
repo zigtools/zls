@@ -54,6 +54,7 @@ build_runner_cache_path: []const u8,
 std_uri: ?[]const u8,
 zig_cache_root: []const u8,
 zig_global_cache_root: []const u8,
+builtin_path: ?[]const u8,
 
 pub fn init(
     self: *DocumentStore,
@@ -64,6 +65,7 @@ pub fn init(
     zig_lib_path: ?[]const u8,
     zig_cache_root: []const u8,
     zig_global_cache_root: []const u8,
+    builtin_path: ?[]const u8,
 ) !void {
     self.allocator = allocator;
     self.handles = std.StringHashMap(*Handle).init(allocator);
@@ -74,6 +76,7 @@ pub fn init(
     self.std_uri = try stdUriFromLibPath(allocator, zig_lib_path);
     self.zig_cache_root = zig_cache_root;
     self.zig_global_cache_root = zig_global_cache_root;
+    self.builtin_path = builtin_path;
 }
 
 fn loadBuildAssociatedConfiguration(allocator: std.mem.Allocator, build_file: *BuildFile, build_file_path: []const u8) !void {
@@ -239,6 +242,12 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: [:0]u8) anyerror!*Ha
         loadBuildAssociatedConfiguration(self.allocator, build_file, build_file_path) catch |err| {
             log.debug("Failed to load config associated with build file {s} (error: {})", .{ build_file.uri, err });
         };
+        if (build_file.builtin_uri == null) {
+            if (self.builtin_path != null) {
+                build_file.builtin_uri = try URI.fromPath(self.allocator, self.builtin_path.?);
+                log.info("builtin config not found, falling back to defualt: {s}", .{build_file.builtin_uri});
+            }
+        }
 
         // TODO: Do this in a separate thread?
         // It can take quite long.
@@ -605,7 +614,10 @@ pub fn uriFromImportStr(self: *DocumentStore, allocator: std.mem.Allocator, hand
                 return try allocator.dupe(u8, builtin_uri);
             }
         }
-        return null; // TODO find the correct zig-cache folder
+        if (self.builtin_path) |_| {
+            return try URI.fromPath(allocator, self.builtin_path.?);
+        }
+        return null;
     } else if (!std.mem.endsWith(u8, import_str, ".zig")) {
         if (handle.associated_build_file) |build_file| {
             for (build_file.packages.items) |pkg| {
