@@ -1809,6 +1809,16 @@ fn getDocumentSymbolsInternal(allocator: std.mem.Allocator, tree: Ast, node: Ast
                 if (var_decl.ast.init_node != 0)
                     try addOutlineNodes(allocator, tree, var_decl.ast.init_node, &child_context);
             }
+            if (tags[node] == .fn_decl) fn_ch: {
+                const fn_decl = tree.nodes.items(.data)[node];
+                var params: [1]Ast.Node.Index = undefined;
+                const fn_proto = ast.fnProto(tree, fn_decl.lhs, &params) orelse break :fn_ch;
+                if (!isTypeFunction(tree, fn_proto)) break :fn_ch;
+                const ret_stmt = findReturnStatement(tree, fn_proto, fn_decl.rhs) orelse break :fn_ch;
+                const type_decl = tree.nodes.items(.data)[ret_stmt].lhs;
+                if (type_decl != 0)
+                    try addOutlineNodes(allocator, tree, type_decl, &child_context);
+            }
             break :ch children.items;
         },
     };
