@@ -1654,16 +1654,13 @@ pub fn main() anyerror!void {
     defer analysis.deinit();
 
     // Check arguments.
-    var args_it = std.process.args();
+    var args_it = try std.process.ArgIterator.initWithAllocator(allocator);
     defer args_it.deinit();
-    const prog_name = (try args_it.next(allocator)) orelse @panic("Could not find self argument");
-    allocator.free(prog_name);
+    if(!args_it.skip()) @panic("Could not find self argument");
 
     var config_path: ?[]const u8 = null;
     var next_arg_config_path = false;
-    while (try args_it.next(allocator)) |arg| {
-        defer allocator.free(arg);
-
+    while (args_it.next()) |arg| {
         if (next_arg_config_path) {
             config_path = try allocator.dupe(u8, arg);
             next_arg_config_path = false;
@@ -1684,6 +1681,7 @@ pub fn main() anyerror!void {
             std.os.exit(1);
         }
     }
+
     if (next_arg_config_path) {
         std.debug.print("Expected configuration file path after --config-path argument\n", .{});
         return;
