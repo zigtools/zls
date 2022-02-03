@@ -1691,7 +1691,6 @@ fn addOutlineNodes(allocator: std.mem.Allocator, tree: Ast, child: Ast.Node.Inde
         .@"if",
         .if_simple,
         .multiline_string_literal,
-        .@"anytype",
         .block,
         .block_semicolon,
         .block_two,
@@ -2295,8 +2294,9 @@ const CompletionContext = struct {
         return @truncate(u32, std.hash.Wyhash.hash(0, item.label));
     }
 
-    pub fn eql(self: @This(), a: types.CompletionItem, b: types.CompletionItem) bool {
+    pub fn eql(self: @This(), a: types.CompletionItem, b: types.CompletionItem, b_index: usize) bool {
         _ = self;
+        _ = b_index;
         return std.mem.eql(u8, a.label, b.label);
     }
 };
@@ -3078,7 +3078,6 @@ fn makeScopeInternal(allocator: std.mem.Allocator, context: ScopeContext, node_i
         .asm_output,
         .asm_input,
         .error_value,
-        .@"anytype",
         .multiline_string_literal,
         .string_literal,
         .enum_literal,

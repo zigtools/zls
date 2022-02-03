@@ -778,9 +778,6 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
             try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, asm_node.ast.template });
             // TODO Inputs, outputs.
         },
-        .@"anytype" => {
-            try writeToken(builder, main_token, .type);
-        },
         .test_decl => {
             if (analysis.getDocCommentTokenIndex(token_tags, main_token)) |doc|
                 try writeDocComments(builder, tree, doc);
