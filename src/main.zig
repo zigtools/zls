@@ -1721,6 +1721,7 @@ pub fn main() anyerror!void {
             }
         }
         logger.info("No config file zls.json found.", .{});
+        config_path = null;
     }
 
     // Find the zig executable in PATH
