@@ -147,6 +147,7 @@ fn loadPackages(context: LoadPackagesContext) !void {
             context.cache_root,
             context.global_cache_root,
         },
+        .max_output_bytes = 50 * 1024 * 1024,
     });
 
     defer {
