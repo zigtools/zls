@@ -87,7 +87,7 @@ pub fn wizard(allocator: std.mem.Allocator) !void {
     const semantic_tokens = try zinput.askBool("Do you want to enable semantic highlighting?");
     const operator_completions = try zinput.askBool("Do you want to enable .* and .? completions?");
     const include_at_in_builtins = switch (editor) {
-        .Sublime => true,
+        .Sublime => !try zinput.askBool("Are you using a Sublime Text version > 4000?"),
         .VSCode, .Kate, .Neovim, .Vim8, .Emacs, .Doom => false,
         else => try zinput.askBool("Should the @ sign be included in completions of builtin functions?\nChange this later if `@inc` completes to `include` or `@@include`"),
     };
