@@ -43,7 +43,7 @@ mkdir $HOME/zls && cd $HOME/zls && curl -L https://github.com/zigtools/zls/relea
 
 You can install the latest release into `$HOME/zls` using e.g.:
 
-```
+```bash
 sudo apt install xz-utils
 mkdir $HOME/zls && cd $HOME/zls && curl -L https://github.com/zigtools/zls/releases/download/0.9.0/x86_64-linux.tar.xz | tar -xJ --strip-components=1 -C .
 ```
@@ -67,7 +67,7 @@ zig build -Drelease-safe
 <!-- If this table grows too large, then delete this one and move it all over to the Wiki page about building from source. -->
 | Option | Type | Default Value | What it Does |
 | --- | --- | --- | --- |
-| `-Ddata_version` | `string` (master, 0.7.0 or 0.7.1) | master | The data file version. This selects the files in the `src/data` folder that correspond to the Zig version being served.|
+| `-Ddata_version` | `string` (like 0.7.1 or 0.9.0) | master | The data file version. This selects the files in the `src/data` folder that correspond to the Zig version being served.|
 
 #### Updating Data Files
 
@@ -95,11 +95,13 @@ The following options are currently available.
 | `build_runner_cache_path` | `?[]const u8` | `null` | Path to a directroy that will be used as zig's cache when running `zig run build_runner.zig ...`. `null` is equivalent to `${KnownFloders.Cache}/zls` |
 | `enable_semantic_tokens` | `bool` | `true` | Enables semantic token support when the client also supports it. |
 | `operator_completions` | `bool` | `true` | Enables `*` and `?` operators in completion lists. |
+|`include_at_in_builtins`|`bool`|`false`| Whether the @ sign should be part of the completion of builtins.
+|`max_detail_length`|`usize`|`1024 * 1024`| The detail field of completions is truncated to be no longer than this (in bytes).
 | `skip_std_references` | `bool` | `false` | When true, skips searching for references in std. Improves lookup speed for functions in user's code. Renaming and go-to-definition will continue to work as is.
 
 ## Features
 
-`zls` supports most language features, including simple type function support, usingnamespace, payload capture type resolution, custom packages and others.
+`zls` supports most language features, including simple type function support, using namespace, payload capture type resolution, custom packages and others.
 Notable language features that are not currently implemented include `@cImport` as well as most forms of compile time evaluation.
 
 The following LSP features are supported:
