@@ -138,6 +138,30 @@ const Builder = struct {
 
         var i: usize = from;
         while (i < to - 1) : (i += 1) {
+            // Skip multi-line string literals
+            if (source[i] == '\\' and source[i + 1] == '\\') {
+                while (i < to - 1 and source[i] != '\n') : (i += 1) {}
+                continue;
+            }
+            // Skip normal string literals
+            if (source[i] == '"') {
+                i += 1;
+                while (i < to - 1 and
+                    source[i] != '\n' and
+                    !(source[i] == '"' and source[i - 1] != '\\')) : (i += 1)
+                {}
+                continue;
+            }
+            // Skip char literals
+            if (source[i] == '\'') {
+                i += 1;
+                while (i < to - 1 and
+                    source[i] != '\n' and
+                    !(source[i] == '\'' and source[i - 1] != '\\')) : (i += 1)
+                {}
+                continue;
+            }
+ 
             if (source[i] != '/' or source[i + 1] != '/')
                 continue;
 
