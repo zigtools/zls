@@ -1656,28 +1656,28 @@ pub fn main() anyerror!void {
     // Check arguments.
     var args_it = try std.process.ArgIterator.initWithAllocator(allocator);
     defer args_it.deinit();
-    if(!args_it.skip()) @panic("Could not find self argument");
+    if (!args_it.skip()) @panic("Could not find self argument");
 
     var config_path: ?[]const u8 = null;
     var next_arg_config_path = false;
-    while (args_it.next()) |arg| {
+    while (args_it.next(allocator)) |arg| {
         if (next_arg_config_path) {
-            config_path = try allocator.dupe(u8, arg);
+            config_path = try allocator.dupe(u8, try arg);
             next_arg_config_path = false;
             continue;
         }
 
-        if (std.mem.eql(u8, arg, "--debug-log")) {
+        if (std.mem.eql(u8, try arg, "--debug-log")) {
             actual_log_level = .debug;
             std.debug.print("Enabled debug logging\n", .{});
-        } else if (std.mem.eql(u8, arg, "--config-path")) {
+        } else if (std.mem.eql(u8, try arg, "--config-path")) {
             next_arg_config_path = true;
             continue;
-        } else if (std.mem.eql(u8, arg, "config") or std.mem.eql(u8, arg, "configure")) {
+        } else if (std.mem.eql(u8, try arg, "config") or std.mem.eql(u8, try arg, "configure")) {
             try setup.wizard(allocator);
             return;
         } else {
-            std.debug.print("Unrecognized argument {s}\n", .{arg});
+            std.debug.print("Unrecognized argument {s}\n", .{try arg});
             std.os.exit(1);
         }
     }

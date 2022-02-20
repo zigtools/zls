@@ -2294,9 +2294,8 @@ const CompletionContext = struct {
         return @truncate(u32, std.hash.Wyhash.hash(0, item.label));
     }
 
-    pub fn eql(self: @This(), a: types.CompletionItem, b: types.CompletionItem, b_index: usize) bool {
+    pub fn eql(self: @This(), a: types.CompletionItem, b: types.CompletionItem) bool {
         _ = self;
-        _ = b_index;
         return std.mem.eql(u8, a.label, b.label);
     }
 };
@@ -2562,21 +2561,7 @@ fn makeScopeInternal(allocator: std.mem.Allocator, context: ScopeContext, node_i
     }
 
     switch (node_tag) {
-        .container_decl,
-        .container_decl_trailing,
-        .container_decl_arg,
-        .container_decl_arg_trailing,
-        .container_decl_two,
-        .container_decl_two_trailing,
-        .tagged_union,
-        .tagged_union_trailing,
-        .tagged_union_two,
-        .tagged_union_two_trailing,
-        .tagged_union_enum_tag,
-        .tagged_union_enum_tag_trailing,
-        .root,
-        .error_set_decl,
-        => {
+        .container_decl, .container_decl_trailing, .container_decl_arg, .container_decl_arg_trailing, .container_decl_two, .container_decl_two_trailing, .tagged_union, .tagged_union_trailing, .tagged_union_two, .tagged_union_two_trailing, .tagged_union_enum_tag, .tagged_union_enum_tag_trailing, .root, .error_set_decl, .@"anytype" => {
             try makeInnerScope(allocator, context, node_idx);
         },
         .array_type_sentinel => {

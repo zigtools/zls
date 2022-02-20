@@ -451,16 +451,7 @@ pub fn lastToken(tree: Ast, node: Ast.Node.Index) Ast.TokenIndex {
         .error_value,
         => return datas[n].rhs + end_offset,
 
-        .anyframe_literal,
-        .char_literal,
-        .integer_literal,
-        .float_literal,
-        .unreachable_literal,
-        .identifier,
-        .deref,
-        .enum_literal,
-        .string_literal,
-        => return main_tokens[n] + end_offset,
+        .anyframe_literal, .char_literal, .integer_literal, .float_literal, .unreachable_literal, .identifier, .deref, .enum_literal, .string_literal, .@"anytype" => return main_tokens[n] + end_offset,
 
         .@"return" => if (datas[n].lhs != 0) {
             n = datas[n].lhs;

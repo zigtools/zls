@@ -973,7 +973,7 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
             try writeToken(builder, main_token, .keyword);
             try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, node_data[node].lhs });
         },
-        .anyframe_literal => try writeToken(builder, main_token, .keyword),
+        .anyframe_literal, .@"anytype" => try writeToken(builder, main_token, .keyword),
     }
 }
 
