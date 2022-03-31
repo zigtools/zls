@@ -107,7 +107,7 @@ pub fn getFunctionSnippet(allocator: std.mem.Allocator, tree: Ast, func: Ast.ful
 
     const token_tags = tree.tokens.items(.tag);
 
-    var it = func.iterate(tree);
+    var it = func.iterate(&tree);
     var i: usize = 0;
     while (it.next()) |param| : (i += 1) {
         if (skip_self_param and i == 0) continue;
@@ -161,7 +161,7 @@ pub fn hasSelfParam(arena: *std.heap.ArenaAllocator, document_store: *DocumentSt
     if (func.ast.params.len == 0) return false;
 
     const tree = handle.tree;
-    var it = func.iterate(tree);
+    var it = func.iterate(&tree);
     const param = it.next().?;
     if (param.type_expr == 0) return false;
 
@@ -215,7 +215,7 @@ pub fn isTypeFunction(tree: Ast, func: Ast.full.FnProto) bool {
 }
 
 pub fn isGenericFunction(tree: Ast, func: Ast.full.FnProto) bool {
-    var it = func.iterate(tree);
+    var it = func.iterate(&tree);
     while (it.next()) |param| {
         if (param.anytype_ellipsis3 != null or param.comptime_noalias != null) {
             return true;
@@ -723,7 +723,7 @@ pub fn resolveTypeOfNodeInternal(store: *DocumentStore, arena: *std.heap.ArenaAl
                 var expected_params = fn_decl.ast.params.len;
                 // If we call as method, the first parameter should be skipped
                 // TODO: Back-parse to extract the self argument?
-                var it = fn_decl.iterate(decl.handle.tree);
+                var it = fn_decl.iterate(&decl.handle.tree);
                 if (token_tags[call.ast.lparen - 2] == .period) {
                     if (try hasSelfParam(arena, store, decl.handle, fn_decl)) {
                         _ = it.next();
@@ -2600,7 +2600,7 @@ fn makeScopeInternal(allocator: std.mem.Allocator, context: ScopeContext, node_i
             var scope_idx = scopes.items.len - 1;
             errdefer scopes.items[scope_idx].decls.deinit();
 
-            var it = func.iterate(tree);
+            var it = func.iterate(&tree);
             while (it.next()) |param| {
                 // Add parameter decls
                 if (param.name_token) |name_token| {

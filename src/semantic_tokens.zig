@@ -161,7 +161,7 @@ const Builder = struct {
                 {}
                 continue;
             }
- 
+
             if (source[i] != '/' or source[i + 1] != '/')
                 continue;
 
@@ -475,7 +475,7 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
 
             try writeTokenMod(builder, fn_proto.name_token, func_name_tok_type, tok_mod);
 
-            var it = fn_proto.iterate(tree);
+            var it = fn_proto.iterate(&tree);
             while (it.next()) |param_decl| {
                 if (param_decl.first_doc_comment) |docs| try writeDocComments(builder, tree, docs);
 
