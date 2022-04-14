@@ -155,6 +155,7 @@ Install the `zls-vscode` extension from [here](https://github.com/zigtools/zls-v
 
 ### Kate
 
+- Install language support for Zig from [here](https://github.com/ziglang/kde-syntax-highlighting)
 - Enable `LSP client` plugin in Kate settings.
 - Add this snippet to `LSP client's` user settings (e.g. /$HOME/.config/kate/lspclient)
   (or paste it in `LSP client's` GUI settings)
