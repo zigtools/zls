@@ -448,8 +448,17 @@ pub fn lastToken(tree: Ast, node: Ast.Node.Index) Ast.TokenIndex {
         .asm_simple,
         .asm_output,
         .asm_input,
-        .error_value,
         => return datas[n].rhs + end_offset,
+
+        .error_value => {
+            if (datas[n].rhs != 0) {
+                return datas[n].rhs + end_offset;
+            } else if (datas[n].lhs != 0) {
+                return datas[n].lhs + end_offset;
+            } else {
+                return main_tokens[n] + end_offset;
+            }
+        },
 
         .anyframe_literal,
         .char_literal,
