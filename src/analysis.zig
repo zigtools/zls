@@ -55,6 +55,7 @@ pub fn getDocCommentTokenIndex(tokens: []std.zig.Token.Tag, base_token: Ast.Toke
     if (tokens[idx] == .string_literal and idx > 1 and tokens[idx - 1] == .keyword_extern) idx -= 1;
     if (tokens[idx] == .keyword_extern and idx > 0) idx -= 1;
     if (tokens[idx] == .keyword_export and idx > 0) idx -= 1;
+    if (tokens[idx] == .keyword_inline and idx > 0) idx -= 1;
     if (tokens[idx] == .keyword_pub and idx > 0) idx -= 1;
 
     // Find first doc comment token
