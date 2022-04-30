@@ -1447,6 +1447,10 @@ fn documentSymbolsHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, 
     try documentSymbol(arena, id, handle);
 }
 
+fn cp_deinit(p: *std.ChildProcess) void {
+    p.allocator.destroy(p);
+}
+
 fn formattingHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.Formatting, config: Config) !void {
     if (config.zig_exe_path) |zig_exe_path| {
         const handle = document_store.getHandle(req.params.textDocument.uri) orelse {
@@ -1454,8 +1458,8 @@ fn formattingHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: 
             return try respondGeneric(id, null_result_response);
         };
 
-        var process = try std.ChildProcess.init(&[_][]const u8{ zig_exe_path, "fmt", "--stdin" }, allocator);
-        defer process.deinit();
+        var process = std.ChildProcess.init(&[_][]const u8{ zig_exe_path, "fmt", "--stdin" }, allocator);
+        defer cp_deinit(&process);
         process.stdin_behavior = .Pipe;
         process.stdout_behavior = .Pipe;
 
