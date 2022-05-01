@@ -1447,9 +1447,6 @@ fn documentSymbolsHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, 
     try documentSymbol(arena, id, handle);
 }
 
-fn cp_deinit(p: *std.ChildProcess) void {
-    p.allocator.destroy(p);
-}
 
 fn formattingHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.Formatting, config: Config) !void {
     if (config.zig_exe_path) |zig_exe_path| {
@@ -1459,7 +1456,6 @@ fn formattingHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: 
         };
 
         var process = std.ChildProcess.init(&[_][]const u8{ zig_exe_path, "fmt", "--stdin" }, allocator);
-        defer cp_deinit(&process);
         process.stdin_behavior = .Pipe;
         process.stdout_behavior = .Pipe;
 
