@@ -108,7 +108,7 @@ const Server = struct {
 };
 
 fn startZls() !*std.ChildProcess {
-    var process = try std.ChildProcess.init(&[_][]const u8{"zig-out/bin/zls" ++ suffix}, allocator);
+    var process = std.ChildProcess.init(&[_][]const u8{"zig-out/bin/zls" ++ suffix}, allocator);
     process.stdin_behavior = .Pipe;
     process.stdout_behavior = .Pipe;
     process.stderr_behavior = .Inherit;
