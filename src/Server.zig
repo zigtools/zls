@@ -1135,6 +1135,7 @@ fn referencesDefinitionGlobal(
     handle: *DocumentStore.Handle,
     pos_index: usize,
     include_decl: bool,
+    comptime highlight: bool,
 ) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
@@ -1151,9 +1152,21 @@ fn referencesDefinitionGlobal(
         std.ArrayList(types.Location).append,
         server.config.skip_std_references,
     );
+
+    const result: types.ResponseParams = if (highlight) result: {
+        var highlights = try std.ArrayList(types.DocumentHighlight).initCapacity(arena.allocator(), locs.items.len);
+        for (locs.items) |loc| {
+            highlights.appendAssumeCapacity(.{
+                .range = loc.range,
+                .kind = .Text,
+            });
+        }
+        break :result .{ .DocumentHighlight = highlights.items };
+    } else .{ .Locations = locs.items };
+
     try send(arena, types.Response{
         .id = id,
-        .result = .{ .Locations = locs.items },
+        .result = result,
     });
 }
 
@@ -1165,6 +1178,7 @@ fn referencesDefinitionFieldAccess(
     position: offsets.DocumentPosition,
     range: analysis.SourceRange,
     include_decl: bool,
+    comptime highlight: bool,
 ) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
@@ -1172,9 +1186,19 @@ fn referencesDefinitionFieldAccess(
     const decl = (try server.getSymbolFieldAccess(handle, arena, position, range)) orelse return try respondGeneric(id, null_result_response);
     var locs = std.ArrayList(types.Location).init(arena.allocator());
     try references.symbolReferences(arena, &server.document_store, decl, server.offset_encoding, include_decl, &locs, std.ArrayList(types.Location).append, server.config.skip_std_references);
+    const result: types.ResponseParams = if (highlight) result: {
+        var highlights = try std.ArrayList(types.DocumentHighlight).initCapacity(arena.allocator(), locs.items.len);
+        for (locs.items) |loc| {
+            highlights.appendAssumeCapacity(.{
+                .range = loc.range,
+                .kind = .Text,
+            });
+        }
+        break :result .{ .DocumentHighlight = highlights.items };
+    } else .{ .Locations = locs.items };
     try send(arena, types.Response{
         .id = id,
-        .result = .{ .Locations = locs.items },
+        .result = result,
     });
 }
 
@@ -1185,6 +1209,7 @@ fn referencesDefinitionLabel(
     handle: *DocumentStore.Handle,
     pos_index: usize,
     include_decl: bool,
+    comptime highlight: bool,
 ) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
@@ -1192,9 +1217,19 @@ fn referencesDefinitionLabel(
     const decl = (try getLabelGlobal(pos_index, handle)) orelse return try respondGeneric(id, null_result_response);
     var locs = std.ArrayList(types.Location).init(arena.allocator());
     try references.labelReferences(arena, decl, server.offset_encoding, include_decl, &locs, std.ArrayList(types.Location).append);
+    const result: types.ResponseParams = if (highlight) result: {
+        var highlights = try std.ArrayList(types.DocumentHighlight).initCapacity(arena.allocator(), locs.items.len);
+        for (locs.items) |loc| {
+            highlights.appendAssumeCapacity(.{
+                .range = loc.range,
+                .kind = .Text,
+            });
+        }
+        break :result .{ .DocumentHighlight = highlights.items };
+    } else .{ .Locations = locs.items };
     try send(arena, types.Response{
         .id = id,
-        .result = .{ .Locations = locs.items },
+        .result = result,
     });
 }
 
@@ -1747,7 +1782,7 @@ fn initializeHandler(server: *Server, arena: *std.heap.ArenaAllocator, id: types
                     .textDocumentSync = .Full,
                     .renameProvider = true,
                     .completionProvider = .{ .resolveProvider = false, .triggerCharacters = &[_][]const u8{ ".", ":", "@" }, .completionItem = .{ .labelDetailsSupport = true } },
-                    .documentHighlightProvider = false,
+                    .documentHighlightProvider = true,
                     .hoverProvider = true,
                     .codeActionProvider = false,
                     .declarationProvider = true,
@@ -2268,9 +2303,33 @@ fn referencesHandler(server: *Server, arena: *std.heap.ArenaAllocator, id: types
 
         const include_decl = req.params.context.includeDeclaration;
         switch (pos_context) {
-            .var_access => try server.referencesDefinitionGlobal(arena, id, handle, doc_position.absolute_index, include_decl),
-            .field_access => |range| try server.referencesDefinitionFieldAccess(arena, id, handle, doc_position, range, include_decl),
-            .label => try server.referencesDefinitionLabel(arena, id, handle, doc_position.absolute_index, include_decl),
+            .var_access => try server.referencesDefinitionGlobal(arena, id, handle, doc_position.absolute_index, include_decl, false),
+            .field_access => |range| try server.referencesDefinitionFieldAccess(arena, id, handle, doc_position, range, include_decl, false),
+            .label => try server.referencesDefinitionLabel(arena, id, handle, doc_position.absolute_index, include_decl, false),
+            else => try respondGeneric(id, null_result_response),
+        }
+    } else {
+        try respondGeneric(id, null_result_response);
+    }
+}
+
+fn documentHighlightHandler(server: *Server, arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.DocumentHighlight) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
+        logger.warn("Trying to highlight references in non existent document {s}", .{req.params.textDocument.uri});
+        return try respondGeneric(id, null_result_response);
+    };
+
+    if (req.params.position.character >= 0) {
+        const doc_position = try offsets.documentPosition(handle.document, req.params.position, server.offset_encoding);
+        const pos_context = try analysis.documentPositionContext(arena, handle.document, doc_position);
+
+        switch (pos_context) {
+            .var_access => try server.referencesDefinitionGlobal(arena, id, handle, doc_position.absolute_index, true, true),
+            .field_access => |range| try server.referencesDefinitionFieldAccess(arena, id, handle, doc_position, range, true, true),
+            .label => try server.referencesDefinitionLabel(arena, id, handle, doc_position.absolute_index, true, true),
             else => try respondGeneric(id, null_result_response),
         }
     } else {
@@ -2375,6 +2434,7 @@ fn processJsonRpc(server: *Server, arena: *std.heap.ArenaAllocator, parser: *std
         .{ "textDocument/formatting", requests.Formatting, formattingHandler },
         .{ "textDocument/rename", requests.Rename, renameHandler },
         .{ "textDocument/references", requests.References, referencesHandler },
+        .{ "textDocument/documentHighlight", requests.DocumentHighlight, documentHighlightHandler },
         .{ "workspace/didChangeConfiguration", std.json.Value, didChangeConfigurationHandler },
     };
 
@@ -2414,7 +2474,6 @@ fn processJsonRpc(server: *Server, arena: *std.heap.ArenaAllocator, parser: *std
     // needs a response) or false if the method is a notification (in which
     // case it should be silently ignored)
     const unimplemented_map = std.ComptimeStringMap(bool, .{
-        .{ "textDocument/documentHighlight", true },
         .{ "textDocument/codeAction", true },
         .{ "textDocument/codeLens", true },
         .{ "textDocument/documentLink", true },

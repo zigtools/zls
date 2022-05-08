@@ -45,6 +45,7 @@ pub const ResponseParams = union(enum) {
     InitializeResult: InitializeResult,
     ConfigurationParams: ConfigurationParams,
     RegistrationParams: RegistrationParams,
+    DocumentHighlight: []DocumentHighlight,
 };
 
 /// JSONRPC notifications
@@ -411,4 +412,19 @@ pub const RegistrationParams = struct {
 
         // registerOptions?: LSPAny;
     };
+};
+
+pub const DocumentHighlightKind = enum(u8) {
+    Text = 1,
+    Read = 2,
+    Write = 3,
+
+    pub fn jsonStringify(value: DocumentHighlightKind, options: std.json.StringifyOptions, out_stream: anytype) !void {
+        try std.json.stringify(@enumToInt(value), options, out_stream);
+    }
+};
+
+pub const DocumentHighlight = struct {
+    range: Range,
+    kind: ?DocumentHighlightKind,
 };
