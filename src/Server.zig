@@ -1151,6 +1151,7 @@ fn referencesDefinitionGlobal(
         &locs,
         std.ArrayList(types.Location).append,
         server.config.skip_std_references,
+        !highlight,
     );
 
     const result: types.ResponseParams = if (highlight) result: {
@@ -1185,7 +1186,17 @@ fn referencesDefinitionFieldAccess(
 
     const decl = (try server.getSymbolFieldAccess(handle, arena, position, range)) orelse return try respondGeneric(id, null_result_response);
     var locs = std.ArrayList(types.Location).init(arena.allocator());
-    try references.symbolReferences(arena, &server.document_store, decl, server.offset_encoding, include_decl, &locs, std.ArrayList(types.Location).append, server.config.skip_std_references);
+    try references.symbolReferences(
+        arena,
+        &server.document_store,
+        decl,
+        server.offset_encoding,
+        include_decl,
+        &locs,
+        std.ArrayList(types.Location).append,
+        server.config.skip_std_references,
+        !highlight,
+    );
     const result: types.ResponseParams = if (highlight) result: {
         var highlights = try std.ArrayList(types.DocumentHighlight).initCapacity(arena.allocator(), locs.items.len);
         for (locs.items) |loc| {
