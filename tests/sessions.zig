@@ -13,7 +13,7 @@ const initialize_msg_offs =
 ;
 
 const Server = struct {
-    process: *std.ChildProcess,
+    process: std.ChildProcess,
     request_id: u32 = 1,
 
     fn start(initialization: []const u8, expect: ?[]const u8) !Server {
@@ -103,12 +103,11 @@ const Server = struct {
         // FIXME this shutdown request fails with a broken pipe on stdin on the CI
         self.request("shutdown", "{}", null) catch @panic("Could not send shutdown request");
         // waitNoError(self.process) catch @panic("Server error");
-        self.process.deinit();
     }
 };
 
-fn startZls() !*std.ChildProcess {
-    var process = try std.ChildProcess.init(&[_][]const u8{"zig-out/bin/zls" ++ suffix}, allocator);
+fn startZls() !std.ChildProcess {
+    var process = std.ChildProcess.init(&[_][]const u8{"zig-out/bin/zls" ++ suffix}, allocator);
     process.stdin_behavior = .Pipe;
     process.stdout_behavior = .Pipe;
     process.stderr_behavior = .Inherit;
