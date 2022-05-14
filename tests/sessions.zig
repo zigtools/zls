@@ -103,7 +103,6 @@ const Server = struct {
         // FIXME this shutdown request fails with a broken pipe on stdin on the CI
         self.request("shutdown", "{}", null) catch @panic("Could not send shutdown request");
         // waitNoError(self.process) catch @panic("Server error");
-        self.process.deinit();
     }
 };
 
@@ -118,7 +117,7 @@ fn startZls() !*std.ChildProcess {
         return err;
     };
 
-    return process;
+    return &process;
 }
 
 fn waitNoError(process: *std.ChildProcess) !void {
