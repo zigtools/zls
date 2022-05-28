@@ -22,8 +22,8 @@ pub fn build(b: *std.build.Builder) !void {
         b.option(std.log.Level, "log_level", "The Log Level to be used.") orelse .info,
     );
 
-    exe.addPackage(.{ .name = "known-folders", .path = .{ .path = "src/known-folders/known-folders.zig" } });
-    exe.addPackage(.{ .name = "zinput", .path = .{ .path = "src/zinput/src/main.zig" } });
+    exe.addPackage(.{ .name = "known-folders", .source = .{ .path = "src/known-folders/known-folders.zig" } });
+    exe.addPackage(.{ .name = "zinput", .source = .{ .path = "src/zinput/src/main.zig" } });
 
     exe.setTarget(target);
     exe.setBuildMode(mode);
@@ -39,7 +39,7 @@ pub fn build(b: *std.build.Builder) !void {
     test_step.dependOn(&unit_tests.step);
 
     var session_tests = b.addTest("tests/sessions.zig");
-    session_tests.addPackage(.{ .name = "header", .path = .{ .path = "src/header.zig" } });
+    session_tests.addPackage(.{ .name = "header", .source = .{ .path = "src/header.zig" } });
     session_tests.setBuildMode(.Debug);
     test_step.dependOn(&session_tests.step);
 }
