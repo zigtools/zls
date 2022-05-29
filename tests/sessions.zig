@@ -13,7 +13,7 @@ const initialize_msg_offs =
 ;
 
 const Server = struct {
-    process: *std.ChildProcess,
+    process: std.ChildProcess,
     request_id: u32 = 1,
 
     fn start(initialization: []const u8, expect: ?[]const u8) !Server {
@@ -103,12 +103,11 @@ const Server = struct {
         // FIXME this shutdown request fails with a broken pipe on stdin on the CI
         self.request("shutdown", "{}", null) catch @panic("Could not send shutdown request");
         // waitNoError(self.process) catch @panic("Server error");
-        self.process.deinit();
     }
 };
 
-fn startZls() !*std.ChildProcess {
-    var process = try std.ChildProcess.init(&[_][]const u8{"zig-out/bin/zls" ++ suffix}, allocator);
+fn startZls() !std.ChildProcess {
+    var process = std.ChildProcess.init(&[_][]const u8{"zig-out/bin/zls" ++ suffix}, allocator);
     process.stdin_behavior = .Pipe;
     process.stdout_behavior = .Pipe;
     process.stderr_behavior = .Inherit;
@@ -155,10 +154,10 @@ test "Open file, ask for semantic tokens" {
     defer server.shutdown();
 
     try server.request("textDocument/didOpen",
-        \\{"textDocument":{"uri":"file://./tests/test.zig","languageId":"zig","version":420,"text":"const std = @import(\"std\");"}}
+        \\{"textDocument":{"uri":"file:///test.zig","languageId":"zig","version":420,"text":"const std = @import(\"std\");"}}
     , null);
     try server.request("textDocument/semanticTokens/full",
-        \\{"textDocument":{"uri":"file://./tests/test.zig"}}
+        \\{"textDocument":{"uri":"file:///test.zig"}}
     ,
         \\{"data":[0,0,5,7,0,0,6,3,0,33,0,4,1,11,0,0,2,7,12,0,0,8,5,9,0]}
     );
@@ -218,19 +217,23 @@ test "Self-referential definition" {
         \\{"isIncomplete":false,"items":[{"label":"h","kind":21,"textEdit":null,"filterText":null,"insertText":"h","insertTextFormat":1,"detail":"const h = h(0)","documentation":null}]}
     );
 }
-test "Missing return type" {
-    var server = try Server.start(initialize_msg, null);
-    defer server.shutdown();
 
-    try server.request("textDocument/didOpen",
-        \\{"textDocument":{"uri":"file:///test.zig","languageId":"zig","version":420,"text":"fn w() {}\nc"}}
-    , null);
-    try server.request("textDocument/completion",
-        \\{"textDocument":{"uri":"file:///test.zig"}, "position":{"line":1,"character":1}}
-    ,
-        \\{"isIncomplete":false,"items":[{"label":"w","kind":3,"textEdit":null,"filterText":null,"insertText":"w","insertTextFormat":1,"detail":"fn","documentation":null}]}
-    );
-}
+// This test as written depends on the configuration in the *host* machines zls.json, if `enable_snippets` is true then
+// the insert text is "w()" if it is false it is "w"
+//
+// test "Missing return type" {
+//     var server = try Server.start(initialize_msg, null);
+//     defer server.shutdown();
+
+//     try server.request("textDocument/didOpen",
+//         \\{"textDocument":{"uri":"file:///test.zig","languageId":"zig","version":420,"text":"fn w() {}\nc"}}
+//     , null);
+//     try server.request("textDocument/completion",
+//         \\{"textDocument":{"uri":"file:///test.zig"}, "position":{"line":1,"character":1}}
+//     ,
+//         \\{"isIncomplete":false,"items":[{"label":"w","kind":3,"textEdit":null,"filterText":null,"insertText":"w","insertTextFormat":1,"detail":"fn","documentation":null}]}
+//     );
+// }
 
 test "Pointer and optional deref" {
     var server = try Server.start(initialize_msg, null);
