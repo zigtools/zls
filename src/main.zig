@@ -1454,8 +1454,7 @@ fn formattingHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: 
             return try respondGeneric(id, null_result_response);
         };
 
-        var process = try std.ChildProcess.init(&[_][]const u8{ zig_exe_path, "fmt", "--stdin" }, allocator);
-        defer process.deinit();
+        var process = std.ChildProcess.init(&[_][]const u8{ zig_exe_path, "fmt", "--stdin" }, allocator);
         process.stdin_behavior = .Pipe;
         process.stdout_behavior = .Pipe;
 

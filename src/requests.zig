@@ -114,11 +114,11 @@ fn fromDynamicTreeInternal(arena: *std.heap.ArenaAllocator, value: std.json.Valu
         if (value != .Integer) return error.MalformedJson;
         out.* = std.meta.intToEnum(
             T,
-            std.math.cast(TagType, value.Integer) catch return error.MalformedJson,
+            std.math.cast(TagType, value.Integer) orelse return error.MalformedJson,
         ) catch return error.MalformedJson;
     } else if (comptime std.meta.trait.is(.Int)(T)) {
         if (value != .Integer) return error.MalformedJson;
-        out.* = std.math.cast(T, value.Integer) catch return error.MalformedJson;
+        out.* = std.math.cast(T, value.Integer) orelse return error.MalformedJson;
     } else switch (T) {
         bool => {
             if (value != .Bool) return error.MalformedJson;
