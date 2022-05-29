@@ -36,10 +36,12 @@ pub fn build(b: *std.build.Builder) !void {
 
     var unit_tests = b.addTest("src/unit_tests.zig");
     unit_tests.setBuildMode(.Debug);
+    unit_tests.setTarget(target);
     test_step.dependOn(&unit_tests.step);
 
     var session_tests = b.addTest("tests/sessions.zig");
     session_tests.addPackage(.{ .name = "header", .source = .{ .path = "src/header.zig" } });
     session_tests.setBuildMode(.Debug);
+    session_tests.setTarget(target);
     test_step.dependOn(&session_tests.step);
 }
