@@ -1454,8 +1454,7 @@ fn formattingHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: 
             return try respondGeneric(id, null_result_response);
         };
 
-        var process = try std.ChildProcess.init(&[_][]const u8{ zig_exe_path, "fmt", "--stdin" }, allocator);
-        defer process.deinit();
+        var process = std.ChildProcess.init(&[_][]const u8{ zig_exe_path, "fmt", "--stdin" }, allocator);
         process.stdin_behavior = .Pipe;
         process.stdout_behavior = .Pipe;
 
@@ -1656,7 +1655,7 @@ pub fn main() anyerror!void {
     // Check arguments.
     var args_it = try std.process.ArgIterator.initWithAllocator(allocator);
     defer args_it.deinit();
-    if(!args_it.skip()) @panic("Could not find self argument");
+    if (!args_it.skip()) @panic("Could not find self argument");
 
     var config_path: ?[]const u8 = null;
     var next_arg_config_path = false;
