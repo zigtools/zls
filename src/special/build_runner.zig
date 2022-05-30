@@ -10,9 +10,9 @@ const InstallArtifactStep = std.build.InstallArtifactStep;
 const LibExeObjStep = std.build.LibExeObjStep;
 const ArrayList = std.ArrayList;
 
+
 ///! This is a modified build runner to extract information out of build.zig
 ///! Modified from the std.special.build_runner
-
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
@@ -84,7 +84,7 @@ fn processStep(stdout_stream: anytype, step: *std.build.Step) anyerror!void {
 }
 
 fn processPackage(out_stream: anytype, pkg: Pkg) anyerror!void {
-    switch (pkg.path) {
+    switch (pkg.source) {
         .path => |path| try out_stream.print("{s}\x00{s}\n", .{ pkg.name, path }),
         .generated => |generated| if (generated.path != null) try out_stream.print("{s}\x00{s}\n", .{ pkg.name, generated.path.? }),
     }
