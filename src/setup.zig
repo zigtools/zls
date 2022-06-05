@@ -1,7 +1,94 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const zinput = @import("zinput");
 const known_folders = @import("known-folders");
+
+/// Caller must free memory.
+pub fn askString(allocator: std.mem.Allocator, prompt: []const u8, max_size: usize) ![]u8 {
+    const in = std.io.getStdIn().reader();
+    const out = std.io.getStdOut().writer();
+
+    try out.print("? {s}", .{prompt});
+
+    const result = try in.readUntilDelimiterAlloc(allocator, '\n', max_size);
+    return if (std.mem.endsWith(u8, result, "\r")) result[0..(result.len - 1)] else result;
+}
+
+/// Caller must free memory. Max size is recommended to be a high value, like 512.
+pub fn askDirPath(allocator: std.mem.Allocator, prompt: []const u8, max_size: usize) ![]u8 {
+    const out = std.io.getStdOut().writer();
+
+    while (true) {
+        const path = try askString(allocator, prompt, max_size);
+        if (!std.fs.path.isAbsolute(path)) {
+            try out.writeAll("Error: Invalid directory, please try again.\n\n");
+            allocator.free(path);
+            continue;
+        }
+
+        var dir = std.fs.cwd().openDir(path, std.fs.Dir.OpenDirOptions{}) catch {
+            try out.writeAll("Error: Invalid directory, please try again.\n\n");
+            allocator.free(path);
+            continue;
+        };
+
+        dir.close();
+        return path;
+    }
+}
+
+pub fn askBool(prompt: []const u8) !bool {
+    const in = std.io.getStdIn().reader();
+    const out = std.io.getStdOut().writer();
+
+    var buffer: [1]u8 = undefined;
+
+    while (true) {
+        try out.print("? {s} (y/n) > ", .{prompt});
+
+        const read = in.read(&buffer) catch continue;
+        try in.skipUntilDelimiterOrEof('\n');
+
+        if (read == 0) return error.EndOfStream;
+
+        switch (buffer[0]) {
+            'y' => return true,
+            'n' => return false,
+            else => continue,
+        }
+    }
+}
+
+pub fn askSelectOne(prompt: []const u8, comptime Options: type) !Options {
+    const in = std.io.getStdIn().reader();
+    const out = std.io.getStdOut().writer();
+
+    try out.print("? {s} (select one)\n\n", .{prompt});
+
+    comptime var max_size: usize = 0;
+    inline for (@typeInfo(Options).Enum.fields) |option| {
+        try out.print("  - {s}\n", .{option.name});
+        if (option.name.len > max_size) max_size = option.name.len;
+    }
+
+    while (true) {
+        var buffer: [max_size + 1]u8 = undefined;
+
+        try out.writeAll("\n> ");
+
+        var result = (in.readUntilDelimiterOrEof(&buffer, '\n') catch {
+            try in.skipUntilDelimiterOrEof('\n');
+            try out.writeAll("Error: Invalid option, please try again.\n");
+            continue;
+        }) orelse return error.EndOfStream;
+        result = if (std.mem.endsWith(u8, result, "\r")) result[0..(result.len - 1)] else result;
+
+        inline for (@typeInfo(Options).Enum.fields) |option|
+            if (std.ascii.eqlIgnoreCase(option.name, result))
+                return @intToEnum(Options, option.value);
+
+        try out.writeAll("Error: Invalid option, please try again.\n");
+    }
+}
 
 fn print(comptime fmt: []const u8, args: anytype) void {
     const stdout = std.io.getStdOut().writer();
@@ -39,7 +126,7 @@ pub fn wizard(allocator: std.mem.Allocator) !void {
         return;
     }
     var config_path: []const u8 = undefined;
-    if (try zinput.askBool("Should this configuration be system-wide?")) {
+    if (try askBool("Should this configuration be system-wide?")) {
         if (global_path) |p| {
             config_path = p;
         } else {
@@ -73,7 +160,7 @@ pub fn wizard(allocator: std.mem.Allocator) !void {
         print("Found zig executable '{s}' in PATH.\n", .{path});
     } else {
         write("Could not find 'zig' in PATH\n");
-        zig_exe_path = try zinput.askString(allocator, if (builtin.os.tag == .windows)
+        zig_exe_path = try askString(allocator, if (builtin.os.tag == .windows)
             \\What is the path to the 'zig' executable you would like to use?
             \\Note that due to a bug in zig (https://github.com/ziglang/zig/issues/6044),
             \\your zig directory cannot contain the '/' character.
@@ -81,15 +168,15 @@ pub fn wizard(allocator: std.mem.Allocator) !void {
             "What is the path to the 'zig' executable you would like to use?", std.fs.MAX_PATH_BYTES);
     }
 
-    const editor = try zinput.askSelectOne("Which code editor do you use?", enum { VSCode, Sublime, Kate, Neovim, Vim8, Emacs, Doom, Other });
-    const snippets = try zinput.askBool("Do you want to enable snippets?");
-    const style = try zinput.askBool("Do you want to enable style warnings?");
-    const semantic_tokens = try zinput.askBool("Do you want to enable semantic highlighting?");
-    const operator_completions = try zinput.askBool("Do you want to enable .* and .? completions?");
+    const editor = try askSelectOne("Which code editor do you use?", enum { VSCode, Sublime, Kate, Neovim, Vim8, Emacs, Doom, Other });
+    const snippets = try askBool("Do you want to enable snippets?");
+    const style = try askBool("Do you want to enable style warnings?");
+    const semantic_tokens = try askBool("Do you want to enable semantic highlighting?");
+    const operator_completions = try askBool("Do you want to enable .* and .? completions?");
     const include_at_in_builtins = switch (editor) {
         .Sublime => true,
         .VSCode, .Kate, .Neovim, .Vim8, .Emacs, .Doom => false,
-        else => try zinput.askBool("Should the @ sign be included in completions of builtin functions?\nChange this later if `@inc` completes to `include` or `@@include`"),
+        else => try askBool("Should the @ sign be included in completions of builtin functions?\nChange this later if `@inc` completes to `include` or `@@include`"),
     };
     const max_detail_length: usize = switch (editor) {
         .Sublime => 256,
