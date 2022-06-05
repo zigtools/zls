@@ -272,6 +272,7 @@ pub const Configuration = struct {
             include_at_in_builtins: ?bool,
             max_detail_length: ?usize,
             skip_std_references: ?bool,
+            builtin_path: ?[]const u8,
         },
     },
 };
