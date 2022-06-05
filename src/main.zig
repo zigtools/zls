@@ -1637,23 +1637,31 @@ fn processJsonRpc(arena: *std.heap.ArenaAllocator, parser: *std.json.Parser, jso
         else => return err,
     };
 
-    const unimplemented_map = std.ComptimeStringMap(void, .{
-        .{"textDocument/documentHighlight"},
-        .{"textDocument/codeAction"},
-        .{"textDocument/codeLens"},
-        .{"textDocument/documentLink"},
-        .{"textDocument/rangeFormatting"},
-        .{"textDocument/onTypeFormatting"},
-        .{"textDocument/prepareRename"},
-        .{"textDocument/foldingRange"},
-        .{"textDocument/selectionRange"},
-        .{"textDocument/semanticTokens/range"},
-        .{"workspace/didChangeWorkspaceFolders"},
+    // Boolean value is true if the method is a request (and thus the client
+    // needs a response) or false if the method is a notification (in which
+    // case it should be silently ignored)
+    const unimplemented_map = std.ComptimeStringMap(bool, .{
+        .{ "textDocument/documentHighlight", true },
+        .{ "textDocument/codeAction", true },
+        .{ "textDocument/codeLens", true },
+        .{ "textDocument/documentLink", true },
+        .{ "textDocument/rangeFormatting", true },
+        .{ "textDocument/onTypeFormatting", true },
+        .{ "textDocument/prepareRename", true },
+        .{ "textDocument/foldingRange", true },
+        .{ "textDocument/selectionRange", true },
+        .{ "textDocument/semanticTokens/range", true },
+        .{ "workspace/didChangeWorkspaceFolders", false },
     });
 
-    if (unimplemented_map.has(method)) {
+    if (unimplemented_map.get(method)) |request| {
         // TODO: Unimplemented methods, implement them and add them to server capabilities.
-        return try respondGeneric(id, null_result_response);
+        if (request) {
+            return try respondGeneric(id, null_result_response);
+        }
+
+        logger.debug("Notification method {s} is not implemented", .{method});
+        return;
     }
     if (tree.root.Object.get("id")) |_| {
         return try respondGeneric(id, not_implemented_response);
