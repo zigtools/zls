@@ -168,14 +168,14 @@ pub fn wizard(allocator: std.mem.Allocator) !void {
             "What is the path to the 'zig' executable you would like to use?", std.fs.MAX_PATH_BYTES);
     }
 
-    const editor = try askSelectOne("Which code editor do you use?", enum { VSCode, Sublime, Kate, Neovim, Vim8, Emacs, Doom, Other });
+    const editor = try askSelectOne("Which code editor do you use?", enum { VSCode, Sublime, Kate, Neovim, Vim8, Emacs, Doom, Spacemacs, Other });
     const snippets = try askBool("Do you want to enable snippets?");
     const style = try askBool("Do you want to enable style warnings?");
     const semantic_tokens = try askBool("Do you want to enable semantic highlighting?");
     const operator_completions = try askBool("Do you want to enable .* and .? completions?");
     const include_at_in_builtins = switch (editor) {
         .Sublime => true,
-        .VSCode, .Kate, .Neovim, .Vim8, .Emacs, .Doom => false,
+        .VSCode, .Kate, .Neovim, .Vim8, .Emacs, .Doom, .Spacemacs => false,
         else => try askBool("Should the @ sign be included in completions of builtin functions?\nChange this later if `@inc` completes to `include` or `@@include`"),
     };
     const max_detail_length: usize = switch (editor) {
@@ -301,6 +301,16 @@ pub fn wizard(allocator: std.mem.Allocator) !void {
                 \\        :new-connection (lsp-stdio-connection "<path to zls>")
                 \\        :major-modes '(zig-mode)
                 \\        :server-id 'zls))))
+            );
+        },
+        .Spacemacs => {
+            write(
+                \\To use ZLS in Spacemacs, add the `lsp` and `zig` layers
+                \\to `dotspacemacs-configuration-layers` in your .spacemacs file.
+                \\Then, if you don't have `zls` in your PATH, add the following to
+                \\`dotspacemacs/user-config` in your .spacemacs file:
+                \\
+                \\(setq lsp-zig-zls-executable "<path to zls>")
             );
         },
         .Other => {
