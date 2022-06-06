@@ -16,6 +16,7 @@ const semantic_tokens = @import("./semantic_tokens.zig");
 const shared = @import("./shared.zig");
 const Ast = std.zig.Ast;
 const known_folders = @import("known-folders");
+const tracy = @import("./tracy.zig");
 
 const data = switch (build_options.data_version) {
     .master => @import("data/master.zig"),
@@ -38,6 +39,9 @@ var actual_log_level: std.log.Level = switch (zig_builtin.mode) {
 };
 
 pub fn log(comptime message_level: std.log.Level, comptime scope: @Type(.EnumLiteral), comptime format: []const u8, args: anytype) void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     if (@enumToInt(message_level) > @enumToInt(actual_log_level)) {
         return;
     }
@@ -118,6 +122,9 @@ const no_semantic_tokens_response =
 
 /// Sends a request or response
 fn send(arena: *std.heap.ArenaAllocator, reqOrRes: anytype) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     var arr = std.ArrayList(u8).init(arena.allocator());
     try std.json.stringify(reqOrRes, .{}, arr.writer());
 
@@ -138,6 +145,9 @@ fn truncateCompletions(list: []types.CompletionItem, max_detail_length: usize) v
 }
 
 fn respondGeneric(id: types.RequestId, response: []const u8) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const id_len = switch (id) {
         .Integer => |id_val| blk: {
             if (id_val == 0) break :blk 1;
@@ -194,6 +204,9 @@ fn astLocationToRange(loc: Ast.Location) types.Range {
 }
 
 fn publishDiagnostics(arena: *std.heap.ArenaAllocator, handle: DocumentStore.Handle, config: *const Config) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const tree = handle.tree;
 
     var diagnostics = std.ArrayList(types.Diagnostic).init(arena.allocator());
@@ -273,7 +286,16 @@ fn publishDiagnostics(arena: *std.heap.ArenaAllocator, handle: DocumentStore.Han
     });
 }
 
-fn typeToCompletion(arena: *std.heap.ArenaAllocator, list: *std.ArrayList(types.CompletionItem), field_access: analysis.FieldAccessReturn, orig_handle: *DocumentStore.Handle, config: *const Config) error{OutOfMemory}!void {
+fn typeToCompletion(
+    arena: *std.heap.ArenaAllocator,
+    list: *std.ArrayList(types.CompletionItem),
+    field_access: analysis.FieldAccessReturn,
+    orig_handle: *DocumentStore.Handle,
+    config: *const Config,
+) error{OutOfMemory}!void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const type_handle = field_access.original;
     switch (type_handle.type.data) {
         .slice => {
@@ -327,7 +349,19 @@ fn typeToCompletion(arena: *std.heap.ArenaAllocator, list: *std.ArrayList(types.
     }
 }
 
-fn nodeToCompletion(arena: *std.heap.ArenaAllocator, list: *std.ArrayList(types.CompletionItem), node_handle: analysis.NodeWithHandle, unwrapped: ?analysis.TypeWithHandle, orig_handle: *DocumentStore.Handle, is_type_val: bool, parent_is_type_val: ?bool, config: *const Config) error{OutOfMemory}!void {
+fn nodeToCompletion(
+    arena: *std.heap.ArenaAllocator,
+    list: *std.ArrayList(types.CompletionItem),
+    node_handle: analysis.NodeWithHandle,
+    unwrapped: ?analysis.TypeWithHandle,
+    orig_handle: *DocumentStore.Handle,
+    is_type_val: bool,
+    parent_is_type_val: ?bool,
+    config: *const Config,
+) error{OutOfMemory}!void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const node = node_handle.node;
     const handle = node_handle.handle;
     const tree = handle.tree;
@@ -547,6 +581,9 @@ fn isSymbolChar(char: u8) bool {
 }
 
 fn gotoDefinitionSymbol(id: types.RequestId, arena: *std.heap.ArenaAllocator, decl_handle: analysis.DeclWithHandle, resolve_alias: bool) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     var handle = decl_handle.handle;
 
     const location = switch (decl_handle.decl.*) {
@@ -586,6 +623,9 @@ fn gotoDefinitionSymbol(id: types.RequestId, arena: *std.heap.ArenaAllocator, de
 }
 
 fn hoverSymbol(id: types.RequestId, arena: *std.heap.ArenaAllocator, decl_handle: analysis.DeclWithHandle) (std.os.WriteError || error{OutOfMemory})!void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const handle = decl_handle.handle;
     const tree = handle.tree;
 
@@ -660,6 +700,9 @@ fn hoverSymbol(id: types.RequestId, arena: *std.heap.ArenaAllocator, decl_handle
 }
 
 fn getLabelGlobal(pos_index: usize, handle: *DocumentStore.Handle) !?analysis.DeclWithHandle {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const name = identifierFromPosition(pos_index, handle.*);
     if (name.len == 0) return null;
 
@@ -667,6 +710,9 @@ fn getLabelGlobal(pos_index: usize, handle: *DocumentStore.Handle) !?analysis.De
 }
 
 fn getSymbolGlobal(arena: *std.heap.ArenaAllocator, pos_index: usize, handle: *DocumentStore.Handle) !?analysis.DeclWithHandle {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const name = identifierFromPosition(pos_index, handle.*);
     if (name.len == 0) return null;
 
@@ -674,6 +720,9 @@ fn getSymbolGlobal(arena: *std.heap.ArenaAllocator, pos_index: usize, handle: *D
 }
 
 fn gotoDefinitionLabel(arena: *std.heap.ArenaAllocator, id: types.RequestId, pos_index: usize, handle: *DocumentStore.Handle, config: *const Config) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     _ = config;
 
     const decl = (try getLabelGlobal(pos_index, handle)) orelse return try respondGeneric(id, null_result_response);
@@ -681,6 +730,9 @@ fn gotoDefinitionLabel(arena: *std.heap.ArenaAllocator, id: types.RequestId, pos
 }
 
 fn gotoDefinitionGlobal(arena: *std.heap.ArenaAllocator, id: types.RequestId, pos_index: usize, handle: *DocumentStore.Handle, config: *const Config, resolve_alias: bool) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     _ = config;
 
     const decl = (try getSymbolGlobal(arena, pos_index, handle)) orelse return try respondGeneric(id, null_result_response);
@@ -688,6 +740,9 @@ fn gotoDefinitionGlobal(arena: *std.heap.ArenaAllocator, id: types.RequestId, po
 }
 
 fn hoverDefinitionLabel(arena: *std.heap.ArenaAllocator, id: types.RequestId, pos_index: usize, handle: *DocumentStore.Handle, config: *const Config) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     _ = config;
 
     const decl = (try getLabelGlobal(pos_index, handle)) orelse return try respondGeneric(id, null_result_response);
@@ -695,6 +750,9 @@ fn hoverDefinitionLabel(arena: *std.heap.ArenaAllocator, id: types.RequestId, po
 }
 
 fn hoverDefinitionBuiltin(arena: *std.heap.ArenaAllocator, id: types.RequestId, pos_index: usize, handle: *DocumentStore.Handle) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const name = identifierFromPosition(pos_index, handle.*);
     if (name.len == 0) return try respondGeneric(id, null_result_response);
 
@@ -719,6 +777,9 @@ fn hoverDefinitionBuiltin(arena: *std.heap.ArenaAllocator, id: types.RequestId, 
 }
 
 fn hoverDefinitionGlobal(arena: *std.heap.ArenaAllocator, id: types.RequestId, pos_index: usize, handle: *DocumentStore.Handle, config: *const Config) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     _ = config;
 
     const decl = (try getSymbolGlobal(arena, pos_index, handle)) orelse return try respondGeneric(id, null_result_response);
@@ -726,6 +787,9 @@ fn hoverDefinitionGlobal(arena: *std.heap.ArenaAllocator, id: types.RequestId, p
 }
 
 fn getSymbolFieldAccess(handle: *DocumentStore.Handle, arena: *std.heap.ArenaAllocator, position: offsets.DocumentPosition, range: analysis.SourceRange, config: *const Config) !?analysis.DeclWithHandle {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     _ = config;
 
     const name = identifierFromPosition(position.absolute_index, handle.*);
@@ -755,16 +819,25 @@ fn getSymbolFieldAccess(handle: *DocumentStore.Handle, arena: *std.heap.ArenaAll
 }
 
 fn gotoDefinitionFieldAccess(arena: *std.heap.ArenaAllocator, id: types.RequestId, handle: *DocumentStore.Handle, position: offsets.DocumentPosition, range: analysis.SourceRange, config: *const Config, resolve_alias: bool) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const decl = (try getSymbolFieldAccess(handle, arena, position, range, config)) orelse return try respondGeneric(id, null_result_response);
     return try gotoDefinitionSymbol(id, arena, decl, resolve_alias);
 }
 
 fn hoverDefinitionFieldAccess(arena: *std.heap.ArenaAllocator, id: types.RequestId, handle: *DocumentStore.Handle, position: offsets.DocumentPosition, range: analysis.SourceRange, config: *const Config) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const decl = (try getSymbolFieldAccess(handle, arena, position, range, config)) orelse return try respondGeneric(id, null_result_response);
     return try hoverSymbol(id, arena, decl);
 }
 
 fn gotoDefinitionString(arena: *std.heap.ArenaAllocator, id: types.RequestId, pos_index: usize, handle: *DocumentStore.Handle, config: *const Config) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     _ = config;
 
     const tree = handle.tree;
@@ -791,6 +864,9 @@ fn gotoDefinitionString(arena: *std.heap.ArenaAllocator, id: types.RequestId, po
 }
 
 fn renameDefinitionGlobal(arena: *std.heap.ArenaAllocator, id: types.RequestId, handle: *DocumentStore.Handle, pos_index: usize, new_name: []const u8) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const decl = (try getSymbolGlobal(arena, pos_index, handle)) orelse return try respondGeneric(id, null_result_response);
 
     var workspace_edit = types.WorkspaceEdit{
@@ -804,6 +880,9 @@ fn renameDefinitionGlobal(arena: *std.heap.ArenaAllocator, id: types.RequestId, 
 }
 
 fn renameDefinitionFieldAccess(arena: *std.heap.ArenaAllocator, id: types.RequestId, handle: *DocumentStore.Handle, position: offsets.DocumentPosition, range: analysis.SourceRange, new_name: []const u8, config: *const Config) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const decl = (try getSymbolFieldAccess(handle, arena, position, range, config)) orelse return try respondGeneric(id, null_result_response);
 
     var workspace_edit = types.WorkspaceEdit{
@@ -817,6 +896,9 @@ fn renameDefinitionFieldAccess(arena: *std.heap.ArenaAllocator, id: types.Reques
 }
 
 fn renameDefinitionLabel(arena: *std.heap.ArenaAllocator, id: types.RequestId, handle: *DocumentStore.Handle, pos_index: usize, new_name: []const u8) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const decl = (try getLabelGlobal(pos_index, handle)) orelse return try respondGeneric(id, null_result_response);
 
     var workspace_edit = types.WorkspaceEdit{
@@ -830,6 +912,9 @@ fn renameDefinitionLabel(arena: *std.heap.ArenaAllocator, id: types.RequestId, h
 }
 
 fn referencesDefinitionGlobal(arena: *std.heap.ArenaAllocator, id: types.RequestId, handle: *DocumentStore.Handle, pos_index: usize, include_decl: bool, skip_std_references: bool) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const decl = (try getSymbolGlobal(arena, pos_index, handle)) orelse return try respondGeneric(id, null_result_response);
     var locs = std.ArrayList(types.Location).init(arena.allocator());
     try references.symbolReferences(
@@ -849,6 +934,9 @@ fn referencesDefinitionGlobal(arena: *std.heap.ArenaAllocator, id: types.Request
 }
 
 fn referencesDefinitionFieldAccess(arena: *std.heap.ArenaAllocator, id: types.RequestId, handle: *DocumentStore.Handle, position: offsets.DocumentPosition, range: analysis.SourceRange, include_decl: bool, config: *const Config) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const decl = (try getSymbolFieldAccess(handle, arena, position, range, config)) orelse return try respondGeneric(id, null_result_response);
     var locs = std.ArrayList(types.Location).init(arena.allocator());
     try references.symbolReferences(arena, &document_store, decl, offset_encoding, include_decl, &locs, std.ArrayList(types.Location).append, config.skip_std_references);
@@ -859,6 +947,9 @@ fn referencesDefinitionFieldAccess(arena: *std.heap.ArenaAllocator, id: types.Re
 }
 
 fn referencesDefinitionLabel(arena: *std.heap.ArenaAllocator, id: types.RequestId, handle: *DocumentStore.Handle, pos_index: usize, include_decl: bool) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const decl = (try getLabelGlobal(pos_index, handle)) orelse return try respondGeneric(id, null_result_response);
     var locs = std.ArrayList(types.Location).init(arena.allocator());
     try references.labelReferences(arena, decl, offset_encoding, include_decl, &locs, std.ArrayList(types.Location).append);
@@ -869,6 +960,9 @@ fn referencesDefinitionLabel(arena: *std.heap.ArenaAllocator, id: types.RequestI
 }
 
 fn hasComment(tree: Ast.Tree, start_token: Ast.TokenIndex, end_token: Ast.TokenIndex) bool {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const token_starts = tree.tokens.items(.start);
 
     const start = token_starts[start_token];
@@ -886,6 +980,9 @@ const DeclToCompletionContext = struct {
 };
 
 fn declToCompletion(context: DeclToCompletionContext, decl_handle: analysis.DeclWithHandle) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const tree = decl_handle.handle.tree;
     switch (decl_handle.decl.*) {
         .ast_node => |node| try nodeToCompletion(
@@ -967,6 +1064,9 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: analysis.Decl
 }
 
 fn completeLabel(arena: *std.heap.ArenaAllocator, id: types.RequestId, pos_index: usize, handle: *DocumentStore.Handle, config: *const Config) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     var completions = std.ArrayList(types.CompletionItem).init(arena.allocator());
 
     const context = DeclToCompletionContext{
@@ -991,6 +1091,9 @@ fn completeLabel(arena: *std.heap.ArenaAllocator, id: types.RequestId, pos_index
 
 var builtin_completions: ?[]types.CompletionItem = null;
 fn completeBuiltin(arena: *std.heap.ArenaAllocator, id: types.RequestId, config: *const Config) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     if (builtin_completions == null) {
         builtin_completions = try allocator.alloc(types.CompletionItem, data.builtins.len);
         for (data.builtins) |builtin, idx| {
@@ -1033,6 +1136,9 @@ fn completeBuiltin(arena: *std.heap.ArenaAllocator, id: types.RequestId, config:
 }
 
 fn completeGlobal(arena: *std.heap.ArenaAllocator, id: types.RequestId, pos_index: usize, handle: *DocumentStore.Handle, config: *const Config) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     var completions = std.ArrayList(types.CompletionItem).init(arena.allocator());
 
     const context = DeclToCompletionContext{
@@ -1056,6 +1162,9 @@ fn completeGlobal(arena: *std.heap.ArenaAllocator, id: types.RequestId, pos_inde
 }
 
 fn completeFieldAccess(arena: *std.heap.ArenaAllocator, id: types.RequestId, handle: *DocumentStore.Handle, position: offsets.DocumentPosition, range: analysis.SourceRange, config: *const Config) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     var completions = std.ArrayList(types.CompletionItem).init(arena.allocator());
 
     const line_mem_start = @ptrToInt(position.line.ptr) - @ptrToInt(handle.document.mem.ptr);
@@ -1081,6 +1190,9 @@ fn completeFieldAccess(arena: *std.heap.ArenaAllocator, id: types.RequestId, han
 }
 
 fn completeError(arena: *std.heap.ArenaAllocator, id: types.RequestId, handle: *DocumentStore.Handle, config: *const Config) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const completions = try document_store.errorCompletionItems(arena, handle);
     truncateCompletions(completions, config.max_detail_length);
     logger.debug("Completing error:", .{});
@@ -1097,6 +1209,9 @@ fn completeError(arena: *std.heap.ArenaAllocator, id: types.RequestId, handle: *
 }
 
 fn completeDot(arena: *std.heap.ArenaAllocator, id: types.RequestId, handle: *DocumentStore.Handle, config: *const Config) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     var completions = try document_store.enumCompletionItems(arena, handle);
     truncateCompletions(completions, config.max_detail_length);
 
@@ -1112,6 +1227,9 @@ fn completeDot(arena: *std.heap.ArenaAllocator, id: types.RequestId, handle: *Do
 }
 
 fn documentSymbol(arena: *std.heap.ArenaAllocator, id: types.RequestId, handle: *DocumentStore.Handle) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     try send(arena, types.Response{
         .id = id,
         .result = .{ .DocumentSymbols = try analysis.getDocumentSymbols(arena.allocator(), handle.tree, offset_encoding) },
@@ -1119,6 +1237,9 @@ fn documentSymbol(arena: *std.heap.ArenaAllocator, id: types.RequestId, handle: 
 }
 
 fn loadConfigFile(file_path: []const u8) ?Config {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     var file = std.fs.cwd().openFile(file_path, .{}) catch |err| {
         if (err != error.FileNotFound)
             logger.warn("Error while reading configuration file: {}", .{err});
@@ -1148,12 +1269,18 @@ fn loadConfigFile(file_path: []const u8) ?Config {
 }
 
 fn loadConfigInFolder(folder_path: []const u8) ?Config {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const full_path = std.fs.path.resolve(allocator, &.{ folder_path, "zls.json" }) catch return null;
     defer allocator.free(full_path);
     return loadConfigFile(full_path);
 }
 
 fn initializeHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.Initialize, config: *const Config) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     _ = config;
 
     for (req.params.capabilities.offsetEncoding.value) |encoding| {
@@ -1287,6 +1414,9 @@ fn shutdownHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, config:
 }
 
 fn openDocumentHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.OpenDocument, config: *const Config) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const handle = try document_store.openDocument(req.params.textDocument.uri, req.params.textDocument.text);
     try publishDiagnostics(arena, handle.*, config);
 
@@ -1295,6 +1425,9 @@ fn openDocumentHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req
 }
 
 fn changeDocumentHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.ChangeDocument, config: *const Config) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     _ = id;
 
     const handle = document_store.getHandle(req.params.textDocument.uri) orelse {
@@ -1307,6 +1440,9 @@ fn changeDocumentHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, r
 }
 
 fn saveDocumentHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.SaveDocument, config: *const Config) error{OutOfMemory}!void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     _ = config;
     _ = id;
     _ = arena;
@@ -1318,6 +1454,9 @@ fn saveDocumentHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req
 }
 
 fn closeDocumentHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.CloseDocument, config: *const Config) error{}!void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     _ = config;
     _ = id;
     _ = arena;
@@ -1325,6 +1464,9 @@ fn closeDocumentHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, re
 }
 
 fn semanticTokensFullHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.SemanticTokensFull, config: *const Config) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     if (config.enable_semantic_tokens) blk: {
         const handle = document_store.getHandle(req.params.textDocument.uri) orelse {
             logger.warn("Trying to get semantic tokens of non existent document {s}", .{req.params.textDocument.uri});
@@ -1343,6 +1485,9 @@ fn semanticTokensFullHandler(arena: *std.heap.ArenaAllocator, id: types.RequestI
 }
 
 fn completionHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.Completion, config: *const Config) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const handle = document_store.getHandle(req.params.textDocument.uri) orelse {
         logger.warn("Trying to complete in non existent document {s}", .{req.params.textDocument.uri});
         return try respondGeneric(id, no_completions_response);
@@ -1366,6 +1511,9 @@ fn completionHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: 
 }
 
 fn signatureHelpHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.SignatureHelp, config: *const Config) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     _ = config;
 
     const getSignatureInfo = @import("signature_help.zig").getSignatureInfo;
@@ -1400,6 +1548,9 @@ fn signatureHelpHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, re
 }
 
 fn gotoHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.GotoDefinition, config: *const Config, resolve_alias: bool) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const handle = document_store.getHandle(req.params.textDocument.uri) orelse {
         logger.warn("Trying to go to definition in non existent document {s}", .{req.params.textDocument.uri});
         return try respondGeneric(id, null_result_response);
@@ -1422,14 +1573,23 @@ fn gotoHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: reques
 }
 
 fn gotoDefinitionHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.GotoDefinition, config: *const Config) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     try gotoHandler(arena, id, req, config, true);
 }
 
 fn gotoDeclarationHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.GotoDeclaration, config: *const Config) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     try gotoHandler(arena, id, req, config, false);
 }
 
 fn hoverHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.Hover, config: *const Config) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const handle = document_store.getHandle(req.params.textDocument.uri) orelse {
         logger.warn("Trying to get hover in non existent document {s}", .{req.params.textDocument.uri});
         return try respondGeneric(id, null_result_response);
@@ -1451,6 +1611,9 @@ fn hoverHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: reque
 }
 
 fn documentSymbolsHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.DocumentSymbols, config: *const Config) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     _ = config;
 
     const handle = document_store.getHandle(req.params.textDocument.uri) orelse {
@@ -1461,6 +1624,9 @@ fn documentSymbolsHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, 
 }
 
 fn formattingHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.Formatting, config: *const Config) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     if (config.zig_exe_path) |zig_exe_path| {
         const handle = document_store.getHandle(req.params.textDocument.uri) orelse {
             logger.warn("Trying to got to definition in non existent document {s}", .{req.params.textDocument.uri});
@@ -1503,6 +1669,9 @@ fn formattingHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: 
 }
 
 fn renameHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.Rename, config: *const Config) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const handle = document_store.getHandle(req.params.textDocument.uri) orelse {
         logger.warn("Trying to rename in non existent document {s}", .{req.params.textDocument.uri});
         return try respondGeneric(id, null_result_response);
@@ -1524,6 +1693,9 @@ fn renameHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requ
 }
 
 fn didChangeConfigurationHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.Configuration, config: *Config) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     _ = arena;
     _ = id;
     inline for (std.meta.fields(Config)) |field| {
@@ -1535,6 +1707,9 @@ fn didChangeConfigurationHandler(arena: *std.heap.ArenaAllocator, id: types.Requ
 }
 
 fn referencesHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.References, config: *const Config) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const handle = document_store.getHandle(req.params.textDocument.uri) orelse {
         logger.warn("Trying to get references in non existent document {s}", .{req.params.textDocument.uri});
         return try respondGeneric(id, null_result_response);
@@ -1563,6 +1738,9 @@ fn extractErr(val: anytype) anyerror {
 }
 
 fn processJsonRpc(arena: *std.heap.ArenaAllocator, parser: *std.json.Parser, json: []const u8, config: *Config) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     var tree = try parser.parse(json);
     defer tree.deinit();
 
@@ -1673,14 +1851,18 @@ const stack_frames = switch (zig_builtin.mode) {
     .Debug => 10,
     else => 0,
 };
-var gpa_state = std.heap.GeneralPurposeAllocator(.{ .stack_trace_frames = stack_frames }){};
+var gpa_state = std.heap.GeneralPurposeAllocator(.{ .stack_trace_frames = stack_frames }){ .backing_allocator = std.heap.page_allocator };
 
 pub fn main() anyerror!void {
     defer _ = gpa_state.deinit();
     defer keep_running = false;
-    // allocator = &gpa_state.allocator;
+    allocator = gpa_state.allocator();
+    if (tracy.enable_allocation) {
+        allocator = tracy.tracyAllocator(allocator).allocator();
+    }
+    defer _ = gpa_state.deinit();
     // @TODO Using the GPA here, realloc calls hang currently for some reason
-    allocator = std.heap.page_allocator;
+    // allocator = std.heap.page_allocator;
 
     analysis.init(allocator);
     defer analysis.deinit();

@@ -6,6 +6,7 @@ const offsets = @import("./offsets.zig");
 const log = std.log.scoped(.doc_store);
 const Ast = std.zig.Ast;
 const BuildAssociatedConfig = @import("./BuildAssociatedConfig.zig");
+const tracy = @import("./tracy.zig");
 
 const DocumentStore = @This();
 
@@ -119,6 +120,9 @@ const LoadPackagesContext = struct {
 };
 
 fn loadPackages(context: LoadPackagesContext) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const allocator = context.allocator;
     const build_file = context.build_file;
     const build_runner_path = context.build_runner_path;
@@ -195,6 +199,9 @@ fn loadPackages(context: LoadPackagesContext) !void {
 /// This function asserts the document is not open yet and takes ownership
 /// of the uri and text passed in.
 fn newDocument(self: *DocumentStore, uri: []const u8, text: [:0]u8) anyerror!*Handle {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     log.debug("Opened document: {s}", .{uri});
 
     var handle = try self.allocator.create(Handle);

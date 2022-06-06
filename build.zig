@@ -22,7 +22,47 @@ pub fn build(b: *std.build.Builder) !void {
         b.option(std.log.Level, "log_level", "The Log Level to be used.") orelse .info,
     );
 
+    const enable_tracy = b.option(bool, "enable_tracy", "Whether of not tracy should be enabled.") orelse false;
+
+    exe_options.addOption(
+        bool,
+        "enable_tracy",
+        enable_tracy,
+    );
+
+    exe_options.addOption(
+        bool,
+        "enable_tracy_allocation",
+        b.option(bool, "enable_tracy_allocation", "Enable using TracyAllocator to monitor allocations.") orelse false,
+    );
+
+    exe_options.addOption(
+        bool,
+        "enable_tracy_callstack",
+        b.option(bool, "enable_tracy_callstack", "Enable callstack graphs.") orelse false,
+    );
+
     exe.addPackage(.{ .name = "known-folders", .source = .{ .path = "src/known-folders/known-folders.zig" } });
+
+    if (enable_tracy) {
+        const client_cpp = "src/tracy/TracyClient.cpp";
+
+        // On mingw, we need to opt into windows 7+ to get some features required by tracy.
+        const tracy_c_flags: []const []const u8 = if (target.isWindows() and target.getAbi() == .gnu)
+            &[_][]const u8{ "-DTRACY_ENABLE=1", "-fno-sanitize=undefined", "-D_WIN32_WINNT=0x601" }
+        else
+            &[_][]const u8{ "-DTRACY_ENABLE=1", "-fno-sanitize=undefined" };
+
+        exe.addIncludePath("src/tracy");
+        exe.addCSourceFile(client_cpp, tracy_c_flags);
+        exe.linkSystemLibraryName("c++");
+        exe.linkLibC();
+
+        if (target.isWindows()) {
+            exe.linkSystemLibrary("dbghelp");
+            exe.linkSystemLibrary("ws2_32");
+        }
+    }
 
     exe.setTarget(target);
     exe.setBuildMode(mode);
