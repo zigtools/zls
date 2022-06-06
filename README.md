@@ -290,6 +290,16 @@ let g:LanguageClient_serverCommands = {
         :server-id 'zls))))
 ```
 
+### Spacemacs
+
+- Add `lsp` and `zig` to `dotspacemacs-configuration-layers` in your `.spacemacs` file.
+- If you don't have `zls` in your `PATH`, add the following to `dotspacemacs/user-config` in your
+  `.spacemacs` file:
+
+```elisp
+(setq lsp-zig-zls-executable "<path to zls>")
+```
+
 ## Related Projects
 
 - [`sublime-zig-language` by @prime31](https://github.com/prime31/sublime-zig-language)
