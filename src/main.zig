@@ -1860,7 +1860,6 @@ pub fn main() anyerror!void {
     if (tracy.enable_allocation) {
         allocator = tracy.tracyAllocator(allocator).allocator();
     }
-    defer _ = gpa_state.deinit();
     // @TODO Using the GPA here, realloc calls hang currently for some reason
     // allocator = std.heap.page_allocator;
 
