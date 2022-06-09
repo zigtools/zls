@@ -190,6 +190,8 @@ pub fn documentRange(doc: types.TextDocument, encoding: Encoding) !types.Range {
         curr_line = line;
     }
 
+    if (line_idx > 0) line_idx -= 1;
+
     if (encoding == .utf8) {
         return types.Range{
             .start = .{
