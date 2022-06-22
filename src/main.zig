@@ -1076,8 +1076,6 @@ fn completeLabel(arena: *std.heap.ArenaAllocator, id: types.RequestId, pos_index
         .orig_handle = handle,
     };
     try analysis.iterateLabels(handle, pos_index, declToCompletion, context);
-
-
     sortCompletionItems(completions.items, config);
     truncateCompletions(completions.items, config.max_detail_length);
 
@@ -1236,7 +1234,7 @@ fn kindToSortScore(kind: types.CompletionItem.Kind) [] const u8 {
     };
 }
 
-fn sortCompletionItems(completions: []types.CompletionItem, config: *const Config) void {
+fn sortCompletionItems(completions: []types.CompletionItem, _: *const Config) void {
     // TODO: config for sorting rule?
     for (completions) |*c| {
         c.sortText = kindToSortScore(c.kind);
