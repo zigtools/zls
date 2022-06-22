@@ -1076,6 +1076,9 @@ fn completeLabel(arena: *std.heap.ArenaAllocator, id: types.RequestId, pos_index
         .orig_handle = handle,
     };
     try analysis.iterateLabels(handle, pos_index, declToCompletion, context);
+
+
+    sortCompletionItems(completions.items, config);
     truncateCompletions(completions.items, config.max_detail_length);
 
     try send(arena, types.Response{
@@ -1148,6 +1151,8 @@ fn completeGlobal(arena: *std.heap.ArenaAllocator, id: types.RequestId, pos_inde
         .orig_handle = handle,
     };
     try analysis.iterateSymbolsGlobal(&document_store, arena, handle, pos_index, declToCompletion, context);
+
+    sortCompletionItems(completions.items, config);
     truncateCompletions(completions.items, config.max_detail_length);
 
     try send(arena, types.Response{
@@ -1175,6 +1180,8 @@ fn completeFieldAccess(arena: *std.heap.ArenaAllocator, id: types.RequestId, han
     if (try analysis.getFieldAccessType(&document_store, arena, handle, position.absolute_index, &tokenizer)) |result| {
         held_range.release();
         try typeToCompletion(arena, &completions, result, handle, config);
+
+        sortCompletionItems(completions.items, config);
         truncateCompletions(completions.items, config.max_detail_length);
     }
 
@@ -1193,7 +1200,8 @@ fn completeError(arena: *std.heap.ArenaAllocator, id: types.RequestId, handle: *
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const completions = try document_store.errorCompletionItems(arena, handle);
+    var completions = try document_store.errorCompletionItems(arena, handle);
+
     truncateCompletions(completions, config.max_detail_length);
     logger.debug("Completing error:", .{});
 
@@ -1208,11 +1216,39 @@ fn completeError(arena: *std.heap.ArenaAllocator, id: types.RequestId, handle: *
     });
 }
 
+fn kindToSortScore(kind: types.CompletionItem.Kind) [] const u8 {
+    return switch (kind)
+    {
+        .Variable => "2_",
+        .Field => "3_",
+        .Function => "4_",
+        
+        .Keyword,
+        .EnumMember => "5_",
+        
+        .Class,
+        .Interface,
+        .Struct,
+        // Union?
+        .TypeParameter => "6_",
+        
+        else => "9_"
+    };
+}
+
+fn sortCompletionItems(completions: []types.CompletionItem, config: *const Config) void {
+    // TODO: config for sorting rule?
+    for (completions) |*c| {
+        c.sortText = kindToSortScore(c.kind);
+    }
+}
+
 fn completeDot(arena: *std.heap.ArenaAllocator, id: types.RequestId, handle: *DocumentStore.Handle, config: *const Config) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
     var completions = try document_store.enumCompletionItems(arena, handle);
+    sortCompletionItems(completions, config);
     truncateCompletions(completions, config.max_detail_length);
 
     try send(arena, types.Response{
