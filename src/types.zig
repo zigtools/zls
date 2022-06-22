@@ -208,7 +208,7 @@ pub const InsertTextFormat = enum(i64) {
 };
 
 pub const CompletionItem = struct {
-    const Kind = enum(i64) {
+    pub const Kind = enum(i64) {
         Text = 1,
         Method = 2,
         Function = 3,
