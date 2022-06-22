@@ -248,6 +248,7 @@ pub const CompletionItem = struct {
     insertTextFormat: ?InsertTextFormat = .PlainText,
     detail: ?string = null,
     documentation: ?MarkupContent = null,
+    sortText: ?string = null,
 };
 
 pub const DocumentSymbol = struct {
