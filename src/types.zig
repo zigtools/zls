@@ -208,7 +208,7 @@ pub const InsertTextFormat = enum(i64) {
 };
 
 pub const CompletionItem = struct {
-    const Kind = enum(i64) {
+    pub const Kind = enum(i64) {
         Text = 1,
         Method = 2,
         Function = 3,
@@ -241,13 +241,25 @@ pub const CompletionItem = struct {
     };
 
     label: string,
+    labelDetails: ?CompletionItemLabelDetails = null,
     kind: Kind,
-    textEdit: ?TextEdit = null,
-    filterText: ?string = null,
-    insertText: string = "",
-    insertTextFormat: ?InsertTextFormat = .PlainText,
     detail: ?string = null,
+
+    sortText: ?string = null,
+    filterText: ?string = null,
+    insertText: ?string = null,
+
+    insertTextFormat: ?InsertTextFormat = .PlainText,
     documentation: ?MarkupContent = null,
+    
+    // FIXME: i commented this out, because otherwise the vscode client complains about *ranges*
+    // and breaks code completion entirely
+    // textEdit: ?TextEdit = null, 
+};
+
+pub const CompletionItemLabelDetails = struct {
+    detail: ?string,
+    description: ?string,
 };
 
 pub const DocumentSymbol = struct {
@@ -338,6 +350,7 @@ const InitializeResult = struct {
         completionProvider: struct {
             resolveProvider: bool,
             triggerCharacters: []const string,
+            completionItem: struct { labelDetailsSupport: bool },
         },
         documentHighlightProvider: bool,
         hoverProvider: bool,
