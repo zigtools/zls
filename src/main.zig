@@ -89,6 +89,7 @@ const ClientCapabilities = struct {
     supports_semantic_tokens: bool = false,
     hover_supports_md: bool = false,
     completion_doc_supports_md: bool = false,
+    label_details_support: bool = false,
 };
 
 var client_capabilities = ClientCapabilities{};
@@ -302,6 +303,7 @@ fn typeToCompletion(
             if (!type_handle.type.is_type_val) {
                 try list.append(.{
                     .label = "len",
+                    .detail = "const len: usize",
                     .kind = .Field,
                     .insertText = "len",
                     .insertTextFormat = .PlainText,
@@ -482,6 +484,7 @@ fn nodeToCompletion(
         => {
             try list.append(.{
                 .label = "len",
+                .detail = "const len: usize",
                 .kind = .Field,
                 .insertText = "len",
                 .insertTextFormat = .PlainText,
@@ -512,6 +515,7 @@ fn nodeToCompletion(
                     });
                     try list.append(.{
                         .label = "len",
+                        .detail = "const len: usize",
                         .kind = .Field,
                         .insertText = "len",
                         .insertTextFormat = .PlainText,
@@ -539,6 +543,7 @@ fn nodeToCompletion(
         .string_literal => {
             try list.append(.{
                 .label = "len",
+                .detail = "const len: usize",
                 .kind = .Field,
                 .insertText = "len",
                 .insertTextFormat = .PlainText,
@@ -1076,6 +1081,7 @@ fn completeLabel(arena: *std.heap.ArenaAllocator, id: types.RequestId, pos_index
         .orig_handle = handle,
     };
     try analysis.iterateLabels(handle, pos_index, declToCompletion, context);
+    sortCompletionItems(completions.items, config);
     truncateCompletions(completions.items, config.max_detail_length);
 
     try send(arena, types.Response{
@@ -1148,7 +1154,14 @@ fn completeGlobal(arena: *std.heap.ArenaAllocator, id: types.RequestId, pos_inde
         .orig_handle = handle,
     };
     try analysis.iterateSymbolsGlobal(&document_store, arena, handle, pos_index, declToCompletion, context);
+    sortCompletionItems(completions.items, config);
     truncateCompletions(completions.items, config.max_detail_length);
+
+    if (client_capabilities.label_details_support) {
+        for (completions.items) |*item| {
+            try formatDetailledLabel(item, arena.allocator());
+        }
+    }
 
     try send(arena, types.Response{
         .id = id,
@@ -1175,7 +1188,13 @@ fn completeFieldAccess(arena: *std.heap.ArenaAllocator, id: types.RequestId, han
     if (try analysis.getFieldAccessType(&document_store, arena, handle, position.absolute_index, &tokenizer)) |result| {
         held_range.release();
         try typeToCompletion(arena, &completions, result, handle, config);
+        sortCompletionItems(completions.items, config);
         truncateCompletions(completions.items, config.max_detail_length);
+        if (client_capabilities.label_details_support) {
+            for (completions.items) |*item| {
+               try formatDetailledLabel(item, arena.allocator());
+            }
+        }
     }
 
     try send(arena, types.Response{
@@ -1189,11 +1208,180 @@ fn completeFieldAccess(arena: *std.heap.ArenaAllocator, id: types.RequestId, han
     });
 }
 
+fn formatDetailledLabel(item: *types.CompletionItem, alloc: std.mem.Allocator) !void {
+    // NOTE: this is not ideal, we should build a detailled label like we do for label/detail
+    // because this implementation is very loose, nothing is formated properly so we need to clean
+    // things a little bit, wich is quite messy
+    // but it works, it provide decent results
+
+    if (item.detail == null)
+        return;
+
+    var detailLen: usize = item.detail.?.len;
+    var it: []u8 = try alloc.alloc(u8, detailLen);
+
+    detailLen -= std.mem.replace(u8, item.detail.?, "    ", " ", it) * 3;
+    it = it[0..detailLen];
+
+    // HACK: for enums 'MyEnum.', item.detail shows everything, we don't want that
+    const isValue = std.mem.startsWith(u8, item.label, it);
+
+    const isVar = std.mem.startsWith(u8, it, "var ");
+    const isConst = std.mem.startsWith(u8, it, "const ");
+
+    // we don't want the entire content of things, see the NOTE above
+    if (std.mem.indexOf(u8, it, "{")) |end| {
+        it = it[0..end];
+    }
+    if (std.mem.indexOf(u8, it, "}")) |end| {
+        it = it[0..end];
+    }
+    if (std.mem.indexOf(u8, it, ";")) |end| {
+        it = it[0..end];
+    }
+
+    // logger.info("## label: {s} it: {s} kind: {} isValue: {}", .{item.label, it, item.kind, isValue});
+
+    if (std.mem.startsWith(u8, it, "fn ")) {
+        var s: usize = std.mem.indexOf(u8, it, "(") orelse return;
+        var e: usize = std.mem.lastIndexOf(u8, it, ")") orelse return;
+        if (e < s) {
+            logger.warn("something wrong when trying to build label detail for {s} kind: {s}", .{ it, item.kind });
+            return;
+        }
+
+        item.insertText = item.label;
+        item.insertTextFormat = .PlainText;
+        item.detail = item.label;
+        item.labelDetails = .{ .detail = it[s .. e + 1], .description = it[e + 1 ..] };
+
+        if (item.kind == .Constant) {
+            if (std.mem.indexOf(u8, it, "= struct")) |_| {
+                item.labelDetails.?.description = "struct";
+            } else if (std.mem.indexOf(u8, it, "= union")) |_| {
+                var us: usize = std.mem.indexOf(u8, it, "(") orelse return;
+                var ue: usize = std.mem.lastIndexOf(u8, it, ")") orelse return;
+                if (ue < us) {
+                    logger.warn("something wrong when trying to build label detail for a .Constant|union {s}", .{it});
+                    return;
+                }
+
+                item.labelDetails.?.description = it[us - 5 .. ue + 1];
+            }
+        }
+    } else if ((item.kind == .Variable or item.kind == .Constant) and (isVar or isConst)) {
+        item.insertText = item.label;
+        item.insertTextFormat = .PlainText;
+        item.detail = item.label;
+
+        const eqlPos = std.mem.indexOf(u8, it, "=");
+
+        if (std.mem.indexOf(u8, it, ":")) |start| {
+            if (eqlPos != null) {
+                if (start > eqlPos.?) return;
+            }
+            var e: usize = eqlPos orelse it.len;
+            item.labelDetails = .{
+                .detail = "", // left
+                .description = it[start + 1 .. e], // right
+            };
+        } else if (std.mem.indexOf(u8, it, "= .")) |start| {
+            item.labelDetails = .{
+                .detail = "", // left
+                .description = it[start + 2 .. it.len], // right
+            };
+        } else if (eqlPos) |start| {
+            item.labelDetails = .{
+                .detail = "", // left
+                .description = it[start + 2 .. it.len], // right
+            };
+        }
+    } else if (item.kind == .Variable) {
+        var s: usize = std.mem.indexOf(u8, it, ":") orelse return;
+        var e: usize = std.mem.indexOf(u8, it, "=") orelse return;
+
+        if (e < s) {
+            logger.warn("something wrong when trying to build label detail for a .Variable {s}", .{it});
+            return;
+        }
+        // logger.info("s: {} -> {}", .{s, e});
+        item.insertText = item.label;
+        item.insertTextFormat = .PlainText;
+        item.detail = item.label;
+        item.labelDetails = .{
+            .detail = "", // left
+            .description = it[s + 1 .. e], // right
+        };
+    } else if (std.mem.indexOf(u8, it, "@import") != null) {
+        item.insertText = item.label;
+        item.insertTextFormat = .PlainText;
+        item.detail = item.label;
+        item.labelDetails = .{
+            .detail = "", // left
+            .description = it, // right
+        };
+    } else if (item.kind == .Constant or item.kind == .Field) {
+        var s: usize = std.mem.indexOf(u8, it, " ") orelse return;
+        var e: usize = std.mem.indexOf(u8, it, "=") orelse it.len;
+        if (e < s) {
+            logger.warn("something wrong when trying to build label detail for a .Variable {s}", .{it});
+            return;
+        }
+        // logger.info("s: {} -> {}", .{s, e});
+        item.insertText = item.label;
+        item.insertTextFormat = .PlainText;
+        item.detail = item.label;
+        item.labelDetails = .{
+            .detail = "", // left
+            .description = it[s + 1 .. e], // right
+        };
+
+        if (std.mem.indexOf(u8, it, "= union(")) |_| {
+            var us: usize = std.mem.indexOf(u8, it, "(") orelse return;
+            var ue: usize = std.mem.lastIndexOf(u8, it, ")") orelse return;
+            if (ue < us) {
+                logger.warn("something wrong when trying to build label detail for a .Constant|union {s}", .{it});
+                return;
+            }
+            item.labelDetails.?.description = it[us - 5 .. ue + 1];
+        } else if (std.mem.indexOf(u8, it, "= enum(")) |_| {
+            var es: usize = std.mem.indexOf(u8, it, "(") orelse return;
+            var ee: usize = std.mem.lastIndexOf(u8, it, ")") orelse return;
+            if (ee < es) {
+                logger.warn("something wrong when trying to build label detail for a .Constant|enum {s}", .{it});
+                return;
+            }
+            item.labelDetails.?.description = it[es - 4 .. ee + 1];
+        } else if (std.mem.indexOf(u8, it, "= struct")) |_| {
+            item.labelDetails.?.description = "struct";
+        } else if (std.mem.indexOf(u8, it, "= union")) |_| {
+            item.labelDetails.?.description = "union";
+        } else if (std.mem.indexOf(u8, it, "= enum")) |_| {
+            item.labelDetails.?.description = "enum";
+        }
+    } else if (item.kind == .Field and isValue) {
+        item.insertText = item.label;
+        item.insertTextFormat = .PlainText;
+        item.detail = item.label;
+        item.labelDetails = .{
+            .detail = "", // left
+            .description = item.label, // right
+        };
+    } else {
+        // TODO: if something is missing, it neecs to be implemented here
+    }
+
+    // if (item.labelDetails != null)
+    //     logger.info("labelDetails: {s}  ::  {s}", .{item.labelDetails.?.detail, item.labelDetails.?.description});
+}
+
+
 fn completeError(arena: *std.heap.ArenaAllocator, id: types.RequestId, handle: *DocumentStore.Handle, config: *const Config) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const completions = try document_store.errorCompletionItems(arena, handle);
+    var completions = try document_store.errorCompletionItems(arena, handle);
+
     truncateCompletions(completions, config.max_detail_length);
     logger.debug("Completing error:", .{});
 
@@ -1208,11 +1396,38 @@ fn completeError(arena: *std.heap.ArenaAllocator, id: types.RequestId, handle: *
     });
 }
 
+fn kindToSortScore(kind: types.CompletionItem.Kind) [] const u8 {
+    return switch (kind) {
+        .Variable => "2_",
+        .Field => "3_",
+        .Function => "4_",
+        
+        .Keyword,
+        .EnumMember => "5_",
+        
+        .Class,
+        .Interface,
+        .Struct,
+        // Union?
+        .TypeParameter => "6_",
+        
+        else => "9_"
+    };
+}
+
+fn sortCompletionItems(completions: []types.CompletionItem, _: *const Config) void {
+    // TODO: config for sorting rule?
+    for (completions) |*c| {
+        c.sortText = kindToSortScore(c.kind);
+    }
+}
+
 fn completeDot(arena: *std.heap.ArenaAllocator, id: types.RequestId, handle: *DocumentStore.Handle, config: *const Config) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
     var completions = try document_store.enumCompletionItems(arena, handle);
+    sortCompletionItems(completions, config);
     truncateCompletions(completions, config.max_detail_length);
 
     try send(arena, types.Response{
@@ -1300,6 +1515,7 @@ fn initializeHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: 
         }
         if (textDocument.completion) |completion| {
             if (completion.completionItem) |completionItem| {
+                client_capabilities.label_details_support = completionItem.labelDetailsSupport.value;
                 client_capabilities.supports_snippets = completionItem.snippetSupport.value;
                 for (completionItem.documentationFormat.value) |documentationFormat| {
                     if (std.mem.eql(u8, "markdown", documentationFormat)) {
@@ -1332,6 +1548,9 @@ fn initializeHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: 
                     .completionProvider = .{
                         .resolveProvider = false,
                         .triggerCharacters = &[_][]const u8{ ".", ":", "@" },
+                        .completionItem = .{
+                            .labelDetailsSupport = true
+                        }
                     },
                     .documentHighlightProvider = false,
                     .hoverProvider = true,
@@ -1791,6 +2010,7 @@ fn processJsonRpc(arena: *std.heap.ArenaAllocator, parser: *std.json.Parser, jso
     inline for (method_map) |method_info| {
         if (done == null and std.mem.eql(u8, method, method_info[0])) {
             if (method_info.len == 1) {
+                logger.warn("method not mapped: {s}", .{method});
                 done = error.HackDone;
             } else if (method_info[1] != void) {
                 const ReqT = method_info[1];
