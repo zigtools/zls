@@ -1217,6 +1217,8 @@ fn completeError(arena: *std.heap.ArenaAllocator, id: types.RequestId, handle: *
 fn kindToSortScore(kind: types.CompletionItem.Kind) [] const u8 {
     return switch (kind)
     {
+        .Constant => "1_",
+
         .Variable => "2_",
         .Field => "3_",
         .Function => "4_",
