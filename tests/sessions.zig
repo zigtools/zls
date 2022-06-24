@@ -186,7 +186,7 @@ test "Request completion with no trailing whitespace" {
     try server.request("textDocument/completion",
         \\{"textDocument":{"uri":"file:///test.zig"}, "position":{"line":1,"character":1}}
     ,
-        \\{"isIncomplete":false,"items":[{"label":"std","kind":21,"textEdit":null,"filterText":null,"insertText":"std","insertTextFormat":1,"detail":"const std = @import(\"std\")","documentation":null}]}
+         \\{"isIncomplete":false,"items":[{"label":"std","kind":21,"textEdit":null,"filterText":null,"insertText":"std","insertTextFormat":1,"detail":"const std = @import(\"std\")","documentation":null,"sortText":"1_std"}]}
     );
 }
 
