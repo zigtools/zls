@@ -1076,7 +1076,7 @@ fn completeLabel(arena: *std.heap.ArenaAllocator, id: types.RequestId, pos_index
         .orig_handle = handle,
     };
     try analysis.iterateLabels(handle, pos_index, declToCompletion, context);
-    sortCompletionItems(completions.items, config);
+    sortCompletionItems(completions.items, config, arena.allocator());
     truncateCompletions(completions.items, config.max_detail_length);
 
     try send(arena, types.Response{
@@ -1150,7 +1150,7 @@ fn completeGlobal(arena: *std.heap.ArenaAllocator, id: types.RequestId, pos_inde
     };
     try analysis.iterateSymbolsGlobal(&document_store, arena, handle, pos_index, declToCompletion, context);
 
-    sortCompletionItems(completions.items, config);
+    sortCompletionItems(completions.items, config, arena.allocator());
     truncateCompletions(completions.items, config.max_detail_length);
 
     try send(arena, types.Response{
@@ -1179,7 +1179,7 @@ fn completeFieldAccess(arena: *std.heap.ArenaAllocator, id: types.RequestId, han
         held_range.release();
         try typeToCompletion(arena, &completions, result, handle, config);
 
-        sortCompletionItems(completions.items, config);
+        sortCompletionItems(completions.items, config, arena.allocator());
         truncateCompletions(completions.items, config.max_detail_length);
     }
 
@@ -1234,10 +1234,16 @@ fn kindToSortScore(kind: types.CompletionItem.Kind) [] const u8 {
     };
 }
 
-fn sortCompletionItems(completions: []types.CompletionItem, _: *const Config) void {
+fn sortCompletionItems(completions: []types.CompletionItem, _: *const Config, alloc: std.mem.Allocator) void {
     // TODO: config for sorting rule?
     for (completions) |*c| {
         c.sortText = kindToSortScore(c.kind);
+        
+        if (alloc.alloc(u8, 2 + c.label.len)) |it| {
+            std.mem.copy(u8, it, c.sortText.?);
+            std.mem.copy(u8, it[2 .. ], c.label);
+            c.sortText = it;
+        } else |_| {}
     }
 }
 
@@ -1246,7 +1252,7 @@ fn completeDot(arena: *std.heap.ArenaAllocator, id: types.RequestId, handle: *Do
     defer tracy_zone.end();
 
     var completions = try document_store.enumCompletionItems(arena, handle);
-    sortCompletionItems(completions, config);
+    sortCompletionItems(completions, config, arena.allocator());
     truncateCompletions(completions, config.max_detail_length);
 
     try send(arena, types.Response{
