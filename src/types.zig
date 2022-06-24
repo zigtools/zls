@@ -254,6 +254,7 @@ pub const CompletionItem = struct {
     
     // FIXME: i commented this out, because otherwise the vscode client complains about *ranges*
     // and breaks code completion entirely
+    // see: https://github.com/zigtools/zls-vscode/pull/33
     // textEdit: ?TextEdit = null, 
 };
 
