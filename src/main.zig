@@ -1874,6 +1874,8 @@ pub fn main() anyerror!void {
     if (!args_it.skip()) @panic("Could not find self argument");
 
     var config_path: ?[]const u8 = null;
+    defer if (config_path) |path| allocator.free(path);
+
     var next_arg_config_path = false;
     while (args_it.next()) |arg| {
         if (next_arg_config_path) {
@@ -1913,13 +1915,14 @@ pub fn main() anyerror!void {
 
     config_read: {
         if (config_path) |path| {
-            defer allocator.free(path);
             if (loadConfigFile(path)) |conf| {
                 config = conf;
                 break :config_read;
             }
             std.debug.print("Could not open configuration file '{s}'\n", .{path});
             std.debug.print("Falling back to a lookup in the local and global configuration folders\n", .{});
+            allocator.free(path);
+            config_path = null;
         }
         if (try known_folders.getPath(allocator, .local_configuration)) |path| {
             config_path = path;
