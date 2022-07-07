@@ -190,6 +190,8 @@ fn loadPackages(context: LoadPackagesContext) !void {
                         };
                     }
                 }
+            } else {
+                return error.RunFailed;
             }
         },
         else => return error.RunFailed,
@@ -268,7 +270,7 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: [:0]u8) anyerror!*Ha
             .cache_root = self.zig_cache_root,
             .global_cache_root = self.zig_global_cache_root,
         }) catch |err| {
-            log.debug("Failed to load packages of build file {s} (error: {})", .{ build_file.uri, err });
+            log.warn("Failed to load packages of build file {s} (error: {})", .{ build_file.uri, err });
         };
 
         try self.build_files.append(self.allocator, build_file);
@@ -537,7 +539,7 @@ pub fn applySave(self: *DocumentStore, handle: *Handle) !void {
             .cache_root = self.zig_cache_root,
             .global_cache_root = self.zig_global_cache_root,
         }) catch |err| {
-            log.debug("Failed to load packages of build file {s} (error: {})", .{ build_file.uri, err });
+            log.warn("Failed to load packages of build file {s} (error: {})", .{ build_file.uri, err });
         };
     }
 }

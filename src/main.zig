@@ -1081,7 +1081,7 @@ fn completeLabel(arena: *std.heap.ArenaAllocator, id: types.RequestId, pos_index
         .orig_handle = handle,
     };
     try analysis.iterateLabels(handle, pos_index, declToCompletion, context);
-    sortCompletionItems(completions.items, config);
+    sortCompletionItems(completions.items, config, arena.allocator());
     truncateCompletions(completions.items, config.max_detail_length);
 
     try send(arena, types.Response{
@@ -1154,7 +1154,7 @@ fn completeGlobal(arena: *std.heap.ArenaAllocator, id: types.RequestId, pos_inde
         .orig_handle = handle,
     };
     try analysis.iterateSymbolsGlobal(&document_store, arena, handle, pos_index, declToCompletion, context);
-    sortCompletionItems(completions.items, config);
+    sortCompletionItems(completions.items, config, arena.allocator());
     truncateCompletions(completions.items, config.max_detail_length);
 
     if (client_capabilities.label_details_support) {
@@ -1188,7 +1188,7 @@ fn completeFieldAccess(arena: *std.heap.ArenaAllocator, id: types.RequestId, han
     if (try analysis.getFieldAccessType(&document_store, arena, handle, position.absolute_index, &tokenizer)) |result| {
         held_range.release();
         try typeToCompletion(arena, &completions, result, handle, config);
-        sortCompletionItems(completions.items, config);
+        sortCompletionItems(completions.items, config, arena.allocator());
         truncateCompletions(completions.items, config.max_detail_length);
         if (client_capabilities.label_details_support) {
             for (completions.items) |*item| {
@@ -1397,7 +1397,10 @@ fn completeError(arena: *std.heap.ArenaAllocator, id: types.RequestId, handle: *
 }
 
 fn kindToSortScore(kind: types.CompletionItem.Kind) [] const u8 {
-    return switch (kind) {
+    return switch (kind)
+    {
+        .Constant => "1_",
+
         .Variable => "2_",
         .Field => "3_",
         .Function => "4_",
@@ -1415,10 +1418,16 @@ fn kindToSortScore(kind: types.CompletionItem.Kind) [] const u8 {
     };
 }
 
-fn sortCompletionItems(completions: []types.CompletionItem, _: *const Config) void {
+fn sortCompletionItems(completions: []types.CompletionItem, _: *const Config, alloc: std.mem.Allocator) void {
     // TODO: config for sorting rule?
     for (completions) |*c| {
         c.sortText = kindToSortScore(c.kind);
+        
+        if (alloc.alloc(u8, 2 + c.label.len)) |it| {
+            std.mem.copy(u8, it, c.sortText.?);
+            std.mem.copy(u8, it[2 .. ], c.label);
+            c.sortText = it;
+        } else |_| {}
     }
 }
 
@@ -1427,7 +1436,7 @@ fn completeDot(arena: *std.heap.ArenaAllocator, id: types.RequestId, handle: *Do
     defer tracy_zone.end();
 
     var completions = try document_store.enumCompletionItems(arena, handle);
-    sortCompletionItems(completions, config);
+    sortCompletionItems(completions, config, arena.allocator());
     truncateCompletions(completions, config.max_detail_length);
 
     try send(arena, types.Response{
@@ -2094,6 +2103,8 @@ pub fn main() anyerror!void {
     if (!args_it.skip()) @panic("Could not find self argument");
 
     var config_path: ?[]const u8 = null;
+    defer if (config_path) |path| allocator.free(path);
+
     var next_arg_config_path = false;
     while (args_it.next()) |arg| {
         if (next_arg_config_path) {
@@ -2133,13 +2144,14 @@ pub fn main() anyerror!void {
 
     config_read: {
         if (config_path) |path| {
-            defer allocator.free(path);
             if (loadConfigFile(path)) |conf| {
                 config = conf;
                 break :config_read;
             }
             std.debug.print("Could not open configuration file '{s}'\n", .{path});
             std.debug.print("Falling back to a lookup in the local and global configuration folders\n", .{});
+            allocator.free(path);
+            config_path = null;
         }
         if (try known_folders.getPath(allocator, .local_configuration)) |path| {
             config_path = path;

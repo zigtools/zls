@@ -261,6 +261,7 @@ pub const CompletionItem = struct {
 pub const CompletionItemLabelDetails = struct {
     detail: ?string,
     description: ?string,
+    sortText: ?string = null,
 };
 
 pub const DocumentSymbol = struct {
