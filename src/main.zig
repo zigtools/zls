@@ -271,40 +271,65 @@ fn publishDiagnostics(arena: *std.heap.ArenaAllocator, handle: DocumentStore.Han
                         .severity = .Error,
                         .code = "unused_variable",
                         .source = "zls",
-                        .message = "Unused variable! Either remove the variable or use '_ = ' on the variable to bypass this error.",
+                        .message = "Unused variable; either remove the variable or use '_ = ' on the variable to bypass this error",
                     });
             }
         }
     }
 
-    // TODO: style warnings for types, values and declarations below root scope
-    if (tree.errors.len == 0) {
-        for (tree.rootDecls()) |decl_idx| {
-            const decl = tree.nodes.items(.tag)[decl_idx];
-            switch (decl) {
-                // .simple_var_decl => {
-                //     // var d = ast.varDecl(tree, decl_idx).?;
-                //     const loc = tree.tokenLocation(0, decl_idx);
+    if (config.warn_style) {
+        var node: u32 = 0;
+        while (node < tree.nodes.len) : (node += 1) {
+            if (ast.isBuiltinCall(tree, node)) {
+                const builtin_token = tree.nodes.items(.main_token)[node];
+                const call_name = tree.tokenSlice(builtin_token);
 
-                // try diagnostics.append(.{
-                //     .range = astLocationToRange(loc),
-                //     .severity = .Information,
-                //     .code = "unused_variable",
-                //     .source = "zls",
-                //     .message = "Unused variable",
-                // });
-                // },
-                .fn_proto,
-                .fn_proto_multi,
-                .fn_proto_one,
-                .fn_proto_simple,
-                .fn_decl,
-                => blk: {
-                    var buf: [1]Ast.Node.Index = undefined;
-                    const func = ast.fnProto(tree, decl_idx, &buf).?;
-                    if (func.extern_export_inline_token != null) break :blk;
+                if (!std.mem.eql(u8, call_name, "@import")) continue;
 
-                    if (config.warn_style) {
+                const node_data = tree.nodes.items(.data)[node];
+                const params = switch (tree.nodes.items(.tag)[node]) {
+                    .builtin_call, .builtin_call_comma => tree.extra_data[node_data.lhs..node_data.rhs],
+                    .builtin_call_two, .builtin_call_two_comma => if (node_data.lhs == 0)
+                        &[_]Ast.Node.Index{}
+                    else if (node_data.rhs == 0)
+                        &[_]Ast.Node.Index{node_data.lhs}
+                    else
+                        &[_]Ast.Node.Index{ node_data.lhs, node_data.rhs },
+                    else => unreachable,
+                };
+
+                if (params.len != 1) continue;
+
+                const import_str_token = tree.nodes.items(.main_token)[params[0]];
+                const import_str = tree.tokenSlice(import_str_token);
+
+                if (std.mem.startsWith(u8, import_str, "\".")) {
+                    try diagnostics.append(.{
+                        .range = astLocationToRange(tree.tokenLocation(0, import_str_token)),
+                        .severity = .Hint,
+                        .code = "useless_dot",
+                        .source = "zls",
+                        .message = "A . or ./ is not needed in imports",
+                    });
+                }
+            }
+        }
+
+        // TODO: style warnings for types, values and declarations below root scope
+        if (tree.errors.len == 0) {
+            for (tree.rootDecls()) |decl_idx| {
+                const decl = tree.nodes.items(.tag)[decl_idx];
+                switch (decl) {
+                    .fn_proto,
+                    .fn_proto_multi,
+                    .fn_proto_one,
+                    .fn_proto_simple,
+                    .fn_decl,
+                    => blk: {
+                        var buf: [1]Ast.Node.Index = undefined;
+                        const func = ast.fnProto(tree, decl_idx, &buf).?;
+                        if (func.extern_export_inline_token != null) break :blk;
+
                         if (func.name_token) |name_token| {
                             const loc = tree.tokenLocation(0, name_token);
 
@@ -314,24 +339,24 @@ fn publishDiagnostics(arena: *std.heap.ArenaAllocator, handle: DocumentStore.Han
                             if (!is_type_function and !analysis.isCamelCase(func_name)) {
                                 try diagnostics.append(.{
                                     .range = astLocationToRange(loc),
-                                    .severity = .Information,
-                                    .code = "bad-style",
+                                    .severity = .Hint,
+                                    .code = "bad_style",
                                     .source = "zls",
                                     .message = "Functions should be camelCase",
                                 });
                             } else if (is_type_function and !analysis.isPascalCase(func_name)) {
                                 try diagnostics.append(.{
                                     .range = astLocationToRange(loc),
-                                    .severity = .Information,
-                                    .code = "bad-style",
+                                    .severity = .Hint,
+                                    .code = "bad_style",
                                     .source = "zls",
                                     .message = "Type functions should be PascalCase",
                                 });
                             }
                         }
-                    }
-                },
-                else => {},
+                    },
+                    else => {},
+                }
             }
         }
     }
@@ -769,7 +794,14 @@ fn hoverSymbol(id: types.RequestId, arena: *std.heap.ArenaAllocator, decl_handle
                 .fn_proto_simple,
                 .fn_decl,
                 => "fn", // TODO:(?) Add more info?
-                else => tree.getNodeSource(p),
+                .array_type,
+                .array_type_sentinel,
+                .ptr_type,
+                .ptr_type_aligned,
+                .ptr_type_bit_range,
+                .ptr_type_sentinel,
+                => tree.getNodeSource(p),
+                else => "unknown", // TODO: Implement more "other" type expressions; better safe than sorry
             },
             else => "unknown",
         }
