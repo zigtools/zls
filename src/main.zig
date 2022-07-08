@@ -229,11 +229,66 @@ fn publishDiagnostics(arena: *std.heap.ArenaAllocator, handle: DocumentStore.Han
         });
     }
 
+    for (handle.document_scope.scopes) |scope| {
+        const scope_data = switch (scope.data) {
+            .function => |f| f,
+            .block => |b| b,
+            else => continue,
+        };
+
+        var decl_iterator = scope.decls.iterator();
+        while (decl_iterator.next()) |decl| {
+            var identifier_count: usize = 0;
+
+            var name_token_index = switch (decl.value_ptr.*) {
+                .ast_node => |an| s: {
+                    const an_tag = tree.nodes.items(.tag)[an];
+                    switch (an_tag) {
+                        .simple_var_decl => {
+                            break :s tree.nodes.items(.main_token)[an] + 1;
+                        },
+                        else => continue,
+                    }
+                },
+                .param_decl => |param| param.name_token orelse continue,
+                else => continue,
+            };
+
+            const pit_start = tree.firstToken(scope_data);
+            const pit_end = ast.lastToken(tree, scope_data);
+
+            for (tree.tokens.items(.tag)[pit_start..pit_end]) |tag, index| {
+                if (tag == .identifier and std.mem.eql(u8, tree.tokenSlice(pit_start + @intCast(u32, index)), tree.tokenSlice(name_token_index))) identifier_count += 1;
+            }
+
+            if (identifier_count <= 1)
+                try diagnostics.append(.{
+                    .range = astLocationToRange(tree.tokenLocation(0, name_token_index)),
+                    .severity = .Error,
+                    .code = "unused_variable",
+                    .source = "zls",
+                    .message = "Unused variable! Either remove the variable or use '_ = ' on the variable to bypass this error.",
+                });
+        }
+    }
+
     // TODO: style warnings for types, values and declarations below root scope
     if (tree.errors.len == 0) {
         for (tree.rootDecls()) |decl_idx| {
             const decl = tree.nodes.items(.tag)[decl_idx];
             switch (decl) {
+                // .simple_var_decl => {
+                //     // var d = ast.varDecl(tree, decl_idx).?;
+                //     const loc = tree.tokenLocation(0, decl_idx);
+
+                // try diagnostics.append(.{
+                //     .range = astLocationToRange(loc),
+                //     .severity = .Information,
+                //     .code = "unused_variable",
+                //     .source = "zls",
+                //     .message = "Unused variable",
+                // });
+                // },
                 .fn_proto,
                 .fn_proto_multi,
                 .fn_proto_one,
@@ -255,7 +310,7 @@ fn publishDiagnostics(arena: *std.heap.ArenaAllocator, handle: DocumentStore.Han
                                 try diagnostics.append(.{
                                     .range = astLocationToRange(loc),
                                     .severity = .Information,
-                                    .code = "BadStyle",
+                                    .code = "bad-style",
                                     .source = "zls",
                                     .message = "Functions should be camelCase",
                                 });
@@ -263,7 +318,7 @@ fn publishDiagnostics(arena: *std.heap.ArenaAllocator, handle: DocumentStore.Han
                                 try diagnostics.append(.{
                                     .range = astLocationToRange(loc),
                                     .severity = .Information,
-                                    .code = "BadStyle",
+                                    .code = "bad-style",
                                     .source = "zls",
                                     .message = "Type functions should be PascalCase",
                                 });
@@ -1192,7 +1247,7 @@ fn completeFieldAccess(arena: *std.heap.ArenaAllocator, id: types.RequestId, han
         truncateCompletions(completions.items, config.max_detail_length);
         if (client_capabilities.label_details_support) {
             for (completions.items) |*item| {
-               try formatDetailledLabel(item, arena.allocator());
+                try formatDetailledLabel(item, arena.allocator());
             }
         }
     }
@@ -1375,7 +1430,6 @@ fn formatDetailledLabel(item: *types.CompletionItem, alloc: std.mem.Allocator) !
     //     logger.info("labelDetails: {s}  ::  {s}", .{item.labelDetails.?.detail, item.labelDetails.?.description});
 }
 
-
 fn completeError(arena: *std.heap.ArenaAllocator, id: types.RequestId, handle: *DocumentStore.Handle, config: *const Config) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
@@ -1396,25 +1450,24 @@ fn completeError(arena: *std.heap.ArenaAllocator, id: types.RequestId, handle: *
     });
 }
 
-fn kindToSortScore(kind: types.CompletionItem.Kind) [] const u8 {
-    return switch (kind)
-    {
+fn kindToSortScore(kind: types.CompletionItem.Kind) []const u8 {
+    return switch (kind) {
         .Constant => "1_",
 
         .Variable => "2_",
         .Field => "3_",
         .Function => "4_",
-        
-        .Keyword,
-        .EnumMember => "5_",
-        
+
+        .Keyword, .EnumMember => "5_",
+
         .Class,
         .Interface,
         .Struct,
         // Union?
-        .TypeParameter => "6_",
-        
-        else => "9_"
+        .TypeParameter,
+        => "6_",
+
+        else => "9_",
     };
 }
 
@@ -1422,10 +1475,10 @@ fn sortCompletionItems(completions: []types.CompletionItem, _: *const Config, al
     // TODO: config for sorting rule?
     for (completions) |*c| {
         c.sortText = kindToSortScore(c.kind);
-        
+
         if (alloc.alloc(u8, 2 + c.label.len)) |it| {
             std.mem.copy(u8, it, c.sortText.?);
-            std.mem.copy(u8, it[2 .. ], c.label);
+            std.mem.copy(u8, it[2..], c.label);
             c.sortText = it;
         } else |_| {}
     }
@@ -1554,13 +1607,7 @@ fn initializeHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: 
                     },
                     .textDocumentSync = .Full,
                     .renameProvider = true,
-                    .completionProvider = .{
-                        .resolveProvider = false,
-                        .triggerCharacters = &[_][]const u8{ ".", ":", "@" },
-                        .completionItem = .{
-                            .labelDetailsSupport = true
-                        }
-                    },
+                    .completionProvider = .{ .resolveProvider = false, .triggerCharacters = &[_][]const u8{ ".", ":", "@" }, .completionItem = .{ .labelDetailsSupport = true } },
                     .documentHighlightProvider = false,
                     .hoverProvider = true,
                     .codeActionProvider = false,

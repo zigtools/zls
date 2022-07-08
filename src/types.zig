@@ -251,11 +251,11 @@ pub const CompletionItem = struct {
 
     insertTextFormat: ?InsertTextFormat = .PlainText,
     documentation: ?MarkupContent = null,
-    
+
     // FIXME: i commented this out, because otherwise the vscode client complains about *ranges*
     // and breaks code completion entirely
     // see: https://github.com/zigtools/zls-vscode/pull/33
-    // textEdit: ?TextEdit = null, 
+    // textEdit: ?TextEdit = null,
 };
 
 pub const CompletionItemLabelDetails = struct {
