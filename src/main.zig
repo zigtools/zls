@@ -404,7 +404,7 @@ fn typeToCompletion(
             null,
             config,
         ),
-        .primitive => {},
+        .primitive, .array_index => {},
     }
 }
 
@@ -736,19 +736,50 @@ fn hoverSymbol(id: types.RequestId, arena: *std.heap.ArenaAllocator, decl_handle
         .label_decl => |label_decl| tree.tokenSlice(label_decl),
     };
 
+    var bound_type_params = analysis.BoundTypeParams.init(arena.allocator());
+    const resolved_type = try decl_handle.resolveType(&document_store, arena, &bound_type_params);
+
+    const resolved_type_str = if (resolved_type) |rt|
+        if (rt.type.is_type_val) "type" else switch (rt.type.data) {
+            .pointer,
+            .slice,
+            .error_union,
+            .primitive,
+            => |p| tree.getNodeSource(p),
+            .other => |p| switch (tree.nodes.items(.tag)[p]) {
+                .container_decl,
+                .container_decl_arg,
+                .container_decl_arg_trailing,
+                .container_decl_trailing,
+                .container_decl_two,
+                .container_decl_two_trailing,
+                .tagged_union,
+                .tagged_union_trailing,
+                .tagged_union_two,
+                .tagged_union_two_trailing,
+                .tagged_union_enum_tag,
+                .tagged_union_enum_tag_trailing,
+                => tree.tokenSlice(tree.nodes.items(.main_token)[p] - 2), // NOTE: This is a hacky nightmare but it works :P
+                else => tree.getNodeSource(p),
+            },
+            else => "unknown",
+        }
+    else
+        "unknown";
+
     var hover_text: []const u8 = undefined;
     if (hover_kind == .Markdown) {
         hover_text =
             if (doc_str) |doc|
-            try std.fmt.allocPrint(arena.allocator(), "```zig\n{s}\n```\n{s}", .{ def_str, doc })
+            try std.fmt.allocPrint(arena.allocator(), "```zig\n{s}\n```\n```zig\n({s})\n```\n{s}", .{ def_str, resolved_type_str, doc })
         else
-            try std.fmt.allocPrint(arena.allocator(), "```zig\n{s}\n```", .{def_str});
+            try std.fmt.allocPrint(arena.allocator(), "```zig\n{s}\n```\n```zig\n({s})\n```", .{ def_str, resolved_type_str });
     } else {
         hover_text =
             if (doc_str) |doc|
-            try std.fmt.allocPrint(arena.allocator(), "{s}\n{s}", .{ def_str, doc })
+            try std.fmt.allocPrint(arena.allocator(), "{s} ({s})\n{s}", .{ def_str, resolved_type_str, doc })
         else
-            def_str;
+            try std.fmt.allocPrint(arena.allocator(), "{s} ({s})", .{ def_str, resolved_type_str });
     }
 
     try send(arena, types.Response{
