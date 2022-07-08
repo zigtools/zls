@@ -255,6 +255,9 @@ fn publishDiagnostics(arena: *std.heap.ArenaAllocator, handle: DocumentStore.Han
                     else => continue,
                 };
 
+                if (std.mem.eql(u8, tree.tokenSlice(name_token_index), "_"))
+                    continue;
+
                 const pit_start = tree.firstToken(scope_data);
                 const pit_end = ast.lastToken(tree, scope_data);
 
@@ -760,6 +763,12 @@ fn hoverSymbol(id: types.RequestId, arena: *std.heap.ArenaAllocator, decl_handle
                 .tagged_union_enum_tag,
                 .tagged_union_enum_tag_trailing,
                 => tree.tokenSlice(tree.nodes.items(.main_token)[p] - 2), // NOTE: This is a hacky nightmare but it works :P
+                .fn_proto,
+                .fn_proto_multi,
+                .fn_proto_one,
+                .fn_proto_simple,
+                .fn_decl,
+                => "fn", // TODO:(?) Add more info?
                 else => tree.getNodeSource(p),
             },
             else => "unknown",
