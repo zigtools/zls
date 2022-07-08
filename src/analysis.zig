@@ -494,7 +494,7 @@ fn resolveUnwrapErrorType(store: *DocumentStore, arena: *std.heap.ArenaAllocator
             .type = .{ .data = .{ .other = n }, .is_type_val = rhs.type.is_type_val },
             .handle = rhs.handle,
         },
-        .primitive, .slice, .pointer => return null,
+        .primitive, .slice, .pointer, .array_index => return null,
     };
 
     if (rhs.handle.tree.nodes.items(.tag)[rhs_node] == .error_union) {
@@ -670,7 +670,7 @@ pub fn resolveTypeOfNodeInternal(store: *DocumentStore, arena: *std.heap.ArenaAl
         .identifier => {
             if (isTypeIdent(handle.tree, main_tokens[node])) {
                 return TypeWithHandle{
-                    .type = .{ .data = .primitive, .is_type_val = true },
+                    .type = .{ .data = .{ .primitive = node }, .is_type_val = true },
                     .handle = handle,
                 };
             }
@@ -977,7 +977,8 @@ pub const Type = struct {
         slice: Ast.Node.Index,
         error_union: Ast.Node.Index,
         other: Ast.Node.Index,
-        primitive,
+        primitive: Ast.Node.Index,
+        array_index,
     },
     /// If true, the type `type`, the attached data is the value of the type value.
     is_type_val: bool,
@@ -1941,7 +1942,7 @@ pub const DeclWithHandle = struct {
                 bound_type_params,
             ),
             .array_index => TypeWithHandle{
-                .type = .{ .data = .primitive, .is_type_val = false },
+                .type = .{ .data = .array_index, .is_type_val = false },
                 .handle = self.handle,
             },
             .label_decl => return null,
