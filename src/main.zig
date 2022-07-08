@@ -1307,8 +1307,6 @@ fn formatDetailledLabel(item: *types.CompletionItem, alloc: std.mem.Allocator) !
             return;
         }
 
-        item.insertText = item.label;
-        item.insertTextFormat = .PlainText;
         item.detail = item.label;
         item.labelDetails = .{ .detail = it[s .. e + 1], .description = it[e + 1 ..] };
 
