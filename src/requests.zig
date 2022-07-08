@@ -263,6 +263,7 @@ pub const Configuration = struct {
     params: struct {
         settings: struct {
             enable_snippets: ?bool,
+            enable_unused_variable_warnings: ?bool,
             zig_lib_path: ?[]const u8,
             zig_exe_path: ?[]const u8,
             warn_style: ?bool,

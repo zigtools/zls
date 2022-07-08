@@ -229,46 +229,48 @@ fn publishDiagnostics(arena: *std.heap.ArenaAllocator, handle: DocumentStore.Han
         });
     }
 
-    for (handle.document_scope.scopes) |scope| {
-        const scope_data = switch (scope.data) {
-            .function => |f| f,
-            .block => |b| b,
-            else => continue,
-        };
-
-        var decl_iterator = scope.decls.iterator();
-        while (decl_iterator.next()) |decl| {
-            var identifier_count: usize = 0;
-
-            var name_token_index = switch (decl.value_ptr.*) {
-                .ast_node => |an| s: {
-                    const an_tag = tree.nodes.items(.tag)[an];
-                    switch (an_tag) {
-                        .simple_var_decl => {
-                            break :s tree.nodes.items(.main_token)[an] + 1;
-                        },
-                        else => continue,
-                    }
-                },
-                .param_decl => |param| param.name_token orelse continue,
+    if (config.enable_unused_variable_warnings) {
+        for (handle.document_scope.scopes) |scope| {
+            const scope_data = switch (scope.data) {
+                .function => |f| f,
+                .block => |b| b,
                 else => continue,
             };
 
-            const pit_start = tree.firstToken(scope_data);
-            const pit_end = ast.lastToken(tree, scope_data);
+            var decl_iterator = scope.decls.iterator();
+            while (decl_iterator.next()) |decl| {
+                var identifier_count: usize = 0;
 
-            for (tree.tokens.items(.tag)[pit_start..pit_end]) |tag, index| {
-                if (tag == .identifier and std.mem.eql(u8, tree.tokenSlice(pit_start + @intCast(u32, index)), tree.tokenSlice(name_token_index))) identifier_count += 1;
+                var name_token_index = switch (decl.value_ptr.*) {
+                    .ast_node => |an| s: {
+                        const an_tag = tree.nodes.items(.tag)[an];
+                        switch (an_tag) {
+                            .simple_var_decl => {
+                                break :s tree.nodes.items(.main_token)[an] + 1;
+                            },
+                            else => continue,
+                        }
+                    },
+                    .param_decl => |param| param.name_token orelse continue,
+                    else => continue,
+                };
+
+                const pit_start = tree.firstToken(scope_data);
+                const pit_end = ast.lastToken(tree, scope_data);
+
+                for (tree.tokens.items(.tag)[pit_start..pit_end]) |tag, index| {
+                    if (tag == .identifier and std.mem.eql(u8, tree.tokenSlice(pit_start + @intCast(u32, index)), tree.tokenSlice(name_token_index))) identifier_count += 1;
+                }
+
+                if (identifier_count <= 1)
+                    try diagnostics.append(.{
+                        .range = astLocationToRange(tree.tokenLocation(0, name_token_index)),
+                        .severity = .Error,
+                        .code = "unused_variable",
+                        .source = "zls",
+                        .message = "Unused variable! Either remove the variable or use '_ = ' on the variable to bypass this error.",
+                    });
             }
-
-            if (identifier_count <= 1)
-                try diagnostics.append(.{
-                    .range = astLocationToRange(tree.tokenLocation(0, name_token_index)),
-                    .severity = .Error,
-                    .code = "unused_variable",
-                    .source = "zls",
-                    .message = "Unused variable! Either remove the variable or use '_ = ' on the variable to bypass this error.",
-                });
         }
     }
 

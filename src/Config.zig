@@ -3,6 +3,9 @@
 /// Whether to enable snippet completions
 enable_snippets: bool = false,
 
+/// Whether to enable unused variable warnings
+enable_unused_variable_warnings: bool = false,
+
 /// zig library path
 zig_lib_path: ?[]const u8 = null,
 

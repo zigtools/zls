@@ -9,15 +9,27 @@ Zig Language Server, or `zls`, is a language server for Zig. The Zig wiki states
 ## Table Of Contents
 
 - [Installation](#installation)
-  - [Build Options](#build-options)
+  - [Installing binaries](#installing-binaries)
+    - [MacOS](#macos)
+    - [Linux](#linux)
+  - [From Source](#from-source)
+    - [Build Options](#build-options)
+    - [Updating Data Files](#updating-data-files)
   - [Configuration Options](#configuration-options)
-- [Usage](#usage)
+- [Features](#features)
   - [VSCode](#vscode)
   - [Sublime Text](#sublime-text)
+    - [Sublime Text 3](#sublime-text-3)
+    - [Sublime Text 4](#sublime-text-4)
   - [Kate](#kate)
   - [Neovim/Vim8](#neovimvim8)
+    - [CoC](#coc)
+    - [YouCompleteMe](#youcompleteme)
+    - [nvim-lspconfig](#nvim-lspconfig)
+    - [LanguageClient-neovim](#languageclient-neovim)
   - [Emacs](#emacs)
   - [Doom Emacs](#doom-emacs)
+  - [Spacemacs](#spacemacs)
 - [Related Projects](#related-projects)
 - [License](#license)
 
@@ -88,6 +100,7 @@ The following options are currently available.
 | Option | Type | Default value | What it Does |
 | --- | --- | --- | --- |
 | `enable_snippets` | `bool` | `false` | Enables snippet completions when the client also supports them. |
+| `enable_unused_variable_warnings` | `bool` | `false`| Enables warnings for local variables that aren't used. |
 | `zig_lib_path` | `?[]const u8` | `null` | zig library path, e.g. `/path/to/zig/lib/zig`, used to analyze std library imports. |
 | `zig_exe_path` | `?[]const u8` | `null` | zig executable path, e.g. `/path/to/zig/zig`, used to run the custom build runner. If `null`, zig is looked up in `PATH`. Will be used to infer the zig standard library path if none is provided. |
 | `warn_style` | `bool` | `false` | Enables warnings for style *guideline* mismatches |
@@ -125,7 +138,7 @@ Install the `zls-vscode` extension from [here](https://github.com/zigtools/zls-v
 - Install the `LSP` package from [here](https://github.com/sublimelsp/LSP/releases) or via Package Control.
 - Add this snippet to `LSP's` user settings:
 
-#### For Sublime Text 3:
+#### Sublime Text 3
 
 ```json
 {
@@ -141,7 +154,7 @@ Install the `zls-vscode` extension from [here](https://github.com/zigtools/zls-v
 }
 ```
 
-#### For Sublime Text 4:
+#### Sublime Text 4
 
 ```json
 {
