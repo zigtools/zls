@@ -6,6 +6,9 @@ enable_snippets: bool = false,
 /// Whether to enable unused variable warnings
 enable_unused_variable_warnings: bool = false,
 
+/// Whether to enable import/embedFile argument completions (NOTE: these are triggered manually as updating the autotrigger characters may cause issues)
+enable_import_embedfile_argument_completions: bool = false,
+
 /// zig library path
 zig_lib_path: ?[]const u8 = null,
 
