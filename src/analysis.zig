@@ -1398,6 +1398,8 @@ pub const SourceRange = std.zig.Token.Loc;
 pub const PositionContext = union(enum) {
     builtin: SourceRange,
     comment,
+    import_string_literal: SourceRange,
+    embedfile_string_literal: SourceRange,
     string_literal: SourceRange,
     field_access: SourceRange,
     var_access: SourceRange,
@@ -1412,6 +1414,8 @@ pub const PositionContext = union(enum) {
         return switch (self) {
             .builtin => |r| r,
             .comment => null,
+            .import_string_literal => |r| r,
+            .embedfile_string_literal => |r| r,
             .string_literal => |r| r,
             .field_access => |r| r,
             .var_access => |r| r,
@@ -1485,7 +1489,27 @@ pub fn documentPositionContext(arena: *std.heap.ArenaAllocator, document: types.
             // State changes
             var curr_ctx = try peek(&stack);
             switch (tok.tag) {
-                .string_literal, .multiline_string_literal_line => curr_ctx.ctx = .{ .string_literal = tok.loc },
+                .string_literal, .multiline_string_literal_line => string_lit_block: {
+                    if (curr_ctx.stack_id == .Paren and stack.items.len >= 2) {
+                        const perhaps_builtin = stack.items[stack.items.len - 2];
+
+                        switch (perhaps_builtin.ctx) {
+                            .builtin => |loc| {
+                                const builtin_name = tokenizer.buffer[loc.start..loc.end];
+                                if (std.mem.eql(u8, builtin_name, "@import")) {
+                                    curr_ctx.ctx = .{ .import_string_literal = tok.loc };
+                                    break :string_lit_block;
+                                }
+                                if (std.mem.eql(u8, builtin_name, "@embedFile")) {
+                                    curr_ctx.ctx = .{ .embedfile_string_literal = tok.loc };
+                                    break :string_lit_block;
+                                }
+                            },
+                            else => {},
+                        }
+                    }
+                    curr_ctx.ctx = .{ .string_literal = tok.loc };
+                },
                 .identifier => switch (curr_ctx.ctx) {
                     .empty, .pre_label => curr_ctx.ctx = .{ .var_access = tok.loc },
                     .label => |filled| if (!filled) {
