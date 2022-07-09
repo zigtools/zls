@@ -231,9 +231,16 @@ fn publishDiagnostics(arena: *std.heap.ArenaAllocator, handle: DocumentStore.Han
     }
 
     if (config.enable_unused_variable_warnings) {
-        for (handle.document_scope.scopes) |scope| {
+        scopes: for (handle.document_scope.scopes) |scope| {
             const scope_data = switch (scope.data) {
-                .function => |f| f,
+                .function => |f| b: {
+                    var buf: [1]std.zig.Ast.Node.Index = undefined;
+                    var proto = ast.fnProto(tree, f, &buf) orelse break :b f;
+                    if (proto.extern_export_inline_token) |tok| {
+                        if (std.mem.eql(u8, tree.tokenSlice(tok), "extern")) continue :scopes;
+                    }
+                    break :b f;
+                },
                 .block => |b| b,
                 else => continue,
             };
@@ -769,13 +776,13 @@ fn hoverSymbol(id: types.RequestId, arena: *std.heap.ArenaAllocator, decl_handle
     const resolved_type = try decl_handle.resolveType(&document_store, arena, &bound_type_params);
 
     const resolved_type_str = if (resolved_type) |rt|
-        if (rt.type.is_type_val) "type" else switch (rt.type.data) {
+        if (rt.type.is_type_val) "type" else switch (rt.type.data) { // TODO: Investigate random weird numbers like 897 that cause index of bounds
             .pointer,
             .slice,
             .error_union,
             .primitive,
-            => |p| tree.getNodeSource(p),
-            .other => |p| switch (tree.nodes.items(.tag)[p]) {
+            => |p| if (p >= tree.nodes.len) "unknown" else tree.getNodeSource(p),
+            .other => |p| if (p >= tree.nodes.len) "unknown" else switch (tree.nodes.items(.tag)[p]) {
                 .container_decl,
                 .container_decl_arg,
                 .container_decl_arg_trailing,
@@ -1587,6 +1594,8 @@ fn documentSymbol(arena: *std.heap.ArenaAllocator, id: types.RequestId, handle: 
 }
 
 fn loadConfigFile(file_path: []const u8) ?Config {
+    @setEvalBranchQuota(5000);
+
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -1855,6 +1864,9 @@ fn completionHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: 
         .enum_literal => try completeDot(arena, id, handle, config),
         .label => try completeLabel(arena, id, doc_position.absolute_index, handle, config),
         .import_string_literal, .embedfile_string_literal => |loc| {
+            if (!config.enable_import_embedfile_argument_completions)
+                return try respondGeneric(id, no_completions_response);
+
             const line_mem_start = @ptrToInt(doc_position.line.ptr) - @ptrToInt(handle.document.mem.ptr);
             const completing = handle.tree.source[line_mem_start + loc.start + 1 .. line_mem_start + loc.end];
 
