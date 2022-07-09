@@ -22,7 +22,7 @@ pub fn build(b: *std.build.Builder) !void {
         b.option(std.log.Level, "log_level", "The Log Level to be used.") orelse .info,
     );
 
-    const enable_tracy = b.option(bool, "enable_tracy", "Whether of not tracy should be enabled.") orelse false;
+    const enable_tracy = b.option(bool, "enable_tracy", "Whether tracy should be enabled.") orelse false;
 
     exe_options.addOption(
         bool,
