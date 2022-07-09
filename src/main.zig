@@ -17,6 +17,7 @@ const shared = @import("./shared.zig");
 const Ast = std.zig.Ast;
 const known_folders = @import("known-folders");
 const tracy = @import("./tracy.zig");
+const uri_utils = @import("./uri.zig");
 
 const data = switch (build_options.data_version) {
     .master => @import("data/master.zig"),
@@ -1853,6 +1854,73 @@ fn completionHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: 
         .global_error_set => try completeError(arena, id, handle, config),
         .enum_literal => try completeDot(arena, id, handle, config),
         .label => try completeLabel(arena, id, doc_position.absolute_index, handle, config),
+        .import_string_literal, .embedfile_string_literal => |loc| {
+            const line_mem_start = @ptrToInt(doc_position.line.ptr) - @ptrToInt(handle.document.mem.ptr);
+            const completing = handle.tree.source[line_mem_start + loc.start + 1 .. line_mem_start + loc.end];
+
+            var subpath_present = false;
+            var fsl_completions = std.ArrayList(types.CompletionItem).init(allocator);
+
+            fsc: {
+                var document_path = try uri_utils.parse(arena.allocator(), handle.uri());
+                var document_dir_path = std.fs.openDirAbsolute(std.fs.path.dirname(document_path) orelse break :fsc, .{ .iterate = true }) catch break :fsc;
+                defer document_dir_path.close();
+
+                if (std.mem.lastIndexOfScalar(u8, completing, '/')) |subpath_index| {
+                    var subpath = completing[0..subpath_index];
+
+                    if (std.mem.startsWith(u8, subpath, "./") and subpath_index > 2) {
+                        subpath = completing[2..subpath_index];
+                    } else if (std.mem.startsWith(u8, subpath, ".") and subpath_index > 1) {
+                        subpath = completing[1..subpath_index];
+                    }
+
+                    var old = document_dir_path;
+                    document_dir_path = document_dir_path.openDir(subpath, .{ .iterate = true }) catch break :fsc // NOTE: Is this even safe lol?
+                    old.close();
+
+                    subpath_present = true;
+                }
+
+                var dir_iterator = document_dir_path.iterate();
+                while (try dir_iterator.next()) |entry| {
+                    if (std.mem.startsWith(u8, entry.name, ".")) continue;
+                    if (entry.kind == .File and pos_context == .import_string_literal and !std.mem.endsWith(u8, entry.name, ".zig")) continue;
+
+                    const l = try arena.allocator().dupe(u8, entry.name);
+                    try fsl_completions.append(types.CompletionItem{
+                        .label = l,
+                        .insertText = l,
+                        .kind = if (entry.kind == .File) .File else .Folder,
+                    });
+                }
+            }
+
+            if (!subpath_present and pos_context == .import_string_literal) {
+                if (handle.associated_build_file) |bf| {
+                    try fsl_completions.ensureUnusedCapacity(bf.packages.items.len);
+
+                    for (bf.packages.items) |pkg| {
+                        try fsl_completions.append(.{
+                            .label = pkg.name,
+                            .kind = .Module,
+                        });
+                    }
+                }
+            }
+
+            truncateCompletions(fsl_completions.items, config.max_detail_length);
+
+            try send(arena, types.Response{
+                .id = id,
+                .result = .{
+                    .CompletionList = .{
+                        .isIncomplete = false,
+                        .items = fsl_completions.items,
+                    },
+                },
+            });
+        },
         else => try respondGeneric(id, no_completions_response),
     }
 }
@@ -1910,7 +1978,7 @@ fn gotoHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: reques
         switch (pos_context) {
             .var_access => try gotoDefinitionGlobal(arena, id, doc_position.absolute_index, handle, config, resolve_alias),
             .field_access => |range| try gotoDefinitionFieldAccess(arena, id, handle, doc_position, range, config, resolve_alias),
-            .string_literal => try gotoDefinitionString(arena, id, doc_position.absolute_index, handle, config),
+            .import_string_literal => try gotoDefinitionString(arena, id, doc_position.absolute_index, handle, config),
             .label => try gotoDefinitionLabel(arena, id, doc_position.absolute_index, handle, config),
             else => try respondGeneric(id, null_result_response),
         }
