@@ -2255,13 +2255,7 @@ pub fn lookupSymbolGlobal(store: *DocumentStore, arena: *std.heap.ArenaAllocator
         const scope = &handle.document_scope.scopes[curr];
         if (source_index >= scope.range.start and source_index <= scope.range.end) blk: {
             if (scope.decls.getEntry(symbol)) |candidate| {
-                switch (candidate.value_ptr.*) {
-                    .ast_node => |node| {
-                        if (handle.tree.nodes.items(.tag)[node].isContainerField()) break :blk;
-                    },
-                    .label_decl => break :blk,
-                    else => {},
-                }
+                if (candidate.value_ptr.* == .label_decl) break :blk;
                 return DeclWithHandle{
                     .decl = candidate.value_ptr,
                     .handle = handle,
