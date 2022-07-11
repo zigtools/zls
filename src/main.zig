@@ -91,6 +91,7 @@ const ClientCapabilities = struct {
     hover_supports_md: bool = false,
     completion_doc_supports_md: bool = false,
     label_details_support: bool = false,
+    supports_configuration: bool = false,
 };
 
 var client_capabilities = ClientCapabilities{};
@@ -1741,21 +1742,78 @@ fn initializeHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: 
     });
 
     if (req.params.capabilities.workspace) |workspace| {
-        if (workspace.configuration.value) {
-            try send(arena, types.Request{
-                .method = "workspace/configuration",
-                .params = .{
-                    .ConfigurationParams = .{
-                        .items = &[_]types.ConfigurationParams.ConfigurationItem{},
-                    },
-                },
-            });
+        client_capabilities.supports_configuration = workspace.configuration.value;
+        if (workspace.didChangeConfiguration != null and workspace.didChangeConfiguration.?.dynamicRegistration.value) {
+            try registerCapability(arena, "workspace/didChangeConfiguration");
         }
     }
 
     logger.info("zls initialized", .{});
     logger.info("{}", .{client_capabilities});
     logger.info("Using offset encoding: {s}", .{std.meta.tagName(offset_encoding)});
+}
+
+fn registerCapability(arena: *std.heap.ArenaAllocator, method: []const u8) !void {
+    // NOTE: stage1 moment occurs if we dont do it like this :(
+    // long live stage2's not broken anon structs
+    logger.debug("Dynamically registering method '{s}'", .{method});
+
+    const id = try std.fmt.allocPrint(arena.allocator(), "register-{s}", .{method});
+    const reg = types.RegistrationParams.Registration{
+        .id = id,
+        .method = method,
+    };
+    const registrations = [1]types.RegistrationParams.Registration{reg};
+    const params = types.RegistrationParams{
+        .registrations = &registrations,
+    };
+
+    const respp = types.ResponseParams{
+        .RegistrationParams = params,
+    };
+
+    const req = types.Request{
+        .id = .{ .String = id },
+        .method = "client/registerCapability",
+        .params = respp,
+    };
+
+    std.log.info("AAAAA {s}", .{req});
+
+    try send(arena, req);
+}
+
+fn requestConfiguration(arena: *std.heap.ArenaAllocator) !void {
+    const configuration_items = comptime confi: {
+        var comp_confi: [std.meta.fields(Config).len]types.ConfigurationParams.ConfigurationItem = undefined;
+        inline for (std.meta.fields(Config)) |field, index| {
+            comp_confi[index] = .{
+                .scopeUri = "zls",
+                .section = "zls." ++ field.name,
+            };
+        }
+
+        break :confi comp_confi;
+    };
+
+    logger.info("Requesting configuration!", .{});
+    try send(arena, types.Request{
+        .id = .{ .String = "i_haz_configuration" },
+        .method = "workspace/configuration",
+        .params = .{
+            .ConfigurationParams = .{
+                .items = &configuration_items,
+            },
+        },
+    });
+}
+
+fn initializedHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, config: *const Config) !void {
+    _ = id;
+    _ = config;
+
+    if (client_capabilities.supports_configuration)
+        try requestConfiguration(arena);
 }
 
 var keep_running = true;
@@ -2121,18 +2179,22 @@ fn renameHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requ
     }
 }
 
-fn didChangeConfigurationHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.Configuration, config: *Config) !void {
+fn didChangeConfigurationHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, maybe_req: std.json.Value, config: *Config) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
     _ = arena;
     _ = id;
-    inline for (std.meta.fields(Config)) |field| {
-        if (@field(req.params.settings, field.name)) |value| {
-            logger.debug("setting configuration option '{s}' to '{any}'", .{ field.name, value });
-            @field(config, field.name) = value;
+    if (maybe_req.Object.get("params").?.Object.get("settings").? == .Object) {
+        const req = try requests.fromDynamicTree(arena, requests.Configuration, maybe_req);
+        inline for (std.meta.fields(Config)) |field| {
+            if (@field(req.params.settings, field.name)) |value| {
+                logger.debug("setting configuration option '{s}' to '{any}'", .{ field.name, value });
+                @field(config, field.name) = value;
+            }
         }
-    }
+    } else if (client_capabilities.supports_configuration)
+        try requestConfiguration(arena);
 }
 
 fn referencesHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.References, config: *const Config) !void {
@@ -2179,6 +2241,53 @@ fn processJsonRpc(arena: *std.heap.ArenaAllocator, parser: *std.json.Parser, jso
         else => types.RequestId{ .Integer = 0 },
     } else types.RequestId{ .Integer = 0 };
 
+    if (id == .String and std.mem.startsWith(u8, id.String, "register")) {
+        logger.info("INFO!!! {s}", .{json});
+        return;
+    }
+    if (id == .String and std.mem.eql(u8, id.String, "i_haz_configuration")) {
+        logger.info("Setting configuration...", .{});
+
+        // NOTE: Does this work with other editors?
+        // Yes, String ids are officially supported by LSP
+        // but not sure how standard this "standard" really is
+
+        const result = tree.root.Object.get("result").?.Array;
+
+        inline for (std.meta.fields(Config)) |field, index| {
+            const value = result.items[index];
+            const ft = if (@typeInfo(field.field_type) == .Optional)
+                @typeInfo(field.field_type).Optional.child
+            else
+                field.field_type;
+            const ti = @typeInfo(ft);
+
+            if (value != .Null) {
+                const new_value: field.field_type = switch (ft) {
+                    []const u8 => switch (value) {
+                        .String => |s| s,
+                        else => @panic("Invalid configuration value"), // TODO: Handle this
+                    },
+                    else => switch (ti) {
+                        .Int => switch (value) {
+                            .Integer => |s| std.math.cast(ft, s) orelse @panic("Invalid configuration value"),
+                            else => @panic("Invalid configuration value"), // TODO: Handle this
+                        },
+                        .Bool => switch (value) {
+                            .Bool => |b| b,
+                            else => @panic("Invalid configuration value"), // TODO: Handle this
+                        },
+                        else => @compileError("Not implemented for " ++ @typeName(ft)),
+                    },
+                };
+                logger.debug("setting configuration option '{s}' to '{any}'", .{ field.name, new_value });
+                @field(config, field.name) = new_value;
+            }
+        }
+
+        return;
+    }
+
     std.debug.assert(tree.root.Object.get("method") != null);
     const method = tree.root.Object.get("method").?.String;
 
@@ -2189,7 +2298,7 @@ fn processJsonRpc(arena: *std.heap.ArenaAllocator, parser: *std.json.Parser, jso
     }
 
     const method_map = .{
-        .{"initialized"},
+        .{ "initialized", void, initializedHandler },
         .{"$/cancelRequest"},
         .{"textDocument/willSave"},
         .{ "initialize", requests.Initialize, initializeHandler },
@@ -2210,7 +2319,7 @@ fn processJsonRpc(arena: *std.heap.ArenaAllocator, parser: *std.json.Parser, jso
         .{ "textDocument/formatting", requests.Formatting, formattingHandler },
         .{ "textDocument/rename", requests.Rename, renameHandler },
         .{ "textDocument/references", requests.References, referencesHandler },
-        .{ "workspace/didChangeConfiguration", requests.Configuration, didChangeConfigurationHandler },
+        .{ "workspace/didChangeConfiguration", std.json.Value, didChangeConfigurationHandler },
     };
 
     // Hack to avoid `return`ing in the inline for, which causes bugs.

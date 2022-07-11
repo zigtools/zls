@@ -44,6 +44,7 @@ pub const ResponseParams = union(enum) {
     WorkspaceEdit: WorkspaceEdit,
     InitializeResult: InitializeResult,
     ConfigurationParams: ConfigurationParams,
+    RegistrationParams: RegistrationParams,
 };
 
 /// JSONRPC notifications
@@ -77,6 +78,7 @@ pub const Response = struct {
 
 pub const Request = struct {
     jsonrpc: string = "2.0",
+    id: RequestId,
     method: []const u8,
     params: ?ResponseParams,
 };
@@ -398,5 +400,16 @@ pub const ConfigurationParams = struct {
     pub const ConfigurationItem = struct {
         scopeUri: ?[]const u8,
         section: ?[]const u8,
+    };
+};
+
+pub const RegistrationParams = struct {
+    registrations: []const Registration,
+
+    pub const Registration = struct {
+        id: string,
+        method: string,
+
+        // registerOptions?: LSPAny;
     };
 };

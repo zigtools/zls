@@ -148,6 +148,9 @@ pub const Initialize = struct {
     pub const ClientCapabilities = struct {
         workspace: ?struct {
             configuration: Default(bool, false),
+            didChangeConfiguration: ?struct {
+                dynamicRegistration: Default(bool, false), // NOTE: Should this be true? Seems like this critical feature should be nearly universal
+            },
             workspaceFolders: Default(bool, false),
         },
         textDocument: ?struct {
