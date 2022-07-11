@@ -9,10 +9,10 @@ enable_unused_variable_warnings: bool = false,
 /// Whether to enable import/embedFile argument completions (NOTE: these are triggered manually as updating the autotrigger characters may cause issues)
 enable_import_embedfile_argument_completions: bool = false,
 
-/// zig library path
+/// Zig library path
 zig_lib_path: ?[]const u8 = null,
 
-/// zig executable path used to run the custom build runner.
+/// Zig executable path used to run the custom build runner.
 /// May be used to find a lib path if none is provided.
 zig_exe_path: ?[]const u8 = null,
 
@@ -36,10 +36,11 @@ operator_completions: bool = true,
 include_at_in_builtins: bool = false,
 
 /// The detail field of completions is truncated to be no longer than this (in bytes).
-max_detail_length: usize = 1024 * 1024,
+max_detail_length: usize = 1048576,
 
 /// Skips references to std. This will improve lookup speeds.
 /// Going to definition however will continue to work
 skip_std_references: bool = false,
 
+/// Path to "builtin;" useful for debugging, automatically set if let null
 builtin_path: ?[]const u8 = null,
