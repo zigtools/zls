@@ -2024,7 +2024,7 @@ fn findContainerScope(container_handle: NodeWithHandle) ?*Scope {
     } else null;
 }
 
-fn iterateSymbolsContainerInternal(store: *DocumentStore, arena: *std.heap.ArenaAllocator, container_handle: NodeWithHandle, orig_handle: *DocumentStore.Handle, comptime callback: anytype, context: anytype, instance_access: bool, use_trail: *std.ArrayList(*const Ast.Node.Index)) error{OutOfMemory}!void {
+fn iterateSymbolsContainerInternal(store: *DocumentStore, arena: *std.heap.ArenaAllocator, container_handle: NodeWithHandle, orig_handle: *DocumentStore.Handle, comptime callback: anytype, context: anytype, instance_access: bool, use_trail: *std.ArrayList(Ast.Node.Index)) error{OutOfMemory}!void {
     const container = container_handle.node;
     const handle = container_handle.handle;
 
@@ -2062,13 +2062,13 @@ fn iterateSymbolsContainerInternal(store: *DocumentStore, arena: *std.heap.Arena
     }
 
     for (container_scope.uses) |use| {
-        const use_token = tree.nodes.items(.main_token)[use.*];
+        const use_token = tree.nodes.items(.main_token)[use];
         const is_pub = use_token > 0 and token_tags[use_token - 1] == .keyword_pub;
         if (handle != orig_handle and !is_pub) continue;
-        if (std.mem.indexOfScalar(*const Ast.Node.Index, use_trail.items, use) != null) continue;
+        if (std.mem.indexOfScalar(Ast.Node.Index, use_trail.items, use) != null) continue;
         try use_trail.append(use);
 
-        const lhs = tree.nodes.items(.data)[use.*].lhs;
+        const lhs = tree.nodes.items(.data)[use].lhs;
         const use_expr = (try resolveTypeOfNode(store, arena, .{
             .node = lhs,
             .handle = handle,
@@ -2092,7 +2092,7 @@ fn iterateSymbolsContainerInternal(store: *DocumentStore, arena: *std.heap.Arena
 }
 
 pub fn iterateSymbolsContainer(store: *DocumentStore, arena: *std.heap.ArenaAllocator, container_handle: NodeWithHandle, orig_handle: *DocumentStore.Handle, comptime callback: anytype, context: anytype, instance_access: bool) error{OutOfMemory}!void {
-    var use_trail = std.ArrayList(*const Ast.Node.Index).init(arena.allocator());
+    var use_trail = std.ArrayList(Ast.Node.Index).init(arena.allocator());
     return try iterateSymbolsContainerInternal(store, arena, container_handle, orig_handle, callback, context, instance_access, &use_trail);
 }
 
@@ -2112,7 +2112,7 @@ pub fn iterateLabels(handle: *DocumentStore.Handle, source_index: usize, comptim
     }
 }
 
-fn iterateSymbolsGlobalInternal(store: *DocumentStore, arena: *std.heap.ArenaAllocator, handle: *DocumentStore.Handle, source_index: usize, comptime callback: anytype, context: anytype, use_trail: *std.ArrayList(*const Ast.Node.Index)) error{OutOfMemory}!void {
+fn iterateSymbolsGlobalInternal(store: *DocumentStore, arena: *std.heap.ArenaAllocator, handle: *DocumentStore.Handle, source_index: usize, comptime callback: anytype, context: anytype, use_trail: *std.ArrayList(Ast.Node.Index)) error{OutOfMemory}!void {
     for (handle.document_scope.scopes) |scope| {
         if (source_index >= scope.range.start and source_index <= scope.range.end) {
             var decl_it = scope.decls.iterator();
@@ -2124,13 +2124,13 @@ fn iterateSymbolsGlobalInternal(store: *DocumentStore, arena: *std.heap.ArenaAll
             }
 
             for (scope.uses) |use| {
-                if (std.mem.indexOfScalar(*const Ast.Node.Index, use_trail.items, use) != null) continue;
+                if (std.mem.indexOfScalar(Ast.Node.Index, use_trail.items, use) != null) continue;
                 try use_trail.append(use);
 
                 const use_expr = (try resolveTypeOfNode(
                     store,
                     arena,
-                    .{ .node = handle.tree.nodes.items(.data)[use.*].lhs, .handle = handle },
+                    .{ .node = handle.tree.nodes.items(.data)[use].lhs, .handle = handle },
                 )) orelse continue;
                 const use_expr_node = switch (use_expr.type.data) {
                     .other => |n| n,
@@ -2154,7 +2154,7 @@ fn iterateSymbolsGlobalInternal(store: *DocumentStore, arena: *std.heap.ArenaAll
 }
 
 pub fn iterateSymbolsGlobal(store: *DocumentStore, arena: *std.heap.ArenaAllocator, handle: *DocumentStore.Handle, source_index: usize, comptime callback: anytype, context: anytype) error{OutOfMemory}!void {
-    var use_trail = std.ArrayList(*const Ast.Node.Index).init(arena.allocator());
+    var use_trail = std.ArrayList(Ast.Node.Index).init(arena.allocator());
     return try iterateSymbolsGlobalInternal(store, arena, handle, source_index, callback, context, &use_trail);
 }
 
@@ -2194,7 +2194,7 @@ pub fn innermostContainer(handle: *DocumentStore.Handle, source_index: usize) Ty
     return TypeWithHandle.typeVal(.{ .node = current, .handle = handle });
 }
 
-fn resolveUse(store: *DocumentStore, arena: *std.heap.ArenaAllocator, uses: []const *const Ast.Node.Index, symbol: []const u8, handle: *DocumentStore.Handle) error{OutOfMemory}!?DeclWithHandle {
+fn resolveUse(store: *DocumentStore, arena: *std.heap.ArenaAllocator, uses: []const Ast.Node.Index, symbol: []const u8, handle: *DocumentStore.Handle) error{OutOfMemory}!?DeclWithHandle {
     // If we were asked to resolve this symbol before,
     // it is self-referential and we cannot resolve it.
     if (std.mem.indexOfScalar([*]const u8, using_trail.items, symbol.ptr) != null)
@@ -2202,9 +2202,7 @@ fn resolveUse(store: *DocumentStore, arena: *std.heap.ArenaAllocator, uses: []co
     try using_trail.append(symbol.ptr);
     defer _ = using_trail.pop();
 
-    for (uses) |use| {
-        const index = use.*;
-
+    for (uses) |index| {
         if (handle.tree.nodes.items(.data).len <= index) continue;
 
         const expr = .{ .node = handle.tree.nodes.items(.data)[index].lhs, .handle = handle };
@@ -2395,7 +2393,7 @@ pub const Scope = struct {
     range: SourceRange,
     decls: std.StringHashMap(Declaration),
     tests: []const Ast.Node.Index = &.{},
-    uses: []const *const Ast.Node.Index = &.{},
+    uses: []const Ast.Node.Index = &.{},
 
     data: Data,
 
@@ -2473,7 +2471,7 @@ fn makeInnerScope(allocator: std.mem.Allocator, context: ScopeContext, node_idx:
         .data = .{ .container = node_idx },
     };
     const scope_idx = scopes.items.len - 1;
-    var uses = std.ArrayListUnmanaged(*const Ast.Node.Index){};
+    var uses = std.ArrayListUnmanaged(Ast.Node.Index){};
     var tests = std.ArrayListUnmanaged(Ast.Node.Index){};
 
     errdefer {
@@ -2520,10 +2518,9 @@ fn makeInnerScope(allocator: std.mem.Allocator, context: ScopeContext, node_idx:
             (kind != .keyword_union or container.ast.enum_token != null or container.ast.arg != 0);
     } else false;
 
-    for (ast_decls) |*ptr_decl| {
-        const decl = ptr_decl.*;
+    for (ast_decls) |decl| {
         if (tags[decl] == .@"usingnamespace") {
-            try uses.append(allocator, ptr_decl);
+            try uses.append(allocator, decl);
             continue;
         }
 
@@ -2686,7 +2683,7 @@ fn makeScopeInternal(allocator: std.mem.Allocator, context: ScopeContext, node_i
                 .data = .{ .block = node_idx },
             };
             var scope_idx = scopes.items.len - 1;
-            var uses = std.ArrayList(*const Ast.Node.Index).init(allocator);
+            var uses = std.ArrayList(Ast.Node.Index).init(allocator);
 
             errdefer {
                 scopes.items[scope_idx].decls.deinit();
@@ -2708,10 +2705,9 @@ fn makeScopeInternal(allocator: std.mem.Allocator, context: ScopeContext, node_i
                 else => unreachable,
             };
 
-            for (statements) |*ptr_stmt| {
-                const idx = ptr_stmt.*;
+            for (statements) |idx| {
                 if (tags[idx] == .@"usingnamespace") {
-                    try uses.append(ptr_stmt);
+                    try uses.append(idx);
                     continue;
                 }
 
