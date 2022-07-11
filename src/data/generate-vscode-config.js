@@ -32,8 +32,6 @@ for (const line of lines) {
         const name = line.split(":")[0].trim();
         const type = line.split(":")[1].split("=")[0].trim();
         const defaultValue = line.split(":")[1].split("=")[1].trim().replace(",","");
-        
-        // console.log(name, type, defaultValue);
 
         console.log(`"zls.${name}": ${JSON.stringify({
             "scope": "resource",

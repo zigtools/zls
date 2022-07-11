@@ -66,7 +66,7 @@ const Server = struct {
             const rest = response_bytes[json_fmt.len..];
             const id_end = std.mem.indexOfScalar(u8, rest, ',') orelse return error.InvalidResponse;
 
-            const id = try std.fmt.parseInt(u32, rest[0..id_end], 10);
+            const id = std.fmt.parseInt(u32, rest[0..id_end], 10) catch continue;
 
             if (id != self.request_id) {
                 continue;
@@ -83,6 +83,7 @@ const Server = struct {
             }
         }
     }
+
     fn extractError(msg: []const u8) !void {
         const log_request =
             \\"method":"window/logMessage","params":{"type":

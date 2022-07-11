@@ -1756,6 +1756,7 @@ fn initializeHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: 
 fn registerCapability(arena: *std.heap.ArenaAllocator, method: []const u8) !void {
     // NOTE: stage1 moment occurs if we dont do it like this :(
     // long live stage2's not broken anon structs
+
     logger.debug("Dynamically registering method '{s}'", .{method});
 
     const id = try std.fmt.allocPrint(arena.allocator(), "register-{s}", .{method});
@@ -1777,8 +1778,6 @@ fn registerCapability(arena: *std.heap.ArenaAllocator, method: []const u8) !void
         .method = "client/registerCapability",
         .params = respp,
     };
-
-    std.log.info("AAAAA {s}", .{req});
 
     try send(arena, req);
 }
@@ -2241,10 +2240,8 @@ fn processJsonRpc(arena: *std.heap.ArenaAllocator, parser: *std.json.Parser, jso
         else => types.RequestId{ .Integer = 0 },
     } else types.RequestId{ .Integer = 0 };
 
-    if (id == .String and std.mem.startsWith(u8, id.String, "register")) {
-        logger.info("INFO!!! {s}", .{json});
+    if (id == .String and std.mem.startsWith(u8, id.String, "register"))
         return;
-    }
     if (id == .String and std.mem.eql(u8, id.String, "i_haz_configuration")) {
         logger.info("Setting configuration...", .{});
 
