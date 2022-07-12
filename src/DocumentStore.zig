@@ -133,68 +133,52 @@ fn loadPackages(context: LoadPackagesContext) !void {
     defer if (context.build_file_path == null) allocator.free(build_file_path);
     const directory_path = build_file_path[0 .. build_file_path.len - "build.zig".len];
 
-    const zig_run_result = try std.ChildProcess.exec(.{
-        .allocator = allocator,
-        .argv = &[_][]const u8{
-            zig_exe_path,
-            "run",
-            build_runner_path,
-            "--cache-dir",
-            build_runner_cache_path,
-            "--pkg-begin",
-            "@build@",
-            build_file_path,
-            "--pkg-end",
-            "--",
-            zig_exe_path,
-            directory_path,
-            context.cache_root,
-            context.global_cache_root,
-        },
-    });
+    var child = std.ChildProcess.init(&[_][]const u8{
+        zig_exe_path,
+        "run",
+        build_runner_path,
+        "--cache-dir",
+        build_runner_cache_path,
+        "--pkg-begin",
+        "@build@",
+        build_file_path,
+        "--pkg-end",
+        "--",
+        zig_exe_path,
+        directory_path,
+        context.cache_root,
+        context.global_cache_root,
+    }, allocator);
 
-    defer {
-        allocator.free(zig_run_result.stdout);
-        allocator.free(zig_run_result.stderr);
-    }
+    child.stdin_behavior = .Ignore;
+    child.stdout_behavior = .Pipe;
+    child.stderr_behavior = .Ignore;
 
-    switch (zig_run_result.term) {
-        .Exited => |exit_code| {
-            if (exit_code == 0) {
-                log.debug("Finished zig run for build file {s}", .{build_file.uri});
+    try child.spawn();
+    defer _ = child.wait() catch unreachable;
 
-                for (build_file.packages.items) |old_pkg| {
-                    allocator.free(old_pkg.name);
-                    allocator.free(old_pkg.uri);
-                }
+    const reader = child.stdout.?.reader();
 
-                build_file.packages.shrinkAndFree(allocator, 0);
-                var line_it = std.mem.split(u8, zig_run_result.stdout, "\n");
-                while (line_it.next()) |line| {
-                    if (std.mem.indexOfScalar(u8, line, '\x00')) |zero_byte_idx| {
-                        const name = line[0..zero_byte_idx];
-                        const rel_path = line[zero_byte_idx + 1 ..];
+    var buf: [4096]u8 = undefined;
+    while (try reader.readUntilDelimiterOrEof(&buf, '\n')) |line| {
+        if (std.mem.indexOfScalar(u8, line, '\x00')) |zero_byte_idx| {
+            const name = line[0..zero_byte_idx];
+            const rel_path = line[zero_byte_idx + 1 ..];
 
-                        const pkg_abs_path = try std.fs.path.resolve(allocator, &[_][]const u8{ directory_path, rel_path });
-                        defer allocator.free(pkg_abs_path);
+            const pkg_abs_path = try std.fs.path.resolve(allocator, &[_][]const u8{ directory_path, rel_path });
+            defer allocator.free(pkg_abs_path);
 
-                        const pkg_uri = try URI.fromPath(allocator, pkg_abs_path);
-                        errdefer allocator.free(pkg_uri);
+            const pkg_uri = try URI.fromPath(allocator, pkg_abs_path);
+            errdefer allocator.free(pkg_uri);
 
-                        const duped_name = try allocator.dupe(u8, name);
-                        errdefer allocator.free(duped_name);
+            const duped_name = try allocator.dupe(u8, name);
+            errdefer allocator.free(duped_name);
 
-                        (try build_file.packages.addOne(allocator)).* = .{
-                            .name = duped_name,
-                            .uri = pkg_uri,
-                        };
-                    }
-                }
-            } else {
-                return error.RunFailed;
-            }
-        },
-        else => return error.RunFailed,
+            (try build_file.packages.addOne(allocator)).* = .{
+                .name = duped_name,
+                .uri = pkg_uri,
+            };
+        }
     }
 }
 
