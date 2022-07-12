@@ -43,8 +43,8 @@ jobs:
             sed -e '1,5d' < README.md > artifacts/${target}/README.md
             cp LICENSE artifacts/${target}/
             cd artifacts/${target}/
-            tar cfJ ${target}.tar.xz *.md bin/*
-            mv ${target}.tar.xz ../
+            tar cfa ${target}.tar.zst *.md bin/*
+            mv ${target}.tar.zst ../
             cd ../..
           done
 
@@ -53,4 +53,4 @@ jobs:
         uses: actions/upload-artifact@v2
         with:
           name: builds
-          path: artifacts/*.tar.xz
+          path: artifacts/*.tar.zst
