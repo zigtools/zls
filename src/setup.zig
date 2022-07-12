@@ -209,7 +209,7 @@ pub fn wizard(allocator: std.mem.Allocator) !void {
                 \\'https://github.com/zigtools/zls-vscode/releases' or via the extensions menu.
                 \\Then, open VSCode's 'settings.json' file, and add:
                 \\
-                \\"zigLanguageClient.path": "[command_or_path_to_zls]"
+                \\"zls.path": "[command_or_path_to_zls]"
             );
         },
         .Sublime => {
