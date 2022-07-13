@@ -60,3 +60,14 @@ jobs:
         with:
           name: builds
           path: artifacts/*.tar.zst
+
+      - name: Beam to Felix
+        if: ${{ matrix.os == 'ubuntu-latest' && github.ref == 'refs/heads/master' }}
+        uses: easingthemes/ssh-deploy@v2.1.1
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SERVER_SSH_PRIVKEY }}
+          ARGS: "-rltgoDzvO --delete"
+          SOURCE: "artifacts/"
+          REMOTE_HOST: ${{ secrets.WEBSITE_DEPLOY_HOST }}
+          REMOTE_USER: ${{ secrets.WEBSITE_DEPLOY_USER }}
+          TARGET: ${{ secrets.WEBSITE_DEPLOY_FOLDER }}
