@@ -38,13 +38,19 @@ jobs:
 
           for target in "${targets[@]}"; do
             mkdir -p artifacts/$target
-            echo "Building target ${target}..."	    
-            zig build -Dtarget=${target} -Drelease-safe --prefix artifacts/${target}/
+            echo "Building target ${target}..."   
+            if [ "${GITHUB_REF##*/}" == "master" ]; then
+              echo "Building safe"
+              zig build -Dtarget=${target} -Drelease-safe --prefix artifacts/${target}/
+            else
+              echo "Building debug as action is not running on master"
+              zig build -Dtarget=${target} --prefix artifacts/${target}/
+            fi
             sed -e '1,5d' < README.md > artifacts/${target}/README.md
             cp LICENSE artifacts/${target}/
             cd artifacts/${target}/
-            tar cfJ ${target}.tar.xz *.md bin/*
-            mv ${target}.tar.xz ../
+            tar cfa ${target}.tar.zst *.md bin/*
+            mv ${target}.tar.zst ../
             cd ../..
           done
 
@@ -53,4 +59,4 @@ jobs:
         uses: actions/upload-artifact@v2
         with:
           name: builds
-          path: artifacts/*.tar.xz
+          path: artifacts/*.tar.zst
