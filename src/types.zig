@@ -398,7 +398,6 @@ pub const ConfigurationParams = struct {
     items: []const ConfigurationItem,
 
     pub const ConfigurationItem = struct {
-        scopeUri: ?[]const u8,
         section: ?[]const u8,
     };
 };

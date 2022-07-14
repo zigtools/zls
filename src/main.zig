@@ -1787,7 +1787,6 @@ fn requestConfiguration(arena: *std.heap.ArenaAllocator) !void {
         var comp_confi: [std.meta.fields(Config).len]types.ConfigurationParams.ConfigurationItem = undefined;
         inline for (std.meta.fields(Config)) |field, index| {
             comp_confi[index] = .{
-                .scopeUri = "zls",
                 .section = "zls." ++ field.name,
             };
         }
@@ -2189,7 +2188,7 @@ fn didChangeConfigurationHandler(arena: *std.heap.ArenaAllocator, id: types.Requ
         inline for (std.meta.fields(Config)) |field| {
             if (@field(req.params.settings, field.name)) |value| {
                 logger.debug("setting configuration option '{s}' to '{any}'", .{ field.name, value });
-                @field(config, field.name) = value;
+                @field(config, field.name) = if (@TypeOf(value) == []const u8) try gpa_state.allocator().dupe(u8, value) else value;
             }
         }
     } else if (client_capabilities.supports_configuration)
@@ -2262,7 +2261,7 @@ fn processJsonRpc(arena: *std.heap.ArenaAllocator, parser: *std.json.Parser, jso
             if (value != .Null) {
                 const new_value: field.field_type = switch (ft) {
                     []const u8 => switch (value) {
-                        .String => |s| s,
+                        .String => |s| try gpa_state.allocator().dupe(u8, s), // TODO: Allocation model? (same with didChangeConfiguration); imo this isn't *that* bad but still
                         else => @panic("Invalid configuration value"), // TODO: Handle this
                     },
                     else => switch (ti) {
