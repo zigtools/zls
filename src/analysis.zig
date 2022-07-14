@@ -94,6 +94,31 @@ pub fn getFunctionSignature(tree: Ast, func: Ast.full.FnProto) []const u8 {
     return tree.source[start.start..end.end];
 }
 
+fn formatSnippetPlaceholder(
+    data: []const u8,
+    comptime fmt: []const u8,
+    options: std.fmt.FormatOptions,
+    writer: anytype,
+) !void {
+    _ = fmt;
+    _ = options;
+
+    var splitit = std.mem.split(u8, data, "}");
+    while (splitit.next()) |segment| {
+        try writer.writeAll(segment);
+        if (splitit.index) |index|
+            if (data[index - 1] == '}') {
+                try writer.writeAll("\\}");
+            };
+    }
+}
+
+const SnippetPlaceholderFormatter = std.fmt.Formatter(formatSnippetPlaceholder);
+
+fn fmtSnippetPlaceholder(bytes: []const u8) SnippetPlaceholderFormatter {
+    return .{ .data = bytes };
+}
+
 /// Creates snippet insert text for a function. Caller owns returned memory.
 pub fn getFunctionSnippet(allocator: std.mem.Allocator, tree: Ast, func: Ast.full.FnProto, skip_self_param: bool) ![]const u8 {
     const name_index = func.name_token.?;
@@ -127,7 +152,7 @@ pub fn getFunctionSnippet(allocator: std.mem.Allocator, tree: Ast, func: Ast.ful
         }
 
         if (param.name_token) |name_token| {
-            try buffer.appendSlice(tree.tokenSlice(name_token));
+            try buf_stream.print("{}", .{fmtSnippetPlaceholder(tree.tokenSlice(name_token))});
             try buffer.appendSlice(": ");
         }
 
@@ -144,7 +169,7 @@ pub fn getFunctionSnippet(allocator: std.mem.Allocator, tree: Ast, func: Ast.ful
                 const is_comma = tag == .comma;
 
                 if (curr_token == end_token and is_comma) continue;
-                try buffer.appendSlice(tree.tokenSlice(curr_token));
+                try buf_stream.print("{}", .{fmtSnippetPlaceholder(tree.tokenSlice(curr_token))});
                 if (is_comma or tag == .keyword_const) try buffer.append(' ');
             }
         } else unreachable;
