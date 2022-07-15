@@ -3,7 +3,7 @@
 //! We only define what we actually use.
 
 const std = @import("std");
-const types = @import("./types.zig");
+const types = @import("types.zig");
 
 /// Only check for the field's existence.
 const Exists = struct {
