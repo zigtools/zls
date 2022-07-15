@@ -2567,7 +2567,7 @@ pub fn main() anyerror!void {
         config.builtin_path = try std.fs.path.join(allocator, &.{ config_path.?, "builtin.zig" });
     }
 
-    const build_runner_path = if (config.build_runner_path) |p|
+    config.build_runner_path = if (config.build_runner_path) |p|
         try allocator.dupe(u8, p)
     else blk: {
         var exe_dir_bytes: [std.fs.MAX_PATH_BYTES]u8 = undefined;
@@ -2575,7 +2575,7 @@ pub fn main() anyerror!void {
         break :blk try std.fs.path.resolve(allocator, &[_][]const u8{ exe_dir_path, "build_runner.zig" });
     };
 
-    const build_runner_cache_path = if (config.build_runner_cache_path) |p|
+    config.build_runner_cache_path = if (config.build_runner_cache_path) |p|
         try allocator.dupe(u8, p)
     else blk: {
         const cache_dir_path = (try known_folders.getPath(allocator, .cache)) orelse {
@@ -2586,20 +2586,9 @@ pub fn main() anyerror!void {
         break :blk try std.fs.path.resolve(allocator, &[_][]const u8{ cache_dir_path, "zls" });
     };
 
-    try document_store.init(
+    document_store = try DocumentStore.init(
         allocator,
-        config.zig_exe_path,
-        build_runner_path,
-        build_runner_cache_path,
-        config.zig_lib_path,
-        // TODO make this configurable
-        // We can't figure it out ourselves since we don't know what arguments
-        // the user will use to run "zig build"
-        "zig-cache",
-        // Since we don't compile anything and no packages should put their
-        // files there this path can be ignored
-        "ZLS_DONT_CARE",
-        config.builtin_path,
+        &config,
     );
     defer document_store.deinit();
 

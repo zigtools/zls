@@ -3,6 +3,8 @@
 [![CI](https://github.com/zigtools/zls/workflows/CI/badge.svg)](https://github.com/zigtools/zls/actions)
 ![Zig Tools](./.github/assets/zigtools.svg)
 
+**Need support? Wanna help out? Join our [Discord server](https://discord.gg/5m5U3qpUhk)!**
+
 Zig Language Server, or `zls`, is a language server for Zig. The Zig wiki states that "The Zig community is decentralized" and "There is no concept of 'official' or 'unofficial'", so instead of calling `zls` unofficial, and I'm going to call it a cool option, one of [many](https://github.com/search?q=zig+language+server).
 
 <!-- omit in toc -->
