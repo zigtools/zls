@@ -1,13 +1,13 @@
 const std = @import("std");
-const types = @import("./types.zig");
-const URI = @import("./uri.zig");
-const analysis = @import("./analysis.zig");
-const offsets = @import("./offsets.zig");
+const types = @import("types.zig");
+const URI = @import("uri.zig");
+const analysis = @import("analysis.zig");
+const offsets = @import("offsets.zig");
 const log = std.log.scoped(.doc_store);
 const Ast = std.zig.Ast;
-const BuildAssociatedConfig = @import("./BuildAssociatedConfig.zig");
-const tracy = @import("./tracy.zig");
-const Config = @import("./Config.zig");
+const BuildAssociatedConfig = @import("BuildAssociatedConfig.zig");
+const tracy = @import("tracy.zig");
+const Config = @import("Config.zig");
 
 const DocumentStore = @This();
 
@@ -73,6 +73,12 @@ pub fn init(
         .config = config,
         .std_uri = try stdUriFromLibPath(allocator, config.zig_lib_path),
     };
+}
+
+fn updateStdUri(store: *DocumentStore) !void {
+    if (store.std_uri) |std_uri|
+        store.allocator.free(std_uri);
+    store.std_uri = try stdUriFromLibPath(store.allocator, store.config.zig_lib_path);
 }
 
 fn loadBuildAssociatedConfiguration(allocator: std.mem.Allocator, build_file: *BuildFile, build_file_path: []const u8) !void {
@@ -767,8 +773,6 @@ pub fn deinit(self: *DocumentStore) void {
     if (self.std_uri) |std_uri| {
         self.allocator.free(std_uri);
     }
-    self.allocator.free(self.config.build_runner_path.?);
-    self.allocator.free(self.config.build_runner_cache_path.?);
     self.build_files.deinit(self.allocator);
 }
 

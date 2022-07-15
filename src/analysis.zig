@@ -1,10 +1,10 @@
 const std = @import("std");
-const DocumentStore = @import("./DocumentStore.zig");
+const DocumentStore = @import("DocumentStore.zig");
 const Ast = std.zig.Ast;
-const types = @import("./types.zig");
-const offsets = @import("./offsets.zig");
+const types = @import("types.zig");
+const offsets = @import("offsets.zig");
 const log = std.log.scoped(.analysis);
-const ast = @import("./ast.zig");
+const ast = @import("ast.zig");
 
 var using_trail: std.ArrayList([*]const u8) = undefined;
 var resolve_trail: std.ArrayList(NodeWithHandle) = undefined;
