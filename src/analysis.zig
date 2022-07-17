@@ -629,19 +629,19 @@ fn allDigits(str: []const u8) bool {
 
 pub fn isTypeIdent(tree: Ast, token_idx: Ast.TokenIndex) bool {
     const PrimitiveTypes = std.ComptimeStringMap(void, .{
-        .{"isize"},          .{"usize"},
-        .{"c_short"},        .{"c_ushort"},
-        .{"c_int"},          .{"c_uint"},
-        .{"c_long"},         .{"c_ulong"},
-        .{"c_longlong"},     .{"c_ulonglong"},
-        .{"c_longdouble"},   .{"anyopaque"},
-        .{"f16"},            .{"f32"},
-        .{"f64"},            .{"f128"},
-        .{"bool"},           .{"void"},
-        .{"noreturn"},       .{"type"},
-        .{"anyerror"},       .{"comptime_int"},
-        .{"comptime_float"}, .{"anyframe"},
-        .{"anytype"},
+        .{"isize"},        .{"usize"},
+        .{"c_short"},      .{"c_ushort"},
+        .{"c_int"},        .{"c_uint"},
+        .{"c_long"},       .{"c_ulong"},
+        .{"c_longlong"},   .{"c_ulonglong"},
+        .{"c_longdouble"}, .{"anyopaque"},
+        .{"f16"},          .{"f32"},
+        .{"f64"},          .{"f80"},
+        .{"f128"},         .{"bool"},
+        .{"void"},         .{"noreturn"},
+        .{"type"},         .{"anyerror"},
+        .{"comptime_int"}, .{"comptime_float"},
+        .{"anyframe"},     .{"anytype"},
     });
 
     const text = tree.tokenSlice(token_idx);
