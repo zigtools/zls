@@ -4,6 +4,7 @@ const Config = @This();
 
 const std = @import("std");
 const setup = @import("setup.zig");
+const tracy = @import("tracy.zig");
 const known_folders = @import("known-folders");
 
 const logger = std.log.scoped(.config);
@@ -53,6 +54,50 @@ skip_std_references: bool = false,
 /// Path to "builtin;" useful for debugging, automatically set if let null
 builtin_path: ?[]const u8 = null,
 
+pub fn loadFromFile(allocator: std.mem.Allocator, file_path: []const u8) ?Config {
+    @setEvalBranchQuota(5000);
+
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    var file = std.fs.cwd().openFile(file_path, .{}) catch |err| {
+        if (err != error.FileNotFound)
+            logger.warn("Error while reading configuration file: {}", .{err});
+        return null;
+    };
+
+    defer file.close();
+
+    const file_buf = file.readToEndAlloc(allocator, 0x1000000) catch return null;
+    defer allocator.free(file_buf);
+    @setEvalBranchQuota(3000);
+    // TODO: Better errors? Doesn't seem like std.json can provide us positions or context.
+    var config = std.json.parse(Config, &std.json.TokenStream.init(file_buf), std.json.ParseOptions{ .allocator = allocator }) catch |err| {
+        logger.warn("Error while parsing configuration file: {}", .{err});
+        return null;
+    };
+
+    if (config.zig_lib_path) |zig_lib_path| {
+        if (!std.fs.path.isAbsolute(zig_lib_path)) {
+            logger.warn("zig library path is not absolute, defaulting to null.", .{});
+            allocator.free(zig_lib_path);
+            config.zig_lib_path = null;
+        }
+    }
+
+    return config;
+}
+
+pub fn loadFromFolder(allocator: std.mem.Allocator, folder_path: []const u8) ?Config {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    const full_path = std.fs.path.resolve(allocator, &.{ folder_path, "zls.json" }) catch return null;
+    defer allocator.free(full_path);
+    return loadFromFile(allocator, full_path);
+}
+
+/// Invoke this once all config values have been changed.
 pub fn configChanged(config: *Config, allocator: std.mem.Allocator, builtin_creation_dir: ?[]const u8) !void {
     // Find the zig executable in PATH
     find_zig: {
