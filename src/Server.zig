@@ -63,7 +63,7 @@ pub fn log(comptime message_level: std.log.Level, comptime scope: @Type(.EnumLit
     }
 
     // TODO: Use GPA
-    var arena = std.heap.ArenaAllocator.init(std.heap.allocator);
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
 
     var message = std.fmt.allocPrint(arena.allocator(), "[{s}-{s}] " ++ format, .{ @tagName(message_level), @tagName(scope) } ++ args) catch {
@@ -214,7 +214,7 @@ fn astLocationToRange(loc: Ast.Location) types.Range {
     };
 }
 
-fn publishDiagnostics(arena: *std.heap.ArenaAllocator, handle: DocumentStore.Handle, config: *const Config) !void {
+fn publishDiagnostics(server: *Server, arena: *std.heap.ArenaAllocator, handle: DocumentStore.Handle) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -239,7 +239,7 @@ fn publishDiagnostics(arena: *std.heap.ArenaAllocator, handle: DocumentStore.Han
         });
     }
 
-    if (config.enable_unused_variable_warnings) {
+    if (server.config.enable_unused_variable_warnings) {
         scopes: for (handle.document_scope.scopes) |scope| {
             const scope_data = switch (scope.data) {
                 .function => |f| b: {
@@ -294,7 +294,7 @@ fn publishDiagnostics(arena: *std.heap.ArenaAllocator, handle: DocumentStore.Han
         }
     }
 
-    if (config.warn_style) {
+    if (server.config.warn_style) {
         var node: u32 = 0;
         while (node < tree.nodes.len) : (node += 1) {
             if (ast.isBuiltinCall(tree, node)) {
@@ -490,8 +490,8 @@ fn nodeToCompletion(
 
     if (ast.isContainer(handle.tree, node)) {
         const context = DeclToCompletionContext{
+            .server = server,
             .completions = list,
-            .config = server.config,
             .arena = arena,
             .orig_handle = orig_handle,
             .parent_is_type_val = is_type_val,
@@ -548,12 +548,12 @@ fn nodeToCompletion(
 
             if (try analysis.resolveVarDeclAlias(&server.document_store, arena, node_handle)) |result| {
                 const context = DeclToCompletionContext{
+                    .server = server,
                     .completions = list,
-                    .config = server.config,
                     .arena = arena,
                     .orig_handle = orig_handle,
                 };
-                return try server.declToCompletion(context, result);
+                return try declToCompletion(context, result);
             }
 
             try list.append(.{
@@ -751,7 +751,7 @@ fn hoverSymbol(
     const def_str = switch (decl_handle.decl.*) {
         .ast_node => |node| def: {
             if (try analysis.resolveVarDeclAlias(&server.document_store, arena, .{ .node = node, .handle = handle })) |result| {
-                return try hoverSymbol(id, arena, result);
+                return try server.hoverSymbol(id, arena, result);
             }
             doc_str = try analysis.getDocComments(arena.allocator(), tree, node, hover_kind);
 
@@ -890,12 +890,9 @@ fn gotoDefinitionLabel(
     id: types.RequestId,
     pos_index: usize,
     handle: *DocumentStore.Handle,
-    config: *const Config,
 ) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
-
-    _ = config;
 
     const decl = (try getLabelGlobal(pos_index, handle)) orelse return try respondGeneric(id, null_result_response);
     return try server.gotoDefinitionSymbol(id, arena, decl, false);
@@ -916,14 +913,12 @@ fn gotoDefinitionGlobal(
     return try server.gotoDefinitionSymbol(id, arena, decl, resolve_alias);
 }
 
-fn hoverDefinitionLabel(arena: *std.heap.ArenaAllocator, id: types.RequestId, pos_index: usize, handle: *DocumentStore.Handle, config: *const Config) !void {
+fn hoverDefinitionLabel(server: *Server, arena: *std.heap.ArenaAllocator, id: types.RequestId, pos_index: usize, handle: *DocumentStore.Handle) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    _ = config;
-
     const decl = (try getLabelGlobal(pos_index, handle)) orelse return try respondGeneric(id, null_result_response);
-    return try hoverSymbol(id, arena, decl);
+    return try server.hoverSymbol(id, arena, decl);
 }
 
 fn hoverDefinitionBuiltin(arena: *std.heap.ArenaAllocator, id: types.RequestId, pos_index: usize, handle: *DocumentStore.Handle) !void {
@@ -959,8 +954,8 @@ fn hoverDefinitionGlobal(server: *Server, arena: *std.heap.ArenaAllocator, id: t
 
     _ = server;
 
-    const decl = (try getSymbolGlobal(arena, pos_index, handle)) orelse return try respondGeneric(id, null_result_response);
-    return try hoverSymbol(id, arena, decl);
+    const decl = (try server.getSymbolGlobal(arena, pos_index, handle)) orelse return try respondGeneric(id, null_result_response);
+    return try server.hoverSymbol(id, arena, decl);
 }
 
 fn getSymbolFieldAccess(
@@ -1074,7 +1069,7 @@ fn renameDefinitionGlobal(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const decl = (try getSymbolGlobal(arena, pos_index, handle)) orelse return try respondGeneric(id, null_result_response);
+    const decl = (try server.getSymbolGlobal(arena, pos_index, handle)) orelse return try respondGeneric(id, null_result_response);
 
     var workspace_edit = types.WorkspaceEdit{
         .changes = std.StringHashMap([]types.TextEdit).init(arena.allocator()),
@@ -1098,7 +1093,7 @@ fn renameDefinitionFieldAccess(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const decl = (try getSymbolFieldAccess(handle, arena, position, range, &server.config)) orelse return try respondGeneric(id, null_result_response);
+    const decl = (try server.getSymbolFieldAccess(handle, arena, position, range)) orelse return try respondGeneric(id, null_result_response);
 
     var workspace_edit = types.WorkspaceEdit{
         .changes = std.StringHashMap([]types.TextEdit).init(arena.allocator()),
@@ -1144,7 +1139,7 @@ fn referencesDefinitionGlobal(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const decl = (try getSymbolGlobal(arena, pos_index, handle)) orelse return try respondGeneric(id, null_result_response);
+    const decl = (try server.getSymbolGlobal(arena, pos_index, handle)) orelse return try respondGeneric(id, null_result_response);
     var locs = std.ArrayList(types.Location).init(arena.allocator());
     try references.symbolReferences(
         arena,
@@ -1174,7 +1169,7 @@ fn referencesDefinitionFieldAccess(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const decl = (try getSymbolFieldAccess(handle, arena, position, range, server.config)) orelse return try respondGeneric(id, null_result_response);
+    const decl = (try server.getSymbolFieldAccess(handle, arena, position, range)) orelse return try respondGeneric(id, null_result_response);
     var locs = std.ArrayList(types.Location).init(arena.allocator());
     try references.symbolReferences(arena, &server.document_store, decl, server.offset_encoding, include_decl, &locs, std.ArrayList(types.Location).append, server.config.skip_std_references);
     try send(arena, types.Response{
@@ -1216,19 +1211,20 @@ fn hasComment(tree: Ast.Tree, start_token: Ast.TokenIndex, end_token: Ast.TokenI
 }
 
 const DeclToCompletionContext = struct {
+    server: *Server,
     completions: *std.ArrayList(types.CompletionItem),
     arena: *std.heap.ArenaAllocator,
     orig_handle: *DocumentStore.Handle,
     parent_is_type_val: ?bool = null,
 };
 
-fn declToCompletion(server: *Server, context: DeclToCompletionContext, decl_handle: analysis.DeclWithHandle) !void {
+fn declToCompletion(context: DeclToCompletionContext, decl_handle: analysis.DeclWithHandle) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
     const tree = decl_handle.handle.tree;
     switch (decl_handle.decl.*) {
-        .ast_node => |node| try nodeToCompletion(
+        .ast_node => |node| try context.server.nodeToCompletion(
             context.arena,
             context.completions,
             .{ .node = node, .handle = decl_handle.handle },
@@ -1236,10 +1232,9 @@ fn declToCompletion(server: *Server, context: DeclToCompletionContext, decl_hand
             context.orig_handle,
             false,
             context.parent_is_type_val,
-            server.config,
         ),
         .param_decl => |param| {
-            const doc_kind: types.MarkupContent.Kind = if (server.client_capabilities.completion_doc_supports_md) .Markdown else .PlainText;
+            const doc_kind: types.MarkupContent.Kind = if (context.server.client_capabilities.completion_doc_supports_md) .Markdown else .PlainText;
             const doc = if (param.first_doc_comment) |doc_comments|
                 types.MarkupContent{
                     .kind = doc_kind,
@@ -1306,21 +1301,27 @@ fn declToCompletion(server: *Server, context: DeclToCompletionContext, decl_hand
     }
 }
 
-fn completeLabel(arena: *std.heap.ArenaAllocator, id: types.RequestId, pos_index: usize, handle: *DocumentStore.Handle, config: *const Config) !void {
+fn completeLabel(
+    server: *Server,
+    arena: *std.heap.ArenaAllocator,
+    id: types.RequestId,
+    pos_index: usize,
+    handle: *DocumentStore.Handle,
+) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
     var completions = std.ArrayList(types.CompletionItem).init(arena.allocator());
 
     const context = DeclToCompletionContext{
+        .server = server,
         .completions = &completions,
-        .config = config,
         .arena = arena,
         .orig_handle = handle,
     };
     try analysis.iterateLabels(handle, pos_index, declToCompletion, context);
-    sortCompletionItems(completions.items, config, arena.allocator());
-    truncateCompletions(completions.items, config.max_detail_length);
+    sortCompletionItems(completions.items, arena.allocator());
+    truncateCompletions(completions.items, server.config.max_detail_length);
 
     try send(arena, types.Response{
         .id = id,
@@ -1386,13 +1387,13 @@ fn completeGlobal(server: *Server, arena: *std.heap.ArenaAllocator, id: types.Re
     var completions = std.ArrayList(types.CompletionItem).init(arena.allocator());
 
     const context = DeclToCompletionContext{
+        .server = server,
         .completions = &completions,
-        .config = server.config,
         .arena = arena,
         .orig_handle = handle,
     };
     try analysis.iterateSymbolsGlobal(&server.document_store, arena, handle, pos_index, declToCompletion, context);
-    sortCompletionItems(completions.items, server.config, arena.allocator());
+    sortCompletionItems(completions.items, arena.allocator());
     truncateCompletions(completions.items, server.config.max_detail_length);
 
     if (server.client_capabilities.label_details_support) {
@@ -1426,7 +1427,7 @@ fn completeFieldAccess(server: *Server, arena: *std.heap.ArenaAllocator, id: typ
     if (try analysis.getFieldAccessType(&server.document_store, arena, handle, position.absolute_index, &tokenizer)) |result| {
         held_range.release();
         try server.typeToCompletion(arena, &completions, result, handle);
-        sortCompletionItems(completions.items, server.config, arena.allocator());
+        sortCompletionItems(completions.items, arena.allocator());
         truncateCompletions(completions.items, server.config.max_detail_length);
         if (server.client_capabilities.label_details_support) {
             for (completions.items) |*item| {
@@ -1652,7 +1653,7 @@ fn kindToSortScore(kind: types.CompletionItem.Kind) []const u8 {
     };
 }
 
-fn sortCompletionItems(completions: []types.CompletionItem, _: *const Config, alloc: std.mem.Allocator) void {
+fn sortCompletionItems(completions: []types.CompletionItem, alloc: std.mem.Allocator) void {
     // TODO: config for sorting rule?
     for (completions) |*c| {
         c.sortText = kindToSortScore(c.kind);
@@ -1670,7 +1671,7 @@ fn completeDot(server: *Server, arena: *std.heap.ArenaAllocator, id: types.Reque
     defer tracy_zone.end();
 
     var completions = try server.document_store.enumCompletionItems(arena, handle);
-    sortCompletionItems(completions, server.config, arena.allocator());
+    sortCompletionItems(completions, arena.allocator());
     truncateCompletions(completions, server.config.max_detail_length);
 
     try send(arena, types.Response{
@@ -1886,10 +1887,10 @@ fn openDocumentHandler(server: *Server, arena: *std.heap.ArenaAllocator, id: typ
     defer tracy_zone.end();
 
     const handle = try server.document_store.openDocument(req.params.textDocument.uri, req.params.textDocument.text);
-    try publishDiagnostics(arena, handle.*, server.config);
+    try server.publishDiagnostics(arena, handle.*);
 
     if (server.client_capabilities.supports_semantic_tokens)
-        try semanticTokensFullHandler(arena, id, .{ .params = .{ .textDocument = .{ .uri = req.params.textDocument.uri } } }, server.config);
+        try server.semanticTokensFullHandler(arena, id, .{ .params = .{ .textDocument = .{ .uri = req.params.textDocument.uri } } });
 }
 
 fn changeDocumentHandler(server: *Server, arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.ChangeDocument) !void {
@@ -1904,7 +1905,7 @@ fn changeDocumentHandler(server: *Server, arena: *std.heap.ArenaAllocator, id: t
     };
 
     try server.document_store.applyChanges(handle, req.params.contentChanges.Array, server.offset_encoding);
-    try publishDiagnostics(arena, handle.*, server.config);
+    try server.publishDiagnostics(arena, handle.*);
 }
 
 fn saveDocumentHandler(server: *Server, arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.SaveDocument) error{OutOfMemory}!void {
@@ -1969,11 +1970,11 @@ fn completionHandler(server: *Server, arena: *std.heap.ArenaAllocator, id: types
 
     switch (pos_context) {
         .builtin => try server.completeBuiltin(arena, id),
-        .var_access, .empty => try completeGlobal(arena, id, doc_position.absolute_index, handle, &server.config),
+        .var_access, .empty => try server.completeGlobal(arena, id, doc_position.absolute_index, handle),
         .field_access => |range| try server.completeFieldAccess(arena, id, handle, doc_position, range),
         .global_error_set => try server.completeError(arena, id, handle),
         .enum_literal => try server.completeDot(arena, id, handle),
-        .label => try completeLabel(arena, id, doc_position.absolute_index, handle, &server.config),
+        .label => try server.completeLabel(arena, id, doc_position.absolute_index, handle),
         .import_string_literal, .embedfile_string_literal => |loc| {
             if (!server.config.enable_import_embedfile_argument_completions)
                 return try respondGeneric(id, no_completions_response);
@@ -2099,10 +2100,10 @@ fn gotoHandler(server: *Server, arena: *std.heap.ArenaAllocator, id: types.Reque
         const pos_context = try analysis.documentPositionContext(arena, handle.document, doc_position);
 
         switch (pos_context) {
-            .var_access => try server.gotoDefinitionGlobal(arena, id, doc_position.absolute_index, handle, &server.config, resolve_alias),
-            .field_access => |range| try server.gotoDefinitionFieldAccess(arena, id, handle, doc_position, range, &server.config, resolve_alias),
-            .import_string_literal => try server.gotoDefinitionString(arena, id, doc_position.absolute_index, handle, &server.config),
-            .label => try server.gotoDefinitionLabel(arena, id, doc_position.absolute_index, handle, &server.config),
+            .var_access => try server.gotoDefinitionGlobal(arena, id, doc_position.absolute_index, handle, resolve_alias),
+            .field_access => |range| try server.gotoDefinitionFieldAccess(arena, id, handle, doc_position, range, resolve_alias),
+            .import_string_literal => try server.gotoDefinitionString(arena, id, doc_position.absolute_index, handle),
+            .label => try server.gotoDefinitionLabel(arena, id, doc_position.absolute_index, handle),
             else => try respondGeneric(id, null_result_response),
         }
     } else {
@@ -2137,10 +2138,10 @@ fn hoverHandler(server: *Server, arena: *std.heap.ArenaAllocator, id: types.Requ
         const doc_position = try offsets.documentPosition(handle.document, req.params.position, server.offset_encoding);
         const pos_context = try analysis.documentPositionContext(arena, handle.document, doc_position);
         switch (pos_context) {
-            .builtin => try server.hoverDefinitionBuiltin(arena, id, doc_position.absolute_index, handle),
-            .var_access => try server.hoverDefinitionGlobal(arena, id, doc_position.absolute_index, handle, &server.config),
-            .field_access => |range| try server.hoverDefinitionFieldAccess(arena, id, handle, doc_position, range, &server.config),
-            .label => try server.hoverDefinitionLabel(arena, id, doc_position.absolute_index, handle, &server.config),
+            .builtin => try hoverDefinitionBuiltin(arena, id, doc_position.absolute_index, handle),
+            .var_access => try server.hoverDefinitionGlobal(arena, id, doc_position.absolute_index, handle),
+            .field_access => |range| try server.hoverDefinitionFieldAccess(arena, id, handle, doc_position, range),
+            .label => try server.hoverDefinitionLabel(arena, id, doc_position.absolute_index, handle),
             else => try respondGeneric(id, null_result_response),
         }
     } else {
@@ -2222,9 +2223,9 @@ fn renameHandler(server: *Server, arena: *std.heap.ArenaAllocator, id: types.Req
         const pos_context = try analysis.documentPositionContext(arena, handle.document, doc_position);
 
         switch (pos_context) {
-            .var_access => try renameDefinitionGlobal(arena, id, handle, doc_position.absolute_index, req.params.newName),
-            .field_access => |range| try renameDefinitionFieldAccess(arena, id, handle, doc_position, range, req.params.newName, server.config),
-            .label => try renameDefinitionLabel(arena, id, handle, doc_position.absolute_index, req.params.newName),
+            .var_access => try server.renameDefinitionGlobal(arena, id, handle, doc_position.absolute_index, req.params.newName),
+            .field_access => |range| try server.renameDefinitionFieldAccess(arena, id, handle, doc_position, range, req.params.newName),
+            .label => try server.renameDefinitionLabel(arena, id, handle, doc_position.absolute_index, req.params.newName),
             else => try respondGeneric(id, null_result_response),
         }
     } else {
@@ -2267,7 +2268,7 @@ fn referencesHandler(server: *Server, arena: *std.heap.ArenaAllocator, id: types
 
         const include_decl = req.params.context.includeDeclaration;
         switch (pos_context) {
-            .var_access => try server.referencesDefinitionGlobal(arena, id, handle, doc_position.absolute_index, include_decl, server.config.skip_std_references),
+            .var_access => try server.referencesDefinitionGlobal(arena, id, handle, doc_position.absolute_index, include_decl),
             .field_access => |range| try server.referencesDefinitionFieldAccess(arena, id, handle, doc_position, range, include_decl),
             .label => try server.referencesDefinitionLabel(arena, id, handle, doc_position.absolute_index, include_decl),
             else => try respondGeneric(id, null_result_response),
@@ -2441,7 +2442,7 @@ fn processJsonRpc(server: *Server, arena: *std.heap.ArenaAllocator, parser: *std
     logger.debug("Method without return value not implemented: {s}", .{method});
 }
 
-pub fn loop(server: *Server) void {
+pub fn loop(server: *Server) !void {
     // This JSON parser is passed to processJsonRpc and reset.
     var json_parser = std.json.Parser.init(server.allocator, false);
     defer json_parser.deinit();
@@ -2572,7 +2573,7 @@ pub fn main() anyerror!void {
         .document_store = document_store,
     };
 
-    server.loop();
+    try server.loop();
 
     if (builtin_completions) |compls| {
         allocator.free(compls);
