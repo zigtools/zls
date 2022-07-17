@@ -1926,12 +1926,12 @@ fn completionHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: 
             const line_mem_start = @ptrToInt(doc_position.line.ptr) - @ptrToInt(handle.document.mem.ptr);
             const completing = handle.tree.source[line_mem_start + loc.start + 1 .. line_mem_start + loc.end];
 
-            var subpath_present = false;
+            var subpath_wrapper: ?[]const u8 = null;
             var fsl_completions = std.ArrayList(types.CompletionItem).init(allocator);
 
             fsc: {
                 var document_path = try uri_utils.parse(arena.allocator(), handle.uri());
-                var document_dir_path = std.fs.openDirAbsolute(std.fs.path.dirname(document_path) orelse break :fsc, .{ .iterate = true }) catch break :fsc;
+                var document_dir_path = std.fs.openDirAbsolute(std.fs.path.dirname(document_path) orelse break :fsc, .{}) catch break :fsc;
                 defer document_dir_path.close();
 
                 if (std.mem.lastIndexOfScalar(u8, completing, '/')) |subpath_index| {
@@ -1943,14 +1943,10 @@ fn completionHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: 
                         subpath = completing[1..subpath_index];
                     }
 
-                    var old = document_dir_path;
-                    document_dir_path = document_dir_path.openDir(subpath, .{ .iterate = true }) catch break :fsc // NOTE: Is this even safe lol?
-                    old.close();
-
-                    subpath_present = true;
+                    subpath_wrapper = subpath;
                 }
 
-                var dir_iterator = document_dir_path.iterate();
+                var dir_iterator = (document_dir_path.openIterableDir(subpath_wrapper orelse ".", .{}) catch break :fsc).iterate(); // NOTE: Is this even safe lol?
                 while (try dir_iterator.next()) |entry| {
                     if (std.mem.startsWith(u8, entry.name, ".")) continue;
                     if (entry.kind == .File and pos_context == .import_string_literal and !std.mem.endsWith(u8, entry.name, ".zig")) continue;
@@ -1964,7 +1960,7 @@ fn completionHandler(arena: *std.heap.ArenaAllocator, id: types.RequestId, req: 
                 }
             }
 
-            if (!subpath_present and pos_context == .import_string_literal) {
+            if (subpath_wrapper == null and pos_context == .import_string_literal) {
                 if (handle.associated_build_file) |bf| {
                     try fsl_completions.ensureUnusedCapacity(bf.packages.items.len);
 
