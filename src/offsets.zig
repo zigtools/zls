@@ -104,7 +104,9 @@ pub const TokenLocation = struct {
 };
 
 pub fn tokenRelativeLocation(tree: Ast, start_index: usize, token_start: usize, encoding: Encoding) !TokenLocation {
-    std.debug.assert(token_start >= start_index);
+    if (token_start < start_index)
+        return error.InvalidParams;
+
     var loc = TokenLocation{
         .line = 0,
         .column = 0,
