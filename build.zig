@@ -42,7 +42,9 @@ pub fn build(b: *std.build.Builder) !void {
         b.option(bool, "enable_tracy_callstack", "Enable callstack graphs.") orelse false,
     );
 
-    exe.addPackage(.{ .name = "known-folders", .source = .{ .path = "src/known-folders/known-folders.zig" } });
+    const KNOWN_FOLDERS_DEFAULT_PATH = "src/known-folders/known-folders.zig";
+    const known_folders_path = b.option([]const u8, "known-folders", "Path to known-folders package (default: " ++ KNOWN_FOLDERS_DEFAULT_PATH ++ ")") orelse KNOWN_FOLDERS_DEFAULT_PATH;
+    exe.addPackage(.{ .name = "known-folders", .source = .{ .path = known_folders_path } });
 
     if (enable_tracy) {
         const client_cpp = "src/tracy/TracyClient.cpp";
