@@ -1,0 +1,2 @@
+- Remove all files not used by zls (most files). This is quite the effort.
+- Figure out how to poll these files from Zig

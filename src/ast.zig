@@ -6,6 +6,7 @@ const std = @import("std");
 const Ast = std.zig.Ast;
 const Node = Ast.Node;
 const full = Ast.full;
+const types = @import("types.zig");
 
 fn fullPtrType(tree: Ast, info: full.PtrType.Components) full.PtrType {
     const token_tags = tree.tokens.items(.tag);
@@ -1027,5 +1028,19 @@ pub fn callFull(tree: Ast, node: Ast.Node.Index, buf: *[1]Ast.Node.Index) ?Ast.f
         .async_call_one_comma,
         => tree.callOne(buf, node),
         else => null,
+    };
+}
+
+// TODO: Is this correct or can we get a better end?
+pub fn astLocationToRange(loc: Ast.Location) types.Range {
+    return .{
+        .start = .{
+            .line = @intCast(i64, loc.line),
+            .character = @intCast(i64, loc.column),
+        },
+        .end = .{
+            .line = @intCast(i64, loc.line),
+            .character = @intCast(i64, loc.column),
+        },
     };
 }

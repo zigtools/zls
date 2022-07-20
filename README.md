@@ -339,3 +339,5 @@ let g:LanguageClient_serverCommands = {
 ## License
 
 MIT
+
+Some parts of this source code are (anal2/stage2) are pulled from the official Zig repository; see LICENSE (MIT) in anal2/stage2 for license information.
