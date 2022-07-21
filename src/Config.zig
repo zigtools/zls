@@ -63,9 +63,6 @@ skip_std_references: bool = false,
 /// Path to "builtin;" useful for debugging, automatically set if let null
 builtin_path: ?[]const u8 = null,
 
-/// Whether or not to use stage2 analysis; extremely experimental
-use_stage2_analysis: bool = false,
-
 pub fn loadFromFile(allocator: std.mem.Allocator, file_path: []const u8) ?Config {
     @setEvalBranchQuota(5000);
 

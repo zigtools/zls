@@ -292,7 +292,6 @@ pub const Configuration = struct {
             max_detail_length: ?usize,
             skip_std_references: ?bool,
             builtin_path: ?[]const u8,
-            use_stage2_analysis: ?bool,
         },
     },
 };

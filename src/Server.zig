@@ -201,7 +201,7 @@ fn publishDiagnostics(server: *Server, arena: *std.heap.ArenaAllocator, handle: 
 
     const tree = handle.tree;
 
-    var diagnostics = std.ArrayList(types.Diagnostic).init(arena.allocator());
+    var diagnostics = std.ArrayListUnmanaged(types.Diagnostic){};
 
     for (tree.errors) |err| {
         const loc = tree.tokenLocation(0, err.token);
@@ -210,7 +210,7 @@ fn publishDiagnostics(server: *Server, arena: *std.heap.ArenaAllocator, handle: 
         var fbs = std.io.fixedBufferStream(&mem_buffer);
         try tree.renderError(err, fbs.writer());
 
-        try diagnostics.append(.{
+        try diagnostics.append(arena.allocator(), .{
             .range = ast.astLocationToRange(loc),
             .severity = .Error,
             .code = @tagName(err.tag),
@@ -220,62 +220,12 @@ fn publishDiagnostics(server: *Server, arena: *std.heap.ArenaAllocator, handle: 
         });
     }
 
-    if (server.config.use_stage2_analysis) {
-        try anal2.getDiagnostics(server.allocator, tree, &diagnostics);
-    } else if (server.config.enable_unused_variable_warnings) {
-        scopes: for (handle.document_scope.scopes) |scope| {
-            const scope_data = switch (scope.data) {
-                .function => |f| b: {
-                    var buf: [1]std.zig.Ast.Node.Index = undefined;
-                    var proto = ast.fnProto(tree, f, &buf) orelse break :b f;
-                    if (proto.extern_export_inline_token) |tok| {
-                        if (std.mem.eql(u8, tree.tokenSlice(tok), "extern")) continue :scopes;
-                    }
-                    break :b f;
-                },
-                .block => |b| b,
-                else => continue,
-            };
-
-            var decl_iterator = scope.decls.iterator();
-            while (decl_iterator.next()) |decl| {
-                var identifier_count: usize = 0;
-
-                var name_token_index = switch (decl.value_ptr.*) {
-                    .ast_node => |an| s: {
-                        const an_tag = tree.nodes.items(.tag)[an];
-                        switch (an_tag) {
-                            .simple_var_decl => {
-                                break :s tree.nodes.items(.main_token)[an] + 1;
-                            },
-                            else => continue,
-                        }
-                    },
-                    .param_decl => |param| param.name_token orelse continue,
-                    else => continue,
-                };
-
-                if (std.mem.eql(u8, tree.tokenSlice(name_token_index), "_"))
-                    continue;
-
-                const pit_start = tree.firstToken(scope_data);
-                const pit_end = ast.lastToken(tree, scope_data);
-
-                for (tree.tokens.items(.tag)[pit_start..pit_end]) |tag, index| {
-                    if (tag == .identifier and std.mem.eql(u8, tree.tokenSlice(pit_start + @intCast(u32, index)), tree.tokenSlice(name_token_index))) identifier_count += 1;
-                }
-
-                if (identifier_count <= 1)
-                    try diagnostics.append(.{
-                        .range = ast.astLocationToRange(tree.tokenLocation(0, name_token_index)),
-                        .severity = .Error,
-                        .code = "unused_variable",
-                        .source = "zls",
-                        .message = "Unused variable; either remove the variable or use '_ = ' on the variable to bypass this error",
-                    });
-            }
-        }
-    }
+    try anal2.getDiagnostics(.{
+        .allocator = arena.allocator(),
+        .tree = tree,
+        .diagnostics = &diagnostics,
+        .uri = handle.uri(),
+    });
 
     if (server.config.warn_style) {
         var node: u32 = 0;
@@ -304,7 +254,7 @@ fn publishDiagnostics(server: *Server, arena: *std.heap.ArenaAllocator, handle: 
                 const import_str = tree.tokenSlice(import_str_token);
 
                 if (std.mem.startsWith(u8, import_str, "\".")) {
-                    try diagnostics.append(.{
+                    try diagnostics.append(arena.allocator(), .{
                         .range = ast.astLocationToRange(tree.tokenLocation(0, import_str_token)),
                         .severity = .Hint,
                         .code = "useless_dot",
@@ -337,7 +287,7 @@ fn publishDiagnostics(server: *Server, arena: *std.heap.ArenaAllocator, handle: 
 
                             const func_name = tree.tokenSlice(name_token);
                             if (!is_type_function and !analysis.isCamelCase(func_name)) {
-                                try diagnostics.append(.{
+                                try diagnostics.append(arena.allocator(), .{
                                     .range = ast.astLocationToRange(loc),
                                     .severity = .Hint,
                                     .code = "bad_style",
@@ -345,7 +295,7 @@ fn publishDiagnostics(server: *Server, arena: *std.heap.ArenaAllocator, handle: 
                                     .message = "Functions should be camelCase",
                                 });
                             } else if (is_type_function and !analysis.isPascalCase(func_name)) {
-                                try diagnostics.append(.{
+                                try diagnostics.append(arena.allocator(), .{
                                     .range = ast.astLocationToRange(loc),
                                     .severity = .Hint,
                                     .code = "bad_style",
