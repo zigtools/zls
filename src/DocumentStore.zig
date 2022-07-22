@@ -8,6 +8,8 @@ const Ast = std.zig.Ast;
 const BuildAssociatedConfig = @import("BuildAssociatedConfig.zig");
 const tracy = @import("tracy.zig");
 const Config = @import("Config.zig");
+const Zir = @import("anal2/stage2/Zir.zig");
+const AstGen = @import("anal2/stage2/AstGen.zig");
 
 const DocumentStore = @This();
 
@@ -37,6 +39,7 @@ pub const Handle = struct {
     /// Items in this array list come from `import_uris`
     imports_used: std.ArrayListUnmanaged([]const u8),
     tree: Ast,
+    zir: Zir,
     document_scope: analysis.DocumentScope,
 
     associated_build_file: ?*BuildFile,
@@ -213,7 +216,10 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: [:0]u8) anyerror!*Ha
     var tree = try std.zig.parse(self.allocator, text);
     errdefer tree.deinit(self.allocator);
 
-    var document_scope = try analysis.makeDocumentScope(self.allocator, tree);
+    var zir = try AstGen.generate(self.allocator, tree);
+    errdefer zir.deinit(self.allocator);
+
+    var document_scope = try analysis.makeDocumentScope(self.allocator, tree, zir);
     errdefer document_scope.deinit(self.allocator);
 
     handle.* = Handle{
@@ -227,6 +233,7 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: [:0]u8) anyerror!*Ha
             .mem = text.ptr[0 .. text.len + 1],
         },
         .tree = tree,
+        .zir = zir,
         .document_scope = document_scope,
         .associated_build_file = null,
         .is_build_file = null,
@@ -432,6 +439,7 @@ fn decrementCount(self: *DocumentStore, uri: []const u8) void {
             self.decrementBuildFileRefs(build_file);
         }
 
+        handle.zir.deinit(self.allocator);
         handle.tree.deinit(self.allocator);
         self.allocator.free(handle.document.mem);
 
@@ -489,9 +497,11 @@ fn refreshDocument(self: *DocumentStore, handle: *Handle) !void {
     log.debug("New text for document {s}", .{handle.uri()});
     handle.tree.deinit(self.allocator);
     handle.tree = try std.zig.parse(self.allocator, handle.document.text);
+    handle.zir.deinit(self.allocator);
+    handle.zir = try AstGen.generate(self.allocator, handle.tree);
 
     handle.document_scope.deinit(self.allocator);
-    handle.document_scope = try analysis.makeDocumentScope(self.allocator, handle.tree);
+    handle.document_scope = try analysis.makeDocumentScope(self.allocator, handle.tree, handle.zir);
 
     const new_imports = try self.collectImportUris(handle);
     errdefer {

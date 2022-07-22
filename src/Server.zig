@@ -220,12 +220,7 @@ fn publishDiagnostics(server: *Server, arena: *std.heap.ArenaAllocator, handle: 
         });
     }
 
-    try anal2.getDiagnostics(.{
-        .allocator = arena.allocator(),
-        .tree = tree,
-        .diagnostics = &diagnostics,
-        .uri = handle.uri(),
-    });
+    try anal2.getDiagnostics(arena.allocator(), handle, &diagnostics);
 
     if (server.config.warn_style) {
         var node: u32 = 0;
