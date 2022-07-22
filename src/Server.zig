@@ -1987,7 +1987,7 @@ fn completionHandler(server: *Server, arena: *std.heap.ArenaAllocator, id: types
 
             fsc: {
                 var document_path = try uri_utils.parse(arena.allocator(), handle.uri());
-                var document_dir_path = std.fs.openIterableDirAbsolute(std.fs.path.dirname(document_path) orelse break :fsc, .{}) catch break :fsc;
+                var document_dir_path = std.fs.openDirAbsolute(std.fs.path.dirname(document_path) orelse break :fsc, .{}) catch break :fsc;
                 defer document_dir_path.close();
 
                 if (std.mem.lastIndexOfScalar(u8, completing, '/')) |subpath_index| {
@@ -2000,7 +2000,7 @@ fn completionHandler(server: *Server, arena: *std.heap.ArenaAllocator, id: types
                     }
 
                     var old = document_dir_path;
-                    document_dir_path = document_dir_path.dir.openIterableDir(subpath, .{}) catch break :fsc // NOTE: Is this even safe lol?
+                    document_dir_path = document_dir_path.openDir(subpath, .{}) catch break :fsc // NOTE: Is this even safe lol?
                     old.close();
 
                     subpath_present = true;
