@@ -176,7 +176,7 @@ pub fn wizard(allocator: std.mem.Allocator) !void {
     const semantic_tokens = try askBool("Do you want to enable semantic highlighting?");
     const operator_completions = try askBool("Do you want to enable .* and .? completions?");
     const include_at_in_builtins = switch (editor) {
-        .Sublime => !try zinput.askBool("Are you using a Sublime Text version > 4000?"),
+        .Sublime => !try askBool("Are you using a Sublime Text version > 4000?"),
         .VSCode, .Kate, .Neovim, .Vim8, .Emacs, .Doom, .Spacemacs => false,
         else => try askBool("Should the @ sign be included in completions of builtin functions?\nChange this later if `@inc` completes to `include` or `@@include`"),
     };
