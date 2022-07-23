@@ -871,7 +871,7 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
         => {
             try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, node_data[node].lhs });
             const token_type: TokenType = switch (tag) {
-                .bool_and, .bool_or => .keyword,
+                .bool_and, .bool_or, .@"orelse" => .keyword,
                 else => .operator,
             };
 
