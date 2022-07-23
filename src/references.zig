@@ -1,11 +1,11 @@
 const std = @import("std");
 const Ast = std.zig.Ast;
-const DocumentStore = @import("./DocumentStore.zig");
-const analysis = @import("./analysis.zig");
-const types = @import("./types.zig");
-const offsets = @import("./offsets.zig");
+const DocumentStore = @import("DocumentStore.zig");
+const analysis = @import("analysis.zig");
+const types = @import("types.zig");
+const offsets = @import("offsets.zig");
 const log = std.log.scoped(.references);
-const ast = @import("./ast.zig");
+const ast = @import("ast.zig");
 
 fn tokenReference(handle: *DocumentStore.Handle, tok: Ast.TokenIndex, encoding: offsets.Encoding, context: anytype, comptime handler: anytype) !void {
     const loc = offsets.tokenRelativeLocation(handle.tree, 0, handle.tree.tokens.items(.start)[tok], encoding) catch return;
@@ -146,7 +146,7 @@ fn symbolReferencesInternal(arena: *std.heap.ArenaAllocator, store: *DocumentSto
         => {
             var buf: [1]Ast.Node.Index = undefined;
             const fn_proto = ast.fnProto(tree, node, &buf).?;
-            var it = fn_proto.iterate(tree);
+            var it = fn_proto.iterate(&tree);
             while (it.next()) |param| {
                 if (param.type_expr != 0)
                     try symbolReferencesInternal(arena, store, .{ .node = param.type_expr, .handle = handle }, decl, encoding, context, handler);
@@ -492,7 +492,7 @@ fn symbolReferencesInternal(arena: *std.heap.ArenaAllocator, store: *DocumentSto
     }
 }
 
-pub fn symbolReferences(arena: *std.heap.ArenaAllocator, store: *DocumentStore, decl_handle: analysis.DeclWithHandle, encoding: offsets.Encoding, include_decl: bool, context: anytype, comptime handler: anytype, skip_std_references: bool) !void {
+pub fn symbolReferences(arena: *std.heap.ArenaAllocator, store: *DocumentStore, decl_handle: analysis.DeclWithHandle, encoding: offsets.Encoding, include_decl: bool, context: anytype, comptime handler: anytype, skip_std_references: bool, workspace: bool) !void {
     std.debug.assert(decl_handle.decl.* != .label_decl);
     const curr_handle = decl_handle.handle;
     if (include_decl) {
@@ -503,41 +503,43 @@ pub fn symbolReferences(arena: *std.heap.ArenaAllocator, store: *DocumentStore, 
         .ast_node => {
             try symbolReferencesInternal(arena, store, .{ .node = 0, .handle = curr_handle }, decl_handle, encoding, context, handler);
 
-            var imports = std.ArrayList(*DocumentStore.Handle).init(arena.allocator());
+            if (workspace) {
+                var imports = std.ArrayList(*DocumentStore.Handle).init(arena.allocator());
 
-            var handle_it = store.handles.iterator();
-            while (handle_it.next()) |entry| {
-                if (skip_std_references and std.mem.indexOf(u8, entry.key_ptr.*, "std") != null) {
-                    if (!include_decl or entry.value_ptr.* != curr_handle)
-                        continue;
-                }
+                var handle_it = store.handles.iterator();
+                while (handle_it.next()) |entry| {
+                    if (skip_std_references and std.mem.indexOf(u8, entry.key_ptr.*, "std") != null) {
+                        if (!include_decl or entry.value_ptr.* != curr_handle)
+                            continue;
+                    }
 
-                // Check entry's transitive imports
-                try imports.append(entry.value_ptr.*);
-                var i: usize = 0;
-                blk: while (i < imports.items.len) : (i += 1) {
-                    const import = imports.items[i];
-                    for (import.imports_used.items) |uri| {
-                        const h = store.getHandle(uri) orelse break;
+                    // Check entry's transitive imports
+                    try imports.append(entry.value_ptr.*);
+                    var i: usize = 0;
+                    blk: while (i < imports.items.len) : (i += 1) {
+                        const import = imports.items[i];
+                        for (import.imports_used.items) |uri| {
+                            const h = store.getHandle(uri) orelse break;
 
-                        if (h == curr_handle) {
-                            // entry does import curr_handle
-                            try symbolReferencesInternal(arena, store, .{ .node = 0, .handle = entry.value_ptr.* }, decl_handle, encoding, context, handler);
-                            break :blk;
-                        }
-
-                        select: {
-                            for (imports.items) |item| {
-                                if (item == h) {
-                                    // already checked this import
-                                    break :select;
-                                }
+                            if (h == curr_handle) {
+                                // entry does import curr_handle
+                                try symbolReferencesInternal(arena, store, .{ .node = 0, .handle = entry.value_ptr.* }, decl_handle, encoding, context, handler);
+                                break :blk;
                             }
-                            try imports.append(h);
+
+                            select: {
+                                for (imports.items) |item| {
+                                    if (item == h) {
+                                        // already checked this import
+                                        break :select;
+                                    }
+                                }
+                                try imports.append(h);
+                            }
                         }
                     }
+                    try imports.resize(0);
                 }
-                try imports.resize(0);
             }
         },
         .param_decl => |param| {
@@ -547,7 +549,7 @@ pub fn symbolReferences(arena: *std.heap.ArenaAllocator, store: *DocumentStore, 
                     .function => |proto| {
                         var buf: [1]Ast.Node.Index = undefined;
                         const fn_proto = ast.fnProto(curr_handle.tree, proto, &buf).?;
-                        var it = fn_proto.iterate(curr_handle.tree);
+                        var it = fn_proto.iterate(&curr_handle.tree);
                         while (it.next()) |candidate| {
                             if (std.meta.eql(candidate, param)) {
                                 if (curr_handle.tree.nodes.items(.tag)[proto] == .fn_decl) {

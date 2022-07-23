@@ -1,12 +1,12 @@
 const std = @import("std");
-const analysis = @import("./analysis.zig");
-const offsets = @import("./offsets.zig");
-const DocumentStore = @import("./DocumentStore.zig");
-const types = @import("./types.zig");
+const analysis = @import("analysis.zig");
+const offsets = @import("offsets.zig");
+const DocumentStore = @import("DocumentStore.zig");
+const types = @import("types.zig");
 const Ast = std.zig.Ast;
 const Token = std.zig.Token;
-const identifierFromPosition = @import("./main.zig").identifierFromPosition;
-const ast = @import("./ast.zig");
+const identifierFromPosition = @import("Server.zig").identifierFromPosition;
+const ast = @import("ast.zig");
 
 fn fnProtoToSignatureInfo(document_store: *DocumentStore, arena: *std.heap.ArenaAllocator, commas: u32, skip_self_param: bool, handle: *DocumentStore.Handle, fn_node: Ast.Node.Index, proto: Ast.full.FnProto) !types.SignatureInformation {
     const ParameterInformation = types.SignatureInformation.ParameterInformation;
@@ -23,7 +23,7 @@ fn fnProtoToSignatureInfo(document_store: *DocumentStore, arena: *std.heap.Arena
     } else commas;
 
     var params = std.ArrayListUnmanaged(ParameterInformation){};
-    var param_it = proto.iterate(tree);
+    var param_it = proto.iterate(&tree);
     while (param_it.next()) |param| {
         const param_comments = if (param.first_doc_comment) |dc|
             try analysis.collectDocComments(alloc, tree, dc, .Markdown, false)

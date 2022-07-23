@@ -1,10 +1,10 @@
 const std = @import("std");
-const offsets = @import("./offsets.zig");
-const DocumentStore = @import("./DocumentStore.zig");
-const analysis = @import("./analysis.zig");
+const offsets = @import("offsets.zig");
+const DocumentStore = @import("DocumentStore.zig");
+const analysis = @import("analysis.zig");
 const Ast = std.zig.Ast;
 const log = std.log.scoped(.semantic_tokens);
-const ast = @import("./ast.zig");
+const ast = @import("ast.zig");
 
 pub const TokenType = enum(u32) {
     type,
@@ -138,6 +138,30 @@ const Builder = struct {
 
         var i: usize = from;
         while (i < to - 1) : (i += 1) {
+            // Skip multi-line string literals
+            if (source[i] == '\\' and source[i + 1] == '\\') {
+                while (i < to - 1 and source[i] != '\n') : (i += 1) {}
+                continue;
+            }
+            // Skip normal string literals
+            if (source[i] == '"') {
+                i += 1;
+                while (i < to - 1 and
+                    source[i] != '\n' and
+                    !(source[i] == '"' and source[i - 1] != '\\')) : (i += 1)
+                {}
+                continue;
+            }
+            // Skip char literals
+            if (source[i] == '\'') {
+                i += 1;
+                while (i < to - 1 and
+                    source[i] != '\n' and
+                    !(source[i] == '\'' and source[i - 1] != '\\')) : (i += 1)
+                {}
+                continue;
+            }
+
             if (source[i] != '/' or source[i + 1] != '/')
                 continue;
 
@@ -451,7 +475,7 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
 
             try writeTokenMod(builder, fn_proto.name_token, func_name_tok_type, tok_mod);
 
-            var it = fn_proto.iterate(tree);
+            var it = fn_proto.iterate(&tree);
             while (it.next()) |param_decl| {
                 if (param_decl.first_doc_comment) |docs| try writeDocComments(builder, tree, docs);
 
@@ -847,7 +871,7 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
         => {
             try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, node_data[node].lhs });
             const token_type: TokenType = switch (tag) {
-                .bool_and, .bool_or => .keyword,
+                .bool_and, .bool_or, .@"orelse" => .keyword,
                 else => .operator,
             };
 

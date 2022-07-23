@@ -448,8 +448,17 @@ pub fn lastToken(tree: Ast, node: Ast.Node.Index) Ast.TokenIndex {
         .asm_simple,
         .asm_output,
         .asm_input,
-        .error_value,
         => return datas[n].rhs + end_offset,
+
+        .error_value => {
+            if (datas[n].rhs != 0) {
+                return datas[n].rhs + end_offset;
+            } else if (datas[n].lhs != 0) {
+                return datas[n].lhs + end_offset;
+            } else {
+                return main_tokens[n] + end_offset;
+            }
+        },
 
         .anyframe_literal,
         .char_literal,
@@ -744,7 +753,7 @@ pub fn lastToken(tree: Ast, node: Ast.Node.Index) Ast.TokenIndex {
         },
         .fn_proto_one => {
             const extra = tree.extraData(datas[n].lhs, Node.FnProtoOne);
-            // linksection, callconv, align can appear in any order, so we
+            // addrspace, linksection, callconv, align can appear in any order, so we
             // find the last one here.
             // rhs can be zero if no return type is provided
             var max_node: Node.Index = 0;
@@ -759,6 +768,14 @@ pub fn lastToken(tree: Ast, node: Ast.Node.Index) Ast.TokenIndex {
                 const start = token_starts[main_tokens[extra.align_expr]];
                 if (start > max_start) {
                     max_node = extra.align_expr;
+                    max_start = start;
+                    max_offset = 1; // for the rparen
+                }
+            }
+            if (extra.addrspace_expr != 0) {
+                const start = token_starts[main_tokens[extra.addrspace_expr]];
+                if (start > max_start) {
+                    max_node = extra.addrspace_expr;
                     max_start = start;
                     max_offset = 1; // for the rparen
                 }
@@ -797,7 +814,7 @@ pub fn lastToken(tree: Ast, node: Ast.Node.Index) Ast.TokenIndex {
         },
         .fn_proto => {
             const extra = tree.extraData(datas[n].lhs, Node.FnProto);
-            // linksection, callconv, align can appear in any order, so we
+            // addrspace, linksection, callconv, align can appear in any order, so we
             // find the last one here.
             // rhs can be zero if no return type is provided
             var max_node: Node.Index = 0;
@@ -812,6 +829,14 @@ pub fn lastToken(tree: Ast, node: Ast.Node.Index) Ast.TokenIndex {
                 const start = token_starts[main_tokens[extra.align_expr]];
                 if (start > max_start) {
                     max_node = extra.align_expr;
+                    max_start = start;
+                    max_offset = 1; // for the rparen
+                }
+            }
+            if (extra.addrspace_expr != 0) {
+                const start = token_starts[main_tokens[extra.addrspace_expr]];
+                if (start > max_start) {
+                    max_node = extra.addrspace_expr;
                     max_start = start;
                     max_offset = 1; // for the rparen
                 }

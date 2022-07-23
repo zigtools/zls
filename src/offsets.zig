@@ -1,5 +1,5 @@
 const std = @import("std");
-const types = @import("./types.zig");
+const types = @import("types.zig");
 const Ast = std.zig.Ast;
 
 pub const Encoding = enum {
@@ -104,7 +104,9 @@ pub const TokenLocation = struct {
 };
 
 pub fn tokenRelativeLocation(tree: Ast, start_index: usize, token_start: usize, encoding: Encoding) !TokenLocation {
-    std.debug.assert(token_start >= start_index);
+    if (token_start < start_index)
+        return error.InvalidParams;
+
     var loc = TokenLocation{
         .line = 0,
         .column = 0,
@@ -189,6 +191,8 @@ pub fn documentRange(doc: types.TextDocument, encoding: Encoding) !types.Range {
     while (split_iterator.next()) |line| : (line_idx += 1) {
         curr_line = line;
     }
+
+    if (line_idx > 0) line_idx -= 1;
 
     if (encoding == .utf8) {
         return types.Range{

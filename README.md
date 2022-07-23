@@ -3,21 +3,35 @@
 [![CI](https://github.com/zigtools/zls/workflows/CI/badge.svg)](https://github.com/zigtools/zls/actions)
 ![Zig Tools](./.github/assets/zigtools.svg)
 
+**Need support? Wanna help out? Join our [Discord server](https://discord.gg/5m5U3qpUhk)!**
+
 Zig Language Server, or `zls`, is a language server for Zig. The Zig wiki states that "The Zig community is decentralized" and "There is no concept of 'official' or 'unofficial'", so instead of calling `zls` unofficial, and I'm going to call it a cool option, one of [many](https://github.com/search?q=zig+language+server).
 
 <!-- omit in toc -->
 ## Table Of Contents
 
 - [Installation](#installation)
-  - [Build Options](#build-options)
+  - [Installing binaries](#installing-binaries)
+    - [MacOS](#macos)
+    - [Linux](#linux)
+  - [From Source](#from-source)
+    - [Build Options](#build-options)
+    - [Updating Data Files](#updating-data-files)
   - [Configuration Options](#configuration-options)
-- [Usage](#usage)
+- [Features](#features)
   - [VSCode](#vscode)
   - [Sublime Text](#sublime-text)
+    - [Sublime Text 3](#sublime-text-3)
+    - [Sublime Text 4](#sublime-text-4)
   - [Kate](#kate)
   - [Neovim/Vim8](#neovimvim8)
+    - [CoC](#coc)
+    - [YouCompleteMe](#youcompleteme)
+    - [nvim-lspconfig](#nvim-lspconfig)
+    - [LanguageClient-neovim](#languageclient-neovim)
   - [Emacs](#emacs)
   - [Doom Emacs](#doom-emacs)
+  - [Spacemacs](#spacemacs)
 - [Related Projects](#related-projects)
 - [License](#license)
 
@@ -43,7 +57,7 @@ mkdir $HOME/zls && cd $HOME/zls && curl -L https://github.com/zigtools/zls/relea
 
 You can install the latest release into `$HOME/zls` using e.g.:
 
-```
+```bash
 sudo apt install xz-utils
 mkdir $HOME/zls && cd $HOME/zls && curl -L https://github.com/zigtools/zls/releases/download/0.9.0/x86_64-linux.tar.xz | tar -xJ --strip-components=1 -C .
 ```
@@ -67,7 +81,7 @@ zig build -Drelease-safe
 <!-- If this table grows too large, then delete this one and move it all over to the Wiki page about building from source. -->
 | Option | Type | Default Value | What it Does |
 | --- | --- | --- | --- |
-| `-Ddata_version` | `string` (master, 0.7.0 or 0.7.1) | master | The data file version. This selects the files in the `src/data` folder that correspond to the Zig version being served.|
+| `-Ddata_version` | `string` (like 0.7.1 or 0.9.0) | master | The data file version. This selects the files in the `src/data` folder that correspond to the Zig version being served.|
 
 #### Updating Data Files
 
@@ -88,6 +102,8 @@ The following options are currently available.
 | Option | Type | Default value | What it Does |
 | --- | --- | --- | --- |
 | `enable_snippets` | `bool` | `false` | Enables snippet completions when the client also supports them. |
+| `enable_unused_variable_warnings` | `bool` | `false`| Enables warnings for local variables that aren't used. |
+| `enable_import_embedfile_argument_completions` | `bool` | `false` | Whether to enable import/embedFile argument completions |
 | `zig_lib_path` | `?[]const u8` | `null` | zig library path, e.g. `/path/to/zig/lib/zig`, used to analyze std library imports. |
 | `zig_exe_path` | `?[]const u8` | `null` | zig executable path, e.g. `/path/to/zig/zig`, used to run the custom build runner. If `null`, zig is looked up in `PATH`. Will be used to infer the zig standard library path if none is provided. |
 | `warn_style` | `bool` | `false` | Enables warnings for style *guideline* mismatches |
@@ -95,11 +111,13 @@ The following options are currently available.
 | `build_runner_cache_path` | `?[]const u8` | `null` | Path to a directroy that will be used as zig's cache when running `zig run build_runner.zig ...`. `null` is equivalent to `${KnownFloders.Cache}/zls` |
 | `enable_semantic_tokens` | `bool` | `true` | Enables semantic token support when the client also supports it. |
 | `operator_completions` | `bool` | `true` | Enables `*` and `?` operators in completion lists. |
+|`include_at_in_builtins`|`bool`|`false`| Whether the @ sign should be part of the completion of builtins.
+|`max_detail_length`|`usize`|`1024 * 1024`| The detail field of completions is truncated to be no longer than this (in bytes).
 | `skip_std_references` | `bool` | `false` | When true, skips searching for references in std. Improves lookup speed for functions in user's code. Renaming and go-to-definition will continue to work as is.
 
 ## Features
 
-`zls` supports most language features, including simple type function support, usingnamespace, payload capture type resolution, custom packages and others.
+`zls` supports most language features, including simple type function support, using namespace, payload capture type resolution, custom packages and others.
 Notable language features that are not currently implemented include `@cImport` as well as most forms of compile time evaluation.
 
 The following LSP features are supported:
@@ -123,7 +141,7 @@ Install the `zls-vscode` extension from [here](https://github.com/zigtools/zls-v
 - Install the `LSP` package from [here](https://github.com/sublimelsp/LSP/releases) or via Package Control.
 - Add this snippet to `LSP's` user settings:
 
-#### For Sublime Text 3:
+#### Sublime Text 3
 
 ```json
 {
@@ -139,7 +157,7 @@ Install the `zls-vscode` extension from [here](https://github.com/zigtools/zls-v
 }
 ```
 
-#### For Sublime Text 4:
+#### Sublime Text 4
 
 ```json
 {
@@ -155,6 +173,7 @@ Install the `zls-vscode` extension from [here](https://github.com/zigtools/zls-v
 
 ### Kate
 
+- Install language support for Zig from [here](https://github.com/ziglang/kde-syntax-highlighting)
 - Enable `LSP client` plugin in Kate settings.
 - Add this snippet to `LSP client's` user settings (e.g. /$HOME/.config/kate/lspclient)
   (or paste it in `LSP client's` GUI settings)
@@ -175,18 +194,25 @@ Install the `zls-vscode` extension from [here](https://github.com/zigtools/zls-v
 #### CoC
 
 - Install the CoC engine from [here](https://github.com/neoclide/coc.nvim).
-- Issue `:CocConfig` from within your Vim editor, and the following snippet:
 
-```json
-{
-   "languageserver": {
-       "zls" : {
-           "command": "command_or_path_to_zls",
-           "filetypes": ["zig"]
+Then choose one of the following two ways
+
+1. Use extension
+
+    Run `:CocInstall coc-zls` to install [coc-zls](https://github.com/xiyaowong/coc-zls), 
+    this extension supports the same functionality as the VScode extension
+  
+2. Manually register
+    ```json
+    {
+       "languageserver": {
+           "zls" : {
+               "command": "command_or_path_to_zls",
+               "filetypes": ["zig"]
+           }
        }
-   }
-}
-```
+    }
+    ```
 
 #### YouCompleteMe
 - Install YouCompleteMeFrom [here](https://github.com/ycm-core/YouCompleteMe.git).
@@ -287,6 +313,16 @@ let g:LanguageClient_serverCommands = {
         :new-connection (lsp-stdio-connection "<path to zls>")
         :major-modes '(zig-mode)
         :server-id 'zls))))
+```
+
+### Spacemacs
+
+- Add `lsp` and `zig` to `dotspacemacs-configuration-layers` in your `.spacemacs` file.
+- If you don't have `zls` in your `PATH`, add the following to `dotspacemacs/user-config` in your
+  `.spacemacs` file:
+
+```elisp
+(setq lsp-zig-zls-executable "<path to zls>")
 ```
 
 ## Related Projects

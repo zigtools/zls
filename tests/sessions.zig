@@ -13,7 +13,7 @@ const initialize_msg_offs =
 ;
 
 const Server = struct {
-    process: *std.ChildProcess,
+    process: std.ChildProcess,
     request_id: u32 = 1,
 
     fn start(initialization: []const u8, expect: ?[]const u8) !Server {
@@ -66,7 +66,7 @@ const Server = struct {
             const rest = response_bytes[json_fmt.len..];
             const id_end = std.mem.indexOfScalar(u8, rest, ',') orelse return error.InvalidResponse;
 
-            const id = try std.fmt.parseInt(u32, rest[0..id_end], 10);
+            const id = std.fmt.parseInt(u32, rest[0..id_end], 10) catch continue;
 
             if (id != self.request_id) {
                 continue;
@@ -83,6 +83,7 @@ const Server = struct {
             }
         }
     }
+
     fn extractError(msg: []const u8) !void {
         const log_request =
             \\"method":"window/logMessage","params":{"type":
@@ -103,12 +104,11 @@ const Server = struct {
         // FIXME this shutdown request fails with a broken pipe on stdin on the CI
         self.request("shutdown", "{}", null) catch @panic("Could not send shutdown request");
         // waitNoError(self.process) catch @panic("Server error");
-        self.process.deinit();
     }
 };
 
-fn startZls() !*std.ChildProcess {
-    var process = try std.ChildProcess.init(&[_][]const u8{"zig-out/bin/zls" ++ suffix}, allocator);
+fn startZls() !std.ChildProcess {
+    var process = std.ChildProcess.init(&[_][]const u8{"zig-out/bin/zls" ++ suffix}, allocator);
     process.stdin_behavior = .Pipe;
     process.stdout_behavior = .Pipe;
     process.stderr_behavior = .Inherit;
@@ -155,10 +155,10 @@ test "Open file, ask for semantic tokens" {
     defer server.shutdown();
 
     try server.request("textDocument/didOpen",
-        \\{"textDocument":{"uri":"file://./tests/test.zig","languageId":"zig","version":420,"text":"const std = @import(\"std\");"}}
+        \\{"textDocument":{"uri":"file:///test.zig","languageId":"zig","version":420,"text":"const std = @import(\"std\");"}}
     , null);
     try server.request("textDocument/semanticTokens/full",
-        \\{"textDocument":{"uri":"file://./tests/test.zig"}}
+        \\{"textDocument":{"uri":"file:///test.zig"}}
     ,
         \\{"data":[0,0,5,7,0,0,6,3,0,33,0,4,1,11,0,0,2,7,12,0,0,8,5,9,0]}
     );
@@ -187,7 +187,7 @@ test "Request completion with no trailing whitespace" {
     try server.request("textDocument/completion",
         \\{"textDocument":{"uri":"file:///test.zig"}, "position":{"line":1,"character":1}}
     ,
-        \\{"isIncomplete":false,"items":[{"label":"std","kind":21,"textEdit":null,"filterText":null,"insertText":"std","insertTextFormat":1,"detail":"const std = @import(\"std\")","documentation":null}]}
+        \\{"isIncomplete":false,"items":[{"label":"std","labelDetails":{"detail":"","description":"@import(\"std\")","sortText":null},"kind":21,"detail":"std","sortText":"1_std","filterText":null,"insertText":"std","insertTextFormat":1,"documentation":null}]}
     );
 }
 
@@ -215,22 +215,26 @@ test "Self-referential definition" {
     try server.request("textDocument/completion",
         \\{"textDocument":{"uri":"file:///test.zig"}, "position":{"line":1,"character":1}}
     ,
-        \\{"isIncomplete":false,"items":[{"label":"h","kind":21,"textEdit":null,"filterText":null,"insertText":"h","insertTextFormat":1,"detail":"const h = h(0)","documentation":null}]}
+        \\{"isIncomplete":false,"items":[{"label":"h","labelDetails":{"detail":"","description":"h(0)","sortText":null},"kind":21,"detail":"h","sortText":"1_h","filterText":null,"insertText":"h","insertTextFormat":1,"documentation":null}]}
     );
 }
-test "Missing return type" {
-    var server = try Server.start(initialize_msg, null);
-    defer server.shutdown();
 
-    try server.request("textDocument/didOpen",
-        \\{"textDocument":{"uri":"file:///test.zig","languageId":"zig","version":420,"text":"fn w() {}\nc"}}
-    , null);
-    try server.request("textDocument/completion",
-        \\{"textDocument":{"uri":"file:///test.zig"}, "position":{"line":1,"character":1}}
-    ,
-        \\{"isIncomplete":false,"items":[{"label":"w","kind":3,"textEdit":null,"filterText":null,"insertText":"w","insertTextFormat":1,"detail":"fn","documentation":null}]}
-    );
-}
+// This test as written depends on the configuration in the *host* machines zls.json, if `enable_snippets` is true then
+// the insert text is "w()" if it is false it is "w"
+//
+// test "Missing return type" {
+//     var server = try Server.start(initialize_msg, null);
+//     defer server.shutdown();
+
+//     try server.request("textDocument/didOpen",
+//         \\{"textDocument":{"uri":"file:///test.zig","languageId":"zig","version":420,"text":"fn w() {}\nc"}}
+//     , null);
+//     try server.request("textDocument/completion",
+//         \\{"textDocument":{"uri":"file:///test.zig"}, "position":{"line":1,"character":1}}
+//     ,
+//         \\{"isIncomplete":false,"items":[{"label":"w","kind":3,"textEdit":null,"filterText":null,"insertText":"w","insertTextFormat":1,"detail":"fn","documentation":null}]}
+//     );
+// }
 
 test "Pointer and optional deref" {
     var server = try Server.start(initialize_msg, null);
@@ -242,13 +246,13 @@ test "Pointer and optional deref" {
     try server.request("textDocument/completion",
         \\{"textDocument":{"uri":"file:///test.zig"}, "position":{"line":1,"character":18}}
     ,
-        \\{"isIncomplete":false,"items":[{"label":"data","kind":5,"textEdit":null,"filterText":null,"insertText":"data","insertTextFormat":1,"detail":"data: i32 = 5","documentation":null}]}
+        \\{"isIncomplete":false,"items":[{"label":"data","labelDetails":{"detail":"","description":"i32 ","sortText":null},"kind":5,"detail":"data","sortText":"3_data","filterText":null,"insertText":"data","insertTextFormat":1,"documentation":null}]}
     );
 }
 
 test "Request utf-8 offset encoding" {
     var server = try Server.start(initialize_msg_offs,
-        \\{"offsetEncoding":"utf-8","capabilities":{"signatureHelpProvider":{"triggerCharacters":["("],"retriggerCharacters":[","]},"textDocumentSync":1,"renameProvider":true,"completionProvider":{"resolveProvider":false,"triggerCharacters":[".",":","@"]},"documentHighlightProvider":false,"hoverProvider":true,"codeActionProvider":false,"declarationProvider":true,"definitionProvider":true,"typeDefinitionProvider":true,"implementationProvider":false,"referencesProvider":true,"documentSymbolProvider":true,"colorProvider":false,"documentFormattingProvider":true,"documentRangeFormattingProvider":false,"foldingRangeProvider":false,"selectionRangeProvider":false,"workspaceSymbolProvider":false,"rangeProvider":false,"documentProvider":true,"workspace":{"workspaceFolders":{"supported":false,"changeNotifications":false}},"semanticTokensProvider":{"full":true,"range":false,"legend":{"tokenTypes":["type","parameter","variable","enumMember","field","errorTag","function","keyword","comment","string","number","operator","builtin","label","keywordLiteral"],"tokenModifiers":["namespace","struct","enum","union","opaque","declaration","async","documentation","generic"]}}},"serverInfo":{"name":"zls","version":"0.1.0"}}
+        \\{"offsetEncoding":"utf-8","capabilities":{"signatureHelpProvider":{"triggerCharacters":["("],"retriggerCharacters":[","]},"textDocumentSync":1,"renameProvider":true,"completionProvider":{"resolveProvider":false,"triggerCharacters":[".",":","@"],"completionItem":{"labelDetailsSupport":true}},"documentHighlightProvider":false,"hoverProvider":true,"codeActionProvider":false,"declarationProvider":true,"definitionProvider":true,"typeDefinitionProvider":true,"implementationProvider":false,"referencesProvider":true,"documentSymbolProvider":true,"colorProvider":false,"documentFormattingProvider":true,"documentRangeFormattingProvider":false,"foldingRangeProvider":false,"selectionRangeProvider":false,"workspaceSymbolProvider":false,"rangeProvider":false,"documentProvider":true,"workspace":{"workspaceFolders":{"supported":false,"changeNotifications":false}},"semanticTokensProvider":{"full":true,"range":false,"legend":{"tokenTypes":["type","parameter","variable","enumMember","field","errorTag","function","keyword","comment","string","number","operator","builtin","label","keywordLiteral"],"tokenModifiers":["namespace","struct","enum","union","opaque","declaration","async","documentation","generic"]}}},"serverInfo":{"name":"zls","version":"0.1.0"}}
     );
     defer server.shutdown();
 }

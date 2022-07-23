@@ -3,7 +3,7 @@
 //! We only define what we actually use.
 
 const std = @import("std");
-const types = @import("./types.zig");
+const types = @import("types.zig");
 
 /// Only check for the field's existence.
 const Exists = struct {
@@ -114,11 +114,11 @@ fn fromDynamicTreeInternal(arena: *std.heap.ArenaAllocator, value: std.json.Valu
         if (value != .Integer) return error.MalformedJson;
         out.* = std.meta.intToEnum(
             T,
-            std.math.cast(TagType, value.Integer) catch return error.MalformedJson,
+            std.math.cast(TagType, value.Integer) orelse return error.MalformedJson,
         ) catch return error.MalformedJson;
     } else if (comptime std.meta.trait.is(.Int)(T)) {
         if (value != .Integer) return error.MalformedJson;
-        out.* = std.math.cast(T, value.Integer) catch return error.MalformedJson;
+        out.* = std.math.cast(T, value.Integer) orelse return error.MalformedJson;
     } else switch (T) {
         bool => {
             if (value != .Bool) return error.MalformedJson;
@@ -147,6 +147,10 @@ const MaybeStringArray = Default([]const []const u8, &.{});
 pub const Initialize = struct {
     pub const ClientCapabilities = struct {
         workspace: ?struct {
+            configuration: Default(bool, false),
+            didChangeConfiguration: ?struct {
+                dynamicRegistration: Default(bool, false), // NOTE: Should this be true? Seems like this critical feature should be nearly universal
+            },
             workspaceFolders: Default(bool, false),
         },
         textDocument: ?struct {
@@ -157,9 +161,11 @@ pub const Initialize = struct {
             completion: ?struct {
                 completionItem: ?struct {
                     snippetSupport: Default(bool, false),
+                    labelDetailsSupport: Default(bool, true),
                     documentationFormat: MaybeStringArray,
                 },
             },
+            documentHighlight: Exists,
         },
         offsetEncoding: MaybeStringArray,
     };
@@ -239,6 +245,7 @@ pub const GotoDeclaration = TextDocumentIdentifierPositionRequest;
 pub const Hover = TextDocumentIdentifierPositionRequest;
 pub const DocumentSymbols = TextDocumentIdentifierRequest;
 pub const Formatting = TextDocumentIdentifierRequest;
+pub const DocumentHighlight = TextDocumentIdentifierPositionRequest;
 pub const Rename = struct {
     params: struct {
         textDocument: TextDocumentIdentifier,
@@ -253,6 +260,27 @@ pub const References = struct {
         position: types.Position,
         context: struct {
             includeDeclaration: bool,
+        },
+    },
+};
+
+pub const Configuration = struct {
+    params: struct {
+        settings: struct {
+            enable_snippets: ?bool,
+            enable_unused_variable_warnings: ?bool,
+            enable_import_embedfile_argument_completions: ?bool,
+            zig_lib_path: ?[]const u8,
+            zig_exe_path: ?[]const u8,
+            warn_style: ?bool,
+            build_runner_path: ?[]const u8,
+            build_runner_cache_path: ?[]const u8,
+            enable_semantic_tokens: ?bool,
+            operator_completions: ?bool,
+            include_at_in_builtins: ?bool,
+            max_detail_length: ?usize,
+            skip_std_references: ?bool,
+            builtin_path: ?[]const u8,
         },
     },
 };

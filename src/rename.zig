@@ -1,9 +1,9 @@
 const std = @import("std");
-const DocumentStore = @import("./DocumentStore.zig");
-const analysis = @import("./analysis.zig");
-const references = @import("./references.zig");
-const types = @import("./types.zig");
-const offsets = @import("./offsets.zig");
+const DocumentStore = @import("DocumentStore.zig");
+const analysis = @import("analysis.zig");
+const references = @import("references.zig");
+const types = @import("types.zig");
+const offsets = @import("offsets.zig");
 
 // TODO Use a map to array lists and collect at the end instead?
 const RefHandlerContext = struct {
@@ -31,7 +31,7 @@ pub fn renameSymbol(arena: *std.heap.ArenaAllocator, store: *DocumentStore, decl
         .edits = edits,
         .allocator = arena.allocator(),
         .new_name = new_name,
-    }, refHandler, true);
+    }, refHandler, true, true);
 }
 
 pub fn renameLabel(arena: *std.heap.ArenaAllocator, decl_handle: analysis.DeclWithHandle, new_name: []const u8, edits: *std.StringHashMap([]types.TextEdit), encoding: offsets.Encoding) !void {

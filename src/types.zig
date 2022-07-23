@@ -43,6 +43,9 @@ pub const ResponseParams = union(enum) {
     Locations: []Location,
     WorkspaceEdit: WorkspaceEdit,
     InitializeResult: InitializeResult,
+    ConfigurationParams: ConfigurationParams,
+    RegistrationParams: RegistrationParams,
+    DocumentHighlight: []DocumentHighlight,
 };
 
 /// JSONRPC notifications
@@ -72,6 +75,13 @@ pub const Response = struct {
     jsonrpc: string = "2.0",
     id: RequestId,
     result: ResponseParams,
+};
+
+pub const Request = struct {
+    jsonrpc: string = "2.0",
+    id: RequestId,
+    method: []const u8,
+    params: ?ResponseParams,
 };
 
 /// Type of a debug message
@@ -201,7 +211,7 @@ pub const InsertTextFormat = enum(i64) {
 };
 
 pub const CompletionItem = struct {
-    const Kind = enum(i64) {
+    pub const Kind = enum(i64) {
         Text = 1,
         Method = 2,
         Function = 3,
@@ -234,13 +244,27 @@ pub const CompletionItem = struct {
     };
 
     label: string,
+    labelDetails: ?CompletionItemLabelDetails = null,
     kind: Kind,
-    textEdit: ?TextEdit = null,
-    filterText: ?string = null,
-    insertText: string = "",
-    insertTextFormat: ?InsertTextFormat = .PlainText,
     detail: ?string = null,
+
+    sortText: ?string = null,
+    filterText: ?string = null,
+    insertText: ?string = null,
+
+    insertTextFormat: ?InsertTextFormat = .PlainText,
     documentation: ?MarkupContent = null,
+
+    // FIXME: i commented this out, because otherwise the vscode client complains about *ranges*
+    // and breaks code completion entirely
+    // see: https://github.com/zigtools/zls-vscode/pull/33
+    // textEdit: ?TextEdit = null,
+};
+
+pub const CompletionItemLabelDetails = struct {
+    detail: ?string,
+    description: ?string,
+    sortText: ?string = null,
 };
 
 pub const DocumentSymbol = struct {
@@ -331,6 +355,7 @@ const InitializeResult = struct {
         completionProvider: struct {
             resolveProvider: bool,
             triggerCharacters: []const string,
+            completionItem: struct { labelDetailsSupport: bool },
         },
         documentHighlightProvider: bool,
         hoverProvider: bool,
@@ -368,4 +393,38 @@ const InitializeResult = struct {
         name: string,
         version: ?string = null,
     },
+};
+
+pub const ConfigurationParams = struct {
+    items: []const ConfigurationItem,
+
+    pub const ConfigurationItem = struct {
+        section: ?[]const u8,
+    };
+};
+
+pub const RegistrationParams = struct {
+    registrations: []const Registration,
+
+    pub const Registration = struct {
+        id: string,
+        method: string,
+
+        // registerOptions?: LSPAny;
+    };
+};
+
+pub const DocumentHighlightKind = enum(u8) {
+    Text = 1,
+    Read = 2,
+    Write = 3,
+
+    pub fn jsonStringify(value: DocumentHighlightKind, options: std.json.StringifyOptions, out_stream: anytype) !void {
+        try std.json.stringify(@enumToInt(value), options, out_stream);
+    }
+};
+
+pub const DocumentHighlight = struct {
+    range: Range,
+    kind: ?DocumentHighlightKind,
 };
