@@ -165,6 +165,7 @@ pub const Initialize = struct {
                     documentationFormat: MaybeStringArray,
                 },
             },
+            documentHighlight: Exists,
         },
         offsetEncoding: MaybeStringArray,
     };
@@ -244,6 +245,7 @@ pub const GotoDeclaration = TextDocumentIdentifierPositionRequest;
 pub const Hover = TextDocumentIdentifierPositionRequest;
 pub const DocumentSymbols = TextDocumentIdentifierRequest;
 pub const Formatting = TextDocumentIdentifierRequest;
+pub const DocumentHighlight = TextDocumentIdentifierPositionRequest;
 pub const Rename = struct {
     params: struct {
         textDocument: TextDocumentIdentifier,

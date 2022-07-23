@@ -492,7 +492,7 @@ fn symbolReferencesInternal(arena: *std.heap.ArenaAllocator, store: *DocumentSto
     }
 }
 
-pub fn symbolReferences(arena: *std.heap.ArenaAllocator, store: *DocumentStore, decl_handle: analysis.DeclWithHandle, encoding: offsets.Encoding, include_decl: bool, context: anytype, comptime handler: anytype, skip_std_references: bool) !void {
+pub fn symbolReferences(arena: *std.heap.ArenaAllocator, store: *DocumentStore, decl_handle: analysis.DeclWithHandle, encoding: offsets.Encoding, include_decl: bool, context: anytype, comptime handler: anytype, skip_std_references: bool, workspace: bool) !void {
     std.debug.assert(decl_handle.decl.* != .label_decl);
     const curr_handle = decl_handle.handle;
     if (include_decl) {
@@ -503,41 +503,43 @@ pub fn symbolReferences(arena: *std.heap.ArenaAllocator, store: *DocumentStore, 
         .ast_node => {
             try symbolReferencesInternal(arena, store, .{ .node = 0, .handle = curr_handle }, decl_handle, encoding, context, handler);
 
-            var imports = std.ArrayList(*DocumentStore.Handle).init(arena.allocator());
+            if (workspace) {
+                var imports = std.ArrayList(*DocumentStore.Handle).init(arena.allocator());
 
-            var handle_it = store.handles.iterator();
-            while (handle_it.next()) |entry| {
-                if (skip_std_references and std.mem.indexOf(u8, entry.key_ptr.*, "std") != null) {
-                    if (!include_decl or entry.value_ptr.* != curr_handle)
-                        continue;
-                }
+                var handle_it = store.handles.iterator();
+                while (handle_it.next()) |entry| {
+                    if (skip_std_references and std.mem.indexOf(u8, entry.key_ptr.*, "std") != null) {
+                        if (!include_decl or entry.value_ptr.* != curr_handle)
+                            continue;
+                    }
 
-                // Check entry's transitive imports
-                try imports.append(entry.value_ptr.*);
-                var i: usize = 0;
-                blk: while (i < imports.items.len) : (i += 1) {
-                    const import = imports.items[i];
-                    for (import.imports_used.items) |uri| {
-                        const h = store.getHandle(uri) orelse break;
+                    // Check entry's transitive imports
+                    try imports.append(entry.value_ptr.*);
+                    var i: usize = 0;
+                    blk: while (i < imports.items.len) : (i += 1) {
+                        const import = imports.items[i];
+                        for (import.imports_used.items) |uri| {
+                            const h = store.getHandle(uri) orelse break;
 
-                        if (h == curr_handle) {
-                            // entry does import curr_handle
-                            try symbolReferencesInternal(arena, store, .{ .node = 0, .handle = entry.value_ptr.* }, decl_handle, encoding, context, handler);
-                            break :blk;
-                        }
-
-                        select: {
-                            for (imports.items) |item| {
-                                if (item == h) {
-                                    // already checked this import
-                                    break :select;
-                                }
+                            if (h == curr_handle) {
+                                // entry does import curr_handle
+                                try symbolReferencesInternal(arena, store, .{ .node = 0, .handle = entry.value_ptr.* }, decl_handle, encoding, context, handler);
+                                break :blk;
                             }
-                            try imports.append(h);
+
+                            select: {
+                                for (imports.items) |item| {
+                                    if (item == h) {
+                                        // already checked this import
+                                        break :select;
+                                    }
+                                }
+                                try imports.append(h);
+                            }
                         }
                     }
+                    try imports.resize(0);
                 }
-                try imports.resize(0);
             }
         },
         .param_decl => |param| {
