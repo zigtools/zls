@@ -194,18 +194,25 @@ Install the `zls-vscode` extension from [here](https://github.com/zigtools/zls-v
 #### CoC
 
 - Install the CoC engine from [here](https://github.com/neoclide/coc.nvim).
-- Issue `:CocConfig` from within your Vim editor, and the following snippet:
 
-```json
-{
-   "languageserver": {
-       "zls" : {
-           "command": "command_or_path_to_zls",
-           "filetypes": ["zig"]
+Then choose one of the following two ways
+
+1. Use extension
+
+    Run `:CocInstall coc-zls` to install [coc-zls](https://github.com/xiyaowong/coc-zls), 
+    this extension supports the same functionality as the VScode extension
+  
+2. Manually register
+    ```json
+    {
+       "languageserver": {
+           "zls" : {
+               "command": "command_or_path_to_zls",
+               "filetypes": ["zig"]
+           }
        }
-   }
-}
-```
+    }
+    ```
 
 #### YouCompleteMe
 - Install YouCompleteMeFrom [here](https://github.com/ycm-core/YouCompleteMe.git).
