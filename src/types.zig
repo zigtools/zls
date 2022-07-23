@@ -39,6 +39,7 @@ pub const ResponseParams = union(enum) {
     Hover: Hover,
     DocumentSymbols: []DocumentSymbol,
     SemanticTokensFull: struct { data: []const u32 },
+    InlayHint: []InlayHint,
     TextEdits: []TextEdit,
     Locations: []Location,
     WorkspaceEdit: WorkspaceEdit,
@@ -334,6 +335,41 @@ pub const SignatureHelp = struct {
     activeParameter: ?u32,
 };
 
+pub const InlayHint = struct {
+    position: Position,
+    label: string,
+    kind: InlayHintKind,
+    tooltip: MarkupContent,
+    paddingLeft: bool,
+    paddingRight: bool,
+
+    // appends a colon to the label and reduces the output size
+    pub fn jsonStringify(value: InlayHint, options: std.json.StringifyOptions, writer: anytype) @TypeOf(writer).Error!void {
+        try writer.writeAll("{\"position\":");
+        try std.json.stringify(value.position, options, writer);
+        try writer.writeAll(",\"label\":\"");
+        try writer.writeAll(value.label);
+        try writer.writeAll(":\",\"kind\":");
+        try std.json.stringify(value.kind, options, writer);
+        if (value.tooltip.value.len != 0) {
+            try writer.writeAll(",\"tooltip\":");
+            try std.json.stringify(value.tooltip, options, writer);
+        }
+        if (value.paddingLeft) try writer.writeAll(",\"paddingLeft\":true");
+        if (value.paddingRight) try writer.writeAll(",\"paddingRight\":true");
+        try writer.writeByte('}');
+    }
+};
+
+pub const InlayHintKind = enum(i64) {
+    Type = 1,
+    Parameter = 2,
+
+    pub fn jsonStringify(value: InlayHintKind, options: std.json.StringifyOptions, out_stream: anytype) !void {
+        try std.json.stringify(@enumToInt(value), options, out_stream);
+    }
+};
+
 // Only includes options we set in our initialize result.
 const InitializeResult = struct {
     offsetEncoding: string,
@@ -388,6 +424,7 @@ const InitializeResult = struct {
                 tokenModifiers: []const string,
             },
         },
+        inlayHintProvider: bool,
     },
     serverInfo: struct {
         name: string,

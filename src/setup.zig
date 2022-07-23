@@ -174,6 +174,7 @@ pub fn wizard(allocator: std.mem.Allocator) !void {
     const ief_apc = try askBool("Do you want to enable @import/@embedFile argument path completion?");
     const style = try askBool("Do you want to enable style warnings?");
     const semantic_tokens = try askBool("Do you want to enable semantic highlighting?");
+    const inlay_hints = try askBool("Do you want to enable inlay hints?");
     const operator_completions = try askBool("Do you want to enable .* and .? completions?");
     const include_at_in_builtins = switch (editor) {
         .Sublime => true,
@@ -194,6 +195,7 @@ pub fn wizard(allocator: std.mem.Allocator) !void {
         .enable_import_embedfile_argument_completions = ief_apc,
         .warn_style = style,
         .enable_semantic_tokens = semantic_tokens,
+        .enable_inlay_hints = inlay_hints,
         .operator_completions = operator_completions,
         .include_at_in_builtins = include_at_in_builtins,
         .max_detail_length = max_detail_length,

@@ -38,6 +38,9 @@ build_runner_cache_path: ?[]const u8 = null,
 /// Semantic token support
 enable_semantic_tokens: bool = true,
 
+/// Inlay hint support
+enable_inlay_hints: bool = false,
+
 /// Whether to enable `*` and `?` operators in completion lists
 operator_completions: bool = true,
 
