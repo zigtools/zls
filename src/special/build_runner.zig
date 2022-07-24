@@ -84,7 +84,8 @@ fn processStep(stdout_stream: anytype, step: *std.build.Step) anyerror!void {
 }
 
 fn processPackage(out_stream: anytype, pkg: Pkg) anyerror!void {
-    switch (pkg.source) {
+    const source = if (@hasField(Pkg, "source")) pkg.source else pkg.path;
+    switch (source) {
         .path => |path| try out_stream.print("{s}\x00{s}\n", .{ pkg.name, path }),
         .generated => |generated| if (generated.path != null) try out_stream.print("{s}\x00{s}\n", .{ pkg.name, generated.path.? }),
     }
