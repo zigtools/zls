@@ -47,10 +47,6 @@ inlay_hints_show_builtin: bool = true,
 /// don't show inlay hints for single argument calls
 inlay_hints_exclude_single_argument: bool = true,
 
-/// max number of children in a declaration/array-init/struct-init or similar
-/// that will not get a visibility check
-inlay_hints_max_inline_children: usize = 12,
-
 /// Whether to enable `*` and `?` operators in completion lists
 operator_completions: bool = true,
 

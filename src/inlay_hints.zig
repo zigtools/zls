@@ -14,6 +14,10 @@ const Config = @import("Config.zig");
 /// non-configurable at runtime
 pub const inlay_hints_exclude_builtins: []const u8 = &.{};
 
+/// max number of children in a declaration/array-init/struct-init or similar
+/// that will not get a visibility check
+pub const inlay_hints_max_inline_children = 12;
+
 /// checks whether node is inside the range
 fn isNodeInRange(tree: Ast, node: Ast.Node.Index, range: types.Range) bool {
     const endLocation = tree.tokenLocation(0, tree.lastToken(node));
@@ -272,7 +276,7 @@ fn writeNodeInlayHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store:
             try writeCallNodeHint(builder, arena, store, call);
 
             for (call.ast.params) |param| {
-                if (call.ast.params.len > builder.config.inlay_hints_max_inline_children) {
+                if (call.ast.params.len > inlay_hints_max_inline_children) {
                     if (!isNodeInRange(tree, param, range)) continue;
                 }
 
@@ -319,7 +323,7 @@ fn writeNodeInlayHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store:
             }
 
             for (parameters) |param| {
-                if (parameters.len > builder.config.inlay_hints_max_inline_children) {
+                if (parameters.len > inlay_hints_max_inline_children) {
                     if (!isNodeInRange(tree, param, range)) continue;
                 }
 
@@ -520,7 +524,7 @@ fn writeNodeInlayHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store:
             try await @asyncCall(child_frame, {}, writeNodeInlayHint, .{ builder, arena, store, struct_init.ast.type_expr, range });
 
             for (struct_init.ast.fields) |field_init| {
-                if (struct_init.ast.fields.len > builder.config.inlay_hints_max_inline_children) {
+                if (struct_init.ast.fields.len > inlay_hints_max_inline_children) {
                     if (!isNodeInRange(tree, field_init, range)) continue;
                 }
 
@@ -537,7 +541,7 @@ fn writeNodeInlayHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store:
             const cases = tree.extra_data[extra.start..extra.end];
 
             for (cases) |case_node| {
-                if (cases.len > builder.config.inlay_hints_max_inline_children) {
+                if (cases.len > inlay_hints_max_inline_children) {
                     if (!isNodeInRange(tree, case_node, range)) continue;
                 }
 
@@ -632,7 +636,7 @@ fn writeNodeInlayHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store:
             try await @asyncCall(child_frame, {}, writeNodeInlayHint, .{ builder, arena, store, decl.ast.arg, range });
 
             for (decl.ast.members) |child| {
-                if (decl.ast.members.len > builder.config.inlay_hints_max_inline_children) {
+                if (decl.ast.members.len > inlay_hints_max_inline_children) {
                     if (!isNodeInRange(tree, child, range)) continue;
                 }
 
@@ -663,7 +667,7 @@ fn writeNodeInlayHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store:
             const subrange = tree.extra_data[node_data[node].lhs..node_data[node].rhs];
 
             for (subrange) |child| {
-                if (subrange.len > builder.config.inlay_hints_max_inline_children) {
+                if (subrange.len > inlay_hints_max_inline_children) {
                     if (!isNodeInRange(tree, child, range)) continue;
                 }
 
