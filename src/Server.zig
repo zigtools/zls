@@ -15,11 +15,13 @@ const rename = @import("rename.zig");
 const offsets = @import("offsets.zig");
 const setup = @import("setup.zig");
 const semantic_tokens = @import("semantic_tokens.zig");
+const inlay_hints = @import("inlay_hints.zig");
 const shared = @import("shared.zig");
 const Ast = std.zig.Ast;
 const known_folders = @import("known-folders");
 const tracy = @import("tracy.zig");
 const uri_utils = @import("uri.zig");
+const data = @import("data/data.zig");
 
 // Server fields
 
@@ -28,15 +30,6 @@ allocator: std.mem.Allocator = undefined,
 document_store: DocumentStore = undefined,
 client_capabilities: ClientCapabilities = .{},
 offset_encoding: offsets.Encoding = .utf16,
-
-const data = switch (build_options.data_version) {
-    .master => @import("data/master.zig"),
-    .@"0.7.0" => @import("data/0.7.0.zig"),
-    .@"0.7.1" => @import("data/0.7.1.zig"),
-    .@"0.8.0" => @import("data/0.8.0.zig"),
-    .@"0.8.1" => @import("data/0.8.1.zig"),
-    .@"0.9.0" => @import("data/0.9.0.zig"),
-};
 
 const logger = std.log.scoped(.main);
 
@@ -86,8 +79,8 @@ pub fn log(comptime message_level: std.log.Level, comptime scope: @Type(.EnumLit
                 .message = message,
             },
         },
-    }) catch |err| {
-        std.debug.print("Failed to send show message notification (error: {}).\n", .{err});
+    }) catch {
+        // TODO: Find a way to handle this error properly
     };
 }
 
@@ -96,6 +89,7 @@ pub fn log(comptime message_level: std.log.Level, comptime scope: @Type(.EnumLit
 const ClientCapabilities = struct {
     supports_snippets: bool = false,
     supports_semantic_tokens: bool = false,
+    supports_inlay_hints: bool = false,
     hover_supports_md: bool = false,
     completion_doc_supports_md: bool = false,
     label_details_support: bool = false,
@@ -1753,6 +1747,7 @@ fn initializeHandler(server: *Server, arena: *std.heap.ArenaAllocator, id: types
 
     if (req.params.capabilities.textDocument) |textDocument| {
         server.client_capabilities.supports_semantic_tokens = textDocument.semanticTokens.exists;
+        server.client_capabilities.supports_inlay_hints = textDocument.inlayHint.exists;
         if (textDocument.hover) |hover| {
             for (hover.contentFormat.value) |format| {
                 if (std.mem.eql(u8, "markdown", format)) {
@@ -1838,6 +1833,7 @@ fn initializeHandler(server: *Server, arena: *std.heap.ArenaAllocator, id: types
                             },
                         },
                     },
+                    .inlayHintProvider = true,
                 },
             },
         },
@@ -2348,6 +2344,61 @@ fn documentHighlightHandler(server: *Server, arena: *std.heap.ArenaAllocator, id
     }
 }
 
+fn isPositionBefore(lhs: types.Position, rhs: types.Position) bool {
+    if (lhs.line == rhs.line) {
+        return lhs.character < rhs.character;
+    } else {
+        return lhs.line < rhs.line;
+    }
+}
+
+fn inlayHintHandler(server: *Server, arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.InlayHint) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    if (server.config.enable_inlay_hints) blk: {
+        const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
+            logger.warn("Trying to get inlay hint of non existent document {s}", .{req.params.textDocument.uri});
+            break :blk;
+        };
+
+        const hover_kind: types.MarkupContent.Kind = if (server.client_capabilities.hover_supports_md) .Markdown else .PlainText;
+
+        // TODO cache hints per document
+        // because the function could be stored in a different document
+        // we need the regenerate hints when the document itself or its imported documents change
+        // with caching it would also make sense to generate all hints instead of only the visible ones
+        const hints = try inlay_hints.writeRangeInlayHint(arena, &server.config, &server.document_store, handle, req.params.range, hover_kind);
+        defer {
+            for (hints) |hint| {
+                server.allocator.free(hint.tooltip.value);
+            }
+            server.allocator.free(hints);
+        }
+
+        // and only convert and return all hints in range for every request
+        var visible_hints = hints;
+
+        // small_hints should roughly be sorted by position
+        for (hints) |hint, i| {
+            if (isPositionBefore(hint.position, req.params.range.start)) continue;
+            visible_hints = hints[i..];
+            break;
+        }
+        for (visible_hints) |hint, i| {
+            if (isPositionBefore(hint.position, req.params.range.end)) continue;
+            visible_hints = visible_hints[0..i];
+            break;
+        }
+
+        return try send(arena, types.Response{
+            .id = id,
+            .result = .{ .InlayHint = visible_hints },
+        });
+    }
+    return try respondGeneric(id, null_result_response);
+}
+
 // Needed for the hack seen below.
 fn extractErr(val: anytype) anyerror {
     val catch |e| return e;
@@ -2434,6 +2485,7 @@ fn processJsonRpc(server: *Server, arena: *std.heap.ArenaAllocator, parser: *std
         .{ "textDocument/didSave", requests.SaveDocument, saveDocumentHandler },
         .{ "textDocument/didClose", requests.CloseDocument, closeDocumentHandler },
         .{ "textDocument/semanticTokens/full", requests.SemanticTokensFull, semanticTokensFullHandler },
+        .{ "textDocument/inlayHint", requests.InlayHint, inlayHintHandler },
         .{ "textDocument/completion", requests.Completion, completionHandler },
         .{ "textDocument/signatureHelp", requests.SignatureHelp, signatureHelpHandler },
         .{ "textDocument/definition", requests.GotoDefinition, gotoDefinitionHandler },

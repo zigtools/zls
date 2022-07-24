@@ -155,6 +155,7 @@ pub const Initialize = struct {
         },
         textDocument: ?struct {
             semanticTokens: Exists,
+            inlayHint: Exists,
             hover: ?struct {
                 contentFormat: MaybeStringArray,
             },
@@ -264,6 +265,13 @@ pub const References = struct {
     },
 };
 
+pub const InlayHint = struct {
+    params: struct {
+        textDocument: TextDocumentIdentifier,
+        range: types.Range,
+    },
+};
+
 pub const Configuration = struct {
     params: struct {
         settings: struct {
@@ -276,6 +284,9 @@ pub const Configuration = struct {
             build_runner_path: ?[]const u8,
             build_runner_cache_path: ?[]const u8,
             enable_semantic_tokens: ?bool,
+            enable_inlay_hints: ?bool,
+            inlay_hints_show_builtin: ?bool,
+            inlay_hints_exclude_single_argument: ?bool,
             operator_completions: ?bool,
             include_at_in_builtins: ?bool,
             max_detail_length: ?usize,
