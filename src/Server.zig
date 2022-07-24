@@ -79,8 +79,8 @@ pub fn log(comptime message_level: std.log.Level, comptime scope: @Type(.EnumLit
                 .message = message,
             },
         },
-    }) catch |err| {
-        std.debug.print("Failed to send show message notification (error: {}).\n", .{err});
+    }) catch {
+        // TODO: Find a way to handle this error properly
     };
 }
 

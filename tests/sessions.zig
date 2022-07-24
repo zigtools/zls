@@ -102,7 +102,7 @@ const Server = struct {
 
     fn shutdown(self: *Server) void {
         // FIXME this shutdown request fails with a broken pipe on stdin on the CI
-        self.request("shutdown", "{}", null) catch @panic("Could not send shutdown request");
+        self.request("shutdown", "{}", null) catch {};
         // waitNoError(self.process) catch @panic("Server error");
     }
 };
@@ -252,7 +252,7 @@ test "Pointer and optional deref" {
 
 test "Request utf-8 offset encoding" {
     var server = try Server.start(initialize_msg_offs,
-        \\{"offsetEncoding":"utf-8","capabilities":{"signatureHelpProvider":{"triggerCharacters":["("],"retriggerCharacters":[","]},"textDocumentSync":1,"renameProvider":true,"completionProvider":{"resolveProvider":false,"triggerCharacters":[".",":","@"],"completionItem":{"labelDetailsSupport":true}},"documentHighlightProvider":false,"hoverProvider":true,"codeActionProvider":false,"declarationProvider":true,"definitionProvider":true,"typeDefinitionProvider":true,"implementationProvider":false,"referencesProvider":true,"documentSymbolProvider":true,"colorProvider":false,"documentFormattingProvider":true,"documentRangeFormattingProvider":false,"foldingRangeProvider":false,"selectionRangeProvider":false,"workspaceSymbolProvider":false,"rangeProvider":false,"documentProvider":true,"workspace":{"workspaceFolders":{"supported":false,"changeNotifications":false}},"semanticTokensProvider":{"full":true,"range":false,"legend":{"tokenTypes":["type","parameter","variable","enumMember","field","errorTag","function","keyword","comment","string","number","operator","builtin","label","keywordLiteral"],"tokenModifiers":["namespace","struct","enum","union","opaque","declaration","async","documentation","generic"]}}},"serverInfo":{"name":"zls","version":"0.1.0"}}
+        \\{"offsetEncoding":"utf-8","capabilities":{"signatureHelpProvider":{"triggerCharacters":["("],"retriggerCharacters":[","]},"textDocumentSync":1,"renameProvider":true,"completionProvider":{"resolveProvider":false,"triggerCharacters":[".",":","@"],"completionItem":{"labelDetailsSupport":true}},"documentHighlightProvider":true,"hoverProvider":true,"codeActionProvider":false,"declarationProvider":true,"definitionProvider":true,"typeDefinitionProvider":true,"implementationProvider":false,"referencesProvider":true,"documentSymbolProvider":true,"colorProvider":false,"documentFormattingProvider":true,"documentRangeFormattingProvider":false,"foldingRangeProvider":false,"selectionRangeProvider":false,"workspaceSymbolProvider":false,"rangeProvider":false,"documentProvider":true,"workspace":{"workspaceFolders":{"supported":false,"changeNotifications":false}},"semanticTokensProvider":{"full":true,"range":false,"legend":{"tokenTypes":["type","parameter","variable","enumMember","field","errorTag","function","keyword","comment","string","number","operator","builtin","label","keywordLiteral"],"tokenModifiers":["namespace","struct","enum","union","opaque","declaration","async","documentation","generic"]}},"inlayHintProvider":true},"serverInfo":{"name":"zls","version":"0.1.0"}}
     );
     defer server.shutdown();
 }
