@@ -19,7 +19,7 @@ Zig Language Server, or `zls`, is a language server for Zig. The Zig wiki states
     - [Updating Data Files](#updating-data-files)
   - [Configuration Options](#configuration-options)
 - [Features](#features)
-  - [VSCode](#vscode)
+  - [VS Code](#vscode)
   - [Sublime Text](#sublime-text)
     - [Sublime Text 3](#sublime-text-3)
     - [Sublime Text 4](#sublime-text-4)
@@ -129,13 +129,15 @@ The following LSP features are supported:
 - Find references
 - Rename symbol
 - Formatting using `zig fmt`
-- Semantic token highlighting (LSP 3.16 proposed feature, implemented by a few clients including VSCode, kak and emacs lsp-mode)
+- Semantic token highlighting (implemented by a few clients including VS Code, kak and emacs lsp-mode)
+- Inlay hints (implemented by VS Code)
 
 You can install `zls` using the instuctions for your text editor below:
 
-### VSCode
+### VS Code
 
-Install the `zls-vscode` extension from [here](https://github.com/zigtools/zls-vscode/releases) and provide a path to the build `zls` executable.
+Install the `zls-vscode` extension from [here](https://github.com/zigtools/zls-vscode/releases) or via the extensions menu.
+It will install `zls` if it is not found in your `PATH`
 
 ### Sublime Text
 
@@ -201,7 +203,7 @@ Then choose one of the following two ways
 1. Use extension
 
     Run `:CocInstall coc-zls` to install [coc-zls](https://github.com/xiyaowong/coc-zls), 
-    this extension supports the same functionality as the VScode extension
+    this extension supports the same functionality as the VS Code extension
   
 2. Manually register
     ```json
@@ -325,6 +327,11 @@ let g:LanguageClient_serverCommands = {
 ```elisp
 (setq lsp-zig-zls-executable "<path to zls>")
 ```
+
+### Helix
+
+- Just add `zls` to your `PATH`.
+- run `hx --health` to check if helix found `zls`.
 
 ## Related Projects
 
