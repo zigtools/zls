@@ -168,7 +168,7 @@ pub fn wizard(allocator: std.mem.Allocator) !void {
             "What is the path to the 'zig' executable you would like to use?", std.fs.MAX_PATH_BYTES);
     }
 
-    const editor = try askSelectOne("Which code editor do you use?", enum { VSCode, Sublime, Kate, Neovim, Vim8, Emacs, Doom, Spacemacs, Other });
+    const editor = try askSelectOne("Which code editor do you use?", enum { VSCode, Sublime, Kate, Neovim, Vim8, Emacs, Doom, Spacemacs, Helix, Other });
     const snippets = try askBool("Do you want to enable snippets?");
     const unused_variables = try askBool("Do you want to enable unused variable warnings?");
     const ief_apc = try askBool("Do you want to enable @import/@embedFile argument path completion?");
@@ -178,7 +178,7 @@ pub fn wizard(allocator: std.mem.Allocator) !void {
     const operator_completions = try askBool("Do you want to enable .* and .? completions?");
     const include_at_in_builtins = switch (editor) {
         .Sublime => !try askBool("Are you using a Sublime Text version > 4000?"),
-        .VSCode, .Kate, .Neovim, .Vim8, .Emacs, .Doom, .Spacemacs => false,
+        .VSCode, .Kate, .Neovim, .Vim8, .Emacs, .Doom, .Spacemacs, .Helix => false,
         else => try askBool("Should the @ sign be included in completions of builtin functions?\nChange this later if `@inc` completes to `include` or `@@include`"),
     };
     const max_detail_length: usize = switch (editor) {
@@ -209,9 +209,7 @@ pub fn wizard(allocator: std.mem.Allocator) !void {
             write(
                 \\To use ZLS in Visual Studio Code, install the 'ZLS for VSCode' extension from 
                 \\'https://github.com/zigtools/zls-vscode/releases' or via the extensions menu.
-                \\Then, open VSCode's 'settings.json' file, and add:
-                \\
-                \\"zls.path": "[command_or_path_to_zls]"
+                \\ZLS will automatically be installed if it is not found in your PATH
             );
         },
         .Sublime => {
@@ -317,6 +315,13 @@ pub fn wizard(allocator: std.mem.Allocator) !void {
                 \\`dotspacemacs/user-config` in your .spacemacs file:
                 \\
                 \\(setq lsp-zig-zls-executable "<path to zls>")
+            );
+        },
+        .Helix => {
+            write(
+                \\Helix has out of the box support for ZLS
+                \\Make sure you have added ZLS to your PATH
+                \\run hx --health to check if helix has found it.
             );
         },
         .Other => {
