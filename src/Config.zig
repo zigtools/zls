@@ -39,7 +39,17 @@ build_runner_cache_path: ?[]const u8 = null,
 enable_semantic_tokens: bool = true,
 
 /// Inlay hint support
-enable_inlay_hints: bool = false,
+enable_inlay_hints: bool = true,
+
+/// enable inlay hints for builtin functions
+inlay_hints_show_builtin: bool = true,
+
+/// don't show inlay hints for single argument calls
+inlay_hints_exclude_single_argument: bool = true,
+
+/// max number of children in a declaration/array-init/struct-init or similar
+/// that will not get a visibility check
+inlay_hints_max_inline_children: usize = 12,
 
 /// Whether to enable `*` and `?` operators in completion lists
 operator_completions: bool = true,

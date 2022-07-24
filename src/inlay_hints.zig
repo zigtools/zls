@@ -6,22 +6,13 @@ const Ast = std.zig.Ast;
 const log = std.log.scoped(.inlay_hint);
 const ast = @import("ast.zig");
 const data = @import("data/data.zig");
-
-// TODO expose options
-
-/// enable inlay hints for builtin functions
-pub const inlay_hints_show_builtin: bool = true;
+const Config = @import("Config.zig");
 
 /// don't show inlay hints for the given builtin functions
 /// builtins with one parameter are skipped automatically
+/// this option is rare and is therefore build-only and
+/// non-configurable at runtime
 pub const inlay_hints_exclude_builtins: []const u8 = &.{};
-
-/// don't show inlay hints for single argument calls
-pub const inlay_hints_exclude_single_argument: bool = true;
-
-/// max number of children in a declaration/array-init/struct-init or similar
-/// that will not get a visibility check
-const max_inline_children = 12;
 
 /// checks whether node is inside the range
 fn isNodeInRange(tree: Ast, node: Ast.Node.Index, range: types.Range) bool {
@@ -35,17 +26,19 @@ fn isNodeInRange(tree: Ast, node: Ast.Node.Index, range: types.Range) bool {
 }
 
 const Builder = struct {
-    handle: *DocumentStore.Handle,
     allocator: std.mem.Allocator,
+    config: *const Config,
+    handle: *DocumentStore.Handle,
     hints: std.ArrayList(types.InlayHint),
     hover_kind: types.MarkupContent.Kind,
 
-    fn init(allocator: std.mem.Allocator, handle: *DocumentStore.Handle, hover_kind: types.MarkupContent.Kind) Builder {
+    fn init(allocator: std.mem.Allocator, config: *const Config, handle: *DocumentStore.Handle, hover_kind: types.MarkupContent.Kind) Builder {
         return Builder{
+            .allocator = allocator,
+            .config = config,
             .handle = handle,
             .hints = std.ArrayList(types.InlayHint).init(allocator),
             .hover_kind = hover_kind,
-            .allocator = allocator,
         };
     }
 
@@ -175,7 +168,7 @@ fn writeBuiltinHint(builder: *Builder, parameters: []Ast.Node.Index, arguments: 
 /// takes a Ast.full.Call (a function call), analysis its function expression, finds its declaration and writes parameter hints into `builder.hints`
 fn writeCallNodeHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *DocumentStore, call: Ast.full.Call) !void {
     if (call.ast.params.len == 0) return;
-    if (inlay_hints_exclude_single_argument and call.ast.params.len == 1) return;
+    if (builder.config.inlay_hints_exclude_single_argument and call.ast.params.len == 1) return;
 
     const handle = builder.handle;
     const tree = handle.tree;
@@ -279,7 +272,7 @@ fn writeNodeInlayHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store:
             try writeCallNodeHint(builder, arena, store, call);
 
             for (call.ast.params) |param| {
-                if (call.ast.params.len > max_inline_children) {
+                if (call.ast.params.len > builder.config.inlay_hints_max_inline_children) {
                     if (!isNodeInRange(tree, param, range)) continue;
                 }
 
@@ -311,7 +304,7 @@ fn writeNodeInlayHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store:
                 else => unreachable,
             };
 
-            if (inlay_hints_show_builtin and parameters.len > 1) {
+            if (builder.config.inlay_hints_show_builtin and parameters.len > 1) {
                 const name = tree.tokenSlice(main_tokens[node]);
 
                 outer: for (data.builtins) |builtin| {
@@ -326,7 +319,7 @@ fn writeNodeInlayHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store:
             }
 
             for (parameters) |param| {
-                if (parameters.len > max_inline_children) {
+                if (parameters.len > builder.config.inlay_hints_max_inline_children) {
                     if (!isNodeInRange(tree, param, range)) continue;
                 }
 
@@ -527,7 +520,7 @@ fn writeNodeInlayHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store:
             try await @asyncCall(child_frame, {}, writeNodeInlayHint, .{ builder, arena, store, struct_init.ast.type_expr, range });
 
             for (struct_init.ast.fields) |field_init| {
-                if (struct_init.ast.fields.len > max_inline_children) {
+                if (struct_init.ast.fields.len > builder.config.inlay_hints_max_inline_children) {
                     if (!isNodeInRange(tree, field_init, range)) continue;
                 }
 
@@ -544,7 +537,7 @@ fn writeNodeInlayHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store:
             const cases = tree.extra_data[extra.start..extra.end];
 
             for (cases) |case_node| {
-                if (cases.len > max_inline_children) {
+                if (cases.len > builder.config.inlay_hints_max_inline_children) {
                     if (!isNodeInRange(tree, case_node, range)) continue;
                 }
 
@@ -639,7 +632,7 @@ fn writeNodeInlayHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store:
             try await @asyncCall(child_frame, {}, writeNodeInlayHint, .{ builder, arena, store, decl.ast.arg, range });
 
             for (decl.ast.members) |child| {
-                if (decl.ast.members.len > max_inline_children) {
+                if (decl.ast.members.len > builder.config.inlay_hints_max_inline_children) {
                     if (!isNodeInRange(tree, child, range)) continue;
                 }
 
@@ -670,7 +663,7 @@ fn writeNodeInlayHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store:
             const subrange = tree.extra_data[node_data[node].lhs..node_data[node].rhs];
 
             for (subrange) |child| {
-                if (subrange.len > max_inline_children) {
+                if (subrange.len > builder.config.inlay_hints_max_inline_children) {
                     if (!isNodeInRange(tree, child, range)) continue;
                 }
 
@@ -699,8 +692,8 @@ fn writeNodeInlayHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store:
 /// only hints in the given range are created
 /// Caller owns returned memory.
 /// `InlayHint.tooltip.value` has to deallocated separately
-pub fn writeRangeInlayHint(arena: *std.heap.ArenaAllocator, store: *DocumentStore, handle: *DocumentStore.Handle, range: types.Range, hover_kind: types.MarkupContent.Kind) error{OutOfMemory}![]types.InlayHint {
-    var builder = Builder.init(arena.child_allocator, handle, hover_kind);
+pub fn writeRangeInlayHint(arena: *std.heap.ArenaAllocator, config: *const Config, store: *DocumentStore, handle: *DocumentStore.Handle, range: types.Range, hover_kind: types.MarkupContent.Kind) error{OutOfMemory}![]types.InlayHint {
+    var builder = Builder.init(arena.child_allocator, config, handle, hover_kind);
     errdefer builder.deinit();
 
     var buf: [2]Ast.Node.Index = undefined;

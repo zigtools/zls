@@ -2368,7 +2368,7 @@ fn inlayHintHandler(server: *Server, arena: *std.heap.ArenaAllocator, id: types.
         // because the function could be stored in a different document
         // we need the regenerate hints when the document itself or its imported documents change
         // with caching it would also make sense to generate all hints instead of only the visible ones
-        const hints = try inlay_hints.writeRangeInlayHint(arena, &server.document_store, handle, req.params.range, hover_kind);
+        const hints = try inlay_hints.writeRangeInlayHint(arena, &server.config, &server.document_store, handle, req.params.range, hover_kind);
         defer {
             for (hints) |hint| {
                 server.allocator.free(hint.tooltip.value);
