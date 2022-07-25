@@ -2605,8 +2605,6 @@ pub fn main() anyerror!void {
     if (tracy.enable_allocation) {
         allocator = tracy.tracyAllocator(allocator).allocator();
     }
-    // @TODO Using the GPA here, realloc calls hang currently for some reason
-    // allocator = std.heap.page_allocator;
 
     analysis.init(allocator);
     defer analysis.deinit();
@@ -2671,12 +2669,14 @@ pub fn main() anyerror!void {
             }
         }
         if (try known_folders.getPath(allocator, .global_configuration)) |path| {
+            if (config_path) |cp| allocator.free(cp);
             config_path = path;
             if (Config.loadFromFolder(allocator, path)) |conf| {
                 config = conf;
                 break :config_read;
             }
         }
+        if (config_path) |cp| allocator.free(cp);
         logger.info("No config file zls.json found.", .{});
         config_path = null;
     }
