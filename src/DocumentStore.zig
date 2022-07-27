@@ -255,7 +255,7 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: [:0]u8) anyerror!*Ha
         if (build_file.builtin_uri == null) {
             if (self.config.builtin_path != null) {
                 build_file.builtin_uri = try URI.fromPath(self.allocator, self.config.builtin_path.?);
-                log.info("builtin config not found, falling back to default: {s}", .{build_file.builtin_uri});
+                log.info("builtin config not found, falling back to default: {?s}", .{build_file.builtin_uri});
             }
         }
 
