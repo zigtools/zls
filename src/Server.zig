@@ -1525,7 +1525,7 @@ fn formatDetailledLabel(item: *types.CompletionItem, alloc: std.mem.Allocator) !
         var s: usize = std.mem.indexOf(u8, it, "(") orelse return;
         var e: usize = std.mem.lastIndexOf(u8, it, ")") orelse return;
         if (e < s) {
-            logger.warn("something wrong when trying to build label detail for {s} kind: {s}", .{ it, item.kind });
+            logger.warn("something wrong when trying to build label detail for {s} kind: {}", .{ it, item.kind });
             return;
         }
 
