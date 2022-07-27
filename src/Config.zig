@@ -159,7 +159,7 @@ pub fn configChanged(config: *Config, allocator: std.mem.Allocator, builtin_crea
                         // We know this is allocated with `allocator`, we just steal it!
                         config.zig_lib_path = json_env.lib_dir.?;
                         json_env.lib_dir = null;
-                        logger.info("Using zig lib path '{s}'", .{config.zig_lib_path});
+                        logger.info("Using zig lib path '{?s}'", .{config.zig_lib_path});
                     }
                 },
                 else => logger.err("zig env invocation failed", .{}),

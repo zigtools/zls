@@ -51,7 +51,7 @@ pub fn log(comptime message_level: std.log.Level, comptime scope: @Type(.EnumLit
     }
     // After shutdown, pipe output to stderr
     if (!keep_running) {
-        std.debug.print("[{s}-{s}] " ++ format ++ "\n", .{ @tagName(message_level), @tagName(scope) } ++ args);
+        std.debug.print("[{?s}-{?s}] " ++ format ++ "\n", .{ @tagName(message_level), @tagName(scope) } ++ args);
         return;
     }
 
@@ -59,7 +59,7 @@ pub fn log(comptime message_level: std.log.Level, comptime scope: @Type(.EnumLit
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
 
-    var message = std.fmt.allocPrint(arena.allocator(), "[{s}-{s}] " ++ format, .{ @tagName(message_level), @tagName(scope) } ++ args) catch {
+    var message = std.fmt.allocPrint(arena.allocator(), "[{?s}-{?s}] " ++ format, .{ @tagName(message_level), @tagName(scope) } ++ args) catch {
         std.debug.print("Failed to allocPrint message.\n", .{});
         return;
     };
