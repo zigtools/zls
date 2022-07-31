@@ -82,6 +82,7 @@ pub fn build(b: *std.build.Builder) !void {
 
     var session_tests = b.addTest("tests/sessions.zig");
     session_tests.addPackage(.{ .name = "header", .source = .{ .path = "src/header.zig" } });
+    session_tests.addPackage(.{ .name = "server", .source = .{ .path = "src/Server.zig" }, .dependencies = exe.packages.items });
     session_tests.setBuildMode(.Debug);
     session_tests.setTarget(target);
     test_step.dependOn(&session_tests.step);

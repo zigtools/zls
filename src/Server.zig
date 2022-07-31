@@ -2482,8 +2482,11 @@ pub fn processJsonRpc(server: *Server, writer: anytype, arena: *std.heap.ArenaAl
 
     const start_time = std.time.milliTimestamp();
     defer {
-        const end_time = std.time.milliTimestamp();
-        logger.debug("Took {}ms to process method {s}", .{ end_time - start_time, method });
+        // makes `zig build test` look nice
+        if (!zig_builtin.is_test and !std.mem.eql(u8, method, "shutdown")) {
+            const end_time = std.time.milliTimestamp();
+            Logger.debug(server, writer, "Took {}ms to process method {s}", .{ end_time - start_time, method });
+        }
     }
 
     const method_map = .{
