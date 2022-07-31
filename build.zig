@@ -6,7 +6,7 @@ pub fn build(b: *std.build.Builder) !void {
     const target = b.standardTargetOptions(.{});
 
     const mode = b.standardReleaseOptions();
-    const exe = b.addExecutable("zls", "src/Server.zig");
+    const exe = b.addExecutable("zls", "src/main.zig");
     const exe_options = b.addOptions();
     exe.addOptions("build_options", exe_options);
 

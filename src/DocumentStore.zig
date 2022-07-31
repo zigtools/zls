@@ -54,7 +54,7 @@ allocator: std.mem.Allocator,
 handles: UriToHandleMap = .{},
 build_files: BuildFileList = .{},
 
-config: *const Config,
+config: Config,
 std_uri: ?[]const u8,
 // TODO make this configurable
 // We can't figure it out ourselves since we don't know what arguments
@@ -66,7 +66,7 @@ zig_global_cache_root: []const u8 = "ZLS_DONT_CARE",
 
 pub fn init(
     allocator: std.mem.Allocator,
-    config: *const Config,
+    config: Config,
 ) !DocumentStore {
     return DocumentStore{
         .allocator = allocator,
