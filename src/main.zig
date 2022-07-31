@@ -23,20 +23,16 @@ fn loop(server: *Server) !void {
     var reader = std.io.getStdIn().reader();
 
     while (server.keep_running) {
-        // Arena used for temporary allocations while handling a request
-        var arena = std.heap.ArenaAllocator.init(server.allocator);
-        defer arena.deinit();
-
-        const headers = readRequestHeader(arena.allocator(), reader) catch |err| {
+        const headers = readRequestHeader(server.allocator, reader) catch |err| {
             logger.err("{s}; exiting!", .{@errorName(err)});
             return;
         };
-        const buffer = try arena.allocator().alloc(u8, headers.content_length);
+        const buffer = try server.allocator.alloc(u8, headers.content_length);
         try reader.readNoEof(buffer);
 
         var writer = std.io.getStdOut().writer();
 
-        try server.processJsonRpc(writer, &arena, buffer);
+        try server.processJsonRpc(writer, buffer);
     }
 }
 

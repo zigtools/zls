@@ -38,9 +38,6 @@ const Context = struct {
         params: []const u8,
         expect: ?[]const u8,
     ) !void {
-        var arena = std.heap.ArenaAllocator.init(allocator);
-        defer arena.deinit();
-
         var output = std.ArrayList(u8).init(allocator);
         defer output.deinit();
 
@@ -52,7 +49,7 @@ const Context = struct {
         defer allocator.free(req);
 
         //  send the request to the server
-        try self.server.processJsonRpc(output.writer(), &arena, req);
+        try self.server.processJsonRpc(output.writer(), req);
 
         // if we don't expect a response ignore it
         const expected = expect orelse return;

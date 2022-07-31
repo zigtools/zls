@@ -23,6 +23,7 @@ const data = @import("data/data.zig");
 
 config: Config,
 allocator: std.mem.Allocator = undefined,
+arena: std.heap.ArenaAllocator = undefined,
 document_store: DocumentStore = undefined,
 client_capabilities: ClientCapabilities = .{},
 offset_encoding: offsets.Encoding = .utf16,
@@ -209,13 +210,13 @@ fn astLocationToRange(loc: Ast.Location) types.Range {
     };
 }
 
-fn publishDiagnostics(server: *Server, writer: anytype, arena: *std.heap.ArenaAllocator, handle: DocumentStore.Handle) !void {
+fn publishDiagnostics(server: *Server, writer: anytype, handle: DocumentStore.Handle) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
     const tree = handle.tree;
 
-    var diagnostics = std.ArrayList(types.Diagnostic).init(arena.allocator());
+    var diagnostics = std.ArrayList(types.Diagnostic).init(server.arena.allocator());
 
     for (tree.errors) |err| {
         const loc = tree.tokenLocation(0, err.token);
@@ -229,7 +230,7 @@ fn publishDiagnostics(server: *Server, writer: anytype, arena: *std.heap.ArenaAl
             .severity = .Error,
             .code = @tagName(err.tag),
             .source = "zls",
-            .message = try arena.allocator().dupe(u8, fbs.getWritten()),
+            .message = try server.arena.allocator().dupe(u8, fbs.getWritten()),
             // .relatedInformation = undefined
         });
     }
@@ -373,7 +374,7 @@ fn publishDiagnostics(server: *Server, writer: anytype, arena: *std.heap.ArenaAl
         }
     }
 
-    try send(writer, arena.allocator(), types.Notification{
+    try send(writer, server.arena.allocator(), types.Notification{
         .method = "textDocument/publishDiagnostics",
         .params = .{
             .PublishDiagnostics = .{
@@ -386,7 +387,6 @@ fn publishDiagnostics(server: *Server, writer: anytype, arena: *std.heap.ArenaAl
 
 fn typeToCompletion(
     server: *Server,
-    arena: *std.heap.ArenaAllocator,
     list: *std.ArrayList(types.CompletionItem),
     field_access: analysis.FieldAccessReturn,
     orig_handle: *DocumentStore.Handle,
@@ -424,7 +424,6 @@ fn typeToCompletion(
                 });
             }
             try server.nodeToCompletion(
-                arena,
                 list,
                 .{ .node = n, .handle = type_handle.handle },
                 null,
@@ -434,7 +433,6 @@ fn typeToCompletion(
             );
         },
         .other => |n| try server.nodeToCompletion(
-            arena,
             list,
             .{ .node = n, .handle = type_handle.handle },
             field_access.unwrapped,
@@ -448,7 +446,6 @@ fn typeToCompletion(
 
 fn nodeToCompletion(
     server: *Server,
-    arena: *std.heap.ArenaAllocator,
     list: *std.ArrayList(types.CompletionItem),
     node_handle: analysis.NodeWithHandle,
     unwrapped: ?analysis.TypeWithHandle,
@@ -487,13 +484,12 @@ fn nodeToCompletion(
         const context = DeclToCompletionContext{
             .server = server,
             .completions = list,
-            .arena = arena,
             .orig_handle = orig_handle,
             .parent_is_type_val = is_type_val,
         };
         try analysis.iterateSymbolsContainer(
             &server.document_store,
-            arena,
+            &server.arena,
             node_handle,
             orig_handle,
             declToCompletion,
@@ -517,8 +513,8 @@ fn nodeToCompletion(
                 const use_snippets = server.config.enable_snippets and server.client_capabilities.supports_snippets;
                 const insert_text = if (use_snippets) blk: {
                     const skip_self_param = !(parent_is_type_val orelse true) and
-                        try analysis.hasSelfParam(arena, &server.document_store, handle, func);
-                    break :blk try analysis.getFunctionSnippet(arena.allocator(), tree, func, skip_self_param);
+                        try analysis.hasSelfParam(&server.arena, &server.document_store, handle, func);
+                    break :blk try analysis.getFunctionSnippet(server.arena.allocator(), tree, func, skip_self_param);
                 } else tree.tokenSlice(func.name_token.?);
 
                 const is_type_function = analysis.isTypeFunction(handle.tree, func);
@@ -541,11 +537,10 @@ fn nodeToCompletion(
             const var_decl = ast.varDecl(tree, node).?;
             const is_const = token_tags[var_decl.ast.mut_token] == .keyword_const;
 
-            if (try analysis.resolveVarDeclAlias(&server.document_store, arena, node_handle)) |result| {
+            if (try analysis.resolveVarDeclAlias(&server.document_store, &server.arena, node_handle)) |result| {
                 const context = DeclToCompletionContext{
                     .server = server,
                     .completions = list,
-                    .arena = arena,
                     .orig_handle = orig_handle,
                 };
                 return try declToCompletion(context, result);
@@ -620,7 +615,7 @@ fn nodeToCompletion(
             }
 
             if (unwrapped) |actual_type| {
-                try server.typeToCompletion(arena, list, .{ .original = actual_type }, orig_handle);
+                try server.typeToCompletion(list, .{ .original = actual_type }, orig_handle);
             }
             return;
         },
@@ -684,7 +679,6 @@ fn gotoDefinitionSymbol(
     server: *Server,
     writer: anytype,
     id: types.RequestId,
-    arena: *std.heap.ArenaAllocator,
     decl_handle: analysis.DeclWithHandle,
     resolve_alias: bool,
 ) !void {
@@ -696,7 +690,7 @@ fn gotoDefinitionSymbol(
     const location = switch (decl_handle.decl.*) {
         .ast_node => |node| block: {
             if (resolve_alias) {
-                if (try analysis.resolveVarDeclAlias(&server.document_store, arena, .{ .node = node, .handle = handle })) |result| {
+                if (try analysis.resolveVarDeclAlias(&server.document_store, &server.arena, .{ .node = node, .handle = handle })) |result| {
                     handle = result.handle;
                     break :block result.location(server.offset_encoding) catch return;
                 }
@@ -709,7 +703,7 @@ fn gotoDefinitionSymbol(
         else => decl_handle.location(server.offset_encoding) catch return,
     };
 
-    try send(writer, arena.allocator(), types.Response{
+    try send(writer, server.arena.allocator(), types.Response{
         .id = id,
         .result = .{
             .Location = .{
@@ -733,7 +727,6 @@ fn hoverSymbol(
     server: *Server,
     writer: anytype,
     id: types.RequestId,
-    arena: *std.heap.ArenaAllocator,
     decl_handle: analysis.DeclWithHandle,
 ) (std.os.WriteError || error{OutOfMemory})!void {
     const tracy_zone = tracy.trace(@src());
@@ -747,10 +740,10 @@ fn hoverSymbol(
 
     const def_str = switch (decl_handle.decl.*) {
         .ast_node => |node| def: {
-            if (try analysis.resolveVarDeclAlias(&server.document_store, arena, .{ .node = node, .handle = handle })) |result| {
-                return try server.hoverSymbol(writer, id, arena, result);
+            if (try analysis.resolveVarDeclAlias(&server.document_store, &server.arena, .{ .node = node, .handle = handle })) |result| {
+                return try server.hoverSymbol(writer, id, result);
             }
-            doc_str = try analysis.getDocComments(arena.allocator(), tree, node, hover_kind);
+            doc_str = try analysis.getDocComments(server.arena.allocator(), tree, node, hover_kind);
 
             var buf: [1]Ast.Node.Index = undefined;
 
@@ -767,7 +760,7 @@ fn hoverSymbol(
         },
         .param_decl => |param| def: {
             if (param.first_doc_comment) |doc_comments| {
-                doc_str = try analysis.collectDocComments(arena.allocator(), handle.tree, doc_comments, hover_kind, false);
+                doc_str = try analysis.collectDocComments(server.arena.allocator(), handle.tree, doc_comments, hover_kind, false);
             }
 
             const first_token = param.first_doc_comment orelse
@@ -787,8 +780,8 @@ fn hoverSymbol(
         .label_decl => |label_decl| tree.tokenSlice(label_decl),
     };
 
-    var bound_type_params = analysis.BoundTypeParams.init(arena.allocator());
-    const resolved_type = try decl_handle.resolveType(&server.document_store, arena, &bound_type_params);
+    var bound_type_params = analysis.BoundTypeParams.init(server.arena.allocator());
+    const resolved_type = try decl_handle.resolveType(&server.document_store, &server.arena, &bound_type_params);
 
     const resolved_type_str = if (resolved_type) |rt|
         if (rt.type.is_type_val) "type" else switch (rt.type.data) { // TODO: Investigate random weird numbers like 897 that cause index of bounds
@@ -835,18 +828,18 @@ fn hoverSymbol(
     if (hover_kind == .Markdown) {
         hover_text =
             if (doc_str) |doc|
-            try std.fmt.allocPrint(arena.allocator(), "```zig\n{s}\n```\n```zig\n({s})\n```\n{s}", .{ def_str, resolved_type_str, doc })
+            try std.fmt.allocPrint(server.arena.allocator(), "```zig\n{s}\n```\n```zig\n({s})\n```\n{s}", .{ def_str, resolved_type_str, doc })
         else
-            try std.fmt.allocPrint(arena.allocator(), "```zig\n{s}\n```\n```zig\n({s})\n```", .{ def_str, resolved_type_str });
+            try std.fmt.allocPrint(server.arena.allocator(), "```zig\n{s}\n```\n```zig\n({s})\n```", .{ def_str, resolved_type_str });
     } else {
         hover_text =
             if (doc_str) |doc|
-            try std.fmt.allocPrint(arena.allocator(), "{s} ({s})\n{s}", .{ def_str, resolved_type_str, doc })
+            try std.fmt.allocPrint(server.arena.allocator(), "{s} ({s})\n{s}", .{ def_str, resolved_type_str, doc })
         else
-            try std.fmt.allocPrint(arena.allocator(), "{s} ({s})", .{ def_str, resolved_type_str });
+            try std.fmt.allocPrint(server.arena.allocator(), "{s} ({s})", .{ def_str, resolved_type_str });
     }
 
-    try send(writer, arena.allocator(), types.Response{
+    try send(writer, server.arena.allocator(), types.Response{
         .id = id,
         .result = .{
             .Hover = .{
@@ -868,7 +861,6 @@ fn getLabelGlobal(pos_index: usize, handle: *DocumentStore.Handle) !?analysis.De
 
 fn getSymbolGlobal(
     server: *Server,
-    arena: *std.heap.ArenaAllocator,
     pos_index: usize,
     handle: *DocumentStore.Handle,
 ) !?analysis.DeclWithHandle {
@@ -878,13 +870,12 @@ fn getSymbolGlobal(
     const name = identifierFromPosition(pos_index, handle.*);
     if (name.len == 0) return null;
 
-    return try analysis.lookupSymbolGlobal(&server.document_store, arena, handle, name, pos_index);
+    return try analysis.lookupSymbolGlobal(&server.document_store, &server.arena, handle, name, pos_index);
 }
 
 fn gotoDefinitionLabel(
     server: *Server,
     writer: anytype,
-    arena: *std.heap.ArenaAllocator,
     id: types.RequestId,
     pos_index: usize,
     handle: *DocumentStore.Handle,
@@ -893,13 +884,12 @@ fn gotoDefinitionLabel(
     defer tracy_zone.end();
 
     const decl = (try getLabelGlobal(pos_index, handle)) orelse return try respondGeneric(writer, id, null_result_response);
-    return try server.gotoDefinitionSymbol(writer, id, arena, decl, false);
+    return try server.gotoDefinitionSymbol(writer, id, decl, false);
 }
 
 fn gotoDefinitionGlobal(
     server: *Server,
     writer: anytype,
-    arena: *std.heap.ArenaAllocator,
     id: types.RequestId,
     pos_index: usize,
     handle: *DocumentStore.Handle,
@@ -908,19 +898,19 @@ fn gotoDefinitionGlobal(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const decl = (try server.getSymbolGlobal(arena, pos_index, handle)) orelse return try respondGeneric(writer, id, null_result_response);
-    return try server.gotoDefinitionSymbol(writer, id, arena, decl, resolve_alias);
+    const decl = (try server.getSymbolGlobal(pos_index, handle)) orelse return try respondGeneric(writer, id, null_result_response);
+    return try server.gotoDefinitionSymbol(writer, id, decl, resolve_alias);
 }
 
-fn hoverDefinitionLabel(server: *Server, writer: anytype, arena: *std.heap.ArenaAllocator, id: types.RequestId, pos_index: usize, handle: *DocumentStore.Handle) !void {
+fn hoverDefinitionLabel(server: *Server, writer: anytype, id: types.RequestId, pos_index: usize, handle: *DocumentStore.Handle) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
     const decl = (try getLabelGlobal(pos_index, handle)) orelse return try respondGeneric(writer, id, null_result_response);
-    return try server.hoverSymbol(writer, id, arena, decl);
+    return try server.hoverSymbol(writer, id, decl);
 }
 
-fn hoverDefinitionBuiltin(writer: anytype, arena: *std.heap.ArenaAllocator, id: types.RequestId, pos_index: usize, handle: *DocumentStore.Handle) !void {
+fn hoverDefinitionBuiltin(server: *Server, writer: anytype, id: types.RequestId, pos_index: usize, handle: *DocumentStore.Handle) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -929,13 +919,13 @@ fn hoverDefinitionBuiltin(writer: anytype, arena: *std.heap.ArenaAllocator, id: 
 
     inline for (data.builtins) |builtin| {
         if (std.mem.eql(u8, builtin.name[1..], name)) {
-            try send(writer, arena.allocator(), types.Response{
+            try send(writer, server.arena.allocator(), types.Response{
                 .id = id,
                 .result = .{
                     .Hover = .{
                         .contents = .{
                             .value = try std.fmt.allocPrint(
-                                arena.allocator(),
+                                server.arena.allocator(),
                                 "```zig\n{s}\n```\n{s}",
                                 .{ builtin.signature, builtin.documentation },
                             ),
@@ -947,20 +937,19 @@ fn hoverDefinitionBuiltin(writer: anytype, arena: *std.heap.ArenaAllocator, id: 
     }
 }
 
-fn hoverDefinitionGlobal(server: *Server, writer: anytype, arena: *std.heap.ArenaAllocator, id: types.RequestId, pos_index: usize, handle: *DocumentStore.Handle) !void {
+fn hoverDefinitionGlobal(server: *Server, writer: anytype, id: types.RequestId, pos_index: usize, handle: *DocumentStore.Handle) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
     _ = server;
 
-    const decl = (try server.getSymbolGlobal(arena, pos_index, handle)) orelse return try respondGeneric(writer, id, null_result_response);
-    return try server.hoverSymbol(writer, id, arena, decl);
+    const decl = (try server.getSymbolGlobal(pos_index, handle)) orelse return try respondGeneric(writer, id, null_result_response);
+    return try server.hoverSymbol(writer, id, decl);
 }
 
 fn getSymbolFieldAccess(
     server: *Server,
     handle: *DocumentStore.Handle,
-    arena: *std.heap.ArenaAllocator,
     position: offsets.DocumentPosition,
     range: analysis.SourceRange,
 ) !?analysis.DeclWithHandle {
@@ -975,7 +964,7 @@ fn getSymbolFieldAccess(
     var tokenizer = std.zig.Tokenizer.init(held_range.data());
 
     errdefer held_range.release();
-    if (try analysis.getFieldAccessType(&server.document_store, arena, handle, position.absolute_index, &tokenizer)) |result| {
+    if (try analysis.getFieldAccessType(&server.document_store, &server.arena, handle, position.absolute_index, &tokenizer)) |result| {
         held_range.release();
         const container_handle = result.unwrapped orelse result.original;
         const container_handle_node = switch (container_handle.type.data) {
@@ -984,7 +973,7 @@ fn getSymbolFieldAccess(
         };
         return try analysis.lookupSymbolContainer(
             &server.document_store,
-            arena,
+            &server.arena,
             .{ .node = container_handle_node, .handle = container_handle.handle },
             name,
             true,
@@ -996,7 +985,6 @@ fn getSymbolFieldAccess(
 fn gotoDefinitionFieldAccess(
     server: *Server,
     writer: anytype,
-    arena: *std.heap.ArenaAllocator,
     id: types.RequestId,
     handle: *DocumentStore.Handle,
     position: offsets.DocumentPosition,
@@ -1006,14 +994,13 @@ fn gotoDefinitionFieldAccess(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const decl = (try server.getSymbolFieldAccess(handle, arena, position, range)) orelse return try respondGeneric(writer, id, null_result_response);
-    return try server.gotoDefinitionSymbol(writer, id, arena, decl, resolve_alias);
+    const decl = (try server.getSymbolFieldAccess(handle, position, range)) orelse return try respondGeneric(writer, id, null_result_response);
+    return try server.gotoDefinitionSymbol(writer, id, decl, resolve_alias);
 }
 
 fn hoverDefinitionFieldAccess(
     server: *Server,
     writer: anytype,
-    arena: *std.heap.ArenaAllocator,
     id: types.RequestId,
     handle: *DocumentStore.Handle,
     position: offsets.DocumentPosition,
@@ -1022,14 +1009,13 @@ fn hoverDefinitionFieldAccess(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const decl = (try server.getSymbolFieldAccess(handle, arena, position, range)) orelse return try respondGeneric(writer, id, null_result_response);
-    return try server.hoverSymbol(writer, id, arena, decl);
+    const decl = (try server.getSymbolFieldAccess(handle, position, range)) orelse return try respondGeneric(writer, id, null_result_response);
+    return try server.hoverSymbol(writer, id, decl);
 }
 
 fn gotoDefinitionString(
     server: *Server,
     writer: anytype,
-    arena: *std.heap.ArenaAllocator,
     id: types.RequestId,
     pos_index: usize,
     handle: *DocumentStore.Handle,
@@ -1041,12 +1027,12 @@ fn gotoDefinitionString(
 
     const import_str = analysis.getImportStr(tree, 0, pos_index) orelse return try respondGeneric(writer, id, null_result_response);
     const uri = (try server.document_store.uriFromImportStr(
-        arena.allocator(),
+        server.arena.allocator(),
         handle.*,
         import_str,
     )) orelse return try respondGeneric(writer, id, null_result_response);
 
-    try send(writer, arena.allocator(), types.Response{
+    try send(writer, server.arena.allocator(), types.Response{
         .id = id,
         .result = .{
             .Location = .{
@@ -1063,7 +1049,6 @@ fn gotoDefinitionString(
 fn renameDefinitionGlobal(
     server: *Server,
     writer: anytype,
-    arena: *std.heap.ArenaAllocator,
     id: types.RequestId,
     handle: *DocumentStore.Handle,
     pos_index: usize,
@@ -1072,13 +1057,13 @@ fn renameDefinitionGlobal(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const decl = (try server.getSymbolGlobal(arena, pos_index, handle)) orelse return try respondGeneric(writer, id, null_result_response);
+    const decl = (try server.getSymbolGlobal(pos_index, handle)) orelse return try respondGeneric(writer, id, null_result_response);
 
     var workspace_edit = types.WorkspaceEdit{
-        .changes = std.StringHashMap([]types.TextEdit).init(arena.allocator()),
+        .changes = std.StringHashMap([]types.TextEdit).init(server.arena.allocator()),
     };
-    try rename.renameSymbol(arena, &server.document_store, decl, new_name, &workspace_edit.changes.?, server.offset_encoding);
-    try send(writer, arena.allocator(), types.Response{
+    try rename.renameSymbol(&server.arena, &server.document_store, decl, new_name, &workspace_edit.changes.?, server.offset_encoding);
+    try send(writer, server.arena.allocator(), types.Response{
         .id = id,
         .result = .{ .WorkspaceEdit = workspace_edit },
     });
@@ -1087,7 +1072,6 @@ fn renameDefinitionGlobal(
 fn renameDefinitionFieldAccess(
     server: *Server,
     writer: anytype,
-    arena: *std.heap.ArenaAllocator,
     id: types.RequestId,
     handle: *DocumentStore.Handle,
     position: offsets.DocumentPosition,
@@ -1097,13 +1081,13 @@ fn renameDefinitionFieldAccess(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const decl = (try server.getSymbolFieldAccess(handle, arena, position, range)) orelse return try respondGeneric(writer, id, null_result_response);
+    const decl = (try server.getSymbolFieldAccess(handle, position, range)) orelse return try respondGeneric(writer, id, null_result_response);
 
     var workspace_edit = types.WorkspaceEdit{
-        .changes = std.StringHashMap([]types.TextEdit).init(arena.allocator()),
+        .changes = std.StringHashMap([]types.TextEdit).init(server.arena.allocator()),
     };
-    try rename.renameSymbol(arena, &server.document_store, decl, new_name, &workspace_edit.changes.?, server.offset_encoding);
-    try send(writer, arena.allocator(), types.Response{
+    try rename.renameSymbol(&server.arena, &server.document_store, decl, new_name, &workspace_edit.changes.?, server.offset_encoding);
+    try send(writer, server.arena.allocator(), types.Response{
         .id = id,
         .result = .{ .WorkspaceEdit = workspace_edit },
     });
@@ -1112,7 +1096,6 @@ fn renameDefinitionFieldAccess(
 fn renameDefinitionLabel(
     server: *Server,
     writer: anytype,
-    arena: *std.heap.ArenaAllocator,
     id: types.RequestId,
     handle: *DocumentStore.Handle,
     pos_index: usize,
@@ -1124,10 +1107,10 @@ fn renameDefinitionLabel(
     const decl = (try getLabelGlobal(pos_index, handle)) orelse return try respondGeneric(writer, id, null_result_response);
 
     var workspace_edit = types.WorkspaceEdit{
-        .changes = std.StringHashMap([]types.TextEdit).init(arena.allocator()),
+        .changes = std.StringHashMap([]types.TextEdit).init(server.arena.allocator()),
     };
-    try rename.renameLabel(arena, decl, new_name, &workspace_edit.changes.?, server.offset_encoding);
-    try send(writer, arena.allocator(), types.Response{
+    try rename.renameLabel(&server.arena, decl, new_name, &workspace_edit.changes.?, server.offset_encoding);
+    try send(writer, server.arena.allocator(), types.Response{
         .id = id,
         .result = .{ .WorkspaceEdit = workspace_edit },
     });
@@ -1136,7 +1119,6 @@ fn renameDefinitionLabel(
 fn referencesDefinitionGlobal(
     server: *Server,
     writer: anytype,
-    arena: *std.heap.ArenaAllocator,
     id: types.RequestId,
     handle: *DocumentStore.Handle,
     pos_index: usize,
@@ -1146,10 +1128,10 @@ fn referencesDefinitionGlobal(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const decl = (try server.getSymbolGlobal(arena, pos_index, handle)) orelse return try respondGeneric(writer, id, null_result_response);
-    var locs = std.ArrayList(types.Location).init(arena.allocator());
+    const decl = (try server.getSymbolGlobal(pos_index, handle)) orelse return try respondGeneric(writer, id, null_result_response);
+    var locs = std.ArrayList(types.Location).init(server.arena.allocator());
     try references.symbolReferences(
-        arena,
+        &server.arena,
         &server.document_store,
         decl,
         server.offset_encoding,
@@ -1161,7 +1143,7 @@ fn referencesDefinitionGlobal(
     );
 
     const result: types.ResponseParams = if (highlight) result: {
-        var highlights = try std.ArrayList(types.DocumentHighlight).initCapacity(arena.allocator(), locs.items.len);
+        var highlights = try std.ArrayList(types.DocumentHighlight).initCapacity(server.arena.allocator(), locs.items.len);
         for (locs.items) |loc| {
             highlights.appendAssumeCapacity(.{
                 .range = loc.range,
@@ -1171,7 +1153,7 @@ fn referencesDefinitionGlobal(
         break :result .{ .DocumentHighlight = highlights.items };
     } else .{ .Locations = locs.items };
 
-    try send(writer, arena.allocator(), types.Response{
+    try send(writer, server.arena.allocator(), types.Response{
         .id = id,
         .result = result,
     });
@@ -1180,7 +1162,6 @@ fn referencesDefinitionGlobal(
 fn referencesDefinitionFieldAccess(
     server: *Server,
     writer: anytype,
-    arena: *std.heap.ArenaAllocator,
     id: types.RequestId,
     handle: *DocumentStore.Handle,
     position: offsets.DocumentPosition,
@@ -1191,10 +1172,10 @@ fn referencesDefinitionFieldAccess(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const decl = (try server.getSymbolFieldAccess(handle, arena, position, range)) orelse return try respondGeneric(writer, id, null_result_response);
-    var locs = std.ArrayList(types.Location).init(arena.allocator());
+    const decl = (try server.getSymbolFieldAccess(handle, position, range)) orelse return try respondGeneric(writer, id, null_result_response);
+    var locs = std.ArrayList(types.Location).init(server.arena.allocator());
     try references.symbolReferences(
-        arena,
+        &server.arena,
         &server.document_store,
         decl,
         server.offset_encoding,
@@ -1205,7 +1186,7 @@ fn referencesDefinitionFieldAccess(
         !highlight,
     );
     const result: types.ResponseParams = if (highlight) result: {
-        var highlights = try std.ArrayList(types.DocumentHighlight).initCapacity(arena.allocator(), locs.items.len);
+        var highlights = try std.ArrayList(types.DocumentHighlight).initCapacity(server.arena.allocator(), locs.items.len);
         for (locs.items) |loc| {
             highlights.appendAssumeCapacity(.{
                 .range = loc.range,
@@ -1214,7 +1195,7 @@ fn referencesDefinitionFieldAccess(
         }
         break :result .{ .DocumentHighlight = highlights.items };
     } else .{ .Locations = locs.items };
-    try send(writer, arena.allocator(), types.Response{
+    try send(writer, server.arena.allocator(), types.Response{
         .id = id,
         .result = result,
     });
@@ -1223,7 +1204,6 @@ fn referencesDefinitionFieldAccess(
 fn referencesDefinitionLabel(
     server: *Server,
     writer: anytype,
-    arena: *std.heap.ArenaAllocator,
     id: types.RequestId,
     handle: *DocumentStore.Handle,
     pos_index: usize,
@@ -1234,10 +1214,10 @@ fn referencesDefinitionLabel(
     defer tracy_zone.end();
 
     const decl = (try getLabelGlobal(pos_index, handle)) orelse return try respondGeneric(writer, id, null_result_response);
-    var locs = std.ArrayList(types.Location).init(arena.allocator());
-    try references.labelReferences(arena, decl, server.offset_encoding, include_decl, &locs, std.ArrayList(types.Location).append);
+    var locs = std.ArrayList(types.Location).init(server.arena.allocator());
+    try references.labelReferences(&server.arena, decl, server.offset_encoding, include_decl, &locs, std.ArrayList(types.Location).append);
     const result: types.ResponseParams = if (highlight) result: {
-        var highlights = try std.ArrayList(types.DocumentHighlight).initCapacity(arena.allocator(), locs.items.len);
+        var highlights = try std.ArrayList(types.DocumentHighlight).initCapacity(server.arena.allocator(), locs.items.len);
         for (locs.items) |loc| {
             highlights.appendAssumeCapacity(.{
                 .range = loc.range,
@@ -1246,7 +1226,7 @@ fn referencesDefinitionLabel(
         }
         break :result .{ .DocumentHighlight = highlights.items };
     } else .{ .Locations = locs.items };
-    try send(writer, arena.allocator(), types.Response{
+    try send(writer, server.arena.allocator(), types.Response{
         .id = id,
         .result = result,
     });
@@ -1267,7 +1247,6 @@ fn hasComment(tree: Ast.Tree, start_token: Ast.TokenIndex, end_token: Ast.TokenI
 const DeclToCompletionContext = struct {
     server: *Server,
     completions: *std.ArrayList(types.CompletionItem),
-    arena: *std.heap.ArenaAllocator,
     orig_handle: *DocumentStore.Handle,
     parent_is_type_val: ?bool = null,
 };
@@ -1279,7 +1258,6 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: analysis.Decl
     const tree = decl_handle.handle.tree;
     switch (decl_handle.decl.*) {
         .ast_node => |node| try context.server.nodeToCompletion(
-            context.arena,
             context.completions,
             .{ .node = node, .handle = decl_handle.handle },
             null,
@@ -1292,7 +1270,7 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: analysis.Decl
             const doc = if (param.first_doc_comment) |doc_comments|
                 types.MarkupContent{
                     .kind = doc_kind,
-                    .value = try analysis.collectDocComments(context.arena.allocator(), tree, doc_comments, doc_kind, false),
+                    .value = try analysis.collectDocComments(context.server.arena.allocator(), tree, doc_comments, doc_kind, false),
                 }
             else
                 null;
@@ -1358,7 +1336,6 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: analysis.Decl
 fn completeLabel(
     server: *Server,
     writer: anytype,
-    arena: *std.heap.ArenaAllocator,
     id: types.RequestId,
     pos_index: usize,
     handle: *DocumentStore.Handle,
@@ -1366,19 +1343,18 @@ fn completeLabel(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    var completions = std.ArrayList(types.CompletionItem).init(arena.allocator());
+    var completions = std.ArrayList(types.CompletionItem).init(server.arena.allocator());
 
     const context = DeclToCompletionContext{
         .server = server,
         .completions = &completions,
-        .arena = arena,
         .orig_handle = handle,
     };
     try analysis.iterateLabels(handle, pos_index, declToCompletion, context);
-    sortCompletionItems(completions.items, arena.allocator());
+    sortCompletionItems(completions.items, server.arena.allocator());
     truncateCompletions(completions.items, server.config.max_detail_length);
 
-    try send(writer, arena.allocator(), types.Response{
+    try send(writer, server.arena.allocator(), types.Response{
         .id = id,
         .result = .{
             .CompletionList = .{
@@ -1390,7 +1366,7 @@ fn completeLabel(
 }
 
 var builtin_completions: ?[]types.CompletionItem = null;
-fn completeBuiltin(server: *Server, writer: anytype, arena: *std.heap.ArenaAllocator, id: types.RequestId) !void {
+fn completeBuiltin(server: *Server, writer: anytype, id: types.RequestId) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -1424,7 +1400,7 @@ fn completeBuiltin(server: *Server, writer: anytype, arena: *std.heap.ArenaAlloc
         truncateCompletions(builtin_completions.?, server.config.max_detail_length);
     }
 
-    try send(writer, arena.allocator(), types.Response{
+    try send(writer, server.arena.allocator(), types.Response{
         .id = id,
         .result = .{
             .CompletionList = .{
@@ -1435,29 +1411,28 @@ fn completeBuiltin(server: *Server, writer: anytype, arena: *std.heap.ArenaAlloc
     });
 }
 
-fn completeGlobal(server: *Server, writer: anytype, arena: *std.heap.ArenaAllocator, id: types.RequestId, pos_index: usize, handle: *DocumentStore.Handle) !void {
+fn completeGlobal(server: *Server, writer: anytype, id: types.RequestId, pos_index: usize, handle: *DocumentStore.Handle) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    var completions = std.ArrayList(types.CompletionItem).init(arena.allocator());
+    var completions = std.ArrayList(types.CompletionItem).init(server.arena.allocator());
 
     const context = DeclToCompletionContext{
         .server = server,
         .completions = &completions,
-        .arena = arena,
         .orig_handle = handle,
     };
-    try analysis.iterateSymbolsGlobal(&server.document_store, arena, handle, pos_index, declToCompletion, context);
-    sortCompletionItems(completions.items, arena.allocator());
+    try analysis.iterateSymbolsGlobal(&server.document_store, &server.arena, handle, pos_index, declToCompletion, context);
+    sortCompletionItems(completions.items, server.arena.allocator());
     truncateCompletions(completions.items, server.config.max_detail_length);
 
     if (server.client_capabilities.label_details_support) {
         for (completions.items) |*item| {
-            try server.formatDetailledLabel(writer, item, arena.allocator());
+            try server.formatDetailledLabel(writer, item, server.arena.allocator());
         }
     }
 
-    try send(writer, arena.allocator(), types.Response{
+    try send(writer, server.arena.allocator(), types.Response{
         .id = id,
         .result = .{
             .CompletionList = .{
@@ -1468,30 +1443,30 @@ fn completeGlobal(server: *Server, writer: anytype, arena: *std.heap.ArenaAlloca
     });
 }
 
-fn completeFieldAccess(server: *Server, writer: anytype, arena: *std.heap.ArenaAllocator, id: types.RequestId, handle: *DocumentStore.Handle, position: offsets.DocumentPosition, range: analysis.SourceRange) !void {
+fn completeFieldAccess(server: *Server, writer: anytype, id: types.RequestId, handle: *DocumentStore.Handle, position: offsets.DocumentPosition, range: analysis.SourceRange) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    var completions = std.ArrayList(types.CompletionItem).init(arena.allocator());
+    var completions = std.ArrayList(types.CompletionItem).init(server.arena.allocator());
 
     const line_mem_start = @ptrToInt(position.line.ptr) - @ptrToInt(handle.document.mem.ptr);
     var held_range = handle.document.borrowNullTerminatedSlice(line_mem_start + range.start, line_mem_start + range.end);
     errdefer held_range.release();
     var tokenizer = std.zig.Tokenizer.init(held_range.data());
 
-    if (try analysis.getFieldAccessType(&server.document_store, arena, handle, position.absolute_index, &tokenizer)) |result| {
+    if (try analysis.getFieldAccessType(&server.document_store, &server.arena, handle, position.absolute_index, &tokenizer)) |result| {
         held_range.release();
-        try server.typeToCompletion(arena, &completions, result, handle);
-        sortCompletionItems(completions.items, arena.allocator());
+        try server.typeToCompletion(&completions, result, handle);
+        sortCompletionItems(completions.items, server.arena.allocator());
         truncateCompletions(completions.items, server.config.max_detail_length);
         if (server.client_capabilities.label_details_support) {
             for (completions.items) |*item| {
-                try server.formatDetailledLabel(writer, item, arena.allocator());
+                try server.formatDetailledLabel(writer, item, server.arena.allocator());
             }
         }
     }
 
-    try send(writer, arena.allocator(), types.Response{
+    try send(writer, server.arena.allocator(), types.Response{
         .id = id,
         .result = .{
             .CompletionList = .{
@@ -1667,16 +1642,16 @@ fn formatDetailledLabel(server: *Server, writer: anytype, item: *types.Completio
     //     logger.info("labelDetails: {s}  ::  {s}", .{item.labelDetails.?.detail, item.labelDetails.?.description});
 }
 
-fn completeError(server: *Server, writer: anytype, arena: *std.heap.ArenaAllocator, id: types.RequestId, handle: *DocumentStore.Handle) !void {
+fn completeError(server: *Server, writer: anytype, id: types.RequestId, handle: *DocumentStore.Handle) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    var completions = try server.document_store.errorCompletionItems(arena, handle);
+    var completions = try server.document_store.errorCompletionItems(&server.arena, handle);
 
     truncateCompletions(completions, server.config.max_detail_length);
     Logger.debug(server, writer, "Completing error:", .{});
 
-    try send(writer, arena.allocator(), types.Response{
+    try send(writer, server.arena.allocator(), types.Response{
         .id = id,
         .result = .{
             .CompletionList = .{
@@ -1721,15 +1696,15 @@ fn sortCompletionItems(completions: []types.CompletionItem, alloc: std.mem.Alloc
     }
 }
 
-fn completeDot(server: *Server, writer: anytype, arena: *std.heap.ArenaAllocator, id: types.RequestId, handle: *DocumentStore.Handle) !void {
+fn completeDot(server: *Server, writer: anytype, id: types.RequestId, handle: *DocumentStore.Handle) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    var completions = try server.document_store.enumCompletionItems(arena, handle);
-    sortCompletionItems(completions, arena.allocator());
+    var completions = try server.document_store.enumCompletionItems(&server.arena, handle);
+    sortCompletionItems(completions, server.arena.allocator());
     truncateCompletions(completions, server.config.max_detail_length);
 
-    try send(writer, arena.allocator(), types.Response{
+    try send(writer, server.arena.allocator(), types.Response{
         .id = id,
         .result = .{
             .CompletionList = .{
@@ -1740,17 +1715,17 @@ fn completeDot(server: *Server, writer: anytype, arena: *std.heap.ArenaAllocator
     });
 }
 
-fn documentSymbol(server: *Server, writer: anytype, arena: *std.heap.ArenaAllocator, id: types.RequestId, handle: *DocumentStore.Handle) !void {
+fn documentSymbol(server: *Server, writer: anytype, id: types.RequestId, handle: *DocumentStore.Handle) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    try send(writer, arena.allocator(), types.Response{
+    try send(writer, server.arena.allocator(), types.Response{
         .id = id,
-        .result = .{ .DocumentSymbols = try analysis.getDocumentSymbols(arena.allocator(), handle.tree, server.offset_encoding) },
+        .result = .{ .DocumentSymbols = try analysis.getDocumentSymbols(server.arena.allocator(), handle.tree, server.offset_encoding) },
     });
 }
 
-fn initializeHandler(server: *Server, writer: anytype, arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.Initialize) !void {
+fn initializeHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.Initialize) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -1783,7 +1758,7 @@ fn initializeHandler(server: *Server, writer: anytype, arena: *std.heap.ArenaAll
         }
     }
 
-    try send(writer, arena.allocator(), types.Response{
+    try send(writer, server.arena.allocator(), types.Response{
         .id = id,
         .result = .{
             .InitializeResult = .{
@@ -1857,7 +1832,7 @@ fn initializeHandler(server: *Server, writer: anytype, arena: *std.heap.ArenaAll
     if (req.params.capabilities.workspace) |workspace| {
         server.client_capabilities.supports_configuration = workspace.configuration.value;
         if (workspace.didChangeConfiguration != null and workspace.didChangeConfiguration.?.dynamicRegistration.value) {
-            try server.registerCapability(writer, arena, "workspace/didChangeConfiguration");
+            try server.registerCapability(writer, "workspace/didChangeConfiguration");
         }
     }
 
@@ -1866,13 +1841,13 @@ fn initializeHandler(server: *Server, writer: anytype, arena: *std.heap.ArenaAll
     Logger.info(server, writer, "Using offset encoding: {s}", .{std.meta.tagName(server.offset_encoding)});
 }
 
-fn registerCapability(server: *Server, writer: anytype, arena: *std.heap.ArenaAllocator, method: []const u8) !void {
+fn registerCapability(server: *Server, writer: anytype, method: []const u8) !void {
     // NOTE: stage1 moment occurs if we dont do it like this :(
     // long live stage2's not broken anon structs
 
     Logger.debug(server, writer, "Dynamically registering method '{s}'", .{method});
 
-    const id = try std.fmt.allocPrint(arena.allocator(), "register-{s}", .{method});
+    const id = try std.fmt.allocPrint(server.arena.allocator(), "register-{s}", .{method});
     const reg = types.RegistrationParams.Registration{
         .id = id,
         .method = method,
@@ -1892,10 +1867,10 @@ fn registerCapability(server: *Server, writer: anytype, arena: *std.heap.ArenaAl
         .params = respp,
     };
 
-    try send(writer, arena.allocator(), req);
+    try send(writer, server.arena.allocator(), req);
 }
 
-fn requestConfiguration(server: *Server, writer: anytype, arena: *std.heap.ArenaAllocator) !void {
+fn requestConfiguration(server: *Server, writer: anytype) !void {
     const configuration_items = comptime confi: {
         var comp_confi: [std.meta.fields(Config).len]types.ConfigurationParams.ConfigurationItem = undefined;
         inline for (std.meta.fields(Config)) |field, index| {
@@ -1908,7 +1883,7 @@ fn requestConfiguration(server: *Server, writer: anytype, arena: *std.heap.Arena
     };
 
     Logger.info(server, writer, "Requesting configuration!", .{});
-    try send(writer, arena.allocator(), types.Request{
+    try send(writer, server.arena.allocator(), types.Request{
         .id = .{ .String = "i_haz_configuration" },
         .method = "workspace/configuration",
         .params = .{
@@ -1919,16 +1894,14 @@ fn requestConfiguration(server: *Server, writer: anytype, arena: *std.heap.Arena
     });
 }
 
-fn initializedHandler(server: *Server, writer: anytype, arena: *std.heap.ArenaAllocator, id: types.RequestId) !void {
+fn initializedHandler(server: *Server, writer: anytype, id: types.RequestId) !void {
     _ = id;
 
     if (server.client_capabilities.supports_configuration)
-        try server.requestConfiguration(writer, arena);
+        try server.requestConfiguration(writer);
 }
 
-fn shutdownHandler(server: *Server, writer: anytype, arena: *std.heap.ArenaAllocator, id: types.RequestId) !void {
-    _ = arena;
-
+fn shutdownHandler(server: *Server, writer: anytype, id: types.RequestId) !void {
     Logger.info(server, writer, "Server closing...", .{});
 
     server.keep_running = false;
@@ -1936,20 +1909,20 @@ fn shutdownHandler(server: *Server, writer: anytype, arena: *std.heap.ArenaAlloc
     try respondGeneric(writer, id, null_result_response);
 }
 
-fn openDocumentHandler(server: *Server, writer: anytype, arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.OpenDocument) !void {
+fn openDocumentHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.OpenDocument) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
     const handle = try server.document_store.openDocument(req.params.textDocument.uri, req.params.textDocument.text);
-    try server.publishDiagnostics(writer, arena, handle.*);
+    try server.publishDiagnostics(writer, handle.*);
 
     if (server.client_capabilities.supports_semantic_tokens) {
         const request: requests.SemanticTokensFull = .{ .params = .{ .textDocument = .{ .uri = req.params.textDocument.uri } } };
-        try server.semanticTokensFullHandler(writer, arena, id, request);
+        try server.semanticTokensFullHandler(writer, id, request);
     }
 }
 
-fn changeDocumentHandler(server: *Server, writer: anytype, arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.ChangeDocument) !void {
+fn changeDocumentHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.ChangeDocument) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -1961,15 +1934,14 @@ fn changeDocumentHandler(server: *Server, writer: anytype, arena: *std.heap.Aren
     };
 
     try server.document_store.applyChanges(handle, req.params.contentChanges.Array, server.offset_encoding);
-    try server.publishDiagnostics(writer, arena, handle.*);
+    try server.publishDiagnostics(writer, handle.*);
 }
 
-fn saveDocumentHandler(server: *Server, writer: anytype, arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.SaveDocument) error{OutOfMemory}!void {
+fn saveDocumentHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.SaveDocument) error{OutOfMemory}!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
     _ = id;
-    _ = arena;
     const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
         Logger.warn(server, writer, "Trying to save non existent document {s}", .{req.params.textDocument.uri});
         return;
@@ -1977,17 +1949,16 @@ fn saveDocumentHandler(server: *Server, writer: anytype, arena: *std.heap.ArenaA
     try server.document_store.applySave(handle);
 }
 
-fn closeDocumentHandler(server: *Server, writer: anytype, arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.CloseDocument) error{}!void {
+fn closeDocumentHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.CloseDocument) error{}!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
     _ = id;
-    _ = arena;
     _ = writer;
     server.document_store.closeDocument(req.params.textDocument.uri);
 }
 
-fn semanticTokensFullHandler(server: *Server, writer: anytype, arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.SemanticTokensFull) !void {
+fn semanticTokensFullHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.SemanticTokensFull) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -1997,10 +1968,10 @@ fn semanticTokensFullHandler(server: *Server, writer: anytype, arena: *std.heap.
             break :blk;
         };
 
-        const token_array = try semantic_tokens.writeAllSemanticTokens(arena, &server.document_store, handle, server.offset_encoding);
+        const token_array = try semantic_tokens.writeAllSemanticTokens(&server.arena, &server.document_store, handle, server.offset_encoding);
         defer server.allocator.free(token_array);
 
-        return try send(writer, arena.allocator(), types.Response{
+        return try send(writer, server.arena.allocator(), types.Response{
             .id = id,
             .result = .{ .SemanticTokensFull = .{ .data = token_array } },
         });
@@ -2008,7 +1979,7 @@ fn semanticTokensFullHandler(server: *Server, writer: anytype, arena: *std.heap.
     return try respondGeneric(writer, id, no_semantic_tokens_response);
 }
 
-fn completionHandler(server: *Server, writer: anytype, arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.Completion) !void {
+fn completionHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.Completion) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -2021,15 +1992,15 @@ fn completionHandler(server: *Server, writer: anytype, arena: *std.heap.ArenaAll
         return try respondGeneric(writer, id, no_completions_response);
 
     const doc_position = try offsets.documentPosition(handle.document, req.params.position, server.offset_encoding);
-    const pos_context = try analysis.documentPositionContext(arena, handle.document, doc_position);
+    const pos_context = try analysis.documentPositionContext(&server.arena, handle.document, doc_position);
 
     switch (pos_context) {
-        .builtin => try server.completeBuiltin(writer, arena, id),
-        .var_access, .empty => try server.completeGlobal(writer, arena, id, doc_position.absolute_index, handle),
-        .field_access => |range| try server.completeFieldAccess(writer, arena, id, handle, doc_position, range),
-        .global_error_set => try server.completeError(writer, arena, id, handle),
-        .enum_literal => try server.completeDot(writer, arena, id, handle),
-        .label => try server.completeLabel(writer, arena, id, doc_position.absolute_index, handle),
+        .builtin => try server.completeBuiltin(writer, id),
+        .var_access, .empty => try server.completeGlobal(writer, id, doc_position.absolute_index, handle),
+        .field_access => |range| try server.completeFieldAccess(writer, id, handle, doc_position, range),
+        .global_error_set => try server.completeError(writer, id, handle),
+        .enum_literal => try server.completeDot(writer, id, handle),
+        .label => try server.completeLabel(writer, id, doc_position.absolute_index, handle),
         .import_string_literal, .embedfile_string_literal => |loc| {
             if (!server.config.enable_import_embedfile_argument_completions)
                 return try respondGeneric(writer, id, no_completions_response);
@@ -2041,7 +2012,7 @@ fn completionHandler(server: *Server, writer: anytype, arena: *std.heap.ArenaAll
             var fsl_completions = std.ArrayListUnmanaged(types.CompletionItem){};
 
             fsc: {
-                var document_path = try uri_utils.parse(arena.allocator(), handle.uri());
+                var document_path = try uri_utils.parse(server.arena.allocator(), handle.uri());
                 var document_dir_path = std.fs.openIterableDirAbsolute(std.fs.path.dirname(document_path) orelse break :fsc, .{}) catch break :fsc;
                 defer document_dir_path.close();
 
@@ -2066,8 +2037,8 @@ fn completionHandler(server: *Server, writer: anytype, arena: *std.heap.ArenaAll
                     if (std.mem.startsWith(u8, entry.name, ".")) continue;
                     if (entry.kind == .File and pos_context == .import_string_literal and !std.mem.endsWith(u8, entry.name, ".zig")) continue;
 
-                    const l = try arena.allocator().dupe(u8, entry.name);
-                    try fsl_completions.append(arena.allocator(), types.CompletionItem{
+                    const l = try server.arena.allocator().dupe(u8, entry.name);
+                    try fsl_completions.append(server.arena.allocator(), types.CompletionItem{
                         .label = l,
                         .insertText = l,
                         .kind = if (entry.kind == .File) .File else .Folder,
@@ -2077,10 +2048,10 @@ fn completionHandler(server: *Server, writer: anytype, arena: *std.heap.ArenaAll
 
             if (!subpath_present and pos_context == .import_string_literal) {
                 if (handle.associated_build_file) |bf| {
-                    try fsl_completions.ensureUnusedCapacity(arena.allocator(), bf.packages.items.len);
+                    try fsl_completions.ensureUnusedCapacity(server.arena.allocator(), bf.packages.items.len);
 
                     for (bf.packages.items) |pkg| {
-                        try fsl_completions.append(arena.allocator(), .{
+                        try fsl_completions.append(server.arena.allocator(), .{
                             .label = pkg.name,
                             .kind = .Module,
                         });
@@ -2090,7 +2061,7 @@ fn completionHandler(server: *Server, writer: anytype, arena: *std.heap.ArenaAll
 
             truncateCompletions(fsl_completions.items, server.config.max_detail_length);
 
-            try send(writer, arena.allocator(), types.Response{
+            try send(writer, server.arena.allocator(), types.Response{
                 .id = id,
                 .result = .{
                     .CompletionList = .{
@@ -2104,7 +2075,7 @@ fn completionHandler(server: *Server, writer: anytype, arena: *std.heap.ArenaAll
     }
 }
 
-fn signatureHelpHandler(server: *Server, writer: anytype, arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.SignatureHelp) !void {
+fn signatureHelpHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.SignatureHelp) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -2120,12 +2091,12 @@ fn signatureHelpHandler(server: *Server, writer: anytype, arena: *std.heap.Arena
     const doc_position = try offsets.documentPosition(handle.document, req.params.position, server.offset_encoding);
     if (try getSignatureInfo(
         &server.document_store,
-        arena,
+        &server.arena,
         handle,
         doc_position.absolute_index,
         data,
     )) |sig_info| {
-        return try send(writer, arena.allocator(), types.Response{
+        return try send(writer, server.arena.allocator(), types.Response{
             .id = id,
             .result = .{
                 .SignatureHelp = .{
@@ -2139,7 +2110,7 @@ fn signatureHelpHandler(server: *Server, writer: anytype, arena: *std.heap.Arena
     return try respondGeneric(writer, id, no_signatures_response);
 }
 
-fn gotoHandler(server: *Server, writer: anytype, arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.GotoDefinition, resolve_alias: bool) !void {
+fn gotoHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.GotoDefinition, resolve_alias: bool) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -2150,13 +2121,13 @@ fn gotoHandler(server: *Server, writer: anytype, arena: *std.heap.ArenaAllocator
 
     if (req.params.position.character >= 0) {
         const doc_position = try offsets.documentPosition(handle.document, req.params.position, server.offset_encoding);
-        const pos_context = try analysis.documentPositionContext(arena, handle.document, doc_position);
+        const pos_context = try analysis.documentPositionContext(&server.arena, handle.document, doc_position);
 
         switch (pos_context) {
-            .var_access => try server.gotoDefinitionGlobal(writer, arena, id, doc_position.absolute_index, handle, resolve_alias),
-            .field_access => |range| try server.gotoDefinitionFieldAccess(writer, arena, id, handle, doc_position, range, resolve_alias),
-            .import_string_literal => try server.gotoDefinitionString(writer, arena, id, doc_position.absolute_index, handle),
-            .label => try server.gotoDefinitionLabel(writer, arena, id, doc_position.absolute_index, handle),
+            .var_access => try server.gotoDefinitionGlobal(writer, id, doc_position.absolute_index, handle, resolve_alias),
+            .field_access => |range| try server.gotoDefinitionFieldAccess(writer, id, handle, doc_position, range, resolve_alias),
+            .import_string_literal => try server.gotoDefinitionString(writer, id, doc_position.absolute_index, handle),
+            .label => try server.gotoDefinitionLabel(writer, id, doc_position.absolute_index, handle),
             else => try respondGeneric(writer, id, null_result_response),
         }
     } else {
@@ -2164,21 +2135,21 @@ fn gotoHandler(server: *Server, writer: anytype, arena: *std.heap.ArenaAllocator
     }
 }
 
-fn gotoDefinitionHandler(server: *Server, writer: anytype, arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.GotoDefinition) !void {
+fn gotoDefinitionHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.GotoDefinition) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    try server.gotoHandler(writer, arena, id, req, true);
+    try server.gotoHandler(writer, id, req, true);
 }
 
-fn gotoDeclarationHandler(server: *Server, writer: anytype, arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.GotoDeclaration) !void {
+fn gotoDeclarationHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.GotoDeclaration) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    try server.gotoHandler(writer, arena, id, req, false);
+    try server.gotoHandler(writer, id, req, false);
 }
 
-fn hoverHandler(server: *Server, writer: anytype, arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.Hover) !void {
+fn hoverHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.Hover) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -2189,12 +2160,12 @@ fn hoverHandler(server: *Server, writer: anytype, arena: *std.heap.ArenaAllocato
 
     if (req.params.position.character >= 0) {
         const doc_position = try offsets.documentPosition(handle.document, req.params.position, server.offset_encoding);
-        const pos_context = try analysis.documentPositionContext(arena, handle.document, doc_position);
+        const pos_context = try analysis.documentPositionContext(&server.arena, handle.document, doc_position);
         switch (pos_context) {
-            .builtin => try hoverDefinitionBuiltin(writer, arena, id, doc_position.absolute_index, handle),
-            .var_access => try server.hoverDefinitionGlobal(writer, arena, id, doc_position.absolute_index, handle),
-            .field_access => |range| try server.hoverDefinitionFieldAccess(writer, arena, id, handle, doc_position, range),
-            .label => try server.hoverDefinitionLabel(writer, arena, id, doc_position.absolute_index, handle),
+            .builtin => try server.hoverDefinitionBuiltin(writer, id, doc_position.absolute_index, handle),
+            .var_access => try server.hoverDefinitionGlobal(writer, id, doc_position.absolute_index, handle),
+            .field_access => |range| try server.hoverDefinitionFieldAccess(writer, id, handle, doc_position, range),
+            .label => try server.hoverDefinitionLabel(writer, id, doc_position.absolute_index, handle),
             else => try respondGeneric(writer, id, null_result_response),
         }
     } else {
@@ -2202,7 +2173,7 @@ fn hoverHandler(server: *Server, writer: anytype, arena: *std.heap.ArenaAllocato
     }
 }
 
-fn documentSymbolsHandler(server: *Server, writer: anytype, arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.DocumentSymbols) !void {
+fn documentSymbolsHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.DocumentSymbols) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -2210,10 +2181,10 @@ fn documentSymbolsHandler(server: *Server, writer: anytype, arena: *std.heap.Are
         Logger.warn(server, writer, "Trying to get document symbols in non existent document {s}", .{req.params.textDocument.uri});
         return try respondGeneric(writer, id, null_result_response);
     };
-    try server.documentSymbol(writer, arena, id, handle);
+    try server.documentSymbol(writer, id, handle);
 }
 
-fn formattingHandler(server: *Server, writer: anytype, arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.Formatting) !void {
+fn formattingHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.Formatting) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -2242,7 +2213,7 @@ fn formattingHandler(server: *Server, writer: anytype, arena: *std.heap.ArenaAll
             .Exited => |code| if (code == 0) {
                 if (std.mem.eql(u8, handle.document.text, stdout_bytes)) return try respondGeneric(writer, id, null_result_response);
 
-                return try send(writer, arena.allocator(), types.Response{
+                return try send(writer, server.arena.allocator(), types.Response{
                     .id = id,
                     .result = .{
                         .TextEdits = &[1]types.TextEdit{
@@ -2260,7 +2231,7 @@ fn formattingHandler(server: *Server, writer: anytype, arena: *std.heap.ArenaAll
     return try respondGeneric(writer, id, null_result_response);
 }
 
-fn renameHandler(server: *Server, writer: anytype, arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.Rename) !void {
+fn renameHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.Rename) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -2271,12 +2242,12 @@ fn renameHandler(server: *Server, writer: anytype, arena: *std.heap.ArenaAllocat
 
     if (req.params.position.character >= 0) {
         const doc_position = try offsets.documentPosition(handle.document, req.params.position, server.offset_encoding);
-        const pos_context = try analysis.documentPositionContext(arena, handle.document, doc_position);
+        const pos_context = try analysis.documentPositionContext(&server.arena, handle.document, doc_position);
 
         switch (pos_context) {
-            .var_access => try server.renameDefinitionGlobal(writer, arena, id, handle, doc_position.absolute_index, req.params.newName),
-            .field_access => |range| try server.renameDefinitionFieldAccess(writer, arena, id, handle, doc_position, range, req.params.newName),
-            .label => try server.renameDefinitionLabel(writer, arena, id, handle, doc_position.absolute_index, req.params.newName),
+            .var_access => try server.renameDefinitionGlobal(writer, id, handle, doc_position.absolute_index, req.params.newName),
+            .field_access => |range| try server.renameDefinitionFieldAccess(writer, id, handle, doc_position, range, req.params.newName),
+            .label => try server.renameDefinitionLabel(writer, id, handle, doc_position.absolute_index, req.params.newName),
             else => try respondGeneric(writer, id, null_result_response),
         }
     } else {
@@ -2284,14 +2255,13 @@ fn renameHandler(server: *Server, writer: anytype, arena: *std.heap.ArenaAllocat
     }
 }
 
-fn didChangeConfigurationHandler(server: *Server, writer: anytype, arena: *std.heap.ArenaAllocator, id: types.RequestId, maybe_req: std.json.Value) !void {
+fn didChangeConfigurationHandler(server: *Server, writer: anytype, id: types.RequestId, maybe_req: std.json.Value) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    _ = arena;
     _ = id;
     if (maybe_req.Object.get("params").?.Object.get("settings").? == .Object) {
-        const req = try requests.fromDynamicTree(arena, requests.Configuration, maybe_req);
+        const req = try requests.fromDynamicTree(&server.arena, requests.Configuration, maybe_req);
         inline for (std.meta.fields(Config)) |field| {
             if (@field(req.params.settings, field.name)) |value| {
                 Logger.debug(server, writer, "setting configuration option '{s}' to '{any}'", .{ field.name, value });
@@ -2301,10 +2271,10 @@ fn didChangeConfigurationHandler(server: *Server, writer: anytype, arena: *std.h
 
         try server.configChanged(null);
     } else if (server.client_capabilities.supports_configuration)
-        try server.requestConfiguration(writer, arena);
+        try server.requestConfiguration(writer);
 }
 
-fn referencesHandler(server: *Server, writer: anytype, arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.References) !void {
+fn referencesHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.References) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -2315,13 +2285,13 @@ fn referencesHandler(server: *Server, writer: anytype, arena: *std.heap.ArenaAll
 
     if (req.params.position.character >= 0) {
         const doc_position = try offsets.documentPosition(handle.document, req.params.position, server.offset_encoding);
-        const pos_context = try analysis.documentPositionContext(arena, handle.document, doc_position);
+        const pos_context = try analysis.documentPositionContext(&server.arena, handle.document, doc_position);
 
         const include_decl = req.params.context.includeDeclaration;
         switch (pos_context) {
-            .var_access => try server.referencesDefinitionGlobal(writer, arena, id, handle, doc_position.absolute_index, include_decl, false),
-            .field_access => |range| try server.referencesDefinitionFieldAccess(writer, arena, id, handle, doc_position, range, include_decl, false),
-            .label => try server.referencesDefinitionLabel(writer, arena, id, handle, doc_position.absolute_index, include_decl, false),
+            .var_access => try server.referencesDefinitionGlobal(writer, id, handle, doc_position.absolute_index, include_decl, false),
+            .field_access => |range| try server.referencesDefinitionFieldAccess(writer, id, handle, doc_position, range, include_decl, false),
+            .label => try server.referencesDefinitionLabel(writer, id, handle, doc_position.absolute_index, include_decl, false),
             else => try respondGeneric(writer, id, null_result_response),
         }
     } else {
@@ -2329,7 +2299,7 @@ fn referencesHandler(server: *Server, writer: anytype, arena: *std.heap.ArenaAll
     }
 }
 
-fn documentHighlightHandler(server: *Server, writer: anytype, arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.DocumentHighlight) !void {
+fn documentHighlightHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.DocumentHighlight) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -2340,12 +2310,12 @@ fn documentHighlightHandler(server: *Server, writer: anytype, arena: *std.heap.A
 
     if (req.params.position.character >= 0) {
         const doc_position = try offsets.documentPosition(handle.document, req.params.position, server.offset_encoding);
-        const pos_context = try analysis.documentPositionContext(arena, handle.document, doc_position);
+        const pos_context = try analysis.documentPositionContext(&server.arena, handle.document, doc_position);
 
         switch (pos_context) {
-            .var_access => try server.referencesDefinitionGlobal(writer, arena, id, handle, doc_position.absolute_index, true, true),
-            .field_access => |range| try server.referencesDefinitionFieldAccess(writer, arena, id, handle, doc_position, range, true, true),
-            .label => try server.referencesDefinitionLabel(writer, arena, id, handle, doc_position.absolute_index, true, true),
+            .var_access => try server.referencesDefinitionGlobal(writer, id, handle, doc_position.absolute_index, true, true),
+            .field_access => |range| try server.referencesDefinitionFieldAccess(writer, id, handle, doc_position, range, true, true),
+            .label => try server.referencesDefinitionLabel(writer, id, handle, doc_position.absolute_index, true, true),
             else => try respondGeneric(writer, id, null_result_response),
         }
     } else {
@@ -2361,7 +2331,7 @@ fn isPositionBefore(lhs: types.Position, rhs: types.Position) bool {
     }
 }
 
-fn inlayHintHandler(server: *Server, writer: anytype, arena: *std.heap.ArenaAllocator, id: types.RequestId, req: requests.InlayHint) !void {
+fn inlayHintHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.InlayHint) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -2377,7 +2347,7 @@ fn inlayHintHandler(server: *Server, writer: anytype, arena: *std.heap.ArenaAllo
         // because the function could be stored in a different document
         // we need the regenerate hints when the document itself or its imported documents change
         // with caching it would also make sense to generate all hints instead of only the visible ones
-        const hints = try inlay_hints.writeRangeInlayHint(arena, &server.config, &server.document_store, handle, req.params.range, hover_kind);
+        const hints = try inlay_hints.writeRangeInlayHint(&server.arena, &server.config, &server.document_store, handle, req.params.range, hover_kind);
         defer {
             for (hints) |hint| {
                 server.allocator.free(hint.tooltip.value);
@@ -2400,7 +2370,7 @@ fn inlayHintHandler(server: *Server, writer: anytype, arena: *std.heap.ArenaAllo
             break;
         }
 
-        return try send(writer, arena.allocator(), types.Response{
+        return try send(writer, server.arena.allocator(), types.Response{
             .id = id,
             .result = .{ .InlayHint = visible_hints },
         });
@@ -2414,11 +2384,14 @@ fn extractErr(val: anytype) anyerror {
     return error.HackDone;
 }
 
-pub fn processJsonRpc(server: *Server, writer: anytype, arena: *std.heap.ArenaAllocator, json: []const u8) !void {
+pub fn processJsonRpc(server: *Server, writer: anytype, json: []const u8) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    var parser = std.json.Parser.init(arena.allocator(), false);
+    server.arena = std.heap.ArenaAllocator.init(server.allocator);
+    defer server.arena.deinit();
+
+    var parser = std.json.Parser.init(server.arena.allocator(), false);
     defer parser.deinit();
 
     var tree = try parser.parse(json);
@@ -2525,9 +2498,9 @@ pub fn processJsonRpc(server: *Server, writer: anytype, arena: *std.heap.ArenaAl
                 done = error.HackDone;
             } else if (method_info[1] != void) {
                 const ReqT = method_info[1];
-                if (requests.fromDynamicTree(arena, ReqT, tree.root)) |request_obj| {
+                if (requests.fromDynamicTree(&server.arena, ReqT, tree.root)) |request_obj| {
                     done = error.HackDone;
-                    done = extractErr(method_info[2](server, writer, arena, id, request_obj));
+                    done = extractErr(method_info[2](server, writer, id, request_obj));
                 } else |err| {
                     if (err == error.MalformedJson) {
                         Logger.warn(server, writer, "Could not create request type {s} from JSON {s}", .{ @typeName(ReqT), json });
@@ -2536,7 +2509,7 @@ pub fn processJsonRpc(server: *Server, writer: anytype, arena: *std.heap.ArenaAl
                 }
             } else {
                 done = error.HackDone;
-                (method_info[2])(server, writer, arena, id) catch |err| {
+                (method_info[2])(server, writer, id) catch |err| {
                     done = err;
                 };
             }
