@@ -199,7 +199,9 @@ pub fn wizard(allocator: std.mem.Allocator) !void {
         .operator_completions = operator_completions,
         .include_at_in_builtins = include_at_in_builtins,
         .max_detail_length = max_detail_length,
-    }, .{}, out);
+    }, .{
+        .whitespace = .{},
+    }, out);
 
     write("successful.\n\n\n\n");
 
