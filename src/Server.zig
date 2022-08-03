@@ -2565,6 +2565,7 @@ pub fn init(
 ) !Server {
     // TODO replace global with something like an Analyser struct
     // which contains using_trail & resolve_trail and place it inside Server
+    // see: https://github.com/zigtools/zls/issues/536
     analysis.init(allocator);
 
     var server: Server = .{

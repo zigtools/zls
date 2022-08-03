@@ -73,6 +73,23 @@ test "Self-referential definition" {
     );
 }
 
+// This test as written depends on the configuration in the *host* machines zls.json, if `enable_snippets` is true then
+// the insert text is "w()" if it is false it is "w"
+//
+// test "Missing return type" {
+//     var server = try Server.start(initialize_msg, null);
+//     defer server.shutdown();
+
+//     try server.request("textDocument/didOpen",
+//         \\{"textDocument":{"uri":"file:///test.zig","languageId":"zig","version":420,"text":"fn w() {}\nc"}}
+//     , null);
+//     try server.request("textDocument/completion",
+//         \\{"textDocument":{"uri":"file:///test.zig"}, "position":{"line":1,"character":1}}
+//     ,
+//         \\{"isIncomplete":false,"items":[{"label":"w","kind":3,"textEdit":null,"filterText":null,"insertText":"w","insertTextFormat":1,"detail":"fn","documentation":null}]}
+//     );
+// }
+
 test "Pointer and optional deref" {
     var ctx = try Context.init();
     defer ctx.deinit();
@@ -86,3 +103,18 @@ test "Pointer and optional deref" {
         \\{"isIncomplete":false,"items":[{"label":"data","labelDetails":{"detail":"","description":"i32 ","sortText":null},"kind":5,"detail":"data","sortText":"3_data","filterText":null,"insertText":"data","insertTextFormat":1,"documentation":null}]}
     );
 }
+
+// not fixed yet!
+// test "Self-referential import" {
+//     var ctx = try Context.init();
+//     defer ctx.deinit();
+//
+//     try ctx.request("textDocument/didOpen",
+//         \\{"textDocument":{"uri":"file:///test.zig","languageId":"zig","version":420,"text":"const a = @import(\"test.zig\").a;\nc"}}
+//     , null);
+//     try ctx.request("textDocument/completion",
+//         \\{"textDocument":{"uri":"file:///test.zig"}, "position":{"line":1,"character":1}}
+//     ,
+//         \\{"isIncomplete":false,"items":[]}
+//     );
+// }
