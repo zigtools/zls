@@ -134,29 +134,41 @@ fn loadPackages(context: LoadPackagesContext) !void {
     defer if (context.build_file_path == null) allocator.free(build_file_path);
     const directory_path = build_file_path[0 .. build_file_path.len - "build.zig".len];
 
+    const args: []const []const u8 = &[_][]const u8{
+        zig_exe_path,
+        "run",
+        build_runner_path,
+        "--cache-dir",
+        build_runner_cache_path,
+        "--pkg-begin",
+        "@build@",
+        build_file_path,
+        "--pkg-end",
+        "--",
+        zig_exe_path,
+        directory_path,
+        context.cache_root,
+        context.global_cache_root,
+    };
+
     const zig_run_result = try std.ChildProcess.exec(.{
         .allocator = allocator,
-        .argv = &[_][]const u8{
-            zig_exe_path,
-            "run",
-            build_runner_path,
-            "--cache-dir",
-            build_runner_cache_path,
-            "--pkg-begin",
-            "@build@",
-            build_file_path,
-            "--pkg-end",
-            "--",
-            zig_exe_path,
-            directory_path,
-            context.cache_root,
-            context.global_cache_root,
-        },
+        .argv = args,
     });
 
     defer {
         allocator.free(zig_run_result.stdout);
         allocator.free(zig_run_result.stderr);
+    }
+
+    errdefer blk: {
+        const joined = std.mem.join(allocator, " ", args) catch break :blk;
+        defer allocator.free(joined);
+
+        log.err(
+            "Failed to execute build runner to collect packages, command:\n{s}\nError: {s}",
+            .{ joined, zig_run_result.stderr },
+        );
     }
 
     switch (zig_run_result.term) {
@@ -271,7 +283,7 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: [:0]u8) anyerror!*Ha
             .cache_root = self.zig_cache_root,
             .global_cache_root = self.zig_global_cache_root,
         }) catch |err| {
-            log.warn("Failed to load packages of build file {s} (error: {})", .{ build_file.uri, err });
+            log.err("Failed to load packages of build file {s} (error: {})", .{ build_file.uri, err });
         };
 
         try self.build_files.append(self.allocator, build_file);
@@ -540,7 +552,7 @@ pub fn applySave(self: *DocumentStore, handle: *Handle) !void {
             .cache_root = self.zig_cache_root,
             .global_cache_root = self.zig_global_cache_root,
         }) catch |err| {
-            log.warn("Failed to load packages of build file {s} (error: {})", .{ build_file.uri, err });
+            log.err("Failed to load packages of build file {s} (error: {})", .{ build_file.uri, err });
         };
     }
 }
