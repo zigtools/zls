@@ -28,6 +28,8 @@ fn loop(server: *Server) !void {
             return;
         };
         const buffer = try server.allocator.alloc(u8, headers.content_length);
+        defer server.allocator.free(buffer);
+
         try reader.readNoEof(buffer);
 
         var writer = std.io.getStdOut().writer();
@@ -41,8 +43,8 @@ const ConfigWithPath = struct {
     config_path: ?[]const u8,
 };
 
-fn getConfig(allocator: std.mem.Allocator, config_path: ?[]const u8) !?ConfigWithPath {
-    if (config_path) |path| {
+fn getConfig(allocator: std.mem.Allocator, config: ConfigWithPath) !ConfigWithPath {
+    if (config.config_path) |path| {
         if (Config.loadFromFile(allocator, path)) |conf| {
             return ConfigWithPath{
                 .config = conf,
@@ -74,7 +76,10 @@ fn getConfig(allocator: std.mem.Allocator, config_path: ?[]const u8) !?ConfigWit
         }
     }
 
-    return null;
+    return ConfigWithPath{
+        .config = Config{},
+        .config_path = null,
+    };
 }
 
 const stack_frames = switch (zig_builtin.mode) {
@@ -91,8 +96,11 @@ pub fn main() anyerror!void {
         allocator = tracy.tracyAllocator(allocator).allocator();
     }
 
-    var config_path: ?[]const u8 = null;
-    defer if (config_path) |path| allocator.free(path);
+    var config = ConfigWithPath{
+        .config = undefined,
+        .config_path = null,
+    };
+    defer if (config.config_path) |path| allocator.free(path);
 
     // Check arguments.
     var args_it = try std.process.ArgIterator.initWithAllocator(allocator);
@@ -109,7 +117,7 @@ pub fn main() anyerror!void {
                 std.debug.print("Expected configuration file path after --config-path argument\n", .{});
                 std.os.exit(1);
             };
-            config_path = try allocator.dupe(u8, path);
+            config.config_path = try allocator.dupe(u8, path);
         } else if (std.mem.eql(u8, arg, "config") or std.mem.eql(u8, arg, "configure")) {
             try setup.wizard(allocator);
             return;
@@ -119,21 +127,15 @@ pub fn main() anyerror!void {
         }
     }
 
-    var new_config = blk: {
-        if (try getConfig(allocator, config_path)) |config| {
-            break :blk config;
-        }
+    config = try getConfig(allocator, config);
+    if (config.config_path == null) {
         logger.info("No config file zls.json found.", .{});
-        break :blk ConfigWithPath{
-            .config = Config{},
-            .config_path = null,
-        };
-    };
+    }
 
     var server = try Server.init(
         allocator,
-        new_config.config,
-        new_config.config_path,
+        config.config,
+        config.config_path,
         actual_log_level,
     );
     defer server.deinit();
