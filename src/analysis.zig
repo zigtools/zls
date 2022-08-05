@@ -627,7 +627,7 @@ fn allDigits(str: []const u8) bool {
     return true;
 }
 
-pub fn isTypeIdent(tree: Ast, token_idx: Ast.TokenIndex) bool {
+pub fn isTypeIdent(text: []const u8) bool {
     const PrimitiveTypes = std.ComptimeStringMap(void, .{
         .{"isize"},        .{"usize"},
         .{"c_short"},      .{"c_ushort"},
@@ -644,7 +644,6 @@ pub fn isTypeIdent(tree: Ast, token_idx: Ast.TokenIndex) bool {
         .{"anyframe"},     .{"anytype"},
     });
 
-    const text = tree.tokenSlice(token_idx);
     if (PrimitiveTypes.has(text)) return true;
     if (text.len == 1) return false;
     if (!(text[0] == 'u' or text[0] == 'i')) return false;
@@ -693,7 +692,9 @@ pub fn resolveTypeOfNodeInternal(store: *DocumentStore, arena: *std.heap.ArenaAl
             return try resolveTypeOfNodeInternal(store, arena, value, bound_type_params);
         },
         .identifier => {
-            if (isTypeIdent(handle.tree, main_tokens[node])) {
+            const name = tree.getNodeSource(node);
+
+            if (isTypeIdent(name)) {
                 return TypeWithHandle{
                     .type = .{ .data = .{ .primitive = node }, .is_type_val = true },
                     .handle = handle,
@@ -704,7 +705,7 @@ pub fn resolveTypeOfNodeInternal(store: *DocumentStore, arena: *std.heap.ArenaAl
                 store,
                 arena,
                 handle,
-                tree.getNodeSource(node),
+                name,
                 starts[main_tokens[node]],
             )) |child| {
                 switch (child.decl.*) {

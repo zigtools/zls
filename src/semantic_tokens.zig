@@ -425,7 +425,11 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
             try writeToken(builder, node_data[node].rhs, .errorTag);
         },
         .identifier => {
-            if (analysis.isTypeIdent(tree, main_token)) {
+            const name = tree.getNodeSource(node);
+
+            if(std.mem.eql(u8,name, "undefined")) {
+                return try writeToken(builder, main_token, .keywordLiteral);
+            } else if (analysis.isTypeIdent(name)) {
                 return try writeToken(builder, main_token, .type);
             }
 
@@ -433,7 +437,7 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
                 store,
                 arena,
                 handle,
-                tree.getNodeSource(node),
+                name,
                 tree.tokens.items(.start)[main_token],
             )) |child| {
                 if (child.decl.* == .param_decl) {
