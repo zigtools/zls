@@ -14,7 +14,7 @@ test "Open file, ask for semantic tokens" {
     try ctx.request("textDocument/semanticTokens/full",
         \\{"textDocument":{"uri":"file:///test.zig"}}
     ,
-        \\{"data":[0,0,5,7,0,0,6,3,2,32,0,4,1,11,0,0,2,7,12,0,0,8,5,9,0]}
+        \\{"data":[0,0,5,7,0,0,6,3,0,33,0,4,1,11,0,0,2,7,12,0,0,8,5,9,0]}
     );
 }
 

@@ -54,6 +54,7 @@ allocator: std.mem.Allocator,
 handles: UriToHandleMap = .{},
 build_files: BuildFileList = .{},
 
+// TODO use pointer back to Server.config
 config: Config,
 std_uri: ?[]const u8,
 // TODO make this configurable

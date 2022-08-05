@@ -2568,15 +2568,16 @@ pub fn init(
     // see: https://github.com/zigtools/zls/issues/536
     analysis.init(allocator);
 
-    var server: Server = .{
-        .config = config,
+    var cfg = config;
+
+    try cfg.configChanged(allocator, config_path);
+
+    return Server{
+        .config = cfg,
         .allocator = allocator,
-        .document_store = try DocumentStore.init(allocator, config),
+        .document_store = try DocumentStore.init(allocator, cfg),
         .log_level = log_level,
     };
-    try server.configChanged(config_path);
-
-    return server;
 }
 
 pub fn deinit(server: *Server) void {
