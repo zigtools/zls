@@ -876,6 +876,7 @@ pub fn resolveTypeOfNodeInternal(store: *DocumentStore, arena: *std.heap.ArenaAl
         .array_type_sentinel,
         .optional_type,
         .ptr_type_aligned,
+        .ptr_type_sentinel,
         .ptr_type,
         .ptr_type_bit_range,
         .error_union,
