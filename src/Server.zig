@@ -1144,11 +1144,14 @@ fn referencesDefinitionGlobal(
 
     const result: types.ResponseParams = if (highlight) result: {
         var highlights = try std.ArrayList(types.DocumentHighlight).initCapacity(server.arena.allocator(), locs.items.len);
+        const uri = handle.uri();
         for (locs.items) |loc| {
-            highlights.appendAssumeCapacity(.{
-                .range = loc.range,
-                .kind = .Text,
-            });
+            if (std.mem.eql(u8, loc.uri, uri)) {
+                highlights.appendAssumeCapacity(.{
+                    .range = loc.range,
+                    .kind = .Text,
+                });
+            }
         }
         break :result .{ .DocumentHighlight = highlights.items };
     } else .{ .Locations = locs.items };
@@ -1187,11 +1190,14 @@ fn referencesDefinitionFieldAccess(
     );
     const result: types.ResponseParams = if (highlight) result: {
         var highlights = try std.ArrayList(types.DocumentHighlight).initCapacity(server.arena.allocator(), locs.items.len);
+        const uri = handle.uri();
         for (locs.items) |loc| {
-            highlights.appendAssumeCapacity(.{
-                .range = loc.range,
-                .kind = .Text,
-            });
+            if (std.mem.eql(u8, loc.uri, uri)) {
+                highlights.appendAssumeCapacity(.{
+                    .range = loc.range,
+                    .kind = .Text,
+                });
+            }
         }
         break :result .{ .DocumentHighlight = highlights.items };
     } else .{ .Locations = locs.items };
@@ -1218,11 +1224,14 @@ fn referencesDefinitionLabel(
     try references.labelReferences(&server.arena, decl, server.offset_encoding, include_decl, &locs, std.ArrayList(types.Location).append);
     const result: types.ResponseParams = if (highlight) result: {
         var highlights = try std.ArrayList(types.DocumentHighlight).initCapacity(server.arena.allocator(), locs.items.len);
+        const uri = handle.uri();
         for (locs.items) |loc| {
-            highlights.appendAssumeCapacity(.{
-                .range = loc.range,
-                .kind = .Text,
-            });
+            if (std.mem.eql(u8, loc.uri, uri)) {
+                highlights.appendAssumeCapacity(.{
+                    .range = loc.range,
+                    .kind = .Text,
+                });
+            }
         }
         break :result .{ .DocumentHighlight = highlights.items };
     } else .{ .Locations = locs.items };
