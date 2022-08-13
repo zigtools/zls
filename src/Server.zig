@@ -2214,9 +2214,25 @@ fn formattingHandler(server: *Server, writer: anytype, id: types.RequestId, req:
             .Exited => |code| if (code == 0) {
                 if (std.mem.eql(u8, handle.document.text, stdout_bytes)) return try respondGeneric(writer, id, null_result_response);
 
-                var edits = try diff.edits(server.allocator, handle.document.text, stdout_bytes);
-                defer edits.deinit();
-                defer for (edits.items) |item| item.newText.deinit();
+                var edits = diff.edits(server.allocator, handle.document.text, stdout_bytes) catch {
+                    // If there was an error trying to diff the text, return the formatted response
+                    // as the new text for the entire range of the document
+                    return try send(writer, server.arena.allocator(), types.Response{
+                        .id = id,
+                        .result = .{
+                            .TextEdits = &[1]types.TextEdit{
+                                .{
+                                    .range = try offsets.documentRange(handle.document, server.offset_encoding),
+                                    .newText = stdout_bytes,
+                                },
+                            },
+                        },
+                    });
+                };
+                defer {
+                    for (edits.items) |item| item.newText.deinit();
+                    edits.deinit();
+                }
 
                 var text_edits = try std
                     .ArrayList(types.TextEdit)
@@ -2234,18 +2250,11 @@ fn formattingHandler(server: *Server, writer: anytype, id: types.RequestId, req:
                     .TextEdits = text_edits.items,
                 };
 
-                return try send(writer, server.arena.allocator(), types.Response{
-                    .id = id,
-                    .result = result,
-                    // .result = .{
-                    //     .TextEdits = &[1]types.TextEdit{
-                    //         .{
-                    //             .range = try offsets.documentRange(handle.document, server.offset_encoding),
-                    //             .newText = stdout_bytes,
-                    //         },
-                    //     },
-                    // },
-                });
+                return try send(
+                    writer,
+                    server.arena.allocator(),
+                    types.Response{ .id = id, .result = result },
+                );
             },
             else => {},
         }

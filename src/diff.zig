@@ -1,14 +1,18 @@
 const std = @import("std");
 const types = @import("types.zig");
 
-// pub const Position = struct { line: usize, character: usize };
-// pub const Range = struct { start: Position, end: Position };
+// This is essentially the same as `types.TextEdit`, but we use an
+// ArrayList(u8) here to be able to clean up the memory later on
 pub const Edit = struct {
     range: types.Range,
     newText: std.ArrayList(u8),
 };
 
+// Whether the `Change` is an addition, deletion, or no change from the
+// original string to the new string
 const Operation = enum { Deletion, Addition, Nothing };
+
+/// A single character difference between two strings
 const Change = struct {
     operation: Operation,
     pos: usize,
@@ -68,18 +72,45 @@ fn trim_input(a_out: *[]const u8, b_out: *[]const u8) usize {
     }) {}
     end -= 1;
 
-    // Sanity check to make sure our range isn't negative
-    if (start < a.len - end and start < b.len - end) {
-        a_out.* = a[start .. a.len - end];
-        b_out.* = b[start .. b.len - end];
-        return start;
+    var a_start = start;
+    var a_end = a.len - end;
+    var b_start = start;
+    var b_end = b.len - end;
+
+    // In certain situations, the trimmed range can be "negative" where
+    // `a_start` ends up being after `a_end` in the byte stream. If you
+    // consider the following inputs:
+    //     a: "xx    gg  xx"
+    //     b: "xx  gg  xx"
+    //
+    // This will lead to the following calculations:
+    //     a_start: 4
+    //     a_end: 4
+    //     b_start: 4
+    //     b_end: 2
+    //
+    // In negative range situations, we add the absolute value of the
+    // the negative range's length (`b_start - b_end` in this case) to the
+    // other range's length (a_end + (b_start - b_end)), and then set the
+    // negative range end to the negative range start (b_end = b_start)
+    if (a_start > a_end) {
+        const difference = a_start - a_end;
+        a_end = a_start;
+        b_end += difference;
+    }
+    if (b_start > b_end) {
+        const difference = b_start - b_end;
+        b_end = b_start;
+        a_end += difference;
     }
 
-    a_out.* = a_out.*;
-    b_out.* = b_out.*;
-    return 0;
+    a_out.* = a[a_start..a_end];
+    b_out.* = b[b_start..b_end];
+
+    return start;
 }
 
+/// A 2D array that is addressable as a[row, col]
 pub const Array2D = struct {
     const Self = @This();
 
@@ -112,6 +143,7 @@ pub const Array2D = struct {
     }
 };
 
+/// Build a Longest Common Subsequence table
 fn calculate_lcs(
     lcs: *Array2D,
     astr: []const u8,
@@ -122,6 +154,13 @@ fn calculate_lcs(
 
     std.mem.set(usize, lcs.data[0 .. rows * cols], 0);
 
+    // This approach is a dynamic programming technique to calculate the
+    // longest common subsequence between two strings, `a` and `b`. We start
+    // at 1 for `i` and `j` because the first column and first row are always
+    // set to zero
+    //
+    // You can find more information about this at the following url:
+    // https://en.wikipedia.org/wiki/Longest_common_subsequence_problem
     var i: usize = 1;
     while (i < rows) : (i += 1) {
         var j: usize = 1;
@@ -146,6 +185,8 @@ pub fn get_changes(
     b_trim: []const u8,
     allocator: std.mem.Allocator,
 ) !std.ArrayList(Edit) {
+    // First we get a list of changes between strings at the character level:
+    // "addition", "deletion", and "no change" for each character
     var changes = try std.ArrayList(Change).initCapacity(allocator, a_trim.len);
     defer changes.deinit();
     try recur_changes(
@@ -157,6 +198,9 @@ pub fn get_changes(
         @intCast(i64, b_trim.len),
     );
 
+    // We want to group runs of deletions and additions, and separate them by
+    // runs of `.Nothing` changes. This will allow us to calculate the
+    // `TextEdit` ranges
     var groups = std.ArrayList([]Change).init(allocator);
     defer groups.deinit();
     var active_change: ?[]Change = null;
@@ -181,6 +225,8 @@ pub fn get_changes(
         try groups.append(ac.*);
     }
 
+    // The LCS algorithm works "in reverse", so we're putting everything back
+    // in ascending order
     var a_lines = std.mem.split(u8, a, "\n");
     std.mem.reverse([]Change, groups.items);
     for (groups.items) |group| std.mem.reverse(Change, group);
@@ -188,6 +234,7 @@ pub fn get_changes(
     var edit_results = std.ArrayList(Edit).init(allocator);
     errdefer edit_results.deinit();
 
+    // Convert our grouped changes into `Edit`s
     for (groups.items) |group| {
         var range_start = group[0].pos;
         var range_len: usize = 0;
@@ -224,6 +271,10 @@ fn recur_changes(
     i: i64,
     j: i64,
 ) anyerror!void {
+    // This function recursively works backwards through the LCS table in
+    // order to figure out what kind of changes took place to transform `a`
+    // into `b`
+
     const ii = @intCast(usize, i);
     const jj = @intCast(usize, j);
 
@@ -282,14 +333,14 @@ fn char_pos_to_range(
     }
 
     if (result_start_pos == null) return error.InvalidRange;
+
+    // If we did not find an end position, it is outside the range of the
+    // string for some reason so clamp it to the string end position
     if (result_end_pos == null) {
         result_end_pos = types.Position{
             .line = @intCast(i64, line_pos),
             .character = @intCast(i64, char_pos),
         };
-    }
-    if (result_start_pos == null or result_end_pos == null) {
-        return error.InvalidRange;
     }
 
     return types.Range{
