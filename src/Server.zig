@@ -2234,11 +2234,11 @@ fn formattingHandler(server: *Server, writer: anytype, id: types.RequestId, req:
                     edits.deinit();
                 }
 
+                // Convert from `[]diff.Edit` to `[]types.TextEdit`
                 var text_edits = try std
                     .ArrayList(types.TextEdit)
                     .initCapacity(server.allocator, edits.items.len);
                 defer text_edits.deinit();
-
                 for (edits.items) |edit| {
                     try text_edits.append(.{
                         .range = edit.range,
@@ -2246,14 +2246,13 @@ fn formattingHandler(server: *Server, writer: anytype, id: types.RequestId, req:
                     });
                 }
 
-                const result = types.ResponseParams{
-                    .TextEdits = text_edits.items,
-                };
-
                 return try send(
                     writer,
                     server.arena.allocator(),
-                    types.Response{ .id = id, .result = result },
+                    types.Response{
+                        .id = id,
+                        .result = .{ .TextEdits = text_edits.items },
+                    },
                 );
             },
             else => {},
