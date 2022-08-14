@@ -1786,7 +1786,7 @@ fn initializeHandler(server: *Server, writer: anytype, id: types.RequestId, req:
                     },
                     .textDocumentSync = .Full,
                     .renameProvider = true,
-                    .completionProvider = .{ .resolveProvider = false, .triggerCharacters = &[_][]const u8{ ".", ":", "@" }, .completionItem = .{ .labelDetailsSupport = true } },
+                    .completionProvider = .{ .resolveProvider = false, .triggerCharacters = &[_][]const u8{ ".", ":", "@", "]" }, .completionItem = .{ .labelDetailsSupport = true } },
                     .documentHighlightProvider = true,
                     .hoverProvider = true,
                     .codeActionProvider = false,
