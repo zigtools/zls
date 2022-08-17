@@ -133,7 +133,7 @@ fn writeCallHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *Doc
 }
 
 /// takes parameter nodes from the ast and function parameter names from `Builtin.arguments` and writes parameter hints into `builder.hints`
-fn writeBuiltinHint(builder: *Builder, parameters: []Ast.Node.Index, arguments: []const []const u8) !void {
+fn writeBuiltinHint(builder: *Builder, parameters: []const Ast.Node.Index, arguments: []const []const u8) !void {
     if (parameters.len == 0) return;
 
     const handle = builder.handle;
@@ -290,25 +290,9 @@ fn writeNodeInlayHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store:
         .builtin_call_comma,
         => {
             var buffer: [2]Ast.Node.Index = undefined;
-            const parameters: []Ast.Node.Index = switch (tag) {
-                .builtin_call_two, .builtin_call_two_comma => blk: {
-                    buffer[0] = node_data[node].lhs;
-                    buffer[1] = node_data[node].rhs;
+            const params = ast.builtinCallParams(tree, node, &buffer).?;
 
-                    var size: usize = 0;
-
-                    if (node_data[node].rhs != 0) {
-                        size = 2;
-                    } else if (node_data[node].lhs != 0) {
-                        size = 1;
-                    }
-                    break :blk buffer[0..size];
-                },
-                .builtin_call, .builtin_call_comma => tree.extra_data[node_data[node].lhs..node_data[node].rhs],
-                else => unreachable,
-            };
-
-            if (builder.config.inlay_hints_show_builtin and parameters.len > 1) {
+            if (builder.config.inlay_hints_show_builtin and params.len > 1) {
                 const name = tree.tokenSlice(main_tokens[node]);
 
                 outer: for (data.builtins) |builtin| {
@@ -318,12 +302,12 @@ fn writeNodeInlayHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store:
                         if (std.mem.eql(u8, builtin_name, name)) break :outer;
                     }
 
-                    try writeBuiltinHint(builder, parameters, builtin.arguments);
+                    try writeBuiltinHint(builder, params, builtin.arguments);
                 }
             }
 
-            for (parameters) |param| {
-                if (parameters.len > inlay_hints_max_inline_children) {
+            for (params) |param| {
+                if (params.len > inlay_hints_max_inline_children) {
                     if (!isNodeInRange(tree, param, range)) continue;
                 }
 
@@ -623,15 +607,7 @@ fn writeNodeInlayHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store:
         .tagged_union_enum_tag_trailing,
         => {
             var buffer: [2]Ast.Node.Index = undefined;
-            const decl: Ast.full.ContainerDecl = switch (tag) {
-                .container_decl, .container_decl_trailing => tree.containerDecl(node),
-                .container_decl_two, .container_decl_two_trailing => tree.containerDeclTwo(&buffer, node),
-                .container_decl_arg, .container_decl_arg_trailing => tree.containerDeclArg(node),
-                .tagged_union, .tagged_union_trailing => tree.taggedUnion(node),
-                .tagged_union_enum_tag, .tagged_union_enum_tag_trailing => tree.taggedUnionEnumTag(node),
-                .tagged_union_two, .tagged_union_two_trailing => tree.taggedUnionTwo(&buffer, node),
-                else => unreachable,
-            };
+            const decl: Ast.full.ContainerDecl = ast.containerDecl(tree, node, &buffer).?;
 
             try await @asyncCall(child_frame, {}, writeNodeInlayHint, .{ builder, arena, store, decl.ast.arg, range });
 

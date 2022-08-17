@@ -317,20 +317,8 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
                 try writeToken(builder, main_token - 2, .label);
             }
 
-            const statements: []const Ast.Node.Index = switch (tag) {
-                .block, .block_semicolon => tree.extra_data[node_data[node].lhs..node_data[node].rhs],
-                .block_two, .block_two_semicolon => blk: {
-                    const statements = &[_]Ast.Node.Index{ node_data[node].lhs, node_data[node].rhs };
-                    const len: usize = if (node_data[node].lhs == 0)
-                        @as(usize, 0)
-                    else if (node_data[node].rhs == 0)
-                        @as(usize, 1)
-                    else
-                        @as(usize, 2);
-                    break :blk statements[0..len];
-                },
-                else => unreachable,
-            };
+            var buffer: [2]Ast.Node.Index = undefined;
+            const statements = ast.blockStatements(tree, node, &buffer).?;
 
             for (statements) |child| {
                 if (node_tags[child].isContainerField()) {
@@ -390,15 +378,7 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
         .tagged_union_two_trailing,
         => {
             var buf: [2]Ast.Node.Index = undefined;
-            const decl: Ast.full.ContainerDecl = switch (tag) {
-                .container_decl, .container_decl_trailing => tree.containerDecl(node),
-                .container_decl_two, .container_decl_two_trailing => tree.containerDeclTwo(&buf, node),
-                .container_decl_arg, .container_decl_arg_trailing => tree.containerDeclArg(node),
-                .tagged_union, .tagged_union_trailing => tree.taggedUnion(node),
-                .tagged_union_enum_tag, .tagged_union_enum_tag_trailing => tree.taggedUnionEnumTag(node),
-                .tagged_union_two, .tagged_union_two_trailing => tree.taggedUnionTwo(&buf, node),
-                else => unreachable,
-            };
+            const decl: Ast.full.ContainerDecl = ast.containerDecl(tree, node, &buf).?;
 
             try writeToken(builder, decl.layout_token, .keyword);
             try writeToken(builder, decl.ast.main_token, .keyword);
@@ -427,7 +407,7 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
         .identifier => {
             const name = tree.getNodeSource(node);
 
-            if(std.mem.eql(u8,name, "undefined")) {
+            if (std.mem.eql(u8, name, "undefined")) {
                 return try writeToken(builder, main_token, .keywordLiteral);
             } else if (analysis.isTypeIdent(name)) {
                 return try writeToken(builder, main_token, .type);
@@ -682,11 +662,7 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
         .async_call_one_comma,
         => {
             var params: [1]Ast.Node.Index = undefined;
-            const call: Ast.full.Call = switch (tag) {
-                .call, .call_comma, .async_call, .async_call_comma => tree.callFull(node),
-                .call_one, .call_one_comma, .async_call_one, .async_call_one_comma => tree.callOne(&params, node),
-                else => unreachable,
-            };
+            const call = ast.callFull(tree, node, &params).?;
 
             try writeToken(builder, call.async_token, .keyword);
             try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, call.ast.fn_expr });
@@ -757,17 +733,8 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
         .builtin_call_two,
         .builtin_call_two_comma,
         => {
-            const data = node_data[node];
-            const params = switch (tag) {
-                .builtin_call, .builtin_call_comma => tree.extra_data[data.lhs..data.rhs],
-                .builtin_call_two, .builtin_call_two_comma => if (data.lhs == 0)
-                    &[_]Ast.Node.Index{}
-                else if (data.rhs == 0)
-                    &[_]Ast.Node.Index{data.lhs}
-                else
-                    &[_]Ast.Node.Index{ data.lhs, data.rhs },
-                else => unreachable,
-            };
+            var buffer: [2]Ast.Node.Index = undefined;
+            const params = ast.builtinCallParams(tree, node, &buffer).?;
 
             try writeToken(builder, main_token, .builtin);
             for (params) |param|
