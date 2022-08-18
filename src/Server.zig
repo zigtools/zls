@@ -2048,9 +2048,9 @@ fn completionHandler(server: *Server, writer: anytype, id: types.RequestId, req:
 
             if (!subpath_present and pos_context == .import_string_literal) {
                 if (handle.associated_build_file) |bf| {
-                    try fsl_completions.ensureUnusedCapacity(server.arena.allocator(), bf.packages.items.len);
+                    try fsl_completions.ensureUnusedCapacity(server.arena.allocator(), bf.config.packages.len);
 
-                    for (bf.packages.items) |pkg| {
+                    for (bf.config.packages) |pkg| {
                         try fsl_completions.append(server.arena.allocator(), .{
                             .label = pkg.name,
                             .kind = .Module,

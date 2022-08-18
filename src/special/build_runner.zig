@@ -5,14 +5,39 @@ const io = std.io;
 const log = std.log;
 const process = std.process;
 const Builder = std.build.Builder;
-const Pkg = std.build.Pkg;
 const InstallArtifactStep = std.build.InstallArtifactStep;
 const LibExeObjStep = std.build.LibExeObjStep;
 const ArrayList = std.ArrayList;
 
+pub const BuildConfig = struct {
+    packages: []Pkg,
+    include_dirs: []IncludeDir,
+
+    pub const Pkg = struct {
+        name: []const u8,
+        uri: []const u8,
+    };
+
+    pub const IncludeDir = union(enum) {
+        raw_path: []const u8,
+        raw_path_system: []const u8,
+
+        pub fn getPath(self: IncludeDir) []const u8 {
+            return switch (self) {
+                .raw_path => |path| return path,
+                .raw_path_system => |path| return path,
+            };
+        }
+
+        pub fn eql(a: IncludeDir, b: IncludeDir) bool {
+            return @enumToInt(a) == @enumToInt(b) and
+                std.mem.eql(u8, a.getPath(), b.getPath());
+        }
+    };
+};
 
 ///! This is a modified build runner to extract information out of build.zig
-///! Modified from the std.special.build_runner
+///! Modified version of lib/build_runner.zig
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
@@ -55,45 +80,90 @@ pub fn main() !void {
     builder.resolveInstallPrefix(null, Builder.DirList{});
     try runBuild(builder);
 
-    const stdout_stream = io.getStdOut().writer();
+    var packages = ArrayList(BuildConfig.Pkg).init(allocator);
+    defer packages.deinit();
+
+    var include_dirs = ArrayList(BuildConfig.IncludeDir).init(allocator);
+    defer include_dirs.deinit();
 
     // TODO: We currently add packages from every LibExeObj step that the install step depends on.
     //       Should we error out or keep one step or something similar?
     // We also flatten them, we should probably keep the nested structure.
     for (builder.top_level_steps.items) |tls| {
         for (tls.step.dependencies.items) |step| {
-            try processStep(stdout_stream, step);
+            try processStep(&packages, &include_dirs, step);
         }
     }
+
+    try std.json.stringify(
+        BuildConfig{
+            .packages = packages.items,
+            .include_dirs = include_dirs.items,
+        },
+        .{ .whitespace = .{} },
+        io.getStdOut().writer(),
+    );
 }
 
-fn processStep(stdout_stream: anytype, step: *std.build.Step) anyerror!void {
+fn processStep(
+    packages: *ArrayList(BuildConfig.Pkg),
+    include_dirs: *ArrayList(BuildConfig.IncludeDir),
+    step: *std.build.Step,
+) anyerror!void {
     if (step.cast(InstallArtifactStep)) |install_exe| {
+        try processIncludeDirs(include_dirs, install_exe.artifact.include_dirs.items);
         for (install_exe.artifact.packages.items) |pkg| {
-            try processPackage(stdout_stream, pkg);
+            try processPackage(packages, pkg);
         }
     } else if (step.cast(LibExeObjStep)) |exe| {
+        try processIncludeDirs(include_dirs, exe.include_dirs.items);
         for (exe.packages.items) |pkg| {
-            try processPackage(stdout_stream, pkg);
+            try processPackage(packages, pkg);
         }
     } else {
         for (step.dependencies.items) |unknown_step| {
-            try processStep(stdout_stream, unknown_step);
+            try processStep(packages, include_dirs, unknown_step);
         }
     }
 }
 
-fn processPackage(out_stream: anytype, pkg: Pkg) anyerror!void {
-    const source = if (@hasField(Pkg, "source")) pkg.source else pkg.path;
+fn processPackage(
+    packages: *ArrayList(BuildConfig.Pkg),
+    pkg: std.build.Pkg,
+) anyerror!void {
+    for (packages.items) |package| {
+        if (std.mem.eql(u8, package.name, pkg.name)) return;
+    }
+
+    const source = if (@hasField(std.build.Pkg, "source")) pkg.source else pkg.path;
     switch (source) {
-        .path => |path| try out_stream.print("{s}\x00{s}\n", .{ pkg.name, path }),
-        .generated => |generated| if (generated.path != null) try out_stream.print("{s}\x00{s}\n", .{ pkg.name, generated.path.? }),
+        .path => |path| try packages.append(.{ .name = pkg.name, .uri = path }),
+        .generated => |generated| if (generated.path != null) try packages.append(.{ .name = pkg.name, .uri = generated.path.? }),
     }
 
     if (pkg.dependencies) |dependencies| {
         for (dependencies) |dep| {
-            try processPackage(out_stream, dep);
+            try processPackage(packages, dep);
         }
+    }
+}
+
+fn processIncludeDirs(
+    include_dirs: *ArrayList(BuildConfig.IncludeDir),
+    dirs: []std.build.LibExeObjStep.IncludeDir,
+) !void {
+    outer: for (dirs) |dir| {
+        const candidate: BuildConfig.IncludeDir = switch (dir) {
+            .raw_path => |path| .{ .raw_path = path },
+            .raw_path_system => |path| .{ .raw_path_system = path },
+            else => continue,
+        };
+
+        for (include_dirs.items) |include_dir| {
+            if (candidate.eql(include_dir)) continue :outer;
+        }
+
+        try include_dirs.append(candidate);
     }
 }
 

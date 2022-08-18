@@ -6,20 +6,16 @@ const offsets = @import("offsets.zig");
 const log = std.log.scoped(.doc_store);
 const Ast = std.zig.Ast;
 const BuildAssociatedConfig = @import("BuildAssociatedConfig.zig");
+const BuildConfig = @import("special/build_runner.zig").BuildConfig;
 const tracy = @import("tracy.zig");
 const Config = @import("Config.zig");
 
 const DocumentStore = @This();
 
 const BuildFile = struct {
-    const Pkg = struct {
-        name: []const u8,
-        uri: []const u8,
-    };
-
     refs: usize,
     uri: []const u8,
-    packages: std.ArrayListUnmanaged(Pkg),
+    config: BuildConfig,
 
     builtin_uri: ?[]const u8 = null,
 
@@ -110,7 +106,7 @@ fn loadBuildAssociatedConfiguration(allocator: std.mem.Allocator, build_file: *B
     }
 }
 
-const LoadPackagesContext = struct {
+const LoadBuildConfigContext = struct {
     build_file: *BuildFile,
     allocator: std.mem.Allocator,
     build_runner_path: []const u8,
@@ -121,7 +117,7 @@ const LoadPackagesContext = struct {
     global_cache_root: []const u8,
 };
 
-fn loadPackages(context: LoadPackagesContext) !void {
+fn loadBuildConfiguration(context: LoadBuildConfigContext) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -167,46 +163,24 @@ fn loadPackages(context: LoadPackagesContext) !void {
         defer allocator.free(joined);
 
         log.err(
-            "Failed to execute build runner to collect packages, command:\n{s}\nError: {s}",
+            "Failed to execute build runner to collect build configuration, command:\n{s}\nError: {s}",
             .{ joined, zig_run_result.stderr },
         );
     }
 
     switch (zig_run_result.term) {
         .Exited => |exit_code| {
-            if (exit_code == 0) {
-                log.debug("Finished zig run for build file {s}", .{build_file.uri});
+            if (exit_code != 0) return error.RunFailed;
 
-                for (build_file.packages.items) |old_pkg| {
-                    allocator.free(old_pkg.name);
-                    allocator.free(old_pkg.uri);
-                }
+            const parse_options = std.json.ParseOptions{ .allocator = allocator };
 
-                build_file.packages.shrinkAndFree(allocator, 0);
-                var line_it = std.mem.split(u8, zig_run_result.stdout, "\n");
-                while (line_it.next()) |line| {
-                    if (std.mem.indexOfScalar(u8, line, '\x00')) |zero_byte_idx| {
-                        const name = line[0..zero_byte_idx];
-                        const rel_path = line[zero_byte_idx + 1 ..];
+            std.json.parseFree(BuildConfig, build_file.config, parse_options);
 
-                        const pkg_abs_path = try std.fs.path.resolve(allocator, &[_][]const u8{ directory_path, rel_path });
-                        defer allocator.free(pkg_abs_path);
-
-                        const pkg_uri = try URI.fromPath(allocator, pkg_abs_path);
-                        errdefer allocator.free(pkg_uri);
-
-                        const duped_name = try allocator.dupe(u8, name);
-                        errdefer allocator.free(duped_name);
-
-                        (try build_file.packages.addOne(allocator)).* = .{
-                            .name = duped_name,
-                            .uri = pkg_uri,
-                        };
-                    }
-                }
-            } else {
-                return error.RunFailed;
-            }
+            build_file.config = std.json.parse(
+                BuildConfig,
+                &std.json.TokenStream.init(zig_run_result.stdout),
+                parse_options,
+            ) catch return error.RunFailed;
         },
         else => return error.RunFailed,
     }
@@ -256,7 +230,10 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: [:0]u8) anyerror!*Ha
         build_file.* = .{
             .refs = 1,
             .uri = try self.allocator.dupe(u8, uri),
-            .packages = .{},
+            .config = .{
+                .packages = &.{},
+                .include_dirs = &.{},
+            },
         };
 
         const build_file_path = try URI.parse(self.allocator, build_file.uri);
@@ -274,7 +251,7 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: [:0]u8) anyerror!*Ha
 
         // TODO: Do this in a separate thread?
         // It can take quite long.
-        loadPackages(.{
+        loadBuildConfiguration(.{
             .build_file = build_file,
             .allocator = self.allocator,
             .build_runner_path = self.config.build_runner_path.?,
@@ -409,11 +386,8 @@ fn decrementBuildFileRefs(self: *DocumentStore, build_file: *BuildFile) void {
     build_file.refs -= 1;
     if (build_file.refs == 0) {
         log.debug("Freeing build file {s}", .{build_file.uri});
-        for (build_file.packages.items) |pkg| {
-            self.allocator.free(pkg.name);
-            self.allocator.free(pkg.uri);
-        }
-        build_file.packages.deinit(self.allocator);
+
+        std.json.parseFree(BuildConfig, build_file.config, .{ .allocator = self.allocator });
 
         // Decrement count of the document since one count comes
         // from the build file existing.
@@ -544,7 +518,7 @@ fn refreshDocument(self: *DocumentStore, handle: *Handle) !void {
 
 pub fn applySave(self: *DocumentStore, handle: *Handle) !void {
     if (handle.is_build_file) |build_file| {
-        loadPackages(.{
+        loadBuildConfiguration(.{
             .build_file = build_file,
             .allocator = self.allocator,
             .build_runner_path = self.config.build_runner_path.?,
@@ -553,7 +527,7 @@ pub fn applySave(self: *DocumentStore, handle: *Handle) !void {
             .cache_root = self.zig_cache_root,
             .global_cache_root = self.zig_global_cache_root,
         }) catch |err| {
-            log.err("Failed to load packages of build file {s} (error: {})", .{ build_file.uri, err });
+            log.err("Failed to load build configuration for {s} (error: {})", .{ build_file.uri, err });
         };
     }
 }
@@ -643,7 +617,7 @@ pub fn uriFromImportStr(self: *DocumentStore, allocator: std.mem.Allocator, hand
         return null;
     } else if (!std.mem.endsWith(u8, import_str, ".zig")) {
         if (handle.associated_build_file) |build_file| {
-            for (build_file.packages.items) |pkg| {
+            for (build_file.config.packages) |pkg| {
                 if (std.mem.eql(u8, import_str, pkg.name)) {
                     return try allocator.dupe(u8, pkg.uri);
                 }
@@ -686,7 +660,7 @@ pub fn resolveImport(self: *DocumentStore, handle: *Handle, import_str: []const 
             }
         }
         if (handle.associated_build_file) |bf| {
-            for (bf.packages.items) |pkg| {
+            for (bf.config.packages) |pkg| {
                 if (std.mem.eql(u8, pkg.uri, final_uri)) {
                     break :find_uri pkg.uri;
                 }
@@ -775,11 +749,7 @@ pub fn deinit(self: *DocumentStore) void {
 
     self.handles.deinit(self.allocator);
     for (self.build_files.items) |build_file| {
-        for (build_file.packages.items) |pkg| {
-            self.allocator.free(pkg.name);
-            self.allocator.free(pkg.uri);
-        }
-        build_file.packages.deinit(self.allocator);
+        std.json.parseFree(BuildConfig, build_file.config, .{ .allocator = self.allocator });
         self.allocator.free(build_file.uri);
         build_file.destroy(self.allocator);
     }
