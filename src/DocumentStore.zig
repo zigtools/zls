@@ -110,7 +110,7 @@ const LoadBuildConfigContext = struct {
     build_file: *BuildFile,
     allocator: std.mem.Allocator,
     build_runner_path: []const u8,
-    build_runner_cache_path: []const u8,
+    global_cache_path: []const u8,
     zig_exe_path: []const u8,
     build_file_path: ?[]const u8 = null,
     cache_root: []const u8,
@@ -124,7 +124,7 @@ fn loadBuildConfiguration(context: LoadBuildConfigContext) !void {
     const allocator = context.allocator;
     const build_file = context.build_file;
     const build_runner_path = context.build_runner_path;
-    const build_runner_cache_path = context.build_runner_cache_path;
+    const global_cache_path = context.global_cache_path;
     const zig_exe_path = context.zig_exe_path;
 
     const build_file_path = context.build_file_path orelse try URI.parse(allocator, build_file.uri);
@@ -136,7 +136,7 @@ fn loadBuildConfiguration(context: LoadBuildConfigContext) !void {
         "run",
         build_runner_path,
         "--cache-dir",
-        build_runner_cache_path,
+        global_cache_path,
         "--pkg-begin",
         "@build@",
         build_file_path,
@@ -255,7 +255,7 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: [:0]u8) anyerror!*Ha
             .build_file = build_file,
             .allocator = self.allocator,
             .build_runner_path = self.config.build_runner_path.?,
-            .build_runner_cache_path = self.config.build_runner_cache_path.?,
+            .global_cache_path = self.config.global_cache_path.?,
             .zig_exe_path = self.config.zig_exe_path.?,
             .build_file_path = build_file_path,
             .cache_root = self.zig_cache_root,
@@ -522,7 +522,7 @@ pub fn applySave(self: *DocumentStore, handle: *Handle) !void {
             .build_file = build_file,
             .allocator = self.allocator,
             .build_runner_path = self.config.build_runner_path.?,
-            .build_runner_cache_path = self.config.build_runner_cache_path.?,
+            .global_cache_path = self.config.global_cache_path.?,
             .zig_exe_path = self.config.zig_exe_path.?,
             .cache_root = self.zig_cache_root,
             .global_cache_root = self.zig_global_cache_root,
