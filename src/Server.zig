@@ -239,11 +239,7 @@ fn publishDiagnostics(server: *Server, writer: anytype, handle: DocumentStore.Ha
         scopes: for (handle.document_scope.scopes) |scope| {
             const scope_data = switch (scope.data) {
                 .function => |f| b: {
-                    var buf: [1]std.zig.Ast.Node.Index = undefined;
-                    var proto = ast.fnProto(tree, f, &buf) orelse break :b f;
-                    if (proto.extern_export_inline_token) |tok| {
-                        if (std.mem.eql(u8, tree.tokenSlice(tok), "extern")) continue :scopes;
-                    }
+                    if (!ast.fnProtoHasBody(tree, f).?) continue :scopes;
                     break :b f;
                 },
                 .block => |b| b,
@@ -2450,7 +2446,6 @@ pub fn processJsonRpc(server: *Server, writer: anytype, json: []const u8) !void 
         return;
     }
 
-    std.debug.assert(tree.root.Object.get("method") != null);
     const method = tree.root.Object.get("method").?.String;
 
     const start_time = std.time.milliTimestamp();
@@ -2490,6 +2485,7 @@ pub fn processJsonRpc(server: *Server, writer: anytype, json: []const u8) !void 
     };
 
     // Hack to avoid `return`ing in the inline for, which causes bugs.
+    // TODO: Change once stage2 is shipped and more stable?
     var done: ?anyerror = null;
     inline for (method_map) |method_info| {
         if (done == null and std.mem.eql(u8, method, method_info[0])) {
