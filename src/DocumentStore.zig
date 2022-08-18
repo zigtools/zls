@@ -9,8 +9,14 @@ const BuildAssociatedConfig = @import("BuildAssociatedConfig.zig");
 const BuildConfig = @import("special/build_runner.zig").BuildConfig;
 const tracy = @import("tracy.zig");
 const Config = @import("Config.zig");
+const translate_c = @import("translate_c.zig");
 
 const DocumentStore = @This();
+
+pub const Hasher = std.crypto.auth.siphash.SipHash128(1, 3);
+
+/// Initial state, that can be copied.
+pub const hasher_init: Hasher = Hasher.init(&[_]u8{0} ** Hasher.key_length);
 
 const BuildFile = struct {
     refs: usize,
@@ -30,7 +36,9 @@ pub const Handle = struct {
     count: usize,
     /// Contains one entry for every import in the document
     import_uris: []const []const u8,
-    /// Items in this array list come from `import_uris`
+    /// Contains one entry for every cimport in the document
+    cimports: []CImportHandle,
+    /// Items in this array list come from `import_uris` and `cimports`
     imports_used: std.ArrayListUnmanaged([]const u8),
     tree: Ast,
     document_scope: analysis.DocumentScope,
@@ -206,6 +214,7 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: [:0]u8) anyerror!*Ha
     handle.* = Handle{
         .count = 1,
         .import_uris = &.{},
+        .cimports = &.{},
         .imports_used = .{},
         .document = .{
             .uri = uri,
@@ -359,6 +368,14 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: [:0]u8) anyerror!*Ha
         self.allocator.free(handle.import_uris);
     }
 
+    handle.cimports = try self.collectCIncludes(handle);
+    errdefer {
+        for (handle.cimports) |item| {
+            self.allocator.free(item.uri);
+        }
+        self.allocator.free(handle.cimports);
+    }
+
     try self.handles.putNoClobber(self.allocator, uri, handle);
     return handle;
 }
@@ -430,9 +447,14 @@ fn decrementCount(self: *DocumentStore, uri: []const u8) void {
             self.allocator.free(import_uri);
         }
 
+        for (handle.cimports) |item| {
+            self.allocator.free(item.uri);
+        }
+
         handle.document_scope.deinit(self.allocator);
         handle.imports_used.deinit(self.allocator);
         self.allocator.free(handle.import_uris);
+        self.allocator.free(handle.cimports);
         self.allocator.destroy(handle);
         const uri_key = entry.key_ptr.*;
         std.debug.assert(self.handles.remove(uri));
@@ -449,27 +471,146 @@ pub fn getHandle(self: *DocumentStore, uri: []const u8) ?*Handle {
 }
 
 fn collectImportUris(self: *DocumentStore, handle: *Handle) ![]const []const u8 {
-    var new_imports = std.ArrayList([]const u8).init(self.allocator);
+    const collected_imports = try analysis.collectImports(self.allocator, handle.tree);
+
+    var imports = std.ArrayList([]const u8).fromOwnedSlice(self.allocator, collected_imports);
     errdefer {
-        for (new_imports.items) |imp| {
+        for (imports.items) |imp| {
             self.allocator.free(imp);
         }
-        new_imports.deinit();
+        imports.deinit();
     }
-    try analysis.collectImports(&new_imports, handle.tree);
 
     // Convert to URIs
     var i: usize = 0;
-    while (i < new_imports.items.len) {
-        if (try self.uriFromImportStr(self.allocator, handle.*, new_imports.items[i])) |uri| {
+    while (i < imports.items.len) {
+        if (try self.uriFromImportStr(self.allocator, handle.*, imports.items[i])) |uri| {
             // The raw import strings are owned by the document and do not need to be freed here.
-            new_imports.items[i] = uri;
+            imports.items[i] = uri;
             i += 1;
         } else {
-            _ = new_imports.swapRemove(i);
+            _ = imports.swapRemove(i);
         }
     }
-    return new_imports.toOwnedSlice();
+    return imports.toOwnedSlice();
+}
+
+pub const CImportSource = struct {
+    /// the `@cInclude` node
+    node: Ast.Node.Index,
+    /// hash of c source file
+    hash: [Hasher.mac_length]u8,
+    /// c source file
+    source: []const u8,
+};
+
+/// Collects all `@cImport` nodes and converts them into c source code
+/// the translation process is defined in `translate_c.convertCInclude`
+/// Caller owns returned memory.
+fn collectCIncludeSources(self: *DocumentStore, handle: *Handle) ![]CImportSource {
+    var cimport_nodes = try analysis.collectCImportNodes(self.allocator, handle.tree);
+    defer self.allocator.free(cimport_nodes);
+
+    var sources = try std.ArrayListUnmanaged(CImportSource).initCapacity(self.allocator, cimport_nodes.len);
+    errdefer {
+        for (sources.items) |item| {
+            self.allocator.free(item.source);
+        }
+        sources.deinit(self.allocator);
+    }
+
+    for (cimport_nodes) |node| {
+        const c_source = translate_c.convertCInclude(self.allocator, handle.tree, node) catch |err| switch (err) {
+            error.Unsupported => continue,
+            error.OutOfMemory => return error.OutOfMemory,
+        };
+
+        var hasher = hasher_init;
+        hasher.update(c_source);
+        var hash: [Hasher.mac_length]u8 = undefined;
+        hasher.final(&hash);
+
+        sources.appendAssumeCapacity(.{
+            .node = node,
+            .hash = hash,
+            .source = c_source,
+        });
+    }
+
+    return sources.toOwnedSlice(self.allocator);
+}
+
+pub const CImportHandle = struct {
+    /// the `@cInclude` node
+    node: Ast.Node.Index,
+    /// hash of the c source file
+    hash: [Hasher.mac_length]u8,
+    /// uri to a zig source file generated with translate-c
+    uri: []const u8,
+};
+
+/// Collects all `@cImport` nodes and converts them into zig files using translate-c
+/// Caller owns returned memory.
+fn collectCIncludes(self: *DocumentStore, handle: *Handle) ![]CImportHandle {
+    var cimport_nodes = try analysis.collectCImportNodes(self.allocator, handle.tree);
+    defer self.allocator.free(cimport_nodes);
+
+    var uris = try std.ArrayListUnmanaged(CImportHandle).initCapacity(self.allocator, cimport_nodes.len);
+    errdefer {
+        for (uris.items) |item| {
+            self.allocator.free(item.uri);
+        }
+        uris.deinit(self.allocator);
+    }
+
+    for (cimport_nodes) |node| {
+        const c_source = translate_c.convertCInclude(self.allocator, handle.tree, node) catch |err| switch (err) {
+            error.Unsupported => continue,
+            error.OutOfMemory => return error.OutOfMemory,
+        };
+        defer self.allocator.free(c_source);
+
+        const uri = self.translate(handle, c_source) catch |err| {
+            std.log.warn("failed to translate cInclude: {}", .{err});
+            continue;
+        } orelse continue;
+        errdefer self.allocator.free(uri);
+
+        var hasher = hasher_init;
+        hasher.update(c_source);
+        var hash: [Hasher.mac_length]u8 = undefined;
+        hasher.final(&hash);
+
+        uris.appendAssumeCapacity(.{
+            .node = node,
+            .hash = hash,
+            .uri = uri,
+        });
+    }
+
+    return uris.toOwnedSlice(self.allocator);
+}
+
+fn translate(self: *DocumentStore, handle: *Handle, source: []const u8) !?[]const u8 {
+    const dirs: []BuildConfig.IncludeDir = if (handle.associated_build_file) |build_file| build_file.config.include_dirs else &.{};
+    const include_dirs = blk: {
+        var result = try self.allocator.alloc([]const u8, dirs.len);
+        errdefer self.allocator.free(result);
+
+        for (dirs) |dir, i| {
+            result[i] = dir.getPath();
+        }
+
+        break :blk result;
+    };
+    defer self.allocator.free(include_dirs);
+
+    return translate_c.translate(
+        self.allocator,
+        self.config,
+        include_dirs,
+        source,
+    );
 }
 
 fn refreshDocument(self: *DocumentStore, handle: *Handle) !void {
@@ -480,28 +621,37 @@ fn refreshDocument(self: *DocumentStore, handle: *Handle) !void {
     handle.document_scope.deinit(self.allocator);
     handle.document_scope = try analysis.makeDocumentScope(self.allocator, handle.tree);
 
-    const new_imports = try self.collectImportUris(handle);
-    errdefer {
-        for (new_imports) |imp| {
-            self.allocator.free(imp);
-        }
-        self.allocator.free(new_imports);
-    }
+    var old_imports = handle.import_uris;
+    var old_cimports = handle.cimports;
 
-    const old_imports = handle.import_uris;
-    handle.import_uris = new_imports;
+    handle.import_uris = try self.collectImportUris(handle);
+
+    handle.cimports = try self.refreshDocumentCIncludes(handle);
+
     defer {
         for (old_imports) |uri| {
             self.allocator.free(uri);
         }
         self.allocator.free(old_imports);
+
+        for (old_cimports) |old_cimport| {
+            self.allocator.free(old_cimport.uri);
+        }
+        self.allocator.free(old_cimports);
     }
 
     var i: usize = 0;
     while (i < handle.imports_used.items.len) {
         const old = handle.imports_used.items[i];
         still_exists: {
-            for (new_imports) |new| {
+            for (handle.import_uris) |new| {
+                if (std.mem.eql(u8, new, old)) {
+                    handle.imports_used.items[i] = new;
+                    break :still_exists;
+                }
+            }
+            for (handle.cimports) |cimport| {
+                const new = cimport.uri;
                 if (std.mem.eql(u8, new, old)) {
                     handle.imports_used.items[i] = new;
                     break :still_exists;
@@ -514,6 +664,92 @@ fn refreshDocument(self: *DocumentStore, handle: *Handle) !void {
         }
         i += 1;
     }
+}
+
+fn refreshDocumentCIncludes(self: *DocumentStore, handle: *Handle) ![]CImportHandle {
+    const new_sources: []CImportSource = try self.collectCIncludeSources(handle);
+    defer {
+        for (new_sources) |new_source| {
+            self.allocator.free(new_source.source);
+        }
+        self.allocator.free(new_sources);
+    }
+
+    var old_cimports = handle.cimports;
+    var new_cimports = try std.ArrayListUnmanaged(CImportHandle).initCapacity(self.allocator, new_sources.len);
+    errdefer {
+        for (new_cimports.items) |new_cimport| {
+            self.allocator.free(new_cimport.uri);
+        }
+        new_cimports.deinit(self.allocator);
+    }
+
+    for (new_sources) |new_source| {
+        const maybe_old_cimport: ?CImportHandle = blk: {
+            const old_cimport: CImportHandle = found: {
+                for (old_cimports) |old_cimport| {
+                    if (new_source.node == old_cimport.node) {
+                        break :found old_cimport;
+                    }
+                }
+                break :blk null;
+            };
+
+            // avoid re-translating if the source didn't change
+            if (std.mem.eql(u8, &new_source.hash, &old_cimport.hash)) {
+                break :blk CImportHandle{
+                    .node = old_cimport.node,
+                    .hash = old_cimport.hash,
+                    .uri = try self.allocator.dupe(u8, old_cimport.uri),
+                };
+            }
+
+            const new_uri = self.translate(handle, new_source.source) catch |err| {
+                std.log.warn("failed to translate cInclude: {}", .{err});
+                continue;
+            } orelse continue;
+            errdefer self.allocator.free(new_uri);
+
+            break :blk CImportHandle{
+                .node = old_cimport.node,
+                .hash = old_cimport.hash,
+                .uri = new_uri,
+            };
+        };
+
+        if (maybe_old_cimport) |cimport| {
+            new_cimports.appendAssumeCapacity(cimport);
+            continue;
+        }
+
+        const c_source = translate_c.convertCInclude(self.allocator, handle.tree, new_source.node) catch |err| switch (err) {
+            error.Unsupported => continue,
+            error.OutOfMemory => return error.OutOfMemory,
+        };
+        defer self.allocator.free(c_source);
+
+        var hasher = hasher_init;
+        var hash: [Hasher.mac_length]u8 = undefined;
+        hasher.update(c_source);
+        hasher.final(&hash);
+
+        const new_uri = self.translate(
+            handle,
+            c_source,
+        ) catch |err| {
+            std.log.warn("failed to translate cInclude: {}", .{err});
+            continue;
+        } orelse continue;
+        errdefer self.allocator.free(new_uri);
+
+        new_cimports.appendAssumeCapacity(.{
+            .node = new_source.node,
+            .hash = hash,
+            .uri = new_uri,
+        });
+    }
+
+    return new_cimports.toOwnedSlice(self.allocator);
 }
 
 pub fn applySave(self: *DocumentStore, handle: *Handle) !void {
@@ -680,39 +916,66 @@ pub fn resolveImport(self: *DocumentStore, handle: *Handle, import_str: []const 
     }
 
     // New document, read the file then call into openDocument.
-    const file_path = try URI.parse(allocator, final_uri);
-    defer allocator.free(file_path);
+    var document_handle = try self.newDocumentFromUri(final_uri);
 
-    var file = std.fs.cwd().openFile(file_path, .{}) catch {
-        log.debug("Cannot open import file {s}", .{file_path});
+    // Add to import table of current handle.
+    try handle.imports_used.append(allocator, handle_uri);
+
+    return document_handle;
+}
+
+pub fn resolveCImport(self: *DocumentStore, handle: *Handle, node: Ast.Node.Index) !?*Handle {
+    const uri = blk: {
+        for (handle.cimports) |item| {
+            if (item.node == node) break :blk item.uri;
+        }
         return null;
     };
 
-    defer file.close();
-    {
-        const file_contents = file.readToEndAllocOptions(
-            allocator,
-            std.math.maxInt(usize),
-            null,
-            @alignOf(u8),
-            0,
-        ) catch |err| switch (err) {
-            error.OutOfMemory => return error.OutOfMemory,
-            else => {
-                log.debug("Could not read from file {s}", .{file_path});
-                return null;
-            },
-        };
-        errdefer allocator.free(file_contents);
-
-        // Add to import table of current handle.
-        try handle.imports_used.append(self.allocator, handle_uri);
-        // Swap handles.
-        // This takes ownership of the passed uri and text.
-        const duped_final_uri = try allocator.dupe(u8, final_uri);
-        errdefer allocator.free(duped_final_uri);
-        return try self.newDocument(duped_final_uri, file_contents);
+    // Check if the import is already opened by others.
+    if (self.getHandle(uri)) |new_handle| {
+        // If it is, append it to our imports, increment the count, set our new handle
+        // and return the parsed tree root node.
+        try handle.imports_used.append(self.allocator, uri);
+        new_handle.count += 1;
+        return new_handle;
     }
+
+    // New document, read the file then call into openDocument.
+    var document_handle = try self.newDocumentFromUri(uri);
+
+    // Add to cimport table of current handle.
+    try handle.imports_used.append(self.allocator, uri);
+
+    return document_handle;
+}
+
+fn newDocumentFromUri(self: *DocumentStore, uri: []const u8) !?*Handle {
+    const file_path = try URI.parse(self.allocator, uri);
+    defer self.allocator.free(file_path);
+
+    var file = std.fs.openFileAbsolute(file_path, .{}) catch |err| {
+        log.debug("Cannot open file '{s}': {}", .{ file_path, err });
+        return null;
+    };
+    defer file.close();
+
+    const file_contents = file.readToEndAllocOptions(
+        self.allocator,
+        std.math.maxInt(usize),
+        null,
+        @alignOf(u8),
+        0,
+    ) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => {
+            log.debug("Could not read from file {s}", .{file_path});
+            return null;
+        },
+    };
+    errdefer self.allocator.free(file_contents);
+
+    return try self.newDocument(try self.allocator.dupe(u8, uri), file_contents);
 }
 
 fn stdUriFromLibPath(allocator: std.mem.Allocator, zig_lib_path: ?[]const u8) !?[]const u8 {
@@ -742,6 +1005,10 @@ pub fn deinit(self: *DocumentStore) void {
             self.allocator.free(uri);
         }
         self.allocator.free(entry.value_ptr.*.import_uris);
+        for (entry.value_ptr.*.cimports) |cimport| {
+            self.allocator.free(cimport.uri);
+        }
+        self.allocator.free(entry.value_ptr.*.cimports);
         entry.value_ptr.*.imports_used.deinit(self.allocator);
         self.allocator.free(entry.key_ptr.*);
         self.allocator.destroy(entry.value_ptr.*);
@@ -778,6 +1045,7 @@ fn tagStoreCompletionItems(self: DocumentStore, arena: *std.heap.ArenaAllocator,
             result_set.putAssumeCapacity(completion, {});
         }
     }
+
     return result_set.entries.items(.key);
 }
 
