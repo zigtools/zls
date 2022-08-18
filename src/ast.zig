@@ -948,6 +948,18 @@ pub fn isContainer(tree: Ast, node: Ast.Node.Index) bool {
     };
 }
 
+pub fn containerDecl(tree: Ast, node_idx: Ast.Node.Index, buffer: *[2]Ast.Node.Index) ?full.ContainerDecl {
+    return switch (tree.nodes.items(.tag)[node_idx]) {
+        .container_decl, .container_decl_trailing => tree.containerDecl(node_idx),
+        .container_decl_arg, .container_decl_arg_trailing => tree.containerDeclArg(node_idx),
+        .container_decl_two, .container_decl_two_trailing => tree.containerDeclTwo(buffer, node_idx),
+        .tagged_union, .tagged_union_trailing => tree.taggedUnion(node_idx),
+        .tagged_union_enum_tag, .tagged_union_enum_tag_trailing => tree.taggedUnionEnumTag(node_idx),
+        .tagged_union_two, .tagged_union_two_trailing => tree.taggedUnionTwo(buffer, node_idx),
+        else => null,
+    };
+}
+
 /// Returns the member indices of a given declaration container.
 /// Asserts given `tag` is a container node
 pub fn declMembers(tree: Ast, node_idx: Ast.Node.Index, buffer: *[2]Ast.Node.Index) []const Ast.Node.Index {
@@ -977,6 +989,17 @@ pub fn varDecl(tree: Ast, node_idx: Ast.Node.Index) ?Ast.full.VarDecl {
     };
 }
 
+pub fn isPtrType(tree: Ast, node: Ast.Node.Index) bool {
+    return switch (tree.nodes.items(.tag)[node]) {
+        .ptr_type,
+        .ptr_type_aligned,
+        .ptr_type_bit_range,
+        .ptr_type_sentinel,
+        => true,
+        else => false,
+    };
+}
+
 pub fn isBuiltinCall(tree: Ast, node: Ast.Node.Index) bool {
     return switch (tree.nodes.items(.tag)[node]) {
         .builtin_call,
@@ -998,6 +1021,17 @@ pub fn isCall(tree: Ast, node: Ast.Node.Index) bool {
         .async_call_comma,
         .async_call_one,
         .async_call_one_comma,
+        => true,
+        else => false,
+    };
+}
+
+pub fn isBlock(tree: Ast, node: Ast.Node.Index) bool {
+    return switch (tree.nodes.items(.tag)[node]) {
+        .block_two,
+        .block_two_semicolon,
+        .block,
+        .block_semicolon,
         => true,
         else => false,
     };
@@ -1027,5 +1061,49 @@ pub fn callFull(tree: Ast, node: Ast.Node.Index, buf: *[1]Ast.Node.Index) ?Ast.f
         .async_call_one_comma,
         => tree.callOne(buf, node),
         else => null,
+    };
+}
+
+/// returns a list of parameters
+pub fn builtinCallParams(tree: Ast, node: Ast.Node.Index, buf: *[2]Ast.Node.Index) ?[]const Node.Index {
+    const node_data = tree.nodes.items(.data);
+    return switch (tree.nodes.items(.tag)[node]) {
+        .builtin_call_two, .builtin_call_two_comma => {
+            buf[0] = node_data[node].lhs;
+            buf[1] = node_data[node].rhs;
+            if (node_data[node].lhs == 0) {
+                return buf[0..0];
+            } else if (node_data[node].rhs == 0) {
+                return buf[0..1];
+            } else {
+                return buf[0..2];
+            }
+        },
+        .builtin_call,
+        .builtin_call_comma,
+        => tree.extra_data[node_data[node].lhs..node_data[node].rhs],
+        else => return null,
+    };
+}
+
+/// returns a list of statements
+pub fn blockStatements(tree: Ast, node: Ast.Node.Index, buf: *[2]Ast.Node.Index) ?[]const Node.Index {
+    const node_data = tree.nodes.items(.data);
+    return switch (tree.nodes.items(.tag)[node]) {
+        .block_two, .block_two_semicolon => {
+            buf[0] = node_data[node].lhs;
+            buf[1] = node_data[node].rhs;
+            if (node_data[node].lhs == 0) {
+                return buf[0..0];
+            } else if (node_data[node].rhs == 0) {
+                return buf[0..1];
+            } else {
+                return buf[0..2];
+            }
+        },
+        .block,
+        .block_semicolon,
+        => tree.extra_data[node_data[node].lhs..node_data[node].rhs],
+        else => return null,
     };
 }

@@ -299,17 +299,8 @@ fn publishDiagnostics(server: *Server, writer: anytype, handle: DocumentStore.Ha
 
                 if (!std.mem.eql(u8, call_name, "@import")) continue;
 
-                const node_data = tree.nodes.items(.data)[node];
-                const params = switch (tree.nodes.items(.tag)[node]) {
-                    .builtin_call, .builtin_call_comma => tree.extra_data[node_data.lhs..node_data.rhs],
-                    .builtin_call_two, .builtin_call_two_comma => if (node_data.lhs == 0)
-                        &[_]Ast.Node.Index{}
-                    else if (node_data.rhs == 0)
-                        &[_]Ast.Node.Index{node_data.lhs}
-                    else
-                        &[_]Ast.Node.Index{ node_data.lhs, node_data.rhs },
-                    else => unreachable,
-                };
+                var buffer: [2]Ast.Node.Index = undefined;
+                const params = ast.builtinCallParams(tree, node, &buffer).?;
 
                 if (params.len != 1) continue;
 

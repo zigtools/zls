@@ -203,7 +203,7 @@ pub fn hasSelfParam(arena: *std.heap.ArenaAllocator, document_store: *DocumentSt
             return true;
     }
 
-    if (isPtrType(tree, param.type_expr)) {
+    if (ast.isPtrType(tree, param.type_expr)) {
         if (try resolveTypeOfNode(document_store, arena, .{
             .node = token_data[param.type_expr].rhs,
             .handle = handle,
@@ -311,13 +311,6 @@ fn getDeclName(tree: Ast, node: Ast.Node.Index) ?[]const u8 {
     };
 }
 
-fn isContainerDecl(decl_handle: DeclWithHandle) bool {
-    return switch (decl_handle.decl.*) {
-        .ast_node => |inner_node| ast.isContainer(decl_handle.handle.tree.nodes.items(.tag)[inner_node]),
-        else => false,
-    };
-}
-
 fn resolveVarDeclAliasInternal(store: *DocumentStore, arena: *std.heap.ArenaAllocator, node_handle: NodeWithHandle, root: bool) error{OutOfMemory}!?DeclWithHandle {
     _ = root;
     const handle = node_handle.handle;
@@ -394,39 +387,14 @@ pub fn resolveVarDeclAlias(store: *DocumentStore, arena: *std.heap.ArenaAllocato
     return null;
 }
 
-fn isBlock(tree: Ast, node: Ast.Node.Index) bool {
-    return switch (tree.nodes.items(.tag)[node]) {
-        .block,
-        .block_semicolon,
-        .block_two,
-        .block_two_semicolon,
-        => true,
-        else => false,
-    };
-}
-
 fn findReturnStatementInternal(tree: Ast, fn_decl: Ast.full.FnProto, body: Ast.Node.Index, already_found: *bool) ?Ast.Node.Index {
     var result: ?Ast.Node.Index = null;
 
     const node_tags = tree.nodes.items(.tag);
     const datas = tree.nodes.items(.data);
 
-    if (!isBlock(tree, body)) return null;
-
-    const statements: []const Ast.Node.Index = switch (node_tags[body]) {
-        .block, .block_semicolon => tree.extra_data[datas[body].lhs..datas[body].rhs],
-        .block_two, .block_two_semicolon => blk: {
-            const statements = &[_]Ast.Node.Index{ datas[body].lhs, datas[body].rhs };
-            const len: usize = if (datas[body].lhs == 0)
-                @as(usize, 0)
-            else if (datas[body].rhs == 0)
-                @as(usize, 1)
-            else
-                @as(usize, 2);
-            break :blk statements[0..len];
-        },
-        else => unreachable,
-    };
+    var buffer: [2]Ast.Node.Index = undefined;
+    const statements = ast.blockStatements(tree, body, &buffer) orelse return null;
 
     for (statements) |child_idx| {
         if (node_tags[child_idx] == .@"return") {
@@ -532,17 +500,6 @@ fn resolveUnwrapErrorType(store: *DocumentStore, arena: *std.heap.ArenaAllocator
     return null;
 }
 
-pub fn isPtrType(tree: Ast, node: Ast.Node.Index) bool {
-    return switch (tree.nodes.items(.tag)[node]) {
-        .ptr_type,
-        .ptr_type_aligned,
-        .ptr_type_bit_range,
-        .ptr_type_sentinel,
-        => true,
-        else => false,
-    };
-}
-
 /// Resolves the child type of a deref type
 fn resolveDerefType(store: *DocumentStore, arena: *std.heap.ArenaAllocator, deref: TypeWithHandle, bound_type_params: *BoundTypeParams) !?TypeWithHandle {
     const deref_node = switch (deref.type.data) {
@@ -560,7 +517,7 @@ fn resolveDerefType(store: *DocumentStore, arena: *std.heap.ArenaAllocator, dere
     const main_token = tree.nodes.items(.main_token)[deref_node];
     const token_tag = tree.tokens.items(.tag)[main_token];
 
-    if (isPtrType(tree, deref_node)) {
+    if (ast.isPtrType(tree, deref_node)) {
         const ptr_type = ast.ptrType(tree, deref_node).?;
         switch (token_tag) {
             .asterisk => {
@@ -900,17 +857,8 @@ pub fn resolveTypeOfNodeInternal(store: *DocumentStore, arena: *std.heap.ArenaAl
         .builtin_call_two,
         .builtin_call_two_comma,
         => {
-            const data = datas[node];
-            const params = switch (node_tags[node]) {
-                .builtin_call, .builtin_call_comma => tree.extra_data[data.lhs..data.rhs],
-                .builtin_call_two, .builtin_call_two_comma => if (data.lhs == 0)
-                    &[_]Ast.Node.Index{}
-                else if (data.rhs == 0)
-                    &[_]Ast.Node.Index{data.lhs}
-                else
-                    &[_]Ast.Node.Index{ data.lhs, data.rhs },
-                else => unreachable,
-            };
+            var buffer: [2]Ast.Node.Index = undefined;
+            const params = ast.builtinCallParams(tree, node, &buffer).?;
 
             const call_name = tree.tokenSlice(main_tokens[node]);
             if (std.mem.eql(u8, call_name, "@This")) {
@@ -1399,17 +1347,9 @@ pub fn getImportStr(tree: Ast, node: Ast.Node.Index, source_index: usize) ?[]con
         const call_name = tree.tokenSlice(builtin_token);
 
         if (!std.mem.eql(u8, call_name, "@import")) return null;
-        const data = tree.nodes.items(.data)[node];
-        const params = switch (node_tags[node]) {
-            .builtin_call, .builtin_call_comma => tree.extra_data[data.lhs..data.rhs],
-            .builtin_call_two, .builtin_call_two_comma => if (data.lhs == 0)
-                &[_]Ast.Node.Index{}
-            else if (data.rhs == 0)
-                &[_]Ast.Node.Index{data.lhs}
-            else
-                &[_]Ast.Node.Index{ data.lhs, data.rhs },
-            else => unreachable,
-        };
+
+        var buffer: [2]Ast.Node.Index = undefined;
+        const params = ast.builtinCallParams(tree, node, &buffer).?;
 
         if (params.len != 1) return null;
 
@@ -2522,21 +2462,8 @@ fn makeInnerScope(allocator: std.mem.Allocator, context: ScopeContext, node_idx:
         }
     }
 
-    const container_decl = switch (node_tag) {
-        .container_decl, .container_decl_trailing => tree.containerDecl(node_idx),
-        .container_decl_arg, .container_decl_arg_trailing => tree.containerDeclArg(node_idx),
-        .container_decl_two, .container_decl_two_trailing => blk: {
-            var buffer: [2]Ast.Node.Index = undefined;
-            break :blk tree.containerDeclTwo(&buffer, node_idx);
-        },
-        .tagged_union, .tagged_union_trailing => tree.taggedUnion(node_idx),
-        .tagged_union_enum_tag, .tagged_union_enum_tag_trailing => tree.taggedUnionEnumTag(node_idx),
-        .tagged_union_two, .tagged_union_two_trailing => blk: {
-            var buffer: [2]Ast.Node.Index = undefined;
-            break :blk tree.taggedUnionTwo(&buffer, node_idx);
-        },
-        else => null,
-    };
+    var buffer: [2]Ast.Node.Index = undefined;
+    const container_decl = ast.containerDecl(tree, node_idx, &buffer);
 
     // Only tagged unions and enums should pass this
     const can_have_enum_completions = if (container_decl) |container| blk: {
@@ -2717,20 +2644,8 @@ fn makeScopeInternal(allocator: std.mem.Allocator, context: ScopeContext, node_i
                 uses.deinit();
             }
 
-            const statements: []const Ast.Node.Index = switch (node_tag) {
-                .block, .block_semicolon => tree.extra_data[data[node_idx].lhs..data[node_idx].rhs],
-                .block_two, .block_two_semicolon => blk: {
-                    const statements = &[_]Ast.Node.Index{ data[node_idx].lhs, data[node_idx].rhs };
-                    const len: usize = if (data[node_idx].lhs == 0)
-                        @as(usize, 0)
-                    else if (data[node_idx].rhs == 0)
-                        @as(usize, 1)
-                    else
-                        @as(usize, 2);
-                    break :blk statements[0..len];
-                },
-                else => unreachable,
-            };
+            var buffer: [2]Ast.Node.Index = undefined;
+            const statements = ast.blockStatements(tree, node_idx, &buffer).?;
 
             for (statements) |idx| {
                 if (tags[idx] == .@"usingnamespace") {
@@ -3058,17 +2973,8 @@ fn makeScopeInternal(allocator: std.mem.Allocator, context: ScopeContext, node_i
         .builtin_call_two,
         .builtin_call_two_comma,
         => {
-            const b_data = data[node_idx];
-            const params = switch (node_tag) {
-                .builtin_call, .builtin_call_comma => tree.extra_data[b_data.lhs..b_data.rhs],
-                .builtin_call_two, .builtin_call_two_comma => if (b_data.lhs == 0)
-                    &[_]Ast.Node.Index{}
-                else if (b_data.rhs == 0)
-                    &[_]Ast.Node.Index{b_data.lhs}
-                else
-                    &[_]Ast.Node.Index{ b_data.lhs, b_data.rhs },
-                else => unreachable,
-            };
+            var buffer: [2]Ast.Node.Index = undefined;
+            const params = ast.builtinCallParams(tree, node_idx, &buffer).?;
 
             for (params) |param| {
                 try makeScopeInternal(allocator, context, param);
