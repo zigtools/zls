@@ -605,12 +605,15 @@ fn translate(self: *DocumentStore, handle: *Handle, source: []const u8) !?[]cons
     };
     defer self.allocator.free(include_dirs);
 
-    return translate_c.translate(
+    const file_path = (try translate_c.translate(
         self.allocator,
         self.config,
         include_dirs,
         source,
-    );
+    )) orelse return null;
+    defer self.allocator.free(file_path);
+
+    return try URI.fromPath(self.allocator, file_path);
 }
 
 fn refreshDocument(self: *DocumentStore, handle: *Handle) !void {

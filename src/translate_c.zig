@@ -161,10 +161,7 @@ pub fn translate(allocator: std.mem.Allocator, config: Config, include_dirs: []c
 
     return switch (result.term) {
         .Exited => |code| if (code == 0) {
-            return try std.mem.join(allocator, "", &.{
-                "file://",
-                std.mem.sliceTo(result.stdout, '\n'),
-            });
+            return try allocator.dupe(u8, std.mem.sliceTo(result.stdout, '\n'));
         } else {
             // TODO convert failure to `textDocument/publishDiagnostics`
             std.log.err("zig translate-c process failed, code: {}, stderr: '{s}'", .{ code, result.stderr });
