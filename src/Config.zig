@@ -117,6 +117,8 @@ pub fn configChanged(config: *Config, allocator: std.mem.Allocator, builtin_crea
             }
             logger.debug("zig path `{s}` is not absolute, will look in path", .{exe_path});
             allocator.free(exe_path);
+            // Set to null in case the following allocation fails, don't leave a dangling pointer
+            config.zig_exe_path = null;
         }
         config.zig_exe_path = try setup.findZig(allocator);
     }
@@ -141,24 +143,21 @@ pub fn configChanged(config: *Config, allocator: std.mem.Allocator, builtin_crea
                     if (exit_code == 0) {
                         const Env = struct {
                             zig_exe: []const u8,
-                            lib_dir: ?[]const u8,
+                            lib_dir: []const u8,
                             std_dir: []const u8,
                             global_cache_dir: []const u8,
                             version: []const u8,
                         };
 
-                        var json_env = std.json.parse(
-                            Env,
-                            &std.json.TokenStream.init(zig_env_result.stdout),
-                            .{ .allocator = allocator },
-                        ) catch {
+                        var json_tokenizer = std.json.TokenStream.init(zig_env_result.stdout);
+                        var json_env = std.json.parse(Env, &json_tokenizer, .{ .allocator = allocator }) catch {
                             logger.err("Failed to parse zig env JSON result", .{});
                             break :find_lib_path;
                         };
                         defer std.json.parseFree(Env, json_env, .{ .allocator = allocator });
                         // We know this is allocated with `allocator`, we just steal it!
-                        config.zig_lib_path = json_env.lib_dir.?;
-                        json_env.lib_dir = null;
+                        config.zig_lib_path = json_env.lib_dir;
+                        json_env.lib_dir = "";
                         logger.info("Using zig lib path '{?s}'", .{config.zig_lib_path});
                     }
                 },
@@ -200,17 +199,13 @@ pub fn configChanged(config: *Config, allocator: std.mem.Allocator, builtin_crea
         config.builtin_path = try std.fs.path.join(allocator, &.{ builtin_creation_dir.?, "builtin.zig" });
     }
 
-    config.build_runner_path = if (config.build_runner_path) |p|
-        try allocator.dupe(u8, p)
-    else blk: {
+    config.build_runner_path = config.build_runner_path orelse blk: {
         var exe_dir_bytes: [std.fs.MAX_PATH_BYTES]u8 = undefined;
         const exe_dir_path = try std.fs.selfExeDirPath(&exe_dir_bytes);
         break :blk try std.fs.path.resolve(allocator, &[_][]const u8{ exe_dir_path, "build_runner.zig" });
     };
 
-    config.build_runner_cache_path = if (config.build_runner_cache_path) |p|
-        try allocator.dupe(u8, p)
-    else blk: {
+    config.build_runner_cache_path = config.build_runner_cache_path orelse blk: {
         const cache_dir_path = (try known_folders.getPath(allocator, .cache)) orelse {
             logger.warn("Known-folders could not fetch the cache path", .{});
             return;
@@ -218,4 +213,8 @@ pub fn configChanged(config: *Config, allocator: std.mem.Allocator, builtin_crea
         defer allocator.free(cache_dir_path);
         break :blk try std.fs.path.resolve(allocator, &[_][]const u8{ cache_dir_path, "zls" });
     };
+}
+
+pub fn deinit(config: Config, allocator: std.mem.Allocator) void {
+    std.json.parseFree(Config, config, .{ .allocator = allocator });
 }

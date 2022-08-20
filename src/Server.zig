@@ -2584,7 +2584,6 @@ pub fn init(
     analysis.init(allocator);
 
     var cfg = config;
-
     try cfg.configChanged(allocator, config_path);
 
     return Server{
@@ -2599,8 +2598,7 @@ pub fn deinit(server: *Server) void {
     server.document_store.deinit();
     analysis.deinit();
 
-    const config_parse_options = std.json.ParseOptions{ .allocator = server.allocator };
-    defer std.json.parseFree(Config, server.config, config_parse_options);
+    server.config.deinit(server.allocator);
 
     if (builtin_completions) |compls| {
         server.allocator.free(compls);

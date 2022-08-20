@@ -96,8 +96,22 @@ fn getConfig(
 const ParseArgsResult = enum { proceed, exit };
 fn parseArgs(
     allocator: std.mem.Allocator,
-    config: *ConfigWithPath,
+    out: struct {
+        /// must start off pointing at a sring of length 0.
+        /// must be freed by the caller.
+        /// ```
+        /// var config_path: []const u8 = "";
+        /// defer allocator.free(config_path);
+        /// switch (try parseArgs(allocator, .{ .config_path = &config_path })) {
+        ///     .exit => return,
+        ///     .proceed => {},
+        /// }
+        /// ```
+        ///
+        config_path: *[]const u8,
+    },
 ) !ParseArgsResult {
+    std.debug.assert(out.config_path.len == 0);
     const ArgId = enum {
         help,
         version,
@@ -142,9 +156,8 @@ fn parseArgs(
 
     // Makes behavior of enabling debug more logging consistent regardless of argument order.
     var specified = std.enums.EnumArray(ArgId, bool).initFill(false);
-    var config_path: ?[]const u8 = null;
-    errdefer if (config_path) |path| allocator.free(path);
 
+    // Use stderr during CLI interaction, so that messages aren't filtered by log level
     const stderr = std.io.getStdErr().writer();
 
     while (args_it.next()) |tok| {
@@ -178,7 +191,8 @@ fn parseArgs(
                     try stderr.print("Expected configuration file path after --config-path argument.\n", .{});
                     return .exit;
                 };
-                config.config_path = try allocator.dupe(u8, path);
+                std.debug.assert(out.config_path.len == 0);
+                out.config_path.* = try allocator.dupe(u8, path);
             },
         }
     }
@@ -200,7 +214,7 @@ fn parseArgs(
         logger.info("Enabled debug logging.\n", .{});
     }
     if (specified.get(.@"config-path")) {
-        std.debug.assert(config.config_path != null);
+        std.debug.assert(out.config_path.len != 0);
     }
 
     return .proceed;
@@ -218,28 +232,30 @@ pub fn main() !void {
 
     const allocator: std.mem.Allocator = if (tracy.enable_allocation) tracy_state.allocator() else gpa_state.allocator();
 
-    var config = ConfigWithPath{
-        .config = undefined,
-        .config_path = null,
+    var server: Server = blk: {
+        var config_path: []const u8 = "";
+        defer allocator.free(config_path);
+
+        switch (try parseArgs(allocator, .{ .config_path = &config_path })) {
+            .proceed => {},
+            .exit => return,
+        }
+
+        const config = try getConfig(allocator, config_path, false);
+        errdefer config.config.deinit(allocator);
+        defer allocator.free(config.config_path orelse "");
+
+        if (config.config_path == null) {
+            logger.info("No config file zls.json found.", .{});
+        }
+
+        break :blk try Server.init(
+            allocator,
+            config.config,
+            config.config_path,
+            actual_log_level,
+        );
     };
-    defer if (config.config_path) |path| allocator.free(path);
-
-    switch (try parseArgs(allocator, &config)) {
-        .proceed => {},
-        .exit => return,
-    }
-
-    config = try getConfig(allocator, config.config_path, true);
-    if (config.config_path == null) {
-        logger.info("No config file zls.json found.", .{});
-    }
-
-    var server = try Server.init(
-        allocator,
-        config.config,
-        config.config_path,
-        actual_log_level,
-    );
     defer server.deinit();
 
     try loop(&server);
