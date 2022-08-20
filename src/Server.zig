@@ -1886,7 +1886,7 @@ fn requestConfiguration(server: *Server, writer: anytype) !void {
     try send(writer, server.arena.allocator(), types.Request{
         .id = .{ .String = "i_haz_configuration" },
         .method = "workspace/configuration",
-        .params = .{
+        .params = types.ResponseParams{
             .ConfigurationParams = .{
                 .items = &configuration_items,
             },

@@ -80,8 +80,11 @@ pub fn loadFromFile(allocator: std.mem.Allocator, file_path: []const u8) ?Config
     const file_buf = file.readToEndAlloc(allocator, 0x1000000) catch return null;
     defer allocator.free(file_buf);
     @setEvalBranchQuota(3000);
+
+    var token_stream = std.json.TokenStream.init(file_buf);
+
     // TODO: Better errors? Doesn't seem like std.json can provide us positions or context.
-    var config = std.json.parse(Config, &std.json.TokenStream.init(file_buf), std.json.ParseOptions{ .allocator = allocator }) catch |err| {
+    var config = std.json.parse(Config, &token_stream, std.json.ParseOptions{ .allocator = allocator }) catch |err| {
         logger.warn("Error while parsing configuration file: {}", .{err});
         return null;
     };
@@ -147,9 +150,11 @@ pub fn configChanged(config: *Config, allocator: std.mem.Allocator, builtin_crea
                             version: []const u8,
                         };
 
+                        var token_stream = std.json.TokenStream.init(zig_env_result.stdout);
+
                         var json_env = std.json.parse(
                             Env,
-                            &std.json.TokenStream.init(zig_env_result.stdout),
+                            &token_stream,
                             .{ .allocator = allocator },
                         ) catch {
                             logger.err("Failed to parse zig env JSON result", .{});

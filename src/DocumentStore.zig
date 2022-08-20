@@ -99,7 +99,9 @@ fn loadBuildAssociatedConfiguration(allocator: std.mem.Allocator, build_file: *B
         const file_buf = try config_file.readToEndAlloc(allocator, 0x1000000);
         defer allocator.free(file_buf);
 
-        break :blk try std.json.parse(BuildAssociatedConfig, &std.json.TokenStream.init(file_buf), options);
+        var token_stream = std.json.TokenStream.init(file_buf);
+
+        break :blk try std.json.parse(BuildAssociatedConfig, &token_stream, options);
     };
     defer std.json.parseFree(BuildAssociatedConfig, build_associated_config, options);
 
