@@ -337,7 +337,8 @@ fn resolveVarDeclAliasInternal(store: *DocumentStore, arena: *std.heap.ArenaAllo
         const lhs = datas[node_handle.node].lhs;
 
         const container_node = if (ast.isBuiltinCall(tree, lhs)) block: {
-            if (!std.mem.eql(u8, tree.tokenSlice(main_tokens[lhs]), "@import"))
+            const name = tree.tokenSlice(main_tokens[lhs]);
+            if (!std.mem.eql(u8, name, "@import") and !std.mem.eql(u8, name, "@cImport"))
                 return null;
 
             const inner_node = (try resolveTypeOfNode(store, arena, .{ .node = lhs, .handle = handle })) orelse return null;
@@ -904,20 +905,28 @@ pub fn resolveTypeOfNodeInternal(store: *DocumentStore, arena: *std.heap.ArenaAl
                 return resolved_type;
             }
 
-            if (!std.mem.eql(u8, call_name, "@import")) return null;
-            if (params.len == 0) return null;
+            if (std.mem.eql(u8, call_name, "@import")) {
+                if (params.len == 0) return null;
+                const import_param = params[0];
+                if (node_tags[import_param] != .string_literal) return null;
 
-            const import_param = params[0];
-            if (node_tags[import_param] != .string_literal) return null;
+                const import_str = tree.tokenSlice(main_tokens[import_param]);
+                const new_handle = (store.resolveImport(handle, import_str[1 .. import_str.len - 1]) catch |err| {
+                    log.debug("Error {} while processing import {s}", .{ err, import_str });
+                    return null;
+                }) orelse return null;
 
-            const import_str = tree.tokenSlice(main_tokens[import_param]);
-            const new_handle = (store.resolveImport(handle, import_str[1 .. import_str.len - 1]) catch |err| {
-                log.debug("Error {} while processing import {s}", .{ err, import_str });
-                return null;
-            }) orelse return null;
+                // reference to node '0' which is root
+                return TypeWithHandle.typeVal(.{ .node = 0, .handle = new_handle });
+            } else if (std.mem.eql(u8, call_name, "@cImport")) {
+                const new_handle = (store.resolveCImport(handle, node) catch |err| {
+                    log.debug("Error {} while processing cImport", .{err}); // TODO improve
+                    return null;
+                }) orelse return null;
 
-            // reference to node '0' which is root
-            return TypeWithHandle.typeVal(.{ .node = 0, .handle = new_handle });
+                // reference to node '0' which is root
+                return TypeWithHandle.typeVal(.{ .node = 0, .handle = new_handle });
+            }
         },
         .fn_proto,
         .fn_proto_multi,
@@ -1077,8 +1086,17 @@ pub fn resolveTypeOfNode(store: *DocumentStore, arena: *std.heap.ArenaAllocator,
     return resolveTypeOfNodeInternal(store, arena, node_handle, &bound_type_params);
 }
 
-/// Collects all imports we can find into a slice of import paths (without quotes).
-pub fn collectImports(import_arr: *std.ArrayList([]const u8), tree: Ast) !void {
+/// Collects all `@import`'s we can find into a slice of import paths (without quotes).
+/// Caller owns returned memory.
+pub fn collectImports(allocator: std.mem.Allocator, tree: Ast) error{OutOfMemory}![][]const u8 {
+    var imports = std.ArrayListUnmanaged([]const u8){};
+    errdefer {
+        for (imports.items) |imp| {
+            allocator.free(imp);
+        }
+        imports.deinit(allocator);
+    }
+
     const tags = tree.tokens.items(.tag);
 
     var i: usize = 0;
@@ -1098,9 +1116,33 @@ pub fn collectImports(import_arr: *std.ArrayList([]const u8), tree: Ast) !void {
                 continue;
 
             const str = tree.tokenSlice(@intCast(u32, i + 2));
-            try import_arr.append(str[1 .. str.len - 1]);
+            try imports.append(allocator, str[1 .. str.len - 1]);
         }
     }
+
+    return imports.toOwnedSlice(allocator);
+}
+
+/// Collects all `@cImport` nodes
+/// Caller owns returned memory.
+pub fn collectCImportNodes(allocator: std.mem.Allocator, tree: Ast) error{OutOfMemory}![]Ast.Node.Index {
+    var import_nodes = std.ArrayListUnmanaged(Ast.Node.Index){};
+    errdefer import_nodes.deinit(allocator);
+
+    const node_tags = tree.nodes.items(.tag);
+    const main_tokens = tree.nodes.items(.main_token);
+
+    var i: usize = 0;
+    while (i < node_tags.len) : (i += 1) {
+        const node = @intCast(Ast.Node.Index, i);
+        if (!ast.isBuiltinCall(tree, node)) continue;
+
+        if (!std.mem.eql(u8, Ast.tokenSlice(tree, main_tokens[node]), "@cImport")) continue;
+
+        try import_nodes.append(allocator, node);
+    }
+
+    return import_nodes.toOwnedSlice(allocator);
 }
 
 pub const NodeWithHandle = struct {
@@ -1341,26 +1383,22 @@ pub fn getImportStr(tree: Ast, node: Ast.Node.Index, source_index: usize) ?[]con
         return getImportStr(tree, tree.nodes.items(.data)[node].lhs, source_index);
     }
 
-    if (!nodeContainsSourceIndex(tree, node, source_index)) {
-        return null;
-    }
+    if (!nodeContainsSourceIndex(tree, node, source_index)) return null;
 
-    if (ast.isBuiltinCall(tree, node)) {
-        const builtin_token = tree.nodes.items(.main_token)[node];
-        const call_name = tree.tokenSlice(builtin_token);
+    if (!ast.isBuiltinCall(tree, node)) return null;
 
-        if (!std.mem.eql(u8, call_name, "@import")) return null;
+    const builtin_token = tree.nodes.items(.main_token)[node];
+    const call_name = tree.tokenSlice(builtin_token);
 
-        var buffer: [2]Ast.Node.Index = undefined;
-        const params = ast.builtinCallParams(tree, node, &buffer).?;
+    if (!std.mem.eql(u8, call_name, "@import")) return null;
 
-        if (params.len != 1) return null;
+    var buffer: [2]Ast.Node.Index = undefined;
+    const params = ast.builtinCallParams(tree, node, &buffer).?;
 
-        const import_str = tree.tokenSlice(tree.nodes.items(.main_token)[params[0]]);
-        return import_str[1 .. import_str.len - 1];
-    }
+    if (params.len != 1) return null;
 
-    return null;
+    const import_str = tree.tokenSlice(tree.nodes.items(.main_token)[params[0]]);
+    return import_str[1 .. import_str.len - 1];
 }
 
 pub const SourceRange = std.zig.Token.Loc;
