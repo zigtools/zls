@@ -239,11 +239,7 @@ fn publishDiagnostics(server: *Server, writer: anytype, handle: DocumentStore.Ha
         scopes: for (handle.document_scope.scopes) |scope| {
             const scope_data = switch (scope.data) {
                 .function => |f| b: {
-                    var buf: [1]std.zig.Ast.Node.Index = undefined;
-                    var proto = ast.fnProto(tree, f, &buf) orelse break :b f;
-                    if (proto.extern_export_inline_token) |tok| {
-                        if (std.mem.eql(u8, tree.tokenSlice(tok), "extern")) continue :scopes;
-                    }
+                    if (!ast.fnProtoHasBody(tree, f).?) continue :scopes;
                     break :b f;
                 },
                 .block => |b| b,
@@ -254,7 +250,7 @@ fn publishDiagnostics(server: *Server, writer: anytype, handle: DocumentStore.Ha
             while (decl_iterator.next()) |decl| {
                 var identifier_count: usize = 0;
 
-                var name_token_index = switch (decl.value_ptr.*) {
+                const name_token_index = switch (decl.value_ptr.*) {
                     .ast_node => |an| s: {
                         const an_tag = tree.nodes.items(.tag)[an];
                         switch (an_tag) {
@@ -274,8 +270,27 @@ fn publishDiagnostics(server: *Server, writer: anytype, handle: DocumentStore.Ha
                 const pit_start = tree.firstToken(scope_data);
                 const pit_end = ast.lastToken(tree, scope_data);
 
-                for (tree.tokens.items(.tag)[pit_start..pit_end]) |tag, index| {
-                    if (tag == .identifier and std.mem.eql(u8, tree.tokenSlice(pit_start + @intCast(u32, index)), tree.tokenSlice(name_token_index))) identifier_count += 1;
+                const tags = tree.tokens.items(.tag)[pit_start..pit_end];
+                for (tags) |tag, index| {
+                    if (tag != .identifier) continue;
+                    if (!std.mem.eql(u8, tree.tokenSlice(pit_start + @intCast(u32, index)), tree.tokenSlice(name_token_index))) continue;
+                    if (index -| 1 > 0 and tags[index - 1] == .period) continue;
+                    if (index +| 2 < tags.len and tags[index + 1] == .colon) switch (tags[index + 2]) {
+                        .l_brace,
+                        .keyword_inline,
+                        .keyword_while,
+                        .keyword_for,
+                        .keyword_switch,
+                        => continue,
+                        else => {},
+                    };
+                    if (index -| 2 > 0 and tags[index - 1] == .colon) switch (tags[index - 2]) {
+                        .keyword_break,
+                        .keyword_continue,
+                        => continue,
+                        else => {},
+                    };
+                    identifier_count += 1;
                 }
 
                 if (identifier_count <= 1)
@@ -2450,7 +2465,6 @@ pub fn processJsonRpc(server: *Server, writer: anytype, json: []const u8) !void 
         return;
     }
 
-    std.debug.assert(tree.root.Object.get("method") != null);
     const method = tree.root.Object.get("method").?.String;
 
     const start_time = std.time.milliTimestamp();
@@ -2490,6 +2504,7 @@ pub fn processJsonRpc(server: *Server, writer: anytype, json: []const u8) !void 
     };
 
     // Hack to avoid `return`ing in the inline for, which causes bugs.
+    // TODO: Change once stage2 is shipped and more stable?
     var done: ?anyerror = null;
     inline for (method_map) |method_info| {
         if (done == null and std.mem.eql(u8, method, method_info[0])) {

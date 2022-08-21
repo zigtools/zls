@@ -7,6 +7,7 @@ pub fn build(b: *std.build.Builder) !void {
 
     const mode = b.standardReleaseOptions();
     const exe = b.addExecutable("zls", "src/main.zig");
+    exe.use_stage1 = true;
     const exe_options = b.addOptions();
     exe.addOptions("build_options", exe_options);
 
@@ -76,11 +77,13 @@ pub fn build(b: *std.build.Builder) !void {
     test_step.dependOn(b.getInstallStep());
 
     var unit_tests = b.addTest("src/unit_tests.zig");
+    unit_tests.use_stage1 = true;
     unit_tests.setBuildMode(.Debug);
     unit_tests.setTarget(target);
     test_step.dependOn(&unit_tests.step);
 
     var session_tests = b.addTest("tests/sessions.zig");
+    session_tests.use_stage1 = true;
     session_tests.addPackage(.{ .name = "header", .source = .{ .path = "src/header.zig" } });
     session_tests.addPackage(.{ .name = "server", .source = .{ .path = "src/Server.zig" }, .dependencies = exe.packages.items });
     session_tests.setBuildMode(.Debug);
