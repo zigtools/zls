@@ -222,6 +222,9 @@ pub fn getVariableSignature(tree: Ast, var_decl: Ast.full.VarDecl) []const u8 {
 }
 
 pub fn getContainerFieldSignature(tree: Ast, field: Ast.full.ContainerField) []const u8 {
+    if(field.ast.value_expr == 0 and field.ast.type_expr == 0 and field.ast.align_expr == 0) {
+        return ""; // TODO display the container's type
+    }
     const start = offsets.tokenLocation(tree, field.ast.name_token).start;
     const end_node = if (field.ast.value_expr != 0) field.ast.value_expr else field.ast.type_expr;
     const end = offsets.tokenLocation(tree, ast.lastToken(tree, end_node)).end;
