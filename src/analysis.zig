@@ -2542,7 +2542,7 @@ fn makeInnerScope(allocator: std.mem.Allocator, context: ScopeContext, node_idx:
         };
 
         if (container_field) |_| {
-            if (!std.mem.eql(u8, name, "_")) {
+            if (!std.mem.eql(u8, name, "_") and !std.mem.eql(u8, name, "other")) {
                 try context.enums.put(allocator, .{
                     .label = name,
                     .kind = .Constant,
