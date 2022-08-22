@@ -70,7 +70,7 @@ Building `zls` is very easy. You will need [a build of Zig master](https://zigla
 git clone --recurse-submodules https://github.com/zigtools/zls
 cd zls
 zig build -Drelease-safe
-./zig-out/bin/zls config # Configure ZLS
+./zig-out/bin/zls --config # Configure ZLS
 ```
 
 *For detailed building instructions, see the Wiki page about [Cloning With Git](https://github.com/zigtools/zls/wiki/Downloading-and-Building-ZLS#cloning-with-git).*
@@ -92,7 +92,7 @@ There is also a `generate-data.js` in the `src/data` folder, you'll need to run 
 
 ### Configuration Options
 
-You can configure zls by running `zls config` or manually creating your own `zls.json` configuration file.
+You can configure zls by running `zls --config` or manually creating your own `zls.json` configuration file.
 zls will look for a zls.json configuration file in multiple locations with the following priority:
 - In the local configuration folder of your OS (as provided by [known-folders](https://github.com/ziglibs/known-folders/blob/master/RESOURCES.md#folder-list))
 - In the global configuration folder of your OS (as provided by [known-folders](https://github.com/ziglibs/known-folders/blob/master/RESOURCES.md#folder-list))
@@ -118,8 +118,8 @@ The following options are currently available.
 
 ## Features
 
-`zls` supports most language features, including simple type function support, using namespace, payload capture type resolution, custom packages and others.
-Notable language features that are not currently implemented include `@cImport` as well as most forms of compile time evaluation.
+`zls` supports most language features, including simple type function support, using namespace, payload capture type resolution, custom packages, `cImport` and others.
+Currently there is no support for compile time evaluation.
 
 The following LSP features are supported:
 - Completions
