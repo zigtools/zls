@@ -1,0 +1,48 @@
+name: Bug Report
+description: File a bug report
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A bug is when something works differently than it is expected to.
+        ## Remember to search before filing a new report
+        Please search for this bug in the issue tracker, and use a bug report title that
+        would have made your bug report turn up in the search results for your search query.
+  - type: input
+    id: zig-version
+    attributes:
+      label: Zig Version
+      description: "The output of `zig version`"
+      placeholder: "0.9.0-dev.1275+ac52e0056"
+    validations:
+      required: true
+  - type: input
+    id: zls-version
+    attributes:
+      label: Zig Language Server Version
+      description: "Your zls release or commit"
+      placeholder: "b21039d51261923c665d3bc58fadc4b4d5e221ea"
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to Reproduce
+      description: What exactly can someone else do, in order to observe the problem that you observed?
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What did you expect to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual Behavior
+      description: What happened instead? Be sure to include all error messages if any.
+    validations:
+      required: true
