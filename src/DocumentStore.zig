@@ -1052,9 +1052,14 @@ fn stdUriFromLibPath(allocator: std.mem.Allocator, zig_lib_path: ?[]const u8) !?
     if (zig_lib_path) |zpath| {
         const std_path = std.fs.path.resolve(allocator, &[_][]const u8{
             zpath, "./std/std.zig",
-        }) catch |err| {
-            log.debug("Failed to resolve zig std library path, error: {}", .{err});
-            return null;
+        }) catch |first_std_err| blk: {
+            // workaround for https://github.com/ziglang/zig/issues/12516
+            break :blk std.fs.path.resolve(allocator, &[_][]const u8{
+                zpath, "./zig/std/std.zig",
+            }) catch {
+                log.debug("Failed to resolve zig std library path, error: {}", .{first_std_err});
+                return null;
+            };
         };
 
         defer allocator.free(std_path);
