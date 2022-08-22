@@ -1,13 +1,10 @@
 const root = @import("@build@");
 const std = @import("std");
-const fmt = std.fmt;
-const io = std.io;
 const log = std.log;
 const process = std.process;
 const Builder = std.build.Builder;
 const InstallArtifactStep = std.build.InstallArtifactStep;
 const LibExeObjStep = std.build.LibExeObjStep;
-const ArrayList = std.ArrayList;
 
 pub const BuildConfig = struct {
     packages: []Pkg,
@@ -15,24 +12,12 @@ pub const BuildConfig = struct {
 
     pub const Pkg = struct {
         name: []const u8,
-        uri: []const u8,
+        path: []const u8,
     };
 
-    pub const IncludeDir = union(enum) {
-        raw_path: []const u8,
-        raw_path_system: []const u8,
-
-        pub fn getPath(self: IncludeDir) []const u8 {
-            return switch (self) {
-                .raw_path => |path| return path,
-                .raw_path_system => |path| return path,
-            };
-        }
-
-        pub fn eql(a: IncludeDir, b: IncludeDir) bool {
-            return @enumToInt(a) == @enumToInt(b) and
-                std.mem.eql(u8, a.getPath(), b.getPath());
-        }
+    pub const IncludeDir = struct {
+        path: []const u8,
+        system: bool,
     };
 };
 
@@ -80,10 +65,10 @@ pub fn main() !void {
     builder.resolveInstallPrefix(null, Builder.DirList{});
     try runBuild(builder);
 
-    var packages = ArrayList(BuildConfig.Pkg).init(allocator);
+    var packages = std.ArrayList(BuildConfig.Pkg).init(allocator);
     defer packages.deinit();
 
-    var include_dirs = ArrayList(BuildConfig.IncludeDir).init(allocator);
+    var include_dirs = std.ArrayList(BuildConfig.IncludeDir).init(allocator);
     defer include_dirs.deinit();
 
     // TODO: We currently add packages from every LibExeObj step that the install step depends on.
@@ -101,13 +86,13 @@ pub fn main() !void {
             .include_dirs = include_dirs.items,
         },
         .{ .whitespace = .{} },
-        io.getStdOut().writer(),
+        std.io.getStdOut().writer(),
     );
 }
 
 fn processStep(
-    packages: *ArrayList(BuildConfig.Pkg),
-    include_dirs: *ArrayList(BuildConfig.IncludeDir),
+    packages: *std.ArrayList(BuildConfig.Pkg),
+    include_dirs: *std.ArrayList(BuildConfig.IncludeDir),
     step: *std.build.Step,
 ) anyerror!void {
     if (step.cast(InstallArtifactStep)) |install_exe| {
@@ -128,7 +113,7 @@ fn processStep(
 }
 
 fn processPackage(
-    packages: *ArrayList(BuildConfig.Pkg),
+    packages: *std.ArrayList(BuildConfig.Pkg),
     pkg: std.build.Pkg,
 ) anyerror!void {
     for (packages.items) |package| {
@@ -136,9 +121,13 @@ fn processPackage(
     }
 
     const source = if (@hasField(std.build.Pkg, "source")) pkg.source else pkg.path;
-    switch (source) {
-        .path => |path| try packages.append(.{ .name = pkg.name, .uri = path }),
-        .generated => |generated| if (generated.path != null) try packages.append(.{ .name = pkg.name, .uri = generated.path.? }),
+    const maybe_path = switch (source) {
+        .path => |path| path,
+        .generated => |generated| generated.path,
+    };
+
+    if (maybe_path) |path| {
+        try packages.append(.{ .name = pkg.name, .path = path });
     }
 
     if (pkg.dependencies) |dependencies| {
@@ -149,18 +138,18 @@ fn processPackage(
 }
 
 fn processIncludeDirs(
-    include_dirs: *ArrayList(BuildConfig.IncludeDir),
+    include_dirs: *std.ArrayList(BuildConfig.IncludeDir),
     dirs: []std.build.LibExeObjStep.IncludeDir,
 ) !void {
     outer: for (dirs) |dir| {
         const candidate: BuildConfig.IncludeDir = switch (dir) {
-            .raw_path => |path| .{ .raw_path = path },
-            .raw_path_system => |path| .{ .raw_path_system = path },
+            .raw_path => |path| .{ .path = path, .system = false },
+            .raw_path_system => |path| .{ .path = path, .system = true },
             else => continue,
         };
 
         for (include_dirs.items) |include_dir| {
-            if (candidate.eql(include_dir)) continue :outer;
+            if (std.mem.eql(u8, candidate.path, include_dir.path)) continue :outer;
         }
 
         try include_dirs.append(candidate);
