@@ -21,14 +21,38 @@ pub const hasher_init: Hasher = Hasher.init(&[_]u8{0} ** Hasher.key_length);
 const BuildFile = struct {
     refs: usize,
     uri: []const u8,
-    config: BuildConfig,
-
+    config: BuildFileConfig,
     builtin_uri: ?[]const u8 = null,
 
     pub fn destroy(self: *BuildFile, allocator: std.mem.Allocator) void {
         if (self.builtin_uri) |builtin_uri| allocator.free(builtin_uri);
         allocator.destroy(self);
     }
+};
+
+pub const BuildFileConfig = struct {
+    packages: []Pkg,
+    include_dirs: []IncludeDir,
+
+    pub fn deinit(self: BuildFileConfig, allocator: std.mem.Allocator) void {
+        for (self.packages) |pkg| {
+            allocator.free(pkg.name);
+            allocator.free(pkg.uri);
+        }
+        allocator.free(self.packages);
+
+        for (self.include_dirs) |dir| {
+            allocator.free(dir.path);
+        }
+        allocator.free(self.include_dirs);
+    }
+
+    pub const Pkg = struct {
+        name: []const u8,
+        uri: []const u8,
+    };
+
+    pub const IncludeDir = BuildConfig.IncludeDir;
 };
 
 pub const Handle = struct {
@@ -182,13 +206,56 @@ fn loadBuildConfiguration(context: LoadBuildConfigContext) !void {
 
             const parse_options = std.json.ParseOptions{ .allocator = allocator };
 
-            std.json.parseFree(BuildConfig, build_file.config, parse_options);
+            build_file.config.deinit(allocator);
 
-            build_file.config = std.json.parse(
+            const config: BuildConfig = std.json.parse(
                 BuildConfig,
                 &std.json.TokenStream.init(zig_run_result.stdout),
                 parse_options,
             ) catch return error.RunFailed;
+            defer std.json.parseFree(BuildConfig, config, parse_options);
+
+            var packages = try std.ArrayListUnmanaged(BuildFileConfig.Pkg).initCapacity(allocator, config.packages.len);
+            errdefer {
+                for (packages.items) |pkg| {
+                    allocator.free(pkg.name);
+                    allocator.free(pkg.uri);
+                }
+                packages.deinit(allocator);
+            }
+
+            var include_dirs = try std.ArrayListUnmanaged(BuildFileConfig.IncludeDir).initCapacity(allocator, config.include_dirs.len);
+            errdefer {
+                for (include_dirs.items) |dir| {
+                    allocator.free(dir.path);
+                }
+                include_dirs.deinit(allocator);
+            }
+
+            for (config.packages) |pkg| {
+                const pkg_abs_path = try std.fs.path.resolve(allocator, &[_][]const u8{ directory_path, pkg.path });
+                defer allocator.free(pkg_abs_path);
+
+                const uri = try URI.fromPath(allocator, pkg_abs_path);
+                errdefer allocator.free(uri);
+
+                const name = try allocator.dupe(u8, pkg.name);
+                errdefer allocator.free(name);
+
+                packages.appendAssumeCapacity(.{ .name = name, .uri = uri });
+            }
+
+            for (config.include_dirs) |dir| {
+                const path = try allocator.dupe(u8, dir.path);
+                errdefer allocator.free(path);
+
+                include_dirs.appendAssumeCapacity(.{ .path = path, .system = dir.system });
+            }
+
+            build_file.config = .{
+                .packages = packages.toOwnedSlice(allocator),
+                .include_dirs = include_dirs.toOwnedSlice(allocator),
+            };
         },
         else => return error.RunFailed,
     }
@@ -404,7 +471,7 @@ fn decrementBuildFileRefs(self: *DocumentStore, build_file: *BuildFile) void {
     if (build_file.refs == 0) {
         log.debug("Freeing build file {s}", .{build_file.uri});
 
-        std.json.parseFree(BuildConfig, build_file.config, .{ .allocator = self.allocator });
+        build_file.config.deinit(self.allocator);
 
         // Decrement count of the document since one count comes
         // from the build file existing.
@@ -598,7 +665,7 @@ fn translate(self: *DocumentStore, handle: *Handle, source: []const u8) !?[]cons
         errdefer self.allocator.free(result);
 
         for (dirs) |dir, i| {
-            result[i] = dir.getPath();
+            result[i] = dir.path;
         }
 
         break :blk result;
@@ -1019,7 +1086,7 @@ pub fn deinit(self: *DocumentStore) void {
 
     self.handles.deinit(self.allocator);
     for (self.build_files.items) |build_file| {
-        std.json.parseFree(BuildConfig, build_file.config, .{ .allocator = self.allocator });
+        build_file.config.deinit(self.allocator);
         self.allocator.free(build_file.uri);
         build_file.destroy(self.allocator);
     }
