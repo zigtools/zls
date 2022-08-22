@@ -2542,17 +2542,21 @@ fn makeInnerScope(allocator: std.mem.Allocator, context: ScopeContext, node_idx:
         };
 
         if (container_field) |_| {
-            if (!std.mem.eql(u8, name, "_") and !std.mem.eql(u8, name, "other")) {
-                try context.enums.put(allocator, .{
+            if (!std.mem.eql(u8, name, "_")) {
+                var doc = if (try getDocComments(allocator, tree, decl, .Markdown)) |docs|
+                        types.MarkupContent{ .kind = .Markdown, .value = docs }
+                    else
+                        null;
+                var gop_res = try context.enums.getOrPut(allocator, .{
                     .label = name,
                     .kind = .Constant,
                     .insertText = name,
                     .insertTextFormat = .PlainText,
-                    .documentation = if (try getDocComments(allocator, tree, decl, .Markdown)) |docs|
-                        types.MarkupContent{ .kind = .Markdown, .value = docs }
-                    else
-                        null,
-                }, {});
+                    .documentation = doc
+                });
+                if (gop_res.found_existing) {
+                    if (doc) |d| allocator.free(d.value);
+                }
             }
         }
     }
