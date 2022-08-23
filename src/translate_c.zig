@@ -27,8 +27,8 @@ pub fn convertCInclude(allocator: std.mem.Allocator, tree: Ast, node: Ast.Node.I
     std.debug.assert(ast.isBuiltinCall(tree, node));
     std.debug.assert(std.mem.eql(u8, Ast.tokenSlice(tree, main_tokens[node]), "@cImport"));
 
-    var output = std.ArrayList(u8).init(allocator);
-    errdefer output.deinit();
+    var output = std.ArrayListUnmanaged(u8){};
+    errdefer output.deinit(allocator);
 
     var stack_allocator = std.heap.stackFallback(512, allocator);
 
@@ -37,12 +37,14 @@ pub fn convertCInclude(allocator: std.mem.Allocator, tree: Ast, node: Ast.Node.I
         try convertCIncludeInternal(stack_allocator.get(), tree, child, &output);
     }
 
-    return output.toOwnedSlice();
+    return output.toOwnedSlice(allocator);
 }
 
-fn convertCIncludeInternal(allocator: std.mem.Allocator, tree: Ast, node: Ast.Node.Index, output: *std.ArrayList(u8)) error{ OutOfMemory, Unsupported }!void {
+fn convertCIncludeInternal(allocator: std.mem.Allocator, tree: Ast, node: Ast.Node.Index, output: *std.ArrayListUnmanaged(u8)) error{ OutOfMemory, Unsupported }!void {
     const node_tags = tree.nodes.items(.tag);
     const main_tokens = tree.nodes.items(.main_token);
+
+    var writer = output.writer(allocator);
 
     var buffer: [2]Ast.Node.Index = undefined;
     if (ast.isBlock(tree, node)) {
@@ -62,7 +64,7 @@ fn convertCIncludeInternal(allocator: std.mem.Allocator, tree: Ast, node: Ast.No
         const first = extractString(Ast.tokenSlice(tree, main_tokens[params[0]]));
 
         if (std.mem.eql(u8, call_name, "@cInclude")) {
-            try output.writer().print("#include <{s}>\n", .{first});
+            try writer.print("#include <{s}>\n", .{first});
         } else if (std.mem.eql(u8, call_name, "@cDefine")) {
             if (params.len < 2) return;
 
@@ -70,14 +72,14 @@ fn convertCIncludeInternal(allocator: std.mem.Allocator, tree: Ast, node: Ast.No
             const is_void = if (ast.blockStatements(tree, params[1], &buffer2)) |block| block.len == 0 else false;
 
             if (is_void) {
-                try output.writer().print("#define {s}\n", .{first});
+                try writer.print("#define {s}\n", .{first});
             } else {
                 if (node_tags[params[1]] != .string_literal) return error.Unsupported;
                 const second = extractString(Ast.tokenSlice(tree, main_tokens[params[1]]));
-                try output.writer().print("#define {s} {s}\n", .{ first, second });
+                try writer.print("#define {s} {s}\n", .{ first, second });
             }
         } else if (std.mem.eql(u8, call_name, "@cUndef")) {
-            try output.writer().print("#undefine {s}\n", .{first});
+            try writer.print("#undefine {s}\n", .{first});
         } else {
             return error.Unsupported;
         }

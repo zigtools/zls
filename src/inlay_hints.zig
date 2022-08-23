@@ -33,7 +33,7 @@ const Builder = struct {
     allocator: std.mem.Allocator,
     config: *const Config,
     handle: *DocumentStore.Handle,
-    hints: std.ArrayList(types.InlayHint),
+    hints: std.ArrayListUnmanaged(types.InlayHint),
     hover_kind: types.MarkupContent.Kind,
 
     fn init(allocator: std.mem.Allocator, config: *const Config, handle: *DocumentStore.Handle, hover_kind: types.MarkupContent.Kind) Builder {
@@ -41,7 +41,7 @@ const Builder = struct {
             .allocator = allocator,
             .config = config,
             .handle = handle,
-            .hints = std.ArrayList(types.InlayHint).init(allocator),
+            .hints = std.ArrayListUnmanaged(types.InlayHint){},
             .hover_kind = hover_kind,
         };
     }
@@ -50,7 +50,7 @@ const Builder = struct {
         for (self.hints.items) |hint| {
             self.allocator.free(hint.tooltip.value);
         }
-        self.hints.deinit();
+        self.hints.deinit(self.allocator);
     }
 
     fn appendParameterHint(self: *Builder, position: Ast.Location, label: []const u8, tooltip: []const u8, tooltip_noalias: bool, tooltip_comptime: bool) !void {
@@ -67,7 +67,7 @@ const Builder = struct {
             break :blk try std.fmt.allocPrint(self.allocator, "{s}{s}", .{ prefix, tooltip });
         };
 
-        try self.hints.append(.{
+        try self.hints.append(self.allocator, .{
             .position = .{
                 .line = @intCast(i64, position.line),
                 .character = @intCast(i64, position.column),
@@ -84,7 +84,7 @@ const Builder = struct {
     }
 
     fn toOwnedSlice(self: *Builder) []types.InlayHint {
-        return self.hints.toOwnedSlice();
+        return self.hints.toOwnedSlice(self.allocator);
     }
 };
 
