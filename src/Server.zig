@@ -2440,7 +2440,11 @@ pub fn processJsonRpc(server: *Server, writer: anytype, json: []const u8) !void 
             if (value != .Null) {
                 const new_value: field.field_type = switch (ft) {
                     []const u8 => switch (value) {
-                        .String => |s| try server.allocator.dupe(u8, s), // TODO: Allocation model? (same with didChangeConfiguration); imo this isn't *that* bad but still
+                        .String => |s| blk: {
+                            var nv = try server.allocator.dupe(u8, s);
+                            if (@field(server.config, field.name)) |prev_val| server.allocator.free(prev_val);
+                            break :blk nv;
+                        }, // TODO: Allocation model? (same with didChangeConfiguration); imo this isn't *that* bad but still
                         else => @panic("Invalid configuration value"), // TODO: Handle this
                     },
                     else => switch (ti) {
