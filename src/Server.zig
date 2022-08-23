@@ -240,11 +240,7 @@ fn publishDiagnostics(server: *Server, writer: anytype, handle: DocumentStore.Ha
         scopes: for (handle.document_scope.scopes) |scope| {
             const scope_data = switch (scope.data) {
                 .function => |f| b: {
-                    var buf: [1]std.zig.Ast.Node.Index = undefined;
-                    var proto = ast.fnProto(tree, f, &buf) orelse break :b f;
-                    if (proto.extern_export_inline_token) |tok| {
-                        if (std.mem.eql(u8, tree.tokenSlice(tok), "extern")) continue :scopes;
-                    }
+                    if (!ast.fnProtoHasBody(tree, f).?) continue :scopes;
                     break :b f;
                 },
                 .block => |b| b,
@@ -255,7 +251,7 @@ fn publishDiagnostics(server: *Server, writer: anytype, handle: DocumentStore.Ha
             while (decl_iterator.next()) |decl| {
                 var identifier_count: usize = 0;
 
-                var name_token_index = switch (decl.value_ptr.*) {
+                const name_token_index = switch (decl.value_ptr.*) {
                     .ast_node => |an| s: {
                         const an_tag = tree.nodes.items(.tag)[an];
                         switch (an_tag) {
@@ -275,8 +271,27 @@ fn publishDiagnostics(server: *Server, writer: anytype, handle: DocumentStore.Ha
                 const pit_start = tree.firstToken(scope_data);
                 const pit_end = ast.lastToken(tree, scope_data);
 
-                for (tree.tokens.items(.tag)[pit_start..pit_end]) |tag, index| {
-                    if (tag == .identifier and std.mem.eql(u8, tree.tokenSlice(pit_start + @intCast(u32, index)), tree.tokenSlice(name_token_index))) identifier_count += 1;
+                const tags = tree.tokens.items(.tag)[pit_start..pit_end];
+                for (tags) |tag, index| {
+                    if (tag != .identifier) continue;
+                    if (!std.mem.eql(u8, tree.tokenSlice(pit_start + @intCast(u32, index)), tree.tokenSlice(name_token_index))) continue;
+                    if (index -| 1 > 0 and tags[index - 1] == .period) continue;
+                    if (index +| 2 < tags.len and tags[index + 1] == .colon) switch (tags[index + 2]) {
+                        .l_brace,
+                        .keyword_inline,
+                        .keyword_while,
+                        .keyword_for,
+                        .keyword_switch,
+                        => continue,
+                        else => {},
+                    };
+                    if (index -| 2 > 0 and tags[index - 1] == .colon) switch (tags[index - 2]) {
+                        .keyword_break,
+                        .keyword_continue,
+                        => continue,
+                        else => {},
+                    };
+                    identifier_count += 1;
                 }
 
                 if (identifier_count <= 1)
@@ -300,17 +315,8 @@ fn publishDiagnostics(server: *Server, writer: anytype, handle: DocumentStore.Ha
 
                 if (!std.mem.eql(u8, call_name, "@import")) continue;
 
-                const node_data = tree.nodes.items(.data)[node];
-                const params = switch (tree.nodes.items(.tag)[node]) {
-                    .builtin_call, .builtin_call_comma => tree.extra_data[node_data.lhs..node_data.rhs],
-                    .builtin_call_two, .builtin_call_two_comma => if (node_data.lhs == 0)
-                        &[_]Ast.Node.Index{}
-                    else if (node_data.rhs == 0)
-                        &[_]Ast.Node.Index{node_data.lhs}
-                    else
-                        &[_]Ast.Node.Index{ node_data.lhs, node_data.rhs },
-                    else => unreachable,
-                };
+                var buffer: [2]Ast.Node.Index = undefined;
+                const params = ast.builtinCallParams(tree, node, &buffer).?;
 
                 if (params.len != 1) continue;
 
@@ -1145,11 +1151,14 @@ fn referencesDefinitionGlobal(
 
     const result: types.ResponseParams = if (highlight) result: {
         var highlights = try std.ArrayList(types.DocumentHighlight).initCapacity(server.arena.allocator(), locs.items.len);
+        const uri = handle.uri();
         for (locs.items) |loc| {
-            highlights.appendAssumeCapacity(.{
-                .range = loc.range,
-                .kind = .Text,
-            });
+            if (std.mem.eql(u8, loc.uri, uri)) {
+                highlights.appendAssumeCapacity(.{
+                    .range = loc.range,
+                    .kind = .Text,
+                });
+            }
         }
         break :result .{ .DocumentHighlight = highlights.items };
     } else .{ .Locations = locs.items };
@@ -1188,11 +1197,14 @@ fn referencesDefinitionFieldAccess(
     );
     const result: types.ResponseParams = if (highlight) result: {
         var highlights = try std.ArrayList(types.DocumentHighlight).initCapacity(server.arena.allocator(), locs.items.len);
+        const uri = handle.uri();
         for (locs.items) |loc| {
-            highlights.appendAssumeCapacity(.{
-                .range = loc.range,
-                .kind = .Text,
-            });
+            if (std.mem.eql(u8, loc.uri, uri)) {
+                highlights.appendAssumeCapacity(.{
+                    .range = loc.range,
+                    .kind = .Text,
+                });
+            }
         }
         break :result .{ .DocumentHighlight = highlights.items };
     } else .{ .Locations = locs.items };
@@ -1219,11 +1231,14 @@ fn referencesDefinitionLabel(
     try references.labelReferences(&server.arena, decl, server.offset_encoding, include_decl, &locs, std.ArrayList(types.Location).append);
     const result: types.ResponseParams = if (highlight) result: {
         var highlights = try std.ArrayList(types.DocumentHighlight).initCapacity(server.arena.allocator(), locs.items.len);
+        const uri = handle.uri();
         for (locs.items) |loc| {
-            highlights.appendAssumeCapacity(.{
-                .range = loc.range,
-                .kind = .Text,
-            });
+            if (std.mem.eql(u8, loc.uri, uri)) {
+                highlights.appendAssumeCapacity(.{
+                    .range = loc.range,
+                    .kind = .Text,
+                });
+            }
         }
         break :result .{ .DocumentHighlight = highlights.items };
     } else .{ .Locations = locs.items };
@@ -1778,7 +1793,7 @@ fn initializeHandler(server: *Server, writer: anytype, id: types.RequestId, req:
                     },
                     .textDocumentSync = .Full,
                     .renameProvider = true,
-                    .completionProvider = .{ .resolveProvider = false, .triggerCharacters = &[_][]const u8{ ".", ":", "@" }, .completionItem = .{ .labelDetailsSupport = true } },
+                    .completionProvider = .{ .resolveProvider = false, .triggerCharacters = &[_][]const u8{ ".", ":", "@", "]" }, .completionItem = .{ .labelDetailsSupport = true } },
                     .documentHighlightProvider = true,
                     .hoverProvider = true,
                     .codeActionProvider = false,
@@ -2049,9 +2064,9 @@ fn completionHandler(server: *Server, writer: anytype, id: types.RequestId, req:
 
             if (!subpath_present and pos_context == .import_string_literal) {
                 if (handle.associated_build_file) |bf| {
-                    try fsl_completions.ensureUnusedCapacity(server.arena.allocator(), bf.packages.items.len);
+                    try fsl_completions.ensureUnusedCapacity(server.arena.allocator(), bf.config.packages.len);
 
-                    for (bf.packages.items) |pkg| {
+                    for (bf.config.packages) |pkg| {
                         try fsl_completions.append(server.arena.allocator(), .{
                             .label = pkg.name,
                             .kind = .Module,
@@ -2480,7 +2495,6 @@ pub fn processJsonRpc(server: *Server, writer: anytype, json: []const u8) !void 
         return;
     }
 
-    std.debug.assert(tree.root.Object.get("method") != null);
     const method = tree.root.Object.get("method").?.String;
 
     const start_time = std.time.milliTimestamp();
@@ -2520,6 +2534,7 @@ pub fn processJsonRpc(server: *Server, writer: anytype, json: []const u8) !void 
     };
 
     // Hack to avoid `return`ing in the inline for, which causes bugs.
+    // TODO: Change once stage2 is shipped and more stable?
     var done: ?anyerror = null;
     inline for (method_map) |method_info| {
         if (done == null and std.mem.eql(u8, method, method_info[0])) {

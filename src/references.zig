@@ -67,20 +67,9 @@ fn symbolReferencesInternal(arena: *std.heap.ArenaAllocator, store: *DocumentSto
 
     switch (node_tags[node]) {
         .block, .block_semicolon, .block_two, .block_two_semicolon => {
-            const statements: []const Ast.Node.Index = switch (node_tags[node]) {
-                .block, .block_semicolon => tree.extra_data[datas[node].lhs..datas[node].rhs],
-                .block_two, .block_two_semicolon => blk: {
-                    const statements = &[_]Ast.Node.Index{ datas[node].lhs, datas[node].rhs };
-                    const len: usize = if (datas[node].lhs == 0)
-                        @as(usize, 0)
-                    else if (datas[node].rhs == 0)
-                        @as(usize, 1)
-                    else
-                        @as(usize, 2);
-                    break :blk statements[0..len];
-                },
-                else => unreachable,
-            };
+            var buffer: [2]Ast.Node.Index = undefined;
+            const statements = ast.blockStatements(tree, node, &buffer).?;
+
             for (statements) |stmt|
                 try symbolReferencesInternal(arena, store, .{ .node = stmt, .handle = handle }, decl, encoding, context, handler);
         },
@@ -319,13 +308,10 @@ fn symbolReferencesInternal(arena: *std.heap.ArenaAllocator, store: *DocumentSto
         .async_call_comma,
         .async_call_one,
         .async_call_one_comma,
-        => |c| {
+        => {
             var buf: [1]Ast.Node.Index = undefined;
-            const call: Ast.full.Call = switch (c) {
-                .call, .call_comma, .async_call, .async_call_comma => tree.callFull(node),
-                .call_one, .call_one_comma, .async_call_one, .async_call_one_comma => tree.callOne(&buf, node),
-                else => unreachable,
-            };
+            const call = ast.callFull(tree, node, &buf).?;
+
             if (call.ast.fn_expr != 0)
                 try symbolReferencesInternal(arena, store, .{ .node = call.ast.fn_expr, .handle = handle }, decl, encoding, context, handler);
 
@@ -380,18 +366,9 @@ fn symbolReferencesInternal(arena: *std.heap.ArenaAllocator, store: *DocumentSto
         .builtin_call_comma,
         .builtin_call_two,
         .builtin_call_two_comma,
-        => |builtin_tag| {
-            const data = datas[node];
-            const params = switch (builtin_tag) {
-                .builtin_call, .builtin_call_comma => tree.extra_data[data.lhs..data.rhs],
-                .builtin_call_two, .builtin_call_two_comma => if (data.lhs == 0)
-                    &[_]Ast.Node.Index{}
-                else if (data.rhs == 0)
-                    &[_]Ast.Node.Index{data.lhs}
-                else
-                    &[_]Ast.Node.Index{ data.lhs, data.rhs },
-                else => unreachable,
-            };
+        => {
+            var buffer: [2]Ast.Node.Index = undefined;
+            const params = ast.builtinCallParams(tree, node, &buffer).?;
 
             for (params) |param|
                 try symbolReferencesInternal(arena, store, .{ .node = param, .handle = handle }, decl, encoding, context, handler);

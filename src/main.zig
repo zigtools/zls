@@ -32,8 +32,7 @@ fn loop(server: *Server) !void {
 
         try reader.readNoEof(buffer);
 
-        var writer = std.io.getStdOut().writer();
-
+        const writer = std.io.getStdOut().writer();
         try server.processJsonRpc(writer, buffer);
     }
 }
@@ -43,8 +42,15 @@ const ConfigWithPath = struct {
     config_path: ?[]const u8,
 };
 
-fn getConfig(allocator: std.mem.Allocator, config: ConfigWithPath) !ConfigWithPath {
-    if (config.config_path) |path| {
+fn getConfig(
+    allocator: std.mem.Allocator,
+    config_path: ?[]const u8,
+    /// If true, and the provided config_path is non-null, frees
+    /// the aforementioned path, in the case that it is
+    /// not returned.
+    free_old_config_path: bool,
+) !ConfigWithPath {
+    if (config_path) |path| {
         if (Config.loadFromFile(allocator, path)) |conf| {
             return ConfigWithPath{
                 .config = conf,
@@ -56,6 +62,9 @@ fn getConfig(allocator: std.mem.Allocator, config: ConfigWithPath) !ConfigWithPa
             \\Falling back to a lookup in the local and global configuration folders
             \\
         , .{path});
+        if (free_old_config_path) {
+            allocator.free(path);
+        }
     }
 
     if (try known_folders.getPath(allocator, .local_configuration)) |path| {
@@ -65,6 +74,7 @@ fn getConfig(allocator: std.mem.Allocator, config: ConfigWithPath) !ConfigWithPa
                 .config_path = path,
             };
         }
+        allocator.free(path);
     }
 
     if (try known_folders.getPath(allocator, .global_configuration)) |path| {
@@ -74,6 +84,7 @@ fn getConfig(allocator: std.mem.Allocator, config: ConfigWithPath) !ConfigWithPa
                 .config_path = path,
             };
         }
+        allocator.free(path);
     }
 
     return ConfigWithPath{
@@ -82,19 +93,130 @@ fn getConfig(allocator: std.mem.Allocator, config: ConfigWithPath) !ConfigWithPa
     };
 }
 
+const ParseArgsResult = enum { proceed, exit };
+fn parseArgs(
+    allocator: std.mem.Allocator,
+    config: *ConfigWithPath,
+) !ParseArgsResult {
+    const ArgId = enum {
+        help,
+        version,
+        config,
+        @"enable-debug-log",
+        @"config-path",
+    };
+    const arg_id_map = std.ComptimeStringMap(ArgId, comptime blk: {
+        const fields = @typeInfo(ArgId).Enum.fields;
+        const KV = std.meta.Tuple(&.{ []const u8, ArgId });
+        var pairs: [fields.len]KV = undefined;
+        for (pairs) |*pair, i| pair.* = .{ fields[i].name, @intToEnum(ArgId, fields[i].value) };
+        break :blk pairs[0..];
+    });
+    const help_message: []const u8 = comptime help_message: {
+        var help_message: []const u8 =
+            \\Usage: zls [command]
+            \\
+            \\Commands:
+            \\
+            \\
+        ;
+        const InfoMap = std.enums.EnumArray(ArgId, []const u8);
+        var cmd_infos: InfoMap = InfoMap.init(.{
+            .help = "Prints this message.",
+            .version = "Prints the compiler version with which the server was compiled.",
+            .@"enable-debug-log" = "Enables debug logs.",
+            .@"config-path" = "Specify the path to a configuration file specifying LSP behaviour.",
+            .config = "Run the ZLS configuration wizard.",
+        });
+        var info_it = cmd_infos.iterator();
+        while (info_it.next()) |entry| {
+            help_message = help_message ++ std.fmt.comptimePrint("  --{s}: {s}\n", .{ @tagName(entry.key), entry.value.* });
+        }
+        help_message = help_message ++ "\n";
+        break :help_message help_message;
+    };
+
+    var args_it = try std.process.ArgIterator.initWithAllocator(allocator);
+    defer args_it.deinit();
+    if (!args_it.skip()) @panic("Could not find self argument");
+
+    // Makes behavior of enabling debug more logging consistent regardless of argument order.
+    var specified = std.enums.EnumArray(ArgId, bool).initFill(false);
+    var config_path: ?[]const u8 = null;
+    errdefer if (config_path) |path| allocator.free(path);
+
+    const stderr = std.io.getStdErr().writer();
+
+    while (args_it.next()) |tok| {
+        if (!std.mem.startsWith(u8, tok, "--") or tok.len == 2) {
+            try stderr.print("{s}\n", .{help_message});
+            try stderr.print("Unexpected positional argument '{s}'.\n", .{tok});
+            return .exit;
+        }
+
+        const argname = tok["--".len..];
+        const id = arg_id_map.get(argname) orelse {
+            try stderr.print("{s}\n", .{help_message});
+            try stderr.print("Unrecognized argument '{s}'.\n", .{argname});
+            return .exit;
+        };
+
+        if (specified.get(id)) {
+            try stderr.print("{s}\n", .{help_message});
+            try stderr.print("Duplicate argument '{s}'.\n", .{argname});
+            return .exit;
+        }
+        specified.set(id, true);
+
+        switch (id) {
+            .help => {},
+            .version => {},
+            .@"enable-debug-log" => {},
+            .config => {},
+            .@"config-path" => {
+                const path = args_it.next() orelse {
+                    try stderr.print("Expected configuration file path after --config-path argument.\n", .{});
+                    return .exit;
+                };
+                config.config_path = try allocator.dupe(u8, path);
+            },
+        }
+    }
+
+    if (specified.get(.help)) {
+        try stderr.print("{s}\n", .{help_message});
+        return .exit;
+    }
+    if (specified.get(.version)) {
+        try std.io.getStdOut().writer().print("Data Version: {s}\n", .{@tagName(build_options.data_version)});
+        return .exit;
+    }
+    if (specified.get(.config)) {
+        try setup.wizard(allocator);
+        return .exit;
+    }
+    if (specified.get(.@"enable-debug-log")) {
+        actual_log_level = .debug;
+        logger.info("Enabled debug logging.\n", .{});
+    }
+    if (specified.get(.@"config-path")) {
+        std.debug.assert(config.config_path != null);
+    }
+
+    return .proceed;
+}
+
 const stack_frames = switch (zig_builtin.mode) {
     .Debug => 10,
     else => 0,
 };
 
-pub fn main() anyerror!void {
+pub fn main() !void {
     var gpa_state = std.heap.GeneralPurposeAllocator(.{ .stack_trace_frames = stack_frames }){};
     defer _ = gpa_state.deinit();
+    var tracy_state = if (tracy.enable_allocation) tracy.tracyAllocator(gpa_state.allocator()) else void{};
 
-    var allocator = gpa_state.allocator();
-    if (tracy.enable_allocation) {
-        allocator = tracy.tracyAllocator(allocator).allocator();
-    }
+    const allocator: std.mem.Allocator = if (tracy.enable_allocation) tracy_state.allocator() else gpa_state.allocator();
 
     var config = ConfigWithPath{
         .config = undefined,
@@ -102,32 +224,12 @@ pub fn main() anyerror!void {
     };
     defer if (config.config_path) |path| allocator.free(path);
 
-    // Check arguments.
-    var args_it = try std.process.ArgIterator.initWithAllocator(allocator);
-    defer args_it.deinit();
-    if (!args_it.skip()) @panic("Could not find self argument");
-
-    while (args_it.next()) |arg| {
-        // TODO add --help --version
-        if (std.mem.eql(u8, arg, "--debug-log")) {
-            actual_log_level = .debug;
-            std.debug.print("Enabled debug logging\n", .{});
-        } else if (std.mem.eql(u8, arg, "--config-path")) {
-            var path = args_it.next() orelse {
-                std.debug.print("Expected configuration file path after --config-path argument\n", .{});
-                std.os.exit(1);
-            };
-            config.config_path = try allocator.dupe(u8, path);
-        } else if (std.mem.eql(u8, arg, "config") or std.mem.eql(u8, arg, "configure")) {
-            try setup.wizard(allocator);
-            return;
-        } else {
-            std.debug.print("Unrecognized argument {s}\n", .{arg});
-            std.os.exit(1);
-        }
+    switch (try parseArgs(allocator, &config)) {
+        .proceed => {},
+        .exit => return,
     }
 
-    config = try getConfig(allocator, config);
+    config = try getConfig(allocator, config.config_path, true);
     if (config.config_path == null) {
         logger.info("No config file zls.json found.", .{});
     }

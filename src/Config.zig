@@ -32,8 +32,8 @@ warn_style: bool = false,
 /// Path to the build_runner.zig file.
 build_runner_path: ?[]const u8 = null,
 
-/// Path to a directory that will be used as cache when `zig run`ning the build runner
-build_runner_cache_path: ?[]const u8 = null,
+/// Path to the global cache directory
+global_cache_path: ?[]const u8 = null,
 
 /// Semantic token support
 enable_semantic_tokens: bool = true,
@@ -208,7 +208,7 @@ pub fn configChanged(config: *Config, allocator: std.mem.Allocator, builtin_crea
         break :blk try std.fs.path.resolve(allocator, &[_][]const u8{ exe_dir_path, "build_runner.zig" });
     };
 
-    config.build_runner_cache_path = if (config.build_runner_cache_path) |p|
+    config.global_cache_path = if (config.global_cache_path) |p|
         try allocator.dupe(u8, p)
     else blk: {
         const cache_dir_path = (try known_folders.getPath(allocator, .cache)) orelse {
