@@ -152,7 +152,7 @@ pub const TextDocument = struct {
 };
 
 pub const WorkspaceEdit = struct {
-    changes: ?std.StringHashMap([]TextEdit),
+    changes: ?std.StringHashMapUnmanaged([]TextEdit),
 
     pub fn jsonStringify(self: WorkspaceEdit, options: std.json.StringifyOptions, writer: anytype) @TypeOf(writer).Error!void {
         try writer.writeByte('{');

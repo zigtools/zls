@@ -65,18 +65,18 @@ pub fn main() !void {
     builder.resolveInstallPrefix(null, Builder.DirList{});
     try runBuild(builder);
 
-    var packages = std.ArrayList(BuildConfig.Pkg).init(allocator);
-    defer packages.deinit();
+    var packages = std.ArrayListUnmanaged(BuildConfig.Pkg){};
+    defer packages.deinit(allocator);
 
-    var include_dirs = std.ArrayList(BuildConfig.IncludeDir).init(allocator);
-    defer include_dirs.deinit();
+    var include_dirs = std.ArrayListUnmanaged(BuildConfig.IncludeDir){};
+    defer include_dirs.deinit(allocator);
 
     // TODO: We currently add packages from every LibExeObj step that the install step depends on.
     //       Should we error out or keep one step or something similar?
     // We also flatten them, we should probably keep the nested structure.
     for (builder.top_level_steps.items) |tls| {
         for (tls.step.dependencies.items) |step| {
-            try processStep(&packages, &include_dirs, step);
+            try processStep(allocator, &packages, &include_dirs, step);
         }
     }
 
@@ -91,29 +91,31 @@ pub fn main() !void {
 }
 
 fn processStep(
-    packages: *std.ArrayList(BuildConfig.Pkg),
-    include_dirs: *std.ArrayList(BuildConfig.IncludeDir),
+    allocator: std.mem.Allocator,
+    packages: *std.ArrayListUnmanaged(BuildConfig.Pkg),
+    include_dirs: *std.ArrayListUnmanaged(BuildConfig.IncludeDir),
     step: *std.build.Step,
 ) anyerror!void {
     if (step.cast(InstallArtifactStep)) |install_exe| {
-        try processIncludeDirs(include_dirs, install_exe.artifact.include_dirs.items);
+        try processIncludeDirs(allocator, include_dirs, install_exe.artifact.include_dirs.items);
         for (install_exe.artifact.packages.items) |pkg| {
-            try processPackage(packages, pkg);
+            try processPackage(allocator, packages, pkg);
         }
     } else if (step.cast(LibExeObjStep)) |exe| {
-        try processIncludeDirs(include_dirs, exe.include_dirs.items);
+        try processIncludeDirs(allocator, include_dirs, exe.include_dirs.items);
         for (exe.packages.items) |pkg| {
-            try processPackage(packages, pkg);
+            try processPackage(allocator, packages, pkg);
         }
     } else {
         for (step.dependencies.items) |unknown_step| {
-            try processStep(packages, include_dirs, unknown_step);
+            try processStep(allocator, packages, include_dirs, unknown_step);
         }
     }
 }
 
 fn processPackage(
-    packages: *std.ArrayList(BuildConfig.Pkg),
+    allocator: std.mem.Allocator,
+    packages: *std.ArrayListUnmanaged(BuildConfig.Pkg),
     pkg: std.build.Pkg,
 ) anyerror!void {
     for (packages.items) |package| {
@@ -127,20 +129,23 @@ fn processPackage(
     };
 
     if (maybe_path) |path| {
-        try packages.append(.{ .name = pkg.name, .path = path });
+        try packages.append(allocator, .{ .name = pkg.name, .path = path });
     }
 
     if (pkg.dependencies) |dependencies| {
         for (dependencies) |dep| {
-            try processPackage(packages, dep);
+            try processPackage(allocator, packages, dep);
         }
     }
 }
 
 fn processIncludeDirs(
-    include_dirs: *std.ArrayList(BuildConfig.IncludeDir),
+    allocator: std.mem.Allocator,
+    include_dirs: *std.ArrayListUnmanaged(BuildConfig.IncludeDir),
     dirs: []std.build.LibExeObjStep.IncludeDir,
 ) !void {
+    try include_dirs.ensureUnusedCapacity(allocator, dirs.len);
+
     outer: for (dirs) |dir| {
         const candidate: BuildConfig.IncludeDir = switch (dir) {
             .raw_path => |path| .{ .path = path, .system = false },
@@ -152,7 +157,7 @@ fn processIncludeDirs(
             if (std.mem.eql(u8, candidate.path, include_dir.path)) continue :outer;
         }
 
-        try include_dirs.append(candidate);
+        include_dirs.appendAssumeCapacity(candidate);
     }
 }
 

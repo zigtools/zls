@@ -538,14 +538,12 @@ pub fn getHandle(self: *DocumentStore, uri: []const u8) ?*Handle {
 }
 
 fn collectImportUris(self: *DocumentStore, handle: *Handle) ![]const []const u8 {
-    const collected_imports = try analysis.collectImports(self.allocator, handle.tree);
-
-    var imports = std.ArrayList([]const u8).fromOwnedSlice(self.allocator, collected_imports);
+    var imports = try analysis.collectImports(self.allocator, handle.tree);
     errdefer {
         for (imports.items) |imp| {
             self.allocator.free(imp);
         }
-        imports.deinit();
+        imports.deinit(self.allocator);
     }
 
     // Convert to URIs
@@ -559,7 +557,7 @@ fn collectImportUris(self: *DocumentStore, handle: *Handle) ![]const []const u8 
             _ = imports.swapRemove(i);
         }
     }
-    return imports.toOwnedSlice();
+    return imports.toOwnedSlice(self.allocator);
 }
 
 pub const CImportSource = struct {

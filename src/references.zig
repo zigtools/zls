@@ -393,7 +393,7 @@ fn symbolReferencesInternal(arena: *std.heap.ArenaAllocator, store: *DocumentSto
             try symbolReferencesInternal(arena, store, .{ .node = datas[node].lhs, .handle = handle }, decl, encoding, context, handler);
 
             const rhs_str = tree.tokenSlice(datas[node].rhs);
-            var bound_type_params = analysis.BoundTypeParams.init(arena.allocator());
+            var bound_type_params = analysis.BoundTypeParams{};
             const left_type = try analysis.resolveFieldAccessLhsType(
                 store,
                 arena,
@@ -481,7 +481,7 @@ pub fn symbolReferences(arena: *std.heap.ArenaAllocator, store: *DocumentStore, 
             try symbolReferencesInternal(arena, store, .{ .node = 0, .handle = curr_handle }, decl_handle, encoding, context, handler);
 
             if (workspace) {
-                var imports = std.ArrayList(*DocumentStore.Handle).init(arena.allocator());
+                var imports = std.ArrayListUnmanaged(*DocumentStore.Handle){};
 
                 var handle_it = store.handles.iterator();
                 while (handle_it.next()) |entry| {
@@ -491,7 +491,7 @@ pub fn symbolReferences(arena: *std.heap.ArenaAllocator, store: *DocumentStore, 
                     }
 
                     // Check entry's transitive imports
-                    try imports.append(entry.value_ptr.*);
+                    try imports.append(arena.allocator(), entry.value_ptr.*);
                     var i: usize = 0;
                     blk: while (i < imports.items.len) : (i += 1) {
                         const import = imports.items[i];
@@ -511,17 +511,17 @@ pub fn symbolReferences(arena: *std.heap.ArenaAllocator, store: *DocumentStore, 
                                         break :select;
                                     }
                                 }
-                                try imports.append(h);
+                                try imports.append(arena.allocator(), h);
                             }
                         }
                     }
-                    try imports.resize(0);
+                    try imports.resize(arena.allocator(), 0);
                 }
             }
         },
         .param_decl => |param| {
             // Rename the param tok.
-            const fn_node: Ast.full.FnProto = loop: for (curr_handle.document_scope.scopes) |scope| {
+            const fn_node: Ast.full.FnProto = loop: for (curr_handle.document_scope.scopes.items) |scope| {
                 switch (scope.data) {
                     .function => |proto| {
                         var buf: [1]Ast.Node.Index = undefined;

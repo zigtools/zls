@@ -23,16 +23,16 @@ pub fn fromPath(allocator: std.mem.Allocator, path: []const u8) ![]const u8 {
     if (path.len == 0) return "";
     const prefix = if (builtin.os.tag == .windows) "file:///" else "file://";
 
-    var buf = std.ArrayList(u8).init(allocator);
-    try buf.appendSlice(prefix);
+    var buf = std.ArrayListUnmanaged(u8){};
+    try buf.appendSlice(allocator, prefix);
 
     for (path) |char| {
         if (char == std.fs.path.sep) {
-            try buf.append('/');
+            try buf.append(allocator, '/');
         } else if (std.mem.indexOfScalar(u8, reserved_chars, char)) |reserved| {
-            try buf.appendSlice(&reserved_escapes[reserved]);
+            try buf.appendSlice(allocator, &reserved_escapes[reserved]);
         } else {
-            try buf.append(char);
+            try buf.append(allocator, char);
         }
     }
 
@@ -46,7 +46,7 @@ pub fn fromPath(allocator: std.mem.Allocator, path: []const u8) ![]const u8 {
         }
     }
 
-    return buf.toOwnedSlice();
+    return buf.toOwnedSlice(allocator);
 }
 
 /// Move along `rel` from `base` with a single allocation.

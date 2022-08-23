@@ -38,8 +38,8 @@ pub const Context = struct {
         params: []const u8,
         expect: ?[]const u8,
     ) !void {
-        var output = std.ArrayList(u8).init(allocator);
-        defer output.deinit();
+        var output = std.ArrayListUnmanaged(u8){};
+        defer output.deinit(allocator);
 
         // create the request
         self.request_id += 1;
@@ -49,7 +49,7 @@ pub const Context = struct {
         defer allocator.free(req);
 
         //  send the request to the server
-        try self.server.processJsonRpc(output.writer(), req);
+        try self.server.processJsonRpc(output.writer(allocator), req);
 
         // if we don't expect a response ignore it
         const expected = expect orelse return;

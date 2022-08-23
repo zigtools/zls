@@ -51,16 +51,18 @@ pub const TokenModifiers = packed struct {
 };
 
 const Builder = struct {
+    allocator: std.mem.Allocator,
     handle: *DocumentStore.Handle,
     previous_position: usize = 0,
     previous_token: ?Ast.TokenIndex = null,
-    arr: std.ArrayList(u32),
+    arr: std.ArrayListUnmanaged(u32),
     encoding: offsets.Encoding,
 
     fn init(allocator: std.mem.Allocator, handle: *DocumentStore.Handle, encoding: offsets.Encoding) Builder {
         return Builder{
+            .allocator = allocator,
             .handle = handle,
-            .arr = std.ArrayList(u32).init(allocator),
+            .arr = std.ArrayListUnmanaged(u32){},
             .encoding = encoding,
         };
     }
@@ -185,7 +187,7 @@ const Builder = struct {
             self.encoding,
         ) catch return;
 
-        try self.arr.appendSlice(&.{
+        try self.arr.appendSlice(self.allocator, &.{
             @truncate(u32, delta.line),
             @truncate(u32, delta.column),
             @truncate(u32, length),
@@ -196,7 +198,7 @@ const Builder = struct {
     }
 
     fn toOwnedSlice(self: *Builder) []u32 {
-        return self.arr.toOwnedSlice();
+        return self.arr.toOwnedSlice(self.allocator);
     }
 };
 
@@ -423,7 +425,7 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
                 if (child.decl.* == .param_decl) {
                     return try writeToken(builder, main_token, .parameter);
                 }
-                var bound_type_params = analysis.BoundTypeParams.init(arena.allocator());
+                var bound_type_params = analysis.BoundTypeParams{};
                 if (try child.resolveType(store, arena, &bound_type_params)) |decl_type| {
                     try colorIdentifierBasedOnType(builder, decl_type, main_token, .{});
                 } else {
@@ -859,7 +861,7 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
             // TODO This is basically exactly the same as what is done in analysis.resolveTypeOfNode, with the added
             //      writeToken code.
             // Maybe we can hook into it insead? Also applies to Identifier and VarDecl
-            var bound_type_params = analysis.BoundTypeParams.init(arena.allocator());
+            var bound_type_params = analysis.BoundTypeParams{};
             const lhs_type = try analysis.resolveFieldAccessLhsType(
                 store,
                 arena,
@@ -1008,7 +1010,7 @@ fn writeContainerField(builder: *Builder, arena: *std.heap.ArenaAllocator, store
 // TODO Range version, edit version.
 pub fn writeAllSemanticTokens(arena: *std.heap.ArenaAllocator, store: *DocumentStore, handle: *DocumentStore.Handle, encoding: offsets.Encoding) ![]u32 {
     var builder = Builder.init(arena.child_allocator, handle, encoding);
-    errdefer builder.arr.deinit();
+    errdefer builder.arr.deinit(arena.child_allocator);
 
     // reverse the ast from the root declarations
     var buf: [2]Ast.Node.Index = undefined;
