@@ -18,6 +18,7 @@ const Ast = std.zig.Ast;
 const tracy = @import("tracy.zig");
 const uri_utils = @import("uri.zig");
 const data = @import("data/data.zig");
+const diff = @import("diff.zig");
 
 // Server fields
 
@@ -2228,17 +2229,46 @@ fn formattingHandler(server: *Server, writer: anytype, id: types.RequestId, req:
             .Exited => |code| if (code == 0) {
                 if (std.mem.eql(u8, handle.document.text, stdout_bytes)) return try respondGeneric(writer, id, null_result_response);
 
-                return try send(writer, server.arena.allocator(), types.Response{
-                    .id = id,
-                    .result = .{
-                        .TextEdits = &[1]types.TextEdit{
-                            .{
-                                .range = try offsets.documentRange(handle.document, server.offset_encoding),
-                                .newText = stdout_bytes,
+                var edits = diff.edits(server.allocator, handle.document.text, stdout_bytes) catch {
+                    // If there was an error trying to diff the text, return the formatted response
+                    // as the new text for the entire range of the document
+                    return try send(writer, server.arena.allocator(), types.Response{
+                        .id = id,
+                        .result = .{
+                            .TextEdits = &[1]types.TextEdit{
+                                .{
+                                    .range = try offsets.documentRange(handle.document, server.offset_encoding),
+                                    .newText = stdout_bytes,
+                                },
                             },
                         },
+                    });
+                };
+                defer {
+                    for (edits.items) |item| item.newText.deinit();
+                    edits.deinit();
+                }
+
+                // Convert from `[]diff.Edit` to `[]types.TextEdit`
+                var text_edits = try std
+                    .ArrayList(types.TextEdit)
+                    .initCapacity(server.allocator, edits.items.len);
+                defer text_edits.deinit();
+                for (edits.items) |edit| {
+                    try text_edits.append(.{
+                        .range = edit.range,
+                        .newText = edit.newText.items,
+                    });
+                }
+
+                return try send(
+                    writer,
+                    server.arena.allocator(),
+                    types.Response{
+                        .id = id,
+                        .result = .{ .TextEdits = text_edits.items },
                     },
-                });
+                );
             },
             else => {},
         }
