@@ -79,7 +79,7 @@ fn convertCIncludeInternal(allocator: std.mem.Allocator, tree: Ast, node: Ast.No
                 try writer.print("#define {s} {s}\n", .{ first, second });
             }
         } else if (std.mem.eql(u8, call_name, "@cUndef")) {
-            try writer.print("#undefine {s}\n", .{first});
+            try writer.print("#undef {s}\n", .{first});
         } else {
             return error.Unsupported;
         }
