@@ -34,13 +34,19 @@ pub fn convertCInclude(allocator: std.mem.Allocator, tree: Ast, node: Ast.Node.I
 
     var buffer: [2]Ast.Node.Index = undefined;
     for (ast.builtinCallParams(tree, node, &buffer).?) |child| {
-        try convertCIncludeInternal(stack_allocator.get(), tree, child, &output);
+        try convertCIncludeInternal(allocator, stack_allocator.get(), tree, child, &output);
     }
 
     return output.toOwnedSlice(allocator);
 }
 
-fn convertCIncludeInternal(allocator: std.mem.Allocator, tree: Ast, node: Ast.Node.Index, output: *std.ArrayListUnmanaged(u8)) error{ OutOfMemory, Unsupported }!void {
+fn convertCIncludeInternal(
+    allocator: std.mem.Allocator,
+    stack_allocator: std.mem.Allocator,
+    tree: Ast,
+    node: Ast.Node.Index,
+    output: *std.ArrayListUnmanaged(u8),
+) error{ OutOfMemory, Unsupported }!void {
     const node_tags = tree.nodes.items(.tag);
     const main_tokens = tree.nodes.items(.main_token);
 
@@ -49,11 +55,11 @@ fn convertCIncludeInternal(allocator: std.mem.Allocator, tree: Ast, node: Ast.No
     var buffer: [2]Ast.Node.Index = undefined;
     if (ast.isBlock(tree, node)) {
         const FrameSize = @sizeOf(@Frame(convertCIncludeInternal));
-        var child_frame = try allocator.alignedAlloc(u8, std.Target.stack_align, FrameSize);
-        defer allocator.free(child_frame);
+        var child_frame = try stack_allocator.alignedAlloc(u8, std.Target.stack_align, FrameSize);
+        defer stack_allocator.free(child_frame);
 
         for (ast.blockStatements(tree, node, &buffer).?) |statement| {
-            try await @asyncCall(child_frame, {}, convertCIncludeInternal, .{ allocator, tree, statement, output });
+            try await @asyncCall(child_frame, {}, convertCIncludeInternal, .{ allocator, stack_allocator, tree, statement, output });
         }
     } else if (ast.builtinCallParams(tree, node, &buffer)) |params| {
         if (params.len < 1) return;
