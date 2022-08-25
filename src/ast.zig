@@ -1119,3 +1119,99 @@ pub fn blockStatements(tree: Ast, node: Ast.Node.Index, buf: *[2]Ast.Node.Index)
         else => return null,
     };
 }
+
+/// Iterates over FnProto Params w/ added bounds check to support incomplete ast nodes
+pub fn nextFnParam(it: *Ast.full.FnProto.Iterator) ?Ast.full.FnProto.Param {
+    const token_tags = it.tree.tokens.items(.tag);
+    while (true) {
+        var first_doc_comment: ?Ast.TokenIndex = null;
+        var comptime_noalias: ?Ast.TokenIndex = null;
+        var name_token: ?Ast.TokenIndex = null;
+        if (!it.tok_flag) {
+            if (it.param_i >= it.fn_proto.ast.params.len) {
+                return null;
+            }
+            const param_type = it.fn_proto.ast.params[it.param_i];
+            var tok_i = it.tree.firstToken(param_type) - 1;
+            while (true) : (tok_i -= 1) switch (token_tags[tok_i]) {
+                .colon => continue,
+                .identifier => name_token = tok_i,
+                .doc_comment => first_doc_comment = tok_i,
+                .keyword_comptime, .keyword_noalias => comptime_noalias = tok_i,
+                else => break
+            };
+            it.param_i += 1;
+            it.tok_i = it.tree.lastToken(param_type) + 1;
+
+            // #boundsCheck
+            // https://github.com/zigtools/zls/issues/567
+            if (it.tree.lastToken(param_type) >= it.tree.tokens.len - 1)
+                return Ast.full.FnProto.Param{
+                    .first_doc_comment = first_doc_comment,
+                    .comptime_noalias = comptime_noalias,
+                    .name_token = name_token,
+                    .anytype_ellipsis3 = null,
+                    .type_expr = 0,
+                };
+
+            // Look for anytype and ... params afterwards.
+            if (token_tags[it.tok_i] == .comma) {
+                it.tok_i += 1;
+            }
+            it.tok_flag = true;
+            return Ast.full.FnProto.Param{
+                .first_doc_comment = first_doc_comment,
+                .comptime_noalias = comptime_noalias,
+                .name_token = name_token,
+                .anytype_ellipsis3 = null,
+                .type_expr = param_type,
+            };
+        }
+        if (token_tags[it.tok_i] == .comma) {
+            it.tok_i += 1;
+        }
+        if (token_tags[it.tok_i] == .r_paren) {
+            return null;
+        }
+        if (token_tags[it.tok_i] == .doc_comment) {
+            first_doc_comment = it.tok_i;
+            while (token_tags[it.tok_i] == .doc_comment) {
+                it.tok_i += 1;
+            }
+        }
+        switch (token_tags[it.tok_i]) {
+            .ellipsis3 => {
+                it.tok_flag = false; // Next iteration should return null.
+                return Ast.full.FnProto.Param{
+                    .first_doc_comment = first_doc_comment,
+                    .comptime_noalias = null,
+                    .name_token = null,
+                    .anytype_ellipsis3 = it.tok_i,
+                    .type_expr = 0,
+                };
+            },
+            .keyword_noalias, .keyword_comptime => {
+                comptime_noalias = it.tok_i;
+                it.tok_i += 1;
+            },
+            else => {},
+        }
+        if (token_tags[it.tok_i] == .identifier and
+            token_tags[it.tok_i + 1] == .colon)
+        {
+            name_token = it.tok_i;
+            it.tok_i += 2;
+        }
+        if (token_tags[it.tok_i] == .keyword_anytype) {
+            it.tok_i += 1;
+            return Ast.full.FnProto.Param{
+                .first_doc_comment = first_doc_comment,
+                .comptime_noalias = comptime_noalias,
+                .name_token = name_token,
+                .anytype_ellipsis3 = it.tok_i - 1,
+                .type_expr = 0,
+            };
+        }
+        it.tok_flag = false;
+    }
+}

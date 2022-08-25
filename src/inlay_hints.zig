@@ -106,10 +106,10 @@ fn writeCallHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *Doc
                 var it = fn_proto.iterate(&decl_tree);
 
                 if (try analysis.hasSelfParam(arena, store, decl_handle.handle, fn_proto)) {
-                    _ = it.next();
+                    _ = ast.nextFnParam(&it);
                 }
 
-                while (it.next()) |param| : (i += 1) {
+                while (ast.nextFnParam(&it)) |param| : (i += 1) {
                     if (param.name_token == null) continue;
                     if (i >= call.ast.params.len) break;
 
@@ -577,7 +577,7 @@ fn writeNodeInlayHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store:
             const fn_proto: Ast.full.FnProto = ast.fnProto(tree, node, &buffer).?;
 
             var it = fn_proto.iterate(&tree);
-            while (it.next()) |param_decl| {
+            while (ast.nextFnParam(&it)) |param_decl| {
                 try await @asyncCall(child_frame, {}, writeNodeInlayHint, .{ builder, arena, store, param_decl.type_expr, range });
             }
 
