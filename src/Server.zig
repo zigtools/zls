@@ -324,13 +324,13 @@ fn publishDiagnostics(server: *Server, writer: anytype, handle: DocumentStore.Ha
                 const import_str_token = tree.nodes.items(.main_token)[params[0]];
                 const import_str = tree.tokenSlice(import_str_token);
 
-                if (std.mem.startsWith(u8, import_str, "\".")) {
+                if (std.mem.startsWith(u8, import_str, "\"./")) {
                     try diagnostics.append(allocator, .{
                         .range = astLocationToRange(tree.tokenLocation(0, import_str_token)),
                         .severity = .Hint,
-                        .code = "useless_dot",
+                        .code = "dot_slash_import",
                         .source = "zls",
-                        .message = "A . or ./ is not needed in imports",
+                        .message = "A ./ is not needed in imports",
                     });
                 }
             }
