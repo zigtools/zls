@@ -9,5 +9,6 @@ test {
     _ = @import("lsp_features/semantic_tokens.zig");
     _ = @import("lsp_features/inlay_hints.zig");
 
-    // TODO Language features
+    // Language features
+    _ = @import("language_features/cimport.zig");
 }
