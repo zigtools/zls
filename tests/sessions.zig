@@ -3,21 +3,6 @@ const Context = @import("context.zig").Context;
 
 const allocator = std.testing.allocator;
 
-test "Open file, ask for semantic tokens" {
-    var ctx = try Context.init();
-    defer ctx.deinit();
-
-    try ctx.request("textDocument/didOpen",
-        \\{"textDocument":{"uri":"file:///test.zig","languageId":"zig","version":420,"text":"const std = @import(\"std\");"}}
-    , null);
-
-    try ctx.request("textDocument/semanticTokens/full",
-        \\{"textDocument":{"uri":"file:///test.zig"}}
-    ,
-        \\{"data":[0,0,5,7,0,0,6,3,0,33,0,4,1,11,0,0,2,7,12,0,0,8,5,9,0]}
-    );
-}
-
 test "Request completion in an empty file" {
     var ctx = try Context.init();
     defer ctx.deinit();

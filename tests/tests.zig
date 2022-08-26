@@ -5,7 +5,8 @@ test {
 
     // TODO Document Synchronization
 
-    // TODO LSP features
+    // LSP features
+    _ = @import("lsp_features/semantic_tokens.zig");
 
     // TODO Language features
 }
