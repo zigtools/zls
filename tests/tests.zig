@@ -1,4 +1,4 @@
-test {
+comptime {
     _ = @import("sessions.zig");
 
     // TODO Lifecycle Messages
