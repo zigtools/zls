@@ -82,11 +82,12 @@ pub fn build(b: *std.build.Builder) !void {
     unit_tests.setTarget(target);
     test_step.dependOn(&unit_tests.step);
 
-    var session_tests = b.addTest("tests/sessions.zig");
-    session_tests.use_stage1 = true;
-    session_tests.addPackage(.{ .name = "header", .source = .{ .path = "src/header.zig" } });
-    session_tests.addPackage(.{ .name = "server", .source = .{ .path = "src/Server.zig" }, .dependencies = exe.packages.items });
-    session_tests.setBuildMode(.Debug);
-    session_tests.setTarget(target);
-    test_step.dependOn(&session_tests.step);
+    var tests = b.addTest("tests/tests.zig");
+    tests.use_stage1 = true;
+    tests.addPackage(.{ .name = "zls", .source = .{ .path = "src/zls.zig" }, .dependencies = exe.packages.items });
+    tests.addPackage(.{ .name = "helper", .source = .{ .path = "tests/helper.zig" } });
+    tests.addPackage(.{ .name = "context", .source = .{ .path = "tests/context.zig" } });
+    tests.setBuildMode(.Debug);
+    tests.setTarget(target);
+    test_step.dependOn(&tests.step);
 }
