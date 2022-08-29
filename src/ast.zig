@@ -1037,6 +1037,18 @@ pub fn isBlock(tree: Ast, node: Ast.Node.Index) bool {
     };
 }
 
+pub fn fnProtoHasBody(tree: Ast, node: Ast.Node.Index) ?bool {
+    return switch (tree.nodes.items(.tag)[node]) {
+        .fn_proto,
+        .fn_proto_multi,
+        .fn_proto_one,
+        .fn_proto_simple,
+        => false,
+        .fn_decl => true,
+        else => null,
+    };
+}
+
 pub fn fnProto(tree: Ast, node: Ast.Node.Index, buf: *[1]Ast.Node.Index) ?Ast.full.FnProto {
     return switch (tree.nodes.items(.tag)[node]) {
         .fn_proto => tree.fnProto(node),

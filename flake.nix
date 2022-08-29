@@ -2,7 +2,7 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
 
-    zig-overlay.url = "github:arqv/zig-overlay";
+    zig-overlay.url = "github:mitchellh/zig-overlay";
     zig-overlay.inputs.nixpkgs.follows = "nixpkgs";
 
     gitignore.url = "github:hercules-ci/gitignore.nix";
@@ -21,7 +21,7 @@
     in flake-utils.lib.eachSystem systems (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
-        zig = zig-overlay.packages.${system}.master.latest;
+        zig = zig-overlay.packages.${system}.master;
       in rec {
         packages.default = packages.zls;
         packages.zls = pkgs.stdenvNoCC.mkDerivation {

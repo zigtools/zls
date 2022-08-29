@@ -282,7 +282,7 @@ pub const Configuration = struct {
             zig_exe_path: ?[]const u8,
             warn_style: ?bool,
             build_runner_path: ?[]const u8,
-            build_runner_cache_path: ?[]const u8,
+            global_cache_path: ?[]const u8,
             enable_semantic_tokens: ?bool,
             enable_inlay_hints: ?bool,
             inlay_hints_show_builtin: ?bool,

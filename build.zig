@@ -7,6 +7,7 @@ pub fn build(b: *std.build.Builder) !void {
 
     const mode = b.standardReleaseOptions();
     const exe = b.addExecutable("zls", "src/main.zig");
+    exe.use_stage1 = true;
     const exe_options = b.addOptions();
     exe.addOptions("build_options", exe_options);
 
@@ -76,14 +77,17 @@ pub fn build(b: *std.build.Builder) !void {
     test_step.dependOn(b.getInstallStep());
 
     var unit_tests = b.addTest("src/unit_tests.zig");
+    unit_tests.use_stage1 = true;
     unit_tests.setBuildMode(.Debug);
     unit_tests.setTarget(target);
     test_step.dependOn(&unit_tests.step);
 
-    var session_tests = b.addTest("tests/sessions.zig");
-    session_tests.addPackage(.{ .name = "header", .source = .{ .path = "src/header.zig" } });
-    session_tests.addPackage(.{ .name = "server", .source = .{ .path = "src/Server.zig" }, .dependencies = exe.packages.items });
-    session_tests.setBuildMode(.Debug);
-    session_tests.setTarget(target);
-    test_step.dependOn(&session_tests.step);
+    var tests = b.addTest("tests/tests.zig");
+    tests.use_stage1 = true;
+    tests.addPackage(.{ .name = "zls", .source = .{ .path = "src/zls.zig" }, .dependencies = exe.packages.items });
+    tests.addPackage(.{ .name = "helper", .source = .{ .path = "tests/helper.zig" } });
+    tests.addPackage(.{ .name = "context", .source = .{ .path = "tests/context.zig" } });
+    tests.setBuildMode(.Debug);
+    tests.setTarget(target);
+    test_step.dependOn(&tests.step);
 }

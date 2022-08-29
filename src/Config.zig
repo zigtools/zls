@@ -32,8 +32,8 @@ warn_style: bool = false,
 /// Path to the build_runner.zig file.
 build_runner_path: ?[]const u8 = null,
 
-/// Path to a directory that will be used as cache when `zig run`ning the build runner
-build_runner_cache_path: ?[]const u8 = null,
+/// Path to the global cache directory
+global_cache_path: ?[]const u8 = null,
 
 /// Semantic token support
 enable_semantic_tokens: bool = true,
@@ -205,22 +205,18 @@ pub fn configChanged(config: *Config, allocator: std.mem.Allocator, builtin_crea
         config.builtin_path = try std.fs.path.join(allocator, &.{ builtin_creation_dir.?, "builtin.zig" });
     }
 
-    config.build_runner_path = if (config.build_runner_path) |p|
-        try allocator.dupe(u8, p)
-    else blk: {
+    if (null == config.build_runner_path) {
         var exe_dir_bytes: [std.fs.MAX_PATH_BYTES]u8 = undefined;
         const exe_dir_path = try std.fs.selfExeDirPath(&exe_dir_bytes);
-        break :blk try std.fs.path.resolve(allocator, &[_][]const u8{ exe_dir_path, "build_runner.zig" });
-    };
+        config.build_runner_path = try std.fs.path.resolve(allocator, &[_][]const u8{ exe_dir_path, "build_runner.zig" });
+    }
 
-    config.build_runner_cache_path = if (config.build_runner_cache_path) |p|
-        try allocator.dupe(u8, p)
-    else blk: {
+    if (null == config.global_cache_path) {
         const cache_dir_path = (try known_folders.getPath(allocator, .cache)) orelse {
             logger.warn("Known-folders could not fetch the cache path", .{});
             return;
         };
         defer allocator.free(cache_dir_path);
-        break :blk try std.fs.path.resolve(allocator, &[_][]const u8{ cache_dir_path, "zls" });
-    };
+        config.global_cache_path = try std.fs.path.resolve(allocator, &[_][]const u8{ cache_dir_path, "zls" });
+    }
 }

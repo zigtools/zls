@@ -32,8 +32,7 @@ fn loop(server: *Server) !void {
 
         try reader.readNoEof(buffer);
 
-        var writer = std.io.getStdOut().writer();
-
+        const writer = std.io.getStdOut().writer();
         try server.processJsonRpc(writer, buffer);
     }
 }
@@ -212,7 +211,7 @@ const stack_frames = switch (zig_builtin.mode) {
     else => 0,
 };
 
-pub fn main() anyerror!void {
+pub fn main() !void {
     var gpa_state = std.heap.GeneralPurposeAllocator(.{ .stack_trace_frames = stack_frames }){};
     defer _ = gpa_state.deinit();
     var tracy_state = if (tracy.enable_allocation) tracy.tracyAllocator(gpa_state.allocator()) else void{};

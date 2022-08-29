@@ -18,6 +18,7 @@ const Ast = std.zig.Ast;
 const tracy = @import("tracy.zig");
 const uri_utils = @import("uri.zig");
 const data = @import("data/data.zig");
+const diff = @import("diff.zig");
 
 // Server fields
 
@@ -130,10 +131,10 @@ fn send(writer: anytype, allocator: std.mem.Allocator, reqOrRes: anytype) !void 
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    var arr = std.ArrayList(u8).init(allocator);
-    defer arr.deinit();
+    var arr = std.ArrayListUnmanaged(u8){};
+    defer arr.deinit(allocator);
 
-    try std.json.stringify(reqOrRes, .{}, arr.writer());
+    try std.json.stringify(reqOrRes, .{}, arr.writer(allocator));
 
     try writer.print("Content-Length: {}\r\n\r\n", .{arr.items.len});
     try writer.writeAll(arr.items);
@@ -216,7 +217,8 @@ fn publishDiagnostics(server: *Server, writer: anytype, handle: DocumentStore.Ha
 
     const tree = handle.tree;
 
-    var diagnostics = std.ArrayList(types.Diagnostic).init(server.arena.allocator());
+    var allocator = server.arena.allocator();
+    var diagnostics = std.ArrayListUnmanaged(types.Diagnostic){};
 
     for (tree.errors) |err| {
         const loc = tree.tokenLocation(0, err.token);
@@ -225,7 +227,7 @@ fn publishDiagnostics(server: *Server, writer: anytype, handle: DocumentStore.Ha
         var fbs = std.io.fixedBufferStream(&mem_buffer);
         try tree.renderError(err, fbs.writer());
 
-        try diagnostics.append(.{
+        try diagnostics.append(allocator, .{
             .range = astLocationToRange(loc),
             .severity = .Error,
             .code = @tagName(err.tag),
@@ -236,14 +238,10 @@ fn publishDiagnostics(server: *Server, writer: anytype, handle: DocumentStore.Ha
     }
 
     if (server.config.enable_unused_variable_warnings) {
-        scopes: for (handle.document_scope.scopes) |scope| {
+        scopes: for (handle.document_scope.scopes.items) |scope| {
             const scope_data = switch (scope.data) {
                 .function => |f| b: {
-                    var buf: [1]std.zig.Ast.Node.Index = undefined;
-                    var proto = ast.fnProto(tree, f, &buf) orelse break :b f;
-                    if (proto.extern_export_inline_token) |tok| {
-                        if (std.mem.eql(u8, tree.tokenSlice(tok), "extern")) continue :scopes;
-                    }
+                    if (!ast.fnProtoHasBody(tree, f).?) continue :scopes;
                     break :b f;
                 },
                 .block => |b| b,
@@ -254,7 +252,7 @@ fn publishDiagnostics(server: *Server, writer: anytype, handle: DocumentStore.Ha
             while (decl_iterator.next()) |decl| {
                 var identifier_count: usize = 0;
 
-                var name_token_index = switch (decl.value_ptr.*) {
+                const name_token_index = switch (decl.value_ptr.*) {
                     .ast_node => |an| s: {
                         const an_tag = tree.nodes.items(.tag)[an];
                         switch (an_tag) {
@@ -274,12 +272,31 @@ fn publishDiagnostics(server: *Server, writer: anytype, handle: DocumentStore.Ha
                 const pit_start = tree.firstToken(scope_data);
                 const pit_end = ast.lastToken(tree, scope_data);
 
-                for (tree.tokens.items(.tag)[pit_start..pit_end]) |tag, index| {
-                    if (tag == .identifier and std.mem.eql(u8, tree.tokenSlice(pit_start + @intCast(u32, index)), tree.tokenSlice(name_token_index))) identifier_count += 1;
+                const tags = tree.tokens.items(.tag)[pit_start..pit_end];
+                for (tags) |tag, index| {
+                    if (tag != .identifier) continue;
+                    if (!std.mem.eql(u8, tree.tokenSlice(pit_start + @intCast(u32, index)), tree.tokenSlice(name_token_index))) continue;
+                    if (index -| 1 > 0 and tags[index - 1] == .period) continue;
+                    if (index +| 2 < tags.len and tags[index + 1] == .colon) switch (tags[index + 2]) {
+                        .l_brace,
+                        .keyword_inline,
+                        .keyword_while,
+                        .keyword_for,
+                        .keyword_switch,
+                        => continue,
+                        else => {},
+                    };
+                    if (index -| 2 > 0 and tags[index - 1] == .colon) switch (tags[index - 2]) {
+                        .keyword_break,
+                        .keyword_continue,
+                        => continue,
+                        else => {},
+                    };
+                    identifier_count += 1;
                 }
 
                 if (identifier_count <= 1)
-                    try diagnostics.append(.{
+                    try diagnostics.append(allocator, .{
                         .range = astLocationToRange(tree.tokenLocation(0, name_token_index)),
                         .severity = .Error,
                         .code = "unused_variable",
@@ -307,13 +324,13 @@ fn publishDiagnostics(server: *Server, writer: anytype, handle: DocumentStore.Ha
                 const import_str_token = tree.nodes.items(.main_token)[params[0]];
                 const import_str = tree.tokenSlice(import_str_token);
 
-                if (std.mem.startsWith(u8, import_str, "\".")) {
-                    try diagnostics.append(.{
+                if (std.mem.startsWith(u8, import_str, "\"./")) {
+                    try diagnostics.append(allocator, .{
                         .range = astLocationToRange(tree.tokenLocation(0, import_str_token)),
                         .severity = .Hint,
-                        .code = "useless_dot",
+                        .code = "dot_slash_import",
                         .source = "zls",
-                        .message = "A . or ./ is not needed in imports",
+                        .message = "A ./ is not needed in imports",
                     });
                 }
             }
@@ -341,7 +358,7 @@ fn publishDiagnostics(server: *Server, writer: anytype, handle: DocumentStore.Ha
 
                             const func_name = tree.tokenSlice(name_token);
                             if (!is_type_function and !analysis.isCamelCase(func_name)) {
-                                try diagnostics.append(.{
+                                try diagnostics.append(allocator, .{
                                     .range = astLocationToRange(loc),
                                     .severity = .Hint,
                                     .code = "bad_style",
@@ -349,7 +366,7 @@ fn publishDiagnostics(server: *Server, writer: anytype, handle: DocumentStore.Ha
                                     .message = "Functions should be camelCase",
                                 });
                             } else if (is_type_function and !analysis.isPascalCase(func_name)) {
-                                try diagnostics.append(.{
+                                try diagnostics.append(allocator, .{
                                     .range = astLocationToRange(loc),
                                     .severity = .Hint,
                                     .code = "bad_style",
@@ -378,10 +395,12 @@ fn publishDiagnostics(server: *Server, writer: anytype, handle: DocumentStore.Ha
 
 fn typeToCompletion(
     server: *Server,
-    list: *std.ArrayList(types.CompletionItem),
+    list: *std.ArrayListUnmanaged(types.CompletionItem),
     field_access: analysis.FieldAccessReturn,
     orig_handle: *DocumentStore.Handle,
 ) error{OutOfMemory}!void {
+    var allocator = server.arena.allocator();
+
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -389,14 +408,14 @@ fn typeToCompletion(
     switch (type_handle.type.data) {
         .slice => {
             if (!type_handle.type.is_type_val) {
-                try list.append(.{
+                try list.append(allocator, .{
                     .label = "len",
                     .detail = "const len: usize",
                     .kind = .Field,
                     .insertText = "len",
                     .insertTextFormat = .PlainText,
                 });
-                try list.append(.{
+                try list.append(allocator, .{
                     .label = "ptr",
                     .kind = .Field,
                     .insertText = "ptr",
@@ -407,7 +426,7 @@ fn typeToCompletion(
         .error_union => {},
         .pointer => |n| {
             if (server.config.operator_completions) {
-                try list.append(.{
+                try list.append(allocator, .{
                     .label = "*",
                     .kind = .Operator,
                     .insertText = "*",
@@ -437,7 +456,7 @@ fn typeToCompletion(
 
 fn nodeToCompletion(
     server: *Server,
-    list: *std.ArrayList(types.CompletionItem),
+    list: *std.ArrayListUnmanaged(types.CompletionItem),
     node_handle: analysis.NodeWithHandle,
     unwrapped: ?analysis.TypeWithHandle,
     orig_handle: *DocumentStore.Handle,
@@ -446,6 +465,8 @@ fn nodeToCompletion(
 ) error{OutOfMemory}!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
+
+    var allocator = server.arena.allocator();
 
     const node = node_handle.node;
     const handle = node_handle.handle;
@@ -459,7 +480,7 @@ fn nodeToCompletion(
         .PlainText;
 
     const doc = if (try analysis.getDocComments(
-        list.allocator,
+        allocator,
         handle.tree,
         node,
         doc_kind,
@@ -510,7 +531,7 @@ fn nodeToCompletion(
 
                 const is_type_function = analysis.isTypeFunction(handle.tree, func);
 
-                try list.append(.{
+                try list.append(allocator, .{
                     .label = handle.tree.tokenSlice(name_token),
                     .kind = if (is_type_function) .Struct else .Function,
                     .documentation = doc,
@@ -537,7 +558,7 @@ fn nodeToCompletion(
                 return try declToCompletion(context, result);
             }
 
-            try list.append(.{
+            try list.append(allocator, .{
                 .label = handle.tree.tokenSlice(var_decl.ast.mut_token + 1),
                 .kind = if (is_const) .Constant else .Variable,
                 .documentation = doc,
@@ -551,7 +572,7 @@ fn nodeToCompletion(
         .container_field_init,
         => {
             const field = ast.containerField(tree, node).?;
-            try list.append(.{
+            try list.append(allocator, .{
                 .label = handle.tree.tokenSlice(field.ast.name_token),
                 .kind = .Field,
                 .documentation = doc,
@@ -563,7 +584,7 @@ fn nodeToCompletion(
         .array_type,
         .array_type_sentinel,
         => {
-            try list.append(.{
+            try list.append(allocator, .{
                 .label = "len",
                 .detail = "const len: usize",
                 .kind = .Field,
@@ -580,7 +601,7 @@ fn nodeToCompletion(
 
             switch (ptr_type.size) {
                 .One, .C, .Many => if (server.config.operator_completions) {
-                    try list.append(.{
+                    try list.append(allocator, .{
                         .label = "*",
                         .kind = .Operator,
                         .insertText = "*",
@@ -588,13 +609,13 @@ fn nodeToCompletion(
                     });
                 },
                 .Slice => {
-                    try list.append(.{
+                    try list.append(allocator, .{
                         .label = "ptr",
                         .kind = .Field,
                         .insertText = "ptr",
                         .insertTextFormat = .PlainText,
                     });
-                    try list.append(.{
+                    try list.append(allocator, .{
                         .label = "len",
                         .detail = "const len: usize",
                         .kind = .Field,
@@ -612,7 +633,7 @@ fn nodeToCompletion(
         },
         .optional_type => {
             if (server.config.operator_completions) {
-                try list.append(.{
+                try list.append(allocator, .{
                     .label = "?",
                     .kind = .Operator,
                     .insertText = "?",
@@ -622,7 +643,7 @@ fn nodeToCompletion(
             return;
         },
         .string_literal => {
-            try list.append(.{
+            try list.append(allocator, .{
                 .label = "len",
                 .detail = "const len: usize",
                 .kind = .Field,
@@ -631,7 +652,7 @@ fn nodeToCompletion(
             });
         },
         else => if (analysis.nodeToString(tree, node)) |string| {
-            try list.append(.{
+            try list.append(allocator, .{
                 .label = string,
                 .kind = .Field,
                 .documentation = doc,
@@ -771,7 +792,7 @@ fn hoverSymbol(
         .label_decl => |label_decl| tree.tokenSlice(label_decl),
     };
 
-    var bound_type_params = analysis.BoundTypeParams.init(server.arena.allocator());
+    var bound_type_params = analysis.BoundTypeParams{};
     const resolved_type = try decl_handle.resolveType(&server.document_store, &server.arena, &bound_type_params);
 
     const resolved_type_str = if (resolved_type) |rt|
@@ -1051,7 +1072,7 @@ fn renameDefinitionGlobal(
     const decl = (try server.getSymbolGlobal(pos_index, handle)) orelse return try respondGeneric(writer, id, null_result_response);
 
     var workspace_edit = types.WorkspaceEdit{
-        .changes = std.StringHashMap([]types.TextEdit).init(server.arena.allocator()),
+        .changes = std.StringHashMapUnmanaged([]types.TextEdit){},
     };
     try rename.renameSymbol(&server.arena, &server.document_store, decl, new_name, &workspace_edit.changes.?, server.offset_encoding);
     try send(writer, server.arena.allocator(), types.Response{
@@ -1075,7 +1096,7 @@ fn renameDefinitionFieldAccess(
     const decl = (try server.getSymbolFieldAccess(handle, position, range)) orelse return try respondGeneric(writer, id, null_result_response);
 
     var workspace_edit = types.WorkspaceEdit{
-        .changes = std.StringHashMap([]types.TextEdit).init(server.arena.allocator()),
+        .changes = std.StringHashMapUnmanaged([]types.TextEdit){},
     };
     try rename.renameSymbol(&server.arena, &server.document_store, decl, new_name, &workspace_edit.changes.?, server.offset_encoding);
     try send(writer, server.arena.allocator(), types.Response{
@@ -1098,7 +1119,7 @@ fn renameDefinitionLabel(
     const decl = (try getLabelGlobal(pos_index, handle)) orelse return try respondGeneric(writer, id, null_result_response);
 
     var workspace_edit = types.WorkspaceEdit{
-        .changes = std.StringHashMap([]types.TextEdit).init(server.arena.allocator()),
+        .changes = std.StringHashMapUnmanaged([]types.TextEdit){},
     };
     try rename.renameLabel(&server.arena, decl, new_name, &workspace_edit.changes.?, server.offset_encoding);
     try send(writer, server.arena.allocator(), types.Response{
@@ -1134,7 +1155,8 @@ fn referencesDefinitionGlobal(
     );
 
     const result: types.ResponseParams = if (highlight) result: {
-        var highlights = try std.ArrayList(types.DocumentHighlight).initCapacity(server.arena.allocator(), locs.items.len);
+        var highlights = std.ArrayListUnmanaged(types.DocumentHighlight){};
+        try highlights.ensureTotalCapacity(server.arena.allocator(), locs.items.len);
         const uri = handle.uri();
         for (locs.items) |loc| {
             if (std.mem.eql(u8, loc.uri, uri)) {
@@ -1166,8 +1188,10 @@ fn referencesDefinitionFieldAccess(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
+    var allocator = server.arena.allocator();
+
     const decl = (try server.getSymbolFieldAccess(handle, position, range)) orelse return try respondGeneric(writer, id, null_result_response);
-    var locs = std.ArrayList(types.Location).init(server.arena.allocator());
+    var locs = std.ArrayList(types.Location).init(allocator);
     try references.symbolReferences(
         &server.arena,
         &server.document_store,
@@ -1180,7 +1204,8 @@ fn referencesDefinitionFieldAccess(
         !highlight,
     );
     const result: types.ResponseParams = if (highlight) result: {
-        var highlights = try std.ArrayList(types.DocumentHighlight).initCapacity(server.arena.allocator(), locs.items.len);
+        var highlights = std.ArrayListUnmanaged(types.DocumentHighlight){};
+        try highlights.ensureTotalCapacity(allocator, locs.items.len);
         const uri = handle.uri();
         for (locs.items) |loc| {
             if (std.mem.eql(u8, loc.uri, uri)) {
@@ -1192,7 +1217,7 @@ fn referencesDefinitionFieldAccess(
         }
         break :result .{ .DocumentHighlight = highlights.items };
     } else .{ .Locations = locs.items };
-    try send(writer, server.arena.allocator(), types.Response{
+    try send(writer, allocator, types.Response{
         .id = id,
         .result = result,
     });
@@ -1210,11 +1235,14 @@ fn referencesDefinitionLabel(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
+    var allocator = server.arena.allocator();
+
     const decl = (try getLabelGlobal(pos_index, handle)) orelse return try respondGeneric(writer, id, null_result_response);
-    var locs = std.ArrayList(types.Location).init(server.arena.allocator());
+    var locs = std.ArrayList(types.Location).init(allocator);
     try references.labelReferences(&server.arena, decl, server.offset_encoding, include_decl, &locs, std.ArrayList(types.Location).append);
     const result: types.ResponseParams = if (highlight) result: {
-        var highlights = try std.ArrayList(types.DocumentHighlight).initCapacity(server.arena.allocator(), locs.items.len);
+        var highlights = std.ArrayListUnmanaged(types.DocumentHighlight){};
+        try highlights.ensureTotalCapacity(allocator, locs.items.len);
         const uri = handle.uri();
         for (locs.items) |loc| {
             if (std.mem.eql(u8, loc.uri, uri)) {
@@ -1226,7 +1254,8 @@ fn referencesDefinitionLabel(
         }
         break :result .{ .DocumentHighlight = highlights.items };
     } else .{ .Locations = locs.items };
-    try send(writer, server.arena.allocator(), types.Response{
+
+    try send(writer, allocator, types.Response{
         .id = id,
         .result = result,
     });
@@ -1246,7 +1275,7 @@ fn hasComment(tree: Ast.Tree, start_token: Ast.TokenIndex, end_token: Ast.TokenI
 
 const DeclToCompletionContext = struct {
     server: *Server,
-    completions: *std.ArrayList(types.CompletionItem),
+    completions: *std.ArrayListUnmanaged(types.CompletionItem),
     orig_handle: *DocumentStore.Handle,
     parent_is_type_val: ?bool = null,
 };
@@ -1254,6 +1283,8 @@ const DeclToCompletionContext = struct {
 fn declToCompletion(context: DeclToCompletionContext, decl_handle: analysis.DeclWithHandle) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
+
+    var allocator = context.server.arena.allocator();
 
     const tree = decl_handle.handle.tree;
     switch (decl_handle.decl.*) {
@@ -1270,7 +1301,7 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: analysis.Decl
             const doc = if (param.first_doc_comment) |doc_comments|
                 types.MarkupContent{
                     .kind = doc_kind,
-                    .value = try analysis.collectDocComments(context.server.arena.allocator(), tree, doc_comments, doc_kind, false),
+                    .value = try analysis.collectDocComments(allocator, tree, doc_comments, doc_kind, false),
                 }
             else
                 null;
@@ -1281,7 +1312,7 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: analysis.Decl
                 tree.firstToken(param.type_expr);
             const last_token = param.anytype_ellipsis3 orelse tree.lastToken(param.type_expr);
 
-            try context.completions.append(.{
+            try context.completions.append(allocator, .{
                 .label = tree.tokenSlice(param.name_token.?),
                 .kind = .Constant,
                 .documentation = doc,
@@ -1291,7 +1322,7 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: analysis.Decl
             });
         },
         .pointer_payload => |payload| {
-            try context.completions.append(.{
+            try context.completions.append(allocator, .{
                 .label = tree.tokenSlice(payload.name),
                 .kind = .Variable,
                 .insertText = tree.tokenSlice(payload.name),
@@ -1299,7 +1330,7 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: analysis.Decl
             });
         },
         .array_payload => |payload| {
-            try context.completions.append(.{
+            try context.completions.append(allocator, .{
                 .label = tree.tokenSlice(payload.identifier),
                 .kind = .Variable,
                 .insertText = tree.tokenSlice(payload.identifier),
@@ -1307,7 +1338,7 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: analysis.Decl
             });
         },
         .array_index => |payload| {
-            try context.completions.append(.{
+            try context.completions.append(allocator, .{
                 .label = tree.tokenSlice(payload),
                 .kind = .Variable,
                 .insertText = tree.tokenSlice(payload),
@@ -1315,7 +1346,7 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: analysis.Decl
             });
         },
         .switch_payload => |payload| {
-            try context.completions.append(.{
+            try context.completions.append(allocator, .{
                 .label = tree.tokenSlice(payload.node),
                 .kind = .Variable,
                 .insertText = tree.tokenSlice(payload.node),
@@ -1323,7 +1354,7 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: analysis.Decl
             });
         },
         .label_decl => |label_decl| {
-            try context.completions.append(.{
+            try context.completions.append(allocator, .{
                 .label = tree.tokenSlice(label_decl),
                 .kind = .Variable,
                 .insertText = tree.tokenSlice(label_decl),
@@ -1343,7 +1374,7 @@ fn completeLabel(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    var completions = std.ArrayList(types.CompletionItem).init(server.arena.allocator());
+    var completions = std.ArrayListUnmanaged(types.CompletionItem){};
 
     const context = DeclToCompletionContext{
         .server = server,
@@ -1415,7 +1446,7 @@ fn completeGlobal(server: *Server, writer: anytype, id: types.RequestId, pos_ind
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    var completions = std.ArrayList(types.CompletionItem).init(server.arena.allocator());
+    var completions = std.ArrayListUnmanaged(types.CompletionItem){};
 
     const context = DeclToCompletionContext{
         .server = server,
@@ -1447,7 +1478,7 @@ fn completeFieldAccess(server: *Server, writer: anytype, id: types.RequestId, ha
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    var completions = std.ArrayList(types.CompletionItem).init(server.arena.allocator());
+    var completions = std.ArrayListUnmanaged(types.CompletionItem){};
 
     const line_mem_start = @ptrToInt(position.line.ptr) - @ptrToInt(handle.document.mem.ptr);
     var held_range = handle.document.borrowNullTerminatedSlice(line_mem_start + range.start, line_mem_start + range.end);
@@ -2048,9 +2079,9 @@ fn completionHandler(server: *Server, writer: anytype, id: types.RequestId, req:
 
             if (!subpath_present and pos_context == .import_string_literal) {
                 if (handle.associated_build_file) |bf| {
-                    try fsl_completions.ensureUnusedCapacity(server.arena.allocator(), bf.packages.items.len);
+                    try fsl_completions.ensureUnusedCapacity(server.arena.allocator(), bf.config.packages.len);
 
-                    for (bf.packages.items) |pkg| {
+                    for (bf.config.packages) |pkg| {
                         try fsl_completions.append(server.arena.allocator(), .{
                             .label = pkg.name,
                             .kind = .Module,
@@ -2213,17 +2244,46 @@ fn formattingHandler(server: *Server, writer: anytype, id: types.RequestId, req:
             .Exited => |code| if (code == 0) {
                 if (std.mem.eql(u8, handle.document.text, stdout_bytes)) return try respondGeneric(writer, id, null_result_response);
 
-                return try send(writer, server.arena.allocator(), types.Response{
-                    .id = id,
-                    .result = .{
-                        .TextEdits = &[1]types.TextEdit{
-                            .{
-                                .range = try offsets.documentRange(handle.document, server.offset_encoding),
-                                .newText = stdout_bytes,
+                var edits = diff.edits(server.allocator, handle.document.text, stdout_bytes) catch {
+                    // If there was an error trying to diff the text, return the formatted response
+                    // as the new text for the entire range of the document
+                    return try send(writer, server.arena.allocator(), types.Response{
+                        .id = id,
+                        .result = .{
+                            .TextEdits = &[1]types.TextEdit{
+                                .{
+                                    .range = try offsets.documentRange(handle.document, server.offset_encoding),
+                                    .newText = stdout_bytes,
+                                },
                             },
                         },
+                    });
+                };
+                defer {
+                    for (edits.items) |item| item.newText.deinit();
+                    edits.deinit();
+                }
+
+                // Convert from `[]diff.Edit` to `[]types.TextEdit`
+                var text_edits = try std
+                    .ArrayList(types.TextEdit)
+                    .initCapacity(server.allocator, edits.items.len);
+                defer text_edits.deinit();
+                for (edits.items) |edit| {
+                    try text_edits.append(.{
+                        .range = edit.range,
+                        .newText = edit.newText.items,
+                    });
+                }
+
+                return try send(
+                    writer,
+                    server.arena.allocator(),
+                    types.Response{
+                        .id = id,
+                        .result = .{ .TextEdits = text_edits.items },
                     },
-                });
+                );
             },
             else => {},
         }
@@ -2425,7 +2485,11 @@ pub fn processJsonRpc(server: *Server, writer: anytype, json: []const u8) !void 
             if (value != .Null) {
                 const new_value: field.field_type = switch (ft) {
                     []const u8 => switch (value) {
-                        .String => |s| try server.allocator.dupe(u8, s), // TODO: Allocation model? (same with didChangeConfiguration); imo this isn't *that* bad but still
+                        .String => |s| blk: {
+                            var nv = try server.allocator.dupe(u8, s);
+                            if (@field(server.config, field.name)) |prev_val| server.allocator.free(prev_val);
+                            break :blk nv;
+                        }, // TODO: Allocation model? (same with didChangeConfiguration); imo this isn't *that* bad but still
                         else => @panic("Invalid configuration value"), // TODO: Handle this
                     },
                     else => switch (ti) {
@@ -2450,7 +2514,6 @@ pub fn processJsonRpc(server: *Server, writer: anytype, json: []const u8) !void 
         return;
     }
 
-    std.debug.assert(tree.root.Object.get("method") != null);
     const method = tree.root.Object.get("method").?.String;
 
     const start_time = std.time.milliTimestamp();
@@ -2490,6 +2553,7 @@ pub fn processJsonRpc(server: *Server, writer: anytype, json: []const u8) !void 
     };
 
     // Hack to avoid `return`ing in the inline for, which causes bugs.
+    // TODO: Change once stage2 is shipped and more stable?
     var done: ?anyerror = null;
     inline for (method_map) |method_info| {
         if (done == null and std.mem.eql(u8, method, method_info[0])) {
