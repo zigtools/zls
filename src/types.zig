@@ -152,25 +152,21 @@ pub const TextDocument = struct {
 };
 
 pub const WorkspaceEdit = struct {
-    changes: ?std.StringHashMapUnmanaged([]TextEdit),
+    changes: std.StringHashMapUnmanaged(std.ArrayListUnmanaged(TextEdit)),
 
     pub fn jsonStringify(self: WorkspaceEdit, options: std.json.StringifyOptions, writer: anytype) @TypeOf(writer).Error!void {
-        try writer.writeByte('{');
-        if (self.changes) |changes| {
-            try writer.writeAll("\"changes\": {");
-            var it = changes.iterator();
-            var idx: usize = 0;
-            while (it.next()) |entry| : (idx += 1) {
-                if (idx != 0) try writer.writeAll(", ");
+        try writer.writeAll("{\"changes\": {");
+        var it = self.changes.iterator();
+        var idx: usize = 0;
+        while (it.next()) |entry| : (idx += 1) {
+            if (idx != 0) try writer.writeAll(", ");
 
-                try writer.writeByte('"');
-                try writer.writeAll(entry.key_ptr.*);
-                try writer.writeAll("\":");
-                try std.json.stringify(entry.value_ptr.*, options, writer);
-            }
-            try writer.writeByte('}');
+            try writer.writeByte('"');
+            try writer.writeAll(entry.key_ptr.*);
+            try writer.writeAll("\":");
+            try std.json.stringify(entry.value_ptr.items, options, writer);
         }
-        try writer.writeByte('}');
+        try writer.writeAll("}}");
     }
 };
 

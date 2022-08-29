@@ -1071,10 +1071,9 @@ fn renameDefinitionGlobal(
 
     const decl = (try server.getSymbolGlobal(pos_index, handle)) orelse return try respondGeneric(writer, id, null_result_response);
 
-    var workspace_edit = types.WorkspaceEdit{
-        .changes = std.StringHashMapUnmanaged([]types.TextEdit){},
-    };
-    try rename.renameSymbol(&server.arena, &server.document_store, decl, new_name, &workspace_edit.changes.?, server.offset_encoding);
+    var workspace_edit = types.WorkspaceEdit{ .changes = .{} };
+    try rename.renameSymbol(&server.arena, &server.document_store, decl, new_name, &workspace_edit.changes, server.offset_encoding);
+
     try send(writer, server.arena.allocator(), types.Response{
         .id = id,
         .result = .{ .WorkspaceEdit = workspace_edit },
@@ -1095,10 +1094,9 @@ fn renameDefinitionFieldAccess(
 
     const decl = (try server.getSymbolFieldAccess(handle, position, range)) orelse return try respondGeneric(writer, id, null_result_response);
 
-    var workspace_edit = types.WorkspaceEdit{
-        .changes = std.StringHashMapUnmanaged([]types.TextEdit){},
-    };
-    try rename.renameSymbol(&server.arena, &server.document_store, decl, new_name, &workspace_edit.changes.?, server.offset_encoding);
+    var workspace_edit = types.WorkspaceEdit{ .changes = .{} };
+    try rename.renameSymbol(&server.arena, &server.document_store, decl, new_name, &workspace_edit.changes, server.offset_encoding);
+
     try send(writer, server.arena.allocator(), types.Response{
         .id = id,
         .result = .{ .WorkspaceEdit = workspace_edit },
@@ -1118,10 +1116,9 @@ fn renameDefinitionLabel(
 
     const decl = (try getLabelGlobal(pos_index, handle)) orelse return try respondGeneric(writer, id, null_result_response);
 
-    var workspace_edit = types.WorkspaceEdit{
-        .changes = std.StringHashMapUnmanaged([]types.TextEdit){},
-    };
-    try rename.renameLabel(&server.arena, decl, new_name, &workspace_edit.changes.?, server.offset_encoding);
+    var workspace_edit = types.WorkspaceEdit{ .changes = .{} };
+    try rename.renameLabel(&server.arena, decl, new_name, &workspace_edit.changes, server.offset_encoding);
+
     try send(writer, server.arena.allocator(), types.Response{
         .id = id,
         .result = .{ .WorkspaceEdit = workspace_edit },
