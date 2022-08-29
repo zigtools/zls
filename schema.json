@@ -1,0 +1,84 @@
+{
+    "$schema": "http://json-schema.org/schema",
+    "title": "ZLS Config",
+    "description": "Configuration file for the zig language server (ZLS)",
+    "type": "object",
+    "properties": {
+        "enable_snippets": {
+            "description": "Enables snippet completions when the client also supports them",
+            "type": "boolean",
+            "default": "false"
+        },
+        "enable_unused_variable_warnings": {
+            "description": "Enables warnings for local variables that aren't used",
+            "type": "boolean",
+            "default": "false"
+        },
+        "enable_import_embedfile_argument_completions": {
+            "description": "Whether to enable import/embedFile argument completions",
+            "type": "boolean",
+            "default": "false"
+        },
+        "zig_lib_path": {
+            "description": "Zig library path, e.g. `/path/to/zig/lib/zig`, used to analyze std library imports",
+            "type": "string"
+        },
+        "zig_exe_path": {
+            "description": "Zig executable path, e.g. `/path/to/zig/zig`, used to run the custom build runner. If `null`, zig is looked up in `PATH`. Will be used to infer the zig standard library path if none is provided",
+            "type": "string"
+        },
+        "warn_style": {
+            "description": "Enables warnings for style guideline mismatches",
+            "type": "boolean",
+            "default": "false"
+        },
+        "build_runner_path": {
+            "description": "Path to the `build_runner.zig` file provided by zls. null is equivalent to `${executable_directory}/build_runner.zig`",
+            "type": "string"
+        },
+        "global_cache_path": {
+            "description": "Path to a directroy that will be used as zig's cache. null is equivalent to `${KnownFloders.Cache}/zls`",
+            "type": "string"
+        },
+        "enable_semantic_tokens": {
+            "description": "Enables semantic token support when the client also supports it",
+            "type": "boolean",
+            "default": "true"
+        },
+        "enable_inlay_hints": {
+            "description": "Enable inlay hints for builtin functions",
+            "type": "boolean",
+            "default": "false"
+        },
+        "inlay_hints_show_builtin": {
+            "description": "Don't show inlay hints for single argument calls",
+            "type": "boolean",
+            "default": "true"
+        },
+        "inlay_hints_exclude_single_argument": {
+            "description": "Enables inlay hint support when the client also supports it",
+            "type": "boolean",
+            "default": "true"
+        },
+        "operator_completions": {
+            "description": "Enables `*` and `?` operators in completion lists",
+            "type": "boolean",
+            "default": "true"
+        },
+        "include_at_in_builtins": {
+            "description": "Whether the @ sign should be part of the completion of builtins",
+            "type": "boolean",
+            "default": "false"
+        },
+        "max_detail_length": {
+            "description": "The detail field of completions is truncated to be no longer than this (in bytes)",
+            "type": "integer",
+            "default": "1048576"
+        },
+        "skip_std_references": {
+            "description": "When true, skips searching for references in std. Improves lookup speed for functions in user's code. Renaming and go-to-definition will continue to work as is",
+            "type": "boolean",
+            "default": "false"
+        }
+    }
+} 
