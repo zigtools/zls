@@ -121,18 +121,18 @@ pub fn wizard(allocator: std.mem.Allocator) !void {
     defer if (local_path) |d| allocator.free(d);
     defer if (global_path) |d| allocator.free(d);
 
+    const can_access_global = blk: {
+        std.fs.accessAbsolute(global_path orelse break :blk false, .{}) catch break :blk false;
+        break :blk true;
+    };
+
     if (global_path == null and local_path == null) {
         write("Could not open a global or local config directory.\n");
         return;
     }
     var config_path: []const u8 = undefined;
-    if (try askBool("Should this configuration be system-wide?")) {
-        if (global_path) |p| {
-            config_path = p;
-        } else {
-            write("Could not find a global config directory.\n");
-            return;
-        }
+    if (can_access_global and global_path != null and try askBool("Should this configuration be system-wide?")) {
+        config_path = global_path.?;
     } else {
         if (local_path) |p| {
             config_path = p;
