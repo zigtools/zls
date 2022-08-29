@@ -189,6 +189,7 @@ pub fn wizard(allocator: std.mem.Allocator) !void {
     std.debug.print("Writing config to {s}/zls.json ... ", .{config_path});
 
     try std.json.stringify(.{
+        .@"$schema" = "https://raw.githubusercontent.com/zigtools/zls/master/schema.json",
         .zig_exe_path = zig_exe_path,
         .enable_snippets = snippets,
         .enable_unused_variable_warnings = unused_variables,
