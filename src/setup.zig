@@ -131,7 +131,7 @@ pub fn wizard(allocator: std.mem.Allocator) !void {
         return;
     }
     var config_path: []const u8 = undefined;
-    if (can_access_global and global_path != null and try askBool("Should this configuration be system-wide?")) {
+    if (can_access_global and try askBool("Should this configuration be system-wide?")) {
         config_path = global_path.?;
     } else {
         if (local_path) |p| {
