@@ -13,8 +13,8 @@ const logger = std.log.scoped(.config);
 /// Whether to enable snippet completions
 enable_snippets: bool = false,
 
-/// Whether to enable unused variable warnings
-enable_unused_variable_warnings: bool = false,
+/// Whether to enable ast-check diagnostics
+enable_ast_check_diagnostics: bool = false,
 
 /// Whether to enable import/embedFile argument completions (NOTE: these are triggered manually as updating the autotrigger characters may cause issues)
 enable_import_embedfile_argument_completions: bool = false,

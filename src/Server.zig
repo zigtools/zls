@@ -237,72 +237,82 @@ fn publishDiagnostics(server: *Server, writer: anytype, handle: DocumentStore.Ha
         });
     }
 
-    if (server.config.enable_unused_variable_warnings) {
-        scopes: for (handle.document_scope.scopes.items) |scope| {
-            const scope_data = switch (scope.data) {
-                .function => |f| b: {
-                    if (!ast.fnProtoHasBody(tree, f).?) continue :scopes;
-                    break :b f;
-                },
-                .block => |b| b,
-                else => continue,
+    if (server.config.enable_ast_check_diagnostics and tree.errors.len == 0) diag: {
+        if (server.config.zig_exe_path) |zig_exe_path| {
+            var process = std.ChildProcess.init(&[_][]const u8{ zig_exe_path, "ast-check", "--color", "off" }, server.allocator);
+            process.stdin_behavior = .Pipe;
+            process.stderr_behavior = .Pipe;
+
+            process.spawn() catch |err| {
+                Logger.warn(server, writer, "Failed to spawn zig ast-check process, error: {}", .{err});
+                break :diag;
             };
+            try process.stdin.?.writeAll(handle.document.text);
+            process.stdin.?.close();
 
-            var decl_iterator = scope.decls.iterator();
-            while (decl_iterator.next()) |decl| {
-                var identifier_count: usize = 0;
+            process.stdin = null;
 
-                const name_token_index = switch (decl.value_ptr.*) {
-                    .ast_node => |an| s: {
-                        const an_tag = tree.nodes.items(.tag)[an];
-                        switch (an_tag) {
-                            .simple_var_decl => {
-                                break :s tree.nodes.items(.main_token)[an] + 1;
-                            },
-                            else => continue,
+            const stderr_bytes = try process.stderr.?.reader().readAllAlloc(server.allocator, std.math.maxInt(usize));
+            defer server.allocator.free(stderr_bytes);
+
+            switch (try process.wait()) {
+                .Exited => {
+                    // NOTE: I believe that with color off it's one diag per line; is this correct?
+                    var line_iterator = std.mem.split(u8, stderr_bytes, "\n");
+
+                    while (line_iterator.next()) |line| lin: {
+                        var pos_and_diag_iterator = std.mem.split(u8, line, ":");
+                        const maybe_first = pos_and_diag_iterator.next();
+                        if (maybe_first) |first| {
+                            if (first.len <= 1) break :lin;
+                        } else break;
+
+                        const pos = types.Position{
+                            .line = (try std.fmt.parseInt(i64, pos_and_diag_iterator.next().?, 10)) - 1,
+                            .character = (try std.fmt.parseInt(i64, pos_and_diag_iterator.next().?, 10)) - 1,
+                        };
+
+                        const msg = pos_and_diag_iterator.rest()[1..];
+
+                        if (std.mem.startsWith(u8, msg, "error: ")) {
+                            try diagnostics.append(allocator, .{
+                                .range = .{ .start = pos, .end = pos },
+                                .severity = .Error,
+                                .code = "ast_check",
+                                .source = "zls",
+                                .message = try server.arena.allocator().dupe(u8, msg["error: ".len..]),
+                            });
+                        } else if (std.mem.startsWith(u8, msg, "note: ")) {
+                            var latestDiag = &diagnostics.items[diagnostics.items.len - 1];
+
+                            var fresh = if (latestDiag.relatedInformation.len == 0)
+                                try server.arena.allocator().alloc(types.DiagnosticRelatedInformation, 1)
+                            else
+                                try server.arena.allocator().realloc(@ptrCast([]types.DiagnosticRelatedInformation, latestDiag.relatedInformation), latestDiag.relatedInformation.len + 1);
+
+                            const location = types.Location{
+                                .uri = handle.uri(),
+                                .range = .{ .start = pos, .end = pos },
+                            };
+
+                            fresh[fresh.len - 1] = .{
+                                .location = location,
+                                .message = try server.arena.allocator().dupe(u8, msg["note: ".len..]),
+                            };
+
+                            latestDiag.relatedInformation = fresh;
+                        } else {
+                            try diagnostics.append(allocator, .{
+                                .range = .{ .start = pos, .end = pos },
+                                .severity = .Error,
+                                .code = "ast_check",
+                                .source = "zls",
+                                .message = try server.arena.allocator().dupe(u8, msg),
+                            });
                         }
-                    },
-                    .param_decl => |param| param.name_token orelse continue,
-                    else => continue,
-                };
-
-                if (std.mem.eql(u8, tree.tokenSlice(name_token_index), "_"))
-                    continue;
-
-                const pit_start = tree.firstToken(scope_data);
-                const pit_end = ast.lastToken(tree, scope_data);
-
-                const tags = tree.tokens.items(.tag)[pit_start..pit_end];
-                for (tags) |tag, index| {
-                    if (tag != .identifier) continue;
-                    if (!std.mem.eql(u8, tree.tokenSlice(pit_start + @intCast(u32, index)), tree.tokenSlice(name_token_index))) continue;
-                    if (index -| 1 > 0 and tags[index - 1] == .period) continue;
-                    if (index +| 2 < tags.len and tags[index + 1] == .colon) switch (tags[index + 2]) {
-                        .l_brace,
-                        .keyword_inline,
-                        .keyword_while,
-                        .keyword_for,
-                        .keyword_switch,
-                        => continue,
-                        else => {},
-                    };
-                    if (index -| 2 > 0 and tags[index - 1] == .colon) switch (tags[index - 2]) {
-                        .keyword_break,
-                        .keyword_continue,
-                        => continue,
-                        else => {},
-                    };
-                    identifier_count += 1;
-                }
-
-                if (identifier_count <= 1)
-                    try diagnostics.append(allocator, .{
-                        .range = astLocationToRange(tree.tokenLocation(0, name_token_index)),
-                        .severity = .Error,
-                        .code = "unused_variable",
-                        .source = "zls",
-                        .message = "Unused variable; either remove the variable or use '_ = ' on the variable to bypass this error",
-                    });
+                    }
+                },
+                else => {},
             }
         }
     }

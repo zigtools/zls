@@ -108,12 +108,18 @@ pub const DiagnosticSeverity = enum(i64) {
     }
 };
 
+pub const DiagnosticRelatedInformation = struct {
+    location: Location,
+    message: string,
+};
+
 pub const Diagnostic = struct {
     range: Range,
     severity: DiagnosticSeverity,
     code: string,
     source: string,
     message: string,
+    relatedInformation: []const DiagnosticRelatedInformation = &.{},
 };
 
 pub const TextDocument = struct {
