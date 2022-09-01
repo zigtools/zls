@@ -119,7 +119,7 @@ pub const Diagnostic = struct {
     code: string,
     source: string,
     message: string,
-    relatedInformation: []const DiagnosticRelatedInformation = &[0]DiagnosticRelatedInformation{},
+    relatedInformation: []const DiagnosticRelatedInformation = &.{},
 };
 
 pub const TextDocument = struct {

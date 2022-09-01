@@ -237,14 +237,14 @@ fn publishDiagnostics(server: *Server, writer: anytype, handle: DocumentStore.Ha
         });
     }
 
-    if (server.config.enable_ast_check_diagnostics) diag: {
+    if (server.config.enable_ast_check_diagnostics and tree.errors.len == 0) diag: {
         if (server.config.zig_exe_path) |zig_exe_path| {
             var process = std.ChildProcess.init(&[_][]const u8{ zig_exe_path, "ast-check", "--color", "off" }, server.allocator);
             process.stdin_behavior = .Pipe;
             process.stderr_behavior = .Pipe;
 
             process.spawn() catch |err| {
-                Logger.warn(server, writer, "Failed to spawn zig fmt process, error: {}", .{err});
+                Logger.warn(server, writer, "Failed to spawn zig ast-check process, error: {}", .{err});
                 break :diag;
             };
             try process.stdin.?.writeAll(handle.document.text);
