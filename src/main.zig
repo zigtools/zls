@@ -192,7 +192,7 @@ fn parseArgs(
         return .exit;
     }
     if (specified.get(.version)) {
-        try std.io.getStdOut().writer().print("Data Version: {s}\n", .{@tagName(build_options.data_version)});
+        try std.io.getStdOut().writeAll(build_options.version ++ "\n");
         return .exit;
     }
     if (specified.get(.config)) {
