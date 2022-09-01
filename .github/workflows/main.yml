@@ -16,6 +16,7 @@ jobs:
     steps:
       - uses: actions/checkout@v2
         with:
+          fetch-depth: 0
           submodules: true
       - uses: goto-bus-stop/setup-zig@v1
         with:
