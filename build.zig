@@ -43,6 +43,15 @@ pub fn build(b: *std.build.Builder) !void {
         b.option(bool, "enable_tracy_callstack", "Enable callstack graphs.") orelse false,
     );
 
+    const version = v: {
+        const git_describe_untrimmed = try b.exec(&[_][]const u8{
+            "git", "-C", b.build_root, "describe", "--match", "*.*.*", "--tags",
+        });
+
+        break :v std.mem.trim(u8, git_describe_untrimmed, " \n\r");
+    };
+    exe_options.addOption([:0]const u8, "version", try b.allocator.dupeZ(u8, version));
+
     const KNOWN_FOLDERS_DEFAULT_PATH = "src/known-folders/known-folders.zig";
     const known_folders_path = b.option([]const u8, "known-folders", "Path to known-folders package (default: " ++ KNOWN_FOLDERS_DEFAULT_PATH ++ ")") orelse KNOWN_FOLDERS_DEFAULT_PATH;
     exe.addPackage(.{ .name = "known-folders", .source = .{ .path = known_folders_path } });
