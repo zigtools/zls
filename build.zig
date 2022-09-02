@@ -2,6 +2,8 @@ const std = @import("std");
 const builtin = @import("builtin");
 const shared = @import("src/shared.zig");
 
+const zls_version = std.builtin.Version{ .major = 0, .minor = 10, .patch = 0 };
+
 pub fn build(b: *std.build.Builder) !void {
     const target = b.standardTargetOptions(.{});
 
@@ -44,12 +46,40 @@ pub fn build(b: *std.build.Builder) !void {
     );
 
     const version = v: {
+        const version_string = b.fmt("{d}.{d}.{d}", .{ zls_version.major, zls_version.minor, zls_version.patch });
+
         const git_describe_untrimmed = try b.exec(&[_][]const u8{
             "git", "-C", b.build_root, "describe", "--match", "*.*.*", "--tags",
         });
 
-        break :v std.mem.trim(u8, git_describe_untrimmed, " \n\r");
+        const git_describe = std.mem.trim(u8, git_describe_untrimmed, " \n\r");
+
+        switch (std.mem.count(u8, git_describe, "-")) {
+            0 => {
+                // Tagged release version (e.g. 0.10.0).
+                std.debug.assert(std.mem.eql(u8, git_describe, version_string)); // tagged release must match version string
+                break :v version_string;
+            },
+            2 => {
+                // Untagged development build (e.g. 0.10.0-dev.216+34ce200).
+                var it = std.mem.split(u8, git_describe, "-");
+                const tagged_ancestor = it.first();
+                const commit_height = it.next().?;
+                const commit_id = it.next().?;
+
+                const ancestor_ver = try std.builtin.Version.parse(tagged_ancestor);
+                std.debug.assert(zls_version.order(ancestor_ver) == .gt); // zls version must be greater than its previous version
+                std.debug.assert(std.mem.startsWith(u8, commit_id, "g")); // commit hash is prefixed with a 'g'
+
+                break :v b.fmt("{s}-dev.{s}+{s}", .{ version_string, commit_height, commit_id[1..] });
+            },
+            else => {
+                std.debug.print("Unexpected 'git describe' output: '{s}'\n", .{git_describe});
+                std.process.exit(1);
+            },
+        }
     };
+
     exe_options.addOption([:0]const u8, "version", try b.allocator.dupeZ(u8, version));
 
     const KNOWN_FOLDERS_DEFAULT_PATH = "src/known-folders/known-folders.zig";
