@@ -462,7 +462,7 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
             try writeTokenMod(builder, fn_proto.name_token, func_name_tok_type, tok_mod);
 
             var it = fn_proto.iterate(&tree);
-            while (it.next()) |param_decl| {
+            while (ast.nextFnParam(&it)) |param_decl| {
                 if (param_decl.first_doc_comment) |docs| try writeDocComments(builder, tree, docs);
 
                 try writeToken(builder, param_decl.comptime_noalias, .keyword);

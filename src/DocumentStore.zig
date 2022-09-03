@@ -953,7 +953,7 @@ pub fn resolveImport(self: *DocumentStore, handle: *Handle, import_str: []const 
 
     for (handle.imports_used.items) |uri| {
         if (std.mem.eql(u8, uri, final_uri)) {
-            return self.getHandle(final_uri).?;
+            return self.getHandle(final_uri) orelse return null;
         }
     }
     // The URI must be somewhere in the import_uris or the package uris

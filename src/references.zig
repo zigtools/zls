@@ -136,7 +136,7 @@ fn symbolReferencesInternal(arena: *std.heap.ArenaAllocator, store: *DocumentSto
             var buf: [1]Ast.Node.Index = undefined;
             const fn_proto = ast.fnProto(tree, node, &buf).?;
             var it = fn_proto.iterate(&tree);
-            while (it.next()) |param| {
+            while (ast.nextFnParam(&it)) |param| {
                 if (param.type_expr != 0)
                     try symbolReferencesInternal(arena, store, .{ .node = param.type_expr, .handle = handle }, decl, encoding, context, handler);
             }
@@ -527,7 +527,7 @@ pub fn symbolReferences(arena: *std.heap.ArenaAllocator, store: *DocumentStore, 
                         var buf: [1]Ast.Node.Index = undefined;
                         const fn_proto = ast.fnProto(curr_handle.tree, proto, &buf).?;
                         var it = fn_proto.iterate(&curr_handle.tree);
-                        while (it.next()) |candidate| {
+                        while (ast.nextFnParam(&it)) |candidate| {
                             if (std.meta.eql(candidate, param)) {
                                 if (curr_handle.tree.nodes.items(.tag)[proto] == .fn_decl) {
                                     try symbolReferencesInternal(

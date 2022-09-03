@@ -135,7 +135,7 @@ pub fn getFunctionSnippet(allocator: std.mem.Allocator, tree: Ast, func: Ast.ful
 
     var it = func.iterate(&tree);
     var i: usize = 0;
-    while (it.next()) |param| : (i += 1) {
+    while (ast.nextFnParam(&it)) |param| : (i += 1) {
         if (skip_self_param and i == 0) continue;
         if (i != @boolToInt(skip_self_param))
             try buf_stream.writeAll(", ${")
@@ -172,7 +172,7 @@ pub fn getFunctionSnippet(allocator: std.mem.Allocator, tree: Ast, func: Ast.ful
                 try buf_stream.print("{}", .{fmtSnippetPlaceholder(tree.tokenSlice(curr_token))});
                 if (is_comma or tag == .keyword_const) try buf_stream.writeByte(' ');
             }
-        } else unreachable;
+        } // else Incomplete and that's ok :)
 
         try buf_stream.writeByte('}');
     }
@@ -188,7 +188,7 @@ pub fn hasSelfParam(arena: *std.heap.ArenaAllocator, document_store: *DocumentSt
 
     const tree = handle.tree;
     var it = func.iterate(&tree);
-    const param = it.next().?;
+    const param = ast.nextFnParam(&it).?;
     if (param.type_expr == 0) return false;
 
     const token_starts = tree.tokens.items(.start);
@@ -245,7 +245,7 @@ pub fn isTypeFunction(tree: Ast, func: Ast.full.FnProto) bool {
 
 pub fn isGenericFunction(tree: Ast, func: Ast.full.FnProto) bool {
     var it = func.iterate(&tree);
-    while (it.next()) |param| {
+    while (ast.nextFnParam(&it)) |param| {
         if (param.anytype_ellipsis3 != null or param.comptime_noalias != null) {
             return true;
         }
@@ -714,7 +714,7 @@ pub fn resolveTypeOfNodeInternal(store: *DocumentStore, arena: *std.heap.ArenaAl
                 var it = fn_decl.iterate(&decl.handle.tree);
                 if (token_tags[call.ast.lparen - 2] == .period) {
                     if (try hasSelfParam(arena, store, decl.handle, fn_decl)) {
-                        _ = it.next();
+                        _ = ast.nextFnParam(&it);
                         expected_params -= 1;
                     }
                 }
@@ -722,7 +722,7 @@ pub fn resolveTypeOfNodeInternal(store: *DocumentStore, arena: *std.heap.ArenaAl
                 // Bind type params to the arguments passed in the call.
                 const param_len = std.math.min(call.ast.params.len, expected_params);
                 var i: usize = 0;
-                while (it.next()) |decl_param| : (i += 1) {
+                while (ast.nextFnParam(&it)) |decl_param| : (i += 1) {
                     if (i >= param_len) break;
                     if (!isMetaType(decl.handle.tree, decl_param.type_expr))
                         continue;
@@ -808,6 +808,7 @@ pub fn resolveTypeOfNodeInternal(store: *DocumentStore, arena: *std.heap.ArenaAl
         },
         .field_access => {
             if (datas[node].rhs == 0) return null;
+            if (node >= tree.nodes.len - 1) return null; // #boundsCheck
             const rhs_str = tree.tokenSlice(datas[node].rhs);
             // If we are accessing a pointer type, remove one pointerness level :)
             const left_type = try resolveFieldAccessLhsType(
@@ -2605,7 +2606,7 @@ fn makeScopeInternal(allocator: std.mem.Allocator, context: ScopeContext, node_i
             const scope_idx = scopes.items.len - 1;
 
             var it = func.iterate(&tree);
-            while (it.next()) |param| {
+            while (ast.nextFnParam(&it)) |param| {
                 // Add parameter decls
                 if (param.name_token) |name_token| {
                     if (try scopes.items[scope_idx].decls.fetchPut(
