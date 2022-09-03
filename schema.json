@@ -12,7 +12,7 @@
         "enable_ast_check_diagnostics": {
             "description": "Whether to enable ast-check diagnostics",
             "type": "boolean",
-            "default": "false"
+            "default": "true"
         },
         "enable_import_embedfile_argument_completions": {
             "description": "Whether to enable import/embedFile argument completions",
