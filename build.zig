@@ -48,9 +48,10 @@ pub fn build(b: *std.build.Builder) !void {
     const version = v: {
         const version_string = b.fmt("{d}.{d}.{d}", .{ zls_version.major, zls_version.minor, zls_version.patch });
 
-        const git_describe_untrimmed = try b.exec(&[_][]const u8{
+        var code: u8 = undefined;
+        const git_describe_untrimmed = b.execAllowFail(&[_][]const u8{
             "git", "-C", b.build_root, "describe", "--match", "*.*.*", "--tags",
-        });
+        }, &code, .Ignore) catch break :v version_string;
 
         const git_describe = std.mem.trim(u8, git_describe_untrimmed, " \n\r");
 
