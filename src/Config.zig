@@ -14,7 +14,7 @@ const logger = std.log.scoped(.config);
 enable_snippets: bool = false,
 
 /// Whether to enable ast-check diagnostics
-enable_ast_check_diagnostics: bool = false,
+enable_ast_check_diagnostics: bool = true,
 
 /// Whether to enable import/embedFile argument completions (NOTE: these are triggered manually as updating the autotrigger characters may cause issues)
 enable_import_embedfile_argument_completions: bool = false,

@@ -24,8 +24,6 @@ fn testSemanticTokens(source: []const u8, expected: []const u32) !void {
     var ctx = try Context.init();
     defer ctx.deinit();
 
-    ctx.server.config.enable_semantic_tokens = true;
-
     const open_document = requests.OpenDocument{
         .params = .{
             .textDocument = .{
