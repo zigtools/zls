@@ -71,10 +71,6 @@ fn testInlayHints(source: []const u8) !void {
     var ctx = try Context.init();
     defer ctx.deinit();
 
-    ctx.server.config.enable_inlay_hints = true;
-    ctx.server.config.inlay_hints_exclude_single_argument = false;
-    ctx.server.config.inlay_hints_show_builtin = true;
-
     const open_document = requests.OpenDocument{
         .params = .{
             .textDocument = .{

@@ -18,7 +18,13 @@ pub const Context = struct {
         var context = Context{
             .server = try Server.init(
                 allocator,
-                .{},
+                .{
+                    .enable_ast_check_diagnostics = false,
+                    .enable_semantic_tokens = true,
+                    .enable_inlay_hints = true,
+                    .inlay_hints_exclude_single_argument = false,
+                    .inlay_hints_show_builtin = true,
+                },
                 null,
                 .debug,
             ),
