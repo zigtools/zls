@@ -206,6 +206,11 @@ pub fn configChanged(config: *Config, allocator: std.mem.Allocator, builtin_crea
         var exe_dir_bytes: [std.fs.MAX_PATH_BYTES]u8 = undefined;
         const exe_dir_path = try std.fs.selfExeDirPath(&exe_dir_bytes);
         config.build_runner_path = try std.fs.path.resolve(allocator, &[_][]const u8{ exe_dir_path, "build_runner.zig" });
+
+        const file = try std.fs.createFileAbsolute(config.build_runner_path.?, .{});
+        defer file.close();
+
+        try file.writeAll(@embedFile("special/build_runner.zig"));
     }
 
     if (null == config.global_cache_path) {
