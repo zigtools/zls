@@ -111,8 +111,6 @@ pub fn build(b: *std.build.Builder) !void {
     exe.setBuildMode(mode);
     exe.install();
 
-    b.installFile("src/special/build_runner.zig", "bin/build_runner.zig");
-
     const test_step = b.step("test", "Run all the tests");
     test_step.dependOn(b.getInstallStep());
 
