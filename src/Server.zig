@@ -197,8 +197,11 @@ fn showMessage(server: *Server, writer: anytype, message_type: types.MessageType
     });
 }
 
-// TODO: Is this correct or can we get a better end?
-fn astLocationToRange(loc: Ast.Location) types.Range {
+/// returns the range of the given token at `token_index`
+fn tokenToRange(tree: Ast, token_index: Ast.TokenIndex) types.Range {
+    const loc = tree.tokenLocation(0, token_index);
+    const length = tree.tokenSlice(token_index).len;
+
     return .{
         .start = .{
             .line = @intCast(i64, loc.line),
@@ -206,7 +209,41 @@ fn astLocationToRange(loc: Ast.Location) types.Range {
         },
         .end = .{
             .line = @intCast(i64, loc.line),
-            .character = @intCast(i64, loc.column),
+            .character = @intCast(i64, loc.column + length),
+        },
+    };
+}
+
+/// returns the source index in `text` at `position`
+fn positionToIndex(text: [:0]const u8, position: types.Position) usize {
+    var current_line: usize = 0;
+
+    for (text) |c, i| {
+        if (current_line == position.line) {
+            return @minimum(i + @intCast(usize, position.character), text.len);
+        }
+        if (c == '\n') {
+            current_line += 1;
+        }
+    }
+    return text.len;
+}
+
+/// returns the range of a token pointed to by `position`
+fn tokenPositionToRange(text: [:0]const u8, position: types.Position) types.Range {
+    var tokenizer: std.zig.Tokenizer = .{
+        .buffer = text,
+        .index = positionToIndex(text, position),
+        .pending_invalid_token = null,
+    };
+    const token = tokenizer.next();
+    const length = @intCast(i64, token.loc.end - token.loc.start);
+
+    return .{
+        .start = position,
+        .end = .{
+            .line = position.line,
+            .character = position.character + length,
         },
     };
 }
@@ -221,14 +258,12 @@ fn publishDiagnostics(server: *Server, writer: anytype, handle: DocumentStore.Ha
     var diagnostics = std.ArrayListUnmanaged(types.Diagnostic){};
 
     for (tree.errors) |err| {
-        const loc = tree.tokenLocation(0, err.token);
-
         var mem_buffer: [256]u8 = undefined;
         var fbs = std.io.fixedBufferStream(&mem_buffer);
         try tree.renderError(err, fbs.writer());
 
         try diagnostics.append(allocator, .{
-            .range = astLocationToRange(loc),
+            .range = tokenToRange(tree, err.token),
             .severity = .Error,
             .code = @tagName(err.tag),
             .source = "zls",
@@ -267,16 +302,18 @@ fn publishDiagnostics(server: *Server, writer: anytype, handle: DocumentStore.Ha
                             if (first.len <= 1) break :lin;
                         } else break;
 
-                        const pos = types.Position{
+                        const position = types.Position{
                             .line = (try std.fmt.parseInt(i64, pos_and_diag_iterator.next().?, 10)) - 1,
                             .character = (try std.fmt.parseInt(i64, pos_and_diag_iterator.next().?, 10)) - 1,
                         };
+
+                        const range = tokenPositionToRange(handle.document.text, position);
 
                         const msg = pos_and_diag_iterator.rest()[1..];
 
                         if (std.mem.startsWith(u8, msg, "error: ")) {
                             try diagnostics.append(allocator, .{
-                                .range = .{ .start = pos, .end = pos },
+                                .range = range,
                                 .severity = .Error,
                                 .code = "ast_check",
                                 .source = "zls",
@@ -292,7 +329,7 @@ fn publishDiagnostics(server: *Server, writer: anytype, handle: DocumentStore.Ha
 
                             const location = types.Location{
                                 .uri = handle.uri(),
-                                .range = .{ .start = pos, .end = pos },
+                                .range = range,
                             };
 
                             fresh[fresh.len - 1] = .{
@@ -303,7 +340,7 @@ fn publishDiagnostics(server: *Server, writer: anytype, handle: DocumentStore.Ha
                             latestDiag.relatedInformation = fresh;
                         } else {
                             try diagnostics.append(allocator, .{
-                                .range = .{ .start = pos, .end = pos },
+                                .range = range,
                                 .severity = .Error,
                                 .code = "ast_check",
                                 .source = "zls",
@@ -336,7 +373,7 @@ fn publishDiagnostics(server: *Server, writer: anytype, handle: DocumentStore.Ha
 
                 if (std.mem.startsWith(u8, import_str, "\"./")) {
                     try diagnostics.append(allocator, .{
-                        .range = astLocationToRange(tree.tokenLocation(0, import_str_token)),
+                        .range = tokenToRange(tree, import_str_token),
                         .severity = .Hint,
                         .code = "dot_slash_import",
                         .source = "zls",
@@ -362,14 +399,12 @@ fn publishDiagnostics(server: *Server, writer: anytype, handle: DocumentStore.Ha
                         if (func.extern_export_inline_token != null) break :blk;
 
                         if (func.name_token) |name_token| {
-                            const loc = tree.tokenLocation(0, name_token);
-
                             const is_type_function = analysis.isTypeFunction(tree, func);
 
                             const func_name = tree.tokenSlice(name_token);
                             if (!is_type_function and !analysis.isCamelCase(func_name)) {
                                 try diagnostics.append(allocator, .{
-                                    .range = astLocationToRange(loc),
+                                    .range = tokenToRange(tree, name_token),
                                     .severity = .Hint,
                                     .code = "bad_style",
                                     .source = "zls",
@@ -377,7 +412,7 @@ fn publishDiagnostics(server: *Server, writer: anytype, handle: DocumentStore.Ha
                                 });
                             } else if (is_type_function and !analysis.isPascalCase(func_name)) {
                                 try diagnostics.append(allocator, .{
-                                    .range = astLocationToRange(loc),
+                                    .range = tokenToRange(tree, name_token),
                                     .severity = .Hint,
                                     .code = "bad_style",
                                     .source = "zls",
