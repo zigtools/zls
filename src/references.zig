@@ -8,19 +8,9 @@ const log = std.log.scoped(.references);
 const ast = @import("ast.zig");
 
 fn tokenReference(handle: *DocumentStore.Handle, tok: Ast.TokenIndex, encoding: offsets.Encoding, context: anytype, comptime handler: anytype) !void {
-    const loc = offsets.tokenRelativeLocation(handle.tree, 0, handle.tree.tokens.items(.start)[tok], encoding) catch return;
     try handler(context, types.Location{
         .uri = handle.uri(),
-        .range = .{
-            .start = .{
-                .line = @intCast(i64, loc.line),
-                .character = @intCast(i64, loc.column),
-            },
-            .end = .{
-                .line = @intCast(i64, loc.line),
-                .character = @intCast(i64, loc.column + offsets.tokenLength(handle.tree, tok, encoding)),
-            },
-        },
+        .range = offsets.tokenToRange(handle.tree, tok,encoding) catch return,
     });
 }
 

@@ -142,13 +142,22 @@ pub fn tokenRelativeLocation(tree: Ast, start_index: usize, token_start: usize, 
 
 /// Asserts the token is comprised of valid utf8
 pub fn tokenLength(tree: Ast, token: Ast.TokenIndex, encoding: Encoding) usize {
-    const token_loc = tokenLocation(tree, token);
-    if (encoding == .utf8)
-        return token_loc.end - token_loc.start;
+    return locationLength(tokenLocation(tree, token), tree, encoding);
+}
 
-    var i: usize = token_loc.start;
+/// Token location inside source
+pub const Loc = struct {
+    start: usize,
+    end: usize,
+};
+
+pub fn locationLength(loc: Loc, tree: Ast, encoding: Encoding) usize {
+    if (encoding == .utf8)
+        return loc.end - loc.start;
+
+    var i: usize = loc.start;
     var utf16_len: usize = 0;
-    while (i < token_loc.end) {
+    while (i < loc.end) {
         const n = std.unicode.utf8ByteSequenceLength(tree.source[i]) catch unreachable;
         const codepoint = std.unicode.utf8Decode(tree.source[i .. i + n]) catch unreachable;
         if (codepoint < 0x10000) {
@@ -160,12 +169,6 @@ pub fn tokenLength(tree: Ast, token: Ast.TokenIndex, encoding: Encoding) usize {
     }
     return utf16_len;
 }
-
-/// Token location inside source
-pub const Loc = struct {
-    start: usize,
-    end: usize,
-};
 
 pub fn tokenLocation(tree: Ast, token_index: Ast.TokenIndex) Loc {
     const start = tree.tokens.items(.start)[token_index];
@@ -181,6 +184,50 @@ pub fn tokenLocation(tree: Ast, token_index: Ast.TokenIndex) Loc {
     const token = tokenizer.next();
     std.debug.assert(token.tag == tag);
     return .{ .start = token.loc.start, .end = token.loc.end };
+}
+
+/// returns the range of the given token at `token_index`
+pub fn tokenToRange(tree: Ast, token_index: Ast.TokenIndex, encoding: Encoding) !types.Range {
+    const loc = try tokenRelativeLocation(tree, 0, tree.tokens.items(.start)[token_index], encoding);
+    const length = tokenLength(tree, token_index, encoding);
+
+    return types.Range{
+        .start = .{
+            .line = @intCast(i64, loc.line),
+            .character = @intCast(i64, loc.column),
+        },
+        .end = .{
+            .line = @intCast(i64, loc.line),
+            .character = @intCast(i64, loc.column + length),
+        },
+    };
+}
+
+/// returns the range of a token pointed to by `position`
+pub fn tokenPositionToRange(tree: Ast, position: types.Position, encoding: Encoding) !types.Range {
+    const doc = .{
+        .uri = undefined,
+        .text = tree.source,
+        .mem = undefined,
+    };
+    const document_position = try documentPosition(doc, position, encoding);
+
+    var tokenizer: std.zig.Tokenizer = .{
+        .buffer = tree.source,
+        .index = document_position.absolute_index,
+        .pending_invalid_token = null,
+    };
+    const token = tokenizer.next();
+    const loc: Loc = .{ .start = token.loc.start, .end = token.loc.end };
+    const length = locationLength(loc, tree, encoding);
+
+    return types.Range{
+        .start = position,
+        .end = .{
+            .line = position.line,
+            .character = position.character + @intCast(i64, length),
+        },
+    };
 }
 
 pub fn documentRange(doc: types.TextDocument, encoding: Encoding) !types.Range {

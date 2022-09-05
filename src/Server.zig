@@ -197,57 +197,6 @@ fn showMessage(server: *Server, writer: anytype, message_type: types.MessageType
     });
 }
 
-/// returns the range of the given token at `token_index`
-fn tokenToRange(tree: Ast, token_index: Ast.TokenIndex) types.Range {
-    const loc = tree.tokenLocation(0, token_index);
-    const length = tree.tokenSlice(token_index).len;
-
-    return .{
-        .start = .{
-            .line = @intCast(i64, loc.line),
-            .character = @intCast(i64, loc.column),
-        },
-        .end = .{
-            .line = @intCast(i64, loc.line),
-            .character = @intCast(i64, loc.column + length),
-        },
-    };
-}
-
-/// returns the source index in `text` at `position`
-fn positionToIndex(text: [:0]const u8, position: types.Position) usize {
-    var current_line: usize = 0;
-
-    for (text) |c, i| {
-        if (current_line == position.line) {
-            return @minimum(i + @intCast(usize, position.character), text.len);
-        }
-        if (c == '\n') {
-            current_line += 1;
-        }
-    }
-    return text.len;
-}
-
-/// returns the range of a token pointed to by `position`
-fn tokenPositionToRange(text: [:0]const u8, position: types.Position) types.Range {
-    var tokenizer: std.zig.Tokenizer = .{
-        .buffer = text,
-        .index = positionToIndex(text, position),
-        .pending_invalid_token = null,
-    };
-    const token = tokenizer.next();
-    const length = @intCast(i64, token.loc.end - token.loc.start);
-
-    return .{
-        .start = position,
-        .end = .{
-            .line = position.line,
-            .character = position.character + length,
-        },
-    };
-}
-
 fn publishDiagnostics(server: *Server, writer: anytype, handle: DocumentStore.Handle) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
@@ -263,7 +212,7 @@ fn publishDiagnostics(server: *Server, writer: anytype, handle: DocumentStore.Ha
         try tree.renderError(err, fbs.writer());
 
         try diagnostics.append(allocator, .{
-            .range = tokenToRange(tree, err.token),
+            .range = offsets.tokenToRange(tree, err.token, server.offset_encoding) catch continue,
             .severity = .Error,
             .code = @tagName(err.tag),
             .source = "zls",
@@ -307,7 +256,7 @@ fn publishDiagnostics(server: *Server, writer: anytype, handle: DocumentStore.Ha
                             .character = (try std.fmt.parseInt(i64, pos_and_diag_iterator.next().?, 10)) - 1,
                         };
 
-                        const range = tokenPositionToRange(handle.document.text, position);
+                        const range = try offsets.tokenPositionToRange(tree, position, server.offset_encoding);
 
                         const msg = pos_and_diag_iterator.rest()[1..];
 
@@ -373,7 +322,7 @@ fn publishDiagnostics(server: *Server, writer: anytype, handle: DocumentStore.Ha
 
                 if (std.mem.startsWith(u8, import_str, "\"./")) {
                     try diagnostics.append(allocator, .{
-                        .range = tokenToRange(tree, import_str_token),
+                        .range = offsets.tokenToRange(tree, import_str_token, server.offset_encoding) catch continue,
                         .severity = .Hint,
                         .code = "dot_slash_import",
                         .source = "zls",
@@ -404,7 +353,7 @@ fn publishDiagnostics(server: *Server, writer: anytype, handle: DocumentStore.Ha
                             const func_name = tree.tokenSlice(name_token);
                             if (!is_type_function and !analysis.isCamelCase(func_name)) {
                                 try diagnostics.append(allocator, .{
-                                    .range = tokenToRange(tree, name_token),
+                                    .range = offsets.tokenToRange(tree, name_token, server.offset_encoding) catch continue,
                                     .severity = .Hint,
                                     .code = "bad_style",
                                     .source = "zls",
@@ -412,7 +361,7 @@ fn publishDiagnostics(server: *Server, writer: anytype, handle: DocumentStore.Ha
                                 });
                             } else if (is_type_function and !analysis.isPascalCase(func_name)) {
                                 try diagnostics.append(allocator, .{
-                                    .range = tokenToRange(tree, name_token),
+                                    .range = offsets.tokenToRange(tree, name_token, server.offset_encoding) catch continue,
                                     .severity = .Hint,
                                     .code = "bad_style",
                                     .source = "zls",
