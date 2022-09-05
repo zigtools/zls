@@ -854,7 +854,7 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
         .field_access => {
             const data = node_data[node];
             if (data.rhs == 0) return;
-            const rhs_str = tree.tokenSlice(data.rhs);
+            const rhs_str = ast.tokenSlice(tree, data.rhs) orelse return;
 
             try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, data.lhs });
 
