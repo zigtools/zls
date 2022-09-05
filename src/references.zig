@@ -392,7 +392,7 @@ fn symbolReferencesInternal(arena: *std.heap.ArenaAllocator, store: *DocumentSto
         .field_access => {
             try symbolReferencesInternal(arena, store, .{ .node = datas[node].lhs, .handle = handle }, decl, encoding, context, handler);
 
-            const rhs_str = tree.tokenSlice(datas[node].rhs);
+            const rhs_str = ast.tokenSlice(tree, datas[node].rhs) catch return;
             var bound_type_params = analysis.BoundTypeParams{};
             const left_type = try analysis.resolveFieldAccessLhsType(
                 store,

@@ -808,8 +808,8 @@ pub fn resolveTypeOfNodeInternal(store: *DocumentStore, arena: *std.heap.ArenaAl
         },
         .field_access => {
             if (datas[node].rhs == 0) return null;
-            if (node >= tree.nodes.len - 1) return null; // #boundsCheck
-            const rhs_str = tree.tokenSlice(datas[node].rhs);
+            const rhs_str = ast.tokenSlice(tree, datas[node].rhs) catch return null;
+
             // If we are accessing a pointer type, remove one pointerness level :)
             const left_type = try resolveFieldAccessLhsType(
                 store,
@@ -1342,7 +1342,7 @@ pub fn nodeToString(tree: Ast, node: Ast.Node.Index) ?[]const u8 {
         .fn_decl,
         => if (ast.fnProto(tree, node, &buf).?.name_token) |name|
             return tree.tokenSlice(name),
-        .field_access => return tree.tokenSlice(data[node].rhs),
+        .field_access => return ast.tokenSlice(tree, data[node].rhs) catch return null,
         .call,
         .call_comma,
         .async_call,
