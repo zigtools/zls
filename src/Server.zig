@@ -1557,7 +1557,9 @@ fn formatDetailledLabel(server: *Server, writer: anytype, item: *types.Completio
             return;
         }
 
-        item.detail = item.label;
+        // keep the full fn signature in item.detail as not all editors make use of item.labelDetails.detail
+        // https://github.com/zigtools/zls/issues/608
+        // item.detail = item.label;
         item.labelDetails = .{ .detail = it[s .. e + 1], .description = it[e + 1 ..] };
 
         if (item.kind == .Constant) {
