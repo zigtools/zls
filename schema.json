@@ -40,16 +40,6 @@
             "description": "Path to a directroy that will be used as zig's cache. null is equivalent to `${KnownFloders.Cache}/zls`",
             "type": "string"
         },
-        "enable_semantic_tokens": {
-            "description": "Enables semantic token support when the client also supports it",
-            "type": "boolean",
-            "default": "true"
-        },
-        "enable_inlay_hints": {
-            "description": "Enable inlay hints for builtin functions",
-            "type": "boolean",
-            "default": "false"
-        },
         "inlay_hints_show_builtin": {
             "description": "Don't show inlay hints for single argument calls",
             "type": "boolean",

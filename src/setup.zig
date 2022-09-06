@@ -173,8 +173,6 @@ pub fn wizard(allocator: std.mem.Allocator) !void {
     const ast_check = try askBool("Do you want to enable ast-check diagnostics?");
     const ief_apc = try askBool("Do you want to enable @import/@embedFile argument path completion?");
     const style = try askBool("Do you want to enable style warnings?");
-    const semantic_tokens = try askBool("Do you want to enable semantic highlighting?");
-    const inlay_hints = try askBool("Do you want to enable inlay hints?");
     const operator_completions = try askBool("Do you want to enable .* and .? completions?");
     const include_at_in_builtins = switch (editor) {
         .Sublime => !try askBool("Are you using a Sublime Text version > 4000?"),
@@ -195,8 +193,6 @@ pub fn wizard(allocator: std.mem.Allocator) !void {
         .enable_ast_check_diagnostics = ast_check,
         .enable_import_embedfile_argument_completions = ief_apc,
         .warn_style = style,
-        .enable_semantic_tokens = semantic_tokens,
-        .enable_inlay_hints = inlay_hints,
         .operator_completions = operator_completions,
         .include_at_in_builtins = include_at_in_builtins,
         .max_detail_length = max_detail_length,

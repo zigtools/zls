@@ -1984,7 +1984,7 @@ fn semanticTokensFullHandler(server: *Server, writer: anytype, id: types.Request
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    if (server.config.enable_semantic_tokens) blk: {
+    blk: {
         const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
             Logger.warn(server, writer, "Trying to get semantic tokens of non existent document {s}", .{req.params.textDocument.uri});
             break :blk;
@@ -2386,7 +2386,7 @@ fn inlayHintHandler(server: *Server, writer: anytype, id: types.RequestId, req: 
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    if (server.config.enable_inlay_hints) blk: {
+    blk: {
         const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
             Logger.warn(server, writer, "Trying to get inlay hint of non existent document {s}", .{req.params.textDocument.uri});
             break :blk;

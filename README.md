@@ -109,8 +109,6 @@ The following options are currently available.
 | `warn_style` | `bool` | `false` | Enables warnings for style *guideline* mismatches |
 | `build_runner_path` | `?[]const u8` | `null` | Path to the build_runner.zig file provided by zls. `null` is equivalent to `${executable_directory}/build_runner.zig` |
 | `global_cache_path` | `?[]const u8` | `null` | Path to a directroy that will be used as zig's cache. `null` is equivalent to `${KnownFloders.Cache}/zls` |
-| `enable_semantic_tokens` | `bool` | `true` | Enables semantic token support when the client also supports it. |
-| `enable_inlay_hints` | `bool` | `false` | Enables inlay hint support when the client also supports it. |
 | `operator_completions` | `bool` | `true` | Enables `*` and `?` operators in completion lists. |
 |`include_at_in_builtins`|`bool`|`false`| Whether the @ sign should be part of the completion of builtins.
 |`max_detail_length`|`usize`|`1024 * 1024`| The detail field of completions is truncated to be no longer than this (in bytes).
