@@ -1818,7 +1818,7 @@ fn initializeHandler(server: *Server, writer: anytype, id: types.RequestId, req:
                     .completionProvider = .{ .resolveProvider = false, .triggerCharacters = &[_][]const u8{ ".", ":", "@", "]" }, .completionItem = .{ .labelDetailsSupport = true } },
                     .documentHighlightProvider = true,
                     .hoverProvider = true,
-                    .codeActionProvider = false,
+                    .codeActionProvider = true,
                     .declarationProvider = true,
                     .definitionProvider = true,
                     .typeDefinitionProvider = true,
@@ -2445,6 +2445,68 @@ fn inlayHintHandler(server: *Server, writer: anytype, id: types.RequestId, req: 
     return try respondGeneric(writer, id, null_result_response);
 }
 
+fn codeActionHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.CodeAction) !void {
+    // TODO: Figure out indentation; here we just plop the correction after the issue and rely on formatOnSave
+
+    if (req.params.context.diagnostics.len != 0) {
+        const diag = req.params.context.diagnostics[0];
+        if (std.mem.eql(u8, diag.message, "unused local variable")) {
+            var handle = server.document_store.getHandle(req.params.textDocument.uri).?;
+            const pos = try offsets.documentPosition(handle.document, req.params.range.start, server.offset_encoding);
+            var maybe_decl = try server.getSymbolGlobal(pos.absolute_index, handle);
+
+            if (maybe_decl) |decl| {
+                switch (decl.decl.*) {
+                    .ast_node => |index| {
+                        const token_index = ast.lastToken(handle.tree, index);
+                        std.debug.assert(handle.tree.tokens.items(.tag)[token_index + 1] == .semicolon);
+
+                        var loc = handle.tree.tokenLocation(0, token_index + 1);
+                        var fix = std.ArrayListUnmanaged(types.TextEdit){};
+                        try fix.append(server.arena.allocator(), .{
+                            .range = .{
+                                .start = .{
+                                    .line = @intCast(i64, loc.line),
+                                    .character = @intCast(i64, loc.column + 1),
+                                },
+                                .end = .{
+                                    .line = @intCast(i64, loc.line),
+                                    .character = @intCast(i64, loc.column + 1),
+                                },
+                            },
+                            .newText = try std.fmt.allocPrint(server.arena.allocator(), " _ = {s};", .{handle.tree.tokenSlice(analysis.getDeclNameToken(handle.tree, index).?)}),
+                        });
+
+                        var changes = std.StringHashMapUnmanaged(std.ArrayListUnmanaged(types.TextEdit)){};
+                        try changes.put(server.arena.allocator(), handle.uri(), fix);
+
+                        var action = [1]types.CodeAction{
+                            .{
+                                .title = "Add _ =",
+                                .kind = "quickfix",
+                                .isPreferred = true,
+                                .edit = .{
+                                    .changes = changes,
+                                },
+                            },
+                        };
+
+                        return try send(writer, server.arena.allocator(), types.Response{
+                            .id = id,
+                            .result = .{
+                                .CodeAction = &action,
+                            },
+                        });
+                    },
+                    else => {},
+                }
+            }
+        }
+    }
+
+    return try respondGeneric(writer, id, null_result_response);
+}
+
 // Needed for the hack seen below.
 fn extractErr(val: anytype) anyerror {
     val catch |e| return e;
@@ -2557,6 +2619,7 @@ pub fn processJsonRpc(server: *Server, writer: anytype, json: []const u8) !void 
         .{ "textDocument/references", requests.References, referencesHandler },
         .{ "textDocument/documentHighlight", requests.DocumentHighlight, documentHighlightHandler },
         .{ "workspace/didChangeConfiguration", std.json.Value, didChangeConfigurationHandler },
+        .{ "textDocument/codeAction", requests.CodeAction, codeActionHandler },
     };
 
     // Hack to avoid `return`ing in the inline for, which causes bugs.
@@ -2596,7 +2659,6 @@ pub fn processJsonRpc(server: *Server, writer: anytype, json: []const u8) !void 
     // needs a response) or false if the method is a notification (in which
     // case it should be silently ignored)
     const unimplemented_map = std.ComptimeStringMap(bool, .{
-        .{ "textDocument/codeAction", true },
         .{ "textDocument/codeLens", true },
         .{ "textDocument/documentLink", true },
         .{ "textDocument/rangeFormatting", true },

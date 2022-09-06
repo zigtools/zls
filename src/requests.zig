@@ -295,3 +295,13 @@ pub const Configuration = struct {
         },
     },
 };
+
+pub const CodeAction = struct {
+    params: struct {
+        textDocument: TextDocumentIdentifier,
+        range: types.Range,
+        context: struct {
+            diagnostics: []const types.Diagnostic,
+        },
+    },
+};

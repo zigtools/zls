@@ -47,6 +47,7 @@ pub const ResponseParams = union(enum) {
     ConfigurationParams: ConfigurationParams,
     RegistrationParams: RegistrationParams,
     DocumentHighlight: []DocumentHighlight,
+    CodeAction: []CodeAction,
 };
 
 /// JSONRPC notifications
@@ -466,4 +467,11 @@ pub const DocumentHighlightKind = enum(u8) {
 pub const DocumentHighlight = struct {
     range: Range,
     kind: ?DocumentHighlightKind,
+};
+
+pub const CodeAction = struct {
+    title: []const u8,
+    kind: []const u8,
+    isPreferred: bool,
+    edit: WorkspaceEdit,
 };
