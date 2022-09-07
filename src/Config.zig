@@ -202,10 +202,13 @@ pub fn configChanged(config: *Config, allocator: std.mem.Allocator, builtin_crea
         config.builtin_path = try std.fs.path.join(allocator, &.{ builtin_creation_dir.?, "builtin.zig" });
     }
 
+    const cache_dir_path = (try known_folders.getPath(allocator, .cache)) orelse {
+        logger.warn("Known-folders could not fetch the cache path", .{});
+        return;
+    };
+
     if (null == config.build_runner_path) {
-        var exe_dir_bytes: [std.fs.MAX_PATH_BYTES]u8 = undefined;
-        const exe_dir_path = try std.fs.selfExeDirPath(&exe_dir_bytes);
-        config.build_runner_path = try std.fs.path.resolve(allocator, &[_][]const u8{ exe_dir_path, "build_runner.zig" });
+        config.build_runner_path = try std.fs.path.resolve(allocator, &[_][]const u8{ cache_dir_path, "build_runner.zig" });
 
         const file = try std.fs.createFileAbsolute(config.build_runner_path.?, .{});
         defer file.close();
@@ -214,10 +217,6 @@ pub fn configChanged(config: *Config, allocator: std.mem.Allocator, builtin_crea
     }
 
     if (null == config.global_cache_path) {
-        const cache_dir_path = (try known_folders.getPath(allocator, .cache)) orelse {
-            logger.warn("Known-folders could not fetch the cache path", .{});
-            return;
-        };
         defer allocator.free(cache_dir_path);
         config.global_cache_path = try std.fs.path.resolve(allocator, &[_][]const u8{ cache_dir_path, "zls" });
     }
