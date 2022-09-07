@@ -1215,3 +1215,26 @@ pub fn nextFnParam(it: *Ast.full.FnProto.Iterator) ?Ast.full.FnProto.Param {
         it.tok_flag = false;
     }
 }
+
+/// A modified version of tree.tokenSlice that returns an error.UnexpectedToken if the tokenizer encounters an unexpected token
+// https://github.com/zigtools/zls/issues/381
+pub fn tokenSlice(tree: Ast, token_index: Ast.TokenIndex) ![]const u8 {
+    const token_starts = tree.tokens.items(.start);
+    const token_tags = tree.tokens.items(.tag);
+    const token_tag = token_tags[token_index];
+
+    // Many tokens can be determined entirely by their tag.
+    if (token_tag.lexeme()) |lexeme| {
+        return lexeme;
+    }
+
+    // For some tokens, re-tokenization is needed to find the end.
+    var tokenizer: std.zig.Tokenizer = .{
+        .buffer = tree.source,
+        .index = token_starts[token_index],
+        .pending_invalid_token = null,
+    };
+    const token = tokenizer.next();
+    if (token.tag != token_tag) return error.UnexpectedToken; // assert(token.tag == token_tag);
+    return tree.source[token.loc.start..token.loc.end];
+}

@@ -182,7 +182,8 @@ pub fn tokenLocation(tree: Ast, token_index: Ast.TokenIndex) Loc {
     };
 
     const token = tokenizer.next();
-    std.debug.assert(token.tag == tag);
+    // HACK, should return error.UnextectedToken
+    if (token.tag != tag) return .{ .start = 0, .end = 0 }; //std.debug.assert(token.tag == tag);
     return .{ .start = token.loc.start, .end = token.loc.end };
 }
 
