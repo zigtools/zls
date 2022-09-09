@@ -113,7 +113,7 @@ pub fn translate(allocator: std.mem.Allocator, config: Config, include_dirs: []c
     };
 
     const base_include_dirs = blk: {
-        const target_info = std.zig.system.NativeTargetInfo.detect(allocator, .{}) catch break :blk null;
+        const target_info = std.zig.system.NativeTargetInfo.detect(.{}) catch break :blk null;
         var native_paths = std.zig.system.NativePaths.detect(allocator, target_info) catch break :blk null;
         defer native_paths.deinit();
 
