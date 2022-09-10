@@ -114,12 +114,6 @@ pub fn build(b: *std.build.Builder) !void {
     const test_step = b.step("test", "Run all the tests");
     test_step.dependOn(b.getInstallStep());
 
-    var unit_tests = b.addTest("src/unit_tests.zig");
-    unit_tests.use_stage1 = true;
-    unit_tests.setBuildMode(.Debug);
-    unit_tests.setTarget(target);
-    test_step.dependOn(&unit_tests.step);
-
     var tests = b.addTest("tests/tests.zig");
     tests.use_stage1 = true;
     tests.addPackage(.{ .name = "zls", .source = .{ .path = "src/zls.zig" }, .dependencies = exe.packages.items });
