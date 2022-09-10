@@ -50,7 +50,7 @@ You can install the latest release into `$HOME/zls` using e.g.:
 
 ```sh
 brew install xz
-mkdir $HOME/zls && cd $HOME/zls && curl -L https://github.com/zigtools/zls/releases/download/0.9.0/x86_64-macos.tar.xz | tar -xJ --strip-components=1 -C .
+mkdir $HOME/zls && cd $HOME/zls && curl -L https://github.com/zigtools/zls/releases/download/0.9.0/x86_64-macos.tar.xz | tar -xJ --strip-components=1 -C . && chmod +x zls
 ```
 
 #### Linux
