@@ -20,6 +20,8 @@ const uri_utils = @import("uri.zig");
 const data = @import("data/data.zig");
 const diff = @import("diff.zig");
 
+const log = std.log.scoped(.server);
+
 // Server fields
 
 config: Config,
@@ -29,64 +31,6 @@ document_store: DocumentStore = undefined,
 client_capabilities: ClientCapabilities = .{},
 offset_encoding: offsets.Encoding = .utf16,
 keep_running: bool = true,
-log_level: std.log.Level,
-
-pub const Logger = struct {
-    pub fn err(server: *Server, writer: anytype, comptime format: []const u8, args: anytype) void {
-        @setCold(true);
-        log(server, writer, .err, format, args);
-    }
-    pub fn warn(server: *Server, writer: anytype, comptime format: []const u8, args: anytype) void {
-        log(server, writer, .warn, format, args);
-    }
-    pub fn info(server: *Server, writer: anytype, comptime format: []const u8, args: anytype) void {
-        log(server, writer, .info, format, args);
-    }
-    pub fn debug(server: *Server, writer: anytype, comptime format: []const u8, args: anytype) void {
-        log(server, writer, .debug, format, args);
-    }
-};
-
-fn log(server: *Server, writer: anytype, comptime message_level: std.log.Level, comptime format: []const u8, args: anytype) void {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    const scope = .Server;
-
-    if (@enumToInt(message_level) > @enumToInt(server.log_level)) {
-        return;
-    }
-    // After shutdown, pipe output to stderr
-    if (!server.keep_running) {
-        std.debug.print("[{?s}-{?s}] " ++ format ++ "\n", .{ @tagName(message_level), @tagName(scope) } ++ args);
-        return;
-    }
-
-    var message = std.fmt.allocPrint(server.allocator, "[{?s}-{?s}] " ++ format, .{ @tagName(message_level), @tagName(scope) } ++ args) catch {
-        std.debug.print("Failed to allocPrint message.\n", .{});
-        return;
-    };
-    defer server.allocator.free(message);
-
-    const message_type: types.MessageType = switch (message_level) {
-        .debug => .Log,
-        .info => .Info,
-        .warn => .Warning,
-        .err => .Error,
-    };
-
-    send(writer, server.allocator, types.Notification{
-        .method = "window/logMessage",
-        .params = types.Notification.Params{
-            .LogMessage = .{
-                .type = message_type,
-                .message = message,
-            },
-        },
-    }) catch {
-        // TODO: Find a way to handle this error properly
-    };
-}
 
 // Code was based off of https://github.com/andersfr/zig-lsp/blob/master/server.zig
 
@@ -228,7 +172,7 @@ fn publishDiagnostics(server: *Server, writer: anytype, handle: DocumentStore.Ha
             process.stderr_behavior = .Pipe;
 
             process.spawn() catch |err| {
-                Logger.warn(server, writer, "Failed to spawn zig ast-check process, error: {}", .{err});
+                log.warn("Failed to spawn zig ast-check process, error: {}", .{err});
                 break :diag;
             };
             try process.stdin.?.writeAll(handle.document.text);
@@ -1450,7 +1394,7 @@ fn completeGlobal(server: *Server, writer: anytype, id: types.RequestId, pos_ind
 
     if (server.client_capabilities.label_details_support) {
         for (completions.items) |*item| {
-            try server.formatDetailledLabel(writer, item, server.arena.allocator());
+            try formatDetailledLabel(item, server.arena.allocator());
         }
     }
 
@@ -1483,7 +1427,7 @@ fn completeFieldAccess(server: *Server, writer: anytype, id: types.RequestId, ha
         truncateCompletions(completions.items, server.config.max_detail_length);
         if (server.client_capabilities.label_details_support) {
             for (completions.items) |*item| {
-                try server.formatDetailledLabel(writer, item, server.arena.allocator());
+                try formatDetailledLabel(item, server.arena.allocator());
             }
         }
     }
@@ -1499,7 +1443,7 @@ fn completeFieldAccess(server: *Server, writer: anytype, id: types.RequestId, ha
     });
 }
 
-fn formatDetailledLabel(server: *Server, writer: anytype, item: *types.CompletionItem, alloc: std.mem.Allocator) !void {
+fn formatDetailledLabel(item: *types.CompletionItem, alloc: std.mem.Allocator) !void {
     // NOTE: this is not ideal, we should build a detailled label like we do for label/detail
     // because this implementation is very loose, nothing is formated properly so we need to clean
     // things a little bit, wich is quite messy
@@ -1531,13 +1475,13 @@ fn formatDetailledLabel(server: *Server, writer: anytype, item: *types.Completio
         it = it[0..end];
     }
 
-    // logger.info("## label: {s} it: {s} kind: {} isValue: {}", .{item.label, it, item.kind, isValue});
+    // loggerger.info("## label: {s} it: {s} kind: {} isValue: {}", .{item.label, it, item.kind, isValue});
 
     if (std.mem.startsWith(u8, it, "fn ")) {
         var s: usize = std.mem.indexOf(u8, it, "(") orelse return;
         var e: usize = std.mem.lastIndexOf(u8, it, ")") orelse return;
         if (e < s) {
-            Logger.warn(server, writer, "something wrong when trying to build label detail for {s} kind: {}", .{ it, item.kind });
+            log.warn("something wrong when trying to build label detail for {s} kind: {}", .{ it, item.kind });
             return;
         }
 
@@ -1551,7 +1495,7 @@ fn formatDetailledLabel(server: *Server, writer: anytype, item: *types.Completio
                 var us: usize = std.mem.indexOf(u8, it, "(") orelse return;
                 var ue: usize = std.mem.lastIndexOf(u8, it, ")") orelse return;
                 if (ue < us) {
-                    Logger.warn(server, writer, "something wrong when trying to build label detail for a .Constant|union {s}", .{it});
+                    log.warn("something wrong when trying to build label detail for a .Constant|union {s}", .{it});
                     return;
                 }
 
@@ -1590,10 +1534,10 @@ fn formatDetailledLabel(server: *Server, writer: anytype, item: *types.Completio
         var e: usize = std.mem.indexOf(u8, it, "=") orelse return;
 
         if (e < s) {
-            Logger.warn(server, writer, "something wrong when trying to build label detail for a .Variable {s}", .{it});
+            log.warn("something wrong when trying to build label detail for a .Variable {s}", .{it});
             return;
         }
-        // logger.info("s: {} -> {}", .{s, e});
+        // loggerger.info("s: {} -> {}", .{s, e});
         item.insertText = item.label;
         item.insertTextFormat = .PlainText;
         item.detail = item.label;
@@ -1613,10 +1557,10 @@ fn formatDetailledLabel(server: *Server, writer: anytype, item: *types.Completio
         var s: usize = std.mem.indexOf(u8, it, " ") orelse return;
         var e: usize = std.mem.indexOf(u8, it, "=") orelse it.len;
         if (e < s) {
-            Logger.warn(server, writer, "something wrong when trying to build label detail for a .Variable {s}", .{it});
+            log.warn("something wrong when trying to build label detail for a .Variable {s}", .{it});
             return;
         }
-        // logger.info("s: {} -> {}", .{s, e});
+        // loggerger.info("s: {} -> {}", .{s, e});
         item.insertText = item.label;
         item.insertTextFormat = .PlainText;
         item.detail = item.label;
@@ -1629,7 +1573,7 @@ fn formatDetailledLabel(server: *Server, writer: anytype, item: *types.Completio
             var us: usize = std.mem.indexOf(u8, it, "(") orelse return;
             var ue: usize = std.mem.lastIndexOf(u8, it, ")") orelse return;
             if (ue < us) {
-                Logger.warn(server, writer, "something wrong when trying to build label detail for a .Constant|union {s}", .{it});
+                log.warn("something wrong when trying to build label detail for a .Constant|union {s}", .{it});
                 return;
             }
             item.labelDetails.?.description = it[us - 5 .. ue + 1];
@@ -1637,7 +1581,7 @@ fn formatDetailledLabel(server: *Server, writer: anytype, item: *types.Completio
             var es: usize = std.mem.indexOf(u8, it, "(") orelse return;
             var ee: usize = std.mem.lastIndexOf(u8, it, ")") orelse return;
             if (ee < es) {
-                Logger.warn(server, writer, "something wrong when trying to build label detail for a .Constant|enum {s}", .{it});
+                log.warn("something wrong when trying to build label detail for a .Constant|enum {s}", .{it});
                 return;
             }
             item.labelDetails.?.description = it[es - 4 .. ee + 1];
@@ -1671,7 +1615,7 @@ fn completeError(server: *Server, writer: anytype, id: types.RequestId, handle: 
     var completions = try server.document_store.errorCompletionItems(&server.arena, handle);
 
     truncateCompletions(completions, server.config.max_detail_length);
-    Logger.debug(server, writer, "Completing error:", .{});
+    log.debug("Completing error:", .{});
 
     try send(writer, server.arena.allocator(), types.Response{
         .id = id,
@@ -1858,16 +1802,16 @@ fn initializeHandler(server: *Server, writer: anytype, id: types.RequestId, req:
         }
     }
 
-    Logger.info(server, writer, "zls initialized", .{});
-    Logger.info(server, writer, "{}", .{server.client_capabilities});
-    Logger.info(server, writer, "Using offset encoding: {s}", .{std.meta.tagName(server.offset_encoding)});
+    log.info("zls initialized", .{});
+    log.info("{}", .{server.client_capabilities});
+    log.info("Using offset encoding: {s}", .{std.meta.tagName(server.offset_encoding)});
 }
 
 fn registerCapability(server: *Server, writer: anytype, method: []const u8) !void {
     // NOTE: stage1 moment occurs if we dont do it like this :(
     // long live stage2's not broken anon structs
 
-    Logger.debug(server, writer, "Dynamically registering method '{s}'", .{method});
+    log.debug("Dynamically registering method '{s}'", .{method});
 
     const id = try std.fmt.allocPrint(server.arena.allocator(), "register-{s}", .{method});
     const reg = types.RegistrationParams.Registration{
@@ -1904,7 +1848,7 @@ fn requestConfiguration(server: *Server, writer: anytype) !void {
         break :confi comp_confi;
     };
 
-    Logger.info(server, writer, "Requesting configuration!", .{});
+    log.info("Requesting configuration!", .{});
     try send(writer, server.arena.allocator(), types.Request{
         .id = .{ .String = "i_haz_configuration" },
         .method = "workspace/configuration",
@@ -1924,7 +1868,7 @@ fn initializedHandler(server: *Server, writer: anytype, id: types.RequestId) !vo
 }
 
 fn shutdownHandler(server: *Server, writer: anytype, id: types.RequestId) !void {
-    Logger.info(server, writer, "Server closing...", .{});
+    log.info("Server closing...", .{});
 
     server.keep_running = false;
     // Technically we should deinitialize first and send possible errors to the client
@@ -1951,7 +1895,7 @@ fn changeDocumentHandler(server: *Server, writer: anytype, id: types.RequestId, 
     _ = id;
 
     const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
-        Logger.debug(server, writer, "Trying to change non existent document {s}", .{req.params.textDocument.uri});
+        log.debug("Trying to change non existent document {s}", .{req.params.textDocument.uri});
         return;
     };
 
@@ -1964,8 +1908,10 @@ fn saveDocumentHandler(server: *Server, writer: anytype, id: types.RequestId, re
     defer tracy_zone.end();
 
     _ = id;
+    _ = writer;
+
     const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
-        Logger.warn(server, writer, "Trying to save non existent document {s}", .{req.params.textDocument.uri});
+        log.warn("Trying to save non existent document {s}", .{req.params.textDocument.uri});
         return;
     };
     try server.document_store.applySave(handle);
@@ -1986,7 +1932,7 @@ fn semanticTokensFullHandler(server: *Server, writer: anytype, id: types.Request
 
     if (server.config.enable_semantic_tokens) blk: {
         const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
-            Logger.warn(server, writer, "Trying to get semantic tokens of non existent document {s}", .{req.params.textDocument.uri});
+            log.warn("Trying to get semantic tokens of non existent document {s}", .{req.params.textDocument.uri});
             break :blk;
         };
 
@@ -2006,7 +1952,7 @@ fn completionHandler(server: *Server, writer: anytype, id: types.RequestId, req:
     defer tracy_zone.end();
 
     const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
-        Logger.warn(server, writer, "Trying to complete in non existent document {s}", .{req.params.textDocument.uri});
+        log.warn("Trying to complete in non existent document {s}", .{req.params.textDocument.uri});
         return try respondGeneric(writer, id, no_completions_response);
     };
 
@@ -2103,7 +2049,7 @@ fn signatureHelpHandler(server: *Server, writer: anytype, id: types.RequestId, r
 
     const getSignatureInfo = @import("signature_help.zig").getSignatureInfo;
     const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
-        Logger.warn(server, writer, "Trying to get signature help in non existent document {s}", .{req.params.textDocument.uri});
+        log.warn("Trying to get signature help in non existent document {s}", .{req.params.textDocument.uri});
         return try respondGeneric(writer, id, no_signatures_response);
     };
 
@@ -2137,7 +2083,7 @@ fn gotoHandler(server: *Server, writer: anytype, id: types.RequestId, req: reque
     defer tracy_zone.end();
 
     const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
-        Logger.warn(server, writer, "Trying to go to definition in non existent document {s}", .{req.params.textDocument.uri});
+        log.warn("Trying to go to definition in non existent document {s}", .{req.params.textDocument.uri});
         return try respondGeneric(writer, id, null_result_response);
     };
 
@@ -2176,7 +2122,7 @@ fn hoverHandler(server: *Server, writer: anytype, id: types.RequestId, req: requ
     defer tracy_zone.end();
 
     const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
-        Logger.warn(server, writer, "Trying to get hover in non existent document {s}", .{req.params.textDocument.uri});
+        log.warn("Trying to get hover in non existent document {s}", .{req.params.textDocument.uri});
         return try respondGeneric(writer, id, null_result_response);
     };
 
@@ -2200,7 +2146,7 @@ fn documentSymbolsHandler(server: *Server, writer: anytype, id: types.RequestId,
     defer tracy_zone.end();
 
     const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
-        Logger.warn(server, writer, "Trying to get document symbols in non existent document {s}", .{req.params.textDocument.uri});
+        log.warn("Trying to get document symbols in non existent document {s}", .{req.params.textDocument.uri});
         return try respondGeneric(writer, id, null_result_response);
     };
     try server.documentSymbol(writer, id, handle);
@@ -2212,7 +2158,7 @@ fn formattingHandler(server: *Server, writer: anytype, id: types.RequestId, req:
 
     if (server.config.zig_exe_path) |zig_exe_path| {
         const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
-            Logger.warn(server, writer, "Trying to got to definition in non existent document {s}", .{req.params.textDocument.uri});
+            log.warn("Trying to got to definition in non existent document {s}", .{req.params.textDocument.uri});
             return try respondGeneric(writer, id, null_result_response);
         };
 
@@ -2221,7 +2167,7 @@ fn formattingHandler(server: *Server, writer: anytype, id: types.RequestId, req:
         process.stdout_behavior = .Pipe;
 
         process.spawn() catch |err| {
-            Logger.warn(server, writer, "Failed to spawn zig fmt process, error: {}", .{err});
+            log.warn("Failed to spawn zig fmt process, error: {}", .{err});
             return try respondGeneric(writer, id, null_result_response);
         };
         try process.stdin.?.writeAll(handle.document.text);
@@ -2287,7 +2233,7 @@ fn renameHandler(server: *Server, writer: anytype, id: types.RequestId, req: req
     defer tracy_zone.end();
 
     const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
-        Logger.warn(server, writer, "Trying to rename in non existent document {s}", .{req.params.textDocument.uri});
+        log.warn("Trying to rename in non existent document {s}", .{req.params.textDocument.uri});
         return try respondGeneric(writer, id, null_result_response);
     };
 
@@ -2315,7 +2261,7 @@ fn didChangeConfigurationHandler(server: *Server, writer: anytype, id: types.Req
         const req = try requests.fromDynamicTree(&server.arena, requests.Configuration, maybe_req);
         inline for (std.meta.fields(Config)) |field| {
             if (@field(req.params.settings, field.name)) |value| {
-                Logger.debug(server, writer, "setting configuration option '{s}' to '{any}'", .{ field.name, value });
+                log.debug("setting configuration option '{s}' to '{any}'", .{ field.name, value });
                 @field(server.config, field.name) = if (@TypeOf(value) == []const u8) try server.allocator.dupe(u8, value) else value;
             }
         }
@@ -2330,7 +2276,7 @@ fn referencesHandler(server: *Server, writer: anytype, id: types.RequestId, req:
     defer tracy_zone.end();
 
     const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
-        Logger.warn(server, writer, "Trying to get references in non existent document {s}", .{req.params.textDocument.uri});
+        log.warn("Trying to get references in non existent document {s}", .{req.params.textDocument.uri});
         return try respondGeneric(writer, id, null_result_response);
     };
 
@@ -2355,7 +2301,7 @@ fn documentHighlightHandler(server: *Server, writer: anytype, id: types.RequestI
     defer tracy_zone.end();
 
     const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
-        Logger.warn(server, writer, "Trying to highlight references in non existent document {s}", .{req.params.textDocument.uri});
+        log.warn("Trying to highlight references in non existent document {s}", .{req.params.textDocument.uri});
         return try respondGeneric(writer, id, null_result_response);
     };
 
@@ -2388,7 +2334,7 @@ fn inlayHintHandler(server: *Server, writer: anytype, id: types.RequestId, req: 
 
     if (server.config.enable_inlay_hints) blk: {
         const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
-            Logger.warn(server, writer, "Trying to get inlay hint of non existent document {s}", .{req.params.textDocument.uri});
+            log.warn("Trying to get inlay hint of non existent document {s}", .{req.params.textDocument.uri});
             break :blk;
         };
 
@@ -2457,7 +2403,7 @@ pub fn processJsonRpc(server: *Server, writer: anytype, json: []const u8) !void 
     if (id == .String and std.mem.startsWith(u8, id.String, "register"))
         return;
     if (id == .String and std.mem.eql(u8, id.String, "i_haz_configuration")) {
-        Logger.info(server, writer, "Setting configuration...", .{});
+        log.info("Setting configuration...", .{});
 
         // NOTE: Does this work with other editors?
         // Yes, String ids are officially supported by LSP
@@ -2495,7 +2441,7 @@ pub fn processJsonRpc(server: *Server, writer: anytype, json: []const u8) !void 
                         else => @compileError("Not implemented for " ++ @typeName(ft)),
                     },
                 };
-                Logger.debug(server, writer, "setting configuration option '{s}' to '{any}'", .{ field.name, new_value });
+                log.debug("setting configuration option '{s}' to '{any}'", .{ field.name, new_value });
                 @field(server.config, field.name) = new_value;
             }
         }
@@ -2512,7 +2458,7 @@ pub fn processJsonRpc(server: *Server, writer: anytype, json: []const u8) !void 
         // makes `zig build test` look nice
         if (!zig_builtin.is_test and !std.mem.eql(u8, method, "shutdown")) {
             const end_time = std.time.milliTimestamp();
-            Logger.debug(server, writer, "Took {}ms to process method {s}", .{ end_time - start_time, method });
+            log.debug("Took {}ms to process method {s}", .{ end_time - start_time, method });
         }
     }
 
@@ -2549,7 +2495,7 @@ pub fn processJsonRpc(server: *Server, writer: anytype, json: []const u8) !void 
     inline for (method_map) |method_info| {
         if (done == null and std.mem.eql(u8, method, method_info[0])) {
             if (method_info.len == 1) {
-                Logger.warn(server, writer, "method not mapped: {s}", .{method});
+                log.warn("method not mapped: {s}", .{method});
                 done = error.HackDone;
             } else if (method_info[1] != void) {
                 const ReqT = method_info[1];
@@ -2558,7 +2504,7 @@ pub fn processJsonRpc(server: *Server, writer: anytype, json: []const u8) !void 
                     done = extractErr(method_info[2](server, writer, id, request_obj));
                 } else |err| {
                     if (err == error.MalformedJson) {
-                        Logger.warn(server, writer, "Could not create request type {s} from JSON {s}", .{ @typeName(ReqT), json });
+                        log.warn("Could not create request type {s} from JSON {s}", .{ @typeName(ReqT), json });
                     }
                     done = err;
                 }
@@ -2598,13 +2544,13 @@ pub fn processJsonRpc(server: *Server, writer: anytype, json: []const u8) !void 
             return try respondGeneric(writer, id, null_result_response);
         }
 
-        Logger.debug(server, writer, "Notification method {s} is not implemented", .{method});
+        log.debug("Notification method {s} is not implemented", .{method});
         return;
     }
     if (tree.root.Object.get("id")) |_| {
         return try respondGeneric(writer, id, not_implemented_response);
     }
-    Logger.debug(server, writer, "Method without return value not implemented: {s}", .{method});
+    log.debug("Method without return value not implemented: {s}", .{method});
 }
 
 pub fn configChanged(server: *Server, builtin_creation_dir: ?[]const u8) !void {
@@ -2616,7 +2562,6 @@ pub fn init(
     allocator: std.mem.Allocator,
     config: Config,
     config_path: ?[]const u8,
-    log_level: std.log.Level,
 ) !Server {
     // TODO replace global with something like an Analyser struct
     // which contains using_trail & resolve_trail and place it inside Server
@@ -2631,7 +2576,6 @@ pub fn init(
         .config = cfg,
         .allocator = allocator,
         .document_store = try DocumentStore.init(allocator, cfg),
-        .log_level = log_level,
     };
 }
 
