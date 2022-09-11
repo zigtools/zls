@@ -3,11 +3,7 @@ const types = @import("types.zig");
 const ast = @import("ast.zig");
 const Ast = std.zig.Ast;
 
-pub const Encoding = enum {
-    utf8,
-    utf16,
-    utf32,
-};
+pub const Encoding = types.PositionEncodingKind;
 
 pub const Loc = std.zig.Token.Loc;
 

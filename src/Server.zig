@@ -1741,9 +1741,26 @@ fn initializeHandler(server: *Server, writer: anytype, id: types.RequestId, req:
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    for (req.params.capabilities.offsetEncoding.value) |encoding| {
-        if (std.mem.eql(u8, encoding, "utf-8")) {
+    if(req.params.capabilities.general) |general| {
+        var supports_utf8 = false;
+        var supports_utf16 = false;
+        var supports_utf32 = false;
+        for(general.positionEncodings.value) |encoding| {
+            if (std.mem.eql(u8, encoding, "utf-8")) {
+                supports_utf8 = true;
+            } else if(std.mem.eql(u8, encoding, "utf-16")) {
+                supports_utf16 = true;
+            } else if(std.mem.eql(u8, encoding, "utf-32")) {
+                supports_utf32 = true;
+            }
+        }
+
+        if(supports_utf8) {
             server.offset_encoding = .utf8;
+        } else if(supports_utf32) {
+            server.offset_encoding = .utf32;
+        } else {
+            server.offset_encoding = .utf16;
         }
     }
 
@@ -1774,10 +1791,7 @@ fn initializeHandler(server: *Server, writer: anytype, id: types.RequestId, req:
         .id = id,
         .result = .{
             .InitializeResult = .{
-                .offsetEncoding = if (server.offset_encoding == .utf8)
-                    @as([]const u8, "utf-8")
-                else
-                    "utf-16",
+                .offsetEncoding = server.offset_encoding,
                 .serverInfo = .{
                     .name = "zls",
                     .version = "0.1.0",
