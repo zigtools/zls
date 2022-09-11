@@ -10,7 +10,7 @@ const ast = @import("ast.zig");
 fn tokenReference(handle: *DocumentStore.Handle, tok: Ast.TokenIndex, encoding: offsets.Encoding, context: anytype, comptime handler: anytype) !void {
     try handler(context, types.Location{
         .uri = handle.uri(),
-        .range = offsets.tokenToRange(handle.tree, tok,encoding) catch return,
+        .range = offsets.tokenToRange(handle.tree, tok, encoding),
     });
 }
 
@@ -111,7 +111,7 @@ fn symbolReferencesInternal(arena: *std.heap.ArenaAllocator, store: *DocumentSto
             }
         },
         .identifier => {
-            if (try analysis.lookupSymbolGlobal(store, arena, handle, tree.getNodeSource(node), starts[main_tokens[node]])) |child| {
+            if (try analysis.lookupSymbolGlobal(store, arena, handle, offsets.nodeToSlice(tree, node), starts[main_tokens[node]])) |child| {
                 if (std.meta.eql(decl, child)) {
                     try tokenReference(handle, main_tokens[node], encoding, context, handler);
                 }

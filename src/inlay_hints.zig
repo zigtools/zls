@@ -2,6 +2,7 @@ const std = @import("std");
 const DocumentStore = @import("DocumentStore.zig");
 const analysis = @import("analysis.zig");
 const types = @import("types.zig");
+const offsets = @import("offsets.zig");
 const Ast = std.zig.Ast;
 const log = std.log.scoped(.inlay_hint);
 const ast = @import("ast.zig");
@@ -35,16 +36,7 @@ const Builder = struct {
     handle: *DocumentStore.Handle,
     hints: std.ArrayListUnmanaged(types.InlayHint),
     hover_kind: types.MarkupContent.Kind,
-
-    fn init(allocator: std.mem.Allocator, config: *const Config, handle: *DocumentStore.Handle, hover_kind: types.MarkupContent.Kind) Builder {
-        return Builder{
-            .allocator = allocator,
-            .config = config,
-            .handle = handle,
-            .hints = std.ArrayListUnmanaged(types.InlayHint){},
-            .hover_kind = hover_kind,
-        };
-    }
+    encoding: offsets.Encoding,
 
     fn deinit(self: *Builder) void {
         for (self.hints.items) |hint| {
@@ -53,7 +45,7 @@ const Builder = struct {
         self.hints.deinit(self.allocator);
     }
 
-    fn appendParameterHint(self: *Builder, position: Ast.Location, label: []const u8, tooltip: []const u8, tooltip_noalias: bool, tooltip_comptime: bool) !void {
+    fn appendParameterHint(self: *Builder, position: types.Position, label: []const u8, tooltip: []const u8, tooltip_noalias: bool, tooltip_comptime: bool) !void {
         // TODO allocation could be avoided by extending InlayHint.jsonStringify
         // adding tooltip_noalias & tooltip_comptime to InlayHint should be enough
         const tooltip_text = blk: {
@@ -68,10 +60,7 @@ const Builder = struct {
         };
 
         try self.hints.append(self.allocator, .{
-            .position = .{
-                .line = @intCast(i64, position.line),
-                .character = @intCast(i64, position.column),
-            },
+            .position = position,
             .label = label,
             .kind = types.InlayHintKind.Parameter,
             .tooltip = .{
@@ -110,7 +99,7 @@ fn writeCallHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *Doc
                 }
 
                 while (ast.nextFnParam(&it)) |param| : (i += 1) {
-                    if (param.name_token == null) continue;
+                    const name_token = param.name_token orelse continue;
                     if (i >= call.ast.params.len) break;
 
                     const token_tags = decl_tree.tokens.items(.tag);
@@ -121,11 +110,11 @@ fn writeCallHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *Doc
                     const tooltip = if (param.anytype_ellipsis3) |token|
                         if (token_tags[token] == .keyword_anytype) "anytype" else ""
                     else
-                        decl_tree.getNodeSource(param.type_expr);
+                        offsets.nodeToSlice(decl_tree, param.type_expr);
 
                     try builder.appendParameterHint(
-                        tree.tokenLocation(0, tree.firstToken(call.ast.params[i])),
-                        decl_tree.tokenSlice(param.name_token.?),
+                        offsets.tokenToPosition(tree, tree.firstToken(call.ast.params[i]), builder.encoding),
+                        decl_tree.tokenSlice(name_token),
                         tooltip,
                         no_alias,
                         comp_time,
@@ -165,7 +154,7 @@ fn writeBuiltinHint(builder: *Builder, parameters: []const Ast.Node.Index, argum
         }
 
         try builder.appendParameterHint(
-            tree.tokenLocation(0, tree.firstToken(parameters[i])),
+            offsets.tokenToPosition(tree, tree.firstToken(parameters[i]), builder.encoding),
             label orelse "",
             std.mem.trim(u8, type_expr, " \t\n"),
             no_alias,
@@ -203,23 +192,16 @@ fn writeCallNodeHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store: 
             const rhsToken = node_data[call.ast.fn_expr].rhs;
             std.debug.assert(token_tags[rhsToken] == .identifier);
 
-            const lhsLocation = tree.tokenLocation(0, lhsToken);
-            const rhsLocation = tree.tokenLocation(0, rhsToken);
+            const start = offsets.tokenToIndex(tree, lhsToken);
+            const rhs_loc = offsets.tokenToLoc(tree, rhsToken);
 
-            const absolute_index = rhsLocation.line_start + rhsLocation.column;
-
-            const range = .{
-                .start = lhsLocation.line_start + lhsLocation.column,
-                .end = rhsLocation.line_start + rhsLocation.column + tree.tokenSlice(rhsToken).len,
-            };
-
-            var held_range = handle.document.borrowNullTerminatedSlice(range.start, range.end);
+            var held_range = handle.document.borrowNullTerminatedSlice(start, rhs_loc.end);
             var tokenizer = std.zig.Tokenizer.init(held_range.data());
 
             // note: we have the ast node, traversing it would probably yield better results
             // than trying to re-tokenize and re-parse it
             errdefer held_range.release();
-            if (try analysis.getFieldAccessType(store, arena, handle, absolute_index, &tokenizer)) |result| {
+            if (try analysis.getFieldAccessType(store, arena, handle, rhs_loc.end, &tokenizer)) |result| {
                 held_range.release();
                 const container_handle = result.unwrapped orelse result.original;
                 switch (container_handle.type.data) {
@@ -677,8 +659,23 @@ fn writeNodeInlayHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store:
 /// only hints in the given range are created
 /// Caller owns returned memory.
 /// `InlayHint.tooltip.value` has to deallocated separately
-pub fn writeRangeInlayHint(arena: *std.heap.ArenaAllocator, config: *const Config, store: *DocumentStore, handle: *DocumentStore.Handle, range: types.Range, hover_kind: types.MarkupContent.Kind) error{OutOfMemory}![]types.InlayHint {
-    var builder = Builder.init(arena.child_allocator, config, handle, hover_kind);
+pub fn writeRangeInlayHint(
+    arena: *std.heap.ArenaAllocator,
+    config: *const Config,
+    store: *DocumentStore,
+    handle: *DocumentStore.Handle,
+    range: types.Range,
+    hover_kind: types.MarkupContent.Kind,
+    encoding: offsets.Encoding,
+) error{OutOfMemory}![]types.InlayHint {
+    var builder: Builder = .{
+        .allocator = arena.child_allocator,
+        .config = config,
+        .handle = handle,
+        .hints = .{},
+        .hover_kind = hover_kind,
+        .encoding = encoding,
+    };
     errdefer builder.deinit();
 
     var buf: [2]Ast.Node.Index = undefined;

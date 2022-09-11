@@ -5,8 +5,8 @@ const string = []const u8;
 // https://microsoft.github.io/language-server-protocol/specifications/specification-3-16/
 
 pub const Position = struct {
-    line: i64,
-    character: i64,
+    line: u32,
+    character: u32,
 };
 
 pub const Range = struct {

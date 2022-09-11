@@ -320,14 +320,14 @@ fn char_pos_to_range(
     }) {
         if (start >= char_pos and start <= char_pos + line.len) {
             result_start_pos = .{
-                .line = @intCast(i64, line_pos),
-                .character = @intCast(i64, start - char_pos),
+                .line = @intCast(u32, line_pos),
+                .character = @intCast(u32, start - char_pos),
             };
         }
         if (end >= char_pos and end <= char_pos + line.len) {
             result_end_pos = .{
-                .line = @intCast(i64, line_pos),
-                .character = @intCast(i64, end - char_pos),
+                .line = @intCast(u32, line_pos),
+                .character = @intCast(u32, end - char_pos),
             };
         }
     }
@@ -338,8 +338,8 @@ fn char_pos_to_range(
     // string for some reason so clamp it to the string end position
     if (result_end_pos == null) {
         result_end_pos = types.Position{
-            .line = @intCast(i64, line_pos),
-            .character = @intCast(i64, char_pos),
+            .line = @intCast(u32, line_pos),
+            .character = @intCast(u32, char_pos),
         };
     }
 
