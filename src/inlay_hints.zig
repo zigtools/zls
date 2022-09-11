@@ -118,10 +118,15 @@ fn writeCallHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *Doc
                     const no_alias = if (param.comptime_noalias) |t| token_tags[t] == .keyword_noalias or token_tags[t - 1] == .keyword_noalias else false;
                     const comp_time = if (param.comptime_noalias) |t| token_tags[t] == .keyword_comptime or token_tags[t - 1] == .keyword_comptime else false;
 
+                    const tooltip = if (param.anytype_ellipsis3) |token|
+                        if (token_tags[token] == .keyword_anytype) "anytype" else ""
+                    else
+                        decl_tree.getNodeSource(param.type_expr);
+
                     try builder.appendParameterHint(
                         tree.tokenLocation(0, tree.firstToken(call.ast.params[i])),
                         decl_tree.tokenSlice(param.name_token.?),
-                        decl_tree.getNodeSource(param.type_expr),
+                        tooltip,
                         no_alias,
                         comp_time,
                     );
