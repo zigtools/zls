@@ -211,6 +211,11 @@ pub fn configChanged(config: *Config, allocator: std.mem.Allocator, builtin_crea
         defer allocator.free(cache_dir_path);
 
         config.global_cache_path = try std.fs.path.resolve(allocator, &[_][]const u8{ cache_dir_path, "zls" });
+
+        std.fs.makeDirAbsolute(config.global_cache_path.?) catch |err| switch(err) {
+            error.PathAlreadyExists => {},
+            else => return err,
+        };
     }
 
     if (null == config.build_runner_path) {
