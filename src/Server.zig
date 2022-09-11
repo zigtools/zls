@@ -251,13 +251,13 @@ fn publishDiagnostics(server: *Server, writer: anytype, handle: DocumentStore.Ha
                             if (first.len <= 1) break :lin;
                         } else break;
 
-                        const position = types.Position{
+                        const utf8_position = types.Position{
                             .line = (try std.fmt.parseInt(u32, pos_and_diag_iterator.next().?, 10)) - 1,
                             .character = (try std.fmt.parseInt(u32, pos_and_diag_iterator.next().?, 10)) - 1,
                         };
 
-                        // TODO convert position encoding
-
+                        // zig uses utf-8 encoding for character offsets
+                        const position = offsets.convertPositionEncoding(handle.document.text, utf8_position, .utf8, server.offset_encoding);
                         const range = offsets.tokenPositionToRange(handle.document.text, position, server.offset_encoding);
 
                         const msg = pos_and_diag_iterator.rest()[1..];

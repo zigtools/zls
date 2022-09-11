@@ -218,10 +218,13 @@ pub fn lineSliceUntilPosition(text: []const u8, position: types.Position, encodi
 
 pub fn convertPositionEncoding(text: []const u8, position: types.Position, from_encoding: Encoding, to_encoding: Encoding) types.Position {
     if (from_encoding == to_encoding) return position;
-    // TODO implement
-    _ = text;
-    _ = position;
-    unreachable;
+
+    const line_loc = lineLocUntilPosition(text, position, from_encoding);
+
+    return .{
+        .line = position.line,
+        .character = @intCast(u32, locLength(text, line_loc, to_encoding)),
+    };
 }
 
 pub fn convertRangeEncoding(text: []const u8, range: types.Range, from_encoding: Encoding, to_encoding: Encoding) types.Range {
