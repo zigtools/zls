@@ -26,6 +26,7 @@ config: Config,
 allocator: std.mem.Allocator = undefined,
 arena: std.heap.ArenaAllocator = undefined,
 document_store: DocumentStore = undefined,
+builtin_completions: ?std.ArrayListUnmanaged(types.CompletionItem) = null,
 client_capabilities: ClientCapabilities = .{},
 offset_encoding: offsets.Encoding = .utf16,
 keep_running: bool = true,
@@ -1387,39 +1388,33 @@ fn completeLabel(
     });
 }
 
-var builtin_completions: ?[]types.CompletionItem = null;
+fn populateBuiltinCompletions(builtin_completions: *std.ArrayListUnmanaged(types.CompletionItem), config: Config) !void {
+    for (data.builtins) |builtin| {
+        const insert_text = if (config.enable_snippets) builtin.snippet else builtin.name;
+        builtin_completions.appendAssumeCapacity(.{
+            .label = builtin.name,
+            .kind = .Function,
+            .filterText = builtin.name[1..],
+            .detail = builtin.signature,
+            .insertText = if (config.include_at_in_builtins) insert_text else insert_text[1..],
+            .insertTextFormat = if (config.enable_snippets) .Snippet else .PlainText,
+            .documentation = .{
+                .kind = .Markdown,
+                .value = builtin.documentation,
+            },
+        });
+    }
+
+    truncateCompletions(builtin_completions.items, config.max_detail_length);
+}
+
 fn completeBuiltin(server: *Server, writer: anytype, id: types.RequestId) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    if (builtin_completions == null) {
-        builtin_completions = try server.allocator.alloc(types.CompletionItem, data.builtins.len);
-        for (data.builtins) |builtin, idx| {
-            builtin_completions.?[idx] = types.CompletionItem{
-                .label = builtin.name,
-                .kind = .Function,
-                .filterText = builtin.name[1..],
-                .detail = builtin.signature,
-                .documentation = .{
-                    .kind = .Markdown,
-                    .value = builtin.documentation,
-                },
-            };
-
-            var insert_text: []const u8 = undefined;
-            if (server.config.enable_snippets) {
-                insert_text = builtin.snippet;
-                builtin_completions.?[idx].insertTextFormat = .Snippet;
-            } else {
-                insert_text = builtin.name;
-            }
-            builtin_completions.?[idx].insertText =
-                if (server.config.include_at_in_builtins)
-                insert_text
-            else
-                insert_text[1..];
-        }
-        truncateCompletions(builtin_completions.?, server.config.max_detail_length);
+    if (server.builtin_completions == null) {
+        server.builtin_completions = try std.ArrayListUnmanaged(types.CompletionItem).initCapacity(server.allocator, data.builtins.len);
+        try populateBuiltinCompletions(&server.builtin_completions.?, server.config);
     }
 
     try send(writer, server.arena.allocator(), types.Response{
@@ -1427,7 +1422,7 @@ fn completeBuiltin(server: *Server, writer: anytype, id: types.RequestId) !void 
         .result = .{
             .CompletionList = .{
                 .isIncomplete = false,
-                .items = builtin_completions.?,
+                .items = server.builtin_completions.?.items,
             },
         },
     });
@@ -2642,7 +2637,7 @@ pub fn deinit(server: *Server) void {
     const config_parse_options = std.json.ParseOptions{ .allocator = server.allocator };
     defer std.json.parseFree(Config, server.config, config_parse_options);
 
-    if (builtin_completions) |compls| {
-        server.allocator.free(compls);
+    if (server.builtin_completions) |*compls| {
+        compls.deinit(server.allocator);
     }
 }
