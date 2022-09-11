@@ -83,7 +83,8 @@ test "offsets - advancePosition" {
     try testAdvancePosition("", 0, 0, 0, 0, 0, 0);
     try testAdvancePosition("foo", 0, 3, 0, 0, 0, 3);
     try testAdvancePosition("\n", 1, 0, 0, 0, 0, 1);
-    // try testAdvancePosition("foo\nbar", 1, 2, 0, 1, 1, 6); // TODO fix failing test
+    try testAdvancePosition("foo\nbar", 1, 2, 0, 1, 1, 6);
+    try testAdvancePosition("foo\nbar", 1, 3, 1, 0, 4, 7);
 }
 
 test "offsets - countCodeUnits" {

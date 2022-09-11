@@ -239,20 +239,20 @@ pub fn convertRangeEncoding(text: []const u8, range: types.Range, from_encoding:
 
 /// advance `position` which starts at `from_index` to `to_index` accounting for line breaks
 pub fn advancePosition(text: []const u8, position: types.Position, from_index: usize, to_index: usize, encoding: Encoding) types.Position {
-    var pos = position;
+    var line = position.line;
 
-    var last_line_index = from_index;
-    for (text[from_index..to_index]) |c, i| {
+    for (text[from_index..to_index]) |c| {
         if (c == '\n') {
-            pos.line += 1;
-            pos.character = 0;
-            last_line_index = i + 1;
+            line += 1;
         }
     }
 
-    pos.character += @intCast(u32, countCodeUnits(text[last_line_index..to_index], encoding));
+    const line_loc = lineLocUntilIndex(text, to_index);
 
-    return pos;
+    return .{
+        .line = line,
+        .character = @intCast(u32, locLength(text, line_loc, encoding)),
+    };
 }
 
 /// returns the number of code units in `text`
