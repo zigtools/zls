@@ -26,7 +26,6 @@ pub const Context = struct {
                     .inlay_hints_show_builtin = true,
                 },
                 null,
-                .debug,
             ),
         };
 
