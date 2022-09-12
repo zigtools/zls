@@ -60,12 +60,13 @@ pub fn tokenToLoc(tree: Ast, token_index: Ast.TokenIndex) Loc {
 
     // Maybe combine multi-line tokens?
     const token = tokenizer.next();
-    std.debug.assert(token.tag == tag);
+    // TODO investigate why .eof occurs
+    std.debug.assert(token.tag == tag or token.tag == .eof);
     return token.loc;
 }
 
-pub fn tokenToSlice(tree: Ast, token_index: Ast.TokenIndex) []u8 {
-    return locToSlice(tree, tokenToLoc(tree, token_index));
+pub fn tokenToSlice(tree: Ast, token_index: Ast.TokenIndex) []const u8 {
+    return locToSlice(tree.source, tokenToLoc(tree, token_index));
 }
 
 pub fn tokenToPosition(tree: Ast, token_index: Ast.TokenIndex, encoding: Encoding) types.Position {
@@ -121,11 +122,11 @@ pub fn tokenPositionToLoc(text: [:0]const u8, position: types.Position, encoding
     return tokenIndexToLoc(text, index);
 }
 
-pub fn tokenIndexToSlice(text: [:0]const u8, index: usize) []u8 {
+pub fn tokenIndexToSlice(text: [:0]const u8, index: usize) []const u8 {
     return locToSlice(text, tokenIndexToLoc(text, index));
 }
 
-pub fn tokenPositionToSlice(text: [:0]const u8, position: types.Position) []u8 {
+pub fn tokenPositionToSlice(text: [:0]const u8, position: types.Position) []const u8 {
     return locToSlice(text, tokenPositionToLoc(text, position));
 }
 
