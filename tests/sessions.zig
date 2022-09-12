@@ -8,7 +8,7 @@ test "Request completion in an empty file" {
     defer ctx.deinit();
 
     try ctx.request("textDocument/didOpen",
-        \\{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file:///test.zig","languageId":"zig","version":420,"text":""}}}
+        \\{"textDocument":{"uri":"file:///test.zig","languageId":"zig","version":420,"text":""}}
     , null);
     try ctx.request("textDocument/completion",
         \\{"textDocument":{"uri":"file:///test.zig"}, "position":{"line":0,"character":0}}

@@ -19,6 +19,19 @@ var actual_log_level: std.log.Level = switch (zig_builtin.mode) {
     else => @intToEnum(std.log.Level, @enumToInt(build_options.log_level)), // temporary fix to build failing on release-safe due to a Zig bug
 };
 
+pub fn log(
+    comptime level: std.log.Level,
+    comptime scope: @TypeOf(.EnumLiteral),
+    comptime format: []const u8,
+    args: anytype,
+) void {
+    if (@enumToInt(level) > @enumToInt(actual_log_level)) return;
+
+    const level_txt = comptime level.asText();
+    const prefix2 = if (scope == .default) ": " else "(" ++ @tagName(scope) ++ "): ";
+    std.debug.print(level_txt ++ prefix2 ++ format ++ "\n", args);
+}
+
 fn loop(server: *Server) !void {
     var reader = std.io.getStdIn().reader();
 
@@ -258,7 +271,6 @@ pub fn main() !void {
         allocator,
         config.config,
         config.config_path,
-        actual_log_level,
     );
     defer server.deinit();
 
