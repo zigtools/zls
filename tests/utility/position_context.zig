@@ -202,6 +202,18 @@ test "position context - label" {
 
 test "position context - empty" {
     try testContext(
+        \\<cursor>
+    ,
+        .empty,
+        null,
+    );
+    try testContext(
+        \\<cursor>const foo = struct {};
+    ,
+        .empty,
+        null,
+    );
+    try testContext(
         \\try foo(arg, slice[<cursor>]);
     ,
         .empty,

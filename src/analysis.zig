@@ -1590,6 +1590,8 @@ pub fn getPositionContext(allocator: std.mem.Allocator, document: types.TextDocu
             }
         }
 
+        if (line.len == 0) return .empty;
+
         var held_line = document.borrowNullTerminatedSlice(line_loc.start, line_loc.end);
         defer held_line.release();
 
