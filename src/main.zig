@@ -28,8 +28,9 @@ pub fn log(
     if (@enumToInt(level) > @enumToInt(actual_log_level)) return;
 
     const level_txt = comptime level.asText();
-    const prefix2 = if (scope == .default) ": " else "(" ++ @tagName(scope) ++ "): ";
-    std.debug.print(level_txt ++ prefix2 ++ format ++ "\n", args);
+
+    std.debug.print("{s:<5}: ({s:^6}): ", .{ level_txt, @tagName(scope) });
+    std.debug.print(format ++ "\n", args);
 }
 
 fn loop(server: *Server) !void {

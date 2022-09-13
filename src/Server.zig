@@ -1843,7 +1843,6 @@ fn requestConfiguration(server: *Server, writer: anytype) !void {
         break :confi comp_confi;
     };
 
-    log.info("Requesting configuration!", .{});
     try send(writer, server.arena.allocator(), types.Request{
         .id = .{ .String = "i_haz_configuration" },
         .method = "workspace/configuration",
