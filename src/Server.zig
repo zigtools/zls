@@ -1463,11 +1463,10 @@ fn completeFieldAccess(server: *Server, writer: anytype, id: types.RequestId, ha
     var completions = std.ArrayListUnmanaged(types.CompletionItem){};
 
     var held_range = handle.document.borrowNullTerminatedSlice(loc.start, loc.end);
-    errdefer held_range.release();
+    defer held_range.release();
     var tokenizer = std.zig.Tokenizer.init(held_range.data());
 
     if (try analysis.getFieldAccessType(&server.document_store, &server.arena, handle, source_index, &tokenizer)) |result| {
-        held_range.release();
         try server.typeToCompletion(&completions, result, handle);
         sortCompletionItems(completions.items, server.arena.allocator());
         truncateCompletions(completions.items, server.config.max_detail_length);
