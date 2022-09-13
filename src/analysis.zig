@@ -1460,8 +1460,6 @@ fn tokenRangeAppend(prev: SourceRange, token: std.zig.Token) SourceRange {
 const DocumentPosition = offsets.DocumentPosition;
 
 pub fn documentPositionContext(arena: *std.heap.ArenaAllocator, document: types.TextDocument, doc_position: DocumentPosition) !PositionContext {
-    _ = document;
-
     const line = doc_position.line;
 
     const line_mem_start = @ptrToInt(line.ptr) - @ptrToInt(document.mem.ptr);
@@ -2532,16 +2530,10 @@ fn makeInnerScope(allocator: std.mem.Allocator, context: ScopeContext, node_idx:
         if (container_field) |_| {
             if (!std.mem.eql(u8, name, "_")) {
                 var doc = if (try getDocComments(allocator, tree, decl, .Markdown)) |docs|
-                        types.MarkupContent{ .kind = .Markdown, .value = docs }
-                    else
-                        null;
-                var gop_res = try context.enums.getOrPut(allocator, .{
-                    .label = name,
-                    .kind = .Constant,
-                    .insertText = name,
-                    .insertTextFormat = .PlainText,
-                    .documentation = doc
-                });
+                    types.MarkupContent{ .kind = .Markdown, .value = docs }
+                else
+                    null;
+                var gop_res = try context.enums.getOrPut(allocator, .{ .label = name, .kind = .Constant, .insertText = name, .insertTextFormat = .PlainText, .documentation = doc });
                 if (gop_res.found_existing) {
                     if (doc) |d| allocator.free(d.value);
                 }

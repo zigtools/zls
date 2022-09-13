@@ -892,8 +892,6 @@ fn hoverDefinitionGlobal(server: *Server, writer: anytype, id: types.RequestId, 
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    _ = server;
-
     const decl = (try server.getSymbolGlobal(pos_index, handle)) orelse return try respondGeneric(writer, id, null_result_response);
     return try server.hoverSymbol(writer, id, decl);
 }
