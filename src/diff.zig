@@ -33,7 +33,6 @@ pub fn edits(
     var a_trim: []const u8 = a;
     var b_trim: []const u8 = b;
     const a_trim_offset = trim_input(&a_trim, &b_trim);
-    _ = a_trim_offset;
 
     const rows = a_trim.len + 1;
     const cols = b_trim.len + 1;
@@ -239,8 +238,6 @@ pub fn get_changes(
         var range_start = group[0].pos;
         var range_len: usize = 0;
         var newText = std.ArrayList(u8).init(allocator);
-        _ = range_start;
-        _ = range_len;
         for (group) |ch| {
             switch (ch.operation) {
                 .Addition => try newText.append(ch.value.?),

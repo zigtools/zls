@@ -3,7 +3,7 @@ const types = @import("types.zig");
 const URI = @import("uri.zig");
 const analysis = @import("analysis.zig");
 const offsets = @import("offsets.zig");
-const log = std.log.scoped(.doc_store);
+const log = std.log.scoped(.store);
 const Ast = std.zig.Ast;
 const BuildAssociatedConfig = @import("BuildAssociatedConfig.zig");
 const BuildConfig = @import("special/build_runner.zig").BuildConfig;
@@ -267,10 +267,16 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: [:0]u8) anyerror!*Ha
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    log.debug("Opened document: {s}", .{uri});
-
     var handle = try self.allocator.create(Handle);
     errdefer self.allocator.destroy(handle);
+
+    defer {
+        if (handle.associated_build_file) |build_file| {
+            log.debug("Opened document `{s}` with build file `{s}`", .{ handle.uri(), build_file.uri });
+        } else {
+            log.debug("Opened document `{s}` without a build file", .{ handle.uri() });
+        }
+    }
 
     var tree = try std.zig.parse(self.allocator, text);
     errdefer tree.deinit(self.allocator);
@@ -355,9 +361,6 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: [:0]u8) anyerror!*Ha
                     candidate = build_file;
                 }
             }
-            if (candidate) |build_file| {
-                log.debug("Found a candidate associated build file: `{s}`", .{build_file.uri});
-            }
         }
 
         // Then, try to find the closest build file.
@@ -423,7 +426,6 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: [:0]u8) anyerror!*Ha
         if (candidate) |build_file| {
             build_file.refs += 1;
             handle.associated_build_file = build_file;
-            log.debug("Associated build file `{s}` to document `{s}`", .{ build_file.uri, handle.uri() });
         }
     }
 
@@ -449,12 +451,11 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: [:0]u8) anyerror!*Ha
 
 pub fn openDocument(self: *DocumentStore, uri: []const u8, text: []const u8) !*Handle {
     if (self.handles.getEntry(uri)) |entry| {
-        log.debug("Document already open: {s}, incrementing count", .{uri});
         entry.value_ptr.*.count += 1;
+        log.debug("Document already open: {s}, new count: {}", .{ uri, entry.value_ptr.*.count });
         if (entry.value_ptr.*.is_build_file) |build_file| {
             build_file.refs += 1;
         }
-        log.debug("New count: {}", .{entry.value_ptr.*.count});
         return entry.value_ptr.*;
     }
 

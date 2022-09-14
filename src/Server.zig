@@ -884,8 +884,6 @@ fn hoverDefinitionGlobal(server: *Server, writer: anytype, id: types.RequestId, 
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    _ = server;
-
     const decl = (try server.getSymbolGlobal(pos_index, handle)) orelse return try respondGeneric(writer, id, null_result_response);
     return try server.hoverSymbol(writer, id, decl);
 }
@@ -1846,7 +1844,6 @@ fn requestConfiguration(server: *Server, writer: anytype) !void {
         break :confi comp_confi;
     };
 
-    log.info("Requesting configuration!", .{});
     try send(writer, server.arena.allocator(), types.Request{
         .id = .{ .String = "i_haz_configuration" },
         .method = "workspace/configuration",
