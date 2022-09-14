@@ -1617,7 +1617,7 @@ pub fn documentPositionContext(arena: *std.heap.ArenaAllocator, document: types.
 fn addOutlineNodes(allocator: std.mem.Allocator, tree: Ast, child: Ast.Node.Index, context: *GetDocumentSymbolsContext) anyerror!void {
     switch (tree.nodes.items(.tag)[child]) {
         .string_literal,
-        .integer_literal,
+        .number_literal,
         .builtin_call,
         .builtin_call_comma,
         .builtin_call_two,
@@ -3037,8 +3037,7 @@ fn makeScopeInternal(allocator: std.mem.Allocator, context: ScopeContext, node_i
         .anyframe_type,
         .anyframe_literal,
         .char_literal,
-        .integer_literal,
-        .float_literal,
+        .number_literal,
         .unreachable_literal,
         .@"continue",
         => {},
