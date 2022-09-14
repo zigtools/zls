@@ -109,7 +109,7 @@ const Builder = struct {
         const tok_id = tree.tokens.items(.tag)[tok];
         const tok_type: TokenType = switch (tok_id) {
             .keyword_unreachable => .keywordLiteral,
-            .integer_literal, .float_literal => .number,
+            .number_literal => .number,
             .string_literal, .multiline_string_literal_line, .char_literal => .string,
             .period, .comma, .r_paren, .l_paren, .r_brace, .l_brace, .semicolon, .colon => return,
 
@@ -716,8 +716,7 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
             try writeToken(builder, main_token, .keyword);
             try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, node_data[node].lhs });
         },
-        .integer_literal,
-        .float_literal,
+        .number_literal,
         => {
             try writeToken(builder, main_token, .number);
         },
