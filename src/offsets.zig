@@ -60,8 +60,8 @@ pub fn tokenToLoc(tree: Ast, token_index: Ast.TokenIndex) Loc {
 
     // Maybe combine multi-line tokens?
     const token = tokenizer.next();
-    // TODO investigate why .eof occurs
-    std.debug.assert(token.tag == tag or token.tag == .eof);
+    // A failure would indicate a corrupted tree.source
+    std.debug.assert(token.tag == tag);
     return token.loc;
 }
 
