@@ -14,9 +14,7 @@ fn tokenReference(handle: *DocumentStore.Handle, tok: Ast.TokenIndex, encoding: 
     });
 }
 
-pub fn labelReferences(arena: *std.heap.ArenaAllocator, decl: analysis.DeclWithHandle, encoding: offsets.Encoding, include_decl: bool, context: anytype, comptime handler: anytype) !void {
-    _ = arena;
-
+pub fn labelReferences(decl: analysis.DeclWithHandle, encoding: offsets.Encoding, include_decl: bool, context: anytype, comptime handler: anytype) !void {
     std.debug.assert(decl.decl.* == .label_decl);
     const handle = decl.handle;
     const tree = handle.tree;

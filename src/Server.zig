@@ -9,7 +9,6 @@ const types = @import("types.zig");
 const analysis = @import("analysis.zig");
 const ast = @import("ast.zig");
 const references = @import("references.zig");
-const rename = @import("rename.zig");
 const offsets = @import("offsets.zig");
 const semantic_tokens = @import("semantic_tokens.zig");
 const inlay_hints = @import("inlay_hints.zig");
@@ -983,206 +982,6 @@ fn gotoDefinitionString(
                 },
             },
         },
-    });
-}
-
-fn renameDefinitionGlobal(
-    server: *Server,
-    writer: anytype,
-    id: types.RequestId,
-    handle: *DocumentStore.Handle,
-    pos_index: usize,
-    new_name: []const u8,
-) !void {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    const decl = (try server.getSymbolGlobal(pos_index, handle)) orelse return try respondGeneric(writer, id, null_result_response);
-
-    var workspace_edit = types.WorkspaceEdit{ .changes = .{} };
-    try rename.renameSymbol(&server.arena, &server.document_store, decl, new_name, &workspace_edit.changes, server.offset_encoding);
-
-    try send(writer, server.arena.allocator(), types.Response{
-        .id = id,
-        .result = .{ .WorkspaceEdit = workspace_edit },
-    });
-}
-
-fn renameDefinitionFieldAccess(
-    server: *Server,
-    writer: anytype,
-    id: types.RequestId,
-    handle: *DocumentStore.Handle,
-    source_index: usize,
-    loc: offsets.Loc,
-    new_name: []const u8,
-) !void {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    const decl = (try server.getSymbolFieldAccess(handle, source_index, loc)) orelse return try respondGeneric(writer, id, null_result_response);
-
-    var workspace_edit = types.WorkspaceEdit{ .changes = .{} };
-    try rename.renameSymbol(&server.arena, &server.document_store, decl, new_name, &workspace_edit.changes, server.offset_encoding);
-
-    try send(writer, server.arena.allocator(), types.Response{
-        .id = id,
-        .result = .{ .WorkspaceEdit = workspace_edit },
-    });
-}
-
-fn renameDefinitionLabel(
-    server: *Server,
-    writer: anytype,
-    id: types.RequestId,
-    handle: *DocumentStore.Handle,
-    pos_index: usize,
-    new_name: []const u8,
-) !void {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    const decl = (try getLabelGlobal(pos_index, handle)) orelse return try respondGeneric(writer, id, null_result_response);
-
-    var workspace_edit = types.WorkspaceEdit{ .changes = .{} };
-    try rename.renameLabel(&server.arena, decl, new_name, &workspace_edit.changes, server.offset_encoding);
-
-    try send(writer, server.arena.allocator(), types.Response{
-        .id = id,
-        .result = .{ .WorkspaceEdit = workspace_edit },
-    });
-}
-
-fn referencesDefinitionGlobal(
-    server: *Server,
-    writer: anytype,
-    id: types.RequestId,
-    handle: *DocumentStore.Handle,
-    pos_index: usize,
-    include_decl: bool,
-    comptime highlight: bool,
-) !void {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    const decl = (try server.getSymbolGlobal(pos_index, handle)) orelse return try respondGeneric(writer, id, null_result_response);
-    var locs = std.ArrayList(types.Location).init(server.arena.allocator());
-    try references.symbolReferences(
-        &server.arena,
-        &server.document_store,
-        decl,
-        server.offset_encoding,
-        include_decl,
-        &locs,
-        std.ArrayList(types.Location).append,
-        server.config.skip_std_references,
-        !highlight,
-    );
-
-    const result: types.ResponseParams = if (highlight) result: {
-        var highlights = std.ArrayListUnmanaged(types.DocumentHighlight){};
-        try highlights.ensureTotalCapacity(server.arena.allocator(), locs.items.len);
-        const uri = handle.uri();
-        for (locs.items) |loc| {
-            if (std.mem.eql(u8, loc.uri, uri)) {
-                highlights.appendAssumeCapacity(.{
-                    .range = loc.range,
-                    .kind = .Text,
-                });
-            }
-        }
-        break :result .{ .DocumentHighlight = highlights.items };
-    } else .{ .Locations = locs.items };
-
-    try send(writer, server.arena.allocator(), types.Response{
-        .id = id,
-        .result = result,
-    });
-}
-
-fn referencesDefinitionFieldAccess(
-    server: *Server,
-    writer: anytype,
-    id: types.RequestId,
-    handle: *DocumentStore.Handle,
-    source_index: usize,
-    loc: offsets.Loc,
-    include_decl: bool,
-    comptime highlight: bool,
-) !void {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    var allocator = server.arena.allocator();
-
-    const decl = (try server.getSymbolFieldAccess(handle, source_index, loc)) orelse return try respondGeneric(writer, id, null_result_response);
-    var locations = std.ArrayList(types.Location).init(allocator);
-    try references.symbolReferences(
-        &server.arena,
-        &server.document_store,
-        decl,
-        server.offset_encoding,
-        include_decl,
-        &locations,
-        std.ArrayList(types.Location).append,
-        server.config.skip_std_references,
-        !highlight,
-    );
-    const result: types.ResponseParams = if (highlight) result: {
-        var highlights = std.ArrayListUnmanaged(types.DocumentHighlight){};
-        try highlights.ensureTotalCapacity(allocator, locations.items.len);
-        const uri = handle.uri();
-        for (locations.items) |location| {
-            if (std.mem.eql(u8, location.uri, uri)) {
-                highlights.appendAssumeCapacity(.{
-                    .range = location.range,
-                    .kind = .Text,
-                });
-            }
-        }
-        break :result .{ .DocumentHighlight = highlights.items };
-    } else .{ .Locations = locations.items };
-    try send(writer, allocator, types.Response{
-        .id = id,
-        .result = result,
-    });
-}
-
-fn referencesDefinitionLabel(
-    server: *Server,
-    writer: anytype,
-    id: types.RequestId,
-    handle: *DocumentStore.Handle,
-    pos_index: usize,
-    include_decl: bool,
-    comptime highlight: bool,
-) !void {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    var allocator = server.arena.allocator();
-
-    const decl = (try getLabelGlobal(pos_index, handle)) orelse return try respondGeneric(writer, id, null_result_response);
-    var locs = std.ArrayList(types.Location).init(allocator);
-    try references.labelReferences(&server.arena, decl, server.offset_encoding, include_decl, &locs, std.ArrayList(types.Location).append);
-    const result: types.ResponseParams = if (highlight) result: {
-        var highlights = std.ArrayListUnmanaged(types.DocumentHighlight){};
-        try highlights.ensureTotalCapacity(allocator, locs.items.len);
-        const uri = handle.uri();
-        for (locs.items) |loc| {
-            if (std.mem.eql(u8, loc.uri, uri)) {
-                highlights.appendAssumeCapacity(.{
-                    .range = loc.range,
-                    .kind = .Text,
-                });
-            }
-        }
-        break :result .{ .DocumentHighlight = highlights.items };
-    } else .{ .Locations = locs.items };
-
-    try send(writer, allocator, types.Response{
-        .id = id,
-        .result = result,
     });
 }
 
@@ -2223,29 +2022,6 @@ fn formattingHandler(server: *Server, writer: anytype, id: types.RequestId, req:
     return try respondGeneric(writer, id, null_result_response);
 }
 
-fn renameHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.Rename) !void {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
-        log.warn("Trying to rename in non existent document {s}", .{req.params.textDocument.uri});
-        return try respondGeneric(writer, id, null_result_response);
-    };
-
-    if (req.params.position.character >= 0) {
-        const source_index = offsets.positionToIndex(handle.document.text, req.params.position, server.offset_encoding);
-        const pos_context = try analysis.getPositionContext(server.arena.allocator(), handle.document, source_index);
-        switch (pos_context) {
-            .var_access => try server.renameDefinitionGlobal(writer, id, handle, source_index, req.params.newName),
-            .field_access => |loc| try server.renameDefinitionFieldAccess(writer, id, handle, source_index, loc, req.params.newName),
-            .label => try server.renameDefinitionLabel(writer, id, handle, source_index, req.params.newName),
-            else => try respondGeneric(writer, id, null_result_response),
-        }
-    } else {
-        try respondGeneric(writer, id, null_result_response);
-    }
-}
-
 fn didChangeConfigurationHandler(server: *Server, writer: anytype, id: types.RequestId, maybe_req: std.json.Value) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
@@ -2265,53 +2041,140 @@ fn didChangeConfigurationHandler(server: *Server, writer: anytype, id: types.Req
         try server.requestConfiguration(writer);
 }
 
+fn renameHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.Rename) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    try generalReferencesHandler(server, writer, id, .{ .rename = req });
+}
+
 fn referencesHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.References) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
-        log.warn("Trying to get references in non existent document {s}", .{req.params.textDocument.uri});
-        return try respondGeneric(writer, id, null_result_response);
-    };
-
-    if (req.params.position.character >= 0) {
-        const source_index = offsets.positionToIndex(handle.document.text, req.params.position, server.offset_encoding);
-        const pos_context = try analysis.getPositionContext(server.arena.allocator(), handle.document, source_index);
-
-        const include_decl = req.params.context.includeDeclaration;
-        switch (pos_context) {
-            .var_access => try server.referencesDefinitionGlobal(writer, id, handle, source_index, include_decl, false),
-            .field_access => |loc| try server.referencesDefinitionFieldAccess(writer, id, handle, source_index, loc, include_decl, false),
-            .label => try server.referencesDefinitionLabel(writer, id, handle, source_index, include_decl, false),
-            else => try respondGeneric(writer, id, null_result_response),
-        }
-    } else {
-        try respondGeneric(writer, id, null_result_response);
-    }
+    try generalReferencesHandler(server, writer, id, .{ .references = req });
 }
 
 fn documentHighlightHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.DocumentHighlight) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
-        log.warn("Trying to highlight references in non existent document {s}", .{req.params.textDocument.uri});
+    try generalReferencesHandler(server, writer, id, .{ .highlight = req });
+}
+
+const GeneralReferencesRequest = union(enum) {
+    rename: requests.Rename,
+    references: requests.References,
+    highlight: requests.DocumentHighlight,
+
+    pub fn uri(self: @This()) []const u8 {
+        return switch (self) {
+            .rename => |rename| rename.params.textDocument.uri,
+            .references => |ref| ref.params.textDocument.uri,
+            .highlight => |highlight| highlight.params.textDocument.uri,
+        };
+    }
+
+    pub fn position(self: @This()) types.Position {
+        return switch (self) {
+            .rename => |rename| rename.params.position,
+            .references => |ref| ref.params.position,
+            .highlight => |highlight| highlight.params.position,
+        };
+    }
+
+    pub fn name(self: @This()) []const u8 {
+        return switch (self) {
+            .rename => "rename",
+            .references => "references",
+            .highlight => "highlight references",
+        };
+    }
+};
+
+fn generalReferencesHandler(server: *Server, writer: anytype, id: types.RequestId, req: GeneralReferencesRequest) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    const allocator = server.arena.allocator();
+
+    const handle = server.document_store.getHandle(req.uri()) orelse {
+        log.warn("Trying to get {s} in non existent document {s}", .{ req.name(), req.uri() });
         return try respondGeneric(writer, id, null_result_response);
     };
 
-    if (req.params.position.character >= 0) {
-        const source_index = offsets.positionToIndex(handle.document.text, req.params.position, server.offset_encoding);
-        const pos_context = try analysis.getPositionContext(server.arena.allocator(), handle.document, source_index);
+    if (req.position().character <= 0) return try respondGeneric(writer, id, null_result_response);
 
-        switch (pos_context) {
-            .var_access => try server.referencesDefinitionGlobal(writer, id, handle, source_index, true, true),
-            .field_access => |loc| try server.referencesDefinitionFieldAccess(writer, id, handle, source_index, loc, true, true),
-            .label => try server.referencesDefinitionLabel(writer, id, handle, source_index, true, true),
-            else => try respondGeneric(writer, id, null_result_response),
-        }
+    const source_index = offsets.positionToIndex(handle.document.text, req.position(), server.offset_encoding);
+    const pos_context = try analysis.getPositionContext(server.arena.allocator(), handle.document, source_index);
+
+    const decl = switch (pos_context) {
+        .var_access => try server.getSymbolGlobal(source_index, handle),
+        .field_access => |range| try server.getSymbolFieldAccess(handle, source_index, range),
+        .label => try getLabelGlobal(source_index, handle),
+        else => null,
+    } orelse return try respondGeneric(writer, id, null_result_response);
+
+    const include_decl = switch (req) {
+        .references => |ref| ref.params.context.includeDeclaration,
+        else => true,
+    };
+
+    var locations = std.ArrayList(types.Location).init(allocator);
+
+    if (pos_context == .label) {
+        try references.labelReferences(
+            decl,
+            server.offset_encoding,
+            include_decl,
+            &locations,
+            std.ArrayList(types.Location).append,
+        );
     } else {
-        try respondGeneric(writer, id, null_result_response);
+        try references.symbolReferences(
+            &server.arena,
+            &server.document_store,
+            decl,
+            server.offset_encoding,
+            include_decl,
+            &locations,
+            std.ArrayList(types.Location).append,
+            server.config.skip_std_references,
+            req != .highlight, // scan the entire workspace except for highlight
+        );
     }
+
+    const result: types.ResponseParams = switch (req) {
+        .rename => |rename| blk: {
+            var edits: types.WorkspaceEdit = .{ .changes = .{} };
+            for (locations.items) |loc| {
+                const gop = try edits.changes.getOrPutValue(allocator, loc.uri, .{});
+                try gop.value_ptr.append(allocator, .{
+                    .range = loc.range,
+                    .newText = rename.params.newName,
+                });
+            }
+            break :blk .{ .WorkspaceEdit = edits };
+        },
+        .references => .{ .Locations = locations.items },
+        .highlight => blk: {
+            var highlights = try std.ArrayListUnmanaged(types.DocumentHighlight).initCapacity(allocator, locations.items.len);
+            const uri = handle.uri();
+            for (locations.items) |loc| {
+                if (!std.mem.eql(u8, loc.uri, uri)) continue;
+                highlights.appendAssumeCapacity(.{
+                    .range = loc.range,
+                    .kind = .Text,
+                });
+            }
+            break :blk .{ .DocumentHighlight = highlights.items };
+        },
+    };
+
+    try send(writer, allocator, types.Response{
+        .id = id,
+        .result = result,
+    });
 }
 
 fn isPositionBefore(lhs: types.Position, rhs: types.Position) bool {
