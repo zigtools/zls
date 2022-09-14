@@ -2117,29 +2117,18 @@ fn generalReferencesHandler(server: *Server, writer: anytype, id: types.RequestI
         else => true,
     };
 
-    var locations = std.ArrayList(types.Location).init(allocator);
-
-    if (pos_context == .label) {
-        try references.labelReferences(
-            decl,
-            server.offset_encoding,
-            include_decl,
-            &locations,
-            std.ArrayList(types.Location).append,
-        );
-    } else {
+    const locations = if (pos_context == .label)
+        try references.labelReferences(allocator, decl, server.offset_encoding, include_decl)
+    else
         try references.symbolReferences(
             &server.arena,
             &server.document_store,
             decl,
             server.offset_encoding,
             include_decl,
-            &locations,
-            std.ArrayList(types.Location).append,
             server.config.skip_std_references,
             req != .highlight, // scan the entire workspace except for highlight
         );
-    }
 
     const result: types.ResponseParams = switch (req) {
         .rename => |rename| blk: {
