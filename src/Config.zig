@@ -64,6 +64,9 @@ skip_std_references: bool = false,
 /// Path to "builtin;" useful for debugging, automatically set if let null
 builtin_path: ?[]const u8 = null,
 
+/// Whether to highlight global variables.
+highlight_global_variables: bool = false,
+
 pub fn loadFromFile(allocator: std.mem.Allocator, file_path: []const u8) ?Config {
     @setEvalBranchQuota(5000);
 

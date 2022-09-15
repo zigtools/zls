@@ -321,6 +321,36 @@ fn publishDiagnostics(server: *Server, writer: anytype, handle: DocumentStore.Ha
         }
     }
 
+    if (server.config.highlight_global_variables) {
+        for (tree.rootDecls()) |decl| {
+            const main_tokens = tree.nodes.items(.main_token);
+            const tags = tree.tokens.items(.tag);
+
+            const decl_tag = tree.nodes.items(.tag)[decl];
+            const decl_main_token = tree.nodes.items(.main_token)[decl];
+
+            switch (decl_tag) {
+                .simple_var_decl,
+                .aligned_var_decl,
+                .local_var_decl,
+                .global_var_decl,
+                => {
+                    if (tags[main_tokens[decl]] != .keyword_var) continue; // skip anything immutable
+                    // uncomment this to get a list :)
+                    //log.debug("possible global variable \"{s}\"", .{tree.tokenSlice(decl_main_token + 1)});
+                    try diagnostics.append(allocator, .{
+                        .range = offsets.tokenToRange(tree, decl_main_token, server.offset_encoding) catch continue,
+                        .severity = .Hint,
+                        .code = "highlight_global_variables",
+                        .source = "zls",
+                        .message = "Global variable",
+                    });
+                },
+                else => {},
+            }
+        }
+    }
+
     try send(writer, server.arena.allocator(), types.Notification{
         .method = "textDocument/publishDiagnostics",
         .params = .{
