@@ -147,6 +147,7 @@ pub fn configChanged(config: *Config, allocator: std.mem.Allocator, builtin_crea
                             std_dir: []const u8,
                             global_cache_dir: []const u8,
                             version: []const u8,
+                            target: ?[]const u8 = null,
                         };
 
                         var json_env = std.json.parse(
