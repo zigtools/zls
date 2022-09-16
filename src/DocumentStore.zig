@@ -847,18 +847,18 @@ pub fn applyChanges(self: *DocumentStore, handle: *Handle, content_changes: std.
             // TODO: add tests and validate the JSON
             const start_obj = range.Object.get("start").?.Object;
             const start_pos = types.Position{
-                .line = start_obj.get("line").?.Integer,
-                .character = start_obj.get("character").?.Integer,
+                .line = @intCast(u32, start_obj.get("line").?.Integer),
+                .character = @intCast(u32, start_obj.get("character").?.Integer),
             };
             const end_obj = range.Object.get("end").?.Object;
             const end_pos = types.Position{
-                .line = end_obj.get("line").?.Integer,
-                .character = end_obj.get("character").?.Integer,
+                .line = @intCast(u32, end_obj.get("line").?.Integer),
+                .character = @intCast(u32, end_obj.get("character").?.Integer),
             };
 
             const change_text = change.Object.get("text").?.String;
-            const start_index = (try offsets.documentPosition(document.*, start_pos, offset_encoding)).absolute_index;
-            const end_index = (try offsets.documentPosition(document.*, end_pos, offset_encoding)).absolute_index;
+            const start_index = offsets.positionToIndex(document.text, start_pos, offset_encoding);
+            const end_index = offsets.positionToIndex(document.text, end_pos, offset_encoding);
 
             const old_len = document.text.len;
             const new_len = old_len - (end_index - start_index) + change_text.len;

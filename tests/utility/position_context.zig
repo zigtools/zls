@@ -202,6 +202,18 @@ test "position context - label" {
 
 test "position context - empty" {
     try testContext(
+        \\<cursor>
+    ,
+        .empty,
+        null,
+    );
+    try testContext(
+        \\<cursor>const foo = struct {};
+    ,
+        .empty,
+        null,
+    );
+    try testContext(
         \\try foo(arg, slice[<cursor>]);
     ,
         .empty,
@@ -245,18 +257,14 @@ fn testContext(comptime line: []const u8, comptime tag: std.meta.Tag(analysis.Po
     const doc = try makeDocument("", line);
     defer freeDocument(doc);
 
-    var arena = std.heap.ArenaAllocator.init(allocator);
-    defer arena.deinit();
-
-    const p = try offsets.documentPosition(doc, .{ .line = 0, .character = @intCast(i64, cursor_idx) }, .utf8);
-    const ctx = try analysis.documentPositionContext(&arena, doc, p);
+    const ctx = try analysis.getPositionContext(allocator, doc, cursor_idx);
 
     if (std.meta.activeTag(ctx) != tag) {
         std.debug.print("Expected tag `{s}`, got `{s}`\n", .{ @tagName(tag), @tagName(std.meta.activeTag(ctx)) });
         return error.DifferentTag;
     }
 
-    const actual_range = ctx.range() orelse if(maybe_range) |expected_range| {
+    const actual_loc = ctx.loc() orelse if(maybe_range) |expected_range| {
         std.debug.print("Expected `{s}`, got null range\n", .{
             expected_range,
         });
@@ -265,7 +273,7 @@ fn testContext(comptime line: []const u8, comptime tag: std.meta.Tag(analysis.Po
 
     const expected_range = maybe_range orelse {
         std.debug.print("Expected null range, got `{s}`\n", .{
-            doc.text[actual_range.start..actual_range.end],
+            doc.text[actual_loc.start..actual_loc.end],
         });
         return error.DifferentRange;
     };
@@ -273,10 +281,10 @@ fn testContext(comptime line: []const u8, comptime tag: std.meta.Tag(analysis.Po
     const expected_range_start = comptime std.mem.indexOf(u8, final_line, expected_range).?;
     const expected_range_end = expected_range_start + expected_range.len;
 
-    if (expected_range_start != actual_range.start or expected_range_end != actual_range.end) {
+    if (expected_range_start != actual_loc.start or expected_range_end != actual_loc.end) {
         std.debug.print("Expected range `{s}` ({}..{}), got `{s}` ({}..{})\n", .{
             doc.text[expected_range_start..expected_range_end], expected_range_start, expected_range_end,
-            doc.text[actual_range.start..actual_range.end], actual_range.start, actual_range.end,
+            doc.text[actual_loc.start..actual_loc.end], actual_loc.start, actual_loc.end,
         });
         return error.DifferentRange;
     }

@@ -5,6 +5,7 @@ const helper = @import("helper");
 const Context = @import("context").Context;
 
 const types = zls.types;
+const offsets = zls.offsets;
 const requests = zls.requests;
 
 const allocator: std.mem.Allocator = std.testing.allocator;
@@ -89,7 +90,7 @@ fn testInlayHints(source: []const u8) !void {
 
     const range = types.Range{
         .start = types.Position{ .line = 0, .character = 0 },
-        .end = sourceIndexPosition(phr.source, phr.source.len),
+        .end = offsets.indexToPosition(phr.source, phr.source.len, .utf16),
     };
 
     const method = try std.json.stringifyAlloc(allocator, .{
@@ -130,7 +131,7 @@ fn testInlayHints(source: []const u8) !void {
     outer: for (phr.placeholder_locations) |loc, i| {
         const name = phr.placeholders[i].placeholderSlice(source);
 
-        const position = sourceIndexPosition(phr.source, loc);
+        const position = offsets.indexToPosition(phr.source, loc, .utf16);
 
         for (hints) |hint| {
             if (position.line != hint.position.line or position.character != hint.position.character) continue;
@@ -145,15 +146,4 @@ fn testInlayHints(source: []const u8) !void {
         std.debug.print("Placeholder '{s}' at {}:{} (line:colon) not found!", .{ name, position.line, position.character });
         return error.PlaceholderNotFound;
     }
-}
-
-fn sourceIndexPosition(source: []const u8, index: usize) types.Position {
-    const line = std.mem.count(u8, source[0..index], &.{'\n'});
-    const last_line_index = if (std.mem.lastIndexOfScalar(u8, source[0..index], '\n')) |idx| idx + 1 else 0;
-    const last_line_character = index - last_line_index;
-
-    return types.Position{
-        .line = @intCast(i64, line),
-        .character = @intCast(i64, last_line_character),
-    };
 }

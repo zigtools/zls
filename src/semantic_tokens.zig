@@ -173,22 +173,18 @@ const Builder = struct {
 
             while (i < to - 1 and source[i] != '\n') : (i += 1) {}
 
-            const length = try offsets.lineSectionLength(self.handle.tree, comment_start, i, self.encoding);
+            const length = offsets.locLength(self.handle.tree.source, .{ .start = comment_start, .end = i }, self.encoding);
             try self.addDirect(TokenType.comment, mods, comment_start, length);
         }
     }
 
     fn addDirect(self: *Builder, tok_type: TokenType, tok_mod: TokenModifiers, start: usize, length: usize) !void {
-        const delta = offsets.tokenRelativeLocation(
-            self.handle.tree,
-            self.previous_position,
-            start,
-            self.encoding,
-        ) catch return;
+        const text = self.handle.tree.source[self.previous_position..start];
+        const delta = offsets.indexToPosition(text, text.len, self.encoding);
 
         try self.arr.appendSlice(self.allocator, &.{
             @truncate(u32, delta.line),
-            @truncate(u32, delta.column),
+            @truncate(u32, delta.character),
             @truncate(u32, length),
             @enumToInt(tok_type),
             tok_mod.toInt(),
@@ -406,7 +402,7 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
             try writeToken(builder, node_data[node].rhs, .errorTag);
         },
         .identifier => {
-            const name = tree.getNodeSource(node);
+            const name = offsets.nodeToSlice(tree, node);
 
             if (std.mem.eql(u8, name, "undefined")) {
                 return try writeToken(builder, main_token, .keywordLiteral);

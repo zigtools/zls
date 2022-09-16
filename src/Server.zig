@@ -157,7 +157,7 @@ fn publishDiagnostics(server: *Server, writer: anytype, handle: DocumentStore.Ha
         try tree.renderError(err, fbs.writer());
 
         try diagnostics.append(allocator, .{
-            .range = offsets.tokenToRange(tree, err.token, server.offset_encoding) catch continue,
+            .range = offsets.tokenToRange(tree, err.token, server.offset_encoding),
             .severity = .Error,
             .code = @tagName(err.tag),
             .source = "zls",
@@ -196,12 +196,14 @@ fn publishDiagnostics(server: *Server, writer: anytype, handle: DocumentStore.Ha
                             if (first.len <= 1) break :lin;
                         } else break;
 
-                        const position = types.Position{
-                            .line = (try std.fmt.parseInt(i64, pos_and_diag_iterator.next().?, 10)) - 1,
-                            .character = (try std.fmt.parseInt(i64, pos_and_diag_iterator.next().?, 10)) - 1,
+                        const utf8_position = types.Position{
+                            .line = (try std.fmt.parseInt(u32, pos_and_diag_iterator.next().?, 10)) - 1,
+                            .character = (try std.fmt.parseInt(u32, pos_and_diag_iterator.next().?, 10)) - 1,
                         };
 
-                        const range = try offsets.tokenPositionToRange(tree, position, server.offset_encoding);
+                        // zig uses utf-8 encoding for character offsets
+                        const position = offsets.convertPositionEncoding(handle.document.text, utf8_position, .utf8, server.offset_encoding);
+                        const range = offsets.tokenPositionToRange(handle.document.text, position, server.offset_encoding);
 
                         const msg = pos_and_diag_iterator.rest()[1..];
 
@@ -267,7 +269,7 @@ fn publishDiagnostics(server: *Server, writer: anytype, handle: DocumentStore.Ha
 
                 if (std.mem.startsWith(u8, import_str, "\"./")) {
                     try diagnostics.append(allocator, .{
-                        .range = offsets.tokenToRange(tree, import_str_token, server.offset_encoding) catch continue,
+                        .range = offsets.tokenToRange(tree, import_str_token, server.offset_encoding),
                         .severity = .Hint,
                         .code = "dot_slash_import",
                         .source = "zls",
@@ -298,7 +300,7 @@ fn publishDiagnostics(server: *Server, writer: anytype, handle: DocumentStore.Ha
                             const func_name = tree.tokenSlice(name_token);
                             if (!is_type_function and !analysis.isCamelCase(func_name)) {
                                 try diagnostics.append(allocator, .{
-                                    .range = offsets.tokenToRange(tree, name_token, server.offset_encoding) catch continue,
+                                    .range = offsets.tokenToRange(tree, name_token, server.offset_encoding),
                                     .severity = .Hint,
                                     .code = "bad_style",
                                     .source = "zls",
@@ -306,7 +308,7 @@ fn publishDiagnostics(server: *Server, writer: anytype, handle: DocumentStore.Ha
                                 });
                             } else if (is_type_function and !analysis.isPascalCase(func_name)) {
                                 try diagnostics.append(allocator, .{
-                                    .range = offsets.tokenToRange(tree, name_token, server.offset_encoding) catch continue,
+                                    .range = offsets.tokenToRange(tree, name_token, server.offset_encoding),
                                     .severity = .Hint,
                                     .code = "bad_style",
                                     .source = "zls",
@@ -595,7 +597,7 @@ fn nodeToCompletion(
                 .label = string,
                 .kind = .Field,
                 .documentation = doc,
-                .detail = tree.getNodeSource(node),
+                .detail = offsets.nodeToSlice(tree, node),
                 .insertText = string,
                 .insertTextFormat = .PlainText,
             });
@@ -638,20 +640,19 @@ fn gotoDefinitionSymbol(
 
     var handle = decl_handle.handle;
 
-    const location = switch (decl_handle.decl.*) {
+    const name_token = switch (decl_handle.decl.*) {
         .ast_node => |node| block: {
             if (resolve_alias) {
                 if (try analysis.resolveVarDeclAlias(&server.document_store, &server.arena, .{ .node = node, .handle = handle })) |result| {
                     handle = result.handle;
-                    break :block result.location(server.offset_encoding) catch return;
+
+                    break :block result.nameToken();
                 }
             }
 
-            const name_token = analysis.getDeclNameToken(handle.tree, node) orelse
-                return try respondGeneric(writer, id, null_result_response);
-            break :block offsets.tokenRelativeLocation(handle.tree, 0, handle.tree.tokens.items(.start)[name_token], server.offset_encoding) catch return;
+            break :block analysis.getDeclNameToken(handle.tree, node) orelse return try respondGeneric(writer, id, null_result_response);
         },
-        else => decl_handle.location(server.offset_encoding) catch return,
+        else => decl_handle.nameToken(),
     };
 
     try send(writer, server.arena.allocator(), types.Response{
@@ -659,16 +660,7 @@ fn gotoDefinitionSymbol(
         .result = .{
             .Location = .{
                 .uri = handle.document.uri,
-                .range = .{
-                    .start = .{
-                        .line = @intCast(i64, location.line),
-                        .character = @intCast(i64, location.column),
-                    },
-                    .end = .{
-                        .line = @intCast(i64, location.line),
-                        .character = @intCast(i64, location.column),
-                    },
-                },
+                .range = offsets.tokenToRange(handle.tree, name_token, server.offset_encoding),
             },
         },
     });
@@ -720,8 +712,8 @@ fn hoverSymbol(
                 tree.firstToken(param.type_expr); // extern fn
             const last_token = param.anytype_ellipsis3 orelse tree.lastToken(param.type_expr);
 
-            const start = offsets.tokenLocation(tree, first_token).start;
-            const end = offsets.tokenLocation(tree, last_token).end;
+            const start = offsets.tokenToIndex(tree, first_token);
+            const end = offsets.tokenToLoc(tree, last_token).end;
             break :def tree.source[start..end];
         },
         .pointer_payload => |payload| tree.tokenSlice(payload.name),
@@ -740,7 +732,7 @@ fn hoverSymbol(
             .slice,
             .error_union,
             .primitive,
-            => |p| if (p >= tree.nodes.len) "unknown" else tree.getNodeSource(p),
+            => |p| if (p >= tree.nodes.len) "unknown" else offsets.nodeToSlice(tree, p),
             .other => |p| if (p >= tree.nodes.len) "unknown" else switch (tree.nodes.items(.tag)[p]) {
                 .container_decl,
                 .container_decl_arg,
@@ -767,7 +759,7 @@ fn hoverSymbol(
                 .ptr_type_aligned,
                 .ptr_type_bit_range,
                 .ptr_type_sentinel,
-                => tree.getNodeSource(p),
+                => offsets.nodeToSlice(tree, p),
                 else => "unknown", // TODO: Implement more "other" type expressions; better safe than sorry
             },
             else => "unknown",
@@ -899,21 +891,20 @@ fn hoverDefinitionGlobal(server: *Server, writer: anytype, id: types.RequestId, 
 fn getSymbolFieldAccess(
     server: *Server,
     handle: *DocumentStore.Handle,
-    position: offsets.DocumentPosition,
-    range: analysis.SourceRange,
+    source_index: usize,
+    loc: offsets.Loc,
 ) !?analysis.DeclWithHandle {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const name = identifierFromPosition(position.absolute_index, handle.*);
+    const name = identifierFromPosition(source_index, handle.*);
     if (name.len == 0) return null;
 
-    const line_mem_start = @ptrToInt(position.line.ptr) - @ptrToInt(handle.document.mem.ptr);
-    var held_range = handle.document.borrowNullTerminatedSlice(line_mem_start + range.start, line_mem_start + range.end);
+    var held_range = handle.document.borrowNullTerminatedSlice(loc.start, loc.end);
     var tokenizer = std.zig.Tokenizer.init(held_range.data());
 
     errdefer held_range.release();
-    if (try analysis.getFieldAccessType(&server.document_store, &server.arena, handle, position.absolute_index, &tokenizer)) |result| {
+    if (try analysis.getFieldAccessType(&server.document_store, &server.arena, handle, source_index, &tokenizer)) |result| {
         held_range.release();
         const container_handle = result.unwrapped orelse result.original;
         const container_handle_node = switch (container_handle.type.data) {
@@ -936,14 +927,14 @@ fn gotoDefinitionFieldAccess(
     writer: anytype,
     id: types.RequestId,
     handle: *DocumentStore.Handle,
-    position: offsets.DocumentPosition,
-    range: analysis.SourceRange,
+    source_index: usize,
+    loc: offsets.Loc,
     resolve_alias: bool,
 ) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const decl = (try server.getSymbolFieldAccess(handle, position, range)) orelse return try respondGeneric(writer, id, null_result_response);
+    const decl = (try server.getSymbolFieldAccess(handle, source_index, loc)) orelse return try respondGeneric(writer, id, null_result_response);
     return try server.gotoDefinitionSymbol(writer, id, decl, resolve_alias);
 }
 
@@ -952,13 +943,13 @@ fn hoverDefinitionFieldAccess(
     writer: anytype,
     id: types.RequestId,
     handle: *DocumentStore.Handle,
-    position: offsets.DocumentPosition,
-    range: analysis.SourceRange,
+    source_index: usize,
+    loc: offsets.Loc,
 ) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const decl = (try server.getSymbolFieldAccess(handle, position, range)) orelse return try respondGeneric(writer, id, null_result_response);
+    const decl = (try server.getSymbolFieldAccess(handle, source_index, loc)) orelse return try respondGeneric(writer, id, null_result_response);
     return try server.hoverSymbol(writer, id, decl);
 }
 
@@ -1022,14 +1013,14 @@ fn renameDefinitionFieldAccess(
     writer: anytype,
     id: types.RequestId,
     handle: *DocumentStore.Handle,
-    position: offsets.DocumentPosition,
-    range: analysis.SourceRange,
+    source_index: usize,
+    loc: offsets.Loc,
     new_name: []const u8,
 ) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const decl = (try server.getSymbolFieldAccess(handle, position, range)) orelse return try respondGeneric(writer, id, null_result_response);
+    const decl = (try server.getSymbolFieldAccess(handle, source_index, loc)) orelse return try respondGeneric(writer, id, null_result_response);
 
     var workspace_edit = types.WorkspaceEdit{ .changes = .{} };
     try rename.renameSymbol(&server.arena, &server.document_store, decl, new_name, &workspace_edit.changes, server.offset_encoding);
@@ -1114,8 +1105,8 @@ fn referencesDefinitionFieldAccess(
     writer: anytype,
     id: types.RequestId,
     handle: *DocumentStore.Handle,
-    position: offsets.DocumentPosition,
-    range: analysis.SourceRange,
+    source_index: usize,
+    loc: offsets.Loc,
     include_decl: bool,
     comptime highlight: bool,
 ) !void {
@@ -1124,33 +1115,33 @@ fn referencesDefinitionFieldAccess(
 
     var allocator = server.arena.allocator();
 
-    const decl = (try server.getSymbolFieldAccess(handle, position, range)) orelse return try respondGeneric(writer, id, null_result_response);
-    var locs = std.ArrayList(types.Location).init(allocator);
+    const decl = (try server.getSymbolFieldAccess(handle, source_index, loc)) orelse return try respondGeneric(writer, id, null_result_response);
+    var locations = std.ArrayList(types.Location).init(allocator);
     try references.symbolReferences(
         &server.arena,
         &server.document_store,
         decl,
         server.offset_encoding,
         include_decl,
-        &locs,
+        &locations,
         std.ArrayList(types.Location).append,
         server.config.skip_std_references,
         !highlight,
     );
     const result: types.ResponseParams = if (highlight) result: {
         var highlights = std.ArrayListUnmanaged(types.DocumentHighlight){};
-        try highlights.ensureTotalCapacity(allocator, locs.items.len);
+        try highlights.ensureTotalCapacity(allocator, locations.items.len);
         const uri = handle.uri();
-        for (locs.items) |loc| {
-            if (std.mem.eql(u8, loc.uri, uri)) {
+        for (locations.items) |location| {
+            if (std.mem.eql(u8, location.uri, uri)) {
                 highlights.appendAssumeCapacity(.{
-                    .range = loc.range,
+                    .range = location.range,
                     .kind = .Text,
                 });
             }
         }
         break :result .{ .DocumentHighlight = highlights.items };
-    } else .{ .Locations = locs.items };
+    } else .{ .Locations = locations.items };
     try send(writer, allocator, types.Response{
         .id = id,
         .result = result,
@@ -1250,7 +1241,7 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: analysis.Decl
                 .label = tree.tokenSlice(param.name_token.?),
                 .kind = .Constant,
                 .documentation = doc,
-                .detail = tree.source[offsets.tokenLocation(tree, first_token).start..offsets.tokenLocation(tree, last_token).end],
+                .detail = tree.source[offsets.tokenToIndex(tree, first_token)..offsets.tokenToLoc(tree, last_token).end],
                 .insertText = tree.tokenSlice(param.name_token.?),
                 .insertTextFormat = .PlainText,
             });
@@ -1402,19 +1393,17 @@ fn completeGlobal(server: *Server, writer: anytype, id: types.RequestId, pos_ind
     });
 }
 
-fn completeFieldAccess(server: *Server, writer: anytype, id: types.RequestId, handle: *DocumentStore.Handle, position: offsets.DocumentPosition, range: analysis.SourceRange) !void {
+fn completeFieldAccess(server: *Server, writer: anytype, id: types.RequestId, handle: *DocumentStore.Handle, source_index: usize, loc: offsets.Loc) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
     var completions = std.ArrayListUnmanaged(types.CompletionItem){};
 
-    const line_mem_start = @ptrToInt(position.line.ptr) - @ptrToInt(handle.document.mem.ptr);
-    var held_range = handle.document.borrowNullTerminatedSlice(line_mem_start + range.start, line_mem_start + range.end);
-    errdefer held_range.release();
+    var held_range = handle.document.borrowNullTerminatedSlice(loc.start, loc.end);
+    defer held_range.release();
     var tokenizer = std.zig.Tokenizer.init(held_range.data());
 
-    if (try analysis.getFieldAccessType(&server.document_store, &server.arena, handle, position.absolute_index, &tokenizer)) |result| {
-        held_range.release();
+    if (try analysis.getFieldAccessType(&server.document_store, &server.arena, handle, source_index, &tokenizer)) |result| {
         try server.typeToCompletion(&completions, result, handle);
         sortCompletionItems(completions.items, server.arena.allocator());
         truncateCompletions(completions.items, server.config.max_detail_length);
@@ -1688,9 +1677,26 @@ fn initializeHandler(server: *Server, writer: anytype, id: types.RequestId, req:
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    for (req.params.capabilities.offsetEncoding.value) |encoding| {
-        if (std.mem.eql(u8, encoding, "utf-8")) {
+    if(req.params.capabilities.general) |general| {
+        var supports_utf8 = false;
+        var supports_utf16 = false;
+        var supports_utf32 = false;
+        for(general.positionEncodings.value) |encoding| {
+            if (std.mem.eql(u8, encoding, "utf-8")) {
+                supports_utf8 = true;
+            } else if(std.mem.eql(u8, encoding, "utf-16")) {
+                supports_utf16 = true;
+            } else if(std.mem.eql(u8, encoding, "utf-32")) {
+                supports_utf32 = true;
+            }
+        }
+
+        if(supports_utf8) {
             server.offset_encoding = .utf8;
+        } else if(supports_utf32) {
+            server.offset_encoding = .utf32;
+        } else {
+            server.offset_encoding = .utf16;
         }
     }
 
@@ -1721,10 +1727,7 @@ fn initializeHandler(server: *Server, writer: anytype, id: types.RequestId, req:
         .id = id,
         .result = .{
             .InitializeResult = .{
-                .offsetEncoding = if (server.offset_encoding == .utf8)
-                    @as([]const u8, "utf-8")
-                else
-                    "utf-16",
+                .offsetEncoding = server.offset_encoding,
                 .serverInfo = .{
                     .name = "zls",
                     .version = "0.1.0",
@@ -1951,22 +1954,21 @@ fn completionHandler(server: *Server, writer: anytype, id: types.RequestId, req:
     if (req.params.position.character == 0)
         return try respondGeneric(writer, id, no_completions_response);
 
-    const doc_position = try offsets.documentPosition(handle.document, req.params.position, server.offset_encoding);
-    const pos_context = try analysis.documentPositionContext(&server.arena, handle.document, doc_position);
+    const source_index = offsets.positionToIndex(handle.document.text, req.params.position, server.offset_encoding);
+    const pos_context = try analysis.getPositionContext(server.arena.allocator(), handle.document, source_index);
 
     switch (pos_context) {
         .builtin => try server.completeBuiltin(writer, id),
-        .var_access, .empty => try server.completeGlobal(writer, id, doc_position.absolute_index, handle),
-        .field_access => |range| try server.completeFieldAccess(writer, id, handle, doc_position, range),
+        .var_access, .empty => try server.completeGlobal(writer, id, source_index, handle),
+        .field_access => |loc| try server.completeFieldAccess(writer, id, handle, source_index, loc),
         .global_error_set => try server.completeError(writer, id, handle),
         .enum_literal => try server.completeDot(writer, id, handle),
-        .label => try server.completeLabel(writer, id, doc_position.absolute_index, handle),
+        .label => try server.completeLabel(writer, id, source_index, handle),
         .import_string_literal, .embedfile_string_literal => |loc| {
             if (!server.config.enable_import_embedfile_argument_completions)
                 return try respondGeneric(writer, id, no_completions_response);
 
-            const line_mem_start = @ptrToInt(doc_position.line.ptr) - @ptrToInt(handle.document.mem.ptr);
-            const completing = handle.tree.source[line_mem_start + loc.start + 1 .. line_mem_start + loc.end];
+            const completing = offsets.locToSlice(handle.tree.source, loc);
 
             var subpath_present = false;
             var fsl_completions = std.ArrayListUnmanaged(types.CompletionItem){};
@@ -2048,12 +2050,12 @@ fn signatureHelpHandler(server: *Server, writer: anytype, id: types.RequestId, r
     if (req.params.position.character == 0)
         return try respondGeneric(writer, id, no_signatures_response);
 
-    const doc_position = try offsets.documentPosition(handle.document, req.params.position, server.offset_encoding);
+    const source_index = offsets.positionToIndex(handle.document.text, req.params.position, server.offset_encoding);
     if (try getSignatureInfo(
         &server.document_store,
         &server.arena,
         handle,
-        doc_position.absolute_index,
+        source_index,
         data,
     )) |sig_info| {
         return try send(writer, server.arena.allocator(), types.Response{
@@ -2080,14 +2082,14 @@ fn gotoHandler(server: *Server, writer: anytype, id: types.RequestId, req: reque
     };
 
     if (req.params.position.character >= 0) {
-        const doc_position = try offsets.documentPosition(handle.document, req.params.position, server.offset_encoding);
-        const pos_context = try analysis.documentPositionContext(&server.arena, handle.document, doc_position);
+        const source_index = offsets.positionToIndex(handle.document.text, req.params.position, server.offset_encoding);
+        const pos_context = try analysis.getPositionContext(server.arena.allocator(), handle.document, source_index);
 
         switch (pos_context) {
-            .var_access => try server.gotoDefinitionGlobal(writer, id, doc_position.absolute_index, handle, resolve_alias),
-            .field_access => |range| try server.gotoDefinitionFieldAccess(writer, id, handle, doc_position, range, resolve_alias),
-            .import_string_literal => try server.gotoDefinitionString(writer, id, doc_position.absolute_index, handle),
-            .label => try server.gotoDefinitionLabel(writer, id, doc_position.absolute_index, handle),
+            .var_access => try server.gotoDefinitionGlobal(writer, id, source_index, handle, resolve_alias),
+            .field_access => |loc| try server.gotoDefinitionFieldAccess(writer, id, handle, source_index, loc, resolve_alias),
+            .import_string_literal => try server.gotoDefinitionString(writer, id, source_index, handle),
+            .label => try server.gotoDefinitionLabel(writer, id, source_index, handle),
             else => try respondGeneric(writer, id, null_result_response),
         }
     } else {
@@ -2119,13 +2121,13 @@ fn hoverHandler(server: *Server, writer: anytype, id: types.RequestId, req: requ
     };
 
     if (req.params.position.character >= 0) {
-        const doc_position = try offsets.documentPosition(handle.document, req.params.position, server.offset_encoding);
-        const pos_context = try analysis.documentPositionContext(&server.arena, handle.document, doc_position);
+        const source_index = offsets.positionToIndex(handle.document.text, req.params.position, server.offset_encoding);
+        const pos_context = try analysis.getPositionContext(server.arena.allocator(), handle.document, source_index);
         switch (pos_context) {
-            .builtin => try server.hoverDefinitionBuiltin(writer, id, doc_position.absolute_index, handle),
-            .var_access => try server.hoverDefinitionGlobal(writer, id, doc_position.absolute_index, handle),
-            .field_access => |range| try server.hoverDefinitionFieldAccess(writer, id, handle, doc_position, range),
-            .label => try server.hoverDefinitionLabel(writer, id, doc_position.absolute_index, handle),
+            .builtin => try server.hoverDefinitionBuiltin(writer, id, source_index, handle),
+            .var_access => try server.hoverDefinitionGlobal(writer, id, source_index, handle),
+            .field_access => |loc| try server.hoverDefinitionFieldAccess(writer, id, handle, source_index, loc),
+            .label => try server.hoverDefinitionLabel(writer, id, source_index, handle),
             else => try respondGeneric(writer, id, null_result_response),
         }
     } else {
@@ -2174,6 +2176,7 @@ fn formattingHandler(server: *Server, writer: anytype, id: types.RequestId, req:
                 if (std.mem.eql(u8, handle.document.text, stdout_bytes)) return try respondGeneric(writer, id, null_result_response);
 
                 var edits = diff.edits(server.allocator, handle.document.text, stdout_bytes) catch {
+                    const range = offsets.locToRange(handle.document.text, .{ .start = 0, .end = handle.document.text.len }, server.offset_encoding);
                     // If there was an error trying to diff the text, return the formatted response
                     // as the new text for the entire range of the document
                     return try send(writer, server.arena.allocator(), types.Response{
@@ -2181,7 +2184,7 @@ fn formattingHandler(server: *Server, writer: anytype, id: types.RequestId, req:
                         .result = .{
                             .TextEdits = &[1]types.TextEdit{
                                 .{
-                                    .range = try offsets.documentRange(handle.document, server.offset_encoding),
+                                    .range = range,
                                     .newText = stdout_bytes,
                                 },
                             },
@@ -2230,13 +2233,12 @@ fn renameHandler(server: *Server, writer: anytype, id: types.RequestId, req: req
     };
 
     if (req.params.position.character >= 0) {
-        const doc_position = try offsets.documentPosition(handle.document, req.params.position, server.offset_encoding);
-        const pos_context = try analysis.documentPositionContext(&server.arena, handle.document, doc_position);
-
+        const source_index = offsets.positionToIndex(handle.document.text, req.params.position, server.offset_encoding);
+        const pos_context = try analysis.getPositionContext(server.arena.allocator(), handle.document, source_index);
         switch (pos_context) {
-            .var_access => try server.renameDefinitionGlobal(writer, id, handle, doc_position.absolute_index, req.params.newName),
-            .field_access => |range| try server.renameDefinitionFieldAccess(writer, id, handle, doc_position, range, req.params.newName),
-            .label => try server.renameDefinitionLabel(writer, id, handle, doc_position.absolute_index, req.params.newName),
+            .var_access => try server.renameDefinitionGlobal(writer, id, handle, source_index, req.params.newName),
+            .field_access => |loc| try server.renameDefinitionFieldAccess(writer, id, handle, source_index, loc, req.params.newName),
+            .label => try server.renameDefinitionLabel(writer, id, handle, source_index, req.params.newName),
             else => try respondGeneric(writer, id, null_result_response),
         }
     } else {
@@ -2273,14 +2275,14 @@ fn referencesHandler(server: *Server, writer: anytype, id: types.RequestId, req:
     };
 
     if (req.params.position.character >= 0) {
-        const doc_position = try offsets.documentPosition(handle.document, req.params.position, server.offset_encoding);
-        const pos_context = try analysis.documentPositionContext(&server.arena, handle.document, doc_position);
+        const source_index = offsets.positionToIndex(handle.document.text, req.params.position, server.offset_encoding);
+        const pos_context = try analysis.getPositionContext(server.arena.allocator(), handle.document, source_index);
 
         const include_decl = req.params.context.includeDeclaration;
         switch (pos_context) {
-            .var_access => try server.referencesDefinitionGlobal(writer, id, handle, doc_position.absolute_index, include_decl, false),
-            .field_access => |range| try server.referencesDefinitionFieldAccess(writer, id, handle, doc_position, range, include_decl, false),
-            .label => try server.referencesDefinitionLabel(writer, id, handle, doc_position.absolute_index, include_decl, false),
+            .var_access => try server.referencesDefinitionGlobal(writer, id, handle, source_index, include_decl, false),
+            .field_access => |loc| try server.referencesDefinitionFieldAccess(writer, id, handle, source_index, loc, include_decl, false),
+            .label => try server.referencesDefinitionLabel(writer, id, handle, source_index, include_decl, false),
             else => try respondGeneric(writer, id, null_result_response),
         }
     } else {
@@ -2298,13 +2300,13 @@ fn documentHighlightHandler(server: *Server, writer: anytype, id: types.RequestI
     };
 
     if (req.params.position.character >= 0) {
-        const doc_position = try offsets.documentPosition(handle.document, req.params.position, server.offset_encoding);
-        const pos_context = try analysis.documentPositionContext(&server.arena, handle.document, doc_position);
+        const source_index = offsets.positionToIndex(handle.document.text, req.params.position, server.offset_encoding);
+        const pos_context = try analysis.getPositionContext(server.arena.allocator(), handle.document, source_index);
 
         switch (pos_context) {
-            .var_access => try server.referencesDefinitionGlobal(writer, id, handle, doc_position.absolute_index, true, true),
-            .field_access => |range| try server.referencesDefinitionFieldAccess(writer, id, handle, doc_position, range, true, true),
-            .label => try server.referencesDefinitionLabel(writer, id, handle, doc_position.absolute_index, true, true),
+            .var_access => try server.referencesDefinitionGlobal(writer, id, handle, source_index, true, true),
+            .field_access => |loc| try server.referencesDefinitionFieldAccess(writer, id, handle, source_index, loc, true, true),
+            .label => try server.referencesDefinitionLabel(writer, id, handle, source_index, true, true),
             else => try respondGeneric(writer, id, null_result_response),
         }
     } else {
@@ -2336,7 +2338,15 @@ fn inlayHintHandler(server: *Server, writer: anytype, id: types.RequestId, req: 
         // because the function could be stored in a different document
         // we need the regenerate hints when the document itself or its imported documents change
         // with caching it would also make sense to generate all hints instead of only the visible ones
-        const hints = try inlay_hints.writeRangeInlayHint(&server.arena, &server.config, &server.document_store, handle, req.params.range, hover_kind);
+        const hints = try inlay_hints.writeRangeInlayHint(
+            &server.arena,
+            &server.config,
+            &server.document_store,
+            handle,
+            req.params.range,
+            hover_kind,
+            server.offset_encoding,
+        );
         defer {
             for (hints) |hint| {
                 server.allocator.free(hint.tooltip.value);

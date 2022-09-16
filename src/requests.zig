@@ -168,7 +168,9 @@ pub const Initialize = struct {
             },
             documentHighlight: Exists,
         },
-        offsetEncoding: MaybeStringArray,
+        general: ?struct {
+            positionEncodings: MaybeStringArray,
+        },
     };
 
     params: struct {
