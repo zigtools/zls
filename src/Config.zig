@@ -147,6 +147,7 @@ pub fn configChanged(config: *Config, allocator: std.mem.Allocator, builtin_crea
                             std_dir: []const u8,
                             global_cache_dir: []const u8,
                             version: []const u8,
+                            target: []const u8,
                         };
 
                         var json_env = std.json.parse(
@@ -202,7 +203,6 @@ pub fn configChanged(config: *Config, allocator: std.mem.Allocator, builtin_crea
         config.builtin_path = try std.fs.path.join(allocator, &.{ builtin_creation_dir.?, "builtin.zig" });
     }
 
-
     if (null == config.global_cache_path) {
         const cache_dir_path = (try known_folders.getPath(allocator, .cache)) orelse {
             logger.warn("Known-folders could not fetch the cache path", .{});
@@ -212,7 +212,7 @@ pub fn configChanged(config: *Config, allocator: std.mem.Allocator, builtin_crea
 
         config.global_cache_path = try std.fs.path.resolve(allocator, &[_][]const u8{ cache_dir_path, "zls" });
 
-        std.fs.makeDirAbsolute(config.global_cache_path.?) catch |err| switch(err) {
+        std.fs.makeDirAbsolute(config.global_cache_path.?) catch |err| switch (err) {
             error.PathAlreadyExists => {},
             else => return err,
         };
@@ -226,5 +226,4 @@ pub fn configChanged(config: *Config, allocator: std.mem.Allocator, builtin_crea
 
         try file.writeAll(@embedFile("special/build_runner.zig"));
     }
-
 }
