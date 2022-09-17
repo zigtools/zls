@@ -134,6 +134,7 @@ pub fn translate(allocator: std.mem.Allocator, config: Config, include_dirs: []c
         config.zig_lib_path.?,
         "--cache-dir",
         config.global_cache_path.?,
+        "-lc",
     };
 
     const argc = base_args.len + 2 * (include_dirs.len + if (base_include_dirs) |dirs| dirs.len else 0) + 1;
