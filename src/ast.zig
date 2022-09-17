@@ -11,7 +11,7 @@ fn fullPtrType(tree: Ast, info: full.PtrType.Components) full.PtrType {
     const token_tags = tree.tokens.items(.tag);
     // TODO: looks like stage1 isn't quite smart enough to handle enum
     // literals in some places here
-    const Size = std.builtin.TypeInfo.Pointer.Size;
+    const Size = std.builtin.Type.Pointer.Size;
     const size: Size = switch (token_tags[info.main_token]) {
         .asterisk,
         .asterisk_asterisk,
@@ -1137,7 +1137,7 @@ pub fn nextFnParam(it: *Ast.full.FnProto.Iterator) ?Ast.full.FnProto.Param {
                 .identifier => name_token = tok_i,
                 .doc_comment => first_doc_comment = tok_i,
                 .keyword_comptime, .keyword_noalias => comptime_noalias = tok_i,
-                else => break
+                else => break,
             };
             it.param_i += 1;
             it.tok_i = it.tree.lastToken(param_type) + 1;
