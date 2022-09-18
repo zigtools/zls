@@ -516,7 +516,7 @@ pub fn symbolReferences(
                 try imports.resize(arena.allocator(), 0);
             }
         },
-        .param_decl => |param| {
+        .param_decl => |param| blk: {
             // Rename the param tok.
             for (curr_handle.document_scope.scopes.items) |scope| {
                 if (scope.data != .function) continue;
@@ -530,9 +530,9 @@ pub fn symbolReferences(
                 while (ast.nextFnParam(&it)) |candidate| {
                     if (!std.meta.eql(candidate, param)) continue;
 
-                    if (curr_handle.tree.nodes.items(.tag)[proto] != .fn_decl) break;
+                    if (curr_handle.tree.nodes.items(.tag)[proto] != .fn_decl) break :blk;
                     try symbolReferencesInternal(&builder, curr_handle.tree.nodes.items(.data)[proto].rhs, curr_handle);
-                    break;
+                    break :blk;
                 }
             }
             log.warn("Could not find param decl's function", .{});
