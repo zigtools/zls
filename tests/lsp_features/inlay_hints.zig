@@ -72,37 +72,12 @@ fn testInlayHints(source: []const u8) !void {
     var ctx = try Context.init();
     defer ctx.deinit();
 
-    const open_document = requests.OpenDocument{
-        .params = .{
-            .textDocument = .{
-                .uri = "file:///test.zig",
-                // .languageId = "zig",
-                // .version = 420,
-                .text = phr.new_source,
-            },
-        },
-    };
-
-    const did_open_method = try std.json.stringifyAlloc(allocator, open_document.params, .{});
-    defer allocator.free(did_open_method);
-
-    try ctx.request("textDocument/didOpen", did_open_method, null);
+    try ctx.requestDidOpen("file:///test.zig", phr.new_source);
 
     const range = types.Range{
         .start = types.Position{ .line = 0, .character = 0 },
         .end = offsets.indexToPosition(phr.new_source, phr.new_source.len, .utf16),
     };
-
-    const method = try std.json.stringifyAlloc(allocator, .{
-        .textDocument = .{
-            .uri = "file:///test.zig",
-        },
-        .range = range,
-    }, .{});
-    defer allocator.free(method);
-
-    const response_bytes = try ctx.requestAlloc("textDocument/inlayHint", method);
-    defer allocator.free(response_bytes);
 
     const InlayHint = struct {
         position: types.Position,
@@ -110,23 +85,17 @@ fn testInlayHints(source: []const u8) !void {
         kind: types.InlayHintKind,
     };
 
-    const Response = struct {
-        jsonrpc: []const u8,
-        id: types.RequestId,
-        result: []InlayHint,
+    const request = requests.InlayHint{
+        .params = .{
+            .textDocument = .{ .uri = "file:///test.zig" },
+            .range = range,
+        },
     };
 
-    const parse_options = std.json.ParseOptions{
-        .allocator = allocator,
-        .ignore_unknown_fields = true,
-    };
-    var token_stream = std.json.TokenStream.init(response_bytes);
-    var response = try std.json.parse(Response, &token_stream, parse_options);
-    defer std.json.parseFree(Response, response, parse_options);
+    const response = try ctx.requestGetResponse([]InlayHint, "textDocument/inlayHint", request);
+    defer response.deinit();
 
     const hints = response.result;
-
-    try std.testing.expectEqual(phr.locations.len, hints.len);
 
     var i: usize = 0;
     outer: while (i < phr.locations.len) : (i += 1) {
@@ -136,7 +105,7 @@ fn testInlayHints(source: []const u8) !void {
         const expected_name = offsets.locToSlice(source, old_loc);
         const expected_label = expected_name[1 .. expected_name.len - 1]; // convert <name> to name
 
-        const position = offsets.indexToPosition(phr.new_source, new_loc.start, .utf16);
+        const position = offsets.indexToPosition(phr.new_source, new_loc.start, ctx.server.offset_encoding);
 
         for (hints) |hint| {
             if (position.line != hint.position.line or position.character != hint.position.character) continue;
