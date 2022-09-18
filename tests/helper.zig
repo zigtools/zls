@@ -1,73 +1,75 @@
 const std = @import("std");
+const zls = @import("zls");
 
-pub const Placeholder = struct {
-    loc: Loc,
-
-    pub const Loc = std.zig.Token.Loc;
-
-    pub fn placeholderSlice(self: Placeholder, source: []const u8) []const u8 {
-        return source[self.loc.start..self.loc.end];
-    }
-};
+const offsets = zls.offsets;
 
 /// returns an array of all placeholder locations
-pub fn collectPlaceholder(allocator: std.mem.Allocator, source: []const u8) ![]Placeholder {
-    var placeholders = std.ArrayListUnmanaged(Placeholder){};
-    errdefer placeholders.deinit(allocator);
+pub fn collectPlaceholderLocs(allocator: std.mem.Allocator, source: []const u8) ![]offsets.Loc {
+    var locations = std.ArrayListUnmanaged(offsets.Loc){};
+    errdefer locations.deinit(allocator);
 
     var source_index: usize = 0;
     while (std.mem.indexOfScalarPos(u8, source, source_index, '<')) |start_index| {
-        const end_index = std.mem.indexOfScalarPos(u8, source, start_index + 1, '>') orelse return error.Invalid;
+        const end_index = 1 + (std.mem.indexOfScalarPos(u8, source, start_index + 1, '>') orelse return error.Invalid);
 
-        try placeholders.append(allocator, .{ .loc = .{
+        try locations.append(allocator, .{
             .start = start_index,
             .end = end_index,
-        } });
+        });
 
-        source_index = end_index + 1;
+        source_index = end_index;
     }
 
-    return placeholders.toOwnedSlice(allocator);
+    return locations.toOwnedSlice(allocator);
 }
 
-/// returns `source` without any placeholders
-pub fn clearPlaceholders(allocator: std.mem.Allocator, source: []const u8) ![]const u8 {
+/// returns `source` where every placeholder is replaced with `new_name`
+pub fn replacePlaceholders(allocator: std.mem.Allocator, source: []const u8, new_name: []const u8) ![]const u8 {
     var output = std.ArrayListUnmanaged(u8){};
     errdefer output.deinit(allocator);
 
     var source_index: usize = 0;
     while (std.mem.indexOfScalarPos(u8, source, source_index, '<')) |start_index| {
         try output.appendSlice(allocator, source[source_index..start_index]);
+        try output.appendSlice(allocator, new_name);
 
-        source_index = std.mem.indexOfScalarPos(u8, source, start_index + 1, '>') orelse return error.Invalid;
-        source_index += 1;
+        source_index = 1 + (std.mem.indexOfScalarPos(u8, source, start_index + 1, '>') orelse return error.Invalid);
     }
     try output.appendSlice(allocator, source[source_index..source.len]);
 
     return output.toOwnedSlice(allocator);
 }
 
-const CollectClearPlaceholdersResult = struct {
-    /// placeholders relative to the `source` parameter in `collectClearPlaceholders`
-    placeholders: []Placeholder,
-    /// placeholders locations to `source`
-    placeholder_locations: []usize,
-    /// source without any placeholders
-    source: []const u8,
+/// returns `source` without any placeholders
+pub fn clearPlaceholders(allocator: std.mem.Allocator, source: []const u8) ![]const u8 {
+    return replacePlaceholders(allocator, source, "");
+}
 
-    pub fn deinit(self: @This(), allocator: std.mem.Allocator) void {
-        allocator.free(self.placeholders);
-        allocator.free(self.placeholder_locations);
-        allocator.free(self.source);
+const CollectPlaceholdersResult = struct {
+    /// list of all placeholder with old and new location
+    locations: std.MultiArrayList(LocPair),
+    /// equivalent to calling `replacePlaceholders(source, new_name)`
+    new_source: []const u8,
+
+    pub const LocPair = struct {
+        /// placeholder location relative to the `source` parameter
+        old: offsets.Loc,
+        /// placeholder location relative to `new_source`
+        new: offsets.Loc,
+    };
+
+    pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
+        self.locations.deinit(allocator);
+        allocator.free(self.new_source);
     }
 };
 
-/// see `CollectClearPlaceholdersResult`
-pub fn collectClearPlaceholders(allocator: std.mem.Allocator, source: []const u8) !CollectClearPlaceholdersResult {
-    var placeholders = std.ArrayListUnmanaged(Placeholder){};
-    errdefer placeholders.deinit(allocator);
+pub fn collectClearPlaceholders(allocator: std.mem.Allocator, source: []const u8) !CollectPlaceholdersResult {
+    return collectReplacePlaceholders(allocator, source, "");
+}
 
-    var locations = std.ArrayListUnmanaged(usize){};
+pub fn collectReplacePlaceholders(allocator: std.mem.Allocator, source: []const u8, new_name: []const u8) !CollectPlaceholdersResult {
+    var locations = std.MultiArrayList(CollectPlaceholdersResult.LocPair){};
     errdefer locations.deinit(allocator);
 
     var new_source = std.ArrayListUnmanaged(u8){};
@@ -76,27 +78,33 @@ pub fn collectClearPlaceholders(allocator: std.mem.Allocator, source: []const u8
     var source_index: usize = 0;
     var new_source_index: usize = 0;
     while (std.mem.indexOfScalarPos(u8, source, source_index, '<')) |start_index| {
-        const end_index = std.mem.indexOfScalarPos(u8, source, start_index + 1, '>') orelse return error.Invalid;
+        const end_index = 1 + (std.mem.indexOfScalarPos(u8, source, start_index + 1, '>') orelse return error.Invalid);
 
-        const placeholder = Placeholder{ .loc = .{
-            .start = start_index + 1,
+        const old_loc: offsets.Loc = .{
+            .start = start_index,
             .end = end_index,
-        } };
+        };
+        defer source_index = old_loc.end;
 
-        try placeholders.append(allocator, placeholder);
+        const text = source[source_index..start_index];
 
-        new_source_index = new_source_index + (start_index - source_index);
-        try locations.append(allocator, new_source_index);
-        try new_source.appendSlice(allocator, source[source_index..start_index]);
+        const new_loc: offsets.Loc = .{
+            .start = new_source_index + text.len,
+            .end = new_source_index + text.len + new_name.len,
+        };
+        defer new_source_index = new_loc.end;
 
-        source_index = end_index + 1;
+        try locations.append(allocator, .{
+            .old = old_loc,
+            .new = new_loc,
+        });
+        try new_source.appendSlice(allocator, text);
+        try new_source.appendSlice(allocator, new_name);
     }
     try new_source.appendSlice(allocator, source[source_index..source.len]);
 
-    return CollectClearPlaceholdersResult{
-        .placeholders = placeholders.toOwnedSlice(allocator),
-        .placeholder_locations = locations.toOwnedSlice(allocator),
-        .source = new_source.toOwnedSlice(allocator),
+    return CollectPlaceholdersResult{
+        .locations = locations,
+        .new_source = new_source.toOwnedSlice(allocator),
     };
 }
-

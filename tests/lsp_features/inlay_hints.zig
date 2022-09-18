@@ -66,7 +66,7 @@ test "inlayhints - builtin call" {
 }
 
 fn testInlayHints(source: []const u8) !void {
-    const phr = try helper.collectClearPlaceholders(allocator, source);
+    var phr = try helper.collectClearPlaceholders(allocator, source);
     defer phr.deinit(allocator);
 
     var ctx = try Context.init();
@@ -78,7 +78,7 @@ fn testInlayHints(source: []const u8) !void {
                 .uri = "file:///test.zig",
                 // .languageId = "zig",
                 // .version = 420,
-                .text = phr.source,
+                .text = phr.new_source,
             },
         },
     };
@@ -90,7 +90,7 @@ fn testInlayHints(source: []const u8) !void {
 
     const range = types.Range{
         .start = types.Position{ .line = 0, .character = 0 },
-        .end = offsets.indexToPosition(phr.source, phr.source.len, .utf16),
+        .end = offsets.indexToPosition(phr.new_source, phr.new_source.len, .utf16),
     };
 
     const method = try std.json.stringifyAlloc(allocator, .{
@@ -126,24 +126,29 @@ fn testInlayHints(source: []const u8) !void {
 
     const hints = response.result;
 
-    try std.testing.expectEqual(phr.placeholder_locations.len, hints.len);
+    try std.testing.expectEqual(phr.locations.len, hints.len);
 
-    outer: for (phr.placeholder_locations) |loc, i| {
-        const name = phr.placeholders[i].placeholderSlice(source);
+    var i: usize = 0;
+    outer: while (i < phr.locations.len) : (i += 1) {
+        const old_loc = phr.locations.items(.old)[i];
+        const new_loc = phr.locations.items(.new)[i];
 
-        const position = offsets.indexToPosition(phr.source, loc, .utf16);
+        const expected_name = offsets.locToSlice(source, old_loc);
+        const expected_label = expected_name[1 .. expected_name.len - 1]; // convert <name> to name
+
+        const position = offsets.indexToPosition(phr.new_source, new_loc.start, .utf16);
 
         for (hints) |hint| {
             if (position.line != hint.position.line or position.character != hint.position.character) continue;
 
             try std.testing.expect(hint.label.len != 0);
             const trimmedLabel = hint.label[0 .. hint.label.len - 1]; // exclude :
-            try std.testing.expectEqualStrings(name, trimmedLabel);
+            try std.testing.expectEqualStrings(expected_label, trimmedLabel);
             try std.testing.expectEqual(types.InlayHintKind.Parameter, hint.kind);
 
             continue :outer;
         }
-        std.debug.print("Placeholder '{s}' at {}:{} (line:colon) not found!", .{ name, position.line, position.character });
+        std.debug.print("Placeholder '{s}' at {}:{} (line:colon) not found!", .{ expected_name, position.line, position.character });
         return error.PlaceholderNotFound;
     }
 }
