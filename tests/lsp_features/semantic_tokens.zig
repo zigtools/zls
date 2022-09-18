@@ -1,7 +1,7 @@
 const std = @import("std");
 const zls = @import("zls");
 
-const Context = @import("context").Context;
+const Context = @import("../context.zig").Context;
 
 const requests = zls.requests;
 
