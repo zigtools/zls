@@ -108,3 +108,54 @@ pub fn collectReplacePlaceholders(allocator: std.mem.Allocator, source: []const 
         .new_source = new_source.toOwnedSlice(allocator),
     };
 }
+
+fn testCollectReplacePlaceholders(
+    source: []const u8,
+    expected_source: []const u8,
+    expected_old_locs: []const offsets.Loc,
+    expected_new_locs: []const offsets.Loc,
+) !void {
+    const allocator = std.testing.allocator;
+    const new_name = "foo";
+
+    var result = try collectReplacePlaceholders(allocator, source, new_name);
+    defer result.deinit(allocator);
+
+    const expected_old_locs2 = try collectPlaceholderLocs(allocator, source);
+    defer allocator.free(expected_old_locs2);
+
+    const expected_source2 = try replacePlaceholders(allocator, source, new_name);
+    defer allocator.free(expected_source2);
+
+    try std.testing.expectEqualStrings(expected_source, expected_source2);
+    try std.testing.expectEqualSlices(offsets.Loc, expected_old_locs, expected_old_locs2);
+
+    try std.testing.expectEqualStrings(expected_source, result.new_source);
+    try std.testing.expectEqualSlices(offsets.Loc, expected_old_locs, result.locations.items(.old));
+    try std.testing.expectEqualSlices(offsets.Loc, expected_new_locs, result.locations.items(.new));
+}
+
+test "helper - collectReplacePlaceholders" {
+    try testCollectReplacePlaceholders("", "", &.{}, &.{});
+    try testCollectReplacePlaceholders("text", "text", &.{}, &.{});
+
+    try testCollectReplacePlaceholders("<>", "foo", &.{
+        .{ .start = 0, .end = 2 },
+    }, &.{
+        .{ .start = 0, .end = 3 },
+    });
+
+    try testCollectReplacePlaceholders("a<>b", "afoob", &.{
+        .{ .start = 1, .end = 3 },
+    }, &.{
+        .{ .start = 1, .end = 4 },
+    });
+
+    try testCollectReplacePlaceholders("<><>", "foofoo", &.{
+        .{ .start = 0, .end = 2 },
+        .{ .start = 2, .end = 4 },
+    }, &.{
+        .{ .start = 0, .end = 3 },
+        .{ .start = 3, .end = 6 },
+    });
+}
