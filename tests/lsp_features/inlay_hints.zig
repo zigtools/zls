@@ -3,6 +3,7 @@ const zls = @import("zls");
 
 const helper = @import("helper");
 const Context = @import("context").Context;
+const ErrorBuilder = @import("../ErrorBuilder.zig");
 
 const types = zls.types;
 const offsets = zls.offsets;
@@ -92,10 +93,17 @@ fn testInlayHints(source: []const u8) !void {
         },
     };
 
-    const response = try ctx.requestGetResponse([]InlayHint, "textDocument/inlayHint", request);
+    const response = try ctx.requestGetResponse(?[]InlayHint, "textDocument/inlayHint", request);
     defer response.deinit();
 
-    const hints = response.result;
+    const hints: []InlayHint = response.result orelse {
+        std.debug.print("Server returned `null` as the result\n", .{});
+        return error.InvalidResponse;
+    };
+
+    var error_builder = ErrorBuilder.init(allocator, phr.new_source);
+    defer error_builder.deinit();
+    errdefer error_builder.writeDebug();
 
     var i: usize = 0;
     outer: while (i < phr.locations.len) : (i += 1) {
@@ -109,15 +117,20 @@ fn testInlayHints(source: []const u8) !void {
 
         for (hints) |hint| {
             if (position.line != hint.position.line or position.character != hint.position.character) continue;
+            
+            const actual_label = hint.label[0 .. hint.label.len - 1]; // exclude :
 
-            try std.testing.expect(hint.label.len != 0);
-            const trimmedLabel = hint.label[0 .. hint.label.len - 1]; // exclude :
-            try std.testing.expectEqualStrings(expected_label, trimmedLabel);
-            try std.testing.expectEqual(types.InlayHintKind.Parameter, hint.kind);
+            if (!std.mem.eql(u8, expected_label, actual_label)) {
+                try error_builder.msgAtLoc("expected label `{s}` here but got `{s}`!", new_loc, .err, .{ expected_label, actual_label });
+            }
+            if (hint.kind != types.InlayHintKind.Parameter) {
+                try error_builder.msgAtLoc("hint kind should be `{s}` but got `{s}`!", new_loc, .err, .{ @tagName(types.InlayHintKind.Parameter), @tagName(hint.kind) });
+            }
 
             continue :outer;
         }
-        std.debug.print("Placeholder '{s}' at {}:{} (line:colon) not found!", .{ expected_name, position.line, position.character });
-        return error.PlaceholderNotFound;
+        try error_builder.msgAtLoc("expected hint `{s}` here", new_loc, .err, .{expected_label});
     }
+
+    if (error_builder.hasMessages()) return error.InvalidResponse;
 }
