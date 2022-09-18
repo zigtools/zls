@@ -117,8 +117,6 @@ pub fn build(b: *std.build.Builder) !void {
     var tests = b.addTest("tests/tests.zig");
     tests.use_stage1 = true;
     tests.addPackage(.{ .name = "zls", .source = .{ .path = "src/zls.zig" }, .dependencies = exe.packages.items });
-    tests.addPackage(.{ .name = "helper", .source = .{ .path = "tests/helper.zig" } });
-    tests.addPackage(.{ .name = "context", .source = .{ .path = "tests/context.zig" } });
     tests.setBuildMode(.Debug);
     tests.setTarget(target);
     test_step.dependOn(&tests.step);

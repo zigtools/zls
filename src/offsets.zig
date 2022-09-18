@@ -94,10 +94,7 @@ pub fn tokenLength(tree: Ast, token_index: Ast.TokenIndex, encoding: Encoding) u
 }
 
 pub fn rangeLength(text: []const u8, range: types.Range, encoding: Encoding) usize {
-    const loc: Loc = .{
-        .start = positionToIndex(text, range.start, encoding),
-        .end = positionToIndex(text, range.end, encoding),
-    };
+    const loc = rangeToLoc(text, range, encoding);
     return locLength(text, loc, encoding);
 }
 
@@ -160,6 +157,17 @@ pub fn locToRange(text: []const u8, loc: Loc, encoding: Encoding) types.Range {
     return .{
         .start = start,
         .end = advancePosition(text, start, loc.start, loc.end, encoding),
+    };
+}
+
+pub fn rangeToSlice(text: []const u8, range: types.Range, encodig: Encoding) []const u8 {
+    return locToSlice(text, rangeToLoc(text, range, encodig));
+}
+
+pub fn rangeToLoc(text: []const u8, range: types.Range, encodig: Encoding) Loc {
+    return .{
+        .start = positionToIndex(text, range.start, encodig),
+        .end = positionToIndex(text, range.end, encodig),
     };
 }
 
