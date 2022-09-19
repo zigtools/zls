@@ -274,7 +274,7 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: [:0]u8) anyerror!*Ha
         if (handle.associated_build_file) |build_file| {
             log.debug("Opened document `{s}` with build file `{s}`", .{ handle.uri(), build_file.uri });
         } else {
-            log.debug("Opened document `{s}` without a build file", .{ handle.uri() });
+            log.debug("Opened document `{s}` without a build file", .{handle.uri()});
         }
     }
 
@@ -439,8 +439,8 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: [:0]u8) anyerror!*Ha
 
     handle.cimports = try self.collectCIncludes(handle);
     errdefer {
-        for (handle.cimports) |item| {
-            self.allocator.free(item.uri);
+        for (handle.cimports) |*item| {
+            item.result.deinit(self.allocator);
         }
         self.allocator.free(handle.cimports);
     }
@@ -515,8 +515,8 @@ fn decrementCount(self: *DocumentStore, uri: []const u8) void {
             self.allocator.free(import_uri);
         }
 
-        for (handle.cimports) |item| {
-            self.allocator.free(item.uri);
+        for (handle.cimports) |*item| {
+            item.result.deinit(self.allocator);
         }
 
         handle.document_scope.deinit(self.allocator);
@@ -562,7 +562,7 @@ fn collectImportUris(self: *DocumentStore, handle: *Handle) ![]const []const u8 
 }
 
 pub const CImportSource = struct {
-    /// the `@cInclude` node
+    /// the `@cImport` node
     node: Ast.Node.Index,
     /// hash of c source file
     hash: [Hasher.mac_length]u8,
@@ -607,12 +607,13 @@ fn collectCIncludeSources(self: *DocumentStore, handle: *Handle) ![]CImportSourc
 }
 
 pub const CImportHandle = struct {
-    /// the `@cInclude` node
+    /// the `@cImport` node
     node: Ast.Node.Index,
     /// hash of the c source file
     hash: [Hasher.mac_length]u8,
-    /// uri to a zig source file generated with translate-c
-    uri: []const u8,
+    /// the result from calling zig translate-c
+    /// see `translate_c.translate`
+    result: translate_c.Result,
 };
 
 /// Collects all `@cImport` nodes and converts them into zig files using translate-c
@@ -621,12 +622,12 @@ fn collectCIncludes(self: *DocumentStore, handle: *Handle) ![]CImportHandle {
     var cimport_nodes = try analysis.collectCImportNodes(self.allocator, handle.tree);
     defer self.allocator.free(cimport_nodes);
 
-    var uris = try std.ArrayListUnmanaged(CImportHandle).initCapacity(self.allocator, cimport_nodes.len);
+    var cimports = try std.ArrayListUnmanaged(CImportHandle).initCapacity(self.allocator, cimport_nodes.len);
     errdefer {
-        for (uris.items) |item| {
-            self.allocator.free(item.uri);
+        for (cimports.items) |*item| {
+            item.result.deinit(self.allocator);
         }
-        uris.deinit(self.allocator);
+        cimports.deinit(self.allocator);
     }
 
     for (cimport_nodes) |node| {
@@ -636,28 +637,25 @@ fn collectCIncludes(self: *DocumentStore, handle: *Handle) ![]CImportHandle {
         };
         defer self.allocator.free(c_source);
 
-        const uri = self.translate(handle, c_source) catch |err| {
-            std.log.warn("failed to translate cInclude: {}", .{err});
-            continue;
-        } orelse continue;
-        errdefer self.allocator.free(uri);
+        const result = (try self.translate(handle, c_source)) orelse continue;
+        errdefer result.deinit(self.allocator);
 
         var hasher = hasher_init;
         hasher.update(c_source);
         var hash: [Hasher.mac_length]u8 = undefined;
         hasher.final(&hash);
 
-        uris.appendAssumeCapacity(.{
+        cimports.appendAssumeCapacity(.{
             .node = node,
             .hash = hash,
-            .uri = uri,
+            .result = result,
         });
     }
 
-    return uris.toOwnedSlice(self.allocator);
+    return cimports.toOwnedSlice(self.allocator);
 }
 
-fn translate(self: *DocumentStore, handle: *Handle, source: []const u8) !?[]const u8 {
+fn translate(self: *DocumentStore, handle: *Handle, source: []const u8) error{OutOfMemory}!?translate_c.Result {
     const dirs: []BuildConfig.IncludeDir = if (handle.associated_build_file) |build_file| build_file.config.include_dirs else &.{};
     const include_dirs = blk: {
         var result = try self.allocator.alloc([]const u8, dirs.len);
@@ -671,15 +669,21 @@ fn translate(self: *DocumentStore, handle: *Handle, source: []const u8) !?[]cons
     };
     defer self.allocator.free(include_dirs);
 
-    const file_path = (try translate_c.translate(
+    const maybe_result = try translate_c.translate(
         self.allocator,
         self.config,
         include_dirs,
         source,
-    )) orelse return null;
-    defer self.allocator.free(file_path);
+    );
 
-    return try URI.fromPath(self.allocator, file_path);
+    if (maybe_result) |result| {
+        switch (result) {
+            .success => |uri| log.debug("Translated cImport into {s}", .{uri}),
+            else => {},
+        }
+    }
+
+    return maybe_result;
 }
 
 fn refreshDocument(self: *DocumentStore, handle: *Handle) !void {
@@ -703,8 +707,8 @@ fn refreshDocument(self: *DocumentStore, handle: *Handle) !void {
         }
         self.allocator.free(old_imports);
 
-        for (old_cimports) |old_cimport| {
-            self.allocator.free(old_cimport.uri);
+        for (old_cimports) |*old_cimport| {
+            old_cimport.result.deinit(self.allocator);
         }
         self.allocator.free(old_cimports);
     }
@@ -712,26 +716,30 @@ fn refreshDocument(self: *DocumentStore, handle: *Handle) !void {
     var i: usize = 0;
     while (i < handle.imports_used.items.len) {
         const old = handle.imports_used.items[i];
-        still_exists: {
+
+        const found_new = found: {
             for (handle.import_uris) |new| {
-                if (std.mem.eql(u8, new, old)) {
-                    handle.imports_used.items[i] = new;
-                    break :still_exists;
-                }
+                if (!std.mem.eql(u8, new, old)) continue;
+                break :found new;
             }
             for (handle.cimports) |cimport| {
-                const new = cimport.uri;
-                if (std.mem.eql(u8, new, old)) {
-                    handle.imports_used.items[i] = new;
-                    break :still_exists;
-                }
+                if (cimport.result != .success) continue;
+                const new = cimport.result.success;
+
+                if (!std.mem.eql(u8, old, new)) continue;
+                break :found new;
             }
+            break :found null;
+        };
+
+        if (found_new) |new| {
+            handle.imports_used.items[i] = new;
+            i += 1;
+        } else {
             log.debug("Import removed: {s}", .{old});
             self.decrementCount(old);
             _ = handle.imports_used.swapRemove(i);
-            continue;
         }
-        i += 1;
     }
 }
 
@@ -747,48 +755,23 @@ fn refreshDocumentCIncludes(self: *DocumentStore, handle: *Handle) ![]CImportHan
     var old_cimports = handle.cimports;
     var new_cimports = try std.ArrayListUnmanaged(CImportHandle).initCapacity(self.allocator, new_sources.len);
     errdefer {
-        for (new_cimports.items) |new_cimport| {
-            self.allocator.free(new_cimport.uri);
+        for (new_cimports.items) |*new_cimport| {
+            new_cimport.result.deinit(self.allocator);
         }
         new_cimports.deinit(self.allocator);
     }
 
-    for (new_sources) |new_source| {
-        const maybe_old_cimport: ?CImportHandle = blk: {
-            const old_cimport: CImportHandle = found: {
-                for (old_cimports) |old_cimport| {
-                    if (new_source.node == old_cimport.node) {
-                        break :found old_cimport;
-                    }
-                }
-                break :blk null;
-            };
+    outer: for (new_sources) |new_source| {
+        // look for a old cimport with identical source hash
+        for (old_cimports) |old_cimport| {
+            if (!std.mem.eql(u8, &new_source.hash, &old_cimport.hash)) continue;
 
-            // avoid re-translating if the source didn't change
-            if (std.mem.eql(u8, &new_source.hash, &old_cimport.hash)) {
-                break :blk CImportHandle{
-                    .node = old_cimport.node,
-                    .hash = old_cimport.hash,
-                    .uri = try self.allocator.dupe(u8, old_cimport.uri),
-                };
-            }
-
-            const new_uri = self.translate(handle, new_source.source) catch |err| {
-                std.log.warn("failed to translate cInclude: {}", .{err});
-                continue;
-            } orelse continue;
-            errdefer self.allocator.free(new_uri);
-
-            break :blk CImportHandle{
+            new_cimports.appendAssumeCapacity(.{
                 .node = old_cimport.node,
                 .hash = old_cimport.hash,
-                .uri = new_uri,
-            };
-        };
-
-        if (maybe_old_cimport) |cimport| {
-            new_cimports.appendAssumeCapacity(cimport);
-            continue;
+                .result = try old_cimport.result.dupe(self.allocator),
+            });
+            continue :outer;
         }
 
         const c_source = translate_c.convertCInclude(self.allocator, handle.tree, new_source.node) catch |err| switch (err) {
@@ -802,19 +785,13 @@ fn refreshDocumentCIncludes(self: *DocumentStore, handle: *Handle) ![]CImportHan
         hasher.update(c_source);
         hasher.final(&hash);
 
-        const new_uri = self.translate(
-            handle,
-            c_source,
-        ) catch |err| {
-            std.log.warn("failed to translate cInclude: {}", .{err});
-            continue;
-        } orelse continue;
-        errdefer self.allocator.free(new_uri);
+        const new_result = (try self.translate(handle, new_source.source)) orelse continue;
+        errdefer new_result.deinit(self.allocator);
 
         new_cimports.appendAssumeCapacity(.{
             .node = new_source.node,
             .hash = hash,
-            .uri = new_uri,
+            .result = new_result,
         });
     }
 
@@ -996,7 +973,12 @@ pub fn resolveImport(self: *DocumentStore, handle: *Handle, import_str: []const 
 pub fn resolveCImport(self: *DocumentStore, handle: *Handle, node: Ast.Node.Index) !?*Handle {
     const uri = blk: {
         for (handle.cimports) |item| {
-            if (item.node == node) break :blk item.uri;
+            if (item.node != node) continue;
+
+            switch (item.result) {
+                .success => |uri| break :blk uri,
+                .failure => return null,
+            }
         }
         return null;
     };
@@ -1079,8 +1061,8 @@ pub fn deinit(self: *DocumentStore) void {
             self.allocator.free(uri);
         }
         self.allocator.free(entry.value_ptr.*.import_uris);
-        for (entry.value_ptr.*.cimports) |cimport| {
-            self.allocator.free(cimport.uri);
+        for (entry.value_ptr.*.cimports) |*cimport| {
+            cimport.result.deinit(self.allocator);
         }
         self.allocator.free(entry.value_ptr.*.cimports);
         entry.value_ptr.*.imports_used.deinit(self.allocator);
