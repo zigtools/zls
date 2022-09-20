@@ -322,6 +322,24 @@ fn publishDiagnostics(server: *Server, writer: anytype, handle: DocumentStore.Ha
         }
     }
 
+    for (handle.cimports) |cimport| {
+        if (cimport.result != .failure) continue;
+        const stderr = std.mem.trim(u8, cimport.result.failure, " ");
+
+        var pos_and_diag_iterator = std.mem.split(u8, stderr, ":");
+        _ = pos_and_diag_iterator.next(); // skip file path
+        _ = pos_and_diag_iterator.next(); // skip line
+        _ = pos_and_diag_iterator.next(); // skip character
+
+        try diagnostics.append(allocator, .{
+            .range = offsets.nodeToRange(handle.tree, cimport.node, server.offset_encoding),
+            .severity = .Error,
+            .code = "cImport",
+            .source = "zls",
+            .message = try allocator.dupe(u8, pos_and_diag_iterator.rest()),
+        });
+    }
+
     try send(writer, server.arena.allocator(), types.Notification{
         .method = "textDocument/publishDiagnostics",
         .params = .{
