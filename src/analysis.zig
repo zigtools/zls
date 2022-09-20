@@ -85,10 +85,10 @@ pub fn collectDocComments(allocator: std.mem.Allocator, tree: Ast, doc_comments:
 
 /// Gets a function's keyword, name, arguments and return value.
 pub fn getFunctionSignature(tree: Ast, func: Ast.full.FnProto) []const u8 {
-    const start = offsets.tokenLocation(tree, func.ast.fn_token);
+    const start = offsets.tokenToLoc(tree, func.ast.fn_token);
 
     const end = if (func.ast.return_type != 0)
-        offsets.tokenLocation(tree, ast.lastToken(tree, func.ast.return_type))
+        offsets.tokenToLoc(tree, ast.lastToken(tree, func.ast.return_type))
     else
         start;
     return tree.source[start.start..end.end];
@@ -135,7 +135,7 @@ pub fn getFunctionSnippet(allocator: std.mem.Allocator, tree: Ast, func: Ast.ful
 
     var it = func.iterate(&tree);
     var i: usize = 0;
-    while (it.next()) |param| : (i += 1) {
+    while (ast.nextFnParam(&it)) |param| : (i += 1) {
         if (skip_self_param and i == 0) continue;
         if (i != @boolToInt(skip_self_param))
             try buf_stream.writeAll(", ${")
@@ -172,7 +172,7 @@ pub fn getFunctionSnippet(allocator: std.mem.Allocator, tree: Ast, func: Ast.ful
                 try buf_stream.print("{}", .{fmtSnippetPlaceholder(tree.tokenSlice(curr_token))});
                 if (is_comma or tag == .keyword_const) try buf_stream.writeByte(' ');
             }
-        } else unreachable;
+        } // else Incomplete and that's ok :)
 
         try buf_stream.writeByte('}');
     }
@@ -188,7 +188,7 @@ pub fn hasSelfParam(arena: *std.heap.ArenaAllocator, document_store: *DocumentSt
 
     const tree = handle.tree;
     var it = func.iterate(&tree);
-    const param = it.next().?;
+    const param = ast.nextFnParam(&it).?;
     if (param.type_expr == 0) return false;
 
     const token_starts = tree.tokens.items(.start);
@@ -216,8 +216,8 @@ pub fn hasSelfParam(arena: *std.heap.ArenaAllocator, document_store: *DocumentSt
 }
 
 pub fn getVariableSignature(tree: Ast, var_decl: Ast.full.VarDecl) []const u8 {
-    const start = offsets.tokenLocation(tree, var_decl.ast.mut_token).start;
-    const end = offsets.tokenLocation(tree, ast.lastToken(tree, var_decl.ast.init_node)).end;
+    const start = offsets.tokenToIndex(tree, var_decl.ast.mut_token);
+    const end = offsets.tokenToLoc(tree, ast.lastToken(tree, var_decl.ast.init_node)).end;
     return tree.source[start..end];
 }
 
@@ -225,9 +225,9 @@ pub fn getContainerFieldSignature(tree: Ast, field: Ast.full.ContainerField) []c
     if (field.ast.value_expr == 0 and field.ast.type_expr == 0 and field.ast.align_expr == 0) {
         return ""; // TODO display the container's type
     }
-    const start = offsets.tokenLocation(tree, field.ast.name_token).start;
+    const start = offsets.tokenToIndex(tree, field.ast.name_token);
     const end_node = if (field.ast.value_expr != 0) field.ast.value_expr else field.ast.type_expr;
-    const end = offsets.tokenLocation(tree, ast.lastToken(tree, end_node)).end;
+    const end = offsets.tokenToLoc(tree, ast.lastToken(tree, end_node)).end;
     return tree.source[start..end];
 }
 
@@ -245,7 +245,7 @@ pub fn isTypeFunction(tree: Ast, func: Ast.full.FnProto) bool {
 
 pub fn isGenericFunction(tree: Ast, func: Ast.full.FnProto) bool {
     var it = func.iterate(&tree);
-    while (it.next()) |param| {
+    while (ast.nextFnParam(&it)) |param| {
         if (param.anytype_ellipsis3 != null or param.comptime_noalias != null) {
             return true;
         }
@@ -653,7 +653,7 @@ pub fn resolveTypeOfNodeInternal(store: *DocumentStore, arena: *std.heap.ArenaAl
             return try resolveTypeOfNodeInternal(store, arena, value, bound_type_params);
         },
         .identifier => {
-            const name = tree.getNodeSource(node);
+            const name = offsets.nodeToSlice(tree, node);
 
             if (isTypeIdent(name)) {
                 return TypeWithHandle{
@@ -714,7 +714,7 @@ pub fn resolveTypeOfNodeInternal(store: *DocumentStore, arena: *std.heap.ArenaAl
                 var it = fn_decl.iterate(&decl.handle.tree);
                 if (token_tags[call.ast.lparen - 2] == .period) {
                     if (try hasSelfParam(arena, store, decl.handle, fn_decl)) {
-                        _ = it.next();
+                        _ = ast.nextFnParam(&it);
                         expected_params -= 1;
                     }
                 }
@@ -722,7 +722,7 @@ pub fn resolveTypeOfNodeInternal(store: *DocumentStore, arena: *std.heap.ArenaAl
                 // Bind type params to the arguments passed in the call.
                 const param_len = std.math.min(call.ast.params.len, expected_params);
                 var i: usize = 0;
-                while (it.next()) |decl_param| : (i += 1) {
+                while (ast.nextFnParam(&it)) |decl_param| : (i += 1) {
                     if (i >= param_len) break;
                     if (!isMetaType(decl.handle.tree, decl_param.type_expr))
                         continue;
@@ -808,7 +808,8 @@ pub fn resolveTypeOfNodeInternal(store: *DocumentStore, arena: *std.heap.ArenaAl
         },
         .field_access => {
             if (datas[node].rhs == 0) return null;
-            const rhs_str = tree.tokenSlice(datas[node].rhs);
+            const rhs_str = ast.tokenSlice(tree, datas[node].rhs) catch return null;
+
             // If we are accessing a pointer type, remove one pointerness level :)
             const left_type = try resolveFieldAccessLhsType(
                 store,
@@ -1341,7 +1342,7 @@ pub fn nodeToString(tree: Ast, node: Ast.Node.Index) ?[]const u8 {
         .fn_decl,
         => if (ast.fnProto(tree, node, &buf).?.name_token) |name|
             return tree.tokenSlice(name),
-        .field_access => return tree.tokenSlice(data[node].rhs),
+        .field_access => return ast.tokenSlice(tree, data[node].rhs) catch return null,
         .call,
         .call_comma,
         .async_call,
@@ -1361,9 +1362,8 @@ pub fn nodeToString(tree: Ast, node: Ast.Node.Index) ?[]const u8 {
 }
 
 fn nodeContainsSourceIndex(tree: Ast, node: Ast.Node.Index, source_index: usize) bool {
-    const first_token = offsets.tokenLocation(tree, tree.firstToken(node)).start;
-    const last_token = offsets.tokenLocation(tree, ast.lastToken(tree, node)).end;
-    return source_index >= first_token and source_index <= last_token;
+    const loc = offsets.nodeToLoc(tree, node);
+    return source_index >= loc.start and source_index <= loc.end;
 }
 
 pub fn getImportStr(tree: Ast, node: Ast.Node.Index, source_index: usize) ?[]const u8 {
@@ -1401,16 +1401,14 @@ pub fn getImportStr(tree: Ast, node: Ast.Node.Index, source_index: usize) ?[]con
     return import_str[1 .. import_str.len - 1];
 }
 
-pub const SourceRange = std.zig.Token.Loc;
-
 pub const PositionContext = union(enum) {
-    builtin: SourceRange,
+    builtin: offsets.Loc,
     comment,
-    import_string_literal: SourceRange,
-    embedfile_string_literal: SourceRange,
-    string_literal: SourceRange,
-    field_access: SourceRange,
-    var_access: SourceRange,
+    import_string_literal: offsets.Loc,
+    embedfile_string_literal: offsets.Loc,
+    string_literal: offsets.Loc,
+    field_access: offsets.Loc,
+    var_access: offsets.Loc,
     global_error_set,
     enum_literal,
     pre_label,
@@ -1418,7 +1416,7 @@ pub const PositionContext = union(enum) {
     other,
     empty,
 
-    pub fn range(self: PositionContext) ?SourceRange {
+    pub fn loc(self: PositionContext) ?offsets.Loc {
         return switch (self) {
             .builtin => |r| r,
             .comment => null,
@@ -1449,31 +1447,28 @@ fn peek(allocator: std.mem.Allocator, arr: *std.ArrayListUnmanaged(StackState)) 
     return &arr.items[arr.items.len - 1];
 }
 
-fn tokenRangeAppend(prev: SourceRange, token: std.zig.Token) SourceRange {
+fn tokenLocAppend(prev: offsets.Loc, token: std.zig.Token) offsets.Loc {
     return .{
         .start = prev.start,
         .end = token.loc.end,
     };
 }
 
-const DocumentPosition = offsets.DocumentPosition;
+pub fn getPositionContext(allocator: std.mem.Allocator, document: types.TextDocument, doc_index: usize) !PositionContext {
+    const line_loc = offsets.lineLocUntilIndex(document.text, doc_index);
+    const line = offsets.locToSlice(document.text, line_loc);
 
-pub fn documentPositionContext(arena: *std.heap.ArenaAllocator, document: types.TextDocument, doc_position: DocumentPosition) !PositionContext {
-    _ = document;
-
-    const line = doc_position.line;
-
-    const line_mem_start = @ptrToInt(line.ptr) - @ptrToInt(document.mem.ptr);
-    var stack = std.ArrayListUnmanaged(StackState){};
-    try stack.ensureTotalCapacity(arena.allocator(), 8);
+    var stack = try std.ArrayListUnmanaged(StackState).initCapacity(allocator, 8);
+    defer stack.deinit(allocator);
 
     {
-        var held_line = document.borrowNullTerminatedSlice(
-            line_mem_start,
-            line_mem_start + doc_position.line_index,
-        );
+        var held_line = document.borrowNullTerminatedSlice(0, line_loc.end);
         defer held_line.release();
-        var tokenizer = std.zig.Tokenizer.init(held_line.data());
+        var tokenizer: std.zig.Tokenizer = .{
+            .buffer = held_line.data(),
+            .index = line_loc.start,
+            .pending_invalid_token = null,
+        };
 
         while (true) {
             const tok = tokenizer.next();
@@ -1481,11 +1476,11 @@ pub fn documentPositionContext(arena: *std.heap.ArenaAllocator, document: types.
             switch (tok.tag) {
                 .invalid => {
                     // Single '@' do not return a builtin token so we check this on our own.
-                    if (line[doc_position.line_index - 1] == '@') {
+                    if (line[line.len - 1] == '@') {
                         return PositionContext{
                             .builtin = .{
-                                .start = doc_position.line_index - 1,
-                                .end = doc_position.line_index,
+                                .start = line_loc.end - 1,
+                                .end = line_loc.end,
                             },
                         };
                     }
@@ -1497,7 +1492,7 @@ pub fn documentPositionContext(arena: *std.heap.ArenaAllocator, document: types.
             }
 
             // State changes
-            var curr_ctx = try peek(arena.allocator(), &stack);
+            var curr_ctx = try peek(allocator, &stack);
             switch (tok.tag) {
                 .string_literal, .multiline_string_literal_line => string_lit_block: {
                     if (curr_ctx.stack_id == .Paren and stack.items.len >= 2) {
@@ -1540,7 +1535,7 @@ pub fn documentPositionContext(arena: *std.heap.ArenaAllocator, document: types.
                     .other => {},
                     .global_error_set => {},
                     else => curr_ctx.ctx = .{
-                        .field_access = tokenRangeAppend(curr_ctx.ctx.range().?, tok),
+                        .field_access = tokenLocAppend(curr_ctx.ctx.loc().?, tok),
                     },
                 },
                 .keyword_break, .keyword_continue => curr_ctx.ctx = .pre_label,
@@ -1553,18 +1548,18 @@ pub fn documentPositionContext(arena: *std.heap.ArenaAllocator, document: types.
                     .field_access => {},
                     else => curr_ctx.ctx = .empty,
                 },
-                .l_paren => try stack.append(arena.allocator(), .{ .ctx = .empty, .stack_id = .Paren }),
-                .l_bracket => try stack.append(arena.allocator(), .{ .ctx = .empty, .stack_id = .Bracket }),
+                .l_paren => try stack.append(allocator, .{ .ctx = .empty, .stack_id = .Paren }),
+                .l_bracket => try stack.append(allocator, .{ .ctx = .empty, .stack_id = .Bracket }),
                 .r_paren => {
                     _ = stack.pop();
                     if (curr_ctx.stack_id != .Paren) {
-                        (try peek(arena.allocator(), &stack)).ctx = .empty;
+                        (try peek(allocator, &stack)).ctx = .empty;
                     }
                 },
                 .r_bracket => {
                     _ = stack.pop();
                     if (curr_ctx.stack_id != .Bracket) {
-                        (try peek(arena.allocator(), &stack)).ctx = .empty;
+                        (try peek(allocator, &stack)).ctx = .empty;
                     }
                 },
                 .keyword_error => curr_ctx.ctx = .global_error_set,
@@ -1573,7 +1568,7 @@ pub fn documentPositionContext(arena: *std.heap.ArenaAllocator, document: types.
 
             switch (curr_ctx.ctx) {
                 .field_access => |r| curr_ctx.ctx = .{
-                    .field_access = tokenRangeAppend(r, tok),
+                    .field_access = tokenLocAppend(r, tok),
                 },
                 else => {},
             }
@@ -1587,38 +1582,37 @@ pub fn documentPositionContext(arena: *std.heap.ArenaAllocator, document: types.
                 .label => |filled| {
                     // We need to check this because the state could be a filled
                     // label if only a space follows it
-                    const last_char = line[doc_position.line_index - 1];
-                    if (!filled or last_char != ' ') {
+                    if (!filled or line[line.len - 1] != ' ') {
                         break :block state.ctx;
                     }
                 },
                 else => break :block state.ctx,
             }
         }
-        if (doc_position.line_index < line.len) {
-            var held_line = document.borrowNullTerminatedSlice(
-                line_mem_start + doc_position.line_index,
-                line_mem_start + line.len,
-            );
-            defer held_line.release();
 
-            switch (line[doc_position.line_index]) {
-                'a'...'z', 'A'...'Z', '_', '@' => {},
-                else => break :block .empty,
-            }
-            var tokenizer = std.zig.Tokenizer.init(held_line.data());
-            const tok = tokenizer.next();
-            if (tok.tag == .identifier)
-                break :block PositionContext{ .var_access = tok.loc };
+        if (line.len == 0) return .empty;
+
+        var held_line = document.borrowNullTerminatedSlice(line_loc.start, line_loc.end);
+        defer held_line.release();
+
+        switch (line[0]) {
+            'a'...'z', 'A'...'Z', '_', '@' => {},
+            else => break :block .empty,
         }
-        break :block .empty;
+        var tokenizer = std.zig.Tokenizer.init(held_line.data());
+        const tok = tokenizer.next();
+        if (tok.tag == .identifier) {
+            break :block PositionContext{ .var_access = tok.loc };
+        } else {
+            break :block .empty;
+        }
     };
 }
 
 fn addOutlineNodes(allocator: std.mem.Allocator, tree: Ast, child: Ast.Node.Index, context: *GetDocumentSymbolsContext) anyerror!void {
     switch (tree.nodes.items(.tag)[child]) {
         .string_literal,
-        .integer_literal,
+        .number_literal,
         .builtin_call,
         .builtin_call_comma,
         .builtin_call_two,
@@ -1756,11 +1750,6 @@ fn addOutlineNodes(allocator: std.mem.Allocator, tree: Ast, child: Ast.Node.Inde
 }
 
 const GetDocumentSymbolsContext = struct {
-    prev_loc: offsets.TokenLocation = .{
-        .line = 0,
-        .column = 0,
-        .offset = 0,
-    },
     symbols: *std.ArrayListUnmanaged(types.DocumentSymbol),
     encoding: offsets.Encoding,
 };
@@ -1770,30 +1759,7 @@ fn getDocumentSymbolsInternal(allocator: std.mem.Allocator, tree: Ast, node: Ast
     if (name.len == 0)
         return;
 
-    const starts = tree.tokens.items(.start);
-    const start_loc = context.prev_loc.add(try offsets.tokenRelativeLocation(
-        tree,
-        context.prev_loc.offset,
-        starts[tree.firstToken(node)],
-        context.encoding,
-    ));
-    const end_loc = start_loc.add(try offsets.tokenRelativeLocation(
-        tree,
-        start_loc.offset,
-        starts[ast.lastToken(tree, node)],
-        context.encoding,
-    ));
-    context.prev_loc = end_loc;
-    const range = types.Range{
-        .start = .{
-            .line = @intCast(i64, start_loc.line),
-            .character = @intCast(i64, start_loc.column),
-        },
-        .end = .{
-            .line = @intCast(i64, end_loc.line),
-            .character = @intCast(i64, end_loc.column),
-        },
-    };
+    const range = offsets.nodeToRange(tree, node, context.encoding);
 
     const tags = tree.nodes.items(.tag);
     (try context.symbols.addOne(allocator)).* = .{
@@ -1829,7 +1795,6 @@ fn getDocumentSymbolsInternal(allocator: std.mem.Allocator, tree: Ast, node: Ast
             var children = std.ArrayListUnmanaged(types.DocumentSymbol){};
 
             var child_context = GetDocumentSymbolsContext{
-                .prev_loc = start_loc,
                 .symbols = &children,
                 .encoding = context.encoding,
             };
@@ -1912,11 +1877,6 @@ pub const DeclWithHandle = struct {
             .switch_payload => |sp| sp.node,
             .label_decl => |ld| ld,
         };
-    }
-
-    pub fn location(self: DeclWithHandle, encoding: offsets.Encoding) !offsets.TokenLocation {
-        const tree = self.handle.tree;
-        return try offsets.tokenRelativeLocation(tree, 0, tree.tokens.items(.start)[self.nameToken()], encoding);
     }
 
     fn isPublic(self: DeclWithHandle) bool {
@@ -2109,7 +2069,7 @@ pub fn iterateSymbolsContainer(store: *DocumentStore, arena: *std.heap.ArenaAllo
 
 pub fn iterateLabels(handle: *DocumentStore.Handle, source_index: usize, comptime callback: anytype, context: anytype) error{OutOfMemory}!void {
     for (handle.document_scope.scopes.items) |scope| {
-        if (source_index >= scope.range.start and source_index < scope.range.end) {
+        if (source_index >= scope.loc.start and source_index < scope.loc.end) {
             var decl_it = scope.decls.iterator();
             while (decl_it.next()) |entry| {
                 switch (entry.value_ptr.*) {
@@ -2119,13 +2079,13 @@ pub fn iterateLabels(handle: *DocumentStore.Handle, source_index: usize, comptim
                 try callback(context, DeclWithHandle{ .decl = entry.value_ptr, .handle = handle });
             }
         }
-        if (scope.range.start >= source_index) return;
+        if (scope.loc.start >= source_index) return;
     }
 }
 
 fn iterateSymbolsGlobalInternal(store: *DocumentStore, arena: *std.heap.ArenaAllocator, handle: *DocumentStore.Handle, source_index: usize, comptime callback: anytype, context: anytype, use_trail: *std.ArrayList(Ast.Node.Index)) error{OutOfMemory}!void {
     for (handle.document_scope.scopes.items) |scope| {
-        if (source_index >= scope.range.start and source_index <= scope.range.end) {
+        if (source_index >= scope.loc.start and source_index <= scope.loc.end) {
             var decl_it = scope.decls.iterator();
             while (decl_it.next()) |entry| {
                 if (entry.value_ptr.* == .ast_node and
@@ -2160,7 +2120,7 @@ fn iterateSymbolsGlobalInternal(store: *DocumentStore, arena: *std.heap.ArenaAll
             }
         }
 
-        if (scope.range.start >= source_index) return;
+        if (scope.loc.start >= source_index) return;
     }
 }
 
@@ -2174,13 +2134,13 @@ pub fn innermostBlockScopeIndex(handle: DocumentStore.Handle, source_index: usiz
 
     var current: usize = 0;
     for (handle.document_scope.scopes.items[1..]) |*scope, idx| {
-        if (source_index >= scope.range.start and source_index <= scope.range.end) {
+        if (source_index >= scope.loc.start and source_index <= scope.loc.end) {
             switch (scope.data) {
                 .container, .function, .block => current = idx + 1,
                 else => {},
             }
         }
-        if (scope.range.start > source_index) break;
+        if (scope.loc.start > source_index) break;
     }
     return current;
 }
@@ -2194,13 +2154,13 @@ pub fn innermostContainer(handle: *DocumentStore.Handle, source_index: usize) Ty
     if (handle.document_scope.scopes.items.len == 1) return TypeWithHandle.typeVal(.{ .node = current, .handle = handle });
 
     for (handle.document_scope.scopes.items[1..]) |scope| {
-        if (source_index >= scope.range.start and source_index <= scope.range.end) {
+        if (source_index >= scope.loc.start and source_index <= scope.loc.end) {
             switch (scope.data) {
                 .container => |node| current = node,
                 else => {},
             }
         }
-        if (scope.range.start > source_index) break;
+        if (scope.loc.start > source_index) break;
     }
     return TypeWithHandle.typeVal(.{ .node = current, .handle = handle });
 }
@@ -2239,7 +2199,7 @@ fn resolveUse(store: *DocumentStore, arena: *std.heap.ArenaAllocator, uses: []co
 
 pub fn lookupLabel(handle: *DocumentStore.Handle, symbol: []const u8, source_index: usize) error{OutOfMemory}!?DeclWithHandle {
     for (handle.document_scope.scopes.items) |scope| {
-        if (source_index >= scope.range.start and source_index < scope.range.end) {
+        if (source_index >= scope.loc.start and source_index < scope.loc.end) {
             if (scope.decls.getEntry(symbol)) |candidate| {
                 switch (candidate.value_ptr.*) {
                     .label_decl => {},
@@ -2251,7 +2211,7 @@ pub fn lookupLabel(handle: *DocumentStore.Handle, symbol: []const u8, source_ind
                 };
             }
         }
-        if (scope.range.start > source_index) return null;
+        if (scope.loc.start > source_index) return null;
     }
     return null;
 }
@@ -2262,7 +2222,7 @@ pub fn lookupSymbolGlobal(store: *DocumentStore, arena: *std.heap.ArenaAllocator
     var curr = innermost_scope_idx;
     while (curr >= 0) : (curr -= 1) {
         const scope = &handle.document_scope.scopes.items[curr];
-        if (source_index >= scope.range.start and source_index <= scope.range.end) blk: {
+        if (source_index >= scope.loc.start and source_index <= scope.loc.end) blk: {
             if (scope.decls.getEntry(symbol)) |candidate| {
                 switch (candidate.value_ptr.*) {
                     .ast_node => |node| {
@@ -2355,13 +2315,13 @@ pub const DocumentScope = struct {
         for (self.scopes.items) |scope| {
             log.debug(
                 \\--------------------------
-                \\Scope {}, range: [{d}, {d})
+                \\Scope {}, loc: [{d}, {d})
                 \\ {d} usingnamespaces
                 \\Decls:
             , .{
                 scope.data,
-                scope.range.start,
-                scope.range.end,
+                scope.loc.start,
+                scope.loc.end,
                 scope.uses.len,
             });
 
@@ -2399,7 +2359,7 @@ pub const Scope = struct {
         other,
     };
 
-    range: SourceRange,
+    loc: offsets.Loc,
     decls: std.StringHashMapUnmanaged(Declaration) = .{},
     tests: std.ArrayListUnmanaged(Ast.Node.Index) = .{},
     uses: std.ArrayListUnmanaged(Ast.Node.Index) = .{},
@@ -2439,16 +2399,6 @@ pub fn makeDocumentScope(allocator: std.mem.Allocator, tree: Ast) !DocumentScope
     return document_scope;
 }
 
-fn nodeSourceRange(tree: Ast, node: Ast.Node.Index) SourceRange {
-    const loc_start = offsets.tokenLocation(tree, tree.firstToken(node));
-    const loc_end = offsets.tokenLocation(tree, ast.lastToken(tree, node));
-
-    return SourceRange{
-        .start = loc_start.start,
-        .end = loc_end.end,
-    };
-}
-
 const ScopeContext = struct {
     scopes: *std.ArrayListUnmanaged(Scope),
     enums: *CompletionSet,
@@ -2470,7 +2420,7 @@ fn makeInnerScope(allocator: std.mem.Allocator, context: ScopeContext, node_idx:
 
     var scope = try scopes.addOne(allocator);
     scope.* = .{
-        .range = nodeSourceRange(tree, node_idx),
+        .loc = offsets.nodeToLoc(tree, node_idx),
         .data = .{ .container = node_idx },
     };
     const scope_idx = scopes.items.len - 1;
@@ -2531,16 +2481,10 @@ fn makeInnerScope(allocator: std.mem.Allocator, context: ScopeContext, node_idx:
         if (container_field) |_| {
             if (!std.mem.eql(u8, name, "_")) {
                 var doc = if (try getDocComments(allocator, tree, decl, .Markdown)) |docs|
-                        types.MarkupContent{ .kind = .Markdown, .value = docs }
-                    else
-                        null;
-                var gop_res = try context.enums.getOrPut(allocator, .{
-                    .label = name,
-                    .kind = .Constant,
-                    .insertText = name,
-                    .insertTextFormat = .PlainText,
-                    .documentation = doc
-                });
+                    types.MarkupContent{ .kind = .Markdown, .value = docs }
+                else
+                    null;
+                var gop_res = try context.enums.getOrPut(allocator, .{ .label = name, .kind = .Constant, .insertText = name, .insertTextFormat = .PlainText, .documentation = doc });
                 if (gop_res.found_existing) {
                     if (doc) |d| allocator.free(d.value);
                 }
@@ -2599,13 +2543,13 @@ fn makeScopeInternal(allocator: std.mem.Allocator, context: ScopeContext, node_i
             const func = ast.fnProto(tree, node_idx, &buf).?;
 
             try scopes.append(allocator, .{
-                .range = nodeSourceRange(tree, node_idx),
+                .loc = offsets.nodeToLoc(tree, node_idx),
                 .data = .{ .function = node_idx },
             });
             const scope_idx = scopes.items.len - 1;
 
             var it = func.iterate(&tree);
-            while (it.next()) |param| {
+            while (ast.nextFnParam(&it)) |param| {
                 // Add parameter decls
                 if (param.name_token) |name_token| {
                     if (try scopes.items[scope_idx].decls.fetchPut(
@@ -2648,9 +2592,9 @@ fn makeScopeInternal(allocator: std.mem.Allocator, context: ScopeContext, node_i
             if (token_tags[first_token] == .identifier) {
                 const scope = try scopes.addOne(allocator);
                 scope.* = .{
-                    .range = .{
-                        .start = offsets.tokenLocation(tree, main_tokens[node_idx]).start,
-                        .end = offsets.tokenLocation(tree, last_token).start,
+                    .loc = .{
+                        .start = offsets.tokenToIndex(tree, main_tokens[node_idx]),
+                        .end = offsets.tokenToLoc(tree, last_token).start,
                     },
                     .data = .other,
                 };
@@ -2658,7 +2602,7 @@ fn makeScopeInternal(allocator: std.mem.Allocator, context: ScopeContext, node_i
             }
 
             try scopes.append(allocator, .{
-                .range = nodeSourceRange(tree, node_idx),
+                .loc = offsets.nodeToLoc(tree, node_idx),
                 .data = .{ .container = node_idx },
             });
             const scope_idx = scopes.items.len - 1;
@@ -2692,9 +2636,9 @@ fn makeScopeInternal(allocator: std.mem.Allocator, context: ScopeContext, node_i
             if (if_node.payload_token) |payload| {
                 var scope = try scopes.addOne(allocator);
                 scope.* = .{
-                    .range = .{
-                        .start = offsets.tokenLocation(tree, payload).start,
-                        .end = offsets.tokenLocation(tree, ast.lastToken(tree, if_node.ast.then_expr)).end,
+                    .loc = .{
+                        .start = offsets.tokenToIndex(tree, payload),
+                        .end = offsets.tokenToLoc(tree, ast.lastToken(tree, if_node.ast.then_expr)).end,
                     },
                     .data = .other,
                 };
@@ -2718,9 +2662,9 @@ fn makeScopeInternal(allocator: std.mem.Allocator, context: ScopeContext, node_i
                     std.debug.assert(token_tags[err_token] == .identifier);
                     var scope = try scopes.addOne(allocator);
                     scope.* = .{
-                        .range = .{
-                            .start = offsets.tokenLocation(tree, err_token).start,
-                            .end = offsets.tokenLocation(tree, ast.lastToken(tree, if_node.ast.else_expr)).end,
+                        .loc = .{
+                            .start = offsets.tokenToIndex(tree, err_token),
+                            .end = offsets.tokenToLoc(tree, ast.lastToken(tree, if_node.ast.else_expr)).end,
                         },
                         .data = .other,
                     };
@@ -2739,9 +2683,9 @@ fn makeScopeInternal(allocator: std.mem.Allocator, context: ScopeContext, node_i
 
             var scope = try scopes.addOne(allocator);
             scope.* = .{
-                .range = .{
-                    .start = offsets.tokenLocation(tree, tree.firstToken(catch_expr)).start,
-                    .end = offsets.tokenLocation(tree, ast.lastToken(tree, catch_expr)).end,
+                .loc = .{
+                    .start = offsets.tokenToIndex(tree, tree.firstToken(catch_expr)),
+                    .end = offsets.tokenToLoc(tree, ast.lastToken(tree, catch_expr)).end,
                 },
                 .data = .other,
             };
@@ -2768,9 +2712,9 @@ fn makeScopeInternal(allocator: std.mem.Allocator, context: ScopeContext, node_i
                 std.debug.assert(token_tags[label] == .identifier);
                 var scope = try scopes.addOne(allocator);
                 scope.* = .{
-                    .range = .{
-                        .start = offsets.tokenLocation(tree, while_node.ast.while_token).start,
-                        .end = offsets.tokenLocation(tree, ast.lastToken(tree, node_idx)).end,
+                    .loc = .{
+                        .start = offsets.tokenToIndex(tree, while_node.ast.while_token),
+                        .end = offsets.tokenToLoc(tree, ast.lastToken(tree, node_idx)).end,
                     },
                     .data = .other,
                 };
@@ -2781,9 +2725,9 @@ fn makeScopeInternal(allocator: std.mem.Allocator, context: ScopeContext, node_i
             if (while_node.payload_token) |payload| {
                 var scope = try scopes.addOne(allocator);
                 scope.* = .{
-                    .range = .{
-                        .start = offsets.tokenLocation(tree, payload).start,
-                        .end = offsets.tokenLocation(tree, ast.lastToken(tree, while_node.ast.then_expr)).end,
+                    .loc = .{
+                        .start = offsets.tokenToIndex(tree, payload),
+                        .end = offsets.tokenToLoc(tree, ast.lastToken(tree, while_node.ast.then_expr)).end,
                     },
                     .data = .other,
                 };
@@ -2825,9 +2769,9 @@ fn makeScopeInternal(allocator: std.mem.Allocator, context: ScopeContext, node_i
                     std.debug.assert(token_tags[err_token] == .identifier);
                     var scope = try scopes.addOne(allocator);
                     scope.* = .{
-                        .range = .{
-                            .start = offsets.tokenLocation(tree, err_token).start,
-                            .end = offsets.tokenLocation(tree, ast.lastToken(tree, while_node.ast.else_expr)).end,
+                        .loc = .{
+                            .start = offsets.tokenToIndex(tree, err_token),
+                            .end = offsets.tokenToLoc(tree, ast.lastToken(tree, while_node.ast.else_expr)).end,
                         },
                         .data = .other,
                     };
@@ -2855,9 +2799,9 @@ fn makeScopeInternal(allocator: std.mem.Allocator, context: ScopeContext, node_i
                 if (switch_case.payload_token) |payload| {
                     var scope = try scopes.addOne(allocator);
                     scope.* = .{
-                        .range = .{
-                            .start = offsets.tokenLocation(tree, payload).start,
-                            .end = offsets.tokenLocation(tree, ast.lastToken(tree, switch_case.ast.target_expr)).end,
+                        .loc = .{
+                            .start = offsets.tokenToIndex(tree, payload),
+                            .end = offsets.tokenToLoc(tree, ast.lastToken(tree, switch_case.ast.target_expr)).end,
                         },
                         .data = .other,
                     };
@@ -3017,9 +2961,9 @@ fn makeScopeInternal(allocator: std.mem.Allocator, context: ScopeContext, node_i
                 const payload_token = data[node_idx].lhs;
                 var scope = try scopes.addOne(allocator);
                 scope.* = .{
-                    .range = .{
-                        .start = offsets.tokenLocation(tree, payload_token).start,
-                        .end = offsets.tokenLocation(tree, ast.lastToken(tree, expr)).end,
+                    .loc = .{
+                        .start = offsets.tokenToIndex(tree, payload_token),
+                        .end = offsets.tokenToLoc(tree, ast.lastToken(tree, expr)).end,
                     },
                     .data = .other,
                 };
@@ -3044,8 +2988,7 @@ fn makeScopeInternal(allocator: std.mem.Allocator, context: ScopeContext, node_i
         .anyframe_type,
         .anyframe_literal,
         .char_literal,
-        .integer_literal,
-        .float_literal,
+        .number_literal,
         .unreachable_literal,
         .@"continue",
         => {},

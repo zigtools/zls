@@ -50,7 +50,7 @@ You can install the latest release into `$HOME/zls` using e.g.:
 
 ```sh
 brew install xz
-mkdir $HOME/zls && cd $HOME/zls && curl -L https://github.com/zigtools/zls/releases/download/0.9.0/x86_64-macos.tar.xz | tar -xJ --strip-components=1 -C .
+mkdir $HOME/zls && cd $HOME/zls && curl -L https://github.com/zigtools/zls/releases/download/0.9.0/x86_64-macos.tar.xz | tar -xJ --strip-components=1 -C . && chmod +x zls
 ```
 
 #### Linux
@@ -102,7 +102,7 @@ The following options are currently available.
 | Option | Type | Default value | What it Does |
 | --- | --- | --- | --- |
 | `enable_snippets` | `bool` | `false` | Enables snippet completions when the client also supports them. |
-| `enable_unused_variable_warnings` | `bool` | `false`| Enables warnings for local variables that aren't used. |
+| `enable_ast_check_diagnostics` | `bool` | `true`| Whether to enable ast-check diagnostics |
 | `enable_import_embedfile_argument_completions` | `bool` | `false` | Whether to enable import/embedFile argument completions |
 | `zig_lib_path` | `?[]const u8` | `null` | zig library path, e.g. `/path/to/zig/lib/zig`, used to analyze std library imports. |
 | `zig_exe_path` | `?[]const u8` | `null` | zig executable path, e.g. `/path/to/zig/zig`, used to run the custom build runner. If `null`, zig is looked up in `PATH`. Will be used to infer the zig standard library path if none is provided. |

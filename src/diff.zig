@@ -33,7 +33,6 @@ pub fn edits(
     var a_trim: []const u8 = a;
     var b_trim: []const u8 = b;
     const a_trim_offset = trim_input(&a_trim, &b_trim);
-    _ = a_trim_offset;
 
     const rows = a_trim.len + 1;
     const cols = b_trim.len + 1;
@@ -239,8 +238,6 @@ pub fn get_changes(
         var range_start = group[0].pos;
         var range_len: usize = 0;
         var newText = std.ArrayList(u8).init(allocator);
-        _ = range_start;
-        _ = range_len;
         for (group) |ch| {
             switch (ch.operation) {
                 .Addition => try newText.append(ch.value.?),
@@ -320,14 +317,14 @@ fn char_pos_to_range(
     }) {
         if (start >= char_pos and start <= char_pos + line.len) {
             result_start_pos = .{
-                .line = @intCast(i64, line_pos),
-                .character = @intCast(i64, start - char_pos),
+                .line = @intCast(u32, line_pos),
+                .character = @intCast(u32, start - char_pos),
             };
         }
         if (end >= char_pos and end <= char_pos + line.len) {
             result_end_pos = .{
-                .line = @intCast(i64, line_pos),
-                .character = @intCast(i64, end - char_pos),
+                .line = @intCast(u32, line_pos),
+                .character = @intCast(u32, end - char_pos),
             };
         }
     }
@@ -338,8 +335,8 @@ fn char_pos_to_range(
     // string for some reason so clamp it to the string end position
     if (result_end_pos == null) {
         result_end_pos = types.Position{
-            .line = @intCast(i64, line_pos),
-            .character = @intCast(i64, char_pos),
+            .line = @intCast(u32, line_pos),
+            .character = @intCast(u32, char_pos),
         };
     }
 

@@ -9,7 +9,6 @@ const types = @import("types.zig");
 const analysis = @import("analysis.zig");
 const ast = @import("ast.zig");
 const references = @import("references.zig");
-const rename = @import("rename.zig");
 const offsets = @import("offsets.zig");
 const semantic_tokens = @import("semantic_tokens.zig");
 const inlay_hints = @import("inlay_hints.zig");
@@ -20,73 +19,18 @@ const uri_utils = @import("uri.zig");
 const data = @import("data/data.zig");
 const diff = @import("diff.zig");
 
+const log = std.log.scoped(.server);
+
 // Server fields
 
 config: Config,
 allocator: std.mem.Allocator = undefined,
 arena: std.heap.ArenaAllocator = undefined,
 document_store: DocumentStore = undefined,
+builtin_completions: ?std.ArrayListUnmanaged(types.CompletionItem) = null,
 client_capabilities: ClientCapabilities = .{},
 offset_encoding: offsets.Encoding = .utf16,
 keep_running: bool = true,
-log_level: std.log.Level,
-
-pub const Logger = struct {
-    pub fn err(server: *Server, writer: anytype, comptime format: []const u8, args: anytype) void {
-        @setCold(true);
-        log(server, writer, .err, format, args);
-    }
-    pub fn warn(server: *Server, writer: anytype, comptime format: []const u8, args: anytype) void {
-        log(server, writer, .warn, format, args);
-    }
-    pub fn info(server: *Server, writer: anytype, comptime format: []const u8, args: anytype) void {
-        log(server, writer, .info, format, args);
-    }
-    pub fn debug(server: *Server, writer: anytype, comptime format: []const u8, args: anytype) void {
-        log(server, writer, .debug, format, args);
-    }
-};
-
-fn log(server: *Server, writer: anytype, comptime message_level: std.log.Level, comptime format: []const u8, args: anytype) void {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    const scope = .Server;
-
-    if (@enumToInt(message_level) > @enumToInt(server.log_level)) {
-        return;
-    }
-    // After shutdown, pipe output to stderr
-    if (!server.keep_running) {
-        std.debug.print("[{?s}-{?s}] " ++ format ++ "\n", .{ @tagName(message_level), @tagName(scope) } ++ args);
-        return;
-    }
-
-    var message = std.fmt.allocPrint(server.allocator, "[{?s}-{?s}] " ++ format, .{ @tagName(message_level), @tagName(scope) } ++ args) catch {
-        std.debug.print("Failed to allocPrint message.\n", .{});
-        return;
-    };
-    defer server.allocator.free(message);
-
-    const message_type: types.MessageType = switch (message_level) {
-        .debug => .Log,
-        .info => .Info,
-        .warn => .Warning,
-        .err => .Error,
-    };
-
-    send(writer, server.allocator, types.Notification{
-        .method = "window/logMessage",
-        .params = types.Notification.Params{
-            .LogMessage = .{
-                .type = message_type,
-                .message = message,
-            },
-        },
-    }) catch {
-        // TODO: Find a way to handle this error properly
-    };
-}
 
 // Code was based off of https://github.com/andersfr/zig-lsp/blob/master/server.zig
 
@@ -197,20 +141,6 @@ fn showMessage(server: *Server, writer: anytype, message_type: types.MessageType
     });
 }
 
-// TODO: Is this correct or can we get a better end?
-fn astLocationToRange(loc: Ast.Location) types.Range {
-    return .{
-        .start = .{
-            .line = @intCast(i64, loc.line),
-            .character = @intCast(i64, loc.column),
-        },
-        .end = .{
-            .line = @intCast(i64, loc.line),
-            .character = @intCast(i64, loc.column),
-        },
-    };
-}
-
 fn publishDiagnostics(server: *Server, writer: anytype, handle: DocumentStore.Handle) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
@@ -221,14 +151,12 @@ fn publishDiagnostics(server: *Server, writer: anytype, handle: DocumentStore.Ha
     var diagnostics = std.ArrayListUnmanaged(types.Diagnostic){};
 
     for (tree.errors) |err| {
-        const loc = tree.tokenLocation(0, err.token);
-
         var mem_buffer: [256]u8 = undefined;
         var fbs = std.io.fixedBufferStream(&mem_buffer);
         try tree.renderError(err, fbs.writer());
 
         try diagnostics.append(allocator, .{
-            .range = astLocationToRange(loc),
+            .range = offsets.tokenToRange(tree, err.token, server.offset_encoding),
             .severity = .Error,
             .code = @tagName(err.tag),
             .source = "zls",
@@ -237,72 +165,86 @@ fn publishDiagnostics(server: *Server, writer: anytype, handle: DocumentStore.Ha
         });
     }
 
-    if (server.config.enable_unused_variable_warnings) {
-        scopes: for (handle.document_scope.scopes.items) |scope| {
-            const scope_data = switch (scope.data) {
-                .function => |f| b: {
-                    if (!ast.fnProtoHasBody(tree, f).?) continue :scopes;
-                    break :b f;
-                },
-                .block => |b| b,
-                else => continue,
+    if (server.config.enable_ast_check_diagnostics and tree.errors.len == 0) diag: {
+        if (server.config.zig_exe_path) |zig_exe_path| {
+            var process = std.ChildProcess.init(&[_][]const u8{ zig_exe_path, "ast-check", "--color", "off" }, server.allocator);
+            process.stdin_behavior = .Pipe;
+            process.stderr_behavior = .Pipe;
+
+            process.spawn() catch |err| {
+                log.warn("Failed to spawn zig ast-check process, error: {}", .{err});
+                break :diag;
             };
+            try process.stdin.?.writeAll(handle.document.text);
+            process.stdin.?.close();
 
-            var decl_iterator = scope.decls.iterator();
-            while (decl_iterator.next()) |decl| {
-                var identifier_count: usize = 0;
+            process.stdin = null;
 
-                const name_token_index = switch (decl.value_ptr.*) {
-                    .ast_node => |an| s: {
-                        const an_tag = tree.nodes.items(.tag)[an];
-                        switch (an_tag) {
-                            .simple_var_decl => {
-                                break :s tree.nodes.items(.main_token)[an] + 1;
-                            },
-                            else => continue,
+            const stderr_bytes = try process.stderr.?.reader().readAllAlloc(server.allocator, std.math.maxInt(usize));
+            defer server.allocator.free(stderr_bytes);
+
+            switch (try process.wait()) {
+                .Exited => {
+                    // NOTE: I believe that with color off it's one diag per line; is this correct?
+                    var line_iterator = std.mem.split(u8, stderr_bytes, "\n");
+
+                    while (line_iterator.next()) |line| lin: {
+                        var pos_and_diag_iterator = std.mem.split(u8, line, ":");
+                        const maybe_first = pos_and_diag_iterator.next();
+                        if (maybe_first) |first| {
+                            if (first.len <= 1) break :lin;
+                        } else break;
+
+                        const utf8_position = types.Position{
+                            .line = (try std.fmt.parseInt(u32, pos_and_diag_iterator.next().?, 10)) - 1,
+                            .character = (try std.fmt.parseInt(u32, pos_and_diag_iterator.next().?, 10)) - 1,
+                        };
+
+                        // zig uses utf-8 encoding for character offsets
+                        const position = offsets.convertPositionEncoding(handle.document.text, utf8_position, .utf8, server.offset_encoding);
+                        const range = offsets.tokenPositionToRange(handle.document.text, position, server.offset_encoding);
+
+                        const msg = pos_and_diag_iterator.rest()[1..];
+
+                        if (std.mem.startsWith(u8, msg, "error: ")) {
+                            try diagnostics.append(allocator, .{
+                                .range = range,
+                                .severity = .Error,
+                                .code = "ast_check",
+                                .source = "zls",
+                                .message = try server.arena.allocator().dupe(u8, msg["error: ".len..]),
+                            });
+                        } else if (std.mem.startsWith(u8, msg, "note: ")) {
+                            var latestDiag = &diagnostics.items[diagnostics.items.len - 1];
+
+                            var fresh = if (latestDiag.relatedInformation.len == 0)
+                                try server.arena.allocator().alloc(types.DiagnosticRelatedInformation, 1)
+                            else
+                                try server.arena.allocator().realloc(@ptrCast([]types.DiagnosticRelatedInformation, latestDiag.relatedInformation), latestDiag.relatedInformation.len + 1);
+
+                            const location = types.Location{
+                                .uri = handle.uri(),
+                                .range = range,
+                            };
+
+                            fresh[fresh.len - 1] = .{
+                                .location = location,
+                                .message = try server.arena.allocator().dupe(u8, msg["note: ".len..]),
+                            };
+
+                            latestDiag.relatedInformation = fresh;
+                        } else {
+                            try diagnostics.append(allocator, .{
+                                .range = range,
+                                .severity = .Error,
+                                .code = "ast_check",
+                                .source = "zls",
+                                .message = try server.arena.allocator().dupe(u8, msg),
+                            });
                         }
-                    },
-                    .param_decl => |param| param.name_token orelse continue,
-                    else => continue,
-                };
-
-                if (std.mem.eql(u8, tree.tokenSlice(name_token_index), "_"))
-                    continue;
-
-                const pit_start = tree.firstToken(scope_data);
-                const pit_end = ast.lastToken(tree, scope_data);
-
-                const tags = tree.tokens.items(.tag)[pit_start..pit_end];
-                for (tags) |tag, index| {
-                    if (tag != .identifier) continue;
-                    if (!std.mem.eql(u8, tree.tokenSlice(pit_start + @intCast(u32, index)), tree.tokenSlice(name_token_index))) continue;
-                    if (index -| 1 > 0 and tags[index - 1] == .period) continue;
-                    if (index +| 2 < tags.len and tags[index + 1] == .colon) switch (tags[index + 2]) {
-                        .l_brace,
-                        .keyword_inline,
-                        .keyword_while,
-                        .keyword_for,
-                        .keyword_switch,
-                        => continue,
-                        else => {},
-                    };
-                    if (index -| 2 > 0 and tags[index - 1] == .colon) switch (tags[index - 2]) {
-                        .keyword_break,
-                        .keyword_continue,
-                        => continue,
-                        else => {},
-                    };
-                    identifier_count += 1;
-                }
-
-                if (identifier_count <= 1)
-                    try diagnostics.append(allocator, .{
-                        .range = astLocationToRange(tree.tokenLocation(0, name_token_index)),
-                        .severity = .Error,
-                        .code = "unused_variable",
-                        .source = "zls",
-                        .message = "Unused variable; either remove the variable or use '_ = ' on the variable to bypass this error",
-                    });
+                    }
+                },
+                else => {},
             }
         }
     }
@@ -326,7 +268,7 @@ fn publishDiagnostics(server: *Server, writer: anytype, handle: DocumentStore.Ha
 
                 if (std.mem.startsWith(u8, import_str, "\"./")) {
                     try diagnostics.append(allocator, .{
-                        .range = astLocationToRange(tree.tokenLocation(0, import_str_token)),
+                        .range = offsets.tokenToRange(tree, import_str_token, server.offset_encoding),
                         .severity = .Hint,
                         .code = "dot_slash_import",
                         .source = "zls",
@@ -352,14 +294,12 @@ fn publishDiagnostics(server: *Server, writer: anytype, handle: DocumentStore.Ha
                         if (func.extern_export_inline_token != null) break :blk;
 
                         if (func.name_token) |name_token| {
-                            const loc = tree.tokenLocation(0, name_token);
-
                             const is_type_function = analysis.isTypeFunction(tree, func);
 
                             const func_name = tree.tokenSlice(name_token);
                             if (!is_type_function and !analysis.isCamelCase(func_name)) {
                                 try diagnostics.append(allocator, .{
-                                    .range = astLocationToRange(loc),
+                                    .range = offsets.tokenToRange(tree, name_token, server.offset_encoding),
                                     .severity = .Hint,
                                     .code = "bad_style",
                                     .source = "zls",
@@ -367,7 +307,7 @@ fn publishDiagnostics(server: *Server, writer: anytype, handle: DocumentStore.Ha
                                 });
                             } else if (is_type_function and !analysis.isPascalCase(func_name)) {
                                 try diagnostics.append(allocator, .{
-                                    .range = astLocationToRange(loc),
+                                    .range = offsets.tokenToRange(tree, name_token, server.offset_encoding),
                                     .severity = .Hint,
                                     .code = "bad_style",
                                     .source = "zls",
@@ -656,7 +596,7 @@ fn nodeToCompletion(
                 .label = string,
                 .kind = .Field,
                 .documentation = doc,
-                .detail = tree.getNodeSource(node),
+                .detail = offsets.nodeToSlice(tree, node),
                 .insertText = string,
                 .insertTextFormat = .PlainText,
             });
@@ -699,20 +639,19 @@ fn gotoDefinitionSymbol(
 
     var handle = decl_handle.handle;
 
-    const location = switch (decl_handle.decl.*) {
+    const name_token = switch (decl_handle.decl.*) {
         .ast_node => |node| block: {
             if (resolve_alias) {
                 if (try analysis.resolveVarDeclAlias(&server.document_store, &server.arena, .{ .node = node, .handle = handle })) |result| {
                     handle = result.handle;
-                    break :block result.location(server.offset_encoding) catch return;
+
+                    break :block result.nameToken();
                 }
             }
 
-            const name_token = analysis.getDeclNameToken(handle.tree, node) orelse
-                return try respondGeneric(writer, id, null_result_response);
-            break :block offsets.tokenRelativeLocation(handle.tree, 0, handle.tree.tokens.items(.start)[name_token], server.offset_encoding) catch return;
+            break :block analysis.getDeclNameToken(handle.tree, node) orelse return try respondGeneric(writer, id, null_result_response);
         },
-        else => decl_handle.location(server.offset_encoding) catch return,
+        else => decl_handle.nameToken(),
     };
 
     try send(writer, server.arena.allocator(), types.Response{
@@ -720,16 +659,7 @@ fn gotoDefinitionSymbol(
         .result = .{
             .Location = .{
                 .uri = handle.document.uri,
-                .range = .{
-                    .start = .{
-                        .line = @intCast(i64, location.line),
-                        .character = @intCast(i64, location.column),
-                    },
-                    .end = .{
-                        .line = @intCast(i64, location.line),
-                        .character = @intCast(i64, location.column),
-                    },
-                },
+                .range = offsets.tokenToRange(handle.tree, name_token, server.offset_encoding),
             },
         },
     });
@@ -781,8 +711,8 @@ fn hoverSymbol(
                 tree.firstToken(param.type_expr); // extern fn
             const last_token = param.anytype_ellipsis3 orelse tree.lastToken(param.type_expr);
 
-            const start = offsets.tokenLocation(tree, first_token).start;
-            const end = offsets.tokenLocation(tree, last_token).end;
+            const start = offsets.tokenToIndex(tree, first_token);
+            const end = offsets.tokenToLoc(tree, last_token).end;
             break :def tree.source[start..end];
         },
         .pointer_payload => |payload| tree.tokenSlice(payload.name),
@@ -801,7 +731,7 @@ fn hoverSymbol(
             .slice,
             .error_union,
             .primitive,
-            => |p| if (p >= tree.nodes.len) "unknown" else tree.getNodeSource(p),
+            => |p| if (p >= tree.nodes.len) "unknown" else offsets.nodeToSlice(tree, p),
             .other => |p| if (p >= tree.nodes.len) "unknown" else switch (tree.nodes.items(.tag)[p]) {
                 .container_decl,
                 .container_decl_arg,
@@ -828,7 +758,7 @@ fn hoverSymbol(
                 .ptr_type_aligned,
                 .ptr_type_bit_range,
                 .ptr_type_sentinel,
-                => tree.getNodeSource(p),
+                => offsets.nodeToSlice(tree, p),
                 else => "unknown", // TODO: Implement more "other" type expressions; better safe than sorry
             },
             else => "unknown",
@@ -953,8 +883,6 @@ fn hoverDefinitionGlobal(server: *Server, writer: anytype, id: types.RequestId, 
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    _ = server;
-
     const decl = (try server.getSymbolGlobal(pos_index, handle)) orelse return try respondGeneric(writer, id, null_result_response);
     return try server.hoverSymbol(writer, id, decl);
 }
@@ -962,21 +890,20 @@ fn hoverDefinitionGlobal(server: *Server, writer: anytype, id: types.RequestId, 
 fn getSymbolFieldAccess(
     server: *Server,
     handle: *DocumentStore.Handle,
-    position: offsets.DocumentPosition,
-    range: analysis.SourceRange,
+    source_index: usize,
+    loc: offsets.Loc,
 ) !?analysis.DeclWithHandle {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const name = identifierFromPosition(position.absolute_index, handle.*);
+    const name = identifierFromPosition(source_index, handle.*);
     if (name.len == 0) return null;
 
-    const line_mem_start = @ptrToInt(position.line.ptr) - @ptrToInt(handle.document.mem.ptr);
-    var held_range = handle.document.borrowNullTerminatedSlice(line_mem_start + range.start, line_mem_start + range.end);
+    var held_range = handle.document.borrowNullTerminatedSlice(loc.start, loc.end);
     var tokenizer = std.zig.Tokenizer.init(held_range.data());
 
     errdefer held_range.release();
-    if (try analysis.getFieldAccessType(&server.document_store, &server.arena, handle, position.absolute_index, &tokenizer)) |result| {
+    if (try analysis.getFieldAccessType(&server.document_store, &server.arena, handle, source_index, &tokenizer)) |result| {
         held_range.release();
         const container_handle = result.unwrapped orelse result.original;
         const container_handle_node = switch (container_handle.type.data) {
@@ -999,14 +926,14 @@ fn gotoDefinitionFieldAccess(
     writer: anytype,
     id: types.RequestId,
     handle: *DocumentStore.Handle,
-    position: offsets.DocumentPosition,
-    range: analysis.SourceRange,
+    source_index: usize,
+    loc: offsets.Loc,
     resolve_alias: bool,
 ) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const decl = (try server.getSymbolFieldAccess(handle, position, range)) orelse return try respondGeneric(writer, id, null_result_response);
+    const decl = (try server.getSymbolFieldAccess(handle, source_index, loc)) orelse return try respondGeneric(writer, id, null_result_response);
     return try server.gotoDefinitionSymbol(writer, id, decl, resolve_alias);
 }
 
@@ -1015,13 +942,13 @@ fn hoverDefinitionFieldAccess(
     writer: anytype,
     id: types.RequestId,
     handle: *DocumentStore.Handle,
-    position: offsets.DocumentPosition,
-    range: analysis.SourceRange,
+    source_index: usize,
+    loc: offsets.Loc,
 ) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const decl = (try server.getSymbolFieldAccess(handle, position, range)) orelse return try respondGeneric(writer, id, null_result_response);
+    const decl = (try server.getSymbolFieldAccess(handle, source_index, loc)) orelse return try respondGeneric(writer, id, null_result_response);
     return try server.hoverSymbol(writer, id, decl);
 }
 
@@ -1055,209 +982,6 @@ fn gotoDefinitionString(
                 },
             },
         },
-    });
-}
-
-fn renameDefinitionGlobal(
-    server: *Server,
-    writer: anytype,
-    id: types.RequestId,
-    handle: *DocumentStore.Handle,
-    pos_index: usize,
-    new_name: []const u8,
-) !void {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    const decl = (try server.getSymbolGlobal(pos_index, handle)) orelse return try respondGeneric(writer, id, null_result_response);
-
-    var workspace_edit = types.WorkspaceEdit{
-        .changes = std.StringHashMapUnmanaged([]types.TextEdit){},
-    };
-    try rename.renameSymbol(&server.arena, &server.document_store, decl, new_name, &workspace_edit.changes.?, server.offset_encoding);
-    try send(writer, server.arena.allocator(), types.Response{
-        .id = id,
-        .result = .{ .WorkspaceEdit = workspace_edit },
-    });
-}
-
-fn renameDefinitionFieldAccess(
-    server: *Server,
-    writer: anytype,
-    id: types.RequestId,
-    handle: *DocumentStore.Handle,
-    position: offsets.DocumentPosition,
-    range: analysis.SourceRange,
-    new_name: []const u8,
-) !void {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    const decl = (try server.getSymbolFieldAccess(handle, position, range)) orelse return try respondGeneric(writer, id, null_result_response);
-
-    var workspace_edit = types.WorkspaceEdit{
-        .changes = std.StringHashMapUnmanaged([]types.TextEdit){},
-    };
-    try rename.renameSymbol(&server.arena, &server.document_store, decl, new_name, &workspace_edit.changes.?, server.offset_encoding);
-    try send(writer, server.arena.allocator(), types.Response{
-        .id = id,
-        .result = .{ .WorkspaceEdit = workspace_edit },
-    });
-}
-
-fn renameDefinitionLabel(
-    server: *Server,
-    writer: anytype,
-    id: types.RequestId,
-    handle: *DocumentStore.Handle,
-    pos_index: usize,
-    new_name: []const u8,
-) !void {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    const decl = (try getLabelGlobal(pos_index, handle)) orelse return try respondGeneric(writer, id, null_result_response);
-
-    var workspace_edit = types.WorkspaceEdit{
-        .changes = std.StringHashMapUnmanaged([]types.TextEdit){},
-    };
-    try rename.renameLabel(&server.arena, decl, new_name, &workspace_edit.changes.?, server.offset_encoding);
-    try send(writer, server.arena.allocator(), types.Response{
-        .id = id,
-        .result = .{ .WorkspaceEdit = workspace_edit },
-    });
-}
-
-fn referencesDefinitionGlobal(
-    server: *Server,
-    writer: anytype,
-    id: types.RequestId,
-    handle: *DocumentStore.Handle,
-    pos_index: usize,
-    include_decl: bool,
-    comptime highlight: bool,
-) !void {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    const decl = (try server.getSymbolGlobal(pos_index, handle)) orelse return try respondGeneric(writer, id, null_result_response);
-    var locs = std.ArrayList(types.Location).init(server.arena.allocator());
-    try references.symbolReferences(
-        &server.arena,
-        &server.document_store,
-        decl,
-        server.offset_encoding,
-        include_decl,
-        &locs,
-        std.ArrayList(types.Location).append,
-        server.config.skip_std_references,
-        !highlight,
-    );
-
-    const result: types.ResponseParams = if (highlight) result: {
-        var highlights = std.ArrayListUnmanaged(types.DocumentHighlight){};
-        try highlights.ensureTotalCapacity(server.arena.allocator(), locs.items.len);
-        const uri = handle.uri();
-        for (locs.items) |loc| {
-            if (std.mem.eql(u8, loc.uri, uri)) {
-                highlights.appendAssumeCapacity(.{
-                    .range = loc.range,
-                    .kind = .Text,
-                });
-            }
-        }
-        break :result .{ .DocumentHighlight = highlights.items };
-    } else .{ .Locations = locs.items };
-
-    try send(writer, server.arena.allocator(), types.Response{
-        .id = id,
-        .result = result,
-    });
-}
-
-fn referencesDefinitionFieldAccess(
-    server: *Server,
-    writer: anytype,
-    id: types.RequestId,
-    handle: *DocumentStore.Handle,
-    position: offsets.DocumentPosition,
-    range: analysis.SourceRange,
-    include_decl: bool,
-    comptime highlight: bool,
-) !void {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    var allocator = server.arena.allocator();
-
-    const decl = (try server.getSymbolFieldAccess(handle, position, range)) orelse return try respondGeneric(writer, id, null_result_response);
-    var locs = std.ArrayList(types.Location).init(allocator);
-    try references.symbolReferences(
-        &server.arena,
-        &server.document_store,
-        decl,
-        server.offset_encoding,
-        include_decl,
-        &locs,
-        std.ArrayList(types.Location).append,
-        server.config.skip_std_references,
-        !highlight,
-    );
-    const result: types.ResponseParams = if (highlight) result: {
-        var highlights = std.ArrayListUnmanaged(types.DocumentHighlight){};
-        try highlights.ensureTotalCapacity(allocator, locs.items.len);
-        const uri = handle.uri();
-        for (locs.items) |loc| {
-            if (std.mem.eql(u8, loc.uri, uri)) {
-                highlights.appendAssumeCapacity(.{
-                    .range = loc.range,
-                    .kind = .Text,
-                });
-            }
-        }
-        break :result .{ .DocumentHighlight = highlights.items };
-    } else .{ .Locations = locs.items };
-    try send(writer, allocator, types.Response{
-        .id = id,
-        .result = result,
-    });
-}
-
-fn referencesDefinitionLabel(
-    server: *Server,
-    writer: anytype,
-    id: types.RequestId,
-    handle: *DocumentStore.Handle,
-    pos_index: usize,
-    include_decl: bool,
-    comptime highlight: bool,
-) !void {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    var allocator = server.arena.allocator();
-
-    const decl = (try getLabelGlobal(pos_index, handle)) orelse return try respondGeneric(writer, id, null_result_response);
-    var locs = std.ArrayList(types.Location).init(allocator);
-    try references.labelReferences(&server.arena, decl, server.offset_encoding, include_decl, &locs, std.ArrayList(types.Location).append);
-    const result: types.ResponseParams = if (highlight) result: {
-        var highlights = std.ArrayListUnmanaged(types.DocumentHighlight){};
-        try highlights.ensureTotalCapacity(allocator, locs.items.len);
-        const uri = handle.uri();
-        for (locs.items) |loc| {
-            if (std.mem.eql(u8, loc.uri, uri)) {
-                highlights.appendAssumeCapacity(.{
-                    .range = loc.range,
-                    .kind = .Text,
-                });
-            }
-        }
-        break :result .{ .DocumentHighlight = highlights.items };
-    } else .{ .Locations = locs.items };
-
-    try send(writer, allocator, types.Response{
-        .id = id,
-        .result = result,
     });
 }
 
@@ -1316,7 +1040,7 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: analysis.Decl
                 .label = tree.tokenSlice(param.name_token.?),
                 .kind = .Constant,
                 .documentation = doc,
-                .detail = tree.source[offsets.tokenLocation(tree, first_token).start..offsets.tokenLocation(tree, last_token).end],
+                .detail = tree.source[offsets.tokenToIndex(tree, first_token)..offsets.tokenToLoc(tree, last_token).end],
                 .insertText = tree.tokenSlice(param.name_token.?),
                 .insertTextFormat = .PlainText,
             });
@@ -1396,39 +1120,33 @@ fn completeLabel(
     });
 }
 
-var builtin_completions: ?[]types.CompletionItem = null;
+fn populateBuiltinCompletions(builtin_completions: *std.ArrayListUnmanaged(types.CompletionItem), config: Config) !void {
+    for (data.builtins) |builtin| {
+        const insert_text = if (config.enable_snippets) builtin.snippet else builtin.name;
+        builtin_completions.appendAssumeCapacity(.{
+            .label = builtin.name,
+            .kind = .Function,
+            .filterText = builtin.name[1..],
+            .detail = builtin.signature,
+            .insertText = if (config.include_at_in_builtins) insert_text else insert_text[1..],
+            .insertTextFormat = if (config.enable_snippets) .Snippet else .PlainText,
+            .documentation = .{
+                .kind = .Markdown,
+                .value = builtin.documentation,
+            },
+        });
+    }
+
+    truncateCompletions(builtin_completions.items, config.max_detail_length);
+}
+
 fn completeBuiltin(server: *Server, writer: anytype, id: types.RequestId) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    if (builtin_completions == null) {
-        builtin_completions = try server.allocator.alloc(types.CompletionItem, data.builtins.len);
-        for (data.builtins) |builtin, idx| {
-            builtin_completions.?[idx] = types.CompletionItem{
-                .label = builtin.name,
-                .kind = .Function,
-                .filterText = builtin.name[1..],
-                .detail = builtin.signature,
-                .documentation = .{
-                    .kind = .Markdown,
-                    .value = builtin.documentation,
-                },
-            };
-
-            var insert_text: []const u8 = undefined;
-            if (server.config.enable_snippets) {
-                insert_text = builtin.snippet;
-                builtin_completions.?[idx].insertTextFormat = .Snippet;
-            } else {
-                insert_text = builtin.name;
-            }
-            builtin_completions.?[idx].insertText =
-                if (server.config.include_at_in_builtins)
-                insert_text
-            else
-                insert_text[1..];
-        }
-        truncateCompletions(builtin_completions.?, server.config.max_detail_length);
+    if (server.builtin_completions == null) {
+        server.builtin_completions = try std.ArrayListUnmanaged(types.CompletionItem).initCapacity(server.allocator, data.builtins.len);
+        try populateBuiltinCompletions(&server.builtin_completions.?, server.config);
     }
 
     try send(writer, server.arena.allocator(), types.Response{
@@ -1436,7 +1154,7 @@ fn completeBuiltin(server: *Server, writer: anytype, id: types.RequestId) !void 
         .result = .{
             .CompletionList = .{
                 .isIncomplete = false,
-                .items = builtin_completions.?,
+                .items = server.builtin_completions.?.items,
             },
         },
     });
@@ -1459,7 +1177,7 @@ fn completeGlobal(server: *Server, writer: anytype, id: types.RequestId, pos_ind
 
     if (server.client_capabilities.label_details_support) {
         for (completions.items) |*item| {
-            try server.formatDetailledLabel(writer, item, server.arena.allocator());
+            try formatDetailledLabel(item, server.arena.allocator());
         }
     }
 
@@ -1474,25 +1192,23 @@ fn completeGlobal(server: *Server, writer: anytype, id: types.RequestId, pos_ind
     });
 }
 
-fn completeFieldAccess(server: *Server, writer: anytype, id: types.RequestId, handle: *DocumentStore.Handle, position: offsets.DocumentPosition, range: analysis.SourceRange) !void {
+fn completeFieldAccess(server: *Server, writer: anytype, id: types.RequestId, handle: *DocumentStore.Handle, source_index: usize, loc: offsets.Loc) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
     var completions = std.ArrayListUnmanaged(types.CompletionItem){};
 
-    const line_mem_start = @ptrToInt(position.line.ptr) - @ptrToInt(handle.document.mem.ptr);
-    var held_range = handle.document.borrowNullTerminatedSlice(line_mem_start + range.start, line_mem_start + range.end);
-    errdefer held_range.release();
+    var held_range = handle.document.borrowNullTerminatedSlice(loc.start, loc.end);
+    defer held_range.release();
     var tokenizer = std.zig.Tokenizer.init(held_range.data());
 
-    if (try analysis.getFieldAccessType(&server.document_store, &server.arena, handle, position.absolute_index, &tokenizer)) |result| {
-        held_range.release();
+    if (try analysis.getFieldAccessType(&server.document_store, &server.arena, handle, source_index, &tokenizer)) |result| {
         try server.typeToCompletion(&completions, result, handle);
         sortCompletionItems(completions.items, server.arena.allocator());
         truncateCompletions(completions.items, server.config.max_detail_length);
         if (server.client_capabilities.label_details_support) {
             for (completions.items) |*item| {
-                try server.formatDetailledLabel(writer, item, server.arena.allocator());
+                try formatDetailledLabel(item, server.arena.allocator());
             }
         }
     }
@@ -1508,7 +1224,7 @@ fn completeFieldAccess(server: *Server, writer: anytype, id: types.RequestId, ha
     });
 }
 
-fn formatDetailledLabel(server: *Server, writer: anytype, item: *types.CompletionItem, alloc: std.mem.Allocator) !void {
+fn formatDetailledLabel(item: *types.CompletionItem, alloc: std.mem.Allocator) !void {
     // NOTE: this is not ideal, we should build a detailled label like we do for label/detail
     // because this implementation is very loose, nothing is formated properly so we need to clean
     // things a little bit, wich is quite messy
@@ -1540,13 +1256,13 @@ fn formatDetailledLabel(server: *Server, writer: anytype, item: *types.Completio
         it = it[0..end];
     }
 
-    // logger.info("## label: {s} it: {s} kind: {} isValue: {}", .{item.label, it, item.kind, isValue});
+    // loggerger.info("## label: {s} it: {s} kind: {} isValue: {}", .{item.label, it, item.kind, isValue});
 
     if (std.mem.startsWith(u8, it, "fn ")) {
         var s: usize = std.mem.indexOf(u8, it, "(") orelse return;
         var e: usize = std.mem.lastIndexOf(u8, it, ")") orelse return;
         if (e < s) {
-            Logger.warn(server, writer, "something wrong when trying to build label detail for {s} kind: {}", .{ it, item.kind });
+            log.warn("something wrong when trying to build label detail for {s} kind: {}", .{ it, item.kind });
             return;
         }
 
@@ -1560,7 +1276,7 @@ fn formatDetailledLabel(server: *Server, writer: anytype, item: *types.Completio
                 var us: usize = std.mem.indexOf(u8, it, "(") orelse return;
                 var ue: usize = std.mem.lastIndexOf(u8, it, ")") orelse return;
                 if (ue < us) {
-                    Logger.warn(server, writer, "something wrong when trying to build label detail for a .Constant|union {s}", .{it});
+                    log.warn("something wrong when trying to build label detail for a .Constant|union {s}", .{it});
                     return;
                 }
 
@@ -1599,10 +1315,10 @@ fn formatDetailledLabel(server: *Server, writer: anytype, item: *types.Completio
         var e: usize = std.mem.indexOf(u8, it, "=") orelse return;
 
         if (e < s) {
-            Logger.warn(server, writer, "something wrong when trying to build label detail for a .Variable {s}", .{it});
+            log.warn("something wrong when trying to build label detail for a .Variable {s}", .{it});
             return;
         }
-        // logger.info("s: {} -> {}", .{s, e});
+        // loggerger.info("s: {} -> {}", .{s, e});
         item.insertText = item.label;
         item.insertTextFormat = .PlainText;
         item.detail = item.label;
@@ -1622,10 +1338,10 @@ fn formatDetailledLabel(server: *Server, writer: anytype, item: *types.Completio
         var s: usize = std.mem.indexOf(u8, it, " ") orelse return;
         var e: usize = std.mem.indexOf(u8, it, "=") orelse it.len;
         if (e < s) {
-            Logger.warn(server, writer, "something wrong when trying to build label detail for a .Variable {s}", .{it});
+            log.warn("something wrong when trying to build label detail for a .Variable {s}", .{it});
             return;
         }
-        // logger.info("s: {} -> {}", .{s, e});
+        // loggerger.info("s: {} -> {}", .{s, e});
         item.insertText = item.label;
         item.insertTextFormat = .PlainText;
         item.detail = item.label;
@@ -1638,7 +1354,7 @@ fn formatDetailledLabel(server: *Server, writer: anytype, item: *types.Completio
             var us: usize = std.mem.indexOf(u8, it, "(") orelse return;
             var ue: usize = std.mem.lastIndexOf(u8, it, ")") orelse return;
             if (ue < us) {
-                Logger.warn(server, writer, "something wrong when trying to build label detail for a .Constant|union {s}", .{it});
+                log.warn("something wrong when trying to build label detail for a .Constant|union {s}", .{it});
                 return;
             }
             item.labelDetails.?.description = it[us - 5 .. ue + 1];
@@ -1646,7 +1362,7 @@ fn formatDetailledLabel(server: *Server, writer: anytype, item: *types.Completio
             var es: usize = std.mem.indexOf(u8, it, "(") orelse return;
             var ee: usize = std.mem.lastIndexOf(u8, it, ")") orelse return;
             if (ee < es) {
-                Logger.warn(server, writer, "something wrong when trying to build label detail for a .Constant|enum {s}", .{it});
+                log.warn("something wrong when trying to build label detail for a .Constant|enum {s}", .{it});
                 return;
             }
             item.labelDetails.?.description = it[es - 4 .. ee + 1];
@@ -1680,7 +1396,7 @@ fn completeError(server: *Server, writer: anytype, id: types.RequestId, handle: 
     var completions = try server.document_store.errorCompletionItems(&server.arena, handle);
 
     truncateCompletions(completions, server.config.max_detail_length);
-    Logger.debug(server, writer, "Completing error:", .{});
+    log.debug("Completing error:", .{});
 
     try send(writer, server.arena.allocator(), types.Response{
         .id = id,
@@ -1760,9 +1476,26 @@ fn initializeHandler(server: *Server, writer: anytype, id: types.RequestId, req:
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    for (req.params.capabilities.offsetEncoding.value) |encoding| {
-        if (std.mem.eql(u8, encoding, "utf-8")) {
+    if(req.params.capabilities.general) |general| {
+        var supports_utf8 = false;
+        var supports_utf16 = false;
+        var supports_utf32 = false;
+        for(general.positionEncodings.value) |encoding| {
+            if (std.mem.eql(u8, encoding, "utf-8")) {
+                supports_utf8 = true;
+            } else if(std.mem.eql(u8, encoding, "utf-16")) {
+                supports_utf16 = true;
+            } else if(std.mem.eql(u8, encoding, "utf-32")) {
+                supports_utf32 = true;
+            }
+        }
+
+        if(supports_utf8) {
             server.offset_encoding = .utf8;
+        } else if(supports_utf32) {
+            server.offset_encoding = .utf32;
+        } else {
+            server.offset_encoding = .utf16;
         }
     }
 
@@ -1793,10 +1526,7 @@ fn initializeHandler(server: *Server, writer: anytype, id: types.RequestId, req:
         .id = id,
         .result = .{
             .InitializeResult = .{
-                .offsetEncoding = if (server.offset_encoding == .utf8)
-                    @as([]const u8, "utf-8")
-                else
-                    "utf-16",
+                .offsetEncoding = server.offset_encoding,
                 .serverInfo = .{
                     .name = "zls",
                     .version = "0.1.0",
@@ -1867,16 +1597,16 @@ fn initializeHandler(server: *Server, writer: anytype, id: types.RequestId, req:
         }
     }
 
-    Logger.info(server, writer, "zls initialized", .{});
-    Logger.info(server, writer, "{}", .{server.client_capabilities});
-    Logger.info(server, writer, "Using offset encoding: {s}", .{std.meta.tagName(server.offset_encoding)});
+    log.info("zls initialized", .{});
+    log.info("{}", .{server.client_capabilities});
+    log.info("Using offset encoding: {s}", .{std.meta.tagName(server.offset_encoding)});
 }
 
 fn registerCapability(server: *Server, writer: anytype, method: []const u8) !void {
     // NOTE: stage1 moment occurs if we dont do it like this :(
     // long live stage2's not broken anon structs
 
-    Logger.debug(server, writer, "Dynamically registering method '{s}'", .{method});
+    log.debug("Dynamically registering method '{s}'", .{method});
 
     const id = try std.fmt.allocPrint(server.arena.allocator(), "register-{s}", .{method});
     const reg = types.RegistrationParams.Registration{
@@ -1913,7 +1643,6 @@ fn requestConfiguration(server: *Server, writer: anytype) !void {
         break :confi comp_confi;
     };
 
-    Logger.info(server, writer, "Requesting configuration!", .{});
     try send(writer, server.arena.allocator(), types.Request{
         .id = .{ .String = "i_haz_configuration" },
         .method = "workspace/configuration",
@@ -1933,7 +1662,7 @@ fn initializedHandler(server: *Server, writer: anytype, id: types.RequestId) !vo
 }
 
 fn shutdownHandler(server: *Server, writer: anytype, id: types.RequestId) !void {
-    Logger.info(server, writer, "Server closing...", .{});
+    log.info("Server closing...", .{});
 
     server.keep_running = false;
     // Technically we should deinitialize first and send possible errors to the client
@@ -1960,7 +1689,7 @@ fn changeDocumentHandler(server: *Server, writer: anytype, id: types.RequestId, 
     _ = id;
 
     const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
-        Logger.debug(server, writer, "Trying to change non existent document {s}", .{req.params.textDocument.uri});
+        log.debug("Trying to change non existent document {s}", .{req.params.textDocument.uri});
         return;
     };
 
@@ -1973,8 +1702,10 @@ fn saveDocumentHandler(server: *Server, writer: anytype, id: types.RequestId, re
     defer tracy_zone.end();
 
     _ = id;
+    _ = writer;
+
     const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
-        Logger.warn(server, writer, "Trying to save non existent document {s}", .{req.params.textDocument.uri});
+        log.warn("Trying to save non existent document {s}", .{req.params.textDocument.uri});
         return;
     };
     try server.document_store.applySave(handle);
@@ -1995,7 +1726,7 @@ fn semanticTokensFullHandler(server: *Server, writer: anytype, id: types.Request
 
     if (server.config.enable_semantic_tokens) blk: {
         const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
-            Logger.warn(server, writer, "Trying to get semantic tokens of non existent document {s}", .{req.params.textDocument.uri});
+            log.warn("Trying to get semantic tokens of non existent document {s}", .{req.params.textDocument.uri});
             break :blk;
         };
 
@@ -2015,29 +1746,28 @@ fn completionHandler(server: *Server, writer: anytype, id: types.RequestId, req:
     defer tracy_zone.end();
 
     const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
-        Logger.warn(server, writer, "Trying to complete in non existent document {s}", .{req.params.textDocument.uri});
+        log.warn("Trying to complete in non existent document {s}", .{req.params.textDocument.uri});
         return try respondGeneric(writer, id, no_completions_response);
     };
 
     if (req.params.position.character == 0)
         return try respondGeneric(writer, id, no_completions_response);
 
-    const doc_position = try offsets.documentPosition(handle.document, req.params.position, server.offset_encoding);
-    const pos_context = try analysis.documentPositionContext(&server.arena, handle.document, doc_position);
+    const source_index = offsets.positionToIndex(handle.document.text, req.params.position, server.offset_encoding);
+    const pos_context = try analysis.getPositionContext(server.arena.allocator(), handle.document, source_index);
 
     switch (pos_context) {
         .builtin => try server.completeBuiltin(writer, id),
-        .var_access, .empty => try server.completeGlobal(writer, id, doc_position.absolute_index, handle),
-        .field_access => |range| try server.completeFieldAccess(writer, id, handle, doc_position, range),
+        .var_access, .empty => try server.completeGlobal(writer, id, source_index, handle),
+        .field_access => |loc| try server.completeFieldAccess(writer, id, handle, source_index, loc),
         .global_error_set => try server.completeError(writer, id, handle),
         .enum_literal => try server.completeDot(writer, id, handle),
-        .label => try server.completeLabel(writer, id, doc_position.absolute_index, handle),
+        .label => try server.completeLabel(writer, id, source_index, handle),
         .import_string_literal, .embedfile_string_literal => |loc| {
             if (!server.config.enable_import_embedfile_argument_completions)
                 return try respondGeneric(writer, id, no_completions_response);
 
-            const line_mem_start = @ptrToInt(doc_position.line.ptr) - @ptrToInt(handle.document.mem.ptr);
-            const completing = handle.tree.source[line_mem_start + loc.start + 1 .. line_mem_start + loc.end];
+            const completing = offsets.locToSlice(handle.tree.source, loc);
 
             var subpath_present = false;
             var fsl_completions = std.ArrayListUnmanaged(types.CompletionItem){};
@@ -2112,19 +1842,19 @@ fn signatureHelpHandler(server: *Server, writer: anytype, id: types.RequestId, r
 
     const getSignatureInfo = @import("signature_help.zig").getSignatureInfo;
     const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
-        Logger.warn(server, writer, "Trying to get signature help in non existent document {s}", .{req.params.textDocument.uri});
+        log.warn("Trying to get signature help in non existent document {s}", .{req.params.textDocument.uri});
         return try respondGeneric(writer, id, no_signatures_response);
     };
 
     if (req.params.position.character == 0)
         return try respondGeneric(writer, id, no_signatures_response);
 
-    const doc_position = try offsets.documentPosition(handle.document, req.params.position, server.offset_encoding);
+    const source_index = offsets.positionToIndex(handle.document.text, req.params.position, server.offset_encoding);
     if (try getSignatureInfo(
         &server.document_store,
         &server.arena,
         handle,
-        doc_position.absolute_index,
+        source_index,
         data,
     )) |sig_info| {
         return try send(writer, server.arena.allocator(), types.Response{
@@ -2146,19 +1876,19 @@ fn gotoHandler(server: *Server, writer: anytype, id: types.RequestId, req: reque
     defer tracy_zone.end();
 
     const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
-        Logger.warn(server, writer, "Trying to go to definition in non existent document {s}", .{req.params.textDocument.uri});
+        log.warn("Trying to go to definition in non existent document {s}", .{req.params.textDocument.uri});
         return try respondGeneric(writer, id, null_result_response);
     };
 
     if (req.params.position.character >= 0) {
-        const doc_position = try offsets.documentPosition(handle.document, req.params.position, server.offset_encoding);
-        const pos_context = try analysis.documentPositionContext(&server.arena, handle.document, doc_position);
+        const source_index = offsets.positionToIndex(handle.document.text, req.params.position, server.offset_encoding);
+        const pos_context = try analysis.getPositionContext(server.arena.allocator(), handle.document, source_index);
 
         switch (pos_context) {
-            .var_access => try server.gotoDefinitionGlobal(writer, id, doc_position.absolute_index, handle, resolve_alias),
-            .field_access => |range| try server.gotoDefinitionFieldAccess(writer, id, handle, doc_position, range, resolve_alias),
-            .import_string_literal => try server.gotoDefinitionString(writer, id, doc_position.absolute_index, handle),
-            .label => try server.gotoDefinitionLabel(writer, id, doc_position.absolute_index, handle),
+            .var_access => try server.gotoDefinitionGlobal(writer, id, source_index, handle, resolve_alias),
+            .field_access => |loc| try server.gotoDefinitionFieldAccess(writer, id, handle, source_index, loc, resolve_alias),
+            .import_string_literal => try server.gotoDefinitionString(writer, id, source_index, handle),
+            .label => try server.gotoDefinitionLabel(writer, id, source_index, handle),
             else => try respondGeneric(writer, id, null_result_response),
         }
     } else {
@@ -2185,18 +1915,18 @@ fn hoverHandler(server: *Server, writer: anytype, id: types.RequestId, req: requ
     defer tracy_zone.end();
 
     const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
-        Logger.warn(server, writer, "Trying to get hover in non existent document {s}", .{req.params.textDocument.uri});
+        log.warn("Trying to get hover in non existent document {s}", .{req.params.textDocument.uri});
         return try respondGeneric(writer, id, null_result_response);
     };
 
     if (req.params.position.character >= 0) {
-        const doc_position = try offsets.documentPosition(handle.document, req.params.position, server.offset_encoding);
-        const pos_context = try analysis.documentPositionContext(&server.arena, handle.document, doc_position);
+        const source_index = offsets.positionToIndex(handle.document.text, req.params.position, server.offset_encoding);
+        const pos_context = try analysis.getPositionContext(server.arena.allocator(), handle.document, source_index);
         switch (pos_context) {
-            .builtin => try server.hoverDefinitionBuiltin(writer, id, doc_position.absolute_index, handle),
-            .var_access => try server.hoverDefinitionGlobal(writer, id, doc_position.absolute_index, handle),
-            .field_access => |range| try server.hoverDefinitionFieldAccess(writer, id, handle, doc_position, range),
-            .label => try server.hoverDefinitionLabel(writer, id, doc_position.absolute_index, handle),
+            .builtin => try server.hoverDefinitionBuiltin(writer, id, source_index, handle),
+            .var_access => try server.hoverDefinitionGlobal(writer, id, source_index, handle),
+            .field_access => |loc| try server.hoverDefinitionFieldAccess(writer, id, handle, source_index, loc),
+            .label => try server.hoverDefinitionLabel(writer, id, source_index, handle),
             else => try respondGeneric(writer, id, null_result_response),
         }
     } else {
@@ -2209,7 +1939,7 @@ fn documentSymbolsHandler(server: *Server, writer: anytype, id: types.RequestId,
     defer tracy_zone.end();
 
     const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
-        Logger.warn(server, writer, "Trying to get document symbols in non existent document {s}", .{req.params.textDocument.uri});
+        log.warn("Trying to get document symbols in non existent document {s}", .{req.params.textDocument.uri});
         return try respondGeneric(writer, id, null_result_response);
     };
     try server.documentSymbol(writer, id, handle);
@@ -2221,7 +1951,7 @@ fn formattingHandler(server: *Server, writer: anytype, id: types.RequestId, req:
 
     if (server.config.zig_exe_path) |zig_exe_path| {
         const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
-            Logger.warn(server, writer, "Trying to got to definition in non existent document {s}", .{req.params.textDocument.uri});
+            log.warn("Trying to got to definition in non existent document {s}", .{req.params.textDocument.uri});
             return try respondGeneric(writer, id, null_result_response);
         };
 
@@ -2230,7 +1960,7 @@ fn formattingHandler(server: *Server, writer: anytype, id: types.RequestId, req:
         process.stdout_behavior = .Pipe;
 
         process.spawn() catch |err| {
-            Logger.warn(server, writer, "Failed to spawn zig fmt process, error: {}", .{err});
+            log.warn("Failed to spawn zig fmt process, error: {}", .{err});
             return try respondGeneric(writer, id, null_result_response);
         };
         try process.stdin.?.writeAll(handle.document.text);
@@ -2245,6 +1975,7 @@ fn formattingHandler(server: *Server, writer: anytype, id: types.RequestId, req:
                 if (std.mem.eql(u8, handle.document.text, stdout_bytes)) return try respondGeneric(writer, id, null_result_response);
 
                 var edits = diff.edits(server.allocator, handle.document.text, stdout_bytes) catch {
+                    const range = offsets.locToRange(handle.document.text, .{ .start = 0, .end = handle.document.text.len }, server.offset_encoding);
                     // If there was an error trying to diff the text, return the formatted response
                     // as the new text for the entire range of the document
                     return try send(writer, server.arena.allocator(), types.Response{
@@ -2252,7 +1983,7 @@ fn formattingHandler(server: *Server, writer: anytype, id: types.RequestId, req:
                         .result = .{
                             .TextEdits = &[1]types.TextEdit{
                                 .{
-                                    .range = try offsets.documentRange(handle.document, server.offset_encoding),
+                                    .range = range,
                                     .newText = stdout_bytes,
                                 },
                             },
@@ -2291,30 +2022,6 @@ fn formattingHandler(server: *Server, writer: anytype, id: types.RequestId, req:
     return try respondGeneric(writer, id, null_result_response);
 }
 
-fn renameHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.Rename) !void {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
-        Logger.warn(server, writer, "Trying to rename in non existent document {s}", .{req.params.textDocument.uri});
-        return try respondGeneric(writer, id, null_result_response);
-    };
-
-    if (req.params.position.character >= 0) {
-        const doc_position = try offsets.documentPosition(handle.document, req.params.position, server.offset_encoding);
-        const pos_context = try analysis.documentPositionContext(&server.arena, handle.document, doc_position);
-
-        switch (pos_context) {
-            .var_access => try server.renameDefinitionGlobal(writer, id, handle, doc_position.absolute_index, req.params.newName),
-            .field_access => |range| try server.renameDefinitionFieldAccess(writer, id, handle, doc_position, range, req.params.newName),
-            .label => try server.renameDefinitionLabel(writer, id, handle, doc_position.absolute_index, req.params.newName),
-            else => try respondGeneric(writer, id, null_result_response),
-        }
-    } else {
-        try respondGeneric(writer, id, null_result_response);
-    }
-}
-
 fn didChangeConfigurationHandler(server: *Server, writer: anytype, id: types.RequestId, maybe_req: std.json.Value) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
@@ -2324,7 +2031,7 @@ fn didChangeConfigurationHandler(server: *Server, writer: anytype, id: types.Req
         const req = try requests.fromDynamicTree(&server.arena, requests.Configuration, maybe_req);
         inline for (std.meta.fields(Config)) |field| {
             if (@field(req.params.settings, field.name)) |value| {
-                Logger.debug(server, writer, "setting configuration option '{s}' to '{any}'", .{ field.name, value });
+                log.debug("setting configuration option '{s}' to '{any}'", .{ field.name, value });
                 @field(server.config, field.name) = if (@TypeOf(value) == []const u8) try server.allocator.dupe(u8, value) else value;
             }
         }
@@ -2334,53 +2041,129 @@ fn didChangeConfigurationHandler(server: *Server, writer: anytype, id: types.Req
         try server.requestConfiguration(writer);
 }
 
+fn renameHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.Rename) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    try generalReferencesHandler(server, writer, id, .{ .rename = req });
+}
+
 fn referencesHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.References) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
-        Logger.warn(server, writer, "Trying to get references in non existent document {s}", .{req.params.textDocument.uri});
-        return try respondGeneric(writer, id, null_result_response);
-    };
-
-    if (req.params.position.character >= 0) {
-        const doc_position = try offsets.documentPosition(handle.document, req.params.position, server.offset_encoding);
-        const pos_context = try analysis.documentPositionContext(&server.arena, handle.document, doc_position);
-
-        const include_decl = req.params.context.includeDeclaration;
-        switch (pos_context) {
-            .var_access => try server.referencesDefinitionGlobal(writer, id, handle, doc_position.absolute_index, include_decl, false),
-            .field_access => |range| try server.referencesDefinitionFieldAccess(writer, id, handle, doc_position, range, include_decl, false),
-            .label => try server.referencesDefinitionLabel(writer, id, handle, doc_position.absolute_index, include_decl, false),
-            else => try respondGeneric(writer, id, null_result_response),
-        }
-    } else {
-        try respondGeneric(writer, id, null_result_response);
-    }
+    try generalReferencesHandler(server, writer, id, .{ .references = req });
 }
 
 fn documentHighlightHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.DocumentHighlight) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
-        Logger.warn(server, writer, "Trying to highlight references in non existent document {s}", .{req.params.textDocument.uri});
+    try generalReferencesHandler(server, writer, id, .{ .highlight = req });
+}
+
+const GeneralReferencesRequest = union(enum) {
+    rename: requests.Rename,
+    references: requests.References,
+    highlight: requests.DocumentHighlight,
+
+    pub fn uri(self: @This()) []const u8 {
+        return switch (self) {
+            .rename => |rename| rename.params.textDocument.uri,
+            .references => |ref| ref.params.textDocument.uri,
+            .highlight => |highlight| highlight.params.textDocument.uri,
+        };
+    }
+
+    pub fn position(self: @This()) types.Position {
+        return switch (self) {
+            .rename => |rename| rename.params.position,
+            .references => |ref| ref.params.position,
+            .highlight => |highlight| highlight.params.position,
+        };
+    }
+
+    pub fn name(self: @This()) []const u8 {
+        return switch (self) {
+            .rename => "rename",
+            .references => "references",
+            .highlight => "highlight references",
+        };
+    }
+};
+
+fn generalReferencesHandler(server: *Server, writer: anytype, id: types.RequestId, req: GeneralReferencesRequest) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    const allocator = server.arena.allocator();
+
+    const handle = server.document_store.getHandle(req.uri()) orelse {
+        log.warn("Trying to get {s} in non existent document {s}", .{ req.name(), req.uri() });
         return try respondGeneric(writer, id, null_result_response);
     };
 
-    if (req.params.position.character >= 0) {
-        const doc_position = try offsets.documentPosition(handle.document, req.params.position, server.offset_encoding);
-        const pos_context = try analysis.documentPositionContext(&server.arena, handle.document, doc_position);
+    if (req.position().character <= 0) return try respondGeneric(writer, id, null_result_response);
 
-        switch (pos_context) {
-            .var_access => try server.referencesDefinitionGlobal(writer, id, handle, doc_position.absolute_index, true, true),
-            .field_access => |range| try server.referencesDefinitionFieldAccess(writer, id, handle, doc_position, range, true, true),
-            .label => try server.referencesDefinitionLabel(writer, id, handle, doc_position.absolute_index, true, true),
-            else => try respondGeneric(writer, id, null_result_response),
-        }
-    } else {
-        try respondGeneric(writer, id, null_result_response);
-    }
+    const source_index = offsets.positionToIndex(handle.document.text, req.position(), server.offset_encoding);
+    const pos_context = try analysis.getPositionContext(server.arena.allocator(), handle.document, source_index);
+
+    const decl = switch (pos_context) {
+        .var_access => try server.getSymbolGlobal(source_index, handle),
+        .field_access => |range| try server.getSymbolFieldAccess(handle, source_index, range),
+        .label => try getLabelGlobal(source_index, handle),
+        else => null,
+    } orelse return try respondGeneric(writer, id, null_result_response);
+
+    const include_decl = switch (req) {
+        .references => |ref| ref.params.context.includeDeclaration,
+        else => true,
+    };
+
+    const locations = if (pos_context == .label)
+        try references.labelReferences(allocator, decl, server.offset_encoding, include_decl)
+    else
+        try references.symbolReferences(
+            &server.arena,
+            &server.document_store,
+            decl,
+            server.offset_encoding,
+            include_decl,
+            server.config.skip_std_references,
+            req != .highlight, // scan the entire workspace except for highlight
+        );
+
+    const result: types.ResponseParams = switch (req) {
+        .rename => |rename| blk: {
+            var edits: types.WorkspaceEdit = .{ .changes = .{} };
+            for (locations.items) |loc| {
+                const gop = try edits.changes.getOrPutValue(allocator, loc.uri, .{});
+                try gop.value_ptr.append(allocator, .{
+                    .range = loc.range,
+                    .newText = rename.params.newName,
+                });
+            }
+            break :blk .{ .WorkspaceEdit = edits };
+        },
+        .references => .{ .Locations = locations.items },
+        .highlight => blk: {
+            var highlights = try std.ArrayListUnmanaged(types.DocumentHighlight).initCapacity(allocator, locations.items.len);
+            const uri = handle.uri();
+            for (locations.items) |loc| {
+                if (!std.mem.eql(u8, loc.uri, uri)) continue;
+                highlights.appendAssumeCapacity(.{
+                    .range = loc.range,
+                    .kind = .Text,
+                });
+            }
+            break :blk .{ .DocumentHighlight = highlights.items };
+        },
+    };
+
+    try send(writer, allocator, types.Response{
+        .id = id,
+        .result = result,
+    });
 }
 
 fn isPositionBefore(lhs: types.Position, rhs: types.Position) bool {
@@ -2397,7 +2180,7 @@ fn inlayHintHandler(server: *Server, writer: anytype, id: types.RequestId, req: 
 
     if (server.config.enable_inlay_hints) blk: {
         const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
-            Logger.warn(server, writer, "Trying to get inlay hint of non existent document {s}", .{req.params.textDocument.uri});
+            log.warn("Trying to get inlay hint of non existent document {s}", .{req.params.textDocument.uri});
             break :blk;
         };
 
@@ -2407,7 +2190,15 @@ fn inlayHintHandler(server: *Server, writer: anytype, id: types.RequestId, req: 
         // because the function could be stored in a different document
         // we need the regenerate hints when the document itself or its imported documents change
         // with caching it would also make sense to generate all hints instead of only the visible ones
-        const hints = try inlay_hints.writeRangeInlayHint(&server.arena, &server.config, &server.document_store, handle, req.params.range, hover_kind);
+        const hints = try inlay_hints.writeRangeInlayHint(
+            &server.arena,
+            &server.config,
+            &server.document_store,
+            handle,
+            req.params.range,
+            hover_kind,
+            server.offset_encoding,
+        );
         defer {
             for (hints) |hint| {
                 server.allocator.free(hint.tooltip.value);
@@ -2466,7 +2257,7 @@ pub fn processJsonRpc(server: *Server, writer: anytype, json: []const u8) !void 
     if (id == .String and std.mem.startsWith(u8, id.String, "register"))
         return;
     if (id == .String and std.mem.eql(u8, id.String, "i_haz_configuration")) {
-        Logger.info(server, writer, "Setting configuration...", .{});
+        log.info("Setting configuration...", .{});
 
         // NOTE: Does this work with other editors?
         // Yes, String ids are officially supported by LSP
@@ -2504,7 +2295,7 @@ pub fn processJsonRpc(server: *Server, writer: anytype, json: []const u8) !void 
                         else => @compileError("Not implemented for " ++ @typeName(ft)),
                     },
                 };
-                Logger.debug(server, writer, "setting configuration option '{s}' to '{any}'", .{ field.name, new_value });
+                log.debug("setting configuration option '{s}' to '{any}'", .{ field.name, new_value });
                 @field(server.config, field.name) = new_value;
             }
         }
@@ -2521,7 +2312,7 @@ pub fn processJsonRpc(server: *Server, writer: anytype, json: []const u8) !void 
         // makes `zig build test` look nice
         if (!zig_builtin.is_test and !std.mem.eql(u8, method, "shutdown")) {
             const end_time = std.time.milliTimestamp();
-            Logger.debug(server, writer, "Took {}ms to process method {s}", .{ end_time - start_time, method });
+            log.debug("Took {}ms to process method {s}", .{ end_time - start_time, method });
         }
     }
 
@@ -2558,7 +2349,7 @@ pub fn processJsonRpc(server: *Server, writer: anytype, json: []const u8) !void 
     inline for (method_map) |method_info| {
         if (done == null and std.mem.eql(u8, method, method_info[0])) {
             if (method_info.len == 1) {
-                Logger.warn(server, writer, "method not mapped: {s}", .{method});
+                log.warn("method not mapped: {s}", .{method});
                 done = error.HackDone;
             } else if (method_info[1] != void) {
                 const ReqT = method_info[1];
@@ -2567,7 +2358,7 @@ pub fn processJsonRpc(server: *Server, writer: anytype, json: []const u8) !void 
                     done = extractErr(method_info[2](server, writer, id, request_obj));
                 } else |err| {
                     if (err == error.MalformedJson) {
-                        Logger.warn(server, writer, "Could not create request type {s} from JSON {s}", .{ @typeName(ReqT), json });
+                        log.warn("Could not create request type {s} from JSON {s}", .{ @typeName(ReqT), json });
                     }
                     done = err;
                 }
@@ -2607,13 +2398,13 @@ pub fn processJsonRpc(server: *Server, writer: anytype, json: []const u8) !void 
             return try respondGeneric(writer, id, null_result_response);
         }
 
-        Logger.debug(server, writer, "Notification method {s} is not implemented", .{method});
+        log.debug("Notification method {s} is not implemented", .{method});
         return;
     }
     if (tree.root.Object.get("id")) |_| {
         return try respondGeneric(writer, id, not_implemented_response);
     }
-    Logger.debug(server, writer, "Method without return value not implemented: {s}", .{method});
+    log.debug("Method without return value not implemented: {s}", .{method});
 }
 
 pub fn configChanged(server: *Server, builtin_creation_dir: ?[]const u8) !void {
@@ -2625,7 +2416,6 @@ pub fn init(
     allocator: std.mem.Allocator,
     config: Config,
     config_path: ?[]const u8,
-    log_level: std.log.Level,
 ) !Server {
     // TODO replace global with something like an Analyser struct
     // which contains using_trail & resolve_trail and place it inside Server
@@ -2640,7 +2430,6 @@ pub fn init(
         .config = cfg,
         .allocator = allocator,
         .document_store = try DocumentStore.init(allocator, cfg),
-        .log_level = log_level,
     };
 }
 
@@ -2651,7 +2440,7 @@ pub fn deinit(server: *Server) void {
     const config_parse_options = std.json.ParseOptions{ .allocator = server.allocator };
     defer std.json.parseFree(Config, server.config, config_parse_options);
 
-    if (builtin_completions) |compls| {
-        server.allocator.free(compls);
+    if (server.builtin_completions) |*compls| {
+        compls.deinit(server.allocator);
     }
 }

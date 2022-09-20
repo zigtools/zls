@@ -168,7 +168,9 @@ pub const Initialize = struct {
             },
             documentHighlight: Exists,
         },
-        offsetEncoding: MaybeStringArray,
+        general: ?struct {
+            positionEncodings: MaybeStringArray,
+        },
     };
 
     params: struct {
@@ -276,7 +278,7 @@ pub const Configuration = struct {
     params: struct {
         settings: struct {
             enable_snippets: ?bool,
-            enable_unused_variable_warnings: ?bool,
+            enable_ast_check_diagnostics: ?bool,
             enable_import_embedfile_argument_completions: ?bool,
             zig_lib_path: ?[]const u8,
             zig_exe_path: ?[]const u8,

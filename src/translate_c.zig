@@ -124,7 +124,7 @@ pub fn translate(allocator: std.mem.Allocator, config: Config, include_dirs: []c
     };
 
     const base_include_dirs = blk: {
-        const target_info = std.zig.system.NativeTargetInfo.detect(allocator, .{}) catch break :blk null;
+        const target_info = std.zig.system.NativeTargetInfo.detect(.{}) catch break :blk null;
         var native_paths = std.zig.system.NativePaths.detect(allocator, target_info) catch break :blk null;
         defer native_paths.deinit();
 
@@ -145,6 +145,7 @@ pub fn translate(allocator: std.mem.Allocator, config: Config, include_dirs: []c
         config.zig_lib_path.?,
         "--cache-dir",
         config.global_cache_path.?,
+        "-lc",
     };
 
     const argc = base_args.len + 2 * (include_dirs.len + if (base_include_dirs) |dirs| dirs.len else 0) + 1;

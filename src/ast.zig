@@ -11,7 +11,7 @@ fn fullPtrType(tree: Ast, info: full.PtrType.Components) full.PtrType {
     const token_tags = tree.tokens.items(.tag);
     // TODO: looks like stage1 isn't quite smart enough to handle enum
     // literals in some places here
-    const Size = std.builtin.TypeInfo.Pointer.Size;
+    const Size = std.builtin.Type.Pointer.Size;
     const size: Size = switch (token_tags[info.main_token]) {
         .asterisk,
         .asterisk_asterisk,
@@ -462,8 +462,7 @@ pub fn lastToken(tree: Ast, node: Ast.Node.Index) Ast.TokenIndex {
 
         .anyframe_literal,
         .char_literal,
-        .integer_literal,
-        .float_literal,
+        .number_literal,
         .unreachable_literal,
         .identifier,
         .deref,
@@ -1118,4 +1117,123 @@ pub fn blockStatements(tree: Ast, node: Ast.Node.Index, buf: *[2]Ast.Node.Index)
         => tree.extra_data[node_data[node].lhs..node_data[node].rhs],
         else => return null,
     };
+}
+
+/// Iterates over FnProto Params w/ added bounds check to support incomplete ast nodes
+pub fn nextFnParam(it: *Ast.full.FnProto.Iterator) ?Ast.full.FnProto.Param {
+    const token_tags = it.tree.tokens.items(.tag);
+    while (true) {
+        var first_doc_comment: ?Ast.TokenIndex = null;
+        var comptime_noalias: ?Ast.TokenIndex = null;
+        var name_token: ?Ast.TokenIndex = null;
+        if (!it.tok_flag) {
+            if (it.param_i >= it.fn_proto.ast.params.len) {
+                return null;
+            }
+            const param_type = it.fn_proto.ast.params[it.param_i];
+            var tok_i = it.tree.firstToken(param_type) - 1;
+            while (true) : (tok_i -= 1) switch (token_tags[tok_i]) {
+                .colon => continue,
+                .identifier => name_token = tok_i,
+                .doc_comment => first_doc_comment = tok_i,
+                .keyword_comptime, .keyword_noalias => comptime_noalias = tok_i,
+                else => break,
+            };
+            it.param_i += 1;
+            it.tok_i = it.tree.lastToken(param_type) + 1;
+
+            // #boundsCheck
+            // https://github.com/zigtools/zls/issues/567
+            if (it.tree.lastToken(param_type) >= it.tree.tokens.len - 1)
+                return Ast.full.FnProto.Param{
+                    .first_doc_comment = first_doc_comment,
+                    .comptime_noalias = comptime_noalias,
+                    .name_token = name_token,
+                    .anytype_ellipsis3 = null,
+                    .type_expr = 0,
+                };
+
+            // Look for anytype and ... params afterwards.
+            if (token_tags[it.tok_i] == .comma) {
+                it.tok_i += 1;
+            }
+            it.tok_flag = true;
+            return Ast.full.FnProto.Param{
+                .first_doc_comment = first_doc_comment,
+                .comptime_noalias = comptime_noalias,
+                .name_token = name_token,
+                .anytype_ellipsis3 = null,
+                .type_expr = param_type,
+            };
+        }
+        if (token_tags[it.tok_i] == .comma) {
+            it.tok_i += 1;
+        }
+        if (token_tags[it.tok_i] == .r_paren) {
+            return null;
+        }
+        if (token_tags[it.tok_i] == .doc_comment) {
+            first_doc_comment = it.tok_i;
+            while (token_tags[it.tok_i] == .doc_comment) {
+                it.tok_i += 1;
+            }
+        }
+        switch (token_tags[it.tok_i]) {
+            .ellipsis3 => {
+                it.tok_flag = false; // Next iteration should return null.
+                return Ast.full.FnProto.Param{
+                    .first_doc_comment = first_doc_comment,
+                    .comptime_noalias = null,
+                    .name_token = null,
+                    .anytype_ellipsis3 = it.tok_i,
+                    .type_expr = 0,
+                };
+            },
+            .keyword_noalias, .keyword_comptime => {
+                comptime_noalias = it.tok_i;
+                it.tok_i += 1;
+            },
+            else => {},
+        }
+        if (token_tags[it.tok_i] == .identifier and
+            token_tags[it.tok_i + 1] == .colon)
+        {
+            name_token = it.tok_i;
+            it.tok_i += 2;
+        }
+        if (token_tags[it.tok_i] == .keyword_anytype) {
+            it.tok_i += 1;
+            return Ast.full.FnProto.Param{
+                .first_doc_comment = first_doc_comment,
+                .comptime_noalias = comptime_noalias,
+                .name_token = name_token,
+                .anytype_ellipsis3 = it.tok_i - 1,
+                .type_expr = 0,
+            };
+        }
+        it.tok_flag = false;
+    }
+}
+
+/// A modified version of tree.tokenSlice that returns an error.UnexpectedToken if the tokenizer encounters an unexpected token
+// https://github.com/zigtools/zls/issues/381
+pub fn tokenSlice(tree: Ast, token_index: Ast.TokenIndex) ![]const u8 {
+    const token_starts = tree.tokens.items(.start);
+    const token_tags = tree.tokens.items(.tag);
+    const token_tag = token_tags[token_index];
+
+    // Many tokens can be determined entirely by their tag.
+    if (token_tag.lexeme()) |lexeme| {
+        return lexeme;
+    }
+
+    // For some tokens, re-tokenization is needed to find the end.
+    var tokenizer: std.zig.Tokenizer = .{
+        .buffer = tree.source,
+        .index = token_starts[token_index],
+        .pending_invalid_token = null,
+    };
+    const token = tokenizer.next();
+    if (token.tag != token_tag) return error.UnexpectedToken; // assert(token.tag == token_tag);
+    return tree.source[token.loc.start..token.loc.end];
 }

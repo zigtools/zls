@@ -16,6 +16,7 @@ jobs:
     steps:
       - uses: actions/checkout@v2
         with:
+          fetch-depth: 0
           submodules: true
       - uses: goto-bus-stop/setup-zig@v1
         with:
@@ -33,7 +34,7 @@ jobs:
       - name: Build artifacts
         if: ${{ matrix.os == 'ubuntu-latest' }}
         run: |
-          declare -a targets=("x86_64-windows" "x86_64-linux" "x86_64-macos" "i386-windows" "i386-linux")
+          declare -a targets=("x86_64-windows" "x86_64-linux" "x86_64-macos" "i386-windows" "i386-linux" "aarch64-macos")
           mkdir -p "artifacts/"
 
           for target in "${targets[@]}"; do

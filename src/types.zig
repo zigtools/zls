@@ -5,8 +5,8 @@ const string = []const u8;
 // https://microsoft.github.io/language-server-protocol/specifications/specification-3-16/
 
 pub const Position = struct {
-    line: i64,
-    character: i64,
+    line: u32,
+    character: u32,
 };
 
 pub const Range = struct {
@@ -108,12 +108,18 @@ pub const DiagnosticSeverity = enum(i64) {
     }
 };
 
+pub const DiagnosticRelatedInformation = struct {
+    location: Location,
+    message: string,
+};
+
 pub const Diagnostic = struct {
     range: Range,
     severity: DiagnosticSeverity,
     code: string,
     source: string,
     message: string,
+    relatedInformation: []const DiagnosticRelatedInformation = &.{},
 };
 
 pub const TextDocument = struct {
@@ -152,25 +158,21 @@ pub const TextDocument = struct {
 };
 
 pub const WorkspaceEdit = struct {
-    changes: ?std.StringHashMapUnmanaged([]TextEdit),
+    changes: std.StringHashMapUnmanaged(std.ArrayListUnmanaged(TextEdit)),
 
     pub fn jsonStringify(self: WorkspaceEdit, options: std.json.StringifyOptions, writer: anytype) @TypeOf(writer).Error!void {
-        try writer.writeByte('{');
-        if (self.changes) |changes| {
-            try writer.writeAll("\"changes\": {");
-            var it = changes.iterator();
-            var idx: usize = 0;
-            while (it.next()) |entry| : (idx += 1) {
-                if (idx != 0) try writer.writeAll(", ");
+        try writer.writeAll("{\"changes\": {");
+        var it = self.changes.iterator();
+        var idx: usize = 0;
+        while (it.next()) |entry| : (idx += 1) {
+            if (idx != 0) try writer.writeAll(", ");
 
-                try writer.writeByte('"');
-                try writer.writeAll(entry.key_ptr.*);
-                try writer.writeAll("\":");
-                try std.json.stringify(entry.value_ptr.*, options, writer);
-            }
-            try writer.writeByte('}');
+            try writer.writeByte('"');
+            try writer.writeAll(entry.key_ptr.*);
+            try writer.writeAll("\":");
+            try std.json.stringify(entry.value_ptr.items, options, writer);
         }
-        try writer.writeByte('}');
+        try writer.writeAll("}}");
     }
 };
 
@@ -370,9 +372,24 @@ pub const InlayHintKind = enum(i64) {
     }
 };
 
+pub const PositionEncodingKind = enum {
+    utf8,
+    utf16,
+    utf32,
+
+    pub fn jsonStringify(value: PositionEncodingKind, options: std.json.StringifyOptions, out_stream: anytype) !void {
+        const str = switch (value) {
+            .utf8 => "utf-8",
+            .utf16 => "utf-16",
+            .utf32 => "utf-32",
+        };
+        try std.json.stringify(str, options, out_stream);
+    }
+};
+
 // Only includes options we set in our initialize result.
 const InitializeResult = struct {
-    offsetEncoding: string,
+    offsetEncoding: PositionEncodingKind,
     capabilities: struct {
         signatureHelpProvider: struct {
             triggerCharacters: []const string,

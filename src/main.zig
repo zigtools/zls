@@ -19,6 +19,20 @@ var actual_log_level: std.log.Level = switch (zig_builtin.mode) {
     else => @intToEnum(std.log.Level, @enumToInt(build_options.log_level)), // temporary fix to build failing on release-safe due to a Zig bug
 };
 
+pub fn log(
+    comptime level: std.log.Level,
+    comptime scope: @TypeOf(.EnumLiteral),
+    comptime format: []const u8,
+    args: anytype,
+) void {
+    if (@enumToInt(level) > @enumToInt(actual_log_level)) return;
+
+    const level_txt = comptime level.asText();
+
+    std.debug.print("{s:<5}: ({s:^6}): ", .{ level_txt, @tagName(scope) });
+    std.debug.print(format ++ "\n", args);
+}
+
 fn loop(server: *Server) !void {
     var reader = std.io.getStdIn().reader();
 
@@ -103,6 +117,7 @@ fn parseArgs(
         version,
         config,
         @"enable-debug-log",
+        @"show-config-path",
         @"config-path",
     };
     const arg_id_map = std.ComptimeStringMap(ArgId, comptime blk: {
@@ -126,6 +141,7 @@ fn parseArgs(
             .version = "Prints the compiler version with which the server was compiled.",
             .@"enable-debug-log" = "Enables debug logs.",
             .@"config-path" = "Specify the path to a configuration file specifying LSP behaviour.",
+            .@"show-config-path" = "Prints the path to the configuration file to stdout",
             .config = "Run the ZLS configuration wizard.",
         });
         var info_it = cmd_infos.iterator();
@@ -145,6 +161,7 @@ fn parseArgs(
     var config_path: ?[]const u8 = null;
     errdefer if (config_path) |path| allocator.free(path);
 
+    const stdout = std.io.getStdOut().writer();
     const stderr = std.io.getStdErr().writer();
 
     while (args_it.next()) |tok| {
@@ -173,6 +190,7 @@ fn parseArgs(
             .version => {},
             .@"enable-debug-log" => {},
             .config => {},
+            .@"show-config-path" => {},
             .@"config-path" => {
                 const path = args_it.next() orelse {
                     try stderr.print("Expected configuration file path after --config-path argument.\n", .{});
@@ -188,7 +206,7 @@ fn parseArgs(
         return .exit;
     }
     if (specified.get(.version)) {
-        try std.io.getStdOut().writer().print("Data Version: {s}\n", .{@tagName(build_options.data_version)});
+        try std.io.getStdOut().writeAll(build_options.version ++ "\n");
         return .exit;
     }
     if (specified.get(.config)) {
@@ -201,6 +219,22 @@ fn parseArgs(
     }
     if (specified.get(.@"config-path")) {
         std.debug.assert(config.config_path != null);
+    }
+    if (specified.get(.@"show-config-path")) {
+        const new_config = try getConfig(allocator, config.config_path, true);
+        defer if (new_config.config_path) |path| allocator.free(path);
+        defer std.json.parseFree(Config, new_config.config, .{ .allocator = allocator });
+
+        if (new_config.config_path) |path| {
+            const full_path = try std.fs.path.resolve(allocator, &.{ path, "zls.json" });
+            defer allocator.free(full_path);
+
+            try stdout.writeAll(full_path);
+            try stdout.writeByte('\n');
+        } else {
+            logger.err("Failed to find zls.json!\n", .{});
+        }
+        return .exit;
     }
 
     return .proceed;
@@ -238,7 +272,6 @@ pub fn main() !void {
         allocator,
         config.config,
         config.config_path,
-        actual_log_level,
     );
     defer server.deinit();
 

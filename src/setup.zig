@@ -121,18 +121,18 @@ pub fn wizard(allocator: std.mem.Allocator) !void {
     defer if (local_path) |d| allocator.free(d);
     defer if (global_path) |d| allocator.free(d);
 
+    const can_access_global = blk: {
+        std.fs.accessAbsolute(global_path orelse break :blk false, .{}) catch break :blk false;
+        break :blk true;
+    };
+
     if (global_path == null and local_path == null) {
         write("Could not open a global or local config directory.\n");
         return;
     }
     var config_path: []const u8 = undefined;
-    if (try askBool("Should this configuration be system-wide?")) {
-        if (global_path) |p| {
-            config_path = p;
-        } else {
-            write("Could not find a global config directory.\n");
-            return;
-        }
+    if (can_access_global and try askBool("Should this configuration be system-wide?")) {
+        config_path = global_path.?;
     } else {
         if (local_path) |p| {
             config_path = p;
@@ -170,7 +170,7 @@ pub fn wizard(allocator: std.mem.Allocator) !void {
 
     const editor = try askSelectOne("Which code editor do you use?", enum { VSCode, Sublime, Kate, Neovim, Vim8, Emacs, Doom, Spacemacs, Helix, Other });
     const snippets = try askBool("Do you want to enable snippets?");
-    const unused_variables = try askBool("Do you want to enable unused variable warnings?");
+    const ast_check = try askBool("Do you want to enable ast-check diagnostics?");
     const ief_apc = try askBool("Do you want to enable @import/@embedFile argument path completion?");
     const style = try askBool("Do you want to enable style warnings?");
     const semantic_tokens = try askBool("Do you want to enable semantic highlighting?");
@@ -189,9 +189,10 @@ pub fn wizard(allocator: std.mem.Allocator) !void {
     std.debug.print("Writing config to {s}/zls.json ... ", .{config_path});
 
     try std.json.stringify(.{
+        .@"$schema" = "https://raw.githubusercontent.com/zigtools/zls/master/schema.json",
         .zig_exe_path = zig_exe_path,
         .enable_snippets = snippets,
-        .enable_unused_variable_warnings = unused_variables,
+        .enable_ast_check_diagnostics = ast_check,
         .enable_import_embedfile_argument_completions = ief_apc,
         .warn_style = style,
         .enable_semantic_tokens = semantic_tokens,

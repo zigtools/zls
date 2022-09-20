@@ -24,7 +24,7 @@ fn fnProtoToSignatureInfo(document_store: *DocumentStore, arena: *std.heap.Arena
 
     var params = std.ArrayListUnmanaged(ParameterInformation){};
     var param_it = proto.iterate(&tree);
-    while (param_it.next()) |param| {
+    while (ast.nextFnParam(&param_it)) |param| {
         const param_comments = if (param.first_doc_comment) |dc|
             try analysis.collectDocComments(alloc, tree, dc, .Markdown, false)
         else

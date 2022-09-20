@@ -1,4 +1,5 @@
 //! Configuration options for zls.
+//! Keep in sync with schema.json and zls-vscode's package.json!
 
 const Config = @This();
 
@@ -12,8 +13,8 @@ const logger = std.log.scoped(.config);
 /// Whether to enable snippet completions
 enable_snippets: bool = false,
 
-/// Whether to enable unused variable warnings
-enable_unused_variable_warnings: bool = false,
+/// Whether to enable ast-check diagnostics
+enable_ast_check_diagnostics: bool = true,
 
 /// Whether to enable import/embedFile argument completions (NOTE: these are triggered manually as updating the autotrigger characters may cause issues)
 enable_import_embedfile_argument_completions: bool = false,
@@ -82,9 +83,10 @@ pub fn loadFromFile(allocator: std.mem.Allocator, file_path: []const u8) ?Config
     @setEvalBranchQuota(3000);
 
     var token_stream = std.json.TokenStream.init(file_buf);
+    const parse_options = std.json.ParseOptions{ .allocator = allocator, .ignore_unknown_fields = true };
 
     // TODO: Better errors? Doesn't seem like std.json can provide us positions or context.
-    var config = std.json.parse(Config, &token_stream, std.json.ParseOptions{ .allocator = allocator }) catch |err| {
+    var config = std.json.parse(Config, &token_stream, parse_options) catch |err| {
         logger.warn("Error while parsing configuration file: {}", .{err});
         return null;
     };
@@ -148,6 +150,7 @@ pub fn configChanged(config: *Config, allocator: std.mem.Allocator, builtin_crea
                             std_dir: []const u8,
                             global_cache_dir: []const u8,
                             version: []const u8,
+                            target: ?[]const u8 = null,
                         };
 
                         var token_stream = std.json.TokenStream.init(zig_env_result.stdout);
@@ -205,11 +208,6 @@ pub fn configChanged(config: *Config, allocator: std.mem.Allocator, builtin_crea
         config.builtin_path = try std.fs.path.join(allocator, &.{ builtin_creation_dir.?, "builtin.zig" });
     }
 
-    if (null == config.build_runner_path) {
-        var exe_dir_bytes: [std.fs.MAX_PATH_BYTES]u8 = undefined;
-        const exe_dir_path = try std.fs.selfExeDirPath(&exe_dir_bytes);
-        config.build_runner_path = try std.fs.path.resolve(allocator, &[_][]const u8{ exe_dir_path, "build_runner.zig" });
-    }
 
     if (null == config.global_cache_path) {
         const cache_dir_path = (try known_folders.getPath(allocator, .cache)) orelse {
@@ -217,6 +215,22 @@ pub fn configChanged(config: *Config, allocator: std.mem.Allocator, builtin_crea
             return;
         };
         defer allocator.free(cache_dir_path);
+
         config.global_cache_path = try std.fs.path.resolve(allocator, &[_][]const u8{ cache_dir_path, "zls" });
+
+        std.fs.makeDirAbsolute(config.global_cache_path.?) catch |err| switch(err) {
+            error.PathAlreadyExists => {},
+            else => return err,
+        };
     }
+
+    if (null == config.build_runner_path) {
+        config.build_runner_path = try std.fs.path.resolve(allocator, &[_][]const u8{ config.global_cache_path.?, "build_runner.zig" });
+
+        const file = try std.fs.createFileAbsolute(config.build_runner_path.?, .{});
+        defer file.close();
+
+        try file.writeAll(@embedFile("special/build_runner.zig"));
+    }
+
 }
