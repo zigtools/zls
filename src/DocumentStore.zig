@@ -82,8 +82,7 @@ allocator: std.mem.Allocator,
 handles: UriToHandleMap = .{},
 build_files: BuildFileList = .{},
 
-// TODO use pointer back to Server.config
-config: Config,
+config: *Config,
 std_uri: ?[]const u8,
 // TODO make this configurable
 // We can't figure it out ourselves since we don't know what arguments
@@ -95,7 +94,7 @@ zig_global_cache_root: []const u8 = "ZLS_DONT_CARE",
 
 pub fn init(
     allocator: std.mem.Allocator,
-    config: Config,
+    config: *Config,
 ) !DocumentStore {
     return DocumentStore{
         .allocator = allocator,
@@ -671,7 +670,7 @@ fn translate(self: *DocumentStore, handle: *Handle, source: []const u8) error{Ou
 
     const maybe_result = try translate_c.translate(
         self.allocator,
-        self.config,
+        self.config.*,
         include_dirs,
         source,
     );
