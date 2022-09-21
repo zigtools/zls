@@ -271,7 +271,7 @@ pub const CompletionItemLabelDetails = struct {
 };
 
 pub const DocumentSymbol = struct {
-    const Kind = enum(u32) {
+    pub const Kind = enum(u32) {
         File = 1,
         Module = 2,
         Namespace = 3,

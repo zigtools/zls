@@ -1770,12 +1770,12 @@ fn getDocumentSymbolsInternal(allocator: std.mem.Allocator, tree: Ast, node: Ast
             .fn_proto_multi,
             .fn_proto_one,
             .fn_decl,
-            => .Function,
+            => |tag| resolveNodeKind(tree, node, tag),
             .local_var_decl,
-            .global_var_decl,
             .aligned_var_decl,
+            .global_var_decl,
             .simple_var_decl,
-            => .Variable,
+            => |tag| resolveNodeKind(tree, node, tag),
             .container_field,
             .container_field_align,
             .container_field_init,
@@ -1786,7 +1786,7 @@ fn getDocumentSymbolsInternal(allocator: std.mem.Allocator, tree: Ast, node: Ast
             .tagged_union_two,
             .tagged_union_two_trailing,
             => .Field,
-            else => .Variable,
+            else => |tag| resolveNodeKind(tree, node, tag),
         },
         .range = range,
         .selectionRange = range,
@@ -1821,6 +1821,43 @@ fn getDocumentSymbolsInternal(allocator: std.mem.Allocator, tree: Ast, node: Ast
             }
             break :ch children.items;
         },
+    };
+}
+
+fn resolveNodeKind(tree: Ast, node_idx: Ast.Node.Index, tag: std.zig.Ast.Node.Tag) types.DocumentSymbol.Kind {
+    // todo: const Foo = @import("Foo.zig");
+    // todo: pub var|const Type = std.ArrayList(u8);
+
+    const token_tags = tree.tokens.items(.tag);
+    const node_maintokens = tree.nodes.items(.main_token);
+    const node_datum = tree.nodes.items(.data);
+
+    return switch (tag) {
+        .local_var_decl => .Variable,
+        // [pub] var|const Type = struct|enum|union {}
+        .simple_var_decl, .aligned_var_decl, .global_var_decl => {
+            switch (token_tags[node_maintokens[node_idx]]) {
+                .keyword_var => .Variable,
+                .keyword_const => {
+                    const rhs_token = node_maintokens[node_datum[node_idx].rhs];
+                    return switch (token_tags[rhs_token]) {
+                        .keyword_enum => .Enum,
+                        .keyword_union => .Struct,
+                        .keyword_struct => .Struct,
+                        else => .Variable,
+                    };
+                },
+                else => unreachable,
+            }
+        },
+        // [pub] fn Function() type {};
+        .fn_decl => {
+            const proto_idx = node_datum[node_idx].lhs;
+            const return_type_idx = node_datum[proto_idx].rhs;
+            const return_type = tree.tokenSlice(node_maintokens[return_type_idx]);
+            return if (std.mem.eql(u8, return_type, "type")) .Struct else .Function;
+        },
+        else => .Variable,
     };
 }
 
