@@ -1749,7 +1749,6 @@ fn semanticTokensFullHandler(server: *Server, writer: anytype, id: types.Request
         };
 
         const token_array = try semantic_tokens.writeAllSemanticTokens(&server.arena, &server.document_store, handle, server.offset_encoding);
-        defer server.allocator.free(token_array);
 
         return try send(writer, server.arena.allocator(), types.Response{
             .id = id,
