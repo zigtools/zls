@@ -2,6 +2,7 @@ const std = @import("std");
 const zls = @import("zls");
 
 const headerPkg = zls.header;
+const Config = zls.Config;
 const Server = zls.Server;
 const types = zls.types;
 const requests = zls.requests;
@@ -10,25 +11,33 @@ const initialize_msg =
     \\{"processId":6896,"clientInfo":{"name":"vscode","version":"1.46.1"},"rootPath":null,"rootUri":null,"capabilities":{"workspace":{"applyEdit":true,"workspaceEdit":{"documentChanges":true,"resourceOperations":["create","rename","delete"],"failureHandling":"textOnlyTransactional"},"didChangeConfiguration":{"dynamicRegistration":true},"didChangeWatchedFiles":{"dynamicRegistration":true},"symbol":{"dynamicRegistration":true,"symbolKind":{"valueSet":[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26]},"tagSupport":{"valueSet":[1]}},"executeCommand":{"dynamicRegistration":true},"configuration":true,"workspaceFolders":true},"textDocument":{"publishDiagnostics":{"relatedInformation":true,"versionSupport":false,"tagSupport":{"valueSet":[1,2]},"complexDiagnosticCodeSupport":true},"synchronization":{"dynamicRegistration":true,"willSave":true,"willSaveWaitUntil":true,"didSave":true},"completion":{"dynamicRegistration":true,"contextSupport":true,"completionItem":{"snippetSupport":true,"commitCharactersSupport":true,"documentationFormat":["markdown","plaintext"],"deprecatedSupport":true,"preselectSupport":true,"tagSupport":{"valueSet":[1]},"insertReplaceSupport":true},"completionItemKind":{"valueSet":[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25]}},"hover":{"dynamicRegistration":true,"contentFormat":["markdown","plaintext"]},"signatureHelp":{"dynamicRegistration":true,"signatureInformation":{"documentationFormat":["markdown","plaintext"],"parameterInformation":{"labelOffsetSupport":true}},"contextSupport":true},"definition":{"dynamicRegistration":true,"linkSupport":true},"references":{"dynamicRegistration":true},"documentHighlight":{"dynamicRegistration":true},"documentSymbol":{"dynamicRegistration":true,"symbolKind":{"valueSet":[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26]},"hierarchicalDocumentSymbolSupport":true,"tagSupport":{"valueSet":[1]}},"codeAction":{"dynamicRegistration":true,"isPreferredSupport":true,"codeActionLiteralSupport":{"codeActionKind":{"valueSet":["","quickfix","refactor","refactor.extract","refactor.inline","refactor.rewrite","source","source.organizeImports"]}}},"codeLens":{"dynamicRegistration":true},"formatting":{"dynamicRegistration":true},"rangeFormatting":{"dynamicRegistration":true},"onTypeFormatting":{"dynamicRegistration":true},"rename":{"dynamicRegistration":true,"prepareSupport":true},"documentLink":{"dynamicRegistration":true,"tooltipSupport":true},"typeDefinition":{"dynamicRegistration":true,"linkSupport":true},"implementation":{"dynamicRegistration":true,"linkSupport":true},"colorProvider":{"dynamicRegistration":true},"foldingRange":{"dynamicRegistration":true,"rangeLimit":5000,"lineFoldingOnly":true},"declaration":{"dynamicRegistration":true,"linkSupport":true},"selectionRange":{"dynamicRegistration":true},"semanticTokens":{"dynamicRegistration":true,"tokenTypes":["comment","keyword","number","regexp","operator","namespace","type","struct","class","interface","enum","typeParameter","function","member","macro","variable","parameter","property","label"],"tokenModifiers":["declaration","documentation","static","abstract","deprecated","readonly"]}},"window":{"workDoneProgress":true}},"trace":"off","workspaceFolders":[{"uri":"file://./tests", "name":"root"}]}
 ;
 
+const default_config: Config = .{
+    .enable_ast_check_diagnostics = false,
+    .enable_semantic_tokens = true,
+    .enable_inlay_hints = true,
+    .inlay_hints_exclude_single_argument = false,
+    .inlay_hints_show_builtin = true,
+};
+
 const allocator = std.testing.allocator;
 
 pub const Context = struct {
     server: Server,
+    config: *Config,
     request_id: u32 = 1,
 
     pub fn init() !Context {
-        var context = Context{
-            .server = try Server.init(
-                allocator,
-                .{
-                    .enable_ast_check_diagnostics = false,
-                    .enable_semantic_tokens = true,
-                    .enable_inlay_hints = true,
-                    .inlay_hints_exclude_single_argument = false,
-                    .inlay_hints_show_builtin = true,
-                },
-                null,
-            ),
+        var config = try allocator.create(Config);
+        errdefer allocator.destroy(config);
+
+        config.* = default_config;
+
+        var server = try Server.init(allocator, config, null);
+        errdefer server.deinit();
+
+        var context: Context = .{
+            .server = server,
+            .config = config,
         };
 
         try context.request("initialize", initialize_msg, null);
@@ -37,6 +46,9 @@ pub const Context = struct {
     }
 
     pub fn deinit(self: *Context) void {
+        std.json.parseFree(Config, self.config.*, .{ .allocator = allocator });
+        allocator.destroy(self.config);
+
         self.request("shutdown", "{}", null) catch {};
         self.server.deinit();
     }

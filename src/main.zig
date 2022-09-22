@@ -264,13 +264,15 @@ pub fn main() !void {
     }
 
     config = try getConfig(allocator, config.config_path, true);
+    defer std.json.parseFree(Config, config.config, .{ .allocator = allocator });
+
     if (config.config_path == null) {
         logger.info("No config file zls.json found.", .{});
     }
 
     var server = try Server.init(
         allocator,
-        config.config,
+        &config.config,
         config.config_path,
     );
     defer server.deinit();
