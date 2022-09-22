@@ -23,7 +23,7 @@ const log = std.log.scoped(.server);
 
 // Server fields
 
-config: Config,
+config: *Config,
 allocator: std.mem.Allocator = undefined,
 arena: std.heap.ArenaAllocator = undefined,
 document_store: DocumentStore = undefined,
@@ -320,6 +320,24 @@ fn publishDiagnostics(server: *Server, writer: anytype, handle: DocumentStore.Ha
                 }
             }
         }
+    }
+
+    for (handle.cimports) |cimport| {
+        if (cimport.result != .failure) continue;
+        const stderr = std.mem.trim(u8, cimport.result.failure, " ");
+
+        var pos_and_diag_iterator = std.mem.split(u8, stderr, ":");
+        _ = pos_and_diag_iterator.next(); // skip file path
+        _ = pos_and_diag_iterator.next(); // skip line
+        _ = pos_and_diag_iterator.next(); // skip character
+
+        try diagnostics.append(allocator, .{
+            .range = offsets.nodeToRange(handle.tree, cimport.node, server.offset_encoding),
+            .severity = .Error,
+            .code = "cImport",
+            .source = "zls",
+            .message = try allocator.dupe(u8, pos_and_diag_iterator.rest()),
+        });
     }
 
     try send(writer, server.arena.allocator(), types.Notification{
@@ -1146,7 +1164,7 @@ fn completeBuiltin(server: *Server, writer: anytype, id: types.RequestId) !void 
 
     if (server.builtin_completions == null) {
         server.builtin_completions = try std.ArrayListUnmanaged(types.CompletionItem).initCapacity(server.allocator, data.builtins.len);
-        try populateBuiltinCompletions(&server.builtin_completions.?, server.config);
+        try populateBuiltinCompletions(&server.builtin_completions.?, server.config.*);
     }
 
     try send(writer, server.arena.allocator(), types.Response{
@@ -2036,7 +2054,7 @@ fn didChangeConfigurationHandler(server: *Server, writer: anytype, id: types.Req
             }
         }
 
-        try server.configChanged(null);
+        try server.config.configChanged(server.allocator, null);
     } else if (server.client_capabilities.supports_configuration)
         try server.requestConfiguration(writer);
 }
@@ -2192,7 +2210,7 @@ fn inlayHintHandler(server: *Server, writer: anytype, id: types.RequestId, req: 
         // with caching it would also make sense to generate all hints instead of only the visible ones
         const hints = try inlay_hints.writeRangeInlayHint(
             &server.arena,
-            &server.config,
+            server.config.*,
             &server.document_store,
             handle,
             req.params.range,
@@ -2300,7 +2318,7 @@ pub fn processJsonRpc(server: *Server, writer: anytype, json: []const u8) !void 
             }
         }
 
-        try server.configChanged(null);
+        try server.config.configChanged(server.allocator, null);
 
         return;
     }
@@ -2407,14 +2425,9 @@ pub fn processJsonRpc(server: *Server, writer: anytype, json: []const u8) !void 
     log.debug("Method without return value not implemented: {s}", .{method});
 }
 
-pub fn configChanged(server: *Server, builtin_creation_dir: ?[]const u8) !void {
-    try server.config.configChanged(server.allocator, builtin_creation_dir);
-    server.document_store.config = server.config;
-}
-
 pub fn init(
     allocator: std.mem.Allocator,
-    config: Config,
+    config: *Config,
     config_path: ?[]const u8,
 ) !Server {
     // TODO replace global with something like an Analyser struct
@@ -2422,23 +2435,21 @@ pub fn init(
     // see: https://github.com/zigtools/zls/issues/536
     analysis.init(allocator);
 
-    var cfg = config;
+    try config.configChanged(allocator, config_path);
 
-    try cfg.configChanged(allocator, config_path);
+    var document_store = try DocumentStore.init(allocator, config);
+    errdefer document_store.deinit();
 
     return Server{
-        .config = cfg,
+        .config = config,
         .allocator = allocator,
-        .document_store = try DocumentStore.init(allocator, cfg),
+        .document_store = document_store,
     };
 }
 
 pub fn deinit(server: *Server) void {
     server.document_store.deinit();
     analysis.deinit();
-
-    const config_parse_options = std.json.ParseOptions{ .allocator = server.allocator };
-    defer std.json.parseFree(Config, server.config, config_parse_options);
 
     if (server.builtin_completions) |*compls| {
         compls.deinit(server.allocator);

@@ -13,6 +13,10 @@ pub fn build(b: *std.build.Builder) !void {
     const exe_options = b.addOptions();
     exe.addOptions("build_options", exe_options);
 
+    const enable_tracy = b.option(bool, "enable_tracy", "Whether tracy should be enabled.") orelse false;
+    const coverage = b.option(bool, "generate_coverage", "Generate coverage data with kcov") orelse false;
+    const coverage_output_dir = b.option([]const u8, "coverage_output_dir", "Output directory for coverage data") orelse b.pathJoin(&.{b.install_prefix, "kcov"});
+
     exe_options.addOption(
         shared.ZigVersion,
         "data_version",
@@ -24,8 +28,6 @@ pub fn build(b: *std.build.Builder) !void {
         "log_level",
         b.option(std.log.Level, "log_level", "The Log Level to be used.") orelse .info,
     );
-
-    const enable_tracy = b.option(bool, "enable_tracy", "Whether tracy should be enabled.") orelse false;
 
     exe_options.addOption(
         bool,
@@ -115,6 +117,19 @@ pub fn build(b: *std.build.Builder) !void {
     test_step.dependOn(b.getInstallStep());
 
     var tests = b.addTest("tests/tests.zig");
+
+    if(coverage) {
+        const src_dir = b.pathJoin(&.{b.build_root, "src"});
+        const include_pattern = b.fmt("--include-pattern={s}", .{src_dir});
+        
+        tests.setExecCmd(&[_]?[]const u8{
+            "kcov",
+            include_pattern,
+            coverage_output_dir,
+            null,
+        });
+    }
+
     tests.use_stage1 = true;
     tests.addPackage(.{ .name = "zls", .source = .{ .path = "src/zls.zig" }, .dependencies = exe.packages.items });
     tests.setBuildMode(.Debug);

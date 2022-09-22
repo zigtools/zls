@@ -673,7 +673,7 @@ fn writeNodeInlayHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store:
 /// `InlayHint.tooltip.value` has to deallocated separately
 pub fn writeRangeInlayHint(
     arena: *std.heap.ArenaAllocator,
-    config: *const Config,
+    config: Config,
     store: *DocumentStore,
     handle: *DocumentStore.Handle,
     range: types.Range,
@@ -682,7 +682,7 @@ pub fn writeRangeInlayHint(
 ) error{OutOfMemory}![]types.InlayHint {
     var builder: Builder = .{
         .allocator = arena.child_allocator,
-        .config = config,
+        .config = &config,
         .handle = handle,
         .hints = .{},
         .hover_kind = hover_kind,
