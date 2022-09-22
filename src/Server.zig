@@ -877,9 +877,9 @@ fn hoverDefinitionBuiltin(server: *Server, writer: anytype, id: types.RequestId,
     const name = identifierFromPosition(pos_index, handle.*);
     if (name.len == 0) return try respondGeneric(writer, id, null_result_response);
 
-    inline for (data.builtins) |builtin| {
+    for (data.builtins) |builtin| {
         if (std.mem.eql(u8, builtin.name[1..], name)) {
-            try send(writer, server.arena.allocator(), types.Response{
+            return try send(writer, server.arena.allocator(), types.Response{
                 .id = id,
                 .result = .{
                     .Hover = .{
@@ -895,6 +895,8 @@ fn hoverDefinitionBuiltin(server: *Server, writer: anytype, id: types.RequestId,
             });
         }
     }
+
+    return try respondGeneric(writer, id, null_result_response);
 }
 
 fn hoverDefinitionGlobal(server: *Server, writer: anytype, id: types.RequestId, pos_index: usize, handle: *DocumentStore.Handle) !void {
