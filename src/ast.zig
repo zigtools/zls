@@ -896,6 +896,17 @@ pub fn lastToken(tree: Ast, node: Ast.Node.Index) Ast.TokenIndex {
     };
 }
 
+pub fn paramFirstToken(tree: Ast, param: Ast.full.FnProto.Param) Ast.TokenIndex {
+    return param.first_doc_comment orelse
+        param.comptime_noalias orelse
+        param.name_token orelse
+        tree.firstToken(param.type_expr);
+}
+
+pub fn paramLastToken(tree: Ast, param: Ast.full.FnProto.Param) Ast.TokenIndex {
+    return param.anytype_ellipsis3 orelse tree.lastToken(param.type_expr);
+}
+
 pub fn containerField(tree: Ast, node: Ast.Node.Index) ?Ast.full.ContainerField {
     return switch (tree.nodes.items(.tag)[node]) {
         .container_field => tree.containerField(node),

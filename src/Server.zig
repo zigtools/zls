@@ -724,11 +724,8 @@ fn hoverSymbol(
                 doc_str = try analysis.collectDocComments(server.arena.allocator(), handle.tree, doc_comments, hover_kind, false);
             }
 
-            const first_token = param.first_doc_comment orelse
-                param.comptime_noalias orelse
-                param.name_token orelse
-                tree.firstToken(param.type_expr); // extern fn
-            const last_token = param.anytype_ellipsis3 orelse tree.lastToken(param.type_expr);
+            const first_token = ast.paramFirstToken(tree, param);
+            const last_token = ast.paramLastToken(tree, param);
 
             const start = offsets.tokenToIndex(tree, first_token);
             const end = offsets.tokenToLoc(tree, last_token).end;
@@ -1052,11 +1049,8 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: analysis.Decl
             else
                 null;
 
-            const first_token = param.first_doc_comment orelse
-                param.comptime_noalias orelse
-                param.name_token orelse
-                tree.firstToken(param.type_expr);
-            const last_token = param.anytype_ellipsis3 orelse tree.lastToken(param.type_expr);
+            const first_token = ast.paramFirstToken(tree, param);
+            const last_token = ast.paramLastToken(tree, param);
 
             try context.completions.append(allocator, .{
                 .label = tree.tokenSlice(param.name_token.?),
