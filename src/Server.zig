@@ -141,7 +141,7 @@ fn showMessage(server: *Server, writer: anytype, message_type: types.MessageType
     });
 }
 
-fn publishDiagnostics(server: *Server, writer: anytype, handle: DocumentStore.Handle) !void {
+fn publishDiagnostics(server: *Server, writer: anytype, handle: *DocumentStore.Handle) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -165,88 +165,8 @@ fn publishDiagnostics(server: *Server, writer: anytype, handle: DocumentStore.Ha
         });
     }
 
-    if (server.config.enable_ast_check_diagnostics and tree.errors.len == 0) diag: {
-        if (server.config.zig_exe_path) |zig_exe_path| {
-            var process = std.ChildProcess.init(&[_][]const u8{ zig_exe_path, "ast-check", "--color", "off" }, server.allocator);
-            process.stdin_behavior = .Pipe;
-            process.stderr_behavior = .Pipe;
-
-            process.spawn() catch |err| {
-                log.warn("Failed to spawn zig ast-check process, error: {}", .{err});
-                break :diag;
-            };
-            try process.stdin.?.writeAll(handle.document.text);
-            process.stdin.?.close();
-
-            process.stdin = null;
-
-            const stderr_bytes = try process.stderr.?.reader().readAllAlloc(server.allocator, std.math.maxInt(usize));
-            defer server.allocator.free(stderr_bytes);
-
-            switch (try process.wait()) {
-                .Exited => {
-                    // NOTE: I believe that with color off it's one diag per line; is this correct?
-                    var line_iterator = std.mem.split(u8, stderr_bytes, "\n");
-
-                    while (line_iterator.next()) |line| lin: {
-                        var pos_and_diag_iterator = std.mem.split(u8, line, ":");
-                        const maybe_first = pos_and_diag_iterator.next();
-                        if (maybe_first) |first| {
-                            if (first.len <= 1) break :lin;
-                        } else break;
-
-                        const utf8_position = types.Position{
-                            .line = (try std.fmt.parseInt(u32, pos_and_diag_iterator.next().?, 10)) - 1,
-                            .character = (try std.fmt.parseInt(u32, pos_and_diag_iterator.next().?, 10)) - 1,
-                        };
-
-                        // zig uses utf-8 encoding for character offsets
-                        const position = offsets.convertPositionEncoding(handle.document.text, utf8_position, .utf8, server.offset_encoding);
-                        const range = offsets.tokenPositionToRange(handle.document.text, position, server.offset_encoding);
-
-                        const msg = pos_and_diag_iterator.rest()[1..];
-
-                        if (std.mem.startsWith(u8, msg, "error: ")) {
-                            try diagnostics.append(allocator, .{
-                                .range = range,
-                                .severity = .Error,
-                                .code = "ast_check",
-                                .source = "zls",
-                                .message = try server.arena.allocator().dupe(u8, msg["error: ".len..]),
-                            });
-                        } else if (std.mem.startsWith(u8, msg, "note: ")) {
-                            var latestDiag = &diagnostics.items[diagnostics.items.len - 1];
-
-                            var fresh = if (latestDiag.relatedInformation.len == 0)
-                                try server.arena.allocator().alloc(types.DiagnosticRelatedInformation, 1)
-                            else
-                                try server.arena.allocator().realloc(@ptrCast([]types.DiagnosticRelatedInformation, latestDiag.relatedInformation), latestDiag.relatedInformation.len + 1);
-
-                            const location = types.Location{
-                                .uri = handle.uri(),
-                                .range = range,
-                            };
-
-                            fresh[fresh.len - 1] = .{
-                                .location = location,
-                                .message = try server.arena.allocator().dupe(u8, msg["note: ".len..]),
-                            };
-
-                            latestDiag.relatedInformation = fresh;
-                        } else {
-                            try diagnostics.append(allocator, .{
-                                .range = range,
-                                .severity = .Error,
-                                .code = "ast_check",
-                                .source = "zls",
-                                .message = try server.arena.allocator().dupe(u8, msg),
-                            });
-                        }
-                    }
-                },
-                else => {},
-            }
-        }
+    if (server.config.enable_ast_check_diagnostics and tree.errors.len == 0) {
+        try getAstCheckDiagnostics(server, handle, &diagnostics);
     }
 
     if (server.config.warn_style) {
@@ -349,6 +269,98 @@ fn publishDiagnostics(server: *Server, writer: anytype, handle: DocumentStore.Ha
             },
         },
     });
+}
+
+fn getAstCheckDiagnostics(
+    server: *Server,
+    handle: *DocumentStore.Handle,
+    diagnostics: *std.ArrayListUnmanaged(types.Diagnostic),
+) !void {
+    var allocator = server.arena.allocator();
+
+    const zig_exe_path = server.config.zig_exe_path orelse return;
+
+    var process = std.ChildProcess.init(&[_][]const u8{ zig_exe_path, "ast-check", "--color", "off" }, server.allocator);
+    process.stdin_behavior = .Pipe;
+    process.stderr_behavior = .Pipe;
+
+    process.spawn() catch |err| {
+        log.warn("Failed to spawn zig ast-check process, error: {}", .{err});
+        return;
+    };
+    try process.stdin.?.writeAll(handle.document.text);
+    process.stdin.?.close();
+
+    process.stdin = null;
+
+    const stderr_bytes = try process.stderr.?.reader().readAllAlloc(server.allocator, std.math.maxInt(usize));
+    defer server.allocator.free(stderr_bytes);
+
+    const term = process.wait() catch |err| {
+        log.warn("Failed to await zig ast-check process, error: {}", .{err});
+        return;
+    };
+
+    if (term != .Exited) return;
+
+    // NOTE: I believe that with color off it's one diag per line; is this correct?
+    var line_iterator = std.mem.split(u8, stderr_bytes, "\n");
+
+    while (line_iterator.next()) |line| lin: {
+        var pos_and_diag_iterator = std.mem.split(u8, line, ":");
+        const maybe_first = pos_and_diag_iterator.next();
+        if (maybe_first) |first| {
+            if (first.len <= 1) break :lin;
+        } else break;
+
+        const utf8_position = types.Position{
+            .line = (try std.fmt.parseInt(u32, pos_and_diag_iterator.next().?, 10)) - 1,
+            .character = (try std.fmt.parseInt(u32, pos_and_diag_iterator.next().?, 10)) - 1,
+        };
+
+        // zig uses utf-8 encoding for character offsets
+        const position = offsets.convertPositionEncoding(handle.document.text, utf8_position, .utf8, server.offset_encoding);
+        const range = offsets.tokenPositionToRange(handle.document.text, position, server.offset_encoding);
+
+        const msg = pos_and_diag_iterator.rest()[1..];
+
+        if (std.mem.startsWith(u8, msg, "error: ")) {
+            try diagnostics.append(allocator, .{
+                .range = range,
+                .severity = .Error,
+                .code = "ast_check",
+                .source = "zls",
+                .message = try server.arena.allocator().dupe(u8, msg["error: ".len..]),
+            });
+        } else if (std.mem.startsWith(u8, msg, "note: ")) {
+            var latestDiag = &diagnostics.items[diagnostics.items.len - 1];
+
+            var fresh = if (latestDiag.relatedInformation.len == 0)
+                try server.arena.allocator().alloc(types.DiagnosticRelatedInformation, 1)
+            else
+                try server.arena.allocator().realloc(@ptrCast([]types.DiagnosticRelatedInformation, latestDiag.relatedInformation), latestDiag.relatedInformation.len + 1);
+
+            const location = types.Location{
+                .uri = handle.uri(),
+                .range = range,
+            };
+
+            fresh[fresh.len - 1] = .{
+                .location = location,
+                .message = try server.arena.allocator().dupe(u8, msg["note: ".len..]),
+            };
+
+            latestDiag.relatedInformation = fresh;
+        } else {
+            try diagnostics.append(allocator, .{
+                .range = range,
+                .severity = .Error,
+                .code = "ast_check",
+                .source = "zls",
+                .message = try server.arena.allocator().dupe(u8, msg),
+            });
+        }
+    }
 }
 
 fn typeToCompletion(
@@ -1492,23 +1504,23 @@ fn initializeHandler(server: *Server, writer: anytype, id: types.RequestId, req:
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    if(req.params.capabilities.general) |general| {
+    if (req.params.capabilities.general) |general| {
         var supports_utf8 = false;
         var supports_utf16 = false;
         var supports_utf32 = false;
-        for(general.positionEncodings.value) |encoding| {
+        for (general.positionEncodings.value) |encoding| {
             if (std.mem.eql(u8, encoding, "utf-8")) {
                 supports_utf8 = true;
-            } else if(std.mem.eql(u8, encoding, "utf-16")) {
+            } else if (std.mem.eql(u8, encoding, "utf-16")) {
                 supports_utf16 = true;
-            } else if(std.mem.eql(u8, encoding, "utf-32")) {
+            } else if (std.mem.eql(u8, encoding, "utf-32")) {
                 supports_utf32 = true;
             }
         }
 
-        if(supports_utf8) {
+        if (supports_utf8) {
             server.offset_encoding = .utf8;
-        } else if(supports_utf32) {
+        } else if (supports_utf32) {
             server.offset_encoding = .utf32;
         } else {
             server.offset_encoding = .utf16;
@@ -1690,7 +1702,7 @@ fn openDocumentHandler(server: *Server, writer: anytype, id: types.RequestId, re
     defer tracy_zone.end();
 
     const handle = try server.document_store.openDocument(req.params.textDocument.uri, req.params.textDocument.text);
-    try server.publishDiagnostics(writer, handle.*);
+    try server.publishDiagnostics(writer, handle);
 
     if (server.client_capabilities.supports_semantic_tokens) {
         const request: requests.SemanticTokensFull = .{ .params = .{ .textDocument = .{ .uri = req.params.textDocument.uri } } };
@@ -1710,7 +1722,7 @@ fn changeDocumentHandler(server: *Server, writer: anytype, id: types.RequestId, 
     };
 
     try server.document_store.applyChanges(handle, req.params.contentChanges.Array, server.offset_encoding);
-    try server.publishDiagnostics(writer, handle.*);
+    try server.publishDiagnostics(writer, handle);
 }
 
 fn saveDocumentHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.SaveDocument) error{OutOfMemory}!void {
