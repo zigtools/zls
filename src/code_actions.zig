@@ -109,18 +109,12 @@ fn handleUnusedFunctionParameter(builder: *Builder, actions: *std.ArrayListUnman
         .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditPos(index, new_text)}),
     };
 
-    const param_loc = .{
-        .start = offsets.tokenToIndex(tree, ast.paramFirstToken(tree, payload.param)),
-        .end = offsets.tokenToLoc(tree, ast.paramLastToken(tree, payload.param)).end,
-    };
-
     // TODO fix formatting
-    // TODO remove trailing comma on last parameter
     const action2 = types.CodeAction{
         .title = "remove function parameter",
         .kind = .QuickFix,
         .isPreferred = false,
-        .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditLoc(param_loc, "")}),
+        .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditLoc(getParamRemovalRange(tree, payload.param), "")}),
     };
 
     try actions.appendSlice(builder.arena.allocator(), &.{ action1, action2 });
@@ -246,6 +240,45 @@ fn createDiscardText(allocator: std.mem.Allocator, identifier_name: []const u8, 
     new_text.appendAssumeCapacity(';');
 
     return new_text.toOwnedSlice(allocator);
+}
+
+fn getParamRemovalRange(tree: Ast, param: Ast.full.FnProto.Param) offsets.Loc {
+    var param_start = offsets.tokenToIndex(tree, ast.paramFirstToken(tree, param));
+    var param_end = offsets.tokenToLoc(tree, ast.paramLastToken(tree, param)).end;
+
+    var trim_end = false;
+    while (param_start != 0) : (param_start -= 1) {
+        switch (tree.source[param_start - 1]) {
+            ' ', '\n' => continue,
+            ',' => {
+                param_start -= 1;
+                break;
+            },
+            '(' => {
+                trim_end = true;
+                break;
+            },
+            else => break,
+        }
+    }
+
+    var found_comma = false;
+    while (trim_end and param_end < tree.source.len) : (param_end += 1) {
+        switch (tree.source[param_end]) {
+            ' ', '\n' => continue,
+            ',' => if (!found_comma) {
+                found_comma = true;
+                continue;
+            } else {
+                param_end += 1;
+                break;
+            },
+            ')' => break,
+            else => break,
+        }
+    }
+
+    return .{ .start = param_start, .end = param_end };
 }
 
 const DiagnosticKind = union(enum) {
