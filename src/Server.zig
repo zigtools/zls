@@ -718,7 +718,8 @@ fn hoverSymbol(
                     return try respondGeneric(writer, id, null_result_response);
             }
         },
-        .param_decl => |param| def: {
+        .param_payload => |pay| def: {
+            const param = pay.param;
             if (param.first_doc_comment) |doc_comments| {
                 doc_str = try analysis.collectDocComments(server.arena.allocator(), handle.tree, doc_comments, hover_kind, false);
             }
@@ -1040,7 +1041,8 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: analysis.Decl
             false,
             context.parent_is_type_val,
         ),
-        .param_decl => |param| {
+        .param_payload => |pay| {
+            const param = pay.param;
             const doc_kind: types.MarkupContent.Kind = if (context.server.client_capabilities.completion_doc_supports_md) .Markdown else .PlainText;
             const doc = if (param.first_doc_comment) |doc_comments|
                 types.MarkupContent{
