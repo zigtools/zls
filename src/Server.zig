@@ -335,10 +335,10 @@ fn getAstCheckDiagnostics(
         } else if (std.mem.startsWith(u8, msg, "note: ")) {
             var latestDiag = &diagnostics.items[diagnostics.items.len - 1];
 
-            var fresh = if (latestDiag.relatedInformation.len == 0)
-                try server.arena.allocator().alloc(types.DiagnosticRelatedInformation, 1)
+            var fresh = if (latestDiag.relatedInformation) |related_information|
+                try server.arena.allocator().realloc(@ptrCast([]types.DiagnosticRelatedInformation, related_information), related_information.len + 1)
             else
-                try server.arena.allocator().realloc(@ptrCast([]types.DiagnosticRelatedInformation, latestDiag.relatedInformation), latestDiag.relatedInformation.len + 1);
+                try server.arena.allocator().alloc(types.DiagnosticRelatedInformation, 1);
 
             const location = types.Location{
                 .uri = handle.uri(),
