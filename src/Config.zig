@@ -16,6 +16,10 @@ enable_snippets: bool = false,
 /// Whether to enable ast-check diagnostics
 enable_ast_check_diagnostics: bool = true,
 
+/// Whether to automatically fix errors on save.
+/// Currently supports adding and removing discards.
+enable_autofix: bool = false,
+
 /// Whether to enable import/embedFile argument completions (NOTE: these are triggered manually as updating the autotrigger characters may cause issues)
 enable_import_embedfile_argument_completions: bool = false,
 
