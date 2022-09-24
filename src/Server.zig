@@ -12,6 +12,7 @@ const references = @import("references.zig");
 const offsets = @import("offsets.zig");
 const semantic_tokens = @import("semantic_tokens.zig");
 const inlay_hints = @import("inlay_hints.zig");
+const code_actions = @import("code_actions.zig");
 const shared = @import("shared.zig");
 const Ast = std.zig.Ast;
 const tracy = @import("tracy.zig");
@@ -1569,7 +1570,7 @@ fn initializeHandler(server: *Server, writer: anytype, id: types.RequestId, req:
                     .completionProvider = .{ .resolveProvider = false, .triggerCharacters = &[_][]const u8{ ".", ":", "@", "]" }, .completionItem = .{ .labelDetailsSupport = true } },
                     .documentHighlightProvider = true,
                     .hoverProvider = true,
-                    .codeActionProvider = false,
+                    .codeActionProvider = true,
                     .declarationProvider = true,
                     .definitionProvider = true,
                     .typeDefinitionProvider = true,
@@ -2257,6 +2258,38 @@ fn inlayHintHandler(server: *Server, writer: anytype, id: types.RequestId, req: 
     return try respondGeneric(writer, id, null_result_response);
 }
 
+fn codeActionHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.CodeAction) !void {
+    const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
+        log.warn("Trying to get code actions of non existent document {s}", .{req.params.textDocument.uri});
+        return try respondGeneric(writer, id, null_result_response);
+    };
+
+    const allocator = server.arena.allocator();
+
+    var builder = code_actions.Builder{
+        .arena = &server.arena,
+        .document_store = &server.document_store,
+        .handle = handle,
+        .offset_encoding = server.offset_encoding,
+    };
+
+    var actions = std.ArrayListUnmanaged(types.CodeAction){};
+
+    for (req.params.context.diagnostics) |diagnostic| {
+        try builder.generateCodeAction(diagnostic, &actions);
+    }
+
+    for (actions.items) |*action| {
+        // TODO query whether SourceFixAll is supported by the server
+        if (action.kind == .SourceFixAll) action.kind = .QuickFix;
+    }
+
+    return try send(writer, allocator, types.Response{
+        .id = id,
+        .result = .{ .CodeAction = actions.items },
+    });
+}
+
 // Needed for the hack seen below.
 fn extractErr(val: anytype) anyerror {
     val catch |e| return e;
@@ -2368,6 +2401,7 @@ pub fn processJsonRpc(server: *Server, writer: anytype, json: []const u8) !void 
         .{ "textDocument/rename", requests.Rename, renameHandler },
         .{ "textDocument/references", requests.References, referencesHandler },
         .{ "textDocument/documentHighlight", requests.DocumentHighlight, documentHighlightHandler },
+        .{ "textDocument/codeAction", requests.CodeAction, codeActionHandler },
         .{ "workspace/didChangeConfiguration", std.json.Value, didChangeConfigurationHandler },
     };
 
@@ -2408,7 +2442,6 @@ pub fn processJsonRpc(server: *Server, writer: anytype, json: []const u8) !void 
     // needs a response) or false if the method is a notification (in which
     // case it should be silently ignored)
     const unimplemented_map = std.ComptimeStringMap(bool, .{
-        .{ "textDocument/codeAction", true },
         .{ "textDocument/codeLens", true },
         .{ "textDocument/documentLink", true },
         .{ "textDocument/rangeFormatting", true },
