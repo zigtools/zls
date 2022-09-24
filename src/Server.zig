@@ -1726,18 +1726,65 @@ fn changeDocumentHandler(server: *Server, writer: anytype, id: types.RequestId, 
     try server.publishDiagnostics(writer, handle);
 }
 
-fn saveDocumentHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.SaveDocument) error{OutOfMemory}!void {
+fn saveDocumentHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.SaveDocument) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
     _ = id;
-    _ = writer;
+    const allocator = server.arena.allocator();
+    const uri = req.params.textDocument.uri;
 
-    const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
-        log.warn("Trying to save non existent document {s}", .{req.params.textDocument.uri});
+    const handle = server.document_store.getHandle(uri) orelse {
+        log.warn("Trying to save non existent document {s}", .{uri});
         return;
     };
     try server.document_store.applySave(handle);
+
+    if (handle.tree.errors.len != 0) return;
+    if (!server.config.enable_ast_check_diagnostics) return;
+    if (!server.config.enable_autofix) return;
+
+    var diagnostics = std.ArrayListUnmanaged(types.Diagnostic){};
+    try getAstCheckDiagnostics(server, handle, &diagnostics);
+
+    var builder = code_actions.Builder{
+        .arena = &server.arena,
+        .document_store = &server.document_store,
+        .handle = handle,
+        .offset_encoding = server.offset_encoding,
+    };
+
+    var actions = std.ArrayListUnmanaged(types.CodeAction){};
+    for (diagnostics.items) |diagnostic| {
+        try builder.generateCodeAction(diagnostic, &actions);
+    }
+
+    var text_edits = std.ArrayListUnmanaged(types.TextEdit){};
+    for (actions.items) |action| {
+        if (action.kind != .SourceFixAll) continue;
+
+        if (action.edit.changes.size != 1) continue;
+        const edits = action.edit.changes.get(uri) orelse continue;
+
+        try text_edits.appendSlice(allocator, edits.items);
+    }
+
+    var workspace_edit = types.WorkspaceEdit{ .changes = .{} };
+    try workspace_edit.changes.putNoClobber(allocator, uri, text_edits);
+
+    // NOTE: stage1 moment
+    const params = types.ResponseParams{
+        .ApplyEdit = types.ApplyWorkspaceEditParams{
+            .label = "autofix",
+            .edit = workspace_edit,
+        },
+    };
+
+    try send(writer, allocator, types.Request{
+        .id = .{ .String = "apply_edit" },
+        .method = "workspace/applyEdit",
+        .params = params,
+    });
 }
 
 fn closeDocumentHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.CloseDocument) error{}!void {
@@ -2316,6 +2363,8 @@ pub fn processJsonRpc(server: *Server, writer: anytype, json: []const u8) !void 
     } else types.RequestId{ .Integer = 0 };
 
     if (id == .String and std.mem.startsWith(u8, id.String, "register"))
+        return;
+    if (id == .String and std.mem.startsWith(u8, id.String, "apply_edit"))
         return;
     if (id == .String and std.mem.eql(u8, id.String, "i_haz_configuration")) {
         log.info("Setting configuration...", .{});
