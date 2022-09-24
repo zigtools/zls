@@ -274,6 +274,16 @@ pub const InlayHint = struct {
     },
 };
 
+pub const CodeAction = struct {
+    params: struct {
+        textDocument: TextDocumentIdentifier,
+        range: types.Range,
+        context: struct {
+            diagnostics: []types.Diagnostic,
+        },
+    },
+};
+
 pub const Configuration = struct {
     params: struct {
         settings: struct {

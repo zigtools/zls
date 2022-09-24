@@ -47,6 +47,8 @@ pub const ResponseParams = union(enum) {
     ConfigurationParams: ConfigurationParams,
     RegistrationParams: RegistrationParams,
     DocumentHighlight: []DocumentHighlight,
+    CodeAction: []CodeAction,
+    ApplyEdit: ApplyWorkspaceEditParams,
 };
 
 /// JSONRPC notifications
@@ -370,6 +372,46 @@ pub const InlayHintKind = enum(i64) {
     pub fn jsonStringify(value: InlayHintKind, options: std.json.StringifyOptions, out_stream: anytype) !void {
         try std.json.stringify(@enumToInt(value), options, out_stream);
     }
+};
+
+pub const CodeActionKind = enum {
+    Empty,
+    QuickFix,
+    Refactor,
+    RefactorExtract,
+    RefactorInline,
+    RefactorRewrite,
+    Source,
+    SourceOrganizeImports,
+    SourceFixAll,
+
+    pub fn jsonStringify(value: CodeActionKind, options: std.json.StringifyOptions, out_stream: anytype) !void {
+        const name = switch (value) {
+            .Empty => "",
+            .QuickFix => "quickfix",
+            .Refactor => "refactor",
+            .RefactorExtract => "refactor.extract",
+            .RefactorInline => "refactor.inline",
+            .RefactorRewrite => "refactor.rewrite",
+            .Source => "source",
+            .SourceOrganizeImports => "source.organizeImports",
+            .SourceFixAll => "source.fixAll",
+        };
+        try std.json.stringify(name, options, out_stream);
+    }
+};
+
+pub const CodeAction = struct {
+    title: string,
+    kind: CodeActionKind,
+    // diagnostics: []Diagnostic,
+    isPreferred: bool,
+    edit: WorkspaceEdit,
+};
+
+pub const ApplyWorkspaceEditParams = struct {
+    label: string,
+    edit: WorkspaceEdit,
 };
 
 pub const PositionEncodingKind = enum {
