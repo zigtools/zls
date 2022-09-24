@@ -1837,7 +1837,7 @@ fn resolveNodeKind(tree: Ast, node_idx: Ast.Node.Index, tag: std.zig.Ast.Node.Ta
         // [pub] var|const Type = struct|enum|union {}
         .simple_var_decl, .aligned_var_decl, .global_var_decl => {
             switch (token_tags[node_maintokens[node_idx]]) {
-                .keyword_var => .Variable,
+                .keyword_var => return .Variable,
                 .keyword_const => {
                     const rhs_token = node_maintokens[node_datum[node_idx].rhs];
                     return switch (token_tags[rhs_token]) {
