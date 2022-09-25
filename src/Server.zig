@@ -12,6 +12,7 @@ const references = @import("references.zig");
 const offsets = @import("offsets.zig");
 const semantic_tokens = @import("semantic_tokens.zig");
 const inlay_hints = @import("inlay_hints.zig");
+const code_actions = @import("code_actions.zig");
 const shared = @import("shared.zig");
 const Ast = std.zig.Ast;
 const tracy = @import("tracy.zig");
@@ -141,7 +142,7 @@ fn showMessage(server: *Server, writer: anytype, message_type: types.MessageType
     });
 }
 
-fn publishDiagnostics(server: *Server, writer: anytype, handle: DocumentStore.Handle) !void {
+fn publishDiagnostics(server: *Server, writer: anytype, handle: *DocumentStore.Handle) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -165,88 +166,8 @@ fn publishDiagnostics(server: *Server, writer: anytype, handle: DocumentStore.Ha
         });
     }
 
-    if (server.config.enable_ast_check_diagnostics and tree.errors.len == 0) diag: {
-        if (server.config.zig_exe_path) |zig_exe_path| {
-            var process = std.ChildProcess.init(&[_][]const u8{ zig_exe_path, "ast-check", "--color", "off" }, server.allocator);
-            process.stdin_behavior = .Pipe;
-            process.stderr_behavior = .Pipe;
-
-            process.spawn() catch |err| {
-                log.warn("Failed to spawn zig ast-check process, error: {}", .{err});
-                break :diag;
-            };
-            try process.stdin.?.writeAll(handle.document.text);
-            process.stdin.?.close();
-
-            process.stdin = null;
-
-            const stderr_bytes = try process.stderr.?.reader().readAllAlloc(server.allocator, std.math.maxInt(usize));
-            defer server.allocator.free(stderr_bytes);
-
-            switch (try process.wait()) {
-                .Exited => {
-                    // NOTE: I believe that with color off it's one diag per line; is this correct?
-                    var line_iterator = std.mem.split(u8, stderr_bytes, "\n");
-
-                    while (line_iterator.next()) |line| lin: {
-                        var pos_and_diag_iterator = std.mem.split(u8, line, ":");
-                        const maybe_first = pos_and_diag_iterator.next();
-                        if (maybe_first) |first| {
-                            if (first.len <= 1) break :lin;
-                        } else break;
-
-                        const utf8_position = types.Position{
-                            .line = (try std.fmt.parseInt(u32, pos_and_diag_iterator.next().?, 10)) - 1,
-                            .character = (try std.fmt.parseInt(u32, pos_and_diag_iterator.next().?, 10)) - 1,
-                        };
-
-                        // zig uses utf-8 encoding for character offsets
-                        const position = offsets.convertPositionEncoding(handle.document.text, utf8_position, .utf8, server.offset_encoding);
-                        const range = offsets.tokenPositionToRange(handle.document.text, position, server.offset_encoding);
-
-                        const msg = pos_and_diag_iterator.rest()[1..];
-
-                        if (std.mem.startsWith(u8, msg, "error: ")) {
-                            try diagnostics.append(allocator, .{
-                                .range = range,
-                                .severity = .Error,
-                                .code = "ast_check",
-                                .source = "zls",
-                                .message = try server.arena.allocator().dupe(u8, msg["error: ".len..]),
-                            });
-                        } else if (std.mem.startsWith(u8, msg, "note: ")) {
-                            var latestDiag = &diagnostics.items[diagnostics.items.len - 1];
-
-                            var fresh = if (latestDiag.relatedInformation.len == 0)
-                                try server.arena.allocator().alloc(types.DiagnosticRelatedInformation, 1)
-                            else
-                                try server.arena.allocator().realloc(@ptrCast([]types.DiagnosticRelatedInformation, latestDiag.relatedInformation), latestDiag.relatedInformation.len + 1);
-
-                            const location = types.Location{
-                                .uri = handle.uri(),
-                                .range = range,
-                            };
-
-                            fresh[fresh.len - 1] = .{
-                                .location = location,
-                                .message = try server.arena.allocator().dupe(u8, msg["note: ".len..]),
-                            };
-
-                            latestDiag.relatedInformation = fresh;
-                        } else {
-                            try diagnostics.append(allocator, .{
-                                .range = range,
-                                .severity = .Error,
-                                .code = "ast_check",
-                                .source = "zls",
-                                .message = try server.arena.allocator().dupe(u8, msg),
-                            });
-                        }
-                    }
-                },
-                else => {},
-            }
-        }
+    if (server.config.enable_ast_check_diagnostics and tree.errors.len == 0) {
+        try getAstCheckDiagnostics(server, handle, &diagnostics);
     }
 
     if (server.config.warn_style) {
@@ -349,6 +270,98 @@ fn publishDiagnostics(server: *Server, writer: anytype, handle: DocumentStore.Ha
             },
         },
     });
+}
+
+fn getAstCheckDiagnostics(
+    server: *Server,
+    handle: *DocumentStore.Handle,
+    diagnostics: *std.ArrayListUnmanaged(types.Diagnostic),
+) !void {
+    var allocator = server.arena.allocator();
+
+    const zig_exe_path = server.config.zig_exe_path orelse return;
+
+    var process = std.ChildProcess.init(&[_][]const u8{ zig_exe_path, "ast-check", "--color", "off" }, server.allocator);
+    process.stdin_behavior = .Pipe;
+    process.stderr_behavior = .Pipe;
+
+    process.spawn() catch |err| {
+        log.warn("Failed to spawn zig ast-check process, error: {}", .{err});
+        return;
+    };
+    try process.stdin.?.writeAll(handle.document.text);
+    process.stdin.?.close();
+
+    process.stdin = null;
+
+    const stderr_bytes = try process.stderr.?.reader().readAllAlloc(server.allocator, std.math.maxInt(usize));
+    defer server.allocator.free(stderr_bytes);
+
+    const term = process.wait() catch |err| {
+        log.warn("Failed to await zig ast-check process, error: {}", .{err});
+        return;
+    };
+
+    if (term != .Exited) return;
+
+    // NOTE: I believe that with color off it's one diag per line; is this correct?
+    var line_iterator = std.mem.split(u8, stderr_bytes, "\n");
+
+    while (line_iterator.next()) |line| lin: {
+        var pos_and_diag_iterator = std.mem.split(u8, line, ":");
+        const maybe_first = pos_and_diag_iterator.next();
+        if (maybe_first) |first| {
+            if (first.len <= 1) break :lin;
+        } else break;
+
+        const utf8_position = types.Position{
+            .line = (try std.fmt.parseInt(u32, pos_and_diag_iterator.next().?, 10)) - 1,
+            .character = (try std.fmt.parseInt(u32, pos_and_diag_iterator.next().?, 10)) - 1,
+        };
+
+        // zig uses utf-8 encoding for character offsets
+        const position = offsets.convertPositionEncoding(handle.document.text, utf8_position, .utf8, server.offset_encoding);
+        const range = offsets.tokenPositionToRange(handle.document.text, position, server.offset_encoding);
+
+        const msg = pos_and_diag_iterator.rest()[1..];
+
+        if (std.mem.startsWith(u8, msg, "error: ")) {
+            try diagnostics.append(allocator, .{
+                .range = range,
+                .severity = .Error,
+                .code = "ast_check",
+                .source = "zls",
+                .message = try server.arena.allocator().dupe(u8, msg["error: ".len..]),
+            });
+        } else if (std.mem.startsWith(u8, msg, "note: ")) {
+            var latestDiag = &diagnostics.items[diagnostics.items.len - 1];
+
+            var fresh = if (latestDiag.relatedInformation) |related_information|
+                try server.arena.allocator().realloc(@ptrCast([]types.DiagnosticRelatedInformation, related_information), related_information.len + 1)
+            else
+                try server.arena.allocator().alloc(types.DiagnosticRelatedInformation, 1);
+
+            const location = types.Location{
+                .uri = handle.uri(),
+                .range = range,
+            };
+
+            fresh[fresh.len - 1] = .{
+                .location = location,
+                .message = try server.arena.allocator().dupe(u8, msg["note: ".len..]),
+            };
+
+            latestDiag.relatedInformation = fresh;
+        } else {
+            try diagnostics.append(allocator, .{
+                .range = range,
+                .severity = .Error,
+                .code = "ast_check",
+                .source = "zls",
+                .message = try server.arena.allocator().dupe(u8, msg),
+            });
+        }
+    }
 }
 
 fn typeToCompletion(
@@ -718,16 +731,14 @@ fn hoverSymbol(
                     return try respondGeneric(writer, id, null_result_response);
             }
         },
-        .param_decl => |param| def: {
+        .param_payload => |pay| def: {
+            const param = pay.param;
             if (param.first_doc_comment) |doc_comments| {
                 doc_str = try analysis.collectDocComments(server.arena.allocator(), handle.tree, doc_comments, hover_kind, false);
             }
 
-            const first_token = param.first_doc_comment orelse
-                param.comptime_noalias orelse
-                param.name_token orelse
-                tree.firstToken(param.type_expr); // extern fn
-            const last_token = param.anytype_ellipsis3 orelse tree.lastToken(param.type_expr);
+            const first_token = ast.paramFirstToken(tree, param);
+            const last_token = ast.paramLastToken(tree, param);
 
             const start = offsets.tokenToIndex(tree, first_token);
             const end = offsets.tokenToLoc(tree, last_token).end;
@@ -1040,7 +1051,8 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: analysis.Decl
             false,
             context.parent_is_type_val,
         ),
-        .param_decl => |param| {
+        .param_payload => |pay| {
+            const param = pay.param;
             const doc_kind: types.MarkupContent.Kind = if (context.server.client_capabilities.completion_doc_supports_md) .Markdown else .PlainText;
             const doc = if (param.first_doc_comment) |doc_comments|
                 types.MarkupContent{
@@ -1050,11 +1062,8 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: analysis.Decl
             else
                 null;
 
-            const first_token = param.first_doc_comment orelse
-                param.comptime_noalias orelse
-                param.name_token orelse
-                tree.firstToken(param.type_expr);
-            const last_token = param.anytype_ellipsis3 orelse tree.lastToken(param.type_expr);
+            const first_token = ast.paramFirstToken(tree, param);
+            const last_token = ast.paramLastToken(tree, param);
 
             try context.completions.append(allocator, .{
                 .label = tree.tokenSlice(param.name_token.?),
@@ -1496,23 +1505,23 @@ fn initializeHandler(server: *Server, writer: anytype, id: types.RequestId, req:
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    if(req.params.capabilities.general) |general| {
+    if (req.params.capabilities.general) |general| {
         var supports_utf8 = false;
         var supports_utf16 = false;
         var supports_utf32 = false;
-        for(general.positionEncodings.value) |encoding| {
+        for (general.positionEncodings.value) |encoding| {
             if (std.mem.eql(u8, encoding, "utf-8")) {
                 supports_utf8 = true;
-            } else if(std.mem.eql(u8, encoding, "utf-16")) {
+            } else if (std.mem.eql(u8, encoding, "utf-16")) {
                 supports_utf16 = true;
-            } else if(std.mem.eql(u8, encoding, "utf-32")) {
+            } else if (std.mem.eql(u8, encoding, "utf-32")) {
                 supports_utf32 = true;
             }
         }
 
-        if(supports_utf8) {
+        if (supports_utf8) {
             server.offset_encoding = .utf8;
-        } else if(supports_utf32) {
+        } else if (supports_utf32) {
             server.offset_encoding = .utf32;
         } else {
             server.offset_encoding = .utf16;
@@ -1561,7 +1570,7 @@ fn initializeHandler(server: *Server, writer: anytype, id: types.RequestId, req:
                     .completionProvider = .{ .resolveProvider = false, .triggerCharacters = &[_][]const u8{ ".", ":", "@", "]" }, .completionItem = .{ .labelDetailsSupport = true } },
                     .documentHighlightProvider = true,
                     .hoverProvider = true,
-                    .codeActionProvider = false,
+                    .codeActionProvider = true,
                     .declarationProvider = true,
                     .definitionProvider = true,
                     .typeDefinitionProvider = true,
@@ -1694,7 +1703,7 @@ fn openDocumentHandler(server: *Server, writer: anytype, id: types.RequestId, re
     defer tracy_zone.end();
 
     const handle = try server.document_store.openDocument(req.params.textDocument.uri, req.params.textDocument.text);
-    try server.publishDiagnostics(writer, handle.*);
+    try server.publishDiagnostics(writer, handle);
 
     if (server.client_capabilities.supports_semantic_tokens) {
         const request: requests.SemanticTokensFull = .{ .params = .{ .textDocument = .{ .uri = req.params.textDocument.uri } } };
@@ -1714,21 +1723,68 @@ fn changeDocumentHandler(server: *Server, writer: anytype, id: types.RequestId, 
     };
 
     try server.document_store.applyChanges(handle, req.params.contentChanges.Array, server.offset_encoding);
-    try server.publishDiagnostics(writer, handle.*);
+    try server.publishDiagnostics(writer, handle);
 }
 
-fn saveDocumentHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.SaveDocument) error{OutOfMemory}!void {
+fn saveDocumentHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.SaveDocument) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
     _ = id;
-    _ = writer;
+    const allocator = server.arena.allocator();
+    const uri = req.params.textDocument.uri;
 
-    const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
-        log.warn("Trying to save non existent document {s}", .{req.params.textDocument.uri});
+    const handle = server.document_store.getHandle(uri) orelse {
+        log.warn("Trying to save non existent document {s}", .{uri});
         return;
     };
     try server.document_store.applySave(handle);
+
+    if (handle.tree.errors.len != 0) return;
+    if (!server.config.enable_ast_check_diagnostics) return;
+    if (!server.config.enable_autofix) return;
+
+    var diagnostics = std.ArrayListUnmanaged(types.Diagnostic){};
+    try getAstCheckDiagnostics(server, handle, &diagnostics);
+
+    var builder = code_actions.Builder{
+        .arena = &server.arena,
+        .document_store = &server.document_store,
+        .handle = handle,
+        .offset_encoding = server.offset_encoding,
+    };
+
+    var actions = std.ArrayListUnmanaged(types.CodeAction){};
+    for (diagnostics.items) |diagnostic| {
+        try builder.generateCodeAction(diagnostic, &actions);
+    }
+
+    var text_edits = std.ArrayListUnmanaged(types.TextEdit){};
+    for (actions.items) |action| {
+        if (action.kind != .SourceFixAll) continue;
+
+        if (action.edit.changes.size != 1) continue;
+        const edits = action.edit.changes.get(uri) orelse continue;
+
+        try text_edits.appendSlice(allocator, edits.items);
+    }
+
+    var workspace_edit = types.WorkspaceEdit{ .changes = .{} };
+    try workspace_edit.changes.putNoClobber(allocator, uri, text_edits);
+
+    // NOTE: stage1 moment
+    const params = types.ResponseParams{
+        .ApplyEdit = types.ApplyWorkspaceEditParams{
+            .label = "autofix",
+            .edit = workspace_edit,
+        },
+    };
+
+    try send(writer, allocator, types.Request{
+        .id = .{ .String = "apply_edit" },
+        .method = "workspace/applyEdit",
+        .params = params,
+    });
 }
 
 fn closeDocumentHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.CloseDocument) error{}!void {
@@ -2249,6 +2305,38 @@ fn inlayHintHandler(server: *Server, writer: anytype, id: types.RequestId, req: 
     return try respondGeneric(writer, id, null_result_response);
 }
 
+fn codeActionHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.CodeAction) !void {
+    const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
+        log.warn("Trying to get code actions of non existent document {s}", .{req.params.textDocument.uri});
+        return try respondGeneric(writer, id, null_result_response);
+    };
+
+    const allocator = server.arena.allocator();
+
+    var builder = code_actions.Builder{
+        .arena = &server.arena,
+        .document_store = &server.document_store,
+        .handle = handle,
+        .offset_encoding = server.offset_encoding,
+    };
+
+    var actions = std.ArrayListUnmanaged(types.CodeAction){};
+
+    for (req.params.context.diagnostics) |diagnostic| {
+        try builder.generateCodeAction(diagnostic, &actions);
+    }
+
+    for (actions.items) |*action| {
+        // TODO query whether SourceFixAll is supported by the server
+        if (action.kind == .SourceFixAll) action.kind = .QuickFix;
+    }
+
+    return try send(writer, allocator, types.Response{
+        .id = id,
+        .result = .{ .CodeAction = actions.items },
+    });
+}
+
 // Needed for the hack seen below.
 fn extractErr(val: anytype) anyerror {
     val catch |e| return e;
@@ -2275,6 +2363,8 @@ pub fn processJsonRpc(server: *Server, writer: anytype, json: []const u8) !void 
     } else types.RequestId{ .Integer = 0 };
 
     if (id == .String and std.mem.startsWith(u8, id.String, "register"))
+        return;
+    if (id == .String and std.mem.startsWith(u8, id.String, "apply_edit"))
         return;
     if (id == .String and std.mem.eql(u8, id.String, "i_haz_configuration")) {
         log.info("Setting configuration...", .{});
@@ -2360,6 +2450,7 @@ pub fn processJsonRpc(server: *Server, writer: anytype, json: []const u8) !void 
         .{ "textDocument/rename", requests.Rename, renameHandler },
         .{ "textDocument/references", requests.References, referencesHandler },
         .{ "textDocument/documentHighlight", requests.DocumentHighlight, documentHighlightHandler },
+        .{ "textDocument/codeAction", requests.CodeAction, codeActionHandler },
         .{ "workspace/didChangeConfiguration", std.json.Value, didChangeConfigurationHandler },
     };
 
@@ -2400,7 +2491,6 @@ pub fn processJsonRpc(server: *Server, writer: anytype, json: []const u8) !void 
     // needs a response) or false if the method is a notification (in which
     // case it should be silently ignored)
     const unimplemented_map = std.ComptimeStringMap(bool, .{
-        .{ "textDocument/codeAction", true },
         .{ "textDocument/codeLens", true },
         .{ "textDocument/documentLink", true },
         .{ "textDocument/rangeFormatting", true },

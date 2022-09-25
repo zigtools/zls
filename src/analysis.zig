@@ -1844,7 +1844,10 @@ pub const Declaration = union(enum) {
     /// Index of the ast node
     ast_node: Ast.Node.Index,
     /// Function parameter
-    param_decl: Ast.full.FnProto.Param,
+    param_payload: struct {
+        param: Ast.full.FnProto.Param,
+        func: Ast.Node.Index,
+    },
     pointer_payload: struct {
         name: Ast.TokenIndex,
         condition: Ast.Node.Index,
@@ -1870,7 +1873,7 @@ pub const DeclWithHandle = struct {
         const tree = self.handle.tree;
         return switch (self.decl.*) {
             .ast_node => |n| getDeclNameToken(tree, n).?,
-            .param_decl => |p| p.name_token.?,
+            .param_payload => |pp| pp.param.name_token.?,
             .pointer_payload => |pp| pp.name,
             .array_payload => |ap| ap.identifier,
             .array_index => |ai| ai,
@@ -1897,7 +1900,8 @@ pub const DeclWithHandle = struct {
                 .{ .node = node, .handle = self.handle },
                 bound_type_params,
             ),
-            .param_decl => |param_decl| {
+            .param_payload => |pay| {
+                const param_decl = pay.param;
                 if (isMetaType(self.handle.tree, param_decl.type_expr)) {
                     var bound_param_it = bound_type_params.iterator();
                     while (bound_param_it.next()) |entry| {
@@ -2555,7 +2559,7 @@ fn makeScopeInternal(allocator: std.mem.Allocator, context: ScopeContext, node_i
                     if (try scopes.items[scope_idx].decls.fetchPut(
                         allocator,
                         tree.tokenSlice(name_token),
-                        .{ .param_decl = param },
+                        .{ .param_payload = .{ .param = param, .func = node_idx } },
                     )) |existing| {
                         _ = existing;
                         // TODO record a redefinition error
