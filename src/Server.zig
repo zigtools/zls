@@ -17,8 +17,10 @@ const shared = @import("shared.zig");
 const Ast = std.zig.Ast;
 const tracy = @import("tracy.zig");
 const uri_utils = @import("uri.zig");
-const data = @import("data/data.zig");
 const diff = @import("diff.zig");
+
+const data = @import("data/data.zig");
+const snipped_data = @import("data/snippets.zig");
 
 const log = std.log.scoped(.server);
 
@@ -1169,6 +1171,30 @@ fn populateBuiltinCompletions(builtin_completions: *std.ArrayListUnmanaged(types
     truncateCompletions(builtin_completions.items, config.max_detail_length);
 }
 
+fn populateSnippedCompletions(
+    allocator: std.mem.Allocator,
+    completions: *std.ArrayListUnmanaged(types.CompletionItem),
+    snippets: []const snipped_data.Snipped,
+    config: Config,
+    start_with: ?[]const u8,
+) error{OutOfMemory}!void {
+    try completions.ensureUnusedCapacity(allocator, snippets.len);
+
+    for (snippets) |snipped| {
+        if (start_with) |needle| {
+            if (!std.mem.startsWith(u8, snipped.label, needle)) continue;
+        }
+
+        completions.appendAssumeCapacity(.{
+            .label = snipped.label,
+            .kind = snipped.kind,
+            .detail = if (config.enable_snippets) snipped.text else null,
+            .insertText = if (config.enable_snippets) snipped.text else null,
+            .insertTextFormat = if (config.enable_snippets and snipped.text != null) .Snippet else .PlainText,
+        });
+    }
+}
+
 fn completeBuiltin(server: *Server, writer: anytype, id: types.RequestId) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
@@ -1201,6 +1227,7 @@ fn completeGlobal(server: *Server, writer: anytype, id: types.RequestId, pos_ind
         .orig_handle = handle,
     };
     try analysis.iterateSymbolsGlobal(&server.document_store, &server.arena, handle, pos_index, declToCompletion, context);
+    try populateSnippedCompletions(server.arena.allocator(), &completions, &snipped_data.generic, server.config.*, null);
     sortCompletionItems(completions.items, server.arena.allocator());
     truncateCompletions(completions.items, server.config.max_detail_length);
 
@@ -1446,7 +1473,7 @@ fn kindToSortScore(kind: types.CompletionItem.Kind) []const u8 {
         .Field => "3_",
         .Function => "4_",
 
-        .Keyword, .EnumMember => "5_",
+        .Keyword, .Snippet, .EnumMember => "5_",
 
         .Class,
         .Interface,
@@ -1826,8 +1853,17 @@ fn completionHandler(server: *Server, writer: anytype, id: types.RequestId, req:
         return try respondGeneric(writer, id, no_completions_response);
     };
 
-    if (req.params.position.character == 0)
-        return try respondGeneric(writer, id, no_completions_response);
+    if (req.params.position.character == 0) {
+        var completions = std.ArrayListUnmanaged(types.CompletionItem){};
+        try populateSnippedCompletions(server.arena.allocator(), &completions, &snipped_data.top_level_decl_data, server.config.*, null);
+
+        return try send(writer, server.arena.allocator(), types.Response{
+            .id = id,
+            .result = .{
+                .CompletionList = .{ .isIncomplete = false, .items = completions.items },
+            },
+        });
+    }
 
     const source_index = offsets.positionToIndex(handle.document.text, req.params.position, server.offset_encoding);
     const pos_context = try analysis.getPositionContext(server.arena.allocator(), handle.document, source_index);
