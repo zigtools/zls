@@ -9,12 +9,13 @@ pub const Snipped = struct {
 pub const top_level_decl_data = [_]Snipped{
     .{ .label = "fn", .kind = .Snippet, .text = "fn ${1:name}($2) ${3:!void} {$0}" },
     .{ .label = "pub fn", .kind = .Snippet, .text = "pub fn ${1:name}($2) ${3:!void} {$0}" },
-    .{ .label = "struct", .kind = .Snippet, .text = "const $1 = struct {$0}" },
-    .{ .label = "error set", .kind = .Snippet, .text = "const ${1:Error} = error {$0}" },
-    .{ .label = "enum", .kind = .Snippet, .text = "const $1 = enum {$0}" },
-    .{ .label = "union", .kind = .Snippet, .text = "const $1 = union {$0}" },
-    .{ .label = "union tagged", .kind = .Snippet, .text = "const $1 = union(${2:enum}) {$0}" },
+    .{ .label = "struct", .kind = .Snippet, .text = "const $1 = struct {$0};" },
+    .{ .label = "error set", .kind = .Snippet, .text = "const ${1:Error} = error {$0};" },
+    .{ .label = "enum", .kind = .Snippet, .text = "const $1 = enum {$0};" },
+    .{ .label = "union", .kind = .Snippet, .text = "const $1 = union {$0};" },
+    .{ .label = "union tagged", .kind = .Snippet, .text = "const $1 = union(${2:enum}) {$0};" },
     .{ .label = "test", .kind = .Snippet, .text = "test \"$1\" {$0}" },
+    .{ .label = "main", .kind = .Snippet, .text = "pub fn main() !void {$0}" },
 };
 
 pub const generic = [_]Snipped{
@@ -55,7 +56,7 @@ pub const generic = [_]Snipped{
     .{ .label = "resume", .kind = .Keyword },
     .{ .label = "return", .kind = .Keyword },
     .{ .label = "linksection", .kind = .Keyword },
-    .{ .label = "struct", .kind = .Keyword, .text = "struct {$0}" },
+    .{ .label = "struct", .kind = .Keyword, .text = "struct {$0};" },
     .{ .label = "suspend", .kind = .Keyword },
     .{ .label = "switch", .kind = .Keyword, .text = "switch ($1) {$0}" },
     .{ .label = "test", .kind = .Keyword, .text = "test \"$1\" {$0}" },
@@ -75,5 +76,14 @@ pub const generic = [_]Snipped{
     .{ .label = "fori", .kind = .Snippet, .text = "for ($1) |_, ${2:i}| {$0}" },
     .{ .label = "forvi", .kind = .Snippet, .text = "for ($1) |${2:value},${3:i}| {$0}" },
     .{ .label = "if else", .kind = .Snippet, .text = "if ($1) {$2} else {$0}" },
-    .{ .label = "catch switch", .kind = .Snippet, .text = "catch |${1:err}| switch(${1:err}) {$0}" },
+    .{ .label = "catch switch", .kind = .Snippet, .text = "catch |${1:err}| switch(${1:err}) {$0};" },
+
+    // snippets
+    .{ .label = "main", .kind = .Snippet, .text = "pub fn main() !void {$0}" },
+    .{ .label = "todo", .kind = .Snippet, .text = "std.debug.todo(\"$0\");" },
+    .{ .label = "print", .kind = .Snippet, .text = "std.debug.print(\"$1\", .{$0});" },
+    .{ .label = "log err", .kind = .Snippet, .text = "std.log.err(\"$1\", .{$0});" },
+    .{ .label = "log warn", .kind = .Snippet, .text = "std.log.warn(\"$1\", .{$0});" },
+    .{ .label = "log info", .kind = .Snippet, .text = "std.log.info(\"$1\", .{$0});" },
+    .{ .label = "log debug", .kind = .Snippet, .text = "std.log.debug(\"$1\", .{$0});" },
 };
