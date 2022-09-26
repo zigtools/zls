@@ -417,7 +417,7 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
                 name,
                 tree.tokens.items(.start)[main_token],
             )) |child| {
-                if (child.decl.* == .param_decl) {
+                if (child.decl.* == .param_payload) {
                     return try writeToken(builder, main_token, .parameter);
                 }
                 var bound_type_params = analysis.BoundTypeParams{};
@@ -716,8 +716,7 @@ fn writeNodeTokens(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *D
             try writeToken(builder, main_token, .keyword);
             try await @asyncCall(child_frame, {}, writeNodeTokens, .{ builder, arena, store, node_data[node].lhs });
         },
-        .number_literal,
-        => {
+        .number_literal => {
             try writeToken(builder, main_token, .number);
         },
         .enum_literal => {

@@ -103,6 +103,7 @@ The following options are currently available.
 | --- | --- | --- | --- |
 | `enable_snippets` | `bool` | `false` | Enables snippet completions when the client also supports them. |
 | `enable_ast_check_diagnostics` | `bool` | `true`| Whether to enable ast-check diagnostics |
+| `enable_autofix` | `bool` | `false`| Whether to automatically fix errors on save. Currently supports adding and removing discards. |
 | `enable_import_embedfile_argument_completions` | `bool` | `false` | Whether to enable import/embedFile argument completions |
 | `zig_lib_path` | `?[]const u8` | `null` | zig library path, e.g. `/path/to/zig/lib/zig`, used to analyze std library imports. |
 | `zig_exe_path` | `?[]const u8` | `null` | zig executable path, e.g. `/path/to/zig/zig`, used to run the custom build runner. If `null`, zig is looked up in `PATH`. Will be used to infer the zig standard library path if none is provided. |
