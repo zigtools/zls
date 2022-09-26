@@ -8,16 +8,11 @@ const LibExeObjStep = std.build.LibExeObjStep;
 
 pub const BuildConfig = struct {
     packages: []Pkg,
-    include_dirs: []IncludeDir,
+    include_dirs: []const []const u8,
 
     pub const Pkg = struct {
         name: []const u8,
         path: []const u8,
-    };
-
-    pub const IncludeDir = struct {
-        path: []const u8,
-        system: bool,
     };
 };
 
@@ -68,7 +63,7 @@ pub fn main() !void {
     var packages = std.ArrayListUnmanaged(BuildConfig.Pkg){};
     defer packages.deinit(allocator);
 
-    var include_dirs = std.ArrayListUnmanaged(BuildConfig.IncludeDir){};
+    var include_dirs: std.StringArrayHashMapUnmanaged(void) = .{};
     defer include_dirs.deinit(allocator);
 
     // TODO: We currently add packages from every LibExeObj step that the install step depends on.
@@ -83,7 +78,7 @@ pub fn main() !void {
     try std.json.stringify(
         BuildConfig{
             .packages = packages.items,
-            .include_dirs = include_dirs.items,
+            .include_dirs = include_dirs.keys(),
         },
         .{ .whitespace = .{} },
         std.io.getStdOut().writer(),
@@ -93,7 +88,7 @@ pub fn main() !void {
 fn processStep(
     allocator: std.mem.Allocator,
     packages: *std.ArrayListUnmanaged(BuildConfig.Pkg),
-    include_dirs: *std.ArrayListUnmanaged(BuildConfig.IncludeDir),
+    include_dirs: *std.StringArrayHashMapUnmanaged(void),
     step: *std.build.Step,
 ) anyerror!void {
     if (step.cast(InstallArtifactStep)) |install_exe| {
@@ -143,29 +138,27 @@ fn processPackage(
 
 fn processIncludeDirs(
     allocator: std.mem.Allocator,
-    include_dirs: *std.ArrayListUnmanaged(BuildConfig.IncludeDir),
+    include_dirs: *std.StringArrayHashMapUnmanaged(void),
     dirs: []std.build.LibExeObjStep.IncludeDir,
 ) !void {
     try include_dirs.ensureUnusedCapacity(allocator, dirs.len);
 
-    outer: for (dirs) |dir| {
-        const candidate: BuildConfig.IncludeDir = switch (dir) {
-            .raw_path => |path| .{ .path = path, .system = false },
-            .raw_path_system => |path| .{ .path = path, .system = true },
+    for (dirs) |dir| {
+        const candidate: []const u8 = switch (dir) {
+            .raw_path => |path| path,
+            .raw_path_system => |path| path,
             else => continue,
         };
 
-        for (include_dirs.items) |include_dir| {
-            if (std.mem.eql(u8, candidate.path, include_dir.path)) continue :outer;
-        }
+        if (include_dirs.contains(candidate)) continue;
 
-        include_dirs.appendAssumeCapacity(candidate);
+        include_dirs.putAssumeCapacityNoClobber(candidate, {});
     }
 }
 
 fn processPkgConfig(
     allocator: std.mem.Allocator,
-    include_dirs: *std.ArrayListUnmanaged(BuildConfig.IncludeDir),
+    include_dirs: *std.StringArrayHashMapUnmanaged(void),
     exe: *std.build.LibExeObjStep,
 ) !void {
     for (exe.link_objects.items) |link_object| {
@@ -177,7 +170,9 @@ fn processPkgConfig(
                         if (exe.runPkgConfig(system_lib.name)) |args| {
                             for (args) |arg| {
                                 if (std.mem.startsWith(u8, arg, "-I")) {
-                                    try include_dirs.append(allocator, .{ .path = arg[2..], .system = true });
+                                    const candidate = arg[2..];
+                                    if (include_dirs.contains(candidate)) continue;
+                                    try include_dirs.putNoClobber(allocator, candidate, {});
                                 }
                             }
                         } else |err| switch (err) {
