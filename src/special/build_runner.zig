@@ -98,11 +98,13 @@ fn processStep(
 ) anyerror!void {
     if (step.cast(InstallArtifactStep)) |install_exe| {
         try processIncludeDirs(allocator, include_dirs, install_exe.artifact.include_dirs.items);
+        try processPkgConfig(allocator, include_dirs, install_exe.artifact);
         for (install_exe.artifact.packages.items) |pkg| {
             try processPackage(allocator, packages, pkg);
         }
     } else if (step.cast(LibExeObjStep)) |exe| {
         try processIncludeDirs(allocator, include_dirs, exe.include_dirs.items);
+        try processPkgConfig(allocator, include_dirs, exe);
         for (exe.packages.items) |pkg| {
             try processPackage(allocator, packages, pkg);
         }
@@ -158,6 +160,49 @@ fn processIncludeDirs(
         }
 
         include_dirs.appendAssumeCapacity(candidate);
+    }
+}
+
+fn processPkgConfig(
+    allocator: std.mem.Allocator,
+    include_dirs: *std.ArrayListUnmanaged(BuildConfig.IncludeDir),
+    exe: *std.build.LibExeObjStep,
+) !void {
+    for (exe.link_objects.items) |link_object| {
+        switch (link_object) {
+            .system_lib => |system_lib| {
+                switch (system_lib.use_pkg_config) {
+                    .no => {},
+                    .yes, .force => {
+                        if (exe.runPkgConfig(system_lib.name)) |args| {
+                            for (args) |arg| {
+                                if (std.mem.startsWith(u8, arg, "-I")) {
+                                    try include_dirs.append(allocator, .{ .path = arg[2..], .system = true });
+                                }
+                            }
+                        } else |err| switch (err) {
+                            error.PkgConfigInvalidOutput,
+                            error.PkgConfigCrashed,
+                            error.PkgConfigFailed,
+                            error.PkgConfigNotInstalled,
+                            error.PackageNotFound,
+                            => switch (system_lib.use_pkg_config) {
+                                .yes => {
+                                    // pkg-config failed, so zig will not add any include paths
+                                },
+                                .force => {
+                                    log.warn("pkg-config failed for library {s}", .{system_lib.name});
+                                },
+                                .no => unreachable,
+                            },
+
+                            else => |e| return e,
+                        }
+                    },
+                }
+            },
+            else => {},
+        }
     }
 }
 
