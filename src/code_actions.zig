@@ -32,6 +32,7 @@ pub const Builder = struct {
                 .@"loop index capture" => try handleUnusedIndexCapture(builder, actions, loc),
                 .@"capture" => try handleUnusedCapture(builder, actions, loc),
             },
+            .non_camelcase_fn => try handleNonCamelcaseFunction(builder, actions, loc),
             .pointless_discard => try handlePointlessDiscard(builder, actions, loc),
             .omit_discard => |id| switch (id) {
                 .@"index capture" => try handleUnusedIndexCapture(builder, actions, loc),
@@ -69,6 +70,34 @@ pub const Builder = struct {
         return self.handle.document.text;
     }
 };
+
+fn handleNonCamelcaseFunction(builder: *Builder, actions: *std.ArrayListUnmanaged(types.CodeAction), loc: offsets.Loc) !void {
+    const identifier_name = offsets.locToSlice(builder.text(), loc);
+    
+    const tree = builder.handle.tree;
+
+    const decl = (try analysis.lookupSymbolGlobal(
+        builder.document_store,
+        builder.arena,
+        builder.handle,
+        identifier_name,
+        loc.start
+    )) orelse return;    
+    
+    const name_token_idx = decl.nameToken();
+    const name_loc = offsets.tokenToLoc(tree, name_token_idx);   
+    
+    const new_text = try createCamelcaseText(builder.arena.allocator(), identifier_name);
+    
+    const action1 = types.CodeAction {
+        .title = "make function name camelCase",
+        .kind = .SourceFixAll,
+        .isPreferred = true,
+        .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditLoc(name_loc, new_text)}),
+    };
+    
+    try actions.append(builder.arena.allocator(), action1);
+}
 
 fn handleUnusedFunctionParameter(builder: *Builder, actions: *std.ArrayListUnmanaged(types.CodeAction), loc: offsets.Loc) !void {
     const identifier_name = offsets.locToSlice(builder.text(), loc);
@@ -159,7 +188,7 @@ fn handleUnusedVariableOrConstant(builder: *Builder, actions: *std.ArrayListUnma
 
     try actions.append(builder.arena.allocator(), .{
         .title = "discard value",
-        .kind = .SourceFixAll,
+        .kind = .QuickFix,
         .isPreferred = true,
         .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditPos(index, new_text)}),
     });
@@ -233,6 +262,33 @@ fn handlePointlessDiscard(builder: *Builder, actions: *std.ArrayListUnmanaged(ty
     });
 }
 
+// attempts to converts a slice of text into camelcase 'FUNCTION_NAME' -> 'functionName'
+fn createCamelcaseText(allocator: std.mem.Allocator, identifier: []const u8) ![]const u8 {
+    var num_separators: usize = 0;
+    
+    const new_text_len = 1 + identifier.len - num_separators;
+    var new_text = try std.ArrayListUnmanaged(u8).initCapacity(allocator, new_text_len);
+    errdefer new_text.deinit(allocator);
+    
+    var idx: usize = 0;
+    
+    // sloppy
+    while(idx < identifier.len) {
+        const c = identifier[idx];
+
+        if(c == '_') {
+            const c2 = identifier[idx + 1];
+            new_text.appendAssumeCapacity(std.ascii.toUpper(c2));
+            idx += 2;
+        } else {
+            new_text.appendAssumeCapacity(std.ascii.toLower(c));
+            idx += 1;
+        }
+    }
+    
+    return new_text.toOwnedSlice(allocator);
+}
+
 // returns a discard string `\n{indent}_ = identifier_name;`
 fn createDiscardText(allocator: std.mem.Allocator, identifier_name: []const u8, indent: usize) ![]const u8 {
     const new_text_len = 1 + indent + "_ = ;".len + identifier_name.len;
@@ -252,6 +308,7 @@ const DiagnosticKind = union(enum) {
     unused: IdCat,
     pointless_discard: IdCat,
     omit_discard: DiscardCat,
+    non_camelcase_fn: void,
     unreachable_code,
 
     const IdCat = enum {
@@ -284,6 +341,10 @@ const DiagnosticKind = union(enum) {
             return DiagnosticKind{
                 .omit_discard = parseEnum(DiscardCat, msg["discard of ".len..]) orelse return null,
             };
+        } else if (std.mem.startsWith(u8, msg, "Functions should")) {
+            return DiagnosticKind {
+                .non_camelcase_fn = {},
+            }; 
         }
         return null;
     }
