@@ -1592,7 +1592,11 @@ fn initializeHandler(server: *Server, writer: anytype, id: types.RequestId, req:
                         .triggerCharacters = &.{"("},
                         .retriggerCharacters = &.{","},
                     },
-                    .textDocumentSync = .Full,
+                    .textDocumentSync = .{
+                        .openClose = true,
+                        .change = .Full,
+                        .save = true,
+                    },
                     .renameProvider = true,
                     .completionProvider = .{ .resolveProvider = false, .triggerCharacters = &[_][]const u8{ ".", ":", "@", "]" }, .completionItem = .{ .labelDetailsSupport = true } },
                     .documentHighlightProvider = true,
