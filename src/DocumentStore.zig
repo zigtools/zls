@@ -241,6 +241,8 @@ fn loadBuildConfiguration(context: LoadBuildConfigContext) !void {
                 const name = try allocator.dupe(u8, pkg.name);
                 errdefer allocator.free(name);
 
+                log.debug("Found package {s}: {s}", .{ name, uri });
+
                 packages.appendAssumeCapacity(.{ .name = name, .uri = uri });
             }
 
@@ -259,6 +261,54 @@ fn loadBuildConfiguration(context: LoadBuildConfigContext) !void {
         else => return error.RunFailed,
     }
 }
+
+// walks the build.zig files above "uri"
+const BuildDotZigIterator = struct {
+    allocator: std.mem.Allocator,
+    uri_path: []const u8,
+    dir_path: []const u8,
+    i: usize,
+
+    fn init(allocator: std.mem.Allocator, uri_path: []const u8) !BuildDotZigIterator {
+        const dir_path = std.fs.path.dirname(uri_path) orelse uri_path;
+
+        // not sure about windows drives and paths, so deferring to this
+        // function to figure it out for me?
+        const root_dir_path = try URI.parse(allocator, "file:///");
+        defer allocator.free(root_dir_path);
+
+        return BuildDotZigIterator{
+            .allocator = allocator,
+            .uri_path = uri_path,
+            .dir_path = dir_path,
+            .i = root_dir_path.len + 1,
+        };
+    }
+
+    // the iterator allocates this memory so you gotta free it
+    fn next(self: *BuildDotZigIterator) !?[]const u8 {
+        while (true) {
+            if (self.i > self.dir_path.len)
+                return null;
+
+            const potential_build_path = try std.fs.path.join(self.allocator, &.{
+                self.dir_path[0..self.i], "build.zig",
+            });
+
+            self.i += 1;
+            while (self.i < self.dir_path.len and self.dir_path[self.i] != std.fs.path.sep) : (self.i += 1) {}
+
+            if (std.fs.accessAbsolute(potential_build_path, .{})) {
+                // found a build.zig file
+                return potential_build_path;
+            } else |_| {
+                // nope it failed for whatever reason, free it and move the
+                // machinery forward
+                self.allocator.free(potential_build_path);
+            }
+        }
+    }
+};
 
 /// This function asserts the document is not open yet and takes ownership
 /// of the uri and text passed in.
@@ -348,84 +398,87 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: [:0]u8) anyerror!*Ha
         try self.build_files.append(self.allocator, build_file);
         handle.is_build_file = build_file;
     } else if (self.config.zig_exe_path != null and !in_std) {
-        // Look into build files and keep the one that lives closest to the document in the directory structure
-        var candidate: ?*BuildFile = null;
-        {
-            var uri_chars_matched: usize = 0;
-            for (self.build_files.items) |build_file| {
-                const build_file_base_uri = build_file.uri[0 .. std.mem.lastIndexOfScalar(u8, build_file.uri, '/').? + 1];
+        // walk down the tree towards the uri. When we hit build.zig files
+        // determine if the uri we're interested in is involved with the build.
+        // This ensures that _relevant_ build.zig files higher in the
+        // filesystem have precedence.
+        const uri_path = try URI.parse(self.allocator, uri);
+        defer self.allocator.free(uri_path);
 
-                if (build_file_base_uri.len > uri_chars_matched and std.mem.startsWith(u8, uri, build_file_base_uri)) {
-                    uri_chars_matched = build_file_base_uri.len;
-                    candidate = build_file;
-                }
-            }
+        var build_it = try BuildDotZigIterator.init(self.allocator, uri_path);
+        while (try build_it.next()) |build_path| {
+            defer self.allocator.free(build_path);
+
+            log.debug("found build path: {s}", .{build_path});
+            // TODO: do the build and determine if the uri is included
+            // is this a registered build_file?
         }
 
-        // Then, try to find the closest build file.
-        var curr_path = try URI.parse(self.allocator, uri);
-        defer self.allocator.free(curr_path);
-        while (true) {
-            if (curr_path.len == 0) break;
+        //// Then, try to find the closest build file.
+        //var curr_path = try URI.parse(self.allocator, uri);
+        //defer self.allocator.free(curr_path);
+        //log.debug("curr_path: {s}", .{curr_path});
+        //while (true) {
+        //    if (curr_path.len == 0) break;
 
-            if (std.mem.lastIndexOfScalar(u8, curr_path[0 .. curr_path.len - 1], std.fs.path.sep)) |idx| {
-                // This includes the last separator
-                curr_path = curr_path[0 .. idx + 1];
+        //    if (std.mem.lastIndexOfScalar(u8, curr_path[0 .. curr_path.len - 1], std.fs.path.sep)) |idx| {
+        //        // This includes the last separator
+        //        curr_path = curr_path[0 .. idx + 1];
 
-                // Try to open the folder, then the file.
-                var folder = std.fs.cwd().openDir(curr_path, .{}) catch |err| switch (err) {
-                    error.FileNotFound => continue,
-                    else => return err,
-                };
-                defer folder.close();
+        //        // Try to open the folder, then the file.
+        //        var folder = std.fs.cwd().openDir(curr_path, .{}) catch |err| switch (err) {
+        //            error.FileNotFound => continue,
+        //            else => return err,
+        //        };
+        //        defer folder.close();
 
-                var build_file = folder.openFile("build.zig", .{}) catch |err| switch (err) {
-                    error.FileNotFound, error.AccessDenied => continue,
-                    else => return err,
-                };
-                defer build_file.close();
+        //        var build_file = folder.openFile("build.zig", .{}) catch |err| switch (err) {
+        //            error.FileNotFound, error.AccessDenied => continue,
+        //            else => return err,
+        //        };
+        //        defer build_file.close();
 
-                // Calculate build file's URI
-                var candidate_path = try std.mem.concat(self.allocator, u8, &.{ curr_path, "build.zig" });
-                defer self.allocator.free(candidate_path);
-                const build_file_uri = try URI.fromPath(self.allocator, candidate_path);
-                errdefer self.allocator.free(build_file_uri);
+        //        // Calculate build file's URI
+        //        var candidate_path = try std.mem.concat(self.allocator, u8, &.{ curr_path, "build.zig" });
+        //        defer self.allocator.free(candidate_path);
+        //        const build_file_uri = try URI.fromPath(self.allocator, candidate_path);
+        //        errdefer self.allocator.free(build_file_uri);
 
-                if (candidate) |candidate_build_file| {
-                    // Check if it is the same as the current candidate we got from the existing build files.
-                    // If it isn't, we need to read the file and make a new build file.
-                    if (std.mem.eql(u8, candidate_build_file.uri, build_file_uri)) {
-                        self.allocator.free(build_file_uri);
-                        break;
-                    }
-                }
+        //        if (candidate) |candidate_build_file| {
+        //            // Check if it is the same as the current candidate we got from the existing build files.
+        //            // If it isn't, we need to read the file and make a new build file.
+        //            if (std.mem.eql(u8, candidate_build_file.uri, build_file_uri)) {
+        //                self.allocator.free(build_file_uri);
+        //                break;
+        //            }
+        //        }
 
-                // Check if the build file already exists
-                if (self.handles.get(build_file_uri)) |build_file_handle| {
-                    candidate = build_file_handle.is_build_file.?;
-                    break;
-                }
+        //        // Check if the build file already exists
+        //        if (self.handles.get(build_file_uri)) |build_file_handle| {
+        //            candidate = build_file_handle.is_build_file.?;
+        //            break;
+        //        }
 
-                // Read the build file, create a new document, set the candidate to the new build file.
-                const build_file_text = try build_file.readToEndAllocOptions(
-                    self.allocator,
-                    std.math.maxInt(usize),
-                    null,
-                    @alignOf(u8),
-                    0,
-                );
-                errdefer self.allocator.free(build_file_text);
+        //        // Read the build file, create a new document, set the candidate to the new build file.
+        //        const build_file_text = try build_file.readToEndAllocOptions(
+        //            self.allocator,
+        //            std.math.maxInt(usize),
+        //            null,
+        //            @alignOf(u8),
+        //            0,
+        //        );
+        //        errdefer self.allocator.free(build_file_text);
 
-                const build_file_handle = try self.newDocument(build_file_uri, build_file_text);
-                candidate = build_file_handle.is_build_file.?;
-                break;
-            } else break;
-        }
-        // Finally, associate the candidate build file, if any, to the new document.
-        if (candidate) |build_file| {
-            build_file.refs += 1;
-            handle.associated_build_file = build_file;
-        }
+        //        const build_file_handle = try self.newDocument(build_file_uri, build_file_text);
+        //        candidate = build_file_handle.is_build_file.?;
+        //        break;
+        //    } else break;
+        //}
+        //// Finally, associate the candidate build file, if any, to the new document.
+        //if (candidate) |build_file| {
+        //    build_file.refs += 1;
+        //    handle.associated_build_file = build_file;
+        //}
     }
 
     handle.import_uris = try self.collectImportUris(handle);

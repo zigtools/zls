@@ -97,11 +97,18 @@ fn processStep(
     step: *std.build.Step,
 ) anyerror!void {
     if (step.cast(InstallArtifactStep)) |install_exe| {
+        if(install_exe.artifact.root_src) |src| {
+          try packages.append(allocator, .{.name = "root", .path = src.path });
+        }
+
         try processIncludeDirs(allocator, include_dirs, install_exe.artifact.include_dirs.items);
         for (install_exe.artifact.packages.items) |pkg| {
             try processPackage(allocator, packages, pkg);
         }
     } else if (step.cast(LibExeObjStep)) |exe| {
+        if(exe.root_src) |src| {
+          try packages.append(allocator, .{.name = "root", .path = src.path });
+        }
         try processIncludeDirs(allocator, include_dirs, exe.include_dirs.items);
         for (exe.packages.items) |pkg| {
             try processPackage(allocator, packages, pkg);
