@@ -150,9 +150,7 @@ fn processIncludeDirs(
             else => continue,
         };
 
-        if (include_dirs.contains(candidate)) continue;
-
-        include_dirs.putAssumeCapacityNoClobber(candidate, {});
+        include_dirs.putAssumeCapacity(candidate, {});
     }
 }
 
@@ -162,43 +160,45 @@ fn processPkgConfig(
     exe: *std.build.LibExeObjStep,
 ) !void {
     for (exe.link_objects.items) |link_object| {
-        switch (link_object) {
-            .system_lib => |system_lib| {
-                switch (system_lib.use_pkg_config) {
-                    .no => {},
-                    .yes, .force => {
-                        if (exe.runPkgConfig(system_lib.name)) |args| {
-                            for (args) |arg| {
-                                if (std.mem.startsWith(u8, arg, "-I")) {
-                                    const candidate = arg[2..];
-                                    if (include_dirs.contains(candidate)) continue;
-                                    try include_dirs.putNoClobber(allocator, candidate, {});
-                                }
-                            }
-                        } else |err| switch (err) {
-                            error.PkgConfigInvalidOutput,
-                            error.PkgConfigCrashed,
-                            error.PkgConfigFailed,
-                            error.PkgConfigNotInstalled,
-                            error.PackageNotFound,
-                            => switch (system_lib.use_pkg_config) {
-                                .yes => {
-                                    // pkg-config failed, so zig will not add any include paths
-                                },
-                                .force => {
-                                    log.warn("pkg-config failed for library {s}", .{system_lib.name});
-                                },
-                                .no => unreachable,
-                            },
+        if (link_object != .system_lib) continue;
+        const system_lib = link_object.system_lib;
 
-                            else => |e| return e,
-                        }
-                    },
-                }
+        if (system_lib.use_pkg_config == .no) continue;
+
+        getPkgConfigIncludes(allocator, include_dirs, exe, system_lib.name) catch |err| switch (err) {
+            error.PkgConfigInvalidOutput,
+            error.PkgConfigCrashed,
+            error.PkgConfigFailed,
+            error.PkgConfigNotInstalled,
+            error.PackageNotFound,
+            => switch (system_lib.use_pkg_config) {
+                .yes => {
+                    // pkg-config failed, so zig will not add any include paths
+                },
+                .force => {
+                    log.warn("pkg-config failed for library {s}", .{system_lib.name});
+                },
+                .no => unreachable,
             },
-            else => {},
-        }
+            else => |e| return e,
+        };
     }
+}
+
+fn getPkgConfigIncludes(
+    allocator: std.mem.Allocator,
+    include_dirs: *std.StringArrayHashMapUnmanaged(void),
+    exe: *std.build.LibExeObjStep,
+    name: []const u8,
+) !void {
+    if (exe.runPkgConfig(name)) |args| {
+        for (args) |arg| {
+            if (std.mem.startsWith(u8, arg, "-I")) {
+                const candidate = arg[2..];
+                try include_dirs.put(allocator, candidate, {});
+            }
+        }
+    } else |err| return err;
 }
 
 fn runBuild(builder: *Builder) anyerror!void {
