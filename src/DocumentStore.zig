@@ -23,9 +23,16 @@ const BuildFile = struct {
     uri: []const u8,
     config: BuildFileConfig,
     builtin_uri: ?[]const u8 = null,
+    build_options: ?[]BuildAssociatedConfig.BuildOption = null,
 
     pub fn destroy(self: *BuildFile, allocator: std.mem.Allocator) void {
         if (self.builtin_uri) |builtin_uri| allocator.free(builtin_uri);
+        if (self.build_options) |opts| {
+            for (opts) |*opt| {
+                opt.deinit(allocator);
+            }
+            allocator.free(opts);
+        }
         allocator.destroy(self);
     }
 };
@@ -115,6 +122,8 @@ fn loadBuildAssociatedConfiguration(allocator: std.mem.Allocator, build_file: *B
         const config_file_path = try std.fs.path.join(allocator, &[_][]const u8{ directory_path, "zls.build.json" });
         defer allocator.free(config_file_path);
 
+        log.info("Attempting to load build-associated config from {s}", .{config_file_path});
+
         var config_file = std.fs.cwd().openFile(config_file_path, .{}) catch |err| {
             if (err == error.FileNotFound) return;
             return err;
@@ -132,6 +141,21 @@ fn loadBuildAssociatedConfiguration(allocator: std.mem.Allocator, build_file: *B
         var absolute_builtin_path = try std.mem.concat(allocator, u8, &.{ directory_path, relative_builtin_path });
         defer allocator.free(absolute_builtin_path);
         build_file.builtin_uri = try URI.fromPath(allocator, absolute_builtin_path);
+    }
+
+    if (build_associated_config.build_options) |opts| {
+        // Copy options out of json parse result since they will be invalidated
+        var build_opts = try std.ArrayListUnmanaged(BuildAssociatedConfig.BuildOption).initCapacity(allocator, opts.len);
+        errdefer {
+            for (build_opts.items) |*opt| {
+                opt.deinit(allocator);
+            }
+            build_opts.deinit(allocator);
+        }
+        for (opts) |opt| {
+            try build_opts.append(allocator, try opt.dupe(allocator));
+        }
+        build_file.build_options = build_opts.toOwnedSlice(allocator);
     }
 }
 
@@ -156,26 +180,45 @@ fn loadBuildConfiguration(context: LoadBuildConfigContext) !void {
     const global_cache_path = context.global_cache_path;
     const zig_exe_path = context.zig_exe_path;
 
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    const arena_allocator = arena.allocator();
+
     const build_file_path = context.build_file_path orelse try URI.parse(allocator, build_file.uri);
     defer if (context.build_file_path == null) allocator.free(build_file_path);
     const directory_path = build_file_path[0 .. build_file_path.len - "build.zig".len];
 
-    const args: []const []const u8 = &[_][]const u8{
-        zig_exe_path,
-        "run",
-        build_runner_path,
-        "--cache-dir",
-        global_cache_path,
-        "--pkg-begin",
-        "@build@",
-        build_file_path,
-        "--pkg-end",
-        "--",
-        zig_exe_path,
-        directory_path,
-        context.cache_root,
-        context.global_cache_root,
-    };
+    // enough capacity for arguments always passed to the build runner plus a couple build options
+    var arglist = try std.ArrayListUnmanaged([]const u8).initCapacity(arena_allocator, 32);
+    defer arglist.deinit(arena_allocator);
+
+    try arglist.appendSlice(
+        arena_allocator,
+        &[_][]const u8{
+            zig_exe_path,
+            "run",
+            build_runner_path,
+            "--cache-dir",
+            global_cache_path,
+            "--pkg-begin",
+            "@build@",
+            build_file_path,
+            "--pkg-end",
+            "--",
+            zig_exe_path,
+            directory_path,
+            context.cache_root,
+            context.global_cache_root,
+        },
+    );
+
+    if (build_file.build_options) |opts| {
+        for (opts) |opt| {
+            try arglist.append(allocator, try opt.formatParam(arena_allocator));
+        }
+    }
+
+    const args: []const []const u8 = arglist.items;
 
     const zig_run_result = try std.ChildProcess.exec(.{
         .allocator = allocator,

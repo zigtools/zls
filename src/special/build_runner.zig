@@ -57,6 +57,30 @@ pub fn main() !void {
 
     defer builder.destroy();
 
+    while (nextArg(args, &arg_idx)) |arg| {
+        if (std.mem.startsWith(u8, arg, "-D")) {
+            const option_contents = arg[2..];
+            if (option_contents.len == 0) {
+                log.err("Expected option name after '-D'\n\n", .{});
+                return error.InvalidArgs;
+            }
+            if (std.mem.indexOfScalar(u8, option_contents, '=')) |name_end| {
+                const option_name = option_contents[0..name_end];
+                const option_value = option_contents[name_end + 1 ..];
+                if (try builder.addUserInputOption(option_name, option_value)) {
+                    log.err("Option conflict '-D{s}'\n\n", .{option_name});
+                    return error.InvalidArgs;
+                }
+            } else {
+                const option_name = option_contents;
+                if (try builder.addUserInputFlag(option_name)) {
+                    log.err("Option conflict '-D{s}'\n\n", .{option_name});
+                    return error.InvalidArgs;
+                }
+            }
+        }
+    }
+
     builder.resolveInstallPrefix(null, Builder.DirList{});
     try runBuild(builder);
 
