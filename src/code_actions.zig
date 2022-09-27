@@ -266,7 +266,7 @@ fn handlePointlessDiscard(builder: *Builder, actions: *std.ArrayListUnmanaged(ty
 fn createCamelcaseText(allocator: std.mem.Allocator, identifier: []const u8) ![]const u8 {
     var num_separators: usize = 0;
     
-    const new_text_len = 1 + identifier.len - num_separators;
+    const new_text_len = identifier.len - num_separators;
     var new_text = try std.ArrayListUnmanaged(u8).initCapacity(allocator, new_text_len);
     errdefer new_text.deinit(allocator);
     
