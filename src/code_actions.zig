@@ -37,6 +37,8 @@ pub const Builder = struct {
                 .@"index capture" => try handleUnusedIndexCapture(builder, actions, loc),
                 .@"error capture" => try handleUnusedCapture(builder, actions, loc),
             },
+            // the undeclared identifier may be a discard
+            .undeclared_identifier => try handlePointlessDiscard(builder, actions, loc),
             .unreachable_code => {
                 // TODO
                 // autofix: comment out code
@@ -285,6 +287,7 @@ const DiagnosticKind = union(enum) {
     unused: IdCat,
     pointless_discard: IdCat,
     omit_discard: DiscardCat,
+    undeclared_identifier,
     unreachable_code,
 
     const IdCat = enum {
@@ -317,6 +320,8 @@ const DiagnosticKind = union(enum) {
             return DiagnosticKind{
                 .omit_discard = parseEnum(DiscardCat, msg["discard of ".len..]) orelse return null,
             };
+        } else if (std.mem.startsWith(u8, msg, "use of undeclared identifier")) {
+            return .undeclared_identifier;
         }
         return null;
     }
