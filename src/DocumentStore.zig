@@ -23,16 +23,23 @@ const BuildFile = struct {
     uri: []const u8,
     config: BuildFileConfig,
     builtin_uri: ?[]const u8 = null,
+    build_options: ?[]BuildAssociatedConfig.BuildOption = null,
 
     pub fn destroy(self: *BuildFile, allocator: std.mem.Allocator) void {
         if (self.builtin_uri) |builtin_uri| allocator.free(builtin_uri);
+        if (self.build_options) |opts| {
+            for (opts) |*opt| {
+                opt.deinit(allocator);
+            }
+            allocator.free(opts);
+        }
         allocator.destroy(self);
     }
 };
 
 pub const BuildFileConfig = struct {
     packages: []Pkg,
-    include_dirs: []IncludeDir,
+    include_dirs: []const []const u8,
 
     pub fn deinit(self: BuildFileConfig, allocator: std.mem.Allocator) void {
         for (self.packages) |pkg| {
@@ -42,7 +49,7 @@ pub const BuildFileConfig = struct {
         allocator.free(self.packages);
 
         for (self.include_dirs) |dir| {
-            allocator.free(dir.path);
+            allocator.free(dir);
         }
         allocator.free(self.include_dirs);
     }
@@ -51,8 +58,6 @@ pub const BuildFileConfig = struct {
         name: []const u8,
         uri: []const u8,
     };
-
-    pub const IncludeDir = BuildConfig.IncludeDir;
 };
 
 pub const Handle = struct {
@@ -113,9 +118,11 @@ fn loadBuildAssociatedConfiguration(allocator: std.mem.Allocator, build_file: *B
     const directory_path = build_file_path[0 .. build_file_path.len - "build.zig".len];
 
     const options = std.json.ParseOptions{ .allocator = allocator };
-    const build_associated_config = blk: {
+    var build_associated_config = blk: {
         const config_file_path = try std.fs.path.join(allocator, &[_][]const u8{ directory_path, "zls.build.json" });
         defer allocator.free(config_file_path);
+
+        log.info("Attempting to load build-associated config from {s}", .{config_file_path});
 
         var config_file = std.fs.cwd().openFile(config_file_path, .{}) catch |err| {
             if (err == error.FileNotFound) return;
@@ -134,6 +141,11 @@ fn loadBuildAssociatedConfiguration(allocator: std.mem.Allocator, build_file: *B
         var absolute_builtin_path = try std.mem.concat(allocator, u8, &.{ directory_path, relative_builtin_path });
         defer allocator.free(absolute_builtin_path);
         build_file.builtin_uri = try URI.fromPath(allocator, absolute_builtin_path);
+    }
+
+    if (build_associated_config.build_options) |opts| {
+        build_file.build_options = opts;
+        build_associated_config.build_options = null;
     }
 }
 
@@ -158,11 +170,15 @@ fn loadBuildConfiguration(context: LoadBuildConfigContext) !void {
     const global_cache_path = context.global_cache_path;
     const zig_exe_path = context.zig_exe_path;
 
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    const arena_allocator = arena.allocator();
+
     const build_file_path = context.build_file_path orelse try URI.parse(allocator, build_file.uri);
     defer if (context.build_file_path == null) allocator.free(build_file_path);
     const directory_path = build_file_path[0 .. build_file_path.len - "build.zig".len];
 
-    const args: []const []const u8 = &[_][]const u8{
+    const standard_args = [_][]const u8{
         zig_exe_path,
         "run",
         build_runner_path,
@@ -178,6 +194,16 @@ fn loadBuildConfiguration(context: LoadBuildConfigContext) !void {
         context.cache_root,
         context.global_cache_root,
     };
+
+    var args = try arena_allocator.alloc([]const u8, standard_args.len + if (build_file.build_options) |opts| opts.len else 0);
+    defer arena_allocator.free(args);
+
+    args[0..standard_args.len].* = standard_args;
+    if (build_file.build_options) |opts| {
+        for (opts) |opt, i| {
+            args[standard_args.len + i] = try opt.formatParam(arena_allocator);
+        }
+    }
 
     const zig_run_result = try std.ChildProcess.exec(.{
         .allocator = allocator,
@@ -223,10 +249,10 @@ fn loadBuildConfiguration(context: LoadBuildConfigContext) !void {
                 packages.deinit(allocator);
             }
 
-            var include_dirs = try std.ArrayListUnmanaged(BuildFileConfig.IncludeDir).initCapacity(allocator, config.include_dirs.len);
+            var include_dirs = try std.ArrayListUnmanaged([]const u8).initCapacity(allocator, config.include_dirs.len);
             errdefer {
                 for (include_dirs.items) |dir| {
-                    allocator.free(dir.path);
+                    allocator.free(dir);
                 }
                 include_dirs.deinit(allocator);
             }
@@ -245,10 +271,10 @@ fn loadBuildConfiguration(context: LoadBuildConfigContext) !void {
             }
 
             for (config.include_dirs) |dir| {
-                const path = try allocator.dupe(u8, dir.path);
+                const path = try allocator.dupe(u8, dir);
                 errdefer allocator.free(path);
 
-                include_dirs.appendAssumeCapacity(.{ .path = path, .system = dir.system });
+                include_dirs.appendAssumeCapacity(path);
             }
 
             build_file.config = .{
@@ -655,18 +681,7 @@ fn collectCIncludes(self: *DocumentStore, handle: *Handle) ![]CImportHandle {
 }
 
 fn translate(self: *DocumentStore, handle: *Handle, source: []const u8) error{OutOfMemory}!?translate_c.Result {
-    const dirs: []BuildConfig.IncludeDir = if (handle.associated_build_file) |build_file| build_file.config.include_dirs else &.{};
-    const include_dirs = blk: {
-        var result = try self.allocator.alloc([]const u8, dirs.len);
-        errdefer self.allocator.free(result);
-
-        for (dirs) |dir, i| {
-            result[i] = dir.path;
-        }
-
-        break :blk result;
-    };
-    defer self.allocator.free(include_dirs);
+    const include_dirs: []const []const u8 = if (handle.associated_build_file) |build_file| build_file.config.include_dirs else &.{};
 
     const maybe_result = try translate_c.translate(
         self.allocator,
