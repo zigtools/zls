@@ -118,7 +118,7 @@ fn loadBuildAssociatedConfiguration(allocator: std.mem.Allocator, build_file: *B
     const directory_path = build_file_path[0 .. build_file_path.len - "build.zig".len];
 
     const options = std.json.ParseOptions{ .allocator = allocator };
-    const build_associated_config = blk: {
+    var build_associated_config = blk: {
         const config_file_path = try std.fs.path.join(allocator, &[_][]const u8{ directory_path, "zls.build.json" });
         defer allocator.free(config_file_path);
 
@@ -144,18 +144,8 @@ fn loadBuildAssociatedConfiguration(allocator: std.mem.Allocator, build_file: *B
     }
 
     if (build_associated_config.build_options) |opts| {
-        // Copy options out of json parse result since they will be invalidated
-        var build_opts = try std.ArrayListUnmanaged(BuildAssociatedConfig.BuildOption).initCapacity(allocator, opts.len);
-        errdefer {
-            for (build_opts.items) |*opt| {
-                opt.deinit(allocator);
-            }
-            build_opts.deinit(allocator);
-        }
-        for (opts) |opt| {
-            try build_opts.append(allocator, try opt.dupe(allocator));
-        }
-        build_file.build_options = build_opts.toOwnedSlice(allocator);
+        build_file.build_options = opts;
+        build_associated_config.build_options = null;
     }
 }
 
