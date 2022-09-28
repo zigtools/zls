@@ -178,37 +178,32 @@ fn loadBuildConfiguration(context: LoadBuildConfigContext) !void {
     defer if (context.build_file_path == null) allocator.free(build_file_path);
     const directory_path = build_file_path[0 .. build_file_path.len - "build.zig".len];
 
-    // enough capacity for arguments always passed to the build runner plus a couple build options
-    var arglist = try std.ArrayListUnmanaged([]const u8).initCapacity(arena_allocator, 32);
-    defer arglist.deinit(arena_allocator);
+    const standard_args = &[_][]const u8{
+        zig_exe_path,
+        "run",
+        build_runner_path,
+        "--cache-dir",
+        global_cache_path,
+        "--pkg-begin",
+        "@build@",
+        build_file_path,
+        "--pkg-end",
+        "--",
+        zig_exe_path,
+        directory_path,
+        context.cache_root,
+        context.global_cache_root,
+    };
 
-    try arglist.appendSlice(
-        arena_allocator,
-        &[_][]const u8{
-            zig_exe_path,
-            "run",
-            build_runner_path,
-            "--cache-dir",
-            global_cache_path,
-            "--pkg-begin",
-            "@build@",
-            build_file_path,
-            "--pkg-end",
-            "--",
-            zig_exe_path,
-            directory_path,
-            context.cache_root,
-            context.global_cache_root,
-        },
-    );
+    var args = try arena_allocator.alloc([]const u8, standard_args.len + if (build_file.build_options) |opts| opts.len else 0);
+    defer arena_allocator.free(args);
 
+    args[0..standard_args.len].* = standard_args.*;
     if (build_file.build_options) |opts| {
-        for (opts) |opt| {
-            try arglist.append(allocator, try opt.formatParam(arena_allocator));
+        for (opts) |opt, i| {
+            args[standard_args.len + i] = try opt.formatParam(arena_allocator);
         }
     }
-
-    const args: []const []const u8 = arglist.items;
 
     const zig_run_result = try std.ChildProcess.exec(.{
         .allocator = allocator,
