@@ -76,7 +76,13 @@ fn handleNonCamelcaseFunction(builder: *Builder, actions: *std.ArrayListUnmanage
 
     const tree = builder.handle.tree;
 
-    const decl = (try analysis.lookupSymbolGlobal(builder.document_store, builder.arena, builder.handle, identifier_name, loc.start)) orelse return;
+    const decl = (try analysis.lookupSymbolGlobal(
+        builder.document_store,
+        builder.arena,
+        builder.handle,
+        identifier_name,
+        loc.start,
+    )) orelse return;
 
     const name_token_idx = decl.nameToken();
     const name_loc = offsets.tokenToLoc(tree, name_token_idx);
@@ -85,7 +91,7 @@ fn handleNonCamelcaseFunction(builder: *Builder, actions: *std.ArrayListUnmanage
 
     const action1 = types.CodeAction{
         .title = "make function name camelCase",
-        .kind = .SourceFixAll,
+        .kind = .QuickFix,
         .isPreferred = true,
         .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditLoc(name_loc, new_text)}),
     };
