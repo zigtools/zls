@@ -120,7 +120,10 @@ pub fn main() !void {
 
 fn reifyOptions(step: *std.build.Step) !void {
     if (step.cast(OptionsStep)) |option| {
-        try option.step.make();
+        // We don't know how costly the dependency tree might be, so err on the side of caution
+        if (step.dependencies.items.len == 0) {
+            try option.step.make();
+        }
     }
 
     for (step.dependencies.items) |unknown_step| {
