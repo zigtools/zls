@@ -74,26 +74,21 @@ pub const Builder = struct {
 fn handleNonCamelcaseFunction(builder: *Builder, actions: *std.ArrayListUnmanaged(types.CodeAction), loc: offsets.Loc) !void {
     const identifier_name = offsets.locToSlice(builder.text(), loc);
 
-    const tree = builder.handle.tree;
-
-    const decl = (try analysis.lookupSymbolGlobal(
-        builder.document_store,
-        builder.arena,
-        builder.handle,
-        identifier_name,
-        loc.start,
-    )) orelse return;
-
-    const name_token_idx = decl.nameToken();
-    const name_loc = offsets.tokenToLoc(tree, name_token_idx);
+    // const decl = (try analysis.lookupSymbolGlobal(
+    //     builder.document_store,
+    //     builder.arena,
+    //     builder.handle,
+    //     identifier_name,
+    //     loc.start,
+    // )) orelse return;
 
     const new_text = try createCamelcaseText(builder.arena.allocator(), identifier_name);
 
     const action1 = types.CodeAction{
         .title = "make function name camelCase",
-        .kind = .QuickFix,
+        .kind = .SourceFixAll,
         .isPreferred = true,
-        .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditLoc(name_loc, new_text)}),
+        .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditLoc(loc, new_text)}),
     };
 
     try actions.append(builder.arena.allocator(), action1);
@@ -264,28 +259,28 @@ fn handlePointlessDiscard(builder: *Builder, actions: *std.ArrayListUnmanaged(ty
 
 // attempts to converts a slice of text into camelcase 'FUNCTION_NAME' -> 'functionName'
 fn createCamelcaseText(allocator: std.mem.Allocator, identifier: []const u8) ![]const u8 {
-    var num_separators: usize = 0;
+    // skip initial & ending underscores
+    const trimmed_identifier = std.mem.trim(u8, identifier, "_");
 
-    for (identifier) |c| {
-        if (c == '_') num_separators += 1;
-    }
+    const num_separators = std.mem.count(u8, trimmed_identifier, "_");
 
-    const new_text_len = identifier.len - num_separators;
+    const new_text_len = trimmed_identifier.len - num_separators;
     var new_text = try std.ArrayListUnmanaged(u8).initCapacity(allocator, new_text_len);
     errdefer new_text.deinit(allocator);
 
     var idx: usize = 0;
+    while (idx < trimmed_identifier.len) {
+        const ch = trimmed_identifier[idx];
+        if (ch == '_') {
+            // the trimmed identifier is guaranteed to not have underscores at the end,
+            // so it can be assumed that ptr dereferences are safe until an alnum char is found
+            while (trimmed_identifier[idx] == '_') : (idx += 1) {}
+            const ch2 = trimmed_identifier[idx];
+            new_text.appendAssumeCapacity(std.ascii.toUpper(ch2));
 
-    // sloppy
-    while (idx < identifier.len) {
-        const c = identifier[idx];
-
-        if (c == '_') {
-            const c2 = identifier[idx + 1];
-            new_text.appendAssumeCapacity(std.ascii.toUpper(c2));
-            idx += 2;
+            idx += 1;
         } else {
-            new_text.appendAssumeCapacity(std.ascii.toLower(c));
+            new_text.appendAssumeCapacity(std.ascii.toLower(ch));
             idx += 1;
         }
     }
@@ -345,7 +340,7 @@ const DiagnosticKind = union(enum) {
             return DiagnosticKind{
                 .omit_discard = parseEnum(DiscardCat, msg["discard of ".len..]) orelse return null,
             };
-        } else if (std.mem.startsWith(u8, msg, "Functions should")) {
+        } else if (std.mem.startsWith(u8, msg, "Functions should be camelCase")) {
             return DiagnosticKind{
                 .non_camelcase_fn = {},
             };
