@@ -1602,10 +1602,9 @@ fn initializeHandler(server: *Server, writer: anytype, id: types.RequestId, req:
     const env = Config.getZigEnv(server.allocator, server.config.zig_exe_path.?) orelse return;
     defer std.json.parseFree(Config.Env, env, .{ .allocator = server.allocator });
 
-    const zig_build_exe_version = std.SemanticVersion.parse("0.10.0-dev.4177+6d7b0690a") catch return;
     const zig_exe_version = std.SemanticVersion.parse(env.version) catch return;
 
-    if (zig_build_exe_version.order(zig_exe_version) == .gt) {
+    if (zig_builtin.zig_version.order(zig_exe_version) == .gt) {
         try server.showMessage(writer, .Warning,
             \\ZLS has been build with a newer version than you are using!
             \\This may cause unexpected issues.
