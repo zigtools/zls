@@ -1,11 +1,13 @@
 const std = @import("std");
 const types = @import("types.zig");
 
+pub const Error = error{ OutOfMemory, InvalidRange };
+
 // This is essentially the same as `types.TextEdit`, but we use an
 // ArrayList(u8) here to be able to clean up the memory later on
 pub const Edit = struct {
     range: types.Range,
-    newText: std.ArrayList(u8),
+    newText: std.ArrayListUnmanaged(u8),
 };
 
 // Whether the `Change` is an addition, deletion, or no change from the
@@ -25,7 +27,7 @@ pub fn edits(
     allocator: std.mem.Allocator,
     a: []const u8,
     b: []const u8,
-) !std.ArrayList(Edit) {
+) Error!std.ArrayListUnmanaged(Edit) {
     // Given the input strings A and B, we skip over the first N characters
     // where A[0..N] == B[0..N]. We want to trim the start (and end) of the
     // strings that have the same text. This decreases the size of the LCS
@@ -122,7 +124,7 @@ pub const Array2D = struct {
         allocator: std.mem.Allocator,
         rows: usize,
         cols: usize,
-    ) !Self {
+    ) error{OutOfMemory}!Self {
         const data = try allocator.alloc(usize, rows * cols);
 
         return Self{
@@ -183,11 +185,11 @@ pub fn get_changes(
     a_trim: []const u8,
     b_trim: []const u8,
     allocator: std.mem.Allocator,
-) !std.ArrayList(Edit) {
+) Error!std.ArrayListUnmanaged(Edit) {
     // First we get a list of changes between strings at the character level:
     // "addition", "deletion", and "no change" for each character
-    var changes = try std.ArrayList(Change).initCapacity(allocator, a_trim.len);
-    defer changes.deinit();
+    var changes = try std.ArrayListUnmanaged(Change).initCapacity(allocator, a_trim.len);
+    defer changes.deinit(allocator);
     try recur_changes(
         lcs,
         &changes,
@@ -195,13 +197,15 @@ pub fn get_changes(
         b_trim,
         @intCast(i64, a_trim.len),
         @intCast(i64, b_trim.len),
+        allocator,
     );
 
     // We want to group runs of deletions and additions, and separate them by
     // runs of `.Nothing` changes. This will allow us to calculate the
     // `TextEdit` ranges
-    var groups = std.ArrayList([]Change).init(allocator);
-    defer groups.deinit();
+    var groups = std.ArrayListUnmanaged([]Change){};
+    defer groups.deinit(allocator);
+
     var active_change: ?[]Change = null;
     for (changes.items) |ch, i| {
         switch (ch.operation) {
@@ -213,7 +217,7 @@ pub fn get_changes(
             .Nothing => {
                 if (active_change) |*ac| {
                     ac.* = ac.*[0..(i - (changes.items.len - ac.*.len))];
-                    try groups.append(ac.*);
+                    try groups.append(allocator, ac.*);
                     active_change = null;
                 }
             },
@@ -221,7 +225,7 @@ pub fn get_changes(
     }
     if (active_change) |*ac| {
         ac.* = ac.*[0..(changes.items.len - (changes.items.len - ac.*.len))];
-        try groups.append(ac.*);
+        try groups.append(allocator, ac.*);
     }
 
     // The LCS algorithm works "in reverse", so we're putting everything back
@@ -230,17 +234,17 @@ pub fn get_changes(
     std.mem.reverse([]Change, groups.items);
     for (groups.items) |group| std.mem.reverse(Change, group);
 
-    var edit_results = std.ArrayList(Edit).init(allocator);
-    errdefer edit_results.deinit();
+    var edit_results = std.ArrayListUnmanaged(Edit){};
+    errdefer edit_results.deinit(allocator);
 
     // Convert our grouped changes into `Edit`s
     for (groups.items) |group| {
         var range_start = group[0].pos;
         var range_len: usize = 0;
-        var newText = std.ArrayList(u8).init(allocator);
+        var newText = std.ArrayListUnmanaged(u8){};
         for (group) |ch| {
             switch (ch.operation) {
-                .Addition => try newText.append(ch.value.?),
+                .Addition => try newText.append(allocator, ch.value.?),
                 .Deletion => range_len += 1,
                 else => {},
             }
@@ -251,7 +255,7 @@ pub fn get_changes(
             a_trim_offset + range_start + range_len,
         );
         a_lines.reset();
-        try edit_results.append(Edit{
+        try edit_results.append(allocator, Edit{
             .range = range,
             .newText = newText,
         });
@@ -262,12 +266,13 @@ pub fn get_changes(
 
 fn recur_changes(
     lcs: *Array2D,
-    changes: *std.ArrayList(Change),
+    changes: *std.ArrayListUnmanaged(Change),
     a: []const u8,
     b: []const u8,
     i: i64,
     j: i64,
-) anyerror!void {
+    allocator: std.mem.Allocator,
+) error{OutOfMemory}!void {
     // This function recursively works backwards through the LCS table in
     // order to figure out what kind of changes took place to transform `a`
     // into `b`
@@ -276,26 +281,26 @@ fn recur_changes(
     const jj = @intCast(usize, j);
 
     if (i > 0 and j > 0 and a[ii - 1] == b[jj - 1]) {
-        try changes.append(.{
+        try changes.append(allocator, .{
             .operation = .Nothing,
             .pos = ii - 1,
             .value = null,
         });
-        try recur_changes(lcs, changes, a, b, i - 1, j - 1);
+        try recur_changes(lcs, changes, a, b, i - 1, j - 1, allocator);
     } else if (j > 0 and (i == 0 or lcs.get(ii, jj - 1).* >= lcs.get(ii - 1, jj).*)) {
-        try changes.append(.{
+        try changes.append(allocator, .{
             .operation = .Addition,
             .pos = ii,
             .value = b[jj - 1],
         });
-        try recur_changes(lcs, changes, a, b, i, j - 1);
+        try recur_changes(lcs, changes, a, b, i, j - 1, allocator);
     } else if (i > 0 and (j == 0 or lcs.get(ii, jj - 1).* < lcs.get(ii - 1, jj).*)) {
-        try changes.append(.{
+        try changes.append(allocator, .{
             .operation = .Deletion,
             .pos = ii - 1,
             .value = a[ii - 1],
         });
-        try recur_changes(lcs, changes, a, b, i - 1, j);
+        try recur_changes(lcs, changes, a, b, i - 1, j, allocator);
     }
 }
 
@@ -305,7 +310,7 @@ fn char_pos_to_range(
     lines: *std.mem.SplitIterator(u8),
     start: usize,
     end: usize,
-) !types.Range {
+) Error!types.Range {
     var char_pos: usize = 0;
     var line_pos: usize = 0;
     var result_start_pos: ?types.Position = null;

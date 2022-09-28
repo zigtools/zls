@@ -1532,7 +1532,11 @@ fn initializeHandler(server: *Server, writer: anytype, id: types.RequestId, req:
                         .triggerCharacters = &.{"("},
                         .retriggerCharacters = &.{","},
                     },
-                    .textDocumentSync = .Full,
+                    .textDocumentSync = .{
+                        .openClose = true,
+                        .change = .Full,
+                        .save = true,
+                    },
                     .renameProvider = true,
                     .completionProvider = .{ .resolveProvider = false, .triggerCharacters = &[_][]const u8{ ".", ":", "@", "]" }, .completionItem = .{ .labelDetailsSupport = true } },
                     .documentHighlightProvider = true,
@@ -1989,7 +1993,7 @@ fn formattingHandler(server: *Server, writer: anytype, id: types.RequestId, req:
             .Exited => |code| if (code == 0) {
                 if (std.mem.eql(u8, handle.document.text, stdout_bytes)) return try respondGeneric(writer, id, null_result_response);
 
-                var edits = diff.edits(server.allocator, handle.document.text, stdout_bytes) catch {
+                var edits = diff.edits(server.arena.allocator(), handle.document.text, stdout_bytes) catch {
                     const range = offsets.locToRange(handle.document.text, .{ .start = 0, .end = handle.document.text.len }, server.offset_encoding);
                     // If there was an error trying to diff the text, return the formatted response
                     // as the new text for the entire range of the document
@@ -2005,18 +2009,11 @@ fn formattingHandler(server: *Server, writer: anytype, id: types.RequestId, req:
                         },
                     });
                 };
-                defer {
-                    for (edits.items) |item| item.newText.deinit();
-                    edits.deinit();
-                }
 
                 // Convert from `[]diff.Edit` to `[]types.TextEdit`
-                var text_edits = try std
-                    .ArrayList(types.TextEdit)
-                    .initCapacity(server.allocator, edits.items.len);
-                defer text_edits.deinit();
+                var text_edits = try std.ArrayListUnmanaged(types.TextEdit).initCapacity(server.arena.allocator(), edits.items.len);
                 for (edits.items) |edit| {
-                    try text_edits.append(.{
+                    text_edits.appendAssumeCapacity(.{
                         .range = edit.range,
                         .newText = edit.newText.items,
                     });

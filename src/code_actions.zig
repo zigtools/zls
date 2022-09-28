@@ -38,6 +38,8 @@ pub const Builder = struct {
                 .@"index capture" => try handleUnusedIndexCapture(builder, actions, loc),
                 .@"error capture" => try handleUnusedCapture(builder, actions, loc),
             },
+            // the undeclared identifier may be a discard
+            .undeclared_identifier => try handlePointlessDiscard(builder, actions, loc),
             .unreachable_code => {
                 // TODO
                 // autofix: comment out code
@@ -127,18 +129,12 @@ fn handleUnusedFunctionParameter(builder: *Builder, actions: *std.ArrayListUnman
         .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditPos(index, new_text)}),
     };
 
-    const param_loc = .{
-        .start = offsets.tokenToIndex(tree, ast.paramFirstToken(tree, payload.param)),
-        .end = offsets.tokenToLoc(tree, ast.paramLastToken(tree, payload.param)).end,
-    };
-
     // TODO fix formatting
-    // TODO remove trailing comma on last parameter
     const action2 = types.CodeAction{
         .title = "remove function parameter",
         .kind = .QuickFix,
         .isPreferred = false,
-        .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditLoc(param_loc, "")}),
+        .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditLoc(getParamRemovalRange(tree, payload.param), "")}),
     };
 
     try actions.appendSlice(builder.arena.allocator(), &.{ action1, action2 });
@@ -296,11 +292,51 @@ fn createDiscardText(allocator: std.mem.Allocator, identifier_name: []const u8, 
     return new_text.toOwnedSlice(allocator);
 }
 
+fn getParamRemovalRange(tree: Ast, param: Ast.full.FnProto.Param) offsets.Loc {
+    var param_start = offsets.tokenToIndex(tree, ast.paramFirstToken(tree, param));
+    var param_end = offsets.tokenToLoc(tree, ast.paramLastToken(tree, param)).end;
+
+    var trim_end = false;
+    while (param_start != 0) : (param_start -= 1) {
+        switch (tree.source[param_start - 1]) {
+            ' ', '\n' => continue,
+            ',' => {
+                param_start -= 1;
+                break;
+            },
+            '(' => {
+                trim_end = true;
+                break;
+            },
+            else => break,
+        }
+    }
+
+    var found_comma = false;
+    while (trim_end and param_end < tree.source.len) : (param_end += 1) {
+        switch (tree.source[param_end]) {
+            ' ', '\n' => continue,
+            ',' => if (!found_comma) {
+                found_comma = true;
+                continue;
+            } else {
+                param_end += 1;
+                break;
+            },
+            ')' => break,
+            else => break,
+        }
+    }
+
+    return .{ .start = param_start, .end = param_end };
+}
+
 const DiagnosticKind = union(enum) {
     unused: IdCat,
     pointless_discard: IdCat,
     omit_discard: DiscardCat,
-    non_camelcase_fn: void,
+    non_camelcase_fn,
+    undeclared_identifier,
     unreachable_code,
 
     const IdCat = enum {
@@ -334,9 +370,9 @@ const DiagnosticKind = union(enum) {
                 .omit_discard = parseEnum(DiscardCat, msg["discard of ".len..]) orelse return null,
             };
         } else if (std.mem.startsWith(u8, msg, "Functions should be camelCase")) {
-            return DiagnosticKind{
-                .non_camelcase_fn = {},
-            };
+            return .non_camelcase_fn;
+        } else if (std.mem.startsWith(u8, msg, "use of undeclared identifier")) {
+            return .undeclared_identifier;
         }
         return null;
     }
