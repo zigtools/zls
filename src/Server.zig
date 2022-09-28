@@ -2453,7 +2453,7 @@ pub fn processJsonRpc(server: *Server, writer: anytype, json: []const u8) !void 
                         log.err("failed to process request: {s}", .{@errorName(err)});
                     };
                 }
-                break;
+                return;
             }
         }
     }
