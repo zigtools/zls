@@ -133,10 +133,10 @@ fn respondGeneric(writer: anytype, id: types.RequestId, response: []const u8) !v
 }
 
 fn showMessage(server: *Server, writer: anytype, message_type: types.MessageType, message: []const u8) !void {
-    try send(writer, server.allocator, types.Notification{
+    try send(writer, server.arena.allocator(), types.Notification{
         .method = "window/showMessage",
         .params = .{
-            .ShowMessageParams = .{
+            .ShowMessage = .{
                 .type = message_type,
                 .message = message,
             },
@@ -1600,6 +1600,20 @@ fn initializeHandler(server: *Server, writer: anytype, id: types.RequestId, req:
     log.info("zls initialized", .{});
     log.info("{}", .{server.client_capabilities});
     log.info("Using offset encoding: {s}", .{std.meta.tagName(server.offset_encoding)});
+
+    // TODO avoid having to call getZigEnv twice
+    // once in init and here
+    const env = Config.getZigEnv(server.allocator, server.config.zig_exe_path.?) orelse return;
+    defer std.json.parseFree(Config.Env, env, .{ .allocator = server.allocator });
+
+    const zig_exe_version = std.SemanticVersion.parse(env.version) catch return;
+
+    if (zig_builtin.zig_version.order(zig_exe_version) == .gt) {
+        try server.showMessage(writer, .Warning,
+            \\ZLS has been build with a newer version than you are using!
+            \\This may cause unexpected issues.
+        );
+    }
 }
 
 fn registerCapability(server: *Server, writer: anytype, method: []const u8) !void {
