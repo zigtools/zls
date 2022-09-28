@@ -28,6 +28,13 @@ const BuildFile = struct {
         if (self.builtin_uri) |builtin_uri| allocator.free(builtin_uri);
         allocator.destroy(self);
     }
+
+    pub fn uriAssociatedWithBuild(self: *BuildFile, uri: []const u8) bool {
+        return for (self.config.packages) |package| {
+            if (std.mem.eql(u8, uri, package.uri))
+                break true;
+        } else false;
+    }
 };
 
 pub const BuildFileConfig = struct {
@@ -295,6 +302,7 @@ const BuildDotZigIterator = struct {
                 self.dir_path[0..self.i], "build.zig",
             });
 
+            log.debug("potential build path: {s}", .{potential_build_path});
             self.i += 1;
             while (self.i < self.dir_path.len and self.dir_path[self.i] != std.fs.path.sep) : (self.i += 1) {}
 
@@ -309,6 +317,49 @@ const BuildDotZigIterator = struct {
         }
     }
 };
+
+fn createBuildFile(self: *DocumentStore, build_file_path: []const u8) !*BuildFile {
+    var build_file = try self.allocator.create(BuildFile);
+    errdefer build_file.destroy(self.allocator);
+
+    log.debug("creating build file: {s}", .{build_file_path});
+
+    build_file.* = .{
+        .refs = 1,
+        .uri = try URI.fromPath(self.allocator, build_file_path),
+        .config = .{
+            .packages = &.{},
+            .include_dirs = &.{},
+        },
+    };
+
+    loadBuildAssociatedConfiguration(self.allocator, build_file, build_file_path) catch |err| {
+        log.debug("Failed to load config associated with build file {s} (error: {})", .{ build_file.uri, err });
+    };
+    if (build_file.builtin_uri == null) {
+        if (self.config.builtin_path != null) {
+            build_file.builtin_uri = try URI.fromPath(self.allocator, self.config.builtin_path.?);
+            log.info("builtin config not found, falling back to default: {?s}", .{build_file.builtin_uri});
+        }
+    }
+
+    // TODO: Do this in a separate thread?
+    // It can take quite long.
+    loadBuildConfiguration(.{
+        .build_file = build_file,
+        .allocator = self.allocator,
+        .build_runner_path = self.config.build_runner_path.?,
+        .global_cache_path = self.config.global_cache_path.?,
+        .zig_exe_path = self.config.zig_exe_path.?,
+        .build_file_path = build_file_path,
+        .cache_root = self.zig_cache_root,
+        .global_cache_root = self.zig_global_cache_root,
+    }) catch |err| {
+        log.err("Failed to load packages of build file {s} (error: {})", .{ build_file.uri, err });
+    };
+
+    return build_file;
+}
 
 /// This function asserts the document is not open yet and takes ownership
 /// of the uri and text passed in.
@@ -355,49 +406,17 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: [:0]u8) anyerror!*Ha
     if (self.config.zig_exe_path != null and std.mem.endsWith(u8, uri, "/build.zig") and !in_std) {
         log.debug("Document is a build file, extracting packages...", .{});
         // This is a build file.
-        var build_file = try self.allocator.create(BuildFile);
-        errdefer build_file.destroy(self.allocator);
 
-        build_file.* = .{
-            .refs = 1,
-            .uri = try self.allocator.dupe(u8, uri),
-            .config = .{
-                .packages = &.{},
-                .include_dirs = &.{},
-            },
-        };
-
-        const build_file_path = try URI.parse(self.allocator, build_file.uri);
+        const build_file_path = try URI.parse(self.allocator, uri);
         defer self.allocator.free(build_file_path);
 
-        loadBuildAssociatedConfiguration(self.allocator, build_file, build_file_path) catch |err| {
-            log.debug("Failed to load config associated with build file {s} (error: {})", .{ build_file.uri, err });
-        };
-        if (build_file.builtin_uri == null) {
-            if (self.config.builtin_path != null) {
-                build_file.builtin_uri = try URI.fromPath(self.allocator, self.config.builtin_path.?);
-                log.info("builtin config not found, falling back to default: {?s}", .{build_file.builtin_uri});
-            }
-        }
-
-        // TODO: Do this in a separate thread?
-        // It can take quite long.
-        loadBuildConfiguration(.{
-            .build_file = build_file,
-            .allocator = self.allocator,
-            .build_runner_path = self.config.build_runner_path.?,
-            .global_cache_path = self.config.global_cache_path.?,
-            .zig_exe_path = self.config.zig_exe_path.?,
-            .build_file_path = build_file_path,
-            .cache_root = self.zig_cache_root,
-            .global_cache_root = self.zig_global_cache_root,
-        }) catch |err| {
-            log.err("Failed to load packages of build file {s} (error: {})", .{ build_file.uri, err });
-        };
+        const build_file = try self.createBuildFile(build_file_path);
+        errdefer build_file.destroy(self.allocator);
 
         try self.build_files.append(self.allocator, build_file);
         handle.is_build_file = build_file;
     } else if (self.config.zig_exe_path != null and !in_std) {
+        log.debug("Going to walk down the tree towards: {s}", .{uri});
         // walk down the tree towards the uri. When we hit build.zig files
         // determine if the uri we're interested in is involved with the build.
         // This ensures that _relevant_ build.zig files higher in the
@@ -410,75 +429,46 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: [:0]u8) anyerror!*Ha
             defer self.allocator.free(build_path);
 
             log.debug("found build path: {s}", .{build_path});
-            // TODO: do the build and determine if the uri is included
-            // is this a registered build_file?
+            // if it's found or created
+            const build_file = for (self.build_files.items) |build_file| {
+                const entry_build_path = try URI.parse(self.allocator, build_file.uri);
+                defer self.allocator.free(entry_build_path);
+
+                if (std.mem.eql(u8, build_path, entry_build_path))
+                    break build_file;
+            } else build_file: {
+                var ret = try self.createBuildFile(build_path);
+                errdefer ret.destroy(self.allocator);
+
+                try self.build_files.append(self.allocator, ret);
+                break :build_file ret;
+            };
+
+            // TODO: is this needed?
+            // Check if the build file already exists
+            if (self.handles.get(build_file.uri) == null) {
+                // Read the build file, create a new document, set the candidate to the new build file.
+                const file = try std.fs.openFileAbsolute(build_path, .{});
+                defer file.close();
+
+                const build_file_text = try file.readToEndAllocOptions(
+                    self.allocator,
+                    std.math.maxInt(usize),
+                    null,
+                    @alignOf(u8),
+                    0,
+                );
+                errdefer self.allocator.free(build_file_text);
+
+                _ = try self.newDocument(build_file.uri, build_file_text);
+            }
+
+            if (build_file.uriAssociatedWithBuild(uri)) {
+                build_file.refs += 1;
+                handle.associated_build_file = build_file;
+                break;
+            }
         }
-
-        //// Then, try to find the closest build file.
-        //var curr_path = try URI.parse(self.allocator, uri);
-        //defer self.allocator.free(curr_path);
-        //log.debug("curr_path: {s}", .{curr_path});
-        //while (true) {
-        //    if (curr_path.len == 0) break;
-
-        //    if (std.mem.lastIndexOfScalar(u8, curr_path[0 .. curr_path.len - 1], std.fs.path.sep)) |idx| {
-        //        // This includes the last separator
-        //        curr_path = curr_path[0 .. idx + 1];
-
-        //        // Try to open the folder, then the file.
-        //        var folder = std.fs.cwd().openDir(curr_path, .{}) catch |err| switch (err) {
-        //            error.FileNotFound => continue,
-        //            else => return err,
-        //        };
-        //        defer folder.close();
-
-        //        var build_file = folder.openFile("build.zig", .{}) catch |err| switch (err) {
-        //            error.FileNotFound, error.AccessDenied => continue,
-        //            else => return err,
-        //        };
-        //        defer build_file.close();
-
-        //        // Calculate build file's URI
-        //        var candidate_path = try std.mem.concat(self.allocator, u8, &.{ curr_path, "build.zig" });
-        //        defer self.allocator.free(candidate_path);
-        //        const build_file_uri = try URI.fromPath(self.allocator, candidate_path);
-        //        errdefer self.allocator.free(build_file_uri);
-
-        //        if (candidate) |candidate_build_file| {
-        //            // Check if it is the same as the current candidate we got from the existing build files.
-        //            // If it isn't, we need to read the file and make a new build file.
-        //            if (std.mem.eql(u8, candidate_build_file.uri, build_file_uri)) {
-        //                self.allocator.free(build_file_uri);
-        //                break;
-        //            }
-        //        }
-
-        //        // Check if the build file already exists
-        //        if (self.handles.get(build_file_uri)) |build_file_handle| {
-        //            candidate = build_file_handle.is_build_file.?;
-        //            break;
-        //        }
-
-        //        // Read the build file, create a new document, set the candidate to the new build file.
-        //        const build_file_text = try build_file.readToEndAllocOptions(
-        //            self.allocator,
-        //            std.math.maxInt(usize),
-        //            null,
-        //            @alignOf(u8),
-        //            0,
-        //        );
-        //        errdefer self.allocator.free(build_file_text);
-
-        //        const build_file_handle = try self.newDocument(build_file_uri, build_file_text);
-        //        candidate = build_file_handle.is_build_file.?;
-        //        break;
-        //    } else break;
-        //}
-        //// Finally, associate the candidate build file, if any, to the new document.
-        //if (candidate) |build_file| {
-        //    build_file.refs += 1;
-        //    handle.associated_build_file = build_file;
-        //}
     }
 
     handle.import_uris = try self.collectImportUris(handle);
