@@ -121,7 +121,7 @@ The following options are currently available.
 
 ### Per-build Configuration Options
 
-The following options can be set on a per-project basis by placing `zls.user.json` in the project root directory next to `build.zig`.
+The following options can be set on a per-project basis by placing `zls.build.json` in the project root directory next to `build.zig`.
 
 | Option | Type | Default value | What it Does |
 | --- | --- | --- | --- |
