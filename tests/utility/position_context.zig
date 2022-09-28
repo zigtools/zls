@@ -249,7 +249,7 @@ fn freeDocument(doc: types.TextDocument) void {
     allocator.free(doc.text);
 }
 
-fn testContext(comptime line: []const u8, comptime tag: std.meta.Tag(analysis.PositionContext), comptime maybe_range: ?[]const u8) !void {
+fn testContext(line: []const u8, tag: std.meta.Tag(analysis.PositionContext), maybe_range: ?[]const u8) !void {
     const cursor_idx = std.mem.indexOf(u8, line, "<cursor>").?;
     const final_line = try std.mem.concat(allocator, u8, &.{ line[0..cursor_idx], line[cursor_idx + "<cursor>".len ..] });
     defer allocator.free(final_line);
