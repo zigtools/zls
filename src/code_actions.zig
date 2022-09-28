@@ -97,8 +97,12 @@ fn handleUnusedFunctionParameter(builder: *Builder, actions: *std.ArrayListUnman
 
     const block = node_datas[payload.func].rhs;
 
-    const indent = offsets.lineSliceUntilIndex(builder.text(), token_starts[node_tokens[payload.func]]).len;
-    const new_text = try createDiscardText(builder.arena.allocator(), identifier_name, indent + 4);
+    const indent = offsets.lineSliceUntilIndex(builder.text(), token_starts[node_tokens[payload.func]]);
+    var additional_indent: []const u8 = " " ** 4; // TODO: Figure out how many whitespaces are actually used for indentation.
+    if(std.mem.containsAtLeast(u8, builder.text(), 1, "\n\t")) {
+        additional_indent = "\t";
+    }
+    const new_text = try createDiscardText(builder.arena.allocator(), identifier_name, indent, additional_indent);
 
     const index = token_starts[node_tokens[block]] + 1;
 
@@ -149,11 +153,11 @@ fn handleUnusedVariableOrConstant(builder: *Builder, actions: *std.ArrayListUnma
     const first_token = tree.firstToken(node);
     const last_token = ast.lastToken(tree, node) + 1;
 
-    const indent = offsets.lineSliceUntilIndex(builder.text(), token_starts[first_token]).len;
+    const indent = offsets.lineSliceUntilIndex(builder.text(), token_starts[first_token]);
 
     if (token_tags[last_token] != .semicolon) return;
 
-    const new_text = try createDiscardText(builder.arena.allocator(), identifier_name, indent);
+    const new_text = try createDiscardText(builder.arena.allocator(), identifier_name, indent, "");
 
     const index = token_starts[last_token] + 1;
 
@@ -234,13 +238,14 @@ fn handlePointlessDiscard(builder: *Builder, actions: *std.ArrayListUnmanaged(ty
 }
 
 // returns a discard string `\n{indent}_ = identifier_name;`
-fn createDiscardText(allocator: std.mem.Allocator, identifier_name: []const u8, indent: usize) ![]const u8 {
-    const new_text_len = 1 + indent + "_ = ;".len + identifier_name.len;
+fn createDiscardText(allocator: std.mem.Allocator, identifier_name: []const u8, indent1: []const u8, indent2: []const u8) ![]const u8 {
+    const new_text_len = 1 + indent1.len + indent2.len + "_ = ;".len + identifier_name.len;
     var new_text = try std.ArrayListUnmanaged(u8).initCapacity(allocator, new_text_len);
     errdefer new_text.deinit(allocator);
 
     new_text.appendAssumeCapacity('\n');
-    new_text.appendNTimesAssumeCapacity(' ', indent);
+    new_text.appendSliceAssumeCapacity(indent1);
+    new_text.appendSliceAssumeCapacity(indent2);
     new_text.appendSliceAssumeCapacity("_ = ");
     new_text.appendSliceAssumeCapacity(identifier_name);
     new_text.appendAssumeCapacity(';');
