@@ -178,7 +178,7 @@ fn loadBuildConfiguration(context: LoadBuildConfigContext) !void {
     defer if (context.build_file_path == null) allocator.free(build_file_path);
     const directory_path = build_file_path[0 .. build_file_path.len - "build.zig".len];
 
-    const standard_args = &[_][]const u8{
+    const standard_args = [_][]const u8{
         zig_exe_path,
         "run",
         build_runner_path,
@@ -198,7 +198,7 @@ fn loadBuildConfiguration(context: LoadBuildConfigContext) !void {
     var args = try arena_allocator.alloc([]const u8, standard_args.len + if (build_file.build_options) |opts| opts.len else 0);
     defer arena_allocator.free(args);
 
-    args[0..standard_args.len].* = standard_args.*;
+    args[0..standard_args.len].* = standard_args;
     if (build_file.build_options) |opts| {
         for (opts) |opt, i| {
             args[standard_args.len + i] = try opt.formatParam(arena_allocator);
