@@ -274,11 +274,22 @@ pub const InlayHint = struct {
     },
 };
 
+pub const CodeAction = struct {
+    params: struct {
+        textDocument: TextDocumentIdentifier,
+        range: types.Range,
+        context: struct {
+            diagnostics: []types.Diagnostic,
+        },
+    },
+};
+
 pub const Configuration = struct {
     params: struct {
         settings: struct {
             enable_snippets: ?bool,
             enable_ast_check_diagnostics: ?bool,
+            enable_autofix: ?bool,
             enable_import_embedfile_argument_completions: ?bool,
             zig_lib_path: ?[]const u8,
             zig_exe_path: ?[]const u8,

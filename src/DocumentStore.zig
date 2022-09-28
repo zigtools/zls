@@ -32,7 +32,7 @@ const BuildFile = struct {
 
 pub const BuildFileConfig = struct {
     packages: []Pkg,
-    include_dirs: []IncludeDir,
+    include_dirs: []const []const u8,
 
     pub fn deinit(self: BuildFileConfig, allocator: std.mem.Allocator) void {
         for (self.packages) |pkg| {
@@ -42,7 +42,7 @@ pub const BuildFileConfig = struct {
         allocator.free(self.packages);
 
         for (self.include_dirs) |dir| {
-            allocator.free(dir.path);
+            allocator.free(dir);
         }
         allocator.free(self.include_dirs);
     }
@@ -51,8 +51,6 @@ pub const BuildFileConfig = struct {
         name: []const u8,
         uri: []const u8,
     };
-
-    pub const IncludeDir = BuildConfig.IncludeDir;
 };
 
 pub const Handle = struct {
@@ -227,10 +225,10 @@ fn loadBuildConfiguration(context: LoadBuildConfigContext) !void {
                 packages.deinit(allocator);
             }
 
-            var include_dirs = try std.ArrayListUnmanaged(BuildFileConfig.IncludeDir).initCapacity(allocator, config.include_dirs.len);
+            var include_dirs = try std.ArrayListUnmanaged([]const u8).initCapacity(allocator, config.include_dirs.len);
             errdefer {
                 for (include_dirs.items) |dir| {
-                    allocator.free(dir.path);
+                    allocator.free(dir);
                 }
                 include_dirs.deinit(allocator);
             }
@@ -249,10 +247,10 @@ fn loadBuildConfiguration(context: LoadBuildConfigContext) !void {
             }
 
             for (config.include_dirs) |dir| {
-                const path = try allocator.dupe(u8, dir.path);
+                const path = try allocator.dupe(u8, dir);
                 errdefer allocator.free(path);
 
-                include_dirs.appendAssumeCapacity(.{ .path = path, .system = dir.system });
+                include_dirs.appendAssumeCapacity(path);
             }
 
             build_file.config = .{
@@ -659,18 +657,7 @@ fn collectCIncludes(self: *DocumentStore, handle: *Handle) ![]CImportHandle {
 }
 
 fn translate(self: *DocumentStore, handle: *Handle, source: []const u8) error{OutOfMemory}!?translate_c.Result {
-    const dirs: []BuildConfig.IncludeDir = if (handle.associated_build_file) |build_file| build_file.config.include_dirs else &.{};
-    const include_dirs = blk: {
-        var result = try self.allocator.alloc([]const u8, dirs.len);
-        errdefer self.allocator.free(result);
-
-        for (dirs) |dir, i| {
-            result[i] = dir.path;
-        }
-
-        break :blk result;
-    };
-    defer self.allocator.free(include_dirs);
+    const include_dirs: []const []const u8 = if (handle.associated_build_file) |build_file| build_file.config.include_dirs else &.{};
 
     const maybe_result = try translate_c.translate(
         self.allocator,

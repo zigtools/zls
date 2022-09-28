@@ -14,6 +14,11 @@
             "type": "boolean",
             "default": "true"
         },
+        "enable_autofix": {
+            "description": "Whether to automatically fix errors on save. Currently supports adding and removing discards.",
+            "type": "boolean",
+            "default": "false"
+        },
         "enable_import_embedfile_argument_completions": {
             "description": "Whether to enable import/embedFile argument completions",
             "type": "boolean",

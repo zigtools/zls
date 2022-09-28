@@ -1,6 +1,5 @@
 comptime {
     _ = @import("helper.zig");
-    _ = @import("sessions.zig");
 
     _ = @import("utility/offsets.zig");
     _ = @import("utility/position_context.zig");

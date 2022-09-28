@@ -426,7 +426,7 @@ fn writeNodeTokens(builder: *Builder, maybe_node: ?Ast.Node.Index) WriteTokensEr
                 name,
                 tree.tokens.items(.start)[main_token],
             )) |child| {
-                if (child.decl.* == .param_decl) {
+                if (child.decl.* == .param_payload) {
                     return try writeToken(builder, main_token, .parameter);
                 }
                 var bound_type_params = analysis.BoundTypeParams{};

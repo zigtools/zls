@@ -516,8 +516,9 @@ pub fn symbolReferences(
                 try imports.resize(arena.allocator(), 0);
             }
         },
-        .param_decl => |param| blk: {
+        .param_payload => |pay| blk: {
             // Rename the param tok.
+            const param = pay.param;
             for (curr_handle.document_scope.scopes.items) |scope| {
                 if (scope.data != .function) continue;
 
