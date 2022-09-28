@@ -5,6 +5,7 @@ const process = std.process;
 const Builder = std.build.Builder;
 const InstallArtifactStep = std.build.InstallArtifactStep;
 const LibExeObjStep = std.build.LibExeObjStep;
+const OptionsStep = std.build.OptionsStep;
 
 pub const BuildConfig = struct {
     packages: []Pkg,
@@ -90,6 +91,14 @@ pub fn main() !void {
     var include_dirs: std.StringArrayHashMapUnmanaged(void) = .{};
     defer include_dirs.deinit(allocator);
 
+    // This scans the graph of Steps to find all `OptionsStep`s then reifies them
+    // Doing this before the loop to find packages ensures their `GeneratedFile`s have been given paths
+    for (builder.top_level_steps.items) |tls| {
+        for (tls.step.dependencies.items) |step| {
+            try reifyOptions(step);
+        }
+    }
+
     // TODO: We currently add packages from every LibExeObj step that the install step depends on.
     //       Should we error out or keep one step or something similar?
     // We also flatten them, we should probably keep the nested structure.
@@ -107,6 +116,16 @@ pub fn main() !void {
         .{ .whitespace = .{} },
         std.io.getStdOut().writer(),
     );
+}
+
+fn reifyOptions(step: *std.build.Step) !void {
+    if (step.cast(OptionsStep)) |option| {
+        try option.step.make();
+    }
+
+    for (step.dependencies.items) |unknown_step| {
+        try reifyOptions(unknown_step);
+    }
 }
 
 fn processStep(
