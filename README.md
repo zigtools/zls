@@ -18,6 +18,8 @@ Zig Language Server, or `zls`, is a language server for Zig. The Zig wiki states
     - [Build Options](#build-options)
     - [Updating Data Files](#updating-data-files)
   - [Configuration Options](#configuration-options)
+  - [Per-build Configuration Options](#per-build-configuration-options)
+    - [`BuildOption`](#buildoption)
 - [Features](#features)
   - [VS Code](#vs-code)
   - [Sublime Text](#sublime-text)
@@ -116,6 +118,28 @@ The following options are currently available.
 |`include_at_in_builtins`|`bool`|`false`| Whether the @ sign should be part of the completion of builtins.
 |`max_detail_length`|`usize`|`1024 * 1024`| The detail field of completions is truncated to be no longer than this (in bytes).
 | `skip_std_references` | `bool` | `false` | When true, skips searching for references in std. Improves lookup speed for functions in user's code. Renaming and go-to-definition will continue to work as is.
+
+### Per-build Configuration Options
+
+The following options can be set on a per-project basis by placing `zls.user.json` in the project root directory next to `build.zig`.
+
+| Option | Type | Default value | What it Does |
+| --- | --- | --- | --- |
+| `relative_builtin_path` | `?[]const u8` | `null` | If present, this path is used to resolve `@import("builtin")` |
+| `build_options` | `?[]BuildOption` | `null` | If present, this contains a list of user options to pass to the build. This is useful when options are used to conditionally add packages in `build.zig`. |
+
+#### `BuildOption`
+
+`BuildOption` is defined as follows:
+
+```zig
+const BuildOption = struct {
+    name: []const u8,
+    value: ?[]const u8 = null,
+};
+```
+
+When `value` is present, the option will be passed the same as in `zig build -Dname=value`. When `value` is `null`, the option will be passed as a flag instead as in `zig build -Dflag`.
 
 ## Features
 
