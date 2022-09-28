@@ -28,13 +28,6 @@ const BuildFile = struct {
         if (self.builtin_uri) |builtin_uri| allocator.free(builtin_uri);
         allocator.destroy(self);
     }
-
-    pub fn uriAssociatedWithBuild(self: *BuildFile, uri: []const u8) bool {
-        return for (self.config.packages) |package| {
-            if (std.mem.eql(u8, uri, package.uri))
-                break true;
-        } else false;
-    }
 };
 
 pub const BuildFileConfig = struct {
@@ -361,6 +354,68 @@ fn createBuildFile(self: *DocumentStore, build_file_path: []const u8) !*BuildFil
     return build_file;
 }
 
+fn uriInImports(
+    self: *DocumentStore,
+    checked_uris: *std.StringHashMap(void),
+    source_uri: []const u8,
+    uri: []const u8,
+) bool {
+    if (checked_uris.contains(source_uri))
+        return false;
+
+    defer _ = checked_uris.getOrPutValue(source_uri, {}) catch {};
+
+    const handle = self.handles.get(source_uri) orelse package_handle: {
+        var ret = (self.newDocumentFromUri(source_uri) catch return false) orelse return false;
+        self.handles.put(self.allocator, source_uri, ret) catch return false;
+        break :package_handle ret;
+    };
+
+    var import_uris = self.collectImportUris(handle) catch return false;
+    defer {
+        for (import_uris) |import_uri| {
+            self.allocator.free(import_uri);
+        }
+        self.allocator.free(import_uris);
+    }
+
+    for (import_uris) |import_uri| {
+        log.debug("looking at import: {s}", .{import_uri});
+        if (std.mem.eql(u8, uri, import_uri)) {
+            log.debug("found import match: {s}", .{import_uri});
+            return true;
+        }
+
+        if (self.uriInImports(checked_uris, import_uri, uri))
+            return true;
+    }
+
+    return false;
+}
+
+fn uriAssociatedWithBuild(
+    self: *DocumentStore,
+    build_file: *BuildFile,
+    uri: []const u8,
+) bool {
+    var checked_uris = std.StringHashMap(void).init(self.allocator);
+    defer checked_uris.deinit();
+
+    log.debug("checking if build file is associated with {s}", .{uri});
+    for (build_file.config.packages) |package| {
+        log.debug("looking at package: {s}: {s}", .{ package.name, package.uri });
+        if (std.mem.eql(u8, uri, package.uri)) {
+            log.debug("found package root: {s}", .{package.name});
+            return true;
+        }
+
+        if (self.uriInImports(&checked_uris, package.uri, uri))
+            return true;
+    }
+
+    return false;
+}
+
 /// This function asserts the document is not open yet and takes ownership
 /// of the uri and text passed in.
 fn newDocument(self: *DocumentStore, uri: []const u8, text: [:0]u8) anyerror!*Handle {
@@ -463,7 +518,7 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: [:0]u8) anyerror!*Ha
                 _ = try self.newDocument(build_file.uri, build_file_text);
             }
 
-            if (build_file.uriAssociatedWithBuild(uri)) {
+            if (self.uriAssociatedWithBuild(build_file, uri)) {
                 build_file.refs += 1;
                 handle.associated_build_file = build_file;
                 break;
