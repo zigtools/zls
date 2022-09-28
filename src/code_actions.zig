@@ -74,13 +74,7 @@ pub const Builder = struct {
 fn handleNonCamelcaseFunction(builder: *Builder, actions: *std.ArrayListUnmanaged(types.CodeAction), loc: offsets.Loc) !void {
     const identifier_name = offsets.locToSlice(builder.text(), loc);
 
-    // const decl = (try analysis.lookupSymbolGlobal(
-    //     builder.document_store,
-    //     builder.arena,
-    //     builder.handle,
-    //     identifier_name,
-    //     loc.start,
-    // )) orelse return;
+    if (std.mem.allEqual(u8, identifier_name, '_')) return;
 
     const new_text = try createCamelcaseText(builder.arena.allocator(), identifier_name);
 
@@ -277,12 +271,11 @@ fn createCamelcaseText(allocator: std.mem.Allocator, identifier: []const u8) ![]
             while (trimmed_identifier[idx] == '_') : (idx += 1) {}
             const ch2 = trimmed_identifier[idx];
             new_text.appendAssumeCapacity(std.ascii.toUpper(ch2));
-
-            idx += 1;
         } else {
             new_text.appendAssumeCapacity(std.ascii.toLower(ch));
-            idx += 1;
         }
+
+        idx += 1;
     }
 
     return new_text.toOwnedSlice(allocator);
