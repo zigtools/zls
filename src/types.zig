@@ -121,7 +121,7 @@ pub const Diagnostic = struct {
     code: ?string,
     source: ?string,
     message: string,
-    relatedInformation: ?[]const DiagnosticRelatedInformation = null,
+    relatedInformation: ?[]DiagnosticRelatedInformation = null,
 };
 
 pub const TextDocument = struct {
