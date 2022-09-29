@@ -21,6 +21,11 @@ test "semantic tokens" {
     // TODO more tests
 }
 
+const file_uri = switch (builtin.os.tag) {
+    .windows => "file:///C:\\test.zig",
+    else => "file:///test.zig",
+};
+
 fn testSemanticTokens(source: []const u8, expected: []const u32) !void {
     var ctx = try Context.init();
     defer ctx.deinit();
@@ -28,10 +33,7 @@ fn testSemanticTokens(source: []const u8, expected: []const u32) !void {
     const open_document = requests.OpenDocument{
         .params = .{
             .textDocument = .{
-                .uri = switch (builtin.os.tag) {
-                    .windows => "file:///C:\\test.zig",
-                    else => "file:///test.zig",
-                },
+                .uri = file_uri,
                 // .languageId = "zig",
                 // .version = 420,
                 .text = source,
@@ -51,7 +53,7 @@ fn testSemanticTokens(source: []const u8, expected: []const u32) !void {
     const expected_bytes = try std.json.stringifyAlloc(allocator, Response{ .data = expected }, .{});
     defer allocator.free(expected_bytes);
 
-    try ctx.request("textDocument/semanticTokens/full",
-        \\{"textDocument":{"uri":"file:///test.zig"}}
-    , expected_bytes);
+    try ctx.request("textDocument/semanticTokens/full", std.fmt.comptimePrint(
+        \\{{"textDocument":{{"uri":"{s}"}}}}
+    , .{file_uri}), expected_bytes);
 }
