@@ -354,24 +354,63 @@ fn createBuildFile(self: *DocumentStore, build_file_path: []const u8) !*BuildFil
     return build_file;
 }
 
+fn uriAssociatedWithBuild(
+    self: *DocumentStore,
+    build_file: *BuildFile,
+    uri: []const u8,
+) bool {
+    var checked_uris = std.StringHashMap(void).init(self.allocator);
+    defer {
+        var it = checked_uris.iterator();
+        while (it.next()) |entry|
+            self.allocator.free(entry.key_ptr.*);
+
+        checked_uris.deinit();
+    }
+
+    log.debug("checking if build file is associated with {s}", .{uri});
+    for (build_file.config.packages) |package| {
+        if (std.mem.eql(u8, uri, package.uri)) {
+            log.debug("found package root: {s}", .{package.name});
+            return true;
+        }
+
+        if (self.uriInImports(&checked_uris, package.uri, uri))
+            return true;
+    }
+
+    return false;
+}
+
 fn uriInImports(
     self: *DocumentStore,
     checked_uris: *std.StringHashMap(void),
     source_uri: []const u8,
     uri: []const u8,
 ) bool {
+    return self.uriInImportsImpl(checked_uris, source_uri, uri) catch false;
+}
+
+fn uriInImportsImpl(
+    self: *DocumentStore,
+    checked_uris: *std.StringHashMap(void),
+    source_uri: []const u8,
+    uri: []const u8,
+) !bool {
     if (checked_uris.contains(source_uri))
         return false;
 
-    defer _ = checked_uris.getOrPutValue(source_uri, {}) catch {};
+    log.debug("looking at imports in {s}", .{source_uri});
+    // consider it checked even if a failure happens
+    try checked_uris.put(try self.allocator.dupe(u8, source_uri), {});
 
     const handle = self.handles.get(source_uri) orelse package_handle: {
-        var ret = (self.newDocumentFromUri(source_uri) catch return false) orelse return false;
-        self.handles.put(self.allocator, source_uri, ret) catch return false;
+        var ret = (try self.newDocumentFromUri(source_uri)) orelse return false;
+        try self.handles.put(self.allocator, source_uri, ret);
         break :package_handle ret;
     };
 
-    var import_uris = self.collectImportUris(handle) catch return false;
+    var import_uris = try self.collectImportUris(handle);
     defer {
         for (import_uris) |import_uri| {
             self.allocator.free(import_uri);
@@ -387,29 +426,6 @@ fn uriInImports(
         }
 
         if (self.uriInImports(checked_uris, import_uri, uri))
-            return true;
-    }
-
-    return false;
-}
-
-fn uriAssociatedWithBuild(
-    self: *DocumentStore,
-    build_file: *BuildFile,
-    uri: []const u8,
-) bool {
-    var checked_uris = std.StringHashMap(void).init(self.allocator);
-    defer checked_uris.deinit();
-
-    log.debug("checking if build file is associated with {s}", .{uri});
-    for (build_file.config.packages) |package| {
-        log.debug("looking at package: {s}: {s}", .{ package.name, package.uri });
-        if (std.mem.eql(u8, uri, package.uri)) {
-            log.debug("found package root: {s}", .{package.name});
-            return true;
-        }
-
-        if (self.uriInImports(&checked_uris, package.uri, uri))
             return true;
     }
 
@@ -479,6 +495,7 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: [:0]u8) anyerror!*Ha
         const uri_path = try URI.parse(self.allocator, uri);
         defer self.allocator.free(uri_path);
 
+        var prev_build_file: ?*BuildFile = null;
         var build_it = try BuildDotZigIterator.init(self.allocator, uri_path);
         while (try build_it.next()) |build_path| {
             defer self.allocator.free(build_path);
@@ -522,6 +539,16 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: [:0]u8) anyerror!*Ha
                 build_file.refs += 1;
                 handle.associated_build_file = build_file;
                 break;
+            } else {
+                prev_build_file = build_file;
+            }
+        }
+
+        // if there was no direct imports found, use the closest build file if possible
+        if (handle.associated_build_file == null) {
+            if (prev_build_file) |build_file| {
+                build_file.refs += 1;
+                handle.associated_build_file = build_file;
             }
         }
     }
