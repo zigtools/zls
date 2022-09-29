@@ -130,53 +130,18 @@ pub fn configChanged(config: *Config, allocator: std.mem.Allocator, builtin_crea
         config.zig_exe_path = try setup.findZig(allocator);
     }
 
-    if (config.zig_exe_path) |exe_path| {
+    if (config.zig_exe_path) |exe_path| blk: {
         logger.info("Using zig executable {s}", .{exe_path});
 
-        if (config.zig_lib_path == null) find_lib_path: {
-            // Use `zig env` to find the lib path
-            const zig_env_result = try std.ChildProcess.exec(.{
-                .allocator = allocator,
-                .argv = &[_][]const u8{ exe_path, "env" },
-            });
+        if (config.zig_lib_path != null) break :blk;
 
-            defer {
-                allocator.free(zig_env_result.stdout);
-                allocator.free(zig_env_result.stderr);
-            }
+        var env = getZigEnv(allocator, exe_path) orelse break :blk;
+        defer std.json.parseFree(Env, env, .{ .allocator = allocator });
 
-            switch (zig_env_result.term) {
-                .Exited => |exit_code| {
-                    if (exit_code == 0) {
-                        const Env = struct {
-                            zig_exe: []const u8,
-                            lib_dir: ?[]const u8,
-                            std_dir: []const u8,
-                            global_cache_dir: []const u8,
-                            version: []const u8,
-                            target: ?[]const u8 = null,
-                        };
-
-                        var token_stream = std.json.TokenStream.init(zig_env_result.stdout);
-
-                        var json_env = std.json.parse(
-                            Env,
-                            &token_stream,
-                            .{ .allocator = allocator },
-                        ) catch {
-                            logger.err("Failed to parse zig env JSON result", .{});
-                            break :find_lib_path;
-                        };
-                        defer std.json.parseFree(Env, json_env, .{ .allocator = allocator });
-                        // We know this is allocated with `allocator`, we just steal it!
-                        config.zig_lib_path = json_env.lib_dir.?;
-                        json_env.lib_dir = null;
-                        logger.info("Using zig lib path '{?s}'", .{config.zig_lib_path});
-                    }
-                },
-                else => logger.err("zig env invocation failed", .{}),
-            }
-        }
+        // We know this is allocated with `allocator`, we just steal it!
+        config.zig_lib_path = env.lib_dir.?;
+        env.lib_dir = null;
+        logger.info("Using zig lib path '{s}'", .{config.zig_lib_path.?});
     } else {
         logger.warn("Zig executable path not specified in zls.json and could not be found in PATH", .{});
     }
@@ -235,4 +200,52 @@ pub fn configChanged(config: *Config, allocator: std.mem.Allocator, builtin_crea
 
         try file.writeAll(@embedFile("special/build_runner.zig"));
     }
+}
+
+pub const Env = struct {
+    zig_exe: []const u8,
+    lib_dir: ?[]const u8,
+    std_dir: []const u8,
+    global_cache_dir: []const u8,
+    version: []const u8,
+    target: ?[]const u8 = null,
+};
+
+/// result has to be freed with `std.json.parseFree`
+pub fn getZigEnv(allocator: std.mem.Allocator, zig_exe_path: []const u8) ?Env {
+    const zig_env_result = std.ChildProcess.exec(.{
+        .allocator = allocator,
+        .argv = &[_][]const u8{ zig_exe_path, "env" },
+    }) catch {
+        logger.err("Failed to execute zig env", .{});
+        return null;
+    };
+
+    defer {
+        allocator.free(zig_env_result.stdout);
+        allocator.free(zig_env_result.stderr);
+    }
+
+    switch (zig_env_result.term) {
+        .Exited => |code| {
+            if (code != 0) {
+                logger.err("zig env failed with error_code: {}", .{code});
+                return null;
+            }
+        },
+        else => logger.err("zig env invocation failed", .{}),
+    }
+
+    var token_stream = std.json.TokenStream.init(zig_env_result.stdout);
+    return std.json.parse(
+        Env,
+        &token_stream,
+        .{
+            .allocator = allocator,
+            .ignore_unknown_fields = true,
+        },
+    ) catch {
+        logger.err("Failed to parse zig env JSON result", .{});
+        return null;
+    };
 }
