@@ -1,5 +1,6 @@
 const std = @import("std");
 const zls = @import("zls");
+const builtin = @import("builtin");
 
 const Context = @import("../context.zig").Context;
 
@@ -27,7 +28,10 @@ fn testSemanticTokens(source: []const u8, expected: []const u32) !void {
     const open_document = requests.OpenDocument{
         .params = .{
             .textDocument = .{
-                .uri = "file:///test.zig",
+                .uri = switch (builtin.os.tag) {
+                    .windows => "file:///C:\\test.zig",
+                    else => "file:///test.zig",
+                },
                 // .languageId = "zig",
                 // .version = 420,
                 .text = source,
