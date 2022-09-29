@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const types = @import("types.zig");
 const URI = @import("uri.zig");
 const analysis = @import("analysis.zig");
@@ -281,7 +282,10 @@ const BuildDotZigIterator = struct {
             .allocator = allocator,
             .uri_path = uri_path,
             .dir_path = dir_path,
-            .i = root_dir_path.len + 1,
+            .i = switch (builtin.os.tag) {
+                .windows => std.fs.path.diskDesignator(uri_path).len + 1,
+                else => 1,
+            },
         };
     }
 
@@ -295,7 +299,6 @@ const BuildDotZigIterator = struct {
                 self.dir_path[0..self.i], "build.zig",
             });
 
-            log.debug("potential build path: {s}", .{potential_build_path});
             self.i += 1;
             while (self.i < self.dir_path.len and self.dir_path[self.i] != std.fs.path.sep) : (self.i += 1) {}
 
@@ -368,10 +371,8 @@ fn uriAssociatedWithBuild(
         checked_uris.deinit();
     }
 
-    log.debug("checking if build file is associated with {s}", .{uri});
     for (build_file.config.packages) |package| {
         if (std.mem.eql(u8, uri, package.uri)) {
-            log.debug("found package root: {s}", .{package.name});
             return true;
         }
 
@@ -400,7 +401,6 @@ fn uriInImportsImpl(
     if (checked_uris.contains(source_uri))
         return false;
 
-    log.debug("looking at imports in {s}", .{source_uri});
     // consider it checked even if a failure happens
     try checked_uris.put(try self.allocator.dupe(u8, source_uri), {});
 
@@ -419,11 +419,8 @@ fn uriInImportsImpl(
     }
 
     for (import_uris) |import_uri| {
-        log.debug("looking at import: {s}", .{import_uri});
-        if (std.mem.eql(u8, uri, import_uri)) {
-            log.debug("found import match: {s}", .{import_uri});
+        if (std.mem.eql(u8, uri, import_uri))
             return true;
-        }
 
         if (self.uriInImports(checked_uris, import_uri, uri))
             return true;
