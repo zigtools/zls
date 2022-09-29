@@ -22,7 +22,7 @@ pub const Builder = struct {
     ) error{OutOfMemory}!void {
         const kind = DiagnosticKind.parse(diagnostic.message) orelse return;
 
-        const loc = offsets.rangeToLoc(builder.text(), diagnostic.range, builder.offset_encoding);
+        const loc = offsets.rangeToLoc(builder.handle.text, diagnostic.range, builder.offset_encoding);
 
         switch (kind) {
             .unused => |id| switch (id) {
@@ -48,12 +48,12 @@ pub const Builder = struct {
     }
 
     pub fn createTextEditLoc(self: *Builder, loc: offsets.Loc, new_text: []const u8) types.TextEdit {
-        const range = offsets.locToRange(self.text(), loc, self.offset_encoding);
+        const range = offsets.locToRange(self.handle.text, loc, self.offset_encoding);
         return types.TextEdit{ .range = range, .newText = new_text };
     }
 
     pub fn createTextEditPos(self: *Builder, index: usize, new_text: []const u8) types.TextEdit {
-        const position = offsets.indexToPosition(self.text(), index, self.offset_encoding);
+        const position = offsets.indexToPosition(self.handle.text, index, self.offset_encoding);
         return types.TextEdit{ .range = .{ .start = position, .end = position }, .newText = new_text };
     }
 
@@ -62,18 +62,14 @@ pub const Builder = struct {
         try text_edits.appendSlice(self.arena.allocator(), edits);
 
         var workspace_edit = types.WorkspaceEdit{ .changes = .{} };
-        try workspace_edit.changes.putNoClobber(self.arena.allocator(), self.handle.uri(), text_edits);
+        try workspace_edit.changes.putNoClobber(self.arena.allocator(), self.handle.uri, text_edits);
 
         return workspace_edit;
-    }
-
-    fn text(self: *Builder) []const u8 {
-        return self.handle.document.text;
     }
 };
 
 fn handleUnusedFunctionParameter(builder: *Builder, actions: *std.ArrayListUnmanaged(types.CodeAction), loc: offsets.Loc) !void {
-    const identifier_name = offsets.locToSlice(builder.text(), loc);
+    const identifier_name = offsets.locToSlice(builder.handle.text, loc);
 
     const tree = builder.handle.tree;
     const node_tags = tree.nodes.items(.tag);
@@ -99,7 +95,7 @@ fn handleUnusedFunctionParameter(builder: *Builder, actions: *std.ArrayListUnman
 
     const block = node_datas[payload.func].rhs;
 
-    const indent = offsets.lineSliceUntilIndex(builder.text(), token_starts[node_tokens[payload.func]]).len;
+    const indent = offsets.lineSliceUntilIndex(builder.handle.text, token_starts[node_tokens[payload.func]]).len;
     const new_text = try createDiscardText(builder.arena.allocator(), identifier_name, indent + 4);
 
     const index = token_starts[node_tokens[block]] + 1;
@@ -123,7 +119,7 @@ fn handleUnusedFunctionParameter(builder: *Builder, actions: *std.ArrayListUnman
 }
 
 fn handleUnusedVariableOrConstant(builder: *Builder, actions: *std.ArrayListUnmanaged(types.CodeAction), loc: offsets.Loc) !void {
-    const identifier_name = offsets.locToSlice(builder.text(), loc);
+    const identifier_name = offsets.locToSlice(builder.handle.text, loc);
 
     const tree = builder.handle.tree;
     const token_tags = tree.tokens.items(.tag);
@@ -145,7 +141,7 @@ fn handleUnusedVariableOrConstant(builder: *Builder, actions: *std.ArrayListUnma
     const first_token = tree.firstToken(node);
     const last_token = ast.lastToken(tree, node) + 1;
 
-    const indent = offsets.lineSliceUntilIndex(builder.text(), token_starts[first_token]).len;
+    const indent = offsets.lineSliceUntilIndex(builder.handle.text, token_starts[first_token]).len;
 
     if (token_tags[last_token] != .semicolon) return;
 
@@ -162,11 +158,11 @@ fn handleUnusedVariableOrConstant(builder: *Builder, actions: *std.ArrayListUnma
 }
 
 fn handleUnusedIndexCapture(builder: *Builder, actions: *std.ArrayListUnmanaged(types.CodeAction), loc: offsets.Loc) !void {
-    const capture_locs = getCaptureLoc(builder.text(), loc, true) orelse return;
+    const capture_locs = getCaptureLoc(builder.handle.text, loc, true) orelse return;
 
     // TODO support discarding without modifying the capture
     // by adding a discard in the block scope
-    const is_value_discarded = std.mem.eql(u8, offsets.locToSlice(builder.text(), capture_locs.value), "_");
+    const is_value_discarded = std.mem.eql(u8, offsets.locToSlice(builder.handle.text, capture_locs.value), "_");
     if (is_value_discarded) {
         // |_, i| ->
         // TODO fix formatting
@@ -192,7 +188,7 @@ fn handleUnusedIndexCapture(builder: *Builder, actions: *std.ArrayListUnmanaged(
 }
 
 fn handleUnusedCapture(builder: *Builder, actions: *std.ArrayListUnmanaged(types.CodeAction), loc: offsets.Loc) !void {
-    const capture_locs = getCaptureLoc(builder.text(), loc, false) orelse return;
+    const capture_locs = getCaptureLoc(builder.handle.text, loc, false) orelse return;
 
     // TODO support discarding without modifying the capture
     // by adding a discard in the block scope
@@ -217,7 +213,7 @@ fn handleUnusedCapture(builder: *Builder, actions: *std.ArrayListUnmanaged(types
 }
 
 fn handlePointlessDiscard(builder: *Builder, actions: *std.ArrayListUnmanaged(types.CodeAction), loc: offsets.Loc) !void {
-    const edit_loc = getDiscardLoc(builder.text(), loc) orelse return;
+    const edit_loc = getDiscardLoc(builder.handle.text, loc) orelse return;
 
     try actions.append(builder.arena.allocator(), .{
         .title = "remove pointless discard",

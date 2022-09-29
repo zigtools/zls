@@ -211,14 +211,12 @@ fn writeCallNodeHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store: 
             const start = offsets.tokenToIndex(tree, lhsToken);
             const rhs_loc = offsets.tokenToLoc(tree, rhsToken);
 
-            var held_range = handle.document.borrowNullTerminatedSlice(start, rhs_loc.end);
-            var tokenizer = std.zig.Tokenizer.init(held_range.data());
+            var held_range = try arena.allocator().dupeZ(u8, handle.text[start..rhs_loc.end]);
+            var tokenizer = std.zig.Tokenizer.init(held_range);
 
             // note: we have the ast node, traversing it would probably yield better results
             // than trying to re-tokenize and re-parse it
-            errdefer held_range.release();
             if (try analysis.getFieldAccessType(store, arena, handle, rhs_loc.end, &tokenizer)) |result| {
-                held_range.release();
                 const container_handle = result.unwrapped orelse result.original;
                 switch (container_handle.type.data) {
                     .other => |container_handle_node| {

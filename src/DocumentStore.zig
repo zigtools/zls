@@ -1,6 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const types = @import("types.zig");
+const requests = @import("requests.zig");
 const URI = @import("uri.zig");
 const analysis = @import("analysis.zig");
 const offsets = @import("offsets.zig");
@@ -62,16 +63,17 @@ pub const BuildFileConfig = struct {
 };
 
 pub const Handle = struct {
-    document: types.TextDocument,
     count: usize,
+    uri: []const u8,
+    text: [:0]const u8,
+    tree: Ast,
+    document_scope: analysis.DocumentScope,
     /// Contains one entry for every import in the document
     import_uris: []const []const u8,
     /// Contains one entry for every cimport in the document
     cimports: []CImportHandle,
     /// Items in this array list come from `import_uris` and `cimports`
     imports_used: std.ArrayListUnmanaged([]const u8),
-    tree: Ast,
-    document_scope: analysis.DocumentScope,
 
     associated_build_file: ?*BuildFile,
     is_build_file: ?*BuildFile,
@@ -458,9 +460,9 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: [:0]u8) anyerror!*Ha
 
     defer {
         if (handle.associated_build_file) |build_file| {
-            log.debug("Opened document `{s}` with build file `{s}`", .{ handle.uri(), build_file.uri });
+            log.debug("Opened document `{s}` with build file `{s}`", .{ handle.uri, build_file.uri });
         } else {
-            log.debug("Opened document `{s}` without a build file", .{handle.uri()});
+            log.debug("Opened document `{s}` without a build file", .{handle.uri});
         }
     }
 
@@ -472,17 +474,13 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: [:0]u8) anyerror!*Ha
 
     handle.* = Handle{
         .count = 1,
+        .uri = uri,
+        .text = text,
+        .tree = tree,
+        .document_scope = document_scope,
         .import_uris = &.{},
         .cimports = &.{},
         .imports_used = .{},
-        .document = .{
-            .uri = uri,
-            .text = text,
-            // Extra +1 to include the null terminator
-            .mem = text.ptr[0 .. text.len + 1],
-        },
-        .tree = tree,
-        .document_scope = document_scope,
         .associated_build_file = null,
         .is_build_file = null,
     };
@@ -644,7 +642,7 @@ fn decrementCount(self: *DocumentStore, uri: []const u8) void {
         }
 
         handle.tree.deinit(self.allocator);
-        self.allocator.free(handle.document.mem);
+        self.allocator.free(handle.text);
 
         for (handle.imports_used.items) |import_uri| {
             self.decrementCount(import_uri);
@@ -815,9 +813,9 @@ fn translate(self: *DocumentStore, handle: *Handle, source: []const u8) error{Ou
 }
 
 fn refreshDocument(self: *DocumentStore, handle: *Handle) !void {
-    log.debug("New text for document {s}", .{handle.uri()});
+    log.debug("New text for document {s}", .{handle.uri});
     handle.tree.deinit(self.allocator);
-    handle.tree = try std.zig.parse(self.allocator, handle.document.text);
+    handle.tree = try std.zig.parse(self.allocator, handle.text);
 
     handle.document_scope.deinit(self.allocator);
     handle.document_scope = try analysis.makeDocumentScope(self.allocator, handle.tree);
@@ -942,69 +940,40 @@ pub fn applySave(self: *DocumentStore, handle: *Handle) !void {
     }
 }
 
-pub fn applyChanges(self: *DocumentStore, handle: *Handle, content_changes: std.json.Array, offset_encoding: offsets.Encoding) !void {
-    const document = &handle.document;
-
-    for (content_changes.items) |change| {
-        if (change.Object.get("range")) |range| {
-            std.debug.assert(@ptrCast([*]const u8, document.text.ptr) == document.mem.ptr);
-
-            // TODO: add tests and validate the JSON
-            const start_obj = range.Object.get("start").?.Object;
-            const start_pos = types.Position{
-                .line = @intCast(u32, start_obj.get("line").?.Integer),
-                .character = @intCast(u32, start_obj.get("character").?.Integer),
-            };
-            const end_obj = range.Object.get("end").?.Object;
-            const end_pos = types.Position{
-                .line = @intCast(u32, end_obj.get("line").?.Integer),
-                .character = @intCast(u32, end_obj.get("character").?.Integer),
-            };
-
-            const change_text = change.Object.get("text").?.String;
-            const start_index = offsets.positionToIndex(document.text, start_pos, offset_encoding);
-            const end_index = offsets.positionToIndex(document.text, end_pos, offset_encoding);
-
-            const old_len = document.text.len;
-            const new_len = old_len - (end_index - start_index) + change_text.len;
-            if (new_len >= document.mem.len) {
-                // We need to reallocate memory.
-                // We reallocate twice the current filesize or the new length, if it's more than that
-                // so that we can reduce the amount of realloc calls.
-                // We can tune this to find a better size if needed.
-                const realloc_len = std.math.max(2 * old_len, new_len + 1);
-                document.mem = try self.allocator.realloc(document.mem, realloc_len);
-            }
-
-            // The first part of the string, [0 .. start_index] need not be changed.
-            // We then copy the last part of the string, [end_index ..] to its
-            //    new position, [start_index + change_len .. ]
-            if (new_len < old_len) {
-                std.mem.copy(u8, document.mem[start_index + change_text.len ..][0 .. old_len - end_index], document.mem[end_index..old_len]);
-            } else {
-                std.mem.copyBackwards(u8, document.mem[start_index + change_text.len ..][0 .. old_len - end_index], document.mem[end_index..old_len]);
-            }
-            // Finally, we copy the changes over.
-            std.mem.copy(u8, document.mem[start_index..][0..change_text.len], change_text);
-
-            // Reset the text substring.
-            document.mem[new_len] = 0;
-            document.text = document.mem[0..new_len :0];
-        } else {
-            const change_text = change.Object.get("text").?.String;
-            const old_len = document.text.len;
-
-            if (change_text.len >= document.mem.len) {
-                // Like above.
-                const realloc_len = std.math.max(2 * old_len, change_text.len + 1);
-                document.mem = try self.allocator.realloc(document.mem, realloc_len);
-            }
-
-            std.mem.copy(u8, document.mem[0..change_text.len], change_text);
-            document.mem[change_text.len] = 0;
-            document.text = document.mem[0..change_text.len :0];
+pub fn applyChanges(
+    self: *DocumentStore,
+    handle: *Handle,
+    content_changes: []const requests.TextDocumentContentChangeEvent,
+    encoding: offsets.Encoding,
+) !void {
+    var last_full_text_change: ?usize = null;
+    var i: usize = content_changes.len;
+    while (i > 0) {
+        i -= 1;
+        if (content_changes[i].range == null) {
+            last_full_text_change = i;
         }
     }
+
+    var text_array = std.ArrayListUnmanaged(u8){};
+    errdefer text_array.deinit(self.allocator);
+
+    try text_array.appendSlice(self.allocator, if (last_full_text_change) |index| content_changes[index].text else handle.text);
+
+    // don't even bother applying changes before a full text change
+    const changes = content_changes[if (last_full_text_change) |index| index + 1 else 0..];
+
+    for (changes) |item| {
+        const range = item.range.?; // every element is guaranteed to have `range` set
+        const text = item.text;
+
+        const loc = offsets.rangeToLoc(text_array.items, range, encoding);
+        try text_array.replaceRange(self.allocator, loc.start, loc.end - loc.start, text);
+    }
+
+    const new_text = try text_array.toOwnedSliceSentinel(self.allocator, 0);
+    self.allocator.free(handle.text);
+    handle.text = new_text;
 
     try self.refreshDocument(handle);
 }
@@ -1035,7 +1004,7 @@ pub fn uriFromImportStr(self: *DocumentStore, allocator: std.mem.Allocator, hand
         }
         return null;
     } else {
-        const base = handle.uri();
+        const base = handle.uri;
         var base_len = base.len;
         while (base[base_len - 1] != '/' and base_len > 0) {
             base_len -= 1;
@@ -1184,7 +1153,7 @@ pub fn deinit(self: *DocumentStore) void {
     while (entry_iterator.next()) |entry| {
         entry.value_ptr.*.document_scope.deinit(self.allocator);
         entry.value_ptr.*.tree.deinit(self.allocator);
-        self.allocator.free(entry.value_ptr.*.document.mem);
+        self.allocator.free(entry.value_ptr.*.text);
         for (entry.value_ptr.*.import_uris) |uri| {
             self.allocator.free(uri);
         }

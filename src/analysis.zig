@@ -1454,18 +1454,19 @@ fn tokenLocAppend(prev: offsets.Loc, token: std.zig.Token) offsets.Loc {
     };
 }
 
-pub fn getPositionContext(allocator: std.mem.Allocator, document: types.TextDocument, doc_index: usize) !PositionContext {
-    const line_loc = offsets.lineLocUntilIndex(document.text, doc_index);
-    const line = offsets.locToSlice(document.text, line_loc);
+pub fn getPositionContext(allocator: std.mem.Allocator, text: []const u8, doc_index: usize) !PositionContext {
+    const line_loc = offsets.lineLocUntilIndex(text, doc_index);
+    const line = offsets.locToSlice(text, line_loc);
 
     var stack = try std.ArrayListUnmanaged(StackState).initCapacity(allocator, 8);
     defer stack.deinit(allocator);
 
     {
-        var held_line = document.borrowNullTerminatedSlice(0, line_loc.end);
-        defer held_line.release();
+        var held_line = try allocator.dupeZ(u8, text[0..line_loc.end]);
+        defer allocator.free(held_line);
+
         var tokenizer: std.zig.Tokenizer = .{
-            .buffer = held_line.data(),
+            .buffer = held_line,
             .index = line_loc.start,
             .pending_invalid_token = null,
         };
@@ -1592,14 +1593,14 @@ pub fn getPositionContext(allocator: std.mem.Allocator, document: types.TextDocu
 
         if (line.len == 0) return .empty;
 
-        var held_line = document.borrowNullTerminatedSlice(line_loc.start, line_loc.end);
-        defer held_line.release();
+        var held_line = try allocator.dupeZ(u8, offsets.locToSlice(text, line_loc));
+        defer allocator.free(held_line);
 
         switch (line[0]) {
             'a'...'z', 'A'...'Z', '_', '@' => {},
             else => break :block .empty,
         }
-        var tokenizer = std.zig.Tokenizer.init(held_line.data());
+        var tokenizer = std.zig.Tokenizer.init(held_line);
         const tok = tokenizer.next();
         if (tok.tag == .identifier) {
             break :block PositionContext{ .var_access = tok.loc };

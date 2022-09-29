@@ -257,7 +257,7 @@ fn publishDiagnostics(server: *Server, writer: anytype, handle: *DocumentStore.H
         .method = "textDocument/publishDiagnostics",
         .params = .{
             .PublishDiagnostics = .{
-                .uri = handle.uri(),
+                .uri = handle.uri,
                 .diagnostics = diagnostics.items,
             },
         },
@@ -281,7 +281,7 @@ fn getAstCheckDiagnostics(
         log.warn("Failed to spawn zig ast-check process, error: {}", .{err});
         return;
     };
-    try process.stdin.?.writeAll(handle.document.text);
+    try process.stdin.?.writeAll(handle.text);
     process.stdin.?.close();
 
     process.stdin = null;
@@ -312,8 +312,8 @@ fn getAstCheckDiagnostics(
         };
 
         // zig uses utf-8 encoding for character offsets
-        const position = offsets.convertPositionEncoding(handle.document.text, utf8_position, .utf8, server.offset_encoding);
-        const range = offsets.tokenPositionToRange(handle.document.text, position, server.offset_encoding);
+        const position = offsets.convertPositionEncoding(handle.text, utf8_position, .utf8, server.offset_encoding);
+        const range = offsets.tokenPositionToRange(handle.text, position, server.offset_encoding);
 
         const msg = pos_and_diag_iterator.rest()[1..];
 
@@ -334,7 +334,7 @@ fn getAstCheckDiagnostics(
                 try server.arena.allocator().alloc(types.DiagnosticRelatedInformation, 1);
 
             const location = types.Location{
-                .uri = handle.uri(),
+                .uri = handle.uri,
                 .range = range,
             };
 
@@ -628,22 +628,20 @@ fn nodeToCompletion(
 }
 
 pub fn identifierFromPosition(pos_index: usize, handle: DocumentStore.Handle) []const u8 {
-    const text = handle.document.text;
-
-    if (pos_index + 1 >= text.len) return "";
+    if (pos_index + 1 >= handle.text.len) return "";
     var start_idx = pos_index;
 
-    while (start_idx > 0 and isSymbolChar(text[start_idx - 1])) {
+    while (start_idx > 0 and isSymbolChar(handle.text[start_idx - 1])) {
         start_idx -= 1;
     }
 
     var end_idx = pos_index;
-    while (end_idx < handle.document.text.len and isSymbolChar(text[end_idx])) {
+    while (end_idx < handle.text.len and isSymbolChar(handle.text[end_idx])) {
         end_idx += 1;
     }
 
     if (end_idx <= start_idx) return "";
-    return text[start_idx..end_idx];
+    return handle.text[start_idx..end_idx];
 }
 
 fn isSymbolChar(char: u8) bool {
@@ -676,7 +674,7 @@ fn gotoDefinitionSymbol(
     };
 
     return types.Location{
-        .uri = handle.document.uri,
+        .uri = handle.uri,
         .range = offsets.tokenToRange(handle.tree, name_token, server.offset_encoding),
     };
 }
@@ -895,12 +893,10 @@ fn getSymbolFieldAccess(
     const name = identifierFromPosition(source_index, handle.*);
     if (name.len == 0) return null;
 
-    var held_range = handle.document.borrowNullTerminatedSlice(loc.start, loc.end);
-    var tokenizer = std.zig.Tokenizer.init(held_range.data());
+    var held_range = try server.arena.allocator().dupeZ(u8, offsets.locToSlice(handle.text, loc));
+    var tokenizer = std.zig.Tokenizer.init(held_range);
 
-    errdefer held_range.release();
     if (try analysis.getFieldAccessType(&server.document_store, &server.arena, handle, source_index, &tokenizer)) |result| {
-        held_range.release();
         const container_handle = result.unwrapped orelse result.original;
         const container_handle_node = switch (container_handle.type.data) {
             .other => |n| n,
@@ -1127,21 +1123,22 @@ fn completeFieldAccess(server: *Server, handle: *DocumentStore.Handle, source_in
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
+    const allocator = server.arena.allocator();
+
     var completions = std.ArrayListUnmanaged(types.CompletionItem){};
 
-    var held_range = handle.document.borrowNullTerminatedSlice(loc.start, loc.end);
-    defer held_range.release();
-    var tokenizer = std.zig.Tokenizer.init(held_range.data());
+    var held_loc = try allocator.dupeZ(u8, offsets.locToSlice(handle.text, loc));
+    var tokenizer = std.zig.Tokenizer.init(held_loc);
 
     const result = (try analysis.getFieldAccessType(&server.document_store, &server.arena, handle, source_index, &tokenizer)) orelse return null;
     try server.typeToCompletion(&completions, result, handle);
     if (server.client_capabilities.label_details_support) {
         for (completions.items) |*item| {
-            try formatDetailledLabel(item, server.arena.allocator());
+            try formatDetailledLabel(item, allocator);
         }
     }
 
-    return completions.toOwnedSlice(server.arena.allocator());
+    return completions.toOwnedSlice(allocator);
 }
 
 fn formatDetailledLabel(item: *types.CompletionItem, alloc: std.mem.Allocator) !void {
@@ -1358,7 +1355,7 @@ fn completeFileSystemStringLiteral(allocator: std.mem.Allocator, handle: *Docume
     var completions = std.ArrayListUnmanaged(types.CompletionItem){};
 
     fsc: {
-        var document_path = try uri_utils.parse(allocator, handle.uri());
+        var document_path = try uri_utils.parse(allocator, handle.uri);
         var document_dir_path = std.fs.openIterableDirAbsolute(std.fs.path.dirname(document_path) orelse break :fsc, .{}) catch break :fsc;
         defer document_dir_path.close();
 
@@ -1654,7 +1651,7 @@ fn changeDocumentHandler(server: *Server, writer: anytype, id: types.RequestId, 
         return;
     };
 
-    try server.document_store.applyChanges(handle, req.params.contentChanges.Array, server.offset_encoding);
+    try server.document_store.applyChanges(handle, req.params.contentChanges, server.offset_encoding);
     try server.publishDiagnostics(writer, handle);
 }
 
@@ -1769,8 +1766,8 @@ fn completionHandler(server: *Server, writer: anytype, id: types.RequestId, req:
         });
     }
 
-    const source_index = offsets.positionToIndex(handle.document.text, req.params.position, server.offset_encoding);
-    const pos_context = try analysis.getPositionContext(server.arena.allocator(), handle.document, source_index);
+    const source_index = offsets.positionToIndex(handle.text, req.params.position, server.offset_encoding);
+    const pos_context = try analysis.getPositionContext(server.arena.allocator(), handle.text, source_index);
 
     const maybe_completions = switch (pos_context) {
         .builtin => server.builtin_completions.items,
@@ -1831,7 +1828,7 @@ fn signatureHelpHandler(server: *Server, writer: anytype, id: types.RequestId, r
     if (req.params.position.character == 0)
         return try respondGeneric(writer, id, no_signatures_response);
 
-    const source_index = offsets.positionToIndex(handle.document.text, req.params.position, server.offset_encoding);
+    const source_index = offsets.positionToIndex(handle.text, req.params.position, server.offset_encoding);
     if (try getSignatureInfo(
         &server.document_store,
         &server.arena,
@@ -1864,8 +1861,8 @@ fn gotoHandler(server: *Server, writer: anytype, id: types.RequestId, req: reque
 
     if (req.params.position.character == 0) return try respondGeneric(writer, id, null_result_response);
 
-    const source_index = offsets.positionToIndex(handle.document.text, req.params.position, server.offset_encoding);
-    const pos_context = try analysis.getPositionContext(server.arena.allocator(), handle.document, source_index);
+    const source_index = offsets.positionToIndex(handle.text, req.params.position, server.offset_encoding);
+    const pos_context = try analysis.getPositionContext(server.arena.allocator(), handle.text, source_index);
 
     const maybe_location = switch (pos_context) {
         .var_access => try server.gotoDefinitionGlobal(source_index, handle, resolve_alias),
@@ -1908,8 +1905,8 @@ fn hoverHandler(server: *Server, writer: anytype, id: types.RequestId, req: requ
 
     if (req.params.position.character == 0) return try respondGeneric(writer, id, null_result_response);
 
-    const source_index = offsets.positionToIndex(handle.document.text, req.params.position, server.offset_encoding);
-    const pos_context = try analysis.getPositionContext(server.arena.allocator(), handle.document, source_index);
+    const source_index = offsets.positionToIndex(handle.text, req.params.position, server.offset_encoding);
+    const pos_context = try analysis.getPositionContext(server.arena.allocator(), handle.text, source_index);
 
     const maybe_hover = switch (pos_context) {
         .builtin => try server.hoverDefinitionBuiltin(source_index, handle),
@@ -1956,7 +1953,7 @@ fn formattingHandler(server: *Server, writer: anytype, id: types.RequestId, req:
             log.warn("Failed to spawn zig fmt process, error: {}", .{err});
             return try respondGeneric(writer, id, null_result_response);
         };
-        try process.stdin.?.writeAll(handle.document.text);
+        try process.stdin.?.writeAll(handle.text);
         process.stdin.?.close();
         process.stdin = null;
 
@@ -1965,10 +1962,10 @@ fn formattingHandler(server: *Server, writer: anytype, id: types.RequestId, req:
 
         switch (try process.wait()) {
             .Exited => |code| if (code == 0) {
-                if (std.mem.eql(u8, handle.document.text, stdout_bytes)) return try respondGeneric(writer, id, null_result_response);
+                if (std.mem.eql(u8, handle.text, stdout_bytes)) return try respondGeneric(writer, id, null_result_response);
 
-                var edits = diff.edits(server.arena.allocator(), handle.document.text, stdout_bytes) catch {
-                    const range = offsets.locToRange(handle.document.text, .{ .start = 0, .end = handle.document.text.len }, server.offset_encoding);
+                var edits = diff.edits(server.arena.allocator(), handle.text, stdout_bytes) catch {
+                    const range = offsets.locToRange(handle.text, .{ .start = 0, .end = handle.text.len }, server.offset_encoding);
                     // If there was an error trying to diff the text, return the formatted response
                     // as the new text for the entire range of the document
                     return try send(writer, server.arena.allocator(), types.Response{
@@ -2091,8 +2088,8 @@ fn generalReferencesHandler(server: *Server, writer: anytype, id: types.RequestI
 
     if (req.position().character <= 0) return try respondGeneric(writer, id, null_result_response);
 
-    const source_index = offsets.positionToIndex(handle.document.text, req.position(), server.offset_encoding);
-    const pos_context = try analysis.getPositionContext(server.arena.allocator(), handle.document, source_index);
+    const source_index = offsets.positionToIndex(handle.text, req.position(), server.offset_encoding);
+    const pos_context = try analysis.getPositionContext(server.arena.allocator(), handle.text, source_index);
 
     const decl = switch (pos_context) {
         .var_access => try server.getSymbolGlobal(source_index, handle),
@@ -2134,7 +2131,7 @@ fn generalReferencesHandler(server: *Server, writer: anytype, id: types.RequestI
         .references => .{ .Locations = locations.items },
         .highlight => blk: {
             var highlights = try std.ArrayListUnmanaged(types.DocumentHighlight).initCapacity(allocator, locations.items.len);
-            const uri = handle.uri();
+            const uri = handle.uri;
             for (locations.items) |loc| {
                 if (!std.mem.eql(u8, loc.uri, uri)) continue;
                 highlights.appendAssumeCapacity(.{
