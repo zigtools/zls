@@ -99,8 +99,24 @@ fn writeCallHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *Doc
                 }
 
                 while (ast.nextFnParam(&it)) |param| : (i += 1) {
-                    const name_token = param.name_token orelse continue;
                     if (i >= call.ast.params.len) break;
+                    const name_token = param.name_token orelse continue;
+                    const name = decl_tree.tokenSlice(name_token);
+
+                    if (builder.config.inlay_hints_hide_redundant_param_names or builder.config.inlay_hints_hide_redundant_param_names_last_token) {
+                        const last_param_token = tree.lastToken(call.ast.params[i]);
+                        const param_name = tree.tokenSlice(last_param_token);
+
+                        if (std.mem.eql(u8, param_name, name)) {
+                            if (tree.firstToken(call.ast.params[i]) == last_param_token) {
+                                if (builder.config.inlay_hints_hide_redundant_param_names)
+                                    continue;
+                            } else {
+                                if (builder.config.inlay_hints_hide_redundant_param_names_last_token)
+                                    continue;
+                            }
+                        }
+                    }
 
                     const token_tags = decl_tree.tokens.items(.tag);
 
@@ -114,7 +130,7 @@ fn writeCallHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *Doc
 
                     try builder.appendParameterHint(
                         offsets.tokenToPosition(tree, tree.firstToken(call.ast.params[i]), builder.encoding),
-                        decl_tree.tokenSlice(name_token),
+                        name,
                         tooltip,
                         no_alias,
                         comp_time,

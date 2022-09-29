@@ -300,6 +300,8 @@ pub const Configuration = struct {
             enable_inlay_hints: ?bool,
             inlay_hints_show_builtin: ?bool,
             inlay_hints_exclude_single_argument: ?bool,
+            inlay_hints_hide_redundant_param_names: ?bool,
+            inlay_hints_hide_redundant_param_names_last_token: ?bool,
             operator_completions: ?bool,
             include_at_in_builtins: ?bool,
             max_detail_length: ?usize,
