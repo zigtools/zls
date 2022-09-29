@@ -429,6 +429,16 @@ pub const PositionEncodingKind = enum {
     }
 };
 
+const TextDocumentSyncKind = enum(u32) {
+    None = 0,
+    Full = 1,
+    Incremental = 2,
+
+    pub fn jsonStringify(value: @This(), options: std.json.StringifyOptions, out_stream: anytype) !void {
+        try std.json.stringify(@enumToInt(value), options, out_stream);
+    }
+};
+
 // Only includes options we set in our initialize result.
 const InitializeResult = struct {
     offsetEncoding: PositionEncodingKind,
@@ -437,14 +447,10 @@ const InitializeResult = struct {
             triggerCharacters: []const string,
             retriggerCharacters: []const string,
         },
-        textDocumentSync: enum(u32) {
-            None = 0,
-            Full = 1,
-            Incremental = 2,
-
-            pub fn jsonStringify(value: @This(), options: std.json.StringifyOptions, out_stream: anytype) !void {
-                try std.json.stringify(@enumToInt(value), options, out_stream);
-            }
+        textDocumentSync: struct {
+            openClose: bool,
+            change: TextDocumentSyncKind,
+            save: bool,
         },
         renameProvider: bool,
         completionProvider: struct {
