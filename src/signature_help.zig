@@ -237,6 +237,7 @@ pub fn getSignatureInfo(document_store: *DocumentStore, arena: *std.heap.ArenaAl
                             .r_paren => state = .{ .in_paren = 1 },
                             .identifier,
                             .period,
+                            .question_mark,
                             .period_asterisk,
                             => {},
                             else => break i + 1,
