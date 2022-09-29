@@ -1,5 +1,6 @@
 const std = @import("std");
 const zls = @import("zls");
+const builtin = @import("builtin");
 
 const helper = @import("../helper.zig");
 const Context = @import("../context.zig").Context;
@@ -85,7 +86,10 @@ test "references - label" {
 }
 
 fn testReferences(source: []const u8) !void {
-    const file_uri = "file:///test.zig";
+    const file_uri: []const u8 = switch (builtin.os.tag) {
+        .windows => "file:///C:\\test.zig",
+        else => "file:///test.zig",
+    };
     const new_name = "placeholder";
 
     var phr = try helper.collectReplacePlaceholders(allocator, source, new_name);

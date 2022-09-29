@@ -1,5 +1,6 @@
 const std = @import("std");
 const zls = @import("zls");
+const builtin = @import("builtin");
 
 const helper = @import("../helper.zig");
 const Context = @import("../context.zig").Context;
@@ -73,7 +74,12 @@ fn testInlayHints(source: []const u8) !void {
     var ctx = try Context.init();
     defer ctx.deinit();
 
-    try ctx.requestDidOpen("file:///test.zig", phr.new_source);
+    const test_uri: []const u8 = switch (builtin.os.tag) {
+        .windows => "file:///C:\\test.zig",
+        else => "file:///test.zig",
+    };
+
+    try ctx.requestDidOpen(test_uri, phr.new_source);
 
     const range = types.Range{
         .start = types.Position{ .line = 0, .character = 0 },
@@ -88,7 +94,7 @@ fn testInlayHints(source: []const u8) !void {
 
     const request = requests.InlayHint{
         .params = .{
-            .textDocument = .{ .uri = "file:///test.zig" },
+            .textDocument = .{ .uri = test_uri },
             .range = range,
         },
     };
@@ -117,7 +123,7 @@ fn testInlayHints(source: []const u8) !void {
 
         for (hints) |hint| {
             if (position.line != hint.position.line or position.character != hint.position.character) continue;
-            
+
             const actual_label = hint.label[0 .. hint.label.len - 1]; // exclude :
 
             if (!std.mem.eql(u8, expected_label, actual_label)) {
