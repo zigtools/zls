@@ -30,7 +30,7 @@ config: *Config,
 allocator: std.mem.Allocator = undefined,
 arena: std.heap.ArenaAllocator = undefined,
 document_store: DocumentStore = undefined,
-builtin_completions: ?std.ArrayListUnmanaged(types.CompletionItem) = null,
+builtin_completions: std.ArrayListUnmanaged(types.CompletionItem),
 client_capabilities: ClientCapabilities = .{},
 offset_encoding: offsets.Encoding = .utf16,
 keep_running: bool = true,
@@ -85,16 +85,6 @@ fn send(writer: anytype, allocator: std.mem.Allocator, reqOrRes: anytype) !void 
 
     try writer.print("Content-Length: {}\r\n\r\n", .{arr.items.len});
     try writer.writeAll(arr.items);
-}
-
-fn truncateCompletions(list: []types.CompletionItem, max_detail_length: usize) void {
-    for (list) |*item| {
-        if (item.detail) |det| {
-            if (det.len > max_detail_length) {
-                item.detail = det[0..max_detail_length];
-            }
-        }
-    }
 }
 
 fn respondGeneric(writer: anytype, id: types.RequestId, response: []const u8) !void {
@@ -1110,35 +1100,6 @@ fn populateSnippedCompletions(
     }
 }
 
-fn completeBuiltin(server: *Server) ![]types.CompletionItem {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    if (server.builtin_completions) |completions| return completions.items;
-
-    var completions = try std.ArrayListUnmanaged(types.CompletionItem).initCapacity(server.allocator, data.builtins.len);
-    errdefer completions.deinit();
-
-    for (data.builtins) |builtin| {
-        const insert_text = if (server.config.enable_snippets) builtin.snippet else builtin.name;
-        completions.appendAssumeCapacity(.{
-            .label = builtin.name,
-            .kind = .Function,
-            .filterText = builtin.name[1..],
-            .detail = builtin.signature,
-            .insertText = if (server.config.include_at_in_builtins) insert_text else insert_text[1..],
-            .insertTextFormat = if (server.config.enable_snippets) .Snippet else .PlainText,
-            .documentation = .{
-                .kind = .Markdown,
-                .value = builtin.documentation,
-            },
-        });
-    }
-    
-    server.builtin_completions = completions;
-    return completions.items;
-}
-
 fn completeGlobal(server: *Server, pos_index: usize, handle: *DocumentStore.Handle) ![]types.CompletionItem {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
@@ -1152,8 +1113,6 @@ fn completeGlobal(server: *Server, pos_index: usize, handle: *DocumentStore.Hand
     };
     try analysis.iterateSymbolsGlobal(&server.document_store, &server.arena, handle, pos_index, declToCompletion, context);
     try populateSnippedCompletions(server.arena.allocator(), &completions, &snipped_data.generic, server.config.*, null);
-    try sortCompletionItems(completions.items, server.arena.allocator());
-    truncateCompletions(completions.items, server.config.max_detail_length);
 
     if (server.client_capabilities.label_details_support) {
         for (completions.items) |*item| {
@@ -1383,15 +1342,6 @@ fn kindToSortScore(kind: types.CompletionItem.Kind) ?[]const u8 {
             return null;
         },
     };
-}
-
-fn sortCompletionItems(completions: []types.CompletionItem, allocator: std.mem.Allocator) error{OutOfMemory}!void {
-    // TODO: config for sorting rule?
-    for (completions) |*c| {
-        const prefix = kindToSortScore(c.kind) orelse continue;
-
-        c.sortText = try std.fmt.allocPrint(allocator, "{s}{s}", .{ prefix, c.label });
-    }
 }
 
 fn completeDot(server: *Server, handle: *DocumentStore.Handle) ![]types.CompletionItem {
@@ -1687,13 +1637,10 @@ fn openDocumentHandler(server: *Server, writer: anytype, id: types.RequestId, re
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
+    _ = id;
+
     const handle = try server.document_store.openDocument(req.params.textDocument.uri, req.params.textDocument.text);
     try server.publishDiagnostics(writer, handle);
-
-    if (server.client_capabilities.supports_semantic_tokens) {
-        const request: requests.SemanticTokensFull = .{ .params = .{ .textDocument = .{ .uri = req.params.textDocument.uri } } };
-        try server.semanticTokensFullHandler(writer, id, request);
-    }
 }
 
 fn changeDocumentHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.ChangeDocument) !void {
@@ -1785,21 +1732,20 @@ fn semanticTokensFullHandler(server: *Server, writer: anytype, id: types.Request
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    if (server.config.enable_semantic_tokens) blk: {
-        const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
-            log.warn("Trying to get semantic tokens of non existent document {s}", .{req.params.textDocument.uri});
-            break :blk;
-        };
+    if (!server.config.enable_semantic_tokens) return try respondGeneric(writer, id, no_semantic_tokens_response);
 
-        const token_array = try semantic_tokens.writeAllSemanticTokens(&server.arena, &server.document_store, handle, server.offset_encoding);
-        defer server.allocator.free(token_array);
+    const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
+        log.warn("Trying to get semantic tokens of non existent document {s}", .{req.params.textDocument.uri});
+        return try respondGeneric(writer, id, no_semantic_tokens_response);
+    };
 
-        return try send(writer, server.arena.allocator(), types.Response{
-            .id = id,
-            .result = .{ .SemanticTokensFull = .{ .data = token_array } },
-        });
-    }
-    return try respondGeneric(writer, id, no_semantic_tokens_response);
+    const token_array = try semantic_tokens.writeAllSemanticTokens(&server.arena, &server.document_store, handle, server.offset_encoding);
+    defer server.allocator.free(token_array);
+
+    return try send(writer, server.arena.allocator(), types.Response{
+        .id = id,
+        .result = .{ .SemanticTokensFull = .{ .data = token_array } },
+    });
 }
 
 fn completionHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.Completion) !void {
@@ -1827,7 +1773,7 @@ fn completionHandler(server: *Server, writer: anytype, id: types.RequestId, req:
     const pos_context = try analysis.getPositionContext(server.arena.allocator(), handle.document, source_index);
 
     const maybe_completions = switch (pos_context) {
-        .builtin => try server.completeBuiltin(),
+        .builtin => server.builtin_completions.items,
         .var_access, .empty => try server.completeGlobal(source_index, handle),
         .field_access => |loc| try server.completeFieldAccess(handle, source_index, loc),
         .global_error_set => try server.completeError(handle),
@@ -1844,8 +1790,22 @@ fn completionHandler(server: *Server, writer: anytype, id: types.RequestId, req:
     };
 
     const completions = maybe_completions orelse return try respondGeneric(writer, id, no_completions_response);
-    truncateCompletions(completions, server.config.max_detail_length);
-    try sortCompletionItems(completions, server.arena.allocator());
+
+    // truncate completions
+    for (completions) |*item| {
+        if (item.detail) |det| {
+            if (det.len > server.config.max_detail_length) {
+                item.detail = det[0..server.config.max_detail_length];
+            }
+        }
+    }
+
+    // TODO: config for sorting rule?
+    for (completions) |*c| {
+        const prefix = kindToSortScore(c.kind) orelse continue;
+
+        c.sortText = try std.fmt.allocPrint(server.arena.allocator(), "{s}{s}", .{ prefix, c.label });
+    }
 
     try send(writer, server.arena.allocator(), types.Response{
         .id = id,
@@ -2204,55 +2164,54 @@ fn inlayHintHandler(server: *Server, writer: anytype, id: types.RequestId, req: 
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    if (server.config.enable_inlay_hints) blk: {
-        const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
-            log.warn("Trying to get inlay hint of non existent document {s}", .{req.params.textDocument.uri});
-            break :blk;
-        };
+    if (!server.config.enable_inlay_hints) return try respondGeneric(writer, id, null_result_response);
 
-        const hover_kind: types.MarkupContent.Kind = if (server.client_capabilities.hover_supports_md) .Markdown else .PlainText;
+    const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
+        log.warn("Trying to get inlay hint of non existent document {s}", .{req.params.textDocument.uri});
+        return try respondGeneric(writer, id, null_result_response);
+    };
 
-        // TODO cache hints per document
-        // because the function could be stored in a different document
-        // we need the regenerate hints when the document itself or its imported documents change
-        // with caching it would also make sense to generate all hints instead of only the visible ones
-        const hints = try inlay_hints.writeRangeInlayHint(
-            &server.arena,
-            server.config.*,
-            &server.document_store,
-            handle,
-            req.params.range,
-            hover_kind,
-            server.offset_encoding,
-        );
-        defer {
-            for (hints) |hint| {
-                server.allocator.free(hint.tooltip.value);
-            }
-            server.allocator.free(hints);
+    const hover_kind: types.MarkupContent.Kind = if (server.client_capabilities.hover_supports_md) .Markdown else .PlainText;
+
+    // TODO cache hints per document
+    // because the function could be stored in a different document
+    // we need the regenerate hints when the document itself or its imported documents change
+    // with caching it would also make sense to generate all hints instead of only the visible ones
+    const hints = try inlay_hints.writeRangeInlayHint(
+        &server.arena,
+        server.config.*,
+        &server.document_store,
+        handle,
+        req.params.range,
+        hover_kind,
+        server.offset_encoding,
+    );
+    defer {
+        for (hints) |hint| {
+            server.allocator.free(hint.tooltip.value);
         }
-
-        // and only convert and return all hints in range for every request
-        var visible_hints = hints;
-
-        // small_hints should roughly be sorted by position
-        for (hints) |hint, i| {
-            if (isPositionBefore(hint.position, req.params.range.start)) continue;
-            visible_hints = hints[i..];
-            break;
-        }
-        for (visible_hints) |hint, i| {
-            if (isPositionBefore(hint.position, req.params.range.end)) continue;
-            visible_hints = visible_hints[0..i];
-            break;
-        }
-
-        return try send(writer, server.arena.allocator(), types.Response{
-            .id = id,
-            .result = .{ .InlayHint = visible_hints },
-        });
+        server.allocator.free(hints);
     }
-    return try respondGeneric(writer, id, null_result_response);
+
+    // and only convert and return all hints in range for every request
+    var visible_hints = hints;
+
+    // small_hints should roughly be sorted by position
+    for (hints) |hint, i| {
+        if (isPositionBefore(hint.position, req.params.range.start)) continue;
+        visible_hints = hints[i..];
+        break;
+    }
+    for (visible_hints) |hint, i| {
+        if (isPositionBefore(hint.position, req.params.range.end)) continue;
+        visible_hints = visible_hints[0..i];
+        break;
+    }
+
+    return try send(writer, server.arena.allocator(), types.Response{
+        .id = id,
+        .result = .{ .InlayHint = visible_hints },
+    });
 }
 
 fn codeActionHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.CodeAction) !void {
@@ -2482,10 +2441,30 @@ pub fn init(
     var document_store = try DocumentStore.init(allocator, config);
     errdefer document_store.deinit();
 
+    var builtin_completions = try std.ArrayListUnmanaged(types.CompletionItem).initCapacity(allocator, data.builtins.len);
+    errdefer builtin_completions.deinit();
+
+    for (data.builtins) |builtin| {
+        const insert_text = if (config.enable_snippets) builtin.snippet else builtin.name;
+        builtin_completions.appendAssumeCapacity(.{
+            .label = builtin.name,
+            .kind = .Function,
+            .filterText = builtin.name[1..],
+            .detail = builtin.signature,
+            .insertText = if (config.include_at_in_builtins) insert_text else insert_text[1..],
+            .insertTextFormat = if (config.enable_snippets) .Snippet else .PlainText,
+            .documentation = .{
+                .kind = .Markdown,
+                .value = builtin.documentation,
+            },
+        });
+    }
+
     return Server{
         .config = config,
         .allocator = allocator,
         .document_store = document_store,
+        .builtin_completions = builtin_completions,
     };
 }
 
@@ -2493,7 +2472,5 @@ pub fn deinit(server: *Server) void {
     server.document_store.deinit();
     analysis.deinit();
 
-    if (server.builtin_completions) |*compls| {
-        compls.deinit(server.allocator);
-    }
+    server.builtin_completions.deinit(server.allocator);
 }
