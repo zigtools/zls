@@ -33,7 +33,16 @@ document_store: DocumentStore = undefined,
 builtin_completions: ?std.ArrayListUnmanaged(types.CompletionItem) = null,
 client_capabilities: ClientCapabilities = .{},
 offset_encoding: offsets.Encoding = .utf16,
-keep_running: bool = true,
+status: enum {
+    /// the server has not received a `initialize` request
+    uninitialized,
+    /// the server has recieved a `initialize` request and is awaiting the `initialized` notification
+    initializing,
+    /// the server has been initialized and is ready to received requests
+    initialized,
+    /// the server has been shutdown and can't handle any more requests
+    shutdown,
+},
 
 // Code was based off of https://github.com/andersfr/zig-lsp/blob/master/server.zig
 
@@ -87,6 +96,16 @@ fn send(writer: anytype, allocator: std.mem.Allocator, reqOrRes: anytype) !void 
     try writer.writeAll(arr.items);
 }
 
+pub fn sendErrorResponse(writer: anytype, allocator: std.mem.Allocator, code: types.ErrorCodes, message: []const u8) !void {
+    try send(writer, allocator, .{
+        .@"error" = types.ResponseError{
+            .code = @enumToInt(code),
+            .message = message,
+            .data = .Null,
+        },
+    });
+}
+
 fn truncateCompletions(list: []types.CompletionItem, max_detail_length: usize) void {
     for (list) |*item| {
         if (item.detail) |det| {
@@ -115,7 +134,6 @@ fn respondGeneric(writer: anytype, id: types.RequestId, response: []const u8) !v
             break :blk digits;
         },
         .String => |str_val| str_val.len + 2,
-        else => unreachable,
     };
 
     // Numbers of character that will be printed from this string: len - 1 brackets
@@ -125,7 +143,6 @@ fn respondGeneric(writer: anytype, id: types.RequestId, response: []const u8) !v
     switch (id) {
         .Integer => |int| try buf_writer.print("{}", .{int}),
         .String => |str| try buf_writer.print("\"{s}\"", .{str}),
-        else => unreachable,
     }
 
     try buf_writer.writeAll(response);
@@ -1134,7 +1151,7 @@ fn completeBuiltin(server: *Server) ![]types.CompletionItem {
             },
         });
     }
-    
+
     server.builtin_completions = completions;
     return completions.items;
 }
@@ -1522,12 +1539,12 @@ fn initializeHandler(server: *Server, writer: anytype, id: types.RequestId, req:
         .id = id,
         .result = .{
             .InitializeResult = .{
-                .offsetEncoding = server.offset_encoding,
                 .serverInfo = .{
                     .name = "zls",
                     .version = "0.1.0",
                 },
                 .capabilities = .{
+                    .positionEncoding = server.offset_encoding,
                     .signatureHelpProvider = .{
                         .triggerCharacters = &.{"("},
                         .retriggerCharacters = &.{","},
@@ -1590,6 +1607,8 @@ fn initializeHandler(server: *Server, writer: anytype, id: types.RequestId, req:
         },
     });
 
+    server.status = .initializing;
+
     if (req.params.capabilities.workspace) |workspace| {
         server.client_capabilities.supports_configuration = workspace.configuration.value;
         if (workspace.didChangeConfiguration != null and workspace.didChangeConfiguration.?.dynamicRegistration.value) {
@@ -1597,9 +1616,50 @@ fn initializeHandler(server: *Server, writer: anytype, id: types.RequestId, req:
         }
     }
 
-    log.info("zls initialized", .{});
+    log.info("zls initializing", .{});
     log.info("{}", .{server.client_capabilities});
     log.info("Using offset encoding: {s}", .{std.meta.tagName(server.offset_encoding)});
+}
+
+fn initializedHandler(server: *Server, writer: anytype, id: types.RequestId) !void {
+    _ = id;
+
+    if (server.status != .initializing) {
+        std.log.warn("received a initialized notification but the server has not send a initialize request!", .{});
+    }
+
+    server.status = .initialized;
+
+    if (server.client_capabilities.supports_configuration)
+        try server.requestConfiguration(writer);
+}
+
+fn shutdownHandler(server: *Server, writer: anytype, id: types.RequestId) !void {
+    if (server.status != .initialized) {
+        return try sendErrorResponse(
+            writer,
+            server.arena.allocator(),
+            types.ErrorCodes.InvalidRequest,
+            "received a shutdown request but the server is not initialized!",
+        );
+    }
+
+    // Technically we should deinitialize first and send possible errors to the client
+    return try respondGeneric(writer, id, null_result_response);
+}
+
+fn exitHandler(server: *Server, writer: anytype, id: types.RequestId) noreturn {
+    _ = writer;
+    _ = id;
+    log.info("Server exiting...", .{});
+    // Technically we should deinitialize first and send possible errors to the client
+
+    const error_code: u8 = switch (server.status) {
+        .uninitialized, .shutdown => 0,
+        else => 1,
+    };
+
+    std.os.exit(error_code);
 }
 
 fn registerCapability(server: *Server, writer: anytype, method: []const u8) !void {
@@ -1652,21 +1712,6 @@ fn requestConfiguration(server: *Server, writer: anytype) !void {
             },
         },
     });
-}
-
-fn initializedHandler(server: *Server, writer: anytype, id: types.RequestId) !void {
-    _ = id;
-
-    if (server.client_capabilities.supports_configuration)
-        try server.requestConfiguration(writer);
-}
-
-fn shutdownHandler(server: *Server, writer: anytype, id: types.RequestId) !void {
-    log.info("Server closing...", .{});
-
-    server.keep_running = false;
-    // Technically we should deinitialize first and send possible errors to the client
-    try respondGeneric(writer, id, null_result_response);
 }
 
 fn openDocumentHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.OpenDocument) !void {
@@ -2293,7 +2338,7 @@ pub fn processJsonRpc(server: *Server, writer: anytype, json: []const u8) !void 
     defer tree.deinit();
 
     const id = if (tree.root.Object.get("id")) |id| switch (id) {
-        .Integer => |int| types.RequestId{ .Integer = int },
+        .Integer => |int| types.RequestId{ .Integer = @intCast(i32, int) },
         .String => |str| types.RequestId{ .String = str },
         else => types.RequestId{ .Integer = 0 },
     } else types.RequestId{ .Integer = 0 };
@@ -2353,6 +2398,26 @@ pub fn processJsonRpc(server: *Server, writer: anytype, json: []const u8) !void 
 
     const method = tree.root.Object.get("method").?.String;
 
+    switch (server.status) {
+        .uninitialized => blk: {
+            if (std.mem.eql(u8, method, "initialize")) break :blk;
+            if (std.mem.eql(u8, method, "exit")) break :blk;
+
+            // ignore notifications
+            if (tree.root.Object.get("id") == null) break :blk;
+
+            return try sendErrorResponse(writer, server.arena.allocator(), .ServerNotInitialized, "server received a request before being initialized!");
+        },
+        .initializing => blk: {
+            if (std.mem.eql(u8, method, "initialized")) break :blk;
+            if (std.mem.eql(u8, method, "$/progress")) break :blk;
+
+            return try sendErrorResponse(writer, server.arena.allocator(), .InvalidRequest, "server received a request during initialization!");
+        },
+        .initialized => {},
+        .shutdown => return try sendErrorResponse(writer, server.arena.allocator(), .InvalidRequest, "server received a request after shutdown!"),
+    }
+
     const start_time = std.time.milliTimestamp();
     defer {
         // makes `zig build test` look nice
@@ -2368,6 +2433,7 @@ pub fn processJsonRpc(server: *Server, writer: anytype, json: []const u8) !void 
         .{"textDocument/willSave"},
         .{ "initialize", requests.Initialize, initializeHandler },
         .{ "shutdown", void, shutdownHandler },
+        .{ "exit", void, exitHandler },
         .{ "textDocument/didOpen", requests.OpenDocument, openDocumentHandler },
         .{ "textDocument/didChange", requests.ChangeDocument, changeDocumentHandler },
         .{ "textDocument/didSave", requests.SaveDocument, saveDocumentHandler },
@@ -2472,6 +2538,7 @@ pub fn init(
         .config = config,
         .allocator = allocator,
         .document_store = document_store,
+        .status = .uninitialized,
     };
 }
 
