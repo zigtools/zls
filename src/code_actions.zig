@@ -82,7 +82,7 @@ fn handleNonCamelcaseFunction(builder: *Builder, actions: *std.ArrayListUnmanage
 
     const action1 = types.CodeAction{
         .title = "make function name camelCase",
-        .kind = .SourceFixAll,
+        .kind = .QuickFix,
         .isPreferred = true,
         .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditLoc(loc, new_text)}),
     };
@@ -173,7 +173,7 @@ fn handleUnusedVariableOrConstant(builder: *Builder, actions: *std.ArrayListUnma
 
     try actions.append(builder.arena.allocator(), .{
         .title = "discard value",
-        .kind = .QuickFix,
+        .kind = .SourceFixAll,
         .isPreferred = true,
         .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditPos(index, new_text)}),
     });
