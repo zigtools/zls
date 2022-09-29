@@ -53,7 +53,9 @@ fn testSemanticTokens(source: []const u8, expected: []const u32) !void {
     const expected_bytes = try std.json.stringifyAlloc(allocator, Response{ .data = expected }, .{});
     defer allocator.free(expected_bytes);
 
-    try ctx.request("textDocument/semanticTokens/full", std.fmt.comptimePrint(
-        \\{{"textDocument":{{"uri":"{s}"}}}}
-    , .{file_uri}), expected_bytes);
+    try ctx.request(
+        "textDocument/semanticTokens/full",
+        "{\"textDocument\":{\"uri\":\"" ++ file_uri ++ "\"}}",
+        expected_bytes,
+    );
 }
