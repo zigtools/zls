@@ -273,19 +273,11 @@ const BuildDotZigIterator = struct {
     fn init(allocator: std.mem.Allocator, uri_path: []const u8) !BuildDotZigIterator {
         const dir_path = std.fs.path.dirname(uri_path) orelse uri_path;
 
-        // not sure about windows drives and paths, so deferring to this
-        // function to figure it out for me?
-        const root_dir_path = try URI.parse(allocator, "file:///");
-        defer allocator.free(root_dir_path);
-
         return BuildDotZigIterator{
             .allocator = allocator,
             .uri_path = uri_path,
             .dir_path = dir_path,
-            .i = switch (builtin.os.tag) {
-                .windows => std.fs.path.diskDesignator(uri_path).len + 1,
-                else => 1,
-            },
+            .i = std.fs.path.diskDesignator(uri_path).len + 1,
         };
     }
 
