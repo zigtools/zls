@@ -82,7 +82,7 @@ fn handleNonCamelcaseFunction(builder: *Builder, actions: *std.ArrayListUnmanage
 
     const action1 = types.CodeAction{
         .title = "make function name camelCase",
-        .kind = .QuickFix,
+        .kind = .SourceFixAll,
         .isPreferred = true,
         .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditLoc(loc, new_text)}),
     };
