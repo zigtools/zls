@@ -118,7 +118,10 @@ pub fn main() !void {
     );
 }
 
-fn reifyOptions(step: *std.build.Step) !void {
+fn reifyOptions(step: *std.build.Step) anyerror!void {
+    // Support Zig 0.9.1
+    if (!@hasDecl(OptionsStep, "base_id")) return;
+
     if (step.cast(OptionsStep)) |option| {
         // We don't know how costly the dependency tree might be, so err on the side of caution
         if (step.dependencies.items.len == 0) {
@@ -138,8 +141,8 @@ fn processStep(
     step: *std.build.Step,
 ) anyerror!void {
     if (step.cast(InstallArtifactStep)) |install_exe| {
-        if(install_exe.artifact.root_src) |src| {
-          try packages.append(allocator, .{.name = "root", .path = src.path });
+        if (install_exe.artifact.root_src) |src| {
+            try packages.append(allocator, .{ .name = "root", .path = src.path });
         }
 
         try processIncludeDirs(allocator, include_dirs, install_exe.artifact.include_dirs.items);
@@ -148,8 +151,8 @@ fn processStep(
             try processPackage(allocator, packages, pkg);
         }
     } else if (step.cast(LibExeObjStep)) |exe| {
-        if(exe.root_src) |src| {
-          try packages.append(allocator, .{.name = "root", .path = src.path });
+        if (exe.root_src) |src| {
+            try packages.append(allocator, .{ .name = "root", .path = src.path });
         }
         try processIncludeDirs(allocator, include_dirs, exe.include_dirs.items);
         try processPkgConfig(allocator, include_dirs, exe);
@@ -172,7 +175,9 @@ fn processPackage(
         if (std.mem.eql(u8, package.name, pkg.name)) return;
     }
 
+    // Support Zig 0.9.1
     const source = if (@hasField(std.build.Pkg, "source")) pkg.source else pkg.path;
+
     const maybe_path = switch (source) {
         .path => |path| path,
         .generated => |generated| generated.path,
@@ -215,6 +220,9 @@ fn processPkgConfig(
     for (exe.link_objects.items) |link_object| {
         if (link_object != .system_lib) continue;
         const system_lib = link_object.system_lib;
+
+        // Support Zig 0.9.1
+        if (@TypeOf(system_lib) == []const u8) return;
 
         if (system_lib.use_pkg_config == .no) continue;
 
