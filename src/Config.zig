@@ -52,6 +52,14 @@ inlay_hints_show_builtin: bool = true,
 /// don't show inlay hints for single argument calls
 inlay_hints_exclude_single_argument: bool = true,
 
+/// don't show inlay hints when parameter name matches the identifier
+/// for example: `foo: foo`
+inlay_hints_hide_redundant_param_names: bool = false,
+
+/// don't show inlay hints when parameter names matches the last
+/// for example: `foo: bar.foo`, `foo: &foo`
+inlay_hints_hide_redundant_param_names_last_token: bool = false,
+
 /// Whether to enable `*` and `?` operators in completion lists
 operator_completions: bool = true,
 
@@ -69,8 +77,6 @@ skip_std_references: bool = false,
 builtin_path: ?[]const u8 = null,
 
 pub fn loadFromFile(allocator: std.mem.Allocator, file_path: []const u8) ?Config {
-    @setEvalBranchQuota(5000);
-
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -84,7 +90,7 @@ pub fn loadFromFile(allocator: std.mem.Allocator, file_path: []const u8) ?Config
 
     const file_buf = file.readToEndAlloc(allocator, 0x1000000) catch return null;
     defer allocator.free(file_buf);
-    @setEvalBranchQuota(3000);
+    @setEvalBranchQuota(10000);
 
     var token_stream = std.json.TokenStream.init(file_buf);
     const parse_options = std.json.ParseOptions{ .allocator = allocator, .ignore_unknown_fields = true };

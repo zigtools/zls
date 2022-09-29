@@ -5,6 +5,7 @@ const process = std.process;
 const Builder = std.build.Builder;
 const InstallArtifactStep = std.build.InstallArtifactStep;
 const LibExeObjStep = std.build.LibExeObjStep;
+const OptionsStep = std.build.OptionsStep;
 
 pub const BuildConfig = struct {
     packages: []Pkg,
@@ -90,6 +91,14 @@ pub fn main() !void {
     var include_dirs: std.StringArrayHashMapUnmanaged(void) = .{};
     defer include_dirs.deinit(allocator);
 
+    // This scans the graph of Steps to find all `OptionsStep`s then reifies them
+    // Doing this before the loop to find packages ensures their `GeneratedFile`s have been given paths
+    for (builder.top_level_steps.items) |tls| {
+        for (tls.step.dependencies.items) |step| {
+            try reifyOptions(step);
+        }
+    }
+
     // TODO: We currently add packages from every LibExeObj step that the install step depends on.
     //       Should we error out or keep one step or something similar?
     // We also flatten them, we should probably keep the nested structure.
@@ -109,6 +118,19 @@ pub fn main() !void {
     );
 }
 
+fn reifyOptions(step: *std.build.Step) !void {
+    if (step.cast(OptionsStep)) |option| {
+        // We don't know how costly the dependency tree might be, so err on the side of caution
+        if (step.dependencies.items.len == 0) {
+            try option.step.make();
+        }
+    }
+
+    for (step.dependencies.items) |unknown_step| {
+        try reifyOptions(unknown_step);
+    }
+}
+
 fn processStep(
     allocator: std.mem.Allocator,
     packages: *std.ArrayListUnmanaged(BuildConfig.Pkg),
@@ -116,12 +138,19 @@ fn processStep(
     step: *std.build.Step,
 ) anyerror!void {
     if (step.cast(InstallArtifactStep)) |install_exe| {
+        if(install_exe.artifact.root_src) |src| {
+          try packages.append(allocator, .{.name = "root", .path = src.path });
+        }
+
         try processIncludeDirs(allocator, include_dirs, install_exe.artifact.include_dirs.items);
         try processPkgConfig(allocator, include_dirs, install_exe.artifact);
         for (install_exe.artifact.packages.items) |pkg| {
             try processPackage(allocator, packages, pkg);
         }
     } else if (step.cast(LibExeObjStep)) |exe| {
+        if(exe.root_src) |src| {
+          try packages.append(allocator, .{.name = "root", .path = src.path });
+        }
         try processIncludeDirs(allocator, include_dirs, exe.include_dirs.items);
         try processPkgConfig(allocator, include_dirs, exe);
         for (exe.packages.items) |pkg| {
