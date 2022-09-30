@@ -32,6 +32,7 @@ pub const Builder = struct {
                 .@"loop index capture" => try handleUnusedIndexCapture(builder, actions, loc),
                 .@"capture" => try handleUnusedCapture(builder, actions, loc),
             },
+            .non_camelcase_fn => try handleNonCamelcaseFunction(builder, actions, loc),
             .pointless_discard => try handlePointlessDiscard(builder, actions, loc),
             .omit_discard => |id| switch (id) {
                 .@"index capture" => try handleUnusedIndexCapture(builder, actions, loc),
@@ -71,6 +72,23 @@ pub const Builder = struct {
         return self.handle.document.text;
     }
 };
+
+fn handleNonCamelcaseFunction(builder: *Builder, actions: *std.ArrayListUnmanaged(types.CodeAction), loc: offsets.Loc) !void {
+    const identifier_name = offsets.locToSlice(builder.text(), loc);
+
+    if (std.mem.allEqual(u8, identifier_name, '_')) return;
+
+    const new_text = try createCamelcaseText(builder.arena.allocator(), identifier_name);
+
+    const action1 = types.CodeAction{
+        .title = "make function name camelCase",
+        .kind = .QuickFix,
+        .isPreferred = true,
+        .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditLoc(loc, new_text)}),
+    };
+
+    try actions.append(builder.arena.allocator(), action1);
+}
 
 fn handleUnusedFunctionParameter(builder: *Builder, actions: *std.ArrayListUnmanaged(types.CodeAction), loc: offsets.Loc) !void {
     const identifier_name = offsets.locToSlice(builder.text(), loc);
@@ -229,6 +247,36 @@ fn handlePointlessDiscard(builder: *Builder, actions: *std.ArrayListUnmanaged(ty
     });
 }
 
+// attempts to converts a slice of text into camelcase 'FUNCTION_NAME' -> 'functionName'
+fn createCamelcaseText(allocator: std.mem.Allocator, identifier: []const u8) ![]const u8 {
+    // skip initial & ending underscores
+    const trimmed_identifier = std.mem.trim(u8, identifier, "_");
+
+    const num_separators = std.mem.count(u8, trimmed_identifier, "_");
+
+    const new_text_len = trimmed_identifier.len - num_separators;
+    var new_text = try std.ArrayListUnmanaged(u8).initCapacity(allocator, new_text_len);
+    errdefer new_text.deinit(allocator);
+
+    var idx: usize = 0;
+    while (idx < trimmed_identifier.len) {
+        const ch = trimmed_identifier[idx];
+        if (ch == '_') {
+            // the trimmed identifier is guaranteed to not have underscores at the end,
+            // so it can be assumed that ptr dereferences are safe until an alnum char is found
+            while (trimmed_identifier[idx] == '_') : (idx += 1) {}
+            const ch2 = trimmed_identifier[idx];
+            new_text.appendAssumeCapacity(std.ascii.toUpper(ch2));
+        } else {
+            new_text.appendAssumeCapacity(std.ascii.toLower(ch));
+        }
+
+        idx += 1;
+    }
+
+    return new_text.toOwnedSlice(allocator);
+}
+
 // returns a discard string `\n{indent}_ = identifier_name;`
 fn createDiscardText(allocator: std.mem.Allocator, identifier_name: []const u8, indent: usize) ![]const u8 {
     const new_text_len = 1 + indent + "_ = ;".len + identifier_name.len;
@@ -287,6 +335,7 @@ const DiagnosticKind = union(enum) {
     unused: IdCat,
     pointless_discard: IdCat,
     omit_discard: DiscardCat,
+    non_camelcase_fn,
     undeclared_identifier,
     unreachable_code,
 
@@ -320,6 +369,8 @@ const DiagnosticKind = union(enum) {
             return DiagnosticKind{
                 .omit_discard = parseEnum(DiscardCat, msg["discard of ".len..]) orelse return null,
             };
+        } else if (std.mem.startsWith(u8, msg, "Functions should be camelCase")) {
+            return .non_camelcase_fn;
         } else if (std.mem.startsWith(u8, msg, "use of undeclared identifier")) {
             return .undeclared_identifier;
         }
