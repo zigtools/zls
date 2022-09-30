@@ -1,4 +1,5 @@
 const std = @import("std");
+const zig_builtin = @import("builtin");
 const builtin = @import("builtin");
 const Config = @import("Config.zig");
 const ast = @import("ast.zig");
@@ -41,6 +42,20 @@ pub fn convertCInclude(allocator: std.mem.Allocator, tree: Ast, node: Ast.Node.I
     return output.toOwnedSlice(allocator);
 }
 
+/// HACK self-hosted has not implemented async yet
+fn callConvertCIncludeInternal(allocator: std.mem.Allocator, args: anytype) error{ OutOfMemory, Unsupported }!void {
+    if (zig_builtin.zig_backend == .other or zig_builtin.zig_backend == .stage1) {
+        const FrameSize = @sizeOf(@Frame(convertCIncludeInternal));
+        var child_frame = try allocator.alignedAlloc(u8, std.Target.stack_align, FrameSize);
+        defer allocator.free(child_frame);
+
+        return await @asyncCall(child_frame, {}, convertCIncludeInternal, args);
+    } else {
+        // TODO find a non recursive solution
+        return @call(.{}, convertCIncludeInternal, args);
+    }
+}
+
 fn convertCIncludeInternal(
     allocator: std.mem.Allocator,
     stack_allocator: std.mem.Allocator,
@@ -55,12 +70,8 @@ fn convertCIncludeInternal(
 
     var buffer: [2]Ast.Node.Index = undefined;
     if (ast.isBlock(tree, node)) {
-        const FrameSize = @sizeOf(@Frame(convertCIncludeInternal));
-        var child_frame = try stack_allocator.alignedAlloc(u8, std.Target.stack_align, FrameSize);
-        defer stack_allocator.free(child_frame);
-
         for (ast.blockStatements(tree, node, &buffer).?) |statement| {
-            try await @asyncCall(child_frame, {}, convertCIncludeInternal, .{ allocator, stack_allocator, tree, statement, output });
+            try callConvertCIncludeInternal(stack_allocator, .{ allocator, stack_allocator, tree, statement, output });
         }
     } else if (ast.builtinCallParams(tree, node, &buffer)) |params| {
         if (params.len < 1) return;
