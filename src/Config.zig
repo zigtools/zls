@@ -255,3 +255,25 @@ pub fn getZigEnv(allocator: std.mem.Allocator, zig_exe_path: []const u8) ?Env {
         return null;
     };
 }
+
+pub const Configuration = Config.getConfigurationType();
+pub const DidChangeConfigurationParams = struct {
+    settings: ?Configuration,
+};
+
+// returns a Struct which is the same as `Config` except that every field is optional.
+fn getConfigurationType() type {
+    var config_info: std.builtin.Type = @typeInfo(Config);
+    var fields: [config_info.Struct.fields.len]std.builtin.Type.StructField = undefined;
+    for (config_info.Struct.fields) |field, i| {
+        fields[i] = field;
+        if (@typeInfo(field.field_type) != .Optional) {
+            fields[i].field_type = @Type(std.builtin.Type{
+                .Optional = .{ .child = field.field_type },
+            });
+        }
+    }
+    config_info.Struct.fields = fields[0..];
+    config_info.Struct.decls = &.{};
+    return @Type(config_info);
+}
