@@ -77,10 +77,6 @@ pub const Handle = struct {
 
     associated_build_file: ?*BuildFile,
     is_build_file: ?*BuildFile,
-
-    pub fn uri(handle: Handle) []const u8 {
-        return handle.document.uri;
-    }
 };
 
 pub const UriToHandleMap = std.StringHashMapUnmanaged(*Handle);

@@ -70,7 +70,7 @@ pub const Builder = struct {
 };
 
 fn handleNonCamelcaseFunction(builder: *Builder, actions: *std.ArrayListUnmanaged(types.CodeAction), loc: offsets.Loc) !void {
-    const identifier_name = offsets.locToSlice(builder.text(), loc);
+    const identifier_name = offsets.locToSlice(builder.handle.text, loc);
 
     if (std.mem.allEqual(u8, identifier_name, '_')) return;
 
