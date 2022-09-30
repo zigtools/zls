@@ -136,7 +136,9 @@ fn loadBuildAssociatedConfiguration(allocator: std.mem.Allocator, build_file: *B
         const file_buf = try config_file.readToEndAlloc(allocator, 0x1000000);
         defer allocator.free(file_buf);
 
-        break :blk try std.json.parse(BuildAssociatedConfig, &std.json.TokenStream.init(file_buf), options);
+        var token_stream = std.json.TokenStream.init(file_buf);
+
+        break :blk try std.json.parse(BuildAssociatedConfig, &token_stream, options);
     };
     defer std.json.parseFree(BuildAssociatedConfig, build_associated_config, options);
 
@@ -236,9 +238,11 @@ fn loadBuildConfiguration(context: LoadBuildConfigContext) !void {
 
             build_file.config.deinit(allocator);
 
+            var token_stream = std.json.TokenStream.init(zig_run_result.stdout);
+
             const config: BuildConfig = std.json.parse(
                 BuildConfig,
-                &std.json.TokenStream.init(zig_run_result.stdout),
+                &token_stream,
                 parse_options,
             ) catch return error.RunFailed;
             defer std.json.parseFree(BuildConfig, config, parse_options);

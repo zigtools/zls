@@ -90,10 +90,13 @@ pub fn loadFromFile(allocator: std.mem.Allocator, file_path: []const u8) ?Config
 
     const file_buf = file.readToEndAlloc(allocator, 0x1000000) catch return null;
     defer allocator.free(file_buf);
-    @setEvalBranchQuota(7000);
+    @setEvalBranchQuota(10000);
+
+    var token_stream = std.json.TokenStream.init(file_buf);
     const parse_options = std.json.ParseOptions{ .allocator = allocator, .ignore_unknown_fields = true };
+
     // TODO: Better errors? Doesn't seem like std.json can provide us positions or context.
-    var config = std.json.parse(Config, &std.json.TokenStream.init(file_buf), parse_options) catch |err| {
+    var config = std.json.parse(Config, &token_stream, parse_options) catch |err| {
         logger.warn("Error while parsing configuration file: {}", .{err});
         return null;
     };
