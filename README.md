@@ -34,6 +34,7 @@ Zig Language Server, or `zls`, is a language server for Zig. The Zig wiki states
   - [Emacs](#emacs)
   - [Doom Emacs](#doom-emacs)
   - [Spacemacs](#spacemacs)
+  - [Helix](#helix)
 - [Related Projects](#related-projects)
 - [License](#license)
 
@@ -114,6 +115,10 @@ The following options are currently available.
 | `global_cache_path` | `?[]const u8` | `null` | Path to a directroy that will be used as zig's cache. `null` is equivalent to `${KnownFloders.Cache}/zls` |
 | `enable_semantic_tokens` | `bool` | `true` | Enables semantic token support when the client also supports it. |
 | `enable_inlay_hints` | `bool` | `false` | Enables inlay hint support when the client also supports it. |
+| `inlay_hints_show_builtin` | `bool` | `true` | Enable inlay hints for builtin functions |
+| `inlay_hints_exclude_single_argument` | `bool` | `true`| Don't show inlay hints for single argument calls |
+| `inlay_hints_hide_redundant_param_names` | `bool` | `false`| Hides inlay hints when parameter name matches the identifier (e.g. foo: foo) |
+| `inlay_hints_hide_redundant_param_names_last_token` | `bool` | `false`| Hides inlay hints when parameter name matches the last token of a parameter node (e.g. foo: bar.foo, foo: &foo) |
 | `operator_completions` | `bool` | `true` | Enables `*` and `?` operators in completion lists. |
 |`include_at_in_builtins`|`bool`|`false`| Whether the @ sign should be part of the completion of builtins.
 |`max_detail_length`|`usize`|`1024 * 1024`| The detail field of completions is truncated to be no longer than this (in bytes).
