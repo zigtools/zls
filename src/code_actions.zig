@@ -18,11 +18,11 @@ pub const Builder = struct {
     pub fn generateCodeAction(
         builder: *Builder,
         diagnostic: types.Diagnostic,
-        actions: *std.ArrayListUnmanaged(types.CodeAction),
+        actions: *std.ArrayListUnmanaged(types.CodeAction)
     ) error{OutOfMemory}!void {
         const kind = DiagnosticKind.parse(diagnostic.message) orelse return;
 
-        const loc = offsets.rangeToLoc(builder.text(), diagnostic.range, builder.offset_encoding);
+        const loc = offsets.rangeToLoc(builder.handle.text, diagnostic.range, builder.offset_encoding);
 
         switch (kind) {
             .unused => |id| switch (id) {
@@ -32,11 +32,14 @@ pub const Builder = struct {
                 .@"loop index capture" => try handleUnusedIndexCapture(builder, actions, loc),
                 .@"capture" => try handleUnusedCapture(builder, actions, loc),
             },
+            .non_camelcase_fn => try handleNonCamelcaseFunction(builder, actions, loc),
             .pointless_discard => try handlePointlessDiscard(builder, actions, loc),
             .omit_discard => |id| switch (id) {
                 .@"index capture" => try handleUnusedIndexCapture(builder, actions, loc),
                 .@"error capture" => try handleUnusedCapture(builder, actions, loc),
             },
+            // the undeclared identifier may be a discard
+            .undeclared_identifier => try handlePointlessDiscard(builder, actions, loc),
             .unreachable_code => {
                 // TODO
                 // autofix: comment out code
@@ -46,12 +49,12 @@ pub const Builder = struct {
     }
 
     pub fn createTextEditLoc(self: *Builder, loc: offsets.Loc, new_text: []const u8) types.TextEdit {
-        const range = offsets.locToRange(self.text(), loc, self.offset_encoding);
+        const range = offsets.locToRange(self.handle.text, loc, self.offset_encoding);
         return types.TextEdit{ .range = range, .newText = new_text };
     }
 
     pub fn createTextEditPos(self: *Builder, index: usize, new_text: []const u8) types.TextEdit {
-        const position = offsets.indexToPosition(self.text(), index, self.offset_encoding);
+        const position = offsets.indexToPosition(self.handle.text, index, self.offset_encoding);
         return types.TextEdit{ .range = .{ .start = position, .end = position }, .newText = new_text };
     }
 
@@ -60,18 +63,31 @@ pub const Builder = struct {
         try text_edits.appendSlice(self.arena.allocator(), edits);
 
         var workspace_edit = types.WorkspaceEdit{ .changes = .{} };
-        try workspace_edit.changes.putNoClobber(self.arena.allocator(), self.handle.uri(), text_edits);
+        try workspace_edit.changes.putNoClobber(self.arena.allocator(), self.handle.uri, text_edits);
 
         return workspace_edit;
     }
-
-    fn text(self: *Builder) []const u8 {
-        return self.handle.document.text;
-    }
 };
 
+fn handleNonCamelcaseFunction(builder: *Builder, actions: *std.ArrayListUnmanaged(types.CodeAction), loc: offsets.Loc) !void {
+    const identifier_name = offsets.locToSlice(builder.handle.text, loc);
+
+    if (std.mem.allEqual(u8, identifier_name, '_')) return;
+
+    const new_text = try createCamelcaseText(builder.arena.allocator(), identifier_name);
+
+    const action1 = types.CodeAction{
+        .title = "make function name camelCase",
+        .kind = .QuickFix,
+        .isPreferred = true,
+        .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditLoc(loc, new_text)}),
+    };
+
+    try actions.append(builder.arena.allocator(), action1);
+}
+
 fn handleUnusedFunctionParameter(builder: *Builder, actions: *std.ArrayListUnmanaged(types.CodeAction), loc: offsets.Loc) !void {
-    const identifier_name = offsets.locToSlice(builder.text(), loc);
+    const identifier_name = offsets.locToSlice(builder.handle.text, loc);
 
     const tree = builder.handle.tree;
     const node_tags = tree.nodes.items(.tag);
@@ -108,25 +124,19 @@ fn handleUnusedFunctionParameter(builder: *Builder, actions: *std.ArrayListUnman
         .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditPos(index, new_text)}),
     };
 
-    const param_loc = .{
-        .start = offsets.tokenToIndex(tree, ast.paramFirstToken(tree, payload.param)),
-        .end = offsets.tokenToLoc(tree, ast.paramLastToken(tree, payload.param)).end,
-    };
-
     // TODO fix formatting
-    // TODO remove trailing comma on last parameter
     const action2 = types.CodeAction{
         .title = "remove function parameter",
         .kind = .QuickFix,
         .isPreferred = false,
-        .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditLoc(param_loc, "")}),
+        .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditLoc(getParamRemovalRange(tree, payload.param), "")}),
     };
 
     try actions.appendSlice(builder.arena.allocator(), &.{ action1, action2 });
 }
 
 fn handleUnusedVariableOrConstant(builder: *Builder, actions: *std.ArrayListUnmanaged(types.CodeAction), loc: offsets.Loc) !void {
-    const identifier_name = offsets.locToSlice(builder.text(), loc);
+    const identifier_name = offsets.locToSlice(builder.handle.text, loc);
 
     const tree = builder.handle.tree;
     const token_tags = tree.tokens.items(.tag);
@@ -163,11 +173,11 @@ fn handleUnusedVariableOrConstant(builder: *Builder, actions: *std.ArrayListUnma
 }
 
 fn handleUnusedIndexCapture(builder: *Builder, actions: *std.ArrayListUnmanaged(types.CodeAction), loc: offsets.Loc) !void {
-    const capture_locs = getCaptureLoc(builder.text(), loc, true) orelse return;
+    const capture_locs = getCaptureLoc(builder.handle.text, loc, true) orelse return;
 
     // TODO support discarding without modifying the capture
     // by adding a discard in the block scope
-    const is_value_discarded = std.mem.eql(u8, offsets.locToSlice(builder.text(), capture_locs.value), "_");
+    const is_value_discarded = std.mem.eql(u8, offsets.locToSlice(builder.handle.text, capture_locs.value), "_");
     if (is_value_discarded) {
         // |_, i| ->
         // TODO fix formatting
@@ -193,7 +203,7 @@ fn handleUnusedIndexCapture(builder: *Builder, actions: *std.ArrayListUnmanaged(
 }
 
 fn handleUnusedCapture(builder: *Builder, actions: *std.ArrayListUnmanaged(types.CodeAction), loc: offsets.Loc) !void {
-    const capture_locs = getCaptureLoc(builder.text(), loc, false) orelse return;
+    const capture_locs = getCaptureLoc(builder.handle.text, loc, false) orelse return;
 
     // TODO support discarding without modifying the capture
     // by adding a discard in the block scope
@@ -218,7 +228,7 @@ fn handleUnusedCapture(builder: *Builder, actions: *std.ArrayListUnmanaged(types
 }
 
 fn handlePointlessDiscard(builder: *Builder, actions: *std.ArrayListUnmanaged(types.CodeAction), loc: offsets.Loc) !void {
-    const edit_loc = getDiscardLoc(builder.text(), loc) orelse return;
+    const edit_loc = getDiscardLoc(builder.handle.text, loc) orelse return;
 
     try actions.append(builder.arena.allocator(), .{
         .title = "remove pointless discard",
@@ -254,10 +264,40 @@ fn detectIndentation(source: []const u8) []const u8 {
     return " " ** 4; // recommended style
 }
 
+// attempts to converts a slice of text into camelcase 'FUNCTION_NAME' -> 'functionName'
+fn createCamelcaseText(allocator: std.mem.Allocator, identifier: []const u8) ![]const u8 {
+    // skip initial & ending underscores
+    const trimmed_identifier = std.mem.trim(u8, identifier, "_");
+
+    const num_separators = std.mem.count(u8, trimmed_identifier, "_");
+
+    const new_text_len = trimmed_identifier.len - num_separators;
+    var new_text = try std.ArrayListUnmanaged(u8).initCapacity(allocator, new_text_len);
+    errdefer new_text.deinit(allocator);
+
+    var idx: usize = 0;
+    while (idx < trimmed_identifier.len) {
+        const ch = trimmed_identifier[idx];
+        if (ch == '_') {
+            // the trimmed identifier is guaranteed to not have underscores at the end,
+            // so it can be assumed that ptr dereferences are safe until an alnum char is found
+            while (trimmed_identifier[idx] == '_') : (idx += 1) {}
+            const ch2 = trimmed_identifier[idx];
+            new_text.appendAssumeCapacity(std.ascii.toUpper(ch2));
+        } else {
+            new_text.appendAssumeCapacity(std.ascii.toLower(ch));
+        }
+
+        idx += 1;
+    }
+
+    return new_text.toOwnedSlice(allocator);
+}
+
 // returns a discard string `\n{indent}_ = identifier_name;`
 fn createDiscardText(builder: *Builder, identifier_name: []const u8, declaration_start: usize, add_block_indentation: bool) ![]const u8 {
     const indent = find_indent: {
-        const line = offsets.lineSliceUntilIndex(builder.text(), declaration_start);
+        const line = offsets.lineSliceUntilIndex(builder.handle.text, declaration_start);
         for(line) |char, i| {
             if(!std.ascii.isSpace(char)) {
                 break :find_indent line[0..i];
@@ -265,7 +305,7 @@ fn createDiscardText(builder: *Builder, identifier_name: []const u8, declaration
         }
         break :find_indent line;
     };
-    const additional_indent = if(add_block_indentation) detectIndentation(builder.text()) else "";
+    const additional_indent = if(add_block_indentation) detectIndentation(builder.handle.text) else "";
 
     const allocator = builder.arena.allocator();
     const new_text_len = 1 + indent.len + additional_indent.len + "_ = ;".len + identifier_name.len;
@@ -282,10 +322,51 @@ fn createDiscardText(builder: *Builder, identifier_name: []const u8, declaration
     return new_text.toOwnedSlice(allocator);
 }
 
+fn getParamRemovalRange(tree: Ast, param: Ast.full.FnProto.Param) offsets.Loc {
+    var param_start = offsets.tokenToIndex(tree, ast.paramFirstToken(tree, param));
+    var param_end = offsets.tokenToLoc(tree, ast.paramLastToken(tree, param)).end;
+
+    var trim_end = false;
+    while (param_start != 0) : (param_start -= 1) {
+        switch (tree.source[param_start - 1]) {
+            ' ', '\n' => continue,
+            ',' => {
+                param_start -= 1;
+                break;
+            },
+            '(' => {
+                trim_end = true;
+                break;
+            },
+            else => break,
+        }
+    }
+
+    var found_comma = false;
+    while (trim_end and param_end < tree.source.len) : (param_end += 1) {
+        switch (tree.source[param_end]) {
+            ' ', '\n' => continue,
+            ',' => if (!found_comma) {
+                found_comma = true;
+                continue;
+            } else {
+                param_end += 1;
+                break;
+            },
+            ')' => break,
+            else => break,
+        }
+    }
+
+    return .{ .start = param_start, .end = param_end };
+}
+
 const DiagnosticKind = union(enum) {
     unused: IdCat,
     pointless_discard: IdCat,
     omit_discard: DiscardCat,
+    non_camelcase_fn,
+    undeclared_identifier,
     unreachable_code,
 
     const IdCat = enum {
@@ -318,6 +399,10 @@ const DiagnosticKind = union(enum) {
             return DiagnosticKind{
                 .omit_discard = parseEnum(DiscardCat, msg["discard of ".len..]) orelse return null,
             };
+        } else if (std.mem.startsWith(u8, msg, "Functions should be camelCase")) {
+            return .non_camelcase_fn;
+        } else if (std.mem.startsWith(u8, msg, "use of undeclared identifier")) {
+            return .undeclared_identifier;
         }
         return null;
     }

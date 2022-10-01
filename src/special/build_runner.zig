@@ -5,6 +5,7 @@ const process = std.process;
 const Builder = std.build.Builder;
 const InstallArtifactStep = std.build.InstallArtifactStep;
 const LibExeObjStep = std.build.LibExeObjStep;
+const OptionsStep = std.build.OptionsStep;
 
 pub const BuildConfig = struct {
     packages: []Pkg,
@@ -57,6 +58,30 @@ pub fn main() !void {
 
     defer builder.destroy();
 
+    while (nextArg(args, &arg_idx)) |arg| {
+        if (std.mem.startsWith(u8, arg, "-D")) {
+            const option_contents = arg[2..];
+            if (option_contents.len == 0) {
+                log.err("Expected option name after '-D'\n\n", .{});
+                return error.InvalidArgs;
+            }
+            if (std.mem.indexOfScalar(u8, option_contents, '=')) |name_end| {
+                const option_name = option_contents[0..name_end];
+                const option_value = option_contents[name_end + 1 ..];
+                if (try builder.addUserInputOption(option_name, option_value)) {
+                    log.err("Option conflict '-D{s}'\n\n", .{option_name});
+                    return error.InvalidArgs;
+                }
+            } else {
+                const option_name = option_contents;
+                if (try builder.addUserInputFlag(option_name)) {
+                    log.err("Option conflict '-D{s}'\n\n", .{option_name});
+                    return error.InvalidArgs;
+                }
+            }
+        }
+    }
+
     builder.resolveInstallPrefix(null, Builder.DirList{});
     try runBuild(builder);
 
@@ -65,6 +90,14 @@ pub fn main() !void {
 
     var include_dirs: std.StringArrayHashMapUnmanaged(void) = .{};
     defer include_dirs.deinit(allocator);
+
+    // This scans the graph of Steps to find all `OptionsStep`s then reifies them
+    // Doing this before the loop to find packages ensures their `GeneratedFile`s have been given paths
+    for (builder.top_level_steps.items) |tls| {
+        for (tls.step.dependencies.items) |step| {
+            try reifyOptions(step);
+        }
+    }
 
     // TODO: We currently add packages from every LibExeObj step that the install step depends on.
     //       Should we error out or keep one step or something similar?
@@ -85,6 +118,22 @@ pub fn main() !void {
     );
 }
 
+fn reifyOptions(step: *std.build.Step) anyerror!void {
+    // Support Zig 0.9.1
+    if (!@hasDecl(OptionsStep, "base_id")) return;
+
+    if (step.cast(OptionsStep)) |option| {
+        // We don't know how costly the dependency tree might be, so err on the side of caution
+        if (step.dependencies.items.len == 0) {
+            try option.step.make();
+        }
+    }
+
+    for (step.dependencies.items) |unknown_step| {
+        try reifyOptions(unknown_step);
+    }
+}
+
 fn processStep(
     allocator: std.mem.Allocator,
     packages: *std.ArrayListUnmanaged(BuildConfig.Pkg),
@@ -92,12 +141,19 @@ fn processStep(
     step: *std.build.Step,
 ) anyerror!void {
     if (step.cast(InstallArtifactStep)) |install_exe| {
+        if (install_exe.artifact.root_src) |src| {
+            try packages.append(allocator, .{ .name = "root", .path = src.path });
+        }
+
         try processIncludeDirs(allocator, include_dirs, install_exe.artifact.include_dirs.items);
         try processPkgConfig(allocator, include_dirs, install_exe.artifact);
         for (install_exe.artifact.packages.items) |pkg| {
             try processPackage(allocator, packages, pkg);
         }
     } else if (step.cast(LibExeObjStep)) |exe| {
+        if (exe.root_src) |src| {
+            try packages.append(allocator, .{ .name = "root", .path = src.path });
+        }
         try processIncludeDirs(allocator, include_dirs, exe.include_dirs.items);
         try processPkgConfig(allocator, include_dirs, exe);
         for (exe.packages.items) |pkg| {
@@ -119,7 +175,9 @@ fn processPackage(
         if (std.mem.eql(u8, package.name, pkg.name)) return;
     }
 
+    // Support Zig 0.9.1
     const source = if (@hasField(std.build.Pkg, "source")) pkg.source else pkg.path;
+
     const maybe_path = switch (source) {
         .path => |path| path,
         .generated => |generated| generated.path,
@@ -162,6 +220,9 @@ fn processPkgConfig(
     for (exe.link_objects.items) |link_object| {
         if (link_object != .system_lib) continue;
         const system_lib = link_object.system_lib;
+
+        // Support Zig 0.9.1
+        if (@TypeOf(system_lib) == []const u8) return;
 
         if (system_lib.use_pkg_config == .no) continue;
 
