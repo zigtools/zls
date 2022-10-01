@@ -2062,23 +2062,25 @@ fn formattingHandler(server: *Server, writer: anytype, id: types.RequestId, req:
     return try respondGeneric(writer, id, null_result_response);
 }
 
-fn didChangeConfigurationHandler(server: *Server, writer: anytype, id: types.RequestId, maybe_req: std.json.Value) !void {
+fn didChangeConfigurationHandler(server: *Server, writer: anytype, id: types.RequestId, req: Config.DidChangeConfigurationParams) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
     _ = id;
-    if (maybe_req.Object.get("params").?.Object.get("settings").? == .Object) {
-        const req = try requests.fromDynamicTree(&server.arena, requests.Configuration, maybe_req);
-        inline for (std.meta.fields(Config)) |field| {
-            if (@field(req.params.settings, field.name)) |value| {
-                log.debug("setting configuration option '{s}' to '{any}'", .{ field.name, value });
+
+    // NOTE: VS Code seems to always respond with null
+    if (req.settings) |configuration| {
+        inline for (std.meta.fields(Config.Configuration)) |field| {
+            if (@field(configuration, field.name)) |value| {
                 @field(server.config, field.name) = if (@TypeOf(value) == []const u8) try server.allocator.dupe(u8, value) else value;
+                log.debug("setting configuration option '{s}' to '{any}'", .{ field.name, value });
             }
         }
 
         try server.config.configChanged(server.allocator, null);
-    } else if (server.client_capabilities.supports_configuration)
+    } else if (server.client_capabilities.supports_configuration) {
         try server.requestConfiguration(writer);
+    }
 }
 
 fn renameHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.Rename) !void {
@@ -2435,7 +2437,7 @@ pub fn processJsonRpc(server: *Server, writer: anytype, json: []const u8) !void 
         .{ "textDocument/references", requests.References, referencesHandler },
         .{ "textDocument/documentHighlight", requests.DocumentHighlight, documentHighlightHandler },
         .{ "textDocument/codeAction", requests.CodeAction, codeActionHandler },
-        .{ "workspace/didChangeConfiguration", std.json.Value, didChangeConfigurationHandler },
+        .{ "workspace/didChangeConfiguration", Config.DidChangeConfigurationParams, didChangeConfigurationHandler },
     };
 
     if (zig_builtin.zig_backend == .stage1) {

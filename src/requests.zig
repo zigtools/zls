@@ -288,30 +288,3 @@ pub const CodeAction = struct {
         },
     },
 };
-
-pub const Configuration = struct {
-    params: struct {
-        settings: struct {
-            enable_snippets: ?bool,
-            enable_ast_check_diagnostics: ?bool,
-            enable_autofix: ?bool,
-            enable_import_embedfile_argument_completions: ?bool,
-            zig_lib_path: ?[]const u8,
-            zig_exe_path: ?[]const u8,
-            warn_style: ?bool,
-            build_runner_path: ?[]const u8,
-            global_cache_path: ?[]const u8,
-            enable_semantic_tokens: ?bool,
-            enable_inlay_hints: ?bool,
-            inlay_hints_show_builtin: ?bool,
-            inlay_hints_exclude_single_argument: ?bool,
-            inlay_hints_hide_redundant_param_names: ?bool,
-            inlay_hints_hide_redundant_param_names_last_token: ?bool,
-            operator_completions: ?bool,
-            include_at_in_builtins: ?bool,
-            max_detail_length: ?usize,
-            skip_std_references: ?bool,
-            builtin_path: ?[]const u8,
-        },
-    },
-};
