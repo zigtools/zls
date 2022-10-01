@@ -204,8 +204,13 @@ const TextDocumentIdentifier = struct {
 pub const ChangeDocument = struct {
     params: struct {
         textDocument: TextDocumentIdentifier,
-        contentChanges: std.json.Value,
+        contentChanges: []TextDocumentContentChangeEvent,
     },
+};
+
+pub const TextDocumentContentChangeEvent = struct {
+    range: ?types.Range,
+    text: []const u8,
 };
 
 const TextDocumentIdentifierRequest = struct {

@@ -251,11 +251,10 @@ pub fn getSignatureInfo(document_store: *DocumentStore, arena: *std.heap.ArenaAl
                 const last_token_slice = tree.tokenSlice(expr_last_token);
                 const expr_end = token_starts[expr_last_token] + last_token_slice.len;
 
-                var held_expr = handle.document.borrowNullTerminatedSlice(expr_start, expr_end);
-                defer held_expr.release();
+                var held_expr = try alloc.dupeZ(u8, handle.text[expr_start..expr_end]);
 
                 // Resolve the expression.
-                var tokenizer = std.zig.Tokenizer.init(held_expr.data());
+                var tokenizer = std.zig.Tokenizer.init(held_expr);
                 if (try analysis.getFieldAccessType(
                     document_store,
                     arena,

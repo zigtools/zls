@@ -29,7 +29,7 @@ pub fn labelReferences(
     if (include_decl) {
         // The first token is always going to be the label
         try locations.append(allocator, .{
-            .uri = handle.uri(),
+            .uri = handle.uri,
             .range = offsets.tokenToRange(handle.tree, first_tok, encoding),
         });
     }
@@ -45,7 +45,7 @@ pub fn labelReferences(
         if (!std.mem.eql(u8, tree.tokenSlice(curr_tok + 2), tree.tokenSlice(first_tok))) continue;
 
         try locations.append(allocator, .{
-            .uri = handle.uri(),
+            .uri = handle.uri,
             .range = offsets.tokenToRange(handle.tree, curr_tok + 2, encoding),
         });
     }
@@ -72,7 +72,7 @@ const Builder = struct {
 
     pub fn add(self: *Builder, handle: *DocumentStore.Handle, token_index: Ast.TokenIndex) !void {
         try self.locations.append(self.arena.allocator(), .{
-            .uri = handle.uri(),
+            .uri = handle.uri,
             .range = offsets.tokenToRange(handle.tree, token_index, self.encoding),
         });
     }
