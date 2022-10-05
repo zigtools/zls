@@ -379,7 +379,7 @@ fn typeToCompletion(
     server: *Server,
     list: *std.ArrayListUnmanaged(types.CompletionItem),
     field_access: analysis.FieldAccessReturn,
-    orig_handle: *DocumentStore.Handle,
+    orig_handle: *const DocumentStore.Handle,
 ) error{OutOfMemory}!void {
     var allocator = server.arena.allocator();
 
@@ -441,7 +441,7 @@ fn nodeToCompletion(
     list: *std.ArrayListUnmanaged(types.CompletionItem),
     node_handle: analysis.NodeWithHandle,
     unwrapped: ?analysis.TypeWithHandle,
-    orig_handle: *DocumentStore.Handle,
+    orig_handle: *const DocumentStore.Handle,
     is_type_val: bool,
     parent_is_type_val: ?bool,
 ) error{OutOfMemory}!void {
@@ -811,7 +811,7 @@ fn hoverSymbol(server: *Server, decl_handle: analysis.DeclWithHandle) error{OutO
     };
 }
 
-fn getLabelGlobal(pos_index: usize, handle: *DocumentStore.Handle) error{OutOfMemory}!?analysis.DeclWithHandle {
+fn getLabelGlobal(pos_index: usize, handle: *const DocumentStore.Handle) error{OutOfMemory}!?analysis.DeclWithHandle {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -824,7 +824,7 @@ fn getLabelGlobal(pos_index: usize, handle: *DocumentStore.Handle) error{OutOfMe
 fn getSymbolGlobal(
     server: *Server,
     pos_index: usize,
-    handle: *DocumentStore.Handle,
+    handle: *const DocumentStore.Handle,
 ) error{OutOfMemory}!?analysis.DeclWithHandle {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
@@ -838,7 +838,7 @@ fn getSymbolGlobal(
 fn gotoDefinitionLabel(
     server: *Server,
     pos_index: usize,
-    handle: *DocumentStore.Handle,
+    handle: *const DocumentStore.Handle,
 ) error{OutOfMemory}!?types.Location {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
@@ -850,7 +850,7 @@ fn gotoDefinitionLabel(
 fn gotoDefinitionGlobal(
     server: *Server,
     pos_index: usize,
-    handle: *DocumentStore.Handle,
+    handle: *const DocumentStore.Handle,
     resolve_alias: bool,
 ) error{OutOfMemory}!?types.Location {
     const tracy_zone = tracy.trace(@src());
@@ -860,7 +860,7 @@ fn gotoDefinitionGlobal(
     return try server.gotoDefinitionSymbol(decl, resolve_alias);
 }
 
-fn hoverDefinitionLabel(server: *Server, pos_index: usize, handle: *DocumentStore.Handle) error{OutOfMemory}!?types.Hover {
+fn hoverDefinitionLabel(server: *Server, pos_index: usize, handle: *const DocumentStore.Handle) error{OutOfMemory}!?types.Hover {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -868,7 +868,7 @@ fn hoverDefinitionLabel(server: *Server, pos_index: usize, handle: *DocumentStor
     return try server.hoverSymbol(decl);
 }
 
-fn hoverDefinitionBuiltin(server: *Server, pos_index: usize, handle: *DocumentStore.Handle) error{OutOfMemory}!?types.Hover {
+fn hoverDefinitionBuiltin(server: *Server, pos_index: usize, handle: *const DocumentStore.Handle) error{OutOfMemory}!?types.Hover {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -892,7 +892,7 @@ fn hoverDefinitionBuiltin(server: *Server, pos_index: usize, handle: *DocumentSt
     return null;
 }
 
-fn hoverDefinitionGlobal(server: *Server, pos_index: usize, handle: *DocumentStore.Handle) error{OutOfMemory}!?types.Hover {
+fn hoverDefinitionGlobal(server: *Server, pos_index: usize, handle: *const DocumentStore.Handle) error{OutOfMemory}!?types.Hover {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -902,7 +902,7 @@ fn hoverDefinitionGlobal(server: *Server, pos_index: usize, handle: *DocumentSto
 
 fn getSymbolFieldAccess(
     server: *Server,
-    handle: *DocumentStore.Handle,
+    handle: *const DocumentStore.Handle,
     source_index: usize,
     loc: offsets.Loc,
 ) !?analysis.DeclWithHandle {
@@ -934,7 +934,7 @@ fn getSymbolFieldAccess(
 
 fn gotoDefinitionFieldAccess(
     server: *Server,
-    handle: *DocumentStore.Handle,
+    handle: *const DocumentStore.Handle,
     source_index: usize,
     loc: offsets.Loc,
     resolve_alias: bool,
@@ -948,7 +948,7 @@ fn gotoDefinitionFieldAccess(
 
 fn hoverDefinitionFieldAccess(
     server: *Server,
-    handle: *DocumentStore.Handle,
+    handle: *const DocumentStore.Handle,
     source_index: usize,
     loc: offsets.Loc,
 ) error{OutOfMemory}!?types.Hover {
@@ -962,7 +962,7 @@ fn hoverDefinitionFieldAccess(
 fn gotoDefinitionString(
     server: *Server,
     pos_index: usize,
-    handle: *DocumentStore.Handle,
+    handle: *const DocumentStore.Handle,
 ) error{OutOfMemory}!?types.Location {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
@@ -982,7 +982,7 @@ fn gotoDefinitionString(
 const DeclToCompletionContext = struct {
     server: *Server,
     completions: *std.ArrayListUnmanaged(types.CompletionItem),
-    orig_handle: *DocumentStore.Handle,
+    orig_handle: *const DocumentStore.Handle,
     parent_is_type_val: ?bool = null,
 };
 
@@ -1071,7 +1071,7 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: analysis.Decl
 fn completeLabel(
     server: *Server,
     pos_index: usize,
-    handle: *DocumentStore.Handle,
+    handle: *const DocumentStore.Handle,
 ) ![]types.CompletionItem {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
@@ -1112,7 +1112,7 @@ fn populateSnippedCompletions(
     }
 }
 
-fn completeGlobal(server: *Server, pos_index: usize, handle: *DocumentStore.Handle) ![]types.CompletionItem {
+fn completeGlobal(server: *Server, pos_index: usize, handle: *const DocumentStore.Handle) ![]types.CompletionItem {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -1135,7 +1135,7 @@ fn completeGlobal(server: *Server, pos_index: usize, handle: *DocumentStore.Hand
     return completions.toOwnedSlice(server.arena.allocator());
 }
 
-fn completeFieldAccess(server: *Server, handle: *DocumentStore.Handle, source_index: usize, loc: offsets.Loc) !?[]types.CompletionItem {
+fn completeFieldAccess(server: *Server, handle: *const DocumentStore.Handle, source_index: usize, loc: offsets.Loc) !?[]types.CompletionItem {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -1322,7 +1322,7 @@ fn formatDetailledLabel(item: *types.CompletionItem, alloc: std.mem.Allocator) !
     //     logger.info("labelDetails: {s}  ::  {s}", .{item.labelDetails.?.detail, item.labelDetails.?.description});
 }
 
-fn completeError(server: *Server, handle: *DocumentStore.Handle) ![]types.CompletionItem {
+fn completeError(server: *Server, handle: *const DocumentStore.Handle) ![]types.CompletionItem {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -1357,7 +1357,7 @@ fn kindToSortScore(kind: types.CompletionItem.Kind) ?[]const u8 {
     };
 }
 
-fn completeDot(server: *Server, handle: *DocumentStore.Handle) ![]types.CompletionItem {
+fn completeDot(server: *Server, handle: *const DocumentStore.Handle) ![]types.CompletionItem {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -1366,7 +1366,7 @@ fn completeDot(server: *Server, handle: *DocumentStore.Handle) ![]types.Completi
     return completions;
 }
 
-fn completeFileSystemStringLiteral(allocator: std.mem.Allocator, store: *const DocumentStore, handle: *DocumentStore.Handle, completing: []const u8, is_import: bool) ![]types.CompletionItem {
+fn completeFileSystemStringLiteral(allocator: std.mem.Allocator, store: *const DocumentStore, handle: *const DocumentStore.Handle, completing: []const u8, is_import: bool) ![]types.CompletionItem {
     var subpath_present = false;
     var completions = std.ArrayListUnmanaged(types.CompletionItem){};
 
@@ -1422,7 +1422,7 @@ fn completeFileSystemStringLiteral(allocator: std.mem.Allocator, store: *const D
     return completions.toOwnedSlice(allocator);
 }
 
-fn documentSymbol(server: *Server, writer: anytype, id: types.RequestId, handle: *DocumentStore.Handle) !void {
+fn documentSymbol(server: *Server, writer: anytype, id: types.RequestId, handle: *const DocumentStore.Handle) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 

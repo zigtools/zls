@@ -100,7 +100,7 @@ pub fn deinit(self: *DocumentStore) void {
 }
 
 /// returns a handle to the given document
-pub fn getHandle(self: *DocumentStore, uri: Uri) ?*Handle {
+pub fn getHandle(self: *const DocumentStore, uri: Uri) ?*Handle {
     const handle = self.handles.getPtr(uri) orelse {
         log.warn("Trying to open non existent document {s}", .{uri});
         return null;

@@ -56,11 +56,11 @@ pub fn labelReferences(
 const Builder = struct {
     arena: *std.heap.ArenaAllocator,
     locations: std.ArrayListUnmanaged(types.Location),
-    store: *DocumentStore,
+    store: *const DocumentStore,
     decl: analysis.DeclWithHandle,
     encoding: offsets.Encoding,
 
-    pub fn init(arena: *std.heap.ArenaAllocator, store: *DocumentStore, decl: analysis.DeclWithHandle, encoding: offsets.Encoding) Builder {
+    pub fn init(arena: *std.heap.ArenaAllocator, store: *const DocumentStore, decl: analysis.DeclWithHandle, encoding: offsets.Encoding) Builder {
         return Builder{
             .arena = arena,
             .locations = .{},
@@ -70,7 +70,7 @@ const Builder = struct {
         };
     }
 
-    pub fn add(self: *Builder, handle: *DocumentStore.Handle, token_index: Ast.TokenIndex) !void {
+    pub fn add(self: *Builder, handle: *const DocumentStore.Handle, token_index: Ast.TokenIndex) !void {
         try self.locations.append(self.arena.allocator(), .{
             .uri = handle.uri,
             .range = offsets.tokenToRange(handle.tree, token_index, self.encoding),
@@ -81,7 +81,7 @@ const Builder = struct {
 fn symbolReferencesInternal(
     builder: *Builder,
     node: Ast.Node.Index,
-    handle: *DocumentStore.Handle,
+    handle: *const DocumentStore.Handle,
 ) error{OutOfMemory}!void {
     const tree = handle.tree;
 
@@ -453,7 +453,7 @@ fn symbolReferencesInternal(
 
 pub fn symbolReferences(
     arena: *std.heap.ArenaAllocator,
-    store: *DocumentStore,
+    store: *const DocumentStore,
     decl_handle: analysis.DeclWithHandle,
     encoding: offsets.Encoding,
     include_decl: bool,

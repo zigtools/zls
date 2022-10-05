@@ -11,8 +11,8 @@ const offsets = @import("offsets.zig");
 
 pub const Builder = struct {
     arena: *std.heap.ArenaAllocator,
-    document_store: *DocumentStore,
-    handle: *DocumentStore.Handle,
+    document_store: *const DocumentStore,
+    handle: *const DocumentStore.Handle,
     offset_encoding: offsets.Encoding,
 
     pub fn generateCodeAction(
