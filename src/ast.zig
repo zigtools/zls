@@ -437,6 +437,8 @@ pub fn lastToken(tree: Ast, node: Ast.Node.Index) Ast.TokenIndex {
         .array_type,
         .switch_case_one,
         .switch_case,
+        .switch_case_inline_one,
+        .switch_case_inline,
         .switch_range,
         => n = datas[n].rhs,
 
