@@ -15,210 +15,433 @@ const translate_c = @import("translate_c.zig");
 
 const DocumentStore = @This();
 
-pub const Hasher = std.crypto.auth.siphash.SipHash128(1, 3);
+pub const Uri = []const u8;
 
-/// Initial state, that can be copied.
-pub const hasher_init: Hasher = Hasher.init(&[_]u8{0} ** Hasher.key_length);
+pub const Hasher = std.crypto.auth.siphash.SipHash128(1, 3);
+pub const Hash = [Hasher.mac_length]u8;
+
+pub fn computeHash(bytes: []const u8) Hash {
+    var hasher: Hasher = Hasher.init(&[_]u8{0} ** Hasher.key_length);
+    hasher.update(bytes);
+    var hash: Hash = undefined;
+    hasher.final(&hash);
+    return hash;
+}
 
 const BuildFile = struct {
-    refs: usize,
     uri: []const u8,
-    config: BuildFileConfig,
-    builtin_uri: ?[]const u8 = null,
-    build_options: ?[]BuildAssociatedConfig.BuildOption = null,
+    config: BuildConfig,
+    builtin_uri: ?Uri = null,
+    build_associated_config: ?BuildAssociatedConfig = null,
 
-    pub fn destroy(self: *BuildFile, allocator: std.mem.Allocator) void {
+    pub fn deinit(self: *BuildFile, allocator: std.mem.Allocator) void {
+        allocator.free(self.uri);
+        std.json.parseFree(BuildConfig, self.config, .{ .allocator = allocator });
         if (self.builtin_uri) |builtin_uri| allocator.free(builtin_uri);
-        if (self.build_options) |opts| {
-            for (opts) |*opt| {
-                opt.deinit(allocator);
-            }
-            allocator.free(opts);
+        if (self.build_associated_config) |cfg| {
+            std.json.parseFree(BuildAssociatedConfig, cfg, .{ .allocator = allocator });
         }
-        allocator.destroy(self);
     }
-};
-
-pub const BuildFileConfig = struct {
-    packages: []Pkg,
-    include_dirs: []const []const u8,
-
-    pub fn deinit(self: BuildFileConfig, allocator: std.mem.Allocator) void {
-        for (self.packages) |pkg| {
-            allocator.free(pkg.name);
-            allocator.free(pkg.uri);
-        }
-        allocator.free(self.packages);
-
-        for (self.include_dirs) |dir| {
-            allocator.free(dir);
-        }
-        allocator.free(self.include_dirs);
-    }
-
-    pub const Pkg = struct {
-        name: []const u8,
-        uri: []const u8,
-    };
 };
 
 pub const Handle = struct {
-    count: usize,
-    uri: []const u8,
+    /// `true` if the document has been directly opened by the client i.e. with `textDocument/didOpen`
+    /// `false` indicates the document only exists because it is a dependency of another document
+    /// or has been closed with `textDocument/didClose` and is awaiting cleanup through `garbageCollection`
+    open: bool,
+    uri: Uri,
     text: [:0]const u8,
     tree: Ast,
     document_scope: analysis.DocumentScope,
     /// Contains one entry for every import in the document
-    import_uris: []const []const u8,
+    import_uris: std.ArrayListUnmanaged(Uri) = .{},
     /// Contains one entry for every cimport in the document
-    cimports: []CImportHandle,
-    /// Items in this array list come from `import_uris` and `cimports`
-    imports_used: std.ArrayListUnmanaged([]const u8),
+    cimports: std.MultiArrayList(CImportHandle) = .{},
 
-    associated_build_file: ?*BuildFile,
-    is_build_file: ?*BuildFile,
+    associated_build_file: ?Uri = null,
+    is_build_file: bool = false,
+
+    pub fn deinit(self: *Handle, allocator: std.mem.Allocator) void {
+        self.document_scope.deinit(allocator);
+        self.tree.deinit(allocator);
+        allocator.free(self.text);
+        allocator.free(self.uri);
+
+        for (self.import_uris.items) |import_uri| {
+            allocator.free(import_uri);
+        }
+        self.import_uris.deinit(allocator);
+
+        self.cimports.deinit(allocator);
+    }
 };
-
-pub const UriToHandleMap = std.StringHashMapUnmanaged(*Handle);
-pub const BuildFileList = std.ArrayListUnmanaged(*BuildFile);
 
 allocator: std.mem.Allocator,
-handles: UriToHandleMap = .{},
-build_files: BuildFileList = .{},
+config: *const Config,
+handles: std.StringArrayHashMapUnmanaged(Handle) = .{},
+build_files: std.StringArrayHashMapUnmanaged(BuildFile) = .{},
+cimports: std.AutoArrayHashMapUnmanaged(Hash, translate_c.Result) = .{},
 
-config: *Config,
-std_uri: ?[]const u8,
-// TODO make this configurable
-// We can't figure it out ourselves since we don't know what arguments
-// the user will use to run "zig build"
-zig_cache_root: []const u8 = "zig-cache",
-// Since we don't compile anything and no packages should put their
-// files there this path can be ignored
-zig_global_cache_root: []const u8 = "ZLS_DONT_CARE",
-
-pub fn init(
-    allocator: std.mem.Allocator,
-    config: *Config,
-) !DocumentStore {
-    return DocumentStore{
-        .allocator = allocator,
-        .config = config,
-        .std_uri = try stdUriFromLibPath(allocator, config.zig_lib_path),
-    };
-}
-
-fn updateStdUri(store: *DocumentStore) !void {
-    if (store.std_uri) |std_uri|
-        store.allocator.free(std_uri);
-    store.std_uri = try stdUriFromLibPath(store.allocator, store.config.zig_lib_path);
-}
-
-fn loadBuildAssociatedConfiguration(allocator: std.mem.Allocator, build_file: *BuildFile, build_file_path: []const u8) !void {
-    const directory_path = build_file_path[0 .. build_file_path.len - "build.zig".len];
-
-    const options = std.json.ParseOptions{ .allocator = allocator };
-    var build_associated_config = blk: {
-        const config_file_path = try std.fs.path.join(allocator, &[_][]const u8{ directory_path, "zls.build.json" });
-        defer allocator.free(config_file_path);
-
-        log.info("Attempting to load build-associated config from {s}", .{config_file_path});
-
-        var config_file = std.fs.cwd().openFile(config_file_path, .{}) catch |err| {
-            if (err == error.FileNotFound) return;
-            return err;
-        };
-        defer config_file.close();
-
-        const file_buf = try config_file.readToEndAlloc(allocator, 0x1000000);
-        defer allocator.free(file_buf);
-
-        var token_stream = std.json.TokenStream.init(file_buf);
-
-        break :blk try std.json.parse(BuildAssociatedConfig, &token_stream, options);
-    };
-    defer std.json.parseFree(BuildAssociatedConfig, build_associated_config, options);
-
-    if (build_associated_config.relative_builtin_path) |relative_builtin_path| {
-        var absolute_builtin_path = try std.mem.concat(allocator, u8, &.{ directory_path, relative_builtin_path });
-        defer allocator.free(absolute_builtin_path);
-        build_file.builtin_uri = try URI.fromPath(allocator, absolute_builtin_path);
+pub fn deinit(self: *DocumentStore) void {
+    for (self.handles.values()) |*handle| {
+        handle.deinit(self.allocator);
     }
+    self.handles.deinit(self.allocator);
 
-    if (build_associated_config.build_options) |opts| {
-        build_file.build_options = opts;
-        build_associated_config.build_options = null;
+    for (self.build_files.values()) |*build_file| {
+        build_file.deinit(self.allocator);
     }
+    self.build_files.deinit(self.allocator);
+
+    for (self.cimports.values()) |*result| {
+        result.deinit(self.allocator);
+    }
+    self.cimports.deinit(self.allocator);
 }
 
-const LoadBuildConfigContext = struct {
-    build_file: *BuildFile,
-    allocator: std.mem.Allocator,
-    build_runner_path: []const u8,
-    global_cache_path: []const u8,
-    zig_exe_path: []const u8,
-    build_file_path: ?[]const u8 = null,
-    cache_root: []const u8,
-    global_cache_root: []const u8,
-};
+/// returns a handle to the given document
+pub fn getHandle(self: *DocumentStore, uri: Uri) ?*Handle {
+    const handle = self.handles.getPtr(uri) orelse {
+        log.warn("Trying to open non existent document {s}", .{uri});
+        return null;
+    };
 
-fn loadBuildConfiguration(context: LoadBuildConfigContext) !void {
+    return handle;
+}
+
+pub fn openDocument(self: *DocumentStore, uri: Uri, text: []const u8) !Handle {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const allocator = context.allocator;
-    const build_file = context.build_file;
-    const build_runner_path = context.build_runner_path;
-    const global_cache_path = context.global_cache_path;
-    const zig_exe_path = context.zig_exe_path;
+    if (self.handles.getPtr(uri)) |handle| {
+        if (handle.open) {
+            log.warn("Document already open: {s}", .{uri});
+        } else {
+            handle.open = true;
+        }
+        return handle.*;
+    }
+
+    const duped_text = try self.allocator.dupeZ(u8, text);
+    errdefer self.allocator.free(duped_text);
+    const duped_uri = try self.allocator.dupeZ(u8, uri);
+    errdefer self.allocator.free(duped_uri);
+
+    var handle = try self.createDocument(duped_uri, duped_text, true);
+    errdefer handle.deinit(self.allocator);
+
+    try self.handles.putNoClobber(self.allocator, duped_uri, handle);
+
+    try self.ensureDependenciesProcessed(handle);
+
+    return handle;
+}
+
+pub fn closeDocument(self: *DocumentStore, uri: Uri) void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    const handle = self.handles.getPtr(uri) orelse {
+        log.warn("Document not found: {s}", .{uri});
+        return;
+    };
+
+    if (handle.open) {
+        handle.open = false;
+    } else {
+        log.warn("Document already closed: {s}", .{uri});
+    }
+
+    self.garbageCollection() catch {};
+}
+
+pub fn refreshDocument(self: *DocumentStore, handle: *Handle) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    var new_tree = try std.zig.parse(self.allocator, handle.text);
+    handle.tree.deinit(self.allocator);
+    handle.tree = new_tree;
+
+    var new_document_scope = try analysis.makeDocumentScope(self.allocator, handle.tree);
+    handle.document_scope.deinit(self.allocator);
+    handle.document_scope = new_document_scope;
+
+    var new_import_uris = try self.collectImportUris(handle.*);
+    for (handle.import_uris.items) |import_uri| {
+        self.allocator.free(import_uri);
+    }
+    handle.import_uris.deinit(self.allocator);
+    handle.import_uris = new_import_uris;
+
+    var new_cimports = try self.collectCIncludes(handle.*);
+    handle.cimports.deinit(self.allocator);
+    handle.cimports = new_cimports;
+
+    // TODO detect changes
+    // try self.ensureImportsProcessed(handle.*);
+    try self.ensureCImportsProcessed(handle.*);
+}
+
+pub fn applySave(self: *DocumentStore, handle: *Handle) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    if (handle.is_build_file) {
+        const build_file = self.build_files.getPtr(handle.uri).?;
+
+        const build_config = loadBuildConfiguration(self.allocator, build_file.*, self.config.*) catch |err| {
+            log.err("Failed to load build configuration for {s} (error: {})", .{ build_file.uri, err });
+            return;
+        };
+
+        std.json.parseFree(BuildConfig, build_file.config, .{ .allocator = self.allocator });
+        build_file.config = build_config;
+    }
+}
+
+/// The `DocumentStore` represents a graph structure where every
+/// handle/document is a node and every `@import` & `@cImport` represent
+/// a directed edge.
+/// We can remove every document which cannot be reached from
+/// another document that is `open` (see `Handle.open`)
+fn garbageCollection(self: *DocumentStore) error{OutOfMemory}!void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    var reachable_handles = std.StringHashMapUnmanaged(void){};
+    defer reachable_handles.deinit(self.allocator);
+
+    var queue = std.ArrayListUnmanaged(Uri){};
+    defer {
+        for (queue.items) |uri| {
+            self.allocator.free(uri);
+        }
+        queue.deinit(self.allocator);
+    }
+
+    for (self.handles.values()) |handle| {
+        if (!handle.open) continue;
+
+        try reachable_handles.put(self.allocator, handle.uri, {});
+
+        try collectDependencies(self.allocator, self, handle, &queue);
+    }
+
+    while (queue.popOrNull()) |uri| {
+        if (reachable_handles.contains(uri)) continue;
+
+        try reachable_handles.putNoClobber(self.allocator, uri, {});
+
+        const handle = self.handles.get(uri).?;
+
+        try collectDependencies(self.allocator, self, handle, &queue);
+    }
+
+    var unreachable_handles = std.ArrayListUnmanaged(Uri){};
+    defer unreachable_handles.deinit(self.allocator);
+
+    for (self.handles.values()) |handle| {
+        if (reachable_handles.contains(handle.uri)) continue;
+        try unreachable_handles.append(self.allocator, handle.uri);
+    }
+
+    for (unreachable_handles.items) |uri| {
+        std.log.debug("Closing document {s}", .{uri});
+        var kv = self.handles.fetchSwapRemove(uri) orelse continue;
+        kv.value.deinit(self.allocator);
+    }
+
+    try self.garbageCollectionCImportResults();
+}
+
+fn garbageCollectionCImportResults(self: *DocumentStore) error{OutOfMemory}!void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    if (self.cimports.count() == 0) return;
+
+    var reachable_hashes = std.AutoArrayHashMapUnmanaged(Hash, void){};
+    defer reachable_hashes.deinit(self.allocator);
+
+    for (self.handles.values()) |handle| {
+        for (handle.cimports.items(.hash)) |hash| {
+            try reachable_hashes.put(self.allocator, hash, {});
+        }
+    }
+
+    var unreachable_hashes = std.ArrayListUnmanaged(Hash){};
+    defer unreachable_hashes.deinit(self.allocator);
+
+    for (self.cimports.keys()) |hash| {
+        if (reachable_hashes.contains(hash)) continue;
+        try unreachable_hashes.append(self.allocator, hash);
+    }
+
+    for (unreachable_hashes.items) |hash| {
+        var kv = self.cimports.fetchSwapRemove(hash) orelse continue;
+        std.log.debug("Destroying cimport {s}", .{kv.value.success});
+        kv.value.deinit(self.allocator);
+    }
+}
+
+fn ensureDependenciesProcessed(self: *DocumentStore, handle: Handle) error{OutOfMemory}!void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    var queue = std.ArrayListUnmanaged(Uri){};
+    defer {
+        for (queue.items) |uri| {
+            self.allocator.free(uri);
+        }
+        queue.deinit(self.allocator);
+    }
+
+    try collectDependencies(self.allocator, self, handle, &queue);
+
+    while (queue.popOrNull()) |dependency_uri| {
+        if (self.handles.contains(dependency_uri)) {
+            self.allocator.free(dependency_uri);
+            continue;
+        }
+
+        const new_handle = (self.createDocumentFromURI(dependency_uri, false) catch continue) orelse continue;
+        self.handles.putNoClobber(self.allocator, new_handle.uri, new_handle) catch {
+            errdefer new_handle.deinit(self.allocator);
+            continue;
+        };
+        try self.ensureCImportsProcessed(new_handle);
+
+        try collectDependencies(self.allocator, self, new_handle, &queue);
+    }
+
+    try self.ensureCImportsProcessed(handle);
+}
+
+fn ensureCImportsProcessed(self: *DocumentStore, handle: Handle) error{OutOfMemory}!void {
+    for (handle.cimports.items(.hash)) |hash, index| {
+        if (self.cimports.contains(hash)) continue;
+
+        const source: []const u8 = handle.cimports.items(.source)[index];
+
+        const include_dirs: []const []const u8 = if (handle.associated_build_file) |build_file_uri|
+            self.build_files.get(build_file_uri).?.config.include_dirs
+        else
+            &.{};
+
+        var result = (try translate_c.translate(
+            self.allocator,
+            self.config.*,
+            include_dirs,
+            source,
+        )) orelse continue;
+
+        switch (result) {
+            .success => |uri| log.debug("Translated cImport into {s}", .{uri}),
+            .failure => continue,
+        }
+
+        self.cimports.put(self.allocator, hash, result) catch {
+            result.deinit(self.allocator);
+            continue;
+        };
+
+        if (!self.handles.contains(result.success)) {
+            const uri = try self.allocator.dupe(u8, result.success);
+
+            const new_handle = (self.createDocumentFromURI(uri, false) catch continue) orelse continue;
+            self.handles.putNoClobber(self.allocator, new_handle.uri, new_handle) catch {
+                errdefer new_handle.deinit(self.allocator);
+                continue;
+            };
+        }
+    }
+}
+
+/// looks for a `zls.build.json` file in the build file directory
+/// has to be freed with `std.json.parseFree`
+fn loadBuildAssociatedConfiguration(allocator: std.mem.Allocator, build_file: BuildFile) !BuildAssociatedConfig {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    const build_file_path = try URI.parse(allocator, build_file.uri);
+    defer allocator.free(build_file_path);
+    const config_file_path = try std.fs.path.resolve(allocator, &.{ build_file_path, "../zls.build.json" });
+    defer allocator.free(config_file_path);
+
+    var config_file = try std.fs.cwd().openFile(config_file_path, .{});
+    defer config_file.close();
+
+    const file_buf = try config_file.readToEndAlloc(allocator, std.math.maxInt(usize));
+    defer allocator.free(file_buf);
+
+    var token_stream = std.json.TokenStream.init(file_buf);
+    return try std.json.parse(BuildAssociatedConfig, &token_stream, .{ .allocator = allocator });
+}
+
+/// runs the build.zig and extracts include directories and packages
+/// has to be freed with `std.json.parseFree`
+fn loadBuildConfiguration(
+    allocator: std.mem.Allocator,
+    build_file: BuildFile,
+    config: Config,
+) !BuildConfig {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
 
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
     const arena_allocator = arena.allocator();
 
-    const build_file_path = context.build_file_path orelse try URI.parse(allocator, build_file.uri);
-    defer if (context.build_file_path == null) allocator.free(build_file_path);
-    const directory_path = build_file_path[0 .. build_file_path.len - "build.zig".len];
+    const build_file_path = try URI.parse(arena_allocator, build_file.uri);
+    const directory_path = try std.fs.path.resolve(arena_allocator, &.{ build_file_path, "../" });
+
+    // TODO extract this option from `BuildAssociatedConfig.BuildOption`
+    const zig_cache_root: []const u8 = "zig-cache";
+    // Since we don't compile anything and no packages should put their
+    // files there this path can be ignored
+    const zig_global_cache_root: []const u8 = "ZLS_DONT_CARE";
 
     const standard_args = [_][]const u8{
-        zig_exe_path,
+        config.zig_exe_path.?,
         "run",
-        build_runner_path,
+        config.build_runner_path.?,
         "--cache-dir",
-        global_cache_path,
+        config.global_cache_path.?,
         "--pkg-begin",
         "@build@",
         build_file_path,
         "--pkg-end",
         "--",
-        zig_exe_path,
+        config.zig_exe_path.?,
         directory_path,
-        context.cache_root,
-        context.global_cache_root,
+        zig_cache_root,
+        zig_global_cache_root,
     };
 
-    var args = try arena_allocator.alloc([]const u8, standard_args.len + if (build_file.build_options) |opts| opts.len else 0);
-    defer arena_allocator.free(args);
-
-    args[0..standard_args.len].* = standard_args;
-    if (build_file.build_options) |opts| {
-        for (opts) |opt, i| {
-            args[standard_args.len + i] = try opt.formatParam(arena_allocator);
+    const arg_length = standard_args.len + if (build_file.build_associated_config) |cfg| if (cfg.build_options) |options| options.len else 0 else 0;
+    var args = try std.ArrayListUnmanaged([]const u8).initCapacity(arena_allocator, arg_length);
+    args.appendSliceAssumeCapacity(standard_args[0..]);
+    if (build_file.build_associated_config) |cfg| {
+        if (cfg.build_options) |options| {
+            for (options) |opt| {
+                args.appendAssumeCapacity(try opt.formatParam(arena_allocator));
+            }
         }
     }
 
     const zig_run_result = try std.ChildProcess.exec(.{
-        .allocator = allocator,
-        .argv = args,
+        .allocator = arena_allocator,
+        .argv = args.items,
     });
 
     defer {
-        allocator.free(zig_run_result.stdout);
-        allocator.free(zig_run_result.stderr);
+        arena_allocator.free(zig_run_result.stdout);
+        arena_allocator.free(zig_run_result.stderr);
     }
 
     errdefer blk: {
-        const joined = std.mem.join(allocator, " ", args) catch break :blk;
-        defer allocator.free(joined);
+        const joined = std.mem.join(arena_allocator, " ", args.items) catch break :blk;
 
         log.err(
             "Failed to execute build runner to collect build configuration, command:\n{s}\nError: {s}",
@@ -227,68 +450,21 @@ fn loadBuildConfiguration(context: LoadBuildConfigContext) !void {
     }
 
     switch (zig_run_result.term) {
-        .Exited => |exit_code| {
-            if (exit_code != 0) return error.RunFailed;
-
-            const parse_options = std.json.ParseOptions{ .allocator = allocator };
-
-            build_file.config.deinit(allocator);
-
-            var token_stream = std.json.TokenStream.init(zig_run_result.stdout);
-
-            const config: BuildConfig = std.json.parse(
-                BuildConfig,
-                &token_stream,
-                parse_options,
-            ) catch return error.RunFailed;
-            defer std.json.parseFree(BuildConfig, config, parse_options);
-
-            var packages = try std.ArrayListUnmanaged(BuildFileConfig.Pkg).initCapacity(allocator, config.packages.len);
-            errdefer {
-                for (packages.items) |pkg| {
-                    allocator.free(pkg.name);
-                    allocator.free(pkg.uri);
-                }
-                packages.deinit(allocator);
-            }
-
-            var include_dirs = try std.ArrayListUnmanaged([]const u8).initCapacity(allocator, config.include_dirs.len);
-            errdefer {
-                for (include_dirs.items) |dir| {
-                    allocator.free(dir);
-                }
-                include_dirs.deinit(allocator);
-            }
-
-            for (config.packages) |pkg| {
-                const pkg_abs_path = try std.fs.path.resolve(allocator, &[_][]const u8{ directory_path, pkg.path });
-                defer allocator.free(pkg_abs_path);
-
-                const uri = try URI.fromPath(allocator, pkg_abs_path);
-                errdefer allocator.free(uri);
-
-                const name = try allocator.dupe(u8, pkg.name);
-                errdefer allocator.free(name);
-
-                log.debug("Found package {s}: {s}", .{ name, uri });
-
-                packages.appendAssumeCapacity(.{ .name = name, .uri = uri });
-            }
-
-            for (config.include_dirs) |dir| {
-                const path = try allocator.dupe(u8, dir);
-                errdefer allocator.free(path);
-
-                include_dirs.appendAssumeCapacity(path);
-            }
-
-            build_file.config = .{
-                .packages = packages.toOwnedSlice(allocator),
-                .include_dirs = include_dirs.toOwnedSlice(allocator),
-            };
-        },
+        .Exited => |exit_code| if (exit_code != 0) return error.RunFailed,
         else => return error.RunFailed,
     }
+
+    const parse_options = std.json.ParseOptions{ .allocator = allocator };
+    var token_stream = std.json.TokenStream.init(zig_run_result.stdout);
+    var build_config = std.json.parse(BuildConfig, &token_stream, parse_options) catch return error.RunFailed;
+
+    for (build_config.packages) |*pkg| {
+        const pkg_abs_path = try std.fs.path.resolve(allocator, &[_][]const u8{ directory_path, pkg.path });
+        allocator.free(pkg.path);
+        pkg.path = pkg_abs_path;
+    }
+
+    return build_config;
 }
 
 // walks the build.zig files above "uri"
@@ -334,54 +510,53 @@ const BuildDotZigIterator = struct {
     }
 };
 
-fn createBuildFile(self: *DocumentStore, build_file_path: []const u8) !*BuildFile {
-    var build_file = try self.allocator.create(BuildFile);
-    errdefer build_file.destroy(self.allocator);
+/// takes ownership of `uri`
+fn createBuildFile(self: *const DocumentStore, uri: Uri) error{OutOfMemory}!BuildFile {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
 
-    log.debug("creating build file: {s}", .{build_file_path});
-
-    build_file.* = .{
-        .refs = 1,
-        .uri = try URI.fromPath(self.allocator, build_file_path),
+    var build_file = BuildFile{
+        .uri = uri,
         .config = .{
             .packages = &.{},
             .include_dirs = &.{},
         },
     };
+    errdefer build_file.deinit(self.allocator);
 
-    loadBuildAssociatedConfiguration(self.allocator, build_file, build_file_path) catch |err| {
-        log.debug("Failed to load config associated with build file {s} (error: {})", .{ build_file.uri, err });
-    };
-    if (build_file.builtin_uri == null) {
-        if (self.config.builtin_path != null) {
-            build_file.builtin_uri = try URI.fromPath(self.allocator, self.config.builtin_path.?);
-            log.info("builtin config not found, falling back to default: {?s}", .{build_file.builtin_uri});
+    if (loadBuildAssociatedConfiguration(self.allocator, build_file)) |config| {
+        build_file.build_associated_config = config;
+
+        if (config.relative_builtin_path) |relative_builtin_path| blk: {
+            const build_file_path = URI.parse(self.allocator, build_file.uri) catch break :blk;
+            const directory_path = std.fs.path.resolve(self.allocator, &.{ build_file_path, "../build.zig" }) catch break :blk;
+            defer self.allocator.free(directory_path);
+            var absolute_builtin_path = try std.mem.concat(self.allocator, u8, &.{ directory_path, relative_builtin_path });
+            defer self.allocator.free(absolute_builtin_path);
+            build_file.builtin_uri = try URI.fromPath(self.allocator, absolute_builtin_path);
+        }
+    } else |err| {
+        if (err != error.FileNotFound) {
+            log.debug("Failed to load config associated with build file {s} (error: {})", .{ build_file.uri, err });
         }
     }
 
     // TODO: Do this in a separate thread?
     // It can take quite long.
-    loadBuildConfiguration(.{
-        .build_file = build_file,
-        .allocator = self.allocator,
-        .build_runner_path = self.config.build_runner_path.?,
-        .global_cache_path = self.config.global_cache_path.?,
-        .zig_exe_path = self.config.zig_exe_path.?,
-        .build_file_path = build_file_path,
-        .cache_root = self.zig_cache_root,
-        .global_cache_root = self.zig_global_cache_root,
-    }) catch |err| {
-        log.err("Failed to load packages of build file {s} (error: {})", .{ build_file.uri, err });
-    };
+    if (loadBuildConfiguration(self.allocator, build_file, self.config.*)) |build_config| {
+        build_file.config = build_config;
+    } else |err| {
+        log.err("Failed to load build configuration for {s} (error: {})", .{ build_file.uri, err });
+    }
 
     return build_file;
 }
 
 fn uriAssociatedWithBuild(
-    self: *DocumentStore,
-    build_file: *BuildFile,
-    uri: []const u8,
-) bool {
+    self: *const DocumentStore,
+    build_file: BuildFile,
+    uri: Uri,
+) error{OutOfMemory}!bool {
     var checked_uris = std.StringHashMap(void).init(self.allocator);
     defer {
         var it = checked_uris.iterator();
@@ -392,11 +567,14 @@ fn uriAssociatedWithBuild(
     }
 
     for (build_file.config.packages) |package| {
-        if (std.mem.eql(u8, uri, package.uri)) {
+        const package_uri = try URI.fromPath(self.allocator, package.path);
+        defer self.allocator.free(package_uri);
+
+        if (std.mem.eql(u8, uri, package_uri)) {
             return true;
         }
 
-        if (self.uriInImports(&checked_uris, package.uri, uri))
+        if (try self.uriInImports(&checked_uris, package_uri, uri))
             return true;
     }
 
@@ -404,290 +582,148 @@ fn uriAssociatedWithBuild(
 }
 
 fn uriInImports(
-    self: *DocumentStore,
+    self: *const DocumentStore,
     checked_uris: *std.StringHashMap(void),
-    source_uri: []const u8,
-    uri: []const u8,
-) bool {
-    return self.uriInImportsImpl(checked_uris, source_uri, uri) catch false;
-}
-
-fn uriInImportsImpl(
-    self: *DocumentStore,
-    checked_uris: *std.StringHashMap(void),
-    source_uri: []const u8,
-    uri: []const u8,
-) !bool {
+    source_uri: Uri,
+    uri: Uri,
+) error{OutOfMemory}!bool {
     if (checked_uris.contains(source_uri))
         return false;
 
     // consider it checked even if a failure happens
     try checked_uris.put(try self.allocator.dupe(u8, source_uri), {});
 
-    const handle = self.handles.get(source_uri) orelse package_handle: {
-        var ret = (try self.newDocumentFromUri(source_uri)) orelse return false;
-        try self.handles.put(self.allocator, source_uri, ret);
-        break :package_handle ret;
-    };
+    const handle = self.handles.get(source_uri) orelse return false;
 
-    var import_uris = try self.collectImportUris(handle);
-    defer {
-        for (import_uris) |import_uri| {
-            self.allocator.free(import_uri);
-        }
-        self.allocator.free(import_uris);
-    }
-
-    for (import_uris) |import_uri| {
+    for (handle.import_uris.items) |import_uri| {
         if (std.mem.eql(u8, uri, import_uri))
             return true;
 
-        if (self.uriInImports(checked_uris, import_uri, uri))
+        if (self.uriInImports(checked_uris, import_uri, uri) catch false)
             return true;
     }
 
     return false;
 }
 
-/// This function asserts the document is not open yet and takes ownership
-/// of the uri and text passed in.
-fn newDocument(self: *DocumentStore, uri: []const u8, text: [:0]u8) anyerror!*Handle {
+/// takes ownership of the uri and text passed in.
+fn createDocument(self: *DocumentStore, uri: Uri, text: [:0]u8, open: bool) error{OutOfMemory}!Handle {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    var handle = try self.allocator.create(Handle);
-    errdefer self.allocator.destroy(handle);
+    var handle: Handle = blk: {
+        errdefer self.allocator.free(uri);
+        errdefer self.allocator.free(text);
+
+        var tree = try std.zig.parse(self.allocator, text);
+        errdefer tree.deinit(self.allocator);
+
+        var document_scope = try analysis.makeDocumentScope(self.allocator, tree);
+        errdefer document_scope.deinit(self.allocator);
+
+        break :blk Handle{
+            .open = open,
+            .uri = uri,
+            .text = text,
+            .tree = tree,
+            .document_scope = document_scope,
+        };
+    };
+    errdefer handle.deinit(self.allocator);
 
     defer {
-        if (handle.associated_build_file) |build_file| {
-            log.debug("Opened document `{s}` with build file `{s}`", .{ handle.uri, build_file.uri });
+        if (handle.associated_build_file) |build_file_uri| {
+            log.debug("Opened document `{s}` with build file `{s}`", .{ handle.uri, build_file_uri });
+        } else if (handle.is_build_file) {
+            log.debug("Opened document `{s}` (build file)", .{handle.uri});
         } else {
-            log.debug("Opened document `{s}` without a build file", .{handle.uri});
+            log.debug("Opened document `{s}`", .{handle.uri});
         }
     }
 
-    var tree = try std.zig.parse(self.allocator, text);
-    errdefer tree.deinit(self.allocator);
-
-    var document_scope = try analysis.makeDocumentScope(self.allocator, tree);
-    errdefer document_scope.deinit(self.allocator);
-
-    handle.* = Handle{
-        .count = 1,
-        .uri = uri,
-        .text = text,
-        .tree = tree,
-        .document_scope = document_scope,
-        .import_uris = &.{},
-        .cimports = &.{},
-        .imports_used = .{},
-        .associated_build_file = null,
-        .is_build_file = null,
-    };
+    handle.import_uris = try self.collectImportUris(handle);
+    handle.cimports = try self.collectCIncludes(handle);
 
     // TODO: Better logic for detecting std or subdirectories?
     const in_std = std.mem.indexOf(u8, uri, "/std/") != null;
     if (self.config.zig_exe_path != null and std.mem.endsWith(u8, uri, "/build.zig") and !in_std) {
-        log.debug("Document is a build file, extracting packages...", .{});
-        // This is a build file.
-
-        const build_file_path = try URI.parse(self.allocator, uri);
-        defer self.allocator.free(build_file_path);
-
-        const build_file = try self.createBuildFile(build_file_path);
-        errdefer build_file.destroy(self.allocator);
-
-        try self.build_files.append(self.allocator, build_file);
-        handle.is_build_file = build_file;
-    } else if (self.config.zig_exe_path != null and !in_std) {
+        const dupe_uri = try self.allocator.dupe(u8, uri);
+        if (self.createBuildFile(dupe_uri)) |build_file| {
+            try self.build_files.put(self.allocator, dupe_uri, build_file);
+            handle.is_build_file = true;
+        } else |err| {
+            log.debug("Failed to load build file {s}: (error: {})", .{ uri, err });
+        }
+    } else if (self.config.zig_exe_path != null and std.mem.endsWith(u8, uri, "/builtin.zig") and !in_std) blk: {
         log.debug("Going to walk down the tree towards: {s}", .{uri});
         // walk down the tree towards the uri. When we hit build.zig files
         // determine if the uri we're interested in is involved with the build.
         // This ensures that _relevant_ build.zig files higher in the
         // filesystem have precedence.
-        const uri_path = try URI.parse(self.allocator, uri);
-        defer self.allocator.free(uri_path);
+        const path = URI.parse(self.allocator, uri) catch break :blk;
+        defer self.allocator.free(path);
 
-        var prev_build_file: ?*BuildFile = null;
-        var build_it = try BuildDotZigIterator.init(self.allocator, uri_path);
+        var prev_build_file: ?Uri = null;
+        var build_it = try BuildDotZigIterator.init(self.allocator, path);
         while (try build_it.next()) |build_path| {
             defer self.allocator.free(build_path);
 
             log.debug("found build path: {s}", .{build_path});
-            // if it's found or created
-            const build_file = for (self.build_files.items) |build_file| {
-                const entry_build_path = try URI.parse(self.allocator, build_file.uri);
-                defer self.allocator.free(entry_build_path);
 
-                if (std.mem.eql(u8, build_path, entry_build_path))
-                    break build_file;
-            } else build_file: {
-                var ret = try self.createBuildFile(build_path);
-                errdefer ret.destroy(self.allocator);
-
-                try self.build_files.append(self.allocator, ret);
-                break :build_file ret;
-            };
-
-            // TODO: is this needed?
-            // Check if the build file already exists
-            if (self.handles.get(build_file.uri) == null) {
-                // Read the build file, create a new document, set the candidate to the new build file.
-                const file = try std.fs.openFileAbsolute(build_path, .{});
-                defer file.close();
-
-                const build_file_text = try file.readToEndAllocOptions(
-                    self.allocator,
-                    std.math.maxInt(usize),
-                    null,
-                    @alignOf(u8),
-                    0,
-                );
-                errdefer self.allocator.free(build_file_text);
-
-                _ = try self.newDocument(build_file.uri, build_file_text);
+            const build_file_uri = URI.fromPath(self.allocator, build_path) catch unreachable;
+            const gop = try self.build_files.getOrPut(self.allocator, build_file_uri);
+            if (!gop.found_existing) {
+                gop.value_ptr.* = try self.createBuildFile(build_file_uri);
             }
 
-            if (self.uriAssociatedWithBuild(build_file, uri)) {
-                build_file.refs += 1;
-                handle.associated_build_file = build_file;
+            if (try self.uriAssociatedWithBuild(gop.value_ptr.*, uri)) {
+                handle.associated_build_file = build_file_uri;
                 break;
             } else {
-                prev_build_file = build_file;
+                prev_build_file = build_file_uri;
             }
         }
 
         // if there was no direct imports found, use the closest build file if possible
         if (handle.associated_build_file == null) {
-            if (prev_build_file) |build_file| {
-                build_file.refs += 1;
-                handle.associated_build_file = build_file;
+            if (prev_build_file) |build_file_uri| {
+                handle.associated_build_file = build_file_uri;
             }
         }
     }
 
-    handle.import_uris = try self.collectImportUris(handle);
-    errdefer {
-        for (handle.import_uris) |imp_uri| {
-            self.allocator.free(imp_uri);
-        }
-        self.allocator.free(handle.import_uris);
-    }
-
-    handle.cimports = try self.collectCIncludes(handle);
-    errdefer {
-        for (handle.cimports) |*item| {
-            item.result.deinit(self.allocator);
-        }
-        self.allocator.free(handle.cimports);
-    }
-
-    try self.handles.putNoClobber(self.allocator, uri, handle);
     return handle;
 }
 
-pub fn openDocument(self: *DocumentStore, uri: []const u8, text: []const u8) !*Handle {
-    if (self.handles.getEntry(uri)) |entry| {
-        entry.value_ptr.*.count += 1;
-        log.debug("Document already open: {s}, new count: {}", .{ uri, entry.value_ptr.*.count });
-        if (entry.value_ptr.*.is_build_file) |build_file| {
-            build_file.refs += 1;
-        }
-        return entry.value_ptr.*;
-    }
+/// takes ownership of the uri passed in.
+fn createDocumentFromURI(self: *DocumentStore, uri: Uri, open: bool) error{OutOfMemory}!?Handle {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
 
-    const duped_text = try self.allocator.dupeZ(u8, text);
-    errdefer self.allocator.free(duped_text);
-    const duped_uri = try self.allocator.dupeZ(u8, uri);
-    errdefer self.allocator.free(duped_uri);
+    const file_path = URI.parse(self.allocator, uri) catch unreachable;
+    defer self.allocator.free(file_path);
 
-    return try self.newDocument(duped_uri, duped_text);
+    var file = std.fs.openFileAbsolute(file_path, .{}) catch unreachable;
+    defer file.close();
+
+    const file_contents = file.readToEndAllocOptions(self.allocator, std.math.maxInt(usize), null, @alignOf(u8), 0) catch unreachable;
+
+    return try self.createDocument(uri, file_contents, open);
 }
 
-fn decrementBuildFileRefs(self: *DocumentStore, build_file: *BuildFile) void {
-    build_file.refs -= 1;
-    if (build_file.refs == 0) {
-        log.debug("Freeing build file {s}", .{build_file.uri});
+fn collectImportUris(self: *const DocumentStore, handle: Handle) error{OutOfMemory}!std.ArrayListUnmanaged(Uri) {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
 
-        build_file.config.deinit(self.allocator);
-
-        // Decrement count of the document since one count comes
-        // from the build file existing.
-        self.decrementCount(build_file.uri);
-        self.allocator.free(build_file.uri);
-
-        // Remove the build file from the array list
-        _ = self.build_files.swapRemove(std.mem.indexOfScalar(*BuildFile, self.build_files.items, build_file).?);
-        build_file.destroy(self.allocator);
-    }
-}
-
-fn decrementCount(self: *DocumentStore, uri: []const u8) void {
-    if (self.handles.getEntry(uri)) |entry| {
-        const handle = entry.value_ptr.*;
-        if (handle.count == 0) return;
-        handle.count -= 1;
-
-        if (handle.count > 0)
-            return;
-
-        log.debug("Freeing document: {s}", .{uri});
-
-        if (handle.associated_build_file) |build_file| {
-            self.decrementBuildFileRefs(build_file);
-        }
-
-        if (handle.is_build_file) |build_file| {
-            self.decrementBuildFileRefs(build_file);
-        }
-
-        handle.tree.deinit(self.allocator);
-        self.allocator.free(handle.text);
-
-        for (handle.imports_used.items) |import_uri| {
-            self.decrementCount(import_uri);
-        }
-
-        for (handle.import_uris) |import_uri| {
-            self.allocator.free(import_uri);
-        }
-
-        for (handle.cimports) |*item| {
-            item.result.deinit(self.allocator);
-        }
-
-        handle.document_scope.deinit(self.allocator);
-        handle.imports_used.deinit(self.allocator);
-        self.allocator.free(handle.import_uris);
-        self.allocator.free(handle.cimports);
-        self.allocator.destroy(handle);
-        const uri_key = entry.key_ptr.*;
-        std.debug.assert(self.handles.remove(uri));
-        self.allocator.free(uri_key);
-    }
-}
-
-pub fn closeDocument(self: *DocumentStore, uri: []const u8) void {
-    self.decrementCount(uri);
-}
-
-pub fn getHandle(self: *DocumentStore, uri: []const u8) ?*Handle {
-    return self.handles.get(uri);
-}
-
-fn collectImportUris(self: *DocumentStore, handle: *Handle) ![]const []const u8 {
     var imports = try analysis.collectImports(self.allocator, handle.tree);
-    errdefer {
-        for (imports.items) |imp| {
-            self.allocator.free(imp);
-        }
-        imports.deinit(self.allocator);
-    }
+    errdefer imports.deinit(self.allocator);
 
     // Convert to URIs
     var i: usize = 0;
     while (i < imports.items.len) {
-        if (try self.uriFromImportStr(self.allocator, handle.*, imports.items[i])) |uri| {
+        const maybe_uri = try self.uriFromImportStr(self.allocator, handle, imports.items[i]);
+
+        if (maybe_uri) |uri| {
             // The raw import strings are owned by the document and do not need to be freed here.
             imports.items[i] = uri;
             i += 1;
@@ -695,29 +731,33 @@ fn collectImportUris(self: *DocumentStore, handle: *Handle) ![]const []const u8 
             _ = imports.swapRemove(i);
         }
     }
-    return imports.toOwnedSlice(self.allocator);
+
+    return imports;
 }
 
-pub const CImportSource = struct {
+pub const CImportHandle = struct {
     /// the `@cImport` node
     node: Ast.Node.Index,
     /// hash of c source file
-    hash: [Hasher.mac_length]u8,
+    hash: Hash,
     /// c source file
     source: []const u8,
 };
 
 /// Collects all `@cImport` nodes and converts them into c source code
-/// the translation process is defined in `translate_c.convertCInclude`
 /// Caller owns returned memory.
-fn collectCIncludeSources(self: *DocumentStore, handle: *Handle) ![]CImportSource {
+fn collectCIncludes(self: *const DocumentStore, handle: Handle) error{OutOfMemory}!std.MultiArrayList(CImportHandle) {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     var cimport_nodes = try analysis.collectCImportNodes(self.allocator, handle.tree);
     defer self.allocator.free(cimport_nodes);
 
-    var sources = try std.ArrayListUnmanaged(CImportSource).initCapacity(self.allocator, cimport_nodes.len);
+    var sources = std.MultiArrayList(CImportHandle){};
+    try sources.ensureTotalCapacity(self.allocator, cimport_nodes.len);
     errdefer {
-        for (sources.items) |item| {
-            self.allocator.free(item.source);
+        for (sources.items(.source)) |source| {
+            self.allocator.free(source);
         }
         sources.deinit(self.allocator);
     }
@@ -728,277 +768,98 @@ fn collectCIncludeSources(self: *DocumentStore, handle: *Handle) ![]CImportSourc
             error.OutOfMemory => return error.OutOfMemory,
         };
 
-        var hasher = hasher_init;
-        hasher.update(c_source);
-        var hash: [Hasher.mac_length]u8 = undefined;
-        hasher.final(&hash);
-
         sources.appendAssumeCapacity(.{
             .node = node,
-            .hash = hash,
+            .hash = computeHash(c_source),
             .source = c_source,
         });
     }
 
-    return sources.toOwnedSlice(self.allocator);
+    return sources;
 }
 
-pub const CImportHandle = struct {
-    /// the `@cImport` node
-    node: Ast.Node.Index,
-    /// hash of the c source file
-    hash: [Hasher.mac_length]u8,
-    /// the result from calling zig translate-c
-    /// see `translate_c.translate`
-    result: translate_c.Result,
-};
-
-/// Collects all `@cImport` nodes and converts them into zig files using translate-c
-/// Caller owns returned memory.
-fn collectCIncludes(self: *DocumentStore, handle: *Handle) ![]CImportHandle {
-    var cimport_nodes = try analysis.collectCImportNodes(self.allocator, handle.tree);
-    defer self.allocator.free(cimport_nodes);
-
-    var cimports = try std.ArrayListUnmanaged(CImportHandle).initCapacity(self.allocator, cimport_nodes.len);
-    errdefer {
-        for (cimports.items) |*item| {
-            item.result.deinit(self.allocator);
-        }
-        cimports.deinit(self.allocator);
+pub fn collectDependencies(
+    allocator: std.mem.Allocator,
+    store: *const DocumentStore,
+    handle: Handle,
+    dependencies: *std.ArrayListUnmanaged(Uri),
+) error{OutOfMemory}!void {
+    try dependencies.ensureUnusedCapacity(allocator, handle.import_uris.items.len);
+    for (handle.import_uris.items) |uri| {
+        dependencies.appendAssumeCapacity(try allocator.dupe(u8, uri));
     }
 
-    for (cimport_nodes) |node| {
-        const c_source = translate_c.convertCInclude(self.allocator, handle.tree, node) catch |err| switch (err) {
-            error.Unsupported => continue,
-            error.OutOfMemory => return error.OutOfMemory,
-        };
-        defer self.allocator.free(c_source);
-
-        const result = (try self.translate(handle, c_source)) orelse continue;
-        errdefer result.deinit(self.allocator);
-
-        var hasher = hasher_init;
-        hasher.update(c_source);
-        var hash: [Hasher.mac_length]u8 = undefined;
-        hasher.final(&hash);
-
-        cimports.appendAssumeCapacity(.{
-            .node = node,
-            .hash = hash,
-            .result = result,
-        });
-    }
-
-    return cimports.toOwnedSlice(self.allocator);
-}
-
-fn translate(self: *DocumentStore, handle: *Handle, source: []const u8) error{OutOfMemory}!?translate_c.Result {
-    const include_dirs: []const []const u8 = if (handle.associated_build_file) |build_file| build_file.config.include_dirs else &.{};
-
-    const maybe_result = try translate_c.translate(
-        self.allocator,
-        self.config.*,
-        include_dirs,
-        source,
-    );
-
-    if (maybe_result) |result| {
+    try dependencies.ensureUnusedCapacity(allocator, handle.cimports.len);
+    for (handle.cimports.items(.hash)) |hash| {
+        const result = store.cimports.get(hash) orelse continue;
         switch (result) {
-            .success => |uri| log.debug("Translated cImport into {s}", .{uri}),
-            else => {},
+            .success => |uri| dependencies.appendAssumeCapacity(try allocator.dupe(u8, uri)),
+            .failure => continue,
         }
     }
 
-    return maybe_result;
-}
-
-fn refreshDocument(self: *DocumentStore, handle: *Handle) !void {
-    log.debug("New text for document {s}", .{handle.uri});
-    handle.tree.deinit(self.allocator);
-    handle.tree = try std.zig.parse(self.allocator, handle.text);
-
-    handle.document_scope.deinit(self.allocator);
-    handle.document_scope = try analysis.makeDocumentScope(self.allocator, handle.tree);
-
-    var old_imports = handle.import_uris;
-    var old_cimports = handle.cimports;
-
-    handle.import_uris = try self.collectImportUris(handle);
-
-    handle.cimports = try self.refreshDocumentCIncludes(handle);
-
-    defer {
-        for (old_imports) |uri| {
-            self.allocator.free(uri);
-        }
-        self.allocator.free(old_imports);
-
-        for (old_cimports) |*old_cimport| {
-            old_cimport.result.deinit(self.allocator);
-        }
-        self.allocator.free(old_cimports);
-    }
-
-    var i: usize = 0;
-    while (i < handle.imports_used.items.len) {
-        const old = handle.imports_used.items[i];
-
-        const found_new = found: {
-            for (handle.import_uris) |new| {
-                if (!std.mem.eql(u8, new, old)) continue;
-                break :found new;
+    if (handle.associated_build_file) |build_file_uri| {
+        if (store.build_files.get(build_file_uri)) |build_file| {
+            const packages = build_file.config.packages;
+            try dependencies.ensureUnusedCapacity(allocator, packages.len);
+            for (packages) |pkg| {
+                dependencies.appendAssumeCapacity(try URI.fromPath(allocator, pkg.path));
             }
-            for (handle.cimports) |cimport| {
-                if (cimport.result != .success) continue;
-                const new = cimport.result.success;
-
-                if (!std.mem.eql(u8, old, new)) continue;
-                break :found new;
-            }
-            break :found null;
-        };
-
-        if (found_new) |new| {
-            handle.imports_used.items[i] = new;
-            i += 1;
-        } else {
-            log.debug("Import removed: {s}", .{old});
-            self.decrementCount(old);
-            _ = handle.imports_used.swapRemove(i);
         }
     }
 }
 
-fn refreshDocumentCIncludes(self: *DocumentStore, handle: *Handle) ![]CImportHandle {
-    const new_sources: []CImportSource = try self.collectCIncludeSources(handle);
-    defer {
-        for (new_sources) |new_source| {
-            self.allocator.free(new_source.source);
-        }
-        self.allocator.free(new_sources);
-    }
+// returns the document behind `@cImport()` where `node` is the `cImport` node
+/// the translation process is defined in `translate_c.convertCInclude`
+/// if a cImport can't be translated e.g. required computing a value it
+/// will not be included in the result
+pub fn resolveCImport(self: *const DocumentStore, handle: Handle, node: Ast.Node.Index) error{OutOfMemory}!?Uri {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
 
-    var old_cimports = handle.cimports;
-    var new_cimports = try std.ArrayListUnmanaged(CImportHandle).initCapacity(self.allocator, new_sources.len);
-    errdefer {
-        for (new_cimports.items) |*new_cimport| {
-            new_cimport.result.deinit(self.allocator);
-        }
-        new_cimports.deinit(self.allocator);
-    }
+    const index = std.mem.indexOfScalar(Ast.Node.Index, handle.cimports.items(.node), node).?;
 
-    outer: for (new_sources) |new_source| {
-        // look for a old cimport with identical source hash
-        for (old_cimports) |old_cimport| {
-            if (!std.mem.eql(u8, &new_source.hash, &old_cimport.hash)) continue;
+    const hash: Hash = handle.cimports.items(.hash)[index];
 
-            new_cimports.appendAssumeCapacity(.{
-                .node = old_cimport.node,
-                .hash = old_cimport.hash,
-                .result = try old_cimport.result.dupe(self.allocator),
-            });
-            continue :outer;
-        }
+    const result = self.cimports.get(hash) orelse return null;
 
-        const c_source = translate_c.convertCInclude(self.allocator, handle.tree, new_source.node) catch |err| switch (err) {
-            error.Unsupported => continue,
-            error.OutOfMemory => return error.OutOfMemory,
-        };
-        defer self.allocator.free(c_source);
-
-        var hasher = hasher_init;
-        var hash: [Hasher.mac_length]u8 = undefined;
-        hasher.update(c_source);
-        hasher.final(&hash);
-
-        const new_result = (try self.translate(handle, new_source.source)) orelse continue;
-        errdefer new_result.deinit(self.allocator);
-
-        new_cimports.appendAssumeCapacity(.{
-            .node = new_source.node,
-            .hash = hash,
-            .result = new_result,
-        });
-    }
-
-    return new_cimports.toOwnedSlice(self.allocator);
-}
-
-pub fn applySave(self: *DocumentStore, handle: *Handle) !void {
-    if (handle.is_build_file) |build_file| {
-        loadBuildConfiguration(.{
-            .build_file = build_file,
-            .allocator = self.allocator,
-            .build_runner_path = self.config.build_runner_path.?,
-            .global_cache_path = self.config.global_cache_path.?,
-            .zig_exe_path = self.config.zig_exe_path.?,
-            .cache_root = self.zig_cache_root,
-            .global_cache_root = self.zig_global_cache_root,
-        }) catch |err| {
-            log.err("Failed to load build configuration for {s} (error: {})", .{ build_file.uri, err });
-        };
+    switch (result) {
+        .success => |uri| return uri,
+        .failure => return null,
     }
 }
 
-pub fn applyChanges(
-    self: *DocumentStore,
-    handle: *Handle,
-    content_changes: []const requests.TextDocumentContentChangeEvent,
-    encoding: offsets.Encoding,
-) !void {
-    var last_full_text_change: ?usize = null;
-    var i: usize = content_changes.len;
-    while (i > 0) {
-        i -= 1;
-        if (content_changes[i].range == null) {
-            last_full_text_change = i;
-        }
-    }
-
-    var text_array = std.ArrayListUnmanaged(u8){};
-    errdefer text_array.deinit(self.allocator);
-
-    try text_array.appendSlice(self.allocator, if (last_full_text_change) |index| content_changes[index].text else handle.text);
-
-    // don't even bother applying changes before a full text change
-    const changes = content_changes[if (last_full_text_change) |index| index + 1 else 0..];
-
-    for (changes) |item| {
-        const range = item.range.?; // every element is guaranteed to have `range` set
-        const text = item.text;
-
-        const loc = offsets.rangeToLoc(text_array.items, range, encoding);
-        try text_array.replaceRange(self.allocator, loc.start, loc.end - loc.start, text);
-    }
-
-    const new_text = try text_array.toOwnedSliceSentinel(self.allocator, 0);
-    self.allocator.free(handle.text);
-    handle.text = new_text;
-
-    try self.refreshDocument(handle);
-}
-
-pub fn uriFromImportStr(self: *DocumentStore, allocator: std.mem.Allocator, handle: Handle, import_str: []const u8) !?[]const u8 {
+/// takes the string inside a @import() node (without the quotation marks)
+/// and returns it's uri
+/// caller owns the returned memory
+pub fn uriFromImportStr(self: *const DocumentStore, allocator: std.mem.Allocator, handle: Handle, import_str: []const u8) error{OutOfMemory}!?Uri {
     if (std.mem.eql(u8, import_str, "std")) {
-        if (self.std_uri) |uri| return try allocator.dupe(u8, uri) else {
+        const zig_lib_path = self.config.zig_lib_path orelse {
             log.debug("Cannot resolve std library import, path is null.", .{});
             return null;
-        }
+        };
+
+        const std_path = std.fs.path.resolve(allocator, &[_][]const u8{ zig_lib_path, "./std/std.zig" }) catch |err| switch (err) {
+            error.OutOfMemory => return error.OutOfMemory,
+            else => return null,
+        };
+
+        defer allocator.free(std_path);
+        return try URI.fromPath(allocator, std_path);
     } else if (std.mem.eql(u8, import_str, "builtin")) {
-        if (handle.associated_build_file) |build_file| {
-            if (build_file.builtin_uri) |builtin_uri| {
-                return try allocator.dupe(u8, builtin_uri);
-            }
+        if (handle.associated_build_file) |builtin_uri| {
+            return try allocator.dupe(u8, builtin_uri);
         }
         if (self.config.builtin_path) |_| {
             return try URI.fromPath(allocator, self.config.builtin_path.?);
         }
         return null;
     } else if (!std.mem.endsWith(u8, import_str, ".zig")) {
-        if (handle.associated_build_file) |build_file| {
+        if (handle.associated_build_file) |build_file_uri| {
+            const build_file = self.build_files.get(build_file_uri).?;
             for (build_file.config.packages) |pkg| {
                 if (std.mem.eql(u8, import_str, pkg.name)) {
-                    return try allocator.dupe(u8, pkg.uri);
+                    return try URI.fromPath(allocator, pkg.path);
                 }
             }
         }
@@ -1011,201 +872,57 @@ pub fn uriFromImportStr(self: *DocumentStore, allocator: std.mem.Allocator, hand
         }
         base_len -= 1;
         if (base_len <= 0) {
-            return error.UriBadScheme;
-        }
-        return try URI.pathRelative(allocator, base[0..base_len], import_str);
-    }
-}
-
-pub fn resolveImport(self: *DocumentStore, handle: *Handle, import_str: []const u8) !?*Handle {
-    const allocator = self.allocator;
-    const final_uri = (try self.uriFromImportStr(
-        self.allocator,
-        handle.*,
-        import_str,
-    )) orelse return null;
-    defer allocator.free(final_uri);
-
-    for (handle.imports_used.items) |uri| {
-        if (std.mem.eql(u8, uri, final_uri)) {
-            return self.getHandle(final_uri) orelse return null;
-        }
-    }
-    // The URI must be somewhere in the import_uris or the package uris
-    const handle_uri = find_uri: {
-        for (handle.import_uris) |uri| {
-            if (std.mem.eql(u8, uri, final_uri)) {
-                break :find_uri uri;
-            }
-        }
-        if (handle.associated_build_file) |bf| {
-            for (bf.config.packages) |pkg| {
-                if (std.mem.eql(u8, pkg.uri, final_uri)) {
-                    break :find_uri pkg.uri;
-                }
-            }
-        }
-        return null;
-    };
-
-    // New import.
-    // Check if the import is already opened by others.
-    if (self.getHandle(final_uri)) |new_handle| {
-        // If it is, append it to our imports, increment the count, set our new handle
-        // and return the parsed tree root node.
-        try handle.imports_used.append(self.allocator, handle_uri);
-        new_handle.count += 1;
-        return new_handle;
-    }
-
-    // New document, read the file then call into openDocument.
-    var document_handle = try self.newDocumentFromUri(final_uri);
-
-    // Add to import table of current handle.
-    try handle.imports_used.append(allocator, handle_uri);
-
-    return document_handle;
-}
-
-pub fn resolveCImport(self: *DocumentStore, handle: *Handle, node: Ast.Node.Index) !?*Handle {
-    const uri = blk: {
-        for (handle.cimports) |item| {
-            if (item.node != node) continue;
-
-            switch (item.result) {
-                .success => |uri| break :blk uri,
-                .failure => return null,
-            }
-        }
-        return null;
-    };
-
-    // Check if the import is already opened by others.
-    if (self.getHandle(uri)) |new_handle| {
-        // If it is, append it to our imports, increment the count, set our new handle
-        // and return the parsed tree root node.
-        try handle.imports_used.append(self.allocator, uri);
-        new_handle.count += 1;
-        return new_handle;
-    }
-
-    // New document, read the file then call into openDocument.
-    var document_handle = try self.newDocumentFromUri(uri);
-
-    // Add to cimport table of current handle.
-    try handle.imports_used.append(self.allocator, uri);
-
-    return document_handle;
-}
-
-fn newDocumentFromUri(self: *DocumentStore, uri: []const u8) !?*Handle {
-    const file_path = try URI.parse(self.allocator, uri);
-    defer self.allocator.free(file_path);
-
-    var file = std.fs.openFileAbsolute(file_path, .{}) catch |err| {
-        log.debug("Cannot open file '{s}': {}", .{ file_path, err });
-        return null;
-    };
-    defer file.close();
-
-    const file_contents = file.readToEndAllocOptions(
-        self.allocator,
-        std.math.maxInt(usize),
-        null,
-        @alignOf(u8),
-        0,
-    ) catch |err| switch (err) {
-        error.OutOfMemory => return error.OutOfMemory,
-        else => {
-            log.debug("Could not read from file {s}", .{file_path});
             return null;
-        },
-    };
-    errdefer self.allocator.free(file_contents);
+            // return error.UriBadScheme;
+        }
 
-    return try self.newDocument(try self.allocator.dupe(u8, uri), file_contents);
-}
-
-fn stdUriFromLibPath(allocator: std.mem.Allocator, zig_lib_path: ?[]const u8) !?[]const u8 {
-    if (zig_lib_path) |zpath| {
-        const std_path = std.fs.path.resolve(allocator, &[_][]const u8{
-            zpath, "./std/std.zig",
-        }) catch |first_std_err| blk: {
-            // workaround for https://github.com/ziglang/zig/issues/12516
-            break :blk std.fs.path.resolve(allocator, &[_][]const u8{
-                zpath, "./zig/std/std.zig",
-            }) catch {
-                log.debug("Failed to resolve zig std library path, error: {}", .{first_std_err});
-                return null;
-            };
+        return URI.pathRelative(allocator, base[0..base_len], import_str) catch |err| switch (err) {
+            error.OutOfMemory => return error.OutOfMemory,
+            error.UriBadScheme => return null,
         };
-
-        defer allocator.free(std_path);
-        // Get the std_path as a URI, so we can just append to it!
-        return try URI.fromPath(allocator, std_path);
     }
-
-    return null;
 }
 
-pub fn deinit(self: *DocumentStore) void {
-    var entry_iterator = self.handles.iterator();
-    while (entry_iterator.next()) |entry| {
-        entry.value_ptr.*.document_scope.deinit(self.allocator);
-        entry.value_ptr.*.tree.deinit(self.allocator);
-        self.allocator.free(entry.value_ptr.*.text);
-        for (entry.value_ptr.*.import_uris) |uri| {
-            self.allocator.free(uri);
-        }
-        self.allocator.free(entry.value_ptr.*.import_uris);
-        for (entry.value_ptr.*.cimports) |*cimport| {
-            cimport.result.deinit(self.allocator);
-        }
-        self.allocator.free(entry.value_ptr.*.cimports);
-        entry.value_ptr.*.imports_used.deinit(self.allocator);
-        self.allocator.free(entry.key_ptr.*);
-        self.allocator.destroy(entry.value_ptr.*);
-    }
+fn tagStoreCompletionItems(self: DocumentStore, arena: std.mem.Allocator, handle: Handle, comptime name: []const u8) ![]types.CompletionItem {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
 
-    self.handles.deinit(self.allocator);
-    for (self.build_files.items) |build_file| {
-        build_file.config.deinit(self.allocator);
-        self.allocator.free(build_file.uri);
-        build_file.destroy(self.allocator);
-    }
-    if (self.std_uri) |std_uri| {
-        self.allocator.free(std_uri);
-    }
-    self.build_files.deinit(self.allocator);
-}
+    const completion_set: analysis.CompletionSet = @field(handle.document_scope, name);
 
-fn tagStoreCompletionItems(self: DocumentStore, arena: *std.heap.ArenaAllocator, base: *DocumentStore.Handle, comptime name: []const u8) ![]types.CompletionItem {
     // TODO Better solution for deciding what tags to include
-    var max_len: usize = @field(base.document_scope, name).count();
-    for (base.imports_used.items) |uri| {
-        max_len += @field(self.handles.get(uri).?.document_scope, name).count();
-    }
-
     var result_set = analysis.CompletionSet{};
-    try result_set.ensureTotalCapacity(arena.allocator(), max_len);
-    for (@field(base.document_scope, name).entries.items(.key)) |completion| {
+    try result_set.ensureTotalCapacity(arena, completion_set.entries.items(.key).len);
+
+    for (completion_set.entries.items(.key)) |completion| {
         result_set.putAssumeCapacityNoClobber(completion, {});
     }
 
-    for (base.imports_used.items) |uri| {
-        const curr_set = &@field(self.handles.get(uri).?.document_scope, name);
+    for (handle.import_uris.items) |uri| {
+        const curr_set = @field(self.handles.get(uri).?.document_scope, name);
         for (curr_set.entries.items(.key)) |completion| {
-            result_set.putAssumeCapacity(completion, {});
+            try result_set.put(arena, completion, {});
+        }
+    }
+    for (handle.cimports.items(.hash)) |hash| {
+        const result = self.cimports.get(hash) orelse continue;
+        switch (result) {
+            .success => |uri| {
+                const curr_set = @field(self.handles.get(uri).?.document_scope, name);
+                for (curr_set.entries.items(.key)) |completion| {
+                    try result_set.put(arena, completion, {});
+                }
+            },
+            .failure => {},
         }
     }
 
     return result_set.entries.items(.key);
 }
 
-pub fn errorCompletionItems(self: DocumentStore, arena: *std.heap.ArenaAllocator, base: *DocumentStore.Handle) ![]types.CompletionItem {
-    return try self.tagStoreCompletionItems(arena, base, "error_completions");
+pub fn errorCompletionItems(self: DocumentStore, arena: std.mem.Allocator, handle: Handle) ![]types.CompletionItem {
+    return try self.tagStoreCompletionItems(arena, handle, "error_completions");
 }
 
-pub fn enumCompletionItems(self: DocumentStore, arena: *std.heap.ArenaAllocator, base: *DocumentStore.Handle) ![]types.CompletionItem {
-    return try self.tagStoreCompletionItems(arena, base, "enum_completions");
+pub fn enumCompletionItems(self: DocumentStore, arena: std.mem.Allocator, handle: Handle) ![]types.CompletionItem {
+    return try self.tagStoreCompletionItems(arena, handle, "enum_completions");
 }

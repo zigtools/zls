@@ -912,18 +912,16 @@ pub fn resolveTypeOfNodeInternal(store: *DocumentStore, arena: *std.heap.ArenaAl
                 if (node_tags[import_param] != .string_literal) return null;
 
                 const import_str = tree.tokenSlice(main_tokens[import_param]);
-                const new_handle = (store.resolveImport(handle, import_str[1 .. import_str.len - 1]) catch |err| {
-                    log.debug("Error {} while processing import {s}", .{ err, import_str });
-                    return null;
-                }) orelse return null;
+                const import_uri = (try store.uriFromImportStr(arena.allocator(), handle.*, import_str[1 .. import_str.len - 1])) orelse return null;
+
+                const new_handle = store.getHandle(import_uri) orelse return null;
 
                 // reference to node '0' which is root
                 return TypeWithHandle.typeVal(.{ .node = 0, .handle = new_handle });
             } else if (std.mem.eql(u8, call_name, "@cImport")) {
-                const new_handle = (store.resolveCImport(handle, node) catch |err| {
-                    log.debug("Error {} while processing cImport", .{err}); // TODO improve
-                    return null;
-                }) orelse return null;
+                const cimport_uri = (try store.resolveCImport(handle.*, node)) orelse return null;
+
+                const new_handle = store.getHandle(cimport_uri) orelse return null;
 
                 // reference to node '0' which is root
                 return TypeWithHandle.typeVal(.{ .node = 0, .handle = new_handle });
@@ -1088,7 +1086,6 @@ pub fn resolveTypeOfNode(store: *DocumentStore, arena: *std.heap.ArenaAllocator,
 }
 
 /// Collects all `@import`'s we can find into a slice of import paths (without quotes).
-/// Caller owns returned memory.
 pub fn collectImports(allocator: std.mem.Allocator, tree: Ast) error{OutOfMemory}!std.ArrayListUnmanaged([]const u8) {
     var imports = std.ArrayListUnmanaged([]const u8){};
     errdefer {

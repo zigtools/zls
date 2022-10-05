@@ -151,7 +151,7 @@ fn showMessage(server: *Server, writer: anytype, message_type: types.MessageType
     });
 }
 
-fn publishDiagnostics(server: *Server, writer: anytype, handle: *DocumentStore.Handle) !void {
+fn publishDiagnostics(server: *Server, writer: anytype, handle: DocumentStore.Handle) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -252,17 +252,19 @@ fn publishDiagnostics(server: *Server, writer: anytype, handle: *DocumentStore.H
         }
     }
 
-    for (handle.cimports) |cimport| {
-        if (cimport.result != .failure) continue;
-        const stderr = std.mem.trim(u8, cimport.result.failure, " ");
+    for (handle.cimports.items(.hash)) |hash, i| {
+        const result = server.document_store.cimports.get(hash) orelse continue;
+        if (result != .failure) continue;
+        const stderr = std.mem.trim(u8, result.failure, " ");
 
         var pos_and_diag_iterator = std.mem.split(u8, stderr, ":");
         _ = pos_and_diag_iterator.next(); // skip file path
         _ = pos_and_diag_iterator.next(); // skip line
         _ = pos_and_diag_iterator.next(); // skip character
 
+        const node = handle.cimports.items(.node)[i];
         try diagnostics.append(allocator, .{
-            .range = offsets.nodeToRange(handle.tree, cimport.node, server.offset_encoding),
+            .range = offsets.nodeToRange(handle.tree, node, server.offset_encoding),
             .severity = .Error,
             .code = "cImport",
             .source = "zls",
@@ -283,7 +285,7 @@ fn publishDiagnostics(server: *Server, writer: anytype, handle: *DocumentStore.H
 
 fn getAstCheckDiagnostics(
     server: *Server,
-    handle: *DocumentStore.Handle,
+    handle: DocumentStore.Handle,
     diagnostics: *std.ArrayListUnmanaged(types.Diagnostic),
 ) !void {
     var allocator = server.arena.allocator();
@@ -966,10 +968,7 @@ fn gotoDefinitionString(
     defer tracy_zone.end();
 
     const import_str = analysis.getImportStr(handle.tree, 0, pos_index) orelse return null;
-    const uri = server.document_store.uriFromImportStr(server.arena.allocator(), handle.*, import_str) catch |err| switch (err) {
-        error.UriBadScheme => return null,
-        error.OutOfMemory => |e| return e,
-    };
+    const uri = try server.document_store.uriFromImportStr(server.arena.allocator(), handle.*, import_str);
 
     return types.Location{
         .uri = uri orelse return null,
@@ -1327,7 +1326,7 @@ fn completeError(server: *Server, handle: *DocumentStore.Handle) ![]types.Comple
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    return try server.document_store.errorCompletionItems(&server.arena, handle);
+    return try server.document_store.errorCompletionItems(server.arena.allocator(), handle.*);
 }
 
 fn kindToSortScore(kind: types.CompletionItem.Kind) ?[]const u8 {
@@ -1362,12 +1361,12 @@ fn completeDot(server: *Server, handle: *DocumentStore.Handle) ![]types.Completi
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    var completions = try server.document_store.enumCompletionItems(&server.arena, handle);
+    var completions = try server.document_store.enumCompletionItems(server.arena.allocator(), handle.*);
 
     return completions;
 }
 
-fn completeFileSystemStringLiteral(allocator: std.mem.Allocator, handle: *DocumentStore.Handle, completing: []const u8, is_import: bool) ![]types.CompletionItem {
+fn completeFileSystemStringLiteral(allocator: std.mem.Allocator, store: *const DocumentStore, handle: *DocumentStore.Handle, completing: []const u8, is_import: bool) ![]types.CompletionItem {
     var subpath_present = false;
     var completions = std.ArrayListUnmanaged(types.CompletionItem){};
 
@@ -1407,10 +1406,11 @@ fn completeFileSystemStringLiteral(allocator: std.mem.Allocator, handle: *Docume
     }
 
     if (!subpath_present and is_import) {
-        if (handle.associated_build_file) |bf| {
-            try completions.ensureUnusedCapacity(allocator, bf.config.packages.len);
+        if (handle.associated_build_file) |uri| {
+            const build_file = store.build_files.get(uri).?;
+            try completions.ensureUnusedCapacity(allocator, build_file.config.packages.len);
 
-            for (bf.config.packages) |pkg| {
+            for (build_file.config.packages) |pkg| {
                 completions.appendAssumeCapacity(.{
                     .label = pkg.name,
                     .kind = .Module,
@@ -1704,13 +1704,14 @@ fn changeDocumentHandler(server: *Server, writer: anytype, id: types.RequestId, 
 
     _ = id;
 
-    const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
-        log.debug("Trying to change non existent document {s}", .{req.params.textDocument.uri});
-        return;
-    };
+    const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse return;
 
-    try server.document_store.applyChanges(handle, req.params.contentChanges, server.offset_encoding);
-    try server.publishDiagnostics(writer, handle);
+    const new_text = try diff.applyTextEdits(server.allocator, handle.text, req.params.contentChanges, server.offset_encoding);
+    server.allocator.free(handle.text);
+    handle.text = new_text;
+
+    try server.document_store.refreshDocument(handle);
+    try server.publishDiagnostics(writer, handle.*);
 }
 
 fn saveDocumentHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.SaveDocument) !void {
@@ -1721,10 +1722,7 @@ fn saveDocumentHandler(server: *Server, writer: anytype, id: types.RequestId, re
     const allocator = server.arena.allocator();
     const uri = req.params.textDocument.uri;
 
-    const handle = server.document_store.getHandle(uri) orelse {
-        log.warn("Trying to save non existent document {s}", .{uri});
-        return;
-    };
+    const handle = server.document_store.getHandle(uri) orelse return;
     try server.document_store.applySave(handle);
 
     if (handle.tree.errors.len != 0) return;
@@ -1732,7 +1730,7 @@ fn saveDocumentHandler(server: *Server, writer: anytype, id: types.RequestId, re
     if (!server.config.enable_autofix) return;
 
     var diagnostics = std.ArrayListUnmanaged(types.Diagnostic){};
-    try getAstCheckDiagnostics(server, handle, &diagnostics);
+    try getAstCheckDiagnostics(server, handle.*, &diagnostics);
 
     var builder = code_actions.Builder{
         .arena = &server.arena,
@@ -1790,7 +1788,6 @@ fn semanticTokensFullHandler(server: *Server, writer: anytype, id: types.Request
     if (!server.config.enable_semantic_tokens) return try respondGeneric(writer, id, no_semantic_tokens_response);
 
     const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
-        log.warn("Trying to get semantic tokens of non existent document {s}", .{req.params.textDocument.uri});
         return try respondGeneric(writer, id, no_semantic_tokens_response);
     };
 
@@ -1807,7 +1804,6 @@ fn completionHandler(server: *Server, writer: anytype, id: types.RequestId, req:
     defer tracy_zone.end();
 
     const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
-        log.warn("Trying to complete in non existent document {s}", .{req.params.textDocument.uri});
         return try respondGeneric(writer, id, no_completions_response);
     };
 
@@ -1838,7 +1834,7 @@ fn completionHandler(server: *Server, writer: anytype, id: types.RequestId, req:
 
             const completing = offsets.locToSlice(handle.tree.source, loc);
             const is_import = pos_context == .import_string_literal;
-            break :blk try completeFileSystemStringLiteral(server.arena.allocator(), handle, completing, is_import);
+            break :blk try completeFileSystemStringLiteral(server.arena.allocator(), &server.document_store, handle, completing, is_import);
         },
         else => null,
     };
@@ -1878,7 +1874,6 @@ fn signatureHelpHandler(server: *Server, writer: anytype, id: types.RequestId, r
 
     const getSignatureInfo = @import("signature_help.zig").getSignatureInfo;
     const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
-        log.warn("Trying to get signature help in non existent document {s}", .{req.params.textDocument.uri});
         return try respondGeneric(writer, id, no_signatures_response);
     };
 
@@ -1912,7 +1907,6 @@ fn gotoHandler(server: *Server, writer: anytype, id: types.RequestId, req: reque
     defer tracy_zone.end();
 
     const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
-        log.warn("Trying to go to definition in non existent document {s}", .{req.params.textDocument.uri});
         return try respondGeneric(writer, id, null_result_response);
     };
 
@@ -1956,7 +1950,6 @@ fn hoverHandler(server: *Server, writer: anytype, id: types.RequestId, req: requ
     defer tracy_zone.end();
 
     const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
-        log.warn("Trying to get hover in non existent document {s}", .{req.params.textDocument.uri});
         return try respondGeneric(writer, id, null_result_response);
     };
 
@@ -1986,7 +1979,6 @@ fn documentSymbolsHandler(server: *Server, writer: anytype, id: types.RequestId,
     defer tracy_zone.end();
 
     const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
-        log.warn("Trying to get document symbols in non existent document {s}", .{req.params.textDocument.uri});
         return try respondGeneric(writer, id, null_result_response);
     };
     try server.documentSymbol(writer, id, handle);
@@ -1998,7 +1990,6 @@ fn formattingHandler(server: *Server, writer: anytype, id: types.RequestId, req:
 
     if (server.config.zig_exe_path) |zig_exe_path| {
         const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
-            log.warn("Trying to got to definition in non existent document {s}", .{req.params.textDocument.uri});
             return try respondGeneric(writer, id, null_result_response);
         };
 
@@ -2124,14 +2115,6 @@ const GeneralReferencesRequest = union(enum) {
             .highlight => |highlight| highlight.params.position,
         };
     }
-
-    pub fn name(self: @This()) []const u8 {
-        return switch (self) {
-            .rename => "rename",
-            .references => "references",
-            .highlight => "highlight references",
-        };
-    }
 };
 
 fn generalReferencesHandler(server: *Server, writer: anytype, id: types.RequestId, req: GeneralReferencesRequest) !void {
@@ -2141,7 +2124,6 @@ fn generalReferencesHandler(server: *Server, writer: anytype, id: types.RequestI
     const allocator = server.arena.allocator();
 
     const handle = server.document_store.getHandle(req.uri()) orelse {
-        log.warn("Trying to get {s} in non existent document {s}", .{ req.name(), req.uri() });
         return try respondGeneric(writer, id, null_result_response);
     };
 
@@ -2223,7 +2205,6 @@ fn inlayHintHandler(server: *Server, writer: anytype, id: types.RequestId, req: 
     if (!server.config.enable_inlay_hints) return try respondGeneric(writer, id, null_result_response);
 
     const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
-        log.warn("Trying to get inlay hint of non existent document {s}", .{req.params.textDocument.uri});
         return try respondGeneric(writer, id, null_result_response);
     };
 
@@ -2272,7 +2253,6 @@ fn inlayHintHandler(server: *Server, writer: anytype, id: types.RequestId, req: 
 
 fn codeActionHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.CodeAction) !void {
     const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
-        log.warn("Trying to get code actions of non existent document {s}", .{req.params.textDocument.uri});
         return try respondGeneric(writer, id, null_result_response);
     };
 
@@ -2402,12 +2382,12 @@ pub fn processJsonRpc(server: *Server, writer: anytype, json: []const u8) !void 
         .shutdown => return try sendErrorResponse(writer, server.arena.allocator(), .InvalidRequest, "server received a request after shutdown!"),
     }
 
-    const start_time = std.time.milliTimestamp();
+    // const start_time = std.time.milliTimestamp();
     defer {
         // makes `zig build test` look nice
         if (!zig_builtin.is_test and !std.mem.eql(u8, method, "shutdown")) {
-            const end_time = std.time.milliTimestamp();
-            log.debug("Took {}ms to process method {s}", .{ end_time - start_time, method });
+            // const end_time = std.time.milliTimestamp();
+            // log.debug("Took {}ms to process method {s}", .{ end_time - start_time, method });
         }
     }
 
@@ -2535,7 +2515,10 @@ pub fn init(
 
     try config.configChanged(allocator, config_path);
 
-    var document_store = try DocumentStore.init(allocator, config);
+    var document_store = DocumentStore{
+        .allocator = allocator,
+        .config = config,
+    };
     errdefer document_store.deinit();
 
     var builtin_completions = try std.ArrayListUnmanaged(types.CompletionItem).initCapacity(allocator, data.builtins.len);

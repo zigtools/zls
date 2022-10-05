@@ -479,26 +479,26 @@ pub fn symbolReferences(
             if (decl_handle.decl.* != .ast_node) return builder.locations;
             if (!workspace) return builder.locations;
 
-            var imports = std.ArrayListUnmanaged(*DocumentStore.Handle){};
+            var imports = std.ArrayListUnmanaged(*const DocumentStore.Handle){};
 
-            var handle_it = store.handles.iterator();
-            while (handle_it.next()) |entry| {
-                if (skip_std_references and std.mem.indexOf(u8, entry.key_ptr.*, "std") != null) {
-                    if (!include_decl or entry.value_ptr.* != curr_handle)
+            for (store.handles.values()) |*handle| {
+                if (skip_std_references and std.mem.indexOf(u8, handle.uri, "std") != null) {
+                    if (!include_decl or !std.mem.eql(u8, handle.uri, curr_handle.uri))
                         continue;
                 }
 
                 // Check entry's transitive imports
-                try imports.append(arena.allocator(), entry.value_ptr.*);
+                try imports.append(arena.allocator(), handle);
                 var i: usize = 0;
                 blk: while (i < imports.items.len) : (i += 1) {
                     const import = imports.items[i];
-                    for (import.imports_used.items) |uri| {
+                    // TODO handle cimports
+                    for (import.import_uris.items) |uri| {
                         const h = store.getHandle(uri) orelse break;
 
                         if (h == curr_handle) {
                             // entry does import curr_handle
-                            try symbolReferencesInternal(&builder, 0, entry.value_ptr.*);
+                            try symbolReferencesInternal(&builder, 0, handle);
                             break :blk;
                         }
 
