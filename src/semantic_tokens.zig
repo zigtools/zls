@@ -522,6 +522,7 @@ fn writeNodeTokens(builder: *Builder, maybe_node: ?Ast.Node.Index) WriteTokensEr
         .switch_case_inline,
         => {
             const switch_case = if (tag == .switch_case or tag == .switch_case_inline) tree.switchCase(node) else tree.switchCaseOne(node);
+            try writeToken(builder, switch_case.inline_token, .keyword);
             for (switch_case.ast.values) |item_node| try callWriteNodeTokens(allocator, .{ builder, item_node });
             // check it it's 'else'
             if (switch_case.ast.values.len == 0) try writeToken(builder, switch_case.ast.arrow_token - 1, .keyword);
