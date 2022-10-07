@@ -36,7 +36,7 @@ pub fn log(
 fn loop(server: *Server) !void {
     var reader = std.io.getStdIn().reader();
 
-    while (server.keep_running) {
+    while (true) {
         const headers = readRequestHeader(server.allocator, reader) catch |err| {
             logger.err("{s}; exiting!", .{@errorName(err)});
             return;
@@ -264,13 +264,15 @@ pub fn main() !void {
     }
 
     config = try getConfig(allocator, config.config_path, true);
+    defer std.json.parseFree(Config, config.config, .{ .allocator = allocator });
+
     if (config.config_path == null) {
         logger.info("No config file zls.json found.", .{});
     }
 
     var server = try Server.init(
         allocator,
-        config.config,
+        &config.config,
         config.config_path,
     );
     defer server.deinit();

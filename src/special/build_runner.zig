@@ -5,19 +5,15 @@ const process = std.process;
 const Builder = std.build.Builder;
 const InstallArtifactStep = std.build.InstallArtifactStep;
 const LibExeObjStep = std.build.LibExeObjStep;
+const OptionsStep = std.build.OptionsStep;
 
 pub const BuildConfig = struct {
     packages: []Pkg,
-    include_dirs: []IncludeDir,
+    include_dirs: []const []const u8,
 
     pub const Pkg = struct {
         name: []const u8,
         path: []const u8,
-    };
-
-    pub const IncludeDir = struct {
-        path: []const u8,
-        system: bool,
     };
 };
 
@@ -62,14 +58,46 @@ pub fn main() !void {
 
     defer builder.destroy();
 
+    while (nextArg(args, &arg_idx)) |arg| {
+        if (std.mem.startsWith(u8, arg, "-D")) {
+            const option_contents = arg[2..];
+            if (option_contents.len == 0) {
+                log.err("Expected option name after '-D'\n\n", .{});
+                return error.InvalidArgs;
+            }
+            if (std.mem.indexOfScalar(u8, option_contents, '=')) |name_end| {
+                const option_name = option_contents[0..name_end];
+                const option_value = option_contents[name_end + 1 ..];
+                if (try builder.addUserInputOption(option_name, option_value)) {
+                    log.err("Option conflict '-D{s}'\n\n", .{option_name});
+                    return error.InvalidArgs;
+                }
+            } else {
+                const option_name = option_contents;
+                if (try builder.addUserInputFlag(option_name)) {
+                    log.err("Option conflict '-D{s}'\n\n", .{option_name});
+                    return error.InvalidArgs;
+                }
+            }
+        }
+    }
+
     builder.resolveInstallPrefix(null, Builder.DirList{});
     try runBuild(builder);
 
     var packages = std.ArrayListUnmanaged(BuildConfig.Pkg){};
     defer packages.deinit(allocator);
 
-    var include_dirs = std.ArrayListUnmanaged(BuildConfig.IncludeDir){};
+    var include_dirs: std.StringArrayHashMapUnmanaged(void) = .{};
     defer include_dirs.deinit(allocator);
+
+    // This scans the graph of Steps to find all `OptionsStep`s then reifies them
+    // Doing this before the loop to find packages ensures their `GeneratedFile`s have been given paths
+    for (builder.top_level_steps.items) |tls| {
+        for (tls.step.dependencies.items) |step| {
+            try reifyOptions(step);
+        }
+    }
 
     // TODO: We currently add packages from every LibExeObj step that the install step depends on.
     //       Should we error out or keep one step or something similar?
@@ -83,26 +111,51 @@ pub fn main() !void {
     try std.json.stringify(
         BuildConfig{
             .packages = packages.items,
-            .include_dirs = include_dirs.items,
+            .include_dirs = include_dirs.keys(),
         },
         .{ .whitespace = .{} },
         std.io.getStdOut().writer(),
     );
 }
 
+fn reifyOptions(step: *std.build.Step) anyerror!void {
+    // Support Zig 0.9.1
+    if (!@hasDecl(OptionsStep, "base_id")) return;
+
+    if (step.cast(OptionsStep)) |option| {
+        // We don't know how costly the dependency tree might be, so err on the side of caution
+        if (step.dependencies.items.len == 0) {
+            try option.step.make();
+        }
+    }
+
+    for (step.dependencies.items) |unknown_step| {
+        try reifyOptions(unknown_step);
+    }
+}
+
 fn processStep(
     allocator: std.mem.Allocator,
     packages: *std.ArrayListUnmanaged(BuildConfig.Pkg),
-    include_dirs: *std.ArrayListUnmanaged(BuildConfig.IncludeDir),
+    include_dirs: *std.StringArrayHashMapUnmanaged(void),
     step: *std.build.Step,
 ) anyerror!void {
     if (step.cast(InstallArtifactStep)) |install_exe| {
+        if (install_exe.artifact.root_src) |src| {
+            try packages.append(allocator, .{ .name = "root", .path = src.path });
+        }
+
         try processIncludeDirs(allocator, include_dirs, install_exe.artifact.include_dirs.items);
+        try processPkgConfig(allocator, include_dirs, install_exe.artifact);
         for (install_exe.artifact.packages.items) |pkg| {
             try processPackage(allocator, packages, pkg);
         }
     } else if (step.cast(LibExeObjStep)) |exe| {
+        if (exe.root_src) |src| {
+            try packages.append(allocator, .{ .name = "root", .path = src.path });
+        }
         try processIncludeDirs(allocator, include_dirs, exe.include_dirs.items);
+        try processPkgConfig(allocator, include_dirs, exe);
         for (exe.packages.items) |pkg| {
             try processPackage(allocator, packages, pkg);
         }
@@ -122,7 +175,9 @@ fn processPackage(
         if (std.mem.eql(u8, package.name, pkg.name)) return;
     }
 
+    // Support Zig 0.9.1
     const source = if (@hasField(std.build.Pkg, "source")) pkg.source else pkg.path;
+
     const maybe_path = switch (source) {
         .path => |path| path,
         .generated => |generated| generated.path,
@@ -141,24 +196,70 @@ fn processPackage(
 
 fn processIncludeDirs(
     allocator: std.mem.Allocator,
-    include_dirs: *std.ArrayListUnmanaged(BuildConfig.IncludeDir),
+    include_dirs: *std.StringArrayHashMapUnmanaged(void),
     dirs: []std.build.LibExeObjStep.IncludeDir,
 ) !void {
     try include_dirs.ensureUnusedCapacity(allocator, dirs.len);
 
-    outer: for (dirs) |dir| {
-        const candidate: BuildConfig.IncludeDir = switch (dir) {
-            .raw_path => |path| .{ .path = path, .system = false },
-            .raw_path_system => |path| .{ .path = path, .system = true },
+    for (dirs) |dir| {
+        const candidate: []const u8 = switch (dir) {
+            .raw_path => |path| path,
+            .raw_path_system => |path| path,
             else => continue,
         };
 
-        for (include_dirs.items) |include_dir| {
-            if (std.mem.eql(u8, candidate.path, include_dir.path)) continue :outer;
-        }
-
-        include_dirs.appendAssumeCapacity(candidate);
+        include_dirs.putAssumeCapacity(candidate, {});
     }
+}
+
+fn processPkgConfig(
+    allocator: std.mem.Allocator,
+    include_dirs: *std.StringArrayHashMapUnmanaged(void),
+    exe: *std.build.LibExeObjStep,
+) !void {
+    for (exe.link_objects.items) |link_object| {
+        if (link_object != .system_lib) continue;
+        const system_lib = link_object.system_lib;
+
+        // Support Zig 0.9.1
+        if (@TypeOf(system_lib) == []const u8) return;
+
+        if (system_lib.use_pkg_config == .no) continue;
+
+        getPkgConfigIncludes(allocator, include_dirs, exe, system_lib.name) catch |err| switch (err) {
+            error.PkgConfigInvalidOutput,
+            error.PkgConfigCrashed,
+            error.PkgConfigFailed,
+            error.PkgConfigNotInstalled,
+            error.PackageNotFound,
+            => switch (system_lib.use_pkg_config) {
+                .yes => {
+                    // pkg-config failed, so zig will not add any include paths
+                },
+                .force => {
+                    log.warn("pkg-config failed for library {s}", .{system_lib.name});
+                },
+                .no => unreachable,
+            },
+            else => |e| return e,
+        };
+    }
+}
+
+fn getPkgConfigIncludes(
+    allocator: std.mem.Allocator,
+    include_dirs: *std.StringArrayHashMapUnmanaged(void),
+    exe: *std.build.LibExeObjStep,
+    name: []const u8,
+) !void {
+    if (exe.runPkgConfig(name)) |args| {
+        for (args) |arg| {
+            if (std.mem.startsWith(u8, arg, "-I")) {
+                const candidate = arg[2..];
+                try include_dirs.put(allocator, candidate, {});
+            }
+        }
+    } else |err| return err;
 }
 
 fn runBuild(builder: *Builder) anyerror!void {

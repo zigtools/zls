@@ -1,5 +1,7 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const types = @import("types.zig");
+const requests = @import("requests.zig");
 const URI = @import("uri.zig");
 const analysis = @import("analysis.zig");
 const offsets = @import("offsets.zig");
@@ -23,16 +25,23 @@ const BuildFile = struct {
     uri: []const u8,
     config: BuildFileConfig,
     builtin_uri: ?[]const u8 = null,
+    build_options: ?[]BuildAssociatedConfig.BuildOption = null,
 
     pub fn destroy(self: *BuildFile, allocator: std.mem.Allocator) void {
         if (self.builtin_uri) |builtin_uri| allocator.free(builtin_uri);
+        if (self.build_options) |opts| {
+            for (opts) |*opt| {
+                opt.deinit(allocator);
+            }
+            allocator.free(opts);
+        }
         allocator.destroy(self);
     }
 };
 
 pub const BuildFileConfig = struct {
     packages: []Pkg,
-    include_dirs: []IncludeDir,
+    include_dirs: []const []const u8,
 
     pub fn deinit(self: BuildFileConfig, allocator: std.mem.Allocator) void {
         for (self.packages) |pkg| {
@@ -42,7 +51,7 @@ pub const BuildFileConfig = struct {
         allocator.free(self.packages);
 
         for (self.include_dirs) |dir| {
-            allocator.free(dir.path);
+            allocator.free(dir);
         }
         allocator.free(self.include_dirs);
     }
@@ -51,28 +60,23 @@ pub const BuildFileConfig = struct {
         name: []const u8,
         uri: []const u8,
     };
-
-    pub const IncludeDir = BuildConfig.IncludeDir;
 };
 
 pub const Handle = struct {
-    document: types.TextDocument,
     count: usize,
+    uri: []const u8,
+    text: [:0]const u8,
+    tree: Ast,
+    document_scope: analysis.DocumentScope,
     /// Contains one entry for every import in the document
     import_uris: []const []const u8,
     /// Contains one entry for every cimport in the document
     cimports: []CImportHandle,
     /// Items in this array list come from `import_uris` and `cimports`
     imports_used: std.ArrayListUnmanaged([]const u8),
-    tree: Ast,
-    document_scope: analysis.DocumentScope,
 
     associated_build_file: ?*BuildFile,
     is_build_file: ?*BuildFile,
-
-    pub fn uri(handle: Handle) []const u8 {
-        return handle.document.uri;
-    }
 };
 
 pub const UriToHandleMap = std.StringHashMapUnmanaged(*Handle);
@@ -82,8 +86,7 @@ allocator: std.mem.Allocator,
 handles: UriToHandleMap = .{},
 build_files: BuildFileList = .{},
 
-// TODO use pointer back to Server.config
-config: Config,
+config: *Config,
 std_uri: ?[]const u8,
 // TODO make this configurable
 // We can't figure it out ourselves since we don't know what arguments
@@ -95,7 +98,7 @@ zig_global_cache_root: []const u8 = "ZLS_DONT_CARE",
 
 pub fn init(
     allocator: std.mem.Allocator,
-    config: Config,
+    config: *Config,
 ) !DocumentStore {
     return DocumentStore{
         .allocator = allocator,
@@ -114,9 +117,11 @@ fn loadBuildAssociatedConfiguration(allocator: std.mem.Allocator, build_file: *B
     const directory_path = build_file_path[0 .. build_file_path.len - "build.zig".len];
 
     const options = std.json.ParseOptions{ .allocator = allocator };
-    const build_associated_config = blk: {
+    var build_associated_config = blk: {
         const config_file_path = try std.fs.path.join(allocator, &[_][]const u8{ directory_path, "zls.build.json" });
         defer allocator.free(config_file_path);
+
+        log.info("Attempting to load build-associated config from {s}", .{config_file_path});
 
         var config_file = std.fs.cwd().openFile(config_file_path, .{}) catch |err| {
             if (err == error.FileNotFound) return;
@@ -127,7 +132,9 @@ fn loadBuildAssociatedConfiguration(allocator: std.mem.Allocator, build_file: *B
         const file_buf = try config_file.readToEndAlloc(allocator, 0x1000000);
         defer allocator.free(file_buf);
 
-        break :blk try std.json.parse(BuildAssociatedConfig, &std.json.TokenStream.init(file_buf), options);
+        var token_stream = std.json.TokenStream.init(file_buf);
+
+        break :blk try std.json.parse(BuildAssociatedConfig, &token_stream, options);
     };
     defer std.json.parseFree(BuildAssociatedConfig, build_associated_config, options);
 
@@ -135,6 +142,11 @@ fn loadBuildAssociatedConfiguration(allocator: std.mem.Allocator, build_file: *B
         var absolute_builtin_path = try std.mem.concat(allocator, u8, &.{ directory_path, relative_builtin_path });
         defer allocator.free(absolute_builtin_path);
         build_file.builtin_uri = try URI.fromPath(allocator, absolute_builtin_path);
+    }
+
+    if (build_associated_config.build_options) |opts| {
+        build_file.build_options = opts;
+        build_associated_config.build_options = null;
     }
 }
 
@@ -159,11 +171,15 @@ fn loadBuildConfiguration(context: LoadBuildConfigContext) !void {
     const global_cache_path = context.global_cache_path;
     const zig_exe_path = context.zig_exe_path;
 
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    const arena_allocator = arena.allocator();
+
     const build_file_path = context.build_file_path orelse try URI.parse(allocator, build_file.uri);
     defer if (context.build_file_path == null) allocator.free(build_file_path);
     const directory_path = build_file_path[0 .. build_file_path.len - "build.zig".len];
 
-    const args: []const []const u8 = &[_][]const u8{
+    const standard_args = [_][]const u8{
         zig_exe_path,
         "run",
         build_runner_path,
@@ -179,6 +195,16 @@ fn loadBuildConfiguration(context: LoadBuildConfigContext) !void {
         context.cache_root,
         context.global_cache_root,
     };
+
+    var args = try arena_allocator.alloc([]const u8, standard_args.len + if (build_file.build_options) |opts| opts.len else 0);
+    defer arena_allocator.free(args);
+
+    args[0..standard_args.len].* = standard_args;
+    if (build_file.build_options) |opts| {
+        for (opts) |opt, i| {
+            args[standard_args.len + i] = try opt.formatParam(arena_allocator);
+        }
+    }
 
     const zig_run_result = try std.ChildProcess.exec(.{
         .allocator = allocator,
@@ -208,9 +234,11 @@ fn loadBuildConfiguration(context: LoadBuildConfigContext) !void {
 
             build_file.config.deinit(allocator);
 
+            var token_stream = std.json.TokenStream.init(zig_run_result.stdout);
+
             const config: BuildConfig = std.json.parse(
                 BuildConfig,
-                &std.json.TokenStream.init(zig_run_result.stdout),
+                &token_stream,
                 parse_options,
             ) catch return error.RunFailed;
             defer std.json.parseFree(BuildConfig, config, parse_options);
@@ -224,10 +252,10 @@ fn loadBuildConfiguration(context: LoadBuildConfigContext) !void {
                 packages.deinit(allocator);
             }
 
-            var include_dirs = try std.ArrayListUnmanaged(BuildFileConfig.IncludeDir).initCapacity(allocator, config.include_dirs.len);
+            var include_dirs = try std.ArrayListUnmanaged([]const u8).initCapacity(allocator, config.include_dirs.len);
             errdefer {
                 for (include_dirs.items) |dir| {
-                    allocator.free(dir.path);
+                    allocator.free(dir);
                 }
                 include_dirs.deinit(allocator);
             }
@@ -242,14 +270,16 @@ fn loadBuildConfiguration(context: LoadBuildConfigContext) !void {
                 const name = try allocator.dupe(u8, pkg.name);
                 errdefer allocator.free(name);
 
+                log.debug("Found package {s}: {s}", .{ name, uri });
+
                 packages.appendAssumeCapacity(.{ .name = name, .uri = uri });
             }
 
             for (config.include_dirs) |dir| {
-                const path = try allocator.dupe(u8, dir.path);
+                const path = try allocator.dupe(u8, dir);
                 errdefer allocator.free(path);
 
-                include_dirs.appendAssumeCapacity(.{ .path = path, .system = dir.system });
+                include_dirs.appendAssumeCapacity(path);
             }
 
             build_file.config = .{
@@ -259,6 +289,164 @@ fn loadBuildConfiguration(context: LoadBuildConfigContext) !void {
         },
         else => return error.RunFailed,
     }
+}
+
+// walks the build.zig files above "uri"
+const BuildDotZigIterator = struct {
+    allocator: std.mem.Allocator,
+    uri_path: []const u8,
+    dir_path: []const u8,
+    i: usize,
+
+    fn init(allocator: std.mem.Allocator, uri_path: []const u8) !BuildDotZigIterator {
+        const dir_path = std.fs.path.dirname(uri_path) orelse uri_path;
+
+        return BuildDotZigIterator{
+            .allocator = allocator,
+            .uri_path = uri_path,
+            .dir_path = dir_path,
+            .i = std.fs.path.diskDesignator(uri_path).len + 1,
+        };
+    }
+
+    // the iterator allocates this memory so you gotta free it
+    fn next(self: *BuildDotZigIterator) !?[]const u8 {
+        while (true) {
+            if (self.i > self.dir_path.len)
+                return null;
+
+            const potential_build_path = try std.fs.path.join(self.allocator, &.{
+                self.dir_path[0..self.i], "build.zig",
+            });
+
+            self.i += 1;
+            while (self.i < self.dir_path.len and self.dir_path[self.i] != std.fs.path.sep) : (self.i += 1) {}
+
+            if (std.fs.accessAbsolute(potential_build_path, .{})) {
+                // found a build.zig file
+                return potential_build_path;
+            } else |_| {
+                // nope it failed for whatever reason, free it and move the
+                // machinery forward
+                self.allocator.free(potential_build_path);
+            }
+        }
+    }
+};
+
+fn createBuildFile(self: *DocumentStore, build_file_path: []const u8) !*BuildFile {
+    var build_file = try self.allocator.create(BuildFile);
+    errdefer build_file.destroy(self.allocator);
+
+    log.debug("creating build file: {s}", .{build_file_path});
+
+    build_file.* = .{
+        .refs = 1,
+        .uri = try URI.fromPath(self.allocator, build_file_path),
+        .config = .{
+            .packages = &.{},
+            .include_dirs = &.{},
+        },
+    };
+
+    loadBuildAssociatedConfiguration(self.allocator, build_file, build_file_path) catch |err| {
+        log.debug("Failed to load config associated with build file {s} (error: {})", .{ build_file.uri, err });
+    };
+    if (build_file.builtin_uri == null) {
+        if (self.config.builtin_path != null) {
+            build_file.builtin_uri = try URI.fromPath(self.allocator, self.config.builtin_path.?);
+            log.info("builtin config not found, falling back to default: {?s}", .{build_file.builtin_uri});
+        }
+    }
+
+    // TODO: Do this in a separate thread?
+    // It can take quite long.
+    loadBuildConfiguration(.{
+        .build_file = build_file,
+        .allocator = self.allocator,
+        .build_runner_path = self.config.build_runner_path.?,
+        .global_cache_path = self.config.global_cache_path.?,
+        .zig_exe_path = self.config.zig_exe_path.?,
+        .build_file_path = build_file_path,
+        .cache_root = self.zig_cache_root,
+        .global_cache_root = self.zig_global_cache_root,
+    }) catch |err| {
+        log.err("Failed to load packages of build file {s} (error: {})", .{ build_file.uri, err });
+    };
+
+    return build_file;
+}
+
+fn uriAssociatedWithBuild(
+    self: *DocumentStore,
+    build_file: *BuildFile,
+    uri: []const u8,
+) bool {
+    var checked_uris = std.StringHashMap(void).init(self.allocator);
+    defer {
+        var it = checked_uris.iterator();
+        while (it.next()) |entry|
+            self.allocator.free(entry.key_ptr.*);
+
+        checked_uris.deinit();
+    }
+
+    for (build_file.config.packages) |package| {
+        if (std.mem.eql(u8, uri, package.uri)) {
+            return true;
+        }
+
+        if (self.uriInImports(&checked_uris, package.uri, uri))
+            return true;
+    }
+
+    return false;
+}
+
+fn uriInImports(
+    self: *DocumentStore,
+    checked_uris: *std.StringHashMap(void),
+    source_uri: []const u8,
+    uri: []const u8,
+) bool {
+    return self.uriInImportsImpl(checked_uris, source_uri, uri) catch false;
+}
+
+fn uriInImportsImpl(
+    self: *DocumentStore,
+    checked_uris: *std.StringHashMap(void),
+    source_uri: []const u8,
+    uri: []const u8,
+) !bool {
+    if (checked_uris.contains(source_uri))
+        return false;
+
+    // consider it checked even if a failure happens
+    try checked_uris.put(try self.allocator.dupe(u8, source_uri), {});
+
+    const handle = self.handles.get(source_uri) orelse package_handle: {
+        var ret = (try self.newDocumentFromUri(source_uri)) orelse return false;
+        try self.handles.put(self.allocator, source_uri, ret);
+        break :package_handle ret;
+    };
+
+    var import_uris = try self.collectImportUris(handle);
+    defer {
+        for (import_uris) |import_uri| {
+            self.allocator.free(import_uri);
+        }
+        self.allocator.free(import_uris);
+    }
+
+    for (import_uris) |import_uri| {
+        if (std.mem.eql(u8, uri, import_uri))
+            return true;
+
+        if (self.uriInImports(checked_uris, import_uri, uri))
+            return true;
+    }
+
+    return false;
 }
 
 /// This function asserts the document is not open yet and takes ownership
@@ -272,9 +460,9 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: [:0]u8) anyerror!*Ha
 
     defer {
         if (handle.associated_build_file) |build_file| {
-            log.debug("Opened document `{s}` with build file `{s}`", .{ handle.uri(), build_file.uri });
+            log.debug("Opened document `{s}` with build file `{s}`", .{ handle.uri, build_file.uri });
         } else {
-            log.debug("Opened document `{s}` without a build file", .{ handle.uri() });
+            log.debug("Opened document `{s}` without a build file", .{handle.uri});
         }
     }
 
@@ -286,17 +474,13 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: [:0]u8) anyerror!*Ha
 
     handle.* = Handle{
         .count = 1,
+        .uri = uri,
+        .text = text,
+        .tree = tree,
+        .document_scope = document_scope,
         .import_uris = &.{},
         .cimports = &.{},
         .imports_used = .{},
-        .document = .{
-            .uri = uri,
-            .text = text,
-            // Extra +1 to include the null terminator
-            .mem = text.ptr[0 .. text.len + 1],
-        },
-        .tree = tree,
-        .document_scope = document_scope,
         .associated_build_file = null,
         .is_build_file = null,
     };
@@ -306,109 +490,53 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: [:0]u8) anyerror!*Ha
     if (self.config.zig_exe_path != null and std.mem.endsWith(u8, uri, "/build.zig") and !in_std) {
         log.debug("Document is a build file, extracting packages...", .{});
         // This is a build file.
-        var build_file = try self.allocator.create(BuildFile);
-        errdefer build_file.destroy(self.allocator);
 
-        build_file.* = .{
-            .refs = 1,
-            .uri = try self.allocator.dupe(u8, uri),
-            .config = .{
-                .packages = &.{},
-                .include_dirs = &.{},
-            },
-        };
-
-        const build_file_path = try URI.parse(self.allocator, build_file.uri);
+        const build_file_path = try URI.parse(self.allocator, uri);
         defer self.allocator.free(build_file_path);
 
-        loadBuildAssociatedConfiguration(self.allocator, build_file, build_file_path) catch |err| {
-            log.debug("Failed to load config associated with build file {s} (error: {})", .{ build_file.uri, err });
-        };
-        if (build_file.builtin_uri == null) {
-            if (self.config.builtin_path != null) {
-                build_file.builtin_uri = try URI.fromPath(self.allocator, self.config.builtin_path.?);
-                log.info("builtin config not found, falling back to default: {?s}", .{build_file.builtin_uri});
-            }
-        }
-
-        // TODO: Do this in a separate thread?
-        // It can take quite long.
-        loadBuildConfiguration(.{
-            .build_file = build_file,
-            .allocator = self.allocator,
-            .build_runner_path = self.config.build_runner_path.?,
-            .global_cache_path = self.config.global_cache_path.?,
-            .zig_exe_path = self.config.zig_exe_path.?,
-            .build_file_path = build_file_path,
-            .cache_root = self.zig_cache_root,
-            .global_cache_root = self.zig_global_cache_root,
-        }) catch |err| {
-            log.err("Failed to load packages of build file {s} (error: {})", .{ build_file.uri, err });
-        };
+        const build_file = try self.createBuildFile(build_file_path);
+        errdefer build_file.destroy(self.allocator);
 
         try self.build_files.append(self.allocator, build_file);
         handle.is_build_file = build_file;
     } else if (self.config.zig_exe_path != null and !in_std) {
-        // Look into build files and keep the one that lives closest to the document in the directory structure
-        var candidate: ?*BuildFile = null;
-        {
-            var uri_chars_matched: usize = 0;
-            for (self.build_files.items) |build_file| {
-                const build_file_base_uri = build_file.uri[0 .. std.mem.lastIndexOfScalar(u8, build_file.uri, '/').? + 1];
+        log.debug("Going to walk down the tree towards: {s}", .{uri});
+        // walk down the tree towards the uri. When we hit build.zig files
+        // determine if the uri we're interested in is involved with the build.
+        // This ensures that _relevant_ build.zig files higher in the
+        // filesystem have precedence.
+        const uri_path = try URI.parse(self.allocator, uri);
+        defer self.allocator.free(uri_path);
 
-                if (build_file_base_uri.len > uri_chars_matched and std.mem.startsWith(u8, uri, build_file_base_uri)) {
-                    uri_chars_matched = build_file_base_uri.len;
-                    candidate = build_file;
-                }
-            }
-        }
+        var prev_build_file: ?*BuildFile = null;
+        var build_it = try BuildDotZigIterator.init(self.allocator, uri_path);
+        while (try build_it.next()) |build_path| {
+            defer self.allocator.free(build_path);
 
-        // Then, try to find the closest build file.
-        var curr_path = try URI.parse(self.allocator, uri);
-        defer self.allocator.free(curr_path);
-        while (true) {
-            if (curr_path.len == 0) break;
+            log.debug("found build path: {s}", .{build_path});
+            // if it's found or created
+            const build_file = for (self.build_files.items) |build_file| {
+                const entry_build_path = try URI.parse(self.allocator, build_file.uri);
+                defer self.allocator.free(entry_build_path);
 
-            if (std.mem.lastIndexOfScalar(u8, curr_path[0 .. curr_path.len - 1], std.fs.path.sep)) |idx| {
-                // This includes the last separator
-                curr_path = curr_path[0 .. idx + 1];
+                if (std.mem.eql(u8, build_path, entry_build_path))
+                    break build_file;
+            } else build_file: {
+                var ret = try self.createBuildFile(build_path);
+                errdefer ret.destroy(self.allocator);
 
-                // Try to open the folder, then the file.
-                var folder = std.fs.cwd().openDir(curr_path, .{}) catch |err| switch (err) {
-                    error.FileNotFound => continue,
-                    else => return err,
-                };
-                defer folder.close();
+                try self.build_files.append(self.allocator, ret);
+                break :build_file ret;
+            };
 
-                var build_file = folder.openFile("build.zig", .{}) catch |err| switch (err) {
-                    error.FileNotFound, error.AccessDenied => continue,
-                    else => return err,
-                };
-                defer build_file.close();
-
-                // Calculate build file's URI
-                var candidate_path = try std.mem.concat(self.allocator, u8, &.{ curr_path, "build.zig" });
-                defer self.allocator.free(candidate_path);
-                const build_file_uri = try URI.fromPath(self.allocator, candidate_path);
-                errdefer self.allocator.free(build_file_uri);
-
-                if (candidate) |candidate_build_file| {
-                    // Check if it is the same as the current candidate we got from the existing build files.
-                    // If it isn't, we need to read the file and make a new build file.
-                    if (std.mem.eql(u8, candidate_build_file.uri, build_file_uri)) {
-                        self.allocator.free(build_file_uri);
-                        break;
-                    }
-                }
-
-                // Check if the build file already exists
-                if (self.handles.get(build_file_uri)) |build_file_handle| {
-                    candidate = build_file_handle.is_build_file.?;
-                    break;
-                }
-
+            // TODO: is this needed?
+            // Check if the build file already exists
+            if (self.handles.get(build_file.uri) == null) {
                 // Read the build file, create a new document, set the candidate to the new build file.
-                const build_file_text = try build_file.readToEndAllocOptions(
+                const file = try std.fs.openFileAbsolute(build_path, .{});
+                defer file.close();
+
+                const build_file_text = try file.readToEndAllocOptions(
                     self.allocator,
                     std.math.maxInt(usize),
                     null,
@@ -417,15 +545,24 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: [:0]u8) anyerror!*Ha
                 );
                 errdefer self.allocator.free(build_file_text);
 
-                const build_file_handle = try self.newDocument(build_file_uri, build_file_text);
-                candidate = build_file_handle.is_build_file.?;
+                _ = try self.newDocument(build_file.uri, build_file_text);
+            }
+
+            if (self.uriAssociatedWithBuild(build_file, uri)) {
+                build_file.refs += 1;
+                handle.associated_build_file = build_file;
                 break;
-            } else break;
+            } else {
+                prev_build_file = build_file;
+            }
         }
-        // Finally, associate the candidate build file, if any, to the new document.
-        if (candidate) |build_file| {
-            build_file.refs += 1;
-            handle.associated_build_file = build_file;
+
+        // if there was no direct imports found, use the closest build file if possible
+        if (handle.associated_build_file == null) {
+            if (prev_build_file) |build_file| {
+                build_file.refs += 1;
+                handle.associated_build_file = build_file;
+            }
         }
     }
 
@@ -439,8 +576,8 @@ fn newDocument(self: *DocumentStore, uri: []const u8, text: [:0]u8) anyerror!*Ha
 
     handle.cimports = try self.collectCIncludes(handle);
     errdefer {
-        for (handle.cimports) |item| {
-            self.allocator.free(item.uri);
+        for (handle.cimports) |*item| {
+            item.result.deinit(self.allocator);
         }
         self.allocator.free(handle.cimports);
     }
@@ -505,7 +642,7 @@ fn decrementCount(self: *DocumentStore, uri: []const u8) void {
         }
 
         handle.tree.deinit(self.allocator);
-        self.allocator.free(handle.document.mem);
+        self.allocator.free(handle.text);
 
         for (handle.imports_used.items) |import_uri| {
             self.decrementCount(import_uri);
@@ -515,8 +652,8 @@ fn decrementCount(self: *DocumentStore, uri: []const u8) void {
             self.allocator.free(import_uri);
         }
 
-        for (handle.cimports) |item| {
-            self.allocator.free(item.uri);
+        for (handle.cimports) |*item| {
+            item.result.deinit(self.allocator);
         }
 
         handle.document_scope.deinit(self.allocator);
@@ -562,7 +699,7 @@ fn collectImportUris(self: *DocumentStore, handle: *Handle) ![]const []const u8 
 }
 
 pub const CImportSource = struct {
-    /// the `@cInclude` node
+    /// the `@cImport` node
     node: Ast.Node.Index,
     /// hash of c source file
     hash: [Hasher.mac_length]u8,
@@ -607,12 +744,13 @@ fn collectCIncludeSources(self: *DocumentStore, handle: *Handle) ![]CImportSourc
 }
 
 pub const CImportHandle = struct {
-    /// the `@cInclude` node
+    /// the `@cImport` node
     node: Ast.Node.Index,
     /// hash of the c source file
     hash: [Hasher.mac_length]u8,
-    /// uri to a zig source file generated with translate-c
-    uri: []const u8,
+    /// the result from calling zig translate-c
+    /// see `translate_c.translate`
+    result: translate_c.Result,
 };
 
 /// Collects all `@cImport` nodes and converts them into zig files using translate-c
@@ -621,12 +759,12 @@ fn collectCIncludes(self: *DocumentStore, handle: *Handle) ![]CImportHandle {
     var cimport_nodes = try analysis.collectCImportNodes(self.allocator, handle.tree);
     defer self.allocator.free(cimport_nodes);
 
-    var uris = try std.ArrayListUnmanaged(CImportHandle).initCapacity(self.allocator, cimport_nodes.len);
+    var cimports = try std.ArrayListUnmanaged(CImportHandle).initCapacity(self.allocator, cimport_nodes.len);
     errdefer {
-        for (uris.items) |item| {
-            self.allocator.free(item.uri);
+        for (cimports.items) |*item| {
+            item.result.deinit(self.allocator);
         }
-        uris.deinit(self.allocator);
+        cimports.deinit(self.allocator);
     }
 
     for (cimport_nodes) |node| {
@@ -636,56 +774,48 @@ fn collectCIncludes(self: *DocumentStore, handle: *Handle) ![]CImportHandle {
         };
         defer self.allocator.free(c_source);
 
-        const uri = self.translate(handle, c_source) catch |err| {
-            std.log.warn("failed to translate cInclude: {}", .{err});
-            continue;
-        } orelse continue;
-        errdefer self.allocator.free(uri);
+        const result = (try self.translate(handle, c_source)) orelse continue;
+        errdefer result.deinit(self.allocator);
 
         var hasher = hasher_init;
         hasher.update(c_source);
         var hash: [Hasher.mac_length]u8 = undefined;
         hasher.final(&hash);
 
-        uris.appendAssumeCapacity(.{
+        cimports.appendAssumeCapacity(.{
             .node = node,
             .hash = hash,
-            .uri = uri,
+            .result = result,
         });
     }
 
-    return uris.toOwnedSlice(self.allocator);
+    return cimports.toOwnedSlice(self.allocator);
 }
 
-fn translate(self: *DocumentStore, handle: *Handle, source: []const u8) !?[]const u8 {
-    const dirs: []BuildConfig.IncludeDir = if (handle.associated_build_file) |build_file| build_file.config.include_dirs else &.{};
-    const include_dirs = blk: {
-        var result = try self.allocator.alloc([]const u8, dirs.len);
-        errdefer self.allocator.free(result);
+fn translate(self: *DocumentStore, handle: *Handle, source: []const u8) error{OutOfMemory}!?translate_c.Result {
+    const include_dirs: []const []const u8 = if (handle.associated_build_file) |build_file| build_file.config.include_dirs else &.{};
 
-        for (dirs) |dir, i| {
-            result[i] = dir.path;
-        }
-
-        break :blk result;
-    };
-    defer self.allocator.free(include_dirs);
-
-    const file_path = (try translate_c.translate(
+    const maybe_result = try translate_c.translate(
         self.allocator,
-        self.config,
+        self.config.*,
         include_dirs,
         source,
-    )) orelse return null;
-    defer self.allocator.free(file_path);
+    );
 
-    return try URI.fromPath(self.allocator, file_path);
+    if (maybe_result) |result| {
+        switch (result) {
+            .success => |uri| log.debug("Translated cImport into {s}", .{uri}),
+            else => {},
+        }
+    }
+
+    return maybe_result;
 }
 
 fn refreshDocument(self: *DocumentStore, handle: *Handle) !void {
-    log.debug("New text for document {s}", .{handle.uri()});
+    log.debug("New text for document {s}", .{handle.uri});
     handle.tree.deinit(self.allocator);
-    handle.tree = try std.zig.parse(self.allocator, handle.document.text);
+    handle.tree = try std.zig.parse(self.allocator, handle.text);
 
     handle.document_scope.deinit(self.allocator);
     handle.document_scope = try analysis.makeDocumentScope(self.allocator, handle.tree);
@@ -703,8 +833,8 @@ fn refreshDocument(self: *DocumentStore, handle: *Handle) !void {
         }
         self.allocator.free(old_imports);
 
-        for (old_cimports) |old_cimport| {
-            self.allocator.free(old_cimport.uri);
+        for (old_cimports) |*old_cimport| {
+            old_cimport.result.deinit(self.allocator);
         }
         self.allocator.free(old_cimports);
     }
@@ -712,26 +842,30 @@ fn refreshDocument(self: *DocumentStore, handle: *Handle) !void {
     var i: usize = 0;
     while (i < handle.imports_used.items.len) {
         const old = handle.imports_used.items[i];
-        still_exists: {
+
+        const found_new = found: {
             for (handle.import_uris) |new| {
-                if (std.mem.eql(u8, new, old)) {
-                    handle.imports_used.items[i] = new;
-                    break :still_exists;
-                }
+                if (!std.mem.eql(u8, new, old)) continue;
+                break :found new;
             }
             for (handle.cimports) |cimport| {
-                const new = cimport.uri;
-                if (std.mem.eql(u8, new, old)) {
-                    handle.imports_used.items[i] = new;
-                    break :still_exists;
-                }
+                if (cimport.result != .success) continue;
+                const new = cimport.result.success;
+
+                if (!std.mem.eql(u8, old, new)) continue;
+                break :found new;
             }
+            break :found null;
+        };
+
+        if (found_new) |new| {
+            handle.imports_used.items[i] = new;
+            i += 1;
+        } else {
             log.debug("Import removed: {s}", .{old});
             self.decrementCount(old);
             _ = handle.imports_used.swapRemove(i);
-            continue;
         }
-        i += 1;
     }
 }
 
@@ -747,48 +881,23 @@ fn refreshDocumentCIncludes(self: *DocumentStore, handle: *Handle) ![]CImportHan
     var old_cimports = handle.cimports;
     var new_cimports = try std.ArrayListUnmanaged(CImportHandle).initCapacity(self.allocator, new_sources.len);
     errdefer {
-        for (new_cimports.items) |new_cimport| {
-            self.allocator.free(new_cimport.uri);
+        for (new_cimports.items) |*new_cimport| {
+            new_cimport.result.deinit(self.allocator);
         }
         new_cimports.deinit(self.allocator);
     }
 
-    for (new_sources) |new_source| {
-        const maybe_old_cimport: ?CImportHandle = blk: {
-            const old_cimport: CImportHandle = found: {
-                for (old_cimports) |old_cimport| {
-                    if (new_source.node == old_cimport.node) {
-                        break :found old_cimport;
-                    }
-                }
-                break :blk null;
-            };
+    outer: for (new_sources) |new_source| {
+        // look for a old cimport with identical source hash
+        for (old_cimports) |old_cimport| {
+            if (!std.mem.eql(u8, &new_source.hash, &old_cimport.hash)) continue;
 
-            // avoid re-translating if the source didn't change
-            if (std.mem.eql(u8, &new_source.hash, &old_cimport.hash)) {
-                break :blk CImportHandle{
-                    .node = old_cimport.node,
-                    .hash = old_cimport.hash,
-                    .uri = try self.allocator.dupe(u8, old_cimport.uri),
-                };
-            }
-
-            const new_uri = self.translate(handle, new_source.source) catch |err| {
-                std.log.warn("failed to translate cInclude: {}", .{err});
-                continue;
-            } orelse continue;
-            errdefer self.allocator.free(new_uri);
-
-            break :blk CImportHandle{
+            new_cimports.appendAssumeCapacity(.{
                 .node = old_cimport.node,
                 .hash = old_cimport.hash,
-                .uri = new_uri,
-            };
-        };
-
-        if (maybe_old_cimport) |cimport| {
-            new_cimports.appendAssumeCapacity(cimport);
-            continue;
+                .result = try old_cimport.result.dupe(self.allocator),
+            });
+            continue :outer;
         }
 
         const c_source = translate_c.convertCInclude(self.allocator, handle.tree, new_source.node) catch |err| switch (err) {
@@ -802,19 +911,13 @@ fn refreshDocumentCIncludes(self: *DocumentStore, handle: *Handle) ![]CImportHan
         hasher.update(c_source);
         hasher.final(&hash);
 
-        const new_uri = self.translate(
-            handle,
-            c_source,
-        ) catch |err| {
-            std.log.warn("failed to translate cInclude: {}", .{err});
-            continue;
-        } orelse continue;
-        errdefer self.allocator.free(new_uri);
+        const new_result = (try self.translate(handle, new_source.source)) orelse continue;
+        errdefer new_result.deinit(self.allocator);
 
         new_cimports.appendAssumeCapacity(.{
             .node = new_source.node,
             .hash = hash,
-            .uri = new_uri,
+            .result = new_result,
         });
     }
 
@@ -837,69 +940,40 @@ pub fn applySave(self: *DocumentStore, handle: *Handle) !void {
     }
 }
 
-pub fn applyChanges(self: *DocumentStore, handle: *Handle, content_changes: std.json.Array, offset_encoding: offsets.Encoding) !void {
-    const document = &handle.document;
-
-    for (content_changes.items) |change| {
-        if (change.Object.get("range")) |range| {
-            std.debug.assert(@ptrCast([*]const u8, document.text.ptr) == document.mem.ptr);
-
-            // TODO: add tests and validate the JSON
-            const start_obj = range.Object.get("start").?.Object;
-            const start_pos = types.Position{
-                .line = start_obj.get("line").?.Integer,
-                .character = start_obj.get("character").?.Integer,
-            };
-            const end_obj = range.Object.get("end").?.Object;
-            const end_pos = types.Position{
-                .line = end_obj.get("line").?.Integer,
-                .character = end_obj.get("character").?.Integer,
-            };
-
-            const change_text = change.Object.get("text").?.String;
-            const start_index = (try offsets.documentPosition(document.*, start_pos, offset_encoding)).absolute_index;
-            const end_index = (try offsets.documentPosition(document.*, end_pos, offset_encoding)).absolute_index;
-
-            const old_len = document.text.len;
-            const new_len = old_len - (end_index - start_index) + change_text.len;
-            if (new_len >= document.mem.len) {
-                // We need to reallocate memory.
-                // We reallocate twice the current filesize or the new length, if it's more than that
-                // so that we can reduce the amount of realloc calls.
-                // We can tune this to find a better size if needed.
-                const realloc_len = std.math.max(2 * old_len, new_len + 1);
-                document.mem = try self.allocator.realloc(document.mem, realloc_len);
-            }
-
-            // The first part of the string, [0 .. start_index] need not be changed.
-            // We then copy the last part of the string, [end_index ..] to its
-            //    new position, [start_index + change_len .. ]
-            if (new_len < old_len) {
-                std.mem.copy(u8, document.mem[start_index + change_text.len ..][0 .. old_len - end_index], document.mem[end_index..old_len]);
-            } else {
-                std.mem.copyBackwards(u8, document.mem[start_index + change_text.len ..][0 .. old_len - end_index], document.mem[end_index..old_len]);
-            }
-            // Finally, we copy the changes over.
-            std.mem.copy(u8, document.mem[start_index..][0..change_text.len], change_text);
-
-            // Reset the text substring.
-            document.mem[new_len] = 0;
-            document.text = document.mem[0..new_len :0];
-        } else {
-            const change_text = change.Object.get("text").?.String;
-            const old_len = document.text.len;
-
-            if (change_text.len >= document.mem.len) {
-                // Like above.
-                const realloc_len = std.math.max(2 * old_len, change_text.len + 1);
-                document.mem = try self.allocator.realloc(document.mem, realloc_len);
-            }
-
-            std.mem.copy(u8, document.mem[0..change_text.len], change_text);
-            document.mem[change_text.len] = 0;
-            document.text = document.mem[0..change_text.len :0];
+pub fn applyChanges(
+    self: *DocumentStore,
+    handle: *Handle,
+    content_changes: []const requests.TextDocumentContentChangeEvent,
+    encoding: offsets.Encoding,
+) !void {
+    var last_full_text_change: ?usize = null;
+    var i: usize = content_changes.len;
+    while (i > 0) {
+        i -= 1;
+        if (content_changes[i].range == null) {
+            last_full_text_change = i;
         }
     }
+
+    var text_array = std.ArrayListUnmanaged(u8){};
+    errdefer text_array.deinit(self.allocator);
+
+    try text_array.appendSlice(self.allocator, if (last_full_text_change) |index| content_changes[index].text else handle.text);
+
+    // don't even bother applying changes before a full text change
+    const changes = content_changes[if (last_full_text_change) |index| index + 1 else 0..];
+
+    for (changes) |item| {
+        const range = item.range.?; // every element is guaranteed to have `range` set
+        const text = item.text;
+
+        const loc = offsets.rangeToLoc(text_array.items, range, encoding);
+        try text_array.replaceRange(self.allocator, loc.start, loc.end - loc.start, text);
+    }
+
+    const new_text = try text_array.toOwnedSliceSentinel(self.allocator, 0);
+    self.allocator.free(handle.text);
+    handle.text = new_text;
 
     try self.refreshDocument(handle);
 }
@@ -930,7 +1004,7 @@ pub fn uriFromImportStr(self: *DocumentStore, allocator: std.mem.Allocator, hand
         }
         return null;
     } else {
-        const base = handle.uri();
+        const base = handle.uri;
         var base_len = base.len;
         while (base[base_len - 1] != '/' and base_len > 0) {
             base_len -= 1;
@@ -996,7 +1070,12 @@ pub fn resolveImport(self: *DocumentStore, handle: *Handle, import_str: []const 
 pub fn resolveCImport(self: *DocumentStore, handle: *Handle, node: Ast.Node.Index) !?*Handle {
     const uri = blk: {
         for (handle.cimports) |item| {
-            if (item.node == node) break :blk item.uri;
+            if (item.node != node) continue;
+
+            switch (item.result) {
+                .success => |uri| break :blk uri,
+                .failure => return null,
+            }
         }
         return null;
     };
@@ -1074,13 +1153,13 @@ pub fn deinit(self: *DocumentStore) void {
     while (entry_iterator.next()) |entry| {
         entry.value_ptr.*.document_scope.deinit(self.allocator);
         entry.value_ptr.*.tree.deinit(self.allocator);
-        self.allocator.free(entry.value_ptr.*.document.mem);
+        self.allocator.free(entry.value_ptr.*.text);
         for (entry.value_ptr.*.import_uris) |uri| {
             self.allocator.free(uri);
         }
         self.allocator.free(entry.value_ptr.*.import_uris);
-        for (entry.value_ptr.*.cimports) |cimport| {
-            self.allocator.free(cimport.uri);
+        for (entry.value_ptr.*.cimports) |*cimport| {
+            cimport.result.deinit(self.allocator);
         }
         self.allocator.free(entry.value_ptr.*.cimports);
         entry.value_ptr.*.imports_used.deinit(self.allocator);

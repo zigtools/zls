@@ -1,9 +1,11 @@
 const std = @import("std");
+const zig_builtin = @import("builtin");
 const builtin = @import("builtin");
 const Config = @import("Config.zig");
 const ast = @import("ast.zig");
 const Ast = std.zig.Ast;
 const URI = @import("uri.zig");
+const log = std.log.scoped(.translate_c);
 
 /// converts a `@cInclude` node into an equivalent c header file
 /// which can then be handed over to `zig translate-c`
@@ -40,6 +42,20 @@ pub fn convertCInclude(allocator: std.mem.Allocator, tree: Ast, node: Ast.Node.I
     return output.toOwnedSlice(allocator);
 }
 
+/// HACK self-hosted has not implemented async yet
+fn callConvertCIncludeInternal(allocator: std.mem.Allocator, args: anytype) error{ OutOfMemory, Unsupported }!void {
+    if (zig_builtin.zig_backend == .other or zig_builtin.zig_backend == .stage1) {
+        const FrameSize = @sizeOf(@Frame(convertCIncludeInternal));
+        var child_frame = try allocator.alignedAlloc(u8, std.Target.stack_align, FrameSize);
+        defer allocator.free(child_frame);
+
+        return await @asyncCall(child_frame, {}, convertCIncludeInternal, args);
+    } else {
+        // TODO find a non recursive solution
+        return @call(.{}, convertCIncludeInternal, args);
+    }
+}
+
 fn convertCIncludeInternal(
     allocator: std.mem.Allocator,
     stack_allocator: std.mem.Allocator,
@@ -54,12 +70,8 @@ fn convertCIncludeInternal(
 
     var buffer: [2]Ast.Node.Index = undefined;
     if (ast.isBlock(tree, node)) {
-        const FrameSize = @sizeOf(@Frame(convertCIncludeInternal));
-        var child_frame = try stack_allocator.alignedAlloc(u8, std.Target.stack_align, FrameSize);
-        defer stack_allocator.free(child_frame);
-
         for (ast.blockStatements(tree, node, &buffer).?) |statement| {
-            try await @asyncCall(child_frame, {}, convertCIncludeInternal, .{ allocator, stack_allocator, tree, statement, output });
+            try callConvertCIncludeInternal(stack_allocator, .{ allocator, stack_allocator, tree, statement, output });
         }
     } else if (ast.builtinCallParams(tree, node, &buffer)) |params| {
         if (params.len < 1) return;
@@ -92,24 +104,47 @@ fn convertCIncludeInternal(
     }
 }
 
+pub const Result = union(enum) {
+    // uri to the generated zig file
+    success: []const u8,
+    // zig translate-c failed with the given stderr content
+    failure: []const u8,
+
+    pub fn deinit(self: *Result, allocator: std.mem.Allocator) void {
+        switch (self.*) {
+            .success => |path| allocator.free(path),
+            .failure => |stderr| allocator.free(stderr),
+        }
+    }
+
+    pub fn dupe(self: Result, allocator: std.mem.Allocator) !Result {
+        return switch (self) {
+            .success => |path| .{ .success = try allocator.dupe(u8, path) },
+            .failure => |stderr| .{ .failure = try allocator.dupe(u8, stderr) },
+        };
+    }
+};
+
 /// takes a c header file and returns the result from calling `zig translate-c`
-/// returns the file path to the generated zig file
+/// returns a URI to the generated zig file on success or the content of stderr on failure
+/// null indicates a failure which is automatically logged
 /// Caller owns returned memory.
-pub fn translate(allocator: std.mem.Allocator, config: Config, include_dirs: []const []const u8, source: []const u8) error{OutOfMemory}!?[]const u8 {
+pub fn translate(allocator: std.mem.Allocator, config: Config, include_dirs: []const []const u8, source: []const u8) error{OutOfMemory}!?Result {
     const file_path = try std.fs.path.join(allocator, &[_][]const u8{ config.global_cache_path.?, "cimport.h" });
     defer allocator.free(file_path);
 
     var file = std.fs.createFileAbsolute(file_path, .{}) catch |err| {
-        std.log.warn("failed to create file '{s}': {}", .{ file_path, err });
+        log.warn("failed to create file '{s}': {}", .{ file_path, err });
         return null;
     };
     defer file.close();
     defer std.fs.deleteFileAbsolute(file_path) catch |err| {
-        std.log.warn("failed to delete file '{s}': {}", .{ file_path, err });
+        log.warn("failed to delete file '{s}': {}", .{ file_path, err });
     };
 
     _ = file.write(source) catch |err| {
-        std.log.warn("failed to write to '{s}': {}", .{ file_path, err });
+        log.warn("failed to write to '{s}': {}", .{ file_path, err });
+        return null;
     };
 
     const base_include_dirs = blk: {
@@ -134,6 +169,7 @@ pub fn translate(allocator: std.mem.Allocator, config: Config, include_dirs: []c
         config.zig_lib_path.?,
         "--cache-dir",
         config.global_cache_path.?,
+        "-lc",
     };
 
     const argc = base_args.len + 2 * (include_dirs.len + if (base_include_dirs) |dirs| dirs.len else 0) + 1;
@@ -160,7 +196,7 @@ pub fn translate(allocator: std.mem.Allocator, config: Config, include_dirs: []c
         .allocator = allocator,
         .argv = argv.items,
     }) catch |err| {
-        std.log.err("Failed to execute zig translate-c process, error: {}", .{err});
+        log.err("Failed to execute zig translate-c process, error: {}", .{err});
         return null;
     };
 
@@ -169,14 +205,12 @@ pub fn translate(allocator: std.mem.Allocator, config: Config, include_dirs: []c
 
     return switch (result.term) {
         .Exited => |code| if (code == 0) {
-            return try allocator.dupe(u8, std.mem.sliceTo(result.stdout, '\n'));
+            return Result{ .success = try URI.fromPath(allocator, std.mem.sliceTo(result.stdout, '\n')) };
         } else {
-            // TODO convert failure to `textDocument/publishDiagnostics`
-            std.log.err("zig translate-c process failed, code: {}, stderr: '{s}'", .{ code, result.stderr });
-            return null;
+            return Result{ .failure = try allocator.dupe(u8, std.mem.sliceTo(result.stderr, '\n')) };
         },
         else => {
-            std.log.err("zig translate-c process terminated '{}'", .{result.term});
+            log.err("zig translate-c process terminated '{}'", .{result.term});
             return null;
         },
     };

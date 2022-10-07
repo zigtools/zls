@@ -18,6 +18,8 @@ Zig Language Server, or `zls`, is a language server for Zig. The Zig wiki states
     - [Build Options](#build-options)
     - [Updating Data Files](#updating-data-files)
   - [Configuration Options](#configuration-options)
+  - [Per-build Configuration Options](#per-build-configuration-options)
+    - [`BuildOption`](#buildoption)
 - [Features](#features)
   - [VS Code](#vs-code)
   - [Sublime Text](#sublime-text)
@@ -32,6 +34,7 @@ Zig Language Server, or `zls`, is a language server for Zig. The Zig wiki states
   - [Emacs](#emacs)
   - [Doom Emacs](#doom-emacs)
   - [Spacemacs](#spacemacs)
+  - [Helix](#helix)
 - [Related Projects](#related-projects)
 - [License](#license)
 
@@ -103,6 +106,7 @@ The following options are currently available.
 | --- | --- | --- | --- |
 | `enable_snippets` | `bool` | `false` | Enables snippet completions when the client also supports them. |
 | `enable_ast_check_diagnostics` | `bool` | `true`| Whether to enable ast-check diagnostics |
+| `enable_autofix` | `bool` | `false`| Whether to automatically fix errors on save. Currently supports adding and removing discards. |
 | `enable_import_embedfile_argument_completions` | `bool` | `false` | Whether to enable import/embedFile argument completions |
 | `zig_lib_path` | `?[]const u8` | `null` | zig library path, e.g. `/path/to/zig/lib/zig`, used to analyze std library imports. |
 | `zig_exe_path` | `?[]const u8` | `null` | zig executable path, e.g. `/path/to/zig/zig`, used to run the custom build runner. If `null`, zig is looked up in `PATH`. Will be used to infer the zig standard library path if none is provided. |
@@ -111,10 +115,37 @@ The following options are currently available.
 | `global_cache_path` | `?[]const u8` | `null` | Path to a directroy that will be used as zig's cache. `null` is equivalent to `${KnownFloders.Cache}/zls` |
 | `enable_semantic_tokens` | `bool` | `true` | Enables semantic token support when the client also supports it. |
 | `enable_inlay_hints` | `bool` | `false` | Enables inlay hint support when the client also supports it. |
+| `inlay_hints_show_builtin` | `bool` | `true` | Enable inlay hints for builtin functions |
+| `inlay_hints_exclude_single_argument` | `bool` | `true`| Don't show inlay hints for single argument calls |
+| `inlay_hints_hide_redundant_param_names` | `bool` | `false`| Hides inlay hints when parameter name matches the identifier (e.g. foo: foo) |
+| `inlay_hints_hide_redundant_param_names_last_token` | `bool` | `false`| Hides inlay hints when parameter name matches the last token of a parameter node (e.g. foo: bar.foo, foo: &foo) |
 | `operator_completions` | `bool` | `true` | Enables `*` and `?` operators in completion lists. |
 |`include_at_in_builtins`|`bool`|`false`| Whether the @ sign should be part of the completion of builtins.
 |`max_detail_length`|`usize`|`1024 * 1024`| The detail field of completions is truncated to be no longer than this (in bytes).
 | `skip_std_references` | `bool` | `false` | When true, skips searching for references in std. Improves lookup speed for functions in user's code. Renaming and go-to-definition will continue to work as is.
+| `highlight_global_var_declarations` | `bool` | `false` | Whether to highlight global var declarations.
+
+### Per-build Configuration Options
+
+The following options can be set on a per-project basis by placing `zls.build.json` in the project root directory next to `build.zig`.
+
+| Option | Type | Default value | What it Does |
+| --- | --- | --- | --- |
+| `relative_builtin_path` | `?[]const u8` | `null` | If present, this path is used to resolve `@import("builtin")` |
+| `build_options` | `?[]BuildOption` | `null` | If present, this contains a list of user options to pass to the build. This is useful when options are used to conditionally add packages in `build.zig`. |
+
+#### `BuildOption`
+
+`BuildOption` is defined as follows:
+
+```zig
+const BuildOption = struct {
+    name: []const u8,
+    value: ?[]const u8 = null,
+};
+```
+
+When `value` is present, the option will be passed the same as in `zig build -Dname=value`. When `value` is `null`, the option will be passed as a flag instead as in `zig build -Dflag`.
 
 ## Features
 

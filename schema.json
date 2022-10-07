@@ -14,6 +14,11 @@
             "type": "boolean",
             "default": "true"
         },
+        "enable_autofix": {
+            "description": "Whether to automatically fix errors on save. Currently supports adding and removing discards.",
+            "type": "boolean",
+            "default": "false"
+        },
         "enable_import_embedfile_argument_completions": {
             "description": "Whether to enable import/embedFile argument completions",
             "type": "boolean",
@@ -46,19 +51,29 @@
             "default": "true"
         },
         "enable_inlay_hints": {
-            "description": "Enable inlay hints for builtin functions",
+            "description": "Enables inlay hint support when the client also supports it",
             "type": "boolean",
             "default": "false"
         },
         "inlay_hints_show_builtin": {
-            "description": "Don't show inlay hints for single argument calls",
+            "description": "Enable inlay hints for builtin functions",
             "type": "boolean",
             "default": "true"
         },
         "inlay_hints_exclude_single_argument": {
-            "description": "Enables inlay hint support when the client also supports it",
+            "description": "Don't show inlay hints for single argument calls",
             "type": "boolean",
             "default": "true"
+        },
+        "inlay_hints_hide_redundant_param_names": {
+            "description": "Hides inlay hints when parameter name matches the identifier (e.g. foo: foo)",
+            "type": "boolean",
+            "default": "false"
+        },
+        "inlay_hints_hide_redundant_param_names_last_token": {
+            "description": "Hides inlay hints when parameter name matches the last token of a parameter node (e.g. foo: bar.foo, foo: &foo)",
+            "type": "boolean",
+            "default": "false"
         },
         "operator_completions": {
             "description": "Enables `*` and `?` operators in completion lists",
@@ -80,8 +95,8 @@
             "type": "boolean",
             "default": "false"
         },
-        "highlight_global_variables": {
-            "description": "Highlight global variables",
+        "highlight_global_var_declarations": {
+            "description": "Whether to highlight global var declarations",
             "type": "boolean",
             "default": "false"
         }

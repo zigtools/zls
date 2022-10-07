@@ -1,10 +1,13 @@
 const std = @import("std");
 const zls = @import("zls");
+const builtin = @import("builtin");
 
-const helper = @import("helper");
-const Context = @import("context").Context;
+const helper = @import("../helper.zig");
+const Context = @import("../context.zig").Context;
+const ErrorBuilder = @import("../ErrorBuilder.zig");
 
 const types = zls.types;
+const offsets = zls.offsets;
 const requests = zls.requests;
 
 const allocator: std.mem.Allocator = std.testing.allocator;
@@ -65,43 +68,23 @@ test "inlayhints - builtin call" {
 }
 
 fn testInlayHints(source: []const u8) !void {
-    const phr = try helper.collectClearPlaceholders(allocator, source);
+    var phr = try helper.collectClearPlaceholders(allocator, source);
     defer phr.deinit(allocator);
 
     var ctx = try Context.init();
     defer ctx.deinit();
 
-    const open_document = requests.OpenDocument{
-        .params = .{
-            .textDocument = .{
-                .uri = "file:///test.zig",
-                // .languageId = "zig",
-                // .version = 420,
-                .text = phr.source,
-            },
-        },
+    const test_uri: []const u8 = switch (builtin.os.tag) {
+        .windows => "file:///C:\\test.zig",
+        else => "file:///test.zig",
     };
 
-    const did_open_method = try std.json.stringifyAlloc(allocator, open_document.params, .{});
-    defer allocator.free(did_open_method);
-
-    try ctx.request("textDocument/didOpen", did_open_method, null);
+    try ctx.requestDidOpen(test_uri, phr.new_source);
 
     const range = types.Range{
         .start = types.Position{ .line = 0, .character = 0 },
-        .end = sourceIndexPosition(phr.source, phr.source.len),
+        .end = offsets.indexToPosition(phr.new_source, phr.new_source.len, .utf16),
     };
-
-    const method = try std.json.stringifyAlloc(allocator, .{
-        .textDocument = .{
-            .uri = "file:///test.zig",
-        },
-        .range = range,
-    }, .{});
-    defer allocator.free(method);
-
-    const response_bytes = try ctx.requestAlloc("textDocument/inlayHint", method);
-    defer allocator.free(response_bytes);
 
     const InlayHint = struct {
         position: types.Position,
@@ -109,51 +92,51 @@ fn testInlayHints(source: []const u8) !void {
         kind: types.InlayHintKind,
     };
 
-    const Response = struct {
-        jsonrpc: []const u8,
-        id: types.RequestId,
-        result: []InlayHint,
+    const request = requests.InlayHint{
+        .params = .{
+            .textDocument = .{ .uri = test_uri },
+            .range = range,
+        },
     };
 
-    const parse_options = std.json.ParseOptions{
-        .allocator = allocator,
-        .ignore_unknown_fields = true,
+    const response = try ctx.requestGetResponse(?[]InlayHint, "textDocument/inlayHint", request);
+    defer response.deinit();
+
+    const hints: []InlayHint = response.result orelse {
+        std.debug.print("Server returned `null` as the result\n", .{});
+        return error.InvalidResponse;
     };
-    var token_stream = std.json.TokenStream.init(response_bytes);
-    var response = try std.json.parse(Response, &token_stream, parse_options);
-    defer std.json.parseFree(Response, response, parse_options);
 
-    const hints = response.result;
+    var error_builder = ErrorBuilder.init(allocator, phr.new_source);
+    defer error_builder.deinit();
+    errdefer error_builder.writeDebug();
 
-    try std.testing.expectEqual(phr.placeholder_locations.len, hints.len);
+    var i: usize = 0;
+    outer: while (i < phr.locations.len) : (i += 1) {
+        const old_loc = phr.locations.items(.old)[i];
+        const new_loc = phr.locations.items(.new)[i];
 
-    outer: for (phr.placeholder_locations) |loc, i| {
-        const name = phr.placeholders[i].placeholderSlice(source);
+        const expected_name = offsets.locToSlice(source, old_loc);
+        const expected_label = expected_name[1 .. expected_name.len - 1]; // convert <name> to name
 
-        const position = sourceIndexPosition(phr.source, loc);
+        const position = offsets.indexToPosition(phr.new_source, new_loc.start, ctx.server.offset_encoding);
 
         for (hints) |hint| {
             if (position.line != hint.position.line or position.character != hint.position.character) continue;
 
-            try std.testing.expect(hint.label.len != 0);
-            const trimmedLabel = hint.label[0 .. hint.label.len - 1]; // exclude :
-            try std.testing.expectEqualStrings(name, trimmedLabel);
-            try std.testing.expectEqual(types.InlayHintKind.Parameter, hint.kind);
+            const actual_label = hint.label[0 .. hint.label.len - 1]; // exclude :
+
+            if (!std.mem.eql(u8, expected_label, actual_label)) {
+                try error_builder.msgAtLoc("expected label `{s}` here but got `{s}`!", new_loc, .err, .{ expected_label, actual_label });
+            }
+            if (hint.kind != types.InlayHintKind.Parameter) {
+                try error_builder.msgAtLoc("hint kind should be `{s}` but got `{s}`!", new_loc, .err, .{ @tagName(types.InlayHintKind.Parameter), @tagName(hint.kind) });
+            }
 
             continue :outer;
         }
-        std.debug.print("Placeholder '{s}' at {}:{} (line:colon) not found!", .{ name, position.line, position.character });
-        return error.PlaceholderNotFound;
+        try error_builder.msgAtLoc("expected hint `{s}` here", new_loc, .err, .{expected_label});
     }
-}
 
-fn sourceIndexPosition(source: []const u8, index: usize) types.Position {
-    const line = std.mem.count(u8, source[0..index], &.{'\n'});
-    const last_line_index = if (std.mem.lastIndexOfScalar(u8, source[0..index], '\n')) |idx| idx + 1 else 0;
-    const last_line_character = index - last_line_index;
-
-    return types.Position{
-        .line = @intCast(i64, line),
-        .character = @intCast(i64, last_line_character),
-    };
+    if (error_builder.hasMessages()) return error.InvalidResponse;
 }

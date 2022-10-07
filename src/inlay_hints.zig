@@ -1,7 +1,9 @@
 const std = @import("std");
+const zig_builtin = @import("builtin");
 const DocumentStore = @import("DocumentStore.zig");
 const analysis = @import("analysis.zig");
 const types = @import("types.zig");
+const offsets = @import("offsets.zig");
 const Ast = std.zig.Ast;
 const log = std.log.scoped(.inlay_hint);
 const ast = @import("ast.zig");
@@ -35,16 +37,7 @@ const Builder = struct {
     handle: *DocumentStore.Handle,
     hints: std.ArrayListUnmanaged(types.InlayHint),
     hover_kind: types.MarkupContent.Kind,
-
-    fn init(allocator: std.mem.Allocator, config: *const Config, handle: *DocumentStore.Handle, hover_kind: types.MarkupContent.Kind) Builder {
-        return Builder{
-            .allocator = allocator,
-            .config = config,
-            .handle = handle,
-            .hints = std.ArrayListUnmanaged(types.InlayHint){},
-            .hover_kind = hover_kind,
-        };
-    }
+    encoding: offsets.Encoding,
 
     fn deinit(self: *Builder) void {
         for (self.hints.items) |hint| {
@@ -53,7 +46,7 @@ const Builder = struct {
         self.hints.deinit(self.allocator);
     }
 
-    fn appendParameterHint(self: *Builder, position: Ast.Location, label: []const u8, tooltip: []const u8, tooltip_noalias: bool, tooltip_comptime: bool) !void {
+    fn appendParameterHint(self: *Builder, position: types.Position, label: []const u8, tooltip: []const u8, tooltip_noalias: bool, tooltip_comptime: bool) !void {
         // TODO allocation could be avoided by extending InlayHint.jsonStringify
         // adding tooltip_noalias & tooltip_comptime to InlayHint should be enough
         const tooltip_text = blk: {
@@ -68,10 +61,7 @@ const Builder = struct {
         };
 
         try self.hints.append(self.allocator, .{
-            .position = .{
-                .line = @intCast(i64, position.line),
-                .character = @intCast(i64, position.column),
-            },
+            .position = position,
             .label = label,
             .kind = types.InlayHintKind.Parameter,
             .tooltip = .{
@@ -110,8 +100,24 @@ fn writeCallHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *Doc
                 }
 
                 while (ast.nextFnParam(&it)) |param| : (i += 1) {
-                    if (param.name_token == null) continue;
                     if (i >= call.ast.params.len) break;
+                    const name_token = param.name_token orelse continue;
+                    const name = decl_tree.tokenSlice(name_token);
+
+                    if (builder.config.inlay_hints_hide_redundant_param_names or builder.config.inlay_hints_hide_redundant_param_names_last_token) {
+                        const last_param_token = tree.lastToken(call.ast.params[i]);
+                        const param_name = tree.tokenSlice(last_param_token);
+
+                        if (std.mem.eql(u8, param_name, name)) {
+                            if (tree.firstToken(call.ast.params[i]) == last_param_token) {
+                                if (builder.config.inlay_hints_hide_redundant_param_names)
+                                    continue;
+                            } else {
+                                if (builder.config.inlay_hints_hide_redundant_param_names_last_token)
+                                    continue;
+                            }
+                        }
+                    }
 
                     const token_tags = decl_tree.tokens.items(.tag);
 
@@ -121,11 +127,11 @@ fn writeCallHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *Doc
                     const tooltip = if (param.anytype_ellipsis3) |token|
                         if (token_tags[token] == .keyword_anytype) "anytype" else ""
                     else
-                        decl_tree.getNodeSource(param.type_expr);
+                        offsets.nodeToSlice(decl_tree, param.type_expr);
 
                     try builder.appendParameterHint(
-                        tree.tokenLocation(0, tree.firstToken(call.ast.params[i])),
-                        decl_tree.tokenSlice(param.name_token.?),
+                        offsets.tokenToPosition(tree, tree.firstToken(call.ast.params[i]), builder.encoding),
+                        name,
                         tooltip,
                         no_alias,
                         comp_time,
@@ -165,7 +171,7 @@ fn writeBuiltinHint(builder: *Builder, parameters: []const Ast.Node.Index, argum
         }
 
         try builder.appendParameterHint(
-            tree.tokenLocation(0, tree.firstToken(parameters[i])),
+            offsets.tokenToPosition(tree, tree.firstToken(parameters[i]), builder.encoding),
             label orelse "",
             std.mem.trim(u8, type_expr, " \t\n"),
             no_alias,
@@ -203,24 +209,15 @@ fn writeCallNodeHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store: 
             const rhsToken = node_data[call.ast.fn_expr].rhs;
             std.debug.assert(token_tags[rhsToken] == .identifier);
 
-            const lhsLocation = tree.tokenLocation(0, lhsToken);
-            const rhsLocation = tree.tokenLocation(0, rhsToken);
+            const start = offsets.tokenToIndex(tree, lhsToken);
+            const rhs_loc = offsets.tokenToLoc(tree, rhsToken);
 
-            const absolute_index = rhsLocation.line_start + rhsLocation.column;
-
-            const range = .{
-                .start = lhsLocation.line_start + lhsLocation.column,
-                .end = rhsLocation.line_start + rhsLocation.column + tree.tokenSlice(rhsToken).len,
-            };
-
-            var held_range = handle.document.borrowNullTerminatedSlice(range.start, range.end);
-            var tokenizer = std.zig.Tokenizer.init(held_range.data());
+            var held_range = try arena.allocator().dupeZ(u8, handle.text[start..rhs_loc.end]);
+            var tokenizer = std.zig.Tokenizer.init(held_range);
 
             // note: we have the ast node, traversing it would probably yield better results
             // than trying to re-tokenize and re-parse it
-            errdefer held_range.release();
-            if (try analysis.getFieldAccessType(store, arena, handle, absolute_index, &tokenizer)) |result| {
-                held_range.release();
+            if (try analysis.getFieldAccessType(store, arena, handle, rhs_loc.end, &tokenizer)) |result| {
                 const container_handle = result.unwrapped orelse result.original;
                 switch (container_handle.type.data) {
                     .other => |container_handle_node| {
@@ -244,6 +241,20 @@ fn writeCallNodeHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store: 
     }
 }
 
+/// HACK self-hosted has not implemented async yet
+fn callWriteNodeInlayHint(allocator: std.mem.Allocator, args: anytype) error{OutOfMemory}!void {
+    if (zig_builtin.zig_backend == .other or zig_builtin.zig_backend == .stage1) {
+        const FrameSize = @sizeOf(@Frame(writeNodeInlayHint));
+        var child_frame = try allocator.alignedAlloc(u8, std.Target.stack_align, FrameSize);
+        defer allocator.free(child_frame);
+
+        return await @asyncCall(child_frame, {}, writeNodeInlayHint, args);
+    } else {
+        // TODO find a non recursive solution
+        return @call(.{}, writeNodeInlayHint, args);
+    }
+}
+
 /// iterates over the ast and writes parameter hints into `builder.hints` for every function call and builtin call
 /// nodes outside the given range are excluded
 fn writeNodeInlayHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *DocumentStore, maybe_node: ?Ast.Node.Index, range: types.Range) error{OutOfMemory}!void {
@@ -257,9 +268,7 @@ fn writeNodeInlayHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store:
 
     if (node == 0 or node > node_data.len) return;
 
-    const FrameSize = @sizeOf(@Frame(writeNodeInlayHint));
-    var child_frame = try arena.child_allocator.alignedAlloc(u8, std.Target.stack_align, FrameSize);
-    defer arena.child_allocator.free(child_frame);
+    var allocator = arena.allocator();
 
     const tag = node_tags[node];
 
@@ -285,7 +294,7 @@ fn writeNodeInlayHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store:
                     if (!isNodeInRange(tree, param, range)) continue;
                 }
 
-                try await @asyncCall(child_frame, {}, writeNodeInlayHint, .{ builder, arena, store, param, range });
+                try callWriteNodeInlayHint(allocator, .{ builder, arena, store, param, range });
             }
         },
 
@@ -316,7 +325,7 @@ fn writeNodeInlayHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store:
                     if (!isNodeInRange(tree, param, range)) continue;
                 }
 
-                try await @asyncCall(child_frame, {}, writeNodeInlayHint, .{ builder, arena, store, param, range });
+                try callWriteNodeInlayHint(allocator, .{ builder, arena, store, param, range });
             }
         },
 
@@ -338,7 +347,7 @@ fn writeNodeInlayHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store:
         .array_type_sentinel => {
             const array_type = tree.arrayTypeSentinel(node);
 
-            try await @asyncCall(child_frame, {}, writeNodeInlayHint, .{ builder, arena, store, array_type.ast.sentinel, range });
+            try callWriteNodeInlayHint(allocator, .{ builder, arena, store, array_type.ast.sentinel, range });
         },
 
         .ptr_type_aligned,
@@ -349,19 +358,19 @@ fn writeNodeInlayHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store:
             const ptr_type: Ast.full.PtrType = ast.ptrType(tree, node).?;
 
             if (ptr_type.ast.sentinel != 0) {
-                return try await @asyncCall(child_frame, {}, writeNodeInlayHint, .{ builder, arena, store, ptr_type.ast.sentinel, range });
+                return try callWriteNodeInlayHint(allocator, .{ builder, arena, store, ptr_type.ast.sentinel, range });
             }
 
             if (ptr_type.ast.align_node != 0) {
-                try await @asyncCall(child_frame, {}, writeNodeInlayHint, .{ builder, arena, store, ptr_type.ast.align_node, range });
+                try callWriteNodeInlayHint(allocator, .{ builder, arena, store, ptr_type.ast.align_node, range });
 
                 if (ptr_type.ast.bit_range_start != 0) {
-                    try await @asyncCall(child_frame, {}, writeNodeInlayHint, .{ builder, arena, store, ptr_type.ast.bit_range_start, range });
-                    try await @asyncCall(child_frame, {}, writeNodeInlayHint, .{ builder, arena, store, ptr_type.ast.bit_range_end, range });
+                    try callWriteNodeInlayHint(allocator, .{ builder, arena, store, ptr_type.ast.bit_range_start, range });
+                    try callWriteNodeInlayHint(allocator, .{ builder, arena, store, ptr_type.ast.bit_range_end, range });
                 }
             }
 
-            try await @asyncCall(child_frame, {}, writeNodeInlayHint, .{ builder, arena, store, ptr_type.ast.child_type, range });
+            try callWriteNodeInlayHint(allocator, .{ builder, arena, store, ptr_type.ast.child_type, range });
         },
 
         .@"usingnamespace",
@@ -381,7 +390,7 @@ fn writeNodeInlayHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store:
         .grouped_expression,
         .@"comptime",
         .@"nosuspend",
-        => try await @asyncCall(child_frame, {}, writeNodeInlayHint, .{ builder, arena, store, node_data[node].lhs, range }),
+        => try callWriteNodeInlayHint(allocator, .{ builder, arena, store, node_data[node].lhs, range }),
 
         .test_decl,
         .global_var_decl,
@@ -391,7 +400,7 @@ fn writeNodeInlayHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store:
         .@"errdefer",
         .@"defer",
         .@"break",
-        => try await @asyncCall(child_frame, {}, writeNodeInlayHint, .{ builder, arena, store, node_data[node].rhs, range }),
+        => try callWriteNodeInlayHint(allocator, .{ builder, arena, store, node_data[node].rhs, range }),
 
         .@"catch",
         .equal_equal,
@@ -446,8 +455,8 @@ fn writeNodeInlayHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store:
         .error_value,
         .error_union,
         => {
-            try await @asyncCall(child_frame, {}, writeNodeInlayHint, .{ builder, arena, store, node_data[node].lhs, range });
-            try await @asyncCall(child_frame, {}, writeNodeInlayHint, .{ builder, arena, store, node_data[node].rhs, range });
+            try callWriteNodeInlayHint(allocator, .{ builder, arena, store, node_data[node].lhs, range });
+            try callWriteNodeInlayHint(allocator, .{ builder, arena, store, node_data[node].rhs, range });
         },
 
         .slice_open,
@@ -461,10 +470,10 @@ fn writeNodeInlayHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store:
                 else => unreachable,
             };
 
-            try await @asyncCall(child_frame, {}, writeNodeInlayHint, .{ builder, arena, store, slice.ast.sliced, range });
-            try await @asyncCall(child_frame, {}, writeNodeInlayHint, .{ builder, arena, store, slice.ast.start, range });
-            try await @asyncCall(child_frame, {}, writeNodeInlayHint, .{ builder, arena, store, slice.ast.end, range });
-            try await @asyncCall(child_frame, {}, writeNodeInlayHint, .{ builder, arena, store, slice.ast.sentinel, range });
+            try callWriteNodeInlayHint(allocator, .{ builder, arena, store, slice.ast.sliced, range });
+            try callWriteNodeInlayHint(allocator, .{ builder, arena, store, slice.ast.start, range });
+            try callWriteNodeInlayHint(allocator, .{ builder, arena, store, slice.ast.end, range });
+            try callWriteNodeInlayHint(allocator, .{ builder, arena, store, slice.ast.sentinel, range });
         },
 
         .array_init_one,
@@ -485,9 +494,9 @@ fn writeNodeInlayHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store:
                 else => unreachable,
             };
 
-            try await @asyncCall(child_frame, {}, writeNodeInlayHint, .{ builder, arena, store, array_init.ast.type_expr, range });
+            try callWriteNodeInlayHint(allocator, .{ builder, arena, store, array_init.ast.type_expr, range });
             for (array_init.ast.elements) |elem| {
-                try await @asyncCall(child_frame, {}, writeNodeInlayHint, .{ builder, arena, store, elem, range });
+                try callWriteNodeInlayHint(allocator, .{ builder, arena, store, elem, range });
             }
         },
 
@@ -509,21 +518,21 @@ fn writeNodeInlayHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store:
                 else => unreachable,
             };
 
-            try await @asyncCall(child_frame, {}, writeNodeInlayHint, .{ builder, arena, store, struct_init.ast.type_expr, range });
+            try callWriteNodeInlayHint(allocator, .{ builder, arena, store, struct_init.ast.type_expr, range });
 
             for (struct_init.ast.fields) |field_init| {
                 if (struct_init.ast.fields.len > inlay_hints_max_inline_children) {
                     if (!isNodeInRange(tree, field_init, range)) continue;
                 }
 
-                try await @asyncCall(child_frame, {}, writeNodeInlayHint, .{ builder, arena, store, field_init, range });
+                try callWriteNodeInlayHint(allocator, .{ builder, arena, store, field_init, range });
             }
         },
 
         .@"switch",
         .switch_comma,
         => {
-            try await @asyncCall(child_frame, {}, writeNodeInlayHint, .{ builder, arena, store, node_data[node].lhs, range });
+            try callWriteNodeInlayHint(allocator, .{ builder, arena, store, node_data[node].lhs, range });
 
             const extra = tree.extraData(node_data[node].rhs, Ast.Node.SubRange);
             const cases = tree.extra_data[extra.start..extra.end];
@@ -533,7 +542,7 @@ fn writeNodeInlayHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store:
                     if (!isNodeInRange(tree, case_node, range)) continue;
                 }
 
-                try await @asyncCall(child_frame, {}, writeNodeInlayHint, .{ builder, arena, store, case_node, range });
+                try callWriteNodeInlayHint(allocator, .{ builder, arena, store, case_node, range });
             }
         },
 
@@ -542,7 +551,7 @@ fn writeNodeInlayHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store:
         => {
             const switch_case = if (tag == .switch_case) tree.switchCase(node) else tree.switchCaseOne(node);
 
-            try await @asyncCall(child_frame, {}, writeNodeInlayHint, .{ builder, arena, store, switch_case.ast.target_expr, range });
+            try callWriteNodeInlayHint(allocator, .{ builder, arena, store, switch_case.ast.target_expr, range });
         },
 
         .while_simple,
@@ -553,12 +562,12 @@ fn writeNodeInlayHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store:
         => {
             const while_node = ast.whileAst(tree, node).?;
 
-            try await @asyncCall(child_frame, {}, writeNodeInlayHint, .{ builder, arena, store, while_node.ast.cond_expr, range });
-            try await @asyncCall(child_frame, {}, writeNodeInlayHint, .{ builder, arena, store, while_node.ast.cont_expr, range });
-            try await @asyncCall(child_frame, {}, writeNodeInlayHint, .{ builder, arena, store, while_node.ast.then_expr, range });
+            try callWriteNodeInlayHint(allocator, .{ builder, arena, store, while_node.ast.cond_expr, range });
+            try callWriteNodeInlayHint(allocator, .{ builder, arena, store, while_node.ast.cont_expr, range });
+            try callWriteNodeInlayHint(allocator, .{ builder, arena, store, while_node.ast.then_expr, range });
 
             if (while_node.ast.else_expr != 0) {
-                try await @asyncCall(child_frame, {}, writeNodeInlayHint, .{ builder, arena, store, while_node.ast.else_expr, range });
+                try callWriteNodeInlayHint(allocator, .{ builder, arena, store, while_node.ast.else_expr, range });
             }
         },
 
@@ -566,9 +575,9 @@ fn writeNodeInlayHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store:
         .@"if",
         => {
             const if_node = ast.ifFull(tree, node);
-            try await @asyncCall(child_frame, {}, writeNodeInlayHint, .{ builder, arena, store, if_node.ast.cond_expr, range });
-            try await @asyncCall(child_frame, {}, writeNodeInlayHint, .{ builder, arena, store, if_node.ast.then_expr, range });
-            try await @asyncCall(child_frame, {}, writeNodeInlayHint, .{ builder, arena, store, if_node.ast.else_expr, range });
+            try callWriteNodeInlayHint(allocator, .{ builder, arena, store, if_node.ast.cond_expr, range });
+            try callWriteNodeInlayHint(allocator, .{ builder, arena, store, if_node.ast.then_expr, range });
+            try callWriteNodeInlayHint(allocator, .{ builder, arena, store, if_node.ast.else_expr, range });
         },
 
         .fn_proto_simple,
@@ -582,18 +591,18 @@ fn writeNodeInlayHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store:
 
             var it = fn_proto.iterate(&tree);
             while (ast.nextFnParam(&it)) |param_decl| {
-                try await @asyncCall(child_frame, {}, writeNodeInlayHint, .{ builder, arena, store, param_decl.type_expr, range });
+                try callWriteNodeInlayHint(allocator, .{ builder, arena, store, param_decl.type_expr, range });
             }
 
-            try await @asyncCall(child_frame, {}, writeNodeInlayHint, .{ builder, arena, store, fn_proto.ast.align_expr, range });
-            try await @asyncCall(child_frame, {}, writeNodeInlayHint, .{ builder, arena, store, fn_proto.ast.addrspace_expr, range });
-            try await @asyncCall(child_frame, {}, writeNodeInlayHint, .{ builder, arena, store, fn_proto.ast.section_expr, range });
-            try await @asyncCall(child_frame, {}, writeNodeInlayHint, .{ builder, arena, store, fn_proto.ast.callconv_expr, range });
+            try callWriteNodeInlayHint(allocator, .{ builder, arena, store, fn_proto.ast.align_expr, range });
+            try callWriteNodeInlayHint(allocator, .{ builder, arena, store, fn_proto.ast.addrspace_expr, range });
+            try callWriteNodeInlayHint(allocator, .{ builder, arena, store, fn_proto.ast.section_expr, range });
+            try callWriteNodeInlayHint(allocator, .{ builder, arena, store, fn_proto.ast.callconv_expr, range });
 
-            try await @asyncCall(child_frame, {}, writeNodeInlayHint, .{ builder, arena, store, fn_proto.ast.return_type, range });
+            try callWriteNodeInlayHint(allocator, .{ builder, arena, store, fn_proto.ast.return_type, range });
 
             if (tag == .fn_decl) {
-                try await @asyncCall(child_frame, {}, writeNodeInlayHint, .{ builder, arena, store, node_data[node].rhs, range });
+                try callWriteNodeInlayHint(allocator, .{ builder, arena, store, node_data[node].rhs, range });
             }
         },
 
@@ -613,14 +622,14 @@ fn writeNodeInlayHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store:
             var buffer: [2]Ast.Node.Index = undefined;
             const decl: Ast.full.ContainerDecl = ast.containerDecl(tree, node, &buffer).?;
 
-            try await @asyncCall(child_frame, {}, writeNodeInlayHint, .{ builder, arena, store, decl.ast.arg, range });
+            try callWriteNodeInlayHint(allocator, .{ builder, arena, store, decl.ast.arg, range });
 
             for (decl.ast.members) |child| {
                 if (decl.ast.members.len > inlay_hints_max_inline_children) {
                     if (!isNodeInRange(tree, child, range)) continue;
                 }
 
-                try await @asyncCall(child_frame, {}, writeNodeInlayHint, .{ builder, arena, store, child, range });
+                try callWriteNodeInlayHint(allocator, .{ builder, arena, store, child, range });
             }
         },
 
@@ -630,15 +639,15 @@ fn writeNodeInlayHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store:
         => {
             const container_field = ast.containerField(tree, node).?;
 
-            try await @asyncCall(child_frame, {}, writeNodeInlayHint, .{ builder, arena, store, container_field.ast.value_expr, range });
-            try await @asyncCall(child_frame, {}, writeNodeInlayHint, .{ builder, arena, store, container_field.ast.align_expr, range });
+            try callWriteNodeInlayHint(allocator, .{ builder, arena, store, container_field.ast.value_expr, range });
+            try callWriteNodeInlayHint(allocator, .{ builder, arena, store, container_field.ast.align_expr, range });
         },
 
         .block_two,
         .block_two_semicolon,
         => {
-            try await @asyncCall(child_frame, {}, writeNodeInlayHint, .{ builder, arena, store, node_data[node].lhs, range });
-            try await @asyncCall(child_frame, {}, writeNodeInlayHint, .{ builder, arena, store, node_data[node].rhs, range });
+            try callWriteNodeInlayHint(allocator, .{ builder, arena, store, node_data[node].lhs, range });
+            try callWriteNodeInlayHint(allocator, .{ builder, arena, store, node_data[node].rhs, range });
         },
 
         .block,
@@ -651,7 +660,7 @@ fn writeNodeInlayHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store:
                     if (!isNodeInRange(tree, child, range)) continue;
                 }
 
-                try await @asyncCall(child_frame, {}, writeNodeInlayHint, .{ builder, arena, store, child, range });
+                try callWriteNodeInlayHint(allocator, .{ builder, arena, store, child, range });
             }
         },
 
@@ -666,7 +675,7 @@ fn writeNodeInlayHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store:
                 else => return,
             };
 
-            try await @asyncCall(child_frame, {}, writeNodeInlayHint, .{ builder, arena, store, asm_node.ast.template, range });
+            try callWriteNodeInlayHint(allocator, .{ builder, arena, store, asm_node.ast.template, range });
         },
     }
 }
@@ -676,8 +685,23 @@ fn writeNodeInlayHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store:
 /// only hints in the given range are created
 /// Caller owns returned memory.
 /// `InlayHint.tooltip.value` has to deallocated separately
-pub fn writeRangeInlayHint(arena: *std.heap.ArenaAllocator, config: *const Config, store: *DocumentStore, handle: *DocumentStore.Handle, range: types.Range, hover_kind: types.MarkupContent.Kind) error{OutOfMemory}![]types.InlayHint {
-    var builder = Builder.init(arena.child_allocator, config, handle, hover_kind);
+pub fn writeRangeInlayHint(
+    arena: *std.heap.ArenaAllocator,
+    config: Config,
+    store: *DocumentStore,
+    handle: *DocumentStore.Handle,
+    range: types.Range,
+    hover_kind: types.MarkupContent.Kind,
+    encoding: offsets.Encoding,
+) error{OutOfMemory}![]types.InlayHint {
+    var builder: Builder = .{
+        .allocator = arena.child_allocator,
+        .config = &config,
+        .handle = handle,
+        .hints = .{},
+        .hover_kind = hover_kind,
+        .encoding = encoding,
+    };
     errdefer builder.deinit();
 
     var buf: [2]Ast.Node.Index = undefined;

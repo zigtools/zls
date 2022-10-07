@@ -2,11 +2,11 @@ const std = @import("std");
 const string = []const u8;
 
 // LSP types
-// https://microsoft.github.io/language-server-protocol/specifications/specification-3-16/
+// https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/
 
 pub const Position = struct {
-    line: i64,
-    character: i64,
+    line: u32,
+    character: u32,
 };
 
 pub const Range = struct {
@@ -22,13 +22,7 @@ pub const Location = struct {
 /// Id of a request
 pub const RequestId = union(enum) {
     String: string,
-    Integer: i64,
-    Float: f64,
-};
-
-/// Hover response
-pub const Hover = struct {
-    contents: MarkupContent,
+    Integer: i32,
 };
 
 /// Params of a response (result)
@@ -38,7 +32,7 @@ pub const ResponseParams = union(enum) {
     Location: Location,
     Hover: Hover,
     DocumentSymbols: []DocumentSymbol,
-    SemanticTokensFull: struct { data: []const u32 },
+    SemanticTokensFull: SemanticTokens,
     InlayHint: []InlayHint,
     TextEdits: []TextEdit,
     Locations: []Location,
@@ -47,31 +41,10 @@ pub const ResponseParams = union(enum) {
     ConfigurationParams: ConfigurationParams,
     RegistrationParams: RegistrationParams,
     DocumentHighlight: []DocumentHighlight,
+    CodeAction: []CodeAction,
+    ApplyEdit: ApplyWorkspaceEditParams,
 };
 
-/// JSONRPC notifications
-pub const Notification = struct {
-    pub const Params = union(enum) {
-        LogMessage: struct {
-            type: MessageType,
-            message: string,
-        },
-        PublishDiagnostics: struct {
-            uri: string,
-            diagnostics: []Diagnostic,
-        },
-        ShowMessage: struct {
-            type: MessageType,
-            message: string,
-        },
-    };
-
-    jsonrpc: string = "2.0",
-    method: string,
-    params: Params,
-};
-
-/// JSONRPC response
 pub const Response = struct {
     jsonrpc: string = "2.0",
     id: RequestId,
@@ -83,6 +56,52 @@ pub const Request = struct {
     id: RequestId,
     method: []const u8,
     params: ?ResponseParams,
+};
+
+pub const ResponseError = struct {
+    code: i32,
+    message: string,
+    data: std.json.Value,
+};
+
+pub const ErrorCodes = enum(i32) {
+    // Defined by JSON-RPC
+    ParseError = -32700,
+    InvalidRequest = -32600,
+    MethodNotFound = -32601,
+    InvalidParams = -32602,
+    InternalError = -32603,
+
+    // JSON-RPC reserved error codes
+    ServerNotInitialized = -32002,
+    UnknownErrorCode = -3200,
+
+    // LSP reserved error codes
+    RequestFailed = -32803,
+    ServerCancelled = -32802,
+    ContentModified = -32801,
+    RequestCancelled = -32800,
+};
+
+pub const Notification = struct {
+    jsonrpc: string = "2.0",
+    method: string,
+    params: NotificationParams,
+};
+
+pub const NotificationParams = union(enum) {
+    LogMessage: struct {
+        type: MessageType,
+        message: string,
+    },
+    PublishDiagnostics: struct {
+        uri: string,
+        diagnostics: []Diagnostic,
+    },
+    ShowMessage: struct {
+        type: MessageType,
+        message: string,
+    },
 };
 
 /// Type of a debug message
@@ -115,46 +134,11 @@ pub const DiagnosticRelatedInformation = struct {
 
 pub const Diagnostic = struct {
     range: Range,
-    severity: DiagnosticSeverity,
-    code: string,
-    source: string,
+    severity: ?DiagnosticSeverity,
+    code: ?string,
+    source: ?string,
     message: string,
-    relatedInformation: []const DiagnosticRelatedInformation = &.{},
-};
-
-pub const TextDocument = struct {
-    uri: string,
-    // This is a substring of mem starting at 0
-    text: [:0]const u8,
-    // This holds the memory that we have actually allocated.
-    mem: []u8,
-
-    const Held = struct {
-        document: *const TextDocument,
-        popped: u8,
-        start_index: usize,
-        end_index: usize,
-
-        pub fn data(self: @This()) [:0]const u8 {
-            return self.document.mem[self.start_index..self.end_index :0];
-        }
-
-        pub fn release(self: *@This()) void {
-            self.document.mem[self.end_index] = self.popped;
-        }
-    };
-
-    pub fn borrowNullTerminatedSlice(self: *const @This(), start_idx: usize, end_idx: usize) Held {
-        std.debug.assert(end_idx >= start_idx);
-        const popped_char = self.mem[end_idx];
-        self.mem[end_idx] = 0;
-        return .{
-            .document = self,
-            .popped = popped_char,
-            .start_index = start_idx,
-            .end_index = end_idx,
-        };
-    }
+    relatedInformation: ?[]DiagnosticRelatedInformation = null,
 };
 
 pub const WorkspaceEdit = struct {
@@ -211,6 +195,14 @@ pub const InsertTextFormat = enum(i64) {
     pub fn jsonStringify(value: InsertTextFormat, options: std.json.StringifyOptions, out_stream: anytype) !void {
         try std.json.stringify(@enumToInt(value), options, out_stream);
     }
+};
+
+pub const Hover = struct {
+    contents: MarkupContent,
+};
+
+pub const SemanticTokens = struct {
+    data: []const u32,
 };
 
 pub const CompletionItem = struct {
@@ -372,22 +364,83 @@ pub const InlayHintKind = enum(i64) {
     }
 };
 
+pub const CodeActionKind = enum {
+    Empty,
+    QuickFix,
+    Refactor,
+    RefactorExtract,
+    RefactorInline,
+    RefactorRewrite,
+    Source,
+    SourceOrganizeImports,
+    SourceFixAll,
+
+    pub fn jsonStringify(value: CodeActionKind, options: std.json.StringifyOptions, out_stream: anytype) !void {
+        const name = switch (value) {
+            .Empty => "",
+            .QuickFix => "quickfix",
+            .Refactor => "refactor",
+            .RefactorExtract => "refactor.extract",
+            .RefactorInline => "refactor.inline",
+            .RefactorRewrite => "refactor.rewrite",
+            .Source => "source",
+            .SourceOrganizeImports => "source.organizeImports",
+            .SourceFixAll => "source.fixAll",
+        };
+        try std.json.stringify(name, options, out_stream);
+    }
+};
+
+pub const CodeAction = struct {
+    title: string,
+    kind: CodeActionKind,
+    // diagnostics: []Diagnostic,
+    isPreferred: bool,
+    edit: WorkspaceEdit,
+};
+
+pub const ApplyWorkspaceEditParams = struct {
+    label: string,
+    edit: WorkspaceEdit,
+};
+
+pub const PositionEncodingKind = enum {
+    utf8,
+    utf16,
+    utf32,
+
+    pub fn jsonStringify(value: PositionEncodingKind, options: std.json.StringifyOptions, out_stream: anytype) !void {
+        const str = switch (value) {
+            .utf8 => "utf-8",
+            .utf16 => "utf-16",
+            .utf32 => "utf-32",
+        };
+        try std.json.stringify(str, options, out_stream);
+    }
+};
+
+const TextDocumentSyncKind = enum(u32) {
+    None = 0,
+    Full = 1,
+    Incremental = 2,
+
+    pub fn jsonStringify(value: @This(), options: std.json.StringifyOptions, out_stream: anytype) !void {
+        try std.json.stringify(@enumToInt(value), options, out_stream);
+    }
+};
+
 // Only includes options we set in our initialize result.
 const InitializeResult = struct {
-    offsetEncoding: string,
     capabilities: struct {
+        positionEncoding: PositionEncodingKind,
         signatureHelpProvider: struct {
             triggerCharacters: []const string,
             retriggerCharacters: []const string,
         },
-        textDocumentSync: enum(u32) {
-            None = 0,
-            Full = 1,
-            Incremental = 2,
-
-            pub fn jsonStringify(value: @This(), options: std.json.StringifyOptions, out_stream: anytype) !void {
-                try std.json.stringify(@enumToInt(value), options, out_stream);
-            }
+        textDocumentSync: struct {
+            openClose: bool,
+            change: TextDocumentSyncKind,
+            save: bool,
         },
         renameProvider: bool,
         completionProvider: struct {

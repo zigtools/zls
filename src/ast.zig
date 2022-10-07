@@ -11,7 +11,7 @@ fn fullPtrType(tree: Ast, info: full.PtrType.Components) full.PtrType {
     const token_tags = tree.tokens.items(.tag);
     // TODO: looks like stage1 isn't quite smart enough to handle enum
     // literals in some places here
-    const Size = std.builtin.TypeInfo.Pointer.Size;
+    const Size = std.builtin.Type.Pointer.Size;
     const size: Size = switch (token_tags[info.main_token]) {
         .asterisk,
         .asterisk_asterisk,
@@ -896,6 +896,17 @@ pub fn lastToken(tree: Ast, node: Ast.Node.Index) Ast.TokenIndex {
     };
 }
 
+pub fn paramFirstToken(tree: Ast, param: Ast.full.FnProto.Param) Ast.TokenIndex {
+    return param.first_doc_comment orelse
+        param.comptime_noalias orelse
+        param.name_token orelse
+        tree.firstToken(param.type_expr);
+}
+
+pub fn paramLastToken(tree: Ast, param: Ast.full.FnProto.Param) Ast.TokenIndex {
+    return param.anytype_ellipsis3 orelse tree.lastToken(param.type_expr);
+}
+
 pub fn containerField(tree: Ast, node: Ast.Node.Index) ?Ast.full.ContainerField {
     return switch (tree.nodes.items(.tag)[node]) {
         .container_field => tree.containerField(node),
@@ -1137,7 +1148,7 @@ pub fn nextFnParam(it: *Ast.full.FnProto.Iterator) ?Ast.full.FnProto.Param {
                 .identifier => name_token = tok_i,
                 .doc_comment => first_doc_comment = tok_i,
                 .keyword_comptime, .keyword_noalias => comptime_noalias = tok_i,
-                else => break
+                else => break,
             };
             it.param_i += 1;
             it.tok_i = it.tree.lastToken(param_type) + 1;

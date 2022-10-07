@@ -24,6 +24,8 @@ pub fn fromPath(allocator: std.mem.Allocator, path: []const u8) ![]const u8 {
     const prefix = if (builtin.os.tag == .windows) "file:///" else "file://";
 
     var buf = std.ArrayListUnmanaged(u8){};
+    errdefer buf.deinit(allocator);
+
     try buf.appendSlice(allocator, prefix);
 
     for (path) |char| {
@@ -51,43 +53,37 @@ pub fn fromPath(allocator: std.mem.Allocator, path: []const u8) ![]const u8 {
 
 /// Move along `rel` from `base` with a single allocation.
 /// `base` is a URI of a folder, `rel` is a raw relative path.
-pub fn pathRelative(allocator: std.mem.Allocator, base: []const u8, rel: []const u8) ![]const u8 {
+pub fn pathRelative(allocator: std.mem.Allocator, base: []const u8, rel: []const u8) error{ OutOfMemory, UriBadScheme }![]const u8 {
     const max_size = base.len + rel.len * 3 + 1;
 
-    var result = try allocator.alloc(u8, max_size);
-    errdefer allocator.free(result);
+    var result = try std.ArrayListUnmanaged(u8).initCapacity(allocator, max_size);
+    errdefer result.deinit(allocator);
 
-    std.mem.copy(u8, result, base);
-    var result_index: usize = base.len;
+    result.appendSliceAssumeCapacity(base);
+
     var it = std.mem.tokenize(u8, rel, "/");
     while (it.next()) |component| {
         if (std.mem.eql(u8, component, ".")) {
             continue;
         } else if (std.mem.eql(u8, component, "..")) {
             while (true) {
-                if (result_index == 0)
-                    return error.UriBadScheme;
-                result_index -= 1;
-                if (result[result_index] == '/')
-                    break;
+                const char = result.popOrNull() orelse return error.UriBadScheme;
+                if (char == '/') break;
             }
         } else {
-            result[result_index] = '/';
-            result_index += 1;
+            result.appendAssumeCapacity('/');
             for (component) |char| {
                 if (std.mem.indexOfScalar(u8, reserved_chars, char)) |reserved| {
                     const escape = &reserved_escapes[reserved];
-                    std.mem.copy(u8, result[result_index..], escape);
-                    result_index += escape.len;
+                    result.appendSliceAssumeCapacity(escape);
                 } else {
-                    result[result_index] = char;
-                    result_index += 1;
+                    result.appendAssumeCapacity(char);
                 }
             }
         }
     }
 
-    return allocator.resize(result, result_index) orelse error.FailedResize;
+    return result.toOwnedSlice(allocator);
 }
 
 // Original code: https://github.com/andersfr/zig-lsp/blob/master/uri.zig
