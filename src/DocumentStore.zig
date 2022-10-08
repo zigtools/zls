@@ -654,7 +654,7 @@ fn createDocument(self: *DocumentStore, uri: Uri, text: [:0]u8, open: bool) erro
         } else |err| {
             log.debug("Failed to load build file {s}: (error: {})", .{ uri, err });
         }
-    } else if (self.config.zig_exe_path != null and std.mem.endsWith(u8, uri, "/builtin.zig") and !in_std) blk: {
+    } else if (self.config.zig_exe_path != null and !std.mem.endsWith(u8, uri, "/builtin.zig") and !in_std) blk: {
         log.debug("Going to walk down the tree towards: {s}", .{uri});
         // walk down the tree towards the uri. When we hit build.zig files
         // determine if the uri we're interested in is involved with the build.
