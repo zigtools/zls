@@ -176,13 +176,17 @@ fn symbolReferencesInternal(
                 try symbolReferencesInternal(builder, case, handle);
             }
         },
-        .switch_case_one => {
+        .switch_case_one,
+        .switch_case_inline_one,
+        => {
             const case_one = tree.switchCaseOne(node);
             try symbolReferencesInternal(builder, case_one.ast.target_expr, handle);
             for (case_one.ast.values) |val|
                 try symbolReferencesInternal(builder, val, handle);
         },
-        .switch_case => {
+        .switch_case,
+        .switch_case_inline,
+        => {
             const case = tree.switchCase(node);
             try symbolReferencesInternal(builder, case.ast.target_expr, handle);
             for (case.ast.values) |val|
