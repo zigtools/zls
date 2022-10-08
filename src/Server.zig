@@ -2382,12 +2382,12 @@ pub fn processJsonRpc(server: *Server, writer: anytype, json: []const u8) !void 
         .shutdown => return try sendErrorResponse(writer, server.arena.allocator(), .InvalidRequest, "server received a request after shutdown!"),
     }
 
-    // const start_time = std.time.milliTimestamp();
+    const start_time = std.time.milliTimestamp();
     defer {
         // makes `zig build test` look nice
         if (!zig_builtin.is_test and !std.mem.eql(u8, method, "shutdown")) {
-            // const end_time = std.time.milliTimestamp();
-            // log.debug("Took {}ms to process method {s}", .{ end_time - start_time, method });
+            const end_time = std.time.milliTimestamp();
+            log.debug("Took {}ms to process method {s}", .{ end_time - start_time, method });
         }
     }
 
