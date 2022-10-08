@@ -152,7 +152,9 @@ pub fn closeDocument(self: *DocumentStore, uri: Uri) void {
         log.warn("Document already closed: {s}", .{uri});
     }
 
-    self.garbageCollection() catch {};
+    self.garbageCollectionImports() catch {};
+    self.garbageCollectionCImports() catch {};
+    self.garbageCollectionBuildFiles() catch {};
 }
 
 pub fn refreshDocument(self: *DocumentStore, handle: *Handle) !void {
@@ -178,9 +180,11 @@ pub fn refreshDocument(self: *DocumentStore, handle: *Handle) !void {
     handle.cimports.deinit(self.allocator);
     handle.cimports = new_cimports;
 
-    // TODO detect changes
-    // try self.ensureImportsProcessed(handle.*);
-    try self.ensureCImportsProcessed(handle.*);
+    try self.ensureDependenciesProcessed(handle.*);
+
+    // a include could have been removed but it would increase latency
+    // try self.garbageCollectionImports();
+    // try self.garbageCollectionCImports();
 }
 
 pub fn applySave(self: *DocumentStore, handle: *Handle) !void {
@@ -205,7 +209,7 @@ pub fn applySave(self: *DocumentStore, handle: *Handle) !void {
 /// a directed edge.
 /// We can remove every document which cannot be reached from
 /// another document that is `open` (see `Handle.open`)
-fn garbageCollection(self: *DocumentStore) error{OutOfMemory}!void {
+fn garbageCollectionImports(self: *DocumentStore) error{OutOfMemory}!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -238,24 +242,20 @@ fn garbageCollection(self: *DocumentStore) error{OutOfMemory}!void {
         try collectDependencies(self.allocator, self, handle, &queue);
     }
 
-    var unreachable_handles = std.ArrayListUnmanaged(Uri){};
-    defer unreachable_handles.deinit(self.allocator);
-
-    for (self.handles.values()) |handle| {
-        if (reachable_handles.contains(handle.uri)) continue;
-        try unreachable_handles.append(self.allocator, handle.uri);
-    }
-
-    for (unreachable_handles.items) |uri| {
-        std.log.debug("Closing document {s}", .{uri});
-        var kv = self.handles.fetchSwapRemove(uri) orelse continue;
+    var i: usize = 0;
+    while (i < self.handles.count()) {
+        const handle = self.handles.values()[i];
+        if (reachable_handles.contains(handle.uri)) {
+            i += 1;
+            continue;
+        }
+        std.log.debug("Closing document {s}", .{handle.uri});
+        var kv = self.handles.fetchSwapRemove(handle.uri).?;
         kv.value.deinit(self.allocator);
     }
-
-    try self.garbageCollectionCImportResults();
 }
 
-fn garbageCollectionCImportResults(self: *DocumentStore) error{OutOfMemory}!void {
+fn garbageCollectionCImports(self: *DocumentStore) error{OutOfMemory}!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -270,17 +270,38 @@ fn garbageCollectionCImportResults(self: *DocumentStore) error{OutOfMemory}!void
         }
     }
 
-    var unreachable_hashes = std.ArrayListUnmanaged(Hash){};
-    defer unreachable_hashes.deinit(self.allocator);
+    var i: usize = 0;
+    while (i < self.cimports.count()) {
+        const hash = self.cimports.keys()[i];
+        if (reachable_hashes.contains(hash)) {
+            i += 1;
+            continue;
+        }
+        var kv = self.cimports.fetchSwapRemove(hash).?;
+        std.log.debug("Destroying cimport {s}", .{kv.value.success});
+        kv.value.deinit(self.allocator);
+    }
+}
 
-    for (self.cimports.keys()) |hash| {
-        if (reachable_hashes.contains(hash)) continue;
-        try unreachable_hashes.append(self.allocator, hash);
+fn garbageCollectionBuildFiles(self: *DocumentStore) error{OutOfMemory}!void {
+    var reachable_build_files = std.StringHashMapUnmanaged(void){};
+    defer reachable_build_files.deinit(self.allocator);
+
+    for (self.handles.values()) |handle| {
+        const build_file_uri = handle.associated_build_file orelse continue;
+
+        try reachable_build_files.put(self.allocator, build_file_uri, {});
     }
 
-    for (unreachable_hashes.items) |hash| {
-        var kv = self.cimports.fetchSwapRemove(hash) orelse continue;
-        std.log.debug("Destroying cimport {s}", .{kv.value.success});
+    var i: usize = 0;
+    while (i < self.build_files.count()) {
+        const hash = self.build_files.keys()[i];
+        if (reachable_build_files.contains(hash)) {
+            i += 1;
+            continue;
+        }
+        var kv = self.build_files.fetchSwapRemove(hash).?;
+        std.log.debug("Destroying build file {s}", .{kv.value.uri});
         kv.value.deinit(self.allocator);
     }
 }
@@ -319,6 +340,9 @@ fn ensureDependenciesProcessed(self: *DocumentStore, handle: Handle) error{OutOf
 }
 
 fn ensureCImportsProcessed(self: *DocumentStore, handle: Handle) error{OutOfMemory}!void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     for (handle.cimports.items(.hash)) |hash, index| {
         if (self.cimports.contains(hash)) continue;
 
