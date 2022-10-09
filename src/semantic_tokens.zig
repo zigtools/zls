@@ -354,7 +354,9 @@ fn writeNodeTokens(builder: *Builder, maybe_node: ?Ast.Node.Index) WriteTokensEr
             } else {
                 try writeTokenMod(builder, var_decl.ast.mut_token + 1, .variable, .{ .declaration = true });
             }
-            try writeToken(builder, var_decl.ast.mut_token + 2, .operator);
+            if (token_tags[var_decl.ast.mut_token + 2] == .equal) {
+                try writeToken(builder, var_decl.ast.mut_token + 2, .operator);
+            }
 
             try callWriteNodeTokens(allocator, .{ builder, var_decl.ast.type_node });
             try callWriteNodeTokens(allocator, .{ builder, var_decl.ast.align_node });
