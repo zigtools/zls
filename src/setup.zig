@@ -170,6 +170,7 @@ pub fn wizard(allocator: std.mem.Allocator) !void {
 
     const editor = try askSelectOne("Which code editor do you use?", enum { VSCode, Sublime, Kate, Neovim, Vim8, Emacs, Doom, Spacemacs, Helix, Other });
     const snippets = try askBool("Do you want to enable snippets?");
+    const placeholders = try askBool("Do you want to enable argument placeholders?");
     const ast_check = try askBool("Do you want to enable ast-check diagnostics?");
     const autofix = try askBool("Do you want to zls to automatically try to fix errors on save? (supports adding & removing discards)");
     const ief_apc = try askBool("Do you want to enable @import/@embedFile argument path completion?");
@@ -193,6 +194,7 @@ pub fn wizard(allocator: std.mem.Allocator) !void {
         .@"$schema" = "https://raw.githubusercontent.com/zigtools/zls/master/schema.json",
         .zig_exe_path = zig_exe_path,
         .enable_snippets = snippets,
+        .enable_argument_placeholders = placeholders,
         .enable_ast_check_diagnostics = ast_check,
         .enable_autofix = autofix,
         .enable_import_embedfile_argument_completions = ief_apc,

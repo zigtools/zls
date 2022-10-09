@@ -503,7 +503,8 @@ fn nodeToCompletion(
             const func = ast.fnProto(tree, node, &buf).?;
             if (func.name_token) |name_token| {
                 const use_snippets = server.config.enable_snippets and server.client_capabilities.supports_snippets;
-                const insert_text = if (use_snippets) blk: {
+                const use_placeholders = server.config.enable_argument_placeholders and server.client_capabilities.supports_snippets;
+                const insert_text = if (use_placeholders) blk: {
                     const skip_self_param = !(parent_is_type_val orelse true) and
                         try analysis.hasSelfParam(&server.arena, &server.document_store, handle, func);
                     break :blk try analysis.getFunctionSnippet(server.arena.allocator(), tree, func, skip_self_param);
@@ -2542,7 +2543,7 @@ pub fn init(
     errdefer builtin_completions.deinit();
 
     for (data.builtins) |builtin| {
-        const insert_text = if (config.enable_snippets) builtin.snippet else builtin.name;
+        const insert_text = if (config.enable_argument_placeholders) builtin.snippet else builtin.name;
         builtin_completions.appendAssumeCapacity(.{
             .label = builtin.name,
             .kind = .Function,

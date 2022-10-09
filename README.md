@@ -105,6 +105,7 @@ The following options are currently available.
 | Option | Type | Default value | What it Does |
 | --- | --- | --- | --- |
 | `enable_snippets` | `bool` | `false` | Enables snippet completions when the client also supports them. |
+| `enable_argument_placeholders` | `bool` | `false` | Enabes argument placeholder completions, e.g. `@intCast` completes to `@intCast(comptime DestType: type, int: anytype)` instead of `@intCast()`. |
 | `enable_ast_check_diagnostics` | `bool` | `true`| Whether to enable ast-check diagnostics |
 | `enable_autofix` | `bool` | `false`| Whether to automatically fix errors on save. Currently supports adding and removing discards. |
 | `enable_import_embedfile_argument_completions` | `bool` | `false` | Whether to enable import/embedFile argument completions |

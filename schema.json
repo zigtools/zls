@@ -9,6 +9,9 @@
             "type": "boolean",
             "default": "false"
         },
+        "enable_argument_placeholders": {
+            "description": "Enabes argument placeholder completions, e.g. `@intCast` completes to `@intCast(comptime DestType: type, int: anytype)` instead of `@intCast()`"
+        },
         "enable_ast_check_diagnostics": {
             "description": "Whether to enable ast-check diagnostics",
             "type": "boolean",

@@ -13,6 +13,9 @@ const logger = std.log.scoped(.config);
 /// Whether to enable snippet completions
 enable_snippets: bool = false,
 
+/// Whether to enable argument placeholder completions
+enable_argument_placeholders: bool = false,
+
 /// Whether to enable ast-check diagnostics
 enable_ast_check_diagnostics: bool = true,
 
