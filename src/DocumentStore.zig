@@ -553,9 +553,7 @@ fn createBuildFile(self: *const DocumentStore, uri: Uri) error{OutOfMemory}!Buil
 
         if (config.relative_builtin_path) |relative_builtin_path| blk: {
             const build_file_path = URI.parse(self.allocator, build_file.uri) catch break :blk;
-            const directory_path = std.fs.path.resolve(self.allocator, &.{ build_file_path, "../build.zig" }) catch break :blk;
-            defer self.allocator.free(directory_path);
-            var absolute_builtin_path = try std.mem.concat(self.allocator, u8, &.{ directory_path, relative_builtin_path });
+            const absolute_builtin_path = std.fs.path.resolve(self.allocator, &.{ build_file_path, "../", relative_builtin_path }) catch break :blk;
             defer self.allocator.free(absolute_builtin_path);
             build_file.builtin_uri = try URI.fromPath(self.allocator, absolute_builtin_path);
         }
