@@ -354,7 +354,9 @@ fn writeNodeTokens(builder: *Builder, maybe_node: ?Ast.Node.Index) WriteTokensEr
             } else {
                 try writeTokenMod(builder, var_decl.ast.mut_token + 1, .variable, .{ .declaration = true });
             }
-            try writeToken(builder, var_decl.ast.mut_token + 2, .operator);
+            if (token_tags[var_decl.ast.mut_token + 2] == .equal) {
+                try writeToken(builder, var_decl.ast.mut_token + 2, .operator);
+            }
 
             try callWriteNodeTokens(allocator, .{ builder, var_decl.ast.type_node });
             try callWriteNodeTokens(allocator, .{ builder, var_decl.ast.align_node });
@@ -518,8 +520,11 @@ fn writeNodeTokens(builder: *Builder, maybe_node: ?Ast.Node.Index) WriteTokensEr
         },
         .switch_case_one,
         .switch_case,
+        .switch_case_inline_one,
+        .switch_case_inline,
         => {
-            const switch_case = if (tag == .switch_case) tree.switchCase(node) else tree.switchCaseOne(node);
+            const switch_case = if (tag == .switch_case or tag == .switch_case_inline) tree.switchCase(node) else tree.switchCaseOne(node);
+            try writeToken(builder, switch_case.inline_token, .keyword);
             for (switch_case.ast.values) |item_node| try callWriteNodeTokens(allocator, .{ builder, item_node });
             // check it it's 'else'
             if (switch_case.ast.values.len == 0) try writeToken(builder, switch_case.ast.arrow_token - 1, .keyword);

@@ -548,8 +548,10 @@ fn writeNodeInlayHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store:
 
         .switch_case_one,
         .switch_case,
+        .switch_case_inline_one,
+        .switch_case_inline,
         => {
-            const switch_case = if (tag == .switch_case) tree.switchCase(node) else tree.switchCaseOne(node);
+            const switch_case = if (tag == .switch_case or tag == .switch_case_inline) tree.switchCase(node) else tree.switchCaseOne(node);
 
             try callWriteNodeInlayHint(allocator, .{ builder, arena, store, switch_case.ast.target_expr, range });
         },

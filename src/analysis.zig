@@ -2825,7 +2825,9 @@ fn makeScopeInternal(allocator: std.mem.Allocator, context: ScopeContext, node_i
             }
         },
         .switch_case,
+        .switch_case_inline,
         .switch_case_one,
+        .switch_case_inline_one,
         .switch_range,
         => {
             return;
