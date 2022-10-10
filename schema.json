@@ -94,6 +94,11 @@
             "description": "When true, skips searching for references in std. Improves lookup speed for functions in user's code. Renaming and go-to-definition will continue to work as is",
             "type": "boolean",
             "default": "false"
+        },
+        "highlight_global_var_declarations": {
+            "description": "Whether to highlight global var declarations",
+            "type": "boolean",
+            "default": "false"
         }
     }
 } 

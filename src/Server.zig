@@ -175,6 +175,24 @@ fn publishDiagnostics(server: *Server, writer: anytype, handle: *DocumentStore.H
         });
     }
 
+    for (handle.cimports) |cimport| {
+        if (cimport.result != .failure) continue;
+        const stderr = std.mem.trim(u8, cimport.result.failure, " ");
+
+        var pos_and_diag_iterator = std.mem.split(u8, stderr, ":");
+        _ = pos_and_diag_iterator.next(); // skip file path
+        _ = pos_and_diag_iterator.next(); // skip line
+        _ = pos_and_diag_iterator.next(); // skip character
+
+        try diagnostics.append(allocator, .{
+            .range = offsets.nodeToRange(handle.tree, cimport.node, server.offset_encoding),
+            .severity = .Error,
+            .code = "cImport",
+            .source = "zls",
+            .message = try allocator.dupe(u8, pos_and_diag_iterator.rest()),
+        });
+    }
+
     if (server.config.enable_ast_check_diagnostics and tree.errors.len == 0) {
         try getAstCheckDiagnostics(server, handle, &diagnostics);
     }
@@ -251,23 +269,34 @@ fn publishDiagnostics(server: *Server, writer: anytype, handle: *DocumentStore.H
             }
         }
     }
+    
+    if (server.config.highlight_global_var_declarations) {
+        const main_tokens = tree.nodes.items(.main_token);
+        const tags = tree.tokens.items(.tag);
+        for (tree.rootDecls()) |decl| {
+            const decl_tag = tree.nodes.items(.tag)[decl];
+            const decl_main_token = tree.nodes.items(.main_token)[decl];
 
-    for (handle.cimports) |cimport| {
-        if (cimport.result != .failure) continue;
-        const stderr = std.mem.trim(u8, cimport.result.failure, " ");
-
-        var pos_and_diag_iterator = std.mem.split(u8, stderr, ":");
-        _ = pos_and_diag_iterator.next(); // skip file path
-        _ = pos_and_diag_iterator.next(); // skip line
-        _ = pos_and_diag_iterator.next(); // skip character
-
-        try diagnostics.append(allocator, .{
-            .range = offsets.nodeToRange(handle.tree, cimport.node, server.offset_encoding),
-            .severity = .Error,
-            .code = "cImport",
-            .source = "zls",
-            .message = try allocator.dupe(u8, pos_and_diag_iterator.rest()),
-        });
+            switch (decl_tag) {
+                .simple_var_decl,
+                .aligned_var_decl,
+                .local_var_decl,
+                .global_var_decl,
+                => {
+                    if (tags[main_tokens[decl]] != .keyword_var) continue; // skip anything immutable
+                    // uncomment this to get a list :)
+                    //log.debug("possible global variable \"{s}\"", .{tree.tokenSlice(decl_main_token + 1)});
+                    try diagnostics.append(allocator, .{
+                        .range = offsets.tokenToRange(tree, decl_main_token, server.offset_encoding),
+                        .severity = .Hint,
+                        .code = "highlight_global_var_declarations",
+                        .source = "zls",
+                        .message = "Global var declaration",
+                    });
+                },
+                else => {},
+            }
+        }
     }
 
     try send(writer, server.arena.allocator(), types.Notification{
