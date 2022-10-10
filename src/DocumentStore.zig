@@ -871,8 +871,11 @@ pub fn uriFromImportStr(self: *const DocumentStore, allocator: std.mem.Allocator
         defer allocator.free(std_path);
         return try URI.fromPath(allocator, std_path);
     } else if (std.mem.eql(u8, import_str, "builtin")) {
-        if (handle.associated_build_file) |builtin_uri| {
-            return try allocator.dupe(u8, builtin_uri);
+        if (handle.associated_build_file) |build_file_uri| {
+            const build_file = self.build_files.get(build_file_uri).?;
+            if (build_file.builtin_uri) |builtin_uri| {
+                return try allocator.dupe(u8, builtin_uri);
+            }
         }
         if (self.config.builtin_path) |_| {
             return try URI.fromPath(allocator, self.config.builtin_path.?);
