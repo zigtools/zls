@@ -175,17 +175,19 @@ fn publishDiagnostics(server: *Server, writer: anytype, handle: DocumentStore.Ha
         });
     }
 
-    for (handle.cimports) |cimport| {
-        if (cimport.result != .failure) continue;
-        const stderr = std.mem.trim(u8, cimport.result.failure, " ");
+    for (handle.cimports.items(.hash)) |hash, i| {
+        const result = server.document_store.cimports.get(hash) orelse continue;
+        if (result != .failure) continue;
+        const stderr = std.mem.trim(u8, result.failure, " ");
 
         var pos_and_diag_iterator = std.mem.split(u8, stderr, ":");
         _ = pos_and_diag_iterator.next(); // skip file path
         _ = pos_and_diag_iterator.next(); // skip line
         _ = pos_and_diag_iterator.next(); // skip character
 
+        const node = handle.cimports.items(.node)[i];
         try diagnostics.append(allocator, .{
-            .range = offsets.nodeToRange(handle.tree, cimport.node, server.offset_encoding),
+            .range = offsets.nodeToRange(handle.tree, node, server.offset_encoding),
             .severity = .Error,
             .code = "cImport",
             .source = "zls",
@@ -288,7 +290,8 @@ fn publishDiagnostics(server: *Server, writer: anytype, handle: DocumentStore.Ha
             .source = "zls",
             .message = try allocator.dupe(u8, pos_and_diag_iterator.rest()),
         });
-    
+    }
+
     if (server.config.highlight_global_var_declarations) {
         const main_tokens = tree.nodes.items(.main_token);
         const tags = tree.tokens.items(.tag);
