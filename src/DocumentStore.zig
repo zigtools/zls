@@ -29,8 +29,11 @@ pub fn computeHash(bytes: []const u8) Hash {
 }
 
 const BuildFile = struct {
-    uri: []const u8,
+    uri: Uri,
+    /// contains information extracted from running build.zig with a custom build runner
+    /// e.g. include paths & packages
     config: BuildConfig,
+    /// this build file may have an explicitly specified path to builtin.zig
     builtin_uri: ?Uri = null,
     build_associated_config: ?BuildAssociatedConfig = null,
 
@@ -58,6 +61,8 @@ pub const Handle = struct {
     /// Contains one entry for every cimport in the document
     cimports: std.MultiArrayList(CImportHandle) = .{},
 
+    /// `DocumentStore.build_files` is guaranteed to contain this uri
+    /// uri memory managed by its build_file
     associated_build_file: ?Uri = null,
     is_build_file: bool = false,
 
@@ -146,6 +151,8 @@ pub fn closeDocument(self: *DocumentStore, uri: Uri) void {
         return;
     };
 
+    // instead of destroying the handle here we just mark it not open
+    // and let it be destroy by the garbage collection code
     if (handle.open) {
         handle.open = false;
     } else {
@@ -306,6 +313,7 @@ fn garbageCollectionBuildFiles(self: *DocumentStore) error{OutOfMemory}!void {
     }
 }
 
+/// iterates every document the given handle depends on and loads it if it hasn't been already
 fn ensureDependenciesProcessed(self: *DocumentStore, handle: Handle) error{OutOfMemory}!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
@@ -370,6 +378,8 @@ fn ensureCImportsProcessed(self: *DocumentStore, handle: Handle) error{OutOfMemo
             continue;
         };
 
+        // we can avoid having to call ensureDependenciesProcessed again
+        // because the resulting zig file of translate-c doesn't contain and dependencies
         if (!self.handles.contains(result.success)) {
             const uri = try self.allocator.dupe(u8, result.success);
 
@@ -800,6 +810,8 @@ fn collectCIncludes(self: *const DocumentStore, handle: Handle) error{OutOfMemor
     return sources;
 }
 
+/// collects every file uri the given handle depends on
+/// includes imports, cimports & packages
 pub fn collectDependencies(
     allocator: std.mem.Allocator,
     store: *const DocumentStore,
@@ -831,7 +843,7 @@ pub fn collectDependencies(
     }
 }
 
-// returns the document behind `@cImport()` where `node` is the `cImport` node
+/// returns the document behind `@cImport()` where `node` is the `cImport` node
 /// the translation process is defined in `translate_c.convertCInclude`
 /// if a cImport can't be translated e.g. required computing a value it
 /// will not be included in the result
