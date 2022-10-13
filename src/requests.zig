@@ -162,7 +162,7 @@ pub const Initialize = struct {
             completion: ?struct {
                 completionItem: ?struct {
                     snippetSupport: Default(bool, false),
-                    labelDetailsSupport: Default(bool, true),
+                    labelDetailsSupport: Default(bool, false),
                     documentationFormat: MaybeStringArray,
                 },
             },
