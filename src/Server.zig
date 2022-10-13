@@ -2565,7 +2565,7 @@ pub fn init(
     try config.configChanged(allocator, config_path);
 
     var document_store = try DocumentStore.init(allocator, config);
-    errdefer document_store.deinit();
+    errdefer document_store.deinit(allocator);
 
     var builtin_completions = try std.ArrayListUnmanaged(types.CompletionItem).initCapacity(allocator, data.builtins.len);
     errdefer builtin_completions.deinit();
