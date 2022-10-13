@@ -1515,7 +1515,7 @@ fn initializeHandler(server: *Server, writer: anytype, id: types.RequestId, req:
     // so we can now format the prebuilt builtins items for labelDetails
     if (server.client_capabilities.label_details_support) {
         for(server.builtin_completions.items) |*item| {
-            try formatDetailledLabel(item, server.allocator);
+            try formatDetailledLabel(item, std.heap.page_allocator);
         }
     }
 
