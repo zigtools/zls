@@ -2580,7 +2580,7 @@ pub fn init(
 
     for (data.builtins) |builtin| {
         const insert_text = if (config.enable_snippets) builtin.snippet else builtin.name;
-        var item: types.CompletionItem = .{
+        builtin_completions.appendAssumeCapacity(.{
             .label = builtin.name,
             .kind = .Function,
             .filterText = builtin.name[1..],
@@ -2591,11 +2591,7 @@ pub fn init(
                 .kind = .Markdown,
                 .value = builtin.documentation,
             },
-        };
-
-        try formatDetailledLabel(&item, allocator);
-
-        builtin_completions.appendAssumeCapacity(item);
+        });
     }
 
     return Server{
