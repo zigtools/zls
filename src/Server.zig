@@ -1221,7 +1221,7 @@ fn formatDetailledLabel(item: *types.CompletionItem, alloc: std.mem.Allocator) !
 
     // loggerger.info("## label: {s} it: {s} kind: {} isValue: {}", .{item.label, it, item.kind, isValue});
 
-    if (std.mem.startsWith(u8, it, "fn ")) {
+    if (std.mem.startsWith(u8, it, "fn ") or std.mem.startsWith(u8, it, "@")) {
         var s: usize = std.mem.indexOf(u8, it, "(") orelse return;
         var e: usize = std.mem.lastIndexOf(u8, it, ")") orelse return;
         if (e < s) {
@@ -2572,7 +2572,7 @@ pub fn init(
 
     for (data.builtins) |builtin| {
         const insert_text = if (config.enable_snippets) builtin.snippet else builtin.name;
-        builtin_completions.appendAssumeCapacity(.{
+        var item: types.CompletionItem = .{
             .label = builtin.name,
             .kind = .Function,
             .filterText = builtin.name[1..],
@@ -2583,7 +2583,11 @@ pub fn init(
                 .kind = .Markdown,
                 .value = builtin.documentation,
             },
-        });
+        };
+
+        try formatDetailledLabel(&item, allocator);
+
+        builtin_completions.appendAssumeCapacity(item);
     }
 
     return Server{
