@@ -2584,9 +2584,8 @@ pub fn init(
                 .value = builtin.documentation,
             },
         };
-        
-        if (server.client_capabilities.label_details_support)
-            try formatDetailledLabel(&item, allocator);
+
+        try formatDetailledLabel(&item, allocator);
 
         builtin_completions.appendAssumeCapacity(item);
     }
