@@ -2565,10 +2565,10 @@ pub fn init(
     try config.configChanged(allocator, config_path);
 
     var document_store = try DocumentStore.init(allocator, config);
-    errdefer document_store.deinit(allocator);
+    errdefer document_store.deinit();
 
     var builtin_completions = try std.ArrayListUnmanaged(types.CompletionItem).initCapacity(allocator, data.builtins.len);
-    errdefer builtin_completions.deinit();
+    errdefer builtin_completions.deinit(allocator);
 
     for (data.builtins) |builtin| {
         const insert_text = if (config.enable_snippets) builtin.snippet else builtin.name;
@@ -2584,8 +2584,9 @@ pub fn init(
                 .value = builtin.documentation,
             },
         };
-
-        try formatDetailledLabel(&item, allocator);
+        
+        if (server.client_capabilities.label_details_support)
+            try formatDetailledLabel(&item, allocator);
 
         builtin_completions.appendAssumeCapacity(item);
     }
