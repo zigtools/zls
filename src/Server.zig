@@ -1511,6 +1511,14 @@ fn initializeHandler(server: *Server, writer: anytype, id: types.RequestId, req:
         }
     }
 
+    // NOTE: everything is initialized, we got the client capabilities
+    // so we can now format the prebuilt builtins items for labelDetails
+    if (server.client_capabilities.label_details_support) {
+        for(server.builtin_completions.items) |*item| {
+            try formatDetailledLabel(item, server.allocator);
+        }
+    }
+
     try send(writer, server.arena.allocator(), types.Response{
         .id = id,
         .result = .{
