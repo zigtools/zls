@@ -1221,7 +1221,7 @@ fn formatDetailledLabel(item: *types.CompletionItem, alloc: std.mem.Allocator) !
 
     // loggerger.info("## label: {s} it: {s} kind: {} isValue: {}", .{item.label, it, item.kind, isValue});
 
-    if (std.mem.startsWith(u8, it, "fn ")) {
+    if (std.mem.startsWith(u8, it, "fn ") or std.mem.startsWith(u8, it, "@")) {
         var s: usize = std.mem.indexOf(u8, it, "(") orelse return;
         var e: usize = std.mem.lastIndexOf(u8, it, ")") orelse return;
         if (e < s) {
@@ -1508,6 +1508,14 @@ fn initializeHandler(server: *Server, writer: anytype, id: types.RequestId, req:
                     }
                 }
             }
+        }
+    }
+
+    // NOTE: everything is initialized, we got the client capabilities
+    // so we can now format the prebuilt builtins items for labelDetails
+    if (server.client_capabilities.label_details_support) {
+        for(server.builtin_completions.items) |*item| {
+            try formatDetailledLabel(item, std.heap.page_allocator);
         }
     }
 
@@ -2568,7 +2576,7 @@ pub fn init(
     errdefer document_store.deinit();
 
     var builtin_completions = try std.ArrayListUnmanaged(types.CompletionItem).initCapacity(allocator, data.builtins.len);
-    errdefer builtin_completions.deinit();
+    errdefer builtin_completions.deinit(allocator);
 
     for (data.builtins) |builtin| {
         const insert_text = if (config.enable_snippets) builtin.snippet else builtin.name;
