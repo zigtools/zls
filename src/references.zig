@@ -56,11 +56,11 @@ pub fn labelReferences(
 const Builder = struct {
     arena: *std.heap.ArenaAllocator,
     locations: std.ArrayListUnmanaged(types.Location),
-    store: *const DocumentStore,
+    store: *DocumentStore,
     decl: analysis.DeclWithHandle,
     encoding: offsets.Encoding,
 
-    pub fn init(arena: *std.heap.ArenaAllocator, store: *const DocumentStore, decl: analysis.DeclWithHandle, encoding: offsets.Encoding) Builder {
+    pub fn init(arena: *std.heap.ArenaAllocator, store: *DocumentStore, decl: analysis.DeclWithHandle, encoding: offsets.Encoding) Builder {
         return Builder{
             .arena = arena,
             .locations = .{},
@@ -457,7 +457,7 @@ fn symbolReferencesInternal(
 
 pub fn symbolReferences(
     arena: *std.heap.ArenaAllocator,
-    store: *const DocumentStore,
+    store: *DocumentStore,
     decl_handle: analysis.DeclWithHandle,
     encoding: offsets.Encoding,
     include_decl: bool,

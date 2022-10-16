@@ -52,14 +52,14 @@ pub const TokenModifiers = packed struct {
 
 const Builder = struct {
     arena: *std.heap.ArenaAllocator,
-    store: *const DocumentStore,
+    store: *DocumentStore,
     handle: *const DocumentStore.Handle,
     previous_position: usize = 0,
     previous_token: ?Ast.TokenIndex = null,
     arr: std.ArrayListUnmanaged(u32),
     encoding: offsets.Encoding,
 
-    fn init(arena: *std.heap.ArenaAllocator, store: *const DocumentStore, handle: *const DocumentStore.Handle, encoding: offsets.Encoding) Builder {
+    fn init(arena: *std.heap.ArenaAllocator, store: *DocumentStore, handle: *const DocumentStore.Handle, encoding: offsets.Encoding) Builder {
         return Builder{
             .arena = arena,
             .store = store,
@@ -1025,7 +1025,7 @@ fn writeContainerField(builder: *Builder, node: Ast.Node.Index, field_token_type
 // TODO Range version, edit version.
 pub fn writeAllSemanticTokens(
     arena: *std.heap.ArenaAllocator,
-    store: *const DocumentStore,
+    store: *DocumentStore,
     handle: *const DocumentStore.Handle,
     encoding: offsets.Encoding,
 ) ![]u32 {

@@ -81,7 +81,7 @@ const Builder = struct {
 /// `call` is the function call
 /// `decl_handle` should be a function protototype
 /// writes parameter hints into `builder.hints`
-fn writeCallHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *const DocumentStore, call: Ast.full.Call, decl_handle: analysis.DeclWithHandle) !void {
+fn writeCallHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *DocumentStore, call: Ast.full.Call, decl_handle: analysis.DeclWithHandle) !void {
     const handle = builder.handle;
     const tree = handle.tree;
 
@@ -181,7 +181,7 @@ fn writeBuiltinHint(builder: *Builder, parameters: []const Ast.Node.Index, argum
 }
 
 /// takes a Ast.full.Call (a function call), analysis its function expression, finds its declaration and writes parameter hints into `builder.hints`
-fn writeCallNodeHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *const DocumentStore, call: Ast.full.Call) !void {
+fn writeCallNodeHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *DocumentStore, call: Ast.full.Call) !void {
     if (call.ast.params.len == 0) return;
     if (builder.config.inlay_hints_exclude_single_argument and call.ast.params.len == 1) return;
 
@@ -257,7 +257,7 @@ fn callWriteNodeInlayHint(allocator: std.mem.Allocator, args: anytype) error{Out
 
 /// iterates over the ast and writes parameter hints into `builder.hints` for every function call and builtin call
 /// nodes outside the given range are excluded
-fn writeNodeInlayHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *const DocumentStore, maybe_node: ?Ast.Node.Index, range: types.Range) error{OutOfMemory}!void {
+fn writeNodeInlayHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *DocumentStore, maybe_node: ?Ast.Node.Index, range: types.Range) error{OutOfMemory}!void {
     const node = maybe_node orelse return;
 
     const handle = builder.handle;
@@ -690,7 +690,7 @@ fn writeNodeInlayHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store:
 pub fn writeRangeInlayHint(
     arena: *std.heap.ArenaAllocator,
     config: Config,
-    store: *const DocumentStore,
+    store: *DocumentStore,
     handle: *const DocumentStore.Handle,
     range: types.Range,
     hover_kind: types.MarkupContent.Kind,
