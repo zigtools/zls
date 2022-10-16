@@ -83,13 +83,14 @@ pub const Handle = struct {
 
 allocator: std.mem.Allocator,
 config: *const Config,
-handles: std.StringArrayHashMapUnmanaged(Handle) = .{},
+handles: std.StringArrayHashMapUnmanaged(*Handle) = .{},
 build_files: std.StringArrayHashMapUnmanaged(BuildFile) = .{},
 cimports: std.AutoArrayHashMapUnmanaged(Hash, translate_c.Result) = .{},
 
 pub fn deinit(self: *DocumentStore) void {
-    for (self.handles.values()) |*handle| {
+    for (self.handles.values()) |handle| {
         handle.deinit(self.allocator);
+        self.allocator.destroy(handle);
     }
     self.handles.deinit(self.allocator);
 
@@ -105,20 +106,30 @@ pub fn deinit(self: *DocumentStore) void {
 }
 
 /// returns a handle to the given document
-pub fn getHandle(self: *const DocumentStore, uri: Uri) ?*Handle {
-    const handle = self.handles.getPtr(uri) orelse {
-        log.warn("Trying to open non existent document {s}", .{uri});
-        return null;
-    };
-
-    return handle;
+pub fn getHandle(self: *DocumentStore, uri: Uri) ?*Handle {
+    return self.getHandleInternal(uri) catch null;
 }
 
-pub fn openDocument(self: *DocumentStore, uri: Uri, text: []const u8) !Handle {
+fn getHandleInternal(self: *DocumentStore, uri: Uri) !?*Handle {
+    if (self.handles.get(uri)) |handle| return handle;
+
+    var handle = try self.allocator.create(Handle);
+    errdefer self.allocator.destroy(handle);
+
+    const dependency_uri = try self.allocator.dupe(u8, uri);
+    handle.* = (try self.createDocumentFromURI(dependency_uri, false)) orelse return error.Unknown; // error name doesn't matter
+
+    const gop = try self.handles.getOrPutValue(self.allocator, handle.uri, handle);
+    std.debug.assert(!gop.found_existing);
+
+    return gop.value_ptr.*;
+}
+
+pub fn openDocument(self: *DocumentStore, uri: Uri, text: []const u8) error{OutOfMemory}!Handle {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    if (self.handles.getPtr(uri)) |handle| {
+    if (self.handles.get(uri)) |handle| {
         if (handle.open) {
             log.warn("Document already open: {s}", .{uri});
         } else {
@@ -132,21 +143,22 @@ pub fn openDocument(self: *DocumentStore, uri: Uri, text: []const u8) !Handle {
     const duped_uri = try self.allocator.dupeZ(u8, uri);
     errdefer self.allocator.free(duped_uri);
 
-    var handle = try self.createDocument(duped_uri, duped_text, true);
+    var handle = try self.allocator.create(Handle);
+    errdefer self.allocator.destroy(handle);
+
+    handle.* = try self.createDocument(duped_uri, duped_text, true);
     errdefer handle.deinit(self.allocator);
 
     try self.handles.putNoClobber(self.allocator, duped_uri, handle);
 
-    try self.ensureDependenciesProcessed(handle);
-
-    return handle;
+    return handle.*;
 }
 
 pub fn closeDocument(self: *DocumentStore, uri: Uri) void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const handle = self.handles.getPtr(uri) orelse {
+    const handle = self.handles.get(uri) orelse {
         log.warn("Document not found: {s}", .{uri});
         return;
     };
@@ -187,14 +199,12 @@ pub fn refreshDocument(self: *DocumentStore, handle: *Handle) !void {
     handle.cimports.deinit(self.allocator);
     handle.cimports = new_cimports;
 
-    try self.ensureDependenciesProcessed(handle.*);
-
     // a include could have been removed but it would increase latency
     // try self.garbageCollectionImports();
     // try self.garbageCollectionCImports();
 }
 
-pub fn applySave(self: *DocumentStore, handle: *Handle) !void {
+pub fn applySave(self: *DocumentStore, handle: *const Handle) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -236,7 +246,7 @@ fn garbageCollectionImports(self: *DocumentStore) error{OutOfMemory}!void {
 
         try reachable_handles.put(self.allocator, handle.uri, {});
 
-        try collectDependencies(self.allocator, self, handle, &queue);
+        try collectDependencies(self.allocator, self, handle.*, &queue);
     }
 
     while (queue.popOrNull()) |uri| {
@@ -244,9 +254,9 @@ fn garbageCollectionImports(self: *DocumentStore) error{OutOfMemory}!void {
 
         try reachable_handles.putNoClobber(self.allocator, uri, {});
 
-        const handle = self.handles.get(uri).?;
+        const handle = self.handles.get(uri) orelse continue;
 
-        try collectDependencies(self.allocator, self, handle, &queue);
+        try collectDependencies(self.allocator, self, handle.*, &queue);
     }
 
     var i: usize = 0;
@@ -259,6 +269,7 @@ fn garbageCollectionImports(self: *DocumentStore) error{OutOfMemory}!void {
         std.log.debug("Closing document {s}", .{handle.uri});
         var kv = self.handles.fetchSwapRemove(handle.uri).?;
         kv.value.deinit(self.allocator);
+        self.allocator.destroy(kv.value);
     }
 }
 
@@ -310,85 +321,6 @@ fn garbageCollectionBuildFiles(self: *DocumentStore) error{OutOfMemory}!void {
         var kv = self.build_files.fetchSwapRemove(hash).?;
         std.log.debug("Destroying build file {s}", .{kv.value.uri});
         kv.value.deinit(self.allocator);
-    }
-}
-
-/// iterates every document the given handle depends on and loads it if it hasn't been already
-fn ensureDependenciesProcessed(self: *DocumentStore, handle: Handle) error{OutOfMemory}!void {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    var queue = std.ArrayListUnmanaged(Uri){};
-    defer {
-        for (queue.items) |uri| {
-            self.allocator.free(uri);
-        }
-        queue.deinit(self.allocator);
-    }
-
-    try collectDependencies(self.allocator, self, handle, &queue);
-
-    while (queue.popOrNull()) |dependency_uri| {
-        if (self.handles.contains(dependency_uri)) {
-            self.allocator.free(dependency_uri);
-            continue;
-        }
-
-        const new_handle = (self.createDocumentFromURI(dependency_uri, false) catch continue) orelse continue;
-        self.handles.putNoClobber(self.allocator, new_handle.uri, new_handle) catch {
-            errdefer new_handle.deinit(self.allocator);
-            continue;
-        };
-        try self.ensureCImportsProcessed(new_handle);
-
-        try collectDependencies(self.allocator, self, new_handle, &queue);
-    }
-
-    try self.ensureCImportsProcessed(handle);
-}
-
-fn ensureCImportsProcessed(self: *DocumentStore, handle: Handle) error{OutOfMemory}!void {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    for (handle.cimports.items(.hash)) |hash, index| {
-        if (self.cimports.contains(hash)) continue;
-
-        const source: []const u8 = handle.cimports.items(.source)[index];
-
-        const include_dirs: []const []const u8 = if (handle.associated_build_file) |build_file_uri|
-            self.build_files.get(build_file_uri).?.config.include_dirs
-        else
-            &.{};
-
-        var result = (try translate_c.translate(
-            self.allocator,
-            self.config.*,
-            include_dirs,
-            source,
-        )) orelse continue;
-
-        switch (result) {
-            .success => |uri| log.debug("Translated cImport into {s}", .{uri}),
-            .failure => continue,
-        }
-
-        self.cimports.put(self.allocator, hash, result) catch {
-            result.deinit(self.allocator);
-            continue;
-        };
-
-        // we can avoid having to call ensureDependenciesProcessed again
-        // because the resulting zig file of translate-c doesn't contain and dependencies
-        if (!self.handles.contains(result.success)) {
-            const uri = try self.allocator.dupe(u8, result.success);
-
-            const new_handle = (self.createDocumentFromURI(uri, false) catch continue) orelse continue;
-            self.handles.putNoClobber(self.allocator, new_handle.uri, new_handle) catch {
-                errdefer new_handle.deinit(self.allocator);
-                continue;
-            };
-        }
     }
 }
 
@@ -585,7 +517,7 @@ fn createBuildFile(self: *const DocumentStore, uri: Uri) error{OutOfMemory}!Buil
 }
 
 fn uriAssociatedWithBuild(
-    self: *const DocumentStore,
+    self: *DocumentStore,
     build_file: BuildFile,
     uri: Uri,
 ) error{OutOfMemory}!bool {
@@ -614,7 +546,7 @@ fn uriAssociatedWithBuild(
 }
 
 fn uriInImports(
-    self: *const DocumentStore,
+    self: *DocumentStore,
     checked_uris: *std.StringHashMap(void),
     source_uri: Uri,
     uri: Uri,
@@ -625,7 +557,7 @@ fn uriInImports(
     // consider it checked even if a failure happens
     try checked_uris.put(try self.allocator.dupe(u8, source_uri), {});
 
-    const handle = self.handles.get(source_uri) orelse return false;
+    const handle = self.getHandle(source_uri) orelse return false;
 
     for (handle.import_uris.items) |import_uri| {
         if (std.mem.eql(u8, uri, import_uri))

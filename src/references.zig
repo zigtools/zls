@@ -485,7 +485,7 @@ pub fn symbolReferences(
 
             var imports = std.ArrayListUnmanaged(*const DocumentStore.Handle){};
 
-            for (store.handles.values()) |*handle| {
+            for (store.handles.values()) |handle| {
                 if (skip_std_references and std.mem.indexOf(u8, handle.uri, "std") != null) {
                     if (!include_decl or !std.mem.eql(u8, handle.uri, curr_handle.uri))
                         continue;
