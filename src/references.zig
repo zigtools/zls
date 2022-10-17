@@ -483,41 +483,19 @@ pub fn symbolReferences(
             if (decl_handle.decl.* != .ast_node) return builder.locations;
             if (!workspace) return builder.locations;
 
-            var imports = std.ArrayListUnmanaged(*const DocumentStore.Handle){};
-
             for (store.handles.values()) |handle| {
                 if (skip_std_references and std.mem.indexOf(u8, handle.uri, "std") != null) {
                     if (!include_decl or !std.mem.eql(u8, handle.uri, curr_handle.uri))
                         continue;
                 }
 
-                // Check entry's transitive imports
-                try imports.append(arena.allocator(), handle);
-                var i: usize = 0;
-                blk: while (i < imports.items.len) : (i += 1) {
-                    const import = imports.items[i];
-                    // TODO handle cimports
-                    for (import.import_uris.items) |uri| {
-                        const h = store.getHandle(uri) orelse break;
+                var dependencies = std.ArrayListUnmanaged([]const u8){};
+                try store.collectDependencies(store.allocator, handle.*, &dependencies);
 
-                        if (h == curr_handle) {
-                            // entry does import curr_handle
-                            try symbolReferencesInternal(&builder, 0, handle);
-                            break :blk;
-                        }
-
-                        select: {
-                            for (imports.items) |item| {
-                                if (item == h) {
-                                    // already checked this import
-                                    break :select;
-                                }
-                            }
-                            try imports.append(arena.allocator(), h);
-                        }
-                    }
+                for (dependencies.items) |uri| {
+                    const hdl = store.getHandle(uri) orelse continue;
+                    try symbolReferencesInternal(&builder, 0, hdl);
                 }
-                try imports.resize(arena.allocator(), 0);
             }
         },
         .param_payload => |pay| blk: {

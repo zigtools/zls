@@ -258,7 +258,7 @@ fn garbageCollectionImports(self: *DocumentStore) error{OutOfMemory}!void {
 
         try reachable_handles.put(self.allocator, handle.uri, {});
 
-        try collectDependencies(self.allocator, self, handle.*, &queue);
+        try self.collectDependencies(self.allocator, handle.*, &queue);
     }
 
     while (queue.popOrNull()) |uri| {
@@ -268,7 +268,7 @@ fn garbageCollectionImports(self: *DocumentStore) error{OutOfMemory}!void {
 
         const handle = self.handles.get(uri) orelse continue;
 
-        try collectDependencies(self.allocator, self, handle.*, &queue);
+        try self.collectDependencies(self.allocator, handle.*, &queue);
     }
 
     var i: usize = 0;
@@ -763,8 +763,8 @@ fn collectCIncludes(self: *const DocumentStore, handle: Handle) error{OutOfMemor
 /// collects every file uri the given handle depends on
 /// includes imports, cimports & packages
 pub fn collectDependencies(
-    allocator: std.mem.Allocator,
     store: *const DocumentStore,
+    allocator: std.mem.Allocator,
     handle: Handle,
     dependencies: *std.ArrayListUnmanaged(Uri),
 ) error{OutOfMemory}!void {
@@ -879,7 +879,7 @@ fn tagStoreCompletionItems(self: DocumentStore, arena: std.mem.Allocator, handle
 
     var dependencies = std.ArrayListUnmanaged(Uri){};
     try dependencies.append(self.allocator, handle.uri);
-    try collectDependencies(self.allocator, &self, handle, &dependencies);
+    try self.collectDependencies(self.allocator, handle, &dependencies);
 
     // TODO Better solution for deciding what tags to include
     var result_set = analysis.CompletionSet{};
