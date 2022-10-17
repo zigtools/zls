@@ -866,13 +866,13 @@ fn tagStoreCompletionItems(self: DocumentStore, arena: std.mem.Allocator, handle
     defer tracy_zone.end();
 
     var dependencies = std.ArrayListUnmanaged(Uri){};
-    try dependencies.append(self.allocator, handle);
-    try collectDependencies(self.allocator, self, handle, dependencies);
+    try dependencies.append(self.allocator, handle.uri);
+    try collectDependencies(self.allocator, &self, handle, &dependencies);
 
     // TODO Better solution for deciding what tags to include
     var result_set = analysis.CompletionSet{};
 
-    for (dependencies) |uri| {
+    for (dependencies.items) |uri| {
         // not every dependency is loaded which results in incomplete completion
         const hdl = self.handles.get(uri) orelse continue;
         const curr_set = @field(hdl.document_scope, name);
