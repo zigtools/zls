@@ -914,14 +914,14 @@ pub fn resolveTypeOfNodeInternal(store: *DocumentStore, arena: *std.heap.ArenaAl
                 const import_str = tree.tokenSlice(main_tokens[import_param]);
                 const import_uri = (try store.uriFromImportStr(arena.allocator(), handle.*, import_str[1 .. import_str.len - 1])) orelse return null;
 
-                const new_handle = store.getHandle(import_uri) orelse return null;
+                const new_handle = store.getOrLoadHandle(import_uri) orelse return null;
 
                 // reference to node '0' which is root
                 return TypeWithHandle.typeVal(.{ .node = 0, .handle = new_handle });
             } else if (std.mem.eql(u8, call_name, "@cImport")) {
                 const cimport_uri = (try store.resolveCImport(handle.*, node)) orelse return null;
 
-                const new_handle = store.getHandle(cimport_uri) orelse return null;
+                const new_handle = store.getOrLoadHandle(cimport_uri) orelse return null;
 
                 // reference to node '0' which is root
                 return TypeWithHandle.typeVal(.{ .node = 0, .handle = new_handle });

@@ -107,10 +107,16 @@ pub fn deinit(self: *DocumentStore) void {
 
 /// returns a handle to the given document
 pub fn getHandle(self: *DocumentStore, uri: Uri) ?*const Handle {
-    return self.getHandleInternal(uri) catch null;
+    return self.handles.get(uri);
 }
 
-fn getHandleInternal(self: *DocumentStore, uri: Uri) !?*const Handle {
+/// returns a handle to the given document
+/// will load the document from disk if it hasn't been already
+pub fn getOrLoadHandle(self: *DocumentStore, uri: Uri) ?*const Handle {
+    return self.getOrLoadHandleInternal(uri) catch null;
+}
+
+fn getOrLoadHandleInternal(self: *DocumentStore, uri: Uri) !?*const Handle {
     if (self.handles.get(uri)) |handle| return handle;
 
     var handle = try self.allocator.create(Handle);
@@ -569,7 +575,7 @@ fn uriInImports(
     // consider it checked even if a failure happens
     try checked_uris.put(try self.allocator.dupe(u8, source_uri), {});
 
-    const handle = self.getHandle(source_uri) orelse return false;
+    const handle = self.getOrLoadHandle(source_uri) orelse return false;
 
     for (handle.import_uris.items) |import_uri| {
         if (std.mem.eql(u8, uri, import_uri))
