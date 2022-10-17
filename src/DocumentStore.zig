@@ -302,6 +302,9 @@ fn garbageCollectionCImports(self: *DocumentStore) error{OutOfMemory}!void {
 }
 
 fn garbageCollectionBuildFiles(self: *DocumentStore) error{OutOfMemory}!void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     var reachable_build_files = std.StringHashMapUnmanaged(void){};
     defer reachable_build_files.deinit(self.allocator);
 
@@ -521,6 +524,9 @@ fn uriAssociatedWithBuild(
     build_file: BuildFile,
     uri: Uri,
 ) error{OutOfMemory}!bool {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     var checked_uris = std.StringHashMap(void).init(self.allocator);
     defer {
         var it = checked_uris.iterator();
@@ -750,6 +756,9 @@ pub fn collectDependencies(
     handle: Handle,
     dependencies: *std.ArrayListUnmanaged(Uri),
 ) error{OutOfMemory}!void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     try dependencies.ensureUnusedCapacity(allocator, handle.import_uris.items.len);
     for (handle.import_uris.items) |uri| {
         dependencies.appendAssumeCapacity(try allocator.dupe(u8, uri));
