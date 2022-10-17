@@ -856,32 +856,19 @@ fn tagStoreCompletionItems(self: DocumentStore, arena: std.mem.Allocator, handle
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const completion_set: analysis.CompletionSet = @field(handle.document_scope, name);
+    var dependencies = std.ArrayListUnmanaged(Uri){};
+    try dependencies.append(self.allocator, handle);
+    try collectDependencies(self.allocator, self, handle, dependencies);
 
     // TODO Better solution for deciding what tags to include
     var result_set = analysis.CompletionSet{};
-    try result_set.ensureTotalCapacity(arena, completion_set.entries.items(.key).len);
 
-    for (completion_set.entries.items(.key)) |completion| {
-        result_set.putAssumeCapacityNoClobber(completion, {});
-    }
-
-    for (handle.import_uris.items) |uri| {
-        const curr_set = @field(self.handles.get(uri).?.document_scope, name);
+    for (dependencies) |uri| {
+        // not every dependency is loaded which results in incomplete completion
+        const hdl = self.handles.get(uri) orelse continue;
+        const curr_set = @field(hdl.document_scope, name);
         for (curr_set.entries.items(.key)) |completion| {
             try result_set.put(arena, completion, {});
-        }
-    }
-    for (handle.cimports.items(.hash)) |hash| {
-        const result = self.cimports.get(hash) orelse continue;
-        switch (result) {
-            .success => |uri| {
-                const curr_set = @field(self.handles.get(uri).?.document_scope, name);
-                for (curr_set.entries.items(.key)) |completion| {
-                    try result_set.put(arena, completion, {});
-                }
-            },
-            .failure => {},
         }
     }
 
