@@ -16,7 +16,6 @@ const allocator: std.mem.Allocator = std.testing.allocator;
 const skip_references_tests = true;
 
 test "references" {
-    if (skip_references_tests) return error.SkipZigTest;
     try testReferences(
         \\const <0> = 0;
         \\const foo = <0>;
@@ -48,7 +47,6 @@ test "references" {
 }
 
 test "references - global scope" {
-    if (skip_references_tests) return error.SkipZigTest;
     try testReferences(
         \\const foo = <0>;
         \\const <0> = 0;

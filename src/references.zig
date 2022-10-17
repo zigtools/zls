@@ -82,10 +82,11 @@ fn symbolReferencesInternal(
     builder: *Builder,
     node: Ast.Node.Index,
     handle: *DocumentStore.Handle,
+    is_root: bool,
 ) error{OutOfMemory}!void {
     const tree = handle.tree;
 
-    if (node == 0 or node > tree.nodes.len) return;
+    if (!is_root and node == 0 or node > tree.nodes.len) return;
 
     const node_tags = tree.nodes.items(.tag);
     const datas = tree.nodes.items(.data);
@@ -102,7 +103,7 @@ fn symbolReferencesInternal(
             const statements = ast.blockStatements(tree, node, &buffer).?;
 
             for (statements) |stmt|
-                try symbolReferencesInternal(builder, stmt, handle);
+                try symbolReferencesInternal(builder, stmt, handle, false);
         },
         .container_decl,
         .container_decl_trailing,
@@ -121,7 +122,7 @@ fn symbolReferencesInternal(
         => {
             var buf: [2]Ast.Node.Index = undefined;
             for (ast.declMembers(tree, node, &buf)) |member|
-                try symbolReferencesInternal(builder, member, handle);
+                try symbolReferencesInternal(builder, member, handle, false);
         },
         .global_var_decl,
         .local_var_decl,
@@ -129,16 +130,16 @@ fn symbolReferencesInternal(
         .aligned_var_decl,
         => {
             const var_decl = ast.varDecl(tree, node).?;
-            try symbolReferencesInternal(builder, var_decl.ast.type_node, handle);
-            try symbolReferencesInternal(builder, var_decl.ast.init_node, handle);
+            try symbolReferencesInternal(builder, var_decl.ast.type_node, handle, false);
+            try symbolReferencesInternal(builder, var_decl.ast.init_node, handle, false);
         },
         .container_field,
         .container_field_align,
         .container_field_init,
         => {
             const field = ast.containerField(tree, node).?;
-            try symbolReferencesInternal(builder, field.ast.type_expr, handle);
-            try symbolReferencesInternal(builder, field.ast.value_expr, handle);
+            try symbolReferencesInternal(builder, field.ast.type_expr, handle, false);
+            try symbolReferencesInternal(builder, field.ast.value_expr, handle, false);
         },
         .identifier => {
             const child = (try analysis.lookupSymbolGlobal(builder.store, builder.arena, handle, tree.getNodeSource(node), starts[main_tokens[node]])) orelse return;
@@ -154,43 +155,43 @@ fn symbolReferencesInternal(
             const fn_proto = ast.fnProto(tree, node, &buf).?;
             var it = fn_proto.iterate(&tree);
             while (ast.nextFnParam(&it)) |param| {
-                try symbolReferencesInternal(builder, param.type_expr, handle);
+                try symbolReferencesInternal(builder, param.type_expr, handle, false);
             }
 
-            try symbolReferencesInternal(builder, fn_proto.ast.return_type, handle);
-            try symbolReferencesInternal(builder, fn_proto.ast.align_expr, handle);
-            try symbolReferencesInternal(builder, fn_proto.ast.section_expr, handle);
-            try symbolReferencesInternal(builder, fn_proto.ast.callconv_expr, handle);
+            try symbolReferencesInternal(builder, fn_proto.ast.return_type, handle, false);
+            try symbolReferencesInternal(builder, fn_proto.ast.align_expr, handle, false);
+            try symbolReferencesInternal(builder, fn_proto.ast.section_expr, handle, false);
+            try symbolReferencesInternal(builder, fn_proto.ast.callconv_expr, handle, false);
             if (node_tags[node] == .fn_decl) {
-                try symbolReferencesInternal(builder, datas[node].rhs, handle);
+                try symbolReferencesInternal(builder, datas[node].rhs, handle, false);
             }
         },
         .@"switch",
         .switch_comma,
         => {
             // TODO When renaming a union(enum) field, also rename switch items that refer to it.
-            try symbolReferencesInternal(builder, datas[node].lhs, handle);
+            try symbolReferencesInternal(builder, datas[node].lhs, handle, false);
             const extra = tree.extraData(datas[node].rhs, Ast.Node.SubRange);
             const cases = tree.extra_data[extra.start..extra.end];
             for (cases) |case| {
-                try symbolReferencesInternal(builder, case, handle);
+                try symbolReferencesInternal(builder, case, handle, false);
             }
         },
         .switch_case_one,
         .switch_case_inline_one,
         => {
             const case_one = tree.switchCaseOne(node);
-            try symbolReferencesInternal(builder, case_one.ast.target_expr, handle);
+            try symbolReferencesInternal(builder, case_one.ast.target_expr, handle, false);
             for (case_one.ast.values) |val|
-                try symbolReferencesInternal(builder, val, handle);
+                try symbolReferencesInternal(builder, val, handle, false);
         },
         .switch_case,
         .switch_case_inline,
         => {
             const case = tree.switchCase(node);
-            try symbolReferencesInternal(builder, case.ast.target_expr, handle);
+            try symbolReferencesInternal(builder, case.ast.target_expr, handle, false);
             for (case.ast.values) |val|
-                try symbolReferencesInternal(builder, val, handle);
+                try symbolReferencesInternal(builder, val, handle, false);
         },
         .@"while",
         .while_simple,
@@ -199,17 +200,17 @@ fn symbolReferencesInternal(
         .@"for",
         => {
             const loop = ast.whileAst(tree, node).?;
-            try symbolReferencesInternal(builder, loop.ast.cond_expr, handle);
-            try symbolReferencesInternal(builder, loop.ast.then_expr, handle);
-            try symbolReferencesInternal(builder, loop.ast.else_expr, handle);
+            try symbolReferencesInternal(builder, loop.ast.cond_expr, handle, false);
+            try symbolReferencesInternal(builder, loop.ast.then_expr, handle, false);
+            try symbolReferencesInternal(builder, loop.ast.else_expr, handle, false);
         },
         .@"if",
         .if_simple,
         => {
             const if_node = ast.ifFull(tree, node);
-            try symbolReferencesInternal(builder, if_node.ast.cond_expr, handle);
-            try symbolReferencesInternal(builder, if_node.ast.then_expr, handle);
-            try symbolReferencesInternal(builder, if_node.ast.else_expr, handle);
+            try symbolReferencesInternal(builder, if_node.ast.cond_expr, handle, false);
+            try symbolReferencesInternal(builder, if_node.ast.then_expr, handle, false);
+            try symbolReferencesInternal(builder, if_node.ast.else_expr, handle, false);
         },
         .ptr_type,
         .ptr_type_aligned,
@@ -219,15 +220,15 @@ fn symbolReferencesInternal(
             const ptr_type = ast.ptrType(tree, node).?;
 
             if (ptr_type.ast.align_node != 0) {
-                try symbolReferencesInternal(builder, ptr_type.ast.align_node, handle);
+                try symbolReferencesInternal(builder, ptr_type.ast.align_node, handle, false);
                 if (node_tags[node] == .ptr_type_bit_range) {
-                    try symbolReferencesInternal(builder, ptr_type.ast.bit_range_start, handle);
-                    try symbolReferencesInternal(builder, ptr_type.ast.bit_range_end, handle);
+                    try symbolReferencesInternal(builder, ptr_type.ast.bit_range_start, handle, false);
+                    try symbolReferencesInternal(builder, ptr_type.ast.bit_range_end, handle, false);
                 }
             }
 
-            try symbolReferencesInternal(builder, ptr_type.ast.sentinel, handle);
-            try symbolReferencesInternal(builder, ptr_type.ast.child_type, handle);
+            try symbolReferencesInternal(builder, ptr_type.ast.sentinel, handle, false);
+            try symbolReferencesInternal(builder, ptr_type.ast.child_type, handle, false);
         },
         .array_init,
         .array_init_comma,
@@ -246,9 +247,9 @@ fn symbolReferencesInternal(
                 .array_init_dot_two, .array_init_dot_two_comma => tree.arrayInitDotTwo(&buf, node),
                 else => unreachable,
             };
-            try symbolReferencesInternal(builder, array_init.ast.type_expr, handle);
+            try symbolReferencesInternal(builder, array_init.ast.type_expr, handle, false);
             for (array_init.ast.elements) |e|
-                try symbolReferencesInternal(builder, e, handle);
+                try symbolReferencesInternal(builder, e, handle, false);
         },
         .struct_init,
         .struct_init_comma,
@@ -267,9 +268,9 @@ fn symbolReferencesInternal(
                 .struct_init_dot_two, .struct_init_dot_two_comma => tree.structInitDotTwo(&buf, node),
                 else => unreachable,
             };
-            try symbolReferencesInternal(builder, struct_init.ast.type_expr, handle);
+            try symbolReferencesInternal(builder, struct_init.ast.type_expr, handle, false);
             for (struct_init.ast.fields) |field|
-                try symbolReferencesInternal(builder, field, handle);
+                try symbolReferencesInternal(builder, field, handle, false);
         },
         .call,
         .call_comma,
@@ -283,10 +284,10 @@ fn symbolReferencesInternal(
             var buf: [1]Ast.Node.Index = undefined;
             const call = ast.callFull(tree, node, &buf).?;
 
-            try symbolReferencesInternal(builder, call.ast.fn_expr, handle);
+            try symbolReferencesInternal(builder, call.ast.fn_expr, handle, false);
 
             for (call.ast.params) |param| {
-                try symbolReferencesInternal(builder, param, handle);
+                try symbolReferencesInternal(builder, param, handle, false);
             }
         },
         .slice,
@@ -300,10 +301,10 @@ fn symbolReferencesInternal(
                 else => unreachable,
             };
 
-            try symbolReferencesInternal(builder, slice.ast.sliced, handle);
-            try symbolReferencesInternal(builder, slice.ast.start, handle);
-            try symbolReferencesInternal(builder, slice.ast.end, handle);
-            try symbolReferencesInternal(builder, slice.ast.sentinel, handle);
+            try symbolReferencesInternal(builder, slice.ast.sliced, handle, false);
+            try symbolReferencesInternal(builder, slice.ast.start, handle, false);
+            try symbolReferencesInternal(builder, slice.ast.end, handle, false);
+            try symbolReferencesInternal(builder, slice.ast.sentinel, handle, false);
         },
         .builtin_call,
         .builtin_call_comma,
@@ -314,25 +315,25 @@ fn symbolReferencesInternal(
             const params = ast.builtinCallParams(tree, node, &buffer).?;
 
             for (params) |param|
-                try symbolReferencesInternal(builder, param, handle);
+                try symbolReferencesInternal(builder, param, handle, false);
         },
         .@"asm",
         .asm_simple,
         => |tag| {
             const full_asm: Ast.full.Asm = if (tag == .@"asm") tree.asmFull(node) else tree.asmSimple(node);
             if (full_asm.ast.items.len == 0)
-                try symbolReferencesInternal(builder, full_asm.ast.template, handle);
+                try symbolReferencesInternal(builder, full_asm.ast.template, handle, false);
 
             for (full_asm.inputs) |input|
-                try symbolReferencesInternal(builder, input, handle);
+                try symbolReferencesInternal(builder, input, handle, false);
 
             for (full_asm.outputs) |output|
-                try symbolReferencesInternal(builder, output, handle);
+                try symbolReferencesInternal(builder, output, handle, false);
         },
         .asm_output => unreachable,
         .asm_input => unreachable,
         .field_access => {
-            try symbolReferencesInternal(builder, datas[node].lhs, handle);
+            try symbolReferencesInternal(builder, datas[node].lhs, handle, false);
 
             const rhs_str = ast.tokenSlice(tree, datas[node].rhs) catch return;
             var bound_type_params = analysis.BoundTypeParams{};
@@ -380,12 +381,12 @@ fn symbolReferencesInternal(
         .grouped_expression,
         .@"comptime",
         .@"nosuspend",
-        => try symbolReferencesInternal(builder, datas[node].lhs, handle),
+        => try symbolReferencesInternal(builder, datas[node].lhs, handle, false),
         .test_decl,
         .@"errdefer",
         .@"defer",
         .anyframe_type,
-        => try symbolReferencesInternal(builder, datas[node].rhs, handle),
+        => try symbolReferencesInternal(builder, datas[node].rhs, handle, false),
         .equal_equal,
         .bang_equal,
         .less_than,
@@ -440,8 +441,8 @@ fn symbolReferencesInternal(
         .switch_range,
         .error_union,
         => {
-            try symbolReferencesInternal(builder, datas[node].lhs, handle);
-            try symbolReferencesInternal(builder, datas[node].rhs, handle);
+            try symbolReferencesInternal(builder, datas[node].lhs, handle, false);
+            try symbolReferencesInternal(builder, datas[node].rhs, handle, false);
         },
         .anyframe_literal,
         .char_literal,
@@ -472,15 +473,9 @@ pub fn symbolReferences(
     if (include_decl) try builder.add(curr_handle, decl_handle.nameToken());
 
     switch (decl_handle.decl.*) {
-        .pointer_payload,
-        .switch_payload,
-        .array_payload,
-        .array_index,
-        .ast_node,
-        => {
-            try symbolReferencesInternal(&builder, 0, curr_handle);
+        .ast_node => {
+            try symbolReferencesInternal(&builder, 0, curr_handle, true);
 
-            if (decl_handle.decl.* != .ast_node) return builder.locations;
             if (!workspace) return builder.locations;
 
             var imports = std.ArrayListUnmanaged(*DocumentStore.Handle){};
@@ -502,7 +497,7 @@ pub fn symbolReferences(
 
                         if (h == curr_handle) {
                             // entry does import curr_handle
-                            try symbolReferencesInternal(&builder, 0, entry.value_ptr.*);
+                            try symbolReferencesInternal(&builder, 0, entry.value_ptr.*, true);
                             break :blk;
                         }
 
@@ -520,6 +515,15 @@ pub fn symbolReferences(
                 try imports.resize(arena.allocator(), 0);
             }
         },
+        .pointer_payload,
+        .switch_payload,
+        .array_payload,
+        .array_index,
+        => {
+            try symbolReferencesInternal(&builder, 0, curr_handle, true);
+
+            return builder.locations;
+        },
         .param_payload => |pay| blk: {
             // Rename the param tok.
             const param = pay.param;
@@ -536,7 +540,7 @@ pub fn symbolReferences(
                     if (!std.meta.eql(candidate, param)) continue;
 
                     if (curr_handle.tree.nodes.items(.tag)[proto] != .fn_decl) break :blk;
-                    try symbolReferencesInternal(&builder, curr_handle.tree.nodes.items(.data)[proto].rhs, curr_handle);
+                    try symbolReferencesInternal(&builder, curr_handle.tree.nodes.items(.data)[proto].rhs, curr_handle, false);
                     break :blk;
                 }
             }
