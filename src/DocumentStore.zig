@@ -106,11 +106,11 @@ pub fn deinit(self: *DocumentStore) void {
 }
 
 /// returns a handle to the given document
-pub fn getHandle(self: *DocumentStore, uri: Uri) ?*Handle {
+pub fn getHandle(self: *DocumentStore, uri: Uri) ?*const Handle {
     return self.getHandleInternal(uri) catch null;
 }
 
-fn getHandleInternal(self: *DocumentStore, uri: Uri) !?*Handle {
+fn getHandleInternal(self: *DocumentStore, uri: Uri) !?*const Handle {
     if (self.handles.get(uri)) |handle| return handle;
 
     var handle = try self.allocator.create(Handle);
@@ -176,9 +176,15 @@ pub fn closeDocument(self: *DocumentStore, uri: Uri) void {
     self.garbageCollectionBuildFiles() catch {};
 }
 
-pub fn refreshDocument(self: *DocumentStore, handle: *Handle) !void {
+/// takes ownership of `new_text` which has to be allocated with `self.allocator`
+pub fn refreshDocument(self: *DocumentStore, uri: Uri, new_text: [:0]const u8) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
+
+    const handle = self.handles.get(uri) orelse unreachable;
+
+    self.allocator.free(handle.text);
+    handle.text = new_text;
 
     var new_tree = try std.zig.parse(self.allocator, handle.text);
     handle.tree.deinit(self.allocator);

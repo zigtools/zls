@@ -1756,10 +1756,8 @@ fn changeDocumentHandler(server: *Server, writer: anytype, id: types.RequestId, 
     const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse return;
 
     const new_text = try diff.applyTextEdits(server.allocator, handle.text, req.params.contentChanges, server.offset_encoding);
-    server.allocator.free(handle.text);
-    handle.text = new_text;
 
-    try server.document_store.refreshDocument(handle);
+    try server.document_store.refreshDocument(handle.uri, new_text);
     try server.publishDiagnostics(writer, handle.*);
 }
 
