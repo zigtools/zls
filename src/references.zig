@@ -70,7 +70,7 @@ const Builder = struct {
         };
     }
 
-    pub fn add(self: *Builder, handle: *DocumentStore.Handle, token_index: Ast.TokenIndex) !void {
+    pub fn add(self: *Builder, handle: *const DocumentStore.Handle, token_index: Ast.TokenIndex) !void {
         try self.locations.append(self.arena.allocator(), .{
             .uri = handle.uri,
             .range = offsets.tokenToRange(handle.tree, token_index, self.encoding),
@@ -81,7 +81,7 @@ const Builder = struct {
 fn symbolReferencesInternal(
     builder: *Builder,
     node: Ast.Node.Index,
-    handle: *DocumentStore.Handle,
+    handle: *const DocumentStore.Handle,
 ) error{OutOfMemory}!void {
     const tree = handle.tree;
 
@@ -483,41 +483,19 @@ pub fn symbolReferences(
             if (decl_handle.decl.* != .ast_node) return builder.locations;
             if (!workspace) return builder.locations;
 
-            var imports = std.ArrayListUnmanaged(*DocumentStore.Handle){};
-
-            var handle_it = store.handles.iterator();
-            while (handle_it.next()) |entry| {
-                if (skip_std_references and std.mem.indexOf(u8, entry.key_ptr.*, "std") != null) {
-                    if (!include_decl or entry.value_ptr.* != curr_handle)
+            for (store.handles.values()) |handle| {
+                if (skip_std_references and std.mem.indexOf(u8, handle.uri, "std") != null) {
+                    if (!include_decl or !std.mem.eql(u8, handle.uri, curr_handle.uri))
                         continue;
                 }
 
-                // Check entry's transitive imports
-                try imports.append(arena.allocator(), entry.value_ptr.*);
-                var i: usize = 0;
-                blk: while (i < imports.items.len) : (i += 1) {
-                    const import = imports.items[i];
-                    for (import.imports_used.items) |uri| {
-                        const h = store.getHandle(uri) orelse break;
+                var dependencies = std.ArrayListUnmanaged([]const u8){};
+                try store.collectDependencies(store.allocator, handle.*, &dependencies);
 
-                        if (h == curr_handle) {
-                            // entry does import curr_handle
-                            try symbolReferencesInternal(&builder, 0, entry.value_ptr.*);
-                            break :blk;
-                        }
-
-                        select: {
-                            for (imports.items) |item| {
-                                if (item == h) {
-                                    // already checked this import
-                                    break :select;
-                                }
-                            }
-                            try imports.append(arena.allocator(), h);
-                        }
-                    }
+                for (dependencies.items) |uri| {
+                    const hdl = store.getHandle(uri) orelse continue;
+                    try symbolReferencesInternal(&builder, 0, hdl);
                 }
-                try imports.resize(arena.allocator(), 0);
             }
         },
         .param_payload => |pay| blk: {

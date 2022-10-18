@@ -1,5 +1,7 @@
 const std = @import("std");
 const types = @import("types.zig");
+const requests = @import("requests.zig");
+const offsets = @import("offsets.zig");
 
 pub const Error = error{ OutOfMemory, InvalidRange };
 
@@ -349,4 +351,38 @@ fn char_pos_to_range(
         .start = result_start_pos.?,
         .end = result_end_pos.?,
     };
+}
+
+// Caller owns returned memory.
+pub fn applyTextEdits(
+    allocator: std.mem.Allocator,
+    text: []const u8,
+    content_changes: []const requests.TextDocumentContentChangeEvent,
+    encoding: offsets.Encoding,
+) ![:0]const u8 {
+    var last_full_text_change: ?usize = null;
+    var i: usize = content_changes.len;
+    while (i > 0) {
+        i -= 1;
+        if (content_changes[i].range == null) {
+            last_full_text_change = i;
+        }
+    }
+
+    var text_array = std.ArrayListUnmanaged(u8){};
+    errdefer text_array.deinit(allocator);
+
+    try text_array.appendSlice(allocator, if (last_full_text_change) |index| content_changes[index].text else text);
+
+    // don't even bother applying changes before a full text change
+    const changes = content_changes[if (last_full_text_change) |index| index + 1 else 0..];
+
+    for (changes) |item| {
+        const range = item.range.?; // every element is guaranteed to have `range` set
+
+        const loc = offsets.rangeToLoc(text_array.items, range, encoding);
+        try text_array.replaceRange(allocator, loc.start, loc.end - loc.start, item.text);
+    }
+
+    return try text_array.toOwnedSliceSentinel(allocator, 0);
 }

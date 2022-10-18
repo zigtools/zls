@@ -53,13 +53,13 @@ pub const TokenModifiers = packed struct {
 const Builder = struct {
     arena: *std.heap.ArenaAllocator,
     store: *DocumentStore,
-    handle: *DocumentStore.Handle,
+    handle: *const DocumentStore.Handle,
     previous_position: usize = 0,
     previous_token: ?Ast.TokenIndex = null,
     arr: std.ArrayListUnmanaged(u32),
     encoding: offsets.Encoding,
 
-    fn init(arena: *std.heap.ArenaAllocator, store: *DocumentStore, handle: *DocumentStore.Handle, encoding: offsets.Encoding) Builder {
+    fn init(arena: *std.heap.ArenaAllocator, store: *DocumentStore, handle: *const DocumentStore.Handle, encoding: offsets.Encoding) Builder {
         return Builder{
             .arena = arena,
             .store = store,
@@ -223,7 +223,7 @@ fn writeDocComments(builder: *Builder, tree: Ast, doc: Ast.TokenIndex) !void {
     }
 }
 
-fn fieldTokenType(container_decl: Ast.Node.Index, handle: *DocumentStore.Handle) ?TokenType {
+fn fieldTokenType(container_decl: Ast.Node.Index, handle: *const DocumentStore.Handle) ?TokenType {
     const main_token = handle.tree.nodes.items(.main_token)[container_decl];
     if (main_token > handle.tree.tokens.len) return null;
     return @as(?TokenType, switch (handle.tree.tokens.items(.tag)[main_token]) {
@@ -1023,7 +1023,12 @@ fn writeContainerField(builder: *Builder, node: Ast.Node.Index, field_token_type
 }
 
 // TODO Range version, edit version.
-pub fn writeAllSemanticTokens(arena: *std.heap.ArenaAllocator, store: *DocumentStore, handle: *DocumentStore.Handle, encoding: offsets.Encoding) ![]u32 {
+pub fn writeAllSemanticTokens(
+    arena: *std.heap.ArenaAllocator,
+    store: *DocumentStore,
+    handle: *const DocumentStore.Handle,
+    encoding: offsets.Encoding,
+) ![]u32 {
     var builder = Builder.init(arena, store, handle, encoding);
 
     // reverse the ast from the root declarations

@@ -8,7 +8,7 @@ const Token = std.zig.Token;
 const identifierFromPosition = @import("Server.zig").identifierFromPosition;
 const ast = @import("ast.zig");
 
-fn fnProtoToSignatureInfo(document_store: *DocumentStore, arena: *std.heap.ArenaAllocator, commas: u32, skip_self_param: bool, handle: *DocumentStore.Handle, fn_node: Ast.Node.Index, proto: Ast.full.FnProto) !types.SignatureInformation {
+fn fnProtoToSignatureInfo(document_store: *DocumentStore, arena: *std.heap.ArenaAllocator, commas: u32, skip_self_param: bool, handle: *const DocumentStore.Handle, fn_node: Ast.Node.Index, proto: Ast.full.FnProto) !types.SignatureInformation {
     const ParameterInformation = types.SignatureInformation.ParameterInformation;
 
     const tree = handle.tree;
@@ -67,7 +67,7 @@ fn fnProtoToSignatureInfo(document_store: *DocumentStore, arena: *std.heap.Arena
     };
 }
 
-pub fn getSignatureInfo(document_store: *DocumentStore, arena: *std.heap.ArenaAllocator, handle: *DocumentStore.Handle, absolute_index: usize, comptime data: type) !?types.SignatureInformation {
+pub fn getSignatureInfo(document_store: *DocumentStore, arena: *std.heap.ArenaAllocator, handle: *const DocumentStore.Handle, absolute_index: usize, comptime data: type) !?types.SignatureInformation {
     const innermost_block = analysis.innermostBlockScope(handle.*, absolute_index);
     const tree = handle.tree;
     const token_tags = tree.tokens.items(.tag);
