@@ -34,7 +34,7 @@ fn isNodeInRange(tree: Ast, node: Ast.Node.Index, range: types.Range) bool {
 const Builder = struct {
     allocator: std.mem.Allocator,
     config: *const Config,
-    handle: *DocumentStore.Handle,
+    handle: *const DocumentStore.Handle,
     hints: std.ArrayListUnmanaged(types.InlayHint),
     hover_kind: types.MarkupContent.Kind,
     encoding: offsets.Encoding,
@@ -691,7 +691,7 @@ pub fn writeRangeInlayHint(
     arena: *std.heap.ArenaAllocator,
     config: Config,
     store: *DocumentStore,
-    handle: *DocumentStore.Handle,
+    handle: *const DocumentStore.Handle,
     range: types.Range,
     hover_kind: types.MarkupContent.Kind,
     encoding: offsets.Encoding,

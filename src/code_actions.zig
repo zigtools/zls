@@ -12,13 +12,13 @@ const offsets = @import("offsets.zig");
 pub const Builder = struct {
     arena: *std.heap.ArenaAllocator,
     document_store: *DocumentStore,
-    handle: *DocumentStore.Handle,
+    handle: *const DocumentStore.Handle,
     offset_encoding: offsets.Encoding,
 
     pub fn generateCodeAction(
         builder: *Builder,
         diagnostic: types.Diagnostic,
-        actions: *std.ArrayListUnmanaged(types.CodeAction),
+        actions: *std.ArrayListUnmanaged(types.CodeAction)
     ) error{OutOfMemory}!void {
         const kind = DiagnosticKind.parse(diagnostic.message) orelse return;
 
@@ -113,8 +113,7 @@ fn handleUnusedFunctionParameter(builder: *Builder, actions: *std.ArrayListUnman
 
     const block = node_datas[payload.func].rhs;
 
-    const indent = offsets.lineSliceUntilIndex(builder.handle.text, token_starts[node_tokens[payload.func]]).len;
-    const new_text = try createDiscardText(builder.arena.allocator(), identifier_name, indent + 4);
+    const new_text = try createDiscardText(builder, identifier_name, token_starts[node_tokens[payload.func]], true);
 
     const index = token_starts[node_tokens[block]] + 1;
 
@@ -159,11 +158,9 @@ fn handleUnusedVariableOrConstant(builder: *Builder, actions: *std.ArrayListUnma
     const first_token = tree.firstToken(node);
     const last_token = ast.lastToken(tree, node) + 1;
 
-    const indent = offsets.lineSliceUntilIndex(builder.handle.text, token_starts[first_token]).len;
-
     if (token_tags[last_token] != .semicolon) return;
 
-    const new_text = try createDiscardText(builder.arena.allocator(), identifier_name, indent);
+    const new_text = try createDiscardText(builder, identifier_name, token_starts[first_token], false);
 
     const index = token_starts[last_token] + 1;
 
@@ -243,6 +240,30 @@ fn handlePointlessDiscard(builder: *Builder, actions: *std.ArrayListUnmanaged(ty
     });
 }
 
+fn detectIndentation(source: []const u8) []const u8 {
+    // Essentially I'm looking for the first indentation in the file.
+    var i: usize = 0;
+    var len = source.len - 1; // I need 1 look-ahead
+    while(i < len) : (i += 1) {
+        if(source[i] != '\n') continue;
+        i += 1;
+        if(source[i] == '\t') return "\t";
+        var space_count: usize = 0;
+        while(i < source.len and source[i] == ' ') : (i += 1) {
+            space_count += 1;
+        }
+        if(source[i] == '\n') { // Some editors mess up indentation of empty lines
+            i -= 1;
+            continue;
+        }
+        if(space_count == 0) continue;
+        if(source[i] == '/') continue; // Comments sometimes have additional alignment.
+        if(source[i] == '\\') continue; // multi-line strings might as well.
+        return source[i - space_count .. i];
+    }
+    return " " ** 4; // recommended style
+}
+
 // attempts to converts a slice of text into camelcase 'FUNCTION_NAME' -> 'functionName'
 fn createCamelcaseText(allocator: std.mem.Allocator, identifier: []const u8) ![]const u8 {
     // skip initial & ending underscores
@@ -274,13 +295,26 @@ fn createCamelcaseText(allocator: std.mem.Allocator, identifier: []const u8) ![]
 }
 
 // returns a discard string `\n{indent}_ = identifier_name;`
-fn createDiscardText(allocator: std.mem.Allocator, identifier_name: []const u8, indent: usize) ![]const u8 {
-    const new_text_len = 1 + indent + "_ = ;".len + identifier_name.len;
+fn createDiscardText(builder: *Builder, identifier_name: []const u8, declaration_start: usize, add_block_indentation: bool) ![]const u8 {
+    const indent = find_indent: {
+        const line = offsets.lineSliceUntilIndex(builder.handle.text, declaration_start);
+        for(line) |char, i| {
+            if(!std.ascii.isSpace(char)) {
+                break :find_indent line[0..i];
+            }
+        }
+        break :find_indent line;
+    };
+    const additional_indent = if(add_block_indentation) detectIndentation(builder.handle.text) else "";
+
+    const allocator = builder.arena.allocator();
+    const new_text_len = 1 + indent.len + additional_indent.len + "_ = ;".len + identifier_name.len;
     var new_text = try std.ArrayListUnmanaged(u8).initCapacity(allocator, new_text_len);
     errdefer new_text.deinit(allocator);
 
     new_text.appendAssumeCapacity('\n');
-    new_text.appendNTimesAssumeCapacity(' ', indent);
+    new_text.appendSliceAssumeCapacity(indent);
+    new_text.appendSliceAssumeCapacity(additional_indent);
     new_text.appendSliceAssumeCapacity("_ = ");
     new_text.appendSliceAssumeCapacity(identifier_name);
     new_text.appendAssumeCapacity(';');

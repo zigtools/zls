@@ -47,7 +47,7 @@ pub fn getDocComments(allocator: std.mem.Allocator, tree: Ast, node: Ast.Node.In
 }
 
 /// Get the first doc comment of a declaration.
-pub fn getDocCommentTokenIndex(tokens: []std.zig.Token.Tag, base_token: Ast.TokenIndex) ?Ast.TokenIndex {
+pub fn getDocCommentTokenIndex(tokens: []const std.zig.Token.Tag, base_token: Ast.TokenIndex) ?Ast.TokenIndex {
     var idx = base_token;
     if (idx == 0) return null;
     idx -= 1;
@@ -181,7 +181,7 @@ pub fn getFunctionSnippet(allocator: std.mem.Allocator, tree: Ast, func: Ast.ful
     return buffer.toOwnedSlice(allocator);
 }
 
-pub fn hasSelfParam(arena: *std.heap.ArenaAllocator, document_store: *DocumentStore, handle: *DocumentStore.Handle, func: Ast.full.FnProto) !bool {
+pub fn hasSelfParam(arena: *std.heap.ArenaAllocator, document_store: *DocumentStore, handle: *const DocumentStore.Handle, func: Ast.full.FnProto) !bool {
     // Non-decl prototypes cannot have a self parameter.
     if (func.name_token == null) return false;
     if (func.ast.params.len == 0) return false;
@@ -431,7 +431,7 @@ fn findReturnStatement(tree: Ast, fn_decl: Ast.full.FnProto, body: Ast.Node.Inde
     return findReturnStatementInternal(tree, fn_decl, body, &already_found);
 }
 
-pub fn resolveReturnType(store: *DocumentStore, arena: *std.heap.ArenaAllocator, fn_decl: Ast.full.FnProto, handle: *DocumentStore.Handle, bound_type_params: *BoundTypeParams, fn_body: ?Ast.Node.Index) !?TypeWithHandle {
+pub fn resolveReturnType(store: *DocumentStore, arena: *std.heap.ArenaAllocator, fn_decl: Ast.full.FnProto, handle: *const DocumentStore.Handle, bound_type_params: *BoundTypeParams, fn_body: ?Ast.Node.Index) !?TypeWithHandle {
     const tree = handle.tree;
     if (isTypeFunction(tree, fn_decl) and fn_body != null) {
         // If this is a type function and it only contains a single return statement that returns
@@ -912,18 +912,16 @@ pub fn resolveTypeOfNodeInternal(store: *DocumentStore, arena: *std.heap.ArenaAl
                 if (node_tags[import_param] != .string_literal) return null;
 
                 const import_str = tree.tokenSlice(main_tokens[import_param]);
-                const new_handle = (store.resolveImport(handle, import_str[1 .. import_str.len - 1]) catch |err| {
-                    log.debug("Error {} while processing import {s}", .{ err, import_str });
-                    return null;
-                }) orelse return null;
+                const import_uri = (try store.uriFromImportStr(arena.allocator(), handle.*, import_str[1 .. import_str.len - 1])) orelse return null;
+
+                const new_handle = store.getOrLoadHandle(import_uri) orelse return null;
 
                 // reference to node '0' which is root
                 return TypeWithHandle.typeVal(.{ .node = 0, .handle = new_handle });
             } else if (std.mem.eql(u8, call_name, "@cImport")) {
-                const new_handle = (store.resolveCImport(handle, node) catch |err| {
-                    log.debug("Error {} while processing cImport", .{err}); // TODO improve
-                    return null;
-                }) orelse return null;
+                const cimport_uri = (try store.resolveCImport(handle.*, node)) orelse return null;
+
+                const new_handle = store.getOrLoadHandle(cimport_uri) orelse return null;
 
                 // reference to node '0' which is root
                 return TypeWithHandle.typeVal(.{ .node = 0, .handle = new_handle });
@@ -974,7 +972,7 @@ pub const Type = struct {
 
 pub const TypeWithHandle = struct {
     type: Type,
-    handle: *DocumentStore.Handle,
+    handle: *const DocumentStore.Handle,
 
     pub fn typeVal(node_handle: NodeWithHandle) TypeWithHandle {
         return .{
@@ -1088,7 +1086,6 @@ pub fn resolveTypeOfNode(store: *DocumentStore, arena: *std.heap.ArenaAllocator,
 }
 
 /// Collects all `@import`'s we can find into a slice of import paths (without quotes).
-/// Caller owns returned memory.
 pub fn collectImports(allocator: std.mem.Allocator, tree: Ast) error{OutOfMemory}!std.ArrayListUnmanaged([]const u8) {
     var imports = std.ArrayListUnmanaged([]const u8){};
     errdefer {
@@ -1148,7 +1145,7 @@ pub fn collectCImportNodes(allocator: std.mem.Allocator, tree: Ast) error{OutOfM
 
 pub const NodeWithHandle = struct {
     node: Ast.Node.Index,
-    handle: *DocumentStore.Handle,
+    handle: *const DocumentStore.Handle,
 };
 
 pub const FieldAccessReturn = struct {
@@ -1156,7 +1153,7 @@ pub const FieldAccessReturn = struct {
     unwrapped: ?TypeWithHandle = null,
 };
 
-pub fn getFieldAccessType(store: *DocumentStore, arena: *std.heap.ArenaAllocator, handle: *DocumentStore.Handle, source_index: usize, tokenizer: *std.zig.Tokenizer) !?FieldAccessReturn {
+pub fn getFieldAccessType(store: *DocumentStore, arena: *std.heap.ArenaAllocator, handle: *const DocumentStore.Handle, source_index: usize, tokenizer: *std.zig.Tokenizer) !?FieldAccessReturn {
     var current_type = TypeWithHandle.typeVal(.{
         .node = undefined,
         .handle = handle,
@@ -1868,7 +1865,7 @@ pub const Declaration = union(enum) {
 
 pub const DeclWithHandle = struct {
     decl: *Declaration,
-    handle: *DocumentStore.Handle,
+    handle: *const DocumentStore.Handle,
 
     pub fn nameToken(self: DeclWithHandle) Ast.TokenIndex {
         const tree = self.handle.tree;
@@ -2000,7 +1997,7 @@ fn findContainerScope(container_handle: NodeWithHandle) ?*Scope {
     } else null;
 }
 
-fn iterateSymbolsContainerInternal(store: *DocumentStore, arena: *std.heap.ArenaAllocator, container_handle: NodeWithHandle, orig_handle: *DocumentStore.Handle, comptime callback: anytype, context: anytype, instance_access: bool, use_trail: *std.ArrayList(Ast.Node.Index)) error{OutOfMemory}!void {
+fn iterateSymbolsContainerInternal(store: *DocumentStore, arena: *std.heap.ArenaAllocator, container_handle: NodeWithHandle, orig_handle: *const DocumentStore.Handle, comptime callback: anytype, context: anytype, instance_access: bool, use_trail: *std.ArrayList(Ast.Node.Index)) error{OutOfMemory}!void {
     const container = container_handle.node;
     const handle = container_handle.handle;
 
@@ -2067,12 +2064,12 @@ fn iterateSymbolsContainerInternal(store: *DocumentStore, arena: *std.heap.Arena
     }
 }
 
-pub fn iterateSymbolsContainer(store: *DocumentStore, arena: *std.heap.ArenaAllocator, container_handle: NodeWithHandle, orig_handle: *DocumentStore.Handle, comptime callback: anytype, context: anytype, instance_access: bool) error{OutOfMemory}!void {
+pub fn iterateSymbolsContainer(store: *DocumentStore, arena: *std.heap.ArenaAllocator, container_handle: NodeWithHandle, orig_handle: *const DocumentStore.Handle, comptime callback: anytype, context: anytype, instance_access: bool) error{OutOfMemory}!void {
     var use_trail = std.ArrayList(Ast.Node.Index).init(arena.allocator());
     return try iterateSymbolsContainerInternal(store, arena, container_handle, orig_handle, callback, context, instance_access, &use_trail);
 }
 
-pub fn iterateLabels(handle: *DocumentStore.Handle, source_index: usize, comptime callback: anytype, context: anytype) error{OutOfMemory}!void {
+pub fn iterateLabels(handle: *const DocumentStore.Handle, source_index: usize, comptime callback: anytype, context: anytype) error{OutOfMemory}!void {
     for (handle.document_scope.scopes.items) |scope| {
         if (source_index >= scope.loc.start and source_index < scope.loc.end) {
             var decl_it = scope.decls.iterator();
@@ -2088,7 +2085,7 @@ pub fn iterateLabels(handle: *DocumentStore.Handle, source_index: usize, comptim
     }
 }
 
-fn iterateSymbolsGlobalInternal(store: *DocumentStore, arena: *std.heap.ArenaAllocator, handle: *DocumentStore.Handle, source_index: usize, comptime callback: anytype, context: anytype, use_trail: *std.ArrayList(Ast.Node.Index)) error{OutOfMemory}!void {
+fn iterateSymbolsGlobalInternal(store: *DocumentStore, arena: *std.heap.ArenaAllocator, handle: *const DocumentStore.Handle, source_index: usize, comptime callback: anytype, context: anytype, use_trail: *std.ArrayList(Ast.Node.Index)) error{OutOfMemory}!void {
     for (handle.document_scope.scopes.items) |scope| {
         if (source_index >= scope.loc.start and source_index <= scope.loc.end) {
             var decl_it = scope.decls.iterator();
@@ -2129,7 +2126,7 @@ fn iterateSymbolsGlobalInternal(store: *DocumentStore, arena: *std.heap.ArenaAll
     }
 }
 
-pub fn iterateSymbolsGlobal(store: *DocumentStore, arena: *std.heap.ArenaAllocator, handle: *DocumentStore.Handle, source_index: usize, comptime callback: anytype, context: anytype) error{OutOfMemory}!void {
+pub fn iterateSymbolsGlobal(store: *DocumentStore, arena: *std.heap.ArenaAllocator, handle: *const DocumentStore.Handle, source_index: usize, comptime callback: anytype, context: anytype) error{OutOfMemory}!void {
     var use_trail = std.ArrayList(Ast.Node.Index).init(arena.allocator());
     return try iterateSymbolsGlobalInternal(store, arena, handle, source_index, callback, context, &use_trail);
 }
@@ -2154,7 +2151,7 @@ pub fn innermostBlockScope(handle: DocumentStore.Handle, source_index: usize) As
     return handle.document_scope.scopes.items[innermostBlockScopeIndex(handle, source_index)].toNodeIndex().?;
 }
 
-pub fn innermostContainer(handle: *DocumentStore.Handle, source_index: usize) TypeWithHandle {
+pub fn innermostContainer(handle: *const DocumentStore.Handle, source_index: usize) TypeWithHandle {
     var current = handle.document_scope.scopes.items[0].data.container;
     if (handle.document_scope.scopes.items.len == 1) return TypeWithHandle.typeVal(.{ .node = current, .handle = handle });
 
@@ -2170,7 +2167,7 @@ pub fn innermostContainer(handle: *DocumentStore.Handle, source_index: usize) Ty
     return TypeWithHandle.typeVal(.{ .node = current, .handle = handle });
 }
 
-fn resolveUse(store: *DocumentStore, arena: *std.heap.ArenaAllocator, uses: []const Ast.Node.Index, symbol: []const u8, handle: *DocumentStore.Handle) error{OutOfMemory}!?DeclWithHandle {
+fn resolveUse(store: *DocumentStore, arena: *std.heap.ArenaAllocator, uses: []const Ast.Node.Index, symbol: []const u8, handle: *const DocumentStore.Handle) error{OutOfMemory}!?DeclWithHandle {
     // If we were asked to resolve this symbol before,
     // it is self-referential and we cannot resolve it.
     if (std.mem.indexOfScalar([*]const u8, using_trail.items, symbol.ptr) != null)
@@ -2202,7 +2199,7 @@ fn resolveUse(store: *DocumentStore, arena: *std.heap.ArenaAllocator, uses: []co
     return null;
 }
 
-pub fn lookupLabel(handle: *DocumentStore.Handle, symbol: []const u8, source_index: usize) error{OutOfMemory}!?DeclWithHandle {
+pub fn lookupLabel(handle: *const DocumentStore.Handle, symbol: []const u8, source_index: usize) error{OutOfMemory}!?DeclWithHandle {
     for (handle.document_scope.scopes.items) |scope| {
         if (source_index >= scope.loc.start and source_index < scope.loc.end) {
             if (scope.decls.getEntry(symbol)) |candidate| {
@@ -2221,7 +2218,7 @@ pub fn lookupLabel(handle: *DocumentStore.Handle, symbol: []const u8, source_ind
     return null;
 }
 
-pub fn lookupSymbolGlobal(store: *DocumentStore, arena: *std.heap.ArenaAllocator, handle: *DocumentStore.Handle, symbol: []const u8, source_index: usize) error{OutOfMemory}!?DeclWithHandle {
+pub fn lookupSymbolGlobal(store: *DocumentStore, arena: *std.heap.ArenaAllocator, handle: *const DocumentStore.Handle, symbol: []const u8, source_index: usize) error{OutOfMemory}!?DeclWithHandle {
     const innermost_scope_idx = innermostBlockScopeIndex(handle.*, source_index);
 
     var curr = innermost_scope_idx;
