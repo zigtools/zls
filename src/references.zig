@@ -330,8 +330,9 @@ fn symbolReferencesInternal(
             for (full_asm.outputs) |output|
                 try symbolReferencesInternal(builder, output, handle, false);
         },
-        .asm_output => unreachable,
-        .asm_input => unreachable,
+        // TODO implement references for asm
+        .asm_output => {},
+        .asm_input => {},
         .field_access => {
             try symbolReferencesInternal(builder, datas[node].lhs, handle, false);
 
