@@ -940,9 +940,9 @@ pub const builtins = [_]Builtin{
         },
     },
     .{
-        .name = "@maximum",
-        .signature = "@maximum(a: T, b: T) T",
-        .snippet = "@maximum(${1:a: T}, ${2:b: T})",
+        .name = "@max",
+        .signature = "@max(a: T, b: T) T",
+        .snippet = "@max(${1:a: T}, ${2:b: T})",
         .documentation =
         \\Returns the maximum value of `a` and `b`. This builtin accepts integers, floats, and vectors of either. In the latter case, the operation is performed element wise.
         \\
@@ -1010,9 +1010,9 @@ pub const builtins = [_]Builtin{
         },
     },
     .{
-        .name = "@minimum",
-        .signature = "@minimum(a: T, b: T) T",
-        .snippet = "@minimum(${1:a: T}, ${2:b: T})",
+        .name = "@min",
+        .signature = "@min(a: T, b: T) T",
+        .snippet = "@min(${1:a: T}, ${2:b: T})",
         .documentation =
         \\Returns the minimum value of `a` and `b`. This builtin accepts integers, floats, and vectors of either. In the latter case, the operation is performed element wise.
         \\
