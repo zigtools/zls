@@ -1434,7 +1434,7 @@ fn completeFileSystemStringLiteral(allocator: std.mem.Allocator, store: *const D
             }
 
             var old = document_dir_path;
-            document_dir_path = document_dir_path.dir.openIterableDir(subpath, .{}) catch break :fsc // NOTE: Is this even safe lol?
+            document_dir_path = document_dir_path.dir.openIterableDir(subpath, .{}) catch break :fsc; // NOTE: Is this even safe lol?
             old.close();
 
             subpath_present = true;
