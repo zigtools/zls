@@ -368,6 +368,8 @@ fn getAstCheckDiagnostics(
     var line_iterator = std.mem.split(u8, stderr_bytes, "\n");
 
     while (line_iterator.next()) |line| lin: {
+        if (!std.mem.startsWith(u8, line, "<stdin>")) continue;
+
         var pos_and_diag_iterator = std.mem.split(u8, line, ":");
         const maybe_first = pos_and_diag_iterator.next();
         if (maybe_first) |first| {
@@ -1534,7 +1536,7 @@ fn initializeHandler(server: *Server, writer: anytype, id: types.RequestId, req:
     // NOTE: everything is initialized, we got the client capabilities
     // so we can now format the prebuilt builtins items for labelDetails
     if (server.client_capabilities.label_details_support) {
-        for(server.builtin_completions.items) |*item| {
+        for (server.builtin_completions.items) |*item| {
             try formatDetailledLabel(item, std.heap.page_allocator);
         }
     }
