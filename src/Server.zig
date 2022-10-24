@@ -2344,7 +2344,7 @@ fn foldingRangeHandler(server: *Server, writer: anytype, id: types.RequestId, re
     const Tag = std.zig.Token.Tag;
     const allocator = server.arena.allocator();
     const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
-        log.warn("Trying to get inlay hint of non existent document {s}", .{req.params.textDocument.uri});
+        log.warn("Trying to get folding ranges of non existent document {s}", .{req.params.textDocument.uri});
         return try respondGeneric(writer, id, null_result_response);
     };
 
