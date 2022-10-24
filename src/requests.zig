@@ -288,3 +288,9 @@ pub const CodeAction = struct {
         },
     },
 };
+
+pub const FoldingRange = struct {
+    params: struct {
+        textDocument: TextDocumentIdentifier,  
+    },
+};

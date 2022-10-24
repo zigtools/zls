@@ -1574,7 +1574,7 @@ fn initializeHandler(server: *Server, writer: anytype, id: types.RequestId, req:
                     .colorProvider = false,
                     .documentFormattingProvider = true,
                     .documentRangeFormattingProvider = false,
-                    .foldingRangeProvider = false,
+                    .foldingRangeProvider = true,
                     .selectionRangeProvider = false,
                     .workspaceSymbolProvider = false,
                     .rangeProvider = false,
@@ -2339,6 +2339,44 @@ fn codeActionHandler(server: *Server, writer: anytype, id: types.RequestId, req:
     });
 }
 
+fn foldingRangeHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.FoldingRange) !void 
+{
+    const allocator = server.arena.allocator();
+    const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
+        log.warn("Trying to get inlay hint of non existent document {s}", .{req.params.textDocument.uri});
+        return try respondGeneric(writer, id, null_result_response);
+    };
+
+    var stack = try std.ArrayList(usize).initCapacity(allocator, 10);    
+    var ranges = std.ArrayList(types.FoldingRange).init(allocator);
+
+    for (handle.tree.tokens.items(.tag)) |tag, i| {
+        if (tag == std.zig.Token.Tag.l_brace) {
+            const line = handle.tree.tokenLocation(0, @intCast(u32, i)).line;
+            try stack.append(line);
+        }
+
+        if (tag == std.zig.Token.Tag.r_brace and stack.items.len > 0) {
+            const start_line = stack.pop();
+            const end_line = handle.tree.tokenLocation(0, @intCast(u32, i)).line;
+            
+            // Discard brace pairs from the same line
+            if (start_line != end_line)
+            {
+                try ranges.append(.{
+                    .startLine = start_line,
+                    .endLine = end_line,
+                });
+            }
+        }
+    }
+
+    try send(writer, allocator, types.Response {
+        .id = id,
+        .result = .{ .FoldingRange = ranges.items },
+    });
+}
+
 // Needed for the hack seen below.
 fn extractErr(val: anytype) anyerror {
     val catch |e| return e;
@@ -2475,6 +2513,7 @@ pub fn processJsonRpc(server: *Server, writer: anytype, json: []const u8) !void 
         .{ "textDocument/documentHighlight", requests.DocumentHighlight, documentHighlightHandler },
         .{ "textDocument/codeAction", requests.CodeAction, codeActionHandler },
         .{ "workspace/didChangeConfiguration", Config.DidChangeConfigurationParams, didChangeConfigurationHandler },
+        .{ "textDocument/foldingRange", requests.FoldingRange, foldingRangeHandler }
     };
 
     if (zig_builtin.zig_backend == .stage1) {
@@ -2539,7 +2578,6 @@ pub fn processJsonRpc(server: *Server, writer: anytype, json: []const u8) !void 
         .{ "textDocument/rangeFormatting", true },
         .{ "textDocument/onTypeFormatting", true },
         .{ "textDocument/prepareRename", true },
-        .{ "textDocument/foldingRange", true },
         .{ "textDocument/selectionRange", true },
         .{ "textDocument/semanticTokens/range", true },
         .{ "workspace/didChangeWorkspaceFolders", false },
