@@ -2339,34 +2339,79 @@ fn codeActionHandler(server: *Server, writer: anytype, id: types.RequestId, req:
     });
 }
 
-fn foldingRangeHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.FoldingRange) !void 
+fn foldingRangeHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.FoldingRange) !void
 {
+    const Tag = std.zig.Token.Tag;
     const allocator = server.arena.allocator();
     const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
         log.warn("Trying to get inlay hint of non existent document {s}", .{req.params.textDocument.uri});
         return try respondGeneric(writer, id, null_result_response);
     };
 
-    var stack = try std.ArrayList(usize).initCapacity(allocator, 10);    
+    // Used to store the result
     var ranges = std.ArrayList(types.FoldingRange).init(allocator);
 
+    // We add opened curly braces to a stack as we go and pop one off when we find a closing brace.
+    // As an optimization we start with a capacity of 10 which should work well in most cases since
+    // people will almost never have more than 10 levels deep of nested braces. 
+    var stack = try std.ArrayList(usize).initCapacity(allocator, 10);
+
+    // Iterate over the token tags and look for pairs of braces
     for (handle.tree.tokens.items(.tag)) |tag, i| {
-        if (tag == std.zig.Token.Tag.l_brace) {
-            const line = handle.tree.tokenLocation(0, @intCast(u32, i)).line;
+        const token_index = @intCast(Ast.TokenIndex, i);
+
+        // If we found a `{` we add it to our stack
+        if (tag == Tag.l_brace) {
+            const line = handle.tree.tokenLocation(0, token_index).line;
             try stack.append(line);
         }
 
-        if (tag == std.zig.Token.Tag.r_brace and stack.items.len > 0) {
+        // If we found a close `}` we have a matching pair
+        if (tag == Tag.r_brace and stack.items.len > 0) {
             const start_line = stack.pop();
-            const end_line = handle.tree.tokenLocation(0, @intCast(u32, i)).line;
+            const end_line = handle.tree.tokenLocation(0, token_index).line;
             
-            // Discard brace pairs from the same line
+            // Add brace pairs but discard those from the same line, no need to waste memory on them
             if (start_line != end_line)
             {
                 try ranges.append(.{
                     .startLine = start_line,
                     .endLine = end_line,
                 });
+            }
+        }
+    }
+
+    // Iterate over the source code and look for code regions with #region #endregion
+    {
+        // We will reuse the stack
+        stack.clearRetainingCapacity();
+
+        var i: usize = 0;
+        var lines_count: usize = 0;
+        while (i < handle.tree.source.len) : (i += 1) {
+            const slice = handle.tree.source[i..];
+            
+            if (slice[0] == '\n') {
+                lines_count += 1;
+            }
+            
+            if (std.mem.startsWith(u8, slice, "//#region")) {
+                try stack.append(lines_count);
+            }
+
+            if (std.mem.startsWith(u8, slice, "//#endregion") and stack.items.len > 0) {
+                const start_line = stack.pop();
+                const end_line = lines_count;
+                
+                // Add brace pairs but discard those from the same line, no need to waste memory on them
+                if (start_line != end_line)
+                {
+                    try ranges.append(.{
+                        .startLine = start_line,
+                        .endLine = end_line,
+                    });
+                }
             }
         }
     }
