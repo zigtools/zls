@@ -2339,63 +2339,245 @@ fn codeActionHandler(server: *Server, writer: anytype, id: types.RequestId, req:
     });
 }
 
-fn foldingRangeHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.FoldingRange) !void
-{
-    const Tag = std.zig.Token.Tag;
+fn foldingRangeHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.FoldingRange) !void {
+    const Token = std.zig.Token;
+    const Node = Ast.Node;
     const allocator = server.arena.allocator();
     const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
         log.warn("Trying to get folding ranges of non existent document {s}", .{req.params.textDocument.uri});
         return try respondGeneric(writer, id, null_result_response);
     };
 
+    const helper = struct {
+        const Inclusivity = enum { inclusive, exclusive };
+        /// Returns true if added.
+        fn maybeAddTokRange(
+            p_ranges: *std.ArrayList(types.FoldingRange),
+            tree: Ast,
+            start: Ast.TokenIndex,
+            end: Ast.TokenIndex,
+            end_reach: Inclusivity,
+        ) std.mem.Allocator.Error!bool {
+            const can_add = !tree.tokensOnSameLine(start, end);
+            if (can_add) {
+                try addTokRange(p_ranges, tree, start, end, end_reach);
+            }
+            return can_add;
+        }
+        fn addTokRange(
+            p_ranges: *std.ArrayList(types.FoldingRange),
+            tree: Ast,
+            start: Ast.TokenIndex,
+            end: Ast.TokenIndex,
+            end_reach: Inclusivity,
+        ) std.mem.Allocator.Error!void {
+            std.debug.assert(!std.debug.runtime_safety or !tree.tokensOnSameLine(start, end));
+
+            const start_loc = tree.tokenLocation(0, start);
+            const end_loc_rel = tree.tokenLocation(@intCast(Ast.ByteOffset, start_loc.line_start), end);
+            std.debug.assert(end_loc_rel.line != 0);
+
+            try p_ranges.append(.{
+                .startLine = start_loc.line,
+                .endLine = (start_loc.line + end_loc_rel.line) -
+                    @boolToInt(end_reach == .exclusive),
+            });
+        }
+    };
+
     // Used to store the result
     var ranges = std.ArrayList(types.FoldingRange).init(allocator);
 
-    // We add opened curly braces to a stack as we go and pop one off when we find a closing brace.
-    // As an optimization we start with a capacity of 10 which should work well in most cases since
-    // people will almost never have more than 10 levels deep of nested braces. 
-    var stack = try std.ArrayList(usize).initCapacity(allocator, 10);
+    const token_tags: []const Token.Tag = handle.tree.tokens.items(.tag);
+    const node_tags: []const Node.Tag = handle.tree.nodes.items(.tag);
 
-    // Iterate over the token tags and look for pairs of braces
-    for (handle.tree.tokens.items(.tag)) |tag, i| {
-        const token_index = @intCast(Ast.TokenIndex, i);
-
-        // If we found a `{` we add it to our stack
-        if (tag == Tag.l_brace) {
-            const line = handle.tree.tokenLocation(0, token_index).line;
-            try stack.append(line);
-        }
-
-        // If we found a close `}` we have a matching pair
-        if (tag == Tag.r_brace and stack.items.len > 0) {
-            const start_line = stack.pop();
-            const end_line = handle.tree.tokenLocation(0, token_index).line;
-            
-            // Add brace pairs but discard those from the same line, no need to waste memory on them
-            if (start_line != end_line)
-            {
-                try ranges.append(.{
-                    .startLine = start_line,
-                    .endLine = end_line,
-                });
+    if (token_tags.len == 0) return;
+    if (token_tags[0] == .container_doc_comment) {
+        var tok: Ast.TokenIndex = 1;
+        while (tok < token_tags.len) : (tok += 1) {
+            if (token_tags[tok] != .container_doc_comment) {
+                break;
             }
+        }
+        if (tok > 1) { // each container doc comment has its own line, so each one counts for a line
+            try ranges.append(.{
+                .startLine = 1,
+                .endLine = tok,
+            });
+        }
+    }
+
+    for (node_tags) |node_tag, i| {
+        const node = @intCast(Node.Index, i);
+
+        switch (node_tag) {
+            // only fold the expression pertaining to the if statement, and the else statement, each respectively.
+            // TODO: Should folding multiline condition expressions also be supported? Ditto for the other control flow structures.
+            .@"if", .if_simple => {
+                const if_full = ast.ifFull(handle.tree, node);
+
+                const start_tok_1 = handle.tree.lastToken(if_full.ast.cond_expr);
+                const end_tok_1 = handle.tree.lastToken(if_full.ast.then_expr);
+                _ = try helper.maybeAddTokRange(&ranges, handle.tree, start_tok_1, end_tok_1, .inclusive);
+
+                if (if_full.ast.else_expr == 0) continue;
+
+                const start_tok_2 = if_full.else_token;
+                const end_tok_2 = handle.tree.lastToken(if_full.ast.else_expr);
+
+                _ = try helper.maybeAddTokRange(&ranges, handle.tree, start_tok_2, end_tok_2, .inclusive);
+            },
+
+            // same as if/else
+            .@"for",
+            .for_simple,
+            .@"while",
+            .while_cont,
+            .while_simple,
+            => {
+                const loop_full = ast.whileAst(handle.tree, node).?;
+
+                const start_tok_1 = handle.tree.lastToken(loop_full.ast.cond_expr);
+                const end_tok_1 = handle.tree.lastToken(loop_full.ast.then_expr);
+                _ = try helper.maybeAddTokRange(&ranges, handle.tree, start_tok_1, end_tok_1, .inclusive);
+
+                if (loop_full.ast.else_expr == 0) continue;
+
+                const start_tok_2 = loop_full.else_token;
+                const end_tok_2 = handle.tree.lastToken(loop_full.ast.else_expr);
+                _ = try helper.maybeAddTokRange(&ranges, handle.tree, start_tok_2, end_tok_2, .inclusive);
+            },
+
+            .global_var_decl,
+            .simple_var_decl,
+            .aligned_var_decl,
+            .container_field_init,
+            .container_field_align,
+            .container_field,
+            .fn_proto,
+            .fn_proto_multi,
+            .fn_proto_one,
+            .fn_proto_simple,
+            .fn_decl,
+            => decl_node_blk: {
+                doc_comment_range: {
+                    const first_tok: Ast.TokenIndex = handle.tree.firstToken(node);
+                    if (first_tok == 0) break :doc_comment_range;
+
+                    const end_doc_tok = first_tok - 1;
+                    if (token_tags[end_doc_tok] != .doc_comment) break :doc_comment_range;
+
+                    var start_doc_tok = end_doc_tok;
+                    while (start_doc_tok != 0) {
+                        if (token_tags[start_doc_tok - 1] != .doc_comment) break;
+                        start_doc_tok -= 1;
+                    }
+
+                    _ = try helper.maybeAddTokRange(&ranges, handle.tree, start_doc_tok, end_doc_tok, .inclusive);
+                }
+
+                // Function prototype folding regions
+                var fn_proto_buffer: [1]Node.Index = undefined;
+                const fn_proto = ast.fnProto(handle.tree, node, fn_proto_buffer[0..]) orelse
+                    break :decl_node_blk;
+
+                const list_start_tok: Ast.TokenIndex = fn_proto.lparen;
+                const list_end_tok: Ast.TokenIndex = handle.tree.lastToken(fn_proto.ast.proto_node);
+
+                if (handle.tree.tokensOnSameLine(list_start_tok, list_end_tok)) break :decl_node_blk;
+                try ranges.ensureUnusedCapacity(1 + fn_proto.ast.params.len); // best guess, doesn't include anytype params
+                helper.addTokRange(&ranges, handle.tree, list_start_tok, list_end_tok, .exclusive) catch |err| switch (err) {
+                    error.OutOfMemory => unreachable,
+                };
+
+                var it = fn_proto.iterate(&handle.tree);
+                while (ast.nextFnParam(&it)) |param| {
+                    const doc_start_tok = param.first_doc_comment orelse continue;
+                    var doc_end_tok = doc_start_tok;
+
+                    while (token_tags[doc_end_tok + 1] == .doc_comment)
+                        doc_end_tok += 1;
+
+                    _ = try helper.maybeAddTokRange(&ranges, handle.tree, doc_start_tok, doc_end_tok, .inclusive);
+                }
+            },
+
+            .@"catch",
+            .@"orelse",
+            .multiline_string_literal,
+            // TODO: Similar to condition expressions in control flow structures, should folding multiline grouped expressions be enabled?
+            // .grouped_expression,
+            => {
+                const start_tok = handle.tree.firstToken(node);
+                const end_tok = handle.tree.lastToken(node);
+                _ = try helper.maybeAddTokRange(&ranges, handle.tree, start_tok, end_tok, .inclusive);
+            },
+
+            // most other trivial cases can go through here.
+            else => {
+                switch (node_tag) {
+                    .array_init,
+                    .array_init_one,
+                    .array_init_dot_two,
+                    .array_init_one_comma,
+                    .array_init_dot_two_comma,
+                    .array_init_dot,
+                    .array_init_dot_comma,
+                    .array_init_comma,
+
+                    .struct_init,
+                    .struct_init_one,
+                    .struct_init_one_comma,
+                    .struct_init_dot_two,
+                    .struct_init_dot_two_comma,
+                    .struct_init_dot,
+                    .struct_init_dot_comma,
+                    .struct_init_comma,
+
+                    .@"switch",
+                    .switch_comma,
+                    => {},
+
+                    else => disallow_fold: {
+                        if (ast.isBlock(handle.tree, node))
+                            break :disallow_fold;
+
+                        if (ast.isCall(handle.tree, node))
+                            break :disallow_fold;
+
+                        if (ast.isBuiltinCall(handle.tree, node))
+                            break :disallow_fold;
+
+                        if (ast.isContainer(handle.tree, node) and node_tag != .root)
+                            break :disallow_fold;
+
+                        continue; // no conditions met, continue iterating without adding this potential folding range
+                    },
+                }
+
+                const start_tok = handle.tree.firstToken(node);
+                const end_tok = handle.tree.lastToken(node);
+                _ = try helper.maybeAddTokRange(&ranges, handle.tree, start_tok, end_tok, .exclusive);
+            },
         }
     }
 
     // Iterate over the source code and look for code regions with #region #endregion
     {
-        // We will reuse the stack
-        stack.clearRetainingCapacity();
+        // We add opened folding regions to a stack as we go and pop one off when we find a closing brace.
+        // As an optimization we start with a reasonable capacity, which should work well in most cases since
+        // people will almost never have nesting that deep.
+        var stack = try std.ArrayList(usize).initCapacity(allocator, 10);
 
         var i: usize = 0;
         var lines_count: usize = 0;
         while (i < handle.tree.source.len) : (i += 1) {
             const slice = handle.tree.source[i..];
-            
+
             if (slice[0] == '\n') {
                 lines_count += 1;
             }
-            
+
             if (std.mem.startsWith(u8, slice, "//#region")) {
                 try stack.append(lines_count);
             }
@@ -2403,10 +2585,9 @@ fn foldingRangeHandler(server: *Server, writer: anytype, id: types.RequestId, re
             if (std.mem.startsWith(u8, slice, "//#endregion") and stack.items.len > 0) {
                 const start_line = stack.pop();
                 const end_line = lines_count;
-                
+
                 // Add brace pairs but discard those from the same line, no need to waste memory on them
-                if (start_line != end_line)
-                {
+                if (start_line != end_line) {
                     try ranges.append(.{
                         .startLine = start_line,
                         .endLine = end_line,
@@ -2416,7 +2597,7 @@ fn foldingRangeHandler(server: *Server, writer: anytype, id: types.RequestId, re
         }
     }
 
-    try send(writer, allocator, types.Response {
+    try send(writer, allocator, types.Response{
         .id = id,
         .result = .{ .FoldingRange = ranges.items },
     });
@@ -2558,7 +2739,7 @@ pub fn processJsonRpc(server: *Server, writer: anytype, json: []const u8) !void 
         .{ "textDocument/documentHighlight", requests.DocumentHighlight, documentHighlightHandler },
         .{ "textDocument/codeAction", requests.CodeAction, codeActionHandler },
         .{ "workspace/didChangeConfiguration", Config.DidChangeConfigurationParams, didChangeConfigurationHandler },
-        .{ "textDocument/foldingRange", requests.FoldingRange, foldingRangeHandler }
+        .{ "textDocument/foldingRange", requests.FoldingRange, foldingRangeHandler },
     };
 
     if (zig_builtin.zig_backend == .stage1) {
