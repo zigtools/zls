@@ -21,6 +21,7 @@ type_info: std.ArrayListUnmanaged(TypeInfo) = .{},
 type_info_map: std.HashMapUnmanaged(TypeInfo, usize, TypeInfo.Context, std.hash_map.default_max_load_percentage) = .{},
 
 pub fn deinit(interpreter: *ComptimeInterpreter) void {
+    for (interpreter.type_info.items) |*ti| ti.deinit(interpreter.allocator);
     interpreter.type_info.deinit(interpreter.allocator);
     interpreter.type_info_map.deinit(interpreter.allocator);
 }
@@ -136,6 +137,13 @@ pub const TypeInfo = union(enum) {
             .float => |f| context.hasher.update(&std.mem.toBytes(f)),
             else => {},
         };
+    }
+
+    pub fn deinit(ti: *TypeInfo, allocator: std.mem.Allocator) void {
+        switch (ti.*) {
+            .@"struct" => |*s| s.fields.deinit(allocator),
+            else => {},
+        }
     }
 };
 
@@ -267,13 +275,16 @@ pub const TypeInfoFormatter = struct {
             .@"bool" => try writer.writeAll("bool"),
             .@"struct" => |s| {
                 try writer.writeAll("struct {");
+                for (s.fields.items) |field| {
+                    try writer.print("{s}: {s}, ", .{ field.name, value.interpreter.formatTypeInfo(value.interpreter.typeToTypeInfo(field.@"type")) });
+                }
                 var iterator = s.scope.declarations.iterator();
                 while (iterator.next()) |di| {
                     const decl = di.value_ptr.*;
                     if (decl.isConstant(value.interpreter.tree)) {
-                        try writer.print("const {s}: , {any}", .{ decl.name, value.interpreter.formatTypeInfo(value.interpreter.typeToTypeInfo(decl.@"type")) });
+                        try writer.print("const {s}: {any} = TODO_PRINT_VALUES, ", .{ decl.name, value.interpreter.formatTypeInfo(value.interpreter.typeToTypeInfo(decl.@"type")) });
                     } else {
-                        try writer.print("var {s}: , {any}", .{ decl.name, value.interpreter.formatTypeInfo(value.interpreter.typeToTypeInfo(decl.@"type")) });
+                        try writer.print("var {s}: {any}, ", .{ decl.name, value.interpreter.formatTypeInfo(value.interpreter.typeToTypeInfo(decl.@"type")) });
                     }
                 }
                 try writer.writeAll("}");
@@ -388,15 +399,22 @@ pub const InterpretResult = union(enum) {
         };
     }
 
-    pub fn getValue(result: InterpretResult) Value {
-        return result.maybeGetValue() orelse @panic("Attempted to get value from non-value interpret result");
+    pub fn getValue(result: InterpretResult) error{ExpectedValue}!Value {
+        return result.maybeGetValue() orelse error.ExpectedValue;
     }
 };
 
 // Might be useful in the future
 pub const InterpretOptions = struct {};
 
-pub const InterpretError = std.mem.Allocator.Error || std.fmt.ParseIntError || std.fmt.ParseFloatError || error{ InvalidCharacter, InvalidBase };
+pub const InterpretError = std.mem.Allocator.Error || std.fmt.ParseIntError || std.fmt.ParseFloatError || error{
+    InvalidCharacter,
+    InvalidBase,
+    ExpectedValue,
+    InvalidOperation,
+    CriticalAstFailure,
+    InvalidBuiltin,
+};
 pub fn interpret(
     interpreter: *ComptimeInterpreter,
     node_idx: Ast.Node.Index,
@@ -455,13 +473,13 @@ pub fn interpret(
                     var default_value = if (field_info.ast.value_expr == 0)
                         null
                     else
-                        (try interpreter.interpret(field_info.ast.value_expr, container_scope, .{})).getValue();
+                        try (try interpreter.interpret(field_info.ast.value_expr, container_scope, .{})).getValue();
 
                     const name = tree.tokenSlice(field_info.ast.name_token);
                     const field = FieldDefinition{
                         .node_idx = member,
                         .name = name,
-                        .@"type" = init_type.getValue().value_data.@"type",
+                        .@"type" = (try init_type.getValue()).value_data.@"type",
                         .default_value = default_value,
                         // TODO: Default values
                         // .@"type" = T: {
@@ -489,12 +507,12 @@ pub fn interpret(
         .simple_var_decl,
         => {
             const decl = ast.varDecl(tree, node_idx).?;
-            var value = (try interpreter.interpret(decl.ast.init_node, scope, options)).getValue();
+            var value = try (try interpreter.interpret(decl.ast.init_node, scope, options)).getValue();
             var @"type" = if (decl.ast.type_node == 0) Value{
                 .node_idx = std.math.maxInt(Ast.Node.Index),
                 .@"type" = try interpreter.createType(node_idx, .{ .@"type" = .{} }),
                 .value_data = .{ .@"type" = value.@"type" },
-            } else (try interpreter.interpret(decl.ast.type_node, scope, options)).getValue();
+            } else try (try interpreter.interpret(decl.ast.type_node, scope, options)).getValue();
 
             const name = analysis.getDeclName(tree, node_idx).?;
             try scope.?.declarations.put(interpreter.allocator, name, .{
@@ -560,6 +578,22 @@ pub fn interpret(
         .identifier => {
             var value = tree.getNodeSource(node_idx);
 
+            if (std.mem.eql(u8, "bool", value)) return InterpretResult{ .value = Value{
+                .node_idx = node_idx,
+                .@"type" = try interpreter.createType(node_idx, .{ .@"type" = .{} }),
+                .value_data = .{ .@"type" = try interpreter.createType(node_idx, .{ .@"bool" = .{} }) },
+            } };
+            if (std.mem.eql(u8, "true", value)) return InterpretResult{ .value = Value{
+                .node_idx = node_idx,
+                .@"type" = try interpreter.createType(node_idx, .{ .@"bool" = .{} }),
+                .value_data = .{ .@"bool" = true },
+            } };
+            if (std.mem.eql(u8, "false", value)) return InterpretResult{ .value = Value{
+                .node_idx = node_idx,
+                .@"type" = try interpreter.createType(node_idx, .{ .@"bool" = .{} }),
+                .value_data = .{ .@"bool" = false },
+            } };
+
             if (std.mem.eql(u8, "type", value)) {
                 return InterpretResult{ .value = Value{
                     .node_idx = node_idx,
@@ -579,6 +613,8 @@ pub fn interpret(
                 } };
             }
 
+            // TODO: Floats
+
             // Logic to find identifiers in accessible scopes
 
             var psi = scope.?.parentScopeIterator();
@@ -597,32 +633,26 @@ pub fn interpret(
             return if (data[node_idx].rhs == 0)
                 InterpretResult{ .@"break" = label }
             else
-                InterpretResult{ .break_with_value = .{ .label = label, .value = (try interpreter.interpret(data[node_idx].rhs, scope, options)).getValue() } };
+                InterpretResult{ .break_with_value = .{ .label = label, .value = try (try interpreter.interpret(data[node_idx].rhs, scope, options)).getValue() } };
         },
         .@"return" => {
             return if (data[node_idx].lhs == 0)
                 InterpretResult{ .@"return" = {} }
             else
-                InterpretResult{ .return_with_value = (try interpreter.interpret(data[node_idx].lhs, scope, options)).getValue() };
+                InterpretResult{ .return_with_value = try (try interpreter.interpret(data[node_idx].lhs, scope, options)).getValue() };
         },
         .@"if", .if_simple => {
             const iff = ast.ifFull(tree, node_idx);
             // TODO: Don't evaluate runtime ifs
             // if (options.observe_values) {
             const ir = try interpreter.interpret(iff.ast.cond_expr, scope, options);
-            if (ir.getValue().value_data.@"bool") {
+            if ((try ir.getValue()).value_data.@"bool") {
                 return try interpreter.interpret(iff.ast.then_expr, scope, options);
             } else {
                 if (iff.ast.else_expr != 0) {
                     return try interpreter.interpret(iff.ast.else_expr, scope, options);
                 } else return InterpretResult{ .nothing = .{} };
             }
-            // } else {
-            //     _ = try interpreter.interpret(iff.ast.cond_expr, scope, options);
-            //     _ = try interpreter.interpret(iff.ast.then_expr, scope, options);
-            //     _ = try interpreter.interpret(iff.ast.else_expr, scope, options);
-            // }
-            @panic("bruh");
         },
         .equal_equal => {
             var a = try interpreter.interpret(data[node_idx].lhs, scope, options);
@@ -630,7 +660,7 @@ pub fn interpret(
             return InterpretResult{ .value = Value{
                 .node_idx = node_idx,
                 .@"type" = try interpreter.createType(node_idx, .{ .@"bool" = .{} }),
-                .value_data = .{ .@"bool" = a.getValue().eql(b.getValue()) },
+                .value_data = .{ .@"bool" = (try a.getValue()).eql(try b.getValue()) },
             } };
             // a.getValue().eql(b.getValue())
         },
@@ -649,7 +679,7 @@ pub fn interpret(
                         try bi.setString(@enumToInt(bii), s[if (bii != .decimal) @as(usize, 2) else @as(usize, 0)..]);
                         break :ppp .{ .@"comptime_int" = bi };
                     },
-                    .failure => @panic("Failed to parse number literal"),
+                    .failure => return error.CriticalAstFailure,
                 },
             } };
         },
@@ -676,7 +706,7 @@ pub fn interpret(
             var psi = scope.?.parentScopeIterator();
             while (psi.next()) |pscope| {
                 if (pscope.declarations.getEntry(value)) |decl|
-                    decl.value_ptr.value = (try interpreter.interpret(data[node_idx].rhs, scope.?, options)).getValue();
+                    decl.value_ptr.value = try (try interpreter.interpret(data[node_idx].rhs, scope.?, options)).getValue();
             }
 
             return InterpretResult{ .nothing = .{} };
@@ -707,7 +737,7 @@ pub fn interpret(
 
             if (std.mem.eql(u8, call_name, "@compileLog")) {
                 pp: for (params) |param| {
-                    const res = (try interpreter.interpret(param, scope, .{})).getValue();
+                    const res = try (try interpreter.interpret(param, scope, .{})).getValue();
                     const ti = interpreter.type_info.items[res.@"type".info_idx];
                     switch (ti) {
                         .pointer => |ptr| {
@@ -733,6 +763,7 @@ pub fn interpret(
 
             std.log.info("Builtin not implemented: {s}", .{call_name});
             @panic("Builtin not implemented");
+            // return error.InvalidBuiltin;
         },
         .string_literal => {
             const value = tree.getNodeSource(node_idx)[1 .. tree.getNodeSource(node_idx).len - 1];
@@ -886,6 +917,18 @@ pub fn interpret(
             // }
             // return null;
             return InterpretResult{ .nothing = .{} };
+        },
+        .bool_not => {
+            const result = try interpreter.interpret(data[node_idx].lhs, scope, .{});
+            const value = (try result.getValue());
+            if (value.value_data != .@"bool") return error.InvalidOperation;
+            return InterpretResult{
+                .value = .{
+                    .node_idx = node_idx,
+                    .@"type" = value.@"type",
+                    .value_data = .{ .@"bool" = !value.value_data.@"bool" },
+                },
+            };
         },
         else => {
             std.log.err("Unhandled {any}", .{tags[node_idx]});
