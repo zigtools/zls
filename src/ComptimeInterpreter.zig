@@ -180,6 +180,9 @@ pub const ValueData = union(enum) {
     signed_int: i64,
     float: f64,
 
+    runtime,
+    comptime_undetermined,
+
     pub fn eql(data: ValueData, other_data: ValueData) bool {
         if (std.meta.activeTag(data) != std.meta.activeTag(other_data)) return false;
         // std.enums.
@@ -190,7 +193,8 @@ pub const ValueData = union(enum) {
             .unsigned_int => return data.unsigned_int == other_data.unsigned_int,
             .signed_int => return data.signed_int == other_data.signed_int,
             .float => return data.float == other_data.float,
-            else => @panic("Simple eql not implemented!"),
+
+            else => return false,
         }
     }
 };
@@ -395,6 +399,7 @@ pub const InterpretResult = union(enum) {
         return switch (result) {
             .break_with_value => |v| v.value,
             .value => |v| v,
+            .return_with_value => |v| v,
             else => null,
         };
     }
@@ -414,6 +419,7 @@ pub const InterpretError = std.mem.Allocator.Error || std.fmt.ParseIntError || s
     InvalidOperation,
     CriticalAstFailure,
     InvalidBuiltin,
+    IdentifierNotFound,
 };
 pub fn interpret(
     interpreter: *ComptimeInterpreter,
@@ -623,7 +629,7 @@ pub fn interpret(
             }
 
             std.log.err("Identifier not found: {s}", .{value});
-            @panic("Could not find identifier");
+            return error.IdentifierNotFound;
         },
         .grouped_expression => {
             return try interpreter.interpret(data[node_idx].lhs, scope, options);
@@ -733,32 +739,15 @@ pub fn interpret(
         => {
             var buffer: [2]Ast.Node.Index = undefined;
             const params = ast.builtinCallParams(tree, node_idx, &buffer).?;
+            _ = params;
             const call_name = tree.tokenSlice(main_tokens[node_idx]);
 
             if (std.mem.eql(u8, call_name, "@compileLog")) {
-                pp: for (params) |param| {
-                    const res = try (try interpreter.interpret(param, scope, .{})).getValue();
-                    const ti = interpreter.type_info.items[res.@"type".info_idx];
-                    switch (ti) {
-                        .pointer => |ptr| {
-                            const child = interpreter.type_info.items[ptr.child.info_idx];
-                            if (ptr.size == .slice and child == .int and child.int.bits == 8 and child.int.signedness == .unsigned) {
-
-                                // TODO: Fix once I optimize slices
-                                std.debug.print("@compileLog output: ", .{});
-                                for (res.value_data.slice_ptr.items) |i| std.debug.print("{c}", .{@truncate(u8, i.unsigned_int)});
-                                std.debug.print("\n", .{});
-
-                                break :pp;
-                            }
-                        },
-                        else => {},
-                    }
-
-                    @panic("compileLog argument type not printable!");
-                }
-
                 return InterpretResult{ .nothing = .{} };
+            }
+
+            if (std.mem.eql(u8, call_name, "@compileError")) {
+                return InterpretResult{ .@"return" = .{} };
             }
 
             std.log.info("Builtin not implemented: {s}", .{call_name});
@@ -844,12 +833,13 @@ pub fn interpret(
             //     .value_data = .{ .@"fn" = .{} },
             // };
 
-            // const name = ast.getDeclName(tree, node_idx).?;
+            // const name = analysis.getDeclName(tree, node_idx).?;
+            // // TODO: DANGER DANGER DANGER
             // try scope.?.declarations.put(interpreter.allocator, name, .{
             //     .node_idx = node_idx,
             //     .name = name,
-            //     .@"type" = value.@"type",
-            //     .@"value" = value,
+            //     .@"type" = undefined,
+            //     .@"value" = undefined,
             // });
 
             return InterpretResult{ .nothing = .{} };
@@ -863,60 +853,28 @@ pub fn interpret(
         .async_call_one,
         .async_call_one_comma,
         => {
-            // var params: [1]Ast.Node.Index = undefined;
-            // const call = ast.callFull(tree, node_idx, &params) orelse unreachable;
+            var params: [1]Ast.Node.Index = undefined;
+            const call_full = ast.callFull(tree, node_idx, &params) orelse unreachable;
 
-            // const callee = .{ .node = call.ast.fn_expr, .handle = handle };
-            // const decl = (try resolveTypeOfNodeInternal(store, arena, callee, bound_type_params)) orelse
-            //     return null;
+            var args = try std.ArrayListUnmanaged(Value).initCapacity(interpreter.allocator, call_full.ast.params.len);
+            defer args.deinit(interpreter.allocator);
 
-            // if (decl.type.is_type_val) return null;
-            // const decl_node = switch (decl.type.data) {
-            //     .other => |n| n,
-            //     else => return null,
-            // };
-            // var buf: [1]Ast.Node.Index = undefined;
-            // const func_maybe = ast.fnProto(decl.handle.tree, decl_node, &buf);
+            for (call_full.ast.params) |param| {
+                try args.append(interpreter.allocator, try (try interpreter.interpret(param, scope, .{})).getValue());
+            }
 
-            // if (func_maybe) |fn_decl| {
-            //     var expected_params = fn_decl.ast.params.len;
-            //     // If we call as method, the first parameter should be skipped
-            //     // TODO: Back-parse to extract the self argument?
-            //     var it = fn_decl.iterate(&decl.handle.tree);
-            //     if (token_tags[call.ast.lparen - 2] == .period) {
-            //         if (try hasSelfParam(arena, store, decl.handle, fn_decl)) {
-            //             _ = ast.nextFnParam(&it);
-            //             expected_params -= 1;
-            //         }
-            //     }
+            // TODO: Make this actually resolve function; requires interpreting whole file
+            // const res = try interpreter.interpret(call_full.ast.fn_expr, scope, .{});
+            // const value = try res.getValue();
 
-            //     // Bind type params to the arguments passed in the call.
-            //     const param_len = std.math.min(call.ast.params.len, expected_params);
-            //     var i: usize = 0;
-            //     while (ast.nextFnParam(&it)) |decl_param| : (i += 1) {
-            //         if (i >= param_len) break;
-            //         if (!isMetaType(decl.handle.tree, decl_param.type_expr))
-            //             continue;
+            const call_res = try interpreter.call(tree.rootDecls()[0], args.items, options);
+            // defer call_res.scope.deinit();
+            // TODO: Figure out call result memory model
 
-            //         const argument = .{ .node = call.ast.params[i], .handle = handle };
-            //         const argument_type = (try resolveTypeOfNodeInternal(
-            //             store,
-            //             arena,
-            //             argument,
-            //             bound_type_params,
-            //         )) orelse
-            //             continue;
-            //         if (!argument_type.type.is_type_val) continue;
-
-            //         try bound_type_params.put(arena.allocator(), decl_param, argument_type);
-            //     }
-
-            //     const has_body = decl.handle.tree.nodes.items(.tag)[decl_node] == .fn_decl;
-            //     const body = decl.handle.tree.nodes.items(.data)[decl_node].rhs;
-            //     return try resolveReturnType(store, arena, fn_decl, decl.handle, bound_type_params, if (has_body) body else null);
-            // }
-            // return null;
-            return InterpretResult{ .nothing = .{} };
+            return switch (call_res.result) {
+                .value => |v| .{ .value = v },
+                .nothing => .{ .nothing = {} },
+            };
         },
         .bool_not => {
             const result = try interpreter.interpret(data[node_idx].lhs, scope, .{});
@@ -955,15 +913,32 @@ pub fn call(
 
     // TODO: Arguments
     _ = options;
-    _ = arguments;
+    // _ = arguments;
 
     const tree = interpreter.tree;
     const tags = tree.nodes.items(.tag);
 
     std.debug.assert(tags[func_node_idx] == .fn_decl);
 
-    // TODO: Parent sc]ope exploration (consts, typefuncs, etc.)
     var fn_scope = try interpreter.newScope(null, func_node_idx);
+
+    var buf: [1]Ast.Node.Index = undefined;
+    var proto = ast.fnProto(tree, func_node_idx, &buf).?;
+
+    var arg_it = proto.iterate(&tree);
+    var arg_index: usize = 0;
+    while (ast.nextFnParam(&arg_it)) |param| {
+        if (param.name_token) |nt| {
+            const decl = Declaration{
+                .node_idx = param.type_expr,
+                .name = tree.tokenSlice(nt),
+                .@"type" = arguments[arg_index].@"type",
+                .value = arguments[arg_index],
+            };
+            try fn_scope.declarations.put(interpreter.allocator, tree.tokenSlice(nt), decl);
+            arg_index += 1;
+        }
+    }
 
     const body = tree.nodes.items(.data)[func_node_idx].rhs;
     const result = try interpreter.interpret(body, fn_scope, .{});

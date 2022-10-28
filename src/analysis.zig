@@ -5,6 +5,7 @@ const types = @import("types.zig");
 const offsets = @import("offsets.zig");
 const log = std.log.scoped(.analysis);
 const ast = @import("ast.zig");
+const ComptimeInterpreter = @import("ComptimeInterpreter.zig");
 
 var using_trail: std.ArrayList([*]const u8) = undefined;
 var resolve_trail: std.ArrayList(NodeWithHandle) = undefined;
@@ -491,7 +492,7 @@ fn resolveUnwrapErrorType(store: *DocumentStore, arena: *std.heap.ArenaAllocator
             .type = .{ .data = .{ .other = n }, .is_type_val = rhs.type.is_type_val },
             .handle = rhs.handle,
         },
-        .primitive, .slice, .pointer, .array_index => return null,
+        .primitive, .slice, .pointer, .array_index, .@"comptime" => return null,
     };
 
     if (rhs.handle.tree.nodes.items(.tag)[rhs_node] == .error_union) {
@@ -742,7 +743,37 @@ pub fn resolveTypeOfNodeInternal(store: *DocumentStore, arena: *std.heap.ArenaAl
 
                 const has_body = decl.handle.tree.nodes.items(.tag)[decl_node] == .fn_decl;
                 const body = decl.handle.tree.nodes.items(.data)[decl_node].rhs;
-                return try resolveReturnType(store, arena, fn_decl, decl.handle, bound_type_params, if (has_body) body else null);
+                if (try resolveReturnType(store, arena, fn_decl, decl.handle, bound_type_params, if (has_body) body else null)) |ret| {
+                    return ret;
+                } else {
+                    // TODO: Better case-by-case; we just use the ComptimeInterpreter when all else fails,
+                    // probably better to use it more liberally
+                    // TODO: Handle non-isolate args; e.g. `const T = u8; TypeFunc(T);`
+                    var interpreter = ComptimeInterpreter{ .tree = tree, .allocator = arena.allocator() };
+
+                    const result = interpreter.interpret(node, null, .{}) catch |err| {
+                        std.log.err("Interpreter error: {s}", .{@errorName(err)});
+                        return null;
+                    };
+                    const val = result.getValue() catch |err| {
+                        std.log.err("Interpreter error: {s}", .{@errorName(err)});
+                        return null;
+                    };
+
+                    const ti = interpreter.typeToTypeInfo(val.@"type");
+                    if (ti != .@"type") {
+                        std.log.err("Not a type: { }", .{interpreter.formatTypeInfo(ti)});
+                        return null;
+                    }
+
+                    return TypeWithHandle{
+                        .type = .{
+                            .data = .{ .@"comptime" = .{ .interpreter = interpreter, .type = val.value_data.@"type" } },
+                            .is_type_val = true,
+                        },
+                        .handle = node_handle.handle,
+                    };
+                }
             }
             return null;
         },
@@ -965,6 +996,10 @@ pub const Type = struct {
         other: Ast.Node.Index,
         primitive: Ast.Node.Index,
         array_index,
+        @"comptime": struct {
+            interpreter: ComptimeInterpreter,
+            type: ComptimeInterpreter.Type,
+        },
     },
     /// If true, the type `type`, the attached data is the value of the type value.
     is_type_val: bool,
