@@ -306,7 +306,7 @@ pub fn getDeclNameToken(tree: Ast, node: Ast.Node.Index) ?Ast.TokenIndex {
     };
 }
 
-fn getDeclName(tree: Ast, node: Ast.Node.Index) ?[]const u8 {
+pub fn getDeclName(tree: Ast, node: Ast.Node.Index) ?[]const u8 {
     const name = tree.tokenSlice(getDeclNameToken(tree, node) orelse return null);
     return switch (tree.nodes.items(.tag)[node]) {
         .test_decl => name[1 .. name.len - 1],
