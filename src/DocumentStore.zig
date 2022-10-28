@@ -797,10 +797,10 @@ pub fn collectDependencies(
 }
 
 /// returns the document behind `@cImport()` where `node` is the `cImport` node
-/// the translation process is defined in `translate_c.convertCInclude`
-/// if a cImport can't be translated e.g. required computing a value it
-/// will not be included in the result
-pub fn resolveCImport(self: *const DocumentStore, handle: Handle, node: Ast.Node.Index) error{OutOfMemory}!?Uri {
+/// if a cImport can't be translated e.g. requires computing a
+/// comptime value `resolveCImport` will return null
+/// returned memory is owned by DocumentStore
+pub fn resolveCImport(self: *DocumentStore, handle: Handle, node: Ast.Node.Index) error{OutOfMemory}!?Uri {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -808,7 +808,31 @@ pub fn resolveCImport(self: *const DocumentStore, handle: Handle, node: Ast.Node
 
     const hash: Hash = handle.cimports.items(.hash)[index];
 
-    const result = self.cimports.get(hash) orelse return null;
+    // TODO regenerate cimports if config changes or the header files gets modified
+    const result = self.cimports.get(hash) orelse blk: {
+        const source: []const u8 = handle.cimports.items(.source)[index];
+
+        const include_dirs: []const []const u8 = if (handle.associated_build_file) |build_file_uri|
+            self.build_files.get(build_file_uri).?.config.include_dirs
+        else
+            &.{};
+
+        var result = (try translate_c.translate(
+            self.allocator,
+            self.config.*,
+            include_dirs,
+            source,
+        )) orelse return null;
+
+        self.cimports.putNoClobber(self.allocator, hash, result) catch result.deinit(self.allocator);
+
+        switch (result) {
+            .success => |uri| log.debug("Translated cImport into {s}", .{uri}),
+            .failure => {},
+        }
+
+        break :blk result;
+    };
 
     switch (result) {
         .success => |uri| return uri,
