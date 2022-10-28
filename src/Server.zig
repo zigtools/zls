@@ -2401,8 +2401,8 @@ fn foldingRangeHandler(server: *Server, writer: anytype, id: types.RequestId, re
         }
         if (tok > 1) { // each container doc comment has its own line, so each one counts for a line
             try ranges.append(.{
-                .startLine = 1,
-                .endLine = tok,
+                .startLine = 0,
+                .endLine = tok - 1,
             });
         }
     }
