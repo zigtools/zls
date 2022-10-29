@@ -13,14 +13,16 @@ const analysis = @import("analysis.zig");
 const DocumentStore = @import("DocumentStore.zig");
 const ComptimeInterpreter = @This();
 
-tree: Ast,
-root_scope: *InterpreterScope = undefined,
 allocator: std.mem.Allocator,
+document_store: *DocumentStore,
+handle: *const DocumentStore.Handle,
+root_scope: ?*InterpreterScope = null,
 
 type_info: std.ArrayListUnmanaged(TypeInfo) = .{},
 type_info_map: std.HashMapUnmanaged(TypeInfo, usize, TypeInfo.Context, std.hash_map.default_max_load_percentage) = .{},
 
 pub fn deinit(interpreter: *ComptimeInterpreter) void {
+    if (interpreter.root_scope) |rs| rs.deinit();
     for (interpreter.type_info.items) |*ti| ti.deinit(interpreter.allocator);
     interpreter.type_info.deinit(interpreter.allocator);
     interpreter.type_info_map.deinit(interpreter.allocator);
@@ -83,6 +85,7 @@ pub const TypeInfo = union(enum) {
 
     @"struct": Struct,
     pointer: Pointer,
+    @"fn": Fn,
 
     int: Int,
     @"comptime_int",
@@ -145,6 +148,13 @@ pub const TypeInfo = union(enum) {
             else => {},
         }
     }
+
+    pub fn getScopeOfType(ti: TypeInfo) ?*InterpreterScope {
+        return switch (ti) {
+            .@"struct" => |s| s.scope,
+            else => null,
+        };
+    }
 };
 
 pub const Type = struct {
@@ -180,6 +190,7 @@ pub const ValueData = union(enum) {
     signed_int: i64,
     float: f64,
 
+    @"fn",
     runtime,
     comptime_undetermined,
 
@@ -233,7 +244,7 @@ pub const Declaration = struct {
             .aligned_var_decl,
             .simple_var_decl,
             => {
-                return tree.tokenSlice(ast.varDecl(tree, declaration.node_idx).?.ast.mut_token).len == 3;
+                return tree.tokenSlice(ast.varDecl(tree, declaration.node_idx).?.ast.mut_token).len != 3;
             },
             else => false,
         };
@@ -261,7 +272,7 @@ pub fn typeToTypeInfo(interpreter: ComptimeInterpreter, @"type": Type) TypeInfo 
 }
 
 pub const TypeInfoFormatter = struct {
-    interpreter: *ComptimeInterpreter,
+    interpreter: *const ComptimeInterpreter,
     ti: TypeInfo,
 
     pub fn format(value: TypeInfoFormatter, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
@@ -285,7 +296,7 @@ pub const TypeInfoFormatter = struct {
                 var iterator = s.scope.declarations.iterator();
                 while (iterator.next()) |di| {
                     const decl = di.value_ptr.*;
-                    if (decl.isConstant(value.interpreter.tree)) {
+                    if (decl.isConstant(value.interpreter.handle.tree)) {
                         try writer.print("const {s}: {any} = TODO_PRINT_VALUES, ", .{ decl.name, value.interpreter.formatTypeInfo(value.interpreter.typeToTypeInfo(decl.@"type")) });
                     } else {
                         try writer.print("var {s}: {any}, ", .{ decl.name, value.interpreter.formatTypeInfo(value.interpreter.typeToTypeInfo(decl.@"type")) });
@@ -298,7 +309,7 @@ pub const TypeInfoFormatter = struct {
     }
 };
 
-pub fn formatTypeInfo(interpreter: *ComptimeInterpreter, ti: TypeInfo) TypeInfoFormatter {
+pub fn formatTypeInfo(interpreter: *const ComptimeInterpreter, ti: TypeInfo) TypeInfoFormatter {
     return TypeInfoFormatter{ .interpreter = interpreter, .ti = ti };
 }
 
@@ -365,11 +376,13 @@ pub const InterpreterScope = struct {
     }
 
     pub fn deinit(scope: *InterpreterScope) void {
-        scope.declarations.deinit(scope.interpreter.allocator);
-        for (scope.child_scopes.items) |child| child.deinit();
-        scope.child_scopes.deinit(scope.interpreter.allocator);
+        const allocator = scope.interpreter.allocator;
 
-        scope.interpreter.allocator.destroy(scope);
+        scope.declarations.deinit(allocator);
+        for (scope.child_scopes.items) |child| child.deinit();
+        scope.child_scopes.deinit(allocator);
+
+        allocator.destroy(scope);
     }
 };
 
@@ -431,7 +444,7 @@ pub fn interpret(
     // _ = node;
     // _ = observe_values;
 
-    const tree = interpreter.tree;
+    const tree = interpreter.handle.tree;
     const tags = tree.nodes.items(.tag);
     const data = tree.nodes.items(.data);
     const main_tokens = tree.nodes.items(.main_token);
@@ -445,12 +458,12 @@ pub fn interpret(
         .container_decl_arg_trailing,
         .container_decl_two,
         .container_decl_two_trailing,
-        .tagged_union,
-        .tagged_union_trailing,
-        .tagged_union_two,
-        .tagged_union_two_trailing,
-        .tagged_union_enum_tag,
-        .tagged_union_enum_tag_trailing,
+        // .tagged_union, // TODO: Fix these
+        // .tagged_union_trailing,
+        // .tagged_union_two,
+        // .tagged_union_two_trailing,
+        // .tagged_union_enum_tag,
+        // .tagged_union_enum_tag_trailing,
         .root,
         .error_set_decl,
         => {
@@ -631,6 +644,20 @@ pub fn interpret(
             std.log.err("Identifier not found: {s}", .{value});
             return error.IdentifierNotFound;
         },
+        .field_access => {
+            if (data[node_idx].rhs == 0) return error.CriticalAstFailure;
+            const rhs_str = ast.tokenSlice(tree, data[node_idx].rhs) catch return error.CriticalAstFailure;
+
+            var ir = try interpreter.interpret(data[node_idx].lhs, scope, options);
+            var irv = try ir.getValue();
+
+            var sub_scope = interpreter.typeToTypeInfo(irv.value_data.@"type").getScopeOfType() orelse return error.IdentifierNotFound;
+            var scope_sub_decl = sub_scope.declarations.get(rhs_str) orelse return error.IdentifierNotFound;
+
+            return InterpretResult{
+                .value = scope_sub_decl.value,
+            };
+        },
         .grouped_expression => {
             return try interpreter.interpret(data[node_idx].lhs, scope, options);
         },
@@ -796,12 +823,11 @@ pub fn interpret(
 
             // TODO: Add params
 
-            // var type_info = TypeInfo{
-            //     .@"fn" = .{
-            //         .definition_scope = scope.?,
-            //         .node_idx = node_idx,
-            //     },
-            // };
+            var type_info = TypeInfo{
+                .@"fn" = .{
+                    .return_type = null,
+                },
+            };
 
             // var it = func.iterate(&tree);
             // while (ast.nextFnParam(&it)) |param| {
@@ -827,20 +853,19 @@ pub fn interpret(
             // if ((try interpreter.interpret(func.ast.return_type, func_scope_idx, .{ .observe_values = true, .is_comptime = true })).maybeGetValue()) |value|
             //     fnd.return_type = value.value_data.@"type";
 
-            // var value = Value{
-            //     .node_idx = node_idx,
-            //     .@"type" = try interpreter.createType(node_idx, type_info),
-            //     .value_data = .{ .@"fn" = .{} },
-            // };
+            var value = Value{
+                .node_idx = node_idx,
+                .@"type" = try interpreter.createType(node_idx, type_info),
+                .value_data = .{ .@"fn" = .{} },
+            };
 
-            // const name = analysis.getDeclName(tree, node_idx).?;
-            // // TODO: DANGER DANGER DANGER
-            // try scope.?.declarations.put(interpreter.allocator, name, .{
-            //     .node_idx = node_idx,
-            //     .name = name,
-            //     .@"type" = undefined,
-            //     .@"value" = undefined,
-            // });
+            const name = analysis.getDeclName(tree, node_idx).?;
+            try scope.?.declarations.put(interpreter.allocator, name, .{
+                .node_idx = node_idx,
+                .name = name,
+                .@"type" = value.@"type",
+                .@"value" = value,
+            });
 
             return InterpretResult{ .nothing = .{} };
         },
@@ -863,13 +888,15 @@ pub fn interpret(
                 try args.append(interpreter.allocator, try (try interpreter.interpret(param, scope, .{})).getValue());
             }
 
-            // TODO: Make this actually resolve function; requires interpreting whole file
-            // const res = try interpreter.interpret(call_full.ast.fn_expr, scope, .{});
-            // const value = try res.getValue();
+            std.log.err("AEWEWEWE: {s}", .{tree.getNodeSource(call_full.ast.fn_expr)});
 
-            const call_res = try interpreter.call(tree.rootDecls()[0], args.items, options);
+            const func_id_result = try interpreter.interpret(call_full.ast.fn_expr, interpreter.root_scope, .{});
+            const func_id_val = try func_id_result.getValue();
+
+            const call_res = try interpreter.call(interpreter.root_scope, func_id_val.node_idx, args.items, options);
             // defer call_res.scope.deinit();
-            // TODO: Figure out call result memory model
+            // TODO: Figure out call result memory model; this is actually fine because newScope
+            // makes this a child of the decl scope which is freed on refresh... in theory
 
             return switch (call_res.result) {
                 .value => |v| .{ .value = v },
@@ -905,6 +932,7 @@ pub const CallResult = struct {
 
 pub fn call(
     interpreter: *ComptimeInterpreter,
+    scope: ?*InterpreterScope,
     func_node_idx: Ast.Node.Index,
     arguments: []const Value,
     options: InterpretOptions,
@@ -915,12 +943,12 @@ pub fn call(
     _ = options;
     // _ = arguments;
 
-    const tree = interpreter.tree;
+    const tree = interpreter.handle.tree;
     const tags = tree.nodes.items(.tag);
 
     std.debug.assert(tags[func_node_idx] == .fn_decl);
 
-    var fn_scope = try interpreter.newScope(null, func_node_idx);
+    var fn_scope = try interpreter.newScope(scope, func_node_idx);
 
     var buf: [1]Ast.Node.Index = undefined;
     var proto = ast.fnProto(tree, func_node_idx, &buf).?;

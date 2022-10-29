@@ -18,6 +18,7 @@ const Ast = std.zig.Ast;
 const tracy = @import("tracy.zig");
 const uri_utils = @import("uri.zig");
 const diff = @import("diff.zig");
+const ComptimeInterpreter = @import("ComptimeInterpreter.zig");
 
 const data = @import("data/data.zig");
 const snipped_data = @import("data/snippets.zig");
@@ -492,7 +493,7 @@ fn typeToCompletion(
                     while (it.next()) |entry| {
                         try list.append(allocator, .{
                             .label = entry.key_ptr.*,
-                            .kind = if (entry.value_ptr.isConstant(co.interpreter.tree)) .Constant else .Variable,
+                            .kind = if (entry.value_ptr.isConstant(co.interpreter.handle.tree)) .Constant else .Variable,
                             .insertText = entry.key_ptr.*,
                             .insertTextFormat = .PlainText,
                         });
@@ -819,7 +820,10 @@ fn hoverSymbol(server: *Server, decl_handle: analysis.DeclWithHandle) error{OutO
     const resolved_type = try decl_handle.resolveType(&server.document_store, &server.arena, &bound_type_params);
 
     const resolved_type_str = if (resolved_type) |rt|
-        if (rt.type.is_type_val) "type" else switch (rt.type.data) { // TODO: Investigate random weird numbers like 897 that cause index of bounds
+        if (rt.type.is_type_val) switch (rt.type.data) {
+            .@"comptime" => |*co| try std.fmt.allocPrint(server.arena.allocator(), "{ }", .{co.interpreter.formatTypeInfo(co.interpreter.typeToTypeInfo(co.type))}),
+            else => "type",
+        } else switch (rt.type.data) { // TODO: Investigate random weird numbers like 897 that cause index of bounds
             .pointer,
             .slice,
             .error_union,

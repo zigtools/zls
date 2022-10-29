@@ -749,14 +749,32 @@ pub fn resolveTypeOfNodeInternal(store: *DocumentStore, arena: *std.heap.ArenaAl
                     // TODO: Better case-by-case; we just use the ComptimeInterpreter when all else fails,
                     // probably better to use it more liberally
                     // TODO: Handle non-isolate args; e.g. `const T = u8; TypeFunc(T);`
-                    var interpreter = ComptimeInterpreter{ .tree = tree, .allocator = arena.allocator() };
+                    // var interpreter = ComptimeInterpreter{ .tree = tree, .allocator = arena.allocator() };
 
-                    const result = interpreter.interpret(node, null, .{}) catch |err| {
+                    // var top_decl = try (try interpreter.interpret(0, null, .{})).getValue();
+                    // var top_scope = interpreter.typeToTypeInfo(top_decl.@"type".info_idx).@"struct".scope;
+
+                    // var fn_decl_scope = top_scope.getParentScopeFromNode(node);
+
+                    store.ensureInterpreterExists(handle.uri) catch |err| {
                         std.log.err("Interpreter error: {s}", .{@errorName(err)});
+                        return null;
+                    };
+                    var interpreter = handle.interpreter.?;
+
+                    // TODO: Start from current/nearest-current scope
+                    const result = interpreter.interpret(node, interpreter.root_scope, .{}) catch |err| {
+                        std.log.err("Interpreter error: {s}", .{@errorName(err)});
+                        if (@errorReturnTrace()) |trace| {
+                            std.debug.dumpStackTrace(trace.*);
+                        }
                         return null;
                     };
                     const val = result.getValue() catch |err| {
                         std.log.err("Interpreter error: {s}", .{@errorName(err)});
+                        if (@errorReturnTrace()) |trace| {
+                            std.debug.dumpStackTrace(trace.*);
+                        }
                         return null;
                     };
 
@@ -997,7 +1015,7 @@ pub const Type = struct {
         primitive: Ast.Node.Index,
         array_index,
         @"comptime": struct {
-            interpreter: ComptimeInterpreter,
+            interpreter: *ComptimeInterpreter,
             type: ComptimeInterpreter.Type,
         },
     },

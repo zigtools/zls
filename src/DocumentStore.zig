@@ -12,6 +12,7 @@ const BuildConfig = @import("special/build_runner.zig").BuildConfig;
 const tracy = @import("tracy.zig");
 const Config = @import("Config.zig");
 const translate_c = @import("translate_c.zig");
+const ComptimeInterpreter = @import("ComptimeInterpreter.zig");
 
 const DocumentStore = @This();
 
@@ -55,6 +56,8 @@ pub const Handle = struct {
     uri: Uri,
     text: [:0]const u8,
     tree: Ast,
+    /// Not null if a ComptimeInterpreter is actually used
+    interpreter: ?*ComptimeInterpreter = null,
     document_scope: analysis.DocumentScope,
     /// Contains one entry for every import in the document
     import_uris: std.ArrayListUnmanaged(Uri) = .{},
@@ -188,6 +191,11 @@ pub fn refreshDocument(self: *DocumentStore, uri: Uri, new_text: [:0]const u8) !
     defer tracy_zone.end();
 
     const handle = self.handles.get(uri) orelse unreachable;
+
+    if (handle.interpreter) |int| {
+        int.deinit();
+        handle.interpreter = null;
+    }
 
     self.allocator.free(handle.text);
     handle.text = new_text;
@@ -926,4 +934,19 @@ pub fn errorCompletionItems(self: DocumentStore, arena: std.mem.Allocator, handl
 
 pub fn enumCompletionItems(self: DocumentStore, arena: std.mem.Allocator, handle: Handle) ![]types.CompletionItem {
     return try self.tagStoreCompletionItems(arena, handle, "enum_completions");
+}
+
+pub fn ensureInterpreterExists(self: *DocumentStore, uri: Uri) !void {
+    var handle = self.handles.get(uri) orelse unreachable;
+    if (handle.interpreter == null) {
+        var int = try self.allocator.create(ComptimeInterpreter);
+        int.* = ComptimeInterpreter{
+            .allocator = self.allocator,
+            .document_store = self,
+            .handle = handle,
+        };
+        _ = try int.interpret(0, null, .{});
+
+        handle.interpreter = int;
+    }
 }
