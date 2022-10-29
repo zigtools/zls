@@ -16,13 +16,14 @@ const ComptimeInterpreter = @This();
 allocator: std.mem.Allocator,
 document_store: *DocumentStore,
 handle: *const DocumentStore.Handle,
-root_scope: ?*InterpreterScope = null,
+root_type: ?Type = null,
 
+// TODO: Deduplicate typeinfo across different interpreters
 type_info: std.ArrayListUnmanaged(TypeInfo) = .{},
 type_info_map: std.HashMapUnmanaged(TypeInfo, usize, TypeInfo.Context, std.hash_map.default_max_load_percentage) = .{},
 
 pub fn deinit(interpreter: *ComptimeInterpreter) void {
-    if (interpreter.root_scope) |rs| rs.deinit();
+    if (interpreter.root_type) |rt| rt.getTypeInfo().getScopeOfType().?.deinit();
     for (interpreter.type_info.items) |*ti| ti.deinit(interpreter.allocator);
     interpreter.type_info.deinit(interpreter.allocator);
     interpreter.type_info_map.deinit(interpreter.allocator);
@@ -101,8 +102,8 @@ pub const TypeInfo = union(enum) {
                 const bp = b.pointer;
                 break :p ap.size == bp.size and ap.is_const == bp.is_const and ap.is_volatile == bp.is_volatile and eql(
                     interpreter,
-                    interpreter.typeToTypeInfo(ap.child),
-                    interpreter.typeToTypeInfo(bp.child),
+                    ap.child.getTypeInfo(),
+                    bp.child.getTypeInfo(),
                 ) and ap.is_allowzero == bp.is_allowzero and ((ap.sentinel == null and bp.sentinel == null) or ((ap.sentinel != null and bp.sentinel != null) and ap.sentinel.?.eql(bp.sentinel.?)));
             },
             .int => a.int.signedness == b.int.signedness and a.int.bits == b.int.bits,
@@ -123,7 +124,7 @@ pub const TypeInfo = union(enum) {
                 // const ap = a.pointer;
                 // const bp = b.pointer;
                 context.hasher.update(&[_]u8{ @enumToInt(p.size), @boolToInt(p.is_const), @boolToInt(p.is_volatile) });
-                TypeInfo.hash(context, context.interpreter.typeToTypeInfo(p.child));
+                TypeInfo.hash(context, p.child.getTypeInfo());
                 context.hasher.update(&[_]u8{@boolToInt(p.is_allowzero)});
                 // TODO: Hash Sentinel
                 // break :p ap.size == bp.size and ap.is_const == bp.is_const and ap.is_volatile == bp.is_volatile and eql(
@@ -158,11 +159,19 @@ pub const TypeInfo = union(enum) {
 };
 
 pub const Type = struct {
+    handle: *const DocumentStore.Handle,
+
     node_idx: Ast.Node.Index,
     info_idx: usize,
+
+    pub fn getTypeInfo(@"type": Type) TypeInfo {
+        return @"type".handle.interpreter.?.type_info.items[@"type".info_idx];
+    }
 };
 
 pub const Value = struct {
+    handle: *const DocumentStore.Handle,
+
     node_idx: Ast.Node.Index,
     @"type": Type,
     value_data: ValueData,
@@ -258,17 +267,13 @@ pub fn createType(interpreter: *ComptimeInterpreter, node_idx: Ast.Node.Index, t
 
     if (gpr.found_existing) {
         // std.log.info("Deduplicating type {d}", .{interpreter.formatTypeInfo(unit.type_info.items[gpr.value_ptr.*])});
-        return Type{ .node_idx = node_idx, .info_idx = gpr.value_ptr.* };
+        return Type{ .handle = interpreter.handle, .node_idx = node_idx, .info_idx = gpr.value_ptr.* };
     } else {
         try interpreter.type_info.append(interpreter.allocator, type_info);
         const info_idx = interpreter.type_info.items.len - 1;
         gpr.value_ptr.* = info_idx;
-        return Type{ .node_idx = node_idx, .info_idx = info_idx };
+        return Type{ .handle = interpreter.handle, .node_idx = node_idx, .info_idx = info_idx };
     }
-}
-
-pub fn typeToTypeInfo(interpreter: ComptimeInterpreter, @"type": Type) TypeInfo {
-    return interpreter.type_info.items[@"type".info_idx];
 }
 
 pub const TypeInfoFormatter = struct {
@@ -291,15 +296,15 @@ pub const TypeInfoFormatter = struct {
             .@"struct" => |s| {
                 try writer.writeAll("struct {");
                 for (s.fields.items) |field| {
-                    try writer.print("{s}: {s}, ", .{ field.name, value.interpreter.formatTypeInfo(value.interpreter.typeToTypeInfo(field.@"type")) });
+                    try writer.print("{s}: {s}, ", .{ field.name, value.interpreter.formatTypeInfo(field.@"type".getTypeInfo()) });
                 }
                 var iterator = s.scope.declarations.iterator();
                 while (iterator.next()) |di| {
                     const decl = di.value_ptr.*;
                     if (decl.isConstant(value.interpreter.handle.tree)) {
-                        try writer.print("const {s}: {any} = TODO_PRINT_VALUES, ", .{ decl.name, value.interpreter.formatTypeInfo(value.interpreter.typeToTypeInfo(decl.@"type")) });
+                        try writer.print("const {s}: {any} = TODO_PRINT_VALUES, ", .{ decl.name, value.interpreter.formatTypeInfo(decl.@"type".getTypeInfo()) });
                     } else {
-                        try writer.print("var {s}: {any}, ", .{ decl.name, value.interpreter.formatTypeInfo(value.interpreter.typeToTypeInfo(decl.@"type")) });
+                        try writer.print("var {s}: {any}, ", .{ decl.name, value.interpreter.formatTypeInfo(decl.@"type".getTypeInfo()) });
                     }
                 }
                 try writer.writeAll("}");
@@ -422,6 +427,70 @@ pub const InterpretResult = union(enum) {
     }
 };
 
+fn getDeclCount(tree: Ast, node_idx: Ast.Node.Index) usize {
+    var buffer: [2]Ast.Node.Index = undefined;
+    const members = ast.declMembers(tree, node_idx, &buffer);
+
+    var count: usize = 0;
+
+    for (members) |member| {
+        switch (tree.nodes.items(.tag)[member]) {
+            .global_var_decl,
+            .local_var_decl,
+            .aligned_var_decl,
+            .simple_var_decl,
+            => count += 1,
+            else => {},
+        }
+    }
+
+    return count;
+}
+
+pub fn huntItDown(
+    interpreter: *ComptimeInterpreter,
+    scope: *InterpreterScope,
+    decl_name: []const u8,
+    options: InterpretOptions,
+) InterpretError!Declaration {
+    const tree = interpreter.handle.tree;
+    const tags = tree.nodes.items(.tag);
+
+    var psi = scope.parentScopeIterator();
+    while (psi.next()) |pscope| {
+        const known_decl = pscope.declarations.get(decl_name);
+        if (pscope.scopeKind(tree) == .container and
+            known_decl == null and
+            pscope.declarations.count() != getDeclCount(tree, pscope.node_idx))
+        {
+            std.log.info("Order-independent evaluating {s}...", .{decl_name});
+
+            var buffer: [2]Ast.Node.Index = undefined;
+            const members = ast.declMembers(tree, pscope.node_idx, &buffer);
+
+            for (members) |member| {
+                switch (tags[member]) {
+                    .global_var_decl,
+                    .local_var_decl,
+                    .aligned_var_decl,
+                    .simple_var_decl,
+                    => {
+                        if (std.mem.eql(u8, analysis.getDeclName(tree, member).?, decl_name)) {
+                            _ = try interpreter.interpret(member, pscope, options);
+                            return pscope.declarations.get(decl_name).?;
+                        }
+                    },
+                    else => {},
+                }
+            }
+        }
+        return known_decl orelse continue;
+    }
+
+    std.log.err("Identifier not found: {s}", .{decl_name});
+    return error.IdentifierNotFound;
+}
+
 // Might be useful in the future
 pub const InterpretOptions = struct {};
 
@@ -433,6 +502,8 @@ pub const InterpretError = std.mem.Allocator.Error || std.fmt.ParseIntError || s
     CriticalAstFailure,
     InvalidBuiltin,
     IdentifierNotFound,
+    MissingArguments,
+    ImportFailure,
 };
 pub fn interpret(
     interpreter: *ComptimeInterpreter,
@@ -449,7 +520,7 @@ pub fn interpret(
     const data = tree.nodes.items(.data);
     const main_tokens = tree.nodes.items(.main_token);
 
-    std.log.info("{any}", .{tags[node_idx]});
+    std.log.info("{s}: {any}", .{ interpreter.handle.uri, tags[node_idx] });
 
     switch (tags[node_idx]) {
         .container_decl,
@@ -473,8 +544,9 @@ pub fn interpret(
                     .scope = container_scope,
                 },
             };
+            var cont_type = try interpreter.createType(node_idx, type_info);
 
-            if (node_idx == 0) interpreter.root_scope = container_scope;
+            if (node_idx == 0) interpreter.root_type = cont_type;
 
             var buffer: [2]Ast.Node.Index = undefined;
             const members = ast.declMembers(tree, node_idx, &buffer);
@@ -515,9 +587,10 @@ pub fn interpret(
             }
 
             return InterpretResult{ .value = Value{
+                .handle = interpreter.handle,
                 .node_idx = node_idx,
                 .@"type" = try interpreter.createType(node_idx, .{ .@"type" = .{} }),
-                .value_data = .{ .@"type" = try interpreter.createType(node_idx, type_info) },
+                .value_data = .{ .@"type" = cont_type },
             } };
         },
         .global_var_decl,
@@ -525,15 +598,27 @@ pub fn interpret(
         .aligned_var_decl,
         .simple_var_decl,
         => {
+            // TODO: Add 0 check
+            const name = analysis.getDeclName(tree, node_idx).?;
+            if (scope.?.declarations.contains(name))
+                return InterpretResult{ .nothing = .{} };
+
             const decl = ast.varDecl(tree, node_idx).?;
-            var value = try (try interpreter.interpret(decl.ast.init_node, scope, options)).getValue();
+            if (decl.ast.init_node == 0)
+                return InterpretResult{ .nothing = .{} };
+
+            // We should have a value when a var is defined
+            // var value = try (try interpreter.interpret(decl.ast.init_node, scope, options)).getValue();
+            var value = (try interpreter.interpret(decl.ast.init_node, scope, options)).maybeGetValue() orelse return InterpretResult{ .nothing = .{} };
+
+            // Is this redundant? im too afraid to change it rn tbh
             var @"type" = if (decl.ast.type_node == 0) Value{
+                .handle = interpreter.handle,
                 .node_idx = std.math.maxInt(Ast.Node.Index),
                 .@"type" = try interpreter.createType(node_idx, .{ .@"type" = .{} }),
                 .value_data = .{ .@"type" = value.@"type" },
             } else try (try interpreter.interpret(decl.ast.type_node, scope, options)).getValue();
 
-            const name = analysis.getDeclName(tree, node_idx).?;
             try scope.?.declarations.put(interpreter.allocator, name, .{
                 .node_idx = node_idx,
                 .name = name,
@@ -598,16 +683,19 @@ pub fn interpret(
             var value = tree.getNodeSource(node_idx);
 
             if (std.mem.eql(u8, "bool", value)) return InterpretResult{ .value = Value{
+                .handle = interpreter.handle,
                 .node_idx = node_idx,
                 .@"type" = try interpreter.createType(node_idx, .{ .@"type" = .{} }),
                 .value_data = .{ .@"type" = try interpreter.createType(node_idx, .{ .@"bool" = .{} }) },
             } };
             if (std.mem.eql(u8, "true", value)) return InterpretResult{ .value = Value{
+                .handle = interpreter.handle,
                 .node_idx = node_idx,
                 .@"type" = try interpreter.createType(node_idx, .{ .@"bool" = .{} }),
                 .value_data = .{ .@"bool" = true },
             } };
             if (std.mem.eql(u8, "false", value)) return InterpretResult{ .value = Value{
+                .handle = interpreter.handle,
                 .node_idx = node_idx,
                 .@"type" = try interpreter.createType(node_idx, .{ .@"bool" = .{} }),
                 .value_data = .{ .@"bool" = false },
@@ -615,12 +703,14 @@ pub fn interpret(
 
             if (std.mem.eql(u8, "type", value)) {
                 return InterpretResult{ .value = Value{
+                    .handle = interpreter.handle,
                     .node_idx = node_idx,
                     .@"type" = try interpreter.createType(node_idx, .{ .@"type" = .{} }),
                     .value_data = .{ .@"type" = try interpreter.createType(node_idx, .{ .@"type" = .{} }) },
                 } };
             } else if (value.len >= 2 and (value[0] == 'u' or value[0] == 'i')) int: {
                 return InterpretResult{ .value = Value{
+                    .handle = interpreter.handle,
                     .node_idx = node_idx,
                     .@"type" = try interpreter.createType(node_idx, .{ .@"type" = .{} }),
                     .value_data = .{ .@"type" = try interpreter.createType(node_idx, .{
@@ -635,14 +725,7 @@ pub fn interpret(
             // TODO: Floats
 
             // Logic to find identifiers in accessible scopes
-
-            var psi = scope.?.parentScopeIterator();
-            while (psi.next()) |pscope| {
-                return InterpretResult{ .value = (pscope.declarations.get(value) orelse continue).value };
-            }
-
-            std.log.err("Identifier not found: {s}", .{value});
-            return error.IdentifierNotFound;
+            return InterpretResult{ .value = (try interpreter.huntItDown(scope.?, value, options)).value };
         },
         .field_access => {
             if (data[node_idx].rhs == 0) return error.CriticalAstFailure;
@@ -651,8 +734,9 @@ pub fn interpret(
             var ir = try interpreter.interpret(data[node_idx].lhs, scope, options);
             var irv = try ir.getValue();
 
-            var sub_scope = interpreter.typeToTypeInfo(irv.value_data.@"type").getScopeOfType() orelse return error.IdentifierNotFound;
-            var scope_sub_decl = sub_scope.declarations.get(rhs_str) orelse return error.IdentifierNotFound;
+            var sub_scope = irv.value_data.@"type".getTypeInfo().getScopeOfType() orelse return error.IdentifierNotFound;
+            // var scope_sub_decl = sub_scope.declarations.get(rhs_str) orelse return error.IdentifierNotFound;
+            var scope_sub_decl = try irv.value_data.@"type".handle.interpreter.?.huntItDown(sub_scope, rhs_str, options);
 
             return InterpretResult{
                 .value = scope_sub_decl.value,
@@ -691,6 +775,7 @@ pub fn interpret(
             var a = try interpreter.interpret(data[node_idx].lhs, scope, options);
             var b = try interpreter.interpret(data[node_idx].rhs, scope, options);
             return InterpretResult{ .value = Value{
+                .handle = interpreter.handle,
                 .node_idx = node_idx,
                 .@"type" = try interpreter.createType(node_idx, .{ .@"bool" = .{} }),
                 .value_data = .{ .@"bool" = (try a.getValue()).eql(try b.getValue()) },
@@ -702,6 +787,7 @@ pub fn interpret(
             const nl = std.zig.parseNumberLiteral(s);
             // if (nl == .failure) ;
             return InterpretResult{ .value = Value{
+                .handle = interpreter.handle,
                 .node_idx = node_idx,
                 .@"type" = try interpreter.createType(node_idx, .{ .@"comptime_int" = .{} }),
                 .value_data = switch (nl) {
@@ -766,7 +852,6 @@ pub fn interpret(
         => {
             var buffer: [2]Ast.Node.Index = undefined;
             const params = ast.builtinCallParams(tree, node_idx, &buffer).?;
-            _ = params;
             const call_name = tree.tokenSlice(main_tokens[node_idx]);
 
             if (std.mem.eql(u8, call_name, "@compileLog")) {
@@ -777,6 +862,28 @@ pub fn interpret(
                 return InterpretResult{ .@"return" = .{} };
             }
 
+            if (std.mem.eql(u8, call_name, "@import")) {
+                if (params.len == 0) return error.InvalidBuiltin;
+                const import_param = params[0];
+                if (tags[import_param] != .string_literal) return error.InvalidBuiltin;
+
+                const import_str = tree.tokenSlice(main_tokens[import_param]);
+
+                std.log.info("Resolving {s} from {s}", .{ import_str[1 .. import_str.len - 1], interpreter.handle.uri });
+                var import_uri = (try interpreter.document_store.uriFromImportStr(interpreter.allocator, interpreter.handle.*, import_str[1 .. import_str.len - 1])) orelse return error.ImportFailure;
+                defer interpreter.allocator.free(import_uri);
+
+                var handle = interpreter.document_store.getOrLoadHandle(import_uri) orelse return error.ImportFailure;
+                try interpreter.document_store.ensureInterpreterExists(handle.uri);
+
+                return InterpretResult{ .value = Value{
+                    .handle = interpreter.handle,
+                    .node_idx = node_idx,
+                    .@"type" = try interpreter.createType(node_idx, .{ .@"type" = .{} }),
+                    .value_data = .{ .@"type" = handle.interpreter.?.root_type.? },
+                } };
+            }
+
             std.log.info("Builtin not implemented: {s}", .{call_name});
             @panic("Builtin not implemented");
             // return error.InvalidBuiltin;
@@ -784,6 +891,7 @@ pub fn interpret(
         .string_literal => {
             const value = tree.getNodeSource(node_idx)[1 .. tree.getNodeSource(node_idx).len - 1];
             var val = Value{
+                .handle = interpreter.handle,
                 .node_idx = node_idx,
                 .@"type" = try interpreter.createType(node_idx, .{
                     .pointer = .{
@@ -854,6 +962,7 @@ pub fn interpret(
             //     fnd.return_type = value.value_data.@"type";
 
             var value = Value{
+                .handle = interpreter.handle,
                 .node_idx = node_idx,
                 .@"type" = try interpreter.createType(node_idx, type_info),
                 .value_data = .{ .@"fn" = .{} },
@@ -890,10 +999,10 @@ pub fn interpret(
 
             std.log.err("AEWEWEWE: {s}", .{tree.getNodeSource(call_full.ast.fn_expr)});
 
-            const func_id_result = try interpreter.interpret(call_full.ast.fn_expr, interpreter.root_scope, .{});
+            const func_id_result = try interpreter.interpret(call_full.ast.fn_expr, interpreter.root_type.?.getTypeInfo().getScopeOfType().?, .{});
             const func_id_val = try func_id_result.getValue();
 
-            const call_res = try interpreter.call(interpreter.root_scope, func_id_val.node_idx, args.items, options);
+            const call_res = try interpreter.call(interpreter.root_type.?.getTypeInfo().getScopeOfType().?, func_id_val.node_idx, args.items, options);
             // defer call_res.scope.deinit();
             // TODO: Figure out call result memory model; this is actually fine because newScope
             // makes this a child of the decl scope which is freed on refresh... in theory
@@ -909,6 +1018,7 @@ pub fn interpret(
             if (value.value_data != .@"bool") return error.InvalidOperation;
             return InterpretResult{
                 .value = .{
+                    .handle = interpreter.handle,
                     .node_idx = node_idx,
                     .@"type" = value.@"type",
                     .value_data = .{ .@"bool" = !value.value_data.@"bool" },
@@ -937,11 +1047,9 @@ pub fn call(
     arguments: []const Value,
     options: InterpretOptions,
 ) InterpretError!CallResult {
-    // TODO: Eval, check parameter types
-
-    // TODO: Arguments
     _ = options;
-    // _ = arguments;
+
+    // TODO: type check args
 
     const tree = interpreter.handle.tree;
     const tags = tree.nodes.items(.tag);
@@ -956,6 +1064,7 @@ pub fn call(
     var arg_it = proto.iterate(&tree);
     var arg_index: usize = 0;
     while (ast.nextFnParam(&arg_it)) |param| {
+        if (arg_index >= arguments.len) return error.MissingArguments;
         if (param.name_token) |nt| {
             const decl = Declaration{
                 .node_idx = param.type_expr,

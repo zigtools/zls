@@ -192,6 +192,7 @@ pub fn refreshDocument(self: *DocumentStore, uri: Uri, new_text: [:0]const u8) !
 
     const handle = self.handles.get(uri) orelse unreachable;
 
+    // TODO: Handle interpreter cross reference
     if (handle.interpreter) |int| {
         int.deinit();
         handle.interpreter = null;
@@ -937,7 +938,7 @@ pub fn enumCompletionItems(self: DocumentStore, arena: std.mem.Allocator, handle
 }
 
 pub fn ensureInterpreterExists(self: *DocumentStore, uri: Uri) !void {
-    var handle = self.handles.get(uri) orelse unreachable;
+    var handle = self.handles.get(uri).?;
     if (handle.interpreter == null) {
         var int = try self.allocator.create(ComptimeInterpreter);
         int.* = ComptimeInterpreter{
@@ -945,8 +946,7 @@ pub fn ensureInterpreterExists(self: *DocumentStore, uri: Uri) !void {
             .document_store = self,
             .handle = handle,
         };
-        _ = try int.interpret(0, null, .{});
-
         handle.interpreter = int;
+        _ = try int.interpret(0, null, .{});
     }
 }

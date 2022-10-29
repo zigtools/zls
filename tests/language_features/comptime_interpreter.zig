@@ -41,8 +41,8 @@ test "ComptimeInterpreter - basic test" {
     }, .{});
     defer call_with_true.scope.deinit();
 
-    try std.testing.expectFmt("u69", "{any}", .{interpreter.formatTypeInfo(interpreter.typeToTypeInfo(call_with_false.result.value.value_data.@"type"))});
-    try std.testing.expectFmt("u8", "{any}", .{interpreter.formatTypeInfo(interpreter.typeToTypeInfo(call_with_true.result.value.value_data.@"type"))});
+    try std.testing.expectFmt("u69", "{any}", .{interpreter.formatTypeInfo(call_with_false.result.value.value_data.@"type".getTypeInfo())});
+    try std.testing.expectFmt("u8", "{any}", .{interpreter.formatTypeInfo(call_with_true.result.value.value_data.@"type".getTypeInfo())});
 }
 
 test "ComptimeInterpreter - struct" {

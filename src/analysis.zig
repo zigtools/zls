@@ -756,31 +756,36 @@ pub fn resolveTypeOfNodeInternal(store: *DocumentStore, arena: *std.heap.ArenaAl
 
                     // var fn_decl_scope = top_scope.getParentScopeFromNode(node);
 
+                    log.info("Invoking interpreter!", .{});
+
                     store.ensureInterpreterExists(handle.uri) catch |err| {
-                        std.log.err("Interpreter error: {s}", .{@errorName(err)});
+                        log.err("Interpreter error: {s}", .{@errorName(err)});
+                        if (@errorReturnTrace()) |trace| {
+                            std.debug.dumpStackTrace(trace.*);
+                        }
                         return null;
                     };
                     var interpreter = handle.interpreter.?;
 
                     // TODO: Start from current/nearest-current scope
-                    const result = interpreter.interpret(node, interpreter.root_scope, .{}) catch |err| {
-                        std.log.err("Interpreter error: {s}", .{@errorName(err)});
+                    const result = interpreter.interpret(node, interpreter.root_type.?.getTypeInfo().getScopeOfType().?, .{}) catch |err| {
+                        log.err("Interpreter error: {s}", .{@errorName(err)});
                         if (@errorReturnTrace()) |trace| {
                             std.debug.dumpStackTrace(trace.*);
                         }
                         return null;
                     };
                     const val = result.getValue() catch |err| {
-                        std.log.err("Interpreter error: {s}", .{@errorName(err)});
+                        log.err("Interpreter error: {s}", .{@errorName(err)});
                         if (@errorReturnTrace()) |trace| {
                             std.debug.dumpStackTrace(trace.*);
                         }
                         return null;
                     };
 
-                    const ti = interpreter.typeToTypeInfo(val.@"type");
+                    const ti = val.@"type".getTypeInfo();
                     if (ti != .@"type") {
-                        std.log.err("Not a type: { }", .{interpreter.formatTypeInfo(ti)});
+                        log.err("Not a type: { }", .{interpreter.formatTypeInfo(ti)});
                         return null;
                     }
 

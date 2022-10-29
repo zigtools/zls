@@ -486,7 +486,7 @@ fn typeToCompletion(
         ),
         .primitive, .array_index => {},
         .@"comptime" => |co| {
-            const ti = co.interpreter.typeToTypeInfo(co.type);
+            const ti = co.type.getTypeInfo();
             switch (ti) {
                 .@"struct" => |st| {
                     var it = st.scope.declarations.iterator();
@@ -821,7 +821,7 @@ fn hoverSymbol(server: *Server, decl_handle: analysis.DeclWithHandle) error{OutO
 
     const resolved_type_str = if (resolved_type) |rt|
         if (rt.type.is_type_val) switch (rt.type.data) {
-            .@"comptime" => |*co| try std.fmt.allocPrint(server.arena.allocator(), "{ }", .{co.interpreter.formatTypeInfo(co.interpreter.typeToTypeInfo(co.type))}),
+            .@"comptime" => |*co| try std.fmt.allocPrint(server.arena.allocator(), "{ }", .{co.interpreter.formatTypeInfo(co.type.getTypeInfo())}),
             else => "type",
         } else switch (rt.type.data) { // TODO: Investigate random weird numbers like 897 that cause index of bounds
             .pointer,
