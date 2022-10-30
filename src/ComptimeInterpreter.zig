@@ -18,9 +18,24 @@ document_store: *DocumentStore,
 handle: *const DocumentStore.Handle,
 root_type: ?Type = null,
 
+/// Interpreter diagnostic errors
+errors: std.AutoArrayHashMapUnmanaged(Ast.Node.Index, InterpreterError) = .{},
+
 // TODO: Deduplicate typeinfo across different interpreters
 type_info: std.ArrayListUnmanaged(TypeInfo) = .{},
 type_info_map: std.HashMapUnmanaged(TypeInfo, usize, TypeInfo.Context, std.hash_map.default_max_load_percentage) = .{},
+
+pub const InterpreterError = struct {
+    code: []const u8,
+    message: []const u8,
+};
+
+pub fn recordError(interpreter: *ComptimeInterpreter, node_idx: Ast.Node.Index, code: []const u8, message: []const u8) !void {
+    try interpreter.errors.put(interpreter.allocator, node_idx, .{
+        .code = code,
+        .message = message,
+    });
+}
 
 pub fn deinit(interpreter: *ComptimeInterpreter) void {
     if (interpreter.root_type) |rt| rt.getTypeInfo().getScopeOfType().?.deinit();
@@ -48,7 +63,7 @@ pub const TypeInfo = union(enum) {
     pub const Struct = struct {
         /// Declarations contained within
         scope: *InterpreterScope,
-        fields: std.ArrayListUnmanaged(FieldDefinition) = .{},
+        fields: std.StringHashMapUnmanaged(FieldDefinition) = .{},
     };
 
     pub const Int = struct {
@@ -116,7 +131,9 @@ pub const TypeInfo = union(enum) {
         context.hasher.update(&[_]u8{@enumToInt(ti)});
         return switch (ti) {
             .@"struct" => |s| {
-                context.hasher.update(std.mem.sliceAsBytes(s.fields.items));
+                _ = s;
+                // TODO: Fix
+                // context.hasher.update(std.mem.sliceAsBytes(s.fields.items));
                 // TODO: Fix
                 // context.hasher.update(std.mem.sliceAsBytes(s.declarations.items));
             },
@@ -167,6 +184,11 @@ pub const Type = struct {
     pub fn getTypeInfo(@"type": Type) TypeInfo {
         return @"type".handle.interpreter.?.type_info.items[@"type".info_idx];
     }
+
+    /// Be careful with this; typeinfo resizes reassign pointers!
+    pub fn getTypeInfoMutable(@"type": Type) *TypeInfo {
+        return &@"type".handle.interpreter.?.type_info.items[@"type".info_idx];
+    }
 };
 
 pub const Value = struct {
@@ -191,8 +213,8 @@ pub const ValueData = union(enum) {
 
     // },
     // one_ptr: *anyopaque,
-    /// TODO: Optimize this with an ArrayList that uses anyopaque slice
-    slice_ptr: std.ArrayListUnmanaged(ValueData),
+    /// Special case slice; this is extremely common at comptime so it makes sense
+    string: []const u8,
 
     @"comptime_int": std.math.big.int.Managed,
     unsigned_int: u64,
@@ -295,9 +317,11 @@ pub const TypeInfoFormatter = struct {
             .@"bool" => try writer.writeAll("bool"),
             .@"struct" => |s| {
                 try writer.writeAll("struct {");
-                for (s.fields.items) |field| {
-                    try writer.print("{s}: {s}, ", .{ field.name, value.interpreter.formatTypeInfo(field.@"type".getTypeInfo()) });
+                var field_iterator = s.fields.iterator();
+                while (field_iterator.next()) |di| {
+                    try writer.print("{s}: {s}, ", .{ di.key_ptr.*, value.interpreter.formatTypeInfo(di.value_ptr.*.@"type".getTypeInfo()) });
                 }
+
                 var iterator = s.scope.declarations.iterator();
                 while (iterator.next()) |di| {
                     const decl = di.value_ptr.*;
@@ -560,17 +584,26 @@ pub fn interpret(
                 };
 
                 if (maybe_container_field) |field_info| {
-                    var init_type = try interpreter.interpret(field_info.ast.type_expr, container_scope, .{});
+                    var init_type_value = try (try interpreter.interpret(field_info.ast.type_expr, container_scope, .{})).getValue();
                     var default_value = if (field_info.ast.value_expr == 0)
                         null
                     else
                         try (try interpreter.interpret(field_info.ast.value_expr, container_scope, .{})).getValue();
 
+                    if (init_type_value.@"type".getTypeInfo() != .@"type") {
+                        try interpreter.recordError(
+                            field_info.ast.type_expr,
+                            "invalid_field_type_value",
+                            "Field type should be a type!",
+                        );
+                        continue;
+                    }
+
                     const name = tree.tokenSlice(field_info.ast.name_token);
                     const field = FieldDefinition{
                         .node_idx = member,
                         .name = name,
-                        .@"type" = (try init_type.getValue()).value_data.@"type",
+                        .@"type" = init_type_value.value_data.@"type",
                         .default_value = default_value,
                         // TODO: Default values
                         // .@"type" = T: {
@@ -580,7 +613,9 @@ pub fn interpret(
                         // .value = null,
                     };
 
-                    try type_info.@"struct".fields.append(interpreter.allocator, field);
+                    // std.log.info("FIELD: {s}", .{name});
+
+                    try cont_type.getTypeInfoMutable().@"struct".fields.put(interpreter.allocator, name, field);
                 } else {
                     _ = try interpreter.interpret(member, container_scope, options);
                 }
@@ -701,6 +736,22 @@ pub fn interpret(
                 .value_data = .{ .@"bool" = false },
             } };
 
+            if (value.len == 5 and (value[0] == 'u' or value[0] == 'i') and std.mem.eql(u8, "size", value[1..])) return InterpretResult{
+                .value = Value{
+                    .handle = interpreter.handle,
+                    .node_idx = node_idx,
+                    .@"type" = try interpreter.createType(node_idx, .{ .@"type" = .{} }),
+                    .value_data = .{
+                        .@"type" = try interpreter.createType(node_idx, .{
+                            .int = .{
+                                .signedness = if (value[0] == 'u') .unsigned else .signed,
+                                .bits = 64, // TODO: Platform specific
+                            },
+                        }),
+                    },
+                },
+            };
+
             if (std.mem.eql(u8, "type", value)) {
                 return InterpretResult{ .value = Value{
                     .handle = interpreter.handle,
@@ -725,7 +776,14 @@ pub fn interpret(
             // TODO: Floats
 
             // Logic to find identifiers in accessible scopes
-            return InterpretResult{ .value = (try interpreter.huntItDown(scope.?, value, options)).value };
+            return InterpretResult{ .value = (interpreter.huntItDown(scope.?, value, options) catch |err| {
+                if (err == error.IdentifierNotFound) try interpreter.recordError(
+                    node_idx,
+                    "identifier_not_found",
+                    try std.fmt.allocPrint(interpreter.allocator, "Couldn't find identifier \"{s}\"", .{value}),
+                );
+                return err;
+            }).value };
         },
         .field_access => {
             if (data[node_idx].rhs == 0) return error.CriticalAstFailure;
@@ -736,7 +794,14 @@ pub fn interpret(
 
             var sub_scope = irv.value_data.@"type".getTypeInfo().getScopeOfType() orelse return error.IdentifierNotFound;
             // var scope_sub_decl = sub_scope.declarations.get(rhs_str) orelse return error.IdentifierNotFound;
-            var scope_sub_decl = try irv.value_data.@"type".handle.interpreter.?.huntItDown(sub_scope, rhs_str, options);
+            var scope_sub_decl = irv.value_data.@"type".handle.interpreter.?.huntItDown(sub_scope, rhs_str, options) catch |err| {
+                if (err == error.IdentifierNotFound) try interpreter.recordError(
+                    node_idx,
+                    "identifier_not_found",
+                    try std.fmt.allocPrint(interpreter.allocator, "Couldn't find identifier \"{s}\"", .{rhs_str}),
+                );
+                return err;
+            };
 
             return InterpretResult{
                 .value = scope_sub_decl.value,
@@ -884,9 +949,41 @@ pub fn interpret(
                 } };
             }
 
+            if (std.mem.eql(u8, call_name, "@TypeOf")) {
+                if (params.len != 1) return error.InvalidBuiltin;
+
+                const value = try (try interpreter.interpret(params[0], scope, options)).getValue();
+                return InterpretResult{ .value = Value{
+                    .handle = interpreter.handle,
+                    .node_idx = node_idx,
+                    .@"type" = try interpreter.createType(node_idx, .{ .@"type" = .{} }),
+                    .value_data = .{ .@"type" = value.@"type" },
+                } };
+            }
+
+            if (std.mem.eql(u8, call_name, "@hasDecl")) {
+                if (params.len != 2) return error.InvalidBuiltin;
+
+                const value = try (try interpreter.interpret(params[0], scope, options)).getValue();
+                const field_name = try (try interpreter.interpret(params[1], scope, options)).getValue();
+
+                if (value.@"type".getTypeInfo() != .@"type") return error.InvalidBuiltin;
+                if (field_name.@"type".getTypeInfo() != .@"pointer") return error.InvalidBuiltin; // Check if it's a []const u8
+
+                const ti = value.value_data.@"type".getTypeInfo();
+                if (ti.getScopeOfType() == null) return error.InvalidBuiltin;
+
+                return InterpretResult{ .value = Value{
+                    .handle = interpreter.handle,
+                    .node_idx = node_idx,
+                    .@"type" = try interpreter.createType(node_idx, .{ .@"bool" = .{} }),
+                    .value_data = .{ .@"bool" = ti.getScopeOfType().?.declarations.contains(field_name.value_data.string) },
+                } };
+            }
+
             std.log.info("Builtin not implemented: {s}", .{call_name});
-            @panic("Builtin not implemented");
-            // return error.InvalidBuiltin;
+            // @panic("Builtin not implemented");
+            return error.InvalidBuiltin;
         },
         .string_literal => {
             const value = tree.getNodeSource(node_idx)[1 .. tree.getNodeSource(node_idx).len - 1];
@@ -907,13 +1004,12 @@ pub fn interpret(
                         .sentinel = .{ .unsigned_int = 0 },
                     },
                 }),
-                .value_data = .{ .slice_ptr = .{} },
+                .value_data = .{ .string = value },
             };
 
-            for (value) |z| {
-                try val.value_data.slice_ptr.append(interpreter.allocator, .{ .unsigned_int = z });
-            }
-            try val.value_data.slice_ptr.append(interpreter.allocator, .{ .unsigned_int = 0 });
+            // TODO: Add type casting, sentinel
+            // TODO: Should this be a `*const [len:0]u8`?
+            // try val.value_data.slice_ptr.append(interpreter.allocator, .{ .unsigned_int = 0 });
 
             return InterpretResult{ .value = val };
         },
