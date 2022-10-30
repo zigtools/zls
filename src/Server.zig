@@ -2120,8 +2120,15 @@ fn didChangeConfigurationHandler(server: *Server, writer: anytype, id: types.Req
     if (req.settings) |configuration| {
         inline for (std.meta.fields(Config.Configuration)) |field| {
             if (@field(configuration, field.name)) |value| {
-                @field(server.config, field.name) = if (@TypeOf(value) == []const u8) try server.allocator.dupe(u8, value) else value;
-                log.debug("setting configuration option '{s}' to '{any}'", .{ field.name, value });
+                blk: {
+                    if (@TypeOf(value) == []const u8) {
+                        if (value.len == 0) {
+                            break :blk;
+                        }
+                    }
+                    @field(server.config, field.name) = if (@TypeOf(value) == []const u8) try server.allocator.dupe(u8, value) else value;
+                    log.debug("setting configuration option '{s}' to '{any}'", .{ field.name, value });
+                }
             }
         }
 
@@ -2653,6 +2660,14 @@ pub fn processJsonRpc(server: *Server, writer: anytype, json: []const u8) !void 
                 const new_value: field.field_type = switch (ft) {
                     []const u8 => switch (value) {
                         .String => |s| blk: {
+                            if (s.len == 0) {
+                                if (field.field_type == ?[]const u8) {
+                                    break :blk null;
+                                }
+                                else {
+                                    break :blk s;
+                                }
+                            }
                             var nv = try server.allocator.dupe(u8, s);
                             if (@field(server.config, field.name)) |prev_val| server.allocator.free(prev_val);
                             break :blk nv;
