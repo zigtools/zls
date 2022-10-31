@@ -134,7 +134,7 @@ pub fn build(b: *std.build.Builder) !void {
         });
     }
 
-    tests.use_stage1 = true;
+    // tests.use_stage1 = true;
     tests.addPackage(.{ .name = "zls", .source = .{ .path = "src/zls.zig" }, .dependencies = exe.packages.items });
     tests.setBuildMode(.Debug);
     tests.setTarget(target);
