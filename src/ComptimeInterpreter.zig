@@ -30,7 +30,7 @@ pub const InterpreterError = struct {
     message: []const u8,
 };
 
-pub fn recordError(interpreter: *ComptimeInterpreter, node_idx: Ast.Node.Index, code: []const u8, message: []const u8) !void {
+pub fn recordError(interpreter: *ComptimeInterpreter, node_idx: Ast.Node.Index, code: []const u8, message: []const u8) error{OutOfMemory}!void {
     try interpreter.errors.put(interpreter.allocator, node_idx, .{
         .code = code,
         .message = message,
@@ -212,13 +212,19 @@ pub const ValueData = union(enum) {
     // @"struct": struct {
 
     // },
-    // one_ptr: *anyopaque,
+    /// This is what a pointer is; we don't need to map
+    /// this to anything because @ptrToInt is comptime-illegal
+    /// Pointer equality scares me though :( (but that's for later)
+    one_ptr: *ValueData,
     /// Special case slice; this is extremely common at comptime so it makes sense
-    string: []const u8,
+    slice_of_const_u8: []const u8,
 
-    @"comptime_int": std.math.big.int.Managed,
     unsigned_int: u64,
     signed_int: i64,
+    /// If the int does not fit into the previous respective slots,
+    /// use a bit int to store it
+    big_int: std.math.big.int.Managed,
+
     float: f64,
 
     @"fn",
@@ -231,13 +237,23 @@ pub const ValueData = union(enum) {
         // std.meta.activeTag(u: anytype)
         switch (data) {
             .@"bool" => return data.@"bool" == other_data.@"bool",
-            .@"comptime_int" => return data.@"comptime_int".eq(other_data.@"comptime_int"),
+            .big_int => return data.big_int.eq(other_data.big_int),
             .unsigned_int => return data.unsigned_int == other_data.unsigned_int,
             .signed_int => return data.signed_int == other_data.signed_int,
             .float => return data.float == other_data.float,
 
             else => return false,
         }
+    }
+
+    /// Get the bit count required to store a certain integer
+    pub fn bitCount(data: ValueData) ?u16 {
+        return switch (data) {
+            // TODO: Implement for signed ints
+            .unsigned_int => |i| std.math.log2_int(@TypeOf(i), i),
+            .big_int => |bi| @intCast(u16, bi.bitCountAbs()),
+            else => null,
+        };
     }
 };
 
@@ -515,6 +531,49 @@ pub fn huntItDown(
     return error.IdentifierNotFound;
 }
 
+pub fn cast(
+    interpreter: *ComptimeInterpreter,
+    node_idx: Ast.Node.Index,
+    dest_type: Type,
+    value: Value,
+) error{ OutOfMemory, InvalidCast }!Value {
+    const value_data = value.value_data;
+
+    const to_type_info = dest_type.getTypeInfo();
+    const from_type_info = value.@"type".getTypeInfo();
+
+    const err = switch (from_type_info) {
+        .@"comptime_int" => switch (to_type_info) {
+            .int => {
+                if (value_data.bitCount().? > to_type_info.int.bits) {
+                    switch (value_data) {
+                        inline .unsigned_int, .signed_int, .big_int => |bi| {
+                            try interpreter.recordError(node_idx, "invalid_cast", try std.fmt.allocPrint(interpreter.allocator, "integer value {d} cannot be coerced to type '{s}'", .{ bi, interpreter.formatTypeInfo(to_type_info) }));
+                        },
+                        else => unreachable,
+                    }
+                    return error.InvalidCast;
+                }
+            },
+            else => error.InvalidCast,
+        },
+        else => error.InvalidCast,
+    };
+
+    err catch |e| {
+        try interpreter.recordError(node_idx, "invalid_cast", "invalid cast");
+        return e;
+    };
+
+    return Value{
+        .handle = interpreter.handle,
+
+        .node_idx = node_idx,
+        .@"type" = dest_type,
+        .value_data = value.value_data,
+    };
+}
+
 // Might be useful in the future
 pub const InterpretOptions = struct {};
 
@@ -528,6 +587,7 @@ pub const InterpretError = std.mem.Allocator.Error || std.fmt.ParseIntError || s
     IdentifierNotFound,
     MissingArguments,
     ImportFailure,
+    InvalidCast,
 };
 pub fn interpret(
     interpreter: *ComptimeInterpreter,
@@ -624,7 +684,7 @@ pub fn interpret(
             return InterpretResult{ .value = Value{
                 .handle = interpreter.handle,
                 .node_idx = node_idx,
-                .@"type" = try interpreter.createType(node_idx, .{ .@"type" = .{} }),
+                .@"type" = try interpreter.createType(node_idx, .{ .@"type" = {} }),
                 .value_data = .{ .@"type" = cont_type },
             } };
         },
@@ -636,21 +696,21 @@ pub fn interpret(
             // TODO: Add 0 check
             const name = analysis.getDeclName(tree, node_idx).?;
             if (scope.?.declarations.contains(name))
-                return InterpretResult{ .nothing = .{} };
+                return InterpretResult{ .nothing = {} };
 
             const decl = ast.varDecl(tree, node_idx).?;
             if (decl.ast.init_node == 0)
-                return InterpretResult{ .nothing = .{} };
+                return InterpretResult{ .nothing = {} };
 
             // We should have a value when a var is defined
             // var value = try (try interpreter.interpret(decl.ast.init_node, scope, options)).getValue();
-            var value = (try interpreter.interpret(decl.ast.init_node, scope, options)).maybeGetValue() orelse return InterpretResult{ .nothing = .{} };
+            var value = (try interpreter.interpret(decl.ast.init_node, scope, options)).maybeGetValue() orelse return InterpretResult{ .nothing = {} };
 
             // Is this redundant? im too afraid to change it rn tbh
             var @"type" = if (decl.ast.type_node == 0) Value{
                 .handle = interpreter.handle,
                 .node_idx = std.math.maxInt(Ast.Node.Index),
-                .@"type" = try interpreter.createType(node_idx, .{ .@"type" = .{} }),
+                .@"type" = try interpreter.createType(node_idx, .{ .@"type" = {} }),
                 .value_data = .{ .@"type" = value.@"type" },
             } else try (try interpreter.interpret(decl.ast.type_node, scope, options)).getValue();
 
@@ -661,7 +721,7 @@ pub fn interpret(
                 .@"value" = value,
             });
 
-            return InterpretResult{ .nothing = .{} };
+            return InterpretResult{ .nothing = {} };
         },
         .block,
         .block_semicolon,
@@ -687,11 +747,11 @@ pub fn interpret(
                         if (lllll) |l| {
                             if (maybe_block_label_string) |ls| {
                                 if (std.mem.eql(u8, l, ls)) {
-                                    return InterpretResult{ .nothing = .{} };
+                                    return InterpretResult{ .nothing = {} };
                                 } else return ret;
                             } else return ret;
                         } else {
-                            return InterpretResult{ .nothing = .{} };
+                            return InterpretResult{ .nothing = {} };
                         }
                     },
                     .break_with_value => |bwv| {
@@ -712,7 +772,7 @@ pub fn interpret(
                 }
             }
 
-            return InterpretResult{ .nothing = .{} };
+            return InterpretResult{ .nothing = {} };
         },
         .identifier => {
             var value = tree.getNodeSource(node_idx);
@@ -720,19 +780,19 @@ pub fn interpret(
             if (std.mem.eql(u8, "bool", value)) return InterpretResult{ .value = Value{
                 .handle = interpreter.handle,
                 .node_idx = node_idx,
-                .@"type" = try interpreter.createType(node_idx, .{ .@"type" = .{} }),
-                .value_data = .{ .@"type" = try interpreter.createType(node_idx, .{ .@"bool" = .{} }) },
+                .@"type" = try interpreter.createType(node_idx, .{ .@"type" = {} }),
+                .value_data = .{ .@"type" = try interpreter.createType(node_idx, .{ .@"bool" = {} }) },
             } };
             if (std.mem.eql(u8, "true", value)) return InterpretResult{ .value = Value{
                 .handle = interpreter.handle,
                 .node_idx = node_idx,
-                .@"type" = try interpreter.createType(node_idx, .{ .@"bool" = .{} }),
+                .@"type" = try interpreter.createType(node_idx, .{ .@"bool" = {} }),
                 .value_data = .{ .@"bool" = true },
             } };
             if (std.mem.eql(u8, "false", value)) return InterpretResult{ .value = Value{
                 .handle = interpreter.handle,
                 .node_idx = node_idx,
-                .@"type" = try interpreter.createType(node_idx, .{ .@"bool" = .{} }),
+                .@"type" = try interpreter.createType(node_idx, .{ .@"bool" = {} }),
                 .value_data = .{ .@"bool" = false },
             } };
 
@@ -740,7 +800,7 @@ pub fn interpret(
                 .value = Value{
                     .handle = interpreter.handle,
                     .node_idx = node_idx,
-                    .@"type" = try interpreter.createType(node_idx, .{ .@"type" = .{} }),
+                    .@"type" = try interpreter.createType(node_idx, .{ .@"type" = {} }),
                     .value_data = .{
                         .@"type" = try interpreter.createType(node_idx, .{
                             .int = .{
@@ -756,14 +816,14 @@ pub fn interpret(
                 return InterpretResult{ .value = Value{
                     .handle = interpreter.handle,
                     .node_idx = node_idx,
-                    .@"type" = try interpreter.createType(node_idx, .{ .@"type" = .{} }),
-                    .value_data = .{ .@"type" = try interpreter.createType(node_idx, .{ .@"type" = .{} }) },
+                    .@"type" = try interpreter.createType(node_idx, .{ .@"type" = {} }),
+                    .value_data = .{ .@"type" = try interpreter.createType(node_idx, .{ .@"type" = {} }) },
                 } };
             } else if (value.len >= 2 and (value[0] == 'u' or value[0] == 'i')) int: {
                 return InterpretResult{ .value = Value{
                     .handle = interpreter.handle,
                     .node_idx = node_idx,
-                    .@"type" = try interpreter.createType(node_idx, .{ .@"type" = .{} }),
+                    .@"type" = try interpreter.createType(node_idx, .{ .@"type" = {} }),
                     .value_data = .{ .@"type" = try interpreter.createType(node_idx, .{
                         .int = .{
                             .signedness = if (value[0] == 'u') .unsigned else .signed,
@@ -833,7 +893,7 @@ pub fn interpret(
             } else {
                 if (iff.ast.else_expr != 0) {
                     return try interpreter.interpret(iff.ast.else_expr, scope, options);
-                } else return InterpretResult{ .nothing = .{} };
+                } else return InterpretResult{ .nothing = {} };
             }
         },
         .equal_equal => {
@@ -842,7 +902,7 @@ pub fn interpret(
             return InterpretResult{ .value = Value{
                 .handle = interpreter.handle,
                 .node_idx = node_idx,
-                .@"type" = try interpreter.createType(node_idx, .{ .@"bool" = .{} }),
+                .@"type" = try interpreter.createType(node_idx, .{ .@"bool" = {} }),
                 .value_data = .{ .@"bool" = (try a.getValue()).eql(try b.getValue()) },
             } };
             // a.getValue().eql(b.getValue())
@@ -850,22 +910,24 @@ pub fn interpret(
         .number_literal => {
             const s = tree.getNodeSource(node_idx);
             const nl = std.zig.parseNumberLiteral(s);
-            // if (nl == .failure) ;
-            return InterpretResult{ .value = Value{
-                .handle = interpreter.handle,
-                .node_idx = node_idx,
-                .@"type" = try interpreter.createType(node_idx, .{ .@"comptime_int" = .{} }),
-                .value_data = switch (nl) {
-                    .float => .{ .float = try std.fmt.parseFloat(f64, s) },
-                    .int => if (s[0] == '-') ValueData{ .signed_int = try std.fmt.parseInt(i64, s, 0) } else ValueData{ .unsigned_int = try std.fmt.parseInt(u64, s, 0) },
-                    .big_int => |bii| ppp: {
-                        var bi = try std.math.big.int.Managed.init(interpreter.allocator);
-                        try bi.setString(@enumToInt(bii), s[if (bii != .decimal) @as(usize, 2) else @as(usize, 0)..]);
-                        break :ppp .{ .@"comptime_int" = bi };
+
+            return InterpretResult{
+                .value = Value{
+                    .handle = interpreter.handle,
+                    .node_idx = node_idx,
+                    .@"type" = try interpreter.createType(node_idx, .{ .@"comptime_int" = {} }),
+                    .value_data = switch (nl) {
+                        .float => .{ .float = try std.fmt.parseFloat(f64, s) },
+                        .int => if (s[0] == '-') ValueData{ .signed_int = try std.fmt.parseInt(i64, s, 0) } else ValueData{ .unsigned_int = try std.fmt.parseInt(u64, s, 0) },
+                        .big_int => |bii| ppp: {
+                            var bi = try std.math.big.int.Managed.init(interpreter.allocator);
+                            try bi.setString(@enumToInt(bii), s[if (bii != .decimal) @as(usize, 2) else @as(usize, 0)..]);
+                            break :ppp .{ .big_int = bi };
+                        },
+                        .failure => return error.CriticalAstFailure,
                     },
-                    .failure => return error.CriticalAstFailure,
                 },
-            } };
+            };
         },
         .assign,
         .assign_bit_and,
@@ -893,7 +955,7 @@ pub fn interpret(
                     decl.value_ptr.value = try (try interpreter.interpret(data[node_idx].rhs, scope.?, options)).getValue();
             }
 
-            return InterpretResult{ .nothing = .{} };
+            return InterpretResult{ .nothing = {} };
         },
         // .@"switch",
         // .switch_comma,
@@ -920,11 +982,11 @@ pub fn interpret(
             const call_name = tree.tokenSlice(main_tokens[node_idx]);
 
             if (std.mem.eql(u8, call_name, "@compileLog")) {
-                return InterpretResult{ .nothing = .{} };
+                return InterpretResult{ .nothing = {} };
             }
 
             if (std.mem.eql(u8, call_name, "@compileError")) {
-                return InterpretResult{ .@"return" = .{} };
+                return InterpretResult{ .@"return" = {} };
             }
 
             if (std.mem.eql(u8, call_name, "@import")) {
@@ -944,7 +1006,7 @@ pub fn interpret(
                 return InterpretResult{ .value = Value{
                     .handle = interpreter.handle,
                     .node_idx = node_idx,
-                    .@"type" = try interpreter.createType(node_idx, .{ .@"type" = .{} }),
+                    .@"type" = try interpreter.createType(node_idx, .{ .@"type" = {} }),
                     .value_data = .{ .@"type" = handle.interpreter.?.root_type.? },
                 } };
             }
@@ -956,7 +1018,7 @@ pub fn interpret(
                 return InterpretResult{ .value = Value{
                     .handle = interpreter.handle,
                     .node_idx = node_idx,
-                    .@"type" = try interpreter.createType(node_idx, .{ .@"type" = .{} }),
+                    .@"type" = try interpreter.createType(node_idx, .{ .@"type" = {} }),
                     .value_data = .{ .@"type" = value.@"type" },
                 } };
             }
@@ -976,9 +1038,20 @@ pub fn interpret(
                 return InterpretResult{ .value = Value{
                     .handle = interpreter.handle,
                     .node_idx = node_idx,
-                    .@"type" = try interpreter.createType(node_idx, .{ .@"bool" = .{} }),
-                    .value_data = .{ .@"bool" = ti.getScopeOfType().?.declarations.contains(field_name.value_data.string) },
+                    .@"type" = try interpreter.createType(node_idx, .{ .@"bool" = {} }),
+                    .value_data = .{ .@"bool" = ti.getScopeOfType().?.declarations.contains(field_name.value_data.slice_of_const_u8) },
                 } };
+            }
+
+            if (std.mem.eql(u8, call_name, "@as")) {
+                if (params.len != 2) return error.InvalidBuiltin;
+
+                const as_type = try (try interpreter.interpret(params[0], scope, options)).getValue();
+                const value = try (try interpreter.interpret(params[1], scope, options)).getValue();
+
+                if (as_type.@"type".getTypeInfo() != .@"type") return error.InvalidBuiltin;
+
+                return InterpretResult{ .value = try interpreter.cast(node_idx, as_type.value_data.@"type", value) };
             }
 
             std.log.info("Builtin not implemented: {s}", .{call_name});
@@ -990,6 +1063,9 @@ pub fn interpret(
             var val = Value{
                 .handle = interpreter.handle,
                 .node_idx = node_idx,
+                // TODO: This is literally the wrong type lmao
+                // the actual type is *[len:0]u8 because we're pointing
+                // to a fixed size value in the data(?) section (when we're compilign zig code)
                 .@"type" = try interpreter.createType(node_idx, .{
                     .pointer = .{
                         .size = .slice,
@@ -1004,7 +1080,7 @@ pub fn interpret(
                         .sentinel = .{ .unsigned_int = 0 },
                     },
                 }),
-                .value_data = .{ .string = value },
+                .value_data = .{ .slice_of_const_u8 = value },
             };
 
             // TODO: Add type casting, sentinel
@@ -1061,7 +1137,7 @@ pub fn interpret(
                 .handle = interpreter.handle,
                 .node_idx = node_idx,
                 .@"type" = try interpreter.createType(node_idx, type_info),
-                .value_data = .{ .@"fn" = .{} },
+                .value_data = .{ .@"fn" = {} },
             };
 
             const name = analysis.getDeclName(tree, node_idx).?;
@@ -1072,7 +1148,7 @@ pub fn interpret(
                 .@"value" = value,
             });
 
-            return InterpretResult{ .nothing = .{} };
+            return InterpretResult{ .nothing = {} };
         },
         .call,
         .call_comma,
@@ -1123,7 +1199,7 @@ pub fn interpret(
         },
         else => {
             std.log.err("Unhandled {any}", .{tags[node_idx]});
-            return InterpretResult{ .nothing = .{} };
+            return InterpretResult{ .nothing = {} };
         },
     }
 }

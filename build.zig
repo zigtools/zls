@@ -7,19 +7,19 @@ const zls_version = std.builtin.Version{ .major = 0, .minor = 11, .patch = 0 };
 pub fn build(b: *std.build.Builder) !void {
     const current_zig = builtin.zig_version;
     const min_zig = std.SemanticVersion.parse("0.10.0-dev.4458+b120c819d") catch return; // builtins changed to @min / @max
-    if (current_zig.order(min_zig).compare(.lt)) @panic(b.fmt("Your Zig version v{} does not meet the minimum build requirement of v{}", .{current_zig, min_zig}));
+    if (current_zig.order(min_zig).compare(.lt)) @panic(b.fmt("Your Zig version v{} does not meet the minimum build requirement of v{}", .{ current_zig, min_zig }));
 
     const target = b.standardTargetOptions(.{});
 
     const mode = b.standardReleaseOptions();
     const exe = b.addExecutable("zls", "src/main.zig");
-    exe.use_stage1 = true;
+    // exe.use_stage1 = true;
     const exe_options = b.addOptions();
     exe.addOptions("build_options", exe_options);
 
     const enable_tracy = b.option(bool, "enable_tracy", "Whether tracy should be enabled.") orelse false;
     const coverage = b.option(bool, "generate_coverage", "Generate coverage data with kcov") orelse false;
-    const coverage_output_dir = b.option([]const u8, "coverage_output_dir", "Output directory for coverage data") orelse b.pathJoin(&.{b.install_prefix, "kcov"});
+    const coverage_output_dir = b.option([]const u8, "coverage_output_dir", "Output directory for coverage data") orelse b.pathJoin(&.{ b.install_prefix, "kcov" });
 
     exe_options.addOption(
         shared.ZigVersion,
@@ -122,10 +122,10 @@ pub fn build(b: *std.build.Builder) !void {
 
     var tests = b.addTest("tests/tests.zig");
 
-    if(coverage) {
-        const src_dir = b.pathJoin(&.{b.build_root, "src"});
+    if (coverage) {
+        const src_dir = b.pathJoin(&.{ b.build_root, "src" });
         const include_pattern = b.fmt("--include-pattern={s}", .{src_dir});
-        
+
         tests.setExecCmd(&[_]?[]const u8{
             "kcov",
             include_pattern,
