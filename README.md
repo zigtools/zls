@@ -249,7 +249,7 @@ Then choose one of the following two ways:
     ```
 
 #### YouCompleteMe
-- Install YouCompleteMeFrom [here](https://github.com/ycm-core/YouCompleteMe.git).
+- Install YouCompleteMe from [here](https://github.com/ycm-core/YouCompleteMe.git).
 - Add these lines to your vimrc:
 
 ```vim
