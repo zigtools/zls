@@ -520,7 +520,7 @@ fn typeToCompletion(
                     while (it.next()) |entry| {
                         try list.append(allocator, .{
                             .label = entry.key_ptr.*,
-                            .kind = if (entry.value_ptr.isConstant(co.interpreter.handle.tree)) .Constant else .Variable,
+                            .kind = if (entry.value_ptr.isConstant()) .Constant else .Variable,
                             .insertText = entry.key_ptr.*,
                             .insertTextFormat = .PlainText,
                         });
