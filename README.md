@@ -168,7 +168,7 @@ You can install `zls` using the instuctions for your text editor below:
 ### VS Code
 
 Install the `zls-vscode` extension from [here](https://github.com/zigtools/zls-vscode/releases) or via the extensions menu.
-It will install `zls` if it is not found in your `PATH`
+It will install `zls` if it is not found in your `PATH`.
 
 ### Sublime Text
 
@@ -207,7 +207,7 @@ It will install `zls` if it is not found in your `PATH`
 
 ### Kate
 
-- Install language support for Zig from [here](https://github.com/ziglang/kde-syntax-highlighting)
+- Install language support for Zig from [here](https://github.com/ziglang/kde-syntax-highlighting).
 - Enable `LSP client` plugin in Kate settings.
 - Add this snippet to `LSP client's` user settings (e.g. /$HOME/.config/kate/lspclient)
   (or paste it in `LSP client's` GUI settings)
@@ -229,13 +229,13 @@ It will install `zls` if it is not found in your `PATH`
 
 - Install the CoC engine from [here](https://github.com/neoclide/coc.nvim).
 
-Then choose one of the following two ways
+Then choose one of the following two ways:
 
 1. Use extension
 
-    Run `:CocInstall coc-zls` to install [coc-zls](https://github.com/xiyaowong/coc-zls), 
-    this extension supports the same functionality as the VS Code extension
-  
+    Run `:CocInstall coc-zls` to install [coc-zls](https://github.com/xiyaowong/coc-zls),
+    this extension supports the same functionality as the VS Code extension.
+
 2. Manually register
     ```json
     {
@@ -249,7 +249,7 @@ Then choose one of the following two ways
     ```
 
 #### YouCompleteMe
-- Install YouCompleteMeFrom [here](https://github.com/ycm-core/YouCompleteMe.git).
+- Install YouCompleteMe from [here](https://github.com/ycm-core/YouCompleteMe.git).
 - Add these lines to your vimrc:
 
 ```vim
@@ -306,7 +306,7 @@ let g:completion_enable_auto_popup = 1
 
 #### LanguageClient-neovim
 
-- Install the LanguageClient-neovim from [here](https://github.com/autozimu/LanguageClient-neovim)
+- Install the LanguageClient-neovim from [here](https://github.com/autozimu/LanguageClient-neovim).
 - Edit your neovim configuration and add `zls` for zig filetypes:
 
 ```vim
@@ -317,8 +317,8 @@ let g:LanguageClient_serverCommands = {
 
 ### Emacs
 
-- Install [lsp-mode](https://github.com/emacs-lsp/lsp-mode) from melpa
-- [zig mode](https://github.com/ziglang/zig-mode) is also useful
+- Install [lsp-mode](https://github.com/emacs-lsp/lsp-mode) from melpa.
+- [zig mode](https://github.com/ziglang/zig-mode) is also useful.
 
 ```elisp
 ;; Setup lsp-mode as desired.
@@ -331,8 +331,8 @@ let g:LanguageClient_serverCommands = {
 
 ### Doom Emacs
 
-- Enable the `lsp` module
-- Install the [zig-mode](https://github.com/ziglang/zig-mode) package (add `(package! zig-mode)` to your `packages.el` file
+- Enable the `lsp` module.
+- Install the [zig-mode](https://github.com/ziglang/zig-mode) package (add `(package! zig-mode)` to your `packages.el` file.
 - Add the following to your `config.el`:
 
 ```elisp
