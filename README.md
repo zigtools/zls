@@ -233,9 +233,9 @@ Then choose one of the following two ways:
 
 1. Use extension
 
-    Run `:CocInstall coc-zls` to install [coc-zls](https://github.com/xiyaowong/coc-zls), 
+    Run `:CocInstall coc-zls` to install [coc-zls](https://github.com/xiyaowong/coc-zls),
     this extension supports the same functionality as the VS Code extension.
-  
+
 2. Manually register
     ```json
     {
