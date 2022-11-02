@@ -1154,10 +1154,7 @@ pub const FieldAccessReturn = struct {
 };
 
 pub fn getFieldAccessType(store: *DocumentStore, arena: *std.heap.ArenaAllocator, handle: *const DocumentStore.Handle, source_index: usize, tokenizer: *std.zig.Tokenizer) !?FieldAccessReturn {
-    var current_type = TypeWithHandle.typeVal(.{
-        .node = undefined,
-        .handle = handle,
-    });
+    var current_type: ?TypeWithHandle = null;
 
     var bound_type_params = BoundTypeParams{};
 
@@ -1165,14 +1162,15 @@ pub fn getFieldAccessType(store: *DocumentStore, arena: *std.heap.ArenaAllocator
         const tok = tokenizer.next();
         switch (tok.tag) {
             .eof => return FieldAccessReturn{
-                .original = current_type,
-                .unwrapped = try resolveDerefType(store, arena, current_type, &bound_type_params),
+                .original = current_type orelse return null,
+                .unwrapped = try resolveDerefType(store, arena, current_type orelse return null, &bound_type_params),
             },
             .identifier => {
+                const ct_handle = if (current_type) |c| c.handle else handle;
                 if (try lookupSymbolGlobal(
                     store,
                     arena,
-                    current_type.handle,
+                    ct_handle,
                     tokenizer.buffer[tok.loc.start..tok.loc.end],
                     source_index,
                 )) |child| {
@@ -1184,22 +1182,31 @@ pub fn getFieldAccessType(store: *DocumentStore, arena: *std.heap.ArenaAllocator
                 switch (after_period.tag) {
                     .eof => {
                         // function labels cannot be dot accessed
-                        if (current_type.isFunc()) return null;
-                        return FieldAccessReturn{
-                            .original = current_type,
-                            .unwrapped = try resolveDerefType(store, arena, current_type, &bound_type_params),
-                        };
+                        if (current_type) |ct| {
+                            if (ct.isFunc()) return null;
+                            return FieldAccessReturn{
+                                .original = ct,
+                                .unwrapped = try resolveDerefType(store, arena, ct, &bound_type_params),
+                            };
+                        } else {
+                            return null;
+                        }
                     },
                     .identifier => {
                         if (after_period.loc.end == tokenizer.buffer.len) {
-                            return FieldAccessReturn{
-                                .original = current_type,
-                                .unwrapped = try resolveDerefType(store, arena, current_type, &bound_type_params),
-                            };
+                            if (current_type) |ct| {
+                                return FieldAccessReturn{
+                                    .original = ct,
+                                    .unwrapped = try resolveDerefType(store, arena, ct, &bound_type_params),
+                                };
+                            } else {
+                                return null;
+                            }
                         }
 
-                        current_type = try resolveFieldAccessLhsType(store, arena, current_type, &bound_type_params);
-                        const current_type_node = switch (current_type.type.data) {
+                        current_type = try resolveFieldAccessLhsType(store, arena, current_type orelse return null, &bound_type_params);
+
+                        const current_type_node = switch (current_type.?.type.data) {
                             .other => |n| n,
                             else => return null,
                         };
@@ -1207,11 +1214,11 @@ pub fn getFieldAccessType(store: *DocumentStore, arena: *std.heap.ArenaAllocator
                         if (try lookupSymbolContainer(
                             store,
                             arena,
-                            .{ .node = current_type_node, .handle = current_type.handle },
+                            .{ .node = current_type_node, .handle = current_type.?.handle },
                             tokenizer.buffer[after_period.loc.start..after_period.loc.end],
-                            !current_type.type.is_type_val,
+                            !current_type.?.type.is_type_val,
                         )) |child| {
-                            current_type = (try child.resolveType(
+                            current_type.? = (try child.resolveType(
                                 store,
                                 arena,
                                 &bound_type_params,
@@ -1222,7 +1229,7 @@ pub fn getFieldAccessType(store: *DocumentStore, arena: *std.heap.ArenaAllocator
                         current_type = (try resolveUnwrapOptionalType(
                             store,
                             arena,
-                            current_type,
+                            current_type orelse return null,
                             &bound_type_params,
                         )) orelse return null;
                     },
@@ -1236,19 +1243,22 @@ pub fn getFieldAccessType(store: *DocumentStore, arena: *std.heap.ArenaAllocator
                 current_type = (try resolveDerefType(
                     store,
                     arena,
-                    current_type,
+                    current_type orelse return null,
                     &bound_type_params,
                 )) orelse return null;
             },
             .l_paren => {
-                const current_type_node = switch (current_type.type.data) {
+                if (current_type == null) {
+                    return null;
+                }
+                const current_type_node = switch (current_type.?.type.data) {
                     .other => |n| n,
                     else => return null,
                 };
 
                 // Can't call a function type, we need a function type instance.
-                if (current_type.type.is_type_val) return null;
-                const cur_tree = current_type.handle.tree;
+                if (current_type.?.type.is_type_val) return null;
+                const cur_tree = current_type.?.handle.tree;
                 var buf: [1]Ast.Node.Index = undefined;
                 if (ast.fnProto(cur_tree, current_type_node, &buf)) |func| {
                     // Check if the function has a body and if so, pass it
@@ -1258,7 +1268,7 @@ pub fn getFieldAccessType(store: *DocumentStore, arena: *std.heap.ArenaAllocator
                     const body = cur_tree.nodes.items(.data)[current_type_node].rhs;
 
                     // TODO Actually bind params here when calling functions instead of just skipping args.
-                    if (try resolveReturnType(store, arena, func, current_type.handle, &bound_type_params, if (has_body) body else null)) |ret| {
+                    if (try resolveReturnType(store, arena, func, current_type.?.handle, &bound_type_params, if (has_body) body else null)) |ret| {
                         current_type = ret;
                         // Skip to the right paren
                         var paren_count: usize = 1;
@@ -1289,7 +1299,7 @@ pub fn getFieldAccessType(store: *DocumentStore, arena: *std.heap.ArenaAllocator
                     }
                 } else return null;
 
-                current_type = (try resolveBracketAccessType(store, arena, current_type, if (is_range) .Range else .Single, &bound_type_params)) orelse return null;
+                current_type = (try resolveBracketAccessType(store, arena, current_type orelse return null, if (is_range) .Range else .Single, &bound_type_params)) orelse return null;
             },
             else => {
                 log.debug("Unimplemented token: {}", .{tok.tag});
@@ -1298,10 +1308,14 @@ pub fn getFieldAccessType(store: *DocumentStore, arena: *std.heap.ArenaAllocator
         }
     }
 
-    return FieldAccessReturn{
-        .original = current_type,
-        .unwrapped = try resolveDerefType(store, arena, current_type, &bound_type_params),
-    };
+    if (current_type) |ct| {
+        return FieldAccessReturn{
+            .original = ct,
+            .unwrapped = try resolveDerefType(store, arena, ct, &bound_type_params),
+        };
+    } else {
+        return null;
+    }
 }
 
 pub fn isNodePublic(tree: Ast, node: Ast.Node.Index) bool {
