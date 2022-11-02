@@ -8,6 +8,18 @@ const Builtin = struct {
 
 pub const builtins = [_]Builtin{
     .{
+        .name = "@addrSpaceCast",
+        .signature = "@addrSpaceCast(comptime addrspace: std.builtin.AddressSpace, ptr: anytype) anytype",
+        .snippet = "@addrSpaceCast(${1:comptime addrspace: std.builtin.AddressSpace}, ${2:ptr: anytype})",
+        .documentation =
+        \\Converts a pointer from one address space to another. Depending on the current target and address spaces, this cast may be a no-op, a complex operation, or illegal. If the cast is legal, then the resulting pointer points to the same memory location as the pointer operand. It is always valid to cast a pointer between the same address spaces.
+        ,
+        .arguments = &.{
+            "comptime addrspace: std.builtin.AddressSpace",
+            "ptr: anytype",
+        },
+    },
+    .{
         .name = "@addWithOverflow",
         .signature = "@addWithOverflow(comptime T: type, a: T, b: T, result: *T) bool",
         .snippet = "@addWithOverflow(${1:comptime T: type}, ${2:a: T}, ${3:b: T}, ${4:result: *T})",
@@ -26,7 +38,7 @@ pub const builtins = [_]Builtin{
         .signature = "@alignCast(comptime alignment: u29, ptr: anytype) anytype",
         .snippet = "@alignCast(${1:comptime alignment: u29}, ${2:ptr: anytype})",
         .documentation =
-        \\`ptr` can be `*T`, `fn()`, `?*T`, `?fn()`, or `[]T`. It returns the same type as `ptr` except with the alignment adjusted to the new value.
+        \\`ptr` can be `*T`, `?*T`, or `[]T`. It returns the same type as `ptr` except with the alignment adjusted to the new value.
         \\
         \\A [pointer alignment safety check](https://ziglang.org/documentation/master/#Incorrect-Pointer-Alignment) is added to the generated code to make sure the pointer is aligned as promised.
         ,
@@ -222,7 +234,7 @@ pub const builtins = [_]Builtin{
         .signature = "@mulAdd(comptime T: type, a: T, b: T, c: T) T",
         .snippet = "@mulAdd(${1:comptime T: type}, ${2:a: T}, ${3:b: T}, ${4:c: T})",
         .documentation =
-        \\Fused multiply add, similar to `(a * b) + c`, except only rounds once, and is thus more accurate.
+        \\Fused multiply-add, similar to `(a * b) + c`, except only rounds once, and is thus more accurate.
         \\
         \\Supports [Floats](https://ziglang.org/documentation/master/#Floats) and [Vectors](https://ziglang.org/documentation/master/#Vectors) of floats.
         ,
@@ -473,8 +485,6 @@ pub const builtins = [_]Builtin{
         \\    print("Runtime in main, num1 = {}.\n", .{num1});
         \\}
         \\```
-        \\
-        \\will output:
         \\
         \\If all `@compileLog` calls are removed or not encountered by analysis, the program compiles successfully and the generated executable prints:</p> {#code_begin|test|without_compileLog#} const print = @import("std").debug.print; const num1 = blk: { var val1: i32 = 99; val1 = val1 + 1; break :blk val1; }; test "main" { print("Runtime in main, num1 = {}.\n", .{num1}); }`
         ,
@@ -791,7 +801,7 @@ pub const builtins = [_]Builtin{
         .documentation =
         \\This function returns the base pointer of the current stack frame.
         \\
-        \\The implications of this are target specific and not consistent across all platforms. The frame address may not be available in release mode due to aggressive optimizations.
+        \\The implications of this are target-specific and not consistent across all platforms. The frame address may not be available in release mode due to aggressive optimizations.
         \\
         \\This function is only valid within function scope.
         ,
@@ -853,8 +863,8 @@ pub const builtins = [_]Builtin{
         \\
         \\The following packages are always available:
         \\  - `@import("std")` - Zig Standard Library
-        \\  - `@import("builtin")` - Target-specific information The command `zig build-exe --show-builtin` outputs the source to stdout for reference.
-        \\  - `@import("root")` - Points to the root source file This is usually `src/main.zig` but it depends on what file is chosen to be built.
+        \\  - `@import("builtin")` - Target-specific information. The command `zig build-exe --show-builtin` outputs the source to stdout for reference.
+        \\  - `@import("root")` - Points to the root source file. This is usually `src/main.zig` but it depends on what file is chosen to be built.
         ,
         .arguments = &.{
             "comptime path: []u8",
@@ -1117,7 +1127,7 @@ pub const builtins = [_]Builtin{
         .signature = "@prefetch(ptr: anytype, comptime options: std.builtin.PrefetchOptions)",
         .snippet = "@prefetch(${1:ptr: anytype}, ${2:comptime options: std.builtin.PrefetchOptions})",
         .documentation =
-        \\This builtin tells the compiler to emit a prefetch instruction if supported by the target CPU. If the target CPU does not support the requested prefetch instruction, this builtin is a noop. This function has no effect on the behavior of the program, only on the performance characteristics.
+        \\This builtin tells the compiler to emit a prefetch instruction if supported by the target CPU. If the target CPU does not support the requested prefetch instruction, this builtin is a no-op. This function has no effect on the behavior of the program, only on the performance characteristics.
         \\
         \\The `ptr` argument may be any pointer type and determines the memory address to prefetch. This function does not dereference the pointer, it is perfectly legal to pass a pointer to invalid memory to this function and no illegal behavior will result.
         \\
@@ -1147,11 +1157,7 @@ pub const builtins = [_]Builtin{
         .signature = "@ptrToInt(value: anytype) usize",
         .snippet = "@ptrToInt(${1:value: anytype})",
         .documentation =
-        \\Converts `value` to a `usize` which is the address of the pointer. `value` can be one of these types:
-        \\  - `*T`
-        \\  - `?*T`
-        \\  - `fn()`
-        \\  - `?fn()`
+        \\Converts `value` to a `usize` which is the address of the pointer. `value` can be `*T` or `?*T`.
         \\
         \\To convert the other way, use [@intToPtr](https://ziglang.org/documentation/master/#intToPtr)
         ,
@@ -1182,7 +1188,7 @@ pub const builtins = [_]Builtin{
         .documentation =
         \\This function returns the address of the next machine code instruction that will be executed when the current function returns.
         \\
-        \\The implications of this are target specific and not consistent across all platforms.
+        \\The implications of this are target-specific and not consistent across all platforms.
         \\
         \\This function is only valid within function scope. If the function gets inlined into a calling function, the returned address will apply to the calling function.
         ,
@@ -1270,7 +1276,7 @@ pub const builtins = [_]Builtin{
         \\  - Assume the arguments and result are not +/-Inf. Optimizations are required to retain defined behavior over +/-Inf, but the value of the result is undefined.
         \\  - Treat the sign of a zero argument or result as insignificant.
         \\  - Use the reciprocal of an argument rather than perform division.
-        \\  - Perform floating-point contraction (e.g. fusing a multiply followed by an addition into a fused multiply-and-add).
+        \\  - Perform floating-point contraction (e.g. fusing a multiply followed by an addition into a fused multiply-add).
         \\  - Perform algebraically equivalent transformations that may change results in floating point (e.g. reassociate). This is equivalent to `-ffast-math` in GCC.</ul>
         \\
         \\The floating point mode is inherited by child scopes, and can be overridden in any scope. You can set the floating point mode in a struct or module scope by using a comptime block.
@@ -1367,7 +1373,7 @@ pub const builtins = [_]Builtin{
         .documentation =
         \\Constructs a new [vector](https://ziglang.org/documentation/master/#Vectors) by selecting elements from `a` and `b` based on `mask`.
         \\
-        \\Each element in `mask` selects an element from either `a` or `b`. Positive numbers select from `a` starting at 0. Negative values select from `b`, starting at `-1` and going down. It is recommended to use the `~` operator from indexes from `b` so that both indexes can start from `0` (i.e. `~@as(i32, 0)` is `-1`).
+        \\Each element in `mask` selects an element from either `a` or `b`. Positive numbers select from `a` starting at 0. Negative values select from `b`, starting at `-1` and going down. It is recommended to use the `~` operator for indexes from `b` so that both indexes can start from `0` (i.e. `~@as(i32, 0)` is `-1`).
         \\
         \\For each element of `mask`, if it or the selected value from `a` or `b` is `undefined`, then the resulting element is `undefined`.
         \\
@@ -1737,7 +1743,7 @@ pub const builtins = [_]Builtin{
         .documentation =
         \\Provides type reflection.
         \\
-        \\Type information of [structs](https://ziglang.org/documentation/master/#struct), [unions](https://ziglang.org/documentation/master/#union), [enums](https://ziglang.org/documentation/master/#enum), and [error sets](https://ziglang.org/documentation/master/#Error-Set-Type) has fields which are are guaranteed to be in the same order as appearance in the source file.
+        \\Type information of [structs](https://ziglang.org/documentation/master/#struct), [unions](https://ziglang.org/documentation/master/#union), [enums](https://ziglang.org/documentation/master/#enum), and [error sets](https://ziglang.org/documentation/master/#Error-Set-Type) has fields which are guaranteed to be in the same order as appearance in the source file.
         \\
         \\Type information of [structs](https://ziglang.org/documentation/master/#struct), [unions](https://ziglang.org/documentation/master/#union), [enums](https://ziglang.org/documentation/master/#enum), and [opaques](https://ziglang.org/documentation/master/#opaque) has declarations, which are also guaranteed to be in the same order as appearance in the source file.
         ,
