@@ -2,11 +2,11 @@ const std = @import("std");
 const builtin = @import("builtin");
 const shared = @import("src/shared.zig");
 
-const zls_version = std.builtin.Version{ .major = 0, .minor = 10, .patch = 0 };
+const zls_version = std.builtin.Version{ .major = 0, .minor = 11, .patch = 0 };
 
 pub fn build(b: *std.build.Builder) !void {
     const current_zig = builtin.zig_version;
-    const min_zig = std.SemanticVersion.parse("0.10.0-dev.4057+349d78a44") catch return; // std.zig.tokenizer.Token.Tag.number_literal added
+    const min_zig = std.SemanticVersion.parse("0.10.0-dev.4458+b120c819d") catch return; // builtins changed to @min / @max
     if (current_zig.order(min_zig).compare(.lt)) @panic(b.fmt("Your Zig version v{} does not meet the minimum build requirement of v{}", .{current_zig, min_zig}));
 
     const target = b.standardTargetOptions(.{});
