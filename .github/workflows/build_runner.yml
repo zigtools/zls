@@ -1,0 +1,41 @@
+name: BuildRunner
+
+on:
+  push:
+    paths:
+      - "src/special/build_runner.zig"
+  pull_request:
+    paths:
+      - "src/special/build_runner.zig"
+  schedule:
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+
+jobs:
+  check_build_runner:
+    strategy:
+      matrix:
+        zig_version: [0.9.1, 0.10.0, master]
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+          submodules: true
+
+      - name: Grab zig
+        uses: goto-bus-stop/setup-zig@v1
+        with:
+          version: ${{ matrix.zig_version }}
+
+      - name: Create temp zig project
+        run: |
+          mkdir $RUNNER_TEMP/TEMP_ZIG_PROJECT
+          cd $RUNNER_TEMP/TEMP_ZIG_PROJECT
+          zig init-exe
+
+      - name: Check build_runner builds
+        run: zig build-exe $GITHUB_WORKSPACE/src/special/build_runner.zig --pkg-begin @build@ $RUNNER_TEMP/TEMP_ZIG_PROJECT/build.zig --pkg-end
