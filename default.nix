@@ -1,5 +1,6 @@
-{ pkgs ? import <nixpkgs> {},
-  system ? builtins.currentSystem }:
+{ pkgs ? import <nixpkgs> { }
+, system ? builtins.currentSystem
+}:
 
 let
   zig-overlay = pkgs.fetchFromGitHub {
@@ -26,7 +27,7 @@ pkgs.stdenvNoCC.mkDerivation {
   dontInstall = true;
   buildPhase = ''
     mkdir -p $out
-    zig build install -Drelease-safe=true -Ddata_version=master --prefix $out
+    zig build install -Dcpu=baseline -Drelease-safe=true -Ddata_version=master --prefix $out
   '';
   XDG_CACHE_HOME = ".cache";
 }
