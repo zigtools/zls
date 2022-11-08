@@ -67,7 +67,8 @@ pub const TypeInfo = union(enum) {
             return self.hasher.final();
         }
         pub fn eql(self: @This(), a: TypeInfo, b: TypeInfo) bool {
-            return TypeInfo.eql(self.interpreter, a, b);
+            _ = self;
+            return TypeInfo.eql(a, b);
         }
     };
 
@@ -130,15 +131,14 @@ pub const TypeInfo = union(enum) {
 
     array: Array,
 
-    pub fn eql(interpreter: ComptimeInterpreter, a: TypeInfo, b: TypeInfo) bool {
+    pub fn eql(a: TypeInfo, b: TypeInfo) bool {
         if (std.meta.activeTag(a) != std.meta.activeTag(b)) return false;
         return switch (a) {
-            .@"struct" => false, // Struct declarations can never be equal
+            .@"struct" => false, // Struct declarations can never be equal (this is a lie, gotta fix this)
             .pointer => p: {
                 const ap = a.pointer;
                 const bp = b.pointer;
                 break :p ap.size == bp.size and ap.is_const == bp.is_const and ap.is_volatile == bp.is_volatile and eql(
-                    interpreter,
                     ap.child.getTypeInfo(),
                     bp.child.getTypeInfo(),
                 ) and ap.is_allowzero == bp.is_allowzero and ((ap.sentinel == null and bp.sentinel == null) or ((ap.sentinel != null and bp.sentinel != null) and ap.sentinel.?.eql(bp.sentinel.?)));
@@ -460,7 +460,10 @@ pub const ValueFormatter = struct {
 
         return switch (ti) {
             .int, .@"comptime_int" => switch (value.value_data.*) {
-                inline .unsigned_int, .signed_int, .big_int => |a| try writer.print("{d}", .{a}),
+                .unsigned_int => |a| try writer.print("{d}", .{a}),
+                .signed_int => |a| try writer.print("{d}", .{a}),
+                .big_int => |a| try writer.print("{d}", .{a}),
+
                 else => unreachable,
             },
             .@"type" => try writer.print("{ }", .{form.interpreter.formatTypeInfo(value.value_data.@"type".getTypeInfo())}),
@@ -668,14 +671,19 @@ pub fn cast(
     const to_type_info = dest_type.getTypeInfo();
     const from_type_info = value.@"type".getTypeInfo();
 
+    // TODO: Implement more implicit casts
+
+    if (from_type_info.eql(to_type_info)) return value;
+
     const err = switch (from_type_info) {
         .@"comptime_int" => switch (to_type_info) {
             .int => {
                 if (value_data.bitCount().? > to_type_info.int.bits) {
                     switch (value_data.*) {
-                        inline .unsigned_int, .signed_int, .big_int => |bi| {
-                            try interpreter.recordError(node_idx, "invalid_cast", try std.fmt.allocPrint(interpreter.allocator, "integer value {d} cannot be coerced to type '{s}'", .{ bi, interpreter.formatTypeInfo(to_type_info) }));
-                        },
+                        .unsigned_int => |bi| try interpreter.recordError(node_idx, "invalid_cast", try std.fmt.allocPrint(interpreter.allocator, "integer value {d} cannot be coerced to type '{s}'", .{ bi, interpreter.formatTypeInfo(to_type_info) })),
+                        .signed_int => |bi| try interpreter.recordError(node_idx, "invalid_cast", try std.fmt.allocPrint(interpreter.allocator, "integer value {d} cannot be coerced to type '{s}'", .{ bi, interpreter.formatTypeInfo(to_type_info) })),
+                        .big_int => |bi| try interpreter.recordError(node_idx, "invalid_cast", try std.fmt.allocPrint(interpreter.allocator, "integer value {d} cannot be coerced to type '{s}'", .{ bi, interpreter.formatTypeInfo(to_type_info) })),
+
                         else => unreachable,
                     }
                     return error.InvalidCast;
@@ -956,8 +964,8 @@ pub fn interpret(
             return InterpretResult{ .value = try (interpreter.huntItDown(scope.?, value, options) catch |err| {
                 if (err == error.IdentifierNotFound) try interpreter.recordError(
                     node_idx,
-                    "identifier_not_found",
-                    try std.fmt.allocPrint(interpreter.allocator, "Couldn't find identifier \"{s}\"", .{value}),
+                    "undeclared_identifier",
+                    try std.fmt.allocPrint(interpreter.allocator, "use of undeclared identifier '{s}'", .{value}),
                 );
                 return err;
             }).getValue() };
@@ -974,8 +982,8 @@ pub fn interpret(
             var scope_sub_decl = irv.value_data.@"type".interpreter.huntItDown(sub_scope, rhs_str, options) catch |err| {
                 if (err == error.IdentifierNotFound) try interpreter.recordError(
                     node_idx,
-                    "identifier_not_found",
-                    try std.fmt.allocPrint(interpreter.allocator, "Couldn't find identifier \"{s}\"", .{rhs_str}),
+                    "undeclared_identifier",
+                    try std.fmt.allocPrint(interpreter.allocator, "use of undeclared identifier '{s}'", .{rhs_str}),
                 );
                 return err;
             };
@@ -1063,7 +1071,10 @@ pub fn interpret(
         => {
             // TODO: Actually consider operators
 
-            if (std.mem.eql(u8, tree.getNodeSource(data[node_idx].lhs), "_")) return InterpretResult{ .nothing = {} };
+            if (std.mem.eql(u8, tree.getNodeSource(data[node_idx].lhs), "_")) {
+                _ = try interpreter.interpret(data[node_idx].rhs, scope.?, options);
+                return InterpretResult{ .nothing = {} };
+            }
 
             var ir = try interpreter.interpret(data[node_idx].lhs, scope, options);
             var to_value = try ir.getValue();
@@ -1400,7 +1411,7 @@ pub fn call(
     arguments: []const Value,
     options: InterpretOptions,
 ) InterpretError!CallResult {
-    _ = options;
+    // _ = options;
 
     // TODO: type check args
 
@@ -1419,12 +1430,21 @@ pub fn call(
     var arg_index: usize = 0;
     while (ast.nextFnParam(&arg_it)) |param| {
         if (arg_index >= arguments.len) return error.MissingArguments;
+        var tex = try (try interpreter.interpret(param.type_expr, fn_scope, options)).getValue();
+        if (tex.@"type".getTypeInfo() != .@"type") {
+            try interpreter.recordError(
+                param.type_expr,
+                "expected_type",
+                std.fmt.allocPrint(interpreter.allocator, "expected type 'type', found '{s}'", .{interpreter.formatTypeInfo(tex.@"type".getTypeInfo())}) catch return error.CriticalAstFailure,
+            );
+            return error.InvalidCast;
+        }
         if (param.name_token) |nt| {
             const decl = Declaration{
                 .scope = fn_scope,
                 .node_idx = param.type_expr,
                 .name = tree.tokenSlice(nt),
-                .value = arguments[arg_index],
+                .value = try interpreter.cast(arguments[arg_index].node_idx, tex.value_data.@"type", arguments[arg_index]),
             };
             try fn_scope.declarations.put(interpreter.allocator, tree.tokenSlice(nt), decl);
             arg_index += 1;
@@ -1438,7 +1458,7 @@ pub fn call(
     return CallResult{
         .scope = fn_scope,
         .result = switch (result) {
-            .@"return" => .{ .nothing = {} },
+            .@"return", .nothing => .{ .nothing = {} }, // nothing could be due to an error
             .@"return_with_value" => |v| .{ .value = v },
             else => @panic("bruh"),
         },
