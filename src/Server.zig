@@ -1634,10 +1634,8 @@ fn initializeHandler(server: *Server, writer: anytype, id: types.RequestId, req:
     const zig_exe_version = std.SemanticVersion.parse(env.version) catch return;
 
     if (zig_builtin.zig_version.order(zig_exe_version) == .gt) {
-        try server.showMessage(writer, .Warning,
-            \\ZLS has been build with a newer version than you are using!
-            \\This may cause unexpected issues.
-        );
+        const version_mismatch_message = try std.fmt.allocPrint(server.arena.allocator(), "ZLS was built with Zig {}, but your Zig version is {s}. Update Zig to avoid unexpected behavior.", .{ zig_builtin.zig_version, env.version });
+        try server.showMessage(writer, .Warning, version_mismatch_message);
     }
 }
 
