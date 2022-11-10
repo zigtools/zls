@@ -1,9 +1,7 @@
 //! Hacky comptime interpreter, courtesy of midnight code run fuelled by spite;
 //! hope that one day this can use async... <33
 
-// TODO: builtin work!!
 // TODO: DODify
-// TODO: Work with DocumentStore
 
 const std = @import("std");
 const ast = @import("ast.zig");
@@ -12,6 +10,8 @@ const Ast = zig.Ast;
 const analysis = @import("analysis.zig");
 const DocumentStore = @import("DocumentStore.zig");
 const ComptimeInterpreter = @This();
+
+const log = std.log.scoped(.comptime_interpreter);
 
 // TODO: Investigate arena
 
@@ -370,7 +370,6 @@ pub fn createType(interpreter: *ComptimeInterpreter, node_idx: Ast.Node.Index, t
     var gpr = try interpreter.type_info_map.getOrPutContext(interpreter.allocator, type_info, .{ .interpreter = interpreter.*, .hasher = &hasher });
 
     if (gpr.found_existing) {
-        // std.log.info("Deduplicating type {d}", .{interpreter.formatTypeInfo(unit.type_info.items[gpr.value_ptr.*])});
         return Type{ .interpreter = interpreter, .node_idx = node_idx, .info_idx = gpr.value_ptr.* };
     } else {
         try interpreter.type_info.append(interpreter.allocator, type_info);
@@ -632,7 +631,7 @@ pub fn huntItDown(
             known_decl == null and
             pscope.declarations.count() != getDeclCount(tree, pscope.node_idx))
         {
-            std.log.info("Order-independent evaluating {s}...", .{decl_name});
+            log.info("Order-independent evaluating {s}...", .{decl_name});
 
             var buffer: [2]Ast.Node.Index = undefined;
             const members = ast.declMembers(tree, pscope.node_idx, &buffer);
@@ -656,7 +655,7 @@ pub fn huntItDown(
         return (known_decl orelse continue).value_ptr;
     }
 
-    std.log.err("Identifier not found: {s}", .{decl_name});
+    log.err("Identifier not found: {s}", .{decl_name});
     return error.IdentifierNotFound;
 }
 
@@ -729,16 +728,10 @@ pub fn interpret(
     scope: ?*InterpreterScope,
     options: InterpretOptions,
 ) InterpretError!InterpretResult {
-    // _ = unit;
-    // _ = node;
-    // _ = observe_values;
-
     const tree = interpreter.handle.tree;
     const tags = tree.nodes.items(.tag);
     const data = tree.nodes.items(.data);
     const main_tokens = tree.nodes.items(.main_token);
-
-    std.log.info("{s}: {any}", .{ interpreter.handle.uri, tags[node_idx] });
 
     switch (tags[node_idx]) {
         .container_decl,
@@ -806,8 +799,6 @@ pub fn interpret(
                         // },
                         // .value = null,
                     };
-
-                    // std.log.info("FIELD: {s}", .{name});
 
                     try cont_type.getTypeInfoMutable().@"struct".fields.put(interpreter.allocator, name, field);
                 } else {
@@ -1140,7 +1131,7 @@ pub fn interpret(
 
                 const import_str = tree.tokenSlice(main_tokens[import_param]);
 
-                std.log.info("Resolving {s} from {s}", .{ import_str[1 .. import_str.len - 1], interpreter.handle.uri });
+                log.info("Resolving {s} from {s}", .{ import_str[1 .. import_str.len - 1], interpreter.handle.uri });
                 var import_uri = (try interpreter.document_store.uriFromImportStr(interpreter.allocator, interpreter.handle.*, import_str[1 .. import_str.len - 1])) orelse return error.ImportFailure;
                 defer interpreter.allocator.free(import_uri);
 
@@ -1198,8 +1189,7 @@ pub fn interpret(
                 return InterpretResult{ .value = try interpreter.cast(node_idx, as_type.value_data.@"type", value) };
             }
 
-            std.log.info("Builtin not implemented: {s}", .{call_name});
-            // @panic("Builtin not implemented");
+            log.err("Builtin not implemented: {s}", .{call_name});
             return error.InvalidBuiltin;
         },
         .string_literal => {
@@ -1313,8 +1303,6 @@ pub fn interpret(
                 try args.append(interpreter.allocator, try (try interpreter.interpret(param, scope, .{})).getValue());
             }
 
-            std.log.err("AEWEWEWE: {s}", .{tree.getNodeSource(call_full.ast.fn_expr)});
-
             const func_id_result = try interpreter.interpret(call_full.ast.fn_expr, interpreter.root_type.?.getTypeInfo().getScopeOfType().?, .{});
             const func_id_val = try func_id_result.getValue();
 
@@ -1390,7 +1378,7 @@ pub fn interpret(
             };
         },
         else => {
-            std.log.err("Unhandled {any}", .{tags[node_idx]});
+            log.err("Unhandled {any}", .{tags[node_idx]});
             return InterpretResult{ .nothing = {} };
         },
     }
