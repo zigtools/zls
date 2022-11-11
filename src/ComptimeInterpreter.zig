@@ -17,7 +17,7 @@ const log = std.log.scoped(.comptime_interpreter);
 
 allocator: std.mem.Allocator,
 document_store: *DocumentStore,
-handle: *const DocumentStore.Handle,
+uri: DocumentStore.Uri,
 root_type: ?Type = null,
 
 /// Interpreter diagnostic errors
@@ -29,6 +29,11 @@ type_info_map: std.HashMapUnmanaged(TypeInfo, usize, TypeInfo.Context, std.hash_
 
 // TODO: Use DOD
 value_data_list: std.ArrayListUnmanaged(*ValueData) = .{},
+
+pub fn getHandle(interpreter: *ComptimeInterpreter) *const DocumentStore.Handle {
+    // This interpreter is loaded from a known-valid handle so a valid handle must exist
+    return interpreter.document_store.getOrLoadHandle(interpreter.uri).?;
+}
 
 pub const InterpreterError = struct {
     code: []const u8,
@@ -231,9 +236,7 @@ pub const ValueData = union(enum) {
     @"type": Type,
     @"bool": bool,
 
-    // @"struct": struct {
-
-    // },
+    @"struct": struct {},
     /// This is what a pointer is; we don't need to map
     /// this to anything because @ptrToInt is comptime-illegal
     /// Pointer equality scares me though :( (but that's for later)
@@ -311,7 +314,7 @@ pub const Declaration = struct {
 
     pub fn getValue(decl: *Declaration) InterpretError!Value {
         var interpreter = decl.scope.interpreter;
-        const tree = decl.scope.interpreter.handle.tree;
+        const tree = decl.scope.interpreter.getHandle().tree;
         const tags = tree.nodes.items(.tag);
 
         if (decl.value == null) {
@@ -350,7 +353,7 @@ pub const Declaration = struct {
     }
 
     pub fn isConstant(declaration: Declaration) bool {
-        const tree = declaration.scope.interpreter.handle.tree;
+        const tree = declaration.scope.interpreter.getHandle().tree;
         return switch (tree.nodes.items(.tag)[declaration.node_idx]) {
             .global_var_decl,
             .local_var_decl,
@@ -491,7 +494,7 @@ pub const InterpreterScope = struct {
 
     pub const ScopeKind = enum { container, block, function };
     pub fn scopeKind(scope: InterpreterScope) ScopeKind {
-        const tree = scope.interpreter.handle.tree;
+        const tree = scope.interpreter.getHandle().tree;
         return switch (tree.nodes.items(.tag)[scope.node_idx]) {
             .container_decl,
             .container_decl_trailing,
@@ -513,7 +516,7 @@ pub const InterpreterScope = struct {
     }
 
     pub fn getLabel(scope: InterpreterScope) ?Ast.TokenIndex {
-        const tree = scope.interpreter.handle.tree;
+        const tree = scope.interpreter.getHandle().tree;
         const token_tags = tree.tokens.items(.tag);
 
         return switch (scope.scopeKind()) {
@@ -621,7 +624,7 @@ pub fn huntItDown(
     decl_name: []const u8,
     options: InterpretOptions,
 ) InterpretError!*Declaration {
-    const tree = interpreter.handle.tree;
+    const tree = interpreter.getHandle().tree;
     const tags = tree.nodes.items(.tag);
 
     var psi = scope.parentScopeIterator();
@@ -728,7 +731,7 @@ pub fn interpret(
     scope: ?*InterpreterScope,
     options: InterpretOptions,
 ) InterpretError!InterpretResult {
-    const tree = interpreter.handle.tree;
+    const tree = interpreter.getHandle().tree;
     const tags = tree.nodes.items(.tag);
     const data = tree.nodes.items(.data);
     const main_tokens = tree.nodes.items(.main_token);
@@ -833,9 +836,11 @@ pub fn interpret(
                 .name = name,
             });
 
-            if (scope.?.scopeKind() != .container) {
+            // TODO: Am I a dumbo shrimp? (e.g. is this tree shaking correct? works on my machine so like...)
+
+            // if (scope.?.scopeKind() != .container) {
+            if (scope.?.node_idx != 0)
                 _ = try scope.?.declarations.getPtr(name).?.getValue();
-            }
 
             return InterpretResult{ .nothing = {} };
         },
@@ -969,8 +974,7 @@ pub fn interpret(
             var irv = try ir.getValue();
 
             var sub_scope = irv.value_data.@"type".getTypeInfo().getScopeOfType() orelse return error.IdentifierNotFound;
-            // var scope_sub_decl = sub_scope.declarations.get(rhs_str) orelse return error.IdentifierNotFound;
-            var scope_sub_decl = irv.value_data.@"type".interpreter.huntItDown(sub_scope, rhs_str, options) catch |err| {
+            var scope_sub_decl = sub_scope.interpreter.huntItDown(sub_scope, rhs_str, options) catch |err| {
                 if (err == error.IdentifierNotFound) try interpreter.recordError(
                     node_idx,
                     "undeclared_identifier",
@@ -1131,8 +1135,19 @@ pub fn interpret(
 
                 const import_str = tree.tokenSlice(main_tokens[import_param]);
 
-                log.info("Resolving {s} from {s}", .{ import_str[1 .. import_str.len - 1], interpreter.handle.uri });
-                var import_uri = (try interpreter.document_store.uriFromImportStr(interpreter.allocator, interpreter.handle.*, import_str[1 .. import_str.len - 1])) orelse return error.ImportFailure;
+                log.info("Resolving {s} from {s}", .{ import_str[1 .. import_str.len - 1], interpreter.uri });
+
+                // TODO: Implement root support
+                if (std.mem.eql(u8, import_str[1 .. import_str.len - 1], "root")) {
+                    return InterpretResult{ .value = Value{
+                        .interpreter = interpreter,
+                        .node_idx = node_idx,
+                        .@"type" = try interpreter.createType(node_idx, .{ .@"struct" = .{ .scope = try interpreter.newScope(null, 0) } }),
+                        .value_data = try interpreter.createValueData(.{ .@"struct" = .{} }),
+                    } };
+                }
+
+                var import_uri = (try interpreter.document_store.uriFromImportStr(interpreter.allocator, interpreter.getHandle().*, import_str[1 .. import_str.len - 1])) orelse return error.ImportFailure;
                 defer interpreter.allocator.free(import_uri);
 
                 var handle = interpreter.document_store.getOrLoadHandle(import_uri) orelse return error.ImportFailure;
@@ -1403,7 +1418,7 @@ pub fn call(
 
     // TODO: type check args
 
-    const tree = interpreter.handle.tree;
+    const tree = interpreter.getHandle().tree;
     const tags = tree.nodes.items(.tag);
 
     std.debug.assert(tags[func_node_idx] == .fn_decl);

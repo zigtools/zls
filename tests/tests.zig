@@ -17,5 +17,5 @@ comptime {
 
     // Language features
     _ = @import("language_features/cimport.zig");
-    // _ = @import("language_features/comptime_interpreter.zig");
+    _ = @import("language_features/comptime_interpreter.zig");
 }

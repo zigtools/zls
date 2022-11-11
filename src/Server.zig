@@ -2776,7 +2776,35 @@ pub fn processJsonRpc(server: *Server, writer: anytype, json: []const u8) !void 
         }
     }
 
-    const method_map = .{ .{ "initialized", void, initializedHandler }, .{"$/cancelRequest"}, .{"textDocument/willSave"}, .{ "initialize", requests.Initialize, initializeHandler }, .{ "shutdown", void, shutdownHandler }, .{ "exit", void, exitHandler }, .{ "textDocument/didOpen", requests.OpenDocument, openDocumentHandler }, .{ "textDocument/didChange", requests.ChangeDocument, changeDocumentHandler }, .{ "textDocument/didSave", requests.SaveDocument, saveDocumentHandler }, .{ "textDocument/didClose", requests.CloseDocument, closeDocumentHandler }, .{ "textDocument/semanticTokens/full", requests.SemanticTokensFull, semanticTokensFullHandler }, .{ "textDocument/inlayHint", requests.InlayHint, inlayHintHandler }, .{ "textDocument/completion", requests.Completion, completionHandler }, .{ "textDocument/signatureHelp", requests.SignatureHelp, signatureHelpHandler }, .{ "textDocument/definition", requests.GotoDefinition, gotoDefinitionHandler }, .{ "textDocument/typeDefinition", requests.GotoDefinition, gotoDefinitionHandler }, .{ "textDocument/implementation", requests.GotoDefinition, gotoDefinitionHandler }, .{ "textDocument/declaration", requests.GotoDeclaration, gotoDeclarationHandler }, .{ "textDocument/hover", requests.Hover, hoverHandler }, .{ "textDocument/documentSymbol", requests.DocumentSymbols, documentSymbolsHandler }, .{ "textDocument/formatting", requests.Formatting, formattingHandler }, .{ "textDocument/rename", requests.Rename, renameHandler }, .{ "textDocument/references", requests.References, referencesHandler }, .{ "textDocument/documentHighlight", requests.DocumentHighlight, documentHighlightHandler }, .{ "textDocument/codeAction", requests.CodeAction, codeActionHandler }, .{ "workspace/didChangeConfiguration", Config.DidChangeConfigurationParams, didChangeConfigurationHandler }, .{ "textDocument/foldingRange", requests.FoldingRange, foldingRangeHandler } };
+    const method_map = .{
+        .{ "initialized", void, initializedHandler },
+        .{"$/cancelRequest"},
+        .{"textDocument/willSave"},
+        .{ "initialize", requests.Initialize, initializeHandler },
+        .{ "shutdown", void, shutdownHandler },
+        .{ "exit", void, exitHandler },
+        .{ "textDocument/didOpen", requests.OpenDocument, openDocumentHandler },
+        .{ "textDocument/didChange", requests.ChangeDocument, changeDocumentHandler },
+        .{ "textDocument/didSave", requests.SaveDocument, saveDocumentHandler },
+        .{ "textDocument/didClose", requests.CloseDocument, closeDocumentHandler },
+        .{ "textDocument/semanticTokens/full", requests.SemanticTokensFull, semanticTokensFullHandler },
+        .{ "textDocument/inlayHint", requests.InlayHint, inlayHintHandler },
+        .{ "textDocument/completion", requests.Completion, completionHandler },
+        .{ "textDocument/signatureHelp", requests.SignatureHelp, signatureHelpHandler },
+        .{ "textDocument/definition", requests.GotoDefinition, gotoDefinitionHandler },
+        .{ "textDocument/typeDefinition", requests.GotoDefinition, gotoDefinitionHandler },
+        .{ "textDocument/implementation", requests.GotoDefinition, gotoDefinitionHandler },
+        .{ "textDocument/declaration", requests.GotoDeclaration, gotoDeclarationHandler },
+        .{ "textDocument/hover", requests.Hover, hoverHandler },
+        .{ "textDocument/documentSymbol", requests.DocumentSymbols, documentSymbolsHandler },
+        .{ "textDocument/formatting", requests.Formatting, formattingHandler },
+        .{ "textDocument/rename", requests.Rename, renameHandler },
+        .{ "textDocument/references", requests.References, referencesHandler },
+        .{ "textDocument/documentHighlight", requests.DocumentHighlight, documentHighlightHandler },
+        .{ "textDocument/codeAction", requests.CodeAction, codeActionHandler },
+        .{ "workspace/didChangeConfiguration", Config.DidChangeConfigurationParams, didChangeConfigurationHandler },
+        .{ "textDocument/foldingRange", requests.FoldingRange, foldingRangeHandler },
+    };
 
     if (zig_builtin.zig_backend == .stage1) {
         // Hack to avoid `return`ing in the inline for, which causes bugs.

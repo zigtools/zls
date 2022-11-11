@@ -944,7 +944,7 @@ pub fn ensureInterpreterExists(self: *DocumentStore, uri: Uri) !void {
         int.* = ComptimeInterpreter{
             .allocator = self.allocator,
             .document_store = self,
-            .handle = handle,
+            .uri = uri,
         };
         handle.interpreter = int;
         _ = try int.interpret(0, null, .{});
