@@ -52,8 +52,8 @@ See [Downloading and Building ZLS](https://github.com/zigtools/zls/wiki/Download
 You can install the latest release into `$HOME/zls` using e.g.:
 
 ```sh
-brew install xz
-mkdir $HOME/zls && cd $HOME/zls && curl -L https://github.com/zigtools/zls/releases/download/0.9.0/x86_64-macos.tar.xz | tar -xJ --strip-components=1 -C . && chmod +x zls
+brew install zstd
+mkdir $HOME/zls && cd $HOME/zls && curl -L https://github.com/zigtools/zls/releases/download/0.10.0/x86_64-macos.tar.zst | tar --use-compress-program unzstd -x --strip-components=1 -C . && chmod +x zls
 ```
 
 #### Linux
@@ -61,8 +61,8 @@ mkdir $HOME/zls && cd $HOME/zls && curl -L https://github.com/zigtools/zls/relea
 You can install the latest release into `$HOME/zls` using e.g.:
 
 ```bash
-sudo apt install xz-utils
-mkdir $HOME/zls && cd $HOME/zls && curl -L https://github.com/zigtools/zls/releases/download/0.9.0/x86_64-linux.tar.xz | tar -xJ --strip-components=1 -C .
+sudo apt install zstd
+mkdir $HOME/zls && cd $HOME/zls && curl -L https://github.com/zigtools/zls/releases/download/0.10.0/x86_64-linux.tar.zst | tar --use-compress-program unzstd -x --strip-components=1 -C .
 ```
 
 ### From Source
