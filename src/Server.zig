@@ -2644,6 +2644,7 @@ pub fn processJsonRpc(server: *Server, writer: anytype, json: []const u8) !void 
         // Yes, String ids are officially supported by LSP
         // but not sure how standard this "standard" really is
 
+        if (tree.root.Object.get("error")) |_| return;
         const result = tree.root.Object.get("result").?.Array;
 
         inline for (std.meta.fields(Config)) |field, index| {
@@ -2661,8 +2662,7 @@ pub fn processJsonRpc(server: *Server, writer: anytype, json: []const u8) !void 
                             if (s.len == 0) {
                                 if (field.field_type == ?[]const u8) {
                                     break :blk null;
-                                }
-                                else {
+                                } else {
                                     break :blk s;
                                 }
                             }
