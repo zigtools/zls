@@ -36,6 +36,7 @@ Zig Language Server, or `zls`, is a language server for Zig. The Zig wiki states
   - [Spacemacs](#spacemacs)
   - [Helix](#helix)
 - [Related Projects](#related-projects)
+- [Quick Thanks :)](#quick-thanks-)
 - [License](#license)
 
 ## Installation
@@ -373,6 +374,12 @@ let g:LanguageClient_serverCommands = {
   - Inspiration for `zls`
 - [`known-folders` by @ziglibs](https://github.com/ziglibs/known-folders)
   - Provides API to access known folders on Linux, Windows and Mac OS
+
+## Quick Thanks :)
+
+We'd like to take a second to thank all our awesome [contributors](https://github.com/zigtools/zls/graphs/contributors) and donators/backers/sponsors; if you have time or money to spare, consider partaking in either of these options - they help keep zls awesome for everyone! 
+
+[![OpenCollective Backers](https://opencollective.com/zigtools/backers.svg?width=890&limit=1000)](https://opencollective.com/zigtools#category-CONTRIBUTE)
 
 ## License
 
