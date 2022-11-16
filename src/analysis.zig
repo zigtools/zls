@@ -1469,6 +1469,9 @@ pub fn getPositionContext(allocator: std.mem.Allocator, text: []const u8, doc_in
     const line_loc = offsets.lineLocUntilIndex(text, doc_index);
     const line = offsets.locToSlice(text, line_loc);
 
+    const is_comment = std.mem.startsWith(u8, std.mem.trimLeft(u8, line, " \t"), "//");
+    if (is_comment) return .comment;
+
     var stack = try std.ArrayListUnmanaged(StackState).initCapacity(allocator, 8);
     defer stack.deinit(allocator);
 
