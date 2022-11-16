@@ -479,19 +479,25 @@ pub fn symbolReferences(
 
             if (!workspace) return builder.locations;
 
+            var dependencies = std.StringArrayHashMapUnmanaged(void){};
+
             for (store.handles.values()) |handle| {
                 if (skip_std_references and std.mem.indexOf(u8, handle.uri, "std") != null) {
                     if (!include_decl or !std.mem.eql(u8, handle.uri, curr_handle.uri))
                         continue;
                 }
 
-                var dependencies = std.ArrayListUnmanaged([]const u8){};
-                try store.collectDependencies(store.allocator, handle.*, &dependencies);
+                var handle_dependencies = std.ArrayListUnmanaged([]const u8){};
+                try store.collectDependencies(store.allocator, handle.*, &handle_dependencies);
 
-                for (dependencies.items) |uri| {
-                    const hdl = store.getHandle(uri) orelse continue;
-                    try symbolReferencesInternal(&builder, 0, hdl, true);
+                for (handle_dependencies.items) |uri| {
+                    try dependencies.put(arena.allocator(), uri, {});
                 }
+            }
+
+            for (dependencies.keys()) |uri| {
+                const handle = store.getHandle(uri) orelse continue;
+                try symbolReferencesInternal(&builder, 0, handle, true);
             }
         },
         .pointer_payload,
