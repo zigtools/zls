@@ -74,6 +74,15 @@ test "references - local scope" {
     );
 }
 
+test "references - while continue expression" {
+    try testReferences(
+        \\ pub fn foo() void {
+        \\     var <0>: u32 = 0;
+        \\     while (true) : (<0> += 1) {}
+        \\ }
+    );
+}
+
 test "references - label" {
     if (skip_references_tests) return error.SkipZigTest;
     try testReferences(
