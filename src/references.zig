@@ -202,6 +202,7 @@ fn symbolReferencesInternal(
             const loop = ast.whileAst(tree, node).?;
             try symbolReferencesInternal(builder, loop.ast.cond_expr, handle, false);
             try symbolReferencesInternal(builder, loop.ast.then_expr, handle, false);
+            try symbolReferencesInternal(builder, loop.ast.cont_expr, handle, false);
             try symbolReferencesInternal(builder, loop.ast.else_expr, handle, false);
         },
         .@"if",
