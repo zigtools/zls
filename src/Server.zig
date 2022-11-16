@@ -2045,69 +2045,48 @@ fn formattingHandler(server: *Server, writer: anytype, id: types.RequestId, req:
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    if (server.config.zig_exe_path) |zig_exe_path| {
-        const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
-            return try respondGeneric(writer, id, null_result_response);
-        };
+    const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
+        return try respondGeneric(writer, id, null_result_response);
+    };
 
-        var process = std.ChildProcess.init(&[_][]const u8{ zig_exe_path, "fmt", "--stdin" }, server.allocator);
-        process.stdin_behavior = .Pipe;
-        process.stdout_behavior = .Pipe;
+    const formatted = try handle.tree.render(server.allocator);
+    defer server.allocator.free(formatted);
 
-        process.spawn() catch |err| {
-            log.warn("Failed to spawn zig fmt process, error: {}", .{err});
-            return try respondGeneric(writer, id, null_result_response);
-        };
-        try process.stdin.?.writeAll(handle.text);
-        process.stdin.?.close();
-        process.stdin = null;
+    if (std.mem.eql(u8, handle.text, formatted)) return try respondGeneric(writer, id, null_result_response);
 
-        const stdout_bytes = try process.stdout.?.reader().readAllAlloc(server.allocator, std.math.maxInt(usize));
-        defer server.allocator.free(stdout_bytes);
+    // avoid computing diffs if the output is small
+    const maybe_edits = if (formatted.len <= 512) null else diff.edits(server.arena.allocator(), handle.text, formatted) catch null;
 
-        switch (try process.wait()) {
-            .Exited => |code| if (code == 0) {
-                if (std.mem.eql(u8, handle.text, stdout_bytes)) return try respondGeneric(writer, id, null_result_response);
-
-                var edits = diff.edits(server.arena.allocator(), handle.text, stdout_bytes) catch {
-                    const range = offsets.locToRange(handle.text, .{ .start = 0, .end = handle.text.len }, server.offset_encoding);
-                    // If there was an error trying to diff the text, return the formatted response
-                    // as the new text for the entire range of the document
-                    return try send(writer, server.arena.allocator(), types.Response{
-                        .id = id,
-                        .result = .{
-                            .TextEdits = &[1]types.TextEdit{
-                                .{
-                                    .range = range,
-                                    .newText = stdout_bytes,
-                                },
-                            },
-                        },
-                    });
-                };
-
-                // Convert from `[]diff.Edit` to `[]types.TextEdit`
-                var text_edits = try std.ArrayListUnmanaged(types.TextEdit).initCapacity(server.arena.allocator(), edits.items.len);
-                for (edits.items) |edit| {
-                    text_edits.appendAssumeCapacity(.{
-                        .range = edit.range,
-                        .newText = edit.newText.items,
-                    });
-                }
-
-                return try send(
-                    writer,
-                    server.arena.allocator(),
-                    types.Response{
-                        .id = id,
-                        .result = .{ .TextEdits = text_edits.items },
-                    },
-                );
+    const edits = maybe_edits orelse {
+        // if edits have been computed we replace the entire file with the formatted text
+        return try send(writer, server.arena.allocator(), types.Response{
+            .id = id,
+            .result = .{
+                .TextEdits = &[1]types.TextEdit{.{
+                    .range = offsets.locToRange(handle.text, .{ .start = 0, .end = handle.text.len }, server.offset_encoding),
+                    .newText = formatted,
+                }},
             },
-            else => {},
-        }
+        });
+    };
+
+    // Convert from `[]diff.Edit` to `[]types.TextEdit`
+    var text_edits = try std.ArrayListUnmanaged(types.TextEdit).initCapacity(server.arena.allocator(), edits.items.len);
+    for (edits.items) |edit| {
+        text_edits.appendAssumeCapacity(.{
+            .range = edit.range,
+            .newText = edit.newText.items,
+        });
     }
-    return try respondGeneric(writer, id, null_result_response);
+
+    return try send(
+        writer,
+        server.arena.allocator(),
+        types.Response{
+            .id = id,
+            .result = .{ .TextEdits = text_edits.items },
+        },
+    );
 }
 
 fn didChangeConfigurationHandler(server: *Server, writer: anytype, id: types.RequestId, req: Config.DidChangeConfigurationParams) !void {
@@ -2663,8 +2642,7 @@ pub fn processJsonRpc(server: *Server, writer: anytype, json: []const u8) !void 
                             if (s.len == 0) {
                                 if (field.field_type == ?[]const u8) {
                                     break :blk null;
-                                }
-                                else {
+                                } else {
                                     break :blk s;
                                 }
                             }
