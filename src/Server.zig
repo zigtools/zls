@@ -19,6 +19,7 @@ const Ast = std.zig.Ast;
 const tracy = @import("tracy.zig");
 const uri_utils = @import("uri.zig");
 const diff = @import("diff.zig");
+const ComptimeInterpreter = @import("ComptimeInterpreter.zig");
 
 const data = @import("data/data.zig");
 const snipped_data = @import("data/snippets.zig");
@@ -322,6 +323,23 @@ fn publishDiagnostics(server: *Server, writer: anytype, handle: DocumentStore.Ha
         }
     }
 
+    if (handle.interpreter) |int| {
+        try diagnostics.ensureUnusedCapacity(allocator, int.errors.count());
+
+        var err_it = int.errors.iterator();
+
+        while (err_it.next()) |err| {
+            try diagnostics.append(allocator, .{
+                .range = offsets.nodeToRange(tree, err.key_ptr.*, server.offset_encoding),
+                .severity = .Error,
+                .code = err.value_ptr.code,
+                .source = "zls",
+                .message = err.value_ptr.message,
+            });
+        }
+    }
+    // try diagnostics.appendSlice(allocator, handle.interpreter.?.diagnostics.items);
+
     try send(writer, server.arena.allocator(), types.Notification{
         .method = "textDocument/publishDiagnostics",
         .params = .{
@@ -485,6 +503,33 @@ fn typeToCompletion(
             null,
         ),
         .primitive, .array_index => {},
+        .@"comptime" => |co| {
+            const ti = co.type.getTypeInfo();
+            switch (ti) {
+                .@"struct" => |st| {
+                    var fit = st.fields.iterator();
+                    while (fit.next()) |entry| {
+                        try list.append(allocator, .{
+                            .label = entry.key_ptr.*,
+                            .kind = .Field,
+                            .insertText = entry.key_ptr.*,
+                            .insertTextFormat = .PlainText,
+                        });
+                    }
+
+                    var it = st.scope.declarations.iterator();
+                    while (it.next()) |entry| {
+                        try list.append(allocator, .{
+                            .label = entry.key_ptr.*,
+                            .kind = if (entry.value_ptr.isConstant()) .Constant else .Variable,
+                            .insertText = entry.key_ptr.*,
+                            .insertTextFormat = .PlainText,
+                        });
+                    }
+                },
+                else => {},
+            }
+        },
     }
 }
 
@@ -803,7 +848,10 @@ fn hoverSymbol(server: *Server, decl_handle: analysis.DeclWithHandle) error{OutO
     const resolved_type = try decl_handle.resolveType(&server.document_store, &server.arena, &bound_type_params);
 
     const resolved_type_str = if (resolved_type) |rt|
-        if (rt.type.is_type_val) "type" else switch (rt.type.data) { // TODO: Investigate random weird numbers like 897 that cause index of bounds
+        if (rt.type.is_type_val) switch (rt.type.data) {
+            .@"comptime" => |*co| try std.fmt.allocPrint(server.arena.allocator(), "{ }", .{co.interpreter.formatTypeInfo(co.type.getTypeInfo())}),
+            else => "type",
+        } else switch (rt.type.data) { // TODO: Investigate random weird numbers like 897 that cause index of bounds
             .pointer,
             .slice,
             .error_union,
@@ -2023,6 +2071,8 @@ fn hoverHandler(server: *Server, writer: anytype, id: types.RequestId, req: requ
     };
 
     const hover = maybe_hover orelse return try respondGeneric(writer, id, null_result_response);
+    // TODO: Figure out a better solution for comptime interpreter diags
+    try server.publishDiagnostics(writer, handle.*);
 
     try send(writer, server.arena.allocator(), types.Response{
         .id = id,

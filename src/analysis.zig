@@ -5,6 +5,7 @@ const types = @import("types.zig");
 const offsets = @import("offsets.zig");
 const log = std.log.scoped(.analysis);
 const ast = @import("ast.zig");
+const ComptimeInterpreter = @import("ComptimeInterpreter.zig");
 
 var using_trail: std.ArrayList([*]const u8) = undefined;
 var resolve_trail: std.ArrayList(NodeWithHandle) = undefined;
@@ -306,7 +307,7 @@ pub fn getDeclNameToken(tree: Ast, node: Ast.Node.Index) ?Ast.TokenIndex {
     };
 }
 
-fn getDeclName(tree: Ast, node: Ast.Node.Index) ?[]const u8 {
+pub fn getDeclName(tree: Ast, node: Ast.Node.Index) ?[]const u8 {
     const name = tree.tokenSlice(getDeclNameToken(tree, node) orelse return null);
     return switch (tree.nodes.items(.tag)[node]) {
         .test_decl => name[1 .. name.len - 1],
@@ -491,7 +492,7 @@ fn resolveUnwrapErrorType(store: *DocumentStore, arena: *std.heap.ArenaAllocator
             .type = .{ .data = .{ .other = n }, .is_type_val = rhs.type.is_type_val },
             .handle = rhs.handle,
         },
-        .primitive, .slice, .pointer, .array_index => return null,
+        .primitive, .slice, .pointer, .array_index, .@"comptime" => return null,
     };
 
     if (rhs.handle.tree.nodes.items(.tag)[rhs_node] == .error_union) {
@@ -742,7 +743,60 @@ pub fn resolveTypeOfNodeInternal(store: *DocumentStore, arena: *std.heap.ArenaAl
 
                 const has_body = decl.handle.tree.nodes.items(.tag)[decl_node] == .fn_decl;
                 const body = decl.handle.tree.nodes.items(.data)[decl_node].rhs;
-                return try resolveReturnType(store, arena, fn_decl, decl.handle, bound_type_params, if (has_body) body else null);
+                if (try resolveReturnType(store, arena, fn_decl, decl.handle, bound_type_params, if (has_body) body else null)) |ret| {
+                    return ret;
+                } else {
+                    // TODO: Better case-by-case; we just use the ComptimeInterpreter when all else fails,
+                    // probably better to use it more liberally
+                    // TODO: Handle non-isolate args; e.g. `const T = u8; TypeFunc(T);`
+                    // var interpreter = ComptimeInterpreter{ .tree = tree, .allocator = arena.allocator() };
+
+                    // var top_decl = try (try interpreter.interpret(0, null, .{})).getValue();
+                    // var top_scope = interpreter.typeToTypeInfo(top_decl.@"type".info_idx).@"struct".scope;
+
+                    // var fn_decl_scope = top_scope.getParentScopeFromNode(node);
+
+                    log.info("Invoking interpreter!", .{});
+
+                    store.ensureInterpreterExists(handle.uri) catch |err| {
+                        log.err("Interpreter error: {s}", .{@errorName(err)});
+                        if (@errorReturnTrace()) |trace| {
+                            std.debug.dumpStackTrace(trace.*);
+                        }
+                        return null;
+                    };
+                    var interpreter = handle.interpreter.?;
+
+                    // TODO: Start from current/nearest-current scope
+                    const result = interpreter.interpret(node, interpreter.root_type.?.getTypeInfo().getScopeOfType().?, .{}) catch |err| {
+                        log.err("Interpreter error: {s}", .{@errorName(err)});
+                        if (@errorReturnTrace()) |trace| {
+                            std.debug.dumpStackTrace(trace.*);
+                        }
+                        return null;
+                    };
+                    const val = result.getValue() catch |err| {
+                        log.err("Interpreter error: {s}", .{@errorName(err)});
+                        if (@errorReturnTrace()) |trace| {
+                            std.debug.dumpStackTrace(trace.*);
+                        }
+                        return null;
+                    };
+
+                    const ti = val.@"type".getTypeInfo();
+                    if (ti != .@"type") {
+                        log.err("Not a type: { }", .{interpreter.formatTypeInfo(ti)});
+                        return null;
+                    }
+
+                    return TypeWithHandle{
+                        .type = .{
+                            .data = .{ .@"comptime" = .{ .interpreter = interpreter, .type = val.value_data.@"type" } },
+                            .is_type_val = true,
+                        },
+                        .handle = node_handle.handle,
+                    };
+                }
             }
             return null;
         },
@@ -965,6 +1019,10 @@ pub const Type = struct {
         other: Ast.Node.Index,
         primitive: Ast.Node.Index,
         array_index,
+        @"comptime": struct {
+            interpreter: *ComptimeInterpreter,
+            type: ComptimeInterpreter.Type,
+        },
     },
     /// If true, the type `type`, the attached data is the value of the type value.
     is_type_val: bool,
