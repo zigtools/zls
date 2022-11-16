@@ -103,19 +103,18 @@ test "position context - builtin" {
 }
 
 test "position context - comment" {
-    // TODO fix failing test!
-    // try testContext(
-    //     \\// i am<cursor> a test
-    // ,
-    //     .comment,
-    //     "// i am",
-    // );
-    // try testContext(
-    //     \\/// i am<cursor> a test
-    // ,
-    //     .comment,
-    //     "/// i am",
-    // );
+    try testContext(
+        \\// i am<cursor> a test
+    ,
+        .comment,
+        null, // report "// i am a test"
+    );
+    try testContext(
+        \\/// i am<cursor> a test
+    ,
+        .comment,
+        null, // report /// i am a test
+    );
 }
 
 test "position context - import/embedfile string literal" {
