@@ -374,6 +374,8 @@ let g:LanguageClient_serverCommands = {
   - Inspiration for `zls`
 - [`known-folders` by @ziglibs](https://github.com/ziglibs/known-folders)
   - Provides API to access known folders on Linux, Windows and Mac OS
+- [`zls` by @zigtools](https://github.com/zigtools/zls)
+  - Used by many zls developers to more efficently work on zls
 
 ## Quick Thanks :)
 
