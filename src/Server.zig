@@ -2,6 +2,7 @@ const Server = @This();
 
 const std = @import("std");
 const zig_builtin = @import("builtin");
+const build_options = @import("build_options");
 const Config = @import("Config.zig");
 const DocumentStore = @import("DocumentStore.zig");
 const requests = @import("requests.zig");
@@ -1547,7 +1548,7 @@ fn initializeHandler(server: *Server, writer: anytype, id: types.RequestId, req:
             .InitializeResult = .{
                 .serverInfo = .{
                     .name = "zls",
-                    .version = "0.1.0",
+                    .version = build_options.version,
                 },
                 .capabilities = .{
                     .positionEncoding = server.offset_encoding,
