@@ -74,9 +74,9 @@ pub const generic = [_]Snipped{
     .{ .label = "pub fn", .kind = .Snippet, .text = "pub fn ${1:name}($2) ${3:!void} {$0}" },
     .{ .label = "forv", .kind = .Snippet, .text = "for ($1) |${2:value}| {$0}" },
     .{ .label = "fori", .kind = .Snippet, .text = "for ($1) |_, ${2:i}| {$0}" },
-    .{ .label = "forvi", .kind = .Snippet, .text = "for ($1) |${2:value},${3:i}| {$0}" },
+    .{ .label = "forvi", .kind = .Snippet, .text = "for ($1) |${2:value}, ${3:i}| {$0}" },
     .{ .label = "if else", .kind = .Snippet, .text = "if ($1) {$2} else {$0}" },
-    .{ .label = "catch switch", .kind = .Snippet, .text = "catch |${1:err}| switch(${1:err}) {$0};" },
+    .{ .label = "catch switch", .kind = .Snippet, .text = "catch |${1:err}| switch (${1:err}) {$0};" },
 
     // snippets
     .{ .label = "main", .kind = .Snippet, .text = "pub fn main() !void {$0}" },
