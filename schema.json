@@ -99,6 +99,11 @@
             "description": "Whether to highlight global var declarations",
             "type": "boolean",
             "default": "false"
+        },
+        "use_comptime_interpreter": {
+            "description": "Whether to use the comptime interpreter",
+            "type": "boolean",
+            "default": "false"
         }
     }
 } 
