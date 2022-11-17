@@ -125,6 +125,7 @@ The following options are currently available.
 |`max_detail_length`|`usize`|`1024 * 1024`| The detail field of completions is truncated to be no longer than this (in bytes).
 | `skip_std_references` | `bool` | `false` | When true, skips searching for references in std. Improves lookup speed for functions in user's code. Renaming and go-to-definition will continue to work as is.
 | `highlight_global_var_declarations` | `bool` | `false` | Whether to highlight global var declarations.
+| `use_comptime_interpreter` | `bool` | `false` | Whether to use the comptime interpreter.
 
 ### Per-build Configuration Options
 

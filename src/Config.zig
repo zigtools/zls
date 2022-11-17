@@ -79,6 +79,9 @@ builtin_path: ?[]const u8 = null,
 /// Whether to highlight global var declarations.
 highlight_global_var_declarations: bool = false,
 
+/// Whether to use the comptime interpreter
+use_comptime_interpreter: bool = false,
+
 pub fn loadFromFile(allocator: std.mem.Allocator, file_path: []const u8) ?Config {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();

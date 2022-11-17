@@ -1421,7 +1421,7 @@ pub fn call(
     const tree = interpreter.getHandle().tree;
     const tags = tree.nodes.items(.tag);
 
-    std.debug.assert(tags[func_node_idx] == .fn_decl);
+    if (tags[func_node_idx] != .fn_decl) return error.CriticalAstFailure;
 
     // TODO: Make argument scope to evaluate arguments in
     var fn_scope = try interpreter.newScope(scope, func_node_idx);
