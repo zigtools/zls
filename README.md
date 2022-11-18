@@ -35,12 +35,8 @@ zig build -Drelease-safe
 ./zig-out/bin/zls --config # Configure ZLS
 ```
 
-*For detailed building instructions, see the Wiki page about [Cloning With Git](https://github.com/zigtools/zls/wiki/Downloading-and-Building-ZLS#cloning-with-git).*
-
 #### Build Options
 
-<!-- When updating this table, be sure to copy changes to the Wiki page about building from source. -->
-<!-- If this table grows too large, then delete this one and move it all over to the Wiki page about building from source. -->
 | Option | Type | Default Value | What it Does |
 | --- | --- | --- | --- |
 | `-Ddata_version` | `string` (like 0.7.1 or 0.9.0) | master | The data file version. This selects the files in the `src/data` folder that correspond to the Zig version being served.|
