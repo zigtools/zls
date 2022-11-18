@@ -4,6 +4,8 @@
 
 **Need support? Wanna help out? Join our [Discord server](https://discord.gg/5m5U3qpUhk)!**
 
+The Zig Language Server (zls) is a tool that implements Microsoft's Language Server Protocol for Zig in Zig. In simpler terms: it'll provide you with completions, go-to definition, [etc.](#features) when you write Zig code!
+
 <!-- omit in toc -->
 ## Table Of Contents
 
