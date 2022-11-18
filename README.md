@@ -1,19 +1,15 @@
-![Zig Language Server](./.github/assets/zls.svg)
+<img src="https://raw.githubusercontent.com/zigtools/install-zls/main/img/zls-opt.svg" alt="Zig Language Server" width=200>
 
 [![CI](https://github.com/zigtools/zls/workflows/CI/badge.svg)](https://github.com/zigtools/zls/actions)
-![Zig Tools](./.github/assets/zigtools.svg)
 
 **Need support? Wanna help out? Join our [Discord server](https://discord.gg/5m5U3qpUhk)!**
 
-Zig Language Server, or `zls`, is a language server for Zig. The Zig wiki states that "The Zig community is decentralized" and "There is no concept of 'official' or 'unofficial'", so instead of calling `zls` unofficial, and I'm going to call it a cool option, one of [many](https://github.com/search?q=zig+language+server).
+The Zig Language Server (zls) is a tool that implements Microsoft's Language Server Protocol for Zig in Zig. In simpler terms: it'll provide you with completions, go-to definition, [etc.](#features) when you write Zig code!
 
 <!-- omit in toc -->
 ## Table Of Contents
 
 - [Installation](#installation)
-  - [Installing binaries](#installing-binaries)
-    - [MacOS](#macos)
-    - [Linux](#linux)
   - [From Source](#from-source)
     - [Build Options](#build-options)
     - [Updating Data Files](#updating-data-files)
@@ -21,50 +17,14 @@ Zig Language Server, or `zls`, is a language server for Zig. The Zig wiki states
   - [Per-build Configuration Options](#per-build-configuration-options)
     - [`BuildOption`](#buildoption)
 - [Features](#features)
-  - [VS Code](#vs-code)
-  - [Sublime Text](#sublime-text)
-    - [Sublime Text 3](#sublime-text-3)
-    - [Sublime Text 4](#sublime-text-4)
-  - [Kate](#kate)
-  - [Neovim/Vim8](#neovimvim8)
-    - [CoC](#coc)
-    - [YouCompleteMe](#youcompleteme)
-    - [nvim-lspconfig](#nvim-lspconfig)
-    - [LanguageClient-neovim](#languageclient-neovim)
-  - [Emacs](#emacs)
-  - [Doom Emacs](#doom-emacs)
-  - [Spacemacs](#spacemacs)
-  - [Helix](#helix)
 - [Related Projects](#related-projects)
 - [Quick Thanks :)](#quick-thanks-)
 - [License](#license)
 
 ## Installation
 
-Installation starts with downloading an official release from the [Releases page](https://github.com/zigtools/zls/releases).
-Up to date builds from master branch are also available in the [latest successful CI run](https://github.com/zigtools/zls/actions), contained in the `builds` artifact.
-
-See [Downloading and Building ZLS](https://github.com/zigtools/zls/wiki/Downloading-and-Building-ZLS) on the Wiki, or the page about [using ZLS with Visual Studio Code](https://github.com/zigtools/zls/wiki/Installing-for-Visual-Studio-Code) for a guide to help get `zls` running in your editor.
-
-### Installing binaries
-
-#### MacOS
-
-You can install the latest release into `$HOME/zls` using e.g.:
-
-```sh
-brew install zstd
-mkdir $HOME/zls && cd $HOME/zls && curl -L https://github.com/zigtools/zls/releases/download/0.10.0/x86_64-macos.tar.zst | tar --use-compress-program unzstd -x --strip-components=1 -C . && chmod +x zls
-```
-
-#### Linux
-
-You can install the latest release into `$HOME/zls` using e.g.:
-
-```bash
-sudo apt install zstd
-mkdir $HOME/zls && cd $HOME/zls && curl -L https://github.com/zigtools/zls/releases/download/0.10.0/x86_64-linux.tar.zst | tar --use-compress-program unzstd -x --strip-components=1 -C .
-```
+<!-- omit in toc -->
+### [See the `install zls` tool](https://zigtools.github.io/install-zls/) for editor and binary installation instructions.
 
 ### From Source
 
@@ -77,12 +37,8 @@ zig build -Drelease-safe
 ./zig-out/bin/zls --config # Configure ZLS
 ```
 
-*For detailed building instructions, see the Wiki page about [Cloning With Git](https://github.com/zigtools/zls/wiki/Downloading-and-Building-ZLS#cloning-with-git).*
-
 #### Build Options
 
-<!-- When updating this table, be sure to copy changes to the Wiki page about building from source. -->
-<!-- If this table grows too large, then delete this one and move it all over to the Wiki page about building from source. -->
 | Option | Type | Default Value | What it Does |
 | --- | --- | --- | --- |
 | `-Ddata_version` | `string` (like 0.7.1 or 0.9.0) | master | The data file version. This selects the files in the `src/data` folder that correspond to the Zig version being served.|
@@ -164,207 +120,6 @@ The following LSP features are supported:
 - Formatting using `zig fmt`
 - Semantic token highlighting (implemented by a few clients including VS Code, kak and emacs lsp-mode)
 - Inlay hints (implemented by VS Code)
-
-You can install `zls` using the instuctions for your text editor below:
-
-### VS Code
-
-Install the `zls-vscode` extension from [here](https://github.com/zigtools/zls-vscode/releases) or via the extensions menu.
-It will install `zls` if it is not found in your `PATH`.
-
-### Sublime Text
-
-- Install the `LSP` package from [here](https://github.com/sublimelsp/LSP/releases) or via Package Control.
-- Add this snippet to `LSP's` user settings:
-
-#### Sublime Text 3
-
-```json
-{
-    "clients": {
-        "zig": {
-            "command": ["zls"],
-            "enabled": true,
-            "languageId": "zig",
-            "scopes": ["source.zig"],
-            "syntaxes": ["Packages/Zig Language/Syntaxes/Zig.tmLanguage"]
-        }
-    }
-}
-```
-
-#### Sublime Text 4
-
-```json
-{
-    "clients": {
-        "zig": {
-            "command": ["zls"],
-            "enabled": true,
-            "selector": "source.zig"
-        }
-    }
-}
-```
-
-### Kate
-
-- Install language support for Zig from [here](https://github.com/ziglang/kde-syntax-highlighting).
-- Enable `LSP client` plugin in Kate settings.
-- Add this snippet to `LSP client's` user settings (e.g. /$HOME/.config/kate/lspclient)
-  (or paste it in `LSP client's` GUI settings)
-
-```json
-{
-    "servers": {
-        "zig": {
-            "command": ["zls"],
-            "url": "https://github.com/zigtools/zls",
-            "highlightingModeRegex": "^Zig$"
-        }
-    }
-}
-```
-
-### Neovim/Vim8
-#### CoC
-
-- Install the CoC engine from [here](https://github.com/neoclide/coc.nvim).
-
-Then choose one of the following two ways:
-
-1. Use extension
-
-    Run `:CocInstall coc-zls` to install [coc-zls](https://github.com/xiyaowong/coc-zls),
-    this extension supports the same functionality as the VS Code extension.
-
-2. Manually register
-    ```json
-    {
-       "languageserver": {
-           "zls" : {
-               "command": "command_or_path_to_zls",
-               "filetypes": ["zig"]
-           }
-       }
-    }
-    ```
-
-#### YouCompleteMe
-- Install YouCompleteMe from [here](https://github.com/ycm-core/YouCompleteMe.git).
-- Add these lines to your vimrc:
-
-```vim
-"ensure zig is a recognized filetype
-autocmd BufNewFile,BufRead *.zig set filetype=zig
-
-let g:ycm_language_server =
-  \ [
-  \{
-  \     'name': 'zls',
-  \     'filetypes': [ 'zig' ],
-  \     'cmdline': [ '/path/to/zls_executable' ]
-  \    }
-  \ ]
-```
-
-#### nvim-lspconfig
-
-Requires Nvim 0.5 (HEAD)!
-
-- Install nvim-lspconfig from [here](https://github.com/neovim/nvim-lspconfig).
-- Install zig.vim from [here](https://github.com/ziglang/zig.vim).
-
-nvim-lspconfig already ships a configuration for zls. A simple `init.vim` might look like this:
-```vim
-call plug#begin('~/.config/nvim/plugged')
-Plug 'neovim/nvim-lspconfig'
-Plug 'nvim-lua/completion-nvim'
-Plug 'ziglang/zig.vim'
-call plug#end()
-
-:lua << EOF
-    local lspconfig = require('lspconfig')
-
-    local on_attach = function(_, bufnr)
-        vim.api.nvim_buf_set_option(bufnr, 'omnifunc', 'v:lua.vim.lsp.omnifunc')
-        require('completion').on_attach()
-    end
-
-    local servers = {'zls'}
-    for _, lsp in ipairs(servers) do
-        lspconfig[lsp].setup {
-            on_attach = on_attach,
-        }
-    end
-EOF
-
-" Set completeopt to have a better completion experience
-set completeopt=menuone,noinsert,noselect
-
-" Enable completions as you type
-let g:completion_enable_auto_popup = 1
-```
-
-#### LanguageClient-neovim
-
-- Install the LanguageClient-neovim from [here](https://github.com/autozimu/LanguageClient-neovim).
-- Edit your neovim configuration and add `zls` for zig filetypes:
-
-```vim
-let g:LanguageClient_serverCommands = {
-       \ 'zig': ['~/code/zls/zig-out/bin/zls'],
-       \ }
-```
-
-### Emacs
-
-- Install [lsp-mode](https://github.com/emacs-lsp/lsp-mode) from melpa.
-- [zig mode](https://github.com/ziglang/zig-mode) is also useful.
-
-```elisp
-;; Setup lsp-mode as desired.
-;; See https://emacs-lsp.github.io/lsp-mode/page/installation/ for more information.
-(require 'lsp-mode)
-
-;; Either place zls in your PATH or add the following:
-(setq lsp-zig-zls-executable "<path to zls>")
-```
-
-### Doom Emacs
-
-- Enable the `lsp` module.
-- Install the [zig-mode](https://github.com/ziglang/zig-mode) package (add `(package! zig-mode)` to your `packages.el` file.
-- Add the following to your `config.el`:
-
-```elisp
-(use-package! zig-mode
-  :hook ((zig-mode . lsp-deferred))
-  :custom (zig-format-on-save nil)
-  :config
-  (after! lsp-mode
-    (add-to-list 'lsp-language-id-configuration '(zig-mode . "zig"))
-    (lsp-register-client
-      (make-lsp-client
-        :new-connection (lsp-stdio-connection "<path to zls>")
-        :major-modes '(zig-mode)
-        :server-id 'zls))))
-```
-
-### Spacemacs
-
-- Add `lsp` and `zig` to `dotspacemacs-configuration-layers` in your `.spacemacs` file.
-- If you don't have `zls` in your `PATH`, add the following to `dotspacemacs/user-config` in your
-  `.spacemacs` file:
-
-```elisp
-(setq lsp-zig-zls-executable "<path to zls>")
-```
-
-### Helix
-
-- Just add `zls` to your `PATH`.
-- run `hx --health` to check if helix found `zls`.
 
 ## Related Projects
 
