@@ -2098,6 +2098,10 @@ fn formattingHandler(server: *Server, writer: anytype, id: types.RequestId, req:
         return try respondGeneric(writer, id, null_result_response);
     };
 
+    if (handle.tree.errors.len != 0) {
+        return try respondGeneric(writer, id, null_result_response);
+    }
+
     const formatted = try handle.tree.render(server.allocator);
     defer server.allocator.free(formatted);
 
