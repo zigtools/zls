@@ -366,6 +366,7 @@ pub fn applyTextEdits(
         i -= 1;
         if (content_changes[i].range == null) {
             last_full_text_change = i;
+            continue;
         }
     }
 
