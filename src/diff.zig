@@ -364,8 +364,9 @@ pub fn applyTextEdits(
     var i: usize = content_changes.len;
     while (i > 0) {
         i -= 1;
-        if (content_changes[i].range != null) {
+        if (content_changes[i].range == null) {
             last_full_text_change = i;
+            continue;
         }
     }
 
