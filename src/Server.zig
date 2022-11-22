@@ -1606,7 +1606,7 @@ fn initializeHandler(server: *Server, writer: anytype, id: types.RequestId, req:
                     },
                     .textDocumentSync = .{
                         .openClose = true,
-                        .change = .Full,
+                        .change = .Incremental,
                         .save = true,
                     },
                     .renameProvider = true,
