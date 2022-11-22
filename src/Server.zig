@@ -2730,7 +2730,8 @@ pub fn processJsonRpc(server: *Server, writer: anytype, json: []const u8) !void 
         return;
     }
 
-    const method = tree.root.Object.get("method").?.String;
+    const method_value = tree.root.Object.get("method") orelse return;
+    const method = method_value.String;
 
     switch (server.status) {
         .uninitialized => blk: {
