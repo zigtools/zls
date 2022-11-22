@@ -2241,7 +2241,9 @@ fn generalReferencesHandler(server: *Server, writer: anytype, id: types.RequestI
     };
 
     const locations = if (pos_context == .label)
-        try references.labelReferences(allocator, decl, server.offset_encoding, include_decl)
+        // FIXME https://github.com/zigtools/zls/issues/728
+        // try references.labelReferences(allocator, decl, server.offset_encoding, include_decl)
+        std.ArrayListUnmanaged(types.Location){}
     else
         try references.symbolReferences(
             &server.arena,
