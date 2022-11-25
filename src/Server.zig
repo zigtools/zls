@@ -52,6 +52,8 @@ const ClientCapabilities = struct {
     supports_snippets: bool = false,
     supports_semantic_tokens: bool = false,
     supports_inlay_hints: bool = false,
+    supports_will_save: bool = false,
+    supports_will_save_wait_until: bool = false,
     hover_supports_md: bool = false,
     completion_doc_supports_md: bool = false,
     label_details_support: bool = false,
@@ -443,6 +445,36 @@ fn getAstCheckDiagnostics(
             });
         }
     }
+}
+
+/// caller owns returned memory.
+fn autofix(server: *Server, allocator: std.mem.Allocator, handle: *const DocumentStore.Handle) !std.ArrayListUnmanaged(types.TextEdit) {
+    var diagnostics = std.ArrayListUnmanaged(types.Diagnostic){};
+    try getAstCheckDiagnostics(server, handle.*, &diagnostics);
+    
+    var builder = code_actions.Builder{
+        .arena = &server.arena,
+        .document_store = &server.document_store,
+        .handle = handle,
+        .offset_encoding = server.offset_encoding,
+    };
+
+    var actions = std.ArrayListUnmanaged(types.CodeAction){};
+    for (diagnostics.items) |diagnostic| {
+        try builder.generateCodeAction(diagnostic, &actions);
+    }
+
+    var text_edits = std.ArrayListUnmanaged(types.TextEdit){};
+    for (actions.items) |action| {
+        if (action.kind != .SourceFixAll) continue;
+
+        if (action.edit.changes.size != 1) continue;
+        const edits = action.edit.changes.get(handle.uri) orelse continue;
+
+        try text_edits.appendSlice(allocator, edits.items);
+    }
+
+    return text_edits;
 }
 
 fn typeToCompletion(
@@ -1580,6 +1612,10 @@ fn initializeHandler(server: *Server, writer: anytype, id: types.RequestId, req:
                 }
             }
         }
+        if(textDocument.synchronization) |synchronization| {
+            server.client_capabilities.supports_will_save = synchronization.willSave.value;
+            server.client_capabilities.supports_will_save_wait_until = synchronization.willSaveWaitUntil.value;
+        }
     }
 
     // NOTE: everything is initialized, we got the client capabilities
@@ -1608,6 +1644,8 @@ fn initializeHandler(server: *Server, writer: anytype, id: types.RequestId, req:
                         .openClose = true,
                         .change = .Incremental,
                         .save = true,
+                        .willSave = true,
+                        .willSaveWaitUntil = true,
                     },
                     .renameProvider = true,
                     .completionProvider = .{ .resolveProvider = false, .triggerCharacters = &[_][]const u8{ ".", ":", "@", "]" }, .completionItem = .{ .labelDetailsSupport = true } },
@@ -1832,31 +1870,10 @@ fn saveDocumentHandler(server: *Server, writer: anytype, id: types.RequestId, re
     if (handle.tree.errors.len != 0) return;
     if (!server.config.enable_ast_check_diagnostics) return;
     if (!server.config.enable_autofix) return;
+    if (server.client_capabilities.supports_will_save) return;
+    if (server.client_capabilities.supports_will_save_wait_until) return;
 
-    var diagnostics = std.ArrayListUnmanaged(types.Diagnostic){};
-    try getAstCheckDiagnostics(server, handle.*, &diagnostics);
-
-    var builder = code_actions.Builder{
-        .arena = &server.arena,
-        .document_store = &server.document_store,
-        .handle = handle,
-        .offset_encoding = server.offset_encoding,
-    };
-
-    var actions = std.ArrayListUnmanaged(types.CodeAction){};
-    for (diagnostics.items) |diagnostic| {
-        try builder.generateCodeAction(diagnostic, &actions);
-    }
-
-    var text_edits = std.ArrayListUnmanaged(types.TextEdit){};
-    for (actions.items) |action| {
-        if (action.kind != .SourceFixAll) continue;
-
-        if (action.edit.changes.size != 1) continue;
-        const edits = action.edit.changes.get(uri) orelse continue;
-
-        try text_edits.appendSlice(allocator, edits.items);
-    }
+    const text_edits = try server.autofix(allocator, handle);
 
     var workspace_edit = types.WorkspaceEdit{ .changes = .{} };
     try workspace_edit.changes.putNoClobber(allocator, uri, text_edits);
@@ -1883,6 +1900,35 @@ fn closeDocumentHandler(server: *Server, writer: anytype, id: types.RequestId, r
     _ = id;
     _ = writer;
     server.document_store.closeDocument(req.params.textDocument.uri);
+}
+
+fn willSaveHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.WillSave) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    if(server.client_capabilities.supports_will_save_wait_until) return;
+    try willSaveWaitUntilHandler(server, writer, id, req);
+}
+
+fn willSaveWaitUntilHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.WillSave) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    if (!server.config.enable_ast_check_diagnostics) return;
+    if (!server.config.enable_autofix) return;
+
+    const allocator = server.arena.allocator();
+    const uri = req.params.textDocument.uri;
+    
+    const handle = server.document_store.getHandle(uri) orelse return;
+    if (handle.tree.errors.len != 0) return;
+
+    var text_edits = try server.autofix(allocator, handle);
+
+    return try send(writer, allocator, types.Response{
+        .id = id,
+        .result = .{.TextEdits = text_edits.toOwnedSlice(allocator)},
+    });
 }
 
 fn semanticTokensFullHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.SemanticTokensFull) !void {
@@ -2764,7 +2810,6 @@ pub fn processJsonRpc(server: *Server, writer: anytype, json: []const u8) !void 
     const method_map = .{
         .{ "initialized", void, initializedHandler },
         .{"$/cancelRequest"},
-        .{"textDocument/willSave"},
         .{ "initialize", requests.Initialize, initializeHandler },
         .{ "shutdown", void, shutdownHandler },
         .{ "exit", void, exitHandler },
@@ -2772,6 +2817,8 @@ pub fn processJsonRpc(server: *Server, writer: anytype, json: []const u8) !void 
         .{ "textDocument/didChange", requests.ChangeDocument, changeDocumentHandler },
         .{ "textDocument/didSave", requests.SaveDocument, saveDocumentHandler },
         .{ "textDocument/didClose", requests.CloseDocument, closeDocumentHandler },
+        .{"textDocument/willSave", requests.WillSave, willSaveHandler},
+        .{"textDocument/willSaveWaitUntil", requests.WillSave, willSaveWaitUntilHandler},
         .{ "textDocument/semanticTokens/full", requests.SemanticTokensFull, semanticTokensFullHandler },
         .{ "textDocument/inlayHint", requests.InlayHint, inlayHintHandler },
         .{ "textDocument/completion", requests.Completion, completionHandler },
