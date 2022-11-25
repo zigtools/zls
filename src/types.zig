@@ -441,6 +441,8 @@ const InitializeResult = struct {
         textDocumentSync: struct {
             openClose: bool,
             change: TextDocumentSyncKind,
+            willSave: bool,
+            willSaveWaitUntil: bool,
             save: bool,
         },
         renameProvider: bool,
