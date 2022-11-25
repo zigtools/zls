@@ -32,7 +32,7 @@ test "ComptimeInterpreter - basic test" {
 
     _ = try interpreter.interpret(0, null, .{});
 
-    var bool_type = try interpreter.createType(std.math.maxInt(std.zig.Ast.Node.Index), .{ .@"bool" = .{} });
+    var bool_type = try interpreter.createType(std.math.maxInt(std.zig.Ast.Node.Index), .{ .@"bool" = {} });
     var arg_false = ComptimeInterpreter.Value{
         .interpreter = &interpreter,
         .node_idx = std.math.maxInt(std.zig.Ast.Node.Index),
