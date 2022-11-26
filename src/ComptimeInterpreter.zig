@@ -791,7 +791,6 @@ pub fn interpret(
                         continue;
                     }
 
-                    // TODO: Error on tuple field in non struct types
                     const name = if (field_info.ast.tuple_like)
                         &[0]u8{}
                     else tree.tokenSlice(field_info.ast.main_token);
