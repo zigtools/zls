@@ -451,7 +451,7 @@ fn getAstCheckDiagnostics(
 fn autofix(server: *Server, allocator: std.mem.Allocator, handle: *const DocumentStore.Handle) !std.ArrayListUnmanaged(types.TextEdit) {
     var diagnostics = std.ArrayListUnmanaged(types.Diagnostic){};
     try getAstCheckDiagnostics(server, handle.*, &diagnostics);
-    
+
     var builder = code_actions.Builder{
         .arena = &server.arena,
         .document_store = &server.document_store,
@@ -1612,7 +1612,7 @@ fn initializeHandler(server: *Server, writer: anytype, id: types.RequestId, req:
                 }
             }
         }
-        if(textDocument.synchronization) |synchronization| {
+        if (textDocument.synchronization) |synchronization| {
             server.client_capabilities.supports_will_save = synchronization.willSave.value;
             server.client_capabilities.supports_will_save_wait_until = synchronization.willSaveWaitUntil.value;
         }
@@ -1662,7 +1662,7 @@ fn initializeHandler(server: *Server, writer: anytype, id: types.RequestId, req:
                     .documentFormattingProvider = true,
                     .documentRangeFormattingProvider = false,
                     .foldingRangeProvider = true,
-                    .selectionRangeProvider = false,
+                    .selectionRangeProvider = true,
                     .workspaceSymbolProvider = false,
                     .rangeProvider = false,
                     .documentProvider = true,
@@ -1906,7 +1906,7 @@ fn willSaveHandler(server: *Server, writer: anytype, id: types.RequestId, req: r
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    if(server.client_capabilities.supports_will_save_wait_until) return;
+    if (server.client_capabilities.supports_will_save_wait_until) return;
     try willSaveWaitUntilHandler(server, writer, id, req);
 }
 
@@ -1919,7 +1919,7 @@ fn willSaveWaitUntilHandler(server: *Server, writer: anytype, id: types.RequestI
 
     const allocator = server.arena.allocator();
     const uri = req.params.textDocument.uri;
-    
+
     const handle = server.document_store.getHandle(uri) orelse return;
     if (handle.tree.errors.len != 0) return;
 
@@ -1927,7 +1927,7 @@ fn willSaveWaitUntilHandler(server: *Server, writer: anytype, id: types.RequestI
 
     return try send(writer, allocator, types.Response{
         .id = id,
-        .result = .{.TextEdits = text_edits.toOwnedSlice(allocator)},
+        .result = .{ .TextEdits = text_edits.toOwnedSlice(allocator) },
     });
 }
 
@@ -2690,6 +2690,64 @@ fn foldingRangeHandler(server: *Server, writer: anytype, id: types.RequestId, re
     });
 }
 
+fn selectionRangeHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.SelectionRange) !void {
+    const allocator = server.arena.allocator();
+    const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
+        log.warn("Trying to get selection range of non existent document {s}", .{req.params.textDocument.uri});
+        return try respondGeneric(writer, id, null_result_response);
+    };
+
+    // For each of the input positons, we need to compute the stack of AST
+    // nodes/ranges which contain the position. At the moment, we do this in a
+    // super inefficient way, by iterationg _all_ nodes, selecting the ones that
+    // contain position, and then sorting.
+    //
+    // A faster algorithm would be to walk the tree starting from the root,
+    // descending into the child containing the position at every step.
+    var result = try allocator.alloc(*types.SelectionRange, req.params.positions.len);
+    var locs = try std.ArrayListUnmanaged(offsets.Loc).initCapacity(allocator, 32);
+    for (req.params.positions) |position, position_index| {
+        const index = offsets.positionToIndex(handle.text, position, server.offset_encoding);
+
+        locs.clearRetainingCapacity();
+        for (handle.tree.nodes.items(.data)) |_, i| {
+            const node = @intCast(u32, i);
+            const loc = offsets.nodeToLoc(handle.tree, node);
+            if (loc.start <= index and index <= loc.end) {
+                (try locs.addOne(allocator)).* = loc;
+            }
+        }
+
+        std.sort.sort(offsets.Loc, locs.items, {}, shorterLocsFirst);
+        {
+            var i: usize = 0;
+            while (i + 1 < locs.items.len) {
+                if (std.meta.eql(locs.items[i], locs.items[i + 1])) {
+                    _ = locs.orderedRemove(i);
+                } else {
+                    i += 1;
+                }
+            }
+        }
+
+        var selection_ranges = try allocator.alloc(types.SelectionRange, locs.items.len);
+        for (selection_ranges) |*range, i| {
+            range.range = offsets.locToRange(handle.text, locs.items[i], server.offset_encoding);
+            range.parent = if (i + 1 < selection_ranges.len) &selection_ranges[i + 1] else null;
+        }
+        result[position_index] = &selection_ranges[0];
+    }
+
+    try send(writer, allocator, types.Response{
+        .id = id,
+        .result = .{ .SelectionRange = result },
+    });
+}
+
+fn shorterLocsFirst(_: void, lhs: offsets.Loc, rhs: offsets.Loc) bool {
+    return (lhs.end - lhs.start) < (rhs.end - rhs.start);
+}
+
 // Needed for the hack seen below.
 fn extractErr(val: anytype) anyerror {
     val catch |e| return e;
@@ -2817,8 +2875,8 @@ pub fn processJsonRpc(server: *Server, writer: anytype, json: []const u8) !void 
         .{ "textDocument/didChange", requests.ChangeDocument, changeDocumentHandler },
         .{ "textDocument/didSave", requests.SaveDocument, saveDocumentHandler },
         .{ "textDocument/didClose", requests.CloseDocument, closeDocumentHandler },
-        .{"textDocument/willSave", requests.WillSave, willSaveHandler},
-        .{"textDocument/willSaveWaitUntil", requests.WillSave, willSaveWaitUntilHandler},
+        .{ "textDocument/willSave", requests.WillSave, willSaveHandler },
+        .{ "textDocument/willSaveWaitUntil", requests.WillSave, willSaveWaitUntilHandler },
         .{ "textDocument/semanticTokens/full", requests.SemanticTokensFull, semanticTokensFullHandler },
         .{ "textDocument/inlayHint", requests.InlayHint, inlayHintHandler },
         .{ "textDocument/completion", requests.Completion, completionHandler },
@@ -2836,6 +2894,7 @@ pub fn processJsonRpc(server: *Server, writer: anytype, json: []const u8) !void 
         .{ "textDocument/codeAction", requests.CodeAction, codeActionHandler },
         .{ "workspace/didChangeConfiguration", Config.DidChangeConfigurationParams, didChangeConfigurationHandler },
         .{ "textDocument/foldingRange", requests.FoldingRange, foldingRangeHandler },
+        .{ "textDocument/selectionRange", requests.SelectionRange, selectionRangeHandler },
     };
 
     if (zig_builtin.zig_backend == .stage1) {

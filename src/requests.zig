@@ -312,3 +312,10 @@ pub const FoldingRange = struct {
         textDocument: TextDocumentIdentifier,
     },
 };
+
+pub const SelectionRange = struct {
+    params: struct {
+        textDocument: TextDocumentIdentifier,
+        positions: []types.Position,
+    },
+};
