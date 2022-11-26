@@ -226,7 +226,7 @@ pub fn getContainerFieldSignature(tree: Ast, field: Ast.full.ContainerField) []c
     if (field.ast.value_expr == 0 and field.ast.type_expr == 0 and field.ast.align_expr == 0) {
         return ""; // TODO display the container's type
     }
-    const start = offsets.tokenToIndex(tree, field.ast.name_token);
+    const start = offsets.tokenToIndex(tree, field.ast.main_token);
     const end_node = if (field.ast.value_expr != 0) field.ast.value_expr else field.ast.type_expr;
     const end = offsets.tokenToLoc(tree, ast.lastToken(tree, end_node)).end;
     return tree.source[start..end];
@@ -291,9 +291,21 @@ pub fn getDeclNameToken(tree: Ast, node: Ast.Node.Index) ?Ast.TokenIndex {
         },
 
         // containers
-        .container_field => tree.containerField(node).ast.name_token,
-        .container_field_init => tree.containerFieldInit(node).ast.name_token,
-        .container_field_align => tree.containerFieldAlign(node).ast.name_token,
+        .container_field => blk: {
+            const field = tree.containerField(node);
+            if (field.ast.tuple_like) break :blk null;
+            break :blk field.ast.main_token;
+        },
+        .container_field_init => blk: {
+            const field = tree.containerFieldInit(node);
+            if (field.ast.tuple_like) break :blk null;
+            break :blk field.ast.main_token;
+        },
+        .container_field_align => blk: {
+            const field = tree.containerFieldAlign(node);
+            if (field.ast.tuple_like) break :blk null;
+            break :blk field.ast.main_token;
+        },
 
         .identifier => main_token,
         .error_value => main_token + 2, // 'error'.<main_token +2>
@@ -1399,9 +1411,18 @@ pub fn nodeToString(tree: Ast, node: Ast.Node.Index) ?[]const u8 {
     const main_token = tree.nodes.items(.main_token)[node];
     var buf: [1]Ast.Node.Index = undefined;
     switch (tree.nodes.items(.tag)[node]) {
-        .container_field => return tree.tokenSlice(tree.containerField(node).ast.name_token),
-        .container_field_init => return tree.tokenSlice(tree.containerFieldInit(node).ast.name_token),
-        .container_field_align => return tree.tokenSlice(tree.containerFieldAlign(node).ast.name_token),
+        .container_field => {
+            const field = tree.containerField(node).ast;
+            return if (field.tuple_like) null else tree.tokenSlice(field.main_token);
+        },
+        .container_field_init => {
+            const field = tree.containerFieldInit(node).ast;
+            return if (field.tuple_like) null else tree.tokenSlice(field.main_token);
+        },
+        .container_field_align => {
+            const field = tree.containerFieldAlign(node).ast;
+            return if (field.tuple_like) null else tree.tokenSlice(field.main_token);
+        },
         .error_value => return tree.tokenSlice(data[node].rhs),
         .identifier => return tree.tokenSlice(main_token),
         .fn_proto,
