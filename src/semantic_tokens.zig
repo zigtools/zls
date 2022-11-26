@@ -999,7 +999,9 @@ fn writeContainerField(builder: *Builder, node: Ast.Node.Index, field_token_type
         try writeDocComments(builder, tree, docs);
 
     try writeToken(builder, container_field.comptime_token, .keyword);
-    if (field_token_type) |tok_type| try writeToken(builder, container_field.ast.name_token, tok_type);
+    if (!container_field.ast.tuple_like) {
+        if (field_token_type) |tok_type| try writeToken(builder, container_field.ast.main_token, tok_type);
+    }
 
     if (container_field.ast.type_expr != 0) {
         try callWriteNodeTokens(allocator, .{ builder, container_field.ast.type_expr });

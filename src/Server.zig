@@ -683,14 +683,16 @@ fn nodeToCompletion(
         .container_field_init,
         => {
             const field = ast.containerField(tree, node).?;
-            try list.append(allocator, .{
-                .label = handle.tree.tokenSlice(field.ast.name_token),
-                .kind = .Field,
-                .documentation = doc,
-                .detail = analysis.getContainerFieldSignature(handle.tree, field),
-                .insertText = tree.tokenSlice(field.ast.name_token),
-                .insertTextFormat = .PlainText,
-            });
+            if (!field.ast.tuple_like) {
+                try list.append(allocator, .{
+                    .label = handle.tree.tokenSlice(field.ast.main_token),
+                    .kind = .Field,
+                    .documentation = doc,
+                    .detail = analysis.getContainerFieldSignature(handle.tree, field),
+                    .insertText = tree.tokenSlice(field.ast.main_token),
+                    .insertTextFormat = .PlainText,
+                });
+            }
         },
         .array_type,
         .array_type_sentinel,
