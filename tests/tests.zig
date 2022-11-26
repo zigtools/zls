@@ -14,6 +14,7 @@ comptime {
     _ = @import("lsp_features/inlay_hints.zig");
     _ = @import("lsp_features/references.zig");
     _ = @import("lsp_features/completion.zig");
+    _ = @import("lsp_features/selection_range.zig");
 
     // Language features
     _ = @import("language_features/cimport.zig");

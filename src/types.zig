@@ -44,6 +44,7 @@ pub const ResponseParams = union(enum) {
     CodeAction: []CodeAction,
     ApplyEdit: ApplyWorkspaceEditParams,
     FoldingRange: []FoldingRange,
+    SelectionRange: []*SelectionRange,
 };
 
 pub const Response = struct {
@@ -525,6 +526,11 @@ pub const DocumentHighlight = struct {
 };
 
 pub const FoldingRange = struct {
-    startLine: usize, 
+    startLine: usize,
     endLine: usize,
+};
+
+pub const SelectionRange = struct {
+    range: Range,
+    parent: ?*SelectionRange,
 };
