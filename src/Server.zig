@@ -504,11 +504,12 @@ fn typeToCompletion(
         ),
         .primitive, .array_index => {},
         .@"comptime" => |co| {
-            const ti = co.type.getTypeInfo();
-            switch (ti) {
-                .@"struct" => |st| {
-                    var fit = st.fields.iterator();
-                    while (fit.next()) |entry| {
+            const key = co.interpreter.ip.indexToKey(co.type.ty);
+        
+            switch (key) {
+                .struct_type => |struct_info| {
+                    var field_it = struct_info.fields.iterator();
+                    while (field_it.next()) |entry| {
                         try list.append(allocator, .{
                             .label = entry.key_ptr.*,
                             .kind = .Field,
@@ -516,16 +517,8 @@ fn typeToCompletion(
                             .insertTextFormat = .PlainText,
                         });
                     }
-
-                    var it = st.scope.declarations.iterator();
-                    while (it.next()) |entry| {
-                        try list.append(allocator, .{
-                            .label = entry.key_ptr.*,
-                            .kind = if (entry.value_ptr.isConstant()) .Constant else .Variable,
-                            .insertText = entry.key_ptr.*,
-                            .insertTextFormat = .PlainText,
-                        });
-                    }
+                    
+                    // TODO declaration completion
                 },
                 else => {},
             }
@@ -846,10 +839,10 @@ fn hoverSymbol(server: *Server, decl_handle: analysis.DeclWithHandle) error{OutO
 
     var bound_type_params = analysis.BoundTypeParams{};
     const resolved_type = try decl_handle.resolveType(&server.document_store, &server.arena, &bound_type_params);
-
+    
     const resolved_type_str = if (resolved_type) |rt|
         if (rt.type.is_type_val) switch (rt.type.data) {
-            .@"comptime" => |*co| try std.fmt.allocPrint(server.arena.allocator(), "{ }", .{co.interpreter.formatTypeInfo(co.type.getTypeInfo())}),
+            .@"comptime" => |*co| try std.fmt.allocPrint(server.arena.allocator(), "{}", .{co.type.ty.fmtType(&co.interpreter.ip)}),
             else => "type",
         } else switch (rt.type.data) { // TODO: Investigate random weird numbers like 897 that cause index of bounds
             .pointer,
