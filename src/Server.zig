@@ -1769,6 +1769,13 @@ fn exitHandler(server: *Server, writer: anytype, id: types.RequestId) noreturn {
     std.os.exit(error_code);
 }
 
+fn cancelRequestHandler(server: *Server, writer: anytype, id: types.RequestId) !void {
+    _ = id;
+    _ = writer;
+    _ = server;
+    // TODO implement $/cancelRequest
+}
+
 fn registerCapability(server: *Server, writer: anytype, method: []const u8) !void {
     const id = try std.fmt.allocPrint(server.arena.allocator(), "register-{s}", .{method});
     log.debug("Dynamically registering method '{s}'", .{method});
@@ -2869,10 +2876,10 @@ pub fn processJsonRpc(server: *Server, writer: anytype, json: []const u8) !void 
 
     const method_map = .{
         .{ "initialized", void, initializedHandler },
-        .{"$/cancelRequest"},
         .{ "initialize", requests.Initialize, initializeHandler },
         .{ "shutdown", void, shutdownHandler },
         .{ "exit", void, exitHandler },
+        .{ "$/cancelRequest", void, cancelRequestHandler },
         .{ "textDocument/didOpen", requests.OpenDocument, openDocumentHandler },
         .{ "textDocument/didChange", requests.ChangeDocument, changeDocumentHandler },
         .{ "textDocument/didSave", requests.SaveDocument, saveDocumentHandler },
