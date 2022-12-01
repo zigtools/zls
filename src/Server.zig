@@ -1288,7 +1288,7 @@ fn completeFieldAccess(server: *Server, handle: *const DocumentStore.Handle, sou
         }
     }
 
-    return completions.toOwnedSlice(allocator);
+    return try completions.toOwnedSlice(allocator);
 }
 
 fn formatDetailledLabel(item: *types.CompletionItem, alloc: std.mem.Allocator) !void {
@@ -1929,7 +1929,7 @@ fn willSaveWaitUntilHandler(server: *Server, writer: anytype, id: types.RequestI
 
     return try send(writer, allocator, types.Response{
         .id = id,
-        .result = .{ .TextEdits = text_edits.toOwnedSlice(allocator) },
+        .result = .{ .TextEdits = try text_edits.toOwnedSlice(allocator) },
     });
 }
 

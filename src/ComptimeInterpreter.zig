@@ -1122,7 +1122,7 @@ pub fn interpret(
                     if (index != params.len - 1)
                         try writer.writeAll(", ");
                 }
-                try interpreter.recordError(node_idx, "compile_log", final.toOwnedSlice());
+                try interpreter.recordError(node_idx, "compile_log", try final.toOwnedSlice());
 
                 return InterpretResult{ .nothing = {} };
             }

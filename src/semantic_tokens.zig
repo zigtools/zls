@@ -195,7 +195,7 @@ const Builder = struct {
         self.previous_position = start;
     }
 
-    fn toOwnedSlice(self: *Builder) []u32 {
+    fn toOwnedSlice(self: *Builder) error{OutOfMemory}![]u32 {
         return self.arr.toOwnedSlice(self.arena.allocator());
     }
 };
