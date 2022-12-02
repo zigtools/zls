@@ -150,7 +150,7 @@ fn testReferences(source: []const u8) !void {
                 try locs.append(allocator, new_loc);
             }
 
-            break :blk locs.toOwnedSlice(allocator);
+            break :blk try locs.toOwnedSlice(allocator);
         };
         defer allocator.free(expected_locs);
 
