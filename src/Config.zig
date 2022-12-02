@@ -150,9 +150,8 @@ pub fn configChanged(config: *Config, allocator: std.mem.Allocator, builtin_crea
         var env = getZigEnv(allocator, exe_path) orelse break :blk;
         defer std.json.parseFree(Env, env, .{ .allocator = allocator });
 
-        // We know this is allocated with `allocator`, we just steal it!
-        config.zig_lib_path = env.lib_dir.?;
-        env.lib_dir = null;
+        // Make sure the path is absolute
+        config.zig_lib_path = try std.fs.realpathAlloc(allocator, env.lib_dir.?);
         logger.info("Using zig lib path '{s}'", .{config.zig_lib_path.?});
     } else {
         logger.warn("Zig executable path not specified in zls.json and could not be found in PATH", .{});
