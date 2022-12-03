@@ -23,6 +23,20 @@ test "foldingRange - smoke" {
     );
 }
 
+test "foldingRange - #801" {
+    try testFoldingRange(
+        \\fn score(c: u8) !u32 {
+        \\    return switch(c) {
+        \\        'a'...'z' => c - 'a',
+        \\        'A'...'Z' => c - 'A',
+        \\        _ => error
+        \\    };
+        \\}
+    ,
+        \\[]
+    );
+}
+
 fn testFoldingRange(source: []const u8, expect: []const u8) !void {
     var ctx = try Context.init();
     defer ctx.deinit();

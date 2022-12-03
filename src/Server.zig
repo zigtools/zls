@@ -2454,7 +2454,7 @@ fn foldingRangeHandler(server: *Server, writer: anytype, id: types.RequestId, re
             end: Ast.TokenIndex,
             end_reach: Inclusivity,
         ) std.mem.Allocator.Error!bool {
-            const can_add = !tree.tokensOnSameLine(start, end);
+            const can_add = start < end and !tree.tokensOnSameLine(start, end);
             if (can_add) {
                 try addTokRange(p_ranges, tree, start, end, end_reach);
             }
