@@ -26,7 +26,7 @@ test "semantic tokens" {
 }
 
 const file_uri = switch (builtin.os.tag) {
-    .windows => "file:///C:/test.zig",
+    .windows => "file:///C:\\test.zig",
     else => "file:///test.zig",
 };
 
