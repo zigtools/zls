@@ -125,7 +125,5 @@ pub fn parse(allocator: std.mem.Allocator, str: []const u8) ![]u8 {
         i -= 1;
     }
 
-    _ = allocator.resize(uri, i);
-
-    return uri;
+    return allocator.realloc(uri, i);
 }
