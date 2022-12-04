@@ -21,4 +21,8 @@ test "uri - pathRelative" {
     const parseWin = try URI.parse(allocator, "file:///c%3A/main.zig");
     defer allocator.free(parseWin);
     try std.testing.expectEqualStrings("c:\\main.zig", parseWin);
+
+    const parseWin2 = try URI.parse(allocator, "file:///c%3A/main%2B.zig");
+    defer allocator.free(parseWin2);
+    try std.testing.expectEqualStrings("c:\\main+.zig", parseWin2);
 }
