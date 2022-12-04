@@ -101,7 +101,7 @@ pub fn parse(allocator: std.mem.Allocator, str: []const u8) ![]u8 {
     if (str.len < 7 or !std.mem.eql(u8, "file://", str[0..7])) return error.UriBadScheme;
 
     var uri = try allocator.alloc(u8, str.len - (if (std.fs.path.sep == '\\') 8 else 7));
-    defer allocator.free(uri);
+    errdefer allocator.free(uri);
 
     const path = if (std.fs.path.sep == '\\') str[8..] else str[7..];
 
@@ -125,5 +125,5 @@ pub fn parse(allocator: std.mem.Allocator, str: []const u8) ![]u8 {
         i -= 1;
     }
 
-    return try allocator.dupe(u8, uri[0..i]);
+    return allocator.realloc(uri, i);
 }
