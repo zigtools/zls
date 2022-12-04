@@ -100,16 +100,7 @@ fn parseHex(c: u8) !u8 {
 pub fn parse(allocator: std.mem.Allocator, str: []const u8) ![]u8 {
     if (str.len < 7 or !std.mem.eql(u8, "file://", str[0..7])) return error.UriBadScheme;
 
-    var subtractLength: u8 = if (std.fs.path.sep == '\\') 8 else 7;
-    // colon char (:) is replaced with %3A in fromPath which causes problems with
-    // colon as separator in C:/Users/... in windows; it is converted back to : here
-    // when replacing %3A with : need to account for new string length being 2 chars shorter
-    // ex: file:///c%3A/Users => c:\Users
-    if (std.mem.eql(u8, "%3A", str[9..12])) {
-        subtractLength += 2;
-    }
-
-    var uri = try allocator.alloc(u8, str.len - subtractLength);
+    var uri = try allocator.alloc(u8, str.len - (if (std.fs.path.sep == '\\') 8 else 7));
     errdefer allocator.free(uri);
 
     const path = if (std.fs.path.sep == '\\') str[8..] else str[7..];
