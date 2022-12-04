@@ -13,4 +13,12 @@ test "uri - pathRelative" {
     const join2 = try URI.pathRelative(allocator, "file://project/zig/wow", "../]src]/]main.zig");
     defer allocator.free(join2);
     try std.testing.expectEqualStrings("file://project/zig/%5Dsrc%5D/%5Dmain.zig", join2);
+
+    const fromPathWin = try URI.fromPath(allocator, "C:\\main.zig");
+    defer allocator.free(fromPathWin);
+    try std.testing.expectEqualStrings("file:///c%3A/main.zig", fromPathWin);
+
+    const parseWin = try URI.parse(allocator, "file:///c%3A/main.zig");
+    defer allocator.free(parseWin);
+    try std.testing.expectEqualStrings("c:\\main.zig", parseWin);
 }
