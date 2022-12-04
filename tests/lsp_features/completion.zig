@@ -269,7 +269,7 @@ test "completion - union" {
 }
 
 test "completion - enum" {
-    // TODO: Fix this test
+    // TODO: Fix
     return error.SkipZigTest;
     // try testCompletion(
     //     \\const E = enum {
