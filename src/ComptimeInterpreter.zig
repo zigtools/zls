@@ -285,6 +285,7 @@ pub const ValueData = union(enum) {
 pub const FieldDefinition = struct {
     node_idx: Ast.Node.Index,
     /// Store name so tree doesn't need to be used to access field name
+    /// When the field is a tuple field, `name` will be an empty slice
     name: []const u8,
     @"type": Type,
     default_value: ?Value,
@@ -765,6 +766,7 @@ pub fn interpret(
             var buffer: [2]Ast.Node.Index = undefined;
             const members = ast.declMembers(tree, node_idx, &buffer);
 
+            var field_idx: usize = 0;
             for (members) |member| {
                 const maybe_container_field: ?zig.Ast.full.ContainerField = switch (tags[member]) {
                     .container_field => tree.containerField(member),
@@ -789,7 +791,9 @@ pub fn interpret(
                         continue;
                     }
 
-                    const name = tree.tokenSlice(field_info.ast.name_token);
+                    const name = if (field_info.ast.tuple_like)
+                        &[0]u8{}
+                    else tree.tokenSlice(field_info.ast.main_token);
                     const field = FieldDefinition{
                         .node_idx = member,
                         .name = name,
@@ -804,6 +808,7 @@ pub fn interpret(
                     };
 
                     try cont_type.getTypeInfoMutable().@"struct".fields.put(interpreter.allocator, name, field);
+                    field_idx += 1;
                 } else {
                     _ = try interpreter.interpret(member, container_scope, options);
                 }
@@ -1117,7 +1122,7 @@ pub fn interpret(
                     if (index != params.len - 1)
                         try writer.writeAll(", ");
                 }
-                try interpreter.recordError(node_idx, "compile_log", final.toOwnedSlice());
+                try interpreter.recordError(node_idx, "compile_log", try final.toOwnedSlice());
 
                 return InterpretResult{ .nothing = {} };
             }

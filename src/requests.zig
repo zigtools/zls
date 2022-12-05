@@ -154,6 +154,11 @@ pub const Initialize = struct {
             workspaceFolders: Default(bool, false),
         },
         textDocument: ?struct {
+            synchronization: ?struct {
+                willSave: Default(bool, false),
+                willSaveWaitUntil: Default(bool, false),
+                didSave: Default(bool, false),
+            },
             semanticTokens: Exists,
             inlayHint: Exists,
             hover: ?struct {
@@ -230,6 +235,19 @@ const TextDocumentIdentifierPositionRequest = struct {
     },
 };
 
+pub const SaveReason = enum(u32) {
+    Manual = 1,
+    AfterDelay = 2,
+    FocusOut = 3,
+};
+
+pub const WillSave = struct {
+    params: struct {
+        textDocument: TextDocumentIdentifier,
+        reason: SaveReason,
+    },
+};
+
 pub const SignatureHelp = struct {
     params: struct {
         textDocument: TextDocumentIdentifier,
@@ -291,6 +309,13 @@ pub const CodeAction = struct {
 
 pub const FoldingRange = struct {
     params: struct {
-        textDocument: TextDocumentIdentifier,  
+        textDocument: TextDocumentIdentifier,
+    },
+};
+
+pub const SelectionRange = struct {
+    params: struct {
+        textDocument: TextDocumentIdentifier,
+        positions: []types.Position,
     },
 };

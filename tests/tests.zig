@@ -10,10 +10,12 @@ comptime {
     // TODO Document Synchronization
 
     // LSP features
-    _ = @import("lsp_features/semantic_tokens.zig");
+    _ = @import("lsp_features/completion.zig");
+    _ = @import("lsp_features/folding_range.zig");
     _ = @import("lsp_features/inlay_hints.zig");
     _ = @import("lsp_features/references.zig");
-    _ = @import("lsp_features/completion.zig");
+    _ = @import("lsp_features/selection_range.zig");
+    _ = @import("lsp_features/semantic_tokens.zig");
 
     // Language features
     _ = @import("language_features/cimport.zig");

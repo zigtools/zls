@@ -73,7 +73,7 @@ const Builder = struct {
         });
     }
 
-    fn toOwnedSlice(self: *Builder) []types.InlayHint {
+    fn toOwnedSlice(self: *Builder) error{OutOfMemory}![]types.InlayHint {
         return self.hints.toOwnedSlice(self.allocator);
     }
 };
