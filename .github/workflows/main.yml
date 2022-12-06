@@ -53,18 +53,56 @@ jobs:
             fi
             sed -e '1,5d' < README.md > artifacts/${target}/README.md
             cp LICENSE artifacts/${target}/
-            cd artifacts/${target}/
-            tar cfa ${target}.tar.zst *.md bin/*
-            mv ${target}.tar.zst ../
-            cd ../..
           done
 
-      - name: Upload artifacts
+      - name: Upload x86_64-windows artifact
         if: ${{ matrix.os == 'ubuntu-latest' }}
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
-          name: builds
-          path: artifacts/*.tar.zst
+          name: zls-x86_64-windows
+          path: artifacts/x86_64-windows/
+
+      - name: Upload x86_64-linux artifact
+        if: ${{ matrix.os == 'ubuntu-latest' }}
+        uses: actions/upload-artifact@v3
+        with:
+          name: zls-x86_64-linux
+          path: artifacts/x86_64-linux/
+
+      - name: Upload x86_64-macos artifact
+        if: ${{ matrix.os == 'ubuntu-latest' }}
+        uses: actions/upload-artifact@v3
+        with:
+          name: zls-x86_64-macos
+          path: artifacts/x86_64-macos/
+
+      - name: Upload x86-windows artifact
+        if: ${{ matrix.os == 'ubuntu-latest' }}
+        uses: actions/upload-artifact@v3
+        with:
+          name: zls-x86-windows
+          path: artifacts/x86-windows/
+
+      - name: Upload x86-linux artifact
+        if: ${{ matrix.os == 'ubuntu-latest' }}
+        uses: actions/upload-artifact@v3
+        with:
+          name: zls-x86-linux
+          path: artifacts/x86-linux/
+
+      - name: Upload aarch64-linux artifact
+        if: ${{ matrix.os == 'ubuntu-latest' }}
+        uses: actions/upload-artifact@v3
+        with:
+          name: zls-aarch64-linux
+          path: artifacts/aarch64-linux/
+
+      - name: Upload aarch64-macos artifact
+        if: ${{ matrix.os == 'ubuntu-latest' }}
+        uses: actions/upload-artifact@v3
+        with:
+          name: zls-aarch64-macos
+          path: artifacts/aarch64-macos/
 
       - name: Beam to Felix
         if: ${{ matrix.os == 'ubuntu-latest' && github.ref == 'refs/heads/master' }}
