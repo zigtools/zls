@@ -47,7 +47,7 @@ fn testSelectionRange(source: []const u8, want: []const []const u8) !void {
 
     const request = requests.SelectionRange{ .params = .{
         .textDocument = .{ .uri = test_uri },
-        .positions = &.{position},
+        .positions = &[_]types.Position{position},
     } };
 
     const response = try ctx.requestGetResponse(?[]SelectionRange, "textDocument/selectionRange", request);

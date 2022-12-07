@@ -32,18 +32,18 @@ test "ComptimeInterpreter - basic test" {
 
     _ = try interpreter.interpret(0, null, .{});
 
-    var bool_type = try interpreter.createType(std.math.maxInt(std.zig.Ast.Node.Index), .{ .@"bool" = .{} });
+    var bool_type = try interpreter.createType(std.math.maxInt(std.zig.Ast.Node.Index), .{ .bool = {} });
     var arg_false = ComptimeInterpreter.Value{
         .interpreter = &interpreter,
         .node_idx = std.math.maxInt(std.zig.Ast.Node.Index),
-        .@"type" = bool_type,
-        .value_data = try interpreter.createValueData(.{ .@"bool" = false }),
+        .type = bool_type,
+        .value_data = try interpreter.createValueData(.{ .bool = false }),
     };
     var arg_true = ComptimeInterpreter.Value{
         .interpreter = &interpreter,
         .node_idx = std.math.maxInt(std.zig.Ast.Node.Index),
-        .@"type" = bool_type,
-        .value_data = try interpreter.createValueData(.{ .@"bool" = true }),
+        .type = bool_type,
+        .value_data = try interpreter.createValueData(.{ .bool = true }),
     };
 
     const rmt = interpreter.root_type.?.getTypeInfo().@"struct".scope.declarations.get("ReturnMyType").?;
@@ -57,8 +57,8 @@ test "ComptimeInterpreter - basic test" {
     }, .{});
     defer call_with_true.scope.deinit();
 
-    try std.testing.expectFmt("u69", "{any}", .{interpreter.formatTypeInfo(call_with_false.result.value.value_data.@"type".getTypeInfo())});
-    try std.testing.expectFmt("u8", "{any}", .{interpreter.formatTypeInfo(call_with_true.result.value.value_data.@"type".getTypeInfo())});
+    try std.testing.expectFmt("u69", "{any}", .{interpreter.formatTypeInfo(call_with_false.result.value.value_data.type.getTypeInfo())});
+    try std.testing.expectFmt("u8", "{any}", .{interpreter.formatTypeInfo(call_with_true.result.value.value_data.type.getTypeInfo())});
 }
 
 test "ComptimeInterpreter - struct" {
@@ -92,5 +92,5 @@ test "ComptimeInterpreter - struct" {
     const z = try interpreter.call(null, rmt.node_idx, &.{}, .{});
     defer z.scope.deinit();
 
-    try std.testing.expectFmt("struct {slay: bool, var abc: comptime_int = 123, }", "{any}", .{interpreter.formatTypeInfo(z.result.value.value_data.@"type".getTypeInfo())});
+    try std.testing.expectFmt("struct {slay: bool, var abc: comptime_int = 123, }", "{any}", .{interpreter.formatTypeInfo(z.result.value.value_data.type.getTypeInfo())});
 }
