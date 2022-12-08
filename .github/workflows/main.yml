@@ -22,7 +22,7 @@ jobs:
         with:
           fetch-depth: 0
           submodules: true
-      - uses: goto-bus-stop/setup-zig@v1
+      - uses: goto-bus-stop/setup-zig@v2
         with:
           version: master
 
@@ -31,6 +31,10 @@ jobs:
 
       - name: Build
         run: zig build
+
+      - name: Build with Tracy
+        if: ${{ matrix.os != 'macos-latest' }}
+        run: zig build -Denable_tracy -Denable_tracy_allocation
 
       - name: Run Tests
         run: zig build test
