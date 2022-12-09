@@ -4,6 +4,7 @@ const build_options = @import("build_options");
 const tracy = @import("tracy.zig");
 const known_folders = @import("known-folders");
 const Config = @import("Config.zig");
+const configuration = @import("configuration.zig");
 const Server = @import("Server.zig");
 const setup = @import("setup.zig");
 const readRequestHeader = @import("header.zig").readRequestHeader;
@@ -65,7 +66,7 @@ fn getConfig(
     free_old_config_path: bool,
 ) !ConfigWithPath {
     if (config_path) |path| {
-        if (Config.loadFromFile(allocator, path)) |conf| {
+        if (configuration.loadFromFile(allocator, path)) |conf| {
             return ConfigWithPath{
                 .config = conf,
                 .config_path = path,
@@ -82,7 +83,7 @@ fn getConfig(
     }
 
     if (try known_folders.getPath(allocator, .local_configuration)) |path| {
-        if (Config.loadFromFolder(allocator, path)) |conf| {
+        if (configuration.loadFromFolder(allocator, path)) |conf| {
             return ConfigWithPath{
                 .config = conf,
                 .config_path = path,
@@ -92,7 +93,7 @@ fn getConfig(
     }
 
     if (try known_folders.getPath(allocator, .global_configuration)) |path| {
-        if (Config.loadFromFolder(allocator, path)) |conf| {
+        if (configuration.loadFromFolder(allocator, path)) |conf| {
             return ConfigWithPath{
                 .config = conf,
                 .config_path = path,

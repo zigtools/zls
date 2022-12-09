@@ -4,6 +4,7 @@ const std = @import("std");
 const zig_builtin = @import("builtin");
 const build_options = @import("build_options");
 const Config = @import("Config.zig");
+const configuration = @import("configuration.zig");
 const DocumentStore = @import("DocumentStore.zig");
 const requests = @import("requests.zig");
 const types = @import("types.zig");
@@ -1570,6 +1571,22 @@ fn initializeHandler(server: *Server, writer: anytype, id: types.RequestId, req:
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
+    if (req.params.clientInfo) |clientInfo| {
+        std.log.info("client is '{s}-{s}'", .{ clientInfo.name, clientInfo.version orelse "<no version>" });
+
+        if (std.mem.eql(u8, clientInfo.name, "Sublime Text LSP")) blk: {
+            server.config.max_detail_length = 256;
+
+            const version_str = clientInfo.version orelse break :blk;
+            const version = std.SemanticVersion.parse(version_str) catch break :blk;
+            // this indicates a LSP version for sublime text 3
+            // this check can be made more precise if the version that fixed this issue is known
+            if (version.major == 0) {
+                server.config.include_at_in_builtins = true;
+            }
+        }
+    }
+
     if (req.params.capabilities.general) |general| {
         var supports_utf8 = false;
         var supports_utf16 = false;
@@ -1717,8 +1734,8 @@ fn initializeHandler(server: *Server, writer: anytype, id: types.RequestId, req:
 
     // TODO avoid having to call getZigEnv twice
     // once in init and here
-    const env = Config.getZigEnv(server.allocator, server.config.zig_exe_path.?) orelse return;
-    defer std.json.parseFree(Config.Env, env, .{ .allocator = server.allocator });
+    const env = configuration.getZigEnv(server.allocator, server.config.zig_exe_path.?) orelse return;
+    defer std.json.parseFree(configuration.Env, env, .{ .allocator = server.allocator });
 
     const zig_exe_version = std.SemanticVersion.parse(env.version) catch return;
 
@@ -2197,16 +2214,16 @@ fn formattingHandler(server: *Server, writer: anytype, id: types.RequestId, req:
     );
 }
 
-fn didChangeConfigurationHandler(server: *Server, writer: anytype, id: types.RequestId, req: Config.DidChangeConfigurationParams) !void {
+fn didChangeConfigurationHandler(server: *Server, writer: anytype, id: types.RequestId, req: configuration.DidChangeConfigurationParams) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
     _ = id;
 
     // NOTE: VS Code seems to always respond with null
-    if (req.settings) |configuration| {
-        inline for (std.meta.fields(Config.Configuration)) |field| {
-            if (@field(configuration, field.name)) |value| {
+    if (req.settings) |cfg| {
+        inline for (std.meta.fields(configuration.Configuration)) |field| {
+            if (@field(cfg, field.name)) |value| {
                 blk: {
                     if (@TypeOf(value) == []const u8) {
                         if (value.len == 0) {
@@ -2219,7 +2236,7 @@ fn didChangeConfigurationHandler(server: *Server, writer: anytype, id: types.Req
             }
         }
 
-        try server.config.configChanged(server.allocator, null);
+        try configuration.configChanged(server.config, server.allocator, null);
     } else if (server.client_capabilities.supports_configuration) {
         try server.requestConfiguration(writer);
     }
@@ -2838,7 +2855,7 @@ pub fn processJsonRpc(server: *Server, writer: anytype, json: []const u8) !void 
             }
         }
 
-        try server.config.configChanged(server.allocator, null);
+        try configuration.configChanged(server.config, server.allocator, null);
 
         return;
     }
@@ -2901,7 +2918,7 @@ pub fn processJsonRpc(server: *Server, writer: anytype, json: []const u8) !void 
         .{ "textDocument/references", requests.References, referencesHandler },
         .{ "textDocument/documentHighlight", requests.DocumentHighlight, documentHighlightHandler },
         .{ "textDocument/codeAction", requests.CodeAction, codeActionHandler },
-        .{ "workspace/didChangeConfiguration", Config.DidChangeConfigurationParams, didChangeConfigurationHandler },
+        .{ "workspace/didChangeConfiguration", configuration.DidChangeConfigurationParams, didChangeConfigurationHandler },
         .{ "textDocument/foldingRange", requests.FoldingRange, foldingRangeHandler },
         .{ "textDocument/selectionRange", requests.SelectionRange, selectionRangeHandler },
     };
@@ -2998,7 +3015,7 @@ pub fn init(
     // see: https://github.com/zigtools/zls/issues/536
     analysis.init(allocator);
 
-    try config.configChanged(allocator, config_path);
+    try configuration.configChanged(config, allocator, config_path);
 
     var document_store = DocumentStore{
         .allocator = allocator,

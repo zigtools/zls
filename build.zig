@@ -116,6 +116,18 @@ pub fn build(b: *std.build.Builder) !void {
     exe.setBuildMode(mode);
     exe.install();
 
+    const gen_exe = b.addExecutable("zls_gen", "src/config_gen/config_gen.zig");
+
+    const gen_cmd = gen_exe.run();
+    gen_cmd.addArgs(&.{
+        b.fmt("{s}/src/Config.zig", .{b.build_root}),
+        b.fmt("{s}/schema.json", .{b.build_root}),
+        b.fmt("{s}/README.md", .{b.build_root}),
+    });
+
+    const gen_step = b.step("gen", "Regenerate config files");
+    gen_step.dependOn(&gen_cmd.step);
+
     const test_step = b.step("test", "Run all the tests");
     test_step.dependOn(b.getInstallStep());
 
