@@ -6,7 +6,7 @@ const zls_version = std.builtin.Version{ .major = 0, .minor = 11, .patch = 0 };
 
 pub fn build(b: *std.build.Builder) !void {
     const current_zig = builtin.zig_version;
-    const min_zig = std.SemanticVersion.parse("0.11.0-dev.399+44ee1c885") catch return; // whereabouts allocgate 2.0
+    const min_zig = std.SemanticVersion.parse("0.11.0-dev.715+cffbb32d3") catch return; // whereabouts allocgate 2.0
     if (current_zig.order(min_zig).compare(.lt)) @panic(b.fmt("Your Zig version v{} does not meet the minimum build requirement of v{}", .{ current_zig, min_zig }));
 
     const target = b.standardTargetOptions(.{});
