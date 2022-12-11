@@ -79,7 +79,7 @@ fn testConvertCInclude(cimport_source: []const u8, expected: []const u8) !void {
     const output = try translate_c.convertCInclude(allocator, ast, node);
     defer allocator.free(output);
 
-    const trimmed_output = std.mem.trimRight(u8, output, &.{'\n'});
+    const trimmed_output = std.mem.trimRight(u8, output, "\n");
 
     try std.testing.expectEqualStrings(expected, trimmed_output);
 }

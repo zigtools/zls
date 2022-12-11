@@ -299,7 +299,7 @@ fn createDiscardText(builder: *Builder, identifier_name: []const u8, declaration
     const indent = find_indent: {
         const line = offsets.lineSliceUntilIndex(builder.handle.text, declaration_start);
         for(line) |char, i| {
-            if(!std.ascii.isSpace(char)) {
+            if(!std.ascii.isWhitespace(char)) {
                 break :find_indent line[0..i];
             }
         }
@@ -600,5 +600,5 @@ fn getCaptureLoc(text: []const u8, loc: offsets.Loc, is_index_payload: bool) ?Ca
 }
 
 fn isSymbolChar(char: u8) bool {
-    return std.ascii.isAlNum(char) or char == '_';
+    return std.ascii.isAlphanumeric(char) or char == '_';
 }
