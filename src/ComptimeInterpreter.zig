@@ -73,6 +73,7 @@ pub const Value = struct {
 pub const FieldDefinition = struct {
     node_idx: Ast.Node.Index,
     /// Store name so tree doesn't need to be used to access field name
+    /// When the field is a tuple field, `name` will be an empty slice
     name: []const u8,
     ty: Type,
     default_value: ?Value,
@@ -814,7 +815,7 @@ pub fn interpret(
                     if (index != params.len - 1)
                         try writer.writeAll(", ");
                 }
-                try interpreter.recordError(node_idx, "compile_log", final.toOwnedSlice());
+                try interpreter.recordError(node_idx, "compile_log", try final.toOwnedSlice());
 
                 return InterpretResult{ .nothing = {} };
             }

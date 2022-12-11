@@ -52,6 +52,8 @@ const ClientCapabilities = struct {
     supports_snippets: bool = false,
     supports_semantic_tokens: bool = false,
     supports_inlay_hints: bool = false,
+    supports_will_save: bool = false,
+    supports_will_save_wait_until: bool = false,
     hover_supports_md: bool = false,
     completion_doc_supports_md: bool = false,
     label_details_support: bool = false,
@@ -445,6 +447,36 @@ fn getAstCheckDiagnostics(
     }
 }
 
+/// caller owns returned memory.
+fn autofix(server: *Server, allocator: std.mem.Allocator, handle: *const DocumentStore.Handle) !std.ArrayListUnmanaged(types.TextEdit) {
+    var diagnostics = std.ArrayListUnmanaged(types.Diagnostic){};
+    try getAstCheckDiagnostics(server, handle.*, &diagnostics);
+
+    var builder = code_actions.Builder{
+        .arena = &server.arena,
+        .document_store = &server.document_store,
+        .handle = handle,
+        .offset_encoding = server.offset_encoding,
+    };
+
+    var actions = std.ArrayListUnmanaged(types.CodeAction){};
+    for (diagnostics.items) |diagnostic| {
+        try builder.generateCodeAction(diagnostic, &actions);
+    }
+
+    var text_edits = std.ArrayListUnmanaged(types.TextEdit){};
+    for (actions.items) |action| {
+        if (action.kind != .SourceFixAll) continue;
+
+        if (action.edit.changes.size != 1) continue;
+        const edits = action.edit.changes.get(handle.uri) orelse continue;
+
+        try text_edits.appendSlice(allocator, edits.items);
+    }
+
+    return text_edits;
+}
+
 fn typeToCompletion(
     server: *Server,
     list: *std.ArrayListUnmanaged(types.CompletionItem),
@@ -644,14 +676,16 @@ fn nodeToCompletion(
         .container_field_init,
         => {
             const field = ast.containerField(tree, node).?;
-            try list.append(allocator, .{
-                .label = handle.tree.tokenSlice(field.ast.name_token),
-                .kind = .Field,
-                .documentation = doc,
-                .detail = analysis.getContainerFieldSignature(handle.tree, field),
-                .insertText = tree.tokenSlice(field.ast.name_token),
-                .insertTextFormat = .PlainText,
-            });
+            if (!field.ast.tuple_like) {
+                try list.append(allocator, .{
+                    .label = handle.tree.tokenSlice(field.ast.main_token),
+                    .kind = .Field,
+                    .documentation = doc,
+                    .detail = analysis.getContainerFieldSignature(handle.tree, field),
+                    .insertText = tree.tokenSlice(field.ast.main_token),
+                    .insertTextFormat = .PlainText,
+                });
+            }
         },
         .array_type,
         .array_type_sentinel,
@@ -1247,7 +1281,7 @@ fn completeFieldAccess(server: *Server, handle: *const DocumentStore.Handle, sou
         }
     }
 
-    return completions.toOwnedSlice(allocator);
+    return try completions.toOwnedSlice(allocator);
 }
 
 fn formatDetailledLabel(item: *types.CompletionItem, alloc: std.mem.Allocator) !void {
@@ -1573,6 +1607,10 @@ fn initializeHandler(server: *Server, writer: anytype, id: types.RequestId, req:
                 }
             }
         }
+        if (textDocument.synchronization) |synchronization| {
+            server.client_capabilities.supports_will_save = synchronization.willSave.value;
+            server.client_capabilities.supports_will_save_wait_until = synchronization.willSaveWaitUntil.value;
+        }
     }
 
     // NOTE: everything is initialized, we got the client capabilities
@@ -1599,8 +1637,10 @@ fn initializeHandler(server: *Server, writer: anytype, id: types.RequestId, req:
                     },
                     .textDocumentSync = .{
                         .openClose = true,
-                        .change = .Full,
+                        .change = .Incremental,
                         .save = true,
+                        .willSave = true,
+                        .willSaveWaitUntil = true,
                     },
                     .renameProvider = true,
                     .completionProvider = .{ .resolveProvider = false, .triggerCharacters = &[_][]const u8{ ".", ":", "@", "]" }, .completionItem = .{ .labelDetailsSupport = true } },
@@ -1617,7 +1657,7 @@ fn initializeHandler(server: *Server, writer: anytype, id: types.RequestId, req:
                     .documentFormattingProvider = true,
                     .documentRangeFormattingProvider = false,
                     .foldingRangeProvider = true,
-                    .selectionRangeProvider = false,
+                    .selectionRangeProvider = true,
                     .workspaceSymbolProvider = false,
                     .rangeProvider = false,
                     .documentProvider = true,
@@ -1720,6 +1760,13 @@ fn exitHandler(server: *Server, writer: anytype, id: types.RequestId) noreturn {
     };
 
     std.os.exit(error_code);
+}
+
+fn cancelRequestHandler(server: *Server, writer: anytype, id: types.RequestId) !void {
+    _ = id;
+    _ = writer;
+    _ = server;
+    // TODO implement $/cancelRequest
 }
 
 fn registerCapability(server: *Server, writer: anytype, method: []const u8) !void {
@@ -1825,31 +1872,10 @@ fn saveDocumentHandler(server: *Server, writer: anytype, id: types.RequestId, re
     if (handle.tree.errors.len != 0) return;
     if (!server.config.enable_ast_check_diagnostics) return;
     if (!server.config.enable_autofix) return;
+    if (server.client_capabilities.supports_will_save) return;
+    if (server.client_capabilities.supports_will_save_wait_until) return;
 
-    var diagnostics = std.ArrayListUnmanaged(types.Diagnostic){};
-    try getAstCheckDiagnostics(server, handle.*, &diagnostics);
-
-    var builder = code_actions.Builder{
-        .arena = &server.arena,
-        .document_store = &server.document_store,
-        .handle = handle,
-        .offset_encoding = server.offset_encoding,
-    };
-
-    var actions = std.ArrayListUnmanaged(types.CodeAction){};
-    for (diagnostics.items) |diagnostic| {
-        try builder.generateCodeAction(diagnostic, &actions);
-    }
-
-    var text_edits = std.ArrayListUnmanaged(types.TextEdit){};
-    for (actions.items) |action| {
-        if (action.kind != .SourceFixAll) continue;
-
-        if (action.edit.changes.size != 1) continue;
-        const edits = action.edit.changes.get(uri) orelse continue;
-
-        try text_edits.appendSlice(allocator, edits.items);
-    }
+    const text_edits = try server.autofix(allocator, handle);
 
     var workspace_edit = types.WorkspaceEdit{ .changes = .{} };
     try workspace_edit.changes.putNoClobber(allocator, uri, text_edits);
@@ -1876,6 +1902,35 @@ fn closeDocumentHandler(server: *Server, writer: anytype, id: types.RequestId, r
     _ = id;
     _ = writer;
     server.document_store.closeDocument(req.params.textDocument.uri);
+}
+
+fn willSaveHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.WillSave) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    if (server.client_capabilities.supports_will_save_wait_until) return;
+    try willSaveWaitUntilHandler(server, writer, id, req);
+}
+
+fn willSaveWaitUntilHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.WillSave) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    if (!server.config.enable_ast_check_diagnostics) return;
+    if (!server.config.enable_autofix) return;
+
+    const allocator = server.arena.allocator();
+    const uri = req.params.textDocument.uri;
+
+    const handle = server.document_store.getHandle(uri) orelse return;
+    if (handle.tree.errors.len != 0) return;
+
+    var text_edits = try server.autofix(allocator, handle);
+
+    return try send(writer, allocator, types.Response{
+        .id = id,
+        .result = .{ .TextEdits = try text_edits.toOwnedSlice(allocator) },
+    });
 }
 
 fn semanticTokensFullHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.SemanticTokensFull) !void {
@@ -2091,6 +2146,10 @@ fn formattingHandler(server: *Server, writer: anytype, id: types.RequestId, req:
         return try respondGeneric(writer, id, null_result_response);
     };
 
+    if (handle.tree.errors.len != 0) {
+        return try respondGeneric(writer, id, null_result_response);
+    }
+
     const formatted = try handle.tree.render(server.allocator);
     defer server.allocator.free(formatted);
 
@@ -2230,7 +2289,9 @@ fn generalReferencesHandler(server: *Server, writer: anytype, id: types.RequestI
     };
 
     const locations = if (pos_context == .label)
-        try references.labelReferences(allocator, decl, server.offset_encoding, include_decl)
+        // FIXME https://github.com/zigtools/zls/issues/728
+        // try references.labelReferences(allocator, decl, server.offset_encoding, include_decl)
+        std.ArrayListUnmanaged(types.Location){}
     else
         try references.symbolReferences(
             &server.arena,
@@ -2386,7 +2447,7 @@ fn foldingRangeHandler(server: *Server, writer: anytype, id: types.RequestId, re
             end: Ast.TokenIndex,
             end_reach: Inclusivity,
         ) std.mem.Allocator.Error!bool {
-            const can_add = !tree.tokensOnSameLine(start, end);
+            const can_add = start < end and !tree.tokensOnSameLine(start, end);
             if (can_add) {
                 try addTokRange(p_ranges, tree, start, end, end_reach);
             }
@@ -2631,6 +2692,64 @@ fn foldingRangeHandler(server: *Server, writer: anytype, id: types.RequestId, re
     });
 }
 
+fn selectionRangeHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.SelectionRange) !void {
+    const allocator = server.arena.allocator();
+    const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
+        log.warn("Trying to get selection range of non existent document {s}", .{req.params.textDocument.uri});
+        return try respondGeneric(writer, id, null_result_response);
+    };
+
+    // For each of the input positons, we need to compute the stack of AST
+    // nodes/ranges which contain the position. At the moment, we do this in a
+    // super inefficient way, by iterationg _all_ nodes, selecting the ones that
+    // contain position, and then sorting.
+    //
+    // A faster algorithm would be to walk the tree starting from the root,
+    // descending into the child containing the position at every step.
+    var result = try allocator.alloc(*types.SelectionRange, req.params.positions.len);
+    var locs = try std.ArrayListUnmanaged(offsets.Loc).initCapacity(allocator, 32);
+    for (req.params.positions) |position, position_index| {
+        const index = offsets.positionToIndex(handle.text, position, server.offset_encoding);
+
+        locs.clearRetainingCapacity();
+        for (handle.tree.nodes.items(.data)) |_, i| {
+            const node = @intCast(u32, i);
+            const loc = offsets.nodeToLoc(handle.tree, node);
+            if (loc.start <= index and index <= loc.end) {
+                (try locs.addOne(allocator)).* = loc;
+            }
+        }
+
+        std.sort.sort(offsets.Loc, locs.items, {}, shorterLocsFirst);
+        {
+            var i: usize = 0;
+            while (i + 1 < locs.items.len) {
+                if (std.meta.eql(locs.items[i], locs.items[i + 1])) {
+                    _ = locs.orderedRemove(i);
+                } else {
+                    i += 1;
+                }
+            }
+        }
+
+        var selection_ranges = try allocator.alloc(types.SelectionRange, locs.items.len);
+        for (selection_ranges) |*range, i| {
+            range.range = offsets.locToRange(handle.text, locs.items[i], server.offset_encoding);
+            range.parent = if (i + 1 < selection_ranges.len) &selection_ranges[i + 1] else null;
+        }
+        result[position_index] = &selection_ranges[0];
+    }
+
+    try send(writer, allocator, types.Response{
+        .id = id,
+        .result = .{ .SelectionRange = result },
+    });
+}
+
+fn shorterLocsFirst(_: void, lhs: offsets.Loc, rhs: offsets.Loc) bool {
+    return (lhs.end - lhs.start) < (rhs.end - rhs.start);
+}
+
 // Needed for the hack seen below.
 fn extractErr(val: anytype) anyerror {
     val catch |e| return e;
@@ -2750,15 +2869,16 @@ pub fn processJsonRpc(server: *Server, writer: anytype, json: []const u8) !void 
 
     const method_map = .{
         .{ "initialized", void, initializedHandler },
-        .{"$/cancelRequest"},
-        .{"textDocument/willSave"},
         .{ "initialize", requests.Initialize, initializeHandler },
         .{ "shutdown", void, shutdownHandler },
         .{ "exit", void, exitHandler },
+        .{ "$/cancelRequest", void, cancelRequestHandler },
         .{ "textDocument/didOpen", requests.OpenDocument, openDocumentHandler },
         .{ "textDocument/didChange", requests.ChangeDocument, changeDocumentHandler },
         .{ "textDocument/didSave", requests.SaveDocument, saveDocumentHandler },
         .{ "textDocument/didClose", requests.CloseDocument, closeDocumentHandler },
+        .{ "textDocument/willSave", requests.WillSave, willSaveHandler },
+        .{ "textDocument/willSaveWaitUntil", requests.WillSave, willSaveWaitUntilHandler },
         .{ "textDocument/semanticTokens/full", requests.SemanticTokensFull, semanticTokensFullHandler },
         .{ "textDocument/inlayHint", requests.InlayHint, inlayHintHandler },
         .{ "textDocument/completion", requests.Completion, completionHandler },
@@ -2776,6 +2896,7 @@ pub fn processJsonRpc(server: *Server, writer: anytype, json: []const u8) !void 
         .{ "textDocument/codeAction", requests.CodeAction, codeActionHandler },
         .{ "workspace/didChangeConfiguration", Config.DidChangeConfigurationParams, didChangeConfigurationHandler },
         .{ "textDocument/foldingRange", requests.FoldingRange, foldingRangeHandler },
+        .{ "textDocument/selectionRange", requests.SelectionRange, selectionRangeHandler },
     };
 
     if (zig_builtin.zig_backend == .stage1) {

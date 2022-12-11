@@ -105,7 +105,7 @@ pub fn collectReplacePlaceholders(allocator: std.mem.Allocator, source: []const 
 
     return CollectPlaceholdersResult{
         .locations = locations,
-        .new_source = new_source.toOwnedSlice(allocator),
+        .new_source = try new_source.toOwnedSlice(allocator),
     };
 }
 
