@@ -59,29 +59,32 @@ zls will look for a zls.json configuration file in multiple locations with the f
 
 The following options are currently available.
 
+<!-- DO NOT EDIT | THIS SECTION IS AUTO-GENERATED | DO NOT EDIT -->
 | Option | Type | Default value | What it Does |
 | --- | --- | --- | --- |
-| `enable_snippets` | `bool` | `false` | Enables snippet completions when the client also supports them. |
-| `enable_ast_check_diagnostics` | `bool` | `true`| Whether to enable ast-check diagnostics |
-| `enable_autofix` | `bool` | `false`| Whether to automatically fix errors on save. Currently supports adding and removing discards. |
+| `enable_snippets` | `bool` | `false` | Enables snippet completions when the client also supports them |
+| `enable_ast_check_diagnostics` | `bool` | `true` | Whether to enable ast-check diagnostics |
+| `enable_autofix` | `bool` | `false` | Whether to automatically fix errors on save. Currently supports adding and removing discards. |
 | `enable_import_embedfile_argument_completions` | `bool` | `false` | Whether to enable import/embedFile argument completions |
-| `zig_lib_path` | `?[]const u8` | `null` | zig library path, e.g. `/path/to/zig/lib/zig`, used to analyze std library imports. |
-| `zig_exe_path` | `?[]const u8` | `null` | zig executable path, e.g. `/path/to/zig/zig`, used to run the custom build runner. If `null`, zig is looked up in `PATH`. Will be used to infer the zig standard library path if none is provided. |
-| `warn_style` | `bool` | `false` | Enables warnings for style *guideline* mismatches |
-| `build_runner_path` | `?[]const u8` | `null` | Path to the build_runner.zig file provided by zls. `null` is equivalent to `${executable_directory}/build_runner.zig` |
-| `global_cache_path` | `?[]const u8` | `null` | Path to a directroy that will be used as zig's cache. `null` is equivalent to `${KnownFloders.Cache}/zls` |
-| `enable_semantic_tokens` | `bool` | `true` | Enables semantic token support when the client also supports it. |
-| `enable_inlay_hints` | `bool` | `false` | Enables inlay hint support when the client also supports it. |
+| `enable_semantic_tokens` | `bool` | `true` | Enables semantic token support when the client also supports it |
+| `enable_inlay_hints` | `bool` | `false` | Enables inlay hint support when the client also supports it |
 | `inlay_hints_show_builtin` | `bool` | `true` | Enable inlay hints for builtin functions |
-| `inlay_hints_exclude_single_argument` | `bool` | `true`| Don't show inlay hints for single argument calls |
-| `inlay_hints_hide_redundant_param_names` | `bool` | `false`| Hides inlay hints when parameter name matches the identifier (e.g. foo: foo) |
-| `inlay_hints_hide_redundant_param_names_last_token` | `bool` | `false`| Hides inlay hints when parameter name matches the last token of a parameter node (e.g. foo: bar.foo, foo: &foo) |
-| `operator_completions` | `bool` | `true` | Enables `*` and `?` operators in completion lists. |
-|`include_at_in_builtins`|`bool`|`false`| Whether the @ sign should be part of the completion of builtins.
-|`max_detail_length`|`usize`|`1024 * 1024`| The detail field of completions is truncated to be no longer than this (in bytes).
-| `skip_std_references` | `bool` | `false` | When true, skips searching for references in std. Improves lookup speed for functions in user's code. Renaming and go-to-definition will continue to work as is.
-| `highlight_global_var_declarations` | `bool` | `false` | Whether to highlight global var declarations.
-| `use_comptime_interpreter` | `bool` | `false` | Whether to use the comptime interpreter.
+| `inlay_hints_exclude_single_argument` | `bool` | `true` | Don't show inlay hints for single argument calls |
+| `inlay_hints_hide_redundant_param_names` | `bool` | `false` | Hides inlay hints when parameter name matches the identifier (e.g. foo: foo) |
+| `inlay_hints_hide_redundant_param_names_last_token` | `bool` | `false` | Hides inlay hints when parameter name matches the last token of a parameter node (e.g. foo: bar.foo, foo: &foo) |
+| `operator_completions` | `bool` | `true` | Enables `*` and `?` operators in completion lists |
+| `warn_style` | `bool` | `false` | Enables warnings for style guideline mismatches |
+| `highlight_global_var_declarations` | `bool` | `false` | Whether to highlight global var declarations |
+| `use_comptime_interpreter` | `bool` | `false` | Whether to use the comptime interpreter |
+| `include_at_in_builtins` | `bool` | `false` | Whether the @ sign should be part of the completion of builtins |
+| `skip_std_references` | `bool` | `false` | When true, skips searching for references in std. Improves lookup speed for functions in user's code. Renaming and go-to-definition will continue to work as is |
+| `max_detail_length` | `usize` | `1048576` | The detail field of completions is truncated to be no longer than this (in bytes) |
+| `builtin_path` | `?[]const u8` | `null` | Path to 'builtin;' useful for debugging, automatically set if let null |
+| `zig_lib_path` | `?[]const u8` | `null` | Zig library path, e.g. `/path/to/zig/lib/zig`, used to analyze std library imports |
+| `zig_exe_path` | `?[]const u8` | `null` | Zig executable path, e.g. `/path/to/zig/zig`, used to run the custom build runner. If `null`, zig is looked up in `PATH`. Will be used to infer the zig standard library path if none is provided |
+| `build_runner_path` | `?[]const u8` | `null` | Path to the `build_runner.zig` file provided by zls. null is equivalent to `${executable_directory}/build_runner.zig` |
+| `global_cache_path` | `?[]const u8` | `null` | Path to a directroy that will be used as zig's cache. null is equivalent to `${KnownFloders.Cache}/zls` |
+<!-- DO NOT EDIT -->
 
 ### Per-build Configuration Options
 

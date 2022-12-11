@@ -178,7 +178,13 @@ pub const Initialize = struct {
         },
     };
 
+    pub const ClientInfo = struct {
+        name: []const u8,
+        version: ?[]const u8,
+    };
+
     params: struct {
+        clientInfo: ?ClientInfo,
         capabilities: ClientCapabilities,
         workspaceFolders: ?[]const types.WorkspaceFolder,
     },
