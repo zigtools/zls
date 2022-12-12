@@ -41,7 +41,7 @@ pub fn fromPath(allocator: std.mem.Allocator, path: []const u8) ![]const u8 {
     // On windows, we need to lowercase the drive name.
     if (builtin.os.tag == .windows) {
         if (buf.items.len > prefix.len + 1 and
-            std.ascii.isAlpha(buf.items[prefix.len]) and
+            std.ascii.isAlphanumeric(buf.items[prefix.len]) and
             std.mem.startsWith(u8, buf.items[prefix.len + 1 ..], "%3A"))
         {
             buf.items[prefix.len] = std.ascii.toLower(buf.items[prefix.len]);

@@ -796,7 +796,7 @@ pub fn identifierFromPosition(pos_index: usize, handle: DocumentStore.Handle) []
 }
 
 fn isSymbolChar(char: u8) bool {
-    return std.ascii.isAlNum(char) or char == '_';
+    return std.ascii.isAlphanumeric(char) or char == '_';
 }
 
 fn gotoDefinitionSymbol(
