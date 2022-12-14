@@ -876,7 +876,7 @@ fn hoverSymbol(server: *Server, decl_handle: analysis.DeclWithHandle) error{OutO
         .array_payload => |payload| handle.tree.tokenSlice(payload.identifier),
         .array_index => |payload| handle.tree.tokenSlice(payload),
         .switch_payload => |payload| tree.tokenSlice(payload.node),
-        .label_decl => |label_decl| tree.tokenSlice(label_decl),
+        .label_decl => |label_decl| tree.tokenSlice(label_decl.label),
     };
 
     var bound_type_params = analysis.BoundTypeParams{};
@@ -1194,9 +1194,9 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: analysis.Decl
         },
         .label_decl => |label_decl| {
             try context.completions.append(allocator, .{
-                .label = tree.tokenSlice(label_decl),
+                .label = tree.tokenSlice(label_decl.label),
                 .kind = .Variable,
-                .insertText = tree.tokenSlice(label_decl),
+                .insertText = tree.tokenSlice(label_decl.label),
                 .insertTextFormat = .PlainText,
             });
         },
@@ -2313,9 +2313,7 @@ fn generalReferencesHandler(server: *Server, writer: anytype, id: types.RequestI
     };
 
     const locations = if (pos_context == .label)
-        // FIXME https://github.com/zigtools/zls/issues/728
-        // try references.labelReferences(allocator, decl, server.offset_encoding, include_decl)
-        std.ArrayListUnmanaged(types.Location){}
+        try references.labelReferences(allocator, decl, server.offset_encoding, include_decl)
     else
         try references.symbolReferences(
             &server.arena,

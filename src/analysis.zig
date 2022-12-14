@@ -795,15 +795,15 @@ pub fn resolveTypeOfNodeInternal(store: *DocumentStore, arena: *std.heap.ArenaAl
                         return null;
                     };
 
-                    const ti = val.@"type".getTypeInfo();
-                    if (ti != .@"type") {
+                    const ti = val.type.getTypeInfo();
+                    if (ti != .type) {
                         log.err("Not a type: { }", .{interpreter.formatTypeInfo(ti)});
                         return null;
                     }
 
                     return TypeWithHandle{
                         .type = .{
-                            .data = .{ .@"comptime" = .{ .interpreter = interpreter, .type = val.value_data.@"type" } },
+                            .data = .{ .@"comptime" = .{ .interpreter = interpreter, .type = val.value_data.type } },
                             .is_type_val = true,
                         },
                         .handle = node_handle.handle,
@@ -1956,7 +1956,10 @@ pub const Declaration = union(enum) {
         switch_expr: Ast.Node.Index,
         items: []const Ast.Node.Index,
     },
-    label_decl: Ast.TokenIndex,
+    label_decl: struct {
+        label: Ast.TokenIndex,
+        block: Ast.Node.Index,
+    },
 };
 
 pub const DeclWithHandle = struct {
@@ -1972,7 +1975,7 @@ pub const DeclWithHandle = struct {
             .array_payload => |ap| ap.identifier,
             .array_index => |ai| ai,
             .switch_payload => |sp| sp.node,
-            .label_decl => |ld| ld,
+            .label_decl => |ld| ld.label,
         };
     }
 
@@ -2696,7 +2699,10 @@ fn makeScopeInternal(allocator: std.mem.Allocator, context: ScopeContext, node_i
                     },
                     .data = .other,
                 };
-                try scope.decls.putNoClobber(allocator, tree.tokenSlice(first_token), .{ .label_decl = first_token });
+                try scope.decls.putNoClobber(allocator, tree.tokenSlice(first_token), .{ .label_decl = .{
+                    .label = first_token,
+                    .block = node_idx,
+                } });
             }
 
             try scopes.append(allocator, .{
@@ -2817,7 +2823,10 @@ fn makeScopeInternal(allocator: std.mem.Allocator, context: ScopeContext, node_i
                     .data = .other,
                 };
 
-                try scope.decls.putNoClobber(allocator, tree.tokenSlice(label), .{ .label_decl = label });
+                try scope.decls.putNoClobber(allocator, tree.tokenSlice(label), .{ .label_decl = .{
+                    .label = label,
+                    .block = while_node.ast.then_expr,
+                } });
             }
 
             if (while_node.payload_token) |payload| {
