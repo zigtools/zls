@@ -20,7 +20,7 @@ pub fn labelReferences(
 
     // Find while / for / block from label -> iterate over children nodes, find break and continues, change their labels if they match.
     // This case can be implemented just by scanning tokens.
-    const first_tok = tree.firstToken(decl.decl.label_decl.label);
+    const first_tok = decl.decl.label_decl.label;
     const last_tok = ast.lastToken(tree, decl.decl.label_decl.block);
 
     var locations = std.ArrayListUnmanaged(types.Location){};
