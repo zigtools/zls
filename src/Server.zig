@@ -872,11 +872,7 @@ fn hoverSymbol(server: *Server, decl_handle: analysis.DeclWithHandle) error{OutO
             const end = offsets.tokenToLoc(tree, last_token).end;
             break :def tree.source[start..end];
         },
-        .pointer_payload => |payload| tree.tokenSlice(payload.name),
-        .array_payload => |payload| handle.tree.tokenSlice(payload.identifier),
-        .array_index => |payload| handle.tree.tokenSlice(payload),
-        .switch_payload => |payload| tree.tokenSlice(payload.node),
-        .label_decl => |label_decl| tree.tokenSlice(label_decl.label),
+        .pointer_payload, .array_payload, .array_index, .switch_payload, .label_decl => tree.tokenSlice(decl_handle.nameToken()),
     };
 
     var bound_type_params = analysis.BoundTypeParams{};
@@ -1160,43 +1156,18 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: analysis.Decl
                 .insertTextFormat = .PlainText,
             });
         },
-        .pointer_payload => |payload| {
+        .pointer_payload,
+        .array_payload,
+        .array_index,
+        .switch_payload,
+        .label_decl,
+        => {
+            const name = tree.tokenSlice(decl_handle.nameToken());
+
             try context.completions.append(allocator, .{
-                .label = tree.tokenSlice(payload.name),
+                .label = name,
                 .kind = .Variable,
-                .insertText = tree.tokenSlice(payload.name),
-                .insertTextFormat = .PlainText,
-            });
-        },
-        .array_payload => |payload| {
-            try context.completions.append(allocator, .{
-                .label = tree.tokenSlice(payload.identifier),
-                .kind = .Variable,
-                .insertText = tree.tokenSlice(payload.identifier),
-                .insertTextFormat = .PlainText,
-            });
-        },
-        .array_index => |payload| {
-            try context.completions.append(allocator, .{
-                .label = tree.tokenSlice(payload),
-                .kind = .Variable,
-                .insertText = tree.tokenSlice(payload),
-                .insertTextFormat = .PlainText,
-            });
-        },
-        .switch_payload => |payload| {
-            try context.completions.append(allocator, .{
-                .label = tree.tokenSlice(payload.node),
-                .kind = .Variable,
-                .insertText = tree.tokenSlice(payload.node),
-                .insertTextFormat = .PlainText,
-            });
-        },
-        .label_decl => |label_decl| {
-            try context.completions.append(allocator, .{
-                .label = tree.tokenSlice(label_decl.label),
-                .kind = .Variable,
-                .insertText = tree.tokenSlice(label_decl.label),
+                .insertText = name,
                 .insertTextFormat = .PlainText,
             });
         },
