@@ -337,7 +337,6 @@ fn symbolReferencesInternal(
         .field_access => {
             try symbolReferencesInternal(builder, datas[node].lhs, handle, false);
 
-            const rhs_str = ast.tokenSlice(tree, datas[node].rhs) catch return;
             var bound_type_params = analysis.BoundTypeParams{};
             const left_type = try analysis.resolveFieldAccessLhsType(
                 builder.store,
@@ -358,7 +357,7 @@ fn symbolReferencesInternal(
                 builder.store,
                 builder.arena,
                 .{ .node = left_type_node, .handle = left_type.handle },
-                rhs_str,
+                tree.tokenSlice(datas[node].rhs),
                 !left_type.type.is_type_val,
             )) orelse return;
 
