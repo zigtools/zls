@@ -52,7 +52,7 @@ fn callConvertCIncludeInternal(allocator: std.mem.Allocator, args: anytype) erro
         return await @asyncCall(child_frame, {}, convertCIncludeInternal, args);
     } else {
         // TODO find a non recursive solution
-        return @call(.{}, convertCIncludeInternal, args);
+        return @call(.auto, convertCIncludeInternal, args);
     }
 }
 
