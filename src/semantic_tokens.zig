@@ -276,7 +276,7 @@ fn callWriteNodeTokens(allocator: std.mem.Allocator, args: anytype) WriteTokensE
         return await @asyncCall(child_frame, {}, writeNodeTokens, args);
     } else {
         // TODO find a non recursive solution
-        return @call(.{}, writeNodeTokens, args);
+        return @call(.auto, writeNodeTokens, args);
     }
 }
 

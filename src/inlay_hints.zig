@@ -251,7 +251,7 @@ fn callWriteNodeInlayHint(allocator: std.mem.Allocator, args: anytype) error{Out
     // return await @asyncCall(child_frame, {}, writeNodeInlayHint, args);
     // } else {
     // TODO find a non recursive solution
-    return @call(.{}, writeNodeInlayHint, args);
+    return @call(.auto, writeNodeInlayHint, args);
     // }
 }
 
