@@ -862,7 +862,6 @@ fn writeNodeTokens(builder: *Builder, maybe_node: ?Ast.Node.Index) WriteTokensEr
         .field_access => {
             const data = node_data[node];
             if (data.rhs == 0) return;
-            const rhs_str = ast.tokenSlice(tree, data.rhs) catch return;
 
             try callWriteNodeTokens(allocator, .{ builder, data.lhs });
 
@@ -889,7 +888,7 @@ fn writeNodeTokens(builder: *Builder, maybe_node: ?Ast.Node.Index) WriteTokensEr
                 builder.store,
                 builder.arena,
                 .{ .node = left_type_node, .handle = lhs_type.handle },
-                rhs_str,
+                tree.tokenSlice(data.rhs),
                 !lhs_type.type.is_type_val,
             )) |decl_type| {
                 switch (decl_type.decl.*) {

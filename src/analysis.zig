@@ -864,7 +864,6 @@ pub fn resolveTypeOfNodeInternal(store: *DocumentStore, arena: *std.heap.ArenaAl
         },
         .field_access => {
             if (datas[node].rhs == 0) return null;
-            const rhs_str = ast.tokenSlice(tree, datas[node].rhs) catch return null;
 
             // If we are accessing a pointer type, remove one pointerness level :)
             const left_type = try resolveFieldAccessLhsType(
@@ -881,11 +880,12 @@ pub fn resolveTypeOfNodeInternal(store: *DocumentStore, arena: *std.heap.ArenaAl
                 .other => |n| n,
                 else => return null,
             };
+
             if (try lookupSymbolContainer(
                 store,
                 arena,
                 .{ .node = left_type_node, .handle = left_type.handle },
-                rhs_str,
+                tree.tokenSlice(datas[node].rhs),
                 !left_type.type.is_type_val,
             )) |child| {
                 return try child.resolveType(store, arena, bound_type_params);
