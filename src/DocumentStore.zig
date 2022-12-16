@@ -317,7 +317,11 @@ fn garbageCollectionCImports(self: *DocumentStore) error{OutOfMemory}!void {
             continue;
         }
         var kv = self.cimports.fetchSwapRemove(hash).?;
-        std.log.debug("Destroying cimport {s}", .{kv.value.success});
+        const message = switch (kv.value) {
+            .failure => "",
+            .success => |uri| uri,
+        };
+        std.log.debug("Destroying cimport {s}", .{message});
         kv.value.deinit(self.allocator);
     }
 }
