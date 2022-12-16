@@ -1703,16 +1703,29 @@ fn initializeHandler(server: *Server, writer: anytype, id: types.RequestId, req:
     log.info("{}", .{server.client_capabilities});
     log.info("Using offset encoding: {s}", .{std.meta.tagName(server.offset_encoding)});
 
-    // TODO avoid having to call getZigEnv twice
-    // once in init and here
-    const env = configuration.getZigEnv(server.allocator, server.config.zig_exe_path.?) orelse return;
-    defer std.json.parseFree(configuration.Env, env, .{ .allocator = server.allocator });
+    if (server.config.zig_exe_path) |exe_path| blk: {
+        // TODO avoid having to call getZigEnv twice
+        // once in init and here
+        const env = configuration.getZigEnv(server.allocator, exe_path) orelse break :blk;
+        defer std.json.parseFree(configuration.Env, env, .{ .allocator = server.allocator });
 
-    const zig_exe_version = std.SemanticVersion.parse(env.version) catch return;
+        const zig_exe_version = std.SemanticVersion.parse(env.version) catch break :blk;
 
-    if (zig_builtin.zig_version.order(zig_exe_version) == .gt) {
-        const version_mismatch_message = try std.fmt.allocPrint(server.arena.allocator(), "ZLS was built with Zig {}, but your Zig version is {s}. Update Zig to avoid unexpected behavior.", .{ zig_builtin.zig_version, env.version });
-        try server.showMessage(writer, .Warning, version_mismatch_message);
+        if (zig_builtin.zig_version.order(zig_exe_version) == .gt) {
+            const version_mismatch_message = try std.fmt.allocPrint(
+                server.arena.allocator(),
+                "ZLS was built with Zig {}, but your Zig version is {s}. Update Zig to avoid unexpected behavior.",
+                .{ zig_builtin.zig_version, env.version },
+            );
+            try server.showMessage(writer, .Warning, version_mismatch_message);
+        }
+    } else {
+        try server.showMessage(
+            writer,
+            .Warning,
+            \\ZLS failed to find Zig. Please add Zig to your PATH or set the zig_exe_path config option in your zls.json.
+            ,
+        );
     }
 }
 

@@ -854,10 +854,7 @@ pub fn resolveCImport(self: *DocumentStore, handle: Handle, node: Ast.Node.Index
 /// caller owns the returned memory
 pub fn uriFromImportStr(self: *const DocumentStore, allocator: std.mem.Allocator, handle: Handle, import_str: []const u8) error{OutOfMemory}!?Uri {
     if (std.mem.eql(u8, import_str, "std")) {
-        const zig_lib_path = self.config.zig_lib_path orelse {
-            log.debug("Cannot resolve std library import, path is null.", .{});
-            return null;
-        };
+        const zig_lib_path = self.config.zig_lib_path orelse return null;
 
         const std_path = std.fs.path.resolve(allocator, &[_][]const u8{ zig_lib_path, "./std/std.zig" }) catch |err| switch (err) {
             error.OutOfMemory => return error.OutOfMemory,
