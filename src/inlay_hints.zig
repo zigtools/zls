@@ -243,16 +243,15 @@ fn writeCallNodeHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store: 
 
 /// HACK self-hosted has not implemented async yet
 fn callWriteNodeInlayHint(allocator: std.mem.Allocator, args: anytype) error{OutOfMemory}!void {
-    _ = allocator;
-    // if (zig_builtin.zig_backend == .other or zig_builtin.zig_backend == .stage1) {
-    // const FrameSize = @sizeOf(@Frame(writeNodeInlayHint));
-    // var child_frame = try allocator.alignedAlloc(u8, std.Target.stack_align, FrameSize);
-    // defer allocator.free(child_frame);
-    // return await @asyncCall(child_frame, {}, writeNodeInlayHint, args);
-    // } else {
-    // TODO find a non recursive solution
-    return @call(.auto, writeNodeInlayHint, args);
-    // }
+    if (zig_builtin.zig_backend == .other or zig_builtin.zig_backend == .stage1) {
+        const FrameSize = @sizeOf(@Frame(writeNodeInlayHint));
+        var child_frame = try allocator.alignedAlloc(u8, std.Target.stack_align, FrameSize);
+        defer allocator.free(child_frame);
+        return await @asyncCall(child_frame, {}, writeNodeInlayHint, args);
+    } else {
+        // TODO find a non recursive solution
+        return @call(.auto, writeNodeInlayHint, args);
+    }
 }
 
 /// iterates over the ast and writes parameter hints into `builder.hints` for every function call and builtin call
