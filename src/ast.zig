@@ -9,18 +9,15 @@ const full = Ast.full;
 
 fn fullPtrType(tree: Ast, info: full.PtrType.Components) full.PtrType {
     const token_tags = tree.tokens.items(.tag);
-    // TODO: looks like stage1 isn't quite smart enough to handle enum
-    // literals in some places here
-    const Size = std.builtin.Type.Pointer.Size;
-    const size: Size = switch (token_tags[info.main_token]) {
+    const size: std.builtin.Type.Pointer.Size = switch (token_tags[info.main_token]) {
         .asterisk,
         .asterisk_asterisk,
         => switch (token_tags[info.main_token + 1]) {
             .r_bracket, .colon => .Many,
-            .identifier => if (token_tags[info.main_token - 1] == .l_bracket) Size.C else .One,
+            .identifier => if (info.main_token != 0 and token_tags[info.main_token - 1] == .l_bracket) .C else .One,
             else => .One,
         },
-        .l_bracket => Size.Slice,
+        .l_bracket => .Slice,
         else => unreachable,
     };
     var result: full.PtrType = .{
