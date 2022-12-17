@@ -162,11 +162,11 @@ pub fn translate(allocator: std.mem.Allocator, config: Config, include_dirs: []c
     };
 
     const base_args = &[_][]const u8{
-        config.zig_exe_path.?,
+        config.zig_exe_path orelse return null,
         "translate-c",
         "--enable-cache",
         "--zig-lib-dir",
-        config.zig_lib_path.?,
+        config.zig_lib_path orelse return null,
         "--cache-dir",
         config.global_cache_path.?,
         "-lc",
