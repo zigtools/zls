@@ -1748,42 +1748,20 @@ fn registerCapability(server: *Server, writer: anytype, method: []const u8) !voi
     const id = try std.fmt.allocPrint(server.arena.allocator(), "register-{s}", .{method});
     log.debug("Dynamically registering method '{s}'", .{method});
 
-    if (zig_builtin.zig_backend == .stage1) {
-        const reg = types.RegistrationParams.Registration{
-            .id = id,
-            .method = method,
-        };
-        const registrations = [1]types.RegistrationParams.Registration{reg};
-        const params = types.RegistrationParams{
-            .registrations = &registrations,
-        };
-
-        const respp = types.ResponseParams{
-            .RegistrationParams = params,
-        };
-        const req = types.Request{
-            .id = .{ .String = id },
-            .method = "client/registerCapability",
-            .params = respp,
-        };
-
-        try send(writer, server.arena.allocator(), req);
-    } else {
-        try send(writer, server.arena.allocator(), types.Request{
-            .id = .{ .String = id },
-            .method = "client/registerCapability",
-            .params = types.ResponseParams{
-                .RegistrationParams = types.RegistrationParams{
-                    .registrations = &.{
-                        .{
-                            .id = id,
-                            .method = method,
-                        },
+    try send(writer, server.arena.allocator(), types.Request{
+        .id = .{ .String = id },
+        .method = "client/registerCapability",
+        .params = types.ResponseParams{
+            .RegistrationParams = types.RegistrationParams{
+                .registrations = &.{
+                    .{
+                        .id = id,
+                        .method = method,
                     },
                 },
             },
-        });
-    }
+        },
+    });
 }
 
 fn requestConfiguration(server: *Server, writer: anytype) !void {
@@ -1855,18 +1833,15 @@ fn saveDocumentHandler(server: *Server, writer: anytype, id: types.RequestId, re
     var workspace_edit = types.WorkspaceEdit{ .changes = .{} };
     try workspace_edit.changes.putNoClobber(allocator, uri, text_edits);
 
-    // NOTE: stage1 moment
-    const params = types.ResponseParams{
-        .ApplyEdit = types.ApplyWorkspaceEditParams{
-            .label = "autofix",
-            .edit = workspace_edit,
-        },
-    };
-
     try send(writer, allocator, types.Request{
         .id = .{ .String = "apply_edit" },
         .method = "workspace/applyEdit",
-        .params = params,
+        .params = .{
+            .ApplyEdit = .{
+                .label = "autofix",
+                .edit = workspace_edit,
+            },
+        },
     });
 }
 
@@ -2872,56 +2847,22 @@ pub fn processJsonRpc(server: *Server, writer: anytype, json: []const u8) !void 
         .{ "textDocument/selectionRange", requests.SelectionRange, selectionRangeHandler },
     };
 
-    if (zig_builtin.zig_backend == .stage1) {
-        // Hack to avoid `return`ing in the inline for, which causes bugs.
-        var done: ?anyerror = null;
-        inline for (method_map) |method_info| {
-            if (done == null and std.mem.eql(u8, method, method_info[0])) {
-                if (method_info.len == 1) {
-                    log.warn("method not mapped: {s}", .{method});
-                    done = error.HackDone;
-                } else if (method_info[1] != void) {
-                    const ReqT = method_info[1];
-                    if (requests.fromDynamicTree(&server.arena, ReqT, tree.root)) |request_obj| {
-                        done = error.HackDone;
-                        done = extractErr(method_info[2](server, writer, id, request_obj));
-                    } else |err| {
-                        if (err == error.MalformedJson) {
-                            log.warn("Could not create request type {s} from JSON {s}", .{ @typeName(ReqT), json });
-                        }
-                        done = err;
-                    }
-                } else {
-                    done = error.HackDone;
-                    (method_info[2])(server, writer, id) catch |err| {
-                        done = err;
-                    };
-                }
+    inline for (method_map) |method_info| {
+        if (std.mem.eql(u8, method, method_info[0])) {
+            if (method_info.len == 1) {
+                log.warn("method not mapped: {s}", .{method});
+            } else if (method_info[1] != void) {
+                const ReqT = method_info[1];
+                const request_obj = try requests.fromDynamicTree(&server.arena, ReqT, tree.root);
+                method_info[2](server, writer, id, request_obj) catch |err| {
+                    log.err("failed to process request: {s}", .{@errorName(err)});
+                };
+            } else {
+                method_info[2](server, writer, id) catch |err| {
+                    log.err("failed to process request: {s}", .{@errorName(err)});
+                };
             }
-        }
-        if (done) |err| switch (err) {
-            error.MalformedJson => return try respondGeneric(writer, id, null_result_response),
-            error.HackDone => return,
-            else => return err,
-        };
-    } else {
-        inline for (method_map) |method_info| {
-            if (std.mem.eql(u8, method, method_info[0])) {
-                if (method_info.len == 1) {
-                    log.warn("method not mapped: {s}", .{method});
-                } else if (method_info[1] != void) {
-                    const ReqT = method_info[1];
-                    const request_obj = try requests.fromDynamicTree(&server.arena, ReqT, tree.root);
-                    method_info[2](server, writer, id, request_obj) catch |err| {
-                        log.err("failed to process request: {s}", .{@errorName(err)});
-                    };
-                } else {
-                    method_info[2](server, writer, id) catch |err| {
-                        log.err("failed to process request: {s}", .{@errorName(err)});
-                    };
-                }
-                return;
-            }
+            return;
         }
     }
 
