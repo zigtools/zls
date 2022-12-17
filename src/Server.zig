@@ -1879,14 +1879,24 @@ fn willSaveWaitUntilHandler(server: *Server, writer: anytype, id: types.RequestI
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    if (!server.config.enable_ast_check_diagnostics) return;
-    if (!server.config.enable_autofix) return;
-
     const allocator = server.arena.allocator();
+
+    if (!server.config.enable_ast_check_diagnostics or !server.config.enable_autofix)
+        return try send(writer, allocator, types.Response{
+            .id = id,
+            .result = .{ .TextEdits = &.{} },
+        });
+
     const uri = req.params.textDocument.uri;
 
-    const handle = server.document_store.getHandle(uri) orelse return;
-    if (handle.tree.errors.len != 0) return;
+    const handle = server.document_store.getHandle(uri) orelse return try send(writer, allocator, types.Response{
+        .id = id,
+        .result = .{ .TextEdits = &.{} },
+    });
+    if (handle.tree.errors.len != 0) return try send(writer, allocator, types.Response{
+        .id = id,
+        .result = .{ .TextEdits = &.{} },
+    });
 
     var text_edits = try server.autofix(allocator, handle);
 
