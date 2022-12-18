@@ -1612,6 +1612,7 @@ pub fn getPositionContext(allocator: std.mem.Allocator, text: []const u8, doc_in
                     .field_access => {},
                     .other => {},
                     .global_error_set => {},
+                    .label => {},
                     else => curr_ctx.ctx = .{
                         .field_access = tokenLocAppend(curr_ctx.ctx.loc().?, tok),
                     },
