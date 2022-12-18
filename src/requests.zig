@@ -45,10 +45,10 @@ fn fromDynamicTreeInternal(arena: *std.heap.ArenaAllocator, value: std.json.Valu
 
         var err = false;
         inline for (std.meta.fields(T)) |field| {
-            const is_exists = field.field_type == Exists;
+            const is_exists = field.type == Exists;
 
-            const is_optional = comptime std.meta.trait.is(.Optional)(field.field_type);
-            const actual_type = if (is_optional) std.meta.Child(field.field_type) else field.field_type;
+            const is_optional = comptime std.meta.trait.is(.Optional)(field.type);
+            const actual_type = if (is_optional) std.meta.Child(field.type) else field.type;
 
             const is_struct = comptime std.meta.trait.is(.Struct)(actual_type);
             const is_default = comptime if (is_struct) std.meta.trait.hasDecls(actual_type, .{ "default", "value_type" }) else false;
@@ -107,9 +107,6 @@ fn fromDynamicTreeInternal(arena: *std.heap.ArenaAllocator, value: std.json.Valu
         out.* = value;
     } else if (comptime std.meta.trait.is(.Enum)(T)) {
         const info = @typeInfo(T).Enum;
-        if (info.layout != .Auto)
-            @compileError("Only auto layout enums are allowed");
-
         const TagType = info.tag_type;
         if (value != .Integer) return error.MalformedJson;
         out.* = std.meta.intToEnum(

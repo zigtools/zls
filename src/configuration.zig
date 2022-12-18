@@ -198,9 +198,9 @@ fn getConfigurationType() type {
     var fields: [config_info.Struct.fields.len]std.builtin.Type.StructField = undefined;
     for (config_info.Struct.fields) |field, i| {
         fields[i] = field;
-        if (@typeInfo(field.field_type) != .Optional) {
-            fields[i].field_type = @Type(std.builtin.Type{
-                .Optional = .{ .child = field.field_type },
+        if (@typeInfo(field.type) != .Optional) {
+            fields[i].type = @Type(std.builtin.Type{
+                .Optional = .{ .child = field.type },
             });
         }
     }
