@@ -2752,18 +2752,18 @@ pub fn processJsonRpc(server: *Server, writer: anytype, json: []const u8) !void 
 
         inline for (std.meta.fields(Config)) |field, index| {
             const value = result.items[index];
-            const ft = if (@typeInfo(field.field_type) == .Optional)
-                @typeInfo(field.field_type).Optional.child
+            const ft = if (@typeInfo(field.type) == .Optional)
+                @typeInfo(field.type).Optional.child
             else
-                field.field_type;
+                field.type;
             const ti = @typeInfo(ft);
 
             if (value != .Null) {
-                const new_value: field.field_type = switch (ft) {
+                const new_value: field.type = switch (ft) {
                     []const u8 => switch (value) {
                         .String => |s| blk: {
                             if (s.len == 0) {
-                                if (field.field_type == ?[]const u8) {
+                                if (field.type == ?[]const u8) {
                                     break :blk null;
                                 } else {
                                     break :blk s;
