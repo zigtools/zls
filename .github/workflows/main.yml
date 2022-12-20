@@ -47,7 +47,7 @@ jobs:
 
           for target in "${targets[@]}"; do
             mkdir -p artifacts/$target
-            echo "Building target ${target}..."   
+            echo "Building target ${target}..."
             if [ "${GITHUB_REF##*/}" == "master" ]; then
               echo "Building safe"
               zig build -Dtarget=${target} -Drelease-safe --prefix artifacts/${target}/
