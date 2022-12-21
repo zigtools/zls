@@ -22,6 +22,16 @@ test "semantic tokens" {
     // TODO more tests
 }
 
+test "semantic tokens - comments" {
+    try testSemanticTokens(
+        \\//!─
+    ,
+        &.{ 0, 0, 4, 8, 128 },
+    );
+
+    // TODO more tests
+}
+
 const file_uri = switch (builtin.os.tag) {
     .windows => "file:///C:/test.zig",
     else => "file:///test.zig",

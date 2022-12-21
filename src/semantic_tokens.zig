@@ -141,16 +141,16 @@ const Builder = struct {
         const source = self.handle.tree.source;
 
         var i: usize = from;
-        while (i < to - 1) : (i += 1) {
+        while (i < to) : (i += 1) {
             // Skip multi-line string literals
             if (source[i] == '\\' and source[i + 1] == '\\') {
-                while (i < to - 1 and source[i] != '\n') : (i += 1) {}
+                while (i < to and source[i] != '\n') : (i += 1) {}
                 continue;
             }
             // Skip normal string literals
             if (source[i] == '"') {
                 i += 1;
-                while (i < to - 1 and
+                while (i < to and
                     source[i] != '\n' and
                     !(source[i] == '"' and source[i - 1] != '\\')) : (i += 1)
                 {}
@@ -159,7 +159,7 @@ const Builder = struct {
             // Skip char literals
             if (source[i] == '\'') {
                 i += 1;
-                while (i < to - 1 and
+                while (i < to and
                     source[i] != '\n' and
                     !(source[i] == '\'' and source[i - 1] != '\\')) : (i += 1)
                 {}
@@ -174,7 +174,7 @@ const Builder = struct {
             if (i + 2 < to and (source[i + 2] == '!' or source[i + 2] == '/'))
                 mods.documentation = true;
 
-            while (i < to - 1 and source[i] != '\n') : (i += 1) {}
+            while (i < to and source[i] != '\n') : (i += 1) {}
 
             const length = offsets.locLength(self.handle.tree.source, .{ .start = comment_start, .end = i }, self.encoding);
             try self.addDirect(TokenType.comment, mods, comment_start, length);
