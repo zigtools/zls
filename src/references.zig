@@ -497,6 +497,8 @@ pub fn symbolReferences(
 
             for (dependencies.keys()) |uri| {
                 const handle = store.getHandle(uri) orelse continue;
+                if (std.mem.eql(u8, handle.uri, curr_handle.uri)) continue;
+
                 try symbolReferencesInternal(&builder, 0, handle, true);
             }
         },
