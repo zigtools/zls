@@ -507,6 +507,49 @@ pub const builtins = [_]Builtin{
         },
     },
     .{
+        .name = "@cVaArg",
+        .signature = "@cVaArg(operand: *std.builtin.VaList, comptime T: type) T",
+        .snippet = "@cVaArg(${1:operand: *std.builtin.VaList}, ${2:comptime T: type})",
+        .documentation =
+        \\Implements the C macro `va_arg`.
+        ,
+        .arguments = &.{
+            "operand: *std.builtin.VaList",
+            "comptime T: type",
+        },
+    },
+    .{
+        .name = "@cVaCopy",
+        .signature = "@cVaCopy(src: *std.builtin.VaList) std.builtin.VaList",
+        .snippet = "@cVaCopy(${1:src: *std.builtin.VaList})",
+        .documentation =
+        \\Implements the C macro `va_copy`.
+        ,
+        .arguments = &.{
+            "src: *std.builtin.VaList",
+        },
+    },
+    .{
+        .name = "@cVaEnd",
+        .signature = "@cVaEnd(src: *std.builtin.VaList) void",
+        .snippet = "@cVaEnd(${1:src: *std.builtin.VaList})",
+        .documentation =
+        \\Implements the C macro `va_end`.
+        ,
+        .arguments = &.{
+            "src: *std.builtin.VaList",
+        },
+    },
+    .{
+        .name = "@cVaStart",
+        .signature = "@cVaStart() std.builtin.VaList",
+        .snippet = "@cVaStart()",
+        .documentation =
+        \\Implements the C macro `va_start`. Only valid inside a variadic function.
+        ,
+        .arguments = &.{},
+    },
+    .{
         .name = "@divExact",
         .signature = "@divExact(numerator: T, denominator: T) T",
         .snippet = "@divExact(${1:numerator: T}, ${2:denominator: T})",
