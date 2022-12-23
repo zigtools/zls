@@ -2,10 +2,12 @@ const std = @import("std");
 const Ast = std.zig.Ast;
 const DocumentStore = @import("DocumentStore.zig");
 const analysis = @import("analysis.zig");
-const types = @import("types.zig");
 const offsets = @import("offsets.zig");
 const log = std.log.scoped(.references);
 const ast = @import("ast.zig");
+
+const lsp = @import("zig-lsp");
+const types = @import("lsp-types");
 
 pub fn labelReferences(
     allocator: std.mem.Allocator,

@@ -6,8 +6,6 @@ const build_options = @import("build_options");
 const Config = @import("Config.zig");
 const configuration = @import("configuration.zig");
 const DocumentStore = @import("DocumentStore.zig");
-const requests = @import("requests.zig");
-const types = @import("types.zig");
 const analysis = @import("analysis.zig");
 const ast = @import("ast.zig");
 const references = @import("references.zig");
@@ -22,6 +20,11 @@ const uri_utils = @import("uri.zig");
 const diff = @import("diff.zig");
 const ComptimeInterpreter = @import("ComptimeInterpreter.zig");
 
+const lsp = @import("zig-lsp");
+const types = @import("lsp-types");
+
+pub const Connection = lsp.Connection(std.fs.File.Reader, std.fs.File.Writer, @This());
+
 const data = @import("data/data.zig");
 const snipped_data = @import("data/snippets.zig");
 
@@ -35,7 +38,7 @@ arena: std.heap.ArenaAllocator = undefined,
 document_store: DocumentStore = undefined,
 builtin_completions: std.ArrayListUnmanaged(types.CompletionItem),
 client_capabilities: ClientCapabilities = .{},
-offset_encoding: offsets.Encoding = .utf16,
+offset_encoding: offsets.Encoding = .@"utf-16",
 status: enum {
     /// the server has not received a `initialize` request
     uninitialized,
@@ -144,15 +147,10 @@ fn respondGeneric(writer: anytype, id: types.RequestId, response: []const u8) !v
     try buffered_writer.flush();
 }
 
-fn showMessage(server: *Server, writer: anytype, message_type: types.MessageType, message: []const u8) !void {
-    try send(writer, server.arena.allocator(), types.Notification{
-        .method = "window/showMessage",
-        .params = .{
-            .ShowMessage = .{
-                .type = message_type,
-                .message = message,
-            },
-        },
+fn showMessage(conn: *Connection, message_type: types.MessageType, message: []const u8) !void {
+    try conn.notify("window/showMessage", .{
+        .type = message_type,
+        .message = message,
     });
 }
 
@@ -1288,7 +1286,7 @@ fn formatDetailledLabel(item: *types.CompletionItem, alloc: std.mem.Allocator) !
         item.detail = item.label;
         item.labelDetails = .{ .detail = it[s .. e + 1], .description = it[e + 1 ..] };
 
-        if (item.kind == .Constant) {
+        if (item.kind.? == .Constant) {
             if (std.mem.indexOf(u8, it, "= struct")) |_| {
                 item.labelDetails.?.description = "struct";
             } else if (std.mem.indexOf(u8, it, "= union")) |_| {
@@ -1302,7 +1300,7 @@ fn formatDetailledLabel(item: *types.CompletionItem, alloc: std.mem.Allocator) !
                 item.labelDetails.?.description = it[us - 5 .. ue + 1];
             }
         }
-    } else if ((item.kind == .Variable or item.kind == .Constant) and (isVar or isConst)) {
+    } else if ((item.kind.? == .Variable or item.kind.? == .Constant) and (isVar or isConst)) {
         item.insertText = item.label;
         item.insertTextFormat = .PlainText;
         item.detail = item.label;
@@ -1329,7 +1327,7 @@ fn formatDetailledLabel(item: *types.CompletionItem, alloc: std.mem.Allocator) !
                 .description = it[start + 2 .. it.len], // right
             };
         }
-    } else if (item.kind == .Variable) {
+    } else if (item.kind.? == .Variable) {
         var s: usize = std.mem.indexOf(u8, it, ":") orelse return;
         var e: usize = std.mem.indexOf(u8, it, "=") orelse return;
 
@@ -1353,7 +1351,7 @@ fn formatDetailledLabel(item: *types.CompletionItem, alloc: std.mem.Allocator) !
             .detail = "", // left
             .description = it, // right
         };
-    } else if (item.kind == .Constant or item.kind == .Field) {
+    } else if (item.kind.? == .Constant or item.kind.? == .Field) {
         var s: usize = std.mem.indexOf(u8, it, " ") orelse return;
         var e: usize = std.mem.indexOf(u8, it, "=") orelse it.len;
         if (e < s) {
@@ -1392,7 +1390,7 @@ fn formatDetailledLabel(item: *types.CompletionItem, alloc: std.mem.Allocator) !
         } else if (std.mem.indexOf(u8, it, "= enum")) |_| {
             item.labelDetails.?.description = "enum";
         }
-    } else if (item.kind == .Field and isValue) {
+    } else if (item.kind.? == .Field and isValue) {
         item.insertText = item.label;
         item.insertTextFormat = .PlainText;
         item.detail = item.label;
@@ -1518,11 +1516,13 @@ fn documentSymbol(server: *Server, writer: anytype, id: types.RequestId, handle:
     });
 }
 
-fn initializeHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.Initialize) !void {
+pub fn initialize(conn: *Connection, _: types.RequestId, params: types.InitializeParams) !types.InitializeResult {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    if (req.params.clientInfo) |clientInfo| {
+    const server = conn.context;
+
+    if (params.clientInfo) |clientInfo| {
         std.log.info("client is '{s}-{s}'", .{ clientInfo.name, clientInfo.version orelse "<no version>" });
 
         if (std.mem.eql(u8, clientInfo.name, "Sublime Text LSP")) blk: {
@@ -1538,53 +1538,55 @@ fn initializeHandler(server: *Server, writer: anytype, id: types.RequestId, req:
         }
     }
 
-    if (req.params.capabilities.general) |general| {
+    if (params.capabilities.general) |general| {
         var supports_utf8 = false;
         var supports_utf16 = false;
         var supports_utf32 = false;
-        for (general.positionEncodings.value) |encoding| {
-            if (std.mem.eql(u8, encoding, "utf-8")) {
-                supports_utf8 = true;
-            } else if (std.mem.eql(u8, encoding, "utf-16")) {
-                supports_utf16 = true;
-            } else if (std.mem.eql(u8, encoding, "utf-32")) {
-                supports_utf32 = true;
-            }
-        }
+        if (general.positionEncodings) |pe|
+            for (pe) |encoding| {
+                if (encoding == .@"utf-8") {
+                    supports_utf8 = true;
+                } else if (encoding == .@"utf-16") {
+                    supports_utf16 = true;
+                } else if (encoding == .@"utf-32") {
+                    supports_utf32 = true;
+                }
+            };
 
-        if (supports_utf8) {
-            server.offset_encoding = .utf8;
-        } else if (supports_utf32) {
-            server.offset_encoding = .utf32;
-        } else {
-            server.offset_encoding = .utf16;
-        }
+        server.offset_encoding = if (supports_utf8)
+            .@"utf-8"
+        else if (supports_utf32)
+            .@"utf-32"
+        else
+            .@"utf-16";
     }
 
-    if (req.params.capabilities.textDocument) |textDocument| {
-        server.client_capabilities.supports_semantic_tokens = textDocument.semanticTokens.exists;
-        server.client_capabilities.supports_inlay_hints = textDocument.inlayHint.exists;
+    if (params.capabilities.textDocument) |textDocument| {
+        server.client_capabilities.supports_semantic_tokens = textDocument.semanticTokens != null;
+        server.client_capabilities.supports_inlay_hints = textDocument.inlayHint != null;
         if (textDocument.hover) |hover| {
-            for (hover.contentFormat.value) |format| {
-                if (std.mem.eql(u8, "markdown", format)) {
-                    server.client_capabilities.hover_supports_md = true;
-                }
-            }
+            if (hover.contentFormat) |cf|
+                for (cf) |format| {
+                    if (format == .markdown) {
+                        server.client_capabilities.hover_supports_md = true;
+                    }
+                };
         }
         if (textDocument.completion) |completion| {
             if (completion.completionItem) |completionItem| {
-                server.client_capabilities.label_details_support = completionItem.labelDetailsSupport.value;
-                server.client_capabilities.supports_snippets = completionItem.snippetSupport.value;
-                for (completionItem.documentationFormat.value) |documentationFormat| {
-                    if (std.mem.eql(u8, "markdown", documentationFormat)) {
-                        server.client_capabilities.completion_doc_supports_md = true;
-                    }
-                }
+                server.client_capabilities.label_details_support = completionItem.labelDetailsSupport orelse false;
+                server.client_capabilities.supports_snippets = completionItem.snippetSupport orelse false;
+                if (completionItem.documentationFormat) |df|
+                    for (df) |documentationFormat| {
+                        if (documentationFormat == .markdown) {
+                            server.client_capabilities.completion_doc_supports_md = true;
+                        }
+                    };
             }
         }
         if (textDocument.synchronization) |synchronization| {
-            server.client_capabilities.supports_will_save = synchronization.willSave.value;
-            server.client_capabilities.supports_will_save_wait_until = synchronization.willSaveWaitUntil.value;
+            server.client_capabilities.supports_will_save = synchronization.willSave orelse false;
+            server.client_capabilities.supports_will_save_wait_until = synchronization.willSaveWaitUntil orelse false;
         }
     }
 
@@ -1596,86 +1598,12 @@ fn initializeHandler(server: *Server, writer: anytype, id: types.RequestId, req:
         }
     }
 
-    try send(writer, server.arena.allocator(), types.Response{
-        .id = id,
-        .result = .{
-            .InitializeResult = .{
-                .serverInfo = .{
-                    .name = "zls",
-                    .version = build_options.version,
-                },
-                .capabilities = .{
-                    .positionEncoding = server.offset_encoding,
-                    .signatureHelpProvider = .{
-                        .triggerCharacters = &.{"("},
-                        .retriggerCharacters = &.{","},
-                    },
-                    .textDocumentSync = .{
-                        .openClose = true,
-                        .change = .Incremental,
-                        .save = true,
-                        .willSave = true,
-                        .willSaveWaitUntil = true,
-                    },
-                    .renameProvider = true,
-                    .completionProvider = .{ .resolveProvider = false, .triggerCharacters = &[_][]const u8{ ".", ":", "@", "]" }, .completionItem = .{ .labelDetailsSupport = true } },
-                    .documentHighlightProvider = true,
-                    .hoverProvider = true,
-                    .codeActionProvider = true,
-                    .declarationProvider = true,
-                    .definitionProvider = true,
-                    .typeDefinitionProvider = true,
-                    .implementationProvider = false,
-                    .referencesProvider = true,
-                    .documentSymbolProvider = true,
-                    .colorProvider = false,
-                    .documentFormattingProvider = true,
-                    .documentRangeFormattingProvider = false,
-                    .foldingRangeProvider = true,
-                    .selectionRangeProvider = true,
-                    .workspaceSymbolProvider = false,
-                    .rangeProvider = false,
-                    .documentProvider = true,
-                    .workspace = .{
-                        .workspaceFolders = .{
-                            .supported = false,
-                            .changeNotifications = false,
-                        },
-                    },
-                    .semanticTokensProvider = .{
-                        .full = true,
-                        .range = false,
-                        .legend = .{
-                            .tokenTypes = comptime block: {
-                                const tokTypeFields = std.meta.fields(semantic_tokens.TokenType);
-                                var names: [tokTypeFields.len][]const u8 = undefined;
-                                for (tokTypeFields) |field, i| {
-                                    names[i] = field.name;
-                                }
-                                break :block &names;
-                            },
-                            .tokenModifiers = comptime block: {
-                                const tokModFields = std.meta.fields(semantic_tokens.TokenModifiers);
-                                var names: [tokModFields.len][]const u8 = undefined;
-                                for (tokModFields) |field, i| {
-                                    names[i] = field.name;
-                                }
-                                break :block &names;
-                            },
-                        },
-                    },
-                    .inlayHintProvider = true,
-                },
-            },
-        },
-    });
-
     server.status = .initializing;
 
-    if (req.params.capabilities.workspace) |workspace| {
-        server.client_capabilities.supports_configuration = workspace.configuration.value;
-        if (workspace.didChangeConfiguration != null and workspace.didChangeConfiguration.?.dynamicRegistration.value) {
-            try server.registerCapability(writer, "workspace/didChangeConfiguration");
+    if (params.capabilities.workspace) |workspace| {
+        server.client_capabilities.supports_configuration = workspace.configuration orelse false;
+        if (workspace.didChangeConfiguration != null and workspace.didChangeConfiguration.?.dynamicRegistration.?) {
+            try registerCapability(conn, "workspace/didChangeConfiguration");
         }
     }
 
@@ -1697,16 +1625,90 @@ fn initializeHandler(server: *Server, writer: anytype, id: types.RequestId, req:
                 "ZLS was built with Zig {}, but your Zig version is {s}. Update Zig to avoid unexpected behavior.",
                 .{ zig_builtin.zig_version, env.version },
             );
-            try server.showMessage(writer, .Warning, version_mismatch_message);
+            try showMessage(conn, .Warning, version_mismatch_message);
         }
     } else {
-        try server.showMessage(
-            writer,
+        try showMessage(
+            conn,
             .Warning,
             \\ZLS failed to find Zig. Please add Zig to your PATH or set the zig_exe_path config option in your zls.json.
             ,
         );
     }
+
+    var tc = [_][]const u8{"("};
+    var rt = [_][]const u8{","};
+
+    return types.InitializeResult{
+        .serverInfo = .{
+            .name = "zls",
+            .version = build_options.version,
+        },
+        .capabilities = .{
+            .positionEncoding = server.offset_encoding,
+            .signatureHelpProvider = .{
+                .triggerCharacters = &tc,
+                .retriggerCharacters = &rt,
+            },
+            .textDocumentSync = .{
+                .TextDocumentSyncOptions = .{
+                    .openClose = true,
+                    .change = .Incremental,
+                    .save = true,
+                    .willSave = true,
+                    .willSaveWaitUntil = true,
+                },
+            },
+            .renameProvider = true,
+            .completionProvider = .{ .resolveProvider = false, .triggerCharacters = &[_][]const u8{ ".", ":", "@", "]" }, .completionItem = .{ .labelDetailsSupport = true } },
+            .documentHighlightProvider = true,
+            .hoverProvider = true,
+            .codeActionProvider = true,
+            .declarationProvider = true,
+            .definitionProvider = true,
+            .typeDefinitionProvider = true,
+            .implementationProvider = false,
+            .referencesProvider = true,
+            .documentSymbolProvider = true,
+            .colorProvider = false,
+            .documentFormattingProvider = true,
+            .documentRangeFormattingProvider = false,
+            .foldingRangeProvider = true,
+            .selectionRangeProvider = true,
+            .workspaceSymbolProvider = false,
+            .rangeProvider = false,
+            .documentProvider = true,
+            .workspace = .{
+                .workspaceFolders = .{
+                    .supported = false,
+                    .changeNotifications = false,
+                },
+            },
+            .semanticTokensProvider = .{
+                .full = true,
+                .range = false,
+                .legend = .{
+                    .tokenTypes = comptime block: {
+                        const tokTypeFields = std.meta.fields(semantic_tokens.TokenType);
+                        var names: [tokTypeFields.len][]const u8 = undefined;
+                        for (tokTypeFields) |field, i| {
+                            names[i] = field.name;
+                        }
+                        break :block &names;
+                    },
+                    .tokenModifiers = comptime block: {
+                        const tokModFields = std.meta.fields(semantic_tokens.TokenModifiers);
+                        var names: [tokModFields.len][]const u8 = undefined;
+                        for (tokModFields) |field, i| {
+                            names[i] = field.name;
+                        }
+                        break :block &names;
+                    },
+                },
+            },
+            .inlayHintProvider = true,
+        },
+    };
 }
 
 fn initializedHandler(server: *Server, writer: anytype, id: types.RequestId) !void {
@@ -1757,24 +1759,25 @@ fn cancelRequestHandler(server: *Server, writer: anytype, id: types.RequestId) !
     // TODO implement $/cancelRequest
 }
 
-fn registerCapability(server: *Server, writer: anytype, method: []const u8) !void {
+fn registerCapability(conn: *Connection, method: []const u8) !void {
+    const server = conn.context;
     const id = try std.fmt.allocPrint(server.arena.allocator(), "register-{s}", .{method});
     log.debug("Dynamically registering method '{s}'", .{method});
 
-    try send(writer, server.arena.allocator(), types.Request{
-        .id = .{ .String = id },
-        .method = "client/registerCapability",
-        .params = types.ResponseParams{
-            .RegistrationParams = types.RegistrationParams{
-                .registrations = &.{
-                    .{
-                        .id = id,
-                        .method = method,
-                    },
-                },
+    const callback = struct {
+        pub fn onResponse(_: *Connection, _: lsp.RequestResult("client/registerCapability")) !void {}
+
+        pub fn onError(_: *Connection) !void {}
+    };
+
+    try conn.request("client/registerCapability", .{
+        .registrations = &[_]types.Registration{
+            .{
+                .id = id,
+                .method = method,
             },
         },
-    });
+    }, .{ .onResponse = callback.onResponse, .onError = callback.onError });
 }
 
 fn requestConfiguration(server: *Server, writer: anytype) !void {
@@ -1800,1121 +1803,924 @@ fn requestConfiguration(server: *Server, writer: anytype) !void {
     });
 }
 
-fn openDocumentHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.OpenDocument) !void {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
+// fn openDocumentHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.OpenDocument) !void {
+//     const tracy_zone = tracy.trace(@src());
+//     defer tracy_zone.end();
 
-    _ = id;
+//     _ = id;
 
-    const handle = try server.document_store.openDocument(req.params.textDocument.uri, req.params.textDocument.text);
-    try server.publishDiagnostics(writer, handle);
-}
+//     const handle = try server.document_store.openDocument(req.params.textDocument.uri, req.params.textDocument.text);
+//     try server.publishDiagnostics(writer, handle);
+// }
 
-fn changeDocumentHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.ChangeDocument) !void {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
+// fn changeDocumentHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.ChangeDocument) !void {
+//     const tracy_zone = tracy.trace(@src());
+//     defer tracy_zone.end();
 
-    _ = id;
+//     _ = id;
 
-    const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse return;
+//     const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse return;
 
-    const new_text = try diff.applyTextEdits(server.allocator, handle.text, req.params.contentChanges, server.offset_encoding);
+//     const new_text = try diff.applyTextEdits(server.allocator, handle.text, req.params.contentChanges, server.offset_encoding);
 
-    try server.document_store.refreshDocument(handle.uri, new_text);
-    try server.publishDiagnostics(writer, handle.*);
-}
+//     try server.document_store.refreshDocument(handle.uri, new_text);
+//     try server.publishDiagnostics(writer, handle.*);
+// }
 
-fn saveDocumentHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.SaveDocument) !void {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
+// fn saveDocumentHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.SaveDocument) !void {
+//     const tracy_zone = tracy.trace(@src());
+//     defer tracy_zone.end();
 
-    _ = id;
-    const allocator = server.arena.allocator();
-    const uri = req.params.textDocument.uri;
+//     _ = id;
+//     const allocator = server.arena.allocator();
+//     const uri = req.params.textDocument.uri;
 
-    const handle = server.document_store.getHandle(uri) orelse return;
-    try server.document_store.applySave(handle);
+//     const handle = server.document_store.getHandle(uri) orelse return;
+//     try server.document_store.applySave(handle);
 
-    if (handle.tree.errors.len != 0) return;
-    if (!server.config.enable_ast_check_diagnostics) return;
-    if (!server.config.enable_autofix) return;
-    if (server.client_capabilities.supports_will_save) return;
-    if (server.client_capabilities.supports_will_save_wait_until) return;
+//     if (handle.tree.errors.len != 0) return;
+//     if (!server.config.enable_ast_check_diagnostics) return;
+//     if (!server.config.enable_autofix) return;
+//     if (server.client_capabilities.supports_will_save) return;
+//     if (server.client_capabilities.supports_will_save_wait_until) return;
 
-    const text_edits = try server.autofix(allocator, handle);
+//     const text_edits = try server.autofix(allocator, handle);
 
-    var workspace_edit = types.WorkspaceEdit{ .changes = .{} };
-    try workspace_edit.changes.putNoClobber(allocator, uri, text_edits);
+//     var workspace_edit = types.WorkspaceEdit{ .changes = .{} };
+//     try workspace_edit.changes.putNoClobber(allocator, uri, text_edits);
 
-    try send(writer, allocator, types.Request{
-        .id = .{ .String = "apply_edit" },
-        .method = "workspace/applyEdit",
-        .params = .{
-            .ApplyEdit = .{
-                .label = "autofix",
-                .edit = workspace_edit,
-            },
-        },
-    });
-}
-
-fn closeDocumentHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.CloseDocument) error{}!void {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    _ = id;
-    _ = writer;
-    server.document_store.closeDocument(req.params.textDocument.uri);
-}
-
-fn willSaveHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.WillSave) !void {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    if (server.client_capabilities.supports_will_save_wait_until) return;
-    try willSaveWaitUntilHandler(server, writer, id, req);
-}
-
-fn willSaveWaitUntilHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.WillSave) !void {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    const allocator = server.arena.allocator();
-
-    b: {
-        if (!server.config.enable_ast_check_diagnostics or !server.config.enable_autofix)
-            break :b;
-
-        const uri = req.params.textDocument.uri;
-
-        const handle = server.document_store.getHandle(uri) orelse break :b;
-        if (handle.tree.errors.len != 0) break :b;
-
-        var text_edits = try server.autofix(allocator, handle);
-
-        return try send(writer, allocator, types.Response{
-            .id = id,
-            .result = .{ .TextEdits = try text_edits.toOwnedSlice(allocator) },
-        });
-    }
-
-    return try send(writer, allocator, types.Response{
-        .id = id,
-        .result = .{ .TextEdits = &.{} },
-    });
-}
-
-fn semanticTokensFullHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.SemanticTokensFull) !void {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    if (!server.config.enable_semantic_tokens) return try respondGeneric(writer, id, no_semantic_tokens_response);
-
-    const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
-        return try respondGeneric(writer, id, no_semantic_tokens_response);
-    };
-
-    const token_array = try semantic_tokens.writeAllSemanticTokens(&server.arena, &server.document_store, handle, server.offset_encoding);
-
-    return try send(writer, server.arena.allocator(), types.Response{
-        .id = id,
-        .result = .{ .SemanticTokensFull = .{ .data = token_array } },
-    });
-}
-
-fn completionHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.Completion) !void {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
-        return try respondGeneric(writer, id, no_completions_response);
-    };
-
-    if (req.params.position.character == 0) {
-        var completions = std.ArrayListUnmanaged(types.CompletionItem){};
-        try populateSnippedCompletions(server.arena.allocator(), &completions, &snipped_data.top_level_decl_data, server.config.*, null);
-
-        return try send(writer, server.arena.allocator(), types.Response{
-            .id = id,
-            .result = .{
-                .CompletionList = .{ .isIncomplete = false, .items = completions.items },
-            },
-        });
-    }
-
-    const source_index = offsets.positionToIndex(handle.text, req.params.position, server.offset_encoding);
-    const pos_context = try analysis.getPositionContext(server.arena.allocator(), handle.text, source_index);
-
-    const maybe_completions = switch (pos_context) {
-        .builtin => server.builtin_completions.items,
-        .var_access, .empty => try server.completeGlobal(source_index, handle),
-        .field_access => |loc| try server.completeFieldAccess(handle, source_index, loc),
-        .global_error_set => try server.completeError(handle),
-        .enum_literal => try server.completeDot(handle),
-        .label => try server.completeLabel(source_index, handle),
-        .import_string_literal, .embedfile_string_literal => |loc| blk: {
-            if (!server.config.enable_import_embedfile_argument_completions) break :blk null;
-
-            const completing = offsets.locToSlice(handle.tree.source, loc);
-            const is_import = pos_context == .import_string_literal;
-            break :blk try completeFileSystemStringLiteral(server.arena.allocator(), &server.document_store, handle, completing, is_import);
-        },
-        else => null,
-    };
-
-    const completions = maybe_completions orelse return try respondGeneric(writer, id, no_completions_response);
-
-    // truncate completions
-    for (completions) |*item| {
-        if (item.detail) |det| {
-            if (det.len > server.config.max_detail_length) {
-                item.detail = det[0..server.config.max_detail_length];
-            }
-        }
-    }
-
-    // TODO: config for sorting rule?
-    for (completions) |*c| {
-        const prefix = kindToSortScore(c.kind) orelse continue;
-
-        c.sortText = try std.fmt.allocPrint(server.arena.allocator(), "{s}{s}", .{ prefix, c.label });
-    }
-
-    try send(writer, server.arena.allocator(), types.Response{
-        .id = id,
-        .result = .{
-            .CompletionList = .{
-                .isIncomplete = false,
-                .items = completions,
-            },
-        },
-    });
-}
-
-fn signatureHelpHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.SignatureHelp) !void {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    const getSignatureInfo = @import("signature_help.zig").getSignatureInfo;
-    const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
-        return try respondGeneric(writer, id, no_signatures_response);
-    };
-
-    if (req.params.position.character == 0)
-        return try respondGeneric(writer, id, no_signatures_response);
-
-    const source_index = offsets.positionToIndex(handle.text, req.params.position, server.offset_encoding);
-    if (try getSignatureInfo(
-        &server.document_store,
-        &server.arena,
-        handle,
-        source_index,
-        data,
-    )) |sig_info| {
-        return try send(writer, server.arena.allocator(), types.Response{
-            .id = id,
-            .result = .{
-                .SignatureHelp = .{
-                    .signatures = &[1]types.SignatureInformation{sig_info},
-                    .activeSignature = 0,
-                    .activeParameter = sig_info.activeParameter,
-                },
-            },
-        });
-    }
-    return try respondGeneric(writer, id, no_signatures_response);
-}
-
-fn gotoHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.GotoDefinition, resolve_alias: bool) !void {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
-        return try respondGeneric(writer, id, null_result_response);
-    };
-
-    if (req.params.position.character == 0) return try respondGeneric(writer, id, null_result_response);
-
-    const source_index = offsets.positionToIndex(handle.text, req.params.position, server.offset_encoding);
-    const pos_context = try analysis.getPositionContext(server.arena.allocator(), handle.text, source_index);
-
-    const maybe_location = switch (pos_context) {
-        .var_access => try server.gotoDefinitionGlobal(source_index, handle, resolve_alias),
-        .field_access => |loc| try server.gotoDefinitionFieldAccess(handle, source_index, loc, resolve_alias),
-        .import_string_literal => try server.gotoDefinitionString(source_index, handle),
-        .label => try server.gotoDefinitionLabel(source_index, handle),
-        else => null,
-    };
-
-    const location = maybe_location orelse return try respondGeneric(writer, id, null_result_response);
-
-    try send(writer, server.arena.allocator(), types.Response{
-        .id = id,
-        .result = .{ .Location = location },
-    });
-}
-
-fn gotoDefinitionHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.GotoDefinition) !void {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    try server.gotoHandler(writer, id, req, true);
-}
-
-fn gotoDeclarationHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.GotoDeclaration) !void {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    try server.gotoHandler(writer, id, req, false);
-}
-
-fn hoverHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.Hover) !void {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
-        return try respondGeneric(writer, id, null_result_response);
-    };
-
-    if (req.params.position.character == 0) return try respondGeneric(writer, id, null_result_response);
-
-    const source_index = offsets.positionToIndex(handle.text, req.params.position, server.offset_encoding);
-    const pos_context = try analysis.getPositionContext(server.arena.allocator(), handle.text, source_index);
-
-    const maybe_hover = switch (pos_context) {
-        .builtin => try server.hoverDefinitionBuiltin(source_index, handle),
-        .var_access => try server.hoverDefinitionGlobal(source_index, handle),
-        .field_access => |loc| try server.hoverDefinitionFieldAccess(handle, source_index, loc),
-        .label => try server.hoverDefinitionLabel(source_index, handle),
-        else => null,
-    };
-
-    const hover = maybe_hover orelse return try respondGeneric(writer, id, null_result_response);
-    // TODO: Figure out a better solution for comptime interpreter diags
-    try server.publishDiagnostics(writer, handle.*);
-
-    try send(writer, server.arena.allocator(), types.Response{
-        .id = id,
-        .result = .{ .Hover = hover },
-    });
-}
-
-fn documentSymbolsHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.DocumentSymbols) !void {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
-        return try respondGeneric(writer, id, null_result_response);
-    };
-    try server.documentSymbol(writer, id, handle);
-}
-
-fn formattingHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.Formatting) !void {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
-        return try respondGeneric(writer, id, null_result_response);
-    };
-
-    if (handle.tree.errors.len != 0) {
-        return try respondGeneric(writer, id, null_result_response);
-    }
-
-    const formatted = try handle.tree.render(server.allocator);
-    defer server.allocator.free(formatted);
-
-    if (std.mem.eql(u8, handle.text, formatted)) return try respondGeneric(writer, id, null_result_response);
-
-    // avoid computing diffs if the output is small
-    const maybe_edits = if (formatted.len <= 512) null else diff.edits(server.arena.allocator(), handle.text, formatted) catch null;
-
-    const edits = maybe_edits orelse {
-        // if edits have been computed we replace the entire file with the formatted text
-        return try send(writer, server.arena.allocator(), types.Response{
-            .id = id,
-            .result = .{
-                .TextEdits = &[1]types.TextEdit{.{
-                    .range = offsets.locToRange(handle.text, .{ .start = 0, .end = handle.text.len }, server.offset_encoding),
-                    .newText = formatted,
-                }},
-            },
-        });
-    };
-
-    // Convert from `[]diff.Edit` to `[]types.TextEdit`
-    var text_edits = try std.ArrayListUnmanaged(types.TextEdit).initCapacity(server.arena.allocator(), edits.items.len);
-    for (edits.items) |edit| {
-        text_edits.appendAssumeCapacity(.{
-            .range = edit.range,
-            .newText = edit.newText.items,
-        });
-    }
-
-    return try send(
-        writer,
-        server.arena.allocator(),
-        types.Response{
-            .id = id,
-            .result = .{ .TextEdits = text_edits.items },
-        },
-    );
-}
-
-fn didChangeConfigurationHandler(server: *Server, writer: anytype, id: types.RequestId, req: configuration.DidChangeConfigurationParams) !void {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    _ = id;
-
-    // NOTE: VS Code seems to always respond with null
-    if (req.settings) |cfg| {
-        inline for (std.meta.fields(configuration.Configuration)) |field| {
-            if (@field(cfg, field.name)) |value| {
-                blk: {
-                    if (@TypeOf(value) == []const u8) {
-                        if (value.len == 0) {
-                            break :blk;
-                        }
-                    }
-                    @field(server.config, field.name) = if (@TypeOf(value) == []const u8) try server.allocator.dupe(u8, value) else value;
-                    log.debug("setting configuration option '{s}' to '{any}'", .{ field.name, value });
-                }
-            }
-        }
-
-        try configuration.configChanged(server.config, server.allocator, null);
-    } else if (server.client_capabilities.supports_configuration) {
-        try server.requestConfiguration(writer);
-    }
-}
-
-fn renameHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.Rename) !void {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    try generalReferencesHandler(server, writer, id, .{ .rename = req });
-}
-
-fn referencesHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.References) !void {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    try generalReferencesHandler(server, writer, id, .{ .references = req });
-}
-
-fn documentHighlightHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.DocumentHighlight) !void {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    try generalReferencesHandler(server, writer, id, .{ .highlight = req });
-}
-
-const GeneralReferencesRequest = union(enum) {
-    rename: requests.Rename,
-    references: requests.References,
-    highlight: requests.DocumentHighlight,
-
-    pub fn uri(self: @This()) []const u8 {
-        return switch (self) {
-            .rename => |rename| rename.params.textDocument.uri,
-            .references => |ref| ref.params.textDocument.uri,
-            .highlight => |highlight| highlight.params.textDocument.uri,
-        };
-    }
-
-    pub fn position(self: @This()) types.Position {
-        return switch (self) {
-            .rename => |rename| rename.params.position,
-            .references => |ref| ref.params.position,
-            .highlight => |highlight| highlight.params.position,
-        };
-    }
-};
-
-fn generalReferencesHandler(server: *Server, writer: anytype, id: types.RequestId, req: GeneralReferencesRequest) !void {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    const allocator = server.arena.allocator();
-
-    const handle = server.document_store.getHandle(req.uri()) orelse {
-        return try respondGeneric(writer, id, null_result_response);
-    };
-
-    if (req.position().character <= 0) return try respondGeneric(writer, id, null_result_response);
-
-    const source_index = offsets.positionToIndex(handle.text, req.position(), server.offset_encoding);
-    const pos_context = try analysis.getPositionContext(server.arena.allocator(), handle.text, source_index);
-
-    const decl = switch (pos_context) {
-        .var_access => try server.getSymbolGlobal(source_index, handle),
-        .field_access => |range| try server.getSymbolFieldAccess(handle, source_index, range),
-        .label => try getLabelGlobal(source_index, handle),
-        else => null,
-    } orelse return try respondGeneric(writer, id, null_result_response);
-
-    const include_decl = switch (req) {
-        .references => |ref| ref.params.context.includeDeclaration,
-        else => true,
-    };
-
-    const locations = if (pos_context == .label)
-        try references.labelReferences(allocator, decl, server.offset_encoding, include_decl)
-    else
-        try references.symbolReferences(
-            &server.arena,
-            &server.document_store,
-            decl,
-            server.offset_encoding,
-            include_decl,
-            server.config.skip_std_references,
-            req != .highlight, // scan the entire workspace except for highlight
-        );
-
-    const result: types.ResponseParams = switch (req) {
-        .rename => |rename| blk: {
-            var edits: types.WorkspaceEdit = .{ .changes = .{} };
-            for (locations.items) |loc| {
-                const gop = try edits.changes.getOrPutValue(allocator, loc.uri, .{});
-                try gop.value_ptr.append(allocator, .{
-                    .range = loc.range,
-                    .newText = rename.params.newName,
-                });
-            }
-            break :blk .{ .WorkspaceEdit = edits };
-        },
-        .references => .{ .Locations = locations.items },
-        .highlight => blk: {
-            var highlights = try std.ArrayListUnmanaged(types.DocumentHighlight).initCapacity(allocator, locations.items.len);
-            const uri = handle.uri;
-            for (locations.items) |loc| {
-                if (!std.mem.eql(u8, loc.uri, uri)) continue;
-                highlights.appendAssumeCapacity(.{
-                    .range = loc.range,
-                    .kind = .Text,
-                });
-            }
-            break :blk .{ .DocumentHighlight = highlights.items };
-        },
-    };
-
-    try send(writer, allocator, types.Response{
-        .id = id,
-        .result = result,
-    });
-}
-
-fn isPositionBefore(lhs: types.Position, rhs: types.Position) bool {
-    if (lhs.line == rhs.line) {
-        return lhs.character < rhs.character;
-    } else {
-        return lhs.line < rhs.line;
-    }
-}
-
-fn inlayHintHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.InlayHint) !void {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    if (!server.config.enable_inlay_hints) return try respondGeneric(writer, id, null_result_response);
-
-    const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
-        return try respondGeneric(writer, id, null_result_response);
-    };
-
-    const hover_kind: types.MarkupContent.Kind = if (server.client_capabilities.hover_supports_md) .Markdown else .PlainText;
-
-    // TODO cache hints per document
-    // because the function could be stored in a different document
-    // we need the regenerate hints when the document itself or its imported documents change
-    // with caching it would also make sense to generate all hints instead of only the visible ones
-    const hints = try inlay_hints.writeRangeInlayHint(
-        &server.arena,
-        server.config.*,
-        &server.document_store,
-        handle,
-        req.params.range,
-        hover_kind,
-        server.offset_encoding,
-    );
-    defer {
-        for (hints) |hint| {
-            server.allocator.free(hint.tooltip.value);
-        }
-        server.allocator.free(hints);
-    }
-
-    // and only convert and return all hints in range for every request
-    var visible_hints = hints;
-
-    // small_hints should roughly be sorted by position
-    for (hints) |hint, i| {
-        if (isPositionBefore(hint.position, req.params.range.start)) continue;
-        visible_hints = hints[i..];
-        break;
-    }
-    for (visible_hints) |hint, i| {
-        if (isPositionBefore(hint.position, req.params.range.end)) continue;
-        visible_hints = visible_hints[0..i];
-        break;
-    }
-
-    return try send(writer, server.arena.allocator(), types.Response{
-        .id = id,
-        .result = .{ .InlayHint = visible_hints },
-    });
-}
-
-fn codeActionHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.CodeAction) !void {
-    const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
-        return try respondGeneric(writer, id, null_result_response);
-    };
-
-    const allocator = server.arena.allocator();
-
-    var builder = code_actions.Builder{
-        .arena = &server.arena,
-        .document_store = &server.document_store,
-        .handle = handle,
-        .offset_encoding = server.offset_encoding,
-    };
-
-    var actions = std.ArrayListUnmanaged(types.CodeAction){};
-
-    for (req.params.context.diagnostics) |diagnostic| {
-        try builder.generateCodeAction(diagnostic, &actions);
-    }
-
-    for (actions.items) |*action| {
-        // TODO query whether SourceFixAll is supported by the server
-        if (action.kind == .SourceFixAll) action.kind = .QuickFix;
-    }
-
-    return try send(writer, allocator, types.Response{
-        .id = id,
-        .result = .{ .CodeAction = actions.items },
-    });
-}
-
-fn foldingRangeHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.FoldingRange) !void {
-    const Token = std.zig.Token;
-    const Node = Ast.Node;
-    const allocator = server.arena.allocator();
-    const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
-        log.warn("Trying to get folding ranges of non existent document {s}", .{req.params.textDocument.uri});
-        return try respondGeneric(writer, id, null_result_response);
-    };
-
-    const helper = struct {
-        const Inclusivity = enum { inclusive, exclusive };
-        /// Returns true if added.
-        fn maybeAddTokRange(
-            p_ranges: *std.ArrayList(types.FoldingRange),
-            tree: Ast,
-            start: Ast.TokenIndex,
-            end: Ast.TokenIndex,
-            end_reach: Inclusivity,
-        ) std.mem.Allocator.Error!bool {
-            const can_add = start < end and !tree.tokensOnSameLine(start, end);
-            if (can_add) {
-                try addTokRange(p_ranges, tree, start, end, end_reach);
-            }
-            return can_add;
-        }
-        fn addTokRange(
-            p_ranges: *std.ArrayList(types.FoldingRange),
-            tree: Ast,
-            start: Ast.TokenIndex,
-            end: Ast.TokenIndex,
-            end_reach: Inclusivity,
-        ) std.mem.Allocator.Error!void {
-            std.debug.assert(!std.debug.runtime_safety or !tree.tokensOnSameLine(start, end));
-
-            const start_loc = tree.tokenLocation(0, start);
-            const end_loc_rel = tree.tokenLocation(@intCast(Ast.ByteOffset, start_loc.line_start), end);
-            std.debug.assert(end_loc_rel.line != 0);
-
-            try p_ranges.append(.{
-                .startLine = start_loc.line,
-                .endLine = (start_loc.line + end_loc_rel.line) -
-                    @boolToInt(end_reach == .exclusive),
-            });
-        }
-    };
-
-    // Used to store the result
-    var ranges = std.ArrayList(types.FoldingRange).init(allocator);
-
-    const token_tags: []const Token.Tag = handle.tree.tokens.items(.tag);
-    const node_tags: []const Node.Tag = handle.tree.nodes.items(.tag);
-
-    if (token_tags.len == 0) return;
-    if (token_tags[0] == .container_doc_comment) {
-        var tok: Ast.TokenIndex = 1;
-        while (tok < token_tags.len) : (tok += 1) {
-            if (token_tags[tok] != .container_doc_comment) {
-                break;
-            }
-        }
-        if (tok > 1) { // each container doc comment has its own line, so each one counts for a line
-            try ranges.append(.{
-                .startLine = 0,
-                .endLine = tok - 1,
-            });
-        }
-    }
-
-    for (node_tags) |node_tag, i| {
-        const node = @intCast(Node.Index, i);
-
-        switch (node_tag) {
-            // only fold the expression pertaining to the if statement, and the else statement, each respectively.
-            // TODO: Should folding multiline condition expressions also be supported? Ditto for the other control flow structures.
-            .@"if", .if_simple => {
-                const if_full = ast.ifFull(handle.tree, node);
-
-                const start_tok_1 = handle.tree.lastToken(if_full.ast.cond_expr);
-                const end_tok_1 = handle.tree.lastToken(if_full.ast.then_expr);
-                _ = try helper.maybeAddTokRange(&ranges, handle.tree, start_tok_1, end_tok_1, .inclusive);
-
-                if (if_full.ast.else_expr == 0) continue;
-
-                const start_tok_2 = if_full.else_token;
-                const end_tok_2 = handle.tree.lastToken(if_full.ast.else_expr);
-
-                _ = try helper.maybeAddTokRange(&ranges, handle.tree, start_tok_2, end_tok_2, .inclusive);
-            },
-
-            // same as if/else
-            .@"for",
-            .for_simple,
-            .@"while",
-            .while_cont,
-            .while_simple,
-            => {
-                const loop_full = ast.whileAst(handle.tree, node).?;
-
-                const start_tok_1 = handle.tree.lastToken(loop_full.ast.cond_expr);
-                const end_tok_1 = handle.tree.lastToken(loop_full.ast.then_expr);
-                _ = try helper.maybeAddTokRange(&ranges, handle.tree, start_tok_1, end_tok_1, .inclusive);
-
-                if (loop_full.ast.else_expr == 0) continue;
-
-                const start_tok_2 = loop_full.else_token;
-                const end_tok_2 = handle.tree.lastToken(loop_full.ast.else_expr);
-                _ = try helper.maybeAddTokRange(&ranges, handle.tree, start_tok_2, end_tok_2, .inclusive);
-            },
-
-            .global_var_decl,
-            .simple_var_decl,
-            .aligned_var_decl,
-            .container_field_init,
-            .container_field_align,
-            .container_field,
-            .fn_proto,
-            .fn_proto_multi,
-            .fn_proto_one,
-            .fn_proto_simple,
-            .fn_decl,
-            => decl_node_blk: {
-                doc_comment_range: {
-                    const first_tok: Ast.TokenIndex = handle.tree.firstToken(node);
-                    if (first_tok == 0) break :doc_comment_range;
-
-                    const end_doc_tok = first_tok - 1;
-                    if (token_tags[end_doc_tok] != .doc_comment) break :doc_comment_range;
-
-                    var start_doc_tok = end_doc_tok;
-                    while (start_doc_tok != 0) {
-                        if (token_tags[start_doc_tok - 1] != .doc_comment) break;
-                        start_doc_tok -= 1;
-                    }
-
-                    _ = try helper.maybeAddTokRange(&ranges, handle.tree, start_doc_tok, end_doc_tok, .inclusive);
-                }
-
-                // Function prototype folding regions
-                var fn_proto_buffer: [1]Node.Index = undefined;
-                const fn_proto = ast.fnProto(handle.tree, node, fn_proto_buffer[0..]) orelse
-                    break :decl_node_blk;
-
-                const list_start_tok: Ast.TokenIndex = fn_proto.lparen;
-                const list_end_tok: Ast.TokenIndex = handle.tree.lastToken(fn_proto.ast.proto_node);
-
-                if (handle.tree.tokensOnSameLine(list_start_tok, list_end_tok)) break :decl_node_blk;
-                try ranges.ensureUnusedCapacity(1 + fn_proto.ast.params.len); // best guess, doesn't include anytype params
-                helper.addTokRange(&ranges, handle.tree, list_start_tok, list_end_tok, .exclusive) catch |err| switch (err) {
-                    error.OutOfMemory => unreachable,
-                };
-
-                var it = fn_proto.iterate(&handle.tree);
-                while (ast.nextFnParam(&it)) |param| {
-                    const doc_start_tok = param.first_doc_comment orelse continue;
-                    var doc_end_tok = doc_start_tok;
-
-                    while (token_tags[doc_end_tok + 1] == .doc_comment)
-                        doc_end_tok += 1;
-
-                    _ = try helper.maybeAddTokRange(&ranges, handle.tree, doc_start_tok, doc_end_tok, .inclusive);
-                }
-            },
-
-            .@"catch",
-            .@"orelse",
-            .multiline_string_literal,
-            // TODO: Similar to condition expressions in control flow structures, should folding multiline grouped expressions be enabled?
-            // .grouped_expression,
-            => {
-                const start_tok = handle.tree.firstToken(node);
-                const end_tok = handle.tree.lastToken(node);
-                _ = try helper.maybeAddTokRange(&ranges, handle.tree, start_tok, end_tok, .inclusive);
-            },
-
-            // most other trivial cases can go through here.
-            else => {
-                switch (node_tag) {
-                    .array_init,
-                    .array_init_one,
-                    .array_init_dot_two,
-                    .array_init_one_comma,
-                    .array_init_dot_two_comma,
-                    .array_init_dot,
-                    .array_init_dot_comma,
-                    .array_init_comma,
-
-                    .struct_init,
-                    .struct_init_one,
-                    .struct_init_one_comma,
-                    .struct_init_dot_two,
-                    .struct_init_dot_two_comma,
-                    .struct_init_dot,
-                    .struct_init_dot_comma,
-                    .struct_init_comma,
-
-                    .@"switch",
-                    .switch_comma,
-                    => {},
-
-                    else => disallow_fold: {
-                        if (ast.isBlock(handle.tree, node))
-                            break :disallow_fold;
-
-                        if (ast.isCall(handle.tree, node))
-                            break :disallow_fold;
-
-                        if (ast.isBuiltinCall(handle.tree, node))
-                            break :disallow_fold;
-
-                        if (ast.isContainer(handle.tree, node) and node_tag != .root)
-                            break :disallow_fold;
-
-                        continue; // no conditions met, continue iterating without adding this potential folding range
-                    },
-                }
-
-                const start_tok = handle.tree.firstToken(node);
-                const end_tok = handle.tree.lastToken(node);
-                _ = try helper.maybeAddTokRange(&ranges, handle.tree, start_tok, end_tok, .exclusive);
-            },
-        }
-    }
-
-    // Iterate over the source code and look for code regions with #region #endregion
-    {
-        // We add opened folding regions to a stack as we go and pop one off when we find a closing brace.
-        // As an optimization we start with a reasonable capacity, which should work well in most cases since
-        // people will almost never have nesting that deep.
-        var stack = try std.ArrayList(usize).initCapacity(allocator, 10);
-
-        var i: usize = 0;
-        var lines_count: usize = 0;
-        while (i < handle.tree.source.len) : (i += 1) {
-            const slice = handle.tree.source[i..];
-
-            if (slice[0] == '\n') {
-                lines_count += 1;
-            }
-
-            if (std.mem.startsWith(u8, slice, "//#region")) {
-                try stack.append(lines_count);
-            }
-
-            if (std.mem.startsWith(u8, slice, "//#endregion") and stack.items.len > 0) {
-                const start_line = stack.pop();
-                const end_line = lines_count;
-
-                // Add brace pairs but discard those from the same line, no need to waste memory on them
-                if (start_line != end_line) {
-                    try ranges.append(.{
-                        .startLine = start_line,
-                        .endLine = end_line,
-                    });
-                }
-            }
-        }
-    }
-
-    try send(writer, allocator, types.Response{
-        .id = id,
-        .result = .{ .FoldingRange = ranges.items },
-    });
-}
-
-fn selectionRangeHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.SelectionRange) !void {
-    const allocator = server.arena.allocator();
-    const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
-        log.warn("Trying to get selection range of non existent document {s}", .{req.params.textDocument.uri});
-        return try respondGeneric(writer, id, null_result_response);
-    };
-
-    // For each of the input positons, we need to compute the stack of AST
-    // nodes/ranges which contain the position. At the moment, we do this in a
-    // super inefficient way, by iterationg _all_ nodes, selecting the ones that
-    // contain position, and then sorting.
-    //
-    // A faster algorithm would be to walk the tree starting from the root,
-    // descending into the child containing the position at every step.
-    var result = try allocator.alloc(*types.SelectionRange, req.params.positions.len);
-    var locs = try std.ArrayListUnmanaged(offsets.Loc).initCapacity(allocator, 32);
-    for (req.params.positions) |position, position_index| {
-        const index = offsets.positionToIndex(handle.text, position, server.offset_encoding);
-
-        locs.clearRetainingCapacity();
-        for (handle.tree.nodes.items(.data)) |_, i| {
-            const node = @intCast(u32, i);
-            const loc = offsets.nodeToLoc(handle.tree, node);
-            if (loc.start <= index and index <= loc.end) {
-                (try locs.addOne(allocator)).* = loc;
-            }
-        }
-
-        std.sort.sort(offsets.Loc, locs.items, {}, shorterLocsFirst);
-        {
-            var i: usize = 0;
-            while (i + 1 < locs.items.len) {
-                if (std.meta.eql(locs.items[i], locs.items[i + 1])) {
-                    _ = locs.orderedRemove(i);
-                } else {
-                    i += 1;
-                }
-            }
-        }
-
-        var selection_ranges = try allocator.alloc(types.SelectionRange, locs.items.len);
-        for (selection_ranges) |*range, i| {
-            range.range = offsets.locToRange(handle.text, locs.items[i], server.offset_encoding);
-            range.parent = if (i + 1 < selection_ranges.len) &selection_ranges[i + 1] else null;
-        }
-        result[position_index] = &selection_ranges[0];
-    }
-
-    try send(writer, allocator, types.Response{
-        .id = id,
-        .result = .{ .SelectionRange = result },
-    });
-}
-
-fn shorterLocsFirst(_: void, lhs: offsets.Loc, rhs: offsets.Loc) bool {
-    return (lhs.end - lhs.start) < (rhs.end - rhs.start);
-}
-
-// Needed for the hack seen below.
-fn extractErr(val: anytype) anyerror {
-    val catch |e| return e;
-    return error.HackDone;
-}
-
-pub fn processJsonRpc(server: *Server, writer: anytype, json: []const u8) !void {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    server.arena = std.heap.ArenaAllocator.init(server.allocator);
-    defer server.arena.deinit();
-
-    var parser = std.json.Parser.init(server.arena.allocator(), false);
-    defer parser.deinit();
-
-    var tree = try parser.parse(json);
-    defer tree.deinit();
-
-    const id = if (tree.root.Object.get("id")) |id| switch (id) {
-        .Integer => |int| types.RequestId{ .Integer = @intCast(i32, int) },
-        .String => |str| types.RequestId{ .String = str },
-        else => types.RequestId{ .Integer = 0 },
-    } else types.RequestId{ .Integer = 0 };
-
-    if (id == .String and std.mem.startsWith(u8, id.String, "register"))
-        return;
-    if (id == .String and std.mem.startsWith(u8, id.String, "apply_edit"))
-        return;
-    if (id == .String and std.mem.eql(u8, id.String, "i_haz_configuration")) {
-        log.info("Setting configuration...", .{});
-
-        // NOTE: Does this work with other editors?
-        // Yes, String ids are officially supported by LSP
-        // but not sure how standard this "standard" really is
-
-        if (tree.root.Object.get("error")) |_| return;
-        const result = tree.root.Object.get("result").?.Array;
-
-        inline for (std.meta.fields(Config)) |field, index| {
-            const value = result.items[index];
-            const ft = if (@typeInfo(field.type) == .Optional)
-                @typeInfo(field.type).Optional.child
-            else
-                field.type;
-            const ti = @typeInfo(ft);
-
-            if (value != .Null) {
-                const new_value: field.type = switch (ft) {
-                    []const u8 => switch (value) {
-                        .String => |s| blk: {
-                            if (s.len == 0) {
-                                if (field.type == ?[]const u8) {
-                                    break :blk null;
-                                } else {
-                                    break :blk s;
-                                }
-                            }
-                            var nv = try server.allocator.dupe(u8, s);
-                            if (@field(server.config, field.name)) |prev_val| server.allocator.free(prev_val);
-                            break :blk nv;
-                        }, // TODO: Allocation model? (same with didChangeConfiguration); imo this isn't *that* bad but still
-                        else => @panic("Invalid configuration value"), // TODO: Handle this
-                    },
-                    else => switch (ti) {
-                        .Int => switch (value) {
-                            .Integer => |s| std.math.cast(ft, s) orelse @panic("Invalid configuration value"),
-                            else => @panic("Invalid configuration value"), // TODO: Handle this
-                        },
-                        .Bool => switch (value) {
-                            .Bool => |b| b,
-                            else => @panic("Invalid configuration value"), // TODO: Handle this
-                        },
-                        else => @compileError("Not implemented for " ++ @typeName(ft)),
-                    },
-                };
-                log.debug("setting configuration option '{s}' to '{any}'", .{ field.name, new_value });
-                @field(server.config, field.name) = new_value;
-            }
-        }
-
-        try configuration.configChanged(server.config, server.allocator, null);
-
-        return;
-    }
-
-    const method = tree.root.Object.get("method").?.String;
-
-    switch (server.status) {
-        .uninitialized => blk: {
-            if (std.mem.eql(u8, method, "initialize")) break :blk;
-            if (std.mem.eql(u8, method, "exit")) break :blk;
-
-            // ignore notifications
-            if (tree.root.Object.get("id") == null) break :blk;
-
-            return try sendErrorResponse(writer, server.arena.allocator(), .ServerNotInitialized, "server received a request before being initialized!");
-        },
-        .initializing => blk: {
-            if (std.mem.eql(u8, method, "initialized")) break :blk;
-            if (std.mem.eql(u8, method, "$/progress")) break :blk;
-
-            return try sendErrorResponse(writer, server.arena.allocator(), .InvalidRequest, "server received a request during initialization!");
-        },
-        .initialized => {},
-        .shutdown => return try sendErrorResponse(writer, server.arena.allocator(), .InvalidRequest, "server received a request after shutdown!"),
-    }
-
-    const start_time = std.time.milliTimestamp();
-    defer {
-        // makes `zig build test` look nice
-        if (!zig_builtin.is_test and !std.mem.eql(u8, method, "shutdown")) {
-            const end_time = std.time.milliTimestamp();
-            log.debug("Took {}ms to process method {s}", .{ end_time - start_time, method });
-        }
-    }
-
-    const method_map = .{
-        .{ "initialized", void, initializedHandler },
-        .{ "initialize", requests.Initialize, initializeHandler },
-        .{ "shutdown", void, shutdownHandler },
-        .{ "exit", void, exitHandler },
-        .{ "$/cancelRequest", void, cancelRequestHandler },
-        .{ "textDocument/didOpen", requests.OpenDocument, openDocumentHandler },
-        .{ "textDocument/didChange", requests.ChangeDocument, changeDocumentHandler },
-        .{ "textDocument/didSave", requests.SaveDocument, saveDocumentHandler },
-        .{ "textDocument/didClose", requests.CloseDocument, closeDocumentHandler },
-        .{ "textDocument/willSave", requests.WillSave, willSaveHandler },
-        .{ "textDocument/willSaveWaitUntil", requests.WillSave, willSaveWaitUntilHandler },
-        .{ "textDocument/semanticTokens/full", requests.SemanticTokensFull, semanticTokensFullHandler },
-        .{ "textDocument/inlayHint", requests.InlayHint, inlayHintHandler },
-        .{ "textDocument/completion", requests.Completion, completionHandler },
-        .{ "textDocument/signatureHelp", requests.SignatureHelp, signatureHelpHandler },
-        .{ "textDocument/definition", requests.GotoDefinition, gotoDefinitionHandler },
-        .{ "textDocument/typeDefinition", requests.GotoDefinition, gotoDefinitionHandler },
-        .{ "textDocument/implementation", requests.GotoDefinition, gotoDefinitionHandler },
-        .{ "textDocument/declaration", requests.GotoDeclaration, gotoDeclarationHandler },
-        .{ "textDocument/hover", requests.Hover, hoverHandler },
-        .{ "textDocument/documentSymbol", requests.DocumentSymbols, documentSymbolsHandler },
-        .{ "textDocument/formatting", requests.Formatting, formattingHandler },
-        .{ "textDocument/rename", requests.Rename, renameHandler },
-        .{ "textDocument/references", requests.References, referencesHandler },
-        .{ "textDocument/documentHighlight", requests.DocumentHighlight, documentHighlightHandler },
-        .{ "textDocument/codeAction", requests.CodeAction, codeActionHandler },
-        .{ "workspace/didChangeConfiguration", configuration.DidChangeConfigurationParams, didChangeConfigurationHandler },
-        .{ "textDocument/foldingRange", requests.FoldingRange, foldingRangeHandler },
-        .{ "textDocument/selectionRange", requests.SelectionRange, selectionRangeHandler },
-    };
-
-    inline for (method_map) |method_info| {
-        if (std.mem.eql(u8, method, method_info[0])) {
-            if (method_info.len == 1) {
-                log.warn("method not mapped: {s}", .{method});
-            } else if (method_info[1] != void) {
-                const ReqT = method_info[1];
-                const request_obj = try requests.fromDynamicTree(&server.arena, ReqT, tree.root);
-                method_info[2](server, writer, id, request_obj) catch |err| {
-                    log.err("failed to process request: {s}", .{@errorName(err)});
-                };
-            } else {
-                method_info[2](server, writer, id) catch |err| {
-                    log.err("failed to process request: {s}", .{@errorName(err)});
-                };
-            }
-            return;
-        }
-    }
-
-    // Boolean value is true if the method is a request (and thus the client
-    // needs a response) or false if the method is a notification (in which
-    // case it should be silently ignored)
-    const unimplemented_map = std.ComptimeStringMap(bool, .{
-        .{ "textDocument/codeLens", true },
-        .{ "textDocument/documentLink", true },
-        .{ "textDocument/rangeFormatting", true },
-        .{ "textDocument/onTypeFormatting", true },
-        .{ "textDocument/prepareRename", true },
-        .{ "textDocument/selectionRange", true },
-        .{ "textDocument/semanticTokens/range", true },
-        .{ "workspace/didChangeWorkspaceFolders", false },
-    });
-
-    if (unimplemented_map.get(method)) |request| {
-        // TODO: Unimplemented methods, implement them and add them to server capabilities.
-        if (request) {
-            return try respondGeneric(writer, id, null_result_response);
-        }
-
-        log.debug("Notification method {s} is not implemented", .{method});
-        return;
-    }
-    if (tree.root.Object.get("id")) |_| {
-        return try respondGeneric(writer, id, not_implemented_response);
-    }
-    log.debug("Method without return value not implemented: {s}", .{method});
-}
+//     try send(writer, allocator, types.Request{
+//         .id = .{ .String = "apply_edit" },
+//         .method = "workspace/applyEdit",
+//         .params = .{
+//             .ApplyEdit = .{
+//                 .label = "autofix",
+//                 .edit = workspace_edit,
+//             },
+//         },
+//     });
+// }
+
+// fn closeDocumentHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.CloseDocument) error{}!void {
+//     const tracy_zone = tracy.trace(@src());
+//     defer tracy_zone.end();
+
+//     _ = id;
+//     _ = writer;
+//     server.document_store.closeDocument(req.params.textDocument.uri);
+// }
+
+// fn willSaveHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.WillSave) !void {
+//     const tracy_zone = tracy.trace(@src());
+//     defer tracy_zone.end();
+
+//     if (server.client_capabilities.supports_will_save_wait_until) return;
+//     try willSaveWaitUntilHandler(server, writer, id, req);
+// }
+
+// fn willSaveWaitUntilHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.WillSave) !void {
+//     const tracy_zone = tracy.trace(@src());
+//     defer tracy_zone.end();
+
+//     const allocator = server.arena.allocator();
+
+//     b: {
+//         if (!server.config.enable_ast_check_diagnostics or !server.config.enable_autofix)
+//             break :b;
+
+//         const uri = req.params.textDocument.uri;
+
+//         const handle = server.document_store.getHandle(uri) orelse break :b;
+//         if (handle.tree.errors.len != 0) break :b;
+
+//         var text_edits = try server.autofix(allocator, handle);
+
+//         return try send(writer, allocator, types.Response{
+//             .id = id,
+//             .result = .{ .TextEdits = try text_edits.toOwnedSlice(allocator) },
+//         });
+//     }
+
+//     return try send(writer, allocator, types.Response{
+//         .id = id,
+//         .result = .{ .TextEdits = &.{} },
+//     });
+// }
+
+// fn semanticTokensFullHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.SemanticTokensFull) !void {
+//     const tracy_zone = tracy.trace(@src());
+//     defer tracy_zone.end();
+
+//     if (!server.config.enable_semantic_tokens) return try respondGeneric(writer, id, no_semantic_tokens_response);
+
+//     const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
+//         return try respondGeneric(writer, id, no_semantic_tokens_response);
+//     };
+
+//     const token_array = try semantic_tokens.writeAllSemanticTokens(&server.arena, &server.document_store, handle, server.offset_encoding);
+
+//     return try send(writer, server.arena.allocator(), types.Response{
+//         .id = id,
+//         .result = .{ .SemanticTokensFull = .{ .data = token_array } },
+//     });
+// }
+
+// fn completionHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.Completion) !void {
+//     const tracy_zone = tracy.trace(@src());
+//     defer tracy_zone.end();
+
+//     const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
+//         return try respondGeneric(writer, id, no_completions_response);
+//     };
+
+//     if (req.params.position.character == 0) {
+//         var completions = std.ArrayListUnmanaged(types.CompletionItem){};
+//         try populateSnippedCompletions(server.arena.allocator(), &completions, &snipped_data.top_level_decl_data, server.config.*, null);
+
+//         return try send(writer, server.arena.allocator(), types.Response{
+//             .id = id,
+//             .result = .{
+//                 .CompletionList = .{ .isIncomplete = false, .items = completions.items },
+//             },
+//         });
+//     }
+
+//     const source_index = offsets.positionToIndex(handle.text, req.params.position, server.offset_encoding);
+//     const pos_context = try analysis.getPositionContext(server.arena.allocator(), handle.text, source_index);
+
+//     const maybe_completions = switch (pos_context) {
+//         .builtin => server.builtin_completions.items,
+//         .var_access, .empty => try server.completeGlobal(source_index, handle),
+//         .field_access => |loc| try server.completeFieldAccess(handle, source_index, loc),
+//         .global_error_set => try server.completeError(handle),
+//         .enum_literal => try server.completeDot(handle),
+//         .label => try server.completeLabel(source_index, handle),
+//         .import_string_literal, .embedfile_string_literal => |loc| blk: {
+//             if (!server.config.enable_import_embedfile_argument_completions) break :blk null;
+
+//             const completing = offsets.locToSlice(handle.tree.source, loc);
+//             const is_import = pos_context == .import_string_literal;
+//             break :blk try completeFileSystemStringLiteral(server.arena.allocator(), &server.document_store, handle, completing, is_import);
+//         },
+//         else => null,
+//     };
+
+//     const completions = maybe_completions orelse return try respondGeneric(writer, id, no_completions_response);
+
+//     // truncate completions
+//     for (completions) |*item| {
+//         if (item.detail) |det| {
+//             if (det.len > server.config.max_detail_length) {
+//                 item.detail = det[0..server.config.max_detail_length];
+//             }
+//         }
+//     }
+
+//     // TODO: config for sorting rule?
+//     for (completions) |*c| {
+//         const prefix = kindToSortScore(c.kind) orelse continue;
+
+//         c.sortText = try std.fmt.allocPrint(server.arena.allocator(), "{s}{s}", .{ prefix, c.label });
+//     }
+
+//     try send(writer, server.arena.allocator(), types.Response{
+//         .id = id,
+//         .result = .{
+//             .CompletionList = .{
+//                 .isIncomplete = false,
+//                 .items = completions,
+//             },
+//         },
+//     });
+// }
+
+// fn signatureHelpHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.SignatureHelp) !void {
+//     const tracy_zone = tracy.trace(@src());
+//     defer tracy_zone.end();
+
+//     const getSignatureInfo = @import("signature_help.zig").getSignatureInfo;
+//     const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
+//         return try respondGeneric(writer, id, no_signatures_response);
+//     };
+
+//     if (req.params.position.character == 0)
+//         return try respondGeneric(writer, id, no_signatures_response);
+
+//     const source_index = offsets.positionToIndex(handle.text, req.params.position, server.offset_encoding);
+//     if (try getSignatureInfo(
+//         &server.document_store,
+//         &server.arena,
+//         handle,
+//         source_index,
+//         data,
+//     )) |sig_info| {
+//         return try send(writer, server.arena.allocator(), types.Response{
+//             .id = id,
+//             .result = .{
+//                 .SignatureHelp = .{
+//                     .signatures = &[1]types.SignatureInformation{sig_info},
+//                     .activeSignature = 0,
+//                     .activeParameter = sig_info.activeParameter,
+//                 },
+//             },
+//         });
+//     }
+//     return try respondGeneric(writer, id, no_signatures_response);
+// }
+
+// fn gotoHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.GotoDefinition, resolve_alias: bool) !void {
+//     const tracy_zone = tracy.trace(@src());
+//     defer tracy_zone.end();
+
+//     const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
+//         return try respondGeneric(writer, id, null_result_response);
+//     };
+
+//     if (req.params.position.character == 0) return try respondGeneric(writer, id, null_result_response);
+
+//     const source_index = offsets.positionToIndex(handle.text, req.params.position, server.offset_encoding);
+//     const pos_context = try analysis.getPositionContext(server.arena.allocator(), handle.text, source_index);
+
+//     const maybe_location = switch (pos_context) {
+//         .var_access => try server.gotoDefinitionGlobal(source_index, handle, resolve_alias),
+//         .field_access => |loc| try server.gotoDefinitionFieldAccess(handle, source_index, loc, resolve_alias),
+//         .import_string_literal => try server.gotoDefinitionString(source_index, handle),
+//         .label => try server.gotoDefinitionLabel(source_index, handle),
+//         else => null,
+//     };
+
+//     const location = maybe_location orelse return try respondGeneric(writer, id, null_result_response);
+
+//     try send(writer, server.arena.allocator(), types.Response{
+//         .id = id,
+//         .result = .{ .Location = location },
+//     });
+// }
+
+// fn gotoDefinitionHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.GotoDefinition) !void {
+//     const tracy_zone = tracy.trace(@src());
+//     defer tracy_zone.end();
+
+//     try server.gotoHandler(writer, id, req, true);
+// }
+
+// fn gotoDeclarationHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.GotoDeclaration) !void {
+//     const tracy_zone = tracy.trace(@src());
+//     defer tracy_zone.end();
+
+//     try server.gotoHandler(writer, id, req, false);
+// }
+
+// fn hoverHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.Hover) !void {
+//     const tracy_zone = tracy.trace(@src());
+//     defer tracy_zone.end();
+
+//     const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
+//         return try respondGeneric(writer, id, null_result_response);
+//     };
+
+//     if (req.params.position.character == 0) return try respondGeneric(writer, id, null_result_response);
+
+//     const source_index = offsets.positionToIndex(handle.text, req.params.position, server.offset_encoding);
+//     const pos_context = try analysis.getPositionContext(server.arena.allocator(), handle.text, source_index);
+
+//     const maybe_hover = switch (pos_context) {
+//         .builtin => try server.hoverDefinitionBuiltin(source_index, handle),
+//         .var_access => try server.hoverDefinitionGlobal(source_index, handle),
+//         .field_access => |loc| try server.hoverDefinitionFieldAccess(handle, source_index, loc),
+//         .label => try server.hoverDefinitionLabel(source_index, handle),
+//         else => null,
+//     };
+
+//     const hover = maybe_hover orelse return try respondGeneric(writer, id, null_result_response);
+//     // TODO: Figure out a better solution for comptime interpreter diags
+//     try server.publishDiagnostics(writer, handle.*);
+
+//     try send(writer, server.arena.allocator(), types.Response{
+//         .id = id,
+//         .result = .{ .Hover = hover },
+//     });
+// }
+
+// fn documentSymbolsHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.DocumentSymbols) !void {
+//     const tracy_zone = tracy.trace(@src());
+//     defer tracy_zone.end();
+
+//     const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
+//         return try respondGeneric(writer, id, null_result_response);
+//     };
+//     try server.documentSymbol(writer, id, handle);
+// }
+
+// fn formattingHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.Formatting) !void {
+//     const tracy_zone = tracy.trace(@src());
+//     defer tracy_zone.end();
+
+//     const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
+//         return try respondGeneric(writer, id, null_result_response);
+//     };
+
+//     if (handle.tree.errors.len != 0) {
+//         return try respondGeneric(writer, id, null_result_response);
+//     }
+
+//     const formatted = try handle.tree.render(server.allocator);
+//     defer server.allocator.free(formatted);
+
+//     if (std.mem.eql(u8, handle.text, formatted)) return try respondGeneric(writer, id, null_result_response);
+
+//     // avoid computing diffs if the output is small
+//     const maybe_edits = if (formatted.len <= 512) null else diff.edits(server.arena.allocator(), handle.text, formatted) catch null;
+
+//     const edits = maybe_edits orelse {
+//         // if edits have been computed we replace the entire file with the formatted text
+//         return try send(writer, server.arena.allocator(), types.Response{
+//             .id = id,
+//             .result = .{
+//                 .TextEdits = &[1]types.TextEdit{.{
+//                     .range = offsets.locToRange(handle.text, .{ .start = 0, .end = handle.text.len }, server.offset_encoding),
+//                     .newText = formatted,
+//                 }},
+//             },
+//         });
+//     };
+
+//     // Convert from `[]diff.Edit` to `[]types.TextEdit`
+//     var text_edits = try std.ArrayListUnmanaged(types.TextEdit).initCapacity(server.arena.allocator(), edits.items.len);
+//     for (edits.items) |edit| {
+//         text_edits.appendAssumeCapacity(.{
+//             .range = edit.range,
+//             .newText = edit.newText.items,
+//         });
+//     }
+
+//     return try send(
+//         writer,
+//         server.arena.allocator(),
+//         types.Response{
+//             .id = id,
+//             .result = .{ .TextEdits = text_edits.items },
+//         },
+//     );
+// }
+
+// fn didChangeConfigurationHandler(server: *Server, writer: anytype, id: types.RequestId, req: configuration.DidChangeConfigurationParams) !void {
+//     const tracy_zone = tracy.trace(@src());
+//     defer tracy_zone.end();
+
+//     _ = id;
+
+//     // NOTE: VS Code seems to always respond with null
+//     if (req.settings) |cfg| {
+//         inline for (std.meta.fields(configuration.Configuration)) |field| {
+//             if (@field(cfg, field.name)) |value| {
+//                 blk: {
+//                     if (@TypeOf(value) == []const u8) {
+//                         if (value.len == 0) {
+//                             break :blk;
+//                         }
+//                     }
+//                     @field(server.config, field.name) = if (@TypeOf(value) == []const u8) try server.allocator.dupe(u8, value) else value;
+//                     log.debug("setting configuration option '{s}' to '{any}'", .{ field.name, value });
+//                 }
+//             }
+//         }
+
+//         try configuration.configChanged(server.config, server.allocator, null);
+//     } else if (server.client_capabilities.supports_configuration) {
+//         try server.requestConfiguration(writer);
+//     }
+// }
+
+// fn renameHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.Rename) !void {
+//     const tracy_zone = tracy.trace(@src());
+//     defer tracy_zone.end();
+
+//     try generalReferencesHandler(server, writer, id, .{ .rename = req });
+// }
+
+// fn referencesHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.References) !void {
+//     const tracy_zone = tracy.trace(@src());
+//     defer tracy_zone.end();
+
+//     try generalReferencesHandler(server, writer, id, .{ .references = req });
+// }
+
+// fn documentHighlightHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.DocumentHighlight) !void {
+//     const tracy_zone = tracy.trace(@src());
+//     defer tracy_zone.end();
+
+//     try generalReferencesHandler(server, writer, id, .{ .highlight = req });
+// }
+
+// const GeneralReferencesRequest = union(enum) {
+//     rename: requests.Rename,
+//     references: requests.References,
+//     highlight: requests.DocumentHighlight,
+
+//     pub fn uri(self: @This()) []const u8 {
+//         return switch (self) {
+//             .rename => |rename| rename.params.textDocument.uri,
+//             .references => |ref| ref.params.textDocument.uri,
+//             .highlight => |highlight| highlight.params.textDocument.uri,
+//         };
+//     }
+
+//     pub fn position(self: @This()) types.Position {
+//         return switch (self) {
+//             .rename => |rename| rename.params.position,
+//             .references => |ref| ref.params.position,
+//             .highlight => |highlight| highlight.params.position,
+//         };
+//     }
+// };
+
+// fn generalReferencesHandler(server: *Server, writer: anytype, id: types.RequestId, req: GeneralReferencesRequest) !void {
+//     const tracy_zone = tracy.trace(@src());
+//     defer tracy_zone.end();
+
+//     const allocator = server.arena.allocator();
+
+//     const handle = server.document_store.getHandle(req.uri()) orelse {
+//         return try respondGeneric(writer, id, null_result_response);
+//     };
+
+//     if (req.position().character <= 0) return try respondGeneric(writer, id, null_result_response);
+
+//     const source_index = offsets.positionToIndex(handle.text, req.position(), server.offset_encoding);
+//     const pos_context = try analysis.getPositionContext(server.arena.allocator(), handle.text, source_index);
+
+//     const decl = switch (pos_context) {
+//         .var_access => try server.getSymbolGlobal(source_index, handle),
+//         .field_access => |range| try server.getSymbolFieldAccess(handle, source_index, range),
+//         .label => try getLabelGlobal(source_index, handle),
+//         else => null,
+//     } orelse return try respondGeneric(writer, id, null_result_response);
+
+//     const include_decl = switch (req) {
+//         .references => |ref| ref.params.context.includeDeclaration,
+//         else => true,
+//     };
+
+//     const locations = if (pos_context == .label)
+//         try references.labelReferences(allocator, decl, server.offset_encoding, include_decl)
+//     else
+//         try references.symbolReferences(
+//             &server.arena,
+//             &server.document_store,
+//             decl,
+//             server.offset_encoding,
+//             include_decl,
+//             server.config.skip_std_references,
+//             req != .highlight, // scan the entire workspace except for highlight
+//         );
+
+//     const result: types.ResponseParams = switch (req) {
+//         .rename => |rename| blk: {
+//             var edits: types.WorkspaceEdit = .{ .changes = .{} };
+//             for (locations.items) |loc| {
+//                 const gop = try edits.changes.getOrPutValue(allocator, loc.uri, .{});
+//                 try gop.value_ptr.append(allocator, .{
+//                     .range = loc.range,
+//                     .newText = rename.params.newName,
+//                 });
+//             }
+//             break :blk .{ .WorkspaceEdit = edits };
+//         },
+//         .references => .{ .Locations = locations.items },
+//         .highlight => blk: {
+//             var highlights = try std.ArrayListUnmanaged(types.DocumentHighlight).initCapacity(allocator, locations.items.len);
+//             const uri = handle.uri;
+//             for (locations.items) |loc| {
+//                 if (!std.mem.eql(u8, loc.uri, uri)) continue;
+//                 highlights.appendAssumeCapacity(.{
+//                     .range = loc.range,
+//                     .kind = .Text,
+//                 });
+//             }
+//             break :blk .{ .DocumentHighlight = highlights.items };
+//         },
+//     };
+
+//     try send(writer, allocator, types.Response{
+//         .id = id,
+//         .result = result,
+//     });
+// }
+
+// fn isPositionBefore(lhs: types.Position, rhs: types.Position) bool {
+//     if (lhs.line == rhs.line) {
+//         return lhs.character < rhs.character;
+//     } else {
+//         return lhs.line < rhs.line;
+//     }
+// }
+
+// fn inlayHintHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.InlayHint) !void {
+//     const tracy_zone = tracy.trace(@src());
+//     defer tracy_zone.end();
+
+//     if (!server.config.enable_inlay_hints) return try respondGeneric(writer, id, null_result_response);
+
+//     const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
+//         return try respondGeneric(writer, id, null_result_response);
+//     };
+
+//     const hover_kind: types.MarkupContent.Kind = if (server.client_capabilities.hover_supports_md) .Markdown else .PlainText;
+
+//     // TODO cache hints per document
+//     // because the function could be stored in a different document
+//     // we need the regenerate hints when the document itself or its imported documents change
+//     // with caching it would also make sense to generate all hints instead of only the visible ones
+//     const hints = try inlay_hints.writeRangeInlayHint(
+//         &server.arena,
+//         server.config.*,
+//         &server.document_store,
+//         handle,
+//         req.params.range,
+//         hover_kind,
+//         server.offset_encoding,
+//     );
+//     defer {
+//         for (hints) |hint| {
+//             server.allocator.free(hint.tooltip.value);
+//         }
+//         server.allocator.free(hints);
+//     }
+
+//     // and only convert and return all hints in range for every request
+//     var visible_hints = hints;
+
+//     // small_hints should roughly be sorted by position
+//     for (hints) |hint, i| {
+//         if (isPositionBefore(hint.position, req.params.range.start)) continue;
+//         visible_hints = hints[i..];
+//         break;
+//     }
+//     for (visible_hints) |hint, i| {
+//         if (isPositionBefore(hint.position, req.params.range.end)) continue;
+//         visible_hints = visible_hints[0..i];
+//         break;
+//     }
+
+//     return try send(writer, server.arena.allocator(), types.Response{
+//         .id = id,
+//         .result = .{ .InlayHint = visible_hints },
+//     });
+// }
+
+// fn codeActionHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.CodeAction) !void {
+//     const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
+//         return try respondGeneric(writer, id, null_result_response);
+//     };
+
+//     const allocator = server.arena.allocator();
+
+//     var builder = code_actions.Builder{
+//         .arena = &server.arena,
+//         .document_store = &server.document_store,
+//         .handle = handle,
+//         .offset_encoding = server.offset_encoding,
+//     };
+
+//     var actions = std.ArrayListUnmanaged(types.CodeAction){};
+
+//     for (req.params.context.diagnostics) |diagnostic| {
+//         try builder.generateCodeAction(diagnostic, &actions);
+//     }
+
+//     for (actions.items) |*action| {
+//         // TODO query whether SourceFixAll is supported by the server
+//         if (action.kind == .SourceFixAll) action.kind = .QuickFix;
+//     }
+
+//     return try send(writer, allocator, types.Response{
+//         .id = id,
+//         .result = .{ .CodeAction = actions.items },
+//     });
+// }
+
+// fn foldingRangeHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.FoldingRange) !void {
+//     const Token = std.zig.Token;
+//     const Node = Ast.Node;
+//     const allocator = server.arena.allocator();
+//     const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
+//         log.warn("Trying to get folding ranges of non existent document {s}", .{req.params.textDocument.uri});
+//         return try respondGeneric(writer, id, null_result_response);
+//     };
+
+//     const helper = struct {
+//         const Inclusivity = enum { inclusive, exclusive };
+//         /// Returns true if added.
+//         fn maybeAddTokRange(
+//             p_ranges: *std.ArrayList(types.FoldingRange),
+//             tree: Ast,
+//             start: Ast.TokenIndex,
+//             end: Ast.TokenIndex,
+//             end_reach: Inclusivity,
+//         ) std.mem.Allocator.Error!bool {
+//             const can_add = start < end and !tree.tokensOnSameLine(start, end);
+//             if (can_add) {
+//                 try addTokRange(p_ranges, tree, start, end, end_reach);
+//             }
+//             return can_add;
+//         }
+//         fn addTokRange(
+//             p_ranges: *std.ArrayList(types.FoldingRange),
+//             tree: Ast,
+//             start: Ast.TokenIndex,
+//             end: Ast.TokenIndex,
+//             end_reach: Inclusivity,
+//         ) std.mem.Allocator.Error!void {
+//             std.debug.assert(!std.debug.runtime_safety or !tree.tokensOnSameLine(start, end));
+
+//             const start_loc = tree.tokenLocation(0, start);
+//             const end_loc_rel = tree.tokenLocation(@intCast(Ast.ByteOffset, start_loc.line_start), end);
+//             std.debug.assert(end_loc_rel.line != 0);
+
+//             try p_ranges.append(.{
+//                 .startLine = start_loc.line,
+//                 .endLine = (start_loc.line + end_loc_rel.line) -
+//                     @boolToInt(end_reach == .exclusive),
+//             });
+//         }
+//     };
+
+//     // Used to store the result
+//     var ranges = std.ArrayList(types.FoldingRange).init(allocator);
+
+//     const token_tags: []const Token.Tag = handle.tree.tokens.items(.tag);
+//     const node_tags: []const Node.Tag = handle.tree.nodes.items(.tag);
+
+//     if (token_tags.len == 0) return;
+//     if (token_tags[0] == .container_doc_comment) {
+//         var tok: Ast.TokenIndex = 1;
+//         while (tok < token_tags.len) : (tok += 1) {
+//             if (token_tags[tok] != .container_doc_comment) {
+//                 break;
+//             }
+//         }
+//         if (tok > 1) { // each container doc comment has its own line, so each one counts for a line
+//             try ranges.append(.{
+//                 .startLine = 0,
+//                 .endLine = tok - 1,
+//             });
+//         }
+//     }
+
+//     for (node_tags) |node_tag, i| {
+//         const node = @intCast(Node.Index, i);
+
+//         switch (node_tag) {
+//             // only fold the expression pertaining to the if statement, and the else statement, each respectively.
+//             // TODO: Should folding multiline condition expressions also be supported? Ditto for the other control flow structures.
+//             .@"if", .if_simple => {
+//                 const if_full = ast.ifFull(handle.tree, node);
+
+//                 const start_tok_1 = handle.tree.lastToken(if_full.ast.cond_expr);
+//                 const end_tok_1 = handle.tree.lastToken(if_full.ast.then_expr);
+//                 _ = try helper.maybeAddTokRange(&ranges, handle.tree, start_tok_1, end_tok_1, .inclusive);
+
+//                 if (if_full.ast.else_expr == 0) continue;
+
+//                 const start_tok_2 = if_full.else_token;
+//                 const end_tok_2 = handle.tree.lastToken(if_full.ast.else_expr);
+
+//                 _ = try helper.maybeAddTokRange(&ranges, handle.tree, start_tok_2, end_tok_2, .inclusive);
+//             },
+
+//             // same as if/else
+//             .@"for",
+//             .for_simple,
+//             .@"while",
+//             .while_cont,
+//             .while_simple,
+//             => {
+//                 const loop_full = ast.whileAst(handle.tree, node).?;
+
+//                 const start_tok_1 = handle.tree.lastToken(loop_full.ast.cond_expr);
+//                 const end_tok_1 = handle.tree.lastToken(loop_full.ast.then_expr);
+//                 _ = try helper.maybeAddTokRange(&ranges, handle.tree, start_tok_1, end_tok_1, .inclusive);
+
+//                 if (loop_full.ast.else_expr == 0) continue;
+
+//                 const start_tok_2 = loop_full.else_token;
+//                 const end_tok_2 = handle.tree.lastToken(loop_full.ast.else_expr);
+//                 _ = try helper.maybeAddTokRange(&ranges, handle.tree, start_tok_2, end_tok_2, .inclusive);
+//             },
+
+//             .global_var_decl,
+//             .simple_var_decl,
+//             .aligned_var_decl,
+//             .container_field_init,
+//             .container_field_align,
+//             .container_field,
+//             .fn_proto,
+//             .fn_proto_multi,
+//             .fn_proto_one,
+//             .fn_proto_simple,
+//             .fn_decl,
+//             => decl_node_blk: {
+//                 doc_comment_range: {
+//                     const first_tok: Ast.TokenIndex = handle.tree.firstToken(node);
+//                     if (first_tok == 0) break :doc_comment_range;
+
+//                     const end_doc_tok = first_tok - 1;
+//                     if (token_tags[end_doc_tok] != .doc_comment) break :doc_comment_range;
+
+//                     var start_doc_tok = end_doc_tok;
+//                     while (start_doc_tok != 0) {
+//                         if (token_tags[start_doc_tok - 1] != .doc_comment) break;
+//                         start_doc_tok -= 1;
+//                     }
+
+//                     _ = try helper.maybeAddTokRange(&ranges, handle.tree, start_doc_tok, end_doc_tok, .inclusive);
+//                 }
+
+//                 // Function prototype folding regions
+//                 var fn_proto_buffer: [1]Node.Index = undefined;
+//                 const fn_proto = ast.fnProto(handle.tree, node, fn_proto_buffer[0..]) orelse
+//                     break :decl_node_blk;
+
+//                 const list_start_tok: Ast.TokenIndex = fn_proto.lparen;
+//                 const list_end_tok: Ast.TokenIndex = handle.tree.lastToken(fn_proto.ast.proto_node);
+
+//                 if (handle.tree.tokensOnSameLine(list_start_tok, list_end_tok)) break :decl_node_blk;
+//                 try ranges.ensureUnusedCapacity(1 + fn_proto.ast.params.len); // best guess, doesn't include anytype params
+//                 helper.addTokRange(&ranges, handle.tree, list_start_tok, list_end_tok, .exclusive) catch |err| switch (err) {
+//                     error.OutOfMemory => unreachable,
+//                 };
+
+//                 var it = fn_proto.iterate(&handle.tree);
+//                 while (ast.nextFnParam(&it)) |param| {
+//                     const doc_start_tok = param.first_doc_comment orelse continue;
+//                     var doc_end_tok = doc_start_tok;
+
+//                     while (token_tags[doc_end_tok + 1] == .doc_comment)
+//                         doc_end_tok += 1;
+
+//                     _ = try helper.maybeAddTokRange(&ranges, handle.tree, doc_start_tok, doc_end_tok, .inclusive);
+//                 }
+//             },
+
+//             .@"catch",
+//             .@"orelse",
+//             .multiline_string_literal,
+//             // TODO: Similar to condition expressions in control flow structures, should folding multiline grouped expressions be enabled?
+//             // .grouped_expression,
+//             => {
+//                 const start_tok = handle.tree.firstToken(node);
+//                 const end_tok = handle.tree.lastToken(node);
+//                 _ = try helper.maybeAddTokRange(&ranges, handle.tree, start_tok, end_tok, .inclusive);
+//             },
+
+//             // most other trivial cases can go through here.
+//             else => {
+//                 switch (node_tag) {
+//                     .array_init,
+//                     .array_init_one,
+//                     .array_init_dot_two,
+//                     .array_init_one_comma,
+//                     .array_init_dot_two_comma,
+//                     .array_init_dot,
+//                     .array_init_dot_comma,
+//                     .array_init_comma,
+
+//                     .struct_init,
+//                     .struct_init_one,
+//                     .struct_init_one_comma,
+//                     .struct_init_dot_two,
+//                     .struct_init_dot_two_comma,
+//                     .struct_init_dot,
+//                     .struct_init_dot_comma,
+//                     .struct_init_comma,
+
+//                     .@"switch",
+//                     .switch_comma,
+//                     => {},
+
+//                     else => disallow_fold: {
+//                         if (ast.isBlock(handle.tree, node))
+//                             break :disallow_fold;
+
+//                         if (ast.isCall(handle.tree, node))
+//                             break :disallow_fold;
+
+//                         if (ast.isBuiltinCall(handle.tree, node))
+//                             break :disallow_fold;
+
+//                         if (ast.isContainer(handle.tree, node) and node_tag != .root)
+//                             break :disallow_fold;
+
+//                         continue; // no conditions met, continue iterating without adding this potential folding range
+//                     },
+//                 }
+
+//                 const start_tok = handle.tree.firstToken(node);
+//                 const end_tok = handle.tree.lastToken(node);
+//                 _ = try helper.maybeAddTokRange(&ranges, handle.tree, start_tok, end_tok, .exclusive);
+//             },
+//         }
+//     }
+
+//     // Iterate over the source code and look for code regions with #region #endregion
+//     {
+//         // We add opened folding regions to a stack as we go and pop one off when we find a closing brace.
+//         // As an optimization we start with a reasonable capacity, which should work well in most cases since
+//         // people will almost never have nesting that deep.
+//         var stack = try std.ArrayList(usize).initCapacity(allocator, 10);
+
+//         var i: usize = 0;
+//         var lines_count: usize = 0;
+//         while (i < handle.tree.source.len) : (i += 1) {
+//             const slice = handle.tree.source[i..];
+
+//             if (slice[0] == '\n') {
+//                 lines_count += 1;
+//             }
+
+//             if (std.mem.startsWith(u8, slice, "//#region")) {
+//                 try stack.append(lines_count);
+//             }
+
+//             if (std.mem.startsWith(u8, slice, "//#endregion") and stack.items.len > 0) {
+//                 const start_line = stack.pop();
+//                 const end_line = lines_count;
+
+//                 // Add brace pairs but discard those from the same line, no need to waste memory on them
+//                 if (start_line != end_line) {
+//                     try ranges.append(.{
+//                         .startLine = start_line,
+//                         .endLine = end_line,
+//                     });
+//                 }
+//             }
+//         }
+//     }
+
+//     try send(writer, allocator, types.Response{
+//         .id = id,
+//         .result = .{ .FoldingRange = ranges.items },
+//     });
+// }
+
+// fn selectionRangeHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.SelectionRange) !void {
+//     const allocator = server.arena.allocator();
+//     const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
+//         log.warn("Trying to get selection range of non existent document {s}", .{req.params.textDocument.uri});
+//         return try respondGeneric(writer, id, null_result_response);
+//     };
+
+//     // For each of the input positons, we need to compute the stack of AST
+//     // nodes/ranges which contain the position. At the moment, we do this in a
+//     // super inefficient way, by iterationg _all_ nodes, selecting the ones that
+//     // contain position, and then sorting.
+//     //
+//     // A faster algorithm would be to walk the tree starting from the root,
+//     // descending into the child containing the position at every step.
+//     var result = try allocator.alloc(*types.SelectionRange, req.params.positions.len);
+//     var locs = try std.ArrayListUnmanaged(offsets.Loc).initCapacity(allocator, 32);
+//     for (req.params.positions) |position, position_index| {
+//         const index = offsets.positionToIndex(handle.text, position, server.offset_encoding);
+
+//         locs.clearRetainingCapacity();
+//         for (handle.tree.nodes.items(.data)) |_, i| {
+//             const node = @intCast(u32, i);
+//             const loc = offsets.nodeToLoc(handle.tree, node);
+//             if (loc.start <= index and index <= loc.end) {
+//                 (try locs.addOne(allocator)).* = loc;
+//             }
+//         }
+
+//         std.sort.sort(offsets.Loc, locs.items, {}, shorterLocsFirst);
+//         {
+//             var i: usize = 0;
+//             while (i + 1 < locs.items.len) {
+//                 if (std.meta.eql(locs.items[i], locs.items[i + 1])) {
+//                     _ = locs.orderedRemove(i);
+//                 } else {
+//                     i += 1;
+//                 }
+//             }
+//         }
+
+//         var selection_ranges = try allocator.alloc(types.SelectionRange, locs.items.len);
+//         for (selection_ranges) |*range, i| {
+//             range.range = offsets.locToRange(handle.text, locs.items[i], server.offset_encoding);
+//             range.parent = if (i + 1 < selection_ranges.len) &selection_ranges[i + 1] else null;
+//         }
+//         result[position_index] = &selection_ranges[0];
+//     }
+
+//     try send(writer, allocator, types.Response{
+//         .id = id,
+//         .result = .{ .SelectionRange = result },
+//     });
+// }
+
+// fn shorterLocsFirst(_: void, lhs: offsets.Loc, rhs: offsets.Loc) bool {
+//     return (lhs.end - lhs.start) < (rhs.end - rhs.start);
+// }
 
 pub fn init(
     allocator: std.mem.Allocator,
@@ -2947,8 +2753,10 @@ pub fn init(
             .insertText = if (config.include_at_in_builtins) insert_text else insert_text[1..],
             .insertTextFormat = if (config.enable_snippets) .Snippet else .PlainText,
             .documentation = .{
-                .kind = .Markdown,
-                .value = builtin.documentation,
+                .MarkupContent = .{
+                    .kind = .markdown,
+                    .value = builtin.documentation,
+                },
             },
         });
     }

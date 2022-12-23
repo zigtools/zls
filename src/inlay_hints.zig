@@ -2,13 +2,15 @@ const std = @import("std");
 const zig_builtin = @import("builtin");
 const DocumentStore = @import("DocumentStore.zig");
 const analysis = @import("analysis.zig");
-const types = @import("types.zig");
 const offsets = @import("offsets.zig");
 const Ast = std.zig.Ast;
 const log = std.log.scoped(.inlay_hint);
 const ast = @import("ast.zig");
 const data = @import("data/data.zig");
 const Config = @import("Config.zig");
+
+const lsp = @import("zig-lsp");
+const types = @import("lsp-types");
 
 /// don't show inlay hints for the given builtin functions
 /// builtins with one parameter are skipped automatically

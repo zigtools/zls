@@ -90,7 +90,16 @@ pub fn build(b: *std.build.Builder) !void {
 
     const KNOWN_FOLDERS_DEFAULT_PATH = "src/known-folders/known-folders.zig";
     const known_folders_path = b.option([]const u8, "known-folders", "Path to known-folders package (default: " ++ KNOWN_FOLDERS_DEFAULT_PATH ++ ")") orelse KNOWN_FOLDERS_DEFAULT_PATH;
+
     exe.addPackage(.{ .name = "known-folders", .source = .{ .path = known_folders_path } });
+
+    const tres = std.build.Pkg{
+        .name = "tres",
+        .source = .{ .path = "src/zig-lsp/libs/tres/tres.zig" },
+    };
+
+    exe.addPackage(.{ .name = "zig-lsp", .source = .{ .path = "src/zig-lsp/src/connection.zig" }, .dependencies = &.{tres} });
+    exe.addPackage(.{ .name = "lsp-types", .source = .{ .path = "src/zig-lsp/src/lsp.zig" }, .dependencies = &.{tres} });
 
     if (enable_tracy) {
         const client_cpp = "src/tracy/TracyClient.cpp";

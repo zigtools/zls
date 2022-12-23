@@ -1,11 +1,13 @@
 const std = @import("std");
 const DocumentStore = @import("DocumentStore.zig");
 const Ast = std.zig.Ast;
-const types = @import("types.zig");
 const offsets = @import("offsets.zig");
 const log = std.log.scoped(.analysis);
 const ast = @import("ast.zig");
 const ComptimeInterpreter = @import("ComptimeInterpreter.zig");
+
+const lsp = @import("zig-lsp");
+const types = @import("lsp-types");
 
 var using_trail: std.ArrayList([*]const u8) = undefined;
 var resolve_trail: std.ArrayList(NodeWithHandle) = undefined;
@@ -2422,11 +2424,11 @@ pub const DocumentScope = struct {
         }
         self.scopes.deinit(allocator);
         for (self.error_completions.entries.items(.key)) |item| {
-            if (item.documentation) |doc| allocator.free(doc.value);
+            if (item.documentation) |doc| allocator.free(doc.MarkupContent.value);
         }
         self.error_completions.deinit(allocator);
         for (self.enum_completions.entries.items(.key)) |item| {
-            if (item.documentation) |doc| allocator.free(doc.value);
+            if (item.documentation) |doc| allocator.free(doc.MarkupContent.value);
         }
         self.enum_completions.deinit(allocator);
     }

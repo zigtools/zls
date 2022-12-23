@@ -1,7 +1,8 @@
 const std = @import("std");
-const types = @import("types.zig");
-const requests = @import("requests.zig");
 const offsets = @import("offsets.zig");
+
+const lsp = @import("zig-lsp");
+const types = @import("lsp-types");
 
 pub const Error = error{ OutOfMemory, InvalidRange };
 
@@ -357,7 +358,7 @@ fn char_pos_to_range(
 pub fn applyTextEdits(
     allocator: std.mem.Allocator,
     text: []const u8,
-    content_changes: []const requests.TextDocumentContentChangeEvent,
+    content_changes: []const types.TextDocumentContentChangeEvent,
     encoding: offsets.Encoding,
 ) ![:0]const u8 {
     var last_full_text_change: ?usize = null;

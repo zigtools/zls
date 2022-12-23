@@ -5,9 +5,10 @@ const DocumentStore = @import("DocumentStore.zig");
 const analysis = @import("analysis.zig");
 const ast = @import("ast.zig");
 
-const types = @import("types.zig");
-const requests = @import("requests.zig");
 const offsets = @import("offsets.zig");
+
+const lsp = @import("zig-lsp");
+const types = @import("lsp-types");
 
 pub const Builder = struct {
     arena: *std.heap.ArenaAllocator,

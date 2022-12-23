@@ -7,7 +7,7 @@ const Config = @import("Config.zig");
 const configuration = @import("configuration.zig");
 const Server = @import("Server.zig");
 const setup = @import("setup.zig");
-const readRequestHeader = @import("header.zig").readRequestHeader;
+const lsp = @import("zig-lsp");
 
 const logger = std.log.scoped(.main);
 
@@ -32,24 +32,6 @@ pub fn log(
 
     std.debug.print("{s:<5}: ({s:^6}): ", .{ level_txt, @tagName(scope) });
     std.debug.print(format ++ "\n", args);
-}
-
-fn loop(server: *Server) !void {
-    var reader = std.io.getStdIn().reader();
-
-    while (true) {
-        const headers = readRequestHeader(server.allocator, reader) catch |err| {
-            logger.err("{s}; exiting!", .{@errorName(err)});
-            return;
-        };
-        const buffer = try server.allocator.alloc(u8, headers.content_length);
-        defer server.allocator.free(buffer);
-
-        try reader.readNoEof(buffer);
-
-        const writer = std.io.getStdOut().writer();
-        try server.processJsonRpc(writer, buffer);
-    }
 }
 
 const ConfigWithPath = struct {
@@ -278,5 +260,12 @@ pub fn main() !void {
     );
     defer server.deinit();
 
-    try loop(&server);
+    var conn = Server.Connection.init(allocator, std.io.getStdIn().reader(), std.io.getStdOut().writer(), &server);
+    while (true) {
+        var arena = std.heap.ArenaAllocator.init(allocator);
+        defer arena.deinit();
+        server.arena = arena;
+
+        try conn.accept();
+    }
 }

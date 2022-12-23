@@ -1,7 +1,5 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const types = @import("types.zig");
-const requests = @import("requests.zig");
 const URI = @import("uri.zig");
 const analysis = @import("analysis.zig");
 const offsets = @import("offsets.zig");
@@ -13,6 +11,9 @@ const tracy = @import("tracy.zig");
 const Config = @import("Config.zig");
 const translate_c = @import("translate_c.zig");
 const ComptimeInterpreter = @import("ComptimeInterpreter.zig");
+
+const lsp = @import("zig-lsp");
+const types = @import("lsp-types");
 
 const DocumentStore = @This();
 

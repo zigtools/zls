@@ -1,4 +1,4 @@
-const types = @import("../types.zig");
+const types = @import("lsp-types");
 
 pub const Snipped = struct {
     label: []const u8,
