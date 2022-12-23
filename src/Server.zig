@@ -1279,7 +1279,7 @@ fn formatDetailledLabel(item: *types.CompletionItem, alloc: std.mem.Allocator) !
         var s: usize = std.mem.indexOf(u8, it, "(") orelse return;
         var e: usize = std.mem.lastIndexOf(u8, it, ")") orelse return;
         if (e < s) {
-            log.warn("something wrong when trying to build label detail for {s} kind: {}", .{ it, item.kind });
+            log.warn("something wrong when trying to build label detail for {s} kind: {}", .{ it, item.kind.? });
             return;
         }
 
@@ -1600,44 +1600,63 @@ pub fn initialize(conn: *Connection, _: types.RequestId, params: types.Initializ
 
     server.status = .initializing;
 
-    if (params.capabilities.workspace) |workspace| {
-        server.client_capabilities.supports_configuration = workspace.configuration orelse false;
-        if (workspace.didChangeConfiguration != null and workspace.didChangeConfiguration.?.dynamicRegistration.?) {
-            try registerCapability(conn, "workspace/didChangeConfiguration");
-        }
-    }
+    // if (params.capabilities.workspace) |workspace| {
+    //     server.client_capabilities.supports_configuration = workspace.configuration orelse false;
+    //     if (workspace.didChangeConfiguration != null and workspace.didChangeConfiguration.?.dynamicRegistration.?) {
+    //         try registerCapability(conn, "workspace/didChangeConfiguration");
+    //     }
+    // }
 
     log.info("zls initializing", .{});
     log.info("{}", .{server.client_capabilities});
     log.info("Using offset encoding: {s}", .{std.meta.tagName(server.offset_encoding)});
 
-    if (server.config.zig_exe_path) |exe_path| blk: {
-        // TODO avoid having to call getZigEnv twice
-        // once in init and here
-        const env = configuration.getZigEnv(server.allocator, exe_path) orelse break :blk;
-        defer std.json.parseFree(configuration.Env, env, .{ .allocator = server.allocator });
+    // if (server.config.zig_exe_path) |exe_path| blk: {
+    //     // TODO avoid having to call getZigEnv twice
+    //     // once in init and here
+    //     const env = configuration.getZigEnv(server.allocator, exe_path) orelse break :blk;
+    //     defer std.json.parseFree(configuration.Env, env, .{ .allocator = server.allocator });
 
-        const zig_exe_version = std.SemanticVersion.parse(env.version) catch break :blk;
+    //     const zig_exe_version = std.SemanticVersion.parse(env.version) catch break :blk;
 
-        if (zig_builtin.zig_version.order(zig_exe_version) == .gt) {
-            const version_mismatch_message = try std.fmt.allocPrint(
-                server.arena.allocator(),
-                "ZLS was built with Zig {}, but your Zig version is {s}. Update Zig to avoid unexpected behavior.",
-                .{ zig_builtin.zig_version, env.version },
-            );
-            try showMessage(conn, .Warning, version_mismatch_message);
+    //     if (zig_builtin.zig_version.order(zig_exe_version) == .gt) {
+    //         const version_mismatch_message = try std.fmt.allocPrint(
+    //             server.arena.allocator(),
+    //             "ZLS was built with Zig {}, but your Zig version is {s}. Update Zig to avoid unexpected behavior.",
+    //             .{ zig_builtin.zig_version, env.version },
+    //         );
+    //         try showMessage(conn, .Warning, version_mismatch_message);
+    //     }
+    // } else {
+    //     try showMessage(
+    //         conn,
+    //         .Warning,
+    //         \\ZLS failed to find Zig. Please add Zig to your PATH or set the zig_exe_path config option in your zls.json.
+    //         ,
+    //     );
+    // }
+
+    // TODO: Fix by constifying lsp bindings properly
+    var chars = std.ArrayListUnmanaged([]const u8){};
+    try chars.appendSlice(server.arena.allocator(), &.{ "(", ",", ".", ":", "@", "]" });
+
+    const token_types = comptime block: {
+        const tokTypeFields = std.meta.fields(semantic_tokens.TokenType);
+        var names: [tokTypeFields.len][]const u8 = undefined;
+        for (tokTypeFields) |field, i| {
+            names[i] = field.name;
         }
-    } else {
-        try showMessage(
-            conn,
-            .Warning,
-            \\ZLS failed to find Zig. Please add Zig to your PATH or set the zig_exe_path config option in your zls.json.
-            ,
-        );
-    }
+        break :block &names;
+    };
 
-    var tc = [_][]const u8{"("};
-    var rt = [_][]const u8{","};
+    const token_modifiers = comptime block: {
+        const tokModFields = std.meta.fields(semantic_tokens.TokenModifiers);
+        var names: [tokModFields.len][]const u8 = undefined;
+        for (tokModFields) |field, i| {
+            names[i] = field.name;
+        }
+        break :block &names;
+    };
 
     return types.InitializeResult{
         .serverInfo = .{
@@ -1647,66 +1666,66 @@ pub fn initialize(conn: *Connection, _: types.RequestId, params: types.Initializ
         .capabilities = .{
             .positionEncoding = server.offset_encoding,
             .signatureHelpProvider = .{
-                .triggerCharacters = &tc,
-                .retriggerCharacters = &rt,
+                .triggerCharacters = chars.items[0..1],
+                .retriggerCharacters = chars.items[1..2],
             },
             .textDocumentSync = .{
                 .TextDocumentSyncOptions = .{
                     .openClose = true,
                     .change = .Incremental,
-                    .save = true,
+                    .save = .{ .bool = true },
                     .willSave = true,
                     .willSaveWaitUntil = true,
                 },
             },
-            .renameProvider = true,
-            .completionProvider = .{ .resolveProvider = false, .triggerCharacters = &[_][]const u8{ ".", ":", "@", "]" }, .completionItem = .{ .labelDetailsSupport = true } },
-            .documentHighlightProvider = true,
-            .hoverProvider = true,
-            .codeActionProvider = true,
-            .declarationProvider = true,
-            .definitionProvider = true,
-            .typeDefinitionProvider = true,
-            .implementationProvider = false,
-            .referencesProvider = true,
-            .documentSymbolProvider = true,
-            .colorProvider = false,
-            .documentFormattingProvider = true,
-            .documentRangeFormattingProvider = false,
-            .foldingRangeProvider = true,
-            .selectionRangeProvider = true,
-            .workspaceSymbolProvider = false,
-            .rangeProvider = false,
-            .documentProvider = true,
+            .notebookDocumentSync = .{
+                .NotebookDocumentSyncOptions = .{
+                    .notebookSelector = &.{},
+                },
+            },
+            .renameProvider = .{ .bool = true },
+            .completionProvider = .{ .resolveProvider = false, .triggerCharacters = chars.items[2..], .completionItem = .{ .labelDetailsSupport = true } },
+            .documentHighlightProvider = .{ .bool = true },
+            .hoverProvider = .{ .bool = true },
+            .codeActionProvider = .{ .bool = true },
+            .declarationProvider = .{ .bool = true },
+            .definitionProvider = .{ .bool = true },
+            .typeDefinitionProvider = .{ .bool = true },
+            .implementationProvider = .{ .bool = false },
+            .referencesProvider = .{ .bool = true },
+            .documentSymbolProvider = .{ .bool = true },
+            .colorProvider = .{ .bool = false },
+            .documentFormattingProvider = .{ .bool = true },
+            .documentRangeFormattingProvider = .{ .bool = false },
+            .foldingRangeProvider = .{ .bool = true },
+            .selectionRangeProvider = .{ .bool = true },
+            .workspaceSymbolProvider = .{ .bool = false },
+            .linkedEditingRangeProvider = .{ .bool = false },
             .workspace = .{
                 .workspaceFolders = .{
                     .supported = false,
-                    .changeNotifications = false,
+                    .changeNotifications = .{ .bool = false },
+                },
+                .fileOperations = .{
+                    .didCreate = .{ .filters = &.{} },
+                    .willCreate = .{ .filters = &.{} },
+                    .didRename = .{ .filters = &.{} },
+                    .willRename = .{ .filters = &.{} },
+                    .didDelete = .{ .filters = &.{} },
+                    .willDelete = .{ .filters = &.{} },
                 },
             },
             .semanticTokensProvider = .{
-                .full = true,
-                .range = false,
-                .legend = .{
-                    .tokenTypes = comptime block: {
-                        const tokTypeFields = std.meta.fields(semantic_tokens.TokenType);
-                        var names: [tokTypeFields.len][]const u8 = undefined;
-                        for (tokTypeFields) |field, i| {
-                            names[i] = field.name;
-                        }
-                        break :block &names;
-                    },
-                    .tokenModifiers = comptime block: {
-                        const tokModFields = std.meta.fields(semantic_tokens.TokenModifiers);
-                        var names: [tokModFields.len][]const u8 = undefined;
-                        for (tokModFields) |field, i| {
-                            names[i] = field.name;
-                        }
-                        break :block &names;
+                .SemanticTokensOptions = .{
+                    .full = .{ .bool = true },
+                    .range = .{ .bool = false },
+                    .legend = .{
+                        .tokenTypes = token_types,
+                        .tokenModifiers = token_modifiers,
                     },
                 },
             },
-            .inlayHintProvider = true,
+            .inlayHintProvider = .{ .bool = true },
         },
     };
 }
