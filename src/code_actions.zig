@@ -60,7 +60,7 @@ pub const Builder = struct {
         try text_edits.appendSlice(self.arena.allocator(), edits);
 
         var workspace_edit = types.WorkspaceEdit{ .changes = .{} };
-        try workspace_edit.changes.putNoClobber(self.arena.allocator(), self.handle.uri, text_edits);
+        try workspace_edit.changes.?.putNoClobber(self.arena.allocator(), self.handle.uri, text_edits.items);
 
         return workspace_edit;
     }
@@ -75,7 +75,7 @@ fn handleNonCamelcaseFunction(builder: *Builder, actions: *std.ArrayListUnmanage
 
     const action1 = types.CodeAction{
         .title = "make function name camelCase",
-        .kind = .QuickFix,
+        .kind = .quickfix,
         .isPreferred = true,
         .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditLoc(loc, new_text)}),
     };
@@ -116,7 +116,7 @@ fn handleUnusedFunctionParameter(builder: *Builder, actions: *std.ArrayListUnman
 
     const action1 = types.CodeAction{
         .title = "discard function parameter",
-        .kind = .SourceFixAll,
+        .kind = .@"source.fixAll",
         .isPreferred = true,
         .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditPos(index, new_text)}),
     };
@@ -124,7 +124,7 @@ fn handleUnusedFunctionParameter(builder: *Builder, actions: *std.ArrayListUnman
     // TODO fix formatting
     const action2 = types.CodeAction{
         .title = "remove function parameter",
-        .kind = .QuickFix,
+        .kind = .quickfix,
         .isPreferred = false,
         .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditLoc(getParamRemovalRange(tree, payload.param), "")}),
     };
@@ -163,7 +163,7 @@ fn handleUnusedVariableOrConstant(builder: *Builder, actions: *std.ArrayListUnma
 
     try actions.append(builder.arena.allocator(), .{
         .title = "discard value",
-        .kind = .SourceFixAll,
+        .kind = .@"source.fixAll",
         .isPreferred = true,
         .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditPos(index, new_text)}),
     });
@@ -180,7 +180,7 @@ fn handleUnusedIndexCapture(builder: *Builder, actions: *std.ArrayListUnmanaged(
         // TODO fix formatting
         try actions.append(builder.arena.allocator(), .{
             .title = "remove capture",
-            .kind = .QuickFix,
+            .kind = .quickfix,
             .isPreferred = true,
             .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditLoc(capture_locs.loc, "")}),
         });
@@ -189,7 +189,7 @@ fn handleUnusedIndexCapture(builder: *Builder, actions: *std.ArrayListUnmanaged(
         // |v, _| -> |v|
         try actions.append(builder.arena.allocator(), .{
             .title = "remove index capture",
-            .kind = .QuickFix,
+            .kind = .quickfix,
             .isPreferred = true,
             .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditLoc(
                 .{ .start = capture_locs.value.end, .end = capture_locs.loc.end - 1 },
@@ -208,7 +208,7 @@ fn handleUnusedCapture(builder: *Builder, actions: *std.ArrayListUnmanaged(types
         // |v, i| -> |_, i|
         try actions.append(builder.arena.allocator(), .{
             .title = "discard capture",
-            .kind = .QuickFix,
+            .kind = .quickfix,
             .isPreferred = true,
             .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditLoc(capture_locs.value, "_")}),
         });
@@ -217,7 +217,7 @@ fn handleUnusedCapture(builder: *Builder, actions: *std.ArrayListUnmanaged(types
         // TODO fix formatting
         try actions.append(builder.arena.allocator(), .{
             .title = "remove capture",
-            .kind = .QuickFix,
+            .kind = .quickfix,
             .isPreferred = true,
             .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditLoc(capture_locs.loc, "")}),
         });
@@ -229,7 +229,7 @@ fn handlePointlessDiscard(builder: *Builder, actions: *std.ArrayListUnmanaged(ty
 
     try actions.append(builder.arena.allocator(), .{
         .title = "remove pointless discard",
-        .kind = .SourceFixAll,
+        .kind = .@"source.fixAll",
         .isPreferred = true,
         .edit = try builder.createWorkspaceEdit(&.{
             builder.createTextEditLoc(edit_loc, ""),

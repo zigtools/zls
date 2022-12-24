@@ -442,12 +442,12 @@ fn autofix(server: *Server, allocator: std.mem.Allocator, handle: *const Documen
 
     var text_edits = std.ArrayListUnmanaged(types.TextEdit){};
     for (actions.items) |action| {
-        if (action.kind != .SourceFixAll) continue;
+        if (action.kind.? != .@"source.fixAll") continue;
 
-        if (action.edit.changes.size != 1) continue;
-        const edits = action.edit.changes.get(handle.uri) orelse continue;
+        if (action.edit.?.changes.?.size != 1) continue;
+        const edits = action.edit.?.changes.?.get(handle.uri) orelse continue;
 
-        try text_edits.appendSlice(allocator, edits.items);
+        try text_edits.appendSlice(allocator, edits);
     }
 
     return text_edits;
@@ -1863,99 +1863,89 @@ pub fn @"textDocument/didOpen"(conn: *Connection, params: types.DidOpenTextDocum
     try publishDiagnostics(conn, handle);
 }
 
-// fn changeDocumentHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.ChangeDocument) !void {
-//     const tracy_zone = tracy.trace(@src());
-//     defer tracy_zone.end();
+pub fn @"textDocument/didChange"(conn: *Connection, params: types.DidChangeTextDocumentParams) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
 
-//     _ = id;
+    const server = conn.context;
 
-//     const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse return;
+    const handle = server.document_store.getHandle(params.textDocument.uri) orelse return;
 
-//     const new_text = try diff.applyTextEdits(server.allocator, handle.text, req.params.contentChanges, server.offset_encoding);
+    const new_text = try diff.applyTextEdits(server.allocator, handle.text, params.contentChanges, server.offset_encoding);
 
-//     try server.document_store.refreshDocument(handle.uri, new_text);
-//     try server.publishDiagnostics(writer, handle.*);
-// }
+    try server.document_store.refreshDocument(handle.uri, new_text);
+    try publishDiagnostics(conn, handle.*);
+}
 
-// fn saveDocumentHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.SaveDocument) !void {
-//     const tracy_zone = tracy.trace(@src());
-//     defer tracy_zone.end();
+pub fn @"textDocument/didSave"(conn: *Connection, params: types.DidSaveTextDocumentParams) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
 
-//     _ = id;
-//     const allocator = server.arena.allocator();
-//     const uri = req.params.textDocument.uri;
+    const server = conn.context;
+    const allocator = server.arena.allocator();
+    const uri = params.textDocument.uri;
 
-//     const handle = server.document_store.getHandle(uri) orelse return;
-//     try server.document_store.applySave(handle);
+    const handle = server.document_store.getHandle(uri) orelse return;
+    try server.document_store.applySave(handle);
 
-//     if (handle.tree.errors.len != 0) return;
-//     if (!server.config.enable_ast_check_diagnostics) return;
-//     if (!server.config.enable_autofix) return;
-//     if (server.client_capabilities.supports_will_save) return;
-//     if (server.client_capabilities.supports_will_save_wait_until) return;
+    if (handle.tree.errors.len != 0) return;
+    if (!server.config.enable_ast_check_diagnostics) return;
+    if (!server.config.enable_autofix) return;
+    if (server.client_capabilities.supports_will_save) return;
+    if (server.client_capabilities.supports_will_save_wait_until) return;
 
-//     const text_edits = try server.autofix(allocator, handle);
+    const text_edits = try server.autofix(allocator, handle);
 
-//     var workspace_edit = types.WorkspaceEdit{ .changes = .{} };
-//     try workspace_edit.changes.putNoClobber(allocator, uri, text_edits);
+    var workspace_edit = types.WorkspaceEdit{ .changes = .{} };
+    try workspace_edit.changes.?.putNoClobber(allocator, uri, text_edits.items);
 
-//     try send(writer, allocator, types.Request{
-//         .id = .{ .String = "apply_edit" },
-//         .method = "workspace/applyEdit",
-//         .params = .{
-//             .ApplyEdit = .{
-//                 .label = "autofix",
-//                 .edit = workspace_edit,
-//             },
-//         },
-//     });
-// }
+    const callback = struct {
+        pub fn onResponse(_: *Connection, _: lsp.RequestResult("workspace/applyEdit")) !void {}
 
-// fn closeDocumentHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.CloseDocument) error{}!void {
-//     const tracy_zone = tracy.trace(@src());
-//     defer tracy_zone.end();
+        pub fn onError(_: *Connection) !void {}
+    };
 
-//     _ = id;
-//     _ = writer;
-//     server.document_store.closeDocument(req.params.textDocument.uri);
-// }
+    try conn.request("workspace/applyEdit", .{
+        .label = "autofix",
+        .edit = workspace_edit,
+    }, .{ .onResponse = callback.onResponse, .onError = callback.onError });
+}
 
-// fn willSaveHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.WillSave) !void {
-//     const tracy_zone = tracy.trace(@src());
-//     defer tracy_zone.end();
+pub fn @"textDocument/didClose"(conn: *Connection, params: types.DidCloseTextDocumentParams) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
 
-//     if (server.client_capabilities.supports_will_save_wait_until) return;
-//     try willSaveWaitUntilHandler(server, writer, id, req);
-// }
+    conn.context.document_store.closeDocument(params.textDocument.uri);
+}
 
-// fn willSaveWaitUntilHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.WillSave) !void {
-//     const tracy_zone = tracy.trace(@src());
-//     defer tracy_zone.end();
+pub fn @"textDocument/willSave"(conn: *Connection, params: types.WillSaveTextDocumentParams) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
 
-//     const allocator = server.arena.allocator();
+    if (conn.context.client_capabilities.supports_will_save_wait_until) return;
+    _ = try @"textDocument/willSaveWaitUntil"(conn, undefined, params);
+}
 
-//     b: {
-//         if (!server.config.enable_ast_check_diagnostics or !server.config.enable_autofix)
-//             break :b;
+pub fn @"textDocument/willSaveWaitUntil"(conn: *Connection, _: types.RequestId, params: types.WillSaveTextDocumentParams) !lsp.RequestResult("textDocument/willSaveWaitUntil") {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
 
-//         const uri = req.params.textDocument.uri;
+    const server = conn.context;
 
-//         const handle = server.document_store.getHandle(uri) orelse break :b;
-//         if (handle.tree.errors.len != 0) break :b;
+    const allocator = server.arena.allocator();
 
-//         var text_edits = try server.autofix(allocator, handle);
+    if (!server.config.enable_ast_check_diagnostics or !server.config.enable_autofix)
+        return &.{};
 
-//         return try send(writer, allocator, types.Response{
-//             .id = id,
-//             .result = .{ .TextEdits = try text_edits.toOwnedSlice(allocator) },
-//         });
-//     }
+    const uri = params.textDocument.uri;
 
-//     return try send(writer, allocator, types.Response{
-//         .id = id,
-//         .result = .{ .TextEdits = &.{} },
-//     });
-// }
+    const handle = server.document_store.getHandle(uri) orelse return &.{};
+    if (handle.tree.errors.len != 0) return &.{};
+
+    var text_edits = try server.autofix(allocator, handle);
+
+    return try text_edits.toOwnedSlice(allocator);
+}
 
 // fn semanticTokensFullHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.SemanticTokensFull) !void {
 //     const tracy_zone = tracy.trace(@src());
