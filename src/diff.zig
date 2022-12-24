@@ -1,6 +1,5 @@
 const std = @import("std");
 const types = @import("lsp.zig");
-const requests = @import("requests.zig");
 const offsets = @import("offsets.zig");
 
 pub const Error = error{ OutOfMemory, InvalidRange };

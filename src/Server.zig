@@ -6,7 +6,6 @@ const build_options = @import("build_options");
 const Config = @import("Config.zig");
 const configuration = @import("configuration.zig");
 const DocumentStore = @import("DocumentStore.zig");
-const requests = @import("requests.zig");
 const types = @import("lsp.zig");
 const analysis = @import("analysis.zig");
 const ast = @import("ast.zig");

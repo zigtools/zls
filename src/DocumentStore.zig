@@ -1,7 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const types = @import("lsp.zig");
-const requests = @import("requests.zig");
 const URI = @import("uri.zig");
 const analysis = @import("analysis.zig");
 const offsets = @import("offsets.zig");
