@@ -5,7 +5,7 @@ const DocumentStore = @import("DocumentStore.zig");
 const analysis = @import("analysis.zig");
 const ast = @import("ast.zig");
 
-const types = @import("types.zig");
+const types = @import("lsp.zig");
 const requests = @import("requests.zig");
 const offsets = @import("offsets.zig");
 
