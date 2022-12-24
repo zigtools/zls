@@ -36,12 +36,12 @@ const Builder = struct {
     config: *const Config,
     handle: *const DocumentStore.Handle,
     hints: std.ArrayListUnmanaged(types.InlayHint),
-    hover_kind: types.MarkupContent.Kind,
+    hover_kind: types.MarkupKind,
     encoding: offsets.Encoding,
 
     fn deinit(self: *Builder) void {
         for (self.hints.items) |hint| {
-            self.allocator.free(hint.tooltip.value);
+            self.allocator.free(hint.tooltip.?.MarkupContent.value);
         }
         self.hints.deinit(self.allocator);
     }
@@ -53,7 +53,7 @@ const Builder = struct {
             if (tooltip.len == 0) break :blk "";
             const prefix = if (tooltip_noalias) if (tooltip_comptime) "noalias comptime " else "noalias " else if (tooltip_comptime) "comptime " else "";
 
-            if (self.hover_kind == .Markdown) {
+            if (self.hover_kind == .markdown) {
                 break :blk try std.fmt.allocPrint(self.allocator, "```zig\n{s}{s}\n```", .{ prefix, tooltip });
             }
 
@@ -62,11 +62,13 @@ const Builder = struct {
 
         try self.hints.append(self.allocator, .{
             .position = position,
-            .label = label,
+            .label = .{.string = label},
             .kind = types.InlayHintKind.Parameter,
             .tooltip = .{
+                .MarkupContent = .{
                 .kind = self.hover_kind,
                 .value = tooltip_text,
+            }
             },
             .paddingLeft = false,
             .paddingRight = true,
@@ -697,7 +699,7 @@ pub fn writeRangeInlayHint(
     store: *DocumentStore,
     handle: *const DocumentStore.Handle,
     range: types.Range,
-    hover_kind: types.MarkupContent.Kind,
+    hover_kind: types.MarkupKind,
     encoding: offsets.Encoding,
 ) error{OutOfMemory}![]types.InlayHint {
     var builder: Builder = .{
