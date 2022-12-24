@@ -155,9 +155,11 @@ fn showMessage(conn: *Connection, message_type: types.MessageType, message: []co
     });
 }
 
-fn publishDiagnostics(server: *Server, writer: anytype, handle: DocumentStore.Handle) !void {
+fn publishDiagnostics(conn: *Connection, handle: DocumentStore.Handle) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
+
+    var server = conn.context;
 
     const tree = handle.tree;
 
@@ -172,7 +174,7 @@ fn publishDiagnostics(server: *Server, writer: anytype, handle: DocumentStore.Ha
         try diagnostics.append(allocator, .{
             .range = offsets.tokenToRange(tree, err.token, server.offset_encoding),
             .severity = .Error,
-            .code = @tagName(err.tag),
+            .code = .{ .string = @tagName(err.tag) },
             .source = "zls",
             .message = try server.arena.allocator().dupe(u8, fbs.getWritten()),
             // .relatedInformation = undefined
@@ -204,7 +206,7 @@ fn publishDiagnostics(server: *Server, writer: anytype, handle: DocumentStore.Ha
                     try diagnostics.append(allocator, .{
                         .range = offsets.tokenToRange(tree, import_str_token, server.offset_encoding),
                         .severity = .Hint,
-                        .code = "dot_slash_import",
+                        .code = .{ .string = "dot_slash_import" },
                         .source = "zls",
                         .message = "A ./ is not needed in imports",
                     });
@@ -235,7 +237,7 @@ fn publishDiagnostics(server: *Server, writer: anytype, handle: DocumentStore.Ha
                                 try diagnostics.append(allocator, .{
                                     .range = offsets.tokenToRange(tree, name_token, server.offset_encoding),
                                     .severity = .Hint,
-                                    .code = "bad_style",
+                                    .code = .{ .string = "bad_style" },
                                     .source = "zls",
                                     .message = "Functions should be camelCase",
                                 });
@@ -243,7 +245,7 @@ fn publishDiagnostics(server: *Server, writer: anytype, handle: DocumentStore.Ha
                                 try diagnostics.append(allocator, .{
                                     .range = offsets.tokenToRange(tree, name_token, server.offset_encoding),
                                     .severity = .Hint,
-                                    .code = "bad_style",
+                                    .code = .{ .string = "bad_style" },
                                     .source = "zls",
                                     .message = "Type functions should be PascalCase",
                                 });
@@ -270,7 +272,7 @@ fn publishDiagnostics(server: *Server, writer: anytype, handle: DocumentStore.Ha
         try diagnostics.append(allocator, .{
             .range = offsets.nodeToRange(handle.tree, node, server.offset_encoding),
             .severity = .Error,
-            .code = "cImport",
+            .code = .{ .string = "cImport" },
             .source = "zls",
             .message = try allocator.dupe(u8, pos_and_diag_iterator.rest()),
         });
@@ -295,7 +297,7 @@ fn publishDiagnostics(server: *Server, writer: anytype, handle: DocumentStore.Ha
                     try diagnostics.append(allocator, .{
                         .range = offsets.tokenToRange(tree, decl_main_token, server.offset_encoding),
                         .severity = .Hint,
-                        .code = "highlight_global_var_declarations",
+                        .code = .{ .string = "highlight_global_var_declarations" },
                         .source = "zls",
                         .message = "Global var declaration",
                     });
@@ -314,22 +316,16 @@ fn publishDiagnostics(server: *Server, writer: anytype, handle: DocumentStore.Ha
             try diagnostics.append(allocator, .{
                 .range = offsets.nodeToRange(tree, err.key_ptr.*, server.offset_encoding),
                 .severity = .Error,
-                .code = err.value_ptr.code,
+                .code = .{ .string = err.value_ptr.code },
                 .source = "zls",
                 .message = err.value_ptr.message,
             });
         }
     }
-    // try diagnostics.appendSlice(allocator, handle.interpreter.?.diagnostics.items);
 
-    try send(writer, server.arena.allocator(), types.Notification{
-        .method = "textDocument/publishDiagnostics",
-        .params = .{
-            .PublishDiagnostics = .{
-                .uri = handle.uri,
-                .diagnostics = diagnostics.items,
-            },
-        },
+    try conn.notify("textDocument/publishDiagnostics", .{
+        .uri = handle.uri,
+        .diagnostics = diagnostics.items,
     });
 }
 
@@ -383,7 +379,7 @@ fn getAstCheckDiagnostics(
         };
 
         // zig uses utf-8 encoding for character offsets
-        const position = offsets.convertPositionEncoding(handle.text, utf8_position, .utf8, server.offset_encoding);
+        const position = offsets.convertPositionEncoding(handle.text, utf8_position, .@"utf-8", server.offset_encoding);
         const range = offsets.tokenPositionToRange(handle.text, position, server.offset_encoding);
 
         const msg = pos_and_diag_iterator.rest()[1..];
@@ -392,7 +388,7 @@ fn getAstCheckDiagnostics(
             try diagnostics.append(allocator, .{
                 .range = range,
                 .severity = .Error,
-                .code = "ast_check",
+                .code = .{ .string = "ast_check" },
                 .source = "zls",
                 .message = try server.arena.allocator().dupe(u8, msg["error: ".len..]),
             });
@@ -400,7 +396,7 @@ fn getAstCheckDiagnostics(
             var latestDiag = &diagnostics.items[diagnostics.items.len - 1];
 
             var fresh = if (latestDiag.relatedInformation) |related_information|
-                try server.arena.allocator().realloc(@ptrCast([]types.DiagnosticRelatedInformation, related_information), related_information.len + 1)
+                try server.arena.allocator().realloc(@intToPtr([]types.DiagnosticRelatedInformation, @ptrToInt(related_information.ptr)), related_information.len + 1)
             else
                 try server.arena.allocator().alloc(types.DiagnosticRelatedInformation, 1);
 
@@ -419,7 +415,7 @@ fn getAstCheckDiagnostics(
             try diagnostics.append(allocator, .{
                 .range = range,
                 .severity = .Error,
-                .code = "ast_check",
+                .code = .{ .string = "ast_check" },
                 .source = "zls",
                 .message = try server.arena.allocator().dupe(u8, msg),
             });
@@ -1507,16 +1503,6 @@ fn completeFileSystemStringLiteral(allocator: std.mem.Allocator, store: *const D
     return completions.toOwnedSlice(allocator);
 }
 
-fn documentSymbol(server: *Server, writer: anytype, id: types.RequestId, handle: *const DocumentStore.Handle) !void {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    try send(writer, server.arena.allocator(), types.Response{
-        .id = id,
-        .result = .{ .DocumentSymbols = try analysis.getDocumentSymbols(server.arena.allocator(), handle.tree, server.offset_encoding) },
-    });
-}
-
 pub fn initialize(conn: *Connection, _: types.RequestId, params: types.InitializeParams) !types.InitializeResult {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
@@ -1867,15 +1853,15 @@ fn requestConfiguration(conn: *Connection) !void {
     }, .{ .onResponse = callback.onResponse, .onError = callback.onError });
 }
 
-// fn openDocumentHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.OpenDocument) !void {
-//     const tracy_zone = tracy.trace(@src());
-//     defer tracy_zone.end();
+pub fn @"textDocument/didOpen"(conn: *Connection, params: types.DidOpenTextDocumentParams) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
 
-//     _ = id;
+    const server = conn.context;
 
-//     const handle = try server.document_store.openDocument(req.params.textDocument.uri, req.params.textDocument.text);
-//     try server.publishDiagnostics(writer, handle);
-// }
+    const handle = try server.document_store.openDocument(params.textDocument.uri, params.textDocument.text);
+    try publishDiagnostics(conn, handle);
+}
 
 // fn changeDocumentHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.ChangeDocument) !void {
 //     const tracy_zone = tracy.trace(@src());
@@ -2166,15 +2152,22 @@ fn requestConfiguration(conn: *Connection) !void {
 //     });
 // }
 
-// fn documentSymbolsHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.DocumentSymbols) !void {
-//     const tracy_zone = tracy.trace(@src());
-//     defer tracy_zone.end();
+pub fn @"textDocument/documentSymbol"(conn: *Connection, _: types.RequestId, params: types.DocumentSymbolParams) !lsp.RequestResult("textDocument/documentSymbol") {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
 
-//     const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
-//         return try respondGeneric(writer, id, null_result_response);
-//     };
-//     try server.documentSymbol(writer, id, handle);
-// }
+    const server = conn.context;
+
+    const handle = server.document_store.getHandle(params.textDocument.uri) orelse return null;
+
+    return .{
+        .array_of_DocumentSymbol = try analysis.getDocumentSymbols(
+            server.arena.allocator(),
+            handle.tree,
+            server.offset_encoding,
+        ),
+    };
+}
 
 // fn formattingHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.Formatting) !void {
 //     const tracy_zone = tracy.trace(@src());
