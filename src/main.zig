@@ -51,6 +51,9 @@ fn loop(server: *Server) !void {
             try writer.print("{}{s}", .{header, outgoing_message});
             try buffered_writer.flush();
         }
+        for (server.outgoing_messages.items) |outgoing_message| {
+            server.allocator.free(outgoing_message);
+        }
         server.outgoing_messages.clearRetainingCapacity();
 
         // read and handle client -> server message

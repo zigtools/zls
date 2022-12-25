@@ -32,19 +32,12 @@ fn isNodeInRange(tree: Ast, node: Ast.Node.Index, range: types.Range) bool {
 }
 
 const Builder = struct {
-    allocator: std.mem.Allocator,
+    arena: std.mem.Allocator,
     config: *const Config,
     handle: *const DocumentStore.Handle,
     hints: std.ArrayListUnmanaged(types.InlayHint),
     hover_kind: types.MarkupKind,
     encoding: offsets.Encoding,
-
-    fn deinit(self: *Builder) void {
-        for (self.hints.items) |hint| {
-            self.allocator.free(hint.tooltip.?.MarkupContent.value);
-        }
-        self.hints.deinit(self.allocator);
-    }
 
     fn appendParameterHint(self: *Builder, position: types.Position, label: []const u8, tooltip: []const u8, tooltip_noalias: bool, tooltip_comptime: bool) !void {
         // TODO allocation could be avoided by extending InlayHint.jsonStringify
@@ -54,13 +47,13 @@ const Builder = struct {
             const prefix = if (tooltip_noalias) if (tooltip_comptime) "noalias comptime " else "noalias " else if (tooltip_comptime) "comptime " else "";
 
             if (self.hover_kind == .markdown) {
-                break :blk try std.fmt.allocPrint(self.allocator, "```zig\n{s}{s}\n```", .{ prefix, tooltip });
+                break :blk try std.fmt.allocPrint(self.arena, "```zig\n{s}{s}\n```", .{ prefix, tooltip });
             }
 
-            break :blk try std.fmt.allocPrint(self.allocator, "{s}{s}", .{ prefix, tooltip });
+            break :blk try std.fmt.allocPrint(self.arena, "{s}{s}", .{ prefix, tooltip });
         };
 
-        try self.hints.append(self.allocator, .{
+        try self.hints.append(self.arena, .{
             .position = position,
             .label = .{.string = label},
             .kind = types.InlayHintKind.Parameter,
@@ -76,7 +69,7 @@ const Builder = struct {
     }
 
     fn toOwnedSlice(self: *Builder) error{OutOfMemory}![]types.InlayHint {
-        return self.hints.toOwnedSlice(self.allocator);
+        return self.hints.toOwnedSlice(self.arena);
     }
 };
 
@@ -691,8 +684,6 @@ fn writeNodeInlayHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store:
 /// creates a list of `InlayHint`'s from the given document
 /// only parameter hints are created
 /// only hints in the given range are created
-/// Caller owns returned memory.
-/// `InlayHint.tooltip.value` has to deallocated separately
 pub fn writeRangeInlayHint(
     arena: *std.heap.ArenaAllocator,
     config: Config,
@@ -703,14 +694,13 @@ pub fn writeRangeInlayHint(
     encoding: offsets.Encoding,
 ) error{OutOfMemory}![]types.InlayHint {
     var builder: Builder = .{
-        .allocator = arena.child_allocator,
+        .arena = arena.allocator(),
         .config = &config,
         .handle = handle,
         .hints = .{},
         .hover_kind = hover_kind,
         .encoding = encoding,
     };
-    errdefer builder.deinit();
 
     var buf: [2]Ast.Node.Index = undefined;
     for (ast.declMembers(handle.tree, 0, &buf)) |child| {

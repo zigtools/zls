@@ -167,6 +167,7 @@ fn sendInternal(
     try writer.writeByte('}');
 
     const message = try buffer.toOwnedSlice(server.allocator);
+    errdefer server.allocator.free(message);
 
     try server.outgoing_messages.append(server.allocator, message);
 }
@@ -2351,12 +2352,6 @@ fn inlayHintHandler(server: *Server, request: types.InlayHintParams) !?[]types.I
         hover_kind,
         server.offset_encoding,
     );
-    defer {
-        for (hints) |hint| {
-            server.allocator.free(hint.tooltip.?.MarkupContent.value);
-        }
-        server.allocator.free(hints);
-    }
 
     // and only convert and return all hints in range for every request
     var visible_hints = hints;
@@ -2434,7 +2429,7 @@ fn foldingRangeHandler(server: *Server, request: types.FoldingRangeParams) !?[]t
             std.debug.assert(!std.debug.runtime_safety or !tree.tokensOnSameLine(start, end));
 
             const start_line = offsets.tokenToPosition(tree, start, encoding).line;
-            const end_line = offsets.tokenToPosition(tree, start, encoding).line;
+            const end_line = offsets.tokenToPosition(tree, end, encoding).line;
 
             try p_ranges.append(.{
                 .startLine = start_line,
@@ -3051,4 +3046,9 @@ pub fn deinit(server: *Server) void {
     analysis.deinit();
 
     server.builtin_completions.deinit(server.allocator);
+
+    for(server.outgoing_messages.items) |message| {
+        server.allocator.free(message);
+    }
+    server.outgoing_messages.deinit(server.allocator);
 }
