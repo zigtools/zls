@@ -1755,11 +1755,11 @@ fn initializedHandler(server: *Server, notification: types.InitializedParams) !v
         try server.requestConfiguration();
 }
 
-fn shutdownHandler(server: *Server, _: void) !void {
+fn shutdownHandler(server: *Server, _: void) !?void {
     if (server.status != .initialized) return error.InvalidRequest; // received a shutdown request but the server is not initialized!
 
     // Technically we should deinitialize first and send possible errors to the client
-    // return try respondGeneric(writer, id, null_result_response);
+    return null;
 }
 
 fn exitHandler(server: *Server, _: void) noreturn {
@@ -2051,8 +2051,11 @@ fn signatureHelpHandler(server: *Server, request: types.SignatureHelpParams) !?t
         data,
     )) orelse return null;
 
+    var signatures = try server.arena.allocator().alloc(types.SignatureInformation, 1);
+    signatures[0] = signature_info;
+
     return .{
-        .signatures = &[1]types.SignatureInformation{signature_info},
+        .signatures = signatures,
         .activeSignature = 0,
         .activeParameter = signature_info.activeParameter,
     };
@@ -2917,7 +2920,11 @@ fn processMessage(server: *Server, message: Message) Error!void {
             return error.InvalidRequest; // server received a request during initialization!
         },
         .initialized => {},
-        .shutdown => return error.InvalidRequest, // server received a request after shutdown!
+        .shutdown => blk: {
+            if (std.mem.eql(u8, method, "exit")) break :blk;
+
+            return error.InvalidRequest; // server received a request after shutdown!
+        }, 
     }
 
     const start_time = std.time.milliTimestamp();
@@ -2985,8 +2992,9 @@ fn processMessage(server: *Server, message: Message) Error!void {
 
             if (@TypeOf(response) == void) return;
 
-            std.debug.assert(message == .RequestMessage);
-            server.sendResponse(message.RequestMessage.id, response);
+            if(message == .RequestMessage) {
+                server.sendResponse(message.RequestMessage.id, response);
+            }
 
             return;
         }
