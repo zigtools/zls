@@ -148,9 +148,10 @@ fn sendInternal(
         try tres.stringify(id, .{}, writer);
     }
     if (maybe_method) |method| {
-        try writer.print(
-            \\,"method":{s}
-        , .{method});
+        try writer.writeAll(
+            \\,"method":
+        );
+        try tres.stringify(method, .{}, writer);
     }
     if (@TypeOf(extra) != @TypeOf(void)) {
         try writer.print(
@@ -2850,19 +2851,26 @@ pub fn processJsonRpc(
     var parser = std.json.Parser.init(server.arena.allocator(), false);
     defer parser.deinit();
 
-    // how do we handle errors here
-
-    var tree = parser.parse(json) catch return; // what should we do on error?
+    var tree = parser.parse(json) catch {
+        std.log.err("failed to parse message!", .{});
+        return; // maybe panic?
+    };
     defer tree.deinit();
 
-    const message = Message.fromJsonValueTree(tree) catch return;
+    const message = Message.fromJsonValueTree(tree) catch {
+        std.log.err("failed to parse message!", .{});
+        return; // maybe panic?
+    };
 
-    server.processMessage(message) catch |err| switch (message) {
-        .RequestMessage => |request| server.sendResponseError(request.id, .{
-            .code = @errorToInt(err),
-            .message = @errorName(err),
-        }),
-        else => {},
+    server.processMessage(message) catch |err| {
+        std.log.err("got {} while processing message!", .{err}); // TODO include message information
+        switch (message) {
+            .RequestMessage => |request| server.sendResponseError(request.id, .{
+                    .code = @errorToInt(err),
+                    .message = @errorName(err),
+            }),
+            else => {},
+        }
     };
 }
 
@@ -2879,7 +2887,7 @@ fn processMessage(server: *Server, message: Message) Error!void {
         },
         .ResponseMessage => |response| {
             if (response.id != .string) return;
-            if (std.mem.eql(u8, response.id.string, "register")) return;
+            if (std.mem.startsWith(u8, response.id.string, "register")) return;
             if (std.mem.eql(u8, response.id.string, "apply_edit")) return;
 
             if (std.mem.eql(u8, response.id.string, "i_haz_configuration")) {

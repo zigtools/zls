@@ -62,8 +62,6 @@ fn loop(server: *Server) !void {
         const json_message = try arena.allocator().alloc(u8, header.content_length);
         try reader.readNoEof(json_message);
 
-        std.debug.print("{s}\n", .{json_message});
-
         server.processJsonRpc(&arena, json_message);
     }
 }
