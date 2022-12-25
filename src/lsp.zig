@@ -21,6 +21,115 @@ pub fn Map(comptime Key: type, comptime Value: type) type {
         return std.AutoHashMapUnmanaged(Key, Value);
 }
 
+fn stringifyStruct(value: anytype, options: std.json.StringifyOptions, out_stream: anytype) @TypeOf(out_stream).Error!void {
+    try out_stream.writeByte('{');
+    var field_output = false;
+    var child_options = options;
+    if (child_options.whitespace) |*child_whitespace| {
+        child_whitespace.indent_level += 1;
+    }
+    const S = @typeInfo(@TypeOf(value)).Struct;
+    inline for (S.fields) |Field| {
+        // don't include void fields
+        if (Field.type == void) continue;
+
+        var emit_field = true;
+
+        // don't include optional fields that are null when emit_null_optional_fields is set to false
+        if (@typeInfo(Field.type) == .Optional) {
+            if (options.emit_null_optional_fields == false) {
+                if (@field(value, Field.name) == null) {
+                    emit_field = false;
+                }
+            }
+        }
+
+        if (emit_field) {
+            if (!field_output) {
+                field_output = true;
+            } else {
+                try out_stream.writeByte(',');
+            }
+            if (child_options.whitespace) |child_whitespace| {
+                try child_whitespace.outputIndent(out_stream);
+            }
+            try std.json.encodeJsonString(Field.name, options, out_stream);
+            try out_stream.writeByte(':');
+            if (child_options.whitespace) |child_whitespace| {
+                if (child_whitespace.separator) {
+                    try out_stream.writeByte(' ');
+                }
+            }
+
+            const is_map = comptime switch (@typeInfo(Field.type)) {
+                .Struct => tres.isHashMap(Field.type),
+                else => false,
+            };
+
+            const is_optional_of_map = comptime switch (@typeInfo(Field.type)) {
+                .Optional => |optional| switch (@typeInfo(optional.child)) {
+                    .Struct => tres.isHashMap(optional.child),
+                    else => false,
+                },
+                else => false,
+            };
+
+            if (is_optional_of_map) {
+                if (@field(value, Field.name)) |payload| {
+                    try stringifyHashMap(payload, child_options, out_stream);
+                } else {
+                    try std.json.stringify(null, child_options, out_stream);
+                }
+            } else if (is_map) {
+                try stringifyHashMap(@field(value, Field.name), child_options, out_stream);
+            } else {
+                try std.json.stringify(@field(value, Field.name), child_options, out_stream);
+            }
+        }
+    }
+    if (field_output) {
+        if (options.whitespace) |whitespace| {
+            try whitespace.outputIndent(out_stream);
+        }
+    }
+    try out_stream.writeByte('}');
+}
+
+fn stringifyHashMap(value: anytype, options: std.json.StringifyOptions, out_stream: anytype) @TypeOf(out_stream).Error!void {
+    try out_stream.writeByte('{');
+    var field_output = false;
+    var child_options = options;
+    if (child_options.whitespace) |*child_whitespace| {
+        child_whitespace.indent_level += 1;
+    }
+    var it = value.iterator();
+    while (it.next()) |entry| {
+        if (!field_output) {
+            field_output = true;
+        } else {
+            try out_stream.writeByte(',');
+        }
+        if (child_options.whitespace) |child_whitespace| {
+            try child_whitespace.outputIndent(out_stream);
+        }
+
+        try std.json.stringify(entry.key_ptr.*, options, out_stream);
+        try out_stream.writeByte(':');
+        if (child_options.whitespace) |child_whitespace| {
+            if (child_whitespace.separator) {
+                try out_stream.writeByte(' ');
+            }
+        }
+        try std.json.stringify(entry.value_ptr.*, child_options, out_stream);
+    }
+    if (field_output) {
+        if (options.whitespace) |whitespace| {
+            try whitespace.outputIndent(out_stream);
+        }
+    }
+    try out_stream.writeByte('}');
+}
+
 pub const RequestId = union(enum) {
     integer: i64,
     string: []const u8,
@@ -356,6 +465,10 @@ pub const SemanticTokenTypes = enum {
     operator,
     /// @since 3.17.0
     decorator,
+
+    pub fn jsonStringify(value: @This(), options: std.json.StringifyOptions, out_stream: anytype) @TypeOf(out_stream).Error!void {
+        try std.json.stringify(@tagName(value), options, out_stream);
+    }
 };
 
 /// A set of predefined token modifiers. This set is not fixed
@@ -376,6 +489,10 @@ pub const SemanticTokenModifiers = enum {
     modification,
     documentation,
     defaultLibrary,
+
+    pub fn jsonStringify(value: @This(), options: std.json.StringifyOptions, out_stream: anytype) @TypeOf(out_stream).Error!void {
+        try std.json.stringify(@tagName(value), options, out_stream);
+    }
 };
 
 /// The document diagnostic report kinds.
@@ -390,6 +507,10 @@ pub const DocumentDiagnosticReportKind = enum {
     /// A report indicating that the last
     /// returned report is still accurate.
     unchanged,
+
+    pub fn jsonStringify(value: @This(), options: std.json.StringifyOptions, out_stream: anytype) @TypeOf(out_stream).Error!void {
+        try std.json.stringify(@tagName(value), options, out_stream);
+    }
 };
 
 /// Predefined error codes.
@@ -403,6 +524,10 @@ pub const ErrorCodes = enum(i32) {
     /// request before the server has received the `initialize` request.
     ServerNotInitialized = -32002,
     UnknownErrorCode = -32001,
+
+    pub fn jsonStringify(value: @This(), options: std.json.StringifyOptions, out_stream: anytype) @TypeOf(out_stream).Error!void {
+        try std.json.stringify(@enumToInt(value), options, out_stream);
+    }
 };
 
 pub const LSPErrorCodes = enum(i32) {
@@ -431,6 +556,10 @@ pub const LSPErrorCodes = enum(i32) {
     /// The client has canceled a request and a server as detected
     /// the cancel.
     RequestCancelled = -32800,
+
+    pub fn jsonStringify(value: @This(), options: std.json.StringifyOptions, out_stream: anytype) @TypeOf(out_stream).Error!void {
+        try std.json.stringify(@enumToInt(value), options, out_stream);
+    }
 };
 
 /// A set of predefined range kinds.
@@ -443,6 +572,10 @@ pub const FoldingRangeKind = enum {
     imports,
     /// Folding range for a region (e.g. `#region`)
     region,
+
+    pub fn jsonStringify(value: @This(), options: std.json.StringifyOptions, out_stream: anytype) @TypeOf(out_stream).Error!void {
+        try std.json.stringify(@tagName(value), options, out_stream);
+    }
 };
 
 /// A symbol kind.
@@ -473,6 +606,10 @@ pub const SymbolKind = enum(u32) {
     Event = 24,
     Operator = 25,
     TypeParameter = 26,
+
+    pub fn jsonStringify(value: @This(), options: std.json.StringifyOptions, out_stream: anytype) @TypeOf(out_stream).Error!void {
+        try std.json.stringify(@enumToInt(value), options, out_stream);
+    }
 };
 
 /// Symbol tags are extra annotations that tweak the rendering of a symbol.
@@ -482,6 +619,10 @@ pub const SymbolTag = enum(u32) {
     /// Render a symbol as obsolete, usually using a strike-out.
     Deprecated = 1,
     placeholder__, // fixes alignment issue
+
+    pub fn jsonStringify(value: @This(), options: std.json.StringifyOptions, out_stream: anytype) @TypeOf(out_stream).Error!void {
+        try std.json.stringify(@enumToInt(value), options, out_stream);
+    }
 };
 
 /// Moniker uniqueness level to define scope of the moniker.
@@ -500,6 +641,10 @@ pub const UniquenessLevel = enum {
     scheme,
     /// The moniker is globally unique
     global,
+
+    pub fn jsonStringify(value: @This(), options: std.json.StringifyOptions, out_stream: anytype) @TypeOf(out_stream).Error!void {
+        try std.json.stringify(@tagName(value), options, out_stream);
+    }
 };
 
 /// The moniker kind.
@@ -515,6 +660,10 @@ pub const MonikerKind = enum {
     /// The moniker represents a symbol that is local to a project (e.g. a local
     /// variable of a function, a class not visible outside the project, ...)
     local,
+
+    pub fn jsonStringify(value: @This(), options: std.json.StringifyOptions, out_stream: anytype) @TypeOf(out_stream).Error!void {
+        try std.json.stringify(@tagName(value), options, out_stream);
+    }
 };
 
 /// Inlay hint kinds.
@@ -525,6 +674,10 @@ pub const InlayHintKind = enum(u32) {
     Type = 1,
     /// An inlay hint that is for a parameter.
     Parameter = 2,
+
+    pub fn jsonStringify(value: @This(), options: std.json.StringifyOptions, out_stream: anytype) @TypeOf(out_stream).Error!void {
+        try std.json.stringify(@enumToInt(value), options, out_stream);
+    }
 };
 
 /// The message type
@@ -537,6 +690,10 @@ pub const MessageType = enum(u32) {
     Info = 3,
     /// A log message.
     Log = 4,
+
+    pub fn jsonStringify(value: @This(), options: std.json.StringifyOptions, out_stream: anytype) @TypeOf(out_stream).Error!void {
+        try std.json.stringify(@enumToInt(value), options, out_stream);
+    }
 };
 
 /// Defines how the host (editor) should sync
@@ -551,6 +708,10 @@ pub const TextDocumentSyncKind = enum(u32) {
     /// After that only incremental updates to the document are
     /// send.
     Incremental = 2,
+
+    pub fn jsonStringify(value: @This(), options: std.json.StringifyOptions, out_stream: anytype) @TypeOf(out_stream).Error!void {
+        try std.json.stringify(@enumToInt(value), options, out_stream);
+    }
 };
 
 /// Represents reasons why a text document is saved.
@@ -562,6 +723,10 @@ pub const TextDocumentSaveReason = enum(u32) {
     AfterDelay = 2,
     /// When the editor lost focus.
     FocusOut = 3,
+
+    pub fn jsonStringify(value: @This(), options: std.json.StringifyOptions, out_stream: anytype) @TypeOf(out_stream).Error!void {
+        try std.json.stringify(@enumToInt(value), options, out_stream);
+    }
 };
 
 /// The kind of a completion entry.
@@ -591,6 +756,10 @@ pub const CompletionItemKind = enum(u32) {
     Event = 23,
     Operator = 24,
     TypeParameter = 25,
+
+    pub fn jsonStringify(value: @This(), options: std.json.StringifyOptions, out_stream: anytype) @TypeOf(out_stream).Error!void {
+        try std.json.stringify(@enumToInt(value), options, out_stream);
+    }
 };
 
 /// Completion item tags are extra annotations that tweak the rendering of a completion
@@ -601,6 +770,10 @@ pub const CompletionItemTag = enum(u32) {
     /// Render a completion as obsolete, usually using a strike-out.
     Deprecated = 1,
     placeholder__, // fixes alignment issue
+
+    pub fn jsonStringify(value: @This(), options: std.json.StringifyOptions, out_stream: anytype) @TypeOf(out_stream).Error!void {
+        try std.json.stringify(@enumToInt(value), options, out_stream);
+    }
 };
 
 /// Defines whether the insert text in a completion item should be interpreted as
@@ -617,6 +790,10 @@ pub const InsertTextFormat = enum(u32) {
     ///
     /// See also: https://microsoft.github.io/language-server-protocol/specifications/specification-current/#snippet_syntax
     Snippet = 2,
+
+    pub fn jsonStringify(value: @This(), options: std.json.StringifyOptions, out_stream: anytype) @TypeOf(out_stream).Error!void {
+        try std.json.stringify(@enumToInt(value), options, out_stream);
+    }
 };
 
 /// How whitespace and indentation is handled during completion
@@ -638,6 +815,10 @@ pub const InsertTextMode = enum(u32) {
     /// multi line completion item is indented using 2 tabs and all
     /// following lines inserted will be indented using 2 tabs as well.
     adjustIndentation = 2,
+
+    pub fn jsonStringify(value: @This(), options: std.json.StringifyOptions, out_stream: anytype) @TypeOf(out_stream).Error!void {
+        try std.json.stringify(@enumToInt(value), options, out_stream);
+    }
 };
 
 /// A document highlight kind.
@@ -648,6 +829,10 @@ pub const DocumentHighlightKind = enum(u32) {
     Read = 2,
     /// Write-access of a symbol, like writing to a variable.
     Write = 3,
+
+    pub fn jsonStringify(value: @This(), options: std.json.StringifyOptions, out_stream: anytype) @TypeOf(out_stream).Error!void {
+        try std.json.stringify(@enumToInt(value), options, out_stream);
+    }
 };
 
 /// A set of predefined code action kinds
@@ -655,7 +840,7 @@ pub const CodeActionKind = enum {
     pub const tres_string_enum = {};
 
     /// Empty kind.
-    emptyGottaFix,
+    empty,
     /// Base kind for quickfix actions: 'quickfix'
     quickfix,
     /// Base kind for refactoring actions: 'refactor'
@@ -703,6 +888,16 @@ pub const CodeActionKind = enum {
     ///
     /// @since 3.15.0
     @"source.fixAll",
+
+    pub fn jsonStringify(value: @This(), options: std.json.StringifyOptions, out_stream: anytype) @TypeOf(out_stream).Error!void {
+        try std.json.stringify(if (value == .empty) "" else @tagName(value), options, out_stream);
+    }
+    pub fn tresParse(json_value: std.json.Value, maybe_allocator: ?std.mem.Allocator) error{InvalidEnumTag}!@This() {
+        _ = maybe_allocator;
+        if (json_value != .String) return error.InvalidEnumTag;
+        if (json_value.String.len == 0) return .empty;
+        return std.meta.stringToEnum(@This(), json_value.String) orelse return error.InvalidEnumTag;
+    }
 };
 
 pub const TraceValues = enum {
@@ -714,6 +909,10 @@ pub const TraceValues = enum {
     messages,
     /// Verbose message tracing.
     verbose,
+
+    pub fn jsonStringify(value: @This(), options: std.json.StringifyOptions, out_stream: anytype) @TypeOf(out_stream).Error!void {
+        try std.json.stringify(@tagName(value), options, out_stream);
+    }
 };
 
 /// Describes the content type that a client supports in various
@@ -728,6 +927,10 @@ pub const MarkupKind = enum {
     plaintext,
     /// Markdown is supported as a content format
     markdown,
+
+    pub fn jsonStringify(value: @This(), options: std.json.StringifyOptions, out_stream: anytype) @TypeOf(out_stream).Error!void {
+        try std.json.stringify(@tagName(value), options, out_stream);
+    }
 };
 
 /// A set of predefined position encoding kinds.
@@ -749,6 +952,10 @@ pub const PositionEncodingKind = enum {
     /// so this `PositionEncodingKind` may also be used for an
     /// encoding-agnostic representation of character offsets.
     @"utf-32",
+
+    pub fn jsonStringify(value: @This(), options: std.json.StringifyOptions, out_stream: anytype) @TypeOf(out_stream).Error!void {
+        try std.json.stringify(@tagName(value), options, out_stream);
+    }
 };
 
 /// The file event type
@@ -759,6 +966,10 @@ pub const FileChangeType = enum(u32) {
     Changed = 2,
     /// The file got deleted.
     Deleted = 3,
+
+    pub fn jsonStringify(value: @This(), options: std.json.StringifyOptions, out_stream: anytype) @TypeOf(out_stream).Error!void {
+        try std.json.stringify(@enumToInt(value), options, out_stream);
+    }
 };
 
 pub const WatchKind = enum(u32) {
@@ -768,6 +979,10 @@ pub const WatchKind = enum(u32) {
     Change = 2,
     /// Interested in delete events
     Delete = 4,
+
+    pub fn jsonStringify(value: @This(), options: std.json.StringifyOptions, out_stream: anytype) @TypeOf(out_stream).Error!void {
+        try std.json.stringify(@enumToInt(value), options, out_stream);
+    }
 };
 
 /// The diagnostic's severity.
@@ -780,6 +995,10 @@ pub const DiagnosticSeverity = enum(u32) {
     Information = 3,
     /// Reports a hint.
     Hint = 4,
+
+    pub fn jsonStringify(value: @This(), options: std.json.StringifyOptions, out_stream: anytype) @TypeOf(out_stream).Error!void {
+        try std.json.stringify(@enumToInt(value), options, out_stream);
+    }
 };
 
 /// The diagnostic tags.
@@ -795,6 +1014,10 @@ pub const DiagnosticTag = enum(u32) {
     ///
     /// Clients are allowed to rendered diagnostics with this tag strike through.
     Deprecated = 2,
+
+    pub fn jsonStringify(value: @This(), options: std.json.StringifyOptions, out_stream: anytype) @TypeOf(out_stream).Error!void {
+        try std.json.stringify(@enumToInt(value), options, out_stream);
+    }
 };
 
 /// How a completion was triggered
@@ -807,6 +1030,10 @@ pub const CompletionTriggerKind = enum(u32) {
     TriggerCharacter = 2,
     /// Completion was re-triggered as current completion list is incomplete
     TriggerForIncompleteCompletions = 3,
+
+    pub fn jsonStringify(value: @This(), options: std.json.StringifyOptions, out_stream: anytype) @TypeOf(out_stream).Error!void {
+        try std.json.stringify(@enumToInt(value), options, out_stream);
+    }
 };
 
 /// How a signature help was triggered.
@@ -819,6 +1046,10 @@ pub const SignatureHelpTriggerKind = enum(u32) {
     TriggerCharacter = 2,
     /// Signature help was triggered by the cursor moving or by the document content changing.
     ContentChange = 3,
+
+    pub fn jsonStringify(value: @This(), options: std.json.StringifyOptions, out_stream: anytype) @TypeOf(out_stream).Error!void {
+        try std.json.stringify(@enumToInt(value), options, out_stream);
+    }
 };
 
 /// The reason why code actions were requested.
@@ -832,6 +1063,10 @@ pub const CodeActionTriggerKind = enum(u32) {
     /// This typically happens when current selection in a file changes, but can
     /// also be triggered when file content changes.
     Automatic = 2,
+
+    pub fn jsonStringify(value: @This(), options: std.json.StringifyOptions, out_stream: anytype) @TypeOf(out_stream).Error!void {
+        try std.json.stringify(@enumToInt(value), options, out_stream);
+    }
 };
 
 /// A pattern kind describing if a glob pattern matches a file a folder or
@@ -845,6 +1080,10 @@ pub const FileOperationPatternKind = enum {
     file,
     /// The pattern matches a folder only.
     folder,
+
+    pub fn jsonStringify(value: @This(), options: std.json.StringifyOptions, out_stream: anytype) @TypeOf(out_stream).Error!void {
+        try std.json.stringify(@tagName(value), options, out_stream);
+    }
 };
 
 /// A notebook cell kind.
@@ -855,6 +1094,10 @@ pub const NotebookCellKind = enum(u32) {
     Markup = 1,
     /// A code-cell is source code.
     Code = 2,
+
+    pub fn jsonStringify(value: @This(), options: std.json.StringifyOptions, out_stream: anytype) @TypeOf(out_stream).Error!void {
+        try std.json.stringify(@enumToInt(value), options, out_stream);
+    }
 };
 
 pub const ResourceOperationKind = enum {
@@ -866,6 +1109,10 @@ pub const ResourceOperationKind = enum {
     rename,
     /// Supports deleting existing files and folders.
     delete,
+
+    pub fn jsonStringify(value: @This(), options: std.json.StringifyOptions, out_stream: anytype) @TypeOf(out_stream).Error!void {
+        try std.json.stringify(@tagName(value), options, out_stream);
+    }
 };
 
 pub const FailureHandlingKind = enum {
@@ -884,6 +1131,10 @@ pub const FailureHandlingKind = enum {
     /// The client tries to undo the operations already executed. But there is no
     /// guarantee that this is succeeding.
     undo,
+
+    pub fn jsonStringify(value: @This(), options: std.json.StringifyOptions, out_stream: anytype) @TypeOf(out_stream).Error!void {
+        try std.json.stringify(@tagName(value), options, out_stream);
+    }
 };
 
 pub const PrepareSupportDefaultBehavior = enum(u32) {
@@ -891,6 +1142,10 @@ pub const PrepareSupportDefaultBehavior = enum(u32) {
     /// according the to language's syntax rule.
     Identifier = 1,
     placeholder__, // fixes alignment issue
+
+    pub fn jsonStringify(value: @This(), options: std.json.StringifyOptions, out_stream: anytype) @TypeOf(out_stream).Error!void {
+        try std.json.stringify(@enumToInt(value), options, out_stream);
+    }
 };
 
 pub const TokenFormat = enum {
@@ -898,6 +1153,10 @@ pub const TokenFormat = enum {
 
     relative,
     placeholder__, // fixes alignment issue
+
+    pub fn jsonStringify(value: @This(), options: std.json.StringifyOptions, out_stream: anytype) @TypeOf(out_stream).Error!void {
+        try std.json.stringify(@tagName(value), options, out_stream);
+    }
 };
 
 // Structures
@@ -1620,6 +1879,10 @@ pub const WorkspaceEdit = struct {
     /// @since 3.16.0
     /// field can be undefined, but this possible state is non-critical
     changeAnnotations: ?Map(ChangeAnnotationIdentifier, ChangeAnnotation) = null,
+
+    pub fn jsonStringify(value: @This(), options: std.json.StringifyOptions, out_stream: anytype) @TypeOf(out_stream).Error!void {
+        try stringifyStruct(value, options, out_stream);
+    }
 };
 
 /// The options to register for file operations.
@@ -1956,6 +2219,10 @@ pub const DocumentDiagnosticReportPartialResult = struct {
         FullDocumentDiagnosticReport: FullDocumentDiagnosticReport,
         UnchangedDocumentDiagnosticReport: UnchangedDocumentDiagnosticReport,
     }),
+
+    pub fn jsonStringify(value: @This(), options: std.json.StringifyOptions, out_stream: anytype) @TypeOf(out_stream).Error!void {
+        try stringifyStruct(value, options, out_stream);
+    }
 };
 
 /// Cancellation data returned from a diagnostic request.
@@ -4058,6 +4325,10 @@ pub const RelatedFullDocumentDiagnosticReport = struct {
     resultId: ?[]const u8 = null,
     /// The actual items.
     items: []const Diagnostic,
+
+    pub fn jsonStringify(value: @This(), options: std.json.StringifyOptions, out_stream: anytype) @TypeOf(out_stream).Error!void {
+        try stringifyStruct(value, options, out_stream);
+    }
 };
 
 /// An unchanged diagnostic report with a set of related documents.
@@ -4085,6 +4356,10 @@ pub const RelatedUnchangedDocumentDiagnosticReport = struct {
     /// A result id which will be sent on the next
     /// diagnostic request for the same document.
     resultId: []const u8,
+
+    pub fn jsonStringify(value: @This(), options: std.json.StringifyOptions, out_stream: anytype) @TypeOf(out_stream).Error!void {
+        try stringifyStruct(value, options, out_stream);
+    }
 };
 
 /// A diagnostic report with a full set of problems.
