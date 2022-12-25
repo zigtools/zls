@@ -24,16 +24,19 @@ const ComptimeInterpreter = @import("ComptimeInterpreter.zig");
 const data = @import("data/data.zig");
 const snipped_data = @import("data/snippets.zig");
 
+const tres = @import("tres/tres.zig");
+
 const log = std.log.scoped(.server);
 
 // Server fields
 
 config: *Config,
 allocator: std.mem.Allocator = undefined,
-arena: std.heap.ArenaAllocator = undefined,
+arena: *std.heap.ArenaAllocator = undefined,
 document_store: DocumentStore = undefined,
 builtin_completions: std.ArrayListUnmanaged(types.CompletionItem),
 client_capabilities: ClientCapabilities = .{},
+outgoing_messages: std.ArrayListUnmanaged([]const u8) = .{},
 offset_encoding: offsets.Encoding = .@"utf-16",
 status: enum {
     /// the server has not received a `initialize` request
@@ -98,57 +101,77 @@ pub const Error = anyerror || std.mem.Allocator.Error || error{
 };
 
 fn sendResponse(server: *Server, id: types.RequestId, result: anytype) void {
-    _ = server;
-    _ = id;
-    _ = result;
     // TODO validate result type is a possible response
     // TODO validate response is from a client to server request
     // TODO validate result type
 
-    // const allocator = server.arena.allocator();
-
-    // var buffer = std.ArrayListUnmanaged(u8){};
-    // var writer = buffer.writer(allocator);
-    // try writer.writeAll(
-    //     \\{"jsonrpc": "2.0","id":
-    // );
-    // try std.json.stringify(id, .{}, writer);
-    // try writer.writeAll(",result:");
-    // try std.json.stringify(result, .{}, writer);
-    // try writer.writeByte('}');
-
-    // const message = buffer.toOwnedSlice(allocator);
-
-    // server.outgoing_message_handler(message);
+    server.sendInternal(id, null, null, "result", result) catch {};
 }
 
 fn sendRequest(server: *Server, id: types.RequestId, method: []const u8, params: anytype) void {
-    _ = server;
-    _ = id;
-    _ = method;
-    _ = params;
     // TODO validate method is a request
     // TODO validate method is server to client
     // TODO validate params type
+
+    server.sendInternal(id, method, null, "params", params) catch {};
 }
 
 fn sendNotification(server: *Server, method: []const u8, params: anytype) void {
-    _ = server;
-    _ = method;
-    _ = params;
     // TODO validate method is a notification
     // TODO validate method is server to client
     // TODO validate params type
+
+    server.sendInternal(null, method, null, "params", params) catch {};
 }
 
-fn sendResponseError(server: *Server, id: types.RequestId, err: types.ResponseError) void {
-    _ = server;
-    _ = id;
-    _ = err;
-    // TODO validate response is from a client to server request
+fn sendResponseError(server: *Server, id: types.RequestId, err: ?types.ResponseError) void {
+    server.sendInternal(id, null, err, "", void) catch {};
 }
 
-fn showMessage(server: *Server, message_type: types.MessageType, message: []const u8) !void {
+fn sendInternal(
+    server: *Server,
+    maybe_id: ?types.RequestId,
+    maybe_method: ?[]const u8,
+    maybe_err: ?types.ResponseError,
+    extra_name: []const u8,
+    extra: anytype,
+) !void {
+    var buffer = std.ArrayListUnmanaged(u8){};
+    var writer = buffer.writer(server.allocator);
+    try writer.writeAll(
+        \\{"jsonrpc":"2.0"
+    );
+    if (maybe_id) |id| {
+        try writer.writeAll(
+            \\,"id":
+        );
+        try std.json.stringify(id, .{}, writer);
+    }
+    if (maybe_method) |method| {
+        try writer.print(
+            \\,"method":{s}
+        , .{method});
+    }
+    if (@TypeOf(extra) != @TypeOf(void)) {
+        try writer.print(
+            \\,"{s}":
+        ,.{extra_name});
+        try std.json.stringify(extra, .{}, writer);
+    }
+    if (maybe_err) |err| {
+        try writer.writeAll(
+            \\,"error":
+        );
+        try std.json.stringify(err, .{}, writer);
+    }
+    try writer.writeByte('}');
+
+    const message = try buffer.toOwnedSlice(server.allocator);
+
+    try server.outgoing_messages.append(server.allocator, message);
+}
+
+fn showMessage(server: *Server, message_type: types.MessageType, message: []const u8) void {
     server.sendNotification("window/showMessage", types.ShowMessageParams{
         .type = message_type,
         .message = message,
@@ -431,7 +454,7 @@ fn autofix(server: *Server, allocator: std.mem.Allocator, handle: *const Documen
     try getAstCheckDiagnostics(server, handle.*, &diagnostics);
 
     var builder = code_actions.Builder{
-        .arena = &server.arena,
+        .arena = server.arena,
         .document_store = &server.document_store,
         .handle = handle,
         .offset_encoding = server.offset_encoding,
@@ -595,7 +618,7 @@ fn nodeToCompletion(
         };
         try analysis.iterateSymbolsContainer(
             &server.document_store,
-            &server.arena,
+            server.arena,
             node_handle,
             orig_handle,
             declToCompletion,
@@ -619,7 +642,7 @@ fn nodeToCompletion(
                 const use_snippets = server.config.enable_snippets and server.client_capabilities.supports_snippets;
                 const insert_text = if (use_snippets) blk: {
                     const skip_self_param = !(parent_is_type_val orelse true) and
-                        try analysis.hasSelfParam(&server.arena, &server.document_store, handle, func);
+                        try analysis.hasSelfParam(server.arena, &server.document_store, handle, func);
                     break :blk try analysis.getFunctionSnippet(server.arena.allocator(), tree, func, skip_self_param);
                 } else tree.tokenSlice(func.name_token.?);
 
@@ -643,7 +666,7 @@ fn nodeToCompletion(
             const var_decl = ast.varDecl(tree, node).?;
             const is_const = token_tags[var_decl.ast.mut_token] == .keyword_const;
 
-            if (try analysis.resolveVarDeclAlias(&server.document_store, &server.arena, node_handle)) |result| {
+            if (try analysis.resolveVarDeclAlias(&server.document_store, server.arena, node_handle)) |result| {
                 const context = DeclToCompletionContext{
                     .server = server,
                     .completions = list,
@@ -794,7 +817,7 @@ fn gotoDefinitionSymbol(
     const name_token = switch (decl_handle.decl.*) {
         .ast_node => |node| block: {
             if (resolve_alias) {
-                if (try analysis.resolveVarDeclAlias(&server.document_store, &server.arena, .{ .node = node, .handle = handle })) |result| {
+                if (try analysis.resolveVarDeclAlias(&server.document_store, server.arena, .{ .node = node, .handle = handle })) |result| {
                     handle = result.handle;
 
                     break :block result.nameToken();
@@ -824,7 +847,7 @@ fn hoverSymbol(server: *Server, decl_handle: analysis.DeclWithHandle) error{OutO
 
     const def_str = switch (decl_handle.decl.*) {
         .ast_node => |node| def: {
-            if (try analysis.resolveVarDeclAlias(&server.document_store, &server.arena, .{ .node = node, .handle = handle })) |result| {
+            if (try analysis.resolveVarDeclAlias(&server.document_store, server.arena, .{ .node = node, .handle = handle })) |result| {
                 return try server.hoverSymbol(result);
             }
             doc_str = try analysis.getDocComments(server.arena.allocator(), tree, node, hover_kind);
@@ -858,7 +881,7 @@ fn hoverSymbol(server: *Server, decl_handle: analysis.DeclWithHandle) error{OutO
     };
 
     var bound_type_params = analysis.BoundTypeParams{};
-    const resolved_type = try decl_handle.resolveType(&server.document_store, &server.arena, &bound_type_params);
+    const resolved_type = try decl_handle.resolveType(&server.document_store, server.arena, &bound_type_params);
 
     const resolved_type_str = if (resolved_type) |rt|
         if (rt.type.is_type_val) switch (rt.type.data) {
@@ -948,7 +971,7 @@ fn getSymbolGlobal(
     const name = identifierFromPosition(pos_index, handle.*);
     if (name.len == 0) return null;
 
-    return try analysis.lookupSymbolGlobal(&server.document_store, &server.arena, handle, name, pos_index);
+    return try analysis.lookupSymbolGlobal(&server.document_store, server.arena, handle, name, pos_index);
 }
 
 fn gotoDefinitionLabel(
@@ -1034,7 +1057,7 @@ fn getSymbolFieldAccess(
     var held_range = try server.arena.allocator().dupeZ(u8, offsets.locToSlice(handle.text, loc));
     var tokenizer = std.zig.Tokenizer.init(held_range);
 
-    if (try analysis.getFieldAccessType(&server.document_store, &server.arena, handle, source_index, &tokenizer)) |result| {
+    if (try analysis.getFieldAccessType(&server.document_store, server.arena, handle, source_index, &tokenizer)) |result| {
         const container_handle = result.unwrapped orelse result.original;
         const container_handle_node = switch (container_handle.type.data) {
             .other => |n| n,
@@ -1042,7 +1065,7 @@ fn getSymbolFieldAccess(
         };
         return try analysis.lookupSymbolContainer(
             &server.document_store,
-            &server.arena,
+            server.arena,
             .{ .node = container_handle_node, .handle = container_handle.handle },
             name,
             true,
@@ -1216,7 +1239,7 @@ fn completeGlobal(server: *Server, pos_index: usize, handle: *const DocumentStor
         .completions = &completions,
         .orig_handle = handle,
     };
-    try analysis.iterateSymbolsGlobal(&server.document_store, &server.arena, handle, pos_index, declToCompletion, context);
+    try analysis.iterateSymbolsGlobal(&server.document_store, server.arena, handle, pos_index, declToCompletion, context);
     try populateSnippedCompletions(server.arena.allocator(), &completions, &snipped_data.generic, server.config.*, null);
 
     if (server.client_capabilities.label_details_support) {
@@ -1239,7 +1262,7 @@ fn completeFieldAccess(server: *Server, handle: *const DocumentStore.Handle, sou
     var held_loc = try allocator.dupeZ(u8, offsets.locToSlice(handle.text, loc));
     var tokenizer = std.zig.Tokenizer.init(held_loc);
 
-    const result = (try analysis.getFieldAccessType(&server.document_store, &server.arena, handle, source_index, &tokenizer)) orelse return null;
+    const result = (try analysis.getFieldAccessType(&server.document_store, server.arena, handle, source_index, &tokenizer)) orelse return null;
     try server.typeToCompletion(&completions, result, handle);
     if (server.client_capabilities.label_details_support) {
         for (completions.items) |*item| {
@@ -1629,10 +1652,10 @@ fn initializeHandler(server: *Server, request: types.InitializeParams) !types.In
                 "ZLS was built with Zig {}, but your Zig version is {s}. Update Zig to avoid unexpected behavior.",
                 .{ zig_builtin.zig_version, env.version },
             );
-            try server.showMessage(.Warning, version_mismatch_message);
+            server.showMessage(.Warning, version_mismatch_message);
         }
     } else {
-        try server.showMessage(
+        server.showMessage(
             .Warning,
             \\ZLS failed to find Zig. Please add Zig to your PATH or set the zig_exe_path config option in your zls.json.
             ,
@@ -1728,14 +1751,14 @@ fn initializedHandler(server: *Server, notification: types.InitializedParams) !v
         try server.requestConfiguration();
 }
 
-fn shutdownHandler(server: *Server) !void {
+fn shutdownHandler(server: *Server, _: void) !void {
     if (server.status != .initialized) return error.InvalidRequest; // received a shutdown request but the server is not initialized!
 
     // Technically we should deinitialize first and send possible errors to the client
     // return try respondGeneric(writer, id, null_result_response);
 }
 
-fn exitHandler(server: *Server) noreturn {
+fn exitHandler(server: *Server, _: void) noreturn {
     log.info("Server exiting...", .{});
     // Technically we should deinitialize first and send possible errors to the client
 
@@ -1793,15 +1816,14 @@ fn requestConfiguration(server: *Server) !void {
     );
 }
 
-fn handleConfiguration(server: *Server, tree: std.json.ValueTree) error{OutOfMemory}!void {
+fn handleConfiguration(server: *Server, json: std.json.Value) error{OutOfMemory}!void {
     log.info("Setting configuration...", .{});
 
     // NOTE: Does this work with other editors?
     // Yes, String ids are officially supported by LSP
     // but not sure how standard this "standard" really is
 
-    if (tree.root.Object.get("error")) |_| return;
-    const result = tree.root.Object.get("result").?.Array;
+    const result = json.Array;
 
     inline for (std.meta.fields(Config)) |field, index| {
         const value = result.items[index];
@@ -1947,7 +1969,7 @@ fn semanticTokensFullHandler(server: *Server, request: types.SemanticTokensParam
 
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
 
-    const token_array = try semantic_tokens.writeAllSemanticTokens(&server.arena, &server.document_store, handle, server.offset_encoding);
+    const token_array = try semantic_tokens.writeAllSemanticTokens(server.arena, &server.document_store, handle, server.offset_encoding);
 
     return .{ .data = token_array };
 }
@@ -2019,7 +2041,7 @@ fn signatureHelpHandler(server: *Server, request: types.SignatureHelpParams) !?t
 
     const signature_info = (try getSignatureInfo(
         &server.document_store,
-        &server.arena,
+        server.arena,
         handle,
         source_index,
         data,
@@ -2250,7 +2272,7 @@ fn generalReferencesHandler(server: *Server, request: GeneralReferencesRequest) 
         try references.labelReferences(allocator, decl, server.offset_encoding, include_decl)
     else
         try references.symbolReferences(
-            &server.arena,
+            server.arena,
             &server.document_store,
             decl,
             server.offset_encoding,
@@ -2321,7 +2343,7 @@ fn inlayHintHandler(server: *Server, request: types.InlayHintParams) !?[]types.I
     // we need the regenerate hints when the document itself or its imported documents change
     // with caching it would also make sense to generate all hints instead of only the visible ones
     const hints = try inlay_hints.writeRangeInlayHint(
-        &server.arena,
+        server.arena,
         server.config.*,
         &server.document_store,
         handle,
@@ -2358,7 +2380,7 @@ fn codeActionHandler(server: *Server, request: types.CodeActionParams) !?[]types
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
 
     var builder = code_actions.Builder{
-        .arena = &server.arena,
+        .arena = server.arena,
         .document_store = &server.document_store,
         .handle = handle,
         .offset_encoding = server.offset_encoding,
@@ -2693,112 +2715,204 @@ fn shorterLocsFirst(_: void, lhs: offsets.Loc, rhs: offsets.Loc) bool {
     return (lhs.end - lhs.start) < (rhs.end - rhs.start);
 }
 
-// Needed for the hack seen below.
-fn extractErr(val: anytype) anyerror {
-    val catch |e| return e;
-    return error.HackDone;
+/// return true if there is a request with the given method name
+fn requestMethodExists(method: []const u8) bool {
+    const methods = comptime blk: {
+        var methods: [types.request_metadata.len][]const u8 = undefined;
+        for (types.request_metadata) |meta, i| {
+            methods[i] = meta.method;
+        }
+        break :blk methods;
+    };
+
+    return for (methods) |name| {
+        if (std.mem.eql(u8, method, name)) break true;
+    } else false;
 }
 
-pub fn processJsonRpc(server: *Server, writer: anytype, json: []const u8) !void {
+/// return true if there is a notification with the given method name
+fn notificationMethodExists(method: []const u8) bool {
+    const methods = comptime blk: {
+        var methods: [types.notification_metadata.len][]const u8 = undefined;
+        for (types.notification_metadata) |meta, i| {
+            methods[i] = meta.method;
+        }
+        break :blk methods;
+    };
+
+    return for (methods) |name| {
+        if (std.mem.eql(u8, method, name)) break true;
+    } else false;
+}
+
+const Message = union(enum) {
+    RequestMessage: struct {
+        id: types.RequestId,
+        method: []const u8,
+        /// may be null
+        params: types.LSPAny,
+    },
+    NotificationMessage: struct {
+        method: []const u8,
+        /// may be null
+        params: types.LSPAny,
+    },
+    ResponseMessage: struct {
+        id: types.RequestId,
+        /// non null on success
+        result: types.LSPAny,
+        @"error": ?types.ResponseError,
+    },
+
+    pub fn id(self: Message) ?types.RequestId {
+        return switch (self) {
+            .RequestMessage => |request| request.id,
+            .NotificationMessage => null,
+            .ResponseMessage => |response| response.id,
+        };
+    }
+
+    pub fn method(self: Message) ?[]const u8 {
+        return switch (self) {
+            .RequestMessage => |request| request.method,
+            .NotificationMessage => |notification| notification.method,
+            .ResponseMessage => null,
+        };
+    }
+
+    pub fn params(self: Message) ?types.LSPAny {
+        return switch (self) {
+            .RequestMessage => |request| request.params,
+            .NotificationMessage => |notification| notification.params,
+            .ResponseMessage => null,
+        };
+    }
+
+    pub fn fromJsonValueTree(tree: std.json.ValueTree) error{InvalidRequest}!Message {
+        if (tree.root != .Object) return error.InvalidRequest;
+        const object = tree.root.Object;
+
+        if (object.get("id")) |id_obj| {
+            comptime std.debug.assert(!tres.isAllocatorRequired(types.RequestId));
+            const msg_id = tres.parse(types.RequestId, id_obj, null) catch return error.InvalidRequest;
+
+            if (object.get("method")) |method_obj| {
+                const msg_method = switch (method_obj) {
+                    .String => |str| str,
+                    else => return error.InvalidRequest,
+                };
+
+                const msg_params = object.get("params") orelse .Null;
+
+                return .{ .RequestMessage = .{
+                    .id = msg_id,
+                    .method = msg_method,
+                    .params = msg_params,
+                } };
+            } else {
+                const result = object.get("result") orelse .Null;
+                const error_obj = object.get("error") orelse .Null;
+
+                comptime std.debug.assert(!tres.isAllocatorRequired(?types.ResponseError));
+                const err = tres.parse(?types.ResponseError, error_obj, null) catch return error.InvalidRequest;
+
+                if (result != .Null and err != null) return error.InvalidRequest;
+
+                return .{ .ResponseMessage = .{
+                    .id = msg_id,
+                    .result = result,
+                    .@"error" = err,
+                } };
+            }
+        } else {
+            const msg_method = switch (object.get("method") orelse return error.InvalidRequest) {
+                .String => |str| str,
+                else => return error.InvalidRequest,
+            };
+
+            const msg_params = object.get("params") orelse .Null;
+
+            return .{ .NotificationMessage = .{
+                .method = msg_method,
+                .params = msg_params,
+            } };
+        }
+    }
+};
+
+pub fn processJsonRpc(
+    server: *Server,
+    arena: *std.heap.ArenaAllocator,
+    json: []const u8,
+) void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    server.arena = std.heap.ArenaAllocator.init(server.allocator);
-    defer server.arena.deinit();
+    server.arena = arena;
 
     var parser = std.json.Parser.init(server.arena.allocator(), false);
     defer parser.deinit();
 
-    var tree = try parser.parse(json);
+    // how do we handle errors here
+
+    var tree = parser.parse(json) catch return; // what should we do on error?
     defer tree.deinit();
 
-    const id = if (tree.root.Object.get("id")) |id| switch (id) {
-        .Integer => |int| types.RequestId{ .Integer = @intCast(i32, int) },
-        .String => |str| types.RequestId{ .String = str },
-        else => types.RequestId{ .Integer = 0 },
-    } else types.RequestId{ .Integer = 0 };
+    const message = Message.fromJsonValueTree(tree) catch return;
 
-    if (id == .String and std.mem.startsWith(u8, id.String, "register"))
-        return;
-    if (id == .String and std.mem.startsWith(u8, id.String, "apply_edit"))
-        return;
-    if (id == .String and std.mem.eql(u8, id.String, "i_haz_configuration")) {
-        log.info("Setting configuration...", .{});
+    server.processMessage(message) catch |err| switch (message) {
+        .RequestMessage => |request| server.sendResponseError(request.id, .{
+            .code = @errorToInt(err),
+            .message = @errorName(err),
+        }),
+        else => {},
+    };
+}
 
-        // NOTE: Does this work with other editors?
-        // Yes, String ids are officially supported by LSP
-        // but not sure how standard this "standard" really is
+fn processMessage(server: *Server, message: Message) Error!void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
 
-        if (tree.root.Object.get("error")) |_| return;
-        const result = tree.root.Object.get("result").?.Array;
+    switch (message) {
+        .RequestMessage => |request| {
+            if (!requestMethodExists(request.method)) return error.MethodNotFound;
+        },
+        .NotificationMessage => |notification| {
+            if (!notificationMethodExists(notification.method)) return error.MethodNotFound;
+        },
+        .ResponseMessage => |response| {
+            if (response.id != .string) return;
+            if (std.mem.eql(u8, response.id.string, "register")) return;
+            if (std.mem.eql(u8, response.id.string, "apply_edit")) return;
 
-        inline for (std.meta.fields(Config)) |field, index| {
-            const value = result.items[index];
-            const ft = if (@typeInfo(field.type) == .Optional)
-                @typeInfo(field.type).Optional.child
-            else
-                field.type;
-            const ti = @typeInfo(ft);
-
-            if (value != .Null) {
-                const new_value: field.type = switch (ft) {
-                    []const u8 => switch (value) {
-                        .String => |s| blk: {
-                            if (s.len == 0) {
-                                if (field.type == ?[]const u8) {
-                                    break :blk null;
-                                } else {
-                                    break :blk s;
-                                }
-                            }
-                            var nv = try server.allocator.dupe(u8, s);
-                            if (@field(server.config, field.name)) |prev_val| server.allocator.free(prev_val);
-                            break :blk nv;
-                        }, // TODO: Allocation model? (same with didChangeConfiguration); imo this isn't *that* bad but still
-                        else => @panic("Invalid configuration value"), // TODO: Handle this
-                    },
-                    else => switch (ti) {
-                        .Int => switch (value) {
-                            .Integer => |s| std.math.cast(ft, s) orelse @panic("Invalid configuration value"),
-                            else => @panic("Invalid configuration value"), // TODO: Handle this
-                        },
-                        .Bool => switch (value) {
-                            .Bool => |b| b,
-                            else => @panic("Invalid configuration value"), // TODO: Handle this
-                        },
-                        else => @compileError("Not implemented for " ++ @typeName(ft)),
-                    },
-                };
-                log.debug("setting configuration option '{s}' to '{any}'", .{ field.name, new_value });
-                @field(server.config, field.name) = new_value;
+            if (std.mem.eql(u8, response.id.string, "i_haz_configuration")) {
+                if(response.@"error" != null) return;
+                try server.handleConfiguration(response.result);
+                return;
             }
-        }
 
-        try configuration.configChanged(server.config, server.allocator, null);
-
-        return;
+            std.log.warn("received response from client with id '{s}' that has no handler!", .{response.id.string});
+            return;
+        },
     }
 
-    const method = tree.root.Object.get("method").?.String;
+    const method = message.method().?; // message cannot be a ResponseMessage
 
     switch (server.status) {
         .uninitialized => blk: {
             if (std.mem.eql(u8, method, "initialize")) break :blk;
             if (std.mem.eql(u8, method, "exit")) break :blk;
 
-            // ignore notifications
-            if (tree.root.Object.get("id") == null) break :blk;
-
-            return try sendErrorResponse(writer, server.arena.allocator(), .ServerNotInitialized, "server received a request before being initialized!");
+            return error.ServerNotInitialized; // server received a request before being initialized!
         },
         .initializing => blk: {
             if (std.mem.eql(u8, method, "initialized")) break :blk;
             if (std.mem.eql(u8, method, "$/progress")) break :blk;
 
-            return try sendErrorResponse(writer, server.arena.allocator(), .InvalidRequest, "server received a request during initialization!");
+            return error.InvalidRequest; // server received a request during initialization!
         },
         .initialized => {},
-        .shutdown => return try sendErrorResponse(writer, server.arena.allocator(), .InvalidRequest, "server received a request after shutdown!"),
+        .shutdown => return error.InvalidRequest, // server received a request after shutdown!
     }
 
     const start_time = std.time.milliTimestamp();
@@ -2811,83 +2925,77 @@ pub fn processJsonRpc(server: *Server, writer: anytype, json: []const u8) !void 
     }
 
     const method_map = .{
-        .{ "initialized", void, initializedHandler },
-        .{ "initialize", requests.Initialize, initializeHandler },
-        .{ "shutdown", void, shutdownHandler },
-        .{ "exit", void, exitHandler },
-        .{ "$/cancelRequest", void, cancelRequestHandler },
-        .{ "textDocument/didOpen", requests.OpenDocument, openDocumentHandler },
-        .{ "textDocument/didChange", requests.ChangeDocument, changeDocumentHandler },
-        .{ "textDocument/didSave", requests.SaveDocument, saveDocumentHandler },
-        .{ "textDocument/didClose", requests.CloseDocument, closeDocumentHandler },
-        .{ "textDocument/willSave", requests.WillSave, willSaveHandler },
-        .{ "textDocument/willSaveWaitUntil", requests.WillSave, willSaveWaitUntilHandler },
-        .{ "textDocument/semanticTokens/full", requests.SemanticTokensFull, semanticTokensFullHandler },
-        .{ "textDocument/inlayHint", requests.InlayHint, inlayHintHandler },
-        .{ "textDocument/completion", requests.Completion, completionHandler },
-        .{ "textDocument/signatureHelp", requests.SignatureHelp, signatureHelpHandler },
-        .{ "textDocument/definition", requests.GotoDefinition, gotoDefinitionHandler },
-        .{ "textDocument/typeDefinition", requests.GotoDefinition, gotoDefinitionHandler },
-        .{ "textDocument/implementation", requests.GotoDefinition, gotoDefinitionHandler },
-        .{ "textDocument/declaration", requests.GotoDeclaration, gotoDeclarationHandler },
-        .{ "textDocument/hover", requests.Hover, hoverHandler },
-        .{ "textDocument/documentSymbol", requests.DocumentSymbols, documentSymbolsHandler },
-        .{ "textDocument/formatting", requests.Formatting, formattingHandler },
-        .{ "textDocument/rename", requests.Rename, renameHandler },
-        .{ "textDocument/references", requests.References, referencesHandler },
-        .{ "textDocument/documentHighlight", requests.DocumentHighlight, documentHighlightHandler },
-        .{ "textDocument/codeAction", requests.CodeAction, codeActionHandler },
-        .{ "workspace/didChangeConfiguration", configuration.DidChangeConfigurationParams, didChangeConfigurationHandler },
-        .{ "textDocument/foldingRange", requests.FoldingRange, foldingRangeHandler },
-        .{ "textDocument/selectionRange", requests.SelectionRange, selectionRangeHandler },
+        .{ "initialized", initializedHandler },
+        .{ "initialize", initializeHandler },
+        .{ "shutdown", shutdownHandler },
+        .{ "exit", exitHandler },
+        .{ "$/cancelRequest", cancelRequestHandler },
+        .{ "textDocument/didOpen", openDocumentHandler },
+        .{ "textDocument/didChange", changeDocumentHandler },
+        .{ "textDocument/didSave", saveDocumentHandler },
+        .{ "textDocument/didClose", closeDocumentHandler },
+        .{ "textDocument/willSave", willSaveHandler },
+        .{ "textDocument/willSaveWaitUntil", willSaveWaitUntilHandler },
+        .{ "textDocument/semanticTokens/full", semanticTokensFullHandler },
+        .{ "textDocument/inlayHint", inlayHintHandler },
+        .{ "textDocument/completion", completionHandler },
+        .{ "textDocument/signatureHelp", signatureHelpHandler },
+        .{ "textDocument/definition", gotoDefinitionHandler },
+        .{ "textDocument/typeDefinition", gotoDefinitionHandler },
+        .{ "textDocument/implementation", gotoDefinitionHandler },
+        .{ "textDocument/declaration", gotoDeclarationHandler },
+        .{ "textDocument/hover", hoverHandler },
+        .{ "textDocument/documentSymbol", documentSymbolsHandler },
+        .{ "textDocument/formatting", formattingHandler },
+        .{ "textDocument/rename", renameHandler },
+        .{ "textDocument/references", referencesHandler },
+        .{ "textDocument/documentHighlight", documentHighlightHandler },
+        .{ "textDocument/codeAction", codeActionHandler },
+        .{ "workspace/didChangeConfiguration", didChangeConfigurationHandler }, // types.DidChangeConfigurationParams
+        .{ "textDocument/foldingRange", foldingRangeHandler },
+        .{ "textDocument/selectionRange", selectionRangeHandler },
     };
 
+    comptime {
+        inline for (method_map) |method_info| {
+            _ = method_info;
+            // TODO validate that the method actually exists
+            // TODO validate that direction is client_to_server
+            // TODO validate that the handler accepts and returns the correct types
+            // TODO validate that notification handler return Error!void
+            // TODO validate handler parameter names
+        }
+    }
+
+    @setEvalBranchQuota(10000);
     inline for (method_map) |method_info| {
         if (std.mem.eql(u8, method, method_info[0])) {
-            if (method_info.len == 1) {
-                log.warn("method not mapped: {s}", .{method});
-            } else if (method_info[1] != void) {
-                const ReqT = method_info[1];
-                const request_obj = try requests.fromDynamicTree(&server.arena, ReqT, tree.root);
-                method_info[2](server, writer, id, request_obj) catch |err| {
-                    log.err("failed to process request: {s}", .{@errorName(err)});
-                };
-            } else {
-                method_info[2](server, writer, id) catch |err| {
-                    log.err("failed to process request: {s}", .{@errorName(err)});
-                };
+            const handler = method_info[1];
+
+            const handler_info: std.builtin.Type.Fn = @typeInfo(@TypeOf(handler)).Fn;
+            const ParamsType = handler_info.params[1].type.?; // TODO add error message on null
+
+            const params: ParamsType = tres.parse(ParamsType, message.params().?, server.arena.allocator()) catch return error.InternalError;
+            const response = handler(server, params) catch return error.InternalError;
+
+            // @compileLog(comptime std.fmt.comptimePrint("{} {}", .{ ParamsType,  @TypeOf(response)}));
+            if (@TypeOf(response) == void) {
+                std.debug.assert(message == .NotificationMessage);
+                return;
             }
+
+            std.debug.assert(message == .RequestMessage);
+            server.sendResponse(message.RequestMessage.id, response);
+
             return;
         }
     }
 
-    // Boolean value is true if the method is a request (and thus the client
-    // needs a response) or false if the method is a notification (in which
-    // case it should be silently ignored)
-    const unimplemented_map = std.ComptimeStringMap(bool, .{
-        .{ "textDocument/codeLens", true },
-        .{ "textDocument/documentLink", true },
-        .{ "textDocument/rangeFormatting", true },
-        .{ "textDocument/onTypeFormatting", true },
-        .{ "textDocument/prepareRename", true },
-        .{ "textDocument/selectionRange", true },
-        .{ "textDocument/semanticTokens/range", true },
-        .{ "workspace/didChangeWorkspaceFolders", false },
-    });
-
-    if (unimplemented_map.get(method)) |request| {
-        // TODO: Unimplemented methods, implement them and add them to server capabilities.
-        if (request) {
-            return try respondGeneric(writer, id, null_result_response);
-        }
-
-        log.debug("Notification method {s} is not implemented", .{method});
-        return;
+    switch (message) {
+        .RequestMessage => |request| server.sendResponse(request.id, null),
+        .NotificationMessage => return,
+        .ResponseMessage => unreachable,
     }
-    if (tree.root.Object.get("id")) |_| {
-        return try respondGeneric(writer, id, not_implemented_response);
-    }
-    log.debug("Method without return value not implemented: {s}", .{method});
 }
 
 pub fn init(
