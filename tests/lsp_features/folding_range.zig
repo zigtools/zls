@@ -5,7 +5,6 @@ const builtin = @import("builtin");
 const Context = @import("../context.zig").Context;
 
 const types = zls.types;
-const requests = zls.requests;
 
 const allocator: std.mem.Allocator = std.testing.allocator;
 
@@ -48,9 +47,9 @@ fn testFoldingRange(source: []const u8, expect: []const u8) !void {
 
     try ctx.requestDidOpen(test_uri, source);
 
-    const request = requests.FoldingRange{ .params = .{ .textDocument = .{ .uri = test_uri } } };
+    const params = types.FoldingRangeParams{ .textDocument = .{ .uri = test_uri } };
 
-    const response = try ctx.requestGetResponse(?[]types.FoldingRange, "textDocument/foldingRange", request);
+    const response = try ctx.requestGetResponse(?[]types.FoldingRange, "textDocument/foldingRange", params);
     defer response.deinit();
 
     var actual = std.ArrayList(u8).init(allocator);

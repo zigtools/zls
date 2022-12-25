@@ -2973,11 +2973,7 @@ fn processMessage(server: *Server, message: Message) Error!void {
             const params: ParamsType = tres.parse(ParamsType, message.params().?, server.arena.allocator()) catch return error.InternalError;
             const response = handler(server, params) catch return error.InternalError;
 
-            // @compileLog(comptime std.fmt.comptimePrint("{} {}", .{ ParamsType,  @TypeOf(response)}));
-            if (@TypeOf(response) == void) {
-                std.debug.assert(message == .NotificationMessage);
-                return;
-            }
+            if (@TypeOf(response) == void) return;
 
             std.debug.assert(message == .RequestMessage);
             server.sendResponse(message.RequestMessage.id, response);

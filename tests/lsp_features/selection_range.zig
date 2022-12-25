@@ -45,12 +45,12 @@ fn testSelectionRange(source: []const u8, want: []const []const u8) !void {
         parent: ?*@This(),
     };
 
-    const request = requests.SelectionRange{ .params = .{
+    const params = types.SelectionRangeParams{
         .textDocument = .{ .uri = test_uri },
         .positions = &[_]types.Position{position},
-    } };
+    };
 
-    const response = try ctx.requestGetResponse(?[]SelectionRange, "textDocument/selectionRange", request);
+    const response = try ctx.requestGetResponse(?[]SelectionRange, "textDocument/selectionRange", params);
     defer response.deinit();
 
     const selectionRanges: []SelectionRange = response.result orelse {

@@ -8,7 +8,6 @@ const ErrorBuilder = @import("../ErrorBuilder.zig");
 
 const types = zls.types;
 const offsets = zls.offsets;
-const requests = zls.requests;
 
 const allocator: std.mem.Allocator = std.testing.allocator;
 
@@ -83,7 +82,7 @@ fn testInlayHints(source: []const u8) !void {
 
     const range = types.Range{
         .start = types.Position{ .line = 0, .character = 0 },
-        .end = offsets.indexToPosition(phr.new_source, phr.new_source.len, .utf16),
+        .end = offsets.indexToPosition(phr.new_source, phr.new_source.len, .@"utf-16"),
     };
 
     const InlayHint = struct {
@@ -92,14 +91,12 @@ fn testInlayHints(source: []const u8) !void {
         kind: types.InlayHintKind,
     };
 
-    const request = requests.InlayHint{
-        .params = .{
-            .textDocument = .{ .uri = test_uri },
-            .range = range,
-        },
+    const params = types.InlayHintParams{
+        .textDocument = .{ .uri = test_uri },
+        .range = range,
     };
 
-    const response = try ctx.requestGetResponse(?[]InlayHint, "textDocument/inlayHint", request);
+    const response = try ctx.requestGetResponse(?[]InlayHint, "textDocument/inlayHint", params);
     defer response.deinit();
 
     const hints: []InlayHint = response.result orelse {
