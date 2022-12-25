@@ -372,7 +372,7 @@ pub fn applyTextEdits(
     var text_array = std.ArrayListUnmanaged(u8){};
     errdefer text_array.deinit(allocator);
 
-    try text_array.appendSlice(allocator, if (last_full_text_change) |index| content_changes[index].literal_0.text else text);
+    try text_array.appendSlice(allocator, if (last_full_text_change) |index| content_changes[index].literal_1.text else text);
 
     // don't even bother applying changes before a full text change
     const changes = content_changes[if (last_full_text_change) |index| index + 1 else 0..];
