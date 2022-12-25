@@ -55,14 +55,12 @@ const Builder = struct {
 
         try self.hints.append(self.arena, .{
             .position = position,
-            .label = .{.string = label},
+            .label = .{ .string = label },
             .kind = types.InlayHintKind.Parameter,
-            .tooltip = .{
-                .MarkupContent = .{
+            .tooltip = .{ .MarkupContent = .{
                 .kind = self.hover_kind,
                 .value = tooltip_text,
-            }
-            },
+            } },
             .paddingLeft = false,
             .paddingRight = true,
         });

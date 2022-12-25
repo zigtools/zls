@@ -98,12 +98,12 @@ pub const Context = struct {
 
         //  send the request to the server
         self.server.processJsonRpc(&self.arena, req);
-        
+
         const messages = self.server.outgoing_messages.items;
 
         try std.testing.expect(messages.len != 0);
 
-        for(messages[0..(messages.len - 1)]) |message| {
+        for (messages[0..(messages.len - 1)]) |message| {
             self.server.allocator.free(message);
         }
         defer self.server.outgoing_messages.clearRetainingCapacity();
@@ -168,7 +168,7 @@ pub const Context = struct {
     pub fn requestGetResponse(self: *Context, comptime Result: type, method: []const u8, params: anytype) !Response(Result) {
         var buffer = std.ArrayListUnmanaged(u8){};
         defer buffer.deinit(allocator);
-        
+
         try tres.stringify(params, .{}, buffer.writer(allocator));
 
         const response_bytes = try self.requestAlloc(method, buffer.items);

@@ -48,7 +48,7 @@ fn loop(server: *Server) !void {
         // write server -> client messages
         for (server.outgoing_messages.items) |outgoing_message| {
             const header = Header{ .content_length = outgoing_message.len };
-            try writer.print("{}{s}", .{header, outgoing_message});
+            try writer.print("{}{s}", .{ header, outgoing_message });
             try buffered_writer.flush();
         }
         for (server.outgoing_messages.items) |outgoing_message| {

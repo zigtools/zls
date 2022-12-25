@@ -120,7 +120,7 @@ fn testInlayHints(source: []const u8) !void {
         for (hints) |hint| {
             if (position.line != hint.position.line or position.character != hint.position.character) continue;
 
-            const actual_label = hint.label[0 .. hint.label.len];
+            const actual_label = hint.label[0..hint.label.len];
 
             if (!std.mem.eql(u8, expected_label, actual_label)) {
                 try error_builder.msgAtLoc("expected label `{s}` here but got `{s}`!", new_loc, .err, .{ expected_label, actual_label });

@@ -156,7 +156,7 @@ fn sendInternal(
     if (@TypeOf(extra) != @TypeOf(void)) {
         try writer.print(
             \\,"{s}":
-        ,.{extra_name});
+        , .{extra_name});
         try tres.stringify(extra, .{
             .emit_null_optional_fields = false,
         }, writer);
@@ -2869,8 +2869,8 @@ pub fn processJsonRpc(
         std.log.err("got {} while processing message!", .{err}); // TODO include message information
         switch (message) {
             .RequestMessage => |request| server.sendResponseError(request.id, .{
-                    .code = @errorToInt(err),
-                    .message = @errorName(err),
+                .code = @errorToInt(err),
+                .message = @errorName(err),
             }),
             else => {},
         }
@@ -2894,7 +2894,7 @@ fn processMessage(server: *Server, message: Message) Error!void {
             if (std.mem.eql(u8, response.id.string, "apply_edit")) return;
 
             if (std.mem.eql(u8, response.id.string, "i_haz_configuration")) {
-                if(response.@"error" != null) return;
+                if (response.@"error" != null) return;
                 try server.handleConfiguration(response.result);
                 return;
             }
@@ -2924,7 +2924,7 @@ fn processMessage(server: *Server, message: Message) Error!void {
             if (std.mem.eql(u8, method, "exit")) break :blk;
 
             return error.InvalidRequest; // server received a request after shutdown!
-        }, 
+        },
     }
 
     const start_time = std.time.milliTimestamp();
@@ -2992,7 +2992,7 @@ fn processMessage(server: *Server, message: Message) Error!void {
 
             if (@TypeOf(response) == void) return;
 
-            if(message == .RequestMessage) {
+            if (message == .RequestMessage) {
                 server.sendResponse(message.RequestMessage.id, response);
             }
 
@@ -3061,7 +3061,7 @@ pub fn deinit(server: *Server) void {
 
     server.builtin_completions.deinit(server.allocator);
 
-    for(server.outgoing_messages.items) |message| {
+    for (server.outgoing_messages.items) |message| {
         server.allocator.free(message);
     }
     server.outgoing_messages.deinit(server.allocator);

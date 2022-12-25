@@ -462,7 +462,7 @@ fn testCompletion(source: []const u8, expected_completions: []const Completion) 
             try error_builder.msgAtIndex("label '{s}' should be of kind '{s}' but was '{?s}'!", cursor_idx, .err, .{
                 label,
                 @tagName(expected_completion.kind),
-                if(actual_completion.kind) |kind| @tagName(kind) else null,
+                if (actual_completion.kind) |kind| @tagName(kind) else null,
             });
             return error.InvalidCompletionKind;
         }
@@ -498,9 +498,9 @@ fn extractCompletionLabels(items: anytype) error{ DuplicateCompletionLabel, OutO
     for (items) |item| {
         const maybe_kind = switch (@typeInfo(@TypeOf(item.kind))) {
             .Optional => item.kind,
-            else => @as(?@TypeOf(item.kind), item.kind)
+            else => @as(?@TypeOf(item.kind), item.kind),
         };
-        if(maybe_kind) |kind| {
+        if (maybe_kind) |kind| {
             switch (kind) {
                 .Keyword, .Snippet => continue,
                 else => {},

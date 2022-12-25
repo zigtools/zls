@@ -2567,13 +2567,9 @@ fn makeInnerScope(allocator: std.mem.Allocator, context: ScopeContext, node_idx:
 
         if (container_field) |_| {
             if (!std.mem.eql(u8, name, "_")) {
-
                 const Documentation = @TypeOf(@as(types.CompletionItem, undefined).documentation);
 
-                var doc: Documentation = if (try getDocComments(allocator, tree, decl, .markdown)) |docs|
-                    .{.MarkupContent = types.MarkupContent{ .kind = .markdown, .value = docs }}
-                else
-                    null;
+                var doc: Documentation = if (try getDocComments(allocator, tree, decl, .markdown)) |docs| .{ .MarkupContent = types.MarkupContent{ .kind = .markdown, .value = docs } } else null;
                 var gop_res = try context.enums.getOrPut(allocator, .{
                     .label = name,
                     .kind = .Constant,
