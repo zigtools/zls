@@ -148,6 +148,7 @@ pub fn build(b: *std.build.Builder) !void {
     }
 
     tests.addPackage(.{ .name = "zls", .source = .{ .path = "src/zls.zig" }, .dependencies = exe.packages.items });
+    tests.addPackage(.{ .name = "tres", .source = .{ .path = "src/tres/tres.zig" } });
     tests.setBuildMode(.Debug);
     tests.setTarget(target);
     test_step.dependOn(&tests.step);

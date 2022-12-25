@@ -38,7 +38,7 @@ fn testSelectionRange(source: []const u8, want: []const []const u8) !void {
 
     try ctx.requestDidOpen(test_uri, phr.new_source);
 
-    const position = offsets.locToRange(phr.new_source, phr.locations.items(.new)[0], .utf16).start;
+    const position = offsets.locToRange(phr.new_source, phr.locations.items(.new)[0], .@"utf-16").start;
 
     const SelectionRange = struct {
         range: types.Range,
@@ -63,7 +63,7 @@ fn testSelectionRange(source: []const u8, want: []const []const u8) !void {
 
     var it: ?*SelectionRange = &selectionRanges[0];
     while (it) |r| {
-        const slice = offsets.rangeToSlice(phr.new_source, r.range, .utf16);
+        const slice = offsets.rangeToSlice(phr.new_source, r.range, .@"utf-16");
         (try got.addOne()).* = slice;
         it = r.parent;
     }

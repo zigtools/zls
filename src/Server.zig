@@ -145,7 +145,7 @@ fn sendInternal(
         try writer.writeAll(
             \\,"id":
         );
-        try std.json.stringify(id, .{}, writer);
+        try tres.stringify(id, .{}, writer);
     }
     if (maybe_method) |method| {
         try writer.print(
@@ -156,13 +156,15 @@ fn sendInternal(
         try writer.print(
             \\,"{s}":
         ,.{extra_name});
-        try std.json.stringify(extra, .{}, writer);
+        try tres.stringify(extra, .{
+            .emit_null_optional_fields = false,
+        }, writer);
     }
     if (maybe_err) |err| {
         try writer.writeAll(
             \\,"error":
         );
-        try std.json.stringify(err, .{}, writer);
+        try tres.stringify(err, .{}, writer);
     }
     try writer.writeByte('}');
 
