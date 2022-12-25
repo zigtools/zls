@@ -119,7 +119,6 @@ fn testReferences(source: []const u8) !void {
         };
 
         const response = try ctx.requestGetResponse(?[]types.Location, "textDocument/references", params);
-        defer response.deinit();
 
         const locations: []types.Location = response.result orelse {
             std.debug.print("Server returned `null` as the result\n", .{});

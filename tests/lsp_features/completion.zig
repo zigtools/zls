@@ -416,83 +416,79 @@ fn testCompletion(source: []const u8, expected_completions: []const Completion) 
         .position = offsets.indexToPosition(source, cursor_idx, ctx.server.offset_encoding),
     };
 
-    @setEvalBranchQuota(2000);
+    @setEvalBranchQuota(5000);
     const response = try ctx.requestGetResponse(?types.CompletionList, "textDocument/completion", params);
-    defer response.deinit();
 
     const completion_list: types.CompletionList = response.result orelse {
         std.debug.print("Server returned `null` as the result\n", .{});
         return error.InvalidResponse;
     };
 
-    _ = completion_list;
-    _ = expected_completions;
+    var actual = try extractCompletionLabels(completion_list.items);
+    defer actual.deinit(allocator);
 
-    // var actual = try extractCompletionLabels(completion_list.items);
-    // defer actual.deinit(allocator);
+    var expected = try extractCompletionLabels(expected_completions);
+    defer expected.deinit(allocator);
 
-    // var expected = try extractCompletionLabels(expected_completions);
-    // defer expected.deinit(allocator);
+    var found = try set_intersection(actual, expected);
+    defer found.deinit(allocator);
 
-    // var found = try set_intersection(actual, expected);
-    // defer found.deinit(allocator);
+    var missing = try set_difference(expected, actual);
+    defer missing.deinit(allocator);
 
-    // var missing = try set_difference(expected, actual);
-    // defer missing.deinit(allocator);
+    var unexpected = try set_difference(actual, expected);
+    defer unexpected.deinit(allocator);
 
-    // var unexpected = try set_difference(actual, expected);
-    // defer unexpected.deinit(allocator);
+    var error_builder = ErrorBuilder.init(allocator, text);
+    defer error_builder.deinit();
+    errdefer error_builder.writeDebug();
 
-    // var error_builder = ErrorBuilder.init(allocator, text);
-    // defer error_builder.deinit();
-    // errdefer error_builder.writeDebug();
+    for (found.keys()) |label| {
+        const actual_completion: types.CompletionItem = blk: {
+            for (completion_list.items) |item| {
+                if (std.mem.eql(u8, label, item.label)) break :blk item;
+            }
+            unreachable;
+        };
 
-    // for (found.keys()) |label| {
-    //     const actual_completion: types.CompletionItem = blk: {
-    //         for (completion_list.items) |item| {
-    //             if (std.mem.eql(u8, label, item.label)) break :blk item;
-    //         }
-    //         unreachable;
-    //     };
+        const expected_completion: Completion = blk: {
+            for (expected_completions) |item| {
+                if (std.mem.eql(u8, label, item.label)) break :blk item;
+            }
+            unreachable;
+        };
 
-    //     const expected_completion: Completion = blk: {
-    //         for (expected_completions) |item| {
-    //             if (std.mem.eql(u8, label, item.label)) break :blk item;
-    //         }
-    //         unreachable;
-    //     };
+        if (actual_completion.kind == null or expected_completion.kind != actual_completion.kind.?) {
+            try error_builder.msgAtIndex("label '{s}' should be of kind '{s}' but was '{?s}'!", cursor_idx, .err, .{
+                label,
+                @tagName(expected_completion.kind),
+                if(actual_completion.kind) |kind| @tagName(kind) else null,
+            });
+            return error.InvalidCompletionKind;
+        }
 
-    //     if (expected_completion.kind != actual_completion.kind) {
-    //         try error_builder.msgAtIndex("label '{s}' should be of kind '{s}' but was '{s}'!", cursor_idx, .err, .{
-    //             label,
-    //             @tagName(expected_completion.kind),
-    //             @tagName(actual_completion.kind),
-    //         });
-    //         return error.InvalidCompletionKind;
-    //     }
+        if (expected_completion.detail == null) continue;
+        if (actual_completion.detail != null and std.mem.eql(u8, expected_completion.detail.?, actual_completion.detail.?)) continue;
 
-    //     if (expected_completion.detail == null) continue;
-    //     if (actual_completion.detail != null and std.mem.eql(u8, expected_completion.detail.?, actual_completion.detail.?)) continue;
+        try error_builder.msgAtIndex("label '{s}' should have detail '{?s}' but was '{?s}'!", cursor_idx, .err, .{
+            label,
+            expected_completion.detail,
+            actual_completion.detail,
+        });
+        return error.InvalidCompletionDetail;
+    }
 
-    //     try error_builder.msgAtIndex("label '{s}' should have detail '{?s}' but was '{?s}'!", cursor_idx, .err, .{
-    //         label,
-    //         expected_completion.detail,
-    //         actual_completion.detail,
-    //     });
-    //     return error.InvalidCompletionDetail;
-    // }
+    if (missing.count() != 0 or unexpected.count() != 0) {
+        var buffer = std.ArrayListUnmanaged(u8){};
+        defer buffer.deinit(allocator);
+        var out = buffer.writer(allocator);
 
-    // if (missing.count() != 0 or unexpected.count() != 0) {
-    //     var buffer = std.ArrayListUnmanaged(u8){};
-    //     defer buffer.deinit(allocator);
-    //     var out = buffer.writer(allocator);
-
-    //     try printLabels(out, found, "found");
-    //     try printLabels(out, missing, "missing");
-    //     try printLabels(out, unexpected, "unexpected");
-    //     try error_builder.msgAtIndex("invalid completions\n{s}", cursor_idx, .err, .{buffer.items});
-    //     return error.InvalidCompletions;
-    // }
+        try printLabels(out, found, "found");
+        try printLabels(out, missing, "missing");
+        try printLabels(out, unexpected, "unexpected");
+        try error_builder.msgAtIndex("invalid completions\n{s}", cursor_idx, .err, .{buffer.items});
+        return error.InvalidCompletions;
+    }
 }
 
 fn extractCompletionLabels(items: anytype) error{ DuplicateCompletionLabel, OutOfMemory }!std.StringArrayHashMapUnmanaged(void) {
@@ -500,9 +496,15 @@ fn extractCompletionLabels(items: anytype) error{ DuplicateCompletionLabel, OutO
     errdefer set.deinit(allocator);
     try set.ensureTotalCapacity(allocator, items.len);
     for (items) |item| {
-        switch (item.kind) {
-            .Keyword, .Snippet => continue,
-            else => {},
+        const maybe_kind = switch (@typeInfo(@TypeOf(item.kind))) {
+            .Optional => item.kind,
+            else => @as(?@TypeOf(item.kind), item.kind)
+        };
+        if(maybe_kind) |kind| {
+            switch (kind) {
+                .Keyword, .Snippet => continue,
+                else => {},
+            }
         }
         if (set.fetchPutAssumeCapacity(item.label, {}) != null) return error.DuplicateCompletionLabel;
     }

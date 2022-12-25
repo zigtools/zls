@@ -97,7 +97,6 @@ fn testInlayHints(source: []const u8) !void {
     };
 
     const response = try ctx.requestGetResponse(?[]InlayHint, "textDocument/inlayHint", params);
-    defer response.deinit();
 
     const hints: []InlayHint = response.result orelse {
         std.debug.print("Server returned `null` as the result\n", .{});

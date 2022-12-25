@@ -1,6 +1,8 @@
 const std = @import("std");
 const zls = @import("zls");
 
+const tres = @import("tres");
+
 const Header = zls.Header;
 const Config = zls.Config;
 const Server = zls.Server;
@@ -22,6 +24,7 @@ const allocator = std.testing.allocator;
 
 pub const Context = struct {
     server: Server,
+    arena: std.heap.ArenaAllocator,
     config: *Config,
     request_id: u32 = 1,
 
@@ -36,13 +39,16 @@ pub const Context = struct {
 
         var context: Context = .{
             .server = server,
+            .arena = std.heap.ArenaAllocator.init(allocator),
             .config = config,
         };
 
         try context.request("initialize", initialize_msg, null);
         try context.notification("initialized", "{}");
 
-        // std.debug.assert(server.status == .initialized);
+        // TODO this line shouldn't be needed
+        context.server.client_capabilities.label_details_support = false;
+
         return context;
     }
 
@@ -52,6 +58,7 @@ pub const Context = struct {
 
         self.request("shutdown", "{}", null) catch {};
         self.server.deinit();
+        self.arena.deinit();
     }
 
     pub fn notification(
@@ -68,11 +75,8 @@ pub const Context = struct {
         , .{ method, params });
         defer allocator.free(req);
 
-        var arena = std.heap.ArenaAllocator.init(allocator);
-        defer arena.deinit();
-
         //  send the request to the server
-        self.server.processJsonRpc(&arena, req);
+        self.server.processJsonRpc(&self.arena, req);
 
         for (self.server.outgoing_messages.items) |outgoing_message| {
             self.server.allocator.free(outgoing_message);
@@ -92,11 +96,8 @@ pub const Context = struct {
         , .{ self.request_id, method, params });
         defer allocator.free(req);
 
-        var arena = std.heap.ArenaAllocator.init(allocator);
-        defer arena.deinit();
-
         //  send the request to the server
-        self.server.processJsonRpc(&arena, req);
+        self.server.processJsonRpc(&self.arena, req);
         
         const messages = self.server.outgoing_messages.items;
 
@@ -161,35 +162,26 @@ pub const Context = struct {
             jsonrpc: []const u8,
             id: types.RequestId,
             result: Result,
-
-            pub fn deinit(self: @This()) void {
-                const parse_options = std.json.ParseOptions{
-                    .allocator = allocator,
-                    .ignore_unknown_fields = true,
-                };
-                std.json.parseFree(@This(), self, parse_options);
-            }
         };
     }
 
     pub fn requestGetResponse(self: *Context, comptime Result: type, method: []const u8, params: anytype) !Response(Result) {
-        const json_params = try std.json.stringifyAlloc(allocator, params, .{});
-        defer allocator.free(json_params);
+        var buffer = std.ArrayListUnmanaged(u8){};
+        defer buffer.deinit(allocator);
+        
+        try tres.stringify(params, .{}, buffer.writer(allocator));
 
-        const response_bytes = try self.requestAlloc(method, json_params);
+        const response_bytes = try self.requestAlloc(method, buffer.items);
         defer self.server.allocator.free(response_bytes);
 
-        const parse_options = std.json.ParseOptions{
-            .allocator = allocator,
-            .ignore_unknown_fields = true,
-        };
+        var parser = std.json.Parser.init(allocator, false);
+        defer parser.deinit();
 
-        var token_stream = std.json.TokenStream.init(response_bytes);
-        const response = try std.json.parse(Response(Result), &token_stream, parse_options);
-        errdefer std.json.parseFree(Response(Result), response, parse_options);
+        var tree = try parser.parse(try self.arena.allocator().dupe(u8, response_bytes));
+        defer tree.deinit();
 
         // TODO validate jsonrpc and id
 
-        return response;
+        return tres.parse(Response(Result), tree.root, self.arena.allocator());
     }
 };

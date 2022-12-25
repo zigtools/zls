@@ -52,7 +52,6 @@ fn testFoldingRange(source: []const u8, expect: []const u8) !void {
     const params = types.FoldingRangeParams{ .textDocument = .{ .uri = test_uri } };
 
     const response = try ctx.requestGetResponse(?[]types.FoldingRange, "textDocument/foldingRange", params);
-    defer response.deinit();
 
     var actual = std.ArrayList(u8).init(allocator);
     defer actual.deinit();

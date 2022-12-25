@@ -42,7 +42,7 @@ fn testSelectionRange(source: []const u8, want: []const []const u8) !void {
 
     const SelectionRange = struct {
         range: types.Range,
-        parent: ?*@This(),
+        parent: ?*@This() = null,
     };
 
     const params = types.SelectionRangeParams{
@@ -51,7 +51,6 @@ fn testSelectionRange(source: []const u8, want: []const []const u8) !void {
     };
 
     const response = try ctx.requestGetResponse(?[]SelectionRange, "textDocument/selectionRange", params);
-    defer response.deinit();
 
     const selectionRanges: []SelectionRange = response.result orelse {
         std.debug.print("Server returned `null` as the result\n", .{});
