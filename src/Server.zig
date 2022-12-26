@@ -57,6 +57,7 @@ const ClientCapabilities = struct {
     supports_inlay_hints: bool = false,
     supports_will_save: bool = false,
     supports_will_save_wait_until: bool = false,
+    supports_publish_diagnostics: bool = false,
     hover_supports_md: bool = false,
     completion_doc_supports_md: bool = false,
     label_details_support: bool = false,
@@ -186,6 +187,8 @@ fn generateDiagnostics(server: *Server, handle: DocumentStore.Handle) !types.Pub
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
+    std.debug.assert(server.client_capabilities.supports_publish_diagnostics);
+    
     const tree = handle.tree;
 
     var allocator = server.arena.allocator();
@@ -1589,6 +1592,7 @@ fn initializeHandler(server: *Server, request: types.InitializeParams) !types.In
     if (request.capabilities.textDocument) |textDocument| {
         server.client_capabilities.supports_semantic_tokens = textDocument.semanticTokens != null;
         server.client_capabilities.supports_inlay_hints = textDocument.inlayHint != null;
+        server.client_capabilities.supports_publish_diagnostics = textDocument.publishDiagnostics != null;
         if (textDocument.hover) |hover| {
             if (hover.contentFormat) |content_format| {
                 for (content_format) |format| {
@@ -1881,9 +1885,11 @@ fn openDocumentHandler(server: *Server, notification: types.DidOpenTextDocumentP
     defer tracy_zone.end();
 
     const handle = try server.document_store.openDocument(notification.textDocument.uri, notification.textDocument.text);
-
-    const diagnostics = try server.generateDiagnostics(handle);
-    server.sendNotification("textDocument/publishDiagnostics", diagnostics);
+    
+    if (server.client_capabilities.supports_publish_diagnostics) {
+        const diagnostics = try server.generateDiagnostics(handle);
+        server.sendNotification("textDocument/publishDiagnostics", diagnostics);
+    }
 }
 
 fn changeDocumentHandler(server: *Server, notification: types.DidChangeTextDocumentParams) !void {
@@ -1896,8 +1902,10 @@ fn changeDocumentHandler(server: *Server, notification: types.DidChangeTextDocum
 
     try server.document_store.refreshDocument(handle.uri, new_text);
 
-    const diagnostics = try server.generateDiagnostics(handle.*);
-    server.sendNotification("textDocument/publishDiagnostics", diagnostics);
+    if (server.client_capabilities.supports_publish_diagnostics) {
+        const diagnostics = try server.generateDiagnostics(handle.*);
+        server.sendNotification("textDocument/publishDiagnostics", diagnostics);
+    }
 }
 
 fn saveDocumentHandler(server: *Server, notification: types.DidSaveTextDocumentParams) !void {
@@ -2120,9 +2128,12 @@ fn hoverHandler(server: *Server, request: types.HoverParams) !?types.Hover {
         else => null,
     };
 
+    
     // TODO: Figure out a better solution for comptime interpreter diags
-    const diagnostics = try server.generateDiagnostics(handle.*);
-    server.sendNotification("textDocument/publishDiagnostics", diagnostics);
+    if (server.client_capabilities.supports_publish_diagnostics) {
+        const diagnostics = try server.generateDiagnostics(handle.*);
+        server.sendNotification("textDocument/publishDiagnostics", diagnostics);
+    }
 
     return response;
 }
