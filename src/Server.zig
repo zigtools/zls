@@ -561,10 +561,10 @@ fn nodeToCompletion(
     const node_tags = tree.nodes.items(.tag);
     const token_tags = tree.tokens.items(.tag);
 
-    const doc_kind: types.MarkupContent.Kind = if (server.client_capabilities.completion_doc_supports_md)
-        .Markdown
+    const doc_kind: types.MarkupKind = if (server.client_capabilities.completion_doc_supports_md)
+        .markdown
     else
-        .PlainText;
+        .plaintext;
 
     const doc = if (try analysis.getDocComments(
         allocator,
@@ -621,7 +621,7 @@ fn nodeToCompletion(
                 try list.append(allocator, .{
                     .label = handle.tree.tokenSlice(name_token),
                     .kind = if (is_type_function) .Struct else .Function,
-                    .documentation = doc,
+                    .documentation = if (doc) |d| .{ .MarkupContent = d } else null,
                     .detail = analysis.getFunctionSignature(handle.tree, func),
                     .insertText = insert_text,
                     .insertTextFormat = if (use_snippets) .Snippet else .PlainText,
@@ -648,7 +648,7 @@ fn nodeToCompletion(
             try list.append(allocator, .{
                 .label = handle.tree.tokenSlice(var_decl.ast.mut_token + 1),
                 .kind = if (is_const) .Constant else .Variable,
-                .documentation = doc,
+                .documentation = if (doc) |d| .{ .MarkupContent = d } else null,
                 .detail = analysis.getVariableSignature(tree, var_decl),
                 .insertText = tree.tokenSlice(var_decl.ast.mut_token + 1),
                 .insertTextFormat = .PlainText,
@@ -663,7 +663,7 @@ fn nodeToCompletion(
                 try list.append(allocator, .{
                     .label = handle.tree.tokenSlice(field.ast.main_token),
                     .kind = .Field,
-                    .documentation = doc,
+                    .documentation = if (doc) |d| .{ .MarkupContent = d } else null,
                     .detail = analysis.getContainerFieldSignature(handle.tree, field),
                     .insertText = tree.tokenSlice(field.ast.main_token),
                     .insertTextFormat = .PlainText,
@@ -744,7 +744,7 @@ fn nodeToCompletion(
             try list.append(allocator, .{
                 .label = string,
                 .kind = .Field,
-                .documentation = doc,
+                .documentation = if (doc) |d| .{ .MarkupContent = d } else null,
                 .detail = offsets.nodeToSlice(tree, node),
                 .insertText = string,
                 .insertTextFormat = .PlainText,
@@ -1110,7 +1110,7 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: analysis.Decl
         ),
         .param_payload => |pay| {
             const param = pay.param;
-            const doc_kind: types.MarkupContent.Kind = if (context.server.client_capabilities.completion_doc_supports_md) .Markdown else .PlainText;
+            const doc_kind: types.MarkupKind = if (context.server.client_capabilities.completion_doc_supports_md) .markdown else .plaintext;
             const doc = if (param.first_doc_comment) |doc_comments|
                 types.MarkupContent{
                     .kind = doc_kind,
@@ -1125,7 +1125,7 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: analysis.Decl
             try context.completions.append(allocator, .{
                 .label = tree.tokenSlice(param.name_token.?),
                 .kind = .Constant,
-                .documentation = doc,
+                .documentation = if (doc) |d| .{ .MarkupContent = d } else null,
                 .detail = tree.source[offsets.tokenToIndex(tree, first_token)..offsets.tokenToLoc(tree, last_token).end],
                 .insertText = tree.tokenSlice(param.name_token.?),
                 .insertTextFormat = .PlainText,
@@ -1410,7 +1410,7 @@ fn completeError(server: *Server, handle: *const DocumentStore.Handle) ![]types.
     return try server.document_store.errorCompletionItems(server.arena.allocator(), handle.*);
 }
 
-fn kindToSortScore(kind: types.CompletionItem.Kind) ?[]const u8 {
+fn kindToSortScore(kind: types.CompletionItemKind) ?[]const u8 {
     return switch (kind) {
         .Module => "1_", // use for packages
         .Folder => "2_",
@@ -1432,7 +1432,7 @@ fn kindToSortScore(kind: types.CompletionItem.Kind) ?[]const u8 {
         => "6_",
 
         else => {
-            std.log.debug(@typeName(types.CompletionItem.Kind) ++ "{s} has no sort score specified!", .{@tagName(kind)});
+            std.log.debug(@typeName(types.CompletionItemKind) ++ "{s} has no sort score specified!", .{@tagName(kind)});
             return null;
         },
     };
@@ -1965,74 +1965,72 @@ pub fn @"textDocument/willSaveWaitUntil"(conn: *Connection, _: types.RequestId, 
 //     });
 // }
 
-// fn completionHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.Completion) !void {
-//     const tracy_zone = tracy.trace(@src());
-//     defer tracy_zone.end();
+pub fn @"textDocument/completion"(conn: *Connection, _: types.RequestId, params: types.CompletionParams) !lsp.RequestResult("textDocument/completion") {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
 
-//     const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
-//         return try respondGeneric(writer, id, no_completions_response);
-//     };
+    const server = conn.context;
 
-//     if (req.params.position.character == 0) {
-//         var completions = std.ArrayListUnmanaged(types.CompletionItem){};
-//         try populateSnippedCompletions(server.arena.allocator(), &completions, &snipped_data.top_level_decl_data, server.config.*, null);
+    const handle = server.document_store.getHandle(params.textDocument.uri) orelse return null;
 
-//         return try send(writer, server.arena.allocator(), types.Response{
-//             .id = id,
-//             .result = .{
-//                 .CompletionList = .{ .isIncomplete = false, .items = completions.items },
-//             },
-//         });
-//     }
+    if (params.position.character == 0) {
+        var completions = std.ArrayListUnmanaged(types.CompletionItem){};
+        try populateSnippedCompletions(server.arena.allocator(), &completions, &snipped_data.top_level_decl_data, server.config.*, null);
 
-//     const source_index = offsets.positionToIndex(handle.text, req.params.position, server.offset_encoding);
-//     const pos_context = try analysis.getPositionContext(server.arena.allocator(), handle.text, source_index);
+        return .{
+            .CompletionList = .{ .isIncomplete = false, .items = completions.items },
+        };
+    }
 
-//     const maybe_completions = switch (pos_context) {
-//         .builtin => server.builtin_completions.items,
-//         .var_access, .empty => try server.completeGlobal(source_index, handle),
-//         .field_access => |loc| try server.completeFieldAccess(handle, source_index, loc),
-//         .global_error_set => try server.completeError(handle),
-//         .enum_literal => try server.completeDot(handle),
-//         .label => try server.completeLabel(source_index, handle),
-//         .import_string_literal, .embedfile_string_literal => |loc| blk: {
-//             if (!server.config.enable_import_embedfile_argument_completions) break :blk null;
+    const source_index = offsets.positionToIndex(handle.text, params.position, server.offset_encoding);
+    const pos_context = try analysis.getPositionContext(server.arena.allocator(), handle.text, source_index);
 
-//             const completing = offsets.locToSlice(handle.tree.source, loc);
-//             const is_import = pos_context == .import_string_literal;
-//             break :blk try completeFileSystemStringLiteral(server.arena.allocator(), &server.document_store, handle, completing, is_import);
-//         },
-//         else => null,
-//     };
+    const maybe_completions = switch (pos_context) {
+        .builtin => server.builtin_completions.items,
+        .var_access, .empty => try server.completeGlobal(source_index, handle),
+        .field_access => |loc| try server.completeFieldAccess(handle, source_index, loc),
+        .global_error_set => try server.completeError(handle),
+        .enum_literal => try server.completeDot(handle),
+        .label => try server.completeLabel(source_index, handle),
+        .import_string_literal, .embedfile_string_literal => |loc| blk: {
+            if (!server.config.enable_import_embedfile_argument_completions) break :blk null;
 
-//     const completions = maybe_completions orelse return try respondGeneric(writer, id, no_completions_response);
+            const completing = offsets.locToSlice(handle.tree.source, loc);
+            const is_import = pos_context == .import_string_literal;
+            break :blk try completeFileSystemStringLiteral(server.arena.allocator(), &server.document_store, handle, completing, is_import);
+        },
+        else => null,
+    };
 
-//     // truncate completions
-//     for (completions) |*item| {
-//         if (item.detail) |det| {
-//             if (det.len > server.config.max_detail_length) {
-//                 item.detail = det[0..server.config.max_detail_length];
-//             }
-//         }
-//     }
+    const completions = maybe_completions orelse return .{
+        .CompletionList = .{ .isIncomplete = false, .items = &.{} },
+    };
 
-//     // TODO: config for sorting rule?
-//     for (completions) |*c| {
-//         const prefix = kindToSortScore(c.kind) orelse continue;
+    // truncate completions
+    for (completions) |*item| {
+        if (item.detail) |det| {
+            if (det.len > server.config.max_detail_length) {
+                item.detail = det[0..server.config.max_detail_length];
+            }
+        }
+    }
 
-//         c.sortText = try std.fmt.allocPrint(server.arena.allocator(), "{s}{s}", .{ prefix, c.label });
-//     }
+    // TODO: config for sorting rule?
+    for (completions) |*c| {
+        const prefix = kindToSortScore(c.kind.?) orelse continue;
 
-//     try send(writer, server.arena.allocator(), types.Response{
-//         .id = id,
-//         .result = .{
-//             .CompletionList = .{
-//                 .isIncomplete = false,
-//                 .items = completions,
-//             },
-//         },
-//     });
-// }
+        c.tags = &.{};
+        c.deprecated = false;
+        c.sortText = try std.fmt.allocPrint(server.arena.allocator(), "{s}{s}", .{ prefix, c.label });
+    }
+
+    return .{
+        .CompletionList = .{
+            .isIncomplete = false,
+            .items = completions,
+        },
+    };
+}
 
 // fn signatureHelpHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.SignatureHelp) !void {
 //     const tracy_zone = tracy.trace(@src());
@@ -2416,36 +2414,37 @@ pub fn @"textDocument/documentSymbol"(conn: *Connection, _: types.RequestId, par
 //     });
 // }
 
-// fn codeActionHandler(server: *Server, writer: anytype, id: types.RequestId, req: requests.CodeAction) !void {
-//     const handle = server.document_store.getHandle(req.params.textDocument.uri) orelse {
-//         return try respondGeneric(writer, id, null_result_response);
-//     };
+pub fn @"textDocument/codeAction"(conn: *Connection, _: types.RequestId, params: types.CodeActionParams) !lsp.RequestResult("textDocument/codeAction") {
+    const server = conn.context;
+    const allocator = server.arena.allocator();
 
-//     const allocator = server.arena.allocator();
+    const handle = server.document_store.getHandle(params.textDocument.uri) orelse return null;
 
-//     var builder = code_actions.Builder{
-//         .arena = &server.arena,
-//         .document_store = &server.document_store,
-//         .handle = handle,
-//         .offset_encoding = server.offset_encoding,
-//     };
+    var builder = code_actions.Builder{
+        .arena = &server.arena,
+        .document_store = &server.document_store,
+        .handle = handle,
+        .offset_encoding = server.offset_encoding,
+    };
 
-//     var actions = std.ArrayListUnmanaged(types.CodeAction){};
+    var actions = std.ArrayListUnmanaged(types.CodeAction){};
 
-//     for (req.params.context.diagnostics) |diagnostic| {
-//         try builder.generateCodeAction(diagnostic, &actions);
-//     }
+    for (params.context.diagnostics) |diagnostic| {
+        try builder.generateCodeAction(diagnostic, &actions);
+    }
 
-//     for (actions.items) |*action| {
-//         // TODO query whether SourceFixAll is supported by the server
-//         if (action.kind == .SourceFixAll) action.kind = .QuickFix;
-//     }
+    for (actions.items) |*action| {
+        // TODO query whether SourceFixAll is supported by the server
+        if (action.kind.? == .@"source.fixAll") action.kind = .quickfix;
+    }
 
-//     return try send(writer, allocator, types.Response{
-//         .id = id,
-//         .result = .{ .CodeAction = actions.items },
-//     });
-// }
+    // TODO: Fix this
+    var actions_final = std.ArrayListUnmanaged(std.meta.Child(std.meta.Child(lsp.RequestResult("textDocument/codeAction")))){};
+    try actions_final.ensureTotalCapacity(allocator, actions.capacity);
+    for (actions.items) |a| try actions_final.append(allocator, .{ .CodeAction = a });
+
+    return actions_final.items;
+}
 
 pub fn @"textDocument/foldingRange"(conn: *Connection, _: types.RequestId, params: lsp.RequestParams("textDocument/foldingRange")) !lsp.RequestResult("textDocument/foldingRange") {
     const Token = std.zig.Token;

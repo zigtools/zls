@@ -2,7 +2,7 @@ const types = @import("lsp-types");
 
 pub const Snipped = struct {
     label: []const u8,
-    kind: types.CompletionItem.Kind,
+    kind: types.CompletionItemKind,
     text: ?[]const u8 = null,
 };
 

@@ -1840,6 +1840,8 @@ fn getDocumentSymbolsInternal(allocator: std.mem.Allocator, tree: Ast, node: Ast
     const tags = tree.nodes.items(.tag);
     (try context.symbols.addOne(allocator)).* = .{
         .name = name,
+        .tags = &.{},
+        .deprecated = false,
         .kind = switch (tags[node]) {
             .fn_proto,
             .fn_proto_simple,
