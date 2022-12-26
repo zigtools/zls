@@ -174,11 +174,8 @@ pub const Context = struct {
         const response_bytes = try self.requestAlloc(method, buffer.items);
         defer self.server.allocator.free(response_bytes);
 
-        var parser = std.json.Parser.init(allocator, false);
-        defer parser.deinit();
-
+        var parser = std.json.Parser.init(self.arena.allocator(), false);
         var tree = try parser.parse(try self.arena.allocator().dupe(u8, response_bytes));
-        defer tree.deinit();
 
         // TODO validate jsonrpc and id
 
