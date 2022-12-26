@@ -82,7 +82,15 @@ pub const TypeInfo = union(enum) {
     pub const Struct = struct {
         /// Declarations contained within
         scope: *InterpreterScope,
-        fields: std.StringHashMapUnmanaged(FieldDefinition) = .{},
+        fields: std.StringHashMapUnmanaged(StructFieldDefinition) = .{},
+    };
+
+    pub const Enum = struct {
+        /// Declarations contained within
+        scope: *InterpreterScope,
+        tag_type: Type,
+        fields: std.StringHashMapUnmanaged(EnumFieldDefinition) = .{},
+        is_exhaustive: bool,
     };
 
     pub const Int = struct {
@@ -126,6 +134,7 @@ pub const TypeInfo = union(enum) {
     bool,
 
     @"struct": Struct,
+    @"enum": Enum,
     pointer: Pointer,
     @"fn": Fn,
 
@@ -163,6 +172,9 @@ pub const TypeInfo = union(enum) {
                 // context.hasher.update(std.mem.sliceAsBytes(s.fields.items));
                 // TODO: Fix
                 // context.hasher.update(std.mem.sliceAsBytes(s.declarations.items));
+            },
+            .@"enum" => |e| {
+                _ = e;
             },
             .pointer => |p| {
                 // const ap = a.pointer;
@@ -236,7 +248,7 @@ pub const ValueData = union(enum) {
     type: Type,
     bool: bool,
 
-    @"struct": struct {},
+    @"struct": Struct,
     /// This is what a pointer is; we don't need to map
     /// this to anything because @ptrToInt is comptime-illegal
     /// Pointer equality scares me though :( (but that's for later)
@@ -255,6 +267,10 @@ pub const ValueData = union(enum) {
     @"fn",
     runtime,
     comptime_undetermined,
+
+    pub const Struct = struct {
+        fields: std.StringHashMapUnmanaged(*ValueData) = .{},
+    };
 
     pub fn eql(data: *ValueData, other_data: *ValueData) bool {
         if (std.meta.activeTag(data.*) != std.meta.activeTag(other_data.*)) return false;
@@ -282,13 +298,19 @@ pub const ValueData = union(enum) {
     }
 };
 
-pub const FieldDefinition = struct {
+pub const StructFieldDefinition = struct {
     node_idx: Ast.Node.Index,
     /// Store name so tree doesn't need to be used to access field name
     /// When the field is a tuple field, `name` will be an empty slice
     name: []const u8,
     type: Type,
     default_value: ?Value,
+};
+
+pub const EnumFieldDefinition = struct {
+    node_idx: Ast.Node.Index,
+    name: []const u8,
+    value: Value,
 };
 
 pub const Declaration = struct {
@@ -415,6 +437,40 @@ pub const TypeInfoFormatter = struct {
                 }
 
                 var iterator = s.scope.declarations.iterator();
+                while (iterator.next()) |di| {
+                    const decl = di.value_ptr;
+                    if (decl.isConstant()) {
+                        if (decl.value) |sv| {
+                            try writer.print("const {s}: {any} = { }, ", .{
+                                decl.name,
+                                value.interpreter.formatTypeInfo(sv.type.getTypeInfo()),
+                                value.interpreter.formatValue(sv),
+                            });
+                        } else {
+                            try writer.print("const {s} (not analyzed), ", .{decl.name});
+                        }
+                    } else {
+                        if (decl.value) |sv| {
+                            try writer.print("var {s}: {any} = { }, ", .{
+                                decl.name,
+                                value.interpreter.formatTypeInfo(sv.type.getTypeInfo()),
+                                value.interpreter.formatValue(sv),
+                            });
+                        } else {
+                            try writer.print("var {s} (not analyzed), ", .{decl.name});
+                        }
+                    }
+                }
+                try writer.writeAll("}");
+            },
+            .@"enum" => |e| {
+                try writer.print("enum({s}) {{", .{value.interpreter.formatTypeInfo(e.tag_type.getTypeInfo())});
+                var field_iterator = e.fields.iterator();
+                while (field_iterator.next()) |di| {
+                    try writer.print("{s} = {s}, ", .{ di.key_ptr.*, value.interpreter.formatValue(di.value_ptr.value) });
+                }
+
+                var iterator = e.scope.declarations.iterator();
                 while (iterator.next()) |di| {
                     const decl = di.value_ptr;
                     if (decl.isConstant()) {
@@ -663,6 +719,31 @@ pub fn huntItDown(
     return error.IdentifierNotFound;
 }
 
+pub fn import(interpreter: *ComptimeInterpreter, node_idx: Ast.Node.Index, import_str: []const u8) !Value {
+    // TODO: Implement root support
+    if (std.mem.eql(u8, import_str[1 .. import_str.len - 1], "root")) {
+        return Value{
+            .interpreter = interpreter,
+            .node_idx = node_idx,
+            .type = try interpreter.createType(node_idx, .{ .@"struct" = .{ .scope = try interpreter.newScope(null, 0) } }),
+            .value_data = try interpreter.createValueData(.{ .@"struct" = .{} }),
+        };
+    }
+
+    var import_uri = (try interpreter.document_store.uriFromImportStr(interpreter.allocator, interpreter.getHandle().*, import_str[1 .. import_str.len - 1])) orelse return error.ImportFailure;
+    defer interpreter.allocator.free(import_uri);
+
+    var handle = interpreter.document_store.getOrLoadHandle(import_uri) orelse return error.ImportFailure;
+    try interpreter.document_store.ensureInterpreterExists(handle.uri);
+
+    return Value{
+        .interpreter = interpreter,
+        .node_idx = node_idx,
+        .type = try interpreter.createType(node_idx, .{ .type = {} }),
+        .value_data = try interpreter.createValueData(.{ .type = handle.interpreter.?.root_type.? }),
+    };
+}
+
 pub fn cast(
     interpreter: *ComptimeInterpreter,
     node_idx: Ast.Node.Index,
@@ -725,6 +806,7 @@ pub const InterpretError = std.mem.Allocator.Error || std.fmt.ParseIntError || s
     MissingArguments,
     ImportFailure,
     InvalidCast,
+    UnknownField,
 };
 pub fn interpret(
     interpreter: *ComptimeInterpreter,
@@ -736,6 +818,8 @@ pub fn interpret(
     const tags = tree.nodes.items(.tag);
     const data = tree.nodes.items(.data);
     const main_tokens = tree.nodes.items(.main_token);
+
+    const token_tags = tree.tokens.items(.tag);
 
     switch (tags[node_idx]) {
         .container_decl,
@@ -751,22 +835,49 @@ pub fn interpret(
         // .tagged_union_enum_tag,
         // .tagged_union_enum_tag_trailing,
         .root,
-        .error_set_decl,
         => {
+            var cd_buffer: [2]Ast.Node.Index = undefined;
+            const decl = ast.containerDecl(tree, node_idx, &cd_buffer);
+
+            const WhatIsThis = enum { s, e, u };
+            const wut: WhatIsThis = if (decl) |d| switch (token_tags[d.ast.main_token]) {
+                .keyword_struct => .s,
+                .keyword_enum => .e,
+                .keyword_union => .u,
+                else => @panic("Unknown container"),
+            } else .s;
+
+            var buffer: [2]Ast.Node.Index = undefined;
+            const members = ast.declMembers(tree, node_idx, &buffer);
+
             var container_scope = try interpreter.newScope(scope, node_idx);
-            var type_info = TypeInfo{
-                .@"struct" = .{
-                    .scope = container_scope,
+            var type_info = switch (wut) {
+                .s => TypeInfo{
+                    .@"struct" = .{
+                        .scope = container_scope,
+                    },
                 },
+                .e => TypeInfo{
+                    .@"enum" = .{
+                        .scope = container_scope,
+                        .tag_type = if (decl.?.ast.arg != 0)
+                            (try (try interpreter.interpret(decl.?.ast.arg, container_scope, .{})).getValue()).value_data.type
+                        else
+                            try interpreter.createType(node_idx, .{
+                                .int = .{
+                                    .bits = std.math.log2_int_ceil(u16, @intCast(u16, members.len)),
+                                    .signedness = .unsigned,
+                                },
+                            }),
+                        .is_exhaustive = true, // TODO: Handle
+                    },
+                },
+                .u => @panic("No support"),
             };
             var cont_type = try interpreter.createType(node_idx, type_info);
 
             if (node_idx == 0) interpreter.root_type = cont_type;
 
-            var buffer: [2]Ast.Node.Index = undefined;
-            const members = ast.declMembers(tree, node_idx, &buffer);
-
-            var field_idx: usize = 0;
             for (members) |member| {
                 const maybe_container_field: ?zig.Ast.full.ContainerField = switch (tags[member]) {
                     .container_field => tree.containerField(member),
@@ -776,40 +887,57 @@ pub fn interpret(
                 };
 
                 if (maybe_container_field) |field_info| {
-                    var init_type_value = try (try interpreter.interpret(field_info.ast.type_expr, container_scope, .{})).getValue();
-                    var default_value = if (field_info.ast.value_expr == 0)
-                        null
-                    else
-                        try (try interpreter.interpret(field_info.ast.value_expr, container_scope, .{})).getValue();
+                    switch (wut) {
+                        .s => {
+                            var init_type_value = try (try interpreter.interpret(field_info.ast.type_expr, container_scope, .{})).getValue();
+                            var default_value = if (field_info.ast.value_expr == 0)
+                                null
+                            else
+                                try (try interpreter.interpret(field_info.ast.value_expr, container_scope, .{})).getValue();
 
-                    if (init_type_value.type.getTypeInfo() != .type) {
-                        try interpreter.recordError(
-                            field_info.ast.type_expr,
-                            "expected_type",
-                            try std.fmt.allocPrint(interpreter.allocator, "expected type 'type', found '{s}'", .{interpreter.formatTypeInfo(init_type_value.type.getTypeInfo())}),
-                        );
-                        continue;
+                            if (init_type_value.type.getTypeInfo() != .type) {
+                                try interpreter.recordError(
+                                    field_info.ast.type_expr,
+                                    "expected_type",
+                                    try std.fmt.allocPrint(interpreter.allocator, "expected type 'type', found '{s}'", .{interpreter.formatTypeInfo(init_type_value.type.getTypeInfo())}),
+                                );
+                                continue;
+                            }
+
+                            const name = if (field_info.ast.tuple_like)
+                                &[0]u8{}
+                            else
+                                tree.tokenSlice(field_info.ast.main_token);
+                            const field = StructFieldDefinition{
+                                .node_idx = member,
+                                .name = name,
+                                .type = init_type_value.value_data.type,
+                                .default_value = default_value,
+                                // TODO: Default values
+                                // .@"type" = T: {
+                                //     var value = (try interpreter.interpret(field_info.ast.type_expr, scope_idx, true)).?.value;
+                                //     break :T @ptrCast(*Type, @alignCast(@alignOf(*Type), value)).*;
+                                // },
+                                // .value = null,
+                            };
+
+                            try cont_type.getTypeInfoMutable().@"struct".fields.put(interpreter.allocator, name, field);
+                        },
+                        .e => {
+                            const name = tree.tokenSlice(field_info.ast.main_token);
+                            var value = if (field_info.ast.value_expr == 0)
+                                @panic("TODO: implicit enums not supported")
+                            else
+                                try (try interpreter.interpret(field_info.ast.value_expr, container_scope, .{})).getValue();
+                            var mti = cont_type.getTypeInfoMutable();
+                            try mti.@"enum".fields.put(interpreter.allocator, name, .{
+                                .node_idx = member,
+                                .name = name,
+                                .value = try interpreter.cast(member, mti.@"enum".tag_type, value),
+                            });
+                        },
+                        .u => unreachable,
                     }
-
-                    const name = if (field_info.ast.tuple_like)
-                        &[0]u8{}
-                    else
-                        tree.tokenSlice(field_info.ast.main_token);
-                    const field = FieldDefinition{
-                        .node_idx = member,
-                        .name = name,
-                        .type = init_type_value.value_data.type,
-                        .default_value = default_value,
-                        // TODO: Default values
-                        // .@"type" = T: {
-                        //     var value = (try interpreter.interpret(field_info.ast.type_expr, scope_idx, true)).?.value;
-                        //     break :T @ptrCast(*Type, @alignCast(@alignOf(*Type), value)).*;
-                        // },
-                        // .value = null,
-                    };
-
-                    try cont_type.getTypeInfoMutable().@"struct".fields.put(interpreter.allocator, name, field);
-                    field_idx += 1;
                 } else {
                     _ = try interpreter.interpret(member, container_scope, options);
                 }
@@ -978,20 +1106,37 @@ pub fn interpret(
 
             var ir = try interpreter.interpret(data[node_idx].lhs, scope, options);
             var irv = try ir.getValue();
+            const ti = irv.type.getTypeInfo();
 
-            var sub_scope = irv.value_data.type.getTypeInfo().getScopeOfType() orelse return error.IdentifierNotFound;
-            var scope_sub_decl = sub_scope.interpreter.huntItDown(sub_scope, rhs_str, options) catch |err| {
-                if (err == error.IdentifierNotFound) try interpreter.recordError(
-                    node_idx,
-                    "undeclared_identifier",
-                    try std.fmt.allocPrint(interpreter.allocator, "use of undeclared identifier '{s}'", .{rhs_str}),
-                );
-                return err;
-            };
+            switch (ti) {
+                .type => {
+                    // TODO: Only structs, enums, unions, and opaques are sub-accessible types
+                    var sub_scope = irv.value_data.type.getTypeInfo().getScopeOfType() orelse return error.IdentifierNotFound;
+                    var scope_sub_decl = sub_scope.interpreter.huntItDown(sub_scope, rhs_str, options) catch |err| {
+                        if (err == error.IdentifierNotFound) try interpreter.recordError(
+                            node_idx,
+                            "undeclared_identifier",
+                            try std.fmt.allocPrint(interpreter.allocator, "use of undeclared identifier '{s}'", .{rhs_str}),
+                        );
+                        return err;
+                    };
 
-            return InterpretResult{
-                .value = try scope_sub_decl.getValue(),
-            };
+                    return InterpretResult{
+                        .value = try scope_sub_decl.getValue(),
+                    };
+                },
+                .@"struct" => |s| {
+                    return InterpretResult{
+                        .value = .{
+                            .interpreter = interpreter,
+                            .node_idx = 0,
+                            .type = (s.fields.get(rhs_str) orelse return error.UnknownField).type,
+                            .value_data = irv.value_data.@"struct".fields.get(rhs_str) orelse return error.UnknownField,
+                        },
+                    };
+                },
+                else => @panic("Field access for this scenario not implemented"),
+            }
         },
         .grouped_expression => {
             return try interpreter.interpret(data[node_idx].lhs, scope, options);
@@ -1143,28 +1288,7 @@ pub fn interpret(
 
                 log.info("Resolving {s} from {s}", .{ import_str[1 .. import_str.len - 1], interpreter.uri });
 
-                // TODO: Implement root support
-                if (std.mem.eql(u8, import_str[1 .. import_str.len - 1], "root")) {
-                    return InterpretResult{ .value = Value{
-                        .interpreter = interpreter,
-                        .node_idx = node_idx,
-                        .type = try interpreter.createType(node_idx, .{ .@"struct" = .{ .scope = try interpreter.newScope(null, 0) } }),
-                        .value_data = try interpreter.createValueData(.{ .@"struct" = .{} }),
-                    } };
-                }
-
-                var import_uri = (try interpreter.document_store.uriFromImportStr(interpreter.allocator, interpreter.getHandle().*, import_str[1 .. import_str.len - 1])) orelse return error.ImportFailure;
-                defer interpreter.allocator.free(import_uri);
-
-                var handle = interpreter.document_store.getOrLoadHandle(import_uri) orelse return error.ImportFailure;
-                try interpreter.document_store.ensureInterpreterExists(handle.uri);
-
-                return InterpretResult{ .value = Value{
-                    .interpreter = interpreter,
-                    .node_idx = node_idx,
-                    .type = try interpreter.createType(node_idx, .{ .type = {} }),
-                    .value_data = try interpreter.createValueData(.{ .type = handle.interpreter.?.root_type.? }),
-                } };
+                return InterpretResult{ .value = try interpreter.import(node_idx, import_str) };
             }
 
             if (std.mem.eql(u8, call_name, "@TypeOf")) {
@@ -1397,6 +1521,49 @@ pub fn interpret(
                     .value_data = value.value_data.one_ptr,
                 },
             };
+        },
+        .struct_init,
+        .struct_init_comma,
+        .struct_init_dot,
+        .struct_init_dot_comma,
+        .struct_init_dot_two,
+        .struct_init_dot_two_comma,
+        .struct_init_one,
+        .struct_init_one_comma,
+        => |tag| {
+            var buf: [2]Ast.Node.Index = undefined;
+            const struct_init: Ast.full.StructInit = switch (tag) {
+                .struct_init, .struct_init_comma => tree.structInit(node_idx),
+                .struct_init_dot, .struct_init_dot_comma => tree.structInitDot(node_idx),
+                .struct_init_one, .struct_init_one_comma => tree.structInitOne(buf[0..1], node_idx),
+                .struct_init_dot_two, .struct_init_dot_two_comma => tree.structInitDotTwo(&buf, node_idx),
+                else => unreachable,
+            };
+
+            const result = try interpreter.interpret(struct_init.ast.type_expr, scope, options);
+            const value = (try result.getValue());
+            // TODO: Add checks, handle-non-structs
+            const struct_info = value.value_data.type.getTypeInfo().@"struct";
+
+            // TODO: Handle defaults
+
+            var val = Value{
+                .interpreter = interpreter,
+                .node_idx = node_idx,
+                .type = value.value_data.type,
+                .value_data = try interpreter.createValueData(.{ .@"struct" = .{} }),
+            };
+
+            for (struct_init.ast.fields) |field| {
+                const field_name = tree.tokenSlice(tree.firstToken(field) -| 2);
+                const field_value = try (try interpreter.interpret(field, scope, options)).getValue();
+
+                const field_def = struct_info.fields.get(field_name) orelse return error.UnknownField;
+                std.log.info("abc {any} {any}", .{ interpreter.formatTypeInfo(field_def.type.getTypeInfo()), interpreter.formatTypeInfo(field_value.type.getTypeInfo()) });
+                try val.value_data.@"struct".fields.put(interpreter.allocator, field_name, (try interpreter.cast(field, field_def.type, field_value)).value_data);
+            }
+
+            return InterpretResult{ .value = val };
         },
         else => {
             log.err("Unhandled {any}", .{tags[node_idx]});
