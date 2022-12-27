@@ -488,7 +488,7 @@ pub fn symbolReferences(
                 }
 
                 var handle_dependencies = std.ArrayListUnmanaged([]const u8){};
-                try store.collectDependencies(store.allocator, handle.*, &handle_dependencies);
+                try store.collectDependencies(arena.allocator(), handle.*, &handle_dependencies);
 
                 for (handle_dependencies.items) |uri| {
                     try dependencies.put(arena.allocator(), uri, {});

@@ -1148,12 +1148,7 @@ pub fn resolveTypeOfNode(store: *DocumentStore, arena: *std.heap.ArenaAllocator,
 /// Collects all `@import`'s we can find into a slice of import paths (without quotes).
 pub fn collectImports(allocator: std.mem.Allocator, tree: Ast) error{OutOfMemory}!std.ArrayListUnmanaged([]const u8) {
     var imports = std.ArrayListUnmanaged([]const u8){};
-    errdefer {
-        for (imports.items) |imp| {
-            allocator.free(imp);
-        }
-        imports.deinit(allocator);
-    }
+    errdefer imports.deinit(allocator);
 
     const tags = tree.tokens.items(.tag);
 
