@@ -173,9 +173,9 @@ fn fullWhile(tree: Ast, info: full.While.Components) full.While {
         tok_i -= 1;
     }
     if (token_tags[tok_i] == .colon and
-        token_tags[tok_i - 1] == .identifier)
+        token_tags[tok_i -| 1] == .identifier)
     {
-        result.label_token = tok_i - 1;
+        result.label_token = tok_i -| 1;
     }
     const last_cond_token = lastToken(tree, info.cond_expr);
     if (token_tags[last_cond_token + 2] == .pipe) {
