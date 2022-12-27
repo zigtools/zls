@@ -125,11 +125,11 @@ fn getOrLoadHandleInternal(self: *DocumentStore, uri: Uri) !?*const Handle {
     var handle = try self.allocator.create(Handle);
     errdefer self.allocator.destroy(handle);
 
-    const dependency_uri = try self.allocator.dupe(u8, uri);
-    handle.* = (try self.createDocumentFromURI(dependency_uri, false)) orelse return error.Unknown; // error name doesn't matter
+    handle.* = (try self.createDocumentFromURI(uri, false)) orelse return error.Unknown; // error name doesn't matter
+    errdefer handle.deinit(self.allocator);
 
     const gop = try self.handles.getOrPutValue(self.allocator, handle.uri, handle);
-    std.debug.assert(!gop.found_existing);
+    if (gop.found_existing) return error.Unknown;
 
     return gop.value_ptr.*;
 }
@@ -149,16 +149,14 @@ pub fn openDocument(self: *DocumentStore, uri: Uri, text: []const u8) error{OutO
 
     const duped_text = try self.allocator.dupeZ(u8, text);
     errdefer self.allocator.free(duped_text);
-    const duped_uri = try self.allocator.dupeZ(u8, uri);
-    errdefer self.allocator.free(duped_uri);
 
     var handle = try self.allocator.create(Handle);
     errdefer self.allocator.destroy(handle);
 
-    handle.* = try self.createDocument(duped_uri, duped_text, true);
+    handle.* = try self.createDocument(uri, duped_text, true);
     errdefer handle.deinit(self.allocator);
 
-    try self.handles.putNoClobber(self.allocator, duped_uri, handle);
+    try self.handles.putNoClobber(self.allocator, handle.uri, handle);
 
     return handle.*;
 }
@@ -251,33 +249,29 @@ fn garbageCollectionImports(self: *DocumentStore) error{OutOfMemory}!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
+    var arena = std.heap.ArenaAllocator.init(self.allocator);
+    defer arena.deinit();
+
     var reachable_handles = std.StringHashMapUnmanaged(void){};
-    defer reachable_handles.deinit(self.allocator);
+    defer reachable_handles.deinit(arena.allocator());
 
     var queue = std.ArrayListUnmanaged(Uri){};
-    defer {
-        for (queue.items) |uri| {
-            self.allocator.free(uri);
-        }
-        queue.deinit(self.allocator);
-    }
 
     for (self.handles.values()) |handle| {
         if (!handle.open) continue;
 
-        try reachable_handles.put(self.allocator, handle.uri, {});
+        try reachable_handles.put(arena.allocator(), handle.uri, {});
 
-        try self.collectDependencies(self.allocator, handle.*, &queue);
+        try self.collectDependencies(arena.allocator(), handle.*, &queue);
     }
 
     while (queue.popOrNull()) |uri| {
-        if (reachable_handles.contains(uri)) continue;
-
-        try reachable_handles.putNoClobber(self.allocator, uri, {});
+        const gop = try reachable_handles.getOrPut(arena.allocator(), uri);
+        if (gop.found_existing) continue;
 
         const handle = self.handles.get(uri) orelse continue;
 
-        try self.collectDependencies(self.allocator, handle.*, &queue);
+        try self.collectDependencies(arena.allocator(), handle.*, &queue);
     }
 
     var i: usize = 0;
@@ -451,6 +445,7 @@ fn loadBuildConfiguration(
     const parse_options = std.json.ParseOptions{ .allocator = allocator };
     var token_stream = std.json.TokenStream.init(zig_run_result.stdout);
     var build_config = std.json.parse(BuildConfig, &token_stream, parse_options) catch return error.RunFailed;
+    errdefer std.json.parseFree(BuildConfig, build_config, parse_options);
 
     for (build_config.packages) |*pkg| {
         const pkg_abs_path = try std.fs.path.resolve(allocator, &[_][]const u8{ directory_path, pkg.path });
@@ -601,14 +596,16 @@ fn uriInImports(
     return false;
 }
 
-/// takes ownership of the uri and text passed in.
+/// takes ownership of the text passed in.
 fn createDocument(self: *DocumentStore, uri: Uri, text: [:0]u8, open: bool) error{OutOfMemory}!Handle {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
     var handle: Handle = blk: {
-        errdefer self.allocator.free(uri);
         errdefer self.allocator.free(text);
+
+        var duped_uri = try self.allocator.dupe(u8, uri);
+        errdefer self.allocator.free(duped_uri);
 
         var tree = try std.zig.parse(self.allocator, text);
         errdefer tree.deinit(self.allocator);
@@ -618,7 +615,7 @@ fn createDocument(self: *DocumentStore, uri: Uri, text: [:0]u8, open: bool) erro
 
         break :blk Handle{
             .open = open,
-            .uri = uri,
+            .uri = duped_uri,
             .text = text,
             .tree = tree,
             .document_scope = document_scope,
@@ -642,13 +639,12 @@ fn createDocument(self: *DocumentStore, uri: Uri, text: [:0]u8, open: bool) erro
     // TODO: Better logic for detecting std or subdirectories?
     const in_std = std.mem.indexOf(u8, uri, "/std/") != null;
     if (self.config.zig_exe_path != null and std.mem.endsWith(u8, uri, "/build.zig") and !in_std) {
-        const dupe_uri = try self.allocator.dupe(u8, uri);
-        if (self.createBuildFile(dupe_uri)) |build_file| {
-            try self.build_files.put(self.allocator, dupe_uri, build_file);
-            handle.is_build_file = true;
-        } else |err| {
-            log.debug("Failed to load build file {s}: (error: {})", .{ uri, err });
-        }
+        errdefer |err| log.debug("Failed to load build file {s}: (error: {})", .{ uri, err });
+        const duped_uri = try self.allocator.dupe(u8, uri);
+        var build_file = try self.createBuildFile(duped_uri);
+        errdefer build_file.deinit(self.allocator);
+        try self.build_files.putNoClobber(self.allocator, build_file.uri, build_file);
+        handle.is_build_file = true;
     } else if (self.config.zig_exe_path != null and !std.mem.endsWith(u8, uri, "/builtin.zig") and !in_std) blk: {
         log.debug("Going to walk down the tree towards: {s}", .{uri});
         // walk down the tree towards the uri. When we hit build.zig files
@@ -665,17 +661,24 @@ fn createDocument(self: *DocumentStore, uri: Uri, text: [:0]u8, open: bool) erro
 
             log.debug("found build path: {s}", .{build_path});
 
-            const build_file_uri = URI.fromPath(self.allocator, build_path) catch unreachable;
-            const gop = try self.build_files.getOrPut(self.allocator, build_file_uri);
+            const build_file_uri = try URI.fromPath(self.allocator, build_path);
+            const gop = self.build_files.getOrPut(self.allocator, build_file_uri) catch |err| {
+                self.allocator.free(build_file_uri);
+                return err;
+            };
+
             if (!gop.found_existing) {
+                errdefer self.build_files.swapRemoveAt(gop.index);
                 gop.value_ptr.* = try self.createBuildFile(build_file_uri);
+            } else {
+                self.allocator.free(build_file_uri);
             }
 
             if (try self.uriAssociatedWithBuild(gop.value_ptr.*, uri)) {
-                handle.associated_build_file = build_file_uri;
+                handle.associated_build_file = gop.key_ptr.*;
                 break;
             } else {
-                prev_build_file = build_file_uri;
+                prev_build_file = gop.key_ptr.*;
             }
         }
 
@@ -690,7 +693,6 @@ fn createDocument(self: *DocumentStore, uri: Uri, text: [:0]u8, open: bool) erro
     return handle;
 }
 
-/// takes ownership of the uri passed in.
 fn createDocumentFromURI(self: *DocumentStore, uri: Uri, open: bool) error{OutOfMemory}!?Handle {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
@@ -706,15 +708,21 @@ fn createDocumentFromURI(self: *DocumentStore, uri: Uri, open: bool) error{OutOf
     return try self.createDocument(uri, file_contents, open);
 }
 
+/// Caller owns returned memory.
 fn collectImportUris(self: *const DocumentStore, handle: Handle) error{OutOfMemory}!std.ArrayListUnmanaged(Uri) {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
     var imports = try analysis.collectImports(self.allocator, handle.tree);
-    errdefer imports.deinit(self.allocator);
+
+    var i: usize = 0;
+    errdefer {
+        // only free the uris
+        for (imports.items[0..i]) |uri| self.allocator.free(uri);
+        imports.deinit(self.allocator);
+    }
 
     // Convert to URIs
-    var i: usize = 0;
     while (i < imports.items.len) {
         const maybe_uri = try self.uriFromImportStr(self.allocator, handle, imports.items[i]);
 
