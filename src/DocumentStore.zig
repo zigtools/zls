@@ -949,6 +949,6 @@ pub fn ensureInterpreterExists(self: *DocumentStore, uri: Uri) !void {
             .uri = uri,
         };
         handle.interpreter = int;
-        _ = try int.interpret(0, null, .{});
+        _ = try int.interpret(0, 0, .{});
     }
 }

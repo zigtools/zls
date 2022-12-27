@@ -769,15 +769,15 @@ pub fn resolveTypeOfNodeInternal(store: *DocumentStore, arena: *std.heap.ArenaAl
                     };
                     var interpreter = handle.interpreter.?;
 
-                    var root_scope = ComptimeInterpreter.Scope{
+                    try interpreter.scopes.append(interpreter.allocator, .{
                         .interpreter = interpreter,
                         .parent = 0,
                         .node_idx = 0,
-                        .namespace = ComptimeInterpreter.IPIndex.none,
-                    };
+                        .namespace = .none,
+                    });
 
                     // TODO: Start from current/nearest-current scope
-                    const result = interpreter.interpret(node, root_scope, .{}) catch |err| {
+                    const result = interpreter.interpret(node, 0, .{}) catch |err| {
                         log.err("Interpreter error: {s}", .{@errorName(err)});
                         if (@errorReturnTrace()) |trace| {
                             std.debug.dumpStackTrace(trace.*);
@@ -794,7 +794,7 @@ pub fn resolveTypeOfNodeInternal(store: *DocumentStore, arena: *std.heap.ArenaAl
 
                     const type_type = try interpreter.ip.get(interpreter.allocator, ComptimeInterpreter.IPKey{ .simple = .type });
                     if (val.ty != type_type) {
-                        log.err("Not a type: { }", .{val.ty.fmtType(&interpreter.ip)});
+                        log.err("Not a type: {}", .{val.ty.fmtType(&interpreter.ip)});
                         return null;
                     }
 
