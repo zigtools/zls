@@ -29,6 +29,7 @@ pub fn computeHash(bytes: []const u8) Hash {
 }
 
 const BuildFile = struct {
+    times_loaded: if (builtin.mode == .Debug) u64 else void = if (builtin.mode == .Debug) 1 else {},
     uri: Uri,
     /// contains information extracted from running build.zig with a custom build runner
     /// e.g. include paths & packages
@@ -639,10 +640,35 @@ fn createDocument(self: *DocumentStore, uri: Uri, text: [:0]u8, open: bool) erro
     const in_std = std.mem.indexOf(u8, uri, "/std/") != null;
     if (self.config.zig_exe_path != null and std.mem.endsWith(u8, uri, "/build.zig") and !in_std) {
         errdefer |err| log.debug("Failed to load build file {s}: (error: {})", .{ uri, err });
-        const duped_uri = try self.allocator.dupe(u8, uri);
-        var build_file = try self.createBuildFile(duped_uri);
+        const gop = try self.build_files.getOrPut(self.allocator, uri);
+
+        if (gop.found_existing) {
+            if (builtin.mode == .Debug) {
+                const too_many_times = gop.value_ptr.times_loaded == std.math.maxInt(@TypeOf(gop.value_ptr.times_loaded));
+                gop.value_ptr.times_loaded +|= 1;
+
+                if (!too_many_times) {
+                    log.debug("Loaded build file '{s}' {d} times", .{ uri, gop.value_ptr.times_loaded });
+                } else {
+                    log.debug("Loaded build file '{s}' more than {d} times", .{ uri, std.math.maxInt(@TypeOf(gop.value_ptr.times_loaded)) });
+                }
+            } else {
+                log.debug("Loaded build file '{s}' multiple times", .{uri});
+            }
+
+            gop.value_ptr.uri = ""; // don't free the URI if it's already allocated
+            gop.value_ptr.deinit(self.allocator); // TODO: Is it necessary to always re-create the build file?
+        } else {
+            const duped_uri = try self.allocator.dupe(u8, uri);
+            // technically "wrong", but safe, because `uri` (the current key value) and `duped_uri` have identical contents,
+            // and the string hash map shouldn't care about the pointer values themselves.
+            gop.key_ptr.* = duped_uri;
+        }
+
+        var build_file = try self.createBuildFile(gop.key_ptr.*);
         errdefer build_file.deinit(self.allocator);
-        try self.build_files.putNoClobber(self.allocator, build_file.uri, build_file);
+
+        gop.value_ptr.* = build_file;
         handle.is_build_file = true;
     } else if (self.config.zig_exe_path != null and !std.mem.endsWith(u8, uri, "/builtin.zig") and !in_std) blk: {
         log.debug("Going to walk down the tree towards: {s}", .{uri});
