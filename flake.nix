@@ -12,9 +12,12 @@
 
     known-folders.url = "github:ziglibs/known-folders";
     known-folders.flake = false;
+
+    tres.url = "github:ziglibs/tres";
+    tres.flake = false;
   };
 
-  outputs = { self, nixpkgs, zig-overlay, gitignore, flake-utils, known-folders }:
+  outputs = { self, nixpkgs, zig-overlay, gitignore, flake-utils, known-folders, tres }:
     let
       systems = [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
       inherit (gitignore.lib) gitignoreSource;
@@ -35,7 +38,7 @@
           dontInstall = true;
           buildPhase = ''
             mkdir -p $out
-            zig build install -Dcpu=baseline -Drelease-safe=true -Ddata_version=master -Dknown-folders=${known-folders}/known-folders.zig --prefix $out
+            zig build install -Dcpu=baseline -Drelease-safe=true -Ddata_version=master -Dtres=${tres}/tres.zig -Dknown-folders=${known-folders}/known-folders.zig --prefix $out
           '';
           XDG_CACHE_HOME = ".cache";
         };
