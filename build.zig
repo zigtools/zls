@@ -92,6 +92,8 @@ pub fn build(b: *std.build.Builder) !void {
     const known_folders_path = b.option([]const u8, "known-folders", "Path to known-folders package (default: " ++ KNOWN_FOLDERS_DEFAULT_PATH ++ ")") orelse KNOWN_FOLDERS_DEFAULT_PATH;
     exe.addPackage(.{ .name = "known-folders", .source = .{ .path = known_folders_path } });
 
+    exe.addPackage(.{ .name = "tres", .source = .{ .path = "src/tres/tres.zig" } });
+
     if (enable_tracy) {
         const client_cpp = "src/tracy/TracyClient.cpp";
 
@@ -146,6 +148,7 @@ pub fn build(b: *std.build.Builder) !void {
     }
 
     tests.addPackage(.{ .name = "zls", .source = .{ .path = "src/zls.zig" }, .dependencies = exe.packages.items });
+    tests.addPackage(.{ .name = "tres", .source = .{ .path = "src/tres/tres.zig" } });
     tests.setBuildMode(.Debug);
     tests.setTarget(target);
     test_step.dependOn(&tests.step);
