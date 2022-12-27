@@ -154,7 +154,7 @@ pub const Namespace = struct {
     /// always points to Namespace or Index.none
     parent: Index,
     /// Will be a struct, enum, union, or opaque.
-    ty: Index,
+    // ty: Index,
     /// always points to Decl
     decls: []const Index,
     usingnamespaces: []const Index,
@@ -195,6 +195,7 @@ pub const Key = union(enum) {
     type_value: Index,
 
     bytes: Bytes,
+    one_pointer: Index,
 
     // slice
     // error
@@ -377,6 +378,11 @@ pub const Key = union(enum) {
             .float_80_value => .float_f80,
             .float_128_value => .float_f128,
             .type_value => .type,
+
+            .declaration => .declaration,
+            .namespace => .namespace,
+            .bytes => .bytes,
+            .one_pointer => .one_pointer,
         };
     }
 
@@ -509,6 +515,15 @@ pub const Key = union(enum) {
         return switch (ty) {
             .pointer_type => |pointer_info| pointer_info.size == .Slice,
             else => false,
+        };
+    }
+    
+    pub fn getNamespace(ty: Key) ?Index {
+        return switch (ty) {
+            .struct_type => |struct_info| struct_info.namespace,
+            .enum_type => |enum_info| enum_info.namespace,
+            .union_type => |union_info| union_info.namespace,
+            else => null,
         };
     }
 
@@ -695,6 +710,7 @@ pub const Key = union(enum) {
 
             .type_value,
             .bytes,
+            .one_pointer,
             => unreachable,
         }
     }
@@ -788,6 +804,7 @@ pub const Key = union(enum) {
 
             .type_value,
             .bytes,
+            .one_pointer,
             => unreachable,
         }
     }
@@ -908,6 +925,20 @@ pub const Tag = enum(u8) {
     /// A type value.
     /// data is Index.
     type,
+
+    /// A declaration.
+    /// data is payload to Decl.
+    declaration,
+    /// A namespace.
+    /// data is payload to Namespace.
+    namespace,
+
+    /// A byte sequence value.
+    /// data is payload to data begin and length.
+    bytes,
+    /// A single pointer value.
+    /// data is index to value.
+    one_pointer,
 };
 
 pub const Simple = enum(u32) {
@@ -997,6 +1028,9 @@ pub fn indexToKey(ip: InternPool, index: Index) Key {
         .float_f80 => .{ .float_80_value = ip.extraData(f80, data) },
         .float_f128 => .{ .float_128_value = ip.extraData(f128, data) },
         .type => .{ .type_value = @intToEnum(Index, data) },
+
+        .bytes => unreachable, // TODO
+        .one_pointer => .{.one_pointer = @intToEnum(Index, data)},
         else => @panic("TODO"),
     };
 }
@@ -1032,7 +1066,9 @@ pub fn get(ip: *InternPool, gpa: Allocator, key: Key) Allocator.Error!Index {
         },
         .float_16_value => |float_val| .{ .tag = .float_f16, .data = @bitCast(u16, float_val) },
         .float_32_value => |float_val| .{ .tag = .float_f32, .data = @bitCast(u32, float_val) },
-        .type_value => |ty| .{ .tag = .type, .data = ty },
+        .type_value => |ty| .{ .tag = .type, .data = @enumToInt(ty) },
+        .bytes => unreachable, // TODO
+        .one_pointer => |val| .{.tag = .one_pointer, .data = @enumToInt(val)},
         inline else => |data| .{ .tag = key.tag(), .data = try ip.addExtra(gpa, data) }, // TODO sad stage1 noises :(
     };
     try ip.items.append(gpa, item);
@@ -1057,6 +1093,10 @@ fn extraData(ip: InternPool, comptime T: type, index: usize) T {
 // ---------------------------------------------
 //                    UTILITY
 // ---------------------------------------------
+
+pub fn cast(ip: *InternPool, gpa: Allocator, destination_ty: Index, source_ty: Index, target: std.Target) Allocator.Error!Index {
+    return resolvePeerTypes(ip, gpa, &.{destination_ty, source_ty}, target);
+}
 
 pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, target: std.Target) Allocator.Error!Index {
     switch (types.len) {

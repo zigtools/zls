@@ -779,8 +779,15 @@ pub fn resolveTypeOfNodeInternal(store: *DocumentStore, arena: *std.heap.ArenaAl
                     };
                     var interpreter = handle.interpreter.?;
 
+                    var root_scope = ComptimeInterpreter.Scope{
+                        .interpreter = interpreter,
+                        .parent = 0,
+                        .node_idx = 0,
+                        .namespace = ComptimeInterpreter.IPIndex.none,
+                    };
+
                     // TODO: Start from current/nearest-current scope
-                    const result = interpreter.interpret(node, interpreter.root_type.?.getTypeInfo().getScopeOfType().?, .{}) catch |err| {
+                    const result = interpreter.interpret(node, root_scope, .{}) catch |err| {
                         log.err("Interpreter error: {s}", .{@errorName(err)});
                         if (@errorReturnTrace()) |trace| {
                             std.debug.dumpStackTrace(trace.*);
@@ -795,15 +802,22 @@ pub fn resolveTypeOfNodeInternal(store: *DocumentStore, arena: *std.heap.ArenaAl
                         return null;
                     };
 
-                    const ti = val.@"type".getTypeInfo();
-                    if (ti != .@"type") {
-                        log.err("Not a type: { }", .{interpreter.formatTypeInfo(ti)});
+                    const type_type = try interpreter.ip.get(interpreter.allocator, ComptimeInterpreter.IPKey{ .simple = .type });
+                    if (val.ty != type_type) {
+                        log.err("Not a type: { }", .{val.ty.fmtType(&interpreter.ip)});
                         return null;
                     }
 
                     return TypeWithHandle{
                         .type = .{
-                            .data = .{ .@"comptime" = .{ .interpreter = interpreter, .type = val.value_data.@"type" } },
+                            .data = .{ .@"comptime" = .{
+                                .interpreter = interpreter,
+                                .type = ComptimeInterpreter.Type{
+                                    .interpreter = interpreter,
+                                    .node_idx = val.node_idx,
+                                    .ty = val.val,
+                                },
+                            } },
                             .is_type_val = true,
                         },
                         .handle = node_handle.handle,
