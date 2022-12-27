@@ -141,16 +141,16 @@ const Builder = struct {
         const source = self.handle.tree.source;
 
         var i: usize = from;
-        while (i < to - 1) : (i += 1) {
+        while (i < to) : (i += 1) {
             // Skip multi-line string literals
             if (source[i] == '\\' and source[i + 1] == '\\') {
-                while (i < to - 1 and source[i] != '\n') : (i += 1) {}
+                while (i < to and source[i] != '\n') : (i += 1) {}
                 continue;
             }
             // Skip normal string literals
             if (source[i] == '"') {
                 i += 1;
-                while (i < to - 1 and
+                while (i < to and
                     source[i] != '\n' and
                     !(source[i] == '"' and source[i - 1] != '\\')) : (i += 1)
                 {}
@@ -159,7 +159,7 @@ const Builder = struct {
             // Skip char literals
             if (source[i] == '\'') {
                 i += 1;
-                while (i < to - 1 and
+                while (i < to and
                     source[i] != '\n' and
                     !(source[i] == '\'' and source[i - 1] != '\\')) : (i += 1)
                 {}
@@ -174,7 +174,7 @@ const Builder = struct {
             if (i + 2 < to and (source[i + 2] == '!' or source[i + 2] == '/'))
                 mods.documentation = true;
 
-            while (i < to - 1 and source[i] != '\n') : (i += 1) {}
+            while (i < to and source[i] != '\n') : (i += 1) {}
 
             const length = offsets.locLength(self.handle.tree.source, .{ .start = comment_start, .end = i }, self.encoding);
             try self.addDirect(TokenType.comment, mods, comment_start, length);
@@ -276,7 +276,7 @@ fn callWriteNodeTokens(allocator: std.mem.Allocator, args: anytype) WriteTokensE
         return await @asyncCall(child_frame, {}, writeNodeTokens, args);
     } else {
         // TODO find a non recursive solution
-        return @call(.{}, writeNodeTokens, args);
+        return @call(.auto, writeNodeTokens, args);
     }
 }
 
@@ -862,7 +862,6 @@ fn writeNodeTokens(builder: *Builder, maybe_node: ?Ast.Node.Index) WriteTokensEr
         .field_access => {
             const data = node_data[node];
             if (data.rhs == 0) return;
-            const rhs_str = ast.tokenSlice(tree, data.rhs) catch return;
 
             try callWriteNodeTokens(allocator, .{ builder, data.lhs });
 
@@ -889,7 +888,7 @@ fn writeNodeTokens(builder: *Builder, maybe_node: ?Ast.Node.Index) WriteTokensEr
                 builder.store,
                 builder.arena,
                 .{ .node = left_type_node, .handle = lhs_type.handle },
-                rhs_str,
+                tree.tokenSlice(data.rhs),
                 !lhs_type.type.is_type_val,
             )) |decl_type| {
                 switch (decl_type.decl.*) {

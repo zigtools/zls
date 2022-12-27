@@ -20,8 +20,8 @@ pub fn labelReferences(
 
     // Find while / for / block from label -> iterate over children nodes, find break and continues, change their labels if they match.
     // This case can be implemented just by scanning tokens.
-    const first_tok = tree.firstToken(decl.decl.label_decl);
-    const last_tok = ast.lastToken(tree, decl.decl.label_decl);
+    const first_tok = decl.decl.label_decl.label;
+    const last_tok = ast.lastToken(tree, decl.decl.label_decl.block);
 
     var locations = std.ArrayListUnmanaged(types.Location){};
     errdefer locations.deinit(allocator);
@@ -337,7 +337,6 @@ fn symbolReferencesInternal(
         .field_access => {
             try symbolReferencesInternal(builder, datas[node].lhs, handle, false);
 
-            const rhs_str = ast.tokenSlice(tree, datas[node].rhs) catch return;
             var bound_type_params = analysis.BoundTypeParams{};
             const left_type = try analysis.resolveFieldAccessLhsType(
                 builder.store,
@@ -358,7 +357,7 @@ fn symbolReferencesInternal(
                 builder.store,
                 builder.arena,
                 .{ .node = left_type_node, .handle = left_type.handle },
-                rhs_str,
+                tree.tokenSlice(datas[node].rhs),
                 !left_type.type.is_type_val,
             )) orelse return;
 
@@ -498,6 +497,8 @@ pub fn symbolReferences(
 
             for (dependencies.keys()) |uri| {
                 const handle = store.getHandle(uri) orelse continue;
+                if (std.mem.eql(u8, handle.uri, curr_handle.uri)) continue;
+
                 try symbolReferencesInternal(&builder, 0, handle, true);
             }
         },

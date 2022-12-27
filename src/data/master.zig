@@ -80,24 +80,6 @@ pub const builtins = [_]Builtin{
         },
     },
     .{
-        .name = "@asyncCall",
-        .signature = "@asyncCall(frame_buffer: []align(@alignOf(@Frame(anyAsyncFunction))) u8, result_ptr, function_ptr, args: anytype) anyframe->T",
-        .snippet = "@asyncCall(${1:frame_buffer: []align(@alignOf(@Frame(anyAsyncFunction))) u8}, ${2:result_ptr}, ${3:function_ptr}, ${4:args: anytype})",
-        .documentation =
-        \\`@asyncCall` performs an `async` call on a function pointer, which may or may not be an [async function](https://ziglang.org/documentation/master/#Async-Functions).
-        \\
-        \\The provided `frame_buffer` must be large enough to fit the entire function frame. This size can be determined with [@frameSize](https://ziglang.org/documentation/master/#frameSize). To provide a too-small buffer invokes safety-checked [Undefined Behavior](https://ziglang.org/documentation/master/#Undefined-Behavior).
-        \\
-        \\`result_ptr` is optional ([null](https://ziglang.org/documentation/master/#null) may be provided). If provided, the function call will write its result directly to the result pointer, which will be available to read after [await](https://ziglang.org/documentation/master/#Async-and-Await) completes. Any result location provided to `await` will copy the result from `result_ptr`.</p> {#code_begin|test|async_struct_field_fn_pointer#} {#backend_stage1#} const std = @import("std"); const expect = std.testing.expect; test "async fn pointer in a struct field" { var data: i32 = 1; const Foo = struct { bar: fn (*i32) callconv(.Async) void, }; var foo = Foo{ .bar = func }; var bytes: [64]u8 align(@alignOf(@Frame(func))) = undefined; const f = @asyncCall(&bytes, {}, foo.bar, .{&data}); try expect(data == 2); resume f; try expect(data == 4); } fn func(y: *i32) void { defer y.* += 2; y.* += 1; suspend {} }`
-        ,
-        .arguments = &.{
-            "frame_buffer: []align(@alignOf(@Frame(anyAsyncFunction))) u8",
-            "result_ptr",
-            "function_ptr",
-            "args: anytype",
-        },
-    },
-    .{
         .name = "@atomicLoad",
         .signature = "@atomicLoad(comptime T: type, ptr: *const T, comptime ordering: builtin.AtomicOrder) T",
         .snippet = "@atomicLoad(${1:comptime T: type}, ${2:ptr: *const T}, ${3:comptime ordering: builtin.AtomicOrder})",
@@ -291,8 +273,8 @@ pub const builtins = [_]Builtin{
     },
     .{
         .name = "@call",
-        .signature = "@call(options: std.builtin.CallOptions, function: anytype, args: anytype) anytype",
-        .snippet = "@call(${1:options: std.builtin.CallOptions}, ${2:function: anytype}, ${3:args: anytype})",
+        .signature = "@call(modifier: std.builtin.CallModifier, function: anytype, args: anytype) anytype",
+        .snippet = "@call(${1:modifier: std.builtin.CallModifier}, ${2:function: anytype}, ${3:args: anytype})",
         .documentation =
         \\Calls a function, in the same way that invoking an expression with parentheses does:
         \\
@@ -300,7 +282,7 @@ pub const builtins = [_]Builtin{
         \\const expect = @import("std").testing.expect;
         \\
         \\test "noinline function call" {
-        \\    try expect(@call(.{}, add, .{3, 9}) == 12);
+        \\    try expect(@call(.auto, add, .{3, 9}) == 12);
         \\}
         \\
         \\fn add(a: i32, b: i32) i32 {
@@ -308,10 +290,10 @@ pub const builtins = [_]Builtin{
         \\}
         \\```
         \\
-        \\`@call` allows more flexibility than normal function call syntax does. The `CallOptions` struct is reproduced here:</p> {#syntax_block|zig|builtin.CallOptions struct#} pub const CallOptions = struct { modifier: Modifier = .auto, /// Only valid when `Modifier` is `Modifier.async_kw`. stack: ?[]align(std.Target.stack_align) u8 = null, pub const Modifier = enum { /// Equivalent to function call syntax. auto, /// Equivalent to async keyword used with function call syntax. async_kw, /// Prevents tail call optimization. This guarantees that the return /// address will point to the callsite, as opposed to the callsite's /// callsite. If the call is otherwise required to be tail-called /// or inlined, a compile error is emitted instead. never_tail, /// Guarantees that the call will not be inlined. If the call is /// otherwise required to be inlined, a compile error is emitted instead. never_inline, /// Asserts that the function call will not suspend. This allows a /// non-async function to call an async function. no_async, /// Guarantees that the call will be generated with tail call optimization. /// If this is not possible, a compile error is emitted instead. always_tail, /// Guarantees that the call will inlined at the callsite. /// If this is not possible, a compile error is emitted instead. always_inline, /// Evaluates the call at compile-time. If the call cannot be completed at /// compile-time, a compile error is emitted instead. compile_time, }; }; {#end_syntax_block#}
+        \\`@call` allows more flexibility than normal function call syntax does. The `CallModifier` enum is reproduced here:</p> {#syntax_block|zig|builtin.CallModifier struct#} pub const CallModifier = enum { /// Equivalent to function call syntax. auto, /// Equivalent to async keyword used with function call syntax. async_kw, /// Prevents tail call optimization. This guarantees that the return /// address will point to the callsite, as opposed to the callsite's /// callsite. If the call is otherwise required to be tail-called /// or inlined, a compile error is emitted instead. never_tail, /// Guarantees that the call will not be inlined. If the call is /// otherwise required to be inlined, a compile error is emitted instead. never_inline, /// Asserts that the function call will not suspend. This allows a /// non-async function to call an async function. no_async, /// Guarantees that the call will be generated with tail call optimization. /// If this is not possible, a compile error is emitted instead. always_tail, /// Guarantees that the call will inlined at the callsite. /// If this is not possible, a compile error is emitted instead. always_inline, /// Evaluates the call at compile-time. If the call cannot be completed at /// compile-time, a compile error is emitted instead. compile_time, }; {#end_syntax_block#}
         ,
         .arguments = &.{
-            "options: std.builtin.CallOptions",
+            "modifier: std.builtin.CallModifier",
             "function: anytype",
             "args: anytype",
         },
@@ -523,6 +505,49 @@ pub const builtins = [_]Builtin{
         .arguments = &.{
             "comptime name: []u8",
         },
+    },
+    .{
+        .name = "@cVaArg",
+        .signature = "@cVaArg(operand: *std.builtin.VaList, comptime T: type) T",
+        .snippet = "@cVaArg(${1:operand: *std.builtin.VaList}, ${2:comptime T: type})",
+        .documentation =
+        \\Implements the C macro `va_arg`.
+        ,
+        .arguments = &.{
+            "operand: *std.builtin.VaList",
+            "comptime T: type",
+        },
+    },
+    .{
+        .name = "@cVaCopy",
+        .signature = "@cVaCopy(src: *std.builtin.VaList) std.builtin.VaList",
+        .snippet = "@cVaCopy(${1:src: *std.builtin.VaList})",
+        .documentation =
+        \\Implements the C macro `va_copy`.
+        ,
+        .arguments = &.{
+            "src: *std.builtin.VaList",
+        },
+    },
+    .{
+        .name = "@cVaEnd",
+        .signature = "@cVaEnd(src: *std.builtin.VaList) void",
+        .snippet = "@cVaEnd(${1:src: *std.builtin.VaList})",
+        .documentation =
+        \\Implements the C macro `va_end`.
+        ,
+        .arguments = &.{
+            "src: *std.builtin.VaList",
+        },
+    },
+    .{
+        .name = "@cVaStart",
+        .signature = "@cVaStart() std.builtin.VaList",
+        .snippet = "@cVaStart()",
+        .documentation =
+        \\Implements the C macro `va_start`. Only valid inside a variadic function.
+        ,
+        .arguments = &.{},
     },
     .{
         .name = "@divExact",
@@ -771,30 +796,6 @@ pub const builtins = [_]Builtin{
         },
     },
     .{
-        .name = "@frame",
-        .signature = "@frame() *@Frame(func)",
-        .snippet = "@frame()",
-        .documentation =
-        \\This function returns a pointer to the frame for a given function. This type can be [coerced](https://ziglang.org/documentation/master/#Type-Coercion) to `anyframe->T` and to `anyframe`, where `T` is the return type of the function in scope.
-        \\
-        \\This function does not mark a suspension point, but it does cause the function in scope to become an [async function](https://ziglang.org/documentation/master/#Async-Functions).
-        ,
-        .arguments = &.{},
-    },
-    .{
-        .name = "@Frame",
-        .signature = "@Frame(func: anytype) type",
-        .snippet = "@Frame(${1:func: anytype})",
-        .documentation =
-        \\This function returns the frame type of a function. This works for [Async Functions](https://ziglang.org/documentation/master/#Async-Functions) as well as any function without a specific calling convention.
-        \\
-        \\This type is suitable to be used as the return type of [async](https://ziglang.org/documentation/master/#Async-and-Await) which allows one to, for example, heap-allocate an async function frame:</p> {#code_begin|test|heap_allocated_frame#} {#backend_stage1#} const std = @import("std"); test "heap allocated frame" { const frame = try std.heap.page_allocator.create(@Frame(func)); frame.* = async func(); } fn func() void { suspend {} }`
-        ,
-        .arguments = &.{
-            "func: anytype",
-        },
-    },
-    .{
         .name = "@frameAddress",
         .signature = "@frameAddress() usize",
         .snippet = "@frameAddress()",
@@ -808,24 +809,11 @@ pub const builtins = [_]Builtin{
         .arguments = &.{},
     },
     .{
-        .name = "@frameSize",
-        .signature = "@frameSize(func: anytype) usize",
-        .snippet = "@frameSize(${1:func: anytype})",
-        .documentation =
-        \\This is the same as `@sizeOf(@Frame(func))`, where `func` may be runtime-known.
-        \\
-        \\This function is typically used in conjunction with [@asyncCall](https://ziglang.org/documentation/master/#asyncCall).
-        ,
-        .arguments = &.{
-            "func: anytype",
-        },
-    },
-    .{
         .name = "@hasDecl",
         .signature = "@hasDecl(comptime Container: type, comptime name: []const u8) bool",
         .snippet = "@hasDecl(${1:comptime Container: type}, ${2:comptime name: []const u8})",
         .documentation =
-        \\Returns whether or not a [struct](https://ziglang.org/documentation/master/#struct), [enum](https://ziglang.org/documentation/master/#enum), or [union](https://ziglang.org/documentation/master/#union) has a declaration matching `name`.</p> {#code_begin|test|hasDecl#} const std = @import("std"); const expect = std.testing.expect; const Foo = struct { nope: i32, pub var blah = "xxx"; const hi = 1; }; test "@hasDecl" { try expect(@hasDecl(Foo, "blah")); // Even though `hi` is private, @hasDecl returns true because this test is // in the same file scope as Foo. It would return false if Foo was declared // in a different file. try expect(@hasDecl(Foo, "hi")); // @hasDecl is for declarations; not fields. try expect(!@hasDecl(Foo, "nope")); try expect(!@hasDecl(Foo, "nope1234")); }`
+        \\Returns whether or not a [container](https://ziglang.org/documentation/master/#Containers) has a declaration matching `name`.</p> {#code_begin|test|hasDecl#} const std = @import("std"); const expect = std.testing.expect; const Foo = struct { nope: i32, pub var blah = "xxx"; const hi = 1; }; test "@hasDecl" { try expect(@hasDecl(Foo, "blah")); // Even though `hi` is private, @hasDecl returns true because this test is // in the same file scope as Foo. It would return false if Foo was declared // in a different file. try expect(@hasDecl(Foo, "hi")); // @hasDecl is for declarations; not fields. try expect(!@hasDecl(Foo, "nope")); try expect(!@hasDecl(Foo, "nope1234")); }`
         ,
         .arguments = &.{
             "comptime Container: type",
@@ -1721,16 +1709,13 @@ pub const builtins = [_]Builtin{
         \\  - [Error Union Type](https://ziglang.org/documentation/master/#Error-Union-Type)
         \\  - [Vectors](https://ziglang.org/documentation/master/#Vectors)
         \\  - [opaque](https://ziglang.org/documentation/master/#opaque)
-        \\  - [@Frame](https://ziglang.org/documentation/master/#Frame)
         \\  - `anyframe`
         \\  - [struct](https://ziglang.org/documentation/master/#struct)
         \\  - [enum](https://ziglang.org/documentation/master/#enum)
         \\  - [Enum Literals](https://ziglang.org/documentation/master/#Enum-Literals)
         \\  - [union](https://ziglang.org/documentation/master/#union)
         \\
-        \\For these types, `@Type` is not available:
-        \\  - [Functions](https://ziglang.org/documentation/master/#Functions)
-        \\  - BoundFn
+        \\`@Type` is not available for [Functions](https://ziglang.org/documentation/master/#Functions).
         ,
         .arguments = &.{
             "comptime info: std.builtin.Type",

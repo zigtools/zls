@@ -1,0 +1,158 @@
+{
+    "options": [
+        {
+            "name": "enable_snippets",
+            "description": "Enables snippet completions when the client also supports them",
+            "type": "bool",
+            "default": "false",
+            "setup_question": "Do you want to enable snippets?"
+        },
+        {
+            "name": "enable_ast_check_diagnostics",
+            "description": "Whether to enable ast-check diagnostics",
+            "type": "bool",
+            "default": "true",
+            "setup_question": "Do you want to enable ast-check diagnostics?"
+        },
+        {
+            "name": "enable_autofix",
+            "description": "Whether to automatically fix errors on save. Currently supports adding and removing discards.",
+            "type": "bool",
+            "default": "false",
+            "setup_question": "Do you want to zls to automatically try to fix errors on save? (supports adding & removing discards)"
+        },
+        {
+            "name": "enable_import_embedfile_argument_completions",
+            "description": "Whether to enable import/embedFile argument completions",
+            "type": "bool",
+            "default": "false",
+            "setup_question": "Do you want to enable @import/@embedFile argument path completion?"
+        },
+        {
+            "name": "enable_semantic_tokens",
+            "description": "Enables semantic token support when the client also supports it",
+            "type": "bool",
+            "default": "true",
+            "setup_question": "Do you want to enable semantic highlighting?"
+        },
+        {
+            "name": "enable_inlay_hints",
+            "description": "Enables inlay hint support when the client also supports it",
+            "type": "bool",
+            "default": "false",
+            "setup_question": "Do you want to enable inlay hints?"
+        },
+        {
+            "name": "inlay_hints_show_builtin",
+            "description": "Enable inlay hints for builtin functions",
+            "type": "bool",
+            "default": "true",
+            "setup_question": null
+        },
+        {
+            "name": "inlay_hints_exclude_single_argument",
+            "description": "Don't show inlay hints for single argument calls",
+            "type": "bool",
+            "default": "true",
+            "setup_question": null
+        },
+        {
+            "name": "inlay_hints_hide_redundant_param_names",
+            "description": "Hides inlay hints when parameter name matches the identifier (e.g. foo: foo)",
+            "type": "bool",
+            "default": "false",
+            "setup_question": null
+        },
+        {
+            "name": "inlay_hints_hide_redundant_param_names_last_token",
+            "description": "Hides inlay hints when parameter name matches the last token of a parameter node (e.g. foo: bar.foo, foo: &foo)",
+            "type": "bool",
+            "default": "false",
+            "setup_question": null
+        },
+        {
+            "name": "operator_completions",
+            "description": "Enables `*` and `?` operators in completion lists",
+            "type": "bool",
+            "default": "true",
+            "setup_question": "Do you want to enable .* and .? completions?"
+        },
+        {
+            "name": "warn_style",
+            "description": "Enables warnings for style guideline mismatches",
+            "type": "bool",
+            "default": "false",
+            "setup_question": "Do you want to enable style warnings?"
+        },
+        {
+            "name": "highlight_global_var_declarations",
+            "description": "Whether to highlight global var declarations",
+            "type": "bool",
+            "default": "false",
+            "setup_question": null
+        },
+        {
+            "name": "use_comptime_interpreter",
+            "description": "Whether to use the comptime interpreter",
+            "type": "bool",
+            "default": "false",
+            "setup_question": null
+        },
+        {
+            "name": "include_at_in_builtins",
+            "description": "Whether the @ sign should be part of the completion of builtins",
+            "type": "bool",
+            "default": "false",
+            "setup_question": null
+        },
+        {
+            "name": "skip_std_references",
+            "description": "When true, skips searching for references in std. Improves lookup speed for functions in user's code. Renaming and go-to-definition will continue to work as is",
+            "type": "bool",
+            "default": "false",
+            "setup_question": null
+        },
+        {
+            "name": "max_detail_length",
+            "description": "The detail field of completions is truncated to be no longer than this (in bytes)",
+            "type": "usize",
+            "default": "1048576",
+            "setup_question": null
+        },
+        {
+            "name": "builtin_path",
+            "description": "Path to 'builtin;' useful for debugging, automatically set if let null",
+            "type": "?[]const u8",
+            "default": "null",
+            "setup_question": null
+        },
+        {
+            "name": "zig_lib_path",
+            "description": "Zig library path, e.g. `/path/to/zig/lib/zig`, used to analyze std library imports",
+            "type": "?[]const u8",
+            "default": "null",
+            "setup_question": null
+        },
+        {
+            "name": "zig_exe_path",
+            "description": "Zig executable path, e.g. `/path/to/zig/zig`, used to run the custom build runner. If `null`, zig is looked up in `PATH`. Will be used to infer the zig standard library path if none is provided",
+            "type": "?[]const u8",
+            "default": "null",
+            "setup_question": null
+        },
+        {
+            "name": "build_runner_path",
+            "description": "Path to the `build_runner.zig` file provided by zls. null is equivalent to `${executable_directory}/build_runner.zig`",
+            "type": "?[]const u8",
+            "default": "null",
+            "setup_question": null
+        },
+        {
+            "name": "global_cache_path",
+            "description": "Path to a directroy that will be used as zig's cache. null is equivalent to `${KnownFloders.Cache}/zls`",
+            "type": "?[]const u8",
+            "default": "null",
+            "setup_question": null
+        }
+    ]
+}

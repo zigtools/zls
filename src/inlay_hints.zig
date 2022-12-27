@@ -247,11 +247,10 @@ fn callWriteNodeInlayHint(allocator: std.mem.Allocator, args: anytype) error{Out
         const FrameSize = @sizeOf(@Frame(writeNodeInlayHint));
         var child_frame = try allocator.alignedAlloc(u8, std.Target.stack_align, FrameSize);
         defer allocator.free(child_frame);
-
         return await @asyncCall(child_frame, {}, writeNodeInlayHint, args);
     } else {
         // TODO find a non recursive solution
-        return @call(.{}, writeNodeInlayHint, args);
+        return @call(.auto, writeNodeInlayHint, args);
     }
 }
 
@@ -266,7 +265,11 @@ fn writeNodeInlayHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store:
     const node_data = tree.nodes.items(.data);
     const main_tokens = tree.nodes.items(.main_token);
 
-    if (node == 0 or node > node_data.len) return;
+    // std.log.info("max: {d} | curr: {d}", .{ node_data.len, node });
+    // if (node == 0 or node >= node_data.len) return;
+    if (node == 0) return;
+    // std.log.info("tag: {any}", .{node_tags[node]});
+    // std.log.info("src: {s}", .{tree.getNodeSource(node)});
 
     var allocator = arena.allocator();
 
@@ -452,7 +455,6 @@ fn writeNodeInlayHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store:
         .bool_or,
         .array_access,
         .switch_range,
-        .error_value,
         .error_union,
         => {
             try callWriteNodeInlayHint(allocator, .{ builder, arena, store, node_data[node].lhs, range });
@@ -679,6 +681,8 @@ fn writeNodeInlayHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store:
 
             try callWriteNodeInlayHint(allocator, .{ builder, arena, store, asm_node.ast.template, range });
         },
+
+        .error_value => {},
     }
 }
 

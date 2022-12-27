@@ -15,11 +15,7 @@ pub const Builder = struct {
     handle: *const DocumentStore.Handle,
     offset_encoding: offsets.Encoding,
 
-    pub fn generateCodeAction(
-        builder: *Builder,
-        diagnostic: types.Diagnostic,
-        actions: *std.ArrayListUnmanaged(types.CodeAction)
-    ) error{OutOfMemory}!void {
+    pub fn generateCodeAction(builder: *Builder, diagnostic: types.Diagnostic, actions: *std.ArrayListUnmanaged(types.CodeAction)) error{OutOfMemory}!void {
         const kind = DiagnosticKind.parse(diagnostic.message) orelse return;
 
         const loc = offsets.rangeToLoc(builder.handle.text, diagnostic.range, builder.offset_encoding);
@@ -30,7 +26,7 @@ pub const Builder = struct {
                 .@"local constant" => try handleUnusedVariableOrConstant(builder, actions, loc),
                 .@"local variable" => try handleUnusedVariableOrConstant(builder, actions, loc),
                 .@"loop index capture" => try handleUnusedIndexCapture(builder, actions, loc),
-                .@"capture" => try handleUnusedCapture(builder, actions, loc),
+                .capture => try handleUnusedCapture(builder, actions, loc),
             },
             .non_camelcase_fn => try handleNonCamelcaseFunction(builder, actions, loc),
             .pointless_discard => try handlePointlessDiscard(builder, actions, loc),
@@ -244,21 +240,21 @@ fn detectIndentation(source: []const u8) []const u8 {
     // Essentially I'm looking for the first indentation in the file.
     var i: usize = 0;
     var len = source.len - 1; // I need 1 look-ahead
-    while(i < len) : (i += 1) {
-        if(source[i] != '\n') continue;
+    while (i < len) : (i += 1) {
+        if (source[i] != '\n') continue;
         i += 1;
-        if(source[i] == '\t') return "\t";
+        if (source[i] == '\t') return "\t";
         var space_count: usize = 0;
-        while(i < source.len and source[i] == ' ') : (i += 1) {
+        while (i < source.len and source[i] == ' ') : (i += 1) {
             space_count += 1;
         }
-        if(source[i] == '\n') { // Some editors mess up indentation of empty lines
+        if (source[i] == '\n') { // Some editors mess up indentation of empty lines
             i -= 1;
             continue;
         }
-        if(space_count == 0) continue;
-        if(source[i] == '/') continue; // Comments sometimes have additional alignment.
-        if(source[i] == '\\') continue; // multi-line strings might as well.
+        if (space_count == 0) continue;
+        if (source[i] == '/') continue; // Comments sometimes have additional alignment.
+        if (source[i] == '\\') continue; // multi-line strings might as well.
         return source[i - space_count .. i];
     }
     return " " ** 4; // recommended style
@@ -298,14 +294,14 @@ fn createCamelcaseText(allocator: std.mem.Allocator, identifier: []const u8) ![]
 fn createDiscardText(builder: *Builder, identifier_name: []const u8, declaration_start: usize, add_block_indentation: bool) ![]const u8 {
     const indent = find_indent: {
         const line = offsets.lineSliceUntilIndex(builder.handle.text, declaration_start);
-        for(line) |char, i| {
-            if(!std.ascii.isSpace(char)) {
+        for (line) |char, i| {
+            if (!std.ascii.isWhitespace(char)) {
                 break :find_indent line[0..i];
             }
         }
         break :find_indent line;
     };
-    const additional_indent = if(add_block_indentation) detectIndentation(builder.handle.text) else "";
+    const additional_indent = if (add_block_indentation) detectIndentation(builder.handle.text) else "";
 
     const allocator = builder.arena.allocator();
     const new_text_len = 1 + indent.len + additional_indent.len + "_ = ;".len + identifier_name.len;
@@ -374,7 +370,7 @@ const DiagnosticKind = union(enum) {
         @"local constant",
         @"local variable",
         @"loop index capture",
-        @"capture",
+        capture,
     };
 
     const DiscardCat = enum {
@@ -600,5 +596,5 @@ fn getCaptureLoc(text: []const u8, loc: offsets.Loc, is_index_payload: bool) ?Ca
 }
 
 fn isSymbolChar(char: u8) bool {
-    return std.ascii.isAlNum(char) or char == '_';
+    return std.ascii.isAlphanumeric(char) or char == '_';
 }

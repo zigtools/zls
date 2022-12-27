@@ -77,7 +77,7 @@ pub fn collectDocComments(allocator: std.mem.Allocator, tree: Ast, doc_comments:
     while (true) : (curr_line_tok += 1) {
         const comm = tokens[curr_line_tok];
         if ((container_doc and comm == .container_doc_comment) or (!container_doc and comm == .doc_comment)) {
-            try lines.append(std.mem.trim(u8, tree.tokenSlice(curr_line_tok)[3..], &std.ascii.spaces));
+            try lines.append(std.mem.trim(u8, tree.tokenSlice(curr_line_tok)[3..], &std.ascii.whitespace));
         } else break;
     }
 
@@ -275,10 +275,11 @@ pub fn getDeclNameToken(tree: Ast, node: Ast.Node.Index) ?Ast.TokenIndex {
     const main_token = tree.nodes.items(.main_token)[node];
     return switch (tags[node]) {
         // regular declaration names. + 1 to mut token because name comes after 'const'/'var'
-        .local_var_decl => tree.localVarDecl(node).ast.mut_token + 1,
-        .global_var_decl => tree.globalVarDecl(node).ast.mut_token + 1,
-        .simple_var_decl => tree.simpleVarDecl(node).ast.mut_token + 1,
-        .aligned_var_decl => tree.alignedVarDecl(node).ast.mut_token + 1,
+        .local_var_decl,
+        .global_var_decl,
+        .simple_var_decl,
+        .aligned_var_decl,
+        => ast.varDecl(tree, node).?.ast.mut_token + 1,
         // function declaration names
         .fn_proto,
         .fn_proto_multi,
@@ -291,20 +292,9 @@ pub fn getDeclNameToken(tree: Ast, node: Ast.Node.Index) ?Ast.TokenIndex {
         },
 
         // containers
-        .container_field => blk: {
-            const field = tree.containerField(node);
-            if (field.ast.tuple_like) break :blk null;
-            break :blk field.ast.main_token;
-        },
-        .container_field_init => blk: {
-            const field = tree.containerFieldInit(node);
-            if (field.ast.tuple_like) break :blk null;
-            break :blk field.ast.main_token;
-        },
-        .container_field_align => blk: {
-            const field = tree.containerFieldAlign(node);
-            if (field.ast.tuple_like) break :blk null;
-            break :blk field.ast.main_token;
+        .container_field, .container_field_init, .container_field_align => {
+            const field = ast.containerField(tree, node).?.ast;
+            return if (field.tuple_like) null else field.main_token;
         },
 
         .identifier => main_token,
@@ -888,7 +878,6 @@ pub fn resolveTypeOfNodeInternal(store: *DocumentStore, arena: *std.heap.ArenaAl
         },
         .field_access => {
             if (datas[node].rhs == 0) return null;
-            const rhs_str = ast.tokenSlice(tree, datas[node].rhs) catch return null;
 
             // If we are accessing a pointer type, remove one pointerness level :)
             const left_type = try resolveFieldAccessLhsType(
@@ -905,11 +894,12 @@ pub fn resolveTypeOfNodeInternal(store: *DocumentStore, arena: *std.heap.ArenaAl
                 .other => |n| n,
                 else => return null,
             };
+
             if (try lookupSymbolContainer(
                 store,
                 arena,
                 .{ .node = left_type_node, .handle = left_type.handle },
-                rhs_str,
+                tree.tokenSlice(datas[node].rhs),
                 !left_type.type.is_type_val,
             )) |child| {
                 return try child.resolveType(store, arena, bound_type_params);
@@ -1424,45 +1414,39 @@ pub fn nodeToString(tree: Ast, node: Ast.Node.Index) ?[]const u8 {
     const data = tree.nodes.items(.data);
     const main_token = tree.nodes.items(.main_token)[node];
     var buf: [1]Ast.Node.Index = undefined;
-    switch (tree.nodes.items(.tag)[node]) {
-        .container_field => {
-            const field = tree.containerField(node).ast;
+    return switch (tree.nodes.items(.tag)[node]) {
+        .container_field,
+        .container_field_init,
+        .container_field_align,
+        => {
+            const field = ast.containerField(tree, node).?.ast;
             return if (field.tuple_like) null else tree.tokenSlice(field.main_token);
         },
-        .container_field_init => {
-            const field = tree.containerFieldInit(node).ast;
-            return if (field.tuple_like) null else tree.tokenSlice(field.main_token);
-        },
-        .container_field_align => {
-            const field = tree.containerFieldAlign(node).ast;
-            return if (field.tuple_like) null else tree.tokenSlice(field.main_token);
-        },
-        .error_value => return tree.tokenSlice(data[node].rhs),
-        .identifier => return tree.tokenSlice(main_token),
+        .error_value => tree.tokenSlice(data[node].rhs),
+        .identifier => tree.tokenSlice(main_token),
         .fn_proto,
         .fn_proto_multi,
         .fn_proto_one,
         .fn_proto_simple,
         .fn_decl,
-        => if (ast.fnProto(tree, node, &buf).?.name_token) |name|
-            return tree.tokenSlice(name),
-        .field_access => return ast.tokenSlice(tree, data[node].rhs) catch return null,
+        => if (ast.fnProto(tree, node, &buf).?.name_token) |name| tree.tokenSlice(name) else null,
+        .field_access => tree.tokenSlice(data[node].rhs),
         .call,
         .call_comma,
         .async_call,
         .async_call_comma,
-        => return tree.tokenSlice(tree.callFull(node).ast.lparen - 1),
+        => tree.tokenSlice(tree.callFull(node).ast.lparen - 1),
         .call_one,
         .call_one_comma,
         .async_call_one,
         .async_call_one_comma,
-        => return tree.tokenSlice(tree.callOne(&buf, node).ast.lparen - 1),
-        .test_decl => if (data[node].lhs != 0)
-            return tree.tokenSlice(data[node].lhs),
-        else => |tag| log.debug("INVALID: {}", .{tag}),
-    }
-
-    return null;
+        => tree.tokenSlice(tree.callOne(&buf, node).ast.lparen - 1),
+        .test_decl => if (data[node].lhs != 0) tree.tokenSlice(data[node].lhs) else null,
+        else => |tag| {
+            log.debug("INVALID: {}", .{tag});
+            return null;
+        },
+    };
 }
 
 fn nodeContainsSourceIndex(tree: Ast, node: Ast.Node.Index, source_index: usize) bool {
@@ -1642,6 +1626,7 @@ pub fn getPositionContext(allocator: std.mem.Allocator, text: []const u8, doc_in
                     .field_access => {},
                     .other => {},
                     .global_error_set => {},
+                    .label => {},
                     else => curr_ctx.ctx = .{
                         .field_access = tokenLocAppend(curr_ctx.ctx.loc().?, tok),
                     },
@@ -1683,38 +1668,33 @@ pub fn getPositionContext(allocator: std.mem.Allocator, text: []const u8, doc_in
         }
     }
 
-    return block: {
-        if (stack.popOrNull()) |state| {
-            switch (state.ctx) {
-                .empty => {},
-                .label => |filled| {
-                    // We need to check this because the state could be a filled
-                    // label if only a space follows it
-                    if (!filled or line[line.len - 1] != ' ') {
-                        break :block state.ctx;
-                    }
-                },
-                else => break :block state.ctx,
-            }
+    if (stack.popOrNull()) |state| {
+        switch (state.ctx) {
+            .empty => {},
+            .label => |filled| {
+                // We need to check this because the state could be a filled
+                // label if only a space follows it
+                if (!filled or line[line.len - 1] != ' ') {
+                    return state.ctx;
+                }
+            },
+            else => return state.ctx,
         }
+    }
 
-        if (line.len == 0) return .empty;
+    if (line.len == 0) return .empty;
 
-        var held_line = try allocator.dupeZ(u8, offsets.locToSlice(text, line_loc));
-        defer allocator.free(held_line);
+    var held_line = try allocator.dupeZ(u8, offsets.locToSlice(text, line_loc));
+    defer allocator.free(held_line);
 
-        switch (line[0]) {
-            'a'...'z', 'A'...'Z', '_', '@' => {},
-            else => break :block .empty,
-        }
-        var tokenizer = std.zig.Tokenizer.init(held_line);
-        const tok = tokenizer.next();
-        if (tok.tag == .identifier) {
-            break :block PositionContext{ .var_access = tok.loc };
-        } else {
-            break :block .empty;
-        }
-    };
+    switch (line[0]) {
+        'a'...'z', 'A'...'Z', '_', '@' => {},
+        else => return .empty,
+    }
+    var tokenizer = std.zig.Tokenizer.init(held_line);
+    const tok = tokenizer.next();
+
+    return if (tok.tag == .identifier) PositionContext{ .var_access = tok.loc } else .empty;
 }
 
 fn addOutlineNodes(allocator: std.mem.Allocator, tree: Ast, child: Ast.Node.Index, context: *GetDocumentSymbolsContext) anyerror!void {
@@ -1970,7 +1950,10 @@ pub const Declaration = union(enum) {
         switch_expr: Ast.Node.Index,
         items: []const Ast.Node.Index,
     },
-    label_decl: Ast.TokenIndex,
+    label_decl: struct {
+        label: Ast.TokenIndex,
+        block: Ast.Node.Index,
+    },
 };
 
 pub const DeclWithHandle = struct {
@@ -1986,7 +1969,7 @@ pub const DeclWithHandle = struct {
             .array_payload => |ap| ap.identifier,
             .array_index => |ai| ai,
             .switch_payload => |sp| sp.node,
-            .label_decl => |ld| ld,
+            .label_decl => |ld| ld.label,
         };
     }
 
@@ -2710,7 +2693,10 @@ fn makeScopeInternal(allocator: std.mem.Allocator, context: ScopeContext, node_i
                     },
                     .data = .other,
                 };
-                try scope.decls.putNoClobber(allocator, tree.tokenSlice(first_token), .{ .label_decl = first_token });
+                try scope.decls.putNoClobber(allocator, tree.tokenSlice(first_token), .{ .label_decl = .{
+                    .label = first_token,
+                    .block = node_idx,
+                } });
             }
 
             try scopes.append(allocator, .{
@@ -2831,7 +2817,10 @@ fn makeScopeInternal(allocator: std.mem.Allocator, context: ScopeContext, node_i
                     .data = .other,
                 };
 
-                try scope.decls.putNoClobber(allocator, tree.tokenSlice(label), .{ .label_decl = label });
+                try scope.decls.putNoClobber(allocator, tree.tokenSlice(label), .{ .label_decl = .{
+                    .label = label,
+                    .block = while_node.ast.then_expr,
+                } });
             }
 
             if (while_node.payload_token) |payload| {

@@ -4,6 +4,7 @@ const std = @import("std");
 const zig_builtin = @import("builtin");
 const build_options = @import("build_options");
 const Config = @import("Config.zig");
+const configuration = @import("configuration.zig");
 const DocumentStore = @import("DocumentStore.zig");
 const requests = @import("requests.zig");
 const types = @import("types.zig");
@@ -176,26 +177,6 @@ fn publishDiagnostics(server: *Server, writer: anytype, handle: DocumentStore.Ha
             .source = "zls",
             .message = try server.arena.allocator().dupe(u8, fbs.getWritten()),
             // .relatedInformation = undefined
-        });
-    }
-
-    for (handle.cimports.items(.hash)) |hash, i| {
-        const result = server.document_store.cimports.get(hash) orelse continue;
-        if (result != .failure) continue;
-        const stderr = std.mem.trim(u8, result.failure, " ");
-
-        var pos_and_diag_iterator = std.mem.split(u8, stderr, ":");
-        _ = pos_and_diag_iterator.next(); // skip file path
-        _ = pos_and_diag_iterator.next(); // skip line
-        _ = pos_and_diag_iterator.next(); // skip character
-
-        const node = handle.cimports.items(.node)[i];
-        try diagnostics.append(allocator, .{
-            .range = offsets.nodeToRange(handle.tree, node, server.offset_encoding),
-            .severity = .Error,
-            .code = "cImport",
-            .source = "zls",
-            .message = try allocator.dupe(u8, pos_and_diag_iterator.rest()),
         });
     }
 
@@ -788,7 +769,7 @@ pub fn identifierFromPosition(pos_index: usize, handle: DocumentStore.Handle) []
 }
 
 fn isSymbolChar(char: u8) bool {
-    return std.ascii.isAlNum(char) or char == '_';
+    return std.ascii.isAlphanumeric(char) or char == '_';
 }
 
 fn gotoDefinitionSymbol(
@@ -864,11 +845,7 @@ fn hoverSymbol(server: *Server, decl_handle: analysis.DeclWithHandle) error{OutO
             const end = offsets.tokenToLoc(tree, last_token).end;
             break :def tree.source[start..end];
         },
-        .pointer_payload => |payload| tree.tokenSlice(payload.name),
-        .array_payload => |payload| handle.tree.tokenSlice(payload.identifier),
-        .array_index => |payload| handle.tree.tokenSlice(payload),
-        .switch_payload => |payload| tree.tokenSlice(payload.node),
-        .label_decl => |label_decl| tree.tokenSlice(label_decl),
+        .pointer_payload, .array_payload, .array_index, .switch_payload, .label_decl => tree.tokenSlice(decl_handle.nameToken()),
     };
 
     var bound_type_params = analysis.BoundTypeParams{};
@@ -1152,43 +1129,18 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: analysis.Decl
                 .insertTextFormat = .PlainText,
             });
         },
-        .pointer_payload => |payload| {
+        .pointer_payload,
+        .array_payload,
+        .array_index,
+        .switch_payload,
+        .label_decl,
+        => {
+            const name = tree.tokenSlice(decl_handle.nameToken());
+
             try context.completions.append(allocator, .{
-                .label = tree.tokenSlice(payload.name),
+                .label = name,
                 .kind = .Variable,
-                .insertText = tree.tokenSlice(payload.name),
-                .insertTextFormat = .PlainText,
-            });
-        },
-        .array_payload => |payload| {
-            try context.completions.append(allocator, .{
-                .label = tree.tokenSlice(payload.identifier),
-                .kind = .Variable,
-                .insertText = tree.tokenSlice(payload.identifier),
-                .insertTextFormat = .PlainText,
-            });
-        },
-        .array_index => |payload| {
-            try context.completions.append(allocator, .{
-                .label = tree.tokenSlice(payload),
-                .kind = .Variable,
-                .insertText = tree.tokenSlice(payload),
-                .insertTextFormat = .PlainText,
-            });
-        },
-        .switch_payload => |payload| {
-            try context.completions.append(allocator, .{
-                .label = tree.tokenSlice(payload.node),
-                .kind = .Variable,
-                .insertText = tree.tokenSlice(payload.node),
-                .insertTextFormat = .PlainText,
-            });
-        },
-        .label_decl => |label_decl| {
-            try context.completions.append(allocator, .{
-                .label = tree.tokenSlice(label_decl),
-                .kind = .Variable,
-                .insertText = tree.tokenSlice(label_decl),
+                .insertText = name,
                 .insertTextFormat = .PlainText,
             });
         },
@@ -1563,6 +1515,22 @@ fn initializeHandler(server: *Server, writer: anytype, id: types.RequestId, req:
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
+    if (req.params.clientInfo) |clientInfo| {
+        std.log.info("client is '{s}-{s}'", .{ clientInfo.name, clientInfo.version orelse "<no version>" });
+
+        if (std.mem.eql(u8, clientInfo.name, "Sublime Text LSP")) blk: {
+            server.config.max_detail_length = 256;
+
+            const version_str = clientInfo.version orelse break :blk;
+            const version = std.SemanticVersion.parse(version_str) catch break :blk;
+            // this indicates a LSP version for sublime text 3
+            // this check can be made more precise if the version that fixed this issue is known
+            if (version.major == 0) {
+                server.config.include_at_in_builtins = true;
+            }
+        }
+    }
+
     if (req.params.capabilities.general) |general| {
         var supports_utf8 = false;
         var supports_utf16 = false;
@@ -1708,16 +1676,29 @@ fn initializeHandler(server: *Server, writer: anytype, id: types.RequestId, req:
     log.info("{}", .{server.client_capabilities});
     log.info("Using offset encoding: {s}", .{std.meta.tagName(server.offset_encoding)});
 
-    // TODO avoid having to call getZigEnv twice
-    // once in init and here
-    const env = Config.getZigEnv(server.allocator, server.config.zig_exe_path.?) orelse return;
-    defer std.json.parseFree(Config.Env, env, .{ .allocator = server.allocator });
+    if (server.config.zig_exe_path) |exe_path| blk: {
+        // TODO avoid having to call getZigEnv twice
+        // once in init and here
+        const env = configuration.getZigEnv(server.allocator, exe_path) orelse break :blk;
+        defer std.json.parseFree(configuration.Env, env, .{ .allocator = server.allocator });
 
-    const zig_exe_version = std.SemanticVersion.parse(env.version) catch return;
+        const zig_exe_version = std.SemanticVersion.parse(env.version) catch break :blk;
 
-    if (zig_builtin.zig_version.order(zig_exe_version) == .gt) {
-        const version_mismatch_message = try std.fmt.allocPrint(server.arena.allocator(), "ZLS was built with Zig {}, but your Zig version is {s}. Update Zig to avoid unexpected behavior.", .{ zig_builtin.zig_version, env.version });
-        try server.showMessage(writer, .Warning, version_mismatch_message);
+        if (zig_builtin.zig_version.order(zig_exe_version) == .gt) {
+            const version_mismatch_message = try std.fmt.allocPrint(
+                server.arena.allocator(),
+                "ZLS was built with Zig {}, but your Zig version is {s}. Update Zig to avoid unexpected behavior.",
+                .{ zig_builtin.zig_version, env.version },
+            );
+            try server.showMessage(writer, .Warning, version_mismatch_message);
+        }
+    } else {
+        try server.showMessage(
+            writer,
+            .Warning,
+            \\ZLS failed to find Zig. Please add Zig to your PATH or set the zig_exe_path config option in your zls.json.
+            ,
+        );
     }
 }
 
@@ -1773,42 +1754,20 @@ fn registerCapability(server: *Server, writer: anytype, method: []const u8) !voi
     const id = try std.fmt.allocPrint(server.arena.allocator(), "register-{s}", .{method});
     log.debug("Dynamically registering method '{s}'", .{method});
 
-    if (zig_builtin.zig_backend == .stage1) {
-        const reg = types.RegistrationParams.Registration{
-            .id = id,
-            .method = method,
-        };
-        const registrations = [1]types.RegistrationParams.Registration{reg};
-        const params = types.RegistrationParams{
-            .registrations = &registrations,
-        };
-
-        const respp = types.ResponseParams{
-            .RegistrationParams = params,
-        };
-        const req = types.Request{
-            .id = .{ .String = id },
-            .method = "client/registerCapability",
-            .params = respp,
-        };
-
-        try send(writer, server.arena.allocator(), req);
-    } else {
-        try send(writer, server.arena.allocator(), types.Request{
-            .id = .{ .String = id },
-            .method = "client/registerCapability",
-            .params = types.ResponseParams{
-                .RegistrationParams = types.RegistrationParams{
-                    .registrations = &.{
-                        .{
-                            .id = id,
-                            .method = method,
-                        },
+    try send(writer, server.arena.allocator(), types.Request{
+        .id = .{ .String = id },
+        .method = "client/registerCapability",
+        .params = types.ResponseParams{
+            .RegistrationParams = types.RegistrationParams{
+                .registrations = &.{
+                    .{
+                        .id = id,
+                        .method = method,
                     },
                 },
             },
-        });
-    }
+        },
+    });
 }
 
 fn requestConfiguration(server: *Server, writer: anytype) !void {
@@ -1880,18 +1839,15 @@ fn saveDocumentHandler(server: *Server, writer: anytype, id: types.RequestId, re
     var workspace_edit = types.WorkspaceEdit{ .changes = .{} };
     try workspace_edit.changes.putNoClobber(allocator, uri, text_edits);
 
-    // NOTE: stage1 moment
-    const params = types.ResponseParams{
-        .ApplyEdit = types.ApplyWorkspaceEditParams{
-            .label = "autofix",
-            .edit = workspace_edit,
-        },
-    };
-
     try send(writer, allocator, types.Request{
         .id = .{ .String = "apply_edit" },
         .method = "workspace/applyEdit",
-        .params = params,
+        .params = .{
+            .ApplyEdit = .{
+                .label = "autofix",
+                .edit = workspace_edit,
+            },
+        },
     });
 }
 
@@ -1916,20 +1872,28 @@ fn willSaveWaitUntilHandler(server: *Server, writer: anytype, id: types.RequestI
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    if (!server.config.enable_ast_check_diagnostics) return;
-    if (!server.config.enable_autofix) return;
-
     const allocator = server.arena.allocator();
-    const uri = req.params.textDocument.uri;
 
-    const handle = server.document_store.getHandle(uri) orelse return;
-    if (handle.tree.errors.len != 0) return;
+    b: {
+        if (!server.config.enable_ast_check_diagnostics or !server.config.enable_autofix)
+            break :b;
 
-    var text_edits = try server.autofix(allocator, handle);
+        const uri = req.params.textDocument.uri;
+
+        const handle = server.document_store.getHandle(uri) orelse break :b;
+        if (handle.tree.errors.len != 0) break :b;
+
+        var text_edits = try server.autofix(allocator, handle);
+
+        return try send(writer, allocator, types.Response{
+            .id = id,
+            .result = .{ .TextEdits = try text_edits.toOwnedSlice(allocator) },
+        });
+    }
 
     return try send(writer, allocator, types.Response{
         .id = id,
-        .result = .{ .TextEdits = try text_edits.toOwnedSlice(allocator) },
+        .result = .{ .TextEdits = &.{} },
     });
 }
 
@@ -2190,16 +2154,16 @@ fn formattingHandler(server: *Server, writer: anytype, id: types.RequestId, req:
     );
 }
 
-fn didChangeConfigurationHandler(server: *Server, writer: anytype, id: types.RequestId, req: Config.DidChangeConfigurationParams) !void {
+fn didChangeConfigurationHandler(server: *Server, writer: anytype, id: types.RequestId, req: configuration.DidChangeConfigurationParams) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
     _ = id;
 
     // NOTE: VS Code seems to always respond with null
-    if (req.settings) |configuration| {
-        inline for (std.meta.fields(Config.Configuration)) |field| {
-            if (@field(configuration, field.name)) |value| {
+    if (req.settings) |cfg| {
+        inline for (std.meta.fields(configuration.Configuration)) |field| {
+            if (@field(cfg, field.name)) |value| {
                 blk: {
                     if (@TypeOf(value) == []const u8) {
                         if (value.len == 0) {
@@ -2212,7 +2176,7 @@ fn didChangeConfigurationHandler(server: *Server, writer: anytype, id: types.Req
             }
         }
 
-        try server.config.configChanged(server.allocator, null);
+        try configuration.configChanged(server.config, server.allocator, null);
     } else if (server.client_capabilities.supports_configuration) {
         try server.requestConfiguration(writer);
     }
@@ -2289,9 +2253,7 @@ fn generalReferencesHandler(server: *Server, writer: anytype, id: types.RequestI
     };
 
     const locations = if (pos_context == .label)
-        // FIXME https://github.com/zigtools/zls/issues/728
-        // try references.labelReferences(allocator, decl, server.offset_encoding, include_decl)
-        std.ArrayListUnmanaged(types.Location){}
+        try references.labelReferences(allocator, decl, server.offset_encoding, include_decl)
     else
         try references.symbolReferences(
             &server.arena,
@@ -2791,18 +2753,18 @@ pub fn processJsonRpc(server: *Server, writer: anytype, json: []const u8) !void 
 
         inline for (std.meta.fields(Config)) |field, index| {
             const value = result.items[index];
-            const ft = if (@typeInfo(field.field_type) == .Optional)
-                @typeInfo(field.field_type).Optional.child
+            const ft = if (@typeInfo(field.type) == .Optional)
+                @typeInfo(field.type).Optional.child
             else
-                field.field_type;
+                field.type;
             const ti = @typeInfo(ft);
 
             if (value != .Null) {
-                const new_value: field.field_type = switch (ft) {
+                const new_value: field.type = switch (ft) {
                     []const u8 => switch (value) {
                         .String => |s| blk: {
                             if (s.len == 0) {
-                                if (field.field_type == ?[]const u8) {
+                                if (field.type == ?[]const u8) {
                                     break :blk null;
                                 } else {
                                     break :blk s;
@@ -2831,7 +2793,7 @@ pub fn processJsonRpc(server: *Server, writer: anytype, json: []const u8) !void 
             }
         }
 
-        try server.config.configChanged(server.allocator, null);
+        try configuration.configChanged(server.config, server.allocator, null);
 
         return;
     }
@@ -2894,61 +2856,27 @@ pub fn processJsonRpc(server: *Server, writer: anytype, json: []const u8) !void 
         .{ "textDocument/references", requests.References, referencesHandler },
         .{ "textDocument/documentHighlight", requests.DocumentHighlight, documentHighlightHandler },
         .{ "textDocument/codeAction", requests.CodeAction, codeActionHandler },
-        .{ "workspace/didChangeConfiguration", Config.DidChangeConfigurationParams, didChangeConfigurationHandler },
+        .{ "workspace/didChangeConfiguration", configuration.DidChangeConfigurationParams, didChangeConfigurationHandler },
         .{ "textDocument/foldingRange", requests.FoldingRange, foldingRangeHandler },
         .{ "textDocument/selectionRange", requests.SelectionRange, selectionRangeHandler },
     };
 
-    if (zig_builtin.zig_backend == .stage1) {
-        // Hack to avoid `return`ing in the inline for, which causes bugs.
-        var done: ?anyerror = null;
-        inline for (method_map) |method_info| {
-            if (done == null and std.mem.eql(u8, method, method_info[0])) {
-                if (method_info.len == 1) {
-                    log.warn("method not mapped: {s}", .{method});
-                    done = error.HackDone;
-                } else if (method_info[1] != void) {
-                    const ReqT = method_info[1];
-                    if (requests.fromDynamicTree(&server.arena, ReqT, tree.root)) |request_obj| {
-                        done = error.HackDone;
-                        done = extractErr(method_info[2](server, writer, id, request_obj));
-                    } else |err| {
-                        if (err == error.MalformedJson) {
-                            log.warn("Could not create request type {s} from JSON {s}", .{ @typeName(ReqT), json });
-                        }
-                        done = err;
-                    }
-                } else {
-                    done = error.HackDone;
-                    (method_info[2])(server, writer, id) catch |err| {
-                        done = err;
-                    };
-                }
+    inline for (method_map) |method_info| {
+        if (std.mem.eql(u8, method, method_info[0])) {
+            if (method_info.len == 1) {
+                log.warn("method not mapped: {s}", .{method});
+            } else if (method_info[1] != void) {
+                const ReqT = method_info[1];
+                const request_obj = try requests.fromDynamicTree(&server.arena, ReqT, tree.root);
+                method_info[2](server, writer, id, request_obj) catch |err| {
+                    log.err("failed to process request: {s}", .{@errorName(err)});
+                };
+            } else {
+                method_info[2](server, writer, id) catch |err| {
+                    log.err("failed to process request: {s}", .{@errorName(err)});
+                };
             }
-        }
-        if (done) |err| switch (err) {
-            error.MalformedJson => return try respondGeneric(writer, id, null_result_response),
-            error.HackDone => return,
-            else => return err,
-        };
-    } else {
-        inline for (method_map) |method_info| {
-            if (std.mem.eql(u8, method, method_info[0])) {
-                if (method_info.len == 1) {
-                    log.warn("method not mapped: {s}", .{method});
-                } else if (method_info[1] != void) {
-                    const ReqT = method_info[1];
-                    const request_obj = try requests.fromDynamicTree(&server.arena, ReqT, tree.root);
-                    method_info[2](server, writer, id, request_obj) catch |err| {
-                        log.err("failed to process request: {s}", .{@errorName(err)});
-                    };
-                } else {
-                    method_info[2](server, writer, id) catch |err| {
-                        log.err("failed to process request: {s}", .{@errorName(err)});
-                    };
-                }
-                return;
-            }
+            return;
         }
     }
 
@@ -2991,7 +2919,7 @@ pub fn init(
     // see: https://github.com/zigtools/zls/issues/536
     analysis.init(allocator);
 
-    try config.configChanged(allocator, config_path);
+    try configuration.configChanged(config, allocator, config_path);
 
     var document_store = DocumentStore{
         .allocator = allocator,

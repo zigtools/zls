@@ -587,7 +587,7 @@ pub fn interpret(
         },
         .field_access => {
             if (data[node_idx].rhs == 0) return error.CriticalAstFailure;
-            const rhs_str = ast.tokenSlice(tree, data[node_idx].rhs) catch return error.CriticalAstFailure;
+            const rhs_str = tree.tokenSlice(data[node_idx].rhs);
 
             var ir = try interpreter.interpret(data[node_idx].lhs, scope, options);
             var irv = try ir.getValue();

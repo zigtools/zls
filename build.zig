@@ -6,7 +6,7 @@ const zls_version = std.builtin.Version{ .major = 0, .minor = 11, .patch = 0 };
 
 pub fn build(b: *std.build.Builder) !void {
     const current_zig = builtin.zig_version;
-    const min_zig = std.SemanticVersion.parse("0.11.0-dev.399+44ee1c885") catch return; // whereabouts allocgate 2.0
+    const min_zig = std.SemanticVersion.parse("0.11.0-dev.874+40ed6ae84") catch return; // Changes to builtin.Type API
     if (current_zig.order(min_zig).compare(.lt)) @panic(b.fmt("Your Zig version v{} does not meet the minimum build requirement of v{}", .{ current_zig, min_zig }));
 
     const target = b.standardTargetOptions(.{});
@@ -115,6 +115,18 @@ pub fn build(b: *std.build.Builder) !void {
     exe.setTarget(target);
     exe.setBuildMode(mode);
     exe.install();
+
+    const gen_exe = b.addExecutable("zls_gen", "src/config_gen/config_gen.zig");
+
+    const gen_cmd = gen_exe.run();
+    gen_cmd.addArgs(&.{
+        b.fmt("{s}/src/Config.zig", .{b.build_root}),
+        b.fmt("{s}/schema.json", .{b.build_root}),
+        b.fmt("{s}/README.md", .{b.build_root}),
+    });
+
+    const gen_step = b.step("gen", "Regenerate config files");
+    gen_step.dependOn(&gen_cmd.step);
 
     const test_step = b.step("test", "Run all the tests");
     test_step.dependOn(b.getInstallStep());

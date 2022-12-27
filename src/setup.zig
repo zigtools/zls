@@ -90,19 +90,11 @@ pub fn askSelectOne(prompt: []const u8, comptime Options: type) !Options {
     }
 }
 
-fn print(comptime fmt: []const u8, args: anytype) void {
-    const stdout = std.io.getStdOut().writer();
-    stdout.print(fmt, args) catch @panic("Could not write to stdout");
-}
-
-fn write(text: []const u8) void {
-    const stdout = std.io.getStdOut().writer();
-    stdout.writeAll(text) catch @panic("Could not write to stdout");
-}
-
 pub fn wizard(allocator: std.mem.Allocator) !void {
     @setEvalBranchQuota(2500);
-    write(
+    const stdout = std.io.getStdOut().writer();
+
+    try stdout.writeAll(
         \\Welcome to the ZLS configuration wizard!
         \\      *
         \\       |\
@@ -127,7 +119,7 @@ pub fn wizard(allocator: std.mem.Allocator) !void {
     };
 
     if (global_path == null and local_path == null) {
-        write("Could not open a global or local config directory.\n");
+        try stdout.writeAll("Could not open a global or local config directory.\n");
         return;
     }
     var config_path: []const u8 = undefined;
@@ -137,17 +129,17 @@ pub fn wizard(allocator: std.mem.Allocator) !void {
         if (local_path) |p| {
             config_path = p;
         } else {
-            write("Could not find a local config directory.\n");
+            try stdout.writeAll("Could not find a local config directory.\n");
             return;
         }
     }
     var dir = std.fs.cwd().openDir(config_path, .{}) catch |err| {
-        print("Could not open {s}: {}.\n", .{ config_path, err });
+        try stdout.print("Could not open {s}: {}.\n", .{ config_path, err });
         return;
     };
     defer dir.close();
     var file = dir.createFile("zls.json", .{}) catch |err| {
-        print("Could not create {s}/zls.json: {}.\n", .{ config_path, err });
+        try stdout.print("Could not create {s}/zls.json: {}.\n", .{ config_path, err });
         return;
     };
     defer file.close();
@@ -157,9 +149,9 @@ pub fn wizard(allocator: std.mem.Allocator) !void {
     defer if (zig_exe_path) |p| allocator.free(p);
 
     if (zig_exe_path) |path| {
-        print("Found zig executable '{s}' in PATH.\n", .{path});
+        try stdout.print("Found zig executable '{s}' in PATH.\n", .{path});
     } else {
-        write("Could not find 'zig' in PATH\n");
+        try stdout.writeAll("Could not find 'zig' in PATH\n");
         zig_exe_path = try askString(allocator, if (builtin.os.tag == .windows)
             \\What is the path to the 'zig' executable you would like to use?
             \\Note that due to a bug in zig (https://github.com/ziglang/zig/issues/6044),
@@ -168,7 +160,6 @@ pub fn wizard(allocator: std.mem.Allocator) !void {
             "What is the path to the 'zig' executable you would like to use?", std.fs.MAX_PATH_BYTES);
     }
 
-    const editor = try askSelectOne("Which code editor do you use?", enum { VSCode, Sublime, Kate, Neovim, Vim8, Emacs, Doom, Spacemacs, Helix, Other });
     const snippets = try askBool("Do you want to enable snippets?");
     const ast_check = try askBool("Do you want to enable ast-check diagnostics?");
     const autofix = try askBool("Do you want to zls to automatically try to fix errors on save? (supports adding & removing discards)");
@@ -177,15 +168,6 @@ pub fn wizard(allocator: std.mem.Allocator) !void {
     const semantic_tokens = try askBool("Do you want to enable semantic highlighting?");
     const inlay_hints = try askBool("Do you want to enable inlay hints?");
     const operator_completions = try askBool("Do you want to enable .* and .? completions?");
-    const include_at_in_builtins = switch (editor) {
-        .Sublime => !try askBool("Are you using a Sublime Text version > 4000?"),
-        .VSCode, .Kate, .Neovim, .Vim8, .Emacs, .Doom, .Spacemacs, .Helix => false,
-        else => try askBool("Should the @ sign be included in completions of builtin functions?\nChange this later if `@inc` completes to `include` or `@@include`"),
-    };
-    const max_detail_length: usize = switch (editor) {
-        .Sublime => 256,
-        else => 1024 * 1024,
-    };
 
     std.debug.print("Writing config to {s}/zls.json ... ", .{config_path});
 
@@ -200,144 +182,18 @@ pub fn wizard(allocator: std.mem.Allocator) !void {
         .enable_semantic_tokens = semantic_tokens,
         .enable_inlay_hints = inlay_hints,
         .operator_completions = operator_completions,
-        .include_at_in_builtins = include_at_in_builtins,
-        .max_detail_length = max_detail_length,
     }, .{
         .whitespace = .{},
     }, out);
 
-    write("successful.\n\n\n\n");
-
-    // Keep synced with README.md
-    switch (editor) {
-        .VSCode => {
-            write(
-                \\To use ZLS in Visual Studio Code, install the 'ZLS for VSCode' extension from 
-                \\'https://github.com/zigtools/zls-vscode/releases' or via the extensions menu.
-                \\ZLS will automatically be installed if it is not found in your PATH
-            );
-        },
-        .Sublime => {
-            write(
-                \\To use ZLS in Sublime, install the `LSP` package from 
-                \\https://github.com/sublimelsp/LSP/releases or via Package Control.
-                \\Then, add the following snippet to LSP's user settings:
-                \\
-                \\For Sublime Text 3:
-                \\
-                \\{
-                \\  "clients": {
-                \\    "zig": {
-                \\      "command": ["zls"],
-                \\      "enabled": true,
-                \\      "languageId": "zig",
-                \\      "scopes": ["source.zig"],
-                \\      "syntaxes": ["Packages/Zig Language/Syntaxes/Zig.tmLanguage"]
-                \\    }
-                \\  }
-                \\}
-                \\
-                \\For Sublime Text 4:
-                \\
-                \\{
-                \\  "clients": {
-                \\    "zig": {
-                \\      "command": ["zls"],
-                \\      "enabled": true,
-                \\      "selector": "source.zig"
-                \\    }
-                \\  }
-                \\}
-            );
-        },
-        .Kate => {
-            write(
-                \\To use ZLS in Kate, enable `LSP client` plugin in Kate settings.
-                \\Then, add the following snippet to `LSP client's` user settings:
-                \\(or paste it in `LSP client's` GUI settings)
-                \\
-                \\{
-                \\    "servers": {
-                \\        "zig": {
-                \\            "command": ["zls"],
-                \\            "url": "https://github.com/zigtools/zls",
-                \\            "highlightingModeRegex": "^Zig$"
-                \\        }
-                \\    }
-                \\}
-            );
-        },
-        .Neovim, .Vim8 => {
-            write(
-                \\To use ZLS in Neovim/Vim8, we recommend using CoC engine.
-                \\You can get it from https://github.com/neoclide/coc.nvim.
-                \\Then, simply issue cmd from Neovim/Vim8 `:CocConfig`, and add this to your CoC config:
-                \\
-                \\{
-                \\  "languageserver": {
-                \\    "zls" : {
-                \\      "command": "command_or_path_to_zls",
-                \\      "filetypes": ["zig"]
-                \\    }
-                \\  }
-                \\}
-            );
-        },
-        .Emacs => {
-            write(
-                \\To use ZLS in Emacs, install lsp-mode (https://github.com/emacs-lsp/lsp-mode) from melpa.
-                \\Zig mode (https://github.com/ziglang/zig-mode) is also useful!
-                \\Then, add the following to your emacs config:
-                \\
-                \\(require 'lsp-mode)
-                \\(setq lsp-zig-zls-executable "<path to zls>")
-            );
-        },
-        .Doom => {
-            write(
-                \\To use ZLS in Doom Emacs, enable the lsp module
-                \\And install the `zig-mode` (https://github.com/ziglang/zig-mode)
-                \\package by adding `(package! zig-mode)` to your packages.el file.
-                \\
-                \\(use-package! zig-mode
-                \\  :hook ((zig-mode . lsp-deferred))
-                \\  :custom (zig-format-on-save nil)
-                \\  :config
-                \\  (after! lsp-mode
-                \\    (add-to-list 'lsp-language-id-configuration '(zig-mode . "zig"))
-                \\    (lsp-register-client
-                \\      (make-lsp-client
-                \\        :new-connection (lsp-stdio-connection "<path to zls>")
-                \\        :major-modes '(zig-mode)
-                \\        :server-id 'zls))))
-            );
-        },
-        .Spacemacs => {
-            write(
-                \\To use ZLS in Spacemacs, add the `lsp` and `zig` layers
-                \\to `dotspacemacs-configuration-layers` in your .spacemacs file.
-                \\Then, if you don't have `zls` in your PATH, add the following to
-                \\`dotspacemacs/user-config` in your .spacemacs file:
-                \\
-                \\(setq lsp-zig-zls-executable "<path to zls>")
-            );
-        },
-        .Helix => {
-            write(
-                \\Helix has out of the box support for ZLS
-                \\Make sure you have added ZLS to your PATH
-                \\run hx --health to check if helix has found it.
-            );
-        },
-        .Other => {
-            write(
-                \\We might not *officially* support your editor, but you can definitely still use ZLS!
-                \\Simply configure your editor for use with language servers and point it to the ZLS executable!
-            );
-        },
-    }
-
-    write("\n\nThank you for choosing ZLS!\n");
+    try stdout.writeAll(
+        \\successful.
+        \\
+        \\You can find information on how to setup zls for your editor on zigtools.github.io/install-zls/
+        \\
+        \\Thank you for choosing ZLS!
+        \\
+    );
 }
 
 pub fn findZig(allocator: std.mem.Allocator) !?[]const u8 {
