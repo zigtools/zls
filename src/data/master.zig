@@ -21,16 +21,14 @@ pub const builtins = [_]Builtin{
     },
     .{
         .name = "@addWithOverflow",
-        .signature = "@addWithOverflow(comptime T: type, a: T, b: T, result: *T) bool",
-        .snippet = "@addWithOverflow(${1:comptime T: type}, ${2:a: T}, ${3:b: T}, ${4:result: *T})",
+        .signature = "@addWithOverflow(a: anytype, b: anytype) struct { @TypeOf(a, b), u1 }",
+        .snippet = "@addWithOverflow(${1:a: anytype}, ${2:b: anytype})",
         .documentation =
-        \\Performs `result.* = a + b`. If overflow or underflow occurs, stores the overflowed bits in `result` and returns `true`. If no overflow or underflow occurs, returns `false`.
+        \\Performs `a + b` and returns a tuple with the result and a possible overflow bit.
         ,
         .arguments = &.{
-            "comptime T: type",
-            "a: T",
-            "b: T",
-            "result: *T",
+            "a: anytype",
+            "b: anytype",
         },
     },
     .{
@@ -1066,16 +1064,14 @@ pub const builtins = [_]Builtin{
     },
     .{
         .name = "@mulWithOverflow",
-        .signature = "@mulWithOverflow(comptime T: type, a: T, b: T, result: *T) bool",
-        .snippet = "@mulWithOverflow(${1:comptime T: type}, ${2:a: T}, ${3:b: T}, ${4:result: *T})",
+        .signature = "@mulWithOverflow(a: anytype, b: anytype) struct { @TypeOf(a, b), u1 }",
+        .snippet = "@mulWithOverflow(${1:a: anytype}, ${2:b: anytype})",
         .documentation =
-        \\Performs `result.* = a * b`. If overflow or underflow occurs, stores the overflowed bits in `result` and returns `true`. If no overflow or underflow occurs, returns `false`.
+        \\Performs `a * b` and returns a tuple with the result and a possible overflow bit.
         ,
         .arguments = &.{
-            "comptime T: type",
-            "a: T",
-            "b: T",
-            "result: *T",
+            "a: anytype",
+            "b: anytype",
         },
     },
     .{
@@ -1326,18 +1322,16 @@ pub const builtins = [_]Builtin{
     },
     .{
         .name = "@shlWithOverflow",
-        .signature = "@shlWithOverflow(comptime T: type, a: T, shift_amt: Log2T, result: *T) bool",
-        .snippet = "@shlWithOverflow(${1:comptime T: type}, ${2:a: T}, ${3:shift_amt: Log2T}, ${4:result: *T})",
+        .signature = "@shlWithOverflow(a: anytype, shift_amt: Log2T) struct { @TypeOf(a), u1 }",
+        .snippet = "@shlWithOverflow(${1:a: anytype}, ${2:shift_amt: Log2T})",
         .documentation =
-        \\Performs `result.* = a << b`. If overflow or underflow occurs, stores the overflowed bits in `result` and returns `true`. If no overflow or underflow occurs, returns `false`.
+        \\Performs `a << b` and returns a tuple with the result and a possible overflow bit.
         \\
-        \\The type of `shift_amt` is an unsigned integer with `log2(@typeInfo(T).Int.bits)` bits. This is because `shift_amt >= @typeInfo(T).Int.bits` is undefined behavior.
+        \\The type of `shift_amt` is an unsigned integer with `log2(@typeInfo(@TypeOf(a)).Int.bits)` bits. This is because `shift_amt >= @typeInfo(@TypeOf(a)).Int.bits` is undefined behavior.
         ,
         .arguments = &.{
-            "comptime T: type",
-            "a: T",
+            "a: anytype",
             "shift_amt: Log2T",
-            "result: *T",
         },
     },
     .{
@@ -1619,16 +1613,14 @@ pub const builtins = [_]Builtin{
     },
     .{
         .name = "@subWithOverflow",
-        .signature = "@subWithOverflow(comptime T: type, a: T, b: T, result: *T) bool",
-        .snippet = "@subWithOverflow(${1:comptime T: type}, ${2:a: T}, ${3:b: T}, ${4:result: *T})",
+        .signature = "@subWithOverflow(a: anytype, b: anytype) struct { @TypeOf(a, b), u1 }",
+        .snippet = "@subWithOverflow(${1:a: anytype}, ${2:b: anytype})",
         .documentation =
-        \\Performs `result.* = a - b`. If overflow or underflow occurs, stores the overflowed bits in `result` and returns `true`. If no overflow or underflow occurs, returns `false`.
+        \\Performs `a - b` and returns a tuple with the result and a possible overflow bit.
         ,
         .arguments = &.{
-            "comptime T: type",
-            "a: T",
-            "b: T",
-            "result: *T",
+            "a: anytype",
+            "b: anytype",
         },
     },
     .{
