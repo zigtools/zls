@@ -7,7 +7,7 @@ const Config = @import("Config.zig");
 const configuration = @import("configuration.zig");
 const Server = @import("Server.zig");
 const setup = @import("setup.zig");
-const readRequestHeader = @import("header.zig").readRequestHeader;
+const Header = @import("Header.zig");
 
 const logger = std.log.scoped(.main);
 
@@ -35,20 +35,34 @@ pub fn log(
 }
 
 fn loop(server: *Server) !void {
-    var reader = std.io.getStdIn().reader();
+    const reader = std.io.getStdIn().reader();
+
+    const std_out = std.io.getStdOut().writer();
+    var buffered_writer = std.io.bufferedWriter(std_out);
+    const writer = buffered_writer.writer();
 
     while (true) {
-        const headers = readRequestHeader(server.allocator, reader) catch |err| {
-            logger.err("{s}; exiting!", .{@errorName(err)});
-            return;
-        };
-        const buffer = try server.allocator.alloc(u8, headers.content_length);
-        defer server.allocator.free(buffer);
+        var arena = std.heap.ArenaAllocator.init(server.allocator);
+        defer arena.deinit();
 
-        try reader.readNoEof(buffer);
+        // write server -> client messages
+        for (server.outgoing_messages.items) |outgoing_message| {
+            const header = Header{ .content_length = outgoing_message.len };
+            try writer.print("{}{s}", .{ header, outgoing_message });
+            try buffered_writer.flush();
+        }
+        for (server.outgoing_messages.items) |outgoing_message| {
+            server.allocator.free(outgoing_message);
+        }
+        server.outgoing_messages.clearRetainingCapacity();
 
-        const writer = std.io.getStdOut().writer();
-        try server.processJsonRpc(writer, buffer);
+        // read and handle client -> server message
+        const header = try Header.parse(arena.allocator(), reader);
+
+        const json_message = try arena.allocator().alloc(u8, header.content_length);
+        try reader.readNoEof(json_message);
+
+        server.processJsonRpc(&arena, json_message);
     }
 }
 

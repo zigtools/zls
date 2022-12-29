@@ -4,3 +4,6 @@
 [submodule "src/tracy"]
 	path = src/tracy
 	url = https://github.com/wolfpld/tracy
+[submodule "src/tres"]
+	path = src/tres
+	url = https://github.com/ziglibs/tres.git

@@ -7,7 +7,6 @@ const Context = @import("../context.zig").Context;
 const ErrorBuilder = @import("../ErrorBuilder.zig");
 
 const types = zls.types;
-const requests = zls.requests;
 const offsets = zls.offsets;
 
 const allocator: std.mem.Allocator = std.testing.allocator;
@@ -113,16 +112,13 @@ fn testReferences(source: []const u8) !void {
         const var_name = offsets.locToSlice(source, var_loc);
         const var_loc_middle = var_loc.start + (var_loc.end - var_loc.start) / 2;
 
-        const request = requests.References{
-            .params = .{
-                .textDocument = .{ .uri = file_uri },
-                .position = offsets.indexToPosition(source, var_loc_middle, ctx.server.offset_encoding),
-                .context = .{ .includeDeclaration = true },
-            },
+        const params = types.ReferenceParams{
+            .textDocument = .{ .uri = file_uri },
+            .position = offsets.indexToPosition(source, var_loc_middle, ctx.server.offset_encoding),
+            .context = .{ .includeDeclaration = true },
         };
 
-        const response = try ctx.requestGetResponse(?[]types.Location, "textDocument/references", request);
-        defer response.deinit();
+        const response = try ctx.requestGetResponse(?[]types.Location, "textDocument/references", params);
 
         const locations: []types.Location = response.result orelse {
             std.debug.print("Server returned `null` as the result\n", .{});

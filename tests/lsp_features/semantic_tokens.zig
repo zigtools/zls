@@ -4,7 +4,7 @@ const builtin = @import("builtin");
 
 const Context = @import("../context.zig").Context;
 
-const requests = zls.requests;
+const types = zls.types;
 
 const allocator: std.mem.Allocator = std.testing.allocator;
 
@@ -41,21 +41,7 @@ fn testSemanticTokens(source: []const u8, expected: []const u32) !void {
     var ctx = try Context.init();
     defer ctx.deinit();
 
-    const open_document = requests.OpenDocument{
-        .params = .{
-            .textDocument = .{
-                .uri = file_uri,
-                // .languageId = "zig",
-                // .version = 420,
-                .text = source,
-            },
-        },
-    };
-
-    const did_open_method = try std.json.stringifyAlloc(allocator, open_document.params, .{});
-    defer allocator.free(did_open_method);
-
-    try ctx.request("textDocument/didOpen", did_open_method, null);
+    try ctx.requestDidOpen(file_uri, source);
 
     const Response = struct {
         data: []const u32,

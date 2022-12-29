@@ -1,14 +1,21 @@
 const std = @import("std");
 const zls = @import("zls");
 
-const headerPkg = zls.header;
+const tres = @import("tres");
+
+const Header = zls.Header;
 const Config = zls.Config;
 const Server = zls.Server;
 const types = zls.types;
-const requests = zls.requests;
 
+
+/// initialize request taken from Visual Studio Code with the following changes:
+/// - removed locale, rootPath, rootUri, trace, workspaceFolders
+/// - removed capabilities.workspace.configuration
+/// - removed capabilities.workspace.didChangeConfiguration
+/// - removed capabilities.textDocument.publishDiagnostics
 const initialize_msg =
-    \\{"processId":6896,"clientInfo":{"name":"vscode","version":"1.46.1"},"rootPath":null,"rootUri":null,"capabilities":{"workspace":{"applyEdit":true,"workspaceEdit":{"documentChanges":true,"resourceOperations":["create","rename","delete"],"failureHandling":"textOnlyTransactional"},"didChangeConfiguration":{"dynamicRegistration":true},"didChangeWatchedFiles":{"dynamicRegistration":true},"symbol":{"dynamicRegistration":true,"symbolKind":{"valueSet":[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26]},"tagSupport":{"valueSet":[1]}},"executeCommand":{"dynamicRegistration":true},"configuration":true,"workspaceFolders":true},"textDocument":{"publishDiagnostics":{"relatedInformation":true,"versionSupport":false,"tagSupport":{"valueSet":[1,2]},"complexDiagnosticCodeSupport":true},"synchronization":{"dynamicRegistration":true,"willSave":true,"willSaveWaitUntil":true,"didSave":true},"completion":{"dynamicRegistration":true,"contextSupport":true,"completionItem":{"snippetSupport":true,"commitCharactersSupport":true,"documentationFormat":["markdown","plaintext"],"deprecatedSupport":true,"preselectSupport":true,"tagSupport":{"valueSet":[1]},"insertReplaceSupport":true},"completionItemKind":{"valueSet":[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25]}},"hover":{"dynamicRegistration":true,"contentFormat":["markdown","plaintext"]},"signatureHelp":{"dynamicRegistration":true,"signatureInformation":{"documentationFormat":["markdown","plaintext"],"parameterInformation":{"labelOffsetSupport":true}},"contextSupport":true},"definition":{"dynamicRegistration":true,"linkSupport":true},"references":{"dynamicRegistration":true},"documentHighlight":{"dynamicRegistration":true},"documentSymbol":{"dynamicRegistration":true,"symbolKind":{"valueSet":[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26]},"hierarchicalDocumentSymbolSupport":true,"tagSupport":{"valueSet":[1]}},"codeAction":{"dynamicRegistration":true,"isPreferredSupport":true,"codeActionLiteralSupport":{"codeActionKind":{"valueSet":["","quickfix","refactor","refactor.extract","refactor.inline","refactor.rewrite","source","source.organizeImports"]}}},"codeLens":{"dynamicRegistration":true},"formatting":{"dynamicRegistration":true},"rangeFormatting":{"dynamicRegistration":true},"onTypeFormatting":{"dynamicRegistration":true},"rename":{"dynamicRegistration":true,"prepareSupport":true},"documentLink":{"dynamicRegistration":true,"tooltipSupport":true},"typeDefinition":{"dynamicRegistration":true,"linkSupport":true},"implementation":{"dynamicRegistration":true,"linkSupport":true},"colorProvider":{"dynamicRegistration":true},"foldingRange":{"dynamicRegistration":true,"rangeLimit":5000,"lineFoldingOnly":true},"declaration":{"dynamicRegistration":true,"linkSupport":true},"selectionRange":{"dynamicRegistration":true},"semanticTokens":{"dynamicRegistration":true,"tokenTypes":["comment","keyword","number","regexp","operator","namespace","type","struct","class","interface","enum","typeParameter","function","member","macro","variable","parameter","property","label"],"tokenModifiers":["declaration","documentation","static","abstract","deprecated","readonly"]}},"window":{"workDoneProgress":true}},"trace":"off","workspaceFolders":[{"uri":"file://./tests", "name":"root"}]}
+    \\{"processId":0,"clientInfo":{"name":"Visual Studio Code","version":"1.73.1"},"capabilities":{"workspace":{"applyEdit":true,"workspaceEdit":{"documentChanges":true,"resourceOperations":["create","rename","delete"],"failureHandling":"textOnlyTransactional","normalizesLineEndings":true,"changeAnnotationSupport":{"groupsOnLabel":true}},"didChangeWatchedFiles":{"dynamicRegistration":true,"relativePatternSupport":true},"symbol":{"dynamicRegistration":true,"symbolKind":{"valueSet":[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26]},"tagSupport":{"valueSet":[1]},"resolveSupport":{"properties":["location.range"]}},"codeLens":{"refreshSupport":true},"executeCommand":{"dynamicRegistration":true},"workspaceFolders":true,"semanticTokens":{"refreshSupport":true},"fileOperations":{"dynamicRegistration":true,"didCreate":true,"didRename":true,"didDelete":true,"willCreate":true,"willRename":true,"willDelete":true},"inlineValue":{"refreshSupport":true},"inlayHint":{"refreshSupport":true},"diagnostics":{"refreshSupport":true}},"textDocument":{"synchronization":{"dynamicRegistration":true,"willSave":true,"willSaveWaitUntil":true,"didSave":true},"completion":{"dynamicRegistration":true,"contextSupport":true,"completionItem":{"snippetSupport":true,"commitCharactersSupport":true,"documentationFormat":["markdown","plaintext"],"deprecatedSupport":true,"preselectSupport":true,"tagSupport":{"valueSet":[1]},"insertReplaceSupport":true,"resolveSupport":{"properties":["documentation","detail","additionalTextEdits"]},"insertTextModeSupport":{"valueSet":[1,2]},"labelDetailsSupport":true},"insertTextMode":2,"completionItemKind":{"valueSet":[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25]},"completionList":{"itemDefaults":["commitCharacters","editRange","insertTextFormat","insertTextMode"]}},"hover":{"dynamicRegistration":true,"contentFormat":["markdown","plaintext"]},"signatureHelp":{"dynamicRegistration":true,"signatureInformation":{"documentationFormat":["markdown","plaintext"],"parameterInformation":{"labelOffsetSupport":true},"activeParameterSupport":true},"contextSupport":true},"definition":{"dynamicRegistration":true,"linkSupport":true},"references":{"dynamicRegistration":true},"documentHighlight":{"dynamicRegistration":true},"documentSymbol":{"dynamicRegistration":true,"symbolKind":{"valueSet":[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26]},"hierarchicalDocumentSymbolSupport":true,"tagSupport":{"valueSet":[1]},"labelSupport":true},"codeAction":{"dynamicRegistration":true,"isPreferredSupport":true,"disabledSupport":true,"dataSupport":true,"resolveSupport":{"properties":["edit"]},"codeActionLiteralSupport":{"codeActionKind":{"valueSet":["","quickfix","refactor","refactor.extract","refactor.inline","refactor.rewrite","source","source.organizeImports"]}},"honorsChangeAnnotations":false},"codeLens":{"dynamicRegistration":true},"formatting":{"dynamicRegistration":true},"rangeFormatting":{"dynamicRegistration":true},"onTypeFormatting":{"dynamicRegistration":true},"rename":{"dynamicRegistration":true,"prepareSupport":true,"prepareSupportDefaultBehavior":1,"honorsChangeAnnotations":true},"documentLink":{"dynamicRegistration":true,"tooltipSupport":true},"typeDefinition":{"dynamicRegistration":true,"linkSupport":true},"implementation":{"dynamicRegistration":true,"linkSupport":true},"colorProvider":{"dynamicRegistration":true},"foldingRange":{"dynamicRegistration":true,"rangeLimit":5000,"lineFoldingOnly":true,"foldingRangeKind":{"valueSet":["comment","imports","region"]},"foldingRange":{"collapsedText":false}},"declaration":{"dynamicRegistration":true,"linkSupport":true},"selectionRange":{"dynamicRegistration":true},"callHierarchy":{"dynamicRegistration":true},"semanticTokens":{"dynamicRegistration":true,"tokenTypes":["namespace","type","class","enum","interface","struct","typeParameter","parameter","variable","property","enumMember","event","function","method","macro","keyword","modifier","comment","string","number","regexp","operator","decorator"],"tokenModifiers":["declaration","definition","readonly","static","deprecated","abstract","async","modification","documentation","defaultLibrary"],"formats":["relative"],"requests":{"range":true,"full":{"delta":true}},"multilineTokenSupport":false,"overlappingTokenSupport":false,"serverCancelSupport":true,"augmentsSyntaxTokens":true},"linkedEditingRange":{"dynamicRegistration":true},"typeHierarchy":{"dynamicRegistration":true},"inlineValue":{"dynamicRegistration":true},"inlayHint":{"dynamicRegistration":true,"resolveSupport":{"properties":["tooltip","textEdits","label.tooltip","label.location","label.command"]}},"diagnostic":{"dynamicRegistration":true,"relatedDocumentSupport":false}},"window":{"showMessage":{"messageActionItem":{"additionalPropertiesSupport":true}},"showDocument":{"support":true},"workDoneProgress":true},"general":{"staleRequestSupport":{"cancel":true,"retryOnContentModified":["textDocument/semanticTokens/full","textDocument/semanticTokens/range","textDocument/semanticTokens/full/delta"]},"regularExpressions":{"engine":"ECMAScript","version":"ES2020"},"markdown":{"parser":"marked","version":"1.1.0"},"positionEncodings":["utf-16"]},"notebookDocument":{"synchronization":{"dynamicRegistration":true,"executionSummarySupport":true}}}}
 ;
 
 const default_config: Config = .{
@@ -23,6 +30,7 @@ const allocator = std.testing.allocator;
 
 pub const Context = struct {
     server: Server,
+    arena: std.heap.ArenaAllocator,
     config: *Config,
     request_id: u32 = 1,
 
@@ -37,11 +45,16 @@ pub const Context = struct {
 
         var context: Context = .{
             .server = server,
+            .arena = std.heap.ArenaAllocator.init(allocator),
             .config = config,
         };
 
         try context.request("initialize", initialize_msg, null);
-        try context.request("initialized", "{}", null);
+        try context.notification("initialized", "{}");
+
+        // TODO this line shouldn't be needed
+        context.server.client_capabilities.label_details_support = false;
+
         return context;
     }
 
@@ -51,6 +64,30 @@ pub const Context = struct {
 
         self.request("shutdown", "{}", null) catch {};
         self.server.deinit();
+        self.arena.deinit();
+    }
+
+    pub fn notification(
+        self: *Context,
+        method: []const u8,
+        params: []const u8,
+    ) !void {
+        var output = std.ArrayListUnmanaged(u8){};
+        defer output.deinit(allocator);
+
+        // create the request
+        const req = try std.fmt.allocPrint(allocator,
+            \\{{"jsonrpc":"2.0","method":"{s}","params":{s}}}
+        , .{ method, params });
+        defer allocator.free(req);
+
+        //  send the request to the server
+        self.server.processJsonRpc(&self.arena, req);
+
+        for (self.server.outgoing_messages.items) |outgoing_message| {
+            self.server.allocator.free(outgoing_message);
+        }
+        self.server.outgoing_messages.clearRetainingCapacity();
     }
 
     pub fn requestAlloc(
@@ -58,9 +95,6 @@ pub const Context = struct {
         method: []const u8,
         params: []const u8,
     ) ![]const u8 {
-        var output = std.ArrayListUnmanaged(u8){};
-        defer output.deinit(allocator);
-
         // create the request
         self.request_id += 1;
         const req = try std.fmt.allocPrint(allocator,
@@ -69,20 +103,18 @@ pub const Context = struct {
         defer allocator.free(req);
 
         //  send the request to the server
-        try self.server.processJsonRpc(output.writer(allocator), req);
+        self.server.processJsonRpc(&self.arena, req);
 
-        // get the output from the server
-        var buffer_stream = std.io.fixedBufferStream(output.items);
-        const header = try headerPkg.readRequestHeader(allocator, buffer_stream.reader());
-        defer header.deinit(allocator);
+        const messages = self.server.outgoing_messages.items;
 
-        var response_bytes = try allocator.alloc(u8, header.content_length);
-        errdefer allocator.free(response_bytes);
+        try std.testing.expect(messages.len != 0);
 
-        const content_length = try buffer_stream.reader().readAll(response_bytes);
-        try std.testing.expectEqual(content_length, header.content_length);
+        for (messages[0..(messages.len - 1)]) |message| {
+            self.server.allocator.free(message);
+        }
+        defer self.server.outgoing_messages.clearRetainingCapacity();
 
-        return response_bytes;
+        return messages[messages.len - 1];
     }
 
     pub fn request(
@@ -92,7 +124,7 @@ pub const Context = struct {
         expect: ?[]const u8,
     ) !void {
         const response_bytes = try self.requestAlloc(method, params);
-        defer allocator.free(response_bytes);
+        defer self.server.allocator.free(response_bytes);
 
         const expected = expect orelse return;
 
@@ -118,19 +150,17 @@ pub const Context = struct {
 
     // helper
     pub fn requestDidOpen(self: *Context, uri: []const u8, source: []const u8) !void {
-        const open_document = requests.OpenDocument{
-            .params = .{
-                .textDocument = .{
-                    .uri = uri,
-                    // .languageId = "zig",
-                    // .version = 420,
-                    .text = source,
-                },
+        const open_document = types.DidOpenTextDocumentParams{
+            .textDocument = .{
+                .uri = uri,
+                .languageId = "zig",
+                .version = 420,
+                .text = source,
             },
         };
-        const params = try std.json.stringifyAlloc(allocator, open_document.params, .{});
+        const params = try std.json.stringifyAlloc(allocator, open_document, .{});
         defer allocator.free(params);
-        try self.request("textDocument/didOpen", params, null);
+        try self.notification("textDocument/didOpen", params);
     }
 
     pub fn Response(comptime Result: type) type {
@@ -138,35 +168,23 @@ pub const Context = struct {
             jsonrpc: []const u8,
             id: types.RequestId,
             result: Result,
-
-            pub fn deinit(self: @This()) void {
-                const parse_options = std.json.ParseOptions{
-                    .allocator = allocator,
-                    .ignore_unknown_fields = true,
-                };
-                std.json.parseFree(@This(), self, parse_options);
-            }
         };
     }
 
-    pub fn requestGetResponse(self: *Context, comptime Result: type, method: []const u8, request_struct: anytype) !Response(Result) {
-        const params = try std.json.stringifyAlloc(allocator, request_struct.params, .{});
-        defer allocator.free(params);
+    pub fn requestGetResponse(self: *Context, comptime Result: type, method: []const u8, params: anytype) !Response(Result) {
+        var buffer = std.ArrayListUnmanaged(u8){};
+        defer buffer.deinit(allocator);
 
-        const response_bytes = try self.requestAlloc(method, params);
-        defer allocator.free(response_bytes);
+        try tres.stringify(params, .{}, buffer.writer(allocator));
 
-        const parse_options = std.json.ParseOptions{
-            .allocator = allocator,
-            .ignore_unknown_fields = true,
-        };
+        const response_bytes = try self.requestAlloc(method, buffer.items);
+        defer self.server.allocator.free(response_bytes);
 
-        var token_stream = std.json.TokenStream.init(response_bytes);
-        const response = try std.json.parse(Response(Result), &token_stream, parse_options);
-        errdefer std.json.parseFree(Response(Result), response, parse_options);
+        var parser = std.json.Parser.init(self.arena.allocator(), false);
+        var tree = try parser.parse(try self.arena.allocator().dupe(u8, response_bytes));
 
         // TODO validate jsonrpc and id
 
-        return response;
+        return tres.parse(Response(Result), tree.root, self.arena.allocator());
     }
 };

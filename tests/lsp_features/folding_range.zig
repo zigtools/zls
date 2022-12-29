@@ -2,10 +2,11 @@ const std = @import("std");
 const zls = @import("zls");
 const builtin = @import("builtin");
 
+const tres = @import("tres");
+
 const Context = @import("../context.zig").Context;
 
 const types = zls.types;
-const requests = zls.requests;
 
 const allocator: std.mem.Allocator = std.testing.allocator;
 
@@ -48,15 +49,16 @@ fn testFoldingRange(source: []const u8, expect: []const u8) !void {
 
     try ctx.requestDidOpen(test_uri, source);
 
-    const request = requests.FoldingRange{ .params = .{ .textDocument = .{ .uri = test_uri } } };
+    const params = types.FoldingRangeParams{ .textDocument = .{ .uri = test_uri } };
 
-    const response = try ctx.requestGetResponse(?[]types.FoldingRange, "textDocument/foldingRange", request);
-    defer response.deinit();
+    const response = try ctx.requestGetResponse(?[]types.FoldingRange, "textDocument/foldingRange", params);
 
     var actual = std.ArrayList(u8).init(allocator);
     defer actual.deinit();
 
-    try std.json.stringify(response.result, .{}, actual.writer());
+    try tres.stringify(response.result, .{
+        .emit_null_optional_fields = false,
+    }, actual.writer());
     try expectEqualJson(expect, actual.items);
 }
 

@@ -1,18 +1,19 @@
 const std = @import("std");
 
-const RequestHeader = struct {
-    content_length: usize,
+const Header = @This();
 
-    /// null implies "application/vscode-jsonrpc; charset=utf-8"
-    content_type: ?[]const u8,
+content_length: usize,
 
-    pub fn deinit(self: @This(), allocator: std.mem.Allocator) void {
-        if (self.content_type) |ct| allocator.free(ct);
-    }
-};
+/// null implies "application/vscode-jsonrpc; charset=utf-8"
+content_type: ?[]const u8 = null,
 
-pub fn readRequestHeader(allocator: std.mem.Allocator, instream: anytype) !RequestHeader {
-    var r = RequestHeader{
+pub fn deinit(self: @This(), allocator: std.mem.Allocator) void {
+    if (self.content_type) |ct| allocator.free(ct);
+}
+
+// Caller owns returned memory.
+pub fn parse(allocator: std.mem.Allocator, reader: anytype) !Header {
+    var r = Header{
         .content_length = undefined,
         .content_type = null,
     };
@@ -20,7 +21,7 @@ pub fn readRequestHeader(allocator: std.mem.Allocator, instream: anytype) !Reque
 
     var has_content_length = false;
     while (true) {
-        const header = try instream.readUntilDelimiterAlloc(allocator, '\n', 0x100);
+        const header = try reader.readUntilDelimiterAlloc(allocator, '\n', 0x100);
         defer allocator.free(header);
         if (header.len == 0 or header[header.len - 1] != '\r') return error.MissingCarriageReturn;
         if (header.len == 1) break;
@@ -40,4 +41,19 @@ pub fn readRequestHeader(allocator: std.mem.Allocator, instream: anytype) !Reque
     if (!has_content_length) return error.MissingContentLength;
 
     return r;
+}
+
+pub fn format(
+    header: Header,
+    comptime unused_fmt_string: []const u8,
+    options: std.fmt.FormatOptions,
+    writer: anytype,
+) @TypeOf(writer).Error!void {
+    _ = options;
+    std.debug.assert(unused_fmt_string.len == 0);
+    try writer.print("Content-Length: {}\r\n", .{header.content_length});
+    if (header.content_type) |content_type| {
+        try writer.print("Content-Type: {s}\r\n", .{content_type});
+    }
+    try writer.writeAll("\r\n");
 }
