@@ -37,6 +37,8 @@ document_store: DocumentStore = undefined,
 builtin_completions: std.ArrayListUnmanaged(types.CompletionItem),
 client_capabilities: ClientCapabilities = .{},
 outgoing_messages: std.ArrayListUnmanaged([]const u8) = .{},
+recording_enabled: bool,
+replay_enabled: bool,
 offset_encoding: offsets.Encoding = .@"utf-16",
 status: enum {
     /// the server has not received a `initialize` request
@@ -176,7 +178,13 @@ fn sendInternal(
     try server.outgoing_messages.append(server.allocator, message);
 }
 
-fn showMessage(server: *Server, message_type: types.MessageType, message: []const u8) void {
+fn showMessage(
+    server: *Server,
+    message_type: types.MessageType,
+    comptime fmt: []const u8,
+    args: anytype,
+) void {
+    const message = std.fmt.allocPrint(server.arena.allocator(), fmt, args) catch return;
     server.sendNotification("window/showMessage", types.ShowMessageParams{
         .type = message_type,
         .message = message,
@@ -188,7 +196,7 @@ fn generateDiagnostics(server: *Server, handle: DocumentStore.Handle) !types.Pub
     defer tracy_zone.end();
 
     std.debug.assert(server.client_capabilities.supports_publish_diagnostics);
-    
+
     const tree = handle.tree;
 
     var allocator = server.arena.allocator();
@@ -1655,19 +1663,20 @@ fn initializeHandler(server: *Server, request: types.InitializeParams) !types.In
         const zig_exe_version = std.SemanticVersion.parse(env.version) catch break :blk;
 
         if (zig_builtin.zig_version.order(zig_exe_version) == .gt) {
-            const version_mismatch_message = try std.fmt.allocPrint(
-                server.arena.allocator(),
-                "ZLS was built with Zig {}, but your Zig version is {s}. Update Zig to avoid unexpected behavior.",
-                .{ zig_builtin.zig_version, env.version },
-            );
-            server.showMessage(.Warning, version_mismatch_message);
+            server.showMessage(.Warning,
+                \\ZLS was built with Zig {}, but your Zig version is {s}. Update Zig to avoid unexpected behavior.
+            , .{ zig_builtin.zig_version, env.version });
         }
     } else {
-        server.showMessage(
-            .Warning,
+        server.showMessage(.Warning,
             \\ZLS failed to find Zig. Please add Zig to your PATH or set the zig_exe_path config option in your zls.json.
-            ,
-        );
+        , .{});
+    }
+
+    if (server.recording_enabled) {
+        server.showMessage(.Info,
+            \\This zls session is being recorded to {?s}.
+        , .{server.config.record_session_path});
     }
 
     return .{
@@ -1804,6 +1813,11 @@ fn registerCapability(server: *Server, method: []const u8) !void {
 }
 
 fn requestConfiguration(server: *Server) !void {
+    if (server.recording_enabled) {
+        log.info("workspace/configuration are disabled during a recording session!", .{});
+        return;
+    }
+
     const configuration_items = comptime confi: {
         var comp_confi: [std.meta.fields(Config).len]types.ConfigurationItem = undefined;
         inline for (std.meta.fields(Config)) |field, index| {
@@ -1825,6 +1839,10 @@ fn requestConfiguration(server: *Server) !void {
 }
 
 fn handleConfiguration(server: *Server, json: std.json.Value) error{OutOfMemory}!void {
+    if (server.replay_enabled) {
+        log.info("workspace/configuration are disabled during a replay!", .{});
+        return;
+    }
     log.info("Setting configuration...", .{});
 
     // NOTE: Does this work with other editors?
@@ -1885,7 +1903,7 @@ fn openDocumentHandler(server: *Server, notification: types.DidOpenTextDocumentP
     defer tracy_zone.end();
 
     const handle = try server.document_store.openDocument(notification.textDocument.uri, notification.textDocument.text);
-    
+
     if (server.client_capabilities.supports_publish_diagnostics) {
         const diagnostics = try server.generateDiagnostics(handle);
         server.sendNotification("textDocument/publishDiagnostics", diagnostics);
@@ -2128,7 +2146,6 @@ fn hoverHandler(server: *Server, request: types.HoverParams) !?types.Hover {
         else => null,
     };
 
-    
     // TODO: Figure out a better solution for comptime interpreter diags
     if (server.client_capabilities.supports_publish_diagnostics) {
         const diagnostics = try server.generateDiagnostics(handle.*);
@@ -3022,6 +3039,8 @@ pub fn init(
     allocator: std.mem.Allocator,
     config: *Config,
     config_path: ?[]const u8,
+    recording_enabled: bool,
+    replay_enabled: bool,
 ) !Server {
     // TODO replace global with something like an Analyser struct
     // which contains using_trail & resolve_trail and place it inside Server
@@ -3062,6 +3081,8 @@ pub fn init(
         .allocator = allocator,
         .document_store = document_store,
         .builtin_completions = builtin_completions,
+        .recording_enabled = recording_enabled,
+        .replay_enabled = replay_enabled,
         .status = .uninitialized,
     };
 }
