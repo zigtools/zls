@@ -24,7 +24,7 @@ const ComptimeInterpreter = @import("ComptimeInterpreter.zig");
 const data = @import("data/data.zig");
 const snipped_data = @import("data/snippets.zig");
 
-const tres = @import("tres/tres.zig");
+const tres = @import("tres");
 
 const log = std.log.scoped(.server);
 
@@ -188,7 +188,7 @@ fn generateDiagnostics(server: *Server, handle: DocumentStore.Handle) !types.Pub
     defer tracy_zone.end();
 
     std.debug.assert(server.client_capabilities.supports_publish_diagnostics);
-    
+
     const tree = handle.tree;
 
     var allocator = server.arena.allocator();
@@ -1885,7 +1885,7 @@ fn openDocumentHandler(server: *Server, notification: types.DidOpenTextDocumentP
     defer tracy_zone.end();
 
     const handle = try server.document_store.openDocument(notification.textDocument.uri, notification.textDocument.text);
-    
+
     if (server.client_capabilities.supports_publish_diagnostics) {
         const diagnostics = try server.generateDiagnostics(handle);
         server.sendNotification("textDocument/publishDiagnostics", diagnostics);
@@ -2128,7 +2128,6 @@ fn hoverHandler(server: *Server, request: types.HoverParams) !?types.Hover {
         else => null,
     };
 
-    
     // TODO: Figure out a better solution for comptime interpreter diags
     if (server.client_capabilities.supports_publish_diagnostics) {
         const diagnostics = try server.generateDiagnostics(handle.*);
