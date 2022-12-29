@@ -146,11 +146,10 @@ pub fn openDocument(self: *DocumentStore, uri: Uri, text: []const u8) error{OutO
         return handle.*;
     }
 
-    const duped_text = try self.allocator.dupeZ(u8, text);
-    errdefer self.allocator.free(duped_text);
-
     var handle = try self.allocator.create(Handle);
     errdefer self.allocator.destroy(handle);
+
+    const duped_text = try self.allocator.dupeZ(u8, text);
 
     handle.* = try self.createDocument(uri, duped_text, true);
     errdefer handle.deinit(self.allocator);
@@ -580,7 +579,9 @@ fn uriInImports(
         return false;
 
     // consider it checked even if a failure happens
-    try checked_uris.put(try self.allocator.dupe(u8, source_uri), {});
+
+    const duped_uri = try self.allocator.dupe(u8, source_uri);
+    checked_uris.put(duped_uri, {}) catch self.allocator.free(duped_uri);
 
     const handle = self.getOrLoadHandle(source_uri) orelse return false;
 
@@ -638,11 +639,16 @@ fn createDocument(self: *DocumentStore, uri: Uri, text: [:0]u8, open: bool) erro
     // TODO: Better logic for detecting std or subdirectories?
     const in_std = std.mem.indexOf(u8, uri, "/std/") != null;
     if (self.config.zig_exe_path != null and std.mem.endsWith(u8, uri, "/build.zig") and !in_std) {
-        errdefer |err| log.debug("Failed to load build file {s}: (error: {})", .{ uri, err });
-        const duped_uri = try self.allocator.dupe(u8, uri);
-        var build_file = try self.createBuildFile(duped_uri);
-        errdefer build_file.deinit(self.allocator);
-        try self.build_files.putNoClobber(self.allocator, build_file.uri, build_file);
+        const gop = try self.build_files.getOrPut(self.allocator, uri);
+        errdefer |err| {
+            self.build_files.swapRemoveAt(gop.index);
+            log.debug("Failed to load build file {s}: (error: {})", .{ uri, err });
+        }
+        if(!gop.found_existing) {
+            const duped_uri = try self.allocator.dupe(u8, uri);
+            gop.value_ptr.* = try self.createBuildFile(duped_uri);
+            gop.key_ptr.* = gop.value_ptr.uri;
+        }
         handle.is_build_file = true;
     } else if (self.config.zig_exe_path != null and !std.mem.endsWith(u8, uri, "/builtin.zig") and !in_std) blk: {
         log.debug("Going to walk down the tree towards: {s}", .{uri});
