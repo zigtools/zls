@@ -1475,7 +1475,7 @@ fn kindToSortScore(kind: types.CompletionItemKind) ?[]const u8 {
         => "6_",
 
         else => {
-            std.log.debug(@typeName(types.CompletionItemKind) ++ "{s} has no sort score specified!", .{@tagName(kind)});
+            log.debug(@typeName(types.CompletionItemKind) ++ "{s} has no sort score specified!", .{@tagName(kind)});
             return null;
         },
     };
@@ -1551,7 +1551,7 @@ fn initializeHandler(server: *Server, request: types.InitializeParams) !types.In
     defer tracy_zone.end();
 
     if (request.clientInfo) |clientInfo| {
-        std.log.info("client is '{s}-{s}'", .{ clientInfo.name, clientInfo.version orelse "<no version>" });
+        log.info("client is '{s}-{s}'", .{ clientInfo.name, clientInfo.version orelse "<no version>" });
 
         if (std.mem.eql(u8, clientInfo.name, "Sublime Text LSP")) blk: {
             server.config.max_detail_length = 256;
@@ -1750,7 +1750,7 @@ fn initializedHandler(server: *Server, notification: types.InitializedParams) !v
     _ = notification;
 
     if (server.status != .initializing) {
-        std.log.warn("received a initialized notification but the server has not send a initialize request!", .{});
+        log.warn("received a initialized notification but the server has not send a initialize request!", .{});
     }
 
     server.status = .initialized;
@@ -1870,10 +1870,11 @@ fn handleConfiguration(server: *Server, json: std.json.Value) error{OutOfMemory}
                     else => @compileError("Not implemented for " ++ @typeName(ft)),
                 },
             };
-            log.debug("setting configuration option '{s}' to '{any}'", .{ field.name, new_value });
+            // log.debug("setting configuration option '{s}' to '{any}'", .{ field.name, new_value });
             @field(server.config, field.name) = new_value;
         }
     }
+    log.debug("{}", .{server.client_capabilities});
 
     configuration.configChanged(server.config, server.allocator, null) catch |err| {
         log.err("failed to update configuration: {}", .{err});
@@ -2865,18 +2866,18 @@ pub fn processJsonRpc(
     defer parser.deinit();
 
     var tree = parser.parse(json) catch {
-        std.log.err("failed to parse message!", .{});
+        log.err("failed to parse message!", .{});
         return; // maybe panic?
     };
     defer tree.deinit();
 
     const message = Message.fromJsonValueTree(tree) catch {
-        std.log.err("failed to parse message!", .{});
+        log.err("failed to parse message!", .{});
         return; // maybe panic?
     };
 
     server.processMessage(message) catch |err| {
-        std.log.err("got {} while processing message!", .{err}); // TODO include message information
+        log.err("got {} while processing message!", .{err}); // TODO include message information
         switch (message) {
             .RequestMessage => |request| server.sendResponseError(request.id, .{
                 .code = @errorToInt(err),
@@ -2909,7 +2910,7 @@ fn processMessage(server: *Server, message: Message) Error!void {
                 return;
             }
 
-            std.log.warn("received response from client with id '{s}' that has no handler!", .{response.id.string});
+            log.warn("received response from client with id '{s}' that has no handler!", .{response.id.string});
             return;
         },
     }
