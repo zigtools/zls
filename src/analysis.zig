@@ -2387,30 +2387,6 @@ pub const DocumentScope = struct {
     error_completions: CompletionSet,
     enum_completions: CompletionSet,
 
-    pub fn debugPrint(self: DocumentScope) void {
-        for (self.scopes.items) |scope| {
-            log.debug(
-                \\--------------------------
-                \\Scope {}, loc: [{d}, {d})
-                \\ {d} usingnamespaces
-                \\Decls:
-            , .{
-                scope.data,
-                scope.loc.start,
-                scope.loc.end,
-                scope.uses.len,
-            });
-
-            var decl_it = scope.decls.iterator();
-            var idx: usize = 0;
-            while (decl_it.next()) |_| : (idx += 1) {
-                if (idx != 0) log.debug(", ", .{});
-            }
-            // log.debug("{s}", .{name_decl.key});
-            log.debug("\n--------------------------\n", .{});
-        }
-    }
-
     pub fn deinit(self: *DocumentScope, allocator: std.mem.Allocator) void {
         for (self.scopes.items) |*scope| {
             scope.deinit(allocator);
