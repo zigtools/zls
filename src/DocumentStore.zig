@@ -66,7 +66,6 @@ pub const Handle = struct {
     /// `DocumentStore.build_files` is guaranteed to contain this uri
     /// uri memory managed by its build_file
     associated_build_file: ?Uri = null,
-    is_build_file: bool = false,
 
     pub fn deinit(self: *Handle, allocator: std.mem.Allocator) void {
         self.document_scope.deinit(allocator);
@@ -225,7 +224,7 @@ pub fn applySave(self: *DocumentStore, handle: *const Handle) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    if (handle.is_build_file) {
+    if (isBuildFile(handle.uri)) {
         const build_file = self.build_files.getPtr(handle.uri).?;
 
         const build_config = loadBuildConfiguration(self.allocator, build_file.*, self.config.*) catch |err| {
@@ -342,6 +341,19 @@ fn garbageCollectionBuildFiles(self: *DocumentStore) error{OutOfMemory}!void {
         std.log.debug("Destroying build file {s}", .{kv.value.uri});
         kv.value.deinit(self.allocator);
     }
+}
+
+pub fn isBuildFile(uri: Uri) bool {
+    return std.mem.endsWith(u8, uri, "/build.zig");
+}
+
+pub fn isBuiltinFile(uri: Uri) bool {
+    return std.mem.endsWith(u8, uri, "/builtin.zig");
+}
+
+pub fn isInStd(uri: Uri) bool {
+    // TODO: Better logic for detecting std or subdirectories?
+    return std.mem.indexOf(u8, uri, "/std/") != null;
 }
 
 /// looks for a `zls.build.json` file in the build file directory
@@ -545,14 +557,8 @@ fn uriAssociatedWithBuild(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    var checked_uris = std.StringHashMap(void).init(self.allocator);
-    defer {
-        var it = checked_uris.iterator();
-        while (it.next()) |entry|
-            self.allocator.free(entry.key_ptr.*);
-
-        checked_uris.deinit();
-    }
+    var checked_uris = std.StringHashMapUnmanaged(void){};
+    defer checked_uris.deinit(self.allocator);
 
     for (build_file.config.packages) |package| {
         const package_uri = try URI.fromPath(self.allocator, package.path);
@@ -562,7 +568,7 @@ fn uriAssociatedWithBuild(
             return true;
         }
 
-        if (try self.uriInImports(&checked_uris, package_uri, uri))
+        if (try self.uriInImports(&checked_uris, build_file, package_uri, uri))
             return true;
     }
 
@@ -571,25 +577,30 @@ fn uriAssociatedWithBuild(
 
 fn uriInImports(
     self: *DocumentStore,
-    checked_uris: *std.StringHashMap(void),
+    checked_uris: *std.StringHashMapUnmanaged(void),
+    build_file: BuildFile,
     source_uri: Uri,
     uri: Uri,
 ) error{OutOfMemory}!bool {
     if (checked_uris.contains(source_uri))
         return false;
 
-    // consider it checked even if a failure happens
+    if (isInStd(source_uri)) return false;
 
-    const duped_uri = try self.allocator.dupe(u8, source_uri);
-    checked_uris.put(duped_uri, {}) catch self.allocator.free(duped_uri);
+    // consider it checked even if a failure happens
+    try checked_uris.put(self.allocator, source_uri, {});
 
     const handle = self.getOrLoadHandle(source_uri) orelse return false;
+
+    if (handle.associated_build_file) |associated_build_file_uri| {
+        return std.mem.eql(u8, associated_build_file_uri, build_file.uri);
+    }
 
     for (handle.import_uris.items) |import_uri| {
         if (std.mem.eql(u8, uri, import_uri))
             return true;
 
-        if (self.uriInImports(checked_uris, import_uri, uri) catch false)
+        if (try self.uriInImports(checked_uris, build_file, import_uri, uri))
             return true;
     }
 
@@ -626,7 +637,7 @@ fn createDocument(self: *DocumentStore, uri: Uri, text: [:0]u8, open: bool) erro
     defer {
         if (handle.associated_build_file) |build_file_uri| {
             log.debug("Opened document `{s}` with build file `{s}`", .{ handle.uri, build_file_uri });
-        } else if (handle.is_build_file) {
+        } else if (isBuildFile(handle.uri)) {
             log.debug("Opened document `{s}` (build file)", .{handle.uri});
         } else {
             log.debug("Opened document `{s}`", .{handle.uri});
@@ -636,9 +647,7 @@ fn createDocument(self: *DocumentStore, uri: Uri, text: [:0]u8, open: bool) erro
     handle.import_uris = try self.collectImportUris(handle);
     handle.cimports = try self.collectCIncludes(handle);
 
-    // TODO: Better logic for detecting std or subdirectories?
-    const in_std = std.mem.indexOf(u8, uri, "/std/") != null;
-    if (self.config.zig_exe_path != null and std.mem.endsWith(u8, uri, "/build.zig") and !in_std) {
+    if (self.config.zig_exe_path != null and isBuildFile(handle.uri) and !isInStd(handle.uri)) {
         const gop = try self.build_files.getOrPut(self.allocator, uri);
         errdefer |err| {
             self.build_files.swapRemoveAt(gop.index);
@@ -649,9 +658,9 @@ fn createDocument(self: *DocumentStore, uri: Uri, text: [:0]u8, open: bool) erro
             gop.value_ptr.* = try self.createBuildFile(duped_uri);
             gop.key_ptr.* = gop.value_ptr.uri;
         }
-        handle.is_build_file = true;
-    } else if (self.config.zig_exe_path != null and !std.mem.endsWith(u8, uri, "/builtin.zig") and !in_std) blk: {
-        log.debug("Going to walk down the tree towards: {s}", .{uri});
+    } else if (self.config.zig_exe_path != null and !isBuiltinFile(handle.uri) and !isInStd(handle.uri)) blk: {
+        // log.debug("Going to walk down the tree towards: {s}", .{uri});
+        
         // walk down the tree towards the uri. When we hit build.zig files
         // determine if the uri we're interested in is involved with the build.
         // This ensures that _relevant_ build.zig files higher in the
@@ -659,12 +668,11 @@ fn createDocument(self: *DocumentStore, uri: Uri, text: [:0]u8, open: bool) erro
         const path = URI.parse(self.allocator, uri) catch break :blk;
         defer self.allocator.free(path);
 
-        var prev_build_file: ?Uri = null;
         var build_it = try BuildDotZigIterator.init(self.allocator, path);
         while (try build_it.next()) |build_path| {
             defer self.allocator.free(build_path);
 
-            log.debug("found build path: {s}", .{build_path});
+            // log.debug("found build path: {s}", .{build_path});
 
             const build_file_uri = try URI.fromPath(self.allocator, build_path);
             const gop = self.build_files.getOrPut(self.allocator, build_file_uri) catch |err| {
@@ -682,14 +690,7 @@ fn createDocument(self: *DocumentStore, uri: Uri, text: [:0]u8, open: bool) erro
             if (try self.uriAssociatedWithBuild(gop.value_ptr.*, uri)) {
                 handle.associated_build_file = gop.key_ptr.*;
                 break;
-            } else {
-                prev_build_file = gop.key_ptr.*;
-            }
-        }
-
-        // if there was no direct imports found, use the closest build file if possible
-        if (handle.associated_build_file == null) {
-            if (prev_build_file) |build_file_uri| {
+            } else if (handle.associated_build_file == null) {
                 handle.associated_build_file = build_file_uri;
             }
         }
