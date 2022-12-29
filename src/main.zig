@@ -55,22 +55,24 @@ fn loop(
         // write server -> client messages
         for (server.outgoing_messages.items) |outgoing_message| {
             const header = Header{ .content_length = outgoing_message.len };
-            try writer.print("{}{s}", .{ header, outgoing_message });
-            try buffered_writer.flush();
+            try header.write(true, writer);
+            try writer.writeAll(outgoing_message);
         }
+        try buffered_writer.flush();
         for (server.outgoing_messages.items) |outgoing_message| {
             server.allocator.free(outgoing_message);
         }
         server.outgoing_messages.clearRetainingCapacity();
 
         // read and handle client -> server message
-        const header = try Header.parse(arena.allocator(), reader);
+        const header = try Header.parse(arena.allocator(), replay_file == null, reader);
 
         const json_message = try arena.allocator().alloc(u8, header.content_length);
         try reader.readNoEof(json_message);
 
         if (record_file) |file| {
-            try file.writer().print("{}{s}", .{ header, json_message });
+            try header.write(false, file.writer());
+            try file.writeAll(json_message);
         }
 
         server.processJsonRpc(&arena, json_message);
@@ -125,11 +127,12 @@ fn updateConfig(
 
         try std.json.stringify(cfg, .{}, buffer.writer(allocator));
         const header = Header{ .content_length = buffer.items.len };
-        try file.writer().print("{}{s}", .{ header, buffer.items });
+        try header.write(false, file.writer());
+        try file.writeAll(buffer.items);
     }
 
     if (replay_file) |file| {
-        const header = try Header.parse(allocator, file.reader());
+        const header = try Header.parse(allocator, false, file.reader());
         defer header.deinit(allocator);
         const json_message = try allocator.alloc(u8, header.content_length);
         defer allocator.free(json_message);

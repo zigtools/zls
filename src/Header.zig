@@ -12,7 +12,7 @@ pub fn deinit(self: @This(), allocator: std.mem.Allocator) void {
 }
 
 // Caller owns returned memory.
-pub fn parse(allocator: std.mem.Allocator, reader: anytype) !Header {
+pub fn parse(allocator: std.mem.Allocator, include_carriage_return: bool, reader: anytype) !Header {
     var r = Header{
         .content_length = undefined,
         .content_type = null,
@@ -23,11 +23,15 @@ pub fn parse(allocator: std.mem.Allocator, reader: anytype) !Header {
     while (true) {
         const header = try reader.readUntilDelimiterAlloc(allocator, '\n', 0x100);
         defer allocator.free(header);
-        if (header.len == 0 or header[header.len - 1] != '\r') return error.MissingCarriageReturn;
-        if (header.len == 1) break;
+        if (include_carriage_return) {
+            if (header.len == 0 or header[header.len - 1] != '\r') return error.MissingCarriageReturn;
+            if (header.len == 1) break;
+        } else {
+            if (header.len == 0) break;
+        }
 
         const header_name = header[0 .. std.mem.indexOf(u8, header, ": ") orelse return error.MissingColon];
-        const header_value = header[header_name.len + 2 .. header.len - 1];
+        const header_value = header[header_name.len + 2 .. header.len - @boolToInt(include_carriage_return)];
         if (std.mem.eql(u8, header_name, "Content-Length")) {
             if (header_value.len == 0) return error.MissingHeaderValue;
             r.content_length = std.fmt.parseInt(usize, header_value, 10) catch return error.InvalidContentLength;
@@ -43,17 +47,11 @@ pub fn parse(allocator: std.mem.Allocator, reader: anytype) !Header {
     return r;
 }
 
-pub fn format(
-    header: Header,
-    comptime unused_fmt_string: []const u8,
-    options: std.fmt.FormatOptions,
-    writer: anytype,
-) @TypeOf(writer).Error!void {
-    _ = options;
-    std.debug.assert(unused_fmt_string.len == 0);
-    try writer.print("Content-Length: {}\r\n", .{header.content_length});
+pub fn write(header: Header, include_carriage_return: bool, writer: anytype) @TypeOf(writer).Error!void {
+    const seperator: []const u8 = if (include_carriage_return) "\r\n" else "\n";
+    try writer.print("Content-Length: {}{s}", .{header.content_length, seperator});
     if (header.content_type) |content_type| {
-        try writer.print("Content-Type: {s}\r\n", .{content_type});
+        try writer.print("Content-Type: {s}{s}", .{content_type, seperator});
     }
-    try writer.writeAll("\r\n");
+    try writer.writeAll(seperator);
 }
