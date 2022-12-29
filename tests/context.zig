@@ -40,7 +40,7 @@ pub const Context = struct {
 
         config.* = default_config;
 
-        var server = try Server.init(allocator, config, null);
+        var server = try Server.init(allocator, config, null, false, false);
         errdefer server.deinit();
 
         var context: Context = .{
