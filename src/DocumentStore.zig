@@ -279,7 +279,7 @@ fn garbageCollectionImports(self: *DocumentStore) error{OutOfMemory}!void {
             i += 1;
             continue;
         }
-        std.log.debug("Closing document {s}", .{handle.uri});
+        log.debug("Closing document {s}", .{handle.uri});
         var kv = self.handles.fetchSwapRemove(handle.uri).?;
         kv.value.deinit(self.allocator);
         self.allocator.destroy(kv.value);
@@ -313,7 +313,7 @@ fn garbageCollectionCImports(self: *DocumentStore) error{OutOfMemory}!void {
             .failure => "",
             .success => |uri| uri,
         };
-        std.log.debug("Destroying cimport {s}", .{message});
+        log.debug("Destroying cimport {s}", .{message});
         kv.value.deinit(self.allocator);
     }
 }
@@ -339,7 +339,7 @@ fn garbageCollectionBuildFiles(self: *DocumentStore) error{OutOfMemory}!void {
             continue;
         }
         var kv = self.build_files.fetchSwapRemove(hash).?;
-        std.log.debug("Destroying build file {s}", .{kv.value.uri});
+        log.debug("Destroying build file {s}", .{kv.value.uri});
         kv.value.deinit(self.allocator);
     }
 }
