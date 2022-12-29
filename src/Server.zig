@@ -453,6 +453,12 @@ fn getAstCheckDiagnostics(
             };
         }
     }
+
+    if (last_diagnostic) |*diagnostic| {
+        diagnostic.relatedInformation = try last_related_diagnostics.toOwnedSlice(allocator);
+        try diagnostics.append(allocator, diagnostic.*);
+        last_diagnostic = null;
+    }
 }
 
 /// caller owns returned memory.
