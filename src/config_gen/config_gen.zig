@@ -12,7 +12,7 @@ const ConfigOption = struct {
     /// used in Config.zig as the default initializer
     default: []const u8,
     /// If set, this option can be configured through `zls --config`
-    /// currently unused but could laer be used to automatically generate queries for setup.zig
+    /// currently unused but could later be used to automatically generate queries for setup.zig
     setup_question: ?[]const u8,
 };
 
@@ -261,16 +261,14 @@ pub fn main() !void {
     }
 
     if (builtin.os.tag == .windows) {
-        std.log.warn(
-            \\ Running on windows may result in CRLF and LF mismatch
-        , .{});
+        std.log.warn("Running on windows may result in CRLF and LF mismatch", .{});
     }
 
-    std.log.warn(
-        \\ If you have added a new configuration option and it should be configuration through the config wizard, then edit src/setup.zig
-    , .{});
-
-    std.log.info(
-        \\ Changing configuration options may also require editing the `package.json` from zls-vscode at https://github.com/zigtools/zls-vscode/blob/master/package.json
-    , .{});
+    try std.io.getStdOut().writeAll(
+        \\If you have added a new configuration option and it should be configuration through the config wizard, then edit `src/setup.zig`
+        \\
+        \\Changing configuration options may also require editing the `package.json` from zls-vscode at https://github.com/zigtools/zls-vscode/blob/master/package.json
+        \\You can use `zig build gen -Dvscode-config-path=/path/to/output/file.json` to generate the new configuration properties which you can then copy into `package.json`
+        \\
+    );
 }
