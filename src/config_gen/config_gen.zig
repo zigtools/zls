@@ -48,9 +48,7 @@ fn zigTypeToTypescript(ty: []const u8) ![]const u8 {
 fn generateConfigFile(allocator: std.mem.Allocator, config: Config, path: []const u8) !void {
     _ = allocator;
 
-    const config_file = try std.fs.openFileAbsolute(path, .{
-        .mode = .write_only,
-    });
+    const config_file = try std.fs.createFileAbsolute(path, .{});
     defer config_file.close();
 
     var buff_out = std.io.bufferedWriter(config_file.writer());
