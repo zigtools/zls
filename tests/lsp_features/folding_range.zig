@@ -34,7 +34,7 @@ test "foldingRange - #801" {
         \\    };
         \\}
     ,
-        \\[]
+        \\[{"startLine":1,"endLine":4},{"startLine":0,"endLine":5}]
     );
 }
 

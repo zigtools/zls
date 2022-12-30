@@ -289,7 +289,7 @@ fn writeNodeTokens(builder: *Builder, maybe_node: ?Ast.Node.Index) WriteTokensEr
     const token_tags = tree.tokens.items(.tag);
     const node_data = tree.nodes.items(.data);
     const main_tokens = tree.nodes.items(.main_token);
-    if (node == 0 or node > node_data.len) return;
+    if (node == 0 or node >= node_data.len) return;
 
     var allocator = builder.arena.allocator();
 
