@@ -3,6 +3,7 @@
 
 pub const analysis = @import("analysis.zig");
 pub const Header = @import("Header.zig");
+pub const debug = @import("debug.zig");
 pub const offsets = @import("offsets.zig");
 pub const Config = @import("Config.zig");
 pub const Server = @import("Server.zig");

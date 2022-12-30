@@ -8,6 +8,7 @@ const configuration = @import("configuration.zig");
 const Server = @import("Server.zig");
 const setup = @import("setup.zig");
 const Header = @import("Header.zig");
+const debug = @import("debug.zig");
 
 const logger = std.log.scoped(.main);
 
@@ -263,9 +264,12 @@ const stack_frames = switch (zig_builtin.mode) {
 pub fn main() !void {
     var gpa_state = std.heap.GeneralPurposeAllocator(.{ .stack_trace_frames = stack_frames }){};
     defer _ = gpa_state.deinit();
-    var tracy_state = if (tracy.enable_allocation) tracy.tracyAllocator(gpa_state.allocator()) else void{};
 
-    const allocator: std.mem.Allocator = if (tracy.enable_allocation) tracy_state.allocator() else gpa_state.allocator();
+    var tracy_state = if (tracy.enable_allocation) tracy.tracyAllocator(gpa_state.allocator()) else void{};
+    const inner_allocator: std.mem.Allocator = if (tracy.enable_allocation) tracy_state.allocator() else gpa_state.allocator();
+    
+    var failing_allocator_state = if(build_options.enable_failing_allocator) debug.FailingAllocator.init(inner_allocator, build_options.enable_failing_allocator_likelihood) else void{};
+    const allocator: std.mem.Allocator = if(build_options.enable_failing_allocator) failing_allocator_state.allocator() else inner_allocator;
 
     var config = ConfigWithPath{
         .config = undefined,
