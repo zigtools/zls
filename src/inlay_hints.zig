@@ -22,7 +22,7 @@ pub const inlay_hints_max_inline_children = 12;
 
 /// checks whether node is inside the range
 fn isNodeInRange(tree: Ast, node: Ast.Node.Index, range: types.Range) bool {
-    const endLocation = tree.tokenLocation(0, tree.lastToken(node));
+    const endLocation = tree.tokenLocation(0, ast.lastToken(tree, node));
     if (endLocation.line < range.start.line) return false;
 
     const beginLocation = tree.tokenLocation(0, tree.firstToken(node));

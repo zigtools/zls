@@ -2485,14 +2485,14 @@ fn foldingRangeHandler(server: *Server, request: types.FoldingRangeParams) !?[]t
             .@"if", .if_simple => {
                 const if_full = ast.ifFull(handle.tree, node);
 
-                const start_tok_1 = handle.tree.lastToken(if_full.ast.cond_expr);
-                const end_tok_1 = handle.tree.lastToken(if_full.ast.then_expr);
+                const start_tok_1 = ast.lastToken(handle.tree, if_full.ast.cond_expr);
+                const end_tok_1 = ast.lastToken(handle.tree, if_full.ast.then_expr);
                 _ = try helper.maybeAddTokRange(&ranges, handle.tree, start_tok_1, end_tok_1, .inclusive, server.offset_encoding);
 
                 if (if_full.ast.else_expr == 0) continue;
 
                 const start_tok_2 = if_full.else_token;
-                const end_tok_2 = handle.tree.lastToken(if_full.ast.else_expr);
+                const end_tok_2 = ast.lastToken(handle.tree, if_full.ast.else_expr);
 
                 _ = try helper.maybeAddTokRange(&ranges, handle.tree, start_tok_2, end_tok_2, .inclusive, server.offset_encoding);
             },
@@ -2506,14 +2506,14 @@ fn foldingRangeHandler(server: *Server, request: types.FoldingRangeParams) !?[]t
             => {
                 const loop_full = ast.whileAst(handle.tree, node).?;
 
-                const start_tok_1 = handle.tree.lastToken(loop_full.ast.cond_expr);
-                const end_tok_1 = handle.tree.lastToken(loop_full.ast.then_expr);
+                const start_tok_1 = ast.lastToken(handle.tree, loop_full.ast.cond_expr);
+                const end_tok_1 = ast.lastToken(handle.tree, loop_full.ast.then_expr);
                 _ = try helper.maybeAddTokRange(&ranges, handle.tree, start_tok_1, end_tok_1, .inclusive, server.offset_encoding);
 
                 if (loop_full.ast.else_expr == 0) continue;
 
                 const start_tok_2 = loop_full.else_token;
-                const end_tok_2 = handle.tree.lastToken(loop_full.ast.else_expr);
+                const end_tok_2 = ast.lastToken(handle.tree, loop_full.ast.else_expr);
                 _ = try helper.maybeAddTokRange(&ranges, handle.tree, start_tok_2, end_tok_2, .inclusive, server.offset_encoding);
             },
 
@@ -2551,7 +2551,7 @@ fn foldingRangeHandler(server: *Server, request: types.FoldingRangeParams) !?[]t
                     break :decl_node_blk;
 
                 const list_start_tok: Ast.TokenIndex = fn_proto.lparen;
-                const list_end_tok: Ast.TokenIndex = handle.tree.lastToken(fn_proto.ast.proto_node);
+                const list_end_tok: Ast.TokenIndex = ast.lastToken(handle.tree, fn_proto.ast.proto_node);
 
                 if (handle.tree.tokensOnSameLine(list_start_tok, list_end_tok)) break :decl_node_blk;
                 try ranges.ensureUnusedCapacity(1 + fn_proto.ast.params.len); // best guess, doesn't include anytype params
@@ -2578,7 +2578,7 @@ fn foldingRangeHandler(server: *Server, request: types.FoldingRangeParams) !?[]t
             // .grouped_expression,
             => {
                 const start_tok = handle.tree.firstToken(node);
-                const end_tok = handle.tree.lastToken(node);
+                const end_tok = ast.lastToken(handle.tree, node);
                 _ = try helper.maybeAddTokRange(&ranges, handle.tree, start_tok, end_tok, .inclusive, server.offset_encoding);
             },
 
@@ -2625,7 +2625,7 @@ fn foldingRangeHandler(server: *Server, request: types.FoldingRangeParams) !?[]t
                 }
 
                 const start_tok = handle.tree.firstToken(node);
-                const end_tok = handle.tree.lastToken(node);
+                const end_tok = ast.lastToken(handle.tree, node);
                 _ = try helper.maybeAddTokRange(&ranges, handle.tree, start_tok, end_tok, .exclusive, server.offset_encoding);
             },
         }
