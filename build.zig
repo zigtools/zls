@@ -133,6 +133,7 @@ pub fn build(b: *std.build.Builder) !void {
     exe.install();
 
     const gen_exe = b.addExecutable("zls_gen", "src/config_gen/config_gen.zig");
+    gen_exe.addPackage(.{ .name = "tres", .source = .{ .path = "src/tres/tres.zig" } });
 
     const gen_cmd = gen_exe.run();
     gen_cmd.addArgs(&.{
@@ -140,6 +141,10 @@ pub fn build(b: *std.build.Builder) !void {
         b.fmt("{s}/schema.json", .{b.build_root}),
         b.fmt("{s}/README.md", .{b.build_root}),
     });
+
+    if (b.option([]const u8, "vscode-config-path", "Output path to vscode-config")) |path| {
+        gen_cmd.addArg(b.pathFromRoot(path));
+    }
 
     const gen_step = b.step("gen", "Regenerate config files");
     gen_step.dependOn(&gen_cmd.step);
