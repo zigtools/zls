@@ -86,6 +86,9 @@ The following options are currently available.
 | `include_at_in_builtins` | `bool` | `false` | Whether the @ sign should be part of the completion of builtins |
 | `skip_std_references` | `bool` | `false` | When true, skips searching for references in std. Improves lookup speed for functions in user's code. Renaming and go-to-definition will continue to work as is |
 | `max_detail_length` | `usize` | `1048576` | The detail field of completions is truncated to be no longer than this (in bytes) |
+| `record_session` | `bool` | `false` | When true, zls will record all request is receives and write in into `record_session_path`, so that they can replayed with `zls replay` |
+| `record_session_path` | `?[]const u8` | `null` | Output file path when `record_session` is set. The recommended file extension *.zlsreplay |
+| `replay_session_path` | `?[]const u8` | `null` | Used when calling `zls replay` for specifying the replay file. If no extra argument is given `record_session_path` is used as the default path. |
 | `builtin_path` | `?[]const u8` | `null` | Path to 'builtin;' useful for debugging, automatically set if let null |
 | `zig_lib_path` | `?[]const u8` | `null` | Zig library path, e.g. `/path/to/zig/lib/zig`, used to analyze std library imports |
 | `zig_exe_path` | `?[]const u8` | `null` | Zig executable path, e.g. `/path/to/zig/zig`, used to run the custom build runner. If `null`, zig is looked up in `PATH`. Will be used to infer the zig standard library path if none is provided |

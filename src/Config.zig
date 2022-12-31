@@ -55,6 +55,15 @@ skip_std_references: bool = false,
 /// The detail field of completions is truncated to be no longer than this (in bytes)
 max_detail_length: usize = 1048576,
 
+/// When true, zls will record all request is receives and write in into `record_session_path`, so that they can replayed with `zls replay`
+record_session: bool = false,
+
+/// Output file path when `record_session` is set. The recommended file extension *.zlsreplay
+record_session_path: ?[]const u8 = null,
+
+/// Used when calling `zls replay` for specifying the replay file. If no extra argument is given `record_session_path` is used as the default path.
+replay_session_path: ?[]const u8 = null,
+
 /// Path to 'builtin;' useful for debugging, automatically set if let null
 builtin_path: ?[]const u8 = null,
 
