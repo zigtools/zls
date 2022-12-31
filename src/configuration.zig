@@ -129,13 +129,22 @@ pub fn configChanged(config: *Config, allocator: std.mem.Allocator, builtin_crea
         };
     }
 
-    if (null == config.build_runner_path) {
+    if (config.build_runner_path == null) {
         config.build_runner_path = try std.fs.path.resolve(allocator, &[_][]const u8{ config.global_cache_path.?, "build_runner.zig" });
 
         const file = try std.fs.createFileAbsolute(config.build_runner_path.?, .{});
         defer file.close();
 
         try file.writeAll(@embedFile("special/build_runner.zig"));
+    }
+
+    if (config.diagnostics_build_runner_path == null) {
+        config.diagnostics_build_runner_path = try std.fs.path.resolve(allocator, &[_][]const u8{ config.global_cache_path.?, "diagnostics_build_runner.zig" });
+
+        const file = try std.fs.createFileAbsolute(config.diagnostics_build_runner_path.?, .{});
+        defer file.close();
+
+        try file.writeAll(@embedFile("special/diagnostics_build_runner.zig"));
     }
 }
 

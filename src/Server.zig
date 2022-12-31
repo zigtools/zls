@@ -219,6 +219,7 @@ fn generateDiagnostics(server: *Server, handle: DocumentStore.Handle) !types.Pub
 
     if (server.config.enable_ast_check_diagnostics and tree.errors.len == 0) {
         try getAstCheckDiagnostics(server, handle, &diagnostics);
+        try getFullCompilationDiagnostics(server, handle, &diagnostics);
     }
 
     if (server.config.warn_style) {
@@ -466,6 +467,101 @@ fn getAstCheckDiagnostics(
         diagnostic.relatedInformation = try last_related_diagnostics.toOwnedSlice(allocator);
         try diagnostics.append(allocator, diagnostic.*);
         last_diagnostic = null;
+    }
+}
+
+/// TODO: Memory
+pub fn getFullCompilationDiagnostics(
+    server: *Server,
+    handle: DocumentStore.Handle,
+    diagnostics: *std.ArrayListUnmanaged(types.Diagnostic),
+) !void {
+    var allocator = server.arena.allocator();
+    const config = server.config;
+
+    const build_file_uri = handle.associated_build_file orelse return;
+    const build_file = server.document_store.build_files.get(build_file_uri).?;
+
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    const arena_allocator = arena.allocator();
+
+    const build_file_path = try uri_utils.parse(arena_allocator, build_file.uri);
+    const directory_path = try std.fs.path.resolve(arena_allocator, &.{ build_file_path, "../" });
+
+    // TODO extract this option from `BuildAssociatedConfig.BuildOption`
+    const zig_cache_root: []const u8 = try std.fs.path.join(arena_allocator, &.{ directory_path, "zig-cache" });
+    // Since we don't compile anything and no packages should put their
+    // files there this path can be ignored
+    const zig_global_cache_root: []const u8 = "ZLS_DONT_CARE";
+
+    const standard_args = [_][]const u8{
+        config.zig_exe_path.?,
+        "run",
+        config.diagnostics_build_runner_path.?,
+        "--cache-dir",
+        config.global_cache_path.?,
+        "--pkg-begin",
+        "@build@",
+        build_file_path,
+        "--pkg-end",
+        "--",
+        config.zig_exe_path.?,
+        directory_path,
+        zig_cache_root,
+        zig_global_cache_root,
+    };
+
+    const arg_length = standard_args.len + if (build_file.build_associated_config) |cfg| if (cfg.build_options) |options| options.len else 0 else 0;
+    var args = try std.ArrayListUnmanaged([]const u8).initCapacity(arena_allocator, arg_length);
+    args.appendSliceAssumeCapacity(standard_args[0..]);
+    if (build_file.build_associated_config) |cfg| {
+        if (cfg.build_options) |options| {
+            for (options) |opt| {
+                args.appendAssumeCapacity(try opt.formatParam(arena_allocator));
+            }
+        }
+    }
+
+    const zig_run_result = try std.ChildProcess.exec(.{
+        .allocator = arena_allocator,
+        .argv = args.items,
+    });
+
+    var line_iterator = std.mem.split(u8, zig_run_result.stderr, "\n");
+
+    while (line_iterator.next()) |line| lin: {
+        if (std.mem.startsWith(u8, line, " ")) continue;
+
+        var pos_and_diag_iterator = std.mem.split(u8, line, ":");
+        const maybe_first = pos_and_diag_iterator.next();
+        if (maybe_first) |first| {
+            if (first.len <= 1) break :lin;
+        } else break;
+
+        const utf8_position = types.Position{
+            .line = (std.fmt.parseInt(u32, pos_and_diag_iterator.next().?, 10) catch continue) - 1,
+            .character = (std.fmt.parseInt(u32, pos_and_diag_iterator.next().?, 10) catch continue) - 1,
+        };
+
+        // zig uses utf-8 encoding for character offsets
+        const position = offsets.convertPositionEncoding(handle.text, utf8_position, .@"utf-8", server.offset_encoding);
+        const range = offsets.tokenPositionToRange(handle.text, position, server.offset_encoding);
+
+        const msg = pos_and_diag_iterator.rest()[1..];
+
+        if (std.mem.startsWith(u8, msg, "error: ")) {
+            try diagnostics.append(allocator, types.Diagnostic{
+                .range = range,
+                .severity = .Error,
+                .code = .{ .string = "compile_error" },
+                .source = "zls",
+                .message = try server.arena.allocator().dupe(u8, msg["error: ".len..]),
+            });
+        }
     }
 }
 
@@ -3023,7 +3119,13 @@ fn processMessage(server: *Server, message: Message) Error!void {
             const ParamsType = handler_info.params[1].type.?; // TODO add error message on null
 
             const params: ParamsType = tres.parse(ParamsType, message.params().?, server.arena.allocator()) catch return error.InternalError;
-            const response = handler(server, params) catch return error.InternalError;
+            const response = handler(server, params) catch |err| {
+                std.log.err("{s}", .{@errorName(err)});
+                if (@errorReturnTrace()) |trace| {
+                    std.debug.dumpStackTrace(trace.*);
+                }
+                return error.InternalError;
+            };
 
             if (@TypeOf(response) == void) return;
 

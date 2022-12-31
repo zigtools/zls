@@ -73,8 +73,11 @@ zig_lib_path: ?[]const u8 = null,
 /// Zig executable path, e.g. `/path/to/zig/zig`, used to run the custom build runner. If `null`, zig is looked up in `PATH`. Will be used to infer the zig standard library path if none is provided
 zig_exe_path: ?[]const u8 = null,
 
-/// Path to the `build_runner.zig` file provided by zls. null is equivalent to `${executable_directory}/build_runner.zig`
+/// Path to the `build_runner.zig` file provided by zls.
 build_runner_path: ?[]const u8 = null,
+
+/// Path to the `diagnostics_build_runner.zig` file provided by zls.
+diagnostics_build_runner_path: ?[]const u8 = null,
 
 /// Path to a directroy that will be used as zig's cache. null is equivalent to `${KnownFloders.Cache}/zls`
 global_cache_path: ?[]const u8 = null,
