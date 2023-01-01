@@ -28,7 +28,7 @@ pub fn computeHash(bytes: []const u8) Hash {
     return hash;
 }
 
-const BuildFile = struct {
+pub const BuildFile = struct {
     uri: Uri,
     /// contains information extracted from running build.zig with a custom build runner
     /// e.g. include paths & packages

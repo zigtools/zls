@@ -20,6 +20,7 @@ const tracy = @import("tracy.zig");
 const uri_utils = @import("uri.zig");
 const diff = @import("diff.zig");
 const ComptimeInterpreter = @import("ComptimeInterpreter.zig");
+const CompilationDiagnostics = @import("CompilationDiagnostics.zig");
 
 const data = @import("data/data.zig");
 const snipped_data = @import("data/snippets.zig");
@@ -40,6 +41,8 @@ outgoing_messages: std.ArrayListUnmanaged([]const u8) = .{},
 recording_enabled: bool,
 replay_enabled: bool,
 offset_encoding: offsets.Encoding = .@"utf-16",
+compilation_diagnostics: CompilationDiagnostics,
+
 status: enum {
     /// the server has not received a `initialize` request
     uninitialized,
@@ -219,7 +222,10 @@ fn generateDiagnostics(server: *Server, handle: DocumentStore.Handle) !types.Pub
 
     if (server.config.enable_ast_check_diagnostics and tree.errors.len == 0) {
         try getAstCheckDiagnostics(server, handle, &diagnostics);
-        try getFullCompilationDiagnostics(server, handle, &diagnostics);
+    }
+
+    if (server.compilation_diagnostics.diagnostics.get(handle.uri)) |diags| {
+        try diagnostics.appendSlice(allocator, diags.items);
     }
 
     if (server.config.warn_style) {
@@ -496,7 +502,7 @@ pub fn getFullCompilationDiagnostics(
     const zig_cache_root: []const u8 = try std.fs.path.join(arena_allocator, &.{ directory_path, "zig-cache" });
     // Since we don't compile anything and no packages should put their
     // files there this path can be ignored
-    const zig_global_cache_root: []const u8 = "ZLS_DONT_CARE";
+    const zig_global_cache_root: []const u8 = server.config.global_cache_path;
 
     const standard_args = [_][]const u8{
         config.zig_exe_path.?,
@@ -2039,6 +2045,8 @@ fn saveDocumentHandler(server: *Server, notification: types.DidSaveTextDocumentP
     const handle = server.document_store.getHandle(uri) orelse return;
     try server.document_store.applySave(handle);
 
+    try server.compilation_diagnostics.restart(server, handle.*);
+
     if (handle.tree.errors.len != 0) return;
     if (!server.config.enable_ast_check_diagnostics) return;
     if (!server.config.enable_autofix) return;
@@ -3059,6 +3067,8 @@ fn processMessage(server: *Server, message: Message) Error!void {
     }
 
     const start_time = std.time.milliTimestamp();
+    try server.compilation_diagnostics.advance(server);
+
     defer {
         // makes `zig build test` look nice
         if (!zig_builtin.is_test and !std.mem.eql(u8, method, "shutdown")) {
@@ -3193,6 +3203,7 @@ pub fn init(
         .recording_enabled = recording_enabled,
         .replay_enabled = replay_enabled,
         .status = .uninitialized,
+        .compilation_diagnostics = CompilationDiagnostics.init(allocator),
     };
 }
 
