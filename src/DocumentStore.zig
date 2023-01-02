@@ -653,14 +653,14 @@ fn createDocument(self: *DocumentStore, uri: Uri, text: [:0]u8, open: bool) erro
             self.build_files.swapRemoveAt(gop.index);
             log.debug("Failed to load build file {s}: (error: {})", .{ uri, err });
         }
-        if(!gop.found_existing) {
+        if (!gop.found_existing) {
             const duped_uri = try self.allocator.dupe(u8, uri);
             gop.value_ptr.* = try self.createBuildFile(duped_uri);
             gop.key_ptr.* = gop.value_ptr.uri;
         }
     } else if (self.config.zig_exe_path != null and !isBuiltinFile(handle.uri) and !isInStd(handle.uri)) blk: {
         // log.debug("Going to walk down the tree towards: {s}", .{uri});
-        
+
         // walk down the tree towards the uri. When we hit build.zig files
         // determine if the uri we're interested in is involved with the build.
         // This ensures that _relevant_ build.zig files higher in the
