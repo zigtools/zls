@@ -203,7 +203,6 @@ fn parseArgs(allocator: std.mem.Allocator) !ParseArgsResult {
     const ArgId = enum {
         help,
         version,
-        config,
         replay,
         @"enable-debug-log",
         @"show-config-path",
@@ -315,7 +314,10 @@ fn parseArgs(allocator: std.mem.Allocator) !ParseArgsResult {
         const full_path = if (new_config.config_path) |path| blk: {
             break :blk try std.fs.path.resolve(allocator, &.{ path, "zls.json" });
         } else blk: {
-            const local_config_path = try known_folders.getPath(allocator, .local_configuration);
+            const local_config_path = try known_folders.getPath(allocator, .local_configuration) orelse {
+                logger.err("failed to find local configuration folder", .{});
+                return result;
+            };
             defer allocator.free(local_config_path);
             break :blk try std.fs.path.resolve(allocator, &.{ local_config_path, "zls.json" });
         };
