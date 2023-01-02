@@ -49,9 +49,9 @@ pub fn parse(allocator: std.mem.Allocator, include_carriage_return: bool, reader
 
 pub fn write(header: Header, include_carriage_return: bool, writer: anytype) @TypeOf(writer).Error!void {
     const seperator: []const u8 = if (include_carriage_return) "\r\n" else "\n";
-    try writer.print("Content-Length: {}{s}", .{header.content_length, seperator});
+    try writer.print("Content-Length: {}{s}", .{ header.content_length, seperator });
     if (header.content_type) |content_type| {
-        try writer.print("Content-Type: {s}{s}", .{content_type, seperator});
+        try writer.print("Content-Type: {s}{s}", .{ content_type, seperator });
     }
     try writer.writeAll(seperator);
 }

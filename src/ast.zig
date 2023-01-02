@@ -539,7 +539,7 @@ pub fn lastToken(tree: Ast, node: Ast.Node.Index) Ast.TokenIndex {
         .container_decl_arg_trailing,
         .switch_comma,
         => {
-            if(datas[n].rhs != 0) {
+            if (datas[n].rhs != 0) {
                 const members = tree.extraData(datas[n].rhs, Node.SubRange);
                 std.debug.assert(members.end - members.start > 0);
                 end_offset += 2; // for the comma + rbrace

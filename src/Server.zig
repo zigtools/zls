@@ -53,13 +53,13 @@ status: enum {
 
 // Code was based off of https://github.com/andersfr/zig-lsp/blob/master/server.zig
 
-const ClientCapabilities = struct {
+const ClientCapabilities = packed struct {
     supports_snippets: bool = false,
-    supports_semantic_tokens: bool = false,
-    supports_inlay_hints: bool = false,
+    supports_apply_edits: bool = false,
     supports_will_save: bool = false,
     supports_will_save_wait_until: bool = false,
     supports_publish_diagnostics: bool = false,
+    supports_code_action_fixall: bool = false,
     hover_supports_md: bool = false,
     completion_doc_supports_md: bool = false,
     label_details_support: bool = false,
@@ -469,8 +469,26 @@ fn getAstCheckDiagnostics(
     }
 }
 
+fn getAutofixMode(server: *Server) enum {
+    on_save,
+    will_save_wait_until,
+    fixall,
+    none,
+} {
+    if (!server.config.enable_autofix) return .none;
+    if (server.client_capabilities.supports_code_action_fixall) return .fixall;
+    if (server.client_capabilities.supports_apply_edits) {
+        if (server.client_capabilities.supports_will_save_wait_until) return .will_save_wait_until;
+        return .on_save;
+    }
+    return .none;
+}
+
 /// caller owns returned memory.
 fn autofix(server: *Server, allocator: std.mem.Allocator, handle: *const DocumentStore.Handle) !std.ArrayListUnmanaged(types.TextEdit) {
+    if (!server.config.enable_ast_check_diagnostics) return .{};
+
+    if (handle.tree.errors.len != 0) return .{};
     var diagnostics = std.ArrayListUnmanaged(types.Diagnostic){};
     try getAstCheckDiagnostics(server, handle.*, &diagnostics);
 
@@ -1564,11 +1582,16 @@ fn initializeHandler(server: *Server, request: types.InitializeParams) !types.In
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
+    var skip_set_fixall = false;
+
     if (request.clientInfo) |clientInfo| {
         log.info("client is '{s}-{s}'", .{ clientInfo.name, clientInfo.version orelse "<no version>" });
 
         if (std.mem.eql(u8, clientInfo.name, "Sublime Text LSP")) blk: {
             server.config.max_detail_length = 256;
+            // TODO investigate why fixall doesn't work in sublime text
+            server.client_capabilities.supports_code_action_fixall = false;
+            skip_set_fixall = true;
 
             const version_str = clientInfo.version orelse break :blk;
             const version = std.SemanticVersion.parse(version_str) catch break :blk;
@@ -1577,6 +1600,9 @@ fn initializeHandler(server: *Server, request: types.InitializeParams) !types.In
             if (version.major == 0) {
                 server.config.include_at_in_builtins = true;
             }
+        } else if (std.mem.eql(u8, clientInfo.name, "Visual Studio Code")) {
+            server.client_capabilities.supports_code_action_fixall = true;
+            skip_set_fixall = true;
         }
     }
 
@@ -1604,8 +1630,6 @@ fn initializeHandler(server: *Server, request: types.InitializeParams) !types.In
     }
 
     if (request.capabilities.textDocument) |textDocument| {
-        server.client_capabilities.supports_semantic_tokens = textDocument.semanticTokens != null;
-        server.client_capabilities.supports_inlay_hints = textDocument.inlayHint != null;
         server.client_capabilities.supports_publish_diagnostics = textDocument.publishDiagnostics != null;
         if (textDocument.hover) |hover| {
             if (hover.contentFormat) |content_format| {
@@ -1635,6 +1659,14 @@ fn initializeHandler(server: *Server, request: types.InitializeParams) !types.In
             server.client_capabilities.supports_will_save = synchronization.willSave orelse false;
             server.client_capabilities.supports_will_save_wait_until = synchronization.willSaveWaitUntil orelse false;
         }
+        if (textDocument.codeAction) |codeaction| {
+            if (codeaction.codeActionLiteralSupport) |literlSupport| {
+                if (!skip_set_fixall) {
+                    const fixall = std.mem.indexOfScalar(types.CodeActionKind, literlSupport.codeActionKind.valueSet, .@"source.fixAll") != null;
+                    server.client_capabilities.supports_code_action_fixall = fixall;
+                }
+            }
+        }
     }
 
     // NOTE: everything is initialized, we got the client capabilities
@@ -1646,6 +1678,7 @@ fn initializeHandler(server: *Server, request: types.InitializeParams) !types.In
     }
 
     if (request.capabilities.workspace) |workspace| {
+        server.client_capabilities.supports_apply_edits = workspace.applyEdit orelse false;
         server.client_capabilities.supports_configuration = workspace.configuration orelse false;
         if (workspace.didChangeConfiguration) |did_change| {
             if (did_change.dynamicRegistration orelse false) {
@@ -1943,25 +1976,21 @@ fn saveDocumentHandler(server: *Server, notification: types.DidSaveTextDocumentP
     const handle = server.document_store.getHandle(uri) orelse return;
     try server.document_store.applySave(handle);
 
-    if (handle.tree.errors.len != 0) return;
-    if (!server.config.enable_ast_check_diagnostics) return;
-    if (!server.config.enable_autofix) return;
-    if (server.client_capabilities.supports_will_save) return;
-    if (server.client_capabilities.supports_will_save_wait_until) return;
+    if (server.getAutofixMode() == .on_save) {
+        var text_edits = try server.autofix(allocator, handle);
 
-    var text_edits = try server.autofix(allocator, handle);
+        var workspace_edit = types.WorkspaceEdit{ .changes = .{} };
+        try workspace_edit.changes.?.putNoClobber(allocator, uri, try text_edits.toOwnedSlice(allocator));
 
-    var workspace_edit = types.WorkspaceEdit{ .changes = .{} };
-    try workspace_edit.changes.?.putNoClobber(allocator, uri, try text_edits.toOwnedSlice(allocator));
-
-    server.sendRequest(
-        .{ .string = "apply_edit" },
-        "workspace/applyEdit",
-        types.ApplyWorkspaceEditParams{
-            .label = "autofix",
-            .edit = workspace_edit,
-        },
-    );
+        server.sendRequest(
+            .{ .string = "apply_edit" },
+            "workspace/applyEdit",
+            types.ApplyWorkspaceEditParams{
+                .label = "autofix",
+                .edit = workspace_edit,
+            },
+        );
+    }
 }
 
 fn closeDocumentHandler(server: *Server, notification: types.DidCloseTextDocumentParams) error{}!void {
@@ -1971,27 +2000,15 @@ fn closeDocumentHandler(server: *Server, notification: types.DidCloseTextDocumen
     server.document_store.closeDocument(notification.textDocument.uri);
 }
 
-fn willSaveHandler(server: *Server, request: types.WillSaveTextDocumentParams) !?[]types.TextEdit {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    if (server.client_capabilities.supports_will_save_wait_until) return null;
-    return try willSaveWaitUntilHandler(server, request);
-}
-
 fn willSaveWaitUntilHandler(server: *Server, request: types.WillSaveTextDocumentParams) !?[]types.TextEdit {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
     const allocator = server.arena.allocator();
 
-    if (!server.config.enable_ast_check_diagnostics) return null;
-    if (!server.config.enable_autofix) return null;
+    if (server.getAutofixMode() != .will_save_wait_until) return null;
 
-    const uri = request.textDocument.uri;
-
-    const handle = server.document_store.getHandle(uri) orelse return null;
-    if (handle.tree.errors.len != 0) return null;
+    const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
 
     var text_edits = try server.autofix(allocator, handle);
 
@@ -2422,15 +2439,15 @@ fn codeActionHandler(server: *Server, request: types.CodeActionParams) !?[]types
         .offset_encoding = server.offset_encoding,
     };
 
-    var actions = std.ArrayListUnmanaged(types.CodeAction){};
-
-    for (request.context.diagnostics) |diagnostic| {
-        try builder.generateCodeAction(diagnostic, &actions);
+    // as of right now, only ast-check errors may get a code action
+    var diagnostics = std.ArrayListUnmanaged(types.Diagnostic){};
+    if (server.config.enable_ast_check_diagnostics and handle.tree.errors.len == 0) {
+        try getAstCheckDiagnostics(server, handle.*, &diagnostics);
     }
 
-    for (actions.items) |*action| {
-        // TODO query whether SourceFixAll is supported by the server
-        if (action.kind.? == .@"source.fixAll") action.kind = .quickfix;
+    var actions = std.ArrayListUnmanaged(types.CodeAction){};
+    for (diagnostics.items) |diagnostic| {
+        try builder.generateCodeAction(diagnostic, &actions);
     }
 
     return actions.items;
@@ -2981,7 +2998,6 @@ fn processMessage(server: *Server, message: Message) Error!void {
         .{ "textDocument/didChange", changeDocumentHandler },
         .{ "textDocument/didSave", saveDocumentHandler },
         .{ "textDocument/didClose", closeDocumentHandler },
-        .{ "textDocument/willSave", willSaveHandler },
         .{ "textDocument/willSaveWaitUntil", willSaveWaitUntilHandler },
         .{ "textDocument/semanticTokens/full", semanticTokensFullHandler },
         .{ "textDocument/inlayHint", inlayHintHandler },

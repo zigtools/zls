@@ -188,14 +188,14 @@ fn generateVSCodeConfigFile(allocator: std.mem.Allocator, config: Config, path: 
     configuration.putAssumeCapacityNoClobber("trace.server", .{
         .scope = "window",
         .type = "string",
-        .@"enum" = &.{"off", "message", "verbose"},
+        .@"enum" = &.{ "off", "message", "verbose" },
         .description = "Traces the communication between VS Code and the language server.",
-        .default = .{.String = "off"},
+        .default = .{ .String = "off" },
     });
     configuration.putAssumeCapacityNoClobber("check_for_update", .{
         .type = "boolean",
         .description = "Whether to automatically check for new updates",
-        .default = .{.Bool = true},
+        .default = .{ .Bool = true },
     });
     configuration.putAssumeCapacityNoClobber("path", .{
         .type = "string",
@@ -214,7 +214,7 @@ fn generateVSCodeConfigFile(allocator: std.mem.Allocator, config: Config, path: 
             .type = try zigTypeToTypescript(option.type),
             .description = option.description,
             .format = if (std.mem.indexOf(u8, option.name, "path") != null) "path" else null,
-            .default = if(default == .Null) null else default,
+            .default = if (default == .Null) null else default,
         });
     }
 

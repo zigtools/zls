@@ -1466,7 +1466,7 @@ pub fn getImportStr(tree: Ast, node: Ast.Node.Index, source_index: usize) ?[]con
 
     if (params.len != 1) return null;
 
-    if(node_tags[params[0]] != .string_literal) return null;
+    if (node_tags[params[0]] != .string_literal) return null;
 
     const import_str = tree.tokenSlice(tree.nodes.items(.main_token)[params[0]]);
     return import_str[1 .. import_str.len - 1];
