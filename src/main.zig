@@ -6,7 +6,6 @@ const known_folders = @import("known-folders");
 const Config = @import("Config.zig");
 const configuration = @import("configuration.zig");
 const Server = @import("Server.zig");
-const setup = @import("setup.zig");
 const Header = @import("Header.zig");
 const debug = @import("debug.zig");
 
@@ -229,7 +228,6 @@ fn parseArgs(allocator: std.mem.Allocator) !ParseArgsResult {
         var cmd_infos: InfoMap = InfoMap.init(.{
             .help = "Prints this message.",
             .version = "Prints the compiler version with which the server was compiled.",
-            .config = "Run the ZLS configuration wizard.",
             .replay = "Replay a previous recorded zls session",
             .@"enable-debug-log" = "Enables debug logs.",
             .@"config-path" = "Specify the path to a configuration file specifying LSP behaviour.",
@@ -274,7 +272,11 @@ fn parseArgs(allocator: std.mem.Allocator) !ParseArgsResult {
         specified.set(id, true);
 
         switch (id) {
-            .help, .version, .@"enable-debug-log", .config, .@"show-config-path" => {},
+            .help,
+            .version,
+            .@"enable-debug-log",
+            .@"show-config-path",
+            => {},
             .@"config-path" => {
                 const path = args_it.next() orelse {
                     try stderr.print("Expected configuration file path after --config-path argument.\n", .{});
@@ -298,10 +300,6 @@ fn parseArgs(allocator: std.mem.Allocator) !ParseArgsResult {
         try stdout.writeAll(build_options.version ++ "\n");
         return result;
     }
-    if (specified.get(.config)) {
-        try setup.wizard(allocator);
-        return result;
-    }
     if (specified.get(.@"enable-debug-log")) {
         actual_log_level = .debug;
         logger.info("Enabled debug logging.\n", .{});
@@ -314,15 +312,16 @@ fn parseArgs(allocator: std.mem.Allocator) !ParseArgsResult {
         defer if (new_config.config_path) |path| allocator.free(path);
         defer std.json.parseFree(Config, new_config.config, .{ .allocator = allocator });
 
-        if (new_config.config_path) |path| {
-            const full_path = try std.fs.path.resolve(allocator, &.{ path, "zls.json" });
-            defer allocator.free(full_path);
-
-            try stdout.writeAll(full_path);
-            try stdout.writeByte('\n');
-        } else {
-            logger.err("Failed to find zls.json!\n", .{});
-        }
+        const full_path = if (new_config.config_path) |path| blk: {
+            break :blk try std.fs.path.resolve(allocator, &.{ path, "zls.json" });
+        } else blk: {
+            const local_config_path = try known_folders.getPath(allocator, .local_configuration);
+            defer allocator.free(local_config_path);
+            break :blk try std.fs.path.resolve(allocator, &.{ local_config_path, "zls.json" });
+        };
+        defer allocator.free(full_path);
+        try stdout.writeAll(full_path);
+        try stdout.writeByte('\n');
         return result;
     }
 
@@ -341,9 +340,9 @@ pub fn main() !void {
 
     var tracy_state = if (tracy.enable_allocation) tracy.tracyAllocator(gpa_state.allocator()) else void{};
     const inner_allocator: std.mem.Allocator = if (tracy.enable_allocation) tracy_state.allocator() else gpa_state.allocator();
-    
-    var failing_allocator_state = if(build_options.enable_failing_allocator) debug.FailingAllocator.init(inner_allocator, build_options.enable_failing_allocator_likelihood) else void{};
-    const allocator: std.mem.Allocator = if(build_options.enable_failing_allocator) failing_allocator_state.allocator() else inner_allocator;
+
+    var failing_allocator_state = if (build_options.enable_failing_allocator) debug.FailingAllocator.init(inner_allocator, build_options.enable_failing_allocator_likelihood) else void{};
+    const allocator: std.mem.Allocator = if (build_options.enable_failing_allocator) failing_allocator_state.allocator() else inner_allocator;
 
     const result = try parseArgs(allocator);
     defer if (result.config_path) |path| allocator.free(path);

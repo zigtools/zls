@@ -11,9 +11,6 @@ const ConfigOption = struct {
     type: []const u8,
     /// used in Config.zig as the default initializer
     default: []const u8,
-    /// If set, this option can be configured through `zls --config`
-    /// currently unused but could later be used to automatically generate queries for setup.zig
-    setup_question: ?[]const u8,
 };
 
 const Config = struct {
