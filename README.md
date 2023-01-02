@@ -34,7 +34,6 @@ Building `zls` is very easy. You will need [a build of Zig master](https://zigla
 git clone --recurse-submodules https://github.com/zigtools/zls
 cd zls
 zig build -Drelease-safe
-./zig-out/bin/zls --config # Configure ZLS
 ```
 
 #### Build Options
@@ -59,8 +58,10 @@ There is also a `generate-data.js` in the `src/data` folder, you'll need to run 
 
 ### Configuration Options
 
-You can configure zls by running `zls --config` or manually creating your own `zls.json` configuration file.
-zls will look for a zls.json configuration file in multiple locations with the following priority:
+You can configure zls by editing your `zls.json` configuration file.
+Running `zls --show-config-path` will a path to an already existing `zls.json` or a path to the local configuration folder instead.
+
+zls will look for a `zls.json` configuration file in multiple locations with the following priority:
 - In the local configuration folder of your OS (as provided by [known-folders](https://github.com/ziglibs/known-folders/blob/master/RESOURCES.md#folder-list))
 - In the global configuration folder of your OS (as provided by [known-folders](https://github.com/ziglibs/known-folders/blob/master/RESOURCES.md#folder-list))
 
