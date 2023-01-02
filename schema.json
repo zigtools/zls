@@ -7,7 +7,7 @@
         "enable_snippets": {
             "description": "Enables snippet completions when the client also supports them",
             "type": "boolean",
-            "default": "false"
+            "default": "true"
         },
         "enable_ast_check_diagnostics": {
             "description": "Whether to enable ast-check diagnostics",
@@ -17,12 +17,12 @@
         "enable_autofix": {
             "description": "Whether to automatically fix errors on save. Currently supports adding and removing discards.",
             "type": "boolean",
-            "default": "false"
+            "default": "true"
         },
         "enable_import_embedfile_argument_completions": {
             "description": "Whether to enable import/embedFile argument completions",
             "type": "boolean",
-            "default": "false"
+            "default": "true"
         },
         "enable_semantic_tokens": {
             "description": "Enables semantic token support when the client also supports it",
@@ -32,7 +32,7 @@
         "enable_inlay_hints": {
             "description": "Enables inlay hint support when the client also supports it",
             "type": "boolean",
-            "default": "false"
+            "default": "true"
         },
         "inlay_hints_show_builtin": {
             "description": "Enable inlay hints for builtin functions",

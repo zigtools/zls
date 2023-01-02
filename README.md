@@ -70,12 +70,12 @@ The following options are currently available.
 <!-- DO NOT EDIT | THIS SECTION IS AUTO-GENERATED | DO NOT EDIT -->
 | Option | Type | Default value | What it Does |
 | --- | --- | --- | --- |
-| `enable_snippets` | `bool` | `false` | Enables snippet completions when the client also supports them |
+| `enable_snippets` | `bool` | `true` | Enables snippet completions when the client also supports them |
 | `enable_ast_check_diagnostics` | `bool` | `true` | Whether to enable ast-check diagnostics |
-| `enable_autofix` | `bool` | `false` | Whether to automatically fix errors on save. Currently supports adding and removing discards. |
-| `enable_import_embedfile_argument_completions` | `bool` | `false` | Whether to enable import/embedFile argument completions |
+| `enable_autofix` | `bool` | `true` | Whether to automatically fix errors on save. Currently supports adding and removing discards. |
+| `enable_import_embedfile_argument_completions` | `bool` | `true` | Whether to enable import/embedFile argument completions |
 | `enable_semantic_tokens` | `bool` | `true` | Enables semantic token support when the client also supports it |
-| `enable_inlay_hints` | `bool` | `false` | Enables inlay hint support when the client also supports it |
+| `enable_inlay_hints` | `bool` | `true` | Enables inlay hint support when the client also supports it |
 | `inlay_hints_show_builtin` | `bool` | `true` | Enable inlay hints for builtin functions |
 | `inlay_hints_exclude_single_argument` | `bool` | `true` | Don't show inlay hints for single argument calls |
 | `inlay_hints_hide_redundant_param_names` | `bool` | `false` | Hides inlay hints when parameter name matches the identifier (e.g. foo: foo) |
