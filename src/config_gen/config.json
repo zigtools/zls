@@ -4,7 +4,7 @@
             "name": "enable_snippets",
             "description": "Enables snippet completions when the client also supports them",
             "type": "bool",
-            "default": "false",
+            "default": "true",
             "setup_question": "Do you want to enable snippets?"
         },
         {
@@ -18,14 +18,14 @@
             "name": "enable_autofix",
             "description": "Whether to automatically fix errors on save. Currently supports adding and removing discards.",
             "type": "bool",
-            "default": "false",
+            "default": "true",
             "setup_question": "Do you want to zls to automatically try to fix errors on save? (supports adding & removing discards)"
         },
         {
             "name": "enable_import_embedfile_argument_completions",
             "description": "Whether to enable import/embedFile argument completions",
             "type": "bool",
-            "default": "false",
+            "default": "true",
             "setup_question": "Do you want to enable @import/@embedFile argument path completion?"
         },
         {
@@ -39,7 +39,7 @@
             "name": "enable_inlay_hints",
             "description": "Enables inlay hint support when the client also supports it",
             "type": "bool",
-            "default": "false",
+            "default": "true",
             "setup_question": "Do you want to enable inlay hints?"
         },
         {
