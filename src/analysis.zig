@@ -1680,7 +1680,7 @@ pub fn getPositionContext(allocator: std.mem.Allocator, text: []const u8, doc_in
     return if (tok.tag == .identifier) PositionContext{ .var_access = tok.loc } else .empty;
 }
 
-fn addOutlineNodes(allocator: std.mem.Allocator, tree: Ast, child: Ast.Node.Index, context: *GetDocumentSymbolsContext) anyerror!void {
+fn addOutlineNodes(allocator: std.mem.Allocator, tree: Ast, child: Ast.Node.Index, context: *GetDocumentSymbolsContext) error{OutOfMemory}!void {
     switch (tree.nodes.items(.tag)[child]) {
         .string_literal,
         .number_literal,
@@ -1825,7 +1825,7 @@ const GetDocumentSymbolsContext = struct {
     encoding: offsets.Encoding,
 };
 
-fn getDocumentSymbolsInternal(allocator: std.mem.Allocator, tree: Ast, node: Ast.Node.Index, context: *GetDocumentSymbolsContext) anyerror!void {
+fn getDocumentSymbolsInternal(allocator: std.mem.Allocator, tree: Ast, node: Ast.Node.Index, context: *GetDocumentSymbolsContext) error{OutOfMemory}!void {
     const name = getDeclName(tree, node) orelse return;
     if (name.len == 0)
         return;

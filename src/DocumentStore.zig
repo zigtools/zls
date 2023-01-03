@@ -921,7 +921,7 @@ pub fn uriFromImportStr(self: *const DocumentStore, allocator: std.mem.Allocator
     }
 }
 
-fn tagStoreCompletionItems(self: DocumentStore, arena: std.mem.Allocator, handle: Handle, comptime name: []const u8) ![]types.CompletionItem {
+fn tagStoreCompletionItems(self: DocumentStore, arena: std.mem.Allocator, handle: Handle, comptime name: []const u8) error{OutOfMemory}![]types.CompletionItem {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -944,11 +944,11 @@ fn tagStoreCompletionItems(self: DocumentStore, arena: std.mem.Allocator, handle
     return result_set.entries.items(.key);
 }
 
-pub fn errorCompletionItems(self: DocumentStore, arena: std.mem.Allocator, handle: Handle) ![]types.CompletionItem {
+pub fn errorCompletionItems(self: DocumentStore, arena: std.mem.Allocator, handle: Handle) error{OutOfMemory}![]types.CompletionItem {
     return try self.tagStoreCompletionItems(arena, handle, "error_completions");
 }
 
-pub fn enumCompletionItems(self: DocumentStore, arena: std.mem.Allocator, handle: Handle) ![]types.CompletionItem {
+pub fn enumCompletionItems(self: DocumentStore, arena: std.mem.Allocator, handle: Handle) error{OutOfMemory}![]types.CompletionItem {
     return try self.tagStoreCompletionItems(arena, handle, "enum_completions");
 }
 
