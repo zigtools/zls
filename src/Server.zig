@@ -521,18 +521,20 @@ pub fn autofix(server: *Server, allocator: std.mem.Allocator, handle: *const Doc
         .offset_encoding = server.offset_encoding,
     };
 
-    var actions = std.ArrayListUnmanaged(types.CodeAction){};
-    for (diagnostics.items) |diagnostic| {
-        try builder.generateCodeAction(diagnostic, &actions);
-    }
+    try builder.generateCodeActions(diagnostics.items);
 
     var text_edits = std.ArrayListUnmanaged(types.TextEdit){};
-    for (actions.items) |action| {
+    for (builder.actions.items) |action| {
         std.debug.assert(action.kind != null);
         std.debug.assert(action.edit != null);
         std.debug.assert(action.edit.?.changes != null);
 
-        if (action.kind.? != .@"source.fixAll") continue;
+        switch (action.kind.?) {
+            .@"source.organizeImports",
+            .@"source.fixAll",
+            => {},
+            else => continue,
+        }
 
         const changes = action.edit.?.changes.?;
         if (changes.count() != 1) continue;
@@ -1450,13 +1452,6 @@ fn inlayHintHandler(server: *Server, request: types.InlayHintParams) Error!?[]ty
 fn codeActionHandler(server: *Server, request: types.CodeActionParams) Error!?[]types.CodeAction {
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
 
-    var builder = code_actions.Builder{
-        .arena = server.arena.allocator(),
-        .analyser = &server.analyser,
-        .handle = handle,
-        .offset_encoding = server.offset_encoding,
-    };
-
     // as of right now, only ast-check errors may get a code action
     var diagnostics = std.ArrayListUnmanaged(types.Diagnostic){};
     if (server.config.enable_ast_check_diagnostics and handle.tree.errors.len == 0) blk: {
@@ -1467,12 +1462,16 @@ fn codeActionHandler(server: *Server, request: types.CodeActionParams) Error!?[]
         };
     }
 
-    var actions = std.ArrayListUnmanaged(types.CodeAction){};
-    for (diagnostics.items) |diagnostic| {
-        try builder.generateCodeAction(diagnostic, &actions);
-    }
+    var builder = code_actions.Builder{
+        .arena = server.arena.allocator(),
+        .analyser = &server.analyser,
+        .handle = handle,
+        .offset_encoding = server.offset_encoding,
+    };
 
-    return actions.items;
+    try builder.generateCodeActions(diagnostics.items);
+
+    return builder.actions.items;
 }
 
 fn foldingRangeHandler(server: *Server, request: types.FoldingRangeParams) Error!?[]types.FoldingRange {

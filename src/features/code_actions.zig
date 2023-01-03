@@ -12,35 +12,19 @@ pub const Builder = struct {
     arena: std.mem.Allocator,
     analyser: *Analyser,
     handle: *const DocumentStore.Handle,
+    range: ?types.Range = null,
+    actions: std.ArrayListUnmanaged(types.CodeAction) = .{},
     offset_encoding: offsets.Encoding,
 
-    pub fn generateCodeAction(builder: *Builder, diagnostic: types.Diagnostic, actions: *std.ArrayListUnmanaged(types.CodeAction)) error{OutOfMemory}!void {
-        const kind = DiagnosticKind.parse(diagnostic.message) orelse return;
-
-        const loc = offsets.rangeToLoc(builder.handle.text, diagnostic.range, builder.offset_encoding);
-
-        switch (kind) {
-            .unused => |id| switch (id) {
-                .@"function parameter" => try handleUnusedFunctionParameter(builder, actions, loc),
-                .@"local constant" => try handleUnusedVariableOrConstant(builder, actions, loc),
-                .@"local variable" => try handleUnusedVariableOrConstant(builder, actions, loc),
-                .@"loop index capture" => try handleUnusedIndexCapture(builder, actions, loc),
-                .capture => try handleUnusedCapture(builder, actions, loc),
-            },
-            .non_camelcase_fn => try handleNonCamelcaseFunction(builder, actions, loc),
-            .pointless_discard => try handlePointlessDiscard(builder, actions, loc),
-            .omit_discard => |id| switch (id) {
-                .@"index capture" => try handleUnusedIndexCapture(builder, actions, loc),
-                .@"error capture" => try handleUnusedCapture(builder, actions, loc),
-            },
-            // the undeclared identifier may be a discard
-            .undeclared_identifier => try handlePointlessDiscard(builder, actions, loc),
-            .unreachable_code => {
-                // TODO
-                // autofix: comment out code
-                // fix: remove code
-            },
+    pub fn generateCodeActions(
+        builder: *Builder,
+        diagnostisc: []const types.Diagnostic,
+    ) error{OutOfMemory}!void {
+        for (diagnostisc) |diagnostis| {
+            try handleDiagnostic(builder, diagnostis);
         }
+
+        try handleSortingImports(builder);
     }
 
     pub fn createTextEditLoc(self: *Builder, loc: offsets.Loc, new_text: []const u8) types.TextEdit {
@@ -59,26 +43,60 @@ pub const Builder = struct {
 
         return workspace_edit;
     }
+
+    pub fn createCodeAction(self: *Builder, code_action: types.CodeAction) error{OutOfMemory}!void {
+        try self.actions.append(self.arena, code_action);
+    }
 };
 
-fn handleNonCamelcaseFunction(builder: *Builder, actions: *std.ArrayListUnmanaged(types.CodeAction), loc: offsets.Loc) !void {
+pub fn handleDiagnostic(
+    builder: *Builder,
+    diagnostic: types.Diagnostic,
+) error{OutOfMemory}!void {
+    const kind = DiagnosticKind.parse(diagnostic.message) orelse return;
+
+    const loc = offsets.rangeToLoc(builder.handle.text, diagnostic.range, builder.offset_encoding);
+
+    switch (kind) {
+        .unused => |id| switch (id) {
+            .@"function parameter" => try handleUnusedFunctionParameter(builder, loc),
+            .@"local constant" => try handleUnusedVariableOrConstant(builder, loc),
+            .@"local variable" => try handleUnusedVariableOrConstant(builder, loc),
+            .@"loop index capture" => try handleUnusedIndexCapture(builder, loc),
+            .capture => try handleUnusedCapture(builder, loc),
+        },
+        .non_camelcase_fn => try handleNonCamelcaseFunction(builder, loc),
+        .pointless_discard => try handlePointlessDiscard(builder, loc),
+        .omit_discard => |id| switch (id) {
+            .@"index capture" => try handleUnusedIndexCapture(builder, loc),
+            .@"error capture" => try handleUnusedCapture(builder, loc),
+        },
+        // the undeclared identifier may be a discard
+        .undeclared_identifier => try handlePointlessDiscard(builder, loc),
+        .unreachable_code => {
+            // TODO
+            // autofix: comment out code
+            // fix: remove code
+        },
+    }
+}
+
+fn handleNonCamelcaseFunction(builder: *Builder, loc: offsets.Loc) !void {
     const identifier_name = offsets.locToSlice(builder.handle.text, loc);
 
     if (std.mem.allEqual(u8, identifier_name, '_')) return;
 
     const new_text = try createCamelcaseText(builder.arena, identifier_name);
 
-    const action1 = types.CodeAction{
+    try builder.createCodeAction(.{
         .title = "make function name camelCase",
         .kind = .quickfix,
         .isPreferred = true,
         .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditLoc(loc, new_text)}),
-    };
-
-    try actions.append(builder.arena, action1);
+    });
 }
 
-fn handleUnusedFunctionParameter(builder: *Builder, actions: *std.ArrayListUnmanaged(types.CodeAction), loc: offsets.Loc) !void {
+fn handleUnusedFunctionParameter(builder: *Builder, loc: offsets.Loc) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -110,25 +128,23 @@ fn handleUnusedFunctionParameter(builder: *Builder, actions: *std.ArrayListUnman
 
     const index = token_starts[node_tokens[block]] + 1;
 
-    const action1 = types.CodeAction{
+    try builder.createCodeAction(.{
         .title = "discard function parameter",
         .kind = .@"source.fixAll",
         .isPreferred = true,
         .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditPos(index, new_text)}),
-    };
+    });
 
     // TODO fix formatting
-    const action2 = types.CodeAction{
+    try builder.createCodeAction(.{
         .title = "remove function parameter",
         .kind = .quickfix,
         .isPreferred = false,
         .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditLoc(getParamRemovalRange(tree, payload.param), "")}),
-    };
-
-    try actions.appendSlice(builder.arena, &.{ action1, action2 });
+    });
 }
 
-fn handleUnusedVariableOrConstant(builder: *Builder, actions: *std.ArrayListUnmanaged(types.CodeAction), loc: offsets.Loc) !void {
+fn handleUnusedVariableOrConstant(builder: *Builder, loc: offsets.Loc) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -158,7 +174,7 @@ fn handleUnusedVariableOrConstant(builder: *Builder, actions: *std.ArrayListUnma
 
     const index = token_starts[last_token] + 1;
 
-    try actions.append(builder.arena, .{
+    try builder.createCodeAction(.{
         .title = "discard value",
         .kind = .@"source.fixAll",
         .isPreferred = true,
@@ -166,7 +182,7 @@ fn handleUnusedVariableOrConstant(builder: *Builder, actions: *std.ArrayListUnma
     });
 }
 
-fn handleUnusedIndexCapture(builder: *Builder, actions: *std.ArrayListUnmanaged(types.CodeAction), loc: offsets.Loc) !void {
+fn handleUnusedIndexCapture(builder: *Builder, loc: offsets.Loc) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -178,7 +194,7 @@ fn handleUnusedIndexCapture(builder: *Builder, actions: *std.ArrayListUnmanaged(
     if (is_value_discarded) {
         // |_, i| ->
         // TODO fix formatting
-        try actions.append(builder.arena, .{
+        try builder.createCodeAction(.{
             .title = "remove capture",
             .kind = .quickfix,
             .isPreferred = true,
@@ -187,7 +203,7 @@ fn handleUnusedIndexCapture(builder: *Builder, actions: *std.ArrayListUnmanaged(
     } else {
         // |v, i| -> |v|
         // |v, _| -> |v|
-        try actions.append(builder.arena, .{
+        try builder.createCodeAction(.{
             .title = "remove index capture",
             .kind = .quickfix,
             .isPreferred = true,
@@ -199,7 +215,7 @@ fn handleUnusedIndexCapture(builder: *Builder, actions: *std.ArrayListUnmanaged(
     }
 }
 
-fn handleUnusedCapture(builder: *Builder, actions: *std.ArrayListUnmanaged(types.CodeAction), loc: offsets.Loc) !void {
+fn handleUnusedCapture(builder: *Builder, loc: offsets.Loc) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -209,7 +225,7 @@ fn handleUnusedCapture(builder: *Builder, actions: *std.ArrayListUnmanaged(types
     // by adding a discard in the block scope
     if (capture_locs.index != null) {
         // |v, i| -> |_, i|
-        try actions.append(builder.arena, .{
+        try builder.createCodeAction(.{
             .title = "discard capture",
             .kind = .quickfix,
             .isPreferred = true,
@@ -218,7 +234,7 @@ fn handleUnusedCapture(builder: *Builder, actions: *std.ArrayListUnmanaged(types
     } else {
         // |v|    ->
         // TODO fix formatting
-        try actions.append(builder.arena, .{
+        try builder.createCodeAction(.{
             .title = "remove capture",
             .kind = .quickfix,
             .isPreferred = true,
@@ -227,13 +243,13 @@ fn handleUnusedCapture(builder: *Builder, actions: *std.ArrayListUnmanaged(types
     }
 }
 
-fn handlePointlessDiscard(builder: *Builder, actions: *std.ArrayListUnmanaged(types.CodeAction), loc: offsets.Loc) !void {
+fn handlePointlessDiscard(builder: *Builder, loc: offsets.Loc) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
     const edit_loc = getDiscardLoc(builder.handle.text, loc) orelse return;
 
-    try actions.append(builder.arena, .{
+    try builder.createCodeAction(.{
         .title = "remove pointless discard",
         .kind = .@"source.fixAll",
         .isPreferred = true,
@@ -241,6 +257,228 @@ fn handlePointlessDiscard(builder: *Builder, actions: *std.ArrayListUnmanaged(ty
             builder.createTextEditLoc(edit_loc, ""),
         }),
     });
+}
+
+fn handleSortingImports(builder: *Builder) !void {
+    const tree = builder.handle.tree;
+    if (tree.errors.len != 0) return;
+
+    var imports = try getImportsDecls(tree, builder.arena);
+
+    if (std.sort.isSorted(ImportDecl, imports.items, tree, ImportDecl.lessThan)) return;
+
+    const sorted_imports = try builder.arena.dupe(ImportDecl, imports.items);
+    std.sort.sort(ImportDecl, sorted_imports, tree, ImportDecl.lessThan);
+
+    var edits = std.ArrayListUnmanaged(types.TextEdit){};
+
+    // remove previous imports
+    for (imports.items, 0..) |import_decl, i| {
+        // if two imports are next to each other we can extend the previous text edit
+        if (i != 0 and import_decl.var_decl - 1 == imports.items[i - 1].var_decl) {
+            const new_end = offsets.indexToPosition(tree.source, import_decl.getSourceEndIndex(tree, true), builder.offset_encoding);
+            edits.items[edits.items.len - 1].range.end = new_end;
+        } else {
+            try edits.append(builder.arena, .{
+                .range = offsets.locToRange(tree.source, import_decl.getLoc(tree, true), builder.offset_encoding),
+                .newText = "",
+            });
+        }
+    }
+
+    // add sorted imports
+    {
+        var new_text = std.ArrayListUnmanaged(u8){};
+        var writer = new_text.writer(builder.arena);
+
+        for (sorted_imports, 0..) |import_decl, i| {
+            if (i != 0 and ImportDecl.addSeperator(sorted_imports[i - 1], import_decl)) {
+                try new_text.append(builder.arena, '\n');
+            }
+
+            try writer.print("{s}\n", .{offsets.locToSlice(tree.source, import_decl.getLoc(tree, false))});
+        }
+        try writer.writeByte('\n');
+
+        try edits.append(builder.arena, .{
+            .range = .{ .start = .{ .line = 0, .character = 0 }, .end = .{ .line = 0, .character = 0 } },
+            .newText = new_text.items,
+        });
+    }
+
+    var workspace_edit = try builder.createWorkspaceEdit(edits.items);
+
+    try builder.createCodeAction(.{
+        .title = "orgnaize @import",
+        .kind = .@"source.organizeImports",
+        .isPreferred = true,
+        .edit = workspace_edit,
+    });
+
+    if (builder.range) |range| {
+        const edit_range: types.Range = .{
+            .start = edits.items[0].range.start,
+            .end = edits.items[edits.items.len - 1].range.end,
+        };
+
+        const intersects = (edit_range.start.line <= range.start.line and range.start.line <= edit_range.end.line) or
+            (edit_range.start.line <= range.end.line and range.end.line <= edit_range.end.line);
+
+        if (intersects) {
+            try builder.createCodeAction(.{
+                .title = "orgnaize @import",
+                .kind = .quickfix,
+                .isPreferred = true,
+                .edit = workspace_edit,
+            });
+        }
+    }
+}
+
+/// const name_slice = @import(value_slice);
+pub const ImportDecl = struct {
+    var_decl: Ast.Node.Index,
+    first_comment_token: ?Ast.TokenIndex,
+    name: []const u8,
+    value: []const u8,
+
+    /// declaration order controls sorting order
+    pub const Kind = enum {
+        std,
+        builtin,
+        build_options,
+        package,
+        file,
+    };
+
+    pub const sort_case_sensitive: bool = false;
+    pub const sort_public_decls_first: bool = false;
+
+    pub fn lessThan(context: Ast, lhs: ImportDecl, rhs: ImportDecl) bool {
+        const lhs_kind = lhs.getKind();
+        const rhs_kind = rhs.getKind();
+        if (lhs_kind != rhs_kind) return @enumToInt(lhs_kind) < @enumToInt(rhs_kind);
+
+        if (sort_public_decls_first) {
+            const node_tokens = context.nodes.items(.main_token);
+            const token_tags = context.tokens.items(.tag);
+
+            const is_lhs_pub = node_tokens[lhs.var_decl] > 0 and token_tags[node_tokens[lhs.var_decl] - 1] == .keyword_pub;
+            const is_rhs_pub = node_tokens[rhs.var_decl] > 0 and token_tags[node_tokens[rhs.var_decl] - 1] == .keyword_pub;
+            if (is_lhs_pub != is_rhs_pub) return is_lhs_pub;
+        }
+
+        if (sort_case_sensitive) {
+            return std.mem.lessThan(u8, lhs.getSortSlice(), rhs.getSortSlice());
+        } else {
+            return std.ascii.lessThanIgnoreCase(lhs.getSortSlice(), rhs.getSortSlice());
+        }
+    }
+
+    pub fn getKind(self: ImportDecl) Kind {
+        const name = self.value[1 .. self.value.len - 1];
+
+        if (std.mem.endsWith(u8, name, ".zig")) return .file;
+
+        if (std.mem.eql(u8, name, "std")) return .std;
+        if (std.mem.eql(u8, name, "builtin")) return .builtin;
+        if (std.mem.eql(u8, name, "build_options")) return .build_options;
+
+        return .package;
+    }
+
+    /// returns the string by which this import should be sorted
+    pub fn getSortSlice(self: ImportDecl) []const u8 {
+        switch (self.getKind()) {
+            .file => {
+                if (std.mem.indexOfScalar(u8, self.value, '/') != null) {
+                    return self.value[1 .. self.value.len - 1];
+                }
+                return self.name;
+            },
+            .package => return self.name,
+            else => unreachable,
+        }
+    }
+
+    /// returns true if there should be an empty line between these two imports
+    /// assumes `lessThan(void, lhs, rhs) == true`
+    pub fn addSeperator(lhs: ImportDecl, rhs: ImportDecl) bool {
+        const lhs_kind = @enumToInt(lhs.getKind());
+        const rhs_kind = @enumToInt(rhs.getKind());
+        if (rhs_kind <= @enumToInt(Kind.build_options)) return false;
+        return lhs_kind != rhs_kind;
+    }
+
+    pub fn getSourceStartIndex(self: ImportDecl, tree: Ast) usize {
+        return offsets.tokenToIndex(tree, self.first_comment_token orelse tree.firstToken(self.var_decl));
+    }
+
+    pub fn getSourceEndIndex(self: ImportDecl, tree: Ast, include_line_break: bool) usize {
+        const token_tags = tree.tokens.items(.tag);
+
+        var last_token = ast.lastToken(tree, self.var_decl);
+        if (last_token + 1 < tree.tokens.len - 1 and token_tags[last_token + 1] == .semicolon) {
+            last_token += 1;
+        }
+
+        var end = offsets.tokenToLoc(tree, last_token).end;
+        if (!include_line_break) return end;
+        while (end < tree.source.len) {
+            switch (tree.source[end]) {
+                ' ', '\t', '\n' => end += 1,
+                else => break,
+            }
+        }
+        return end;
+    }
+
+    /// similar to `offsets.nodeToLoc` but will also include preceding comments and postfix semicolon and line break
+    pub fn getLoc(self: ImportDecl, tree: Ast, include_line_break: bool) offsets.Loc {
+        return .{
+            .start = self.getSourceStartIndex(tree),
+            .end = self.getSourceEndIndex(tree, include_line_break),
+        };
+    }
+};
+
+pub fn getImportsDecls(tree: Ast, allocator: std.mem.Allocator) error{OutOfMemory}!std.ArrayListUnmanaged(ImportDecl) {
+    var imports = std.ArrayListUnmanaged(ImportDecl){};
+    errdefer imports.deinit(allocator);
+
+    const node_tags = tree.nodes.items(.tag);
+    const node_data = tree.nodes.items(.data);
+    const node_tokens = tree.nodes.items(.main_token);
+    for (tree.rootDecls()) |node| {
+        // TODO allow this pattern: const name = @import("file.zig").Decl;
+
+        if (node_tags[node] != .simple_var_decl) continue;
+        const var_decl = tree.simpleVarDecl(node);
+
+        switch (node_tags[var_decl.ast.init_node]) {
+            .builtin_call_two, .builtin_call_two_comma => {},
+            else => continue,
+        }
+        const call_name = offsets.tokenToSlice(tree, node_tokens[var_decl.ast.init_node]);
+        if (!std.mem.eql(u8, call_name, "@import")) continue;
+        // TODO what about @embedFile ?
+
+        if (node_data[var_decl.ast.init_node].lhs == 0 or node_data[var_decl.ast.init_node].rhs != 0) continue;
+        const import_param_node = node_data[var_decl.ast.init_node].lhs;
+        if (node_tags[import_param_node] != .string_literal) continue;
+
+        const name_token = var_decl.ast.mut_token + 1;
+        const value_token = node_tokens[import_param_node];
+
+        try imports.append(allocator, .{
+            .var_decl = node,
+            .first_comment_token = Analyser.getDocCommentTokenIndex(tree.tokens.items(.tag), node_tokens[node]),
+            .name = offsets.tokenToSlice(tree, name_token),
+            .value = offsets.tokenToSlice(tree, value_token),
+        });
+    }
+
+    return imports;
 }
 
 fn detectIndentation(source: []const u8) []const u8 {
