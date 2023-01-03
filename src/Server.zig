@@ -3049,6 +3049,9 @@ fn processMessage(server: *Server, message: Message) Error!void {
             const params: ParamsType = tres.parse(ParamsType, message.params().?, server.arena.allocator()) catch return error.InternalError;
             const response = handler(server, params) catch |err| {
                 log.err("got {} error while handling {s}", .{ err, method });
+                if (@errorReturnTrace()) |trace| {
+                    std.debug.dumpStackTrace(trace.*);
+                }
                 return error.InternalError;
             };
 
