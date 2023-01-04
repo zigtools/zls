@@ -25,40 +25,38 @@ test "ComptimeInterpreter - basic test" {
 
     var interpreter = ComptimeInterpreter{
         .allocator = allocator,
+        .arena = std.heap.ArenaAllocator.init(allocator),
         .document_store = &doc_store,
         .uri = "file:///file.zig",
     };
     defer interpreter.deinit();
 
-    _ = try interpreter.interpret(0, null, .{});
+    _ = try interpreter.interpret(0, 0, .{});
 
-    var bool_type = try interpreter.createType(std.math.maxInt(std.zig.Ast.Node.Index), .{ .bool = {} });
+    var bool_type = try interpreter.ip.get(allocator, .{ .simple = .bool });
+    var bool_true = try interpreter.ip.get(allocator, .{ .simple = .bool_true });
+    var bool_false = try interpreter.ip.get(allocator, .{ .simple = .bool_false });
+
     var arg_false = ComptimeInterpreter.Value{
         .interpreter = &interpreter,
-        .node_idx = std.math.maxInt(std.zig.Ast.Node.Index),
-        .type = bool_type,
-        .value_data = try interpreter.createValueData(.{ .bool = false }),
+        .node_idx = std.math.maxInt(Ast.Node.Index),
+        .ty = bool_type,
+        .val = bool_false,
     };
     var arg_true = ComptimeInterpreter.Value{
         .interpreter = &interpreter,
-        .node_idx = std.math.maxInt(std.zig.Ast.Node.Index),
-        .type = bool_type,
-        .value_data = try interpreter.createValueData(.{ .bool = true }),
+        .node_idx = std.math.maxInt(Ast.Node.Index),
+        .ty = bool_type,
+        .val = bool_true,
     };
 
-    const rmt = interpreter.root_type.?.getTypeInfo().@"struct".scope.declarations.get("ReturnMyType").?;
+    const function_node: Ast.Node.Index = 4;
 
-    const call_with_false = try interpreter.call(null, rmt.node_idx, &.{
-        arg_false,
-    }, .{});
-    defer call_with_false.scope.deinit();
-    const call_with_true = try interpreter.call(null, rmt.node_idx, &.{
-        arg_true,
-    }, .{});
-    defer call_with_true.scope.deinit();
+    const call_with_false = try interpreter.call(0, function_node, &.{arg_false}, .{});
+    const call_with_true = try interpreter.call(0, function_node, &.{arg_true}, .{});
 
-    try std.testing.expectFmt("u69", "{any}", .{interpreter.formatTypeInfo(call_with_false.result.value.value_data.type.getTypeInfo())});
-    try std.testing.expectFmt("u8", "{any}", .{interpreter.formatTypeInfo(call_with_true.result.value.value_data.type.getTypeInfo())});
+    try std.testing.expectFmt("u69", "{any}", .{call_with_false.result.value.val.fmtValue(call_with_false.result.value.ty, &interpreter.ip)});
+    try std.testing.expectFmt("u8", "{any}", .{call_with_true.result.value.val.fmtValue(call_with_true.result.value.ty, &interpreter.ip)});
 }
 
 test "ComptimeInterpreter - struct" {
@@ -80,17 +78,21 @@ test "ComptimeInterpreter - struct" {
 
     var interpreter = ComptimeInterpreter{
         .allocator = allocator,
+        .arena = std.heap.ArenaAllocator.init(allocator),
         .document_store = &doc_store,
         .uri = "file:///file.zig",
     };
     defer interpreter.deinit();
 
-    _ = try interpreter.interpret(0, null, .{});
+    _ = try interpreter.interpret(0, 0, .{});
 
-    const rmt = interpreter.root_type.?.getTypeInfo().@"struct".scope.declarations.get("ReturnMyType").?;
+    const function_node: Ast.Node.Index = 3;
 
-    const z = try interpreter.call(null, rmt.node_idx, &.{}, .{});
-    defer z.scope.deinit();
+    const call_result = try interpreter.call(0, function_node, &.{}, .{});
 
-    try std.testing.expectFmt("struct {slay: bool, var abc: comptime_int = 123, }", "{any}", .{interpreter.formatTypeInfo(z.result.value.value_data.type.getTypeInfo())});
+    const result_struct = interpreter.ip.indexToKey(call_result.result.value.val).struct_type;
+    
+    try std.testing.expectEqual(@intCast(usize, 1), result_struct.fields.count());
+    try std.testing.expect(result_struct.fields.contains("slay"));
+    try std.testing.expectFmt("bool", "{}", .{result_struct.fields.get("slay").?.ty.fmtType(&interpreter.ip)});
 }
