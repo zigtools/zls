@@ -9,6 +9,7 @@ const ast = @import("ast.zig");
 const zig = std.zig;
 const Ast = zig.Ast;
 const analysis = @import("analysis.zig");
+const offsets = @import("offsets.zig");
 const DocumentStore = @import("DocumentStore.zig");
 
 pub const InternPool = @import("InternPool.zig");
@@ -26,6 +27,8 @@ ip: InternPool = .{},
 document_store: *DocumentStore,
 uri: DocumentStore.Uri,
 scopes: std.MultiArrayList(Scope) = .{},
+decls: std.ArrayListUnmanaged(Decl) = .{},
+namespaces: std.MultiArrayList(Namespace) = .{},
 
 /// Interpreter diagnostic errors
 errors: std.AutoArrayHashMapUnmanaged(Ast.Node.Index, InterpreterError) = .{},
@@ -56,10 +59,15 @@ pub fn deinit(interpreter: *ComptimeInterpreter) void {
     interpreter.ip.deinit(interpreter.allocator);
 
     var i: usize = 0;
-    while (i < interpreter.scopes.len) : (i += 1) {
-        interpreter.scopes.items(.child_scopes)[i].deinit(interpreter.allocator);
+    while (i < interpreter.namespaces.len) : (i += 1) {
+        interpreter.namespaces.items(.decls)[i].deinit(interpreter.allocator);
+        interpreter.namespaces.items(.usingnamespaces)[i].deinit(interpreter.allocator);
     }
+    interpreter.namespaces.deinit(interpreter.allocator);
+    interpreter.decls.deinit(interpreter.allocator);
     interpreter.scopes.deinit(interpreter.allocator);
+
+    interpreter.arena.deinit();
 }
 
 pub const Type = struct {
@@ -77,6 +85,27 @@ pub const Value = struct {
     val: IPIndex,
 };
 
+pub const Decl = struct {
+    name: []const u8,
+    ty: IPIndex,
+    val: IPIndex,
+    alignment: u16,
+    address_space: std.builtin.AddressSpace,
+    is_pub: bool,
+    is_exported: bool,
+};
+
+pub const NamespaceIndex = InternPool.NamespaceIndex;
+
+pub const Namespace = struct {
+    /// always points to Namespace or Index.none
+    parent: NamespaceIndex,
+    /// Will be a struct, enum, union, or opaque.
+    // ty: Index,
+    decls: std.StringArrayHashMapUnmanaged(Decl) = .{},
+    usingnamespaces: std.ArrayListUnmanaged(NamespaceIndex) = .{},
+};
+
 // pub const Comptimeness = enum { @"comptime", runtime };
 
 pub const Scope = struct {
@@ -87,8 +116,7 @@ pub const Scope = struct {
 
     parent: u32, // zero indicates root scope
     node_idx: Ast.Node.Index,
-    namespace: IPIndex,
-    child_scopes: std.ArrayListUnmanaged(u32) = .{},
+    namespace: NamespaceIndex,
 
     pub const ScopeKind = enum { container, block, function };
     pub fn scopeKind(scope: Scope) ScopeKind {
@@ -177,22 +205,19 @@ fn getDeclCount(tree: Ast, node_idx: Ast.Node.Index) usize {
 
 pub fn huntItDown(
     interpreter: *ComptimeInterpreter,
-    namespace: IPIndex,
+    namespace: NamespaceIndex,
     decl_name: []const u8,
     options: InterpretOptions,
-) InterpretError!InternPool.Decl {
+) InterpretError!Decl {
     _ = options;
 
     var current_namespace = namespace;
-    while (current_namespace != IPIndex.none) {
-        const namespace_info = interpreter.ip.indexToKey(current_namespace).namespace;
-        defer current_namespace = namespace_info.parent;
+    while (current_namespace != .none) {
+        const decls: std.StringArrayHashMapUnmanaged(Decl) = interpreter.namespaces.items(.decls)[@enumToInt(current_namespace)];
+        defer current_namespace = interpreter.namespaces.items(.parent)[@enumToInt(current_namespace)];
 
-        for (namespace_info.decls) |decl_index| {
-            const decl_info = interpreter.ip.indexToKey(decl_index).declaration;
-            if (std.mem.eql(u8, decl_info.name, decl_name)) {
-                return decl_info;
-            }
+        if (decls.get(decl_name)) |decl| {
+            return decl;
         }
     }
 
@@ -260,45 +285,37 @@ pub fn interpret(
                 .interpreter = interpreter,
                 .parent = scope,
                 .node_idx = node_idx,
-                .namespace = IPIndex.none, // declarations have not been resolved yet
+                .namespace = .none, // declarations have not been resolved yet
             });
             const container_scope = @intCast(u32, interpreter.scopes.len - 1);
 
             var fields = std.StringArrayHashMapUnmanaged(InternPool.Struct.Field){};
-            defer fields.deinit(interpreter.allocator);
 
             var buffer: [2]Ast.Node.Index = undefined;
             const members = ast.declMembers(tree, node_idx, &buffer);
             for (members) |member| {
-                const maybe_container_field: ?zig.Ast.full.ContainerField = switch (tags[member]) {
-                    .container_field => tree.containerField(member),
-                    .container_field_align => tree.containerFieldAlign(member),
-                    .container_field_init => tree.containerFieldInit(member),
-                    else => null,
-                };
-
-                const field_info = maybe_container_field orelse {
+                const container_field = ast.containerField(tree, member) orelse {
                     _ = try interpreter.interpret(member, container_scope, options);
                     continue;
                 };
 
-                var init_type_value = try (try interpreter.interpret(field_info.ast.type_expr, container_scope, .{})).getValue();
+                var init_type_value = try (try interpreter.interpret(container_field.ast.type_expr, container_scope, .{})).getValue();
 
-                var default_value = if (field_info.ast.value_expr == 0)
+                var default_value = if (container_field.ast.value_expr == 0)
                     IPIndex.none
                 else
-                    (try (try interpreter.interpret(field_info.ast.value_expr, container_scope, .{})).getValue()).val; // TODO check ty
+                    (try (try interpreter.interpret(container_field.ast.value_expr, container_scope, .{})).getValue()).val; // TODO check ty
 
                 if (init_type_value.ty != type_type) {
                     try interpreter.recordError(
-                        field_info.ast.type_expr,
+                        container_field.ast.type_expr,
                         "expected_type",
                         try std.fmt.allocPrint(interpreter.allocator, "expected type 'type', found '{}'", .{init_type_value.ty.fmtType(&interpreter.ip)}),
                     );
                     continue;
                 }
 
-                const name = tree.tokenSlice(field_info.ast.main_token);
+                const name = tree.tokenSlice(container_field.ast.main_token);
 
                 const field: InternPool.Struct.Field = .{
                     .ty = init_type_value.val,
@@ -310,21 +327,12 @@ pub fn interpret(
                 try fields.put(interpreter.arena.allocator(), name, field);
             }
 
-            const namespace = try interpreter.ip.get(interpreter.allocator, IPKey{
-                .namespace = .{
-                    .parent = IPIndex.none,
-                    // .ty = struct_type,
-                    .decls = undefined, // TODO,
-                    .usingnamespaces = &.{},
-                },
-            });
-
             const struct_type = try interpreter.ip.get(interpreter.allocator, IPKey{
                 .struct_type = .{
                     .fields = fields,
-                    .namespace = namespace, // TODO
-                    .layout = std.builtin.Type.ContainerLayout.Auto, // TODO
-                    .backing_int_ty = IPIndex.none, // TODO
+                    .namespace = .none, // TODO
+                    .layout = .Auto, // TODO
+                    .backing_int_ty = .none, // TODO
                 },
             });
 
@@ -372,7 +380,7 @@ pub fn interpret(
                 .interpreter = interpreter,
                 .parent = scope,
                 .node_idx = node_idx,
-                .namespace = IPIndex.none,
+                .namespace = .none,
             });
             const block_scope = @intCast(u32, interpreter.scopes.len - 1);
 
@@ -493,7 +501,7 @@ pub fn interpret(
             var ir = try interpreter.interpret(data[node_idx].lhs, scope, options);
             var irv = try ir.getValue();
 
-            const namespace = interpreter.ip.indexToKey(irv.val).getNamespace() orelse return error.IdentifierNotFound;
+            const namespace = interpreter.ip.indexToKey(irv.val).getNamespace();
 
             var scope_sub_decl = irv.interpreter.huntItDown(namespace, rhs_str, options) catch |err| {
                 if (err == error.IdentifierNotFound) try interpreter.recordError(
@@ -688,7 +696,7 @@ pub fn interpret(
                         .node_idx = node_idx,
                         .ty = try interpreter.ip.get(interpreter.allocator, IPKey{ .struct_type = .{
                             .fields = .{},
-                            .namespace = IPIndex.none,
+                            .namespace = .none,
                             .layout = .Auto,
                             .backing_int_ty = IPIndex.none,
                         } }),
@@ -735,15 +743,13 @@ pub fn interpret(
                 if (value.ty != type_type) return error.InvalidBuiltin;
                 if (interpreter.ip.indexToKey(field_name.ty) != .pointer_type) return error.InvalidBuiltin; // Check if it's a []const u8
 
-                const namespace_index = interpreter.ip.indexToKey(value.val).getNamespace() orelse return error.InvalidBuiltin;
-                const namespace = interpreter.ip.indexToKey(namespace_index).namespace;
+                const namespace = interpreter.ip.indexToKey(value.val).getNamespace();
+                if (namespace == .none) return error.InvalidBuiltin;
 
                 const name = interpreter.ip.indexToKey(field_name.val).bytes.data; // TODO add checks
 
-                const has_decl = for (namespace.decls) |decl| {
-                    const decl_name = interpreter.ip.indexToKey(decl).declaration.name;
-                    if (std.mem.eql(u8, decl_name, name)) break true;
-                } else false;
+                const decls = interpreter.namespaces.items(.decls)[@enumToInt(namespace)];
+                const has_decl = decls.contains(name);
 
                 return InterpretResult{ .value = Value{
                     .interpreter = interpreter,
@@ -812,24 +818,22 @@ pub fn interpret(
         .@"comptime" => {
             return try interpreter.interpret(data[node_idx].lhs, scope, .{});
         },
-        // .fn_proto,
-        // .fn_proto_multi,
-        // .fn_proto_one,
-        // .fn_proto_simple,
-        .fn_decl => {
-            // var buf: [1]Ast.Node.Index = undefined;
-            // const func = ast.fnProto(tree, node_idx, &buf).?;
+        .fn_proto, .fn_proto_multi, .fn_proto_one, .fn_proto_simple, .fn_decl => {
+            var buf: [1]Ast.Node.Index = undefined;
+            const func = ast.fnProto(tree, node_idx, &buf).?;
 
             // TODO: Resolve function type
 
-            // const function_type = try interpreter.ip.get(interpreter.allocator, IPKey{ .function_type = .{
-            //     .calling_convention = .Unspecified,
-            //     .alignment = 0,
-            //     .is_generic = false,
-            //     .is_var_args = false,
-            //     .return_type = IPIndex.none,
-            //     .args = &.{},
-            // } });
+            const type_type = try interpreter.ip.get(interpreter.allocator, IPKey{ .simple = .type });
+
+            const function_type = try interpreter.ip.get(interpreter.allocator, IPKey{ .function_type = .{
+                .calling_convention = .Unspecified,
+                .alignment = 0,
+                .is_generic = false,
+                .is_var_args = false,
+                .return_type = IPIndex.none,
+                .args = &.{},
+            } });
 
             // var it = func.iterate(&tree);
             // while (ast.nextFnParam(&it)) |param| {
@@ -855,21 +859,21 @@ pub fn interpret(
             // if ((try interpreter.interpret(func.ast.return_type, func_scope_idx, .{ .observe_values = true, .is_comptime = true })).maybeGetValue()) |value|
             //     fnd.return_type = value.value_data.@"type";
 
-            // var value = Value{
-            //     .interpreter = interpreter,
-            //     .node_idx = node_idx,
-            //     .ty = function_type,
-            //     .val = IPIndex.none, // TODO
-            // };
+            const name = offsets.tokenToSlice(tree, func.name_token.?);
 
-            // const name = analysis.getDeclName(tree, node_idx).?;
-            // var namespace = interpreter.ip.indexToKey(scope.?.namespace).namespace;
-            // try namespace.decls.put(interpreter.allocator, name, .{
-            //     .scope = scope.?,
-            //     .node_idx = node_idx,
-            //     .name = name,
-            //     .value = value,
-            // });
+            const namespace = interpreter.scopes.items(.namespace)[scope];
+            if (namespace != .none) {
+                const decls = &interpreter.namespaces.items(.decls)[@enumToInt(namespace)];
+                try decls.put(interpreter.allocator, name, .{
+                    .name = name,
+                    .ty = type_type,
+                    .val = function_type,
+                    .alignment = 0, // TODO
+                    .address_space = .generic, // TODO
+                    .is_pub = false, // TODO
+                    .is_exported = false, // TODO
+                });
+            }
 
             return InterpretResult{ .nothing = {} };
         },
@@ -889,7 +893,7 @@ pub fn interpret(
             defer args.deinit(interpreter.allocator);
 
             for (call_full.ast.params) |param| {
-                try args.append(interpreter.allocator, try (try interpreter.interpret(param, scope, .{})).getValue());
+                args.appendAssumeCapacity(try (try interpreter.interpret(param, scope, .{})).getValue());
             }
 
             const func_id_result = try interpreter.interpret(call_full.ast.fn_expr, scope, .{});
@@ -1008,7 +1012,7 @@ pub fn call(
         .interpreter = interpreter,
         .parent = scope,
         .node_idx = func_node_idx,
-        .namespace = IPIndex.none,
+        .namespace = .none,
     });
     const fn_scope = @intCast(u32, interpreter.scopes.len - 1);
 

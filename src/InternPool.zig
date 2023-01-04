@@ -519,8 +519,8 @@ pub const Key = union(enum) {
             .optional_type => |optional_info| {
                 const child_ty = optional_info.payload_type;
                 const child_key = ip.indexToKey(child_ty);
-                if(child_key != .pointer_type) return false;
-                const info  = child_key.pointer_type;
+                if (child_key != .pointer_type) return false;
+                const info = child_key.pointer_type;
                 switch (info.size) {
                     .Slice, .C => return false,
                     .Many, .One => return !info.is_allowzero,
@@ -533,7 +533,7 @@ pub const Key = union(enum) {
 
     pub fn elemType2(ty: Key) Index {
         return switch (ty) {
-            .simple => |simple| switch(simple) {
+            .simple => |simple| switch (simple) {
                 .@"anyframe" => @panic("TODO: return void type"),
                 else => unreachable,
             },
@@ -1544,7 +1544,7 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
         return Index.none;
     }
 
-    if(chosen == .none) return chosen;
+    if (chosen == .none) return chosen;
     const chosen_key = ip.indexToKey(chosen);
 
     if (convert_to_slice) {
@@ -2163,7 +2163,7 @@ fn coerceInMemoryAllowedPtrs(
     const ok_cv_qualifiers =
         (!src_info.is_const or dest_info.is_const) and
         (!src_info.is_volatile or dest_info.is_volatile);
-    
+
     if (!ok_cv_qualifiers) {
         return InMemoryCoercionResult{ .ptr_qualifiers = .{
             .actual_const = src_info.is_const,
@@ -2188,7 +2188,7 @@ fn coerceInMemoryAllowedPtrs(
             .wanted = dest_info.elem_type,
         } };
     }
-    
+
     const dest_allow_zero = dest_ptr_info.ptrAllowsZero(ip);
     const src_allow_zero = src_ptr_info.ptrAllowsZero(ip);
 
@@ -2199,7 +2199,7 @@ fn coerceInMemoryAllowedPtrs(
             .wanted = dest_ty,
         } };
     }
-    
+
     // if (src_info.host_size != dest_info.host_size or
     //     src_info.bit_offset != dest_info.bit_offset)
     // {
@@ -2214,8 +2214,8 @@ fn coerceInMemoryAllowedPtrs(
     const ok_sent = dest_info.sentinel == .none or src_info.size == .C or dest_info.sentinel == src_info.sentinel; // is this enough for a value equality check?
     if (!ok_sent) {
         return InMemoryCoercionResult{ .ptr_sentinel = .{
-            .actual = if(src_info.sentinel != .none) src_info.sentinel else try ip.get(gpa, .{.simple = .unreachable_value}),
-            .wanted = if(dest_info.sentinel != .none) dest_info.sentinel else try ip.get(gpa, .{.simple = .unreachable_value}),
+            .actual = if (src_info.sentinel != .none) src_info.sentinel else try ip.get(gpa, .{ .simple = .unreachable_value }),
+            .wanted = if (dest_info.sentinel != .none) dest_info.sentinel else try ip.get(gpa, .{ .simple = .unreachable_value }),
             .ty = dest_info.elem_type,
         } };
     }
@@ -2227,11 +2227,10 @@ fn coerceInMemoryAllowedPtrs(
     alignment: {
         if (src_info.alignment == 0 and dest_info.alignment == 0 and
             dest_info.elem_type == src_info.elem_type // is this enough for a value equality check?
-            )
-        {
+        ) {
             break :alignment;
         }
-        
+
         // const src_align = if (src_info.alignment != 0)
         //     src_info.alignment
         // else
@@ -2394,7 +2393,7 @@ test "pointer type" {
         .size = .One,
         .is_const = true,
     } });
-    
+
     try std.testing.expect(const_u32_pointer_type != u32_pointer_type);
 
     try testExpectFmtType(&ip, i32_pointer_type_0, "*i32");
