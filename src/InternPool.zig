@@ -6,6 +6,7 @@ extra: std.ArrayListUnmanaged(u8) = .{},
 
 const InternPool = @This();
 const std = @import("std");
+const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 
@@ -1163,14 +1164,14 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
 
         switch (candidate_key) {
             .simple => |candidate_simple| switch (candidate_simple) {
-                // TODO usize, isize
-                // TODO c integer types
                 .f16, .f32, .f64, .f80, .f128 => switch (chosen_key) {
                     .simple => |chosen_simple| switch (chosen_simple) {
                         .f16, .f32, .f64, .f80, .f128 => {
-                            // NOTE we don't have to handle the equality case
-
-                            @panic("TODO: choose larger");
+                            if (chosen_key.floatBits(target) < candidate_key.floatBits(target)) {
+                                chosen = candidate;
+                                chosen_i = candidate_i + 1;
+                                continue;
+                            }
                         },
                         .comptime_int, .comptime_float => {
                             chosen = candidate;
@@ -1179,6 +1180,56 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
                         },
                         else => {},
                     },
+                    else => {},
+                },
+
+                .usize,
+                .isize,
+                .c_short,
+                .c_ushort,
+                .c_int,
+                .c_uint,
+                .c_long,
+                .c_ulong,
+                .c_longlong,
+                .c_ulonglong,
+                .c_longdouble, => switch (chosen_key) {
+                    .simple => |chosen_simple| switch (chosen_simple) {
+                        .usize,
+                        .isize,
+                        .c_short,
+                        .c_ushort,
+                        .c_int,
+                        .c_uint,
+                        .c_long,
+                        .c_ulong,
+                        .c_longlong,
+                        .c_ulonglong,
+                        .c_longdouble, => {
+                            const chosen_bits = chosen_key.intInfo(target, ip).bits;
+                            const candidate_bits = candidate_key.intInfo(target, ip).bits;
+
+                            if(chosen_bits < candidate_bits) {
+                                chosen = candidate;
+                                chosen_i = candidate_i + 1;
+                            }
+                            continue;
+                        },
+                        .comptime_int => {
+                            chosen = candidate;
+                            chosen_i = candidate_i + 1;
+                            continue;
+                        },
+                        else => {},
+                    },
+                    .int_type => |chosen_info| {
+                        if (chosen_info.bits < candidate_key.intInfo(target, ip).bits) {
+                            chosen = candidate;
+                            chosen_i = candidate_i + 1;
+                        }
+                        continue;
+                    },
+                    .pointer_type => |chosen_info| if (chosen_info.size == .C) continue,
                     else => {},
                 },
 
@@ -1191,10 +1242,19 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
                         .f64,
                         .f80,
                         .f128,
-                        => continue,
-                        .usize, .isize => continue,
+                        .usize,
+                        .isize,
+                        .c_short,
+                        .c_ushort,
+                        .c_int,
+                        .c_uint,
+                        .c_long,
+                        .c_ulong,
+                        .c_longlong,
+                        .c_ulonglong,
+                        .c_longdouble,
+                        .comptime_float, => continue,
                         .comptime_int => unreachable,
-                        .comptime_float => continue,
                         else => {},
                     },
                     .int_type => continue,
@@ -1209,6 +1269,7 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
                             chosen_i = candidate_i + 1;
                             continue;
                         },
+                        .comptime_float => unreachable,
                         else => {},
                     },
                     else => {},
@@ -1221,10 +1282,26 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
             },
             .int_type => |candidate_info| switch (chosen_key) {
                 .simple => |chosen_simple| switch (chosen_simple) {
-                    .usize, .isize => {
-                        // TODO
+                    .usize,
+                    .isize,
+                    .c_short,
+                    .c_ushort,
+                    .c_int,
+                    .c_uint,
+                    .c_long,
+                    .c_ulong,
+                    .c_longlong,
+                    .c_ulonglong,
+                    .c_longdouble, => {
+                        const chosen_bits = chosen_key.intInfo(target, ip).bits;
+                        const candidate_bits = candidate_key.intInfo(target, ip).bits;
+
+                        if(chosen_bits < candidate_bits) {
+                            chosen = candidate;
+                            chosen_i = candidate_i + 1;
+                        }
+                        continue;
                     },
-                    // TODO c integer types
                     .comptime_int => {
                         chosen = candidate;
                         chosen_i = candidate_i + 1;
@@ -1458,9 +1535,11 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
             },
             else => {},
         }
+
+        return Index.none;
     }
 
-    @panic("TODO");
+    return chosen;
 }
 
 const InMemoryCoercionResult = union(enum) {
@@ -2202,4 +2281,135 @@ test "array type" {
 
     try testExpectFmtType(&ip, i32_3_array_type_0, "[3]i32");
     try testExpectFmtType(&ip, u32_0_0_array_type, "[3:0]u32");
+}
+
+test "resolvePeerTypes" {
+    const gpa = std.testing.allocator;
+
+    var ip: InternPool = .{};
+    defer ip.deinit(gpa);
+
+    const bool_type = try ip.get(gpa, .{ .simple = .bool });
+    const type_type = try ip.get(gpa, .{ .simple = .type });
+    const noreturn_type = try ip.get(gpa, .{ .simple = .noreturn });
+    const undefined_type = try ip.get(gpa, .{ .simple = .undefined_type });
+
+    try ip.testResolvePeerTypes(Index.none, Index.none, Index.none);
+    try ip.testResolvePeerTypes(bool_type, bool_type, bool_type);
+    try ip.testResolvePeerTypes(bool_type, noreturn_type, bool_type);
+    try ip.testResolvePeerTypes(bool_type, undefined_type, bool_type);
+    try ip.testResolvePeerTypes(type_type, noreturn_type, type_type);
+    try ip.testResolvePeerTypes(type_type, undefined_type, type_type);
+}
+
+test "resolvePeerTypes integers and floats" {
+    const gpa = std.testing.allocator;
+
+    var ip: InternPool = .{};
+    defer ip.deinit(gpa);
+
+    const i16_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .signed, .bits = 16 } });
+    const i32_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .signed, .bits = 32 } });
+    const i64_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .signed, .bits = 64 } });
+    const u16_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .unsigned, .bits = 16 } });
+    const u32_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .unsigned, .bits = 32 } });
+    const u64_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .unsigned, .bits = 64 } });
+
+    const usize_type = try ip.get(gpa, .{ .simple = .usize });
+    const isize_type = try ip.get(gpa, .{ .simple = .isize });
+
+    const c_short_type = try ip.get(gpa, .{ .simple = .c_short });
+    const c_int_type = try ip.get(gpa, .{ .simple = .c_int });
+    const c_long_type = try ip.get(gpa, .{ .simple = .c_long });
+
+    const comptime_int_type = try ip.get(gpa, .{ .simple = .comptime_int });
+    const comptime_float_type = try ip.get(gpa, .{ .simple = .comptime_float });
+
+    const f16_type = try ip.get(gpa, .{ .simple = .f16 });
+    const f32_type = try ip.get(gpa, .{ .simple = .f32 });
+    const f64_type = try ip.get(gpa, .{ .simple = .f64 });
+
+    const bool_type = try ip.get(gpa, .{ .simple = .bool });
+
+    try ip.testResolvePeerTypes(i16_type, i16_type, i16_type);
+    try ip.testResolvePeerTypes(i16_type, i32_type, i32_type);
+    try ip.testResolvePeerTypes(i32_type, i64_type, i64_type);
+
+    try ip.testResolvePeerTypes(u16_type, u16_type, u16_type);
+    try ip.testResolvePeerTypes(u16_type, u32_type, u32_type);
+    try ip.testResolvePeerTypes(u32_type, u64_type, u64_type);
+
+    try ip.testResolvePeerTypesInOrder(i16_type, u16_type, i16_type);
+    try ip.testResolvePeerTypesInOrder(u16_type, i16_type, u16_type);
+    try ip.testResolvePeerTypesInOrder(i32_type, u32_type, i32_type);
+    try ip.testResolvePeerTypesInOrder(u32_type, i32_type, u32_type);
+    try ip.testResolvePeerTypesInOrder(isize_type, usize_type, isize_type);
+    try ip.testResolvePeerTypesInOrder(usize_type, isize_type, usize_type);
+
+    try ip.testResolvePeerTypes(i16_type, u32_type, u32_type);
+    try ip.testResolvePeerTypes(u16_type, i32_type, i32_type);
+    try ip.testResolvePeerTypes(i32_type, u64_type, u64_type);
+    try ip.testResolvePeerTypes(u32_type, i64_type, i64_type);
+
+    try ip.testResolvePeerTypes(i16_type, usize_type, usize_type);
+    try ip.testResolvePeerTypes(i16_type, isize_type, isize_type);
+    try ip.testResolvePeerTypes(u16_type, usize_type, usize_type);
+    try ip.testResolvePeerTypes(u16_type, isize_type, isize_type);
+
+    try ip.testResolvePeerTypes(i16_type, c_long_type, c_long_type);
+    try ip.testResolvePeerTypes(i16_type, c_long_type, c_long_type);
+    try ip.testResolvePeerTypes(u16_type, c_long_type, c_long_type);
+    try ip.testResolvePeerTypes(u16_type, c_long_type, c_long_type);
+
+    try ip.testResolvePeerTypes(comptime_int_type, i16_type, i16_type);
+    try ip.testResolvePeerTypes(comptime_int_type, u64_type, u64_type);
+    try ip.testResolvePeerTypes(comptime_int_type, isize_type, isize_type);
+    try ip.testResolvePeerTypes(comptime_int_type, usize_type, usize_type);
+    try ip.testResolvePeerTypes(comptime_int_type, c_short_type, c_short_type);
+    try ip.testResolvePeerTypes(comptime_int_type, c_int_type, c_int_type);
+    try ip.testResolvePeerTypes(comptime_int_type, c_long_type, c_long_type);
+
+    try ip.testResolvePeerTypes(comptime_float_type, i16_type, Index.none);
+    try ip.testResolvePeerTypes(comptime_float_type, u64_type, Index.none);
+    try ip.testResolvePeerTypes(comptime_float_type, isize_type, Index.none);
+    try ip.testResolvePeerTypes(comptime_float_type, usize_type, Index.none);
+    try ip.testResolvePeerTypes(comptime_float_type, c_short_type, Index.none);
+    try ip.testResolvePeerTypes(comptime_float_type, c_int_type, Index.none);
+    try ip.testResolvePeerTypes(comptime_float_type, c_long_type, Index.none);
+
+    try ip.testResolvePeerTypes(comptime_float_type, comptime_int_type, comptime_float_type);
+
+    try ip.testResolvePeerTypes(comptime_int_type, f16_type, f16_type);
+    try ip.testResolvePeerTypes(comptime_int_type, f32_type, f32_type);
+    try ip.testResolvePeerTypes(comptime_int_type, f64_type, f64_type);
+
+    try ip.testResolvePeerTypes(comptime_float_type, f16_type, f16_type);
+    try ip.testResolvePeerTypes(comptime_float_type, f32_type, f32_type);
+    try ip.testResolvePeerTypes(comptime_float_type, f64_type, f64_type);
+
+    try ip.testResolvePeerTypes(f16_type, i16_type, Index.none);
+    try ip.testResolvePeerTypes(f32_type, u64_type, Index.none);
+    try ip.testResolvePeerTypes(f64_type, isize_type, Index.none);
+    try ip.testResolvePeerTypes(f16_type, usize_type, Index.none);
+    try ip.testResolvePeerTypes(f32_type, c_short_type, Index.none);
+    try ip.testResolvePeerTypes(f64_type, c_int_type, Index.none);
+    try ip.testResolvePeerTypes(f64_type, c_long_type, Index.none);
+
+    try ip.testResolvePeerTypes(bool_type, i16_type, Index.none);
+    try ip.testResolvePeerTypes(bool_type, u64_type, Index.none);
+    try ip.testResolvePeerTypes(bool_type, usize_type, Index.none);
+    try ip.testResolvePeerTypes(bool_type, c_int_type, Index.none);
+    try ip.testResolvePeerTypes(bool_type, comptime_int_type, Index.none);
+    try ip.testResolvePeerTypes(bool_type, comptime_float_type, Index.none);
+    try ip.testResolvePeerTypes(bool_type, f32_type, Index.none);
+}
+
+fn testResolvePeerTypes(ip: *InternPool, a: Index, b: Index, expected: Index) !void {
+    try ip.testResolvePeerTypesInOrder(a, b, expected);
+    try ip.testResolvePeerTypesInOrder(b, a, expected);
+}
+
+fn testResolvePeerTypesInOrder(ip: *InternPool, lhs: Index, rhs: Index, expected: Index) !void {
+    const actual = try resolvePeerTypes(ip, std.testing.allocator, &.{lhs, rhs}, builtin.target);
+    try std.testing.expectEqual(expected, actual);
 }
