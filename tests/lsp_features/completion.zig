@@ -8,13 +8,12 @@ const ErrorBuilder = @import("../ErrorBuilder.zig");
 
 const types = zls.types;
 const offsets = zls.offsets;
-const requests = zls.requests;
 
 const allocator: std.mem.Allocator = std.testing.allocator;
 
 const Completion = struct {
     label: []const u8,
-    kind: types.CompletionItem.Kind,
+    kind: types.CompletionItemKind,
     detail: ?[]const u8 = null,
 };
 
@@ -412,16 +411,13 @@ fn testCompletion(source: []const u8, expected_completions: []const Completion) 
 
     try ctx.requestDidOpen(test_uri, text);
 
-    const request = requests.Completion{
-        .params = .{
-            .textDocument = .{ .uri = test_uri },
-            .position = offsets.indexToPosition(source, cursor_idx, ctx.server.offset_encoding),
-        },
+    const params = types.CompletionParams{
+        .textDocument = .{ .uri = test_uri },
+        .position = offsets.indexToPosition(source, cursor_idx, ctx.server.offset_encoding),
     };
 
-    @setEvalBranchQuota(2000);
-    const response = try ctx.requestGetResponse(?types.CompletionList, "textDocument/completion", request);
-    defer response.deinit();
+    @setEvalBranchQuota(5000);
+    const response = try ctx.requestGetResponse(?types.CompletionList, "textDocument/completion", params);
 
     const completion_list: types.CompletionList = response.result orelse {
         std.debug.print("Server returned `null` as the result\n", .{});
@@ -462,11 +458,11 @@ fn testCompletion(source: []const u8, expected_completions: []const Completion) 
             unreachable;
         };
 
-        if (expected_completion.kind != actual_completion.kind) {
-            try error_builder.msgAtIndex("label '{s}' should be of kind '{s}' but was '{s}'!", cursor_idx, .err, .{
+        if (actual_completion.kind == null or expected_completion.kind != actual_completion.kind.?) {
+            try error_builder.msgAtIndex("label '{s}' should be of kind '{s}' but was '{?s}'!", cursor_idx, .err, .{
                 label,
                 @tagName(expected_completion.kind),
-                @tagName(actual_completion.kind),
+                if (actual_completion.kind) |kind| @tagName(kind) else null,
             });
             return error.InvalidCompletionKind;
         }
@@ -500,9 +496,15 @@ fn extractCompletionLabels(items: anytype) error{ DuplicateCompletionLabel, OutO
     errdefer set.deinit(allocator);
     try set.ensureTotalCapacity(allocator, items.len);
     for (items) |item| {
-        switch (item.kind) {
-            .Keyword, .Snippet => continue,
-            else => {},
+        const maybe_kind = switch (@typeInfo(@TypeOf(item.kind))) {
+            .Optional => item.kind,
+            else => @as(?@TypeOf(item.kind), item.kind),
+        };
+        if (maybe_kind) |kind| {
+            switch (kind) {
+                .Keyword, .Snippet => continue,
+                else => {},
+            }
         }
         if (set.fetchPutAssumeCapacity(item.label, {}) != null) return error.DuplicateCompletionLabel;
     }

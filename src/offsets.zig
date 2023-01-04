@@ -1,5 +1,5 @@
 const std = @import("std");
-const types = @import("types.zig");
+const types = @import("lsp.zig");
 const ast = @import("ast.zig");
 const Ast = std.zig.Ast;
 
@@ -263,8 +263,8 @@ pub fn advancePosition(text: []const u8, position: types.Position, from_index: u
 /// returns the number of code units in `text`
 pub fn countCodeUnits(text: []const u8, encoding: Encoding) usize {
     switch (encoding) {
-        .utf8 => return text.len,
-        .utf16 => {
+        .@"utf-8" => return text.len,
+        .@"utf-16" => {
             var iter: std.unicode.Utf8Iterator = .{ .bytes = text, .i = 0 };
 
             var utf16_len: usize = 0;
@@ -277,15 +277,15 @@ pub fn countCodeUnits(text: []const u8, encoding: Encoding) usize {
             }
             return utf16_len;
         },
-        .utf32 => return std.unicode.utf8CountCodepoints(text) catch unreachable,
+        .@"utf-32" => return std.unicode.utf8CountCodepoints(text) catch unreachable,
     }
 }
 
 /// returns the number of (utf-8 code units / bytes) that represent `n` code units in `text`
 pub fn getNCodeUnitByteCount(text: []const u8, n: usize, encoding: Encoding) usize {
     switch (encoding) {
-        .utf8 => return n,
-        .utf16 => {
+        .@"utf-8" => return n,
+        .@"utf-16" => {
             if (n == 0) return 0;
             var iter: std.unicode.Utf8Iterator = .{ .bytes = text, .i = 0 };
 
@@ -300,7 +300,7 @@ pub fn getNCodeUnitByteCount(text: []const u8, n: usize, encoding: Encoding) usi
             }
             return iter.i;
         },
-        .utf32 => {
+        .@"utf-32" => {
             var i: usize = 0;
             var count: usize = 0;
             while (count != n) : (count += 1) {

@@ -68,8 +68,8 @@ fn testConvertCInclude(cimport_source: []const u8, expected: []const u8) !void {
                 => {},
                 else => continue,
             }
-            
-            if(!std.mem.eql(u8, ast.tokenSlice(main_tokens[index]), "@cImport")) continue;
+
+            if (!std.mem.eql(u8, ast.tokenSlice(main_tokens[index]), "@cImport")) continue;
 
             break :blk @intCast(Ast.Node.Index, index);
         }

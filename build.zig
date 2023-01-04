@@ -49,6 +49,18 @@ pub fn build(b: *std.build.Builder) !void {
         "enable_tracy_callstack",
         b.option(bool, "enable_tracy_callstack", "Enable callstack graphs.") orelse false,
     );
+    
+    exe_options.addOption(
+        bool,
+        "enable_failing_allocator",
+        b.option(bool, "enable_failing_allocator", "Whether to use a randomly failing allocator.") orelse false,
+    );
+
+    exe_options.addOption(
+        u32,
+        "enable_failing_allocator_likelihood",
+        b.option(u32, "enable_failing_allocator_likelihood", "The chance that an allocation will fail is `1/likelihood`") orelse 256,
+    );
 
     const version = v: {
         const version_string = b.fmt("{d}.{d}.{d}", .{ zls_version.major, zls_version.minor, zls_version.patch });
@@ -92,6 +104,10 @@ pub fn build(b: *std.build.Builder) !void {
     const known_folders_path = b.option([]const u8, "known-folders", "Path to known-folders package (default: " ++ KNOWN_FOLDERS_DEFAULT_PATH ++ ")") orelse KNOWN_FOLDERS_DEFAULT_PATH;
     exe.addPackage(.{ .name = "known-folders", .source = .{ .path = known_folders_path } });
 
+    const TRES_DEFAULT_PATH = "src/tres/tres.zig";
+    const tres_path = b.option([]const u8, "tres", "Path to tres package (default: " ++ TRES_DEFAULT_PATH ++ ")") orelse TRES_DEFAULT_PATH;
+    exe.addPackage(.{ .name = "tres", .source = .{ .path = tres_path } });
+
     if (enable_tracy) {
         const client_cpp = "src/tracy/TracyClient.cpp";
 
@@ -117,6 +133,7 @@ pub fn build(b: *std.build.Builder) !void {
     exe.install();
 
     const gen_exe = b.addExecutable("zls_gen", "src/config_gen/config_gen.zig");
+    gen_exe.addPackage(.{ .name = "tres", .source = .{ .path = "src/tres/tres.zig" } });
 
     const gen_cmd = gen_exe.run();
     gen_cmd.addArgs(&.{
@@ -124,6 +141,10 @@ pub fn build(b: *std.build.Builder) !void {
         b.fmt("{s}/schema.json", .{b.build_root}),
         b.fmt("{s}/README.md", .{b.build_root}),
     });
+
+    if (b.option([]const u8, "vscode-config-path", "Output path to vscode-config")) |path| {
+        gen_cmd.addArg(b.pathFromRoot(path));
+    }
 
     const gen_step = b.step("gen", "Regenerate config files");
     gen_step.dependOn(&gen_cmd.step);
@@ -146,6 +167,7 @@ pub fn build(b: *std.build.Builder) !void {
     }
 
     tests.addPackage(.{ .name = "zls", .source = .{ .path = "src/zls.zig" }, .dependencies = exe.packages.items });
+    tests.addPackage(.{ .name = "tres", .source = .{ .path = tres_path } });
     tests.setBuildMode(.Debug);
     tests.setTarget(target);
     test_step.dependOn(&tests.step);

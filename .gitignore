@@ -2,3 +2,4 @@
 zig-*
 debug
 release
+*.zlsreplay

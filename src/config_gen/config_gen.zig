@@ -1,4 +1,6 @@
 const std = @import("std");
+const builtin = @import("builtin");
+const tres = @import("tres");
 
 const ConfigOption = struct {
     /// Name of config option
@@ -9,9 +11,6 @@ const ConfigOption = struct {
     type: []const u8,
     /// used in Config.zig as the default initializer
     default: []const u8,
-    /// If set, this option can be configured through `zls --config`
-    /// currently unused but could laer be used to automatically generate queries for setup.zig
-    setup_question: ?[]const u8,
 };
 
 const Config = struct {
@@ -46,9 +45,7 @@ fn zigTypeToTypescript(ty: []const u8) ![]const u8 {
 fn generateConfigFile(allocator: std.mem.Allocator, config: Config, path: []const u8) !void {
     _ = allocator;
 
-    const config_file = try std.fs.openFileAbsolute(path, .{
-        .mode = .write_only,
-    });
+    const config_file = try std.fs.createFileAbsolute(path, .{});
     defer config_file.close();
 
     var buff_out = std.io.bufferedWriter(config_file.writer());
@@ -69,10 +66,10 @@ fn generateConfigFile(allocator: std.mem.Allocator, config: Config, path: []cons
             \\{s}: {s} = {s},
             \\
         , .{
-            std.mem.trim(u8, option.description, " \t\n\r"),
-            std.mem.trim(u8, option.name, " \t\n\r"),
-            std.mem.trim(u8, option.type, " \t\n\r"),
-            std.mem.trim(u8, option.default, " \t\n\r"),
+            std.mem.trim(u8, option.description, &std.ascii.whitespace),
+            std.mem.trim(u8, option.name, &std.ascii.whitespace),
+            std.mem.trim(u8, option.type, &std.ascii.whitespace),
+            std.mem.trim(u8, option.default, &std.ascii.whitespace),
         });
     }
 
@@ -114,7 +111,7 @@ fn generateSchemaFile(allocator: std.mem.Allocator, config: Config, path: []cons
         \\    "properties": 
     );
 
-    try serializeObjectMap(properties, .{
+    try tres.stringify(properties, .{
         .whitespace = .{
             .indent_level = 1,
         },
@@ -122,26 +119,26 @@ fn generateSchemaFile(allocator: std.mem.Allocator, config: Config, path: []cons
 
     _ = try buff_out.write("\n}\n");
     try buff_out.flush();
+    try schema_file.setEndPos(try schema_file.getPos());
 }
 
 fn updateREADMEFile(allocator: std.mem.Allocator, config: Config, path: []const u8) !void {
     var readme_file = try std.fs.openFileAbsolute(path, .{ .mode = .read_write });
     defer readme_file.close();
 
-    var readme = std.ArrayListUnmanaged(u8){
-        .items = try readme_file.readToEndAlloc(allocator, std.math.maxInt(usize)),
-    };
-    defer readme.deinit(allocator);
+    var readme = try readme_file.readToEndAlloc(allocator, std.math.maxInt(usize));
+    defer allocator.free(readme);
 
     const start_indicator = "<!-- DO NOT EDIT | THIS SECTION IS AUTO-GENERATED | DO NOT EDIT -->";
     const end_indicator = "<!-- DO NOT EDIT -->";
 
-    const start = start_indicator.len + (std.mem.indexOf(u8, readme.items, start_indicator) orelse return error.SectionNotFound);
-    const end = std.mem.indexOfPos(u8, readme.items, start, end_indicator) orelse return error.SectionNotFound;
+    const start = start_indicator.len + (std.mem.indexOf(u8, readme, start_indicator) orelse return error.SectionNotFound);
+    const end = std.mem.indexOfPos(u8, readme, start, end_indicator) orelse return error.SectionNotFound;
 
-    var new_readme = std.ArrayListUnmanaged(u8){};
-    defer new_readme.deinit(allocator);
-    var writer = new_readme.writer(allocator);
+    try readme_file.seekTo(0);
+    var writer = readme_file.writer();
+
+    try writer.writeAll(readme[0..start]);
 
     try writer.writeAll(
         \\
@@ -155,29 +152,95 @@ fn updateREADMEFile(allocator: std.mem.Allocator, config: Config, path: []const 
             \\| `{s}` | `{s}` | `{s}` | {s} |
             \\
         , .{
-            std.mem.trim(u8, option.name, " \t\n\r"),
-            std.mem.trim(u8, option.type, " \t\n\r"),
-            std.mem.trim(u8, option.default, " \t\n\r"),
-            std.mem.trim(u8, option.description, " \t\n\r"),
+            std.mem.trim(u8, option.name, &std.ascii.whitespace),
+            std.mem.trim(u8, option.type, &std.ascii.whitespace),
+            std.mem.trim(u8, option.default, &std.ascii.whitespace),
+            std.mem.trim(u8, option.description, &std.ascii.whitespace),
         });
     }
 
-    try readme.replaceRange(allocator, start, end - start, new_readme.items);
+    try writer.writeAll(readme[end..]);
 
-    try readme_file.seekTo(0);
-    try readme_file.writeAll(readme.items);
+    try readme_file.setEndPos(try readme_file.getPos());
+}
+
+const ConfigurationProperty = struct {
+    scope: []const u8 = "resource",
+    type: []const u8,
+    description: []const u8,
+    @"enum": ?[]const []const u8 = null,
+    format: ?[]const u8 = null,
+    default: ?std.json.Value = null,
+};
+
+fn generateVSCodeConfigFile(allocator: std.mem.Allocator, config: Config, path: []const u8) !void {
+    var config_file = try std.fs.createFileAbsolute(path, .{});
+    defer config_file.close();
+
+    const predefined_configurations: usize = 3;
+    var configuration: std.StringArrayHashMapUnmanaged(ConfigurationProperty) = .{};
+    try configuration.ensureTotalCapacity(allocator, predefined_configurations + @intCast(u32, config.options.len));
+    defer {
+        for (configuration.keys()[predefined_configurations..]) |name| allocator.free(name);
+        configuration.deinit(allocator);
+    }
+
+    configuration.putAssumeCapacityNoClobber("trace.server", .{
+        .scope = "window",
+        .type = "string",
+        .@"enum" = &.{ "off", "message", "verbose" },
+        .description = "Traces the communication between VS Code and the language server.",
+        .default = .{ .String = "off" },
+    });
+    configuration.putAssumeCapacityNoClobber("check_for_update", .{
+        .type = "boolean",
+        .description = "Whether to automatically check for new updates",
+        .default = .{ .Bool = true },
+    });
+    configuration.putAssumeCapacityNoClobber("path", .{
+        .type = "string",
+        .description = "Path to `zls` executable. Example: `C:/zls/zig-cache/bin/zls.exe`.",
+        .format = "path",
+        .default = null,
+    });
+
+    for (config.options) |option| {
+        const name = try std.fmt.allocPrint(allocator, "zls.{s}", .{option.name});
+
+        var parser = std.json.Parser.init(allocator, false);
+        const default = (try parser.parse(option.default)).root;
+
+        configuration.putAssumeCapacityNoClobber(name, .{
+            .type = try zigTypeToTypescript(option.type),
+            .description = option.description,
+            .format = if (std.mem.indexOf(u8, option.name, "path") != null) "path" else null,
+            .default = if (default == .Null) null else default,
+        });
+    }
+
+    var buffered_writer = std.io.bufferedWriter(config_file.writer());
+    var writer = buffered_writer.writer();
+
+    try tres.stringify(configuration, .{
+        .whitespace = .{},
+        .emit_null_optional_fields = false,
+    }, writer);
+
+    try buffered_writer.flush();
 }
 
 pub fn main() !void {
-    var arg_it = std.process.args();
+    var general_purpose_allocator = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = general_purpose_allocator.allocator();
+
+    var arg_it = try std.process.argsWithAllocator(gpa);
+    defer arg_it.deinit();
 
     _ = arg_it.next() orelse @panic("");
     const config_path = arg_it.next() orelse @panic("first argument must be path to Config.zig");
     const schema_path = arg_it.next() orelse @panic("second argument must be path to schema.json");
     const readme_path = arg_it.next() orelse @panic("third argument must be path to README.md");
-
-    var general_purpose_allocator = std.heap.GeneralPurposeAllocator(.{}){};
-    var gpa = general_purpose_allocator.allocator();
+    const maybe_vscode_config_path = arg_it.next();
 
     const parse_options = std.json.ParseOptions{
         .allocator = gpa,
@@ -190,50 +253,19 @@ pub fn main() !void {
     try generateSchemaFile(gpa, config, schema_path);
     try updateREADMEFile(gpa, config, readme_path);
 
-    std.log.warn(
-        \\ If you have added a new configuration option and it should be configuration through the config wizard, then edit src/setup.zig
-    , .{});
-
-    std.log.info(
-        \\ Changing configuration options may also require editing the `package.json` from zls-vscode at https://github.com/zigtools/zls-vscode/blob/master/package.json
-    , .{});
-}
-
-fn serializeObjectMap(
-    value: anytype,
-    options: std.json.StringifyOptions,
-    out_stream: anytype,
-) @TypeOf(out_stream).Error!void {
-    try out_stream.writeByte('{');
-    var field_output = false;
-    var child_options = options;
-    if (child_options.whitespace) |*child_whitespace| {
-        child_whitespace.indent_level += 1;
+    if (maybe_vscode_config_path) |vscode_config_path| {
+        try generateVSCodeConfigFile(gpa, config, vscode_config_path);
     }
-    var it = value.iterator();
-    while (it.next()) |entry| {
-        if (!field_output) {
-            field_output = true;
-        } else {
-            try out_stream.writeByte(',');
-        }
-        if (child_options.whitespace) |child_whitespace| {
-            try child_whitespace.outputIndent(out_stream);
-        }
 
-        try std.json.stringify(entry.key_ptr.*, options, out_stream);
-        try out_stream.writeByte(':');
-        if (child_options.whitespace) |child_whitespace| {
-            if (child_whitespace.separator) {
-                try out_stream.writeByte(' ');
-            }
-        }
-        try std.json.stringify(entry.value_ptr.*, child_options, out_stream);
+    if (builtin.os.tag == .windows) {
+        std.log.warn("Running on windows may result in CRLF and LF mismatch", .{});
     }
-    if (field_output) {
-        if (options.whitespace) |whitespace| {
-            try whitespace.outputIndent(out_stream);
-        }
-    }
-    try out_stream.writeByte('}');
+
+    try std.io.getStdOut().writeAll(
+        \\If you have added a new configuration option and it should be configuration through the config wizard, then edit `src/setup.zig`
+        \\
+        \\Changing configuration options may also require editing the `package.json` from zls-vscode at https://github.com/zigtools/zls-vscode/blob/master/package.json
+        \\You can use `zig build gen -Dvscode-config-path=/path/to/output/file.json` to generate the new configuration properties which you can then copy into `package.json`
+        \\
+    );
 }

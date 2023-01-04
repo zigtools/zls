@@ -2,7 +2,7 @@ const std = @import("std");
 const zig_builtin = @import("builtin");
 const DocumentStore = @import("DocumentStore.zig");
 const analysis = @import("analysis.zig");
-const types = @import("types.zig");
+const types = @import("lsp.zig");
 const offsets = @import("offsets.zig");
 const Ast = std.zig.Ast;
 const log = std.log.scoped(.inlay_hint);
@@ -22,7 +22,7 @@ pub const inlay_hints_max_inline_children = 12;
 
 /// checks whether node is inside the range
 fn isNodeInRange(tree: Ast, node: Ast.Node.Index, range: types.Range) bool {
-    const endLocation = tree.tokenLocation(0, tree.lastToken(node));
+    const endLocation = tree.tokenLocation(0, ast.lastToken(tree, node));
     if (endLocation.line < range.start.line) return false;
 
     const beginLocation = tree.tokenLocation(0, tree.firstToken(node));
@@ -32,19 +32,12 @@ fn isNodeInRange(tree: Ast, node: Ast.Node.Index, range: types.Range) bool {
 }
 
 const Builder = struct {
-    allocator: std.mem.Allocator,
+    arena: std.mem.Allocator,
     config: *const Config,
     handle: *const DocumentStore.Handle,
     hints: std.ArrayListUnmanaged(types.InlayHint),
-    hover_kind: types.MarkupContent.Kind,
+    hover_kind: types.MarkupKind,
     encoding: offsets.Encoding,
-
-    fn deinit(self: *Builder) void {
-        for (self.hints.items) |hint| {
-            self.allocator.free(hint.tooltip.value);
-        }
-        self.hints.deinit(self.allocator);
-    }
 
     fn appendParameterHint(self: *Builder, position: types.Position, label: []const u8, tooltip: []const u8, tooltip_noalias: bool, tooltip_comptime: bool) !void {
         // TODO allocation could be avoided by extending InlayHint.jsonStringify
@@ -53,28 +46,28 @@ const Builder = struct {
             if (tooltip.len == 0) break :blk "";
             const prefix = if (tooltip_noalias) if (tooltip_comptime) "noalias comptime " else "noalias " else if (tooltip_comptime) "comptime " else "";
 
-            if (self.hover_kind == .Markdown) {
-                break :blk try std.fmt.allocPrint(self.allocator, "```zig\n{s}{s}\n```", .{ prefix, tooltip });
+            if (self.hover_kind == .markdown) {
+                break :blk try std.fmt.allocPrint(self.arena, "```zig\n{s}{s}\n```", .{ prefix, tooltip });
             }
 
-            break :blk try std.fmt.allocPrint(self.allocator, "{s}{s}", .{ prefix, tooltip });
+            break :blk try std.fmt.allocPrint(self.arena, "{s}{s}", .{ prefix, tooltip });
         };
 
-        try self.hints.append(self.allocator, .{
+        try self.hints.append(self.arena, .{
             .position = position,
-            .label = label,
+            .label = .{ .string = label },
             .kind = types.InlayHintKind.Parameter,
-            .tooltip = .{
+            .tooltip = .{ .MarkupContent = .{
                 .kind = self.hover_kind,
                 .value = tooltip_text,
-            },
+            } },
             .paddingLeft = false,
             .paddingRight = true,
         });
     }
 
     fn toOwnedSlice(self: *Builder) error{OutOfMemory}![]types.InlayHint {
-        return self.hints.toOwnedSlice(self.allocator);
+        return self.hints.toOwnedSlice(self.arena);
     }
 };
 
@@ -689,26 +682,23 @@ fn writeNodeInlayHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store:
 /// creates a list of `InlayHint`'s from the given document
 /// only parameter hints are created
 /// only hints in the given range are created
-/// Caller owns returned memory.
-/// `InlayHint.tooltip.value` has to deallocated separately
 pub fn writeRangeInlayHint(
     arena: *std.heap.ArenaAllocator,
     config: Config,
     store: *DocumentStore,
     handle: *const DocumentStore.Handle,
     range: types.Range,
-    hover_kind: types.MarkupContent.Kind,
+    hover_kind: types.MarkupKind,
     encoding: offsets.Encoding,
 ) error{OutOfMemory}![]types.InlayHint {
     var builder: Builder = .{
-        .allocator = arena.child_allocator,
+        .arena = arena.allocator(),
         .config = &config,
         .handle = handle,
         .hints = .{},
         .hover_kind = hover_kind,
         .encoding = encoding,
     };
-    errdefer builder.deinit();
 
     var buf: [2]Ast.Node.Index = undefined;
     for (ast.declMembers(handle.tree, 0, &buf)) |child| {

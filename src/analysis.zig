@@ -1,7 +1,7 @@
 const std = @import("std");
 const DocumentStore = @import("DocumentStore.zig");
 const Ast = std.zig.Ast;
-const types = @import("types.zig");
+const types = @import("lsp.zig");
 const offsets = @import("offsets.zig");
 const log = std.log.scoped(.analysis);
 const ast = @import("ast.zig");
@@ -19,7 +19,7 @@ pub fn deinit() void {
 }
 
 /// Gets a declaration's doc comments. Caller owns returned memory.
-pub fn getDocComments(allocator: std.mem.Allocator, tree: Ast, node: Ast.Node.Index, format: types.MarkupContent.Kind) !?[]const u8 {
+pub fn getDocComments(allocator: std.mem.Allocator, tree: Ast, node: Ast.Node.Index, format: types.MarkupKind) !?[]const u8 {
     const base = tree.nodes.items(.main_token)[node];
     const base_kind = tree.nodes.items(.tag)[node];
     const tokens = tree.tokens.items(.tag);
@@ -68,7 +68,7 @@ pub fn getDocCommentTokenIndex(tokens: []const std.zig.Token.Tag, base_token: As
     } else idx + 1;
 }
 
-pub fn collectDocComments(allocator: std.mem.Allocator, tree: Ast, doc_comments: Ast.TokenIndex, format: types.MarkupContent.Kind, container_doc: bool) ![]const u8 {
+pub fn collectDocComments(allocator: std.mem.Allocator, tree: Ast, doc_comments: Ast.TokenIndex, format: types.MarkupKind, container_doc: bool) ![]const u8 {
     var lines = std.ArrayList([]const u8).init(allocator);
     defer lines.deinit();
     const tokens = tree.tokens.items(.tag);
@@ -81,7 +81,7 @@ pub fn collectDocComments(allocator: std.mem.Allocator, tree: Ast, doc_comments:
         } else break;
     }
 
-    return try std.mem.join(allocator, if (format == .Markdown) "  \n" else "\n", lines.items);
+    return try std.mem.join(allocator, if (format == .markdown) "  \n" else "\n", lines.items);
 }
 
 /// Gets a function's keyword, name, arguments and return value.
@@ -1162,12 +1162,7 @@ pub fn resolveTypeOfNode(store: *DocumentStore, arena: *std.heap.ArenaAllocator,
 /// Collects all `@import`'s we can find into a slice of import paths (without quotes).
 pub fn collectImports(allocator: std.mem.Allocator, tree: Ast) error{OutOfMemory}!std.ArrayListUnmanaged([]const u8) {
     var imports = std.ArrayListUnmanaged([]const u8){};
-    errdefer {
-        for (imports.items) |imp| {
-            allocator.free(imp);
-        }
-        imports.deinit(allocator);
-    }
+    errdefer imports.deinit(allocator);
 
     const tags = tree.tokens.items(.tag);
 
@@ -1484,6 +1479,8 @@ pub fn getImportStr(tree: Ast, node: Ast.Node.Index, source_index: usize) ?[]con
     const params = ast.builtinCallParams(tree, node, &buffer).?;
 
     if (params.len != 1) return null;
+
+    if (node_tags[params[0]] != .string_literal) return null;
 
     const import_str = tree.tokenSlice(tree.nodes.items(.main_token)[params[0]]);
     return import_str[1 .. import_str.len - 1];
@@ -2406,41 +2403,23 @@ pub const DocumentScope = struct {
     error_completions: CompletionSet,
     enum_completions: CompletionSet,
 
-    pub fn debugPrint(self: DocumentScope) void {
-        for (self.scopes.items) |scope| {
-            log.debug(
-                \\--------------------------
-                \\Scope {}, loc: [{d}, {d})
-                \\ {d} usingnamespaces
-                \\Decls:
-            , .{
-                scope.data,
-                scope.loc.start,
-                scope.loc.end,
-                scope.uses.len,
-            });
-
-            var decl_it = scope.decls.iterator();
-            var idx: usize = 0;
-            while (decl_it.next()) |_| : (idx += 1) {
-                if (idx != 0) log.debug(", ", .{});
-            }
-            // log.debug("{s}", .{name_decl.key});
-            log.debug("\n--------------------------\n", .{});
-        }
-    }
-
     pub fn deinit(self: *DocumentScope, allocator: std.mem.Allocator) void {
         for (self.scopes.items) |*scope| {
             scope.deinit(allocator);
         }
         self.scopes.deinit(allocator);
         for (self.error_completions.entries.items(.key)) |item| {
-            if (item.documentation) |doc| allocator.free(doc.value);
+            switch (item.documentation orelse continue) {
+                .string => |str| allocator.free(str),
+                .MarkupContent => |content| allocator.free(content.value),
+            }
         }
         self.error_completions.deinit(allocator);
         for (self.enum_completions.entries.items(.key)) |item| {
-            if (item.documentation) |doc| allocator.free(doc.value);
+            switch (item.documentation orelse continue) {
+                .string => |str| allocator.free(str),
+                .MarkupContent => |content| allocator.free(content.value),
+            }
         }
         self.enum_completions.deinit(allocator);
     }
@@ -2575,13 +2554,18 @@ fn makeInnerScope(allocator: std.mem.Allocator, context: ScopeContext, node_idx:
 
         if (container_field) |_| {
             if (!std.mem.eql(u8, name, "_")) {
-                var doc = if (try getDocComments(allocator, tree, decl, .Markdown)) |docs|
-                    types.MarkupContent{ .kind = .Markdown, .value = docs }
-                else
-                    null;
-                var gop_res = try context.enums.getOrPut(allocator, .{ .label = name, .kind = .Constant, .insertText = name, .insertTextFormat = .PlainText, .documentation = doc });
+                const Documentation = @TypeOf(@as(types.CompletionItem, undefined).documentation);
+
+                var doc: Documentation = if (try getDocComments(allocator, tree, decl, .markdown)) |docs| .{ .MarkupContent = types.MarkupContent{ .kind = .markdown, .value = docs } } else null;
+                var gop_res = try context.enums.getOrPut(allocator, .{
+                    .label = name,
+                    .kind = .Constant,
+                    .insertText = name,
+                    .insertTextFormat = .PlainText,
+                    .documentation = doc,
+                });
                 if (gop_res.found_existing) {
-                    if (doc) |d| allocator.free(d.value);
+                    if (doc) |d| allocator.free(d.MarkupContent.value);
                 }
             }
         }

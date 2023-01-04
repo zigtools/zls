@@ -8,7 +8,6 @@ const ErrorBuilder = @import("../ErrorBuilder.zig");
 
 const types = zls.types;
 const offsets = zls.offsets;
-const requests = zls.requests;
 
 const allocator: std.mem.Allocator = std.testing.allocator;
 
@@ -83,7 +82,7 @@ fn testInlayHints(source: []const u8) !void {
 
     const range = types.Range{
         .start = types.Position{ .line = 0, .character = 0 },
-        .end = offsets.indexToPosition(phr.new_source, phr.new_source.len, .utf16),
+        .end = offsets.indexToPosition(phr.new_source, phr.new_source.len, .@"utf-16"),
     };
 
     const InlayHint = struct {
@@ -92,15 +91,12 @@ fn testInlayHints(source: []const u8) !void {
         kind: types.InlayHintKind,
     };
 
-    const request = requests.InlayHint{
-        .params = .{
-            .textDocument = .{ .uri = test_uri },
-            .range = range,
-        },
+    const params = types.InlayHintParams{
+        .textDocument = .{ .uri = test_uri },
+        .range = range,
     };
 
-    const response = try ctx.requestGetResponse(?[]InlayHint, "textDocument/inlayHint", request);
-    defer response.deinit();
+    const response = try ctx.requestGetResponse(?[]InlayHint, "textDocument/inlayHint", params);
 
     const hints: []InlayHint = response.result orelse {
         std.debug.print("Server returned `null` as the result\n", .{});
@@ -124,7 +120,7 @@ fn testInlayHints(source: []const u8) !void {
         for (hints) |hint| {
             if (position.line != hint.position.line or position.character != hint.position.character) continue;
 
-            const actual_label = hint.label[0 .. hint.label.len - 1]; // exclude :
+            const actual_label = hint.label[0..hint.label.len];
 
             if (!std.mem.eql(u8, expected_label, actual_label)) {
                 try error_builder.msgAtLoc("expected label `{s}` here but got `{s}`!", new_loc, .err, .{ expected_label, actual_label });

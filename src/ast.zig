@@ -167,15 +167,15 @@ fn fullWhile(tree: Ast, info: full.While.Components) full.While {
         .else_token = undefined,
         .error_token = null,
     };
-    var tok_i = info.while_token - 1;
+    var tok_i = info.while_token -| 1;
     if (token_tags[tok_i] == .keyword_inline) {
         result.inline_token = tok_i;
         tok_i -= 1;
     }
     if (token_tags[tok_i] == .colon and
-        token_tags[tok_i - 1] == .identifier)
+        token_tags[tok_i -| 1] == .identifier)
     {
-        result.label_token = tok_i - 1;
+        result.label_token = tok_i -| 1;
     }
     const last_cond_token = lastToken(tree, info.cond_expr);
     if (token_tags[last_cond_token + 2] == .pipe) {
@@ -539,10 +539,15 @@ pub fn lastToken(tree: Ast, node: Ast.Node.Index) Ast.TokenIndex {
         .container_decl_arg_trailing,
         .switch_comma,
         => {
-            const members = tree.extraData(datas[n].rhs, Node.SubRange);
-            std.debug.assert(members.end - members.start > 0);
-            end_offset += 2; // for the comma + rbrace
-            n = tree.extra_data[members.end - 1]; // last parameter
+            if (datas[n].rhs != 0) {
+                const members = tree.extraData(datas[n].rhs, Node.SubRange);
+                std.debug.assert(members.end - members.start > 0);
+                end_offset += 2; // for the comma + rbrace
+                n = tree.extra_data[members.end - 1]; // last parameter
+            } else {
+                end_offset += 1;
+                n = datas[n].lhs;
+            }
         },
         .array_init_dot,
         .struct_init_dot,

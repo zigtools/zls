@@ -2,7 +2,7 @@ const std = @import("std");
 const Ast = std.zig.Ast;
 const DocumentStore = @import("DocumentStore.zig");
 const analysis = @import("analysis.zig");
-const types = @import("types.zig");
+const types = @import("lsp.zig");
 const offsets = @import("offsets.zig");
 const log = std.log.scoped(.references);
 const ast = @import("ast.zig");
@@ -488,7 +488,7 @@ pub fn symbolReferences(
                 }
 
                 var handle_dependencies = std.ArrayListUnmanaged([]const u8){};
-                try store.collectDependencies(store.allocator, handle.*, &handle_dependencies);
+                try store.collectDependencies(arena.allocator(), handle.*, &handle_dependencies);
 
                 for (handle_dependencies.items) |uri| {
                     try dependencies.put(arena.allocator(), uri, {});

@@ -107,13 +107,13 @@ fn testIndexPosition(text: []const u8, index: usize, line: u32, characters: [3]u
     const position16: types.Position = .{ .line = line, .character = characters[1] };
     const position32: types.Position = .{ .line = line, .character = characters[2] };
 
-    try std.testing.expectEqual(position8, offsets.indexToPosition(text, index, .utf8));
-    try std.testing.expectEqual(position16, offsets.indexToPosition(text, index, .utf16));
-    try std.testing.expectEqual(position32, offsets.indexToPosition(text, index, .utf32));
+    try std.testing.expectEqual(position8, offsets.indexToPosition(text, index, .@"utf-8"));
+    try std.testing.expectEqual(position16, offsets.indexToPosition(text, index, .@"utf-16"));
+    try std.testing.expectEqual(position32, offsets.indexToPosition(text, index, .@"utf-32"));
 
-    try std.testing.expectEqual(index, offsets.positionToIndex(text, position8, .utf8));
-    try std.testing.expectEqual(index, offsets.positionToIndex(text, position16, .utf16));
-    try std.testing.expectEqual(index, offsets.positionToIndex(text, position32, .utf32));
+    try std.testing.expectEqual(index, offsets.positionToIndex(text, position8, .@"utf-8"));
+    try std.testing.expectEqual(index, offsets.positionToIndex(text, position16, .@"utf-16"));
+    try std.testing.expectEqual(index, offsets.positionToIndex(text, position32, .@"utf-32"));
 }
 
 fn testTokenToLoc(text: [:0]const u8, token_index: std.zig.Ast.TokenIndex, start: usize, end: usize) !void {
@@ -135,7 +135,7 @@ fn testTokenIndexToLoc(text: [:0]const u8, index: usize, start: usize, end: usiz
 
 fn testAdvancePosition(text: [:0]const u8, expected_line: u32, expected_character: u32, line: u32, character: u32, from: usize, to: usize) !void {
     const expected: types.Position = .{ .line = expected_line, .character = expected_character };
-    const actual = offsets.advancePosition(text, .{ .line = line, .character = character }, from, to, .utf16);
+    const actual = offsets.advancePosition(text, .{ .line = line, .character = character }, from, to, .@"utf-16");
 
     try std.testing.expectEqual(expected, actual);
 }
@@ -143,9 +143,9 @@ fn testAdvancePosition(text: [:0]const u8, expected_line: u32, expected_characte
 fn testConvertPositionEncoding(text: [:0]const u8, line: u32, character: u32, new_characters: [3]u32) !void {
     const position: types.Position = .{ .line = line, .character = character };
 
-    const position8 = offsets.convertPositionEncoding(text, position, .utf8, .utf8);
-    const position16 = offsets.convertPositionEncoding(text, position, .utf8, .utf16);
-    const position32 = offsets.convertPositionEncoding(text, position, .utf8, .utf32);
+    const position8 = offsets.convertPositionEncoding(text, position, .@"utf-8", .@"utf-8");
+    const position16 = offsets.convertPositionEncoding(text, position, .@"utf-8", .@"utf-16");
+    const position32 = offsets.convertPositionEncoding(text, position, .@"utf-8", .@"utf-32");
 
     try std.testing.expectEqual(line, position8.line);
     try std.testing.expectEqual(line, position16.line);
@@ -157,13 +157,13 @@ fn testConvertPositionEncoding(text: [:0]const u8, line: u32, character: u32, ne
 }
 
 fn testCountCodeUnits(text: []const u8, counts: [3]usize) !void {
-    try std.testing.expectEqual(counts[0], offsets.countCodeUnits(text, .utf8));
-    try std.testing.expectEqual(counts[1], offsets.countCodeUnits(text, .utf16));
-    try std.testing.expectEqual(counts[2], offsets.countCodeUnits(text, .utf32));
+    try std.testing.expectEqual(counts[0], offsets.countCodeUnits(text, .@"utf-8"));
+    try std.testing.expectEqual(counts[1], offsets.countCodeUnits(text, .@"utf-16"));
+    try std.testing.expectEqual(counts[2], offsets.countCodeUnits(text, .@"utf-32"));
 }
 
 fn testGetNCodeUnitByteCount(text: []const u8, n: [3]usize) !void {
-    try std.testing.expectEqual(n[0], offsets.getNCodeUnitByteCount(text, n[0], .utf8));
-    try std.testing.expectEqual(n[0], offsets.getNCodeUnitByteCount(text, n[1], .utf16));
-    try std.testing.expectEqual(n[0], offsets.getNCodeUnitByteCount(text, n[2], .utf32));
+    try std.testing.expectEqual(n[0], offsets.getNCodeUnitByteCount(text, n[0], .@"utf-8"));
+    try std.testing.expectEqual(n[0], offsets.getNCodeUnitByteCount(text, n[1], .@"utf-16"));
+    try std.testing.expectEqual(n[0], offsets.getNCodeUnitByteCount(text, n[2], .@"utf-32"));
 }

@@ -1,8 +1,8 @@
-const types = @import("../types.zig");
+const types = @import("../lsp.zig");
 
 pub const Snipped = struct {
     label: []const u8,
-    kind: types.CompletionItem.Kind,
+    kind: types.CompletionItemKind,
     text: ?[]const u8 = null,
 };
 
