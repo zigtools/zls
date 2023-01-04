@@ -49,8 +49,7 @@ pub const Array = struct {
 
 pub const Struct = struct {
     fields: std.StringArrayHashMapUnmanaged(Field),
-    /// always points to Namespace
-    namespace: Index,
+    namespace: NamespaceIndex,
     layout: std.builtin.Type.ContainerLayout,
     backing_int_ty: Index,
 
@@ -93,8 +92,7 @@ pub const ErrorSet = struct {
 pub const Enum = struct {
     tag_type: Index,
     fields: std.StringArrayHashMapUnmanaged(Index),
-    /// this always points to Namespace
-    namespace: Index,
+    namespace: NamespaceIndex,
     tag_type_infered: bool,
 };
 
@@ -117,8 +115,7 @@ pub const Fn = struct {
 pub const Union = struct {
     tag_type: Index,
     fields: std.StringArrayHashMapUnmanaged(Field),
-    /// always points to Namespace
-    namespace: Index,
+    namespace: NamespaceIndex,
     layout: std.builtin.Type.ContainerLayout,
 
     pub const Field = struct {
@@ -141,26 +138,6 @@ pub const Vector = struct {
 
 pub const BigInt = std.math.big.int.Const;
 
-pub const Decl = struct {
-    name: []const u8,
-    ty: Index,
-    val: Index,
-    alignment: u16,
-    address_space: std.builtin.AddressSpace,
-    is_pub: bool,
-    is_exported: bool,
-};
-
-pub const Namespace = struct {
-    /// always points to Namespace or Index.none
-    parent: Index,
-    /// Will be a struct, enum, union, or opaque.
-    // ty: Index,
-    /// always points to Decl
-    decls: []const Index,
-    usingnamespaces: []const Index,
-};
-
 pub const Bytes = struct {
     data: []const u8,
 };
@@ -182,9 +159,6 @@ pub const Key = union(enum) {
     tuple_type: Tuple,
     vector_type: Vector,
     // TODO anyframe_T
-
-    declaration: Decl,
-    namespace: Namespace,
 
     int_u64_value: u64,
     int_i64_value: i64,
@@ -246,8 +220,6 @@ pub const Key = union(enum) {
                 std.hash.autoHash(&hasher, union_info.layout);
             },
             .tuple_type => |tuple_info| std.hash.autoHashStrat(&hasher, tuple_info, .Deep),
-            .declaration => |decl_info| std.hash.autoHashStrat(&hasher, decl_info, .Deep),
-            .namespace => |namespace_info| std.hash.autoHashStrat(&hasher, namespace_info, .Deep),
             .int_big_value => |big_int| {
                 std.hash.autoHash(&hasher, big_int.positive);
                 hasher.update(std.mem.sliceAsBytes(big_int.limbs));
@@ -324,30 +296,6 @@ pub const Key = union(enum) {
                 }
                 return true;
             },
-            .declaration => |decl_info| {
-                if (!std.mem.eql(u8, decl_info.name, b.declaration.name)) return false;
-                if (decl_info.ty != b.declaration.ty) return false;
-                if (decl_info.val != b.declaration.val) return false;
-                if (decl_info.alignment != b.declaration.alignment) return false;
-                if (decl_info.address_space != b.declaration.address_space) return false;
-                if (decl_info.is_pub != b.declaration.is_pub) return false;
-                if (decl_info.is_exported != b.declaration.is_exported) return false;
-                return true;
-            },
-            .namespace => |namespace_info| {
-                if (namespace_info.parent != b.namespace.parent) return false;
-
-                if (namespace_info.decls.len != b.namespace.decls.len) return false;
-                if (namespace_info.usingnamespaces.len != b.namespace.usingnamespaces.len) return false;
-
-                for (namespace_info.decls) |decl, i| {
-                    if (decl != b.namespace.decls[i]) return false;
-                }
-                for (namespace_info.usingnamespaces) |namespace, i| {
-                    if (namespace != b.namespace.usingnamespaces[i]) return false;
-                }
-                return false;
-            },
             else => std.meta.eql(a, b),
         };
     }
@@ -382,8 +330,6 @@ pub const Key = union(enum) {
             .float_128_value => .float_f128,
             .type_value => .type,
 
-            .declaration => .declaration,
-            .namespace => .namespace,
             .bytes => .bytes,
             .one_pointer => .one_pointer,
         };
@@ -447,10 +393,6 @@ pub const Key = union(enum) {
             .union_type => .Union,
             .tuple_type => .Struct, // TODO this correct?
             .vector_type => .Vector,
-
-            .declaration,
-            .namespace,
-            => unreachable,
 
             .int_u64_value,
             .int_i64_value,
@@ -616,12 +558,12 @@ pub const Key = union(enum) {
         };
     }
 
-    pub fn getNamespace(ty: Key) ?Index {
+    pub fn getNamespace(ty: Key) NamespaceIndex {
         return switch (ty) {
             .struct_type => |struct_info| struct_info.namespace,
             .enum_type => |enum_info| enum_info.namespace,
             .union_type => |union_info| union_info.namespace,
-            else => null,
+            else => .none,
         };
     }
 
@@ -794,8 +736,6 @@ pub const Key = union(enum) {
                 });
             },
 
-            .declaration, .namespace => unreachable,
-
             .int_u64_value,
             .int_i64_value,
             .int_big_value,
@@ -888,9 +828,6 @@ pub const Key = union(enum) {
             .vector_type,
             => unreachable,
 
-            .declaration => unreachable,
-            .namespace => unreachable,
-
             .int_u64_value => |int| try std.fmt.formatIntValue(int, "", .{}, writer),
             .int_i64_value => |int| try std.fmt.formatIntValue(int, "", .{}, writer),
             .int_big_value => |big_int| try big_int.format("", .{}, writer),
@@ -937,6 +874,11 @@ pub const Index = enum(u32) {
             .ip = ip,
         } };
     }
+};
+
+pub const NamespaceIndex = enum(u32) {
+    none = std.math.maxInt(u32),
+    _,
 };
 
 pub const Tag = enum(u8) {
@@ -1023,13 +965,6 @@ pub const Tag = enum(u8) {
     /// A type value.
     /// data is Index.
     type,
-
-    /// A declaration.
-    /// data is payload to Decl.
-    declaration,
-    /// A namespace.
-    /// data is payload to Namespace.
-    namespace,
 
     /// A byte sequence value.
     /// data is payload to data begin and length.
