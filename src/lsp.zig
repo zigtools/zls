@@ -708,7 +708,29 @@ pub const CodeActionKind = enum {
         _ = maybe_allocator;
         if (json_value != .String) return error.InvalidEnumTag;
         if (json_value.String.len == 0) return .empty;
-        return std.meta.stringToEnum(@This(), json_value.String) orelse return error.InvalidEnumTag;
+        if (std.meta.stringToEnum(@This(), json_value.String)) |val| return val;
+
+        // Some clients (nvim) may report these by the enumeration names rather than the
+        // actual strings, so let's check those names here
+        const aliases = [_]struct { []const u8, CodeActionKind }{
+            .{ "Empty", .empty },
+            .{ "QuickFix", .quickfix },
+            .{ "Refactor", .refactor },
+            .{ "RefactorExtract", .@"refactor.extract" },
+            .{ "RefactorInline", .@"refactor.inline" },
+            .{ "RefactorRewrite", .@"refactor.rewrite" },
+            .{ "Source", .source },
+            .{ "SourceOrganizeImports", .@"source.organizeImports" },
+            .{ "SourceFixAll", .@"source.fixAll" },
+        };
+
+        for (aliases) |alias| {
+            if (std.mem.eql(u8, json_value.String, alias[0])) {
+                return alias[1];
+            }
+        }
+
+        return error.InvalidEnumTag;
     }
 };
 
