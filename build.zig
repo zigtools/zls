@@ -5,10 +5,13 @@ const shared = @import("src/shared.zig");
 const zls_version = std.builtin.Version{ .major = 0, .minor = 11, .patch = 0 };
 
 pub fn build(b: *std.build.Builder) !void {
-    const current_zig = builtin.zig_version;
-    const min_zig = std.SemanticVersion.parse("0.11.0-dev.874+40ed6ae84") catch return; // Changes to builtin.Type API
-    if (current_zig.order(min_zig).compare(.lt)) @panic(b.fmt("Your Zig version v{} does not meet the minimum build requirement of v{}", .{ current_zig, min_zig }));
-
+    comptime {
+        const current_zig = builtin.zig_version;
+        const min_zig = std.SemanticVersion.parse("0.11.0-dev.874+40ed6ae84") catch return; // Changes to builtin.Type API
+        if (current_zig.order(min_zig) == .lt) {
+            @compileError(std.fmt.comptimePrint("Your Zig version v{} does not meet the minimum build requirement of v{}", .{ current_zig, min_zig }));
+        }
+    }
     const target = b.standardTargetOptions(.{});
 
     const mode = b.standardReleaseOptions();
