@@ -224,7 +224,7 @@ pub fn applySave(self: *DocumentStore, handle: *const Handle) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    if (isBuildFile(handle.uri)) {
+    if (std.process.can_spawn and isBuildFile(handle.uri)) {
         const build_file = self.build_files.getPtr(handle.uri).?;
 
         const build_config = loadBuildConfiguration(self.allocator, build_file.*, self.config.*) catch |err| {
@@ -647,7 +647,9 @@ fn createDocument(self: *DocumentStore, uri: Uri, text: [:0]u8, open: bool) erro
     handle.import_uris = try self.collectImportUris(handle);
     handle.cimports = try self.collectCIncludes(handle);
 
-    if (self.config.zig_exe_path != null and isBuildFile(handle.uri) and !isInStd(handle.uri)) {
+    if (!std.process.can_spawn or self.config.zig_exe_path == null) return handle;
+
+    if (isBuildFile(handle.uri) and !isInStd(handle.uri)) {
         const gop = try self.build_files.getOrPut(self.allocator, uri);
         errdefer |err| {
             self.build_files.swapRemoveAt(gop.index);
@@ -658,7 +660,7 @@ fn createDocument(self: *DocumentStore, uri: Uri, text: [:0]u8, open: bool) erro
             gop.value_ptr.* = try self.createBuildFile(duped_uri);
             gop.key_ptr.* = gop.value_ptr.uri;
         }
-    } else if (self.config.zig_exe_path != null and !isBuiltinFile(handle.uri) and !isInStd(handle.uri)) blk: {
+    } else if (!isBuiltinFile(handle.uri) and !isInStd(handle.uri)) blk: {
         // log.debug("Going to walk down the tree towards: {s}", .{uri});
 
         // walk down the tree towards the uri. When we hit build.zig files
@@ -830,6 +832,8 @@ pub fn collectDependencies(
 pub fn resolveCImport(self: *DocumentStore, handle: Handle, node: Ast.Node.Index) error{OutOfMemory}!?Uri {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
+
+    if (!std.process.can_spawn) return null;
 
     const index = std.mem.indexOfScalar(Ast.Node.Index, handle.cimports.items(.node), node).?;
 
