@@ -77,7 +77,7 @@ pub const ErrorUnion = struct {
 
 pub const ErrorSet = struct {
     /// must be sorted
-    names: [][]const u8,
+    names: []const []const u8,
 
     pub fn sort(self: *ErrorSet) void {
         std.sort.sort([][]const u8, self.names, u8, std.mem.lessThan);
@@ -105,9 +105,9 @@ pub const Fn = struct {
     args: []const Param,
 
     pub const Param = struct {
-        is_comptime: bool,
-        is_generic: bool,
-        is_noalias: bool,
+        is_comptime: bool = false,
+        is_generic: bool = false,
+        is_noalias: bool = false,
         arg_type: Index,
     };
 };
@@ -2401,17 +2401,32 @@ test "pointer type" {
     try std.testing.expect(i32_pointer_type_1 == i32_pointer_type_2);
     try std.testing.expect(i32_pointer_type_0 != u32_pointer_type);
 
-    const const_u32_pointer_type = try ip.get(gpa, .{ .pointer_type = .{
+    const @"*const u32" = try ip.get(gpa, .{ .pointer_type = .{
         .elem_type = u32_type,
         .size = .One,
         .is_const = true,
     } });
+    const @"*align(4) u32" = try ip.get(gpa, .{ .pointer_type = .{
+        .elem_type = u32_type,
+        .size = .One,
+        .alignment = 4,
+    } });
+    const @"[*c]const volatile u32" = try ip.get(gpa, .{ .pointer_type = Pointer{
+        .elem_type = u32_type,
+        .size = .C,
+        .is_const = true,
+        .is_volatile = true,
+    } });
 
-    try std.testing.expect(const_u32_pointer_type != u32_pointer_type);
+    try std.testing.expect(@"*const u32" != u32_pointer_type);
+    try std.testing.expect(u32_pointer_type != @"*align(4) u32");
+    try std.testing.expect(@"*align(4) u32" != @"[*c]const volatile u32");
 
     try testExpectFmtType(&ip, i32_pointer_type_0, "*i32");
     try testExpectFmtType(&ip, u32_pointer_type, "*u32");
-    try testExpectFmtType(&ip, const_u32_pointer_type, "*const u32");
+    try testExpectFmtType(&ip, @"*const u32", "*const u32");
+    try testExpectFmtType(&ip, @"*align(4) u32", "*align(4) u32");
+    try testExpectFmtType(&ip, @"[*c]const volatile u32", "[*c]const volatile u32");
 }
 
 test "optional type" {
@@ -2439,6 +2454,47 @@ test "optional type" {
 
     try testExpectFmtValue(&ip, null_value, u32_optional_type, "null");
     try testExpectFmtValue(&ip, u64_42_value, u32_optional_type, "42");
+}
+
+test "error set type" {
+    const gpa = std.testing.allocator;
+
+    var ip: InternPool = .{};
+    defer ip.deinit(gpa);
+
+    const empty_error_set = try ip.get(gpa, .{ .error_set_type = .{ .names = &.{} } });
+
+    const error_set_0 = try ip.get(gpa, .{ .error_set_type = .{
+        .names = &.{ "foo", "bar", "baz" },
+    } });
+
+    // const foo: [3]u8 = "foo".*;
+
+    // const error_set_1 = try ip.get(gpa, .{ .error_set_type = .{
+    //     .names = &.{&foo, "bar", "baz"},
+    // } });
+
+    std.debug.assert(empty_error_set != error_set_0);
+    // std.debug.assert(error_set_0 == error_set_1);
+
+    try testExpectFmtType(&ip, empty_error_set, "error{}");
+    try testExpectFmtType(&ip, error_set_0, "error{foo,bar,baz}");
+}
+
+test "error union type" {
+    const gpa = std.testing.allocator;
+
+    var ip: InternPool = .{};
+    defer ip.deinit(gpa);
+    const empty_error_set = try ip.get(gpa, .{ .error_set_type = .{ .names = &.{} } });
+    const bool_type = try ip.get(gpa, .{ .simple = .bool });
+
+    const @"error{}!bool" = try ip.get(gpa, .{ .error_union_type = ErrorUnion{
+        .error_set_type = empty_error_set,
+        .payload_type = bool_type,
+    } });
+
+    try testExpectFmtType(&ip, @"error{}!bool", "error{}!bool");
 }
 
 test "array type" {
@@ -2507,6 +2563,33 @@ test "struct type" {
         },
     });
     std.debug.assert(struct_type_0 == struct_type_1);
+}
+
+test "function type" {
+    const gpa = std.testing.allocator;
+
+    var ip: InternPool = .{};
+    defer ip.deinit(gpa);
+
+    const i32_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .signed, .bits = 32 } });
+    const bool_type = try ip.get(gpa, .{ .simple = .bool });
+    const type_type = try ip.get(gpa, .{ .simple = .type });
+
+    var param1 = Fn.Param{ .arg_type = i32_type };
+    const @"fn(i32) bool" = try ip.get(gpa, .{ .function_type = .{
+        .return_type = bool_type,
+        .args = &.{param1},
+    } });
+
+    var param2 = Fn.Param{ .is_comptime = true, .arg_type = type_type };
+    var param3 = Fn.Param{ .arg_type = i32_type };
+    const @"fn(comptime type, i32) type" = try ip.get(gpa, .{ .function_type = .{
+        .return_type = type_type,
+        .args = &.{ param2, param3 },
+    } });
+
+    try testExpectFmtType(&ip, @"fn(i32) bool", "fn(i32) bool");
+    try testExpectFmtType(&ip, @"fn(comptime type, i32) type", "fn(comptime type, i32) type");
 }
 
 test "anyframe type" {
