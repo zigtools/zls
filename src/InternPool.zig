@@ -48,16 +48,17 @@ pub const Array = struct {
 };
 
 pub const Struct = struct {
-    fields: std.StringArrayHashMapUnmanaged(Field),
+    fields: []const Field,
     namespace: NamespaceIndex,
-    layout: std.builtin.Type.ContainerLayout,
+    layout: std.builtin.Type.ContainerLayout = .Auto,
     backing_int_ty: Index,
 
     pub const Field = struct {
+        name: []const u8,
         ty: Index,
-        default_value: Index,
-        alignent: u16,
-        is_comptime: bool,
+        default_value: Index = .none,
+        alignment: u16 = 0,
+        is_comptime: bool = false,
     };
 };
 
@@ -76,31 +77,30 @@ pub const ErrorUnion = struct {
 
 pub const ErrorSet = struct {
     /// must be sorted
-    names: std.StringArrayHashMapUnmanaged(void),
+    names: [][]const u8,
 
     pub fn sort(self: *ErrorSet) void {
-        const Context = struct {
-            keys: [][]const u8,
-            pub fn lessThan(ctx: @This(), a_index: usize, b_index: usize) bool {
-                return std.mem.lessThan(u8, ctx.keys[a_index], ctx.keys[b_index]);
-            }
-        };
-        self.names.sort(Context{ .keys = self.names.keys() });
+        std.sort.sort([][]const u8, self.names, u8, std.mem.lessThan);
     }
 };
 
 pub const Enum = struct {
     tag_type: Index,
-    fields: std.StringArrayHashMapUnmanaged(Index),
+    fields: []const Field,
     namespace: NamespaceIndex,
     tag_type_infered: bool,
+
+    pub const Field = struct {
+        name: []const u8,
+        ty: Index,
+    };
 };
 
 pub const Fn = struct {
-    calling_convention: std.builtin.CallingConvention,
-    alignment: u16,
-    is_generic: bool,
-    is_var_args: bool,
+    calling_convention: std.builtin.CallingConvention = .Unspecified,
+    alignment: u16 = 0,
+    is_generic: bool = false,
+    is_var_args: bool = false,
     return_type: Index,
     args: []const Param,
 
@@ -114,20 +114,21 @@ pub const Fn = struct {
 
 pub const Union = struct {
     tag_type: Index,
-    fields: std.StringArrayHashMapUnmanaged(Field),
+    fields: []const Field,
     namespace: NamespaceIndex,
-    layout: std.builtin.Type.ContainerLayout,
+    layout: std.builtin.Type.ContainerLayout = .Auto,
 
     pub const Field = struct {
+        name: []const u8,
         ty: Index,
         alignment: u16,
     };
 };
 
 pub const Tuple = struct {
-    types: []Index,
+    types: []const Index,
     /// unreachable_value elements are used to indicate runtime-known.
-    values: []Index,
+    values: []const Index,
 };
 
 pub const Vector = struct {
@@ -140,6 +141,15 @@ pub const BigInt = std.math.big.int.Const;
 
 pub const Bytes = struct {
     data: []const u8,
+};
+
+pub const Aggregate = struct {
+    data: []const Index,
+};
+
+pub const UnionValue = struct {
+    tag: Index,
+    val: Index,
 };
 
 pub const Key = union(enum) {
@@ -168,10 +178,12 @@ pub const Key = union(enum) {
     float_64_value: f64,
     float_80_value: f80,
     float_128_value: f128,
-    type_value: Index,
+    // type_value: Index,
 
     bytes: Bytes,
-    one_pointer: Index,
+    // one_pointer: Index,
+    aggregate: Aggregate,
+    union_value: UnionValue,
 
     // slice
     // error
@@ -184,54 +196,12 @@ pub const Key = union(enum) {
         var hasher = std.hash.Wyhash.init(0);
         std.hash.autoHash(&hasher, std.meta.activeTag(key));
         switch (key) {
-            .struct_type => |struct_info| {
-                var field_it = struct_info.fields.iterator();
-                while (field_it.next()) |item| {
-                    hasher.update(item.key_ptr.*);
-                    std.hash.autoHash(&hasher, item.value_ptr.*);
-                }
-                std.hash.autoHash(&hasher, struct_info.layout);
-            },
-            // .error_type => |error_info| hasher.update(error_info.name),
-            .error_set_type => |error_set_info| {
-                const names = error_set_info.names.keys();
-                std.debug.assert(std.sort.isSorted([]const u8, names, u8, std.mem.lessThan));
-                for (names) |error_name| {
-                    hasher.update(error_name);
-                }
-            },
-            .enum_type => |enum_info| {
-                std.hash.autoHash(&hasher, enum_info.tag_type);
-                var field_it = enum_info.fields.iterator();
-                while (field_it.next()) |item| {
-                    hasher.update(item.key_ptr.*);
-                    std.hash.autoHash(&hasher, item.value_ptr.*);
-                }
-                std.hash.autoHash(&hasher, enum_info.tag_type_infered);
-            },
-            .function_type => |function_info| std.hash.autoHashStrat(&hasher, function_info, .Deep),
-            .union_type => |union_info| {
-                std.hash.autoHash(&hasher, union_info.tag_type);
-                var field_it = union_info.fields.iterator();
-                while (field_it.next()) |item| {
-                    hasher.update(item.key_ptr.*);
-                    std.hash.autoHash(&hasher, item.value_ptr.*);
-                }
-                std.hash.autoHash(&hasher, union_info.layout);
-            },
-            .tuple_type => |tuple_info| std.hash.autoHashStrat(&hasher, tuple_info, .Deep),
-            .int_big_value => |big_int| {
-                std.hash.autoHash(&hasher, big_int.positive);
-                hasher.update(std.mem.sliceAsBytes(big_int.limbs));
-            },
             .float_16_value => |f| std.hash.autoHash(&hasher, @bitCast(u16, f)),
             .float_32_value => |f| std.hash.autoHash(&hasher, @bitCast(u32, f)),
             .float_64_value => |f| std.hash.autoHash(&hasher, @bitCast(u64, f)),
             .float_80_value => |f| std.hash.autoHash(&hasher, @bitCast(u80, f)),
             .float_128_value => |f| std.hash.autoHash(&hasher, @bitCast(u128, f)),
-
-            .bytes => |bytes| hasher.update(bytes.data),
-            inline else => |info| std.hash.autoHash(&hasher, info), // TODO sad stage1 noises :(
+            inline else => |info| std.hash.autoHashStrat(&hasher, info, .Deep), // TODO sad stage1 noises :(
         }
         return @truncate(u32, hasher.final());
     }
@@ -244,17 +214,17 @@ pub const Key = union(enum) {
         return switch (a) {
             .struct_type => |struct_info| {
                 if (struct_info.layout != b.struct_type.layout) return false;
-                if (struct_info.fields.count() != b.struct_type.fields.count()) return false;
-                @panic("TODO: implement field equality check");
+                if (struct_info.fields.len != b.struct_type.fields.len) return false;
+                for (struct_info.fields) |field, i| {
+                    if (!std.meta.eql(field, b.struct_type.fields[i])) return false;
+                }
+                return true;
             },
             // .error_type => |error_info| std.mem.eql(u8, error_info.name, b.error_type.name),
             .error_set_type => |error_set_info| {
-                const a_names = error_set_info.names.keys();
-                const b_names = b.error_set_type.names.keys();
-
-                if (a_names.len != b_names.len) return false;
-                for (a_names) |a_name, i| {
-                    const b_name = b_names[i];
+                if (error_set_info.names.len != b.error_set_type.names.len) return false;
+                for (error_set_info.names) |a_name, i| {
+                    const b_name = b.error_set_type.names[i];
                     if (!std.mem.eql(u8, a_name, b_name)) return false;
                 }
                 return true;
@@ -262,7 +232,7 @@ pub const Key = union(enum) {
             .enum_type => |enum_info| {
                 if (enum_info.tag_type != b.enum_type.tag_type) return false;
                 if (enum_info.tag_type_infered != b.enum_type.tag_type_infered) return false;
-                if (enum_info.fields.count() != b.enum_type.fields.count()) return false;
+                if (enum_info.fields.len != b.enum_type.fields.len) return false;
                 @panic("TODO: implement field equality check");
             },
             .function_type => |function_info| {
@@ -281,8 +251,11 @@ pub const Key = union(enum) {
             .union_type => |union_info| {
                 if (union_info.tag_type != b.union_type.tag_type) return false;
                 if (union_info.layout != b.union_type.layout) return false;
-                if (union_info.fields.count() != b.union_type.fields.count()) return false;
-                @panic("TODO: implement union equality");
+                if (union_info.fields.len != b.union_type.fields.len) return false;
+                for (union_info.fields) |field, i| {
+                    if (!std.meta.eql(field, b.union_type.fields[i])) return false;
+                }
+                return true;
             },
             .tuple_type => |tuple_info| {
                 std.debug.assert(tuple_info.types.len == tuple_info.values.len);
@@ -293,6 +266,14 @@ pub const Key = union(enum) {
                 }
                 for (tuple_info.values) |val, i| {
                     if (val != b.tuple_type.values[i]) return false;
+                }
+                return true;
+            },
+            .bytes => |bytes| std.mem.eql(u8, bytes.data, b.bytes.data),
+            .aggregate => |aggregate| {
+                if (aggregate.data.len != b.aggregate.data.len) return false;
+                for (aggregate.data) |ty, i| {
+                    if (ty != b.aggregate.data[i]) return false;
                 }
                 return true;
             },
@@ -328,10 +309,12 @@ pub const Key = union(enum) {
             .float_64_value => .float_f64,
             .float_80_value => .float_f80,
             .float_128_value => .float_f128,
-            .type_value => .type,
+            // .type_value => .type,
 
             .bytes => .bytes,
-            .one_pointer => .one_pointer,
+            // .one_pointer => .one_pointer,
+            .aggregate => .aggregate,
+            .union_value => .union_value,
         };
     }
 
@@ -402,11 +385,13 @@ pub const Key = union(enum) {
             .float_64_value,
             .float_80_value,
             .float_128_value,
-            .type_value,
+            // .type_value,
             => unreachable,
 
             .bytes,
-            .one_pointer,
+            // .one_pointer,
+            .aggregate,
+            .union_value,
             => unreachable,
         };
     }
@@ -455,7 +440,6 @@ pub const Key = union(enum) {
     /// Asserts the type is a fixed-size float or comptime_float.
     /// Returns 128 for comptime_float types.
     pub fn floatBits(ty: Key, target: std.Target) u16 {
-        std.debug.assert(ty == .simple);
         _ = target;
         return switch (ty.simple) {
             .f16 => 16,
@@ -464,28 +448,9 @@ pub const Key = union(enum) {
             .f80 => 80,
             .f128, .comptime_float => 128,
             // TODO correctly resolve size based on `target`
-            .c_longdouble => 80,
+            .c_longdouble => @bitSizeOf(c_longdouble),
 
             else => unreachable,
-        };
-    }
-
-    pub fn isCType(ty: Key) bool {
-        return switch (ty) {
-            .simple => |simple| switch (simple) {
-                .c_short,
-                .c_ushort,
-                .c_int,
-                .c_uint,
-                .c_long,
-                .c_ulong,
-                .c_longlong,
-                .c_ulonglong,
-                .c_longdouble,
-                => true,
-                else => false,
-            },
-            else => false,
         };
     }
 
@@ -496,20 +461,11 @@ pub const Key = union(enum) {
         };
     }
 
-    pub fn isSlice(ty: Key) bool {
-        return switch (ty) {
-            .pointer_type => |pointer_info| pointer_info.size == .Slice,
-            else => false,
-        };
-    }
-
     /// For pointer-like optionals, returns true, otherwise returns the allowzero property
     /// of pointers.
     pub fn ptrAllowsZero(ty: Key, ip: *const InternPool) bool {
-        if (ty.isPtrLikeOptional(ip)) {
-            return true;
-        }
-        return ty.pointer_type.is_allowzero;
+        if (ty.pointer_type.is_allowzero) return true;
+        return ty.isPtrLikeOptional(ip);
     }
 
     /// Returns true if the type is optional and would be lowered to a single pointer
@@ -728,7 +684,21 @@ pub const Key = union(enum) {
                 try printType(function_info.return_type, ip, writer);
             },
             .union_type => @panic("TODO"),
-            .tuple_type => @panic("TODO"),
+            .tuple_type => |tuple_info| {
+                try writer.writeAll("tuple{");
+                for (tuple_info.types) |field_ty, i| {
+                    if (i != 0) try writer.writeAll(", ");
+                    const val = tuple_info.values[i];
+                    if (val != Index.none) {
+                        try writer.writeAll("comptime ");
+                    }
+                    try printType(field_ty, ip, writer);
+                    if (val != Index.none) {
+                        try writer.print(" = {}", .{val.fmtValue(field_ty, ip)});
+                    }
+                }
+                try writer.writeByte('}');
+            },
             .vector_type => |vector_info| {
                 try writer.print("@Vector({d},{})", .{
                     vector_info.len,
@@ -746,9 +716,11 @@ pub const Key = union(enum) {
             .float_128_value,
             => unreachable,
 
-            .type_value,
+            // .type_value,
             .bytes,
-            .one_pointer,
+            // .one_pointer,
+            .aggregate,
+            .union_value,
             => unreachable,
         }
     }
@@ -770,7 +742,6 @@ pub const Key = union(enum) {
         ip: *const InternPool,
         writer: anytype,
     ) @TypeOf(writer).Error!void {
-        _ = ty;
         const value_key: Key = ip.indexToKey(value);
         switch (value_key) {
             .simple => |simple| switch (simple) {
@@ -837,10 +808,32 @@ pub const Key = union(enum) {
             .float_80_value => |float| try writer.print("{d}", .{@floatCast(f64, float)}),
             .float_128_value => |float| try writer.print("{d}", .{@floatCast(f64, float)}),
 
-            .type_value,
-            .bytes,
-            .one_pointer,
-            => unreachable,
+            // .type_value => |tty| tty.fmtType(ip),
+            .bytes => |data| try writer.print("\"{}\"", .{std.zig.fmtEscapes(data.data)}),
+            // .one_pointer => unreachable,
+            .aggregate => |aggregate| {
+                const struct_info = ip.indexToKey(ty).struct_type;
+                std.debug.assert(aggregate.data.len == struct_info.fields.len);
+
+                try writer.writeAll(".{");
+                var i: u32 = 0;
+                while (i < aggregate.data.len) : (i += 1) {
+                    if (i != 0) try writer.writeAll(", ");
+
+                    try writer.print(".{s} = ", .{struct_info.fields[i].name});
+                    try printValue(aggregate.data[i], struct_info.fields[i].ty, ip, writer);
+                }
+                try writer.writeByte('}');
+            },
+            .union_value => |union_value| {
+                const union_info = ip.indexToKey(ty).union_type;
+
+                try writer.writeAll(".{ ");
+                try printValue(union_info.tag_type, union_value.tag, ip, writer);
+                try writer.writeAll(" = ");
+                try printValue(union_value.val, @panic("TODO"), ip, writer);
+                try writer.writeAll(" }");
+            },
         }
     }
 };
@@ -962,16 +955,22 @@ pub const Tag = enum(u8) {
     /// A float value that can be represented by f128.
     /// data is payload to f128.
     float_f128,
-    /// A type value.
-    /// data is Index.
-    type,
+    // /// A type value.
+    // /// data is Index.
+    // type,
 
     /// A byte sequence value.
     /// data is payload to data begin and length.
     bytes,
-    /// A single pointer value.
-    /// data is index to value.
-    one_pointer,
+    // /// A single pointer value.
+    // /// data is index to value.
+    // one_pointer,
+    /// A aggregate (struct) value.
+    /// data is index to Aggregate.
+    aggregate,
+    /// A union value.
+    /// data is index to UnionValue.
+    union_value,
 };
 
 pub const Simple = enum(u32) {
@@ -1060,10 +1059,10 @@ pub fn indexToKey(ip: InternPool, index: Index) Key {
         .float_f64 => .{ .float_64_value = ip.extraData(f64, data) },
         .float_f80 => .{ .float_80_value = ip.extraData(f80, data) },
         .float_f128 => .{ .float_128_value = ip.extraData(f128, data) },
-        .type => .{ .type_value = @intToEnum(Index, data) },
+        // .type => .{ .type_value = @intToEnum(Index, data) },
 
         .bytes => unreachable, // TODO
-        .one_pointer => .{ .one_pointer = @intToEnum(Index, data) },
+        // .one_pointer => .{ .one_pointer = @intToEnum(Index, data) },
         else => @panic("TODO"),
     };
 }
@@ -1099,9 +1098,9 @@ pub fn get(ip: *InternPool, gpa: Allocator, key: Key) Allocator.Error!Index {
         },
         .float_16_value => |float_val| .{ .tag = .float_f16, .data = @bitCast(u16, float_val) },
         .float_32_value => |float_val| .{ .tag = .float_f32, .data = @bitCast(u32, float_val) },
-        .type_value => |ty| .{ .tag = .type, .data = @enumToInt(ty) },
+        // .type_value => |ty| .{ .tag = .type, .data = @enumToInt(ty) },
         .bytes => unreachable, // TODO
-        .one_pointer => |val| .{ .tag = .one_pointer, .data = @enumToInt(val) },
+        // .one_pointer => |val| .{ .tag = .one_pointer, .data = @enumToInt(val) },
         inline else => |data| .{ .tag = key.tag(), .data = try ip.addExtra(gpa, data) }, // TODO sad stage1 noises :(
     };
     try ip.items.append(gpa, item);
@@ -2452,6 +2451,42 @@ test "array type" {
 
     try testExpectFmtType(&ip, i32_3_array_type_0, "[3]i32");
     try testExpectFmtType(&ip, u32_0_0_array_type, "[3:0]u32");
+}
+
+test "struct type" {
+    const gpa = std.testing.allocator;
+
+    var ip: InternPool = .{};
+    defer ip.deinit(gpa);
+
+    const i32_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .signed, .bits = 32 } });
+    const u64_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .unsigned, .bits = 64 } });
+    const bool_type = try ip.get(gpa, .{ .simple = .bool });
+
+    const field1 = Struct.Field{ .name = "foo", .ty = u64_type };
+    const field2 = Struct.Field{ .name = "bar", .ty = i32_type };
+    const field3 = Struct.Field{ .name = "baz", .ty = bool_type };
+
+    const struct_type_0 = try ip.get(gpa, Key{
+        .struct_type = Struct{
+            .fields = &.{ field1, field2, field3 },
+            .namespace = .none,
+            .layout = .Auto,
+            .backing_int_ty = .none,
+        },
+    });
+
+    _ = try ip.get(gpa, .{ .simple = .unreachable_value });
+
+    const struct_type_1 = try ip.get(gpa, Key{
+        .struct_type = Struct{
+            .fields = &.{ field1, field2, field3 },
+            .namespace = .none,
+            .layout = .Auto,
+            .backing_int_ty = .none,
+        },
+    });
+    std.debug.assert(struct_type_0 == struct_type_1);
 }
 
 test "resolvePeerTypes" {

@@ -586,12 +586,11 @@ fn typeToCompletion(
         
             switch (key) {
                 .struct_type => |struct_info| {
-                    var field_it = struct_info.fields.iterator();
-                    while (field_it.next()) |entry| {
+                    for (struct_info.fields) |field| {
                         try list.append(allocator, .{
-                            .label = entry.key_ptr.*,
+                            .label = field.name,
                             .kind = .Field,
-                            .insertText = entry.key_ptr.*,
+                            .insertText = field.name,
                             .insertTextFormat = .PlainText,
                         });
                     }

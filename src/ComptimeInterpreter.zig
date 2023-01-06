@@ -289,7 +289,7 @@ pub fn interpret(
             });
             const container_scope = @intCast(u32, interpreter.scopes.len - 1);
 
-            var fields = std.StringArrayHashMapUnmanaged(InternPool.Struct.Field){};
+            var fields = std.ArrayListUnmanaged(InternPool.Struct.Field){};
 
             var buffer: [2]Ast.Node.Index = undefined;
             const members = ast.declMembers(tree, node_idx, &buffer);
@@ -315,21 +315,20 @@ pub fn interpret(
                     continue;
                 }
 
-                const name = tree.tokenSlice(container_field.ast.main_token);
-
                 const field: InternPool.Struct.Field = .{
+                    .name = tree.tokenSlice(container_field.ast.main_token),
                     .ty = init_type_value.val,
                     .default_value = default_value,
                     .alignent = 0, // TODO,
                     .is_comptime = false, // TODO
                 };
 
-                try fields.put(interpreter.arena.allocator(), name, field);
+                try fields.append(interpreter.arena.allocator(), field);
             }
 
             const struct_type = try interpreter.ip.get(interpreter.allocator, IPKey{
                 .struct_type = .{
-                    .fields = fields,
+                    .fields = fields.items,
                     .namespace = .none, // TODO
                     .layout = .Auto, // TODO
                     .backing_int_ty = .none, // TODO
@@ -695,7 +694,7 @@ pub fn interpret(
                         .interpreter = interpreter,
                         .node_idx = node_idx,
                         .ty = try interpreter.ip.get(interpreter.allocator, IPKey{ .struct_type = .{
-                            .fields = .{},
+                            .fields = &.{},
                             .namespace = .none,
                             .layout = .Auto,
                             .backing_int_ty = IPIndex.none,
@@ -715,7 +714,7 @@ pub fn interpret(
                         .interpreter = interpreter,
                         .node_idx = node_idx,
                         .ty = try interpreter.ip.get(interpreter.allocator, IPKey{ .simple = .type }),
-                        .val = try interpreter.ip.get(interpreter.allocator, IPKey{ .type_value = undefined }), // TODO
+                        .val = undefined, // TODO
                     },
                 };
             }
@@ -728,7 +727,7 @@ pub fn interpret(
                     .interpreter = interpreter,
                     .node_idx = node_idx,
                     .ty = try interpreter.ip.get(interpreter.allocator, IPKey{ .simple = .type }),
-                    .val = try interpreter.ip.get(interpreter.allocator, IPKey{ .type_value = value.ty }),
+                    .val = value.ty,
                 } };
             }
 
@@ -953,7 +952,7 @@ pub fn interpret(
                 .interpreter = interpreter,
                 .node_idx = node_idx,
                 .ty = pointer_type,
-                .val = try interpreter.ip.get(interpreter.allocator, IPKey{ .one_pointer = value.val }),
+                .val = value.val,
             } };
         },
         .deref => {
@@ -967,13 +966,11 @@ pub fn interpret(
                 return error.InvalidOperation;
             }
 
-            // TODO: Check if this is a one_ptr or not
-
             return InterpretResult{ .value = .{
                 .interpreter = interpreter,
                 .node_idx = node_idx,
                 .ty = type_key.pointer_type.elem_type,
-                .val = interpreter.ip.indexToKey(value.val).one_pointer,
+                .val = value.val,
             } };
         },
         else => {
