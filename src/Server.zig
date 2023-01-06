@@ -731,16 +731,14 @@ fn nodeToCompletion(
         .container_field_init,
         => {
             const field = ast.containerField(tree, node).?;
-            if (!field.ast.tuple_like) {
-                try list.append(allocator, .{
-                    .label = handle.tree.tokenSlice(field.ast.main_token),
-                    .kind = .Field,
-                    .documentation = doc,
-                    .detail = analysis.getContainerFieldSignature(handle.tree, field),
-                    .insertText = tree.tokenSlice(field.ast.main_token),
-                    .insertTextFormat = .PlainText,
-                });
-            }
+            try list.append(allocator, .{
+                .label = handle.tree.tokenSlice(field.ast.main_token),
+                .kind = if (field.ast.tuple_like) .Enum else .Field,
+                .documentation = doc,
+                .detail = analysis.getContainerFieldSignature(handle.tree, field),
+                .insertText = tree.tokenSlice(field.ast.main_token),
+                .insertTextFormat = .PlainText,
+            });
         },
         .array_type,
         .array_type_sentinel,
@@ -919,7 +917,13 @@ fn hoverSymbol(server: *Server, decl_handle: analysis.DeclWithHandle) error{OutO
             const end = offsets.tokenToLoc(tree, last_token).end;
             break :def tree.source[start..end];
         },
-        .pointer_payload, .array_payload, .array_index, .switch_payload, .label_decl => tree.tokenSlice(decl_handle.nameToken()),
+        .pointer_payload,
+        .array_payload,
+        .array_index,
+        .switch_payload,
+        .label_decl,
+        .error_token,
+        => tree.tokenSlice(decl_handle.nameToken()),
     };
 
     var bound_type_params = analysis.BoundTypeParams{};
@@ -1219,6 +1223,17 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: analysis.Decl
             try context.completions.append(allocator, .{
                 .label = name,
                 .kind = .Variable,
+                .insertText = name,
+                .insertTextFormat = .PlainText,
+            });
+        },
+        .error_token => {
+            const name = tree.tokenSlice(decl_handle.decl.error_token);
+
+            try context.completions.append(allocator, .{
+                .label = name,
+                .kind = .Constant,
+                .detail = try std.fmt.allocPrint(allocator, "error.{s}", .{name}),
                 .insertText = name,
                 .insertTextFormat = .PlainText,
             });
