@@ -656,7 +656,15 @@ pub const Key = union(enum) {
                 });
             },
             // .error_type => @panic("TODO"),
-            .error_set_type => @panic("TODO"),
+            .error_set_type => |error_set_info| {
+                const names = error_set_info.names;
+                try writer.writeAll("error{");
+                for (names) |name, i| {
+                    if (i != 0) try writer.writeByte(',');
+                    try writer.writeAll(name);
+                }
+                try writer.writeByte('}');
+            },
             .enum_type => @panic("TODO"),
             .function_type => |function_info| {
                 try writer.writeAll("fn(");
