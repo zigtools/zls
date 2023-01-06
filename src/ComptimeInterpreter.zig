@@ -319,7 +319,7 @@ pub fn interpret(
                     .name = tree.tokenSlice(container_field.ast.main_token),
                     .ty = init_type_value.val,
                     .default_value = default_value,
-                    .alignent = 0, // TODO,
+                    .alignment = 0, // TODO,
                     .is_comptime = false, // TODO
                 };
 

@@ -137,6 +137,10 @@ pub const Vector = struct {
     child: Index,
 };
 
+pub const AnyFrame = struct {
+    child: Index,
+};
+
 pub const BigInt = std.math.big.int.Const;
 
 pub const Bytes = struct {
@@ -168,7 +172,7 @@ pub const Key = union(enum) {
     union_type: Union,
     tuple_type: Tuple,
     vector_type: Vector,
-    // TODO anyframe_T
+    anyframe_t_type: AnyFrame,
 
     int_u64_value: u64,
     int_i64_value: i64,
@@ -188,9 +192,6 @@ pub const Key = union(enum) {
     // slice
     // error
     // error union
-    // optional
-    // aggregate
-    // union
 
     pub fn hash(key: Key) u32 {
         var hasher = std.hash.Wyhash.init(0);
@@ -300,6 +301,7 @@ pub const Key = union(enum) {
             .union_type => .type_union,
             .tuple_type => .type_tuple,
             .vector_type => .type_vector,
+            .anyframe_t_type => .type_anyframe_t,
 
             .int_u64_value => |int| if (int <= std.math.maxInt(u32)) .int_u32 else .int_u64,
             .int_i64_value => |int| if (std.math.maxInt(i32) <= int and int <= std.math.maxInt(i32)) .int_i32 else .int_i64,
@@ -376,6 +378,7 @@ pub const Key = union(enum) {
             .union_type => .Union,
             .tuple_type => .Struct, // TODO this correct?
             .vector_type => .Vector,
+            .anyframe_t_type => .AnyFrame,
 
             .int_u64_value,
             .int_i64_value,
@@ -497,6 +500,7 @@ pub const Key = union(enum) {
             .array_type => |array_info| array_info.child,
             .optional_type => |optional_info| optional_info.payload_type,
             .vector_type => |vector_info| vector_info.child,
+            .anyframe_t_type => |anyframe_t_info| anyframe_t_info.child,
             else => unreachable,
         };
     }
@@ -705,6 +709,10 @@ pub const Key = union(enum) {
                     vector_info.child.fmtType(ip),
                 });
             },
+            .anyframe_t_type => |anyframe_info| {
+                try writer.writeAll("anyframe->");
+                try printType(anyframe_info.child, ip, writer);
+            },
 
             .int_u64_value,
             .int_i64_value,
@@ -797,6 +805,7 @@ pub const Key = union(enum) {
             .union_type,
             .tuple_type,
             .vector_type,
+            .anyframe_t_type,
             => unreachable,
 
             .int_u64_value => |int| try std.fmt.formatIntValue(int, "", .{}, writer),
@@ -921,6 +930,9 @@ pub const Tag = enum(u8) {
     /// An vector type.
     /// data is payload to Vector.
     type_vector,
+    /// An anyframe->T type.
+    /// data is index to type
+    type_anyframe_t,
 
     /// An unsigned integer value that can be represented by u32.
     /// data is integer value
@@ -1036,9 +1048,8 @@ pub fn indexToKey(ip: InternPool, index: Index) Key {
         .type_pointer => .{ .pointer_type = ip.extraData(Pointer, data) },
         .type_array => .{ .array_type = ip.extraData(Array, data) },
         .type_struct => .{ .struct_type = ip.extraData(Struct, data) },
-        .type_optional => .{ .optional_type = .{
-            .payload_type = @intToEnum(Index, data),
-        } },
+        .type_optional => .{ .optional_type = .{ .payload_type = @intToEnum(Index, data) } },
+        .type_anyframe_t => .{ .anyframe_t_type = .{ .child = @intToEnum(Index, data) } },
         .type_error_union => .{ .error_union_type = ip.extraData(ErrorUnion, data) },
         // .type_error => .{ .error_type = ip.extraData(Error, data) },
         .type_error_set => .{ .error_set_type = ip.extraData(ErrorSet, data) },
@@ -1082,6 +1093,7 @@ pub fn get(ip: *InternPool, gpa: Allocator, key: Key) Allocator.Error!Index {
             .data = int_ty.bits,
         },
         .optional_type => |optional_ty| .{ .tag = .type_optional, .data = @enumToInt(optional_ty.payload_type) },
+        .anyframe_t_type => |anyframe_t| .{ .tag = .type_anyframe_t, .data = @enumToInt(anyframe_t.child) },
         .int_u64_value => |int_val| if (int_val <= std.math.maxInt(u32)) .{
             .tag = .int_u32,
             .data = @intCast(u32, int_val),
@@ -2288,17 +2300,11 @@ fn optionalPtrTy(
 // ---------------------------------------------
 
 fn testExpectFmtType(ip: *const InternPool, index: Index, expected: []const u8) !void {
-    const gpa = std.testing.allocator;
-    const actual = try std.fmt.allocPrint(gpa, "{}", .{index.fmtType(ip)});
-    defer gpa.free(actual);
-    try std.testing.expectEqualStrings(expected, actual);
+    try std.testing.expectFmt(expected, "{}", .{index.fmtType(ip)});
 }
 
 fn testExpectFmtValue(ip: *const InternPool, val: Index, ty: Index, expected: []const u8) !void {
-    const gpa = std.testing.allocator;
-    const actual = try std.fmt.allocPrint(gpa, "{}", .{val.fmtValue(ty, ip)});
-    defer gpa.free(actual);
-    try std.testing.expectEqualStrings(expected, actual);
+    try std.testing.expectFmt(expected, "{}", .{val.fmtValue(ty, ip)});
 }
 
 test "int type" {
@@ -2410,6 +2416,9 @@ test "optional type" {
     const i32_type_1 = try ip.get(gpa, .{ .int_type = .{ .signedness = .signed, .bits = 32 } });
     const u32_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .unsigned, .bits = 32 } });
 
+    const null_value = try ip.get(gpa, .{ .simple = .null_value });
+    const u64_42_value = try ip.get(gpa, .{ .int_u64_value = 42 });
+
     const i32_optional_type_0 = try ip.get(gpa, .{ .optional_type = .{ .payload_type = i32_type_0 } });
     const i32_optional_type_1 = try ip.get(gpa, .{ .optional_type = .{ .payload_type = i32_type_1 } });
     const u32_optional_type = try ip.get(gpa, .{ .optional_type = .{ .payload_type = u32_type } });
@@ -2419,6 +2428,9 @@ test "optional type" {
 
     try testExpectFmtType(&ip, i32_optional_type_0, "?i32");
     try testExpectFmtType(&ip, u32_optional_type, "?u32");
+
+    try testExpectFmtValue(&ip, null_value, u32_optional_type, "null");
+    try testExpectFmtValue(&ip, u64_42_value, u32_optional_type, "42");
 }
 
 test "array type" {
@@ -2487,6 +2499,22 @@ test "struct type" {
         },
     });
     std.debug.assert(struct_type_0 == struct_type_1);
+}
+
+test "anyframe type" {
+    const gpa = std.testing.allocator;
+
+    var ip: InternPool = .{};
+    defer ip.deinit(gpa);
+
+    const i32_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .signed, .bits = 32 } });
+    const bool_type = try ip.get(gpa, .{ .simple = .bool });
+
+    const @"anyframe->i32" = try ip.get(gpa, Key{ .anyframe_t_type = .{ .child = i32_type } });
+    const @"anyframe->bool" = try ip.get(gpa, Key{ .anyframe_t_type = .{ .child = bool_type } });
+
+    try testExpectFmtType(&ip, @"anyframe->i32", "anyframe->i32");
+    try testExpectFmtType(&ip, @"anyframe->bool", "anyframe->bool");
 }
 
 test "resolvePeerTypes" {

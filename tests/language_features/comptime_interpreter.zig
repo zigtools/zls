@@ -92,7 +92,7 @@ test "ComptimeInterpreter - struct" {
 
     const result_struct = interpreter.ip.indexToKey(call_result.result.value.val).struct_type;
     
-    try std.testing.expectEqual(@intCast(usize, 1), result_struct.fields.count());
-    try std.testing.expect(result_struct.fields.contains("slay"));
-    try std.testing.expectFmt("bool", "{}", .{result_struct.fields.get("slay").?.ty.fmtType(&interpreter.ip)});
+    try std.testing.expectEqual(@intCast(usize, 1), result_struct.fields.len);
+    try std.testing.expectEqualStrings("slay", result_struct.fields[0].name);
+    try std.testing.expectFmt("bool", "{}", .{result_struct.fields[0].ty.fmtType(&interpreter.ip)});
 }
