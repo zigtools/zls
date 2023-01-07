@@ -2222,13 +2222,14 @@ fn formattingHandler(server: *Server, request: types.DocumentFormattingParams) E
 
     if (handle.tree.errors.len != 0) return null;
 
-    const formatted = try handle.tree.render(server.allocator);
-    defer server.allocator.free(formatted);
+    const allocator = server.arena.allocator();
+
+    const formatted = try handle.tree.render(allocator);
 
     if (std.mem.eql(u8, handle.text, formatted)) return null;
 
     // avoid computing diffs if the output is small
-    const maybe_edits = if (formatted.len <= 512) null else diff.edits(server.arena.allocator(), handle.text, formatted) catch null;
+    const maybe_edits = if (formatted.len <= 512) null else diff.edits(allocator, handle.text, formatted) catch null;
 
     const edits = maybe_edits orelse {
         // if edits have been computed we replace the entire file with the formatted text
@@ -2239,7 +2240,7 @@ fn formattingHandler(server: *Server, request: types.DocumentFormattingParams) E
     };
 
     // Convert from `[]diff.Edit` to `[]types.TextEdit`
-    var text_edits = try std.ArrayListUnmanaged(types.TextEdit).initCapacity(server.arena.allocator(), edits.items.len);
+    var text_edits = try std.ArrayListUnmanaged(types.TextEdit).initCapacity(allocator, edits.items.len);
     for (edits.items) |edit| {
         text_edits.appendAssumeCapacity(.{
             .range = edit.range,
