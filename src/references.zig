@@ -534,6 +534,7 @@ pub fn symbolReferences(
             log.warn("Could not find param decl's function", .{});
         },
         .label_decl => unreachable, // handled separately by labelReferences
+        .error_token => {},
     }
 
     return builder.locations;
