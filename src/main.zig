@@ -53,7 +53,7 @@ fn loop(
 
     while (true) {
         defer {
-            // Mom, can we have garbage collection at home?
+            // Mom, can we have garbage collection?
             // No, we already have garbage collection at home.
             // at home:
             if (arena.queryCapacity() > 128 * 1024) {
