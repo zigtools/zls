@@ -1330,7 +1330,7 @@ fn completeFieldAccess(server: *Server, handle: *const DocumentStore.Handle, sou
     return try completions.toOwnedSlice(allocator);
 }
 
-fn formatDetailledLabel(item: *types.CompletionItem, alloc: std.mem.Allocator) error{OutOfMemory}!void {
+fn formatDetailledLabel(item: *types.CompletionItem, arena: std.mem.Allocator) error{OutOfMemory}!void {
     // NOTE: this is not ideal, we should build a detailled label like we do for label/detail
     // because this implementation is very loose, nothing is formated properly so we need to clean
     // things a little bit, wich is quite messy
@@ -1341,7 +1341,7 @@ fn formatDetailledLabel(item: *types.CompletionItem, alloc: std.mem.Allocator) e
         return;
 
     var detailLen: usize = item.detail.?.len;
-    var it: []u8 = try alloc.alloc(u8, detailLen);
+    var it: []u8 = try arena.alloc(u8, detailLen);
 
     detailLen -= std.mem.replace(u8, item.detail.?, "    ", " ", it) * 3;
     it = it[0..detailLen];
@@ -1691,7 +1691,7 @@ fn initializeHandler(server: *Server, request: types.InitializeParams) Error!typ
     // so we can now format the prebuilt builtins items for labelDetails
     if (server.client_capabilities.label_details_support) {
         for (server.builtin_completions.items) |*item| {
-            try formatDetailledLabel(item, std.heap.page_allocator);
+            try formatDetailledLabel(item, server.arena.allocator());
         }
     }
 

@@ -48,9 +48,18 @@ fn loop(
     var buffered_writer = std.io.bufferedWriter(std_out);
     const writer = buffered_writer.writer();
 
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+
     while (true) {
-        var arena = std.heap.ArenaAllocator.init(server.allocator);
-        defer arena.deinit();
+        defer {
+            // Mom, can we have garbage collection at home?
+            // No, we already have garbage collection at home.
+            // at home:
+            if (arena.queryCapacity() > 128 * 1024) {
+                _ = arena.reset(.free_all);
+            }
+        }
 
         // write server -> client messages
         for (server.outgoing_messages.items) |outgoing_message| {
@@ -338,7 +347,7 @@ const stack_frames = switch (zig_builtin.mode) {
 
 pub fn main() !void {
     var gpa_state = std.heap.GeneralPurposeAllocator(.{ .stack_trace_frames = stack_frames }){};
-    defer _ = gpa_state.deinit();
+    defer std.debug.assert(gpa_state.deinit());
 
     var tracy_state = if (tracy.enable_allocation) tracy.tracyAllocator(gpa_state.allocator()) else void{};
     const inner_allocator: std.mem.Allocator = if (tracy.enable_allocation) tracy_state.allocator() else gpa_state.allocator();
