@@ -4,11 +4,9 @@ on:
   push:
     paths:
       - "**.zig"
-      - "flake.*"
   pull_request:
     paths:
       - "**.zig"
-      - "flake.*"
   schedule:
     - cron: "0 0 * * *"
   workflow_dispatch:
@@ -49,7 +47,7 @@ jobs:
 
           for target in "${targets[@]}"; do
             mkdir -p artifacts/$target
-            echo "Building target ${target}..."
+            echo "Building target ${target}..."   
             if [ "${GITHUB_REF##*/}" == "master" ]; then
               echo "Building safe"
               zig build -Dtarget=${target} -Drelease-safe --prefix artifacts/${target}/
@@ -120,18 +118,3 @@ jobs:
           REMOTE_HOST: ${{ secrets.WEBSITE_DEPLOY_HOST }}
           REMOTE_USER: ${{ secrets.WEBSITE_DEPLOY_USER }}
           TARGET: ${{ secrets.WEBSITE_DEPLOY_FOLDER }}
-
-      - name: Install Nix
-        if: ${{ matrix.os == 'ubuntu-latest' }}
-        uses: cachix/install-nix-action@v18
-
-      - name: Install Cachix
-        if: ${{ matrix.os == 'ubuntu-latest' }}
-        uses: cachix/cachix-action@v12
-        with:
-          name: zigtools
-          authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
-
-      - name: Build Nix flake package
-        if: ${{ matrix.os == 'ubuntu-latest' }}
-        run: nix build --print-build-logs
