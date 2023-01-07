@@ -1712,6 +1712,7 @@ fn initializeHandler(server: *Server, request: types.InitializeParams) Error!typ
     server.status = .initializing;
 
     if (server.config.zig_exe_path) |exe_path| blk: {
+        if (!std.process.can_spawn) break :blk;
         // TODO avoid having to call getZigEnv twice
         // once in init and here
         const env = configuration.getZigEnv(server.allocator, exe_path) orelse break :blk;
@@ -1962,7 +1963,8 @@ fn openDocumentHandler(server: *Server, notification: types.DidOpenTextDocumentP
 
     const handle = try server.document_store.openDocument(notification.textDocument.uri, notification.textDocument.text);
 
-    if (server.client_capabilities.supports_publish_diagnostics) {
+    if (server.client_capabilities.supports_publish_diagnostics) blk: {
+        if (!std.process.can_spawn) break :blk;
         const diagnostics = try server.generateDiagnostics(handle);
         server.sendNotification("textDocument/publishDiagnostics", diagnostics);
     }
@@ -1978,7 +1980,8 @@ fn changeDocumentHandler(server: *Server, notification: types.DidChangeTextDocum
 
     try server.document_store.refreshDocument(handle.uri, new_text);
 
-    if (server.client_capabilities.supports_publish_diagnostics) {
+    if (server.client_capabilities.supports_publish_diagnostics) blk: {
+        if (!std.process.can_spawn) break :blk;
         const diagnostics = try server.generateDiagnostics(handle.*);
         server.sendNotification("textDocument/publishDiagnostics", diagnostics);
     }
@@ -1994,7 +1997,7 @@ fn saveDocumentHandler(server: *Server, notification: types.DidSaveTextDocumentP
     const handle = server.document_store.getHandle(uri) orelse return;
     try server.document_store.applySave(handle);
 
-    if (server.getAutofixMode() == .on_save) {
+    if (std.process.can_spawn and server.getAutofixMode() == .on_save) {
         var text_edits = try server.autofix(allocator, handle);
 
         var workspace_edit = types.WorkspaceEdit{ .changes = .{} };
@@ -2028,6 +2031,7 @@ fn willSaveWaitUntilHandler(server: *Server, request: types.WillSaveTextDocument
 
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
 
+    if (!std.process.can_spawn) return null;
     var text_edits = try server.autofix(allocator, handle);
 
     return try text_edits.toOwnedSlice(allocator);
@@ -2192,7 +2196,8 @@ fn hoverHandler(server: *Server, request: types.HoverParams) Error!?types.Hover 
     };
 
     // TODO: Figure out a better solution for comptime interpreter diags
-    if (server.client_capabilities.supports_publish_diagnostics) {
+    if (server.client_capabilities.supports_publish_diagnostics) blk: {
+        if (!std.process.can_spawn) break :blk;
         const diagnostics = try server.generateDiagnostics(handle.*);
         server.sendNotification("textDocument/publishDiagnostics", diagnostics);
     }
@@ -2464,7 +2469,8 @@ fn codeActionHandler(server: *Server, request: types.CodeActionParams) Error!?[]
 
     // as of right now, only ast-check errors may get a code action
     var diagnostics = std.ArrayListUnmanaged(types.Diagnostic){};
-    if (server.config.enable_ast_check_diagnostics and handle.tree.errors.len == 0) {
+    if (server.config.enable_ast_check_diagnostics and handle.tree.errors.len == 0) blk: {
+        if (!std.process.can_spawn) break :blk;
         getAstCheckDiagnostics(server, handle.*, &diagnostics) catch |err| {
             log.err("failed to run ast-check: {}", .{err});
             return error.InternalError;

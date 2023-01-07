@@ -55,6 +55,7 @@ pub fn loadFromFolder(allocator: std.mem.Allocator, folder_path: []const u8) ?Co
 
 /// Invoke this once all config values have been changed.
 pub fn configChanged(config: *Config, allocator: std.mem.Allocator, builtin_creation_dir: ?[]const u8) !void {
+    if (!std.process.can_spawn) return;
     // Find the zig executable in PATH
     find_zig: {
         if (config.zig_exe_path) |exe_path| {
