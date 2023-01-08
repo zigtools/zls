@@ -36,11 +36,16 @@
           nativeBuildInputs = [ zig ];
           dontConfigure = true;
           dontInstall = true;
+
+          inherit tres;
+          # Builder var names can't have dashes
+          known_folders = known-folders;
+
           buildPhase = ''
             mkdir -p $out
-            zig build install -Dcpu=baseline -Drelease-safe=true -Ddata_version=master -Dtres=${tres}/tres.zig -Dknown-folders=${known-folders}/known-folders.zig --prefix $out
+            export XDG_CACHE_HOME=$TMP/.cache
+            zig build install -Dcpu=baseline -Drelease-safe=true -Ddata_version=master -Dtres=$tres/tres.zig -Dknown-folders=$known_folders/known-folders.zig --prefix $out
           '';
-          XDG_CACHE_HOME = ".cache";
         };
       }
     );
