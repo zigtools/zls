@@ -76,6 +76,8 @@ fn loop(
         }
 
         server.processJsonRpc(&arena, json_message);
+
+        if(server.status == .exiting_success or server.status == .exiting_failure) return;
     }
 }
 
@@ -387,4 +389,8 @@ pub fn main() !void {
     defer server.deinit();
 
     try loop(&server, record_file, replay_file);
+
+    if (server.status == .exiting_failure) {
+        std.process.exit(1);
+    }
 }
