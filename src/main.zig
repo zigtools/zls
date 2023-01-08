@@ -347,7 +347,7 @@ const stack_frames = switch (zig_builtin.mode) {
 
 pub fn main() !void {
     var gpa_state = std.heap.GeneralPurposeAllocator(.{ .stack_trace_frames = stack_frames }){};
-    defer std.debug.assert(gpa_state.deinit());
+    defer std.debug.assert(!gpa_state.deinit());
 
     var tracy_state = if (tracy.enable_allocation) tracy.tracyAllocator(gpa_state.allocator()) else void{};
     const inner_allocator: std.mem.Allocator = if (tracy.enable_allocation) tracy_state.allocator() else gpa_state.allocator();
