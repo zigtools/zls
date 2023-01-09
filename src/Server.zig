@@ -49,6 +49,10 @@ status: enum {
     initialized,
     /// the server has been shutdown and can't handle any more requests
     shutdown,
+    /// the server is received a `exit` notification and has been shutdown
+    exiting_success,
+    /// the server is received a `exit` notification but has not been shutdown
+    exiting_failure,
 },
 
 // Code was based off of https://github.com/andersfr/zig-lsp/blob/master/server.zig
@@ -1827,22 +1831,18 @@ fn initializedHandler(server: *Server, notification: types.InitializedParams) Er
 }
 
 fn shutdownHandler(server: *Server, _: void) Error!?void {
+    defer server.status = .shutdown;
     if (server.status != .initialized) return error.InvalidRequest; // received a shutdown request but the server is not initialized!
 
-    // Technically we should deinitialize first and send possible errors to the client
     return null;
 }
 
-fn exitHandler(server: *Server, _: void) noreturn {
-    log.info("Server exiting...", .{});
-    // Technically we should deinitialize first and send possible errors to the client
-
-    const error_code: u8 = switch (server.status) {
-        .uninitialized, .shutdown => 0,
-        else => 1,
+fn exitHandler(server: *Server, _: void) Error!void {
+    server.status = switch (server.status) {
+        .initialized => .exiting_failure,
+        .shutdown => .exiting_success,
+        else => unreachable,
     };
-
-    std.os.exit(error_code);
 }
 
 fn cancelRequestHandler(server: *Server, request: types.CancelParams) Error!void {
@@ -3007,12 +3007,14 @@ fn processMessage(server: *Server, message: Message) Error!void {
 
             return error.InvalidRequest; // server received a request after shutdown!
         },
+        .exiting_success,
+        .exiting_failure, => unreachable,
     }
 
     const start_time = std.time.milliTimestamp();
     defer {
         // makes `zig build test` look nice
-        if (!zig_builtin.is_test and !std.mem.eql(u8, method, "shutdown")) {
+        if (!zig_builtin.is_test) {
             const end_time = std.time.milliTimestamp();
             log.debug("Took {}ms to process method {s}", .{ end_time - start_time, method });
         }
