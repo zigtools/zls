@@ -431,6 +431,7 @@ fn loadBuildConfiguration(
     const zig_run_result = try std.ChildProcess.exec(.{
         .allocator = arena_allocator,
         .argv = args.items,
+        .cwd = try std.fs.path.resolve(arena_allocator, &.{ config.zig_exe_path.?, "../" }),
     });
 
     defer {
