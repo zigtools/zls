@@ -653,10 +653,10 @@ fn writeMarkdownFromHtmlInternal(html: []const u8, single_line: bool, depth: u32
                 continue;
             }
             index += 1;
-        } else return error.MissingEndTag;
+        } else html.len;
 
         const content = html[content_start..content_end];
-        index = content_end + closing_tag_name.len;
+        index = @min(html.len, content_end + closing_tag_name.len);
         // std.debug.print("content: {s}\n", .{content});
 
         if (std.mem.eql(u8, tag_name, "p")) {
