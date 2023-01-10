@@ -205,7 +205,7 @@ const CheckSubmodulesStep = struct {
             if (access == error.FileNotFound) {
                 std.debug.print(
                     \\Did you clone ZLS with `git clone --recurse-submodules https://github.com/zigtools/zls`?
-                    \\If you not you can fix this with `git submodule update --init --recursive`.
+                    \\If not you can fix this with `git submodule update --init --recursive`.
                     \\
                     \\
                 , .{});
