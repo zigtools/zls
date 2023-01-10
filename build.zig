@@ -111,6 +111,12 @@ pub fn build(b: *std.build.Builder) !void {
     const tres_path = b.option([]const u8, "tres", "Path to tres package (default: " ++ TRES_DEFAULT_PATH ++ ")") orelse TRES_DEFAULT_PATH;
     exe.addPackage(.{ .name = "tres", .source = .{ .path = tres_path } });
 
+    const check_submodules_step = CheckSubmodulesStep.init(b, &.{
+        known_folders_path,
+        tres_path,
+    });
+    b.getInstallStep().dependOn(&check_submodules_step.step);
+
     if (enable_tracy) {
         const client_cpp = "src/tracy/TracyClient.cpp";
 
@@ -136,7 +142,7 @@ pub fn build(b: *std.build.Builder) !void {
     exe.install();
 
     const gen_exe = b.addExecutable("zls_gen", "src/config_gen/config_gen.zig");
-    gen_exe.addPackage(.{ .name = "tres", .source = .{ .path = "src/tres/tres.zig" } });
+    gen_exe.addPackage(.{ .name = "tres", .source = .{ .path = tres_path } });
 
     const gen_cmd = gen_exe.run();
     gen_cmd.addArgs(&.{
@@ -150,6 +156,7 @@ pub fn build(b: *std.build.Builder) !void {
     }
 
     const gen_step = b.step("gen", "Regenerate config files");
+    gen_step.dependOn(&check_submodules_step.step);
     gen_step.dependOn(&gen_cmd.step);
 
     const test_step = b.step("test", "Run all the tests");
@@ -175,3 +182,35 @@ pub fn build(b: *std.build.Builder) !void {
     tests.setTarget(target);
     test_step.dependOn(&tests.step);
 }
+
+const CheckSubmodulesStep = struct {
+    step: std.build.Step,
+    builder: *std.build.Builder,
+    submodules: []const []const u8,
+
+    pub fn init(builder: *std.build.Builder, submodules: []const []const u8) *CheckSubmodulesStep {
+        var self = builder.allocator.create(CheckSubmodulesStep) catch unreachable;
+        self.* = CheckSubmodulesStep{
+            .builder = builder,
+            .step = std.build.Step.init(.custom, "Check Submodules", builder.allocator, make),
+            .submodules = builder.allocator.dupe([]const u8, submodules) catch unreachable,
+        };
+        return self;
+    }
+
+    fn make(step: *std.build.Step) anyerror!void {
+        const self = @fieldParentPtr(CheckSubmodulesStep, "step", step);
+        for (self.submodules) |path| {
+            const access = std.fs.accessAbsolute(self.builder.pathFromRoot(path), .{});
+            if (access == error.FileNotFound) {
+                std.debug.print(
+                    \\Did you clone ZLS with `git clone --recurse-submodules https://github.com/zigtools/zls`?
+                    \\If not you can fix this with `git submodule update --init --recursive`.
+                    \\
+                    \\
+                , .{});
+                break;
+            }
+        }
+    }
+};
