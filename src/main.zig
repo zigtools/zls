@@ -11,28 +11,30 @@ const debug = @import("debug.zig");
 
 const logger = std.log.scoped(.main);
 
-// Always set this to debug to make std.log call into our handler, then control the runtime
-// value in the definition below.
-pub const log_level = .debug;
-
 var actual_log_level: std.log.Level = switch (zig_builtin.mode) {
     .Debug => .debug,
     else => @intToEnum(std.log.Level, @enumToInt(build_options.log_level)), // temporary fix to build failing on release-safe due to a Zig bug
 };
 
-pub fn log(
-    comptime level: std.log.Level,
-    comptime scope: @TypeOf(.EnumLiteral),
-    comptime format: []const u8,
-    args: anytype,
-) void {
-    if (@enumToInt(level) > @enumToInt(actual_log_level)) return;
+pub const std_options = struct {
+    // Always set this to debug to make std.log call into our handler, then control the runtime
+    // value in the definition below.
+    pub const log_level = .debug;
 
-    const level_txt = comptime level.asText();
+    pub fn logFn(
+        comptime level: std.log.Level,
+        comptime scope: @TypeOf(.EnumLiteral),
+        comptime format: []const u8,
+        args: anytype,
+    ) void {
+        if (@enumToInt(level) > @enumToInt(actual_log_level)) return;
 
-    std.debug.print("{s:<5}: ({s:^6}): ", .{ level_txt, @tagName(scope) });
-    std.debug.print(format ++ "\n", args);
-}
+        const level_txt = comptime level.asText();
+
+        std.debug.print("{s:<5}: ({s:^6}): ", .{ level_txt, @tagName(scope) });
+        std.debug.print(format ++ "\n", args);
+    }
+};
 
 fn loop(
     server: *Server,
@@ -86,7 +88,7 @@ fn loop(
 
         server.processJsonRpc(&arena, json_message);
 
-        if(server.status == .exiting_success or server.status == .exiting_failure) return;
+        if (server.status == .exiting_success or server.status == .exiting_failure) return;
     }
 }
 
