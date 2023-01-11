@@ -694,7 +694,7 @@ fn createDocument(self: *DocumentStore, uri: Uri, text: [:0]u8, open: bool) erro
                 handle.associated_build_file = gop.key_ptr.*;
                 break;
             } else if (handle.associated_build_file == null) {
-                handle.associated_build_file = build_file_uri;
+                handle.associated_build_file = gop.key_ptr.*;
             }
         }
     }
