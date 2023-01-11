@@ -28,15 +28,10 @@ test "definition - cursor is at the end of an identifier" {
 }
 
 test "definition - cursor is at the start of an identifier" {
-    testDefinition(
+    try testDefinition(
         \\fn main() void { <>foo(); }
         \\fn <def>foo</def>() void {}
-    ) catch |err| switch (err) {
-        error.UnresolvedDefinition => {
-            // TODO: #891
-        },
-        else => return err,
-    };
+    );
 }
 
 fn testDefinition(source: []const u8) !void {

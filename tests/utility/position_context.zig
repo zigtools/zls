@@ -12,7 +12,7 @@ test "position context - var access" {
         \\const this_var = id<cursor>entifier;
     ,
         .var_access,
-        "id",
+        "identifier",
     );
     try testContext(
         \\const this_var = identifier<cursor>;
@@ -40,37 +40,37 @@ test "position context - field access" {
         \\if (foo.<cursor>field == foo) {
     ,
         .field_access,
-        "foo.",
+        "foo.field",
     );
     try testContext(
         \\if (foo.member.<cursor>field == foo) {
     ,
         .field_access,
-        "foo.member.",
+        "foo.member.field",
     );
     try testContext(
         \\if (foo.*.?.<cursor>field == foo) {
     ,
         .field_access,
-        "foo.*.?.",
+        "foo.*.?.field",
     );
     try testContext(
         \\if (foo[0].<cursor>field == foo) {
     ,
         .field_access,
-        "foo[0].",
+        "foo[0].field",
     );
     try testContext(
         \\if (foo.<cursor>@"field" == foo) {
     ,
         .field_access,
-        "foo.",
+        "foo.@\"field\"",
     );
     try testContext(
         \\const arr = std.ArrayList(SomeStruct(a, b, c, d)).in<cursor>it(allocator);
     ,
         .field_access,
-        "std.ArrayList(SomeStruct(a, b, c, d)).in",
+        "std.ArrayList(SomeStruct(a, b, c, d)).init",
     );
     try testContext(
         \\fn foo() !Foo.b<cursor> {
@@ -122,13 +122,13 @@ test "position context - import/embedfile string literal" {
         \\const std = @import("st<cursor>");
     ,
         .import_string_literal,
-        "\"st", // maybe report just "st"
+        "\"st\"", // maybe report just "st"
     );
     try testContext(
         \\const std = @embedFile("file.<cursor>");
     ,
         .embedfile_string_literal,
-        "\"file.", // maybe report just "file."
+        "\"file.\"", // maybe report just "file."
     );
 }
 
@@ -137,13 +137,13 @@ test "position context - string literal" {
         \\var foo = "he<cursor>llo world!";
     ,
         .string_literal,
-        "\"he", // maybe report just "he"
+        "\"hello world!\"", // maybe report just "hello world!"
     );
     try testContext(
         \\var foo = \\hello<cursor>;
     ,
         .string_literal,
-        "\\\\hello", // maybe report just "hello"
+        "\\\\hello;", // maybe report just "hello;"
     );
 }
 
@@ -237,7 +237,7 @@ fn testContext(line: []const u8, tag: std.meta.Tag(analysis.PositionContext), ma
     const final_line = try std.mem.concat(allocator, u8, &.{ line[0..cursor_idx], line[cursor_idx + "<cursor>".len ..] });
     defer allocator.free(final_line);
 
-    const ctx = try analysis.getPositionContext(allocator, line, cursor_idx);
+    const ctx = try analysis.getPositionContext(allocator, final_line, cursor_idx);
 
     if (std.meta.activeTag(ctx) != tag) {
         std.debug.print("Expected tag `{s}`, got `{s}`\n", .{ @tagName(tag), @tagName(std.meta.activeTag(ctx)) });
@@ -253,7 +253,7 @@ fn testContext(line: []const u8, tag: std.meta.Tag(analysis.PositionContext), ma
 
     const expected_range = maybe_range orelse {
         std.debug.print("Expected null range, got `{s}`\n", .{
-            line[actual_loc.start..actual_loc.end],
+            final_line[actual_loc.start..actual_loc.end],
         });
         return error.DifferentRange;
     };
@@ -263,8 +263,8 @@ fn testContext(line: []const u8, tag: std.meta.Tag(analysis.PositionContext), ma
 
     if (expected_range_start != actual_loc.start or expected_range_end != actual_loc.end) {
         std.debug.print("Expected range `{s}` ({}..{}), got `{s}` ({}..{})\n", .{
-            line[expected_range_start..expected_range_end], expected_range_start, expected_range_end,
-            line[actual_loc.start..actual_loc.end],         actual_loc.start,     actual_loc.end,
+            final_line[expected_range_start..expected_range_end], expected_range_start, expected_range_end,
+            final_line[actual_loc.start..actual_loc.end],         actual_loc.start,     actual_loc.end,
         });
         return error.DifferentRange;
     }

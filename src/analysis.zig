@@ -1553,9 +1553,15 @@ fn tokenLocAppend(prev: offsets.Loc, token: std.zig.Token) offsets.Loc {
     };
 }
 
+/// Given a byte index in a document (typically cursor offset), classify what kind of entity is at that index.
+///
+/// Classification is based on the lexical structure -- we fetch the line containin index, tokenize it,
+/// and look at the sequence of tokens just before the cursor. Due to the nice way zig is designed (only line
+/// comments, etc) lexing just a single line is always correct.
 pub fn getPositionContext(allocator: std.mem.Allocator, text: []const u8, doc_index: usize) !PositionContext {
-    const line_loc = offsets.lineLocUntilIndex(text, doc_index);
+    const line_loc = offsets.lineLocAtIndex(text, doc_index);
     const line = offsets.locToSlice(text, line_loc);
+    const prev_char = if (doc_index > 0) text[doc_index - 1] else 0;
 
     const is_comment = std.mem.startsWith(u8, std.mem.trimLeft(u8, line, " \t"), "//");
     if (is_comment) return .comment;
@@ -1576,10 +1582,16 @@ pub fn getPositionContext(allocator: std.mem.Allocator, text: []const u8, doc_in
         while (true) {
             const tok = tokenizer.next();
             // Early exits.
+            if (tok.loc.start > doc_index) break;
+            if (tok.loc.start == doc_index) {
+                // Tie-breaking, the curosr is exactly between two tokens, and
+                // `tok` is the latter of the two.
+                if (tok.tag != .identifier) break;
+            }
             switch (tok.tag) {
                 .invalid => {
                     // Single '@' do not return a builtin token so we check this on our own.
-                    if (line[line.len - 1] == '@') {
+                    if (prev_char == '@') {
                         return PositionContext{
                             .builtin = .{
                                 .start = line_loc.end - 1,
@@ -1685,7 +1697,7 @@ pub fn getPositionContext(allocator: std.mem.Allocator, text: []const u8, doc_in
             .label => |filled| {
                 // We need to check this because the state could be a filled
                 // label if only a space follows it
-                if (!filled or line[line.len - 1] != ' ') {
+                if (!filled or prev_char != ' ') {
                     return state.ctx;
                 }
             },
