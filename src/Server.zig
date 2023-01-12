@@ -34,7 +34,7 @@ config: *Config,
 allocator: std.mem.Allocator = undefined,
 arena: *std.heap.ArenaAllocator = undefined,
 document_store: DocumentStore = undefined,
-builtin_completions: std.ArrayListUnmanaged(types.CompletionItem),
+builtin_completions: ?std.ArrayListUnmanaged(types.CompletionItem),
 client_capabilities: ClientCapabilities = .{},
 outgoing_messages: std.ArrayListUnmanaged([]const u8) = .{},
 recording_enabled: bool,
@@ -1289,6 +1289,49 @@ fn populateSnippedCompletions(
     }
 }
 
+fn completeBuiltin(server: *Server) error{OutOfMemory}!?[]types.CompletionItem {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    const allocator = server.arena.allocator();
+
+    const builtin_completions = if (server.builtin_completions) |completions|
+        return completions.items
+    else blk: {
+        server.builtin_completions = try std.ArrayListUnmanaged(types.CompletionItem).initCapacity(server.allocator, data.builtins.len);
+        break :blk &server.builtin_completions.?;
+    };
+
+    for (data.builtins) |builtin| {
+        const insert_text = if (server.config.enable_snippets) builtin.snippet else builtin.name;
+        builtin_completions.appendAssumeCapacity(.{
+            .label = builtin.name,
+            .kind = .Function,
+            .filterText = builtin.name[1..],
+            .detail = builtin.signature,
+            .insertText = if (server.config.include_at_in_builtins) insert_text else insert_text[1..],
+            .insertTextFormat = if (server.config.enable_snippets) .Snippet else .PlainText,
+            .documentation = .{
+                .MarkupContent = .{
+                    .kind = .markdown,
+                    .value = builtin.documentation,
+                },
+            },
+        });
+    }
+
+    var completions = try allocator.alloc(types.CompletionItem, builtin_completions.items.len);
+
+    if (server.client_capabilities.label_details_support) {
+        for (builtin_completions.items) |item, i| {
+            completions[i] = item;
+            try formatDetailledLabel(&completions[i], allocator);
+        }
+    }
+
+    return completions;
+}
+
 fn completeGlobal(server: *Server, pos_index: usize, handle: *const DocumentStore.Handle) error{OutOfMemory}![]types.CompletionItem {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
@@ -1691,14 +1734,6 @@ fn initializeHandler(server: *Server, request: types.InitializeParams) Error!typ
         }
     }
 
-    // NOTE: everything is initialized, we got the client capabilities
-    // so we can now format the prebuilt builtins items for labelDetails
-    if (server.client_capabilities.label_details_support) {
-        for (server.builtin_completions.items) |*item| {
-            try formatDetailledLabel(item, server.arena.allocator());
-        }
-    }
-
     if (request.capabilities.workspace) |workspace| {
         server.client_capabilities.supports_apply_edits = workspace.applyEdit orelse false;
         server.client_capabilities.supports_configuration = workspace.configuration orelse false;
@@ -2067,7 +2102,7 @@ fn completionHandler(server: *Server, request: types.CompletionParams) Error!?ty
     const pos_context = try analysis.getPositionContext(server.arena.allocator(), handle.text, source_index);
 
     const maybe_completions = switch (pos_context) {
-        .builtin => server.builtin_completions.items,
+        .builtin => try server.completeBuiltin(),
         .var_access, .empty => try server.completeGlobal(source_index, handle),
         .field_access => |loc| try server.completeFieldAccess(handle, source_index, loc),
         .global_error_set => try server.completeError(handle),
@@ -3008,7 +3043,8 @@ fn processMessage(server: *Server, message: Message) Error!void {
             return error.InvalidRequest; // server received a request after shutdown!
         },
         .exiting_success,
-        .exiting_failure, => unreachable,
+        .exiting_failure,
+        => unreachable,
     }
 
     const start_time = std.time.milliTimestamp();
@@ -3116,32 +3152,11 @@ pub fn init(
     };
     errdefer document_store.deinit();
 
-    var builtin_completions = try std.ArrayListUnmanaged(types.CompletionItem).initCapacity(allocator, data.builtins.len);
-    errdefer builtin_completions.deinit(allocator);
-
-    for (data.builtins) |builtin| {
-        const insert_text = if (config.enable_snippets) builtin.snippet else builtin.name;
-        builtin_completions.appendAssumeCapacity(.{
-            .label = builtin.name,
-            .kind = .Function,
-            .filterText = builtin.name[1..],
-            .detail = builtin.signature,
-            .insertText = if (config.include_at_in_builtins) insert_text else insert_text[1..],
-            .insertTextFormat = if (config.enable_snippets) .Snippet else .PlainText,
-            .documentation = .{
-                .MarkupContent = .{
-                    .kind = .markdown,
-                    .value = builtin.documentation,
-                },
-            },
-        });
-    }
-
     return Server{
         .config = config,
         .allocator = allocator,
         .document_store = document_store,
-        .builtin_completions = builtin_completions,
+        .builtin_completions = null,
         .recording_enabled = recording_enabled,
         .replay_enabled = replay_enabled,
         .status = .uninitialized,
@@ -3152,7 +3167,7 @@ pub fn deinit(server: *Server) void {
     server.document_store.deinit();
     analysis.deinit();
 
-    server.builtin_completions.deinit(server.allocator);
+    if (server.builtin_completions) |*completions| completions.deinit(server.allocator);
 
     for (server.outgoing_messages.items) |message| {
         server.allocator.free(message);
