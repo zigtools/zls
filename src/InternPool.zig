@@ -10,26 +10,12 @@ const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 
-const KeyAdapter = struct {
-    intern_pool: *const InternPool,
-
-    pub fn eql(ctx: @This(), a: Key, b_void: void, b_map_index: usize) bool {
-        _ = b_void;
-        return ctx.intern_pool.indexToKey(@intToEnum(Index, b_map_index)).eql(a);
-    }
-
-    pub fn hash(ctx: @This(), a: Key) u32 {
-        _ = ctx;
-        return a.hash();
-    }
-};
-
-pub const Int = struct {
+pub const Int = packed struct {
     signedness: std.builtin.Signedness,
     bits: u16,
 };
 
-pub const Pointer = struct {
+pub const Pointer = packed struct {
     elem_type: Index,
     sentinel: Index = .none,
     alignment: u16 = 0,
@@ -40,7 +26,7 @@ pub const Pointer = struct {
     address_space: std.builtin.AddressSpace = .generic,
 };
 
-pub const Array = struct {
+pub const Array = packed struct {
     // TODO support big int
     len: u32,
     child: Index,
@@ -62,18 +48,14 @@ pub const Struct = struct {
     };
 };
 
-pub const Optional = struct {
+pub const Optional = packed struct {
     payload_type: Index,
 };
 
-pub const ErrorUnion = struct {
+pub const ErrorUnion = packed struct {
     error_set_type: Index,
     payload_type: Index,
 };
-
-// pub const Error = struct {
-//     name: []const u8,
-// };
 
 pub const ErrorSet = struct {
     /// must be sorted
@@ -104,11 +86,11 @@ pub const Fn = struct {
     return_type: Index,
     args: []const Param,
 
-    pub const Param = struct {
+    pub const Param = packed struct {
+        arg_type: Index,
         is_comptime: bool = false,
         is_generic: bool = false,
         is_noalias: bool = false,
-        arg_type: Index,
     };
 };
 
@@ -127,31 +109,27 @@ pub const Union = struct {
 
 pub const Tuple = struct {
     types: []const Index,
-    /// unreachable_value elements are used to indicate runtime-known.
+    /// Index.none elements are used to indicate runtime-known.
     values: []const Index,
 };
 
-pub const Vector = struct {
+pub const Vector = packed struct {
     // TODO support big int
     len: u32,
     child: Index,
 };
 
-pub const AnyFrame = struct {
+pub const AnyFrame = packed struct {
     child: Index,
 };
 
 pub const BigInt = std.math.big.int.Const;
 
-pub const Bytes = struct {
-    data: []const u8,
-};
+pub const Bytes = []const u8;
 
-pub const Aggregate = struct {
-    data: []const Index,
-};
+pub const Aggregate = []const Index;
 
-pub const UnionValue = struct {
+pub const UnionValue = packed struct {
     tag: Index,
     val: Index,
 };
@@ -165,14 +143,13 @@ pub const Key = union(enum) {
     struct_type: Struct,
     optional_type: Optional,
     error_union_type: ErrorUnion,
-    // error_type: Error,
     error_set_type: ErrorSet,
     enum_type: Enum,
     function_type: Fn,
     union_type: Union,
     tuple_type: Tuple,
     vector_type: Vector,
-    anyframe_t_type: AnyFrame,
+    anyframe_type: AnyFrame,
 
     int_u64_value: u64,
     int_i64_value: i64,
@@ -182,10 +159,8 @@ pub const Key = union(enum) {
     float_64_value: f64,
     float_80_value: f80,
     float_128_value: f128,
-    // type_value: Index,
 
     bytes: Bytes,
-    // one_pointer: Index,
     aggregate: Aggregate,
     union_value: UnionValue,
 
@@ -193,98 +168,10 @@ pub const Key = union(enum) {
     // error
     // error union
 
-    pub fn hash(key: Key) u32 {
-        var hasher = std.hash.Wyhash.init(0);
-        std.hash.autoHash(&hasher, std.meta.activeTag(key));
-        switch (key) {
-            .float_16_value => |f| std.hash.autoHash(&hasher, @bitCast(u16, f)),
-            .float_32_value => |f| std.hash.autoHash(&hasher, @bitCast(u32, f)),
-            .float_64_value => |f| std.hash.autoHash(&hasher, @bitCast(u64, f)),
-            .float_80_value => |f| std.hash.autoHash(&hasher, @bitCast(u80, f)),
-            .float_128_value => |f| std.hash.autoHash(&hasher, @bitCast(u128, f)),
-            inline else => |info| std.hash.autoHashStrat(&hasher, info, .Deep), // TODO sad stage1 noises :(
-        }
-        return @truncate(u32, hasher.final());
-    }
-
-    pub fn eql(a: Key, b: Key) bool {
-        const KeyTag = std.meta.Tag(Key);
-        const a_tag: KeyTag = a;
-        const b_tag: KeyTag = b;
-        if (a_tag != b_tag) return false;
-        return switch (a) {
-            .struct_type => |struct_info| {
-                if (struct_info.layout != b.struct_type.layout) return false;
-                if (struct_info.fields.len != b.struct_type.fields.len) return false;
-                for (struct_info.fields) |field, i| {
-                    if (!std.meta.eql(field, b.struct_type.fields[i])) return false;
-                }
-                return true;
-            },
-            // .error_type => |error_info| std.mem.eql(u8, error_info.name, b.error_type.name),
-            .error_set_type => |error_set_info| {
-                if (error_set_info.names.len != b.error_set_type.names.len) return false;
-                for (error_set_info.names) |a_name, i| {
-                    const b_name = b.error_set_type.names[i];
-                    if (!std.mem.eql(u8, a_name, b_name)) return false;
-                }
-                return true;
-            },
-            .enum_type => |enum_info| {
-                if (enum_info.tag_type != b.enum_type.tag_type) return false;
-                if (enum_info.tag_type_infered != b.enum_type.tag_type_infered) return false;
-                if (enum_info.fields.len != b.enum_type.fields.len) return false;
-                @panic("TODO: implement field equality check");
-            },
-            .function_type => |function_info| {
-                if (function_info.calling_convention != b.function_type.calling_convention) return false;
-                if (function_info.alignment != b.function_type.alignment) return false;
-                if (function_info.is_generic != b.function_type.is_generic) return false;
-                if (function_info.is_var_args != b.function_type.is_var_args) return false;
-                if (function_info.return_type != b.function_type.return_type) return false;
-                if (function_info.args.len != b.function_type.args.len) return false;
-
-                for (function_info.args) |arg, i| {
-                    if (!std.meta.eql(arg, b.function_type.args[i])) return false;
-                }
-                return true;
-            },
-            .union_type => |union_info| {
-                if (union_info.tag_type != b.union_type.tag_type) return false;
-                if (union_info.layout != b.union_type.layout) return false;
-                if (union_info.fields.len != b.union_type.fields.len) return false;
-                for (union_info.fields) |field, i| {
-                    if (!std.meta.eql(field, b.union_type.fields[i])) return false;
-                }
-                return true;
-            },
-            .tuple_type => |tuple_info| {
-                std.debug.assert(tuple_info.types.len == tuple_info.values.len);
-                std.debug.assert(b.tuple_type.types.len == b.tuple_type.values.len);
-                if (tuple_info.types.len != b.tuple_type.types.len) return false;
-                for (tuple_info.types) |ty, i| {
-                    if (ty != b.tuple_type.types[i]) return false;
-                }
-                for (tuple_info.values) |val, i| {
-                    if (val != b.tuple_type.values[i]) return false;
-                }
-                return true;
-            },
-            .bytes => |bytes| std.mem.eql(u8, bytes.data, b.bytes.data),
-            .aggregate => |aggregate| {
-                if (aggregate.data.len != b.aggregate.data.len) return false;
-                for (aggregate.data) |ty, i| {
-                    if (ty != b.aggregate.data[i]) return false;
-                }
-                return true;
-            },
-            else => std.meta.eql(a, b),
-        };
-    }
-
     pub fn tag(key: Key) Tag {
         return switch (key) {
             .simple => .simple,
+
             .int_type => |int_info| switch (int_info.signedness) {
                 .signed => .type_int_signed,
                 .unsigned => .type_int_unsigned,
@@ -294,14 +181,13 @@ pub const Key = union(enum) {
             .struct_type => .type_struct,
             .optional_type => .type_optional,
             .error_union_type => .type_error_union,
-            // .error_type => .type_error,
             .error_set_type => .type_error_set,
             .enum_type => .type_enum,
             .function_type => .type_function,
             .union_type => .type_union,
             .tuple_type => .type_tuple,
             .vector_type => .type_vector,
-            .anyframe_t_type => .type_anyframe_t,
+            .anyframe_type => .type_anyframe,
 
             .int_u64_value => |int| if (int <= std.math.maxInt(u32)) .int_u32 else .int_u64,
             .int_i64_value => |int| if (std.math.maxInt(i32) <= int and int <= std.math.maxInt(i32)) .int_i32 else .int_i64,
@@ -311,10 +197,8 @@ pub const Key = union(enum) {
             .float_64_value => .float_f64,
             .float_80_value => .float_f80,
             .float_128_value => .float_f128,
-            // .type_value => .type,
 
             .bytes => .bytes,
-            // .one_pointer => .one_pointer,
             .aggregate => .aggregate,
             .union_value => .union_value,
         };
@@ -378,7 +262,7 @@ pub const Key = union(enum) {
             .union_type => .Union,
             .tuple_type => .Struct, // TODO this correct?
             .vector_type => .Vector,
-            .anyframe_t_type => .AnyFrame,
+            .anyframe_type => .AnyFrame,
 
             .int_u64_value,
             .int_i64_value,
@@ -500,7 +384,7 @@ pub const Key = union(enum) {
             .array_type => |array_info| array_info.child,
             .optional_type => |optional_info| optional_info.payload_type,
             .vector_type => |vector_info| vector_info.child,
-            .anyframe_t_type => |anyframe_t_info| anyframe_t_info.child,
+            .anyframe_type => |anyframe_info| anyframe_info.child,
             else => unreachable,
         };
     }
@@ -717,7 +601,7 @@ pub const Key = union(enum) {
                     vector_info.child.fmtType(ip),
                 });
             },
-            .anyframe_t_type => |anyframe_info| {
+            .anyframe_type => |anyframe_info| {
                 try writer.writeAll("anyframe->");
                 try printType(anyframe_info.child, ip, writer);
             },
@@ -813,7 +697,7 @@ pub const Key = union(enum) {
             .union_type,
             .tuple_type,
             .vector_type,
-            .anyframe_t_type,
+            .anyframe_type,
             => unreachable,
 
             .int_u64_value => |int| try std.fmt.formatIntValue(int, "", .{}, writer),
@@ -826,19 +710,19 @@ pub const Key = union(enum) {
             .float_128_value => |float| try writer.print("{d}", .{@floatCast(f64, float)}),
 
             // .type_value => |tty| tty.fmtType(ip),
-            .bytes => |data| try writer.print("\"{}\"", .{std.zig.fmtEscapes(data.data)}),
+            .bytes => |bytes| try writer.print("\"{}\"", .{std.zig.fmtEscapes(bytes)}),
             // .one_pointer => unreachable,
             .aggregate => |aggregate| {
                 const struct_info = ip.indexToKey(ty).struct_type;
-                std.debug.assert(aggregate.data.len == struct_info.fields.len);
+                std.debug.assert(aggregate.len == struct_info.fields.len);
 
                 try writer.writeAll(".{");
                 var i: u32 = 0;
-                while (i < aggregate.data.len) : (i += 1) {
+                while (i < aggregate.len) : (i += 1) {
                     if (i != 0) try writer.writeAll(", ");
 
                     try writer.print(".{s} = ", .{struct_info.fields[i].name});
-                    try printValue(aggregate.data[i], struct_info.fields[i].ty, ip, writer);
+                    try printValue(aggregate[i], struct_info.fields[i].ty, ip, writer);
                 }
                 try writer.writeByte('}');
             },
@@ -917,9 +801,6 @@ pub const Tag = enum(u8) {
     /// An error union type.
     /// data is payload to ErrorUnion.
     type_error_union,
-    /// An error type.
-    /// data is payload to Error.
-    type_error,
     /// An error set type.
     /// data is payload to ErrorSet.
     type_error_set,
@@ -940,7 +821,7 @@ pub const Tag = enum(u8) {
     type_vector,
     /// An anyframe->T type.
     /// data is index to type
-    type_anyframe_t,
+    type_anyframe,
 
     /// An unsigned integer value that can be represented by u32.
     /// data is integer value
@@ -975,16 +856,10 @@ pub const Tag = enum(u8) {
     /// A float value that can be represented by f128.
     /// data is payload to f128.
     float_f128,
-    // /// A type value.
-    // /// data is Index.
-    // type,
 
     /// A byte sequence value.
     /// data is payload to data begin and length.
     bytes,
-    // /// A single pointer value.
-    // /// data is index to value.
-    // one_pointer,
     /// A aggregate (struct) value.
     /// data is index to Aggregate.
     aggregate,
@@ -1039,12 +914,12 @@ pub fn deinit(ip: *InternPool, gpa: Allocator) void {
 
     // TODO deinit fields
 }
-
 pub fn indexToKey(ip: InternPool, index: Index) Key {
     const item = ip.items.get(@enumToInt(index));
     const data = item.data;
     return switch (item.tag) {
         .simple => .{ .simple = @intToEnum(Simple, data) },
+
         .type_int_signed => .{ .int_type = .{
             .signedness = .signed,
             .bits = @intCast(u16, data),
@@ -1057,9 +932,8 @@ pub fn indexToKey(ip: InternPool, index: Index) Key {
         .type_array => .{ .array_type = ip.extraData(Array, data) },
         .type_struct => .{ .struct_type = ip.extraData(Struct, data) },
         .type_optional => .{ .optional_type = .{ .payload_type = @intToEnum(Index, data) } },
-        .type_anyframe_t => .{ .anyframe_t_type = .{ .child = @intToEnum(Index, data) } },
+        .type_anyframe => .{ .anyframe_type = .{ .child = @intToEnum(Index, data) } },
         .type_error_union => .{ .error_union_type = ip.extraData(ErrorUnion, data) },
-        // .type_error => .{ .error_type = ip.extraData(Error, data) },
         .type_error_set => .{ .error_set_type = ip.extraData(ErrorSet, data) },
         .type_enum => .{ .enum_type = ip.extraData(Enum, data) },
         .type_function => .{ .function_type = ip.extraData(Fn, data) },
@@ -1071,59 +945,51 @@ pub fn indexToKey(ip: InternPool, index: Index) Key {
         .int_i32 => .{ .int_i64_value = @bitCast(i32, data) },
         .int_u64 => .{ .int_u64_value = ip.extraData(u64, data) },
         .int_i64 => .{ .int_i64_value = ip.extraData(i64, data) },
-        .int_big_positive => unreachable,
-        .int_big_negative => unreachable,
+        .int_big_positive => .{ .int_big_value = .{
+            .positive = true,
+            .limbs = ip.extraData([]const std.math.big.Limb, data),
+        } },
+        .int_big_negative => .{ .int_big_value = .{
+            .positive = true,
+            .limbs = ip.extraData([]const std.math.big.Limb, data),
+        } },
         .float_f16 => .{ .float_16_value = @bitCast(f16, @intCast(u16, data)) },
         .float_f32 => .{ .float_32_value = @bitCast(f32, data) },
         .float_f64 => .{ .float_64_value = ip.extraData(f64, data) },
         .float_f80 => .{ .float_80_value = ip.extraData(f80, data) },
         .float_f128 => .{ .float_128_value = ip.extraData(f128, data) },
-        // .type => .{ .type_value = @intToEnum(Index, data) },
 
-        .bytes => unreachable, // TODO
-        // .one_pointer => .{ .one_pointer = @intToEnum(Index, data) },
-        else => @panic("TODO"),
+        .bytes => .{ .bytes = ip.extraData([]const u8, data) },
+        .aggregate => .{ .aggregate = ip.extraData(Aggregate, data) },
+        .union_value => .{ .union_value = ip.extraData(UnionValue, data) },
     };
 }
 
 pub fn get(ip: *InternPool, gpa: Allocator, key: Key) Allocator.Error!Index {
-    const adapter: KeyAdapter = .{ .intern_pool = ip };
+    const adapter: KeyAdapter = .{ .ip = ip };
     const gop = try ip.map.getOrPutAdapted(gpa, key, adapter);
     if (gop.found_existing) return @intToEnum(Index, gop.index);
 
-    const item: Item = switch (key) {
-        .simple => |simple| .{ .tag = .simple, .data = @enumToInt(simple) },
-        .int_type => |int_ty| .{
-            .tag = switch (int_ty.signedness) {
-                .signed => .type_int_signed,
-                .unsigned => .type_int_unsigned,
-            },
-            .data = int_ty.bits,
-        },
-        .optional_type => |optional_ty| .{ .tag = .type_optional, .data = @enumToInt(optional_ty.payload_type) },
-        .anyframe_t_type => |anyframe_t| .{ .tag = .type_anyframe_t, .data = @enumToInt(anyframe_t.child) },
-        .int_u64_value => |int_val| if (int_val <= std.math.maxInt(u32)) .{
-            .tag = .int_u32,
-            .data = @intCast(u32, int_val),
-        } else .{
-            .tag = .int_u64,
-            .data = try ip.addExtra(gpa, int_val),
-        },
-        .int_i64_value => |int_val| if (std.math.maxInt(i32) <= int_val and int_val <= std.math.maxInt(i32)) .{
-            .tag = .int_i32,
-            .data = @bitCast(u32, @intCast(u32, int_val)),
-        } else .{
-            .tag = .int_i64,
-            .data = try ip.addExtra(gpa, int_val),
-        },
-        .float_16_value => |float_val| .{ .tag = .float_f16, .data = @bitCast(u16, float_val) },
-        .float_32_value => |float_val| .{ .tag = .float_f32, .data = @bitCast(u32, float_val) },
-        // .type_value => |ty| .{ .tag = .type, .data = @enumToInt(ty) },
-        .bytes => unreachable, // TODO
-        // .one_pointer => |val| .{ .tag = .one_pointer, .data = @enumToInt(val) },
-        inline else => |data| .{ .tag = key.tag(), .data = try ip.addExtra(gpa, data) }, // TODO sad stage1 noises :(
+    const tag: Tag = key.tag();
+    const data: u32 = switch (key) {
+        .simple => |simple| @enumToInt(simple),
+
+        .int_type => |int_ty| int_ty.bits,
+        .optional_type => |optional_ty| @enumToInt(optional_ty.payload_type),
+        .anyframe_type => |anyframe_ty| @enumToInt(anyframe_ty.child),
+
+        .int_u64_value => |int_val| if (tag == .int_u32) @intCast(u32, int_val) else try ip.addExtra(gpa, int_val),
+        .int_i64_value => |int_val| if (tag == .int_i32) @bitCast(u32, @intCast(u32, int_val)) else try ip.addExtra(gpa, int_val),
+        .int_big_value => |big_int_val| try ip.addExtra(gpa, big_int_val.limbs),
+        .float_16_value => |float_val| @bitCast(u16, float_val),
+        .float_32_value => |float_val| @bitCast(u32, float_val),
+        inline else => |data| try ip.addExtra(gpa, data), // TODO sad stage1 noises :(
     };
-    try ip.items.append(gpa, item);
+
+    try ip.items.append(gpa, .{
+        .tag = tag,
+        .data = data,
+    });
     return @intToEnum(Index, ip.items.len - 1);
 }
 
@@ -1140,6 +1006,135 @@ fn extraData(ip: InternPool, comptime T: type, index: usize) T {
     const size = @sizeOf(T);
     const bytes = @ptrCast(*const [size]u8, ip.extra.items.ptr + index);
     return std.mem.bytesToValue(T, bytes);
+}
+
+const KeyAdapter = struct {
+    ip: *const InternPool,
+
+    pub fn eql(ctx: @This(), a: Key, b_void: void, b_map_index: usize) bool {
+        _ = b_void;
+
+        return deepEql(a, ctx.ip.indexToKey(@intToEnum(Index, b_map_index)));
+    }
+
+    pub fn hash(ctx: @This(), a: Key) u32 {
+        _ = ctx;
+        var hasher = std.hash.Wyhash.init(0);
+        deepHash(&hasher, a);
+        return @truncate(u32, hasher.final());
+    }
+};
+
+fn deepEql(a: anytype, b: @TypeOf(a)) bool {
+    const T = @TypeOf(a);
+
+    switch (@typeInfo(T)) {
+        .Struct => |info| {
+            if (info.layout == .Packed) {
+                return std.mem.eql(u8, std.mem.asBytes(&a), std.mem.asBytes(&b));
+            }
+            inline for (info.fields) |field_info| {
+                if (!deepEql(@field(a, field_info.name), @field(b, field_info.name))) return false;
+            }
+            return true;
+        },
+        .Union => |info| {
+            const UnionTag = info.tag_type.?;
+
+            const tag_a = std.meta.activeTag(a);
+            const tag_b = std.meta.activeTag(b);
+            if (tag_a != tag_b) return false;
+
+            inline for (info.fields) |field_info| {
+                if (@field(UnionTag, field_info.name) == tag_a) {
+                    return deepEql(@field(a, field_info.name), @field(b, field_info.name));
+                }
+            }
+            return false;
+        },
+        .Pointer => |info| {
+            if (info.size != .Slice) {
+                @compileError("cannot compare non slice pointer type " ++ @typeName(T));
+            }
+
+            if (@typeInfo(info.child) == .Int) {
+                return std.mem.eql(info.child, a, b);
+            }
+            if (a.len != b.len) return false;
+
+            var i: usize = 0;
+            while (i < a.len) : (i += 1) {
+                if (!deepEql(a[i], b[i])) return false;
+            }
+            return true;
+        },
+        .Enum, .Int => return a == b,
+        else => unreachable,
+    }
+}
+
+fn deepHash(hasher: anytype, key: anytype) void {
+    const Inner = @TypeOf(key);
+
+    switch (@typeInfo(Inner)) {
+        .Int => {
+            if (comptime std.meta.trait.hasUniqueRepresentation(Inner)) {
+                hasher.update(std.mem.asBytes(&key));
+            } else {
+                const byte_size = comptime std.math.divCeil(comptime_int, @bitSizeOf(Inner), 8) catch unreachable;
+                hasher.update(std.mem.asBytes(&key)[0..byte_size]);
+            }
+        },
+
+        .Bool => deepHash(hasher, @boolToInt(key)),
+        .Enum => deepHash(hasher, @enumToInt(key)),
+        .Float => |info| deepHash(hasher, switch (info.bits) {
+            16 => @bitCast(u16, key),
+            32 => @bitCast(u32, key),
+            64 => @bitCast(u64, key),
+            80 => @bitCast(u80, key),
+            128 => @bitCast(u128, key),
+            else => unreachable,
+        }),
+
+        .Pointer => |info| {
+            if (info.size != .Slice) {
+                @compileError("");
+            }
+
+            if (comptime std.meta.trait.hasUniqueRepresentation(info.child)) {
+                hasher.update(std.mem.sliceAsBytes(key));
+            } else {
+                for (key) |item| {
+                    deepHash(hasher, item);
+                }
+            }
+        },
+
+        .Struct => |info| {
+            if (info.layout == .Packed) {
+                hasher.update(std.mem.asBytes(&key));
+            } else {
+                inline for (info.fields) |field| {
+                    deepHash(hasher, @field(key, field.name));
+                }
+            }
+        },
+
+        .Union => |info| {
+            const TagType = info.tag_type.?;
+
+            const tag = std.meta.activeTag(key);
+            deepHash(hasher, tag);
+            inline for (info.fields) |field| {
+                if (@field(TagType, field.name) == tag) {
+                    deepHash(hasher, @field(key, field.name));
+                    break;
+                }
+            }
+        },
+        else => unreachable,
+    }
 }
 
 // ---------------------------------------------
@@ -2601,8 +2596,8 @@ test "anyframe type" {
     const i32_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .signed, .bits = 32 } });
     const bool_type = try ip.get(gpa, .{ .simple = .bool });
 
-    const @"anyframe->i32" = try ip.get(gpa, Key{ .anyframe_t_type = .{ .child = i32_type } });
-    const @"anyframe->bool" = try ip.get(gpa, Key{ .anyframe_t_type = .{ .child = bool_type } });
+    const @"anyframe->i32" = try ip.get(gpa, Key{ .anyframe_type = .{ .child = i32_type } });
+    const @"anyframe->bool" = try ip.get(gpa, Key{ .anyframe_type = .{ .child = bool_type } });
 
     try testExpectFmtType(&ip, @"anyframe->i32", "anyframe->i32");
     try testExpectFmtType(&ip, @"anyframe->bool", "anyframe->bool");

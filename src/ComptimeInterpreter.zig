@@ -705,7 +705,7 @@ pub fn interpret(
                 const value_namespace = interpreter.ip.indexToKey(value.val).getNamespace();
                 if (value_namespace == .none) return error.InvalidBuiltin;
 
-                const name = interpreter.ip.indexToKey(field_name.val).bytes.data; // TODO add checks
+                const name = interpreter.ip.indexToKey(field_name.val).bytes; // TODO add checks
 
                 const decls = interpreter.namespaces.items(.decls)[@enumToInt(value_namespace)];
                 const has_decl = decls.contains(name);
@@ -764,7 +764,7 @@ pub fn interpret(
                 .interpreter = interpreter,
                 .node_idx = node_idx,
                 .ty = string_literal_type,
-                .val = try interpreter.ip.get(interpreter.allocator, IPKey{ .bytes = .{ .data = str } }), // TODO
+                .val = try interpreter.ip.get(interpreter.allocator, IPKey{ .bytes = str }), // TODO
             };
 
             // TODO: Add type casting, sentinel
