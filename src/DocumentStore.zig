@@ -958,7 +958,6 @@ pub fn ensureInterpreterExists(self: *DocumentStore, uri: Uri) !void {
         var int = try self.allocator.create(ComptimeInterpreter);
         int.* = ComptimeInterpreter{
             .allocator = self.allocator,
-            .arena = std.heap.ArenaAllocator.init(self.allocator),
             .document_store = self,
             .uri = uri,
         };

@@ -19,10 +19,7 @@ pub const ComptimeInterpreter = @This();
 
 const log = std.log.scoped(.comptime_interpreter);
 
-// TODO: Investigate arena
-
 allocator: std.mem.Allocator,
-arena: std.heap.ArenaAllocator,
 ip: InternPool = .{},
 document_store: *DocumentStore,
 uri: DocumentStore.Uri,
@@ -64,8 +61,6 @@ pub fn deinit(interpreter: *ComptimeInterpreter) void {
     }
     interpreter.namespaces.deinit(interpreter.allocator);
     interpreter.decls.deinit(interpreter.allocator);
-
-    interpreter.arena.deinit();
 }
 
 pub const Type = struct {
@@ -241,6 +236,7 @@ pub fn interpret(
             const container_namespace = @intToEnum(NamespaceIndex, interpreter.namespaces.len - 1);
 
             var fields = std.ArrayListUnmanaged(InternPool.Struct.Field){};
+            defer fields.deinit(interpreter.allocator);
 
             var buffer: [2]Ast.Node.Index = undefined;
             const members = ast.declMembers(tree, node_idx, &buffer);
@@ -274,7 +270,7 @@ pub fn interpret(
                     .is_comptime = false, // TODO
                 };
 
-                try fields.append(interpreter.arena.allocator(), field);
+                try fields.append(interpreter.allocator, field);
             }
 
             const struct_type = try interpreter.ip.get(interpreter.allocator, IPKey{
