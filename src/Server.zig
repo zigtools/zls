@@ -1734,25 +1734,25 @@ fn initializeHandler(server: *Server, request: types.InitializeParams) Error!typ
         const zig_version_simple = std.SemanticVersion{
             .major = zig_version.major,
             .minor = zig_version.minor,
-            .patch = zig_version.patch,
+            .patch = 0,
         };
         const zls_version_simple = std.SemanticVersion{
             .major = zls_version.major,
             .minor = zls_version.minor,
-            .patch = zls_version.patch,
+            .patch = 0,
         };
 
         switch (zig_version_simple.order(zls_version_simple)) {
             .lt => {
                 server.showMessage(.Warning,
-                    \\Zig {} is older than ZLS {}. Update Zig to avoid unexpected behavior.
-                , .{ zig_version_simple, zls_version_simple });
+                    \\Zig `{}` is older than ZLS `{}`. Update Zig to avoid unexpected behavior.
+                , .{ zig_version, zls_version });
             },
             .eq => {},
             .gt => {
                 server.showMessage(.Warning,
-                    \\Zig {} is newer than ZLS {}. Update ZLS to avoid unexpected behavior.
-                , .{ zig_version_simple, zls_version_simple });
+                    \\Zig `{}` is newer than ZLS `{}`. Update ZLS to avoid unexpected behavior.
+                , .{ zig_version, zls_version });
             },
         }
     } else {
