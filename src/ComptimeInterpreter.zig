@@ -155,7 +155,7 @@ pub fn huntItDown(
     namespace: NamespaceIndex,
     decl_name: []const u8,
     options: InterpretOptions,
-) InterpretError!Decl {
+) error{IdentifierNotFound}!Decl {
     _ = options;
 
     var current_namespace = namespace;
@@ -168,7 +168,6 @@ pub fn huntItDown(
         }
     }
 
-    log.err("Identifier not found: {s}", .{decl_name});
     return error.IdentifierNotFound;
 }
 
@@ -431,13 +430,15 @@ pub fn interpret(
             // TODO: Floats
 
             // Logic to find identifiers in accessible scopes
-            const decl = interpreter.huntItDown(namespace, value, options) catch |err| {
-                if (err == error.IdentifierNotFound) try interpreter.recordError(
-                    node_idx,
-                    "undeclared_identifier",
-                    try std.fmt.allocPrint(interpreter.allocator, "use of undeclared identifier '{s}'", .{value}),
-                );
-                return err;
+            const decl = interpreter.huntItDown(namespace, value, options) catch |err| switch (err) {
+                error.IdentifierNotFound => |e| {
+                    try interpreter.recordError(
+                        node_idx,
+                        "undeclared_identifier",
+                        try std.fmt.allocPrint(interpreter.allocator, "use of undeclared identifier '{s}'", .{value}),
+                    );
+                    return e;
+                },
             };
 
             return InterpretResult{ .value = Value{
@@ -456,13 +457,15 @@ pub fn interpret(
 
             const lhs_namespace = interpreter.ip.indexToKey(irv.val).getNamespace();
 
-            var scope_sub_decl = irv.interpreter.huntItDown(lhs_namespace, rhs_str, options) catch |err| {
-                if (err == error.IdentifierNotFound) try interpreter.recordError(
-                    node_idx,
-                    "undeclared_identifier",
-                    try std.fmt.allocPrint(interpreter.allocator, "use of undeclared identifier '{s}'", .{rhs_str}),
-                );
-                return err;
+            var scope_sub_decl = irv.interpreter.huntItDown(lhs_namespace, rhs_str, options) catch |err| switch (err) {
+                error.IdentifierNotFound => |e| {
+                    try interpreter.recordError(
+                        node_idx,
+                        "undeclared_identifier",
+                        try std.fmt.allocPrint(interpreter.allocator, "use of undeclared identifier '{s}'", .{rhs_str}),
+                    );
+                    return e;
+                },
             };
 
             return InterpretResult{ .value = Value{
@@ -760,12 +763,8 @@ pub fn interpret(
                 .interpreter = interpreter,
                 .node_idx = node_idx,
                 .ty = string_literal_type,
-                .val = try interpreter.ip.get(interpreter.allocator, IPKey{ .bytes = str }), // TODO
+                .val = try interpreter.ip.get(interpreter.allocator, IPKey{ .bytes = str }),
             };
-
-            // TODO: Add type casting, sentinel
-            // TODO: Should this be a `*const [len:0]u8`?
-            // try val.value_data.slice_ptr.append(interpreter.allocator, .{ .unsigned_int = 0 });
 
             return InterpretResult{ .value = val };
         },
@@ -959,9 +958,9 @@ pub fn call(
     // TODO: type check args
 
     const tree = interpreter.getHandle().tree;
-    const tags = tree.nodes.items(.tag);
 
-    if (tags[func_node_idx] != .fn_decl) return error.CriticalAstFailure;
+    var buf: [1]Ast.Node.Index = undefined;
+    var proto = ast.fnProto(tree, func_node_idx, &buf) orelse return error.CriticalAstFailure;
 
     // TODO: Make argument namespace to evaluate arguments in
     try interpreter.namespaces.append(interpreter.allocator, .{
@@ -972,9 +971,6 @@ pub fn call(
     const fn_namespace = @intToEnum(NamespaceIndex, interpreter.namespaces.len - 1);
 
     const type_type = try interpreter.ip.get(interpreter.allocator, IPKey{ .simple = .type });
-
-    var buf: [1]Ast.Node.Index = undefined;
-    var proto = ast.fnProto(tree, func_node_idx, &buf).?;
 
     var arg_it = proto.iterate(&tree);
     var arg_index: usize = 0;
