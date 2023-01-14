@@ -4,13 +4,6 @@ const offsets = @import("offsets.zig");
 
 pub const Error = error{ OutOfMemory, InvalidRange };
 
-// This is essentially the same as `types.TextEdit`, but we use an
-// ArrayList(u8) here to be able to clean up the memory later on
-pub const Edit = struct {
-    range: types.Range,
-    newText: std.ArrayListUnmanaged(u8),
-};
-
 // Whether the `Change` is an addition, deletion, or no change from the
 // original string to the new string
 const Operation = enum { Deletion, Addition, Nothing };
@@ -28,7 +21,7 @@ pub fn edits(
     allocator: std.mem.Allocator,
     a: []const u8,
     b: []const u8,
-) Error!std.ArrayListUnmanaged(Edit) {
+) Error!std.ArrayListUnmanaged(types.TextEdit) {
     // Given the input strings A and B, we skip over the first N characters
     // where A[0..N] == B[0..N]. We want to trim the start (and end) of the
     // strings that have the same text. This decreases the size of the LCS
@@ -186,7 +179,7 @@ pub fn get_changes(
     a_trim: []const u8,
     b_trim: []const u8,
     allocator: std.mem.Allocator,
-) Error!std.ArrayListUnmanaged(Edit) {
+) Error!std.ArrayListUnmanaged(types.TextEdit) {
     // First we get a list of changes between strings at the character level:
     // "addition", "deletion", and "no change" for each character
     var changes = try std.ArrayListUnmanaged(Change).initCapacity(allocator, a_trim.len);
@@ -235,14 +228,20 @@ pub fn get_changes(
     std.mem.reverse([]Change, groups.items);
     for (groups.items) |group| std.mem.reverse(Change, group);
 
-    var edit_results = std.ArrayListUnmanaged(Edit){};
-    errdefer edit_results.deinit(allocator);
+    var edit_results = try std.ArrayListUnmanaged(types.TextEdit).initCapacity(allocator, groups.items.len);
+    errdefer {
+        for (edit_results.items) |edit| {
+            allocator.free(edit.newText);
+        }
+        edit_results.deinit(allocator);
+    }
 
     // Convert our grouped changes into `Edit`s
     for (groups.items) |group| {
         var range_start = group[0].pos;
         var range_len: usize = 0;
         var newText = std.ArrayListUnmanaged(u8){};
+        errdefer newText.deinit(allocator);
         for (group) |ch| {
             switch (ch.operation) {
                 .Addition => try newText.append(allocator, ch.value.?),
@@ -256,9 +255,9 @@ pub fn get_changes(
             a_trim_offset + range_start + range_len,
         );
         a_lines.reset();
-        try edit_results.append(allocator, Edit{
+        edit_results.appendAssumeCapacity(.{
             .range = range,
-            .newText = newText,
+            .newText = try newText.toOwnedSlice(allocator),
         });
     }
 
