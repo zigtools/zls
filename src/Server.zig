@@ -1744,8 +1744,9 @@ fn initializeHandler(server: *Server, request: types.InitializeParams) Error!typ
 
         switch (zig_version_simple.order(zls_version_simple)) {
             .lt => {
-                // ZLS should be backwards compatible with older Zig version which is why we only log
-                log.info("Zig {} is older than ZLS {}", .{ zig_version_simple, zls_version_simple });
+                server.showMessage(.Warning,
+                    \\Zig {} is older than ZLS {}. Update Zig to avoid unexpected behavior.
+                , .{ zig_version_simple, zls_version_simple });
             },
             .eq => {},
             .gt => {
