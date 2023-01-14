@@ -119,7 +119,6 @@ fn testCall(source: []const u8, arguments: []const Value) !CallResult {
 
     var interpreter = ComptimeInterpreter{
         .allocator = allocator,
-        .arena = std.heap.ArenaAllocator.init(allocator),
         .document_store = &doc_store,
         .uri = handle.uri,
     };
