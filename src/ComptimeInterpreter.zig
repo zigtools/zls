@@ -26,7 +26,6 @@ arena: std.heap.ArenaAllocator,
 ip: InternPool = .{},
 document_store: *DocumentStore,
 uri: DocumentStore.Uri,
-scopes: std.MultiArrayList(Scope) = .{},
 decls: std.ArrayListUnmanaged(Decl) = .{},
 namespaces: std.MultiArrayList(Namespace) = .{},
 
@@ -65,7 +64,6 @@ pub fn deinit(interpreter: *ComptimeInterpreter) void {
     }
     interpreter.namespaces.deinit(interpreter.allocator);
     interpreter.decls.deinit(interpreter.allocator);
-    interpreter.scopes.deinit(interpreter.allocator);
 
     interpreter.arena.deinit();
 }
@@ -95,66 +93,40 @@ pub const Decl = struct {
     is_exported: bool,
 };
 
+// pub const Comptimeness = enum { @"comptime", runtime };
+
 pub const NamespaceIndex = InternPool.NamespaceIndex;
 
 pub const Namespace = struct {
     /// always points to Namespace or Index.none
     parent: NamespaceIndex,
-    /// Will be a struct, enum, union, or opaque.
-    // ty: Index,
+    node_idx: Ast.Node.Index,
+    /// Will be a struct, enum, union, opaque or .none
+    ty: IPIndex,
     decls: std.StringArrayHashMapUnmanaged(Decl) = .{},
     usingnamespaces: std.ArrayListUnmanaged(NamespaceIndex) = .{},
-};
-
-// pub const Comptimeness = enum { @"comptime", runtime };
-
-pub const Scope = struct {
-    interpreter: *ComptimeInterpreter,
 
     // TODO: Actually use this value
     // comptimeness: Comptimeness,
 
-    parent: u32, // zero indicates root scope
-    node_idx: Ast.Node.Index,
-    namespace: NamespaceIndex,
-
-    pub const ScopeKind = enum { container, block, function };
-    pub fn scopeKind(scope: Scope) ScopeKind {
-        const tree = scope.interpreter.getHandle().tree;
-        return switch (tree.nodes.items(.tag)[scope.node_idx]) {
-            .container_decl,
-            .container_decl_trailing,
-            .container_decl_arg,
-            .container_decl_arg_trailing,
-            .container_decl_two,
-            .container_decl_two_trailing,
-            .tagged_union,
-            .tagged_union_trailing,
-            .tagged_union_two,
-            .tagged_union_two_trailing,
-            .tagged_union_enum_tag,
-            .tagged_union_enum_tag_trailing,
-            .root,
-            .error_set_decl,
-            => .container,
-            else => .block,
-        };
-    }
-
-    pub fn getLabel(scope: Scope) ?Ast.TokenIndex {
-        const tree = scope.interpreter.getHandle().tree;
+    pub fn getLabel(self: Namespace, tree: Ast) ?Ast.TokenIndex {
         const token_tags = tree.tokens.items(.tag);
 
-        return switch (scope.scopeKind()) {
-            .block => z: {
-                const lbrace = tree.nodes.items(.main_token)[scope.node_idx];
-                break :z if (token_tags[lbrace - 1] == .colon and token_tags[lbrace - 2] == .identifier)
-                    lbrace - 2
-                else
-                    null;
+        switch (tree.nodes.items(.tag)[self.node_idx]) {
+            .block_two,
+            .block_two_semicolon,
+            .block,
+            .block_semicolon,
+            => {
+                const lbrace = tree.nodes.items(.main_token)[self.node_idx];
+                if (token_tags[lbrace - 1] == .colon and token_tags[lbrace - 2] == .identifier) {
+                    return lbrace - 2;
+                }
+
+                return null;
             },
-            else => null,
-        };
+            else => return null,
+        }
     }
 };
 
@@ -182,26 +154,6 @@ pub const InterpretResult = union(enum) {
         return result.maybeGetValue() orelse error.ExpectedValue;
     }
 };
-
-fn getDeclCount(tree: Ast, node_idx: Ast.Node.Index) usize {
-    var buffer: [2]Ast.Node.Index = undefined;
-    const members = ast.declMembers(tree, node_idx, &buffer);
-
-    var count: usize = 0;
-
-    for (members) |member| {
-        switch (tree.nodes.items(.tag)[member]) {
-            .global_var_decl,
-            .local_var_decl,
-            .aligned_var_decl,
-            .simple_var_decl,
-            => count += 1,
-            else => {},
-        }
-    }
-
-    return count;
-}
 
 pub fn huntItDown(
     interpreter: *ComptimeInterpreter,
@@ -255,7 +207,7 @@ pub const InterpretError = std.mem.Allocator.Error || std.fmt.ParseIntError || s
 pub fn interpret(
     interpreter: *ComptimeInterpreter,
     node_idx: Ast.Node.Index,
-    scope: u32,
+    namespace: NamespaceIndex,
     options: InterpretOptions,
 ) InterpretError!InterpretResult {
     const tree = interpreter.getHandle().tree;
@@ -281,13 +233,12 @@ pub fn interpret(
         => {
             const type_type = try interpreter.ip.get(interpreter.allocator, IPKey{ .simple = .type });
 
-            try interpreter.scopes.append(interpreter.allocator, .{
-                .interpreter = interpreter,
-                .parent = scope,
+            try interpreter.namespaces.append(interpreter.allocator, .{
+                .parent = namespace,
                 .node_idx = node_idx,
-                .namespace = .none, // declarations have not been resolved yet
+                .ty = undefined,
             });
-            const container_scope = @intCast(u32, interpreter.scopes.len - 1);
+            const container_namespace = @intToEnum(NamespaceIndex, interpreter.namespaces.len - 1);
 
             var fields = std.ArrayListUnmanaged(InternPool.Struct.Field){};
 
@@ -295,16 +246,16 @@ pub fn interpret(
             const members = ast.declMembers(tree, node_idx, &buffer);
             for (members) |member| {
                 const container_field = ast.containerField(tree, member) orelse {
-                    _ = try interpreter.interpret(member, container_scope, options);
+                    _ = try interpreter.interpret(member, container_namespace, options);
                     continue;
                 };
 
-                var init_type_value = try (try interpreter.interpret(container_field.ast.type_expr, container_scope, .{})).getValue();
+                var init_type_value = try (try interpreter.interpret(container_field.ast.type_expr, container_namespace, .{})).getValue();
 
                 var default_value = if (container_field.ast.value_expr == 0)
                     IPIndex.none
                 else
-                    (try (try interpreter.interpret(container_field.ast.value_expr, container_scope, .{})).getValue()).val; // TODO check ty
+                    (try (try interpreter.interpret(container_field.ast.value_expr, container_namespace, .{})).getValue()).val; // TODO check ty
 
                 if (init_type_value.ty != type_type) {
                     try interpreter.recordError(
@@ -329,11 +280,12 @@ pub fn interpret(
             const struct_type = try interpreter.ip.get(interpreter.allocator, IPKey{
                 .struct_type = .{
                     .fields = fields.items,
-                    .namespace = .none, // TODO
+                    .namespace = namespace,
                     .layout = .Auto, // TODO
                     .backing_int_ty = .none, // TODO
                 },
             });
+            interpreter.namespaces.items(.ty)[@enumToInt(container_namespace)] = struct_type;
 
             return InterpretResult{ .value = Value{
                 .interpreter = interpreter,
@@ -347,26 +299,34 @@ pub fn interpret(
         .aligned_var_decl,
         .simple_var_decl,
         => {
-            // TODO: Add 0 check
-            // const name = analysis.getDeclName(tree, node_idx).?;
-            // if (scope.?.declarations.contains(name))
-            //     return InterpretResult{ .nothing = {} };
+            var decls = &interpreter.namespaces.items(.decls)[@enumToInt(namespace)];
 
-            // const decl = ast.varDecl(tree, node_idx).?;
-            // if (decl.ast.init_node == 0)
-            //     return InterpretResult{ .nothing = {} };
+            const name = analysis.getDeclName(tree, node_idx).?;
+            if (decls.contains(name))
+                return InterpretResult{ .nothing = {} };
 
-            // try scope.?.declarations.put(interpreter.allocator, name, .{
-            //     .scope = scope.?,
-            //     .node_idx = node_idx,
-            //     .name = name,
-            // });
+            const decl = ast.varDecl(tree, node_idx).?;
+
+            if (decl.ast.init_node == 0)
+                return InterpretResult{ .nothing = {} };
+
+            const init_type_value = try ((try interpreter.interpret(decl.ast.init_node, namespace, .{})).getValue());
+
+            try decls.putNoClobber(interpreter.allocator, name, .{
+                .name = name,
+                .ty = init_type_value.ty,
+                .val = init_type_value.val,
+                .alignment = 0, // TODO
+                .address_space = .generic, // TODO
+                .is_pub = true, // TODO
+                .is_exported = false, // TODO
+            });
 
             // TODO: Am I a dumbo shrimp? (e.g. is this tree shaking correct? works on my machine so like...)
 
             // if (scope.?.scopeKind() != .container) {
             // if (scope.?.node_idx != 0)
-            //     _ = try scope.?.declarations.getPtr(name).?.getValue();
+            //     _ = try decls.getPtr(name).?.getValue();
 
             return InterpretResult{ .nothing = {} };
         },
@@ -375,22 +335,21 @@ pub fn interpret(
         .block_two,
         .block_two_semicolon,
         => {
-            try interpreter.scopes.append(interpreter.allocator, .{
-                .interpreter = interpreter,
-                .parent = scope,
+            try interpreter.namespaces.append(interpreter.allocator, .{
+                .parent = namespace,
                 .node_idx = node_idx,
-                .namespace = .none,
+                .ty = .none,
             });
-            const block_scope = @intCast(u32, interpreter.scopes.len - 1);
+            const block_namespace = @intToEnum(NamespaceIndex, interpreter.namespaces.len - 1);
 
             var buffer: [2]Ast.Node.Index = undefined;
             const statements = ast.blockStatements(tree, node_idx, &buffer).?;
 
             for (statements) |idx| {
-                const ret = try interpreter.interpret(idx, block_scope, options);
+                const ret = try interpreter.interpret(idx, block_namespace, options);
                 switch (ret) {
                     .@"break" => |lllll| {
-                        const maybe_block_label_string = if (interpreter.scopes.get(scope).getLabel()) |i| tree.tokenSlice(i) else null;
+                        const maybe_block_label_string = if (interpreter.namespaces.get(@enumToInt(namespace)).getLabel(tree)) |i| tree.tokenSlice(i) else null;
                         if (lllll) |l| {
                             if (maybe_block_label_string) |ls| {
                                 if (std.mem.eql(u8, l, ls)) {
@@ -402,7 +361,7 @@ pub fn interpret(
                         }
                     },
                     .break_with_value => |bwv| {
-                        const maybe_block_label_string = if (interpreter.scopes.get(scope).getLabel()) |i| tree.tokenSlice(i) else null;
+                        const maybe_block_label_string = if (interpreter.namespaces.get(@enumToInt(namespace)).getLabel(tree)) |i| tree.tokenSlice(i) else null;
 
                         if (bwv.label) |l| {
                             if (maybe_block_label_string) |ls| {
@@ -422,39 +381,39 @@ pub fn interpret(
             return InterpretResult{ .nothing = {} };
         },
         .identifier => {
-            var value = tree.getNodeSource(node_idx);
+            const value = offsets.nodeToSlice(tree, node_idx);
 
-            if (std.mem.eql(u8, "bool", value)) return InterpretResult{ .value = Value{
-                .interpreter = interpreter,
-                .node_idx = node_idx,
-                .ty = try interpreter.ip.get(interpreter.allocator, IPKey{ .simple = .type }),
-                .val = try interpreter.ip.get(interpreter.allocator, IPKey{ .simple = .bool }),
-            } };
-            if (std.mem.eql(u8, "true", value)) return InterpretResult{ .value = Value{
-                .interpreter = interpreter,
-                .node_idx = node_idx,
-                .ty = try interpreter.ip.get(interpreter.allocator, IPKey{ .simple = .bool }),
-                .val = try interpreter.ip.get(interpreter.allocator, IPKey{ .simple = .bool_true }),
-            } };
-            if (std.mem.eql(u8, "false", value)) return InterpretResult{ .value = Value{
-                .interpreter = interpreter,
-                .node_idx = node_idx,
-                .ty = try interpreter.ip.get(interpreter.allocator, IPKey{ .simple = .bool }),
-                .val = try interpreter.ip.get(interpreter.allocator, IPKey{ .simple = .bool_false }),
-            } };
-
-            if (value.len == 5 and (value[0] == 'u' or value[0] == 'i') and std.mem.eql(u8, "size", value[1..])) return InterpretResult{
-                .value = Value{
+            if (std.mem.eql(u8, "bool", value)) {
+                return InterpretResult{ .value = Value{
+                    .interpreter = interpreter,
+                    .node_idx = node_idx,
+                    .ty = try interpreter.ip.get(interpreter.allocator, IPKey{ .simple = .type }),
+                    .val = try interpreter.ip.get(interpreter.allocator, IPKey{ .simple = .bool }),
+                } };
+            } else if (std.mem.eql(u8, "true", value)) {
+                return InterpretResult{ .value = Value{
+                    .interpreter = interpreter,
+                    .node_idx = node_idx,
+                    .ty = try interpreter.ip.get(interpreter.allocator, IPKey{ .simple = .bool }),
+                    .val = try interpreter.ip.get(interpreter.allocator, IPKey{ .simple = .bool_true }),
+                } };
+            } else if (std.mem.eql(u8, "false", value)) {
+                return InterpretResult{ .value = Value{
+                    .interpreter = interpreter,
+                    .node_idx = node_idx,
+                    .ty = try interpreter.ip.get(interpreter.allocator, IPKey{ .simple = .bool }),
+                    .val = try interpreter.ip.get(interpreter.allocator, IPKey{ .simple = .bool_false }),
+                } };
+            } else if (std.mem.eql(u8, "usize", value) or std.mem.eql(u8, "isize", value)) {
+                return InterpretResult{ .value = Value{
                     .interpreter = interpreter,
                     .node_idx = node_idx,
                     .ty = try interpreter.ip.get(interpreter.allocator, IPKey{ .simple = .type }),
                     .val = try interpreter.ip.get(interpreter.allocator, IPKey{
                         .simple = if (value[0] == 'u') .usize else .isize,
                     }),
-                },
-            };
-
-            if (std.mem.eql(u8, "type", value)) {
+                } };
+            } else if (std.mem.eql(u8, "type", value)) {
                 return InterpretResult{ .value = Value{
                     .interpreter = interpreter,
                     .node_idx = node_idx,
@@ -476,7 +435,6 @@ pub fn interpret(
             // TODO: Floats
 
             // Logic to find identifiers in accessible scopes
-            const namespace = interpreter.scopes.items(.namespace)[scope];
             const decl = interpreter.huntItDown(namespace, value, options) catch |err| {
                 if (err == error.IdentifierNotFound) try interpreter.recordError(
                     node_idx,
@@ -497,12 +455,12 @@ pub fn interpret(
             if (data[node_idx].rhs == 0) return error.CriticalAstFailure;
             const rhs_str = tree.tokenSlice(data[node_idx].rhs);
 
-            var ir = try interpreter.interpret(data[node_idx].lhs, scope, options);
+            var ir = try interpreter.interpret(data[node_idx].lhs, namespace, options);
             var irv = try ir.getValue();
 
-            const namespace = interpreter.ip.indexToKey(irv.val).getNamespace();
+            const lhs_namespace = interpreter.ip.indexToKey(irv.val).getNamespace();
 
-            var scope_sub_decl = irv.interpreter.huntItDown(namespace, rhs_str, options) catch |err| {
+            var scope_sub_decl = irv.interpreter.huntItDown(lhs_namespace, rhs_str, options) catch |err| {
                 if (err == error.IdentifierNotFound) try interpreter.recordError(
                     node_idx,
                     "undeclared_identifier",
@@ -519,26 +477,28 @@ pub fn interpret(
             } };
         },
         .grouped_expression => {
-            return try interpreter.interpret(data[node_idx].lhs, scope, options);
+            return try interpreter.interpret(data[node_idx].lhs, namespace, options);
         },
         .@"break" => {
             const label = if (data[node_idx].lhs == 0) null else tree.tokenSlice(data[node_idx].lhs);
             return if (data[node_idx].rhs == 0)
                 InterpretResult{ .@"break" = label }
             else
-                InterpretResult{ .break_with_value = .{ .label = label, .value = try (try interpreter.interpret(data[node_idx].rhs, scope, options)).getValue() } };
+                InterpretResult{ .break_with_value = .{ .label = label, .value = try (try interpreter.interpret(data[node_idx].rhs, namespace, options)).getValue() } };
         },
         .@"return" => {
             return if (data[node_idx].lhs == 0)
                 InterpretResult{ .@"return" = {} }
             else
-                InterpretResult{ .return_with_value = try (try interpreter.interpret(data[node_idx].lhs, scope, options)).getValue() };
+                InterpretResult{ .return_with_value = try (try interpreter.interpret(data[node_idx].lhs, namespace, options)).getValue() };
         },
-        .@"if", .if_simple => {
+        .@"if",
+        .if_simple,
+        => {
             const iff = ast.ifFull(tree, node_idx);
             // TODO: Don't evaluate runtime ifs
             // if (options.observe_values) {
-            const ir = try interpreter.interpret(iff.ast.cond_expr, scope, options);
+            const ir = try interpreter.interpret(iff.ast.cond_expr, namespace, options);
 
             const false_value = try interpreter.ip.get(interpreter.allocator, IPKey{ .simple = .bool_false });
             const true_value = try interpreter.ip.get(interpreter.allocator, IPKey{ .simple = .bool_true });
@@ -546,16 +506,16 @@ pub fn interpret(
             const condition = (try ir.getValue()).val;
             std.debug.assert(condition == false_value or condition == true_value);
             if (condition == true_value) {
-                return try interpreter.interpret(iff.ast.then_expr, scope, options);
+                return try interpreter.interpret(iff.ast.then_expr, namespace, options);
             } else {
                 if (iff.ast.else_expr != 0) {
-                    return try interpreter.interpret(iff.ast.else_expr, scope, options);
+                    return try interpreter.interpret(iff.ast.else_expr, namespace, options);
                 } else return InterpretResult{ .nothing = {} };
             }
         },
         .equal_equal => {
-            var a = try interpreter.interpret(data[node_idx].lhs, scope, options);
-            var b = try interpreter.interpret(data[node_idx].rhs, scope, options);
+            var a = try interpreter.interpret(data[node_idx].lhs, namespace, options);
+            var b = try interpreter.interpret(data[node_idx].rhs, namespace, options);
             return InterpretResult{
                 .value = Value{
                     .interpreter = interpreter,
@@ -618,13 +578,13 @@ pub fn interpret(
             // TODO: Actually consider operators
 
             if (std.mem.eql(u8, tree.getNodeSource(data[node_idx].lhs), "_")) {
-                _ = try interpreter.interpret(data[node_idx].rhs, scope, options);
+                _ = try interpreter.interpret(data[node_idx].rhs, namespace, options);
                 return InterpretResult{ .nothing = {} };
             }
 
-            var ir = try interpreter.interpret(data[node_idx].lhs, scope, options);
+            var ir = try interpreter.interpret(data[node_idx].lhs, namespace, options);
             var to_value = try ir.getValue();
-            var from_value = (try (try interpreter.interpret(data[node_idx].rhs, scope, options)).getValue());
+            var from_value = (try (try interpreter.interpret(data[node_idx].rhs, namespace, options)).getValue());
 
             _ = try interpreter.cast(undefined, to_value.ty, from_value.ty);
 
@@ -660,7 +620,7 @@ pub fn interpret(
                 try writer.writeAll("log: ");
 
                 for (params) |param, index| {
-                    var value = (try interpreter.interpret(param, scope, options)).maybeGetValue() orelse {
+                    var value = (try interpreter.interpret(param, namespace, options)).maybeGetValue() orelse {
                         try writer.writeAll("indeterminate");
                         continue;
                     };
@@ -722,7 +682,7 @@ pub fn interpret(
             if (std.mem.eql(u8, call_name, "@TypeOf")) {
                 if (params.len != 1) return error.InvalidBuiltin;
 
-                const value = try (try interpreter.interpret(params[0], scope, options)).getValue();
+                const value = try (try interpreter.interpret(params[0], namespace, options)).getValue();
                 return InterpretResult{ .value = Value{
                     .interpreter = interpreter,
                     .node_idx = node_idx,
@@ -734,20 +694,20 @@ pub fn interpret(
             if (std.mem.eql(u8, call_name, "@hasDecl")) {
                 if (params.len != 2) return error.InvalidBuiltin;
 
-                const value = try (try interpreter.interpret(params[0], scope, options)).getValue();
-                const field_name = try (try interpreter.interpret(params[1], scope, options)).getValue();
+                const value = try (try interpreter.interpret(params[0], namespace, options)).getValue();
+                const field_name = try (try interpreter.interpret(params[1], namespace, options)).getValue();
 
                 const type_type = try interpreter.ip.get(interpreter.allocator, IPKey{ .simple = .type });
 
                 if (value.ty != type_type) return error.InvalidBuiltin;
                 if (interpreter.ip.indexToKey(field_name.ty) != .pointer_type) return error.InvalidBuiltin; // Check if it's a []const u8
 
-                const namespace = interpreter.ip.indexToKey(value.val).getNamespace();
-                if (namespace == .none) return error.InvalidBuiltin;
+                const value_namespace = interpreter.ip.indexToKey(value.val).getNamespace();
+                if (value_namespace == .none) return error.InvalidBuiltin;
 
                 const name = interpreter.ip.indexToKey(field_name.val).bytes.data; // TODO add checks
 
-                const decls = interpreter.namespaces.items(.decls)[@enumToInt(namespace)];
+                const decls = interpreter.namespaces.items(.decls)[@enumToInt(value_namespace)];
                 const has_decl = decls.contains(name);
 
                 return InterpretResult{ .value = Value{
@@ -761,8 +721,8 @@ pub fn interpret(
             if (std.mem.eql(u8, call_name, "@as")) {
                 if (params.len != 2) return error.InvalidBuiltin;
 
-                const as_type = try (try interpreter.interpret(params[0], scope, options)).getValue();
-                const value = try (try interpreter.interpret(params[1], scope, options)).getValue();
+                const as_type = try (try interpreter.interpret(params[0], namespace, options)).getValue();
+                const value = try (try interpreter.interpret(params[1], namespace, options)).getValue();
 
                 const type_type = try interpreter.ip.get(interpreter.allocator, IPKey{ .simple = .type });
 
@@ -815,9 +775,14 @@ pub fn interpret(
         },
         // TODO: Add comptime autodetection; e.g. const MyArrayList = std.ArrayList(u8)
         .@"comptime" => {
-            return try interpreter.interpret(data[node_idx].lhs, scope, .{});
+            return try interpreter.interpret(data[node_idx].lhs, namespace, .{});
         },
-        .fn_proto, .fn_proto_multi, .fn_proto_one, .fn_proto_simple, .fn_decl => {
+        .fn_proto,
+        .fn_proto_multi,
+        .fn_proto_one,
+        .fn_proto_simple,
+        .fn_decl,
+        => {
             var buf: [1]Ast.Node.Index = undefined;
             const func = ast.fnProto(tree, node_idx, &buf).?;
 
@@ -860,7 +825,6 @@ pub fn interpret(
 
             const name = offsets.tokenToSlice(tree, func.name_token.?);
 
-            const namespace = interpreter.scopes.items(.namespace)[scope];
             if (namespace != .none) {
                 const decls = &interpreter.namespaces.items(.decls)[@enumToInt(namespace)];
                 try decls.put(interpreter.allocator, name, .{
@@ -886,20 +850,19 @@ pub fn interpret(
         .async_call_one_comma,
         => {
             var params: [1]Ast.Node.Index = undefined;
-            const call_full = ast.callFull(tree, node_idx, &params) orelse unreachable;
+            const call_full = ast.callFull(tree, node_idx, &params).?;
 
             var args = try std.ArrayListUnmanaged(Value).initCapacity(interpreter.allocator, call_full.ast.params.len);
             defer args.deinit(interpreter.allocator);
 
             for (call_full.ast.params) |param| {
-                args.appendAssumeCapacity(try (try interpreter.interpret(param, scope, .{})).getValue());
+                args.appendAssumeCapacity(try (try interpreter.interpret(param, namespace, .{})).getValue());
             }
 
-            const func_id_result = try interpreter.interpret(call_full.ast.fn_expr, scope, .{});
+            const func_id_result = try interpreter.interpret(call_full.ast.fn_expr, namespace, .{});
             const func_id_val = try func_id_result.getValue();
 
-            const call_res = try interpreter.call(scope, func_id_val.node_idx, args.items, options);
-            // defer call_res.scope.deinit();
+            const call_res = try interpreter.call(namespace, func_id_val.node_idx, args.items, options);
             // TODO: Figure out call result memory model; this is actually fine because newScope
             // makes this a child of the decl scope which is freed on refresh... in theory
 
@@ -909,7 +872,7 @@ pub fn interpret(
             };
         },
         .bool_not => {
-            const result = try interpreter.interpret(data[node_idx].lhs, scope, .{});
+            const result = try interpreter.interpret(data[node_idx].lhs, namespace, .{});
             const bool_type = try interpreter.ip.get(interpreter.allocator, IPKey{ .simple = .bool });
             const value = try result.getValue();
             if (value.ty == bool_type) {
@@ -934,7 +897,7 @@ pub fn interpret(
             // TODO: Make const pointers if we're drawing from a const;
             // variables are the only non-const(?)
 
-            const result = try interpreter.interpret(data[node_idx].lhs, scope, .{});
+            const result = try interpreter.interpret(data[node_idx].lhs, namespace, .{});
             const value = (try result.getValue());
 
             const pointer_type = try interpreter.ip.get(interpreter.allocator, IPKey{ .pointer_type = .{
@@ -956,7 +919,7 @@ pub fn interpret(
             } };
         },
         .deref => {
-            const result = try interpreter.interpret(data[node_idx].lhs, scope, .{});
+            const result = try interpreter.interpret(data[node_idx].lhs, namespace, .{});
             const value = (try result.getValue());
 
             const type_key = interpreter.ip.indexToKey(value.ty);
@@ -981,7 +944,7 @@ pub fn interpret(
 }
 
 pub const CallResult = struct {
-    scope: u32,
+    namespace: NamespaceIndex,
     result: union(enum) {
         value: Value,
         nothing,
@@ -990,7 +953,7 @@ pub const CallResult = struct {
 
 pub fn call(
     interpreter: *ComptimeInterpreter,
-    scope: u32,
+    namespace: NamespaceIndex,
     func_node_idx: Ast.Node.Index,
     arguments: []const Value,
     options: InterpretOptions,
@@ -1004,14 +967,13 @@ pub fn call(
 
     if (tags[func_node_idx] != .fn_decl) return error.CriticalAstFailure;
 
-    // TODO: Make argument scope to evaluate arguments in
-    try interpreter.scopes.append(interpreter.allocator, Scope{
-        .interpreter = interpreter,
-        .parent = scope,
+    // TODO: Make argument namespace to evaluate arguments in
+    try interpreter.namespaces.append(interpreter.allocator, .{
+        .parent = namespace,
         .node_idx = func_node_idx,
-        .namespace = .none,
+        .ty = .none,
     });
-    const fn_scope = @intCast(u32, interpreter.scopes.len - 1);
+    const fn_namespace = @intToEnum(NamespaceIndex, interpreter.namespaces.len - 1);
 
     const type_type = try interpreter.ip.get(interpreter.allocator, IPKey{ .simple = .type });
 
@@ -1022,7 +984,7 @@ pub fn call(
     var arg_index: usize = 0;
     while (ast.nextFnParam(&arg_it)) |param| {
         if (arg_index >= arguments.len) return error.MissingArguments;
-        var tex = try (try interpreter.interpret(param.type_expr, fn_scope, options)).getValue();
+        var tex = try (try interpreter.interpret(param.type_expr, fn_namespace, options)).getValue();
         if (tex.ty != type_type) {
             try interpreter.recordError(
                 param.type_expr,
@@ -1031,29 +993,28 @@ pub fn call(
             );
             return error.InvalidCast;
         }
-        if (param.name_token) |nt| {
-            _ = nt;
-            // const decl = InternPool.Decl{
-            //     .name = tree.tokenSlice(nt),
-            //     .ty = tex.val,
-            //     .val = try interpreter.cast(arguments[arg_index].node_idx, tex.val, arguments[arg_index].val),
-            //     .alignment = 0, // TODO
-            //     .address_space = .generic, // TODO
-            //     .is_pub = true, // TODO
-            //     .is_exported = false, // TODO
-            // };
-            // TODO
-            // try fn_scope.declarations.put(interpreter.allocator, tree.tokenSlice(nt), decl);
+        if (param.name_token) |name_token| {
+            const name = offsets.tokenToSlice(tree, name_token);
+
+            try interpreter.namespaces.items(.decls)[@enumToInt(fn_namespace)].put(interpreter.allocator, name, .{
+                .name = name,
+                .ty = tex.val,
+                .val = arguments[arg_index].val,
+                .alignment = 0, // TODO
+                .address_space = .generic, // TODO
+                .is_pub = true, // TODO
+                .is_exported = false, // TODO
+            });
             arg_index += 1;
         }
     }
 
     const body = tree.nodes.items(.data)[func_node_idx].rhs;
-    const result = try interpreter.interpret(body, fn_scope, .{});
+    const result = try interpreter.interpret(body, fn_namespace, .{});
 
     // TODO: Defers
     return CallResult{
-        .scope = fn_scope,
+        .namespace = fn_namespace,
         .result = switch (result) {
             .@"return", .nothing => .{ .nothing = {} }, // nothing could be due to an error
             .return_with_value => |v| .{ .value = v },

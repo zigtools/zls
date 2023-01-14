@@ -769,15 +769,14 @@ pub fn resolveTypeOfNodeInternal(store: *DocumentStore, arena: *std.heap.ArenaAl
                     };
                     var interpreter = handle.interpreter.?;
 
-                    try interpreter.scopes.append(interpreter.allocator, .{
-                        .interpreter = interpreter,
-                        .parent = 0,
+                    try interpreter.namespaces.append(interpreter.allocator, .{
+                        .parent = .none,
                         .node_idx = 0,
-                        .namespace = .none,
+                        .ty = .none,
                     });
 
                     // TODO: Start from current/nearest-current scope
-                    const result = interpreter.interpret(node, 0, .{}) catch |err| {
+                    const result = interpreter.interpret(node, .none, .{}) catch |err| {
                         log.err("Interpreter error: {s}", .{@errorName(err)});
                         if (@errorReturnTrace()) |trace| {
                             std.debug.dumpStackTrace(trace.*);
