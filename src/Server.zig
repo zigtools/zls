@@ -188,6 +188,12 @@ fn showMessage(
     args: anytype,
 ) void {
     const message = std.fmt.allocPrint(server.arena.allocator(), fmt, args) catch return;
+    switch (message_type) {
+        .Error => log.err("{s}", .{message}),
+        .Warning => log.warn("{s}", .{message}),
+        .Info => log.info("{s}", .{message}),
+        .Log => log.debug("{s}", .{message}),
+    }
     server.sendNotification("window/showMessage", types.ShowMessageParams{
         .type = message_type,
         .message = message,
@@ -1722,12 +1728,31 @@ fn initializeHandler(server: *Server, request: types.InitializeParams) Error!typ
         const env = configuration.getZigEnv(server.allocator, exe_path) orelse break :blk;
         defer std.json.parseFree(configuration.Env, env, .{ .allocator = server.allocator });
 
-        const zig_exe_version = std.SemanticVersion.parse(env.version) catch break :blk;
+        const zig_version = std.SemanticVersion.parse(env.version) catch break :blk;
+        const zls_version = comptime std.SemanticVersion.parse(build_options.version) catch unreachable;
 
-        if (zig_builtin.zig_version.order(zig_exe_version) == .gt) {
-            server.showMessage(.Warning,
-                \\ZLS was built with Zig {}, but your Zig version is {s}. Update Zig to avoid unexpected behavior.
-            , .{ zig_builtin.zig_version, env.version });
+        const zig_version_simple = std.SemanticVersion{
+            .major = zig_version.major,
+            .minor = zig_version.minor,
+            .patch = zig_version.patch,
+        };
+        const zls_version_simple = std.SemanticVersion{
+            .major = zls_version.major,
+            .minor = zls_version.minor,
+            .patch = zls_version.patch,
+        };
+
+        switch (zig_version_simple.order(zls_version_simple)) {
+            .lt => {
+                // ZLS should be backwards compatible with older Zig version which is why we only log
+                log.info("Zig {} is older than ZLS {}", .{ zig_version_simple, zls_version_simple });
+            },
+            .eq => {},
+            .gt => {
+                server.showMessage(.Warning,
+                    \\Zig {} is newer than ZLS {}. Update ZLS to avoid unexpected behavior.
+                , .{ zig_version_simple, zls_version_simple });
+            },
         }
     } else {
         server.showMessage(.Warning,
@@ -3008,7 +3033,8 @@ fn processMessage(server: *Server, message: Message) Error!void {
             return error.InvalidRequest; // server received a request after shutdown!
         },
         .exiting_success,
-        .exiting_failure, => unreachable,
+        .exiting_failure,
+        => unreachable,
     }
 
     const start_time = std.time.milliTimestamp();
