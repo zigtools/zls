@@ -27,7 +27,6 @@ pub const Pointer = packed struct {
 };
 
 pub const Array = packed struct {
-    // TODO support big int
     len: u32,
     child: Index,
     sentinel: Index = .none,
@@ -78,7 +77,7 @@ pub const Enum = struct {
     };
 };
 
-pub const Fn = struct {
+pub const Function = struct {
     calling_convention: std.builtin.CallingConvention = .Unspecified,
     alignment: u16 = 0,
     is_generic: bool = false,
@@ -114,7 +113,6 @@ pub const Tuple = struct {
 };
 
 pub const Vector = packed struct {
-    // TODO support big int
     len: u32,
     child: Index,
 };
@@ -145,7 +143,7 @@ pub const Key = union(enum) {
     error_union_type: ErrorUnion,
     error_set_type: ErrorSet,
     enum_type: Enum,
-    function_type: Fn,
+    function_type: Function,
     union_type: Union,
     tuple_type: Tuple,
     vector_type: Vector,
@@ -539,7 +537,6 @@ pub const Key = union(enum) {
                     error_union_info.payload_type.fmtType(ip),
                 });
             },
-            // .error_type => @panic("TODO"),
             .error_set_type => |error_set_info| {
                 const names = error_set_info.names;
                 try writer.writeAll("error{");
@@ -559,7 +556,10 @@ pub const Key = union(enum) {
                     if (arg.is_comptime) {
                         try writer.writeAll("comptime ");
                     }
-                    // TODO noalias
+                    if (arg.is_noalias) {
+                        try writer.writeAll("noalias ");
+                    }
+
                     try printType(arg.arg_type, ip, writer);
                 }
 
@@ -616,9 +616,7 @@ pub const Key = union(enum) {
             .float_128_value,
             => unreachable,
 
-            // .type_value,
             .bytes,
-            // .one_pointer,
             .aggregate,
             .union_value,
             => unreachable,
@@ -709,9 +707,7 @@ pub const Key = union(enum) {
             .float_80_value => |float| try writer.print("{d}", .{@floatCast(f64, float)}),
             .float_128_value => |float| try writer.print("{d}", .{@floatCast(f64, float)}),
 
-            // .type_value => |tty| tty.fmtType(ip),
             .bytes => |bytes| try writer.print("\"{}\"", .{std.zig.fmtEscapes(bytes)}),
-            // .one_pointer => unreachable,
             .aggregate => |aggregate| {
                 const struct_info = ip.indexToKey(ty).struct_type;
                 std.debug.assert(aggregate.len == struct_info.fields.len);
@@ -808,7 +804,7 @@ pub const Tag = enum(u8) {
     /// data is payload to Enum.
     type_enum,
     /// An function type.
-    /// data is payload to Fn.
+    /// data is payload to Function.
     type_function,
     /// An union type.
     /// data is payload to Union.
@@ -911,9 +907,8 @@ pub fn deinit(ip: *InternPool, gpa: Allocator) void {
     ip.map.deinit(gpa);
     ip.items.deinit(gpa);
     ip.extra.deinit(gpa);
-
-    // TODO deinit fields
 }
+
 pub fn indexToKey(ip: InternPool, index: Index) Key {
     const item = ip.items.get(@enumToInt(index));
     const data = item.data;
@@ -936,7 +931,7 @@ pub fn indexToKey(ip: InternPool, index: Index) Key {
         .type_error_union => .{ .error_union_type = ip.extraData(ErrorUnion, data) },
         .type_error_set => .{ .error_set_type = ip.extraData(ErrorSet, data) },
         .type_enum => .{ .enum_type = ip.extraData(Enum, data) },
-        .type_function => .{ .function_type = ip.extraData(Fn, data) },
+        .type_function => .{ .function_type = ip.extraData(Function, data) },
         .type_union => .{ .union_type = ip.extraData(Union, data) },
         .type_tuple => .{ .tuple_type = ip.extraData(Tuple, data) },
         .type_vector => .{ .vector_type = ip.extraData(Vector, data) },
@@ -997,6 +992,8 @@ fn addExtra(ip: *InternPool, gpa: Allocator, extra: anytype) Allocator.Error!u32
     comptime if (@sizeOf(@TypeOf(extra)) <= 4) {
         @compileError(@typeName(@TypeOf(extra)) ++ " fits into a u32! Consider directly storing this extra in Item's data field");
     };
+
+    // TODO this doesn't correctly store types with slices like `Struct` `Aggregate`
     const result = @intCast(u32, ip.extra.items.len);
     try ip.extra.appendSlice(gpa, &std.mem.toBytes(extra));
     return result;
@@ -1690,7 +1687,7 @@ const InMemoryCoercionResult = union(enum) {
     };
 
     const Sentinel = struct {
-        // unreachable_value indicates no sentinel
+        // Index.none indicates no sentinel
         actual: Index, // value
         wanted: Index, // value
         ty: Index,
@@ -2077,8 +2074,8 @@ fn coerceInMemoryAllowedFns(
     ip: *InternPool,
     gpa: std.mem.Allocator,
     arena: std.mem.Allocator,
-    dest_info: Fn,
-    src_info: Fn,
+    dest_info: Function,
+    src_info: Function,
     target: std.Target,
 ) !InMemoryCoercionResult {
     if (dest_info.is_var_args != src_info.is_var_args) {
@@ -2463,14 +2460,14 @@ test "error set type" {
         .names = &.{ "foo", "bar", "baz" },
     } });
 
-    // const foo: [3]u8 = "foo".*;
+    const foo: [3]u8 = "foo".*;
 
-    // const error_set_1 = try ip.get(gpa, .{ .error_set_type = .{
-    //     .names = &.{&foo, "bar", "baz"},
-    // } });
+    const error_set_1 = try ip.get(gpa, .{ .error_set_type = .{
+        .names = &.{ &foo, "bar", "baz" },
+    } });
 
     std.debug.assert(empty_error_set != error_set_0);
-    // std.debug.assert(error_set_0 == error_set_1);
+    std.debug.assert(error_set_0 == error_set_1);
 
     try testExpectFmtType(&ip, empty_error_set, "error{}");
     try testExpectFmtType(&ip, error_set_0, "error{foo,bar,baz}");
@@ -2570,14 +2567,14 @@ test "function type" {
     const bool_type = try ip.get(gpa, .{ .simple = .bool });
     const type_type = try ip.get(gpa, .{ .simple = .type });
 
-    var param1 = Fn.Param{ .arg_type = i32_type };
+    var param1 = Function.Param{ .arg_type = i32_type };
     const @"fn(i32) bool" = try ip.get(gpa, .{ .function_type = .{
         .return_type = bool_type,
         .args = &.{param1},
     } });
 
-    var param2 = Fn.Param{ .is_comptime = true, .arg_type = type_type };
-    var param3 = Fn.Param{ .arg_type = i32_type };
+    var param2 = Function.Param{ .is_comptime = true, .arg_type = type_type };
+    var param3 = Function.Param{ .arg_type = i32_type };
     const @"fn(comptime type, i32) type" = try ip.get(gpa, .{ .function_type = .{
         .return_type = type_type,
         .args = &.{ param2, param3 },
