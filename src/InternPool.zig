@@ -583,7 +583,7 @@ pub const Key = union(enum) {
                 try writer.writeAll(") ");
 
                 if (function_info.calling_convention != .Unspecified) {
-                    try writer.print("callconv(.{s})", .{@tagName(function_info.calling_convention)});
+                    try writer.print("callconv(.{s}) ", .{@tagName(function_info.calling_convention)});
                 }
                 if (function_info.alignment != 0) {
                     try writer.print("align({d}) ", .{function_info.alignment});
@@ -956,7 +956,7 @@ pub fn indexToKey(ip: InternPool, index: Index) Key {
             .limbs = ip.extraData([]const std.math.big.Limb, data),
         } },
         .int_big_negative => .{ .int_big_value = .{
-            .positive = true,
+            .positive = false,
             .limbs = ip.extraData([]const std.math.big.Limb, data),
         } },
         .float_f16 => .{ .float_16_value = @bitCast(f16, @intCast(u16, data)) },
@@ -2319,6 +2319,34 @@ fn testExpectFmtValue(ip: *const InternPool, val: Index, ty: Index, expected: []
     try std.testing.expectFmt(expected, "{}", .{val.fmtValue(ty, ip)});
 }
 
+test "simple types" {
+    const gpa = std.testing.allocator;
+
+    var ip: InternPool = .{};
+    defer ip.deinit(gpa);
+
+    const null_type = try ip.get(gpa, .{ .simple = .null_type });
+    const undefined_type = try ip.get(gpa, .{ .simple = .undefined_type });
+    const enum_literal_type = try ip.get(gpa, .{ .simple = .enum_literal_type });
+    const undefined_value = try ip.get(gpa, .{ .simple = .undefined_value });
+    const void_value = try ip.get(gpa, .{ .simple = .void_value });
+    const unreachable_value = try ip.get(gpa, .{ .simple = .unreachable_value });
+    const null_value = try ip.get(gpa, .{ .simple = .null_value });
+    const bool_true = try ip.get(gpa, .{ .simple = .bool_true });
+    const bool_false = try ip.get(gpa, .{ .simple = .bool_false });
+
+    try testExpectFmtType(&ip, null_type, "@TypeOf(null)");
+    try testExpectFmtType(&ip, undefined_type, "@TypeOf(undefined)");
+    try testExpectFmtType(&ip, enum_literal_type, "@TypeOf(.enum_literal)");
+
+    try testExpectFmtValue(&ip, undefined_value, undefined, "@Type(.Undefined)");
+    try testExpectFmtValue(&ip, void_value, undefined, "void");
+    try testExpectFmtValue(&ip, unreachable_value, undefined, "unreachable");
+    try testExpectFmtValue(&ip, null_value, undefined, "null");
+    try testExpectFmtValue(&ip, bool_true, undefined, "true");
+    try testExpectFmtValue(&ip, bool_false, undefined, "false");
+}
+
 test "int type" {
     const gpa = std.testing.allocator;
 
@@ -2371,6 +2399,26 @@ test "int value" {
     try testExpectFmtValue(&ip, i64_max_value, undefined, "9223372036854775807");
 }
 
+test "big int value" {
+    const gpa = std.testing.allocator;
+
+    var ip: InternPool = .{};
+    defer ip.deinit(gpa);
+
+    var result = try std.math.big.int.Managed.init(gpa);
+    defer result.deinit();
+    var a = try std.math.big.int.Managed.initSet(gpa, 2);
+    defer a.deinit();
+
+    try result.pow(&a, 128);
+
+    const positive_big_int_value = try ip.get(gpa, .{ .int_big_value = result.toConst() });
+    const negative_big_int_value = try ip.get(gpa, .{ .int_big_value = result.toConst().negate() });
+
+    try testExpectFmtValue(&ip, positive_big_int_value, undefined, "340282366920938463463374607431768211456");
+    try testExpectFmtValue(&ip, negative_big_int_value, undefined, "-340282366920938463463374607431768211456");
+}
+
 test "float type" {
     const gpa = std.testing.allocator;
 
@@ -2399,6 +2447,30 @@ test "float type" {
     try testExpectFmtType(&ip, f64_type, "f64");
     try testExpectFmtType(&ip, f80_type, "f80");
     try testExpectFmtType(&ip, f128_type, "f128");
+}
+
+test "float value" {
+    const gpa = std.testing.allocator;
+
+    var ip: InternPool = .{};
+    defer ip.deinit(gpa);
+
+    const f16_value = try ip.get(gpa, .{ .float_16_value = 0.25 });
+    const f32_value = try ip.get(gpa, .{ .float_32_value = 0.5 });
+    const f64_value = try ip.get(gpa, .{ .float_64_value = 1.0 });
+    const f80_value = try ip.get(gpa, .{ .float_80_value = 2.0 });
+    const f128_value = try ip.get(gpa, .{ .float_128_value = 2.75 });
+
+    try std.testing.expect(f16_value != f32_value);
+    try std.testing.expect(f32_value != f64_value);
+    try std.testing.expect(f64_value != f80_value);
+    try std.testing.expect(f80_value != f128_value);
+
+    try testExpectFmtValue(&ip, f16_value, undefined, "0.25");
+    try testExpectFmtValue(&ip, f32_value, undefined, "0.5");
+    try testExpectFmtValue(&ip, f64_value, undefined, "1");
+    try testExpectFmtValue(&ip, f80_value, undefined, "2");
+    try testExpectFmtValue(&ip, f128_value, undefined, "2.75");
 }
 
 test "pointer type" {
@@ -2633,14 +2705,29 @@ test "function type" {
     } });
 
     var param2 = Function.Param{ .is_comptime = true, .arg_type = type_type };
-    var param3 = Function.Param{ .arg_type = i32_type };
-    const @"fn(comptime type, i32) type" = try ip.get(gpa, .{ .function_type = .{
+    var param3 = Function.Param{ .is_noalias = true, .arg_type = i32_type };
+    const @"fn(comptime type, noalias i32) type" = try ip.get(gpa, .{ .function_type = .{
         .return_type = type_type,
         .args = &.{ param2, param3 },
     } });
 
+    const @"fn(i32, ...) type" = try ip.get(gpa, .{ .function_type = .{
+        .is_var_args = true,
+        .return_type = type_type,
+        .args = &.{param1},
+    } });
+
+    const @"fn() callconv(.C) align(4) type" = try ip.get(gpa, .{ .function_type = .{
+        .calling_convention = .C,
+        .alignment = 4,
+        .return_type = type_type,
+        .args = &.{},
+    } });
+
     try testExpectFmtType(&ip, @"fn(i32) bool", "fn(i32) bool");
-    try testExpectFmtType(&ip, @"fn(comptime type, i32) type", "fn(comptime type, i32) type");
+    try testExpectFmtType(&ip, @"fn(comptime type, noalias i32) type", "fn(comptime type, noalias i32) type");
+    try testExpectFmtType(&ip, @"fn(i32, ...) type", "fn(i32, ...) type");
+    try testExpectFmtType(&ip, @"fn() callconv(.C) align(4) type", "fn() callconv(.C) align(4) type");
 }
 
 test "anyframe type" {
@@ -2683,6 +2770,40 @@ test "vector type" {
 
     try testExpectFmtType(&ip, @"@Vector(2,u32)", "@Vector(2,u32)");
     try testExpectFmtType(&ip, @"@Vector(2,bool)", "@Vector(2,bool)");
+}
+
+test "bytes value" {
+    if (true) return error.SkipZigTest; // TODO
+
+    const gpa = std.testing.allocator;
+
+    var ip: InternPool = .{};
+    defer ip.deinit(gpa);
+
+    var str1: [43]u8 = "https://www.youtube.com/watch?v=dQw4w9WgXcQ".*;
+
+    const bytes_value1 = try ip.get(gpa, .{ .bytes = &str1 });
+    @memset(&str1, 0, str1.len);
+
+    var str2: [43]u8 = "https://www.youtube.com/watch?v=dQw4w9WgXcQ".*;
+    @memset(&str2, 0, str2.len);
+
+    const bytes_value2 = try ip.get(gpa, .{ .bytes = &str2 });
+
+    var str3: [26]u8 = "https://www.duckduckgo.com".*;
+    const bytes_value3 = try ip.get(gpa, .{ .bytes = &str3 });
+    @memset(&str3, 0, str3.len);
+
+    try std.testing.expect(bytes_value1 == bytes_value2);
+    try std.testing.expect(bytes_value2 != bytes_value3);
+
+    try std.testing.expect(str1 != ip.indexToKey(bytes_value1).bytes);
+    try std.testing.expect(str2 != ip.indexToKey(bytes_value2).bytes);
+    try std.testing.expect(str3 != ip.indexToKey(bytes_value3).bytes);
+
+    try std.testing.expectEqualStrings("https://www.youtube.com/watch?v=dQw4w9WgXcQ", ip.indexToKey(bytes_value1).bytes);
+    try std.testing.expectEqualStrings("https://www.youtube.com/watch?v=dQw4w9WgXcQ", ip.indexToKey(bytes_value2).bytes);
+    try std.testing.expectEqualStrings("https://www.duckduckgo.com", ip.indexToKey(bytes_value3).bytes);
 }
 
 test "resolvePeerTypes" {
