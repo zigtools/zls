@@ -20,6 +20,8 @@ pub const Pointer = packed struct {
     sentinel: Index = .none,
     alignment: u16 = 0,
     size: std.builtin.Type.Pointer.Size,
+    bit_offset: u16 = 0,
+    host_size: u16 = 0,
     is_const: bool = false,
     is_volatile: bool = false,
     is_allowzero: bool = false,
@@ -510,8 +512,10 @@ pub const Key = union(enum) {
                 if (pointer_info.alignment != 0) {
                     try writer.print("align({d}", .{pointer_info.alignment});
 
-                    // TODO bit offset
-                    // TODO host size
+                    if (pointer_info.bit_offset != 0 or pointer_info.host_size != 0) {
+                        try writer.print(":{d}:{d}", .{ pointer_info.bit_offset, pointer_info.host_size });
+                    }
+
                     try writer.writeAll(") ");
                 }
 
@@ -2219,16 +2223,16 @@ fn coerceInMemoryAllowedPtrs(
         } };
     }
 
-    // if (src_info.host_size != dest_info.host_size or
-    //     src_info.bit_offset != dest_info.bit_offset)
-    // {
-    //     return InMemoryCoercionResult{ .ptr_bit_range = .{
-    //         .actual_host = src_info.host_size,
-    //         .wanted_host = dest_info.host_size,
-    //         .actual_offset = src_info.bit_offset,
-    //         .wanted_offset = dest_info.bit_offset,
-    //     } };
-    // }
+    if (src_info.host_size != dest_info.host_size or
+        src_info.bit_offset != dest_info.bit_offset)
+    {
+        return InMemoryCoercionResult{ .ptr_bit_range = .{
+            .actual_host = src_info.host_size,
+            .wanted_host = dest_info.host_size,
+            .actual_offset = src_info.bit_offset,
+            .wanted_offset = dest_info.bit_offset,
+        } };
+    }
 
     const ok_sent = dest_info.sentinel == .none or src_info.size == .C or dest_info.sentinel == src_info.sentinel; // is this enough for a value equality check?
     if (!ok_sent) {
@@ -2441,22 +2445,39 @@ test "pointer type" {
         .size = .One,
         .alignment = 4,
     } });
-    const @"[*c]const volatile u32" = try ip.get(gpa, .{ .pointer_type = Pointer{
+    const @"*align(4:2:3) u32" = try ip.get(gpa, .{ .pointer_type = .{
+        .elem_type = u32_type,
+        .size = .One,
+        .alignment = 4,
+        .bit_offset = 2,
+        .host_size = 3,
+    } });
+    const @"[*c]const volatile u32" = try ip.get(gpa, .{ .pointer_type = .{
         .elem_type = u32_type,
         .size = .C,
         .is_const = true,
         .is_volatile = true,
     } });
+    const @"*addrspace(.shared) const u32" = try ip.get(gpa, .{ .pointer_type = Pointer{
+        .elem_type = u32_type,
+        .size = .One,
+        .is_const = true,
+        .address_space = .shared,
+    } });
 
-    try std.testing.expect(@"*const u32" != u32_pointer_type);
-    try std.testing.expect(u32_pointer_type != @"*align(4) u32");
-    try std.testing.expect(@"*align(4) u32" != @"[*c]const volatile u32");
+    try std.testing.expect(u32_pointer_type != @"*const u32");
+    try std.testing.expect(@"*const u32" != @"*align(4) u32");
+    try std.testing.expect(@"*align(4) u32" != @"*align(4:2:3) u32");
+    try std.testing.expect(@"*align(4:2:3) u32" != @"[*c]const volatile u32");
+    try std.testing.expect(@"[*c]const volatile u32" != @"*addrspace(.shared) const u32");
 
     try testExpectFmtType(&ip, i32_pointer_type_0, "*i32");
     try testExpectFmtType(&ip, u32_pointer_type, "*u32");
     try testExpectFmtType(&ip, @"*const u32", "*const u32");
     try testExpectFmtType(&ip, @"*align(4) u32", "*align(4) u32");
+    try testExpectFmtType(&ip, @"*align(4:2:3) u32", "*align(4:2:3) u32");
     try testExpectFmtType(&ip, @"[*c]const volatile u32", "[*c]const volatile u32");
+    try testExpectFmtType(&ip, @"*addrspace(.shared) const u32", "*addrspace(.shared) const u32");
 }
 
 test "optional type" {
