@@ -3,6 +3,7 @@ const DocumentStore = @import("DocumentStore.zig");
 const Ast = std.zig.Ast;
 const types = @import("lsp.zig");
 const offsets = @import("offsets.zig");
+const URI = @import("uri.zig");
 const log = std.log.scoped(.analysis);
 const ast = @import("ast.zig");
 const ComptimeInterpreter = @import("ComptimeInterpreter.zig");
@@ -963,6 +964,30 @@ pub fn resolveTypeOfNodeInternal(store: *DocumentStore, arena: *std.heap.ArenaAl
                 if (resolved_type.type.is_type_val) return null;
                 resolved_type.type.is_type_val = true;
                 return resolved_type;
+            }
+
+            if (std.mem.eql(u8, call_name, "@typeInfo")) {
+                const zig_lib_path = try URI.fromPath(arena.allocator(), store.config.zig_lib_path orelse return null);
+
+                const builtin_uri = URI.pathRelative(arena.allocator(), zig_lib_path, "/std/builtin.zig") catch |err| switch (err) {
+                    error.OutOfMemory => |e| return e,
+                    else => return null,
+                };
+
+                const new_handle = store.getOrLoadHandle(builtin_uri) orelse return null;
+                const root_scope = new_handle.document_scope.scopes.items[0];
+                const decl = root_scope.decls.get("Type") orelse return null;
+                if (decl != .ast_node) return null;
+
+                const var_decl = ast.varDecl(new_handle.tree, decl.ast_node) orelse return null;
+
+                return TypeWithHandle{
+                    .type = .{
+                        .data = .{ .other = var_decl.ast.init_node },
+                        .is_type_val = false,
+                    },
+                    .handle = new_handle,
+                };
             }
 
             if (std.mem.eql(u8, call_name, "@import")) {
