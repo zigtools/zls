@@ -200,7 +200,7 @@ pub const Key = union(enum) {
             .anyframe_type => .type_anyframe,
 
             .int_u64_value => |int| if (int <= std.math.maxInt(u32)) .int_u32 else .int_u64,
-            .int_i64_value => |int| if (std.math.maxInt(i32) <= int and int <= std.math.maxInt(i32)) .int_i32 else .int_i64,
+            .int_i64_value => |int| if (std.math.minInt(i32) <= int and int <= std.math.maxInt(i32)) .int_i32 else .int_i64,
             .int_big_value => |big_int| if (big_int.positive) .int_big_positive else .int_big_negative,
             .float_16_value => .float_f16,
             .float_32_value => .float_f32,
@@ -2382,6 +2382,14 @@ test "int value" {
 
     const u64_max_value = try ip.get(gpa, .{ .int_u64_value = std.math.maxInt(u64) });
     const i64_max_value = try ip.get(gpa, .{ .int_i64_value = std.math.maxInt(i64) });
+    const i64_min_value = try ip.get(gpa, .{ .int_i64_value = std.math.minInt(i64) });
+
+    const tags = ip.items.items(.tag);
+    try std.testing.expect(tags[@enumToInt(unsigned_one_value)] == .int_u32);
+    try std.testing.expect(tags[@enumToInt(signed_one_value)] == .int_i32);
+    try std.testing.expect(tags[@enumToInt(u64_max_value)] == .int_u64);
+    try std.testing.expect(tags[@enumToInt(i64_max_value)] == .int_i64);
+    try std.testing.expect(tags[@enumToInt(i64_min_value)] == .int_i64);
 
     try std.testing.expect(unsigned_zero_value != unsigned_one_value);
     try std.testing.expect(unsigned_one_value != signed_zero_value);
@@ -2389,6 +2397,7 @@ test "int value" {
 
     try std.testing.expect(signed_one_value != u64_max_value);
     try std.testing.expect(u64_max_value != i64_max_value);
+    try std.testing.expect(i64_max_value != i64_min_value);
 
     try testExpectFmtValue(&ip, unsigned_zero_value, undefined, "0");
     try testExpectFmtValue(&ip, unsigned_one_value, undefined, "1");
@@ -2397,6 +2406,7 @@ test "int value" {
 
     try testExpectFmtValue(&ip, u64_max_value, undefined, "18446744073709551615");
     try testExpectFmtValue(&ip, i64_max_value, undefined, "9223372036854775807");
+    try testExpectFmtValue(&ip, i64_min_value, undefined, "-9223372036854775808");
 }
 
 test "big int value" {
