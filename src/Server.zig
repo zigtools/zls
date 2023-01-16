@@ -2263,27 +2263,16 @@ fn formattingHandler(server: *Server, request: types.DocumentFormattingParams) E
 
     if (std.mem.eql(u8, handle.text, formatted)) return null;
 
-    // avoid computing diffs if the output is small
-    const maybe_edits = if (formatted.len <= 512) null else diff.edits(allocator, handle.text, formatted) catch null;
-
-    const edits = maybe_edits orelse {
-        // if edits have been computed we replace the entire file with the formatted text
-        return &[1]types.TextEdit{.{
+    if (formatted.len <= 512) {
+        var text_edits = try allocator.alloc(types.TextEdit, 1);
+        text_edits[0] = .{
             .range = offsets.locToRange(handle.text, .{ .start = 0, .end = handle.text.len }, server.offset_encoding),
             .newText = formatted,
-        }};
-    };
-
-    // Convert from `[]diff.Edit` to `[]types.TextEdit`
-    var text_edits = try std.ArrayListUnmanaged(types.TextEdit).initCapacity(allocator, edits.items.len);
-    for (edits.items) |edit| {
-        text_edits.appendAssumeCapacity(.{
-            .range = edit.range,
-            .newText = edit.newText.items,
-        });
+        };
+        return text_edits;
     }
 
-    return text_edits.items;
+    return if (diff.edits(allocator, handle.text, formatted)) |text_edits| text_edits.items else |_| null;
 }
 
 fn didChangeConfigurationHandler(server: *Server, request: configuration.DidChangeConfigurationParams) Error!void {
