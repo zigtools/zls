@@ -80,19 +80,15 @@ pub const Enum = struct {
 };
 
 pub const Function = struct {
-    calling_convention: std.builtin.CallingConvention = .Unspecified,
+    args: []const Index,
+    args_is_comptime: std.StaticBitSet(32) = std.StaticBitSet(32).initEmpty(),
+    args_is_generic: std.StaticBitSet(32) = std.StaticBitSet(32).initEmpty(),
+    args_is_noalias: std.StaticBitSet(32) = std.StaticBitSet(32).initEmpty(),
+    return_type: Index,
     alignment: u16 = 0,
+    calling_convention: std.builtin.CallingConvention = .Unspecified,
     is_generic: bool = false,
     is_var_args: bool = false,
-    return_type: Index,
-    args: []const Param,
-
-    pub const Param = packed struct {
-        arg_type: Index,
-        is_comptime: bool = false,
-        is_generic: bool = false,
-        is_noalias: bool = false,
-    };
 };
 
 pub const Union = struct {
@@ -572,17 +568,19 @@ pub const Key = union(enum) {
             .function_type => |function_info| {
                 try writer.writeAll("fn(");
 
-                for (function_info.args) |arg, i| {
+                for (function_info.args) |arg_ty, i| {
                     if (i != 0) try writer.writeAll(", ");
 
-                    if (arg.is_comptime) {
-                        try writer.writeAll("comptime ");
-                    }
-                    if (arg.is_noalias) {
-                        try writer.writeAll("noalias ");
+                    if (i < 32) {
+                        if (function_info.args_is_comptime.isSet(i)) {
+                            try writer.writeAll("comptime ");
+                        }
+                        if (function_info.args_is_noalias.isSet(i)) {
+                            try writer.writeAll("noalias ");
+                        }
                     }
 
-                    try printType(arg.arg_type, ip, writer);
+                    try printType(arg_ty, ip, writer);
                 }
 
                 if (function_info.is_var_args) {
@@ -2737,30 +2735,34 @@ test "function type" {
     const bool_type = try ip.get(gpa, .{ .simple = .bool });
     const type_type = try ip.get(gpa, .{ .simple = .type });
 
-    var param1 = Function.Param{ .arg_type = i32_type };
     const @"fn(i32) bool" = try ip.get(gpa, .{ .function_type = .{
+        .args = &.{i32_type},
         .return_type = bool_type,
-        .args = &.{param1},
     } });
 
-    var param2 = Function.Param{ .is_comptime = true, .arg_type = type_type };
-    var param3 = Function.Param{ .is_noalias = true, .arg_type = i32_type };
+    var args_is_comptime = std.StaticBitSet(32).initEmpty();
+    args_is_comptime.set(0);
+    var args_is_noalias = std.StaticBitSet(32).initEmpty();
+    args_is_noalias.set(1);
+
     const @"fn(comptime type, noalias i32) type" = try ip.get(gpa, .{ .function_type = .{
+        .args = &.{ type_type, i32_type },
+        .args_is_comptime = args_is_comptime,
+        .args_is_noalias = args_is_noalias,
         .return_type = type_type,
-        .args = &.{ param2, param3 },
     } });
 
     const @"fn(i32, ...) type" = try ip.get(gpa, .{ .function_type = .{
-        .is_var_args = true,
+        .args = &.{i32_type},
         .return_type = type_type,
-        .args = &.{param1},
+        .is_var_args = true,
     } });
 
     const @"fn() align(4) callconv(.C) type" = try ip.get(gpa, .{ .function_type = .{
-        .calling_convention = .C,
-        .alignment = 4,
-        .return_type = type_type,
         .args = &.{},
+        .return_type = type_type,
+        .alignment = 4,
+        .calling_convention = .C,
     } });
 
     try testExpectFmtType(ip, @"fn(i32) bool", "fn(i32) bool");
