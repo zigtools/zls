@@ -593,6 +593,9 @@ pub const Key = union(enum) {
                 }
                 try writer.writeAll(") ");
 
+                if (function_info.alignment != 0) {
+                    try writer.print("align({d}) ", .{function_info.alignment});
+                }
                 if (function_info.calling_convention != .Unspecified) {
                     try writer.print("callconv(.{s}) ", .{@tagName(function_info.calling_convention)});
                 }
@@ -2336,11 +2339,11 @@ fn optionalPtrTy(
 //                     TESTS
 // ---------------------------------------------
 
-fn testExpectFmtType(ip: *const InternPool, index: Index, expected: []const u8) !void {
+fn testExpectFmtType(ip: InternPool, index: Index, expected: []const u8) !void {
     try std.testing.expectFmt(expected, "{}", .{index.fmtType(ip)});
 }
 
-fn testExpectFmtValue(ip: *const InternPool, val: Index, ty: Index, expected: []const u8) !void {
+fn testExpectFmtValue(ip: InternPool, val: Index, ty: Index, expected: []const u8) !void {
     try std.testing.expectFmt(expected, "{}", .{val.fmtValue(ty, ip)});
 }
 
@@ -2360,16 +2363,16 @@ test "simple types" {
     const bool_true = try ip.get(gpa, .{ .simple = .bool_true });
     const bool_false = try ip.get(gpa, .{ .simple = .bool_false });
 
-    try testExpectFmtType(&ip, null_type, "@TypeOf(null)");
-    try testExpectFmtType(&ip, undefined_type, "@TypeOf(undefined)");
-    try testExpectFmtType(&ip, enum_literal_type, "@TypeOf(.enum_literal)");
+    try testExpectFmtType(ip, null_type, "@TypeOf(null)");
+    try testExpectFmtType(ip, undefined_type, "@TypeOf(undefined)");
+    try testExpectFmtType(ip, enum_literal_type, "@TypeOf(.enum_literal)");
 
-    try testExpectFmtValue(&ip, undefined_value, undefined, "@Type(.Undefined)");
-    try testExpectFmtValue(&ip, void_value, undefined, "void");
-    try testExpectFmtValue(&ip, unreachable_value, undefined, "unreachable");
-    try testExpectFmtValue(&ip, null_value, undefined, "null");
-    try testExpectFmtValue(&ip, bool_true, undefined, "true");
-    try testExpectFmtValue(&ip, bool_false, undefined, "false");
+    try testExpectFmtValue(ip, undefined_value, Index.none, "@Type(.Undefined)");
+    try testExpectFmtValue(ip, void_value, Index.none, "void");
+    try testExpectFmtValue(ip, unreachable_value, Index.none, "unreachable");
+    try testExpectFmtValue(ip, null_value, Index.none, "null");
+    try testExpectFmtValue(ip, bool_true, Index.none, "true");
+    try testExpectFmtValue(ip, bool_false, Index.none, "false");
 }
 
 test "int type" {
@@ -2389,9 +2392,9 @@ test "int type" {
     try std.testing.expect(i16_type != another_i32_type);
     try std.testing.expect(i16_type != u7_type);
 
-    try testExpectFmtType(&ip, i32_type, "i32");
-    try testExpectFmtType(&ip, i16_type, "i16");
-    try testExpectFmtType(&ip, u7_type, "u7");
+    try testExpectFmtType(ip, i32_type, "i32");
+    try testExpectFmtType(ip, i16_type, "i16");
+    try testExpectFmtType(ip, u7_type, "u7");
 }
 
 test "int value" {
@@ -2424,14 +2427,14 @@ test "int value" {
     try std.testing.expect(u64_max_value != i64_max_value);
     try std.testing.expect(i64_max_value != i64_min_value);
 
-    try testExpectFmtValue(&ip, unsigned_zero_value, undefined, "0");
-    try testExpectFmtValue(&ip, unsigned_one_value, undefined, "1");
-    try testExpectFmtValue(&ip, signed_zero_value, undefined, "0");
-    try testExpectFmtValue(&ip, signed_one_value, undefined, "1");
+    try testExpectFmtValue(ip, unsigned_zero_value, undefined, "0");
+    try testExpectFmtValue(ip, unsigned_one_value, undefined, "1");
+    try testExpectFmtValue(ip, signed_zero_value, undefined, "0");
+    try testExpectFmtValue(ip, signed_one_value, undefined, "1");
 
-    try testExpectFmtValue(&ip, u64_max_value, undefined, "18446744073709551615");
-    try testExpectFmtValue(&ip, i64_max_value, undefined, "9223372036854775807");
-    try testExpectFmtValue(&ip, i64_min_value, undefined, "-9223372036854775808");
+    try testExpectFmtValue(ip, u64_max_value, undefined, "18446744073709551615");
+    try testExpectFmtValue(ip, i64_max_value, undefined, "9223372036854775807");
+    try testExpectFmtValue(ip, i64_min_value, undefined, "-9223372036854775808");
 }
 
 test "big int value" {
@@ -2450,8 +2453,8 @@ test "big int value" {
     const positive_big_int_value = try ip.get(gpa, .{ .int_big_value = result.toConst() });
     const negative_big_int_value = try ip.get(gpa, .{ .int_big_value = result.toConst().negate() });
 
-    try testExpectFmtValue(&ip, positive_big_int_value, undefined, "340282366920938463463374607431768211456");
-    try testExpectFmtValue(&ip, negative_big_int_value, undefined, "-340282366920938463463374607431768211456");
+    try testExpectFmtValue(ip, positive_big_int_value, Index.none, "340282366920938463463374607431768211456");
+    try testExpectFmtValue(ip, negative_big_int_value, Index.none, "-340282366920938463463374607431768211456");
 }
 
 test "float type" {
@@ -2477,11 +2480,11 @@ test "float type" {
     try std.testing.expect(f32_type == another_f32_type);
     try std.testing.expect(f64_type == another_f64_type);
 
-    try testExpectFmtType(&ip, f16_type, "f16");
-    try testExpectFmtType(&ip, f32_type, "f32");
-    try testExpectFmtType(&ip, f64_type, "f64");
-    try testExpectFmtType(&ip, f80_type, "f80");
-    try testExpectFmtType(&ip, f128_type, "f128");
+    try testExpectFmtType(ip, f16_type, "f16");
+    try testExpectFmtType(ip, f32_type, "f32");
+    try testExpectFmtType(ip, f64_type, "f64");
+    try testExpectFmtType(ip, f80_type, "f80");
+    try testExpectFmtType(ip, f128_type, "f128");
 }
 
 test "float value" {
@@ -2501,11 +2504,11 @@ test "float value" {
     try std.testing.expect(f64_value != f80_value);
     try std.testing.expect(f80_value != f128_value);
 
-    try testExpectFmtValue(&ip, f16_value, undefined, "0.25");
-    try testExpectFmtValue(&ip, f32_value, undefined, "0.5");
-    try testExpectFmtValue(&ip, f64_value, undefined, "1");
-    try testExpectFmtValue(&ip, f80_value, undefined, "2");
-    try testExpectFmtValue(&ip, f128_value, undefined, "2.75");
+    try testExpectFmtValue(ip, f16_value, undefined, "0.25");
+    try testExpectFmtValue(ip, f32_value, undefined, "0.5");
+    try testExpectFmtValue(ip, f64_value, undefined, "1");
+    try testExpectFmtValue(ip, f80_value, undefined, "2");
+    try testExpectFmtValue(ip, f128_value, undefined, "2.75");
 }
 
 test "pointer type" {
@@ -2565,7 +2568,7 @@ test "pointer type" {
         .is_const = true,
         .is_volatile = true,
     } });
-    const @"*addrspace(.shared) const u32" = try ip.get(gpa, .{ .pointer_type = Pointer{
+    const @"*addrspace(.shared) const u32" = try ip.get(gpa, .{ .pointer_type = .{
         .elem_type = u32_type,
         .size = .One,
         .is_const = true,
@@ -2578,13 +2581,13 @@ test "pointer type" {
     try std.testing.expect(@"*align(4:2:3) u32" != @"[*c]const volatile u32");
     try std.testing.expect(@"[*c]const volatile u32" != @"*addrspace(.shared) const u32");
 
-    try testExpectFmtType(&ip, i32_pointer_type_0, "*i32");
-    try testExpectFmtType(&ip, u32_pointer_type, "*u32");
-    try testExpectFmtType(&ip, @"*const u32", "*const u32");
-    try testExpectFmtType(&ip, @"*align(4) u32", "*align(4) u32");
-    try testExpectFmtType(&ip, @"*align(4:2:3) u32", "*align(4:2:3) u32");
-    try testExpectFmtType(&ip, @"[*c]const volatile u32", "[*c]const volatile u32");
-    try testExpectFmtType(&ip, @"*addrspace(.shared) const u32", "*addrspace(.shared) const u32");
+    try testExpectFmtType(ip, i32_pointer_type_0, "*i32");
+    try testExpectFmtType(ip, u32_pointer_type, "*u32");
+    try testExpectFmtType(ip, @"*const u32", "*const u32");
+    try testExpectFmtType(ip, @"*align(4) u32", "*align(4) u32");
+    try testExpectFmtType(ip, @"*align(4:2:3) u32", "*align(4:2:3) u32");
+    try testExpectFmtType(ip, @"[*c]const volatile u32", "[*c]const volatile u32");
+    try testExpectFmtType(ip, @"*addrspace(.shared) const u32", "*addrspace(.shared) const u32");
 }
 
 test "optional type" {
@@ -2607,11 +2610,11 @@ test "optional type" {
     try std.testing.expect(i32_optional_type_0 == i32_optional_type_1);
     try std.testing.expect(i32_optional_type_0 != u32_optional_type);
 
-    try testExpectFmtType(&ip, i32_optional_type_0, "?i32");
-    try testExpectFmtType(&ip, u32_optional_type, "?u32");
+    try testExpectFmtType(ip, i32_optional_type_0, "?i32");
+    try testExpectFmtType(ip, u32_optional_type, "?u32");
 
-    try testExpectFmtValue(&ip, null_value, u32_optional_type, "null");
-    try testExpectFmtValue(&ip, u64_42_value, u32_optional_type, "42");
+    try testExpectFmtValue(ip, null_value, u32_optional_type, "null");
+    try testExpectFmtValue(ip, u64_42_value, u32_optional_type, "42");
 }
 
 test "error set type" {
@@ -2635,8 +2638,8 @@ test "error set type" {
     try std.testing.expect(empty_error_set != error_set_0);
     try std.testing.expect(error_set_0 == error_set_1);
 
-    try testExpectFmtType(&ip, empty_error_set, "error{}");
-    try testExpectFmtType(&ip, error_set_0, "error{foo,bar,baz}");
+    try testExpectFmtType(ip, empty_error_set, "error{}");
+    try testExpectFmtType(ip, error_set_0, "error{foo,bar,baz}");
 }
 
 test "error union type" {
@@ -2644,15 +2647,16 @@ test "error union type" {
 
     var ip: InternPool = .{};
     defer ip.deinit(gpa);
+
     const empty_error_set = try ip.get(gpa, .{ .error_set_type = .{ .names = &.{} } });
     const bool_type = try ip.get(gpa, .{ .simple = .bool });
 
-    const @"error{}!bool" = try ip.get(gpa, .{ .error_union_type = ErrorUnion{
+    const @"error{}!bool" = try ip.get(gpa, .{ .error_union_type = .{
         .error_set_type = empty_error_set,
         .payload_type = bool_type,
     } });
 
-    try testExpectFmtType(&ip, @"error{}!bool", "error{}!bool");
+    try testExpectFmtType(ip, @"error{}!bool", "error{}!bool");
 }
 
 test "array type" {
@@ -2683,8 +2687,8 @@ test "array type" {
     try std.testing.expect(i32_3_array_type_0 == i32_3_array_type_1);
     try std.testing.expect(i32_3_array_type_1 != u32_0_0_array_type);
 
-    try testExpectFmtType(&ip, i32_3_array_type_0, "[3]i32");
-    try testExpectFmtType(&ip, u32_0_0_array_type, "[3:0]u32");
+    try testExpectFmtType(ip, i32_3_array_type_0, "[3]i32");
+    try testExpectFmtType(ip, u32_0_0_array_type, "[3:0]u32");
 }
 
 test "struct type" {
@@ -2752,17 +2756,17 @@ test "function type" {
         .args = &.{param1},
     } });
 
-    const @"fn() callconv(.C) align(4) type" = try ip.get(gpa, .{ .function_type = .{
+    const @"fn() align(4) callconv(.C) type" = try ip.get(gpa, .{ .function_type = .{
         .calling_convention = .C,
         .alignment = 4,
         .return_type = type_type,
         .args = &.{},
     } });
 
-    try testExpectFmtType(&ip, @"fn(i32) bool", "fn(i32) bool");
-    try testExpectFmtType(&ip, @"fn(comptime type, noalias i32) type", "fn(comptime type, noalias i32) type");
-    try testExpectFmtType(&ip, @"fn(i32, ...) type", "fn(i32, ...) type");
-    try testExpectFmtType(&ip, @"fn() callconv(.C) align(4) type", "fn() callconv(.C) align(4) type");
+    try testExpectFmtType(ip, @"fn(i32) bool", "fn(i32) bool");
+    try testExpectFmtType(ip, @"fn(comptime type, noalias i32) type", "fn(comptime type, noalias i32) type");
+    try testExpectFmtType(ip, @"fn(i32, ...) type", "fn(i32, ...) type");
+    try testExpectFmtType(ip, @"fn() align(4) callconv(.C) type", "fn() align(4) callconv(.C) type");
 }
 
 test "anyframe type" {
@@ -2774,13 +2778,13 @@ test "anyframe type" {
     const i32_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .signed, .bits = 32 } });
     const bool_type = try ip.get(gpa, .{ .simple = .bool });
 
-    const @"anyframe->i32" = try ip.get(gpa, Key{ .anyframe_type = .{ .child = i32_type } });
-    const @"anyframe->bool" = try ip.get(gpa, Key{ .anyframe_type = .{ .child = bool_type } });
+    const @"anyframe->i32" = try ip.get(gpa, .{ .anyframe_type = .{ .child = i32_type } });
+    const @"anyframe->bool" = try ip.get(gpa, .{ .anyframe_type = .{ .child = bool_type } });
 
     try std.testing.expect(@"anyframe->i32" != @"anyframe->bool");
 
-    try testExpectFmtType(&ip, @"anyframe->i32", "anyframe->i32");
-    try testExpectFmtType(&ip, @"anyframe->bool", "anyframe->bool");
+    try testExpectFmtType(ip, @"anyframe->i32", "anyframe->i32");
+    try testExpectFmtType(ip, @"anyframe->bool", "anyframe->bool");
 }
 
 test "vector type" {
@@ -2803,8 +2807,8 @@ test "vector type" {
 
     try std.testing.expect(@"@Vector(2,u32)" != @"@Vector(2,bool)");
 
-    try testExpectFmtType(&ip, @"@Vector(2,u32)", "@Vector(2,u32)");
-    try testExpectFmtType(&ip, @"@Vector(2,bool)", "@Vector(2,bool)");
+    try testExpectFmtType(ip, @"@Vector(2,u32)", "@Vector(2,u32)");
+    try testExpectFmtType(ip, @"@Vector(2,bool)", "@Vector(2,bool)");
 }
 
 test "bytes value" {
@@ -3003,12 +3007,12 @@ test "resolvePeerTypes pointers" {
     const @"[1]u32" = try ip.get(gpa, .{ .array_type = .{
         .len = 1,
         .child = u32_type,
-        .sentinel = Index.none,
+        .sentinel = .none,
     } });
     const @"[2]u32" = try ip.get(gpa, .{ .array_type = .{
         .len = 2,
         .child = u32_type,
-        .sentinel = Index.none,
+        .sentinel = .none,
     } });
 
     const @"*[1]u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = @"[1]u32", .size = .One } });
@@ -3068,18 +3072,18 @@ test "resolvePeerTypes pointers" {
 
     try ip.testResolvePeerTypes(@"*[1]u32", @"*[2]u32", @"[]u32");
 
-    try testExpectFmtType(&ip, @"[*c]u32", "[*c]u32");
-    try testExpectFmtType(&ip, @"*[1]u32", "*[1]u32");
-    try testExpectFmtType(&ip, @"*[2]u32", "*[2]u32");
-    try testExpectFmtType(&ip, @"*u32", "*u32");
-    try testExpectFmtType(&ip, @"*const u32", "*const u32");
-    try testExpectFmtType(&ip, @"[*]u32", "[*]u32");
-    try testExpectFmtType(&ip, @"[*:0]u32", "[*:0]u32");
-    try testExpectFmtType(&ip, @"[]u32", "[]u32");
-    try testExpectFmtType(&ip, @"[]const u32", "[]const u32");
-    try testExpectFmtType(&ip, @"[:0]u32", "[:0]u32");
-    try testExpectFmtType(&ip, @"?[]u32", "?[]u32");
-    try testExpectFmtType(&ip, @"?[]const u32", "?[]const u32");
+    try testExpectFmtType(ip, @"[*c]u32", "[*c]u32");
+    try testExpectFmtType(ip, @"*[1]u32", "*[1]u32");
+    try testExpectFmtType(ip, @"*[2]u32", "*[2]u32");
+    try testExpectFmtType(ip, @"*u32", "*u32");
+    try testExpectFmtType(ip, @"*const u32", "*const u32");
+    try testExpectFmtType(ip, @"[*]u32", "[*]u32");
+    try testExpectFmtType(ip, @"[*:0]u32", "[*:0]u32");
+    try testExpectFmtType(ip, @"[]u32", "[]u32");
+    try testExpectFmtType(ip, @"[]const u32", "[]const u32");
+    try testExpectFmtType(ip, @"[:0]u32", "[:0]u32");
+    try testExpectFmtType(ip, @"?[]u32", "?[]u32");
+    try testExpectFmtType(ip, @"?[]const u32", "?[]const u32");
 }
 
 fn testResolvePeerTypes(ip: *InternPool, a: Index, b: Index, expected: Index) !void {
