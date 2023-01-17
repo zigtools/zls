@@ -75,7 +75,7 @@ pub const Enum = struct {
 
     pub const Field = struct {
         name: []const u8,
-        ty: Index,
+        val: Index,
     };
 };
 
@@ -126,7 +126,7 @@ pub const Bytes = []const u8;
 pub const Aggregate = []const Index;
 
 pub const UnionValue = packed struct {
-    tag: Index,
+    field_index: u32,
     val: Index,
 };
 
@@ -651,7 +651,6 @@ pub const Key = union(enum) {
         options: std.fmt.FormatOptions,
         writer: anytype,
     ) @TypeOf(writer).Error!void {
-        comptime assert(fmt.len == 0);
         _ = options;
         if (fmt.len != 0) std.fmt.invalidFmtError(fmt, Key);
         return printValue(ctx.value, ctx.ty, ctx.ip, writer);
@@ -747,11 +746,11 @@ pub const Key = union(enum) {
             .union_value => |union_value| {
                 const union_info = ip.indexToKey(ty).union_type;
 
-                try writer.writeAll(".{ ");
-                try printValue(ip.indexToKey(union_info.tag_type), union_value.tag, ip, writer);
-                try writer.writeAll(" = ");
-                try printValue(union_value.val, @panic("TODO"), ip, writer);
-                try writer.writeAll(" }");
+                try writer.print(".{{ .{} = {} }}", .{
+                    std.zig.fmtId(union_info.fields[union_value.field_index].name),
+                    // union_value.tag.fmtValue(union_info.tag_type, ip),
+                    union_value.val.fmtValue(union_info.fields[union_value.field_index].ty, ip),
+                });
             },
         }
     }
@@ -2703,26 +2702,62 @@ test "struct type" {
     const field2 = Struct.Field{ .name = "bar", .ty = i32_type };
     const field3 = Struct.Field{ .name = "baz", .ty = bool_type };
 
-    const struct_type_0 = try ip.get(gpa, Key{
-        .struct_type = Struct{
-            .fields = &.{ field1, field2, field3 },
-            .namespace = .none,
-            .layout = .Auto,
-            .backing_int_ty = .none,
-        },
-    });
+    const struct_type_0 = try ip.get(gpa, .{ .struct_type = .{
+        .fields = &.{ field1, field2, field3 },
+        .namespace = .none,
+        .layout = .Auto,
+        .backing_int_ty = .none,
+    } });
 
-    _ = try ip.get(gpa, .{ .simple = .unreachable_value });
+    const struct_type_1 = try ip.get(gpa, .{ .struct_type = .{
+        .fields = &.{ field1, field2, field3 },
+        .namespace = .none,
+        .layout = .Auto,
+        .backing_int_ty = .none,
+    } });
 
-    const struct_type_1 = try ip.get(gpa, Key{
-        .struct_type = Struct{
-            .fields = &.{ field1, field2, field3 },
-            .namespace = .none,
-            .layout = .Auto,
-            .backing_int_ty = .none,
-        },
-    });
     try std.testing.expect(struct_type_0 == struct_type_1);
+}
+
+test "enum type" {
+    const gpa = std.testing.allocator;
+
+    var ip: InternPool = .{};
+    defer ip.deinit(gpa);
+
+    const empty_enum1 = try ip.get(gpa, .{ .enum_type = .{
+        .tag_type = .none,
+        .fields = &.{},
+        .namespace = .none,
+        .tag_type_infered = true,
+    } });
+
+    const empty_enum2 = try ip.get(gpa, .{ .enum_type = .{
+        .tag_type = .none,
+        .fields = &.{},
+        .namespace = .none,
+        .tag_type_infered = true,
+    } });
+
+    const field1 = Enum.Field{ .name = "zig", .val = .none };
+    const field2 = Enum.Field{ .name = "cpp", .val = .none };
+
+    const enum1 = try ip.get(gpa, .{ .enum_type = .{
+        .tag_type = .none,
+        .fields = &.{ field1, field2 },
+        .namespace = .none,
+        .tag_type_infered = true,
+    } });
+    const enum2 = try ip.get(gpa, .{ .enum_type = .{
+        .tag_type = .none,
+        .fields = &.{ field2, field1 },
+        .namespace = .none,
+        .tag_type_infered = true,
+    } });
+
+    try std.testing.expect(empty_enum1 == empty_enum2);
+    try std.testing.expect(empty_enum2 != enum1);
+    try std.testing.expect(enum1 != enum2);
 }
 
 test "function type" {
@@ -2769,6 +2804,73 @@ test "function type" {
     try testExpectFmtType(ip, @"fn(comptime type, noalias i32) type", "fn(comptime type, noalias i32) type");
     try testExpectFmtType(ip, @"fn(i32, ...) type", "fn(i32, ...) type");
     try testExpectFmtType(ip, @"fn() align(4) callconv(.C) type", "fn() align(4) callconv(.C) type");
+}
+
+test "union type" {
+    const gpa = std.testing.allocator;
+
+    var ip: InternPool = .{};
+    defer ip.deinit(gpa);
+
+    const u32_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .unsigned, .bits = 32 } });
+    const void_type = try ip.get(gpa, .{ .simple = .void });
+
+    var field1 = Union.Field{ .name = "Ok", .ty = u32_type, .alignment = 0 };
+    var field2 = Union.Field{ .name = "Err", .ty = void_type, .alignment = 0 };
+
+    const union_type1 = try ip.get(gpa, .{
+        .union_type = .{
+            .tag_type = .none,
+            .fields = &.{ field1, field2 },
+            .namespace = .none,
+        },
+    });
+
+    const union_type2 = try ip.get(gpa, .{
+        .union_type = .{
+            .tag_type = .none,
+            .fields = &.{ field2, field1 },
+            .namespace = .none,
+        },
+    });
+
+    try std.testing.expect(union_type1 != union_type2);
+}
+
+test "union value" {
+    const gpa = std.testing.allocator;
+
+    var ip: InternPool = .{};
+    defer ip.deinit(gpa);
+
+    const u32_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .unsigned, .bits = 32 } });
+    const f16_type = try ip.get(gpa, .{ .simple = .f16 });
+
+    const int_value = try ip.get(gpa, .{ .int_u64_value = 1 });
+    const f16_value = try ip.get(gpa, .{ .float_16_value = 0.25 });
+
+    var field1 = Union.Field{ .name = "int", .ty = u32_type, .alignment = 0 };
+    var field2 = Union.Field{ .name = "float", .ty = f16_type, .alignment = 0 };
+
+    const union_type = try ip.get(gpa, .{
+        .union_type = .{
+            .tag_type = .none,
+            .fields = &.{ field1, field2 },
+            .namespace = .none,
+        },
+    });
+
+    const union_value1 = try ip.get(gpa, .{ .union_value = .{
+        .field_index = 0,
+        .val = int_value,
+    } });
+    const union_value2 = try ip.get(gpa, .{ .union_value = .{
+        .field_index = 1,
+        .val = f16_value,
+    } });
+
+    try testExpectFmtValue(ip, union_value1, union_type, ".{ .int = 1 }");
+    try testExpectFmtValue(ip, union_value2, union_type, ".{ .float = 0.25 }");
 }
 
 test "anyframe type" {
