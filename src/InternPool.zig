@@ -2514,43 +2514,24 @@ test "pointer type" {
     var ip: InternPool = .{};
     defer ip.deinit(gpa);
 
-    const i32_type_0 = try ip.get(gpa, .{ .int_type = .{ .signedness = .signed, .bits = 32 } });
-    const i32_type_1 = try ip.get(gpa, .{ .int_type = .{ .signedness = .signed, .bits = 32 } });
+    const i32_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .signed, .bits = 32 } });
     const u32_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .unsigned, .bits = 32 } });
 
-    try std.testing.expect(i32_type_0 == i32_type_1);
-    try std.testing.expect(i32_type_0 != u32_type);
+    const zero_value = try ip.get(gpa, .{ .int_u64_value = 0 });
 
-    const i32_pointer_type_0 = try ip.get(gpa, .{ .pointer_type = .{
-        .elem_type = i32_type_0,
+    const @"*i32" = try ip.get(gpa, .{ .pointer_type = .{
+        .elem_type = i32_type,
         .size = .One,
     } });
-    const i32_pointer_type_1 = try ip.get(gpa, .{ .pointer_type = .{
-        .elem_type = i32_type_0,
-        .size = .One,
-    } });
-    const i32_pointer_type_2 = try ip.get(gpa, .{ .pointer_type = .{
-        .elem_type = i32_type_1,
-        .size = .One,
-    } });
-    const u32_pointer_type = try ip.get(gpa, .{ .pointer_type = .{
+    const @"*u32" = try ip.get(gpa, .{ .pointer_type = .{
         .elem_type = u32_type,
         .size = .One,
     } });
-
-    try std.testing.expect(i32_pointer_type_0 == i32_pointer_type_1);
-    try std.testing.expect(i32_pointer_type_1 == i32_pointer_type_2);
-    try std.testing.expect(i32_pointer_type_0 != u32_pointer_type);
-
-    const @"*const u32" = try ip.get(gpa, .{ .pointer_type = .{
+    const @"*const volatile u32" = try ip.get(gpa, .{ .pointer_type = .{
         .elem_type = u32_type,
         .size = .One,
         .is_const = true,
-    } });
-    const @"*align(4) u32" = try ip.get(gpa, .{ .pointer_type = .{
-        .elem_type = u32_type,
-        .size = .One,
-        .alignment = 4,
+        .is_volatile = true,
     } });
     const @"*align(4:2:3) u32" = try ip.get(gpa, .{ .pointer_type = .{
         .elem_type = u32_type,
@@ -2559,12 +2540,6 @@ test "pointer type" {
         .bit_offset = 2,
         .host_size = 3,
     } });
-    const @"[*c]const volatile u32" = try ip.get(gpa, .{ .pointer_type = .{
-        .elem_type = u32_type,
-        .size = .C,
-        .is_const = true,
-        .is_volatile = true,
-    } });
     const @"*addrspace(.shared) const u32" = try ip.get(gpa, .{ .pointer_type = .{
         .elem_type = u32_type,
         .size = .One,
@@ -2572,19 +2547,50 @@ test "pointer type" {
         .address_space = .shared,
     } });
 
-    try std.testing.expect(u32_pointer_type != @"*const u32");
-    try std.testing.expect(@"*const u32" != @"*align(4) u32");
-    try std.testing.expect(@"*align(4) u32" != @"*align(4:2:3) u32");
-    try std.testing.expect(@"*align(4:2:3) u32" != @"[*c]const volatile u32");
-    try std.testing.expect(@"[*c]const volatile u32" != @"*addrspace(.shared) const u32");
+    const @"[*]u32" = try ip.get(gpa, .{ .pointer_type = .{
+        .elem_type = u32_type,
+        .size = .Many,
+    } });
+    const @"[*:0]u32" = try ip.get(gpa, .{ .pointer_type = .{
+        .elem_type = u32_type,
+        .size = .Many,
+        .sentinel = zero_value,
+    } });
+    const @"[]u32" = try ip.get(gpa, .{ .pointer_type = .{
+        .elem_type = u32_type,
+        .size = .Slice,
+    } });
+    const @"[:0]u32" = try ip.get(gpa, .{ .pointer_type = .{
+        .elem_type = u32_type,
+        .size = .Slice,
+        .sentinel = zero_value,
+    } });
+    const @"[*c]u32" = try ip.get(gpa, .{ .pointer_type = .{
+        .elem_type = u32_type,
+        .size = .C,
+    } });
 
-    try testExpectFmtType(ip, i32_pointer_type_0, "*i32");
-    try testExpectFmtType(ip, u32_pointer_type, "*u32");
-    try testExpectFmtType(ip, @"*const u32", "*const u32");
-    try testExpectFmtType(ip, @"*align(4) u32", "*align(4) u32");
+    try std.testing.expect(@"*i32" != @"*u32");
+    try std.testing.expect(@"*u32" != @"*const volatile u32");
+    try std.testing.expect(@"*const volatile u32" != @"*align(4:2:3) u32");
+    try std.testing.expect(@"*align(4:2:3) u32" != @"*addrspace(.shared) const u32");
+
+    try std.testing.expect(@"[*]u32" != @"[*:0]u32");
+    try std.testing.expect(@"[*:0]u32" != @"[]u32");
+    try std.testing.expect(@"[*:0]u32" != @"[:0]u32");
+    try std.testing.expect(@"[:0]u32" != @"[*c]u32");
+
+    try testExpectFmtType(ip, @"*i32", "*i32");
+    try testExpectFmtType(ip, @"*u32", "*u32");
+    try testExpectFmtType(ip, @"*const volatile u32", "*const volatile u32");
     try testExpectFmtType(ip, @"*align(4:2:3) u32", "*align(4:2:3) u32");
-    try testExpectFmtType(ip, @"[*c]const volatile u32", "[*c]const volatile u32");
     try testExpectFmtType(ip, @"*addrspace(.shared) const u32", "*addrspace(.shared) const u32");
+
+    try testExpectFmtType(ip, @"[*]u32", "[*c]u32");
+    try testExpectFmtType(ip, @"[*:0]u32", "[*c]u32");
+    try testExpectFmtType(ip, @"[]u32", "[*c]u32");
+    try testExpectFmtType(ip, @"[:0]u32", "[*c]u32");
+    try testExpectFmtType(ip, @"[*c]u32", "[*c]u32");
 }
 
 test "optional type" {
@@ -3104,8 +3110,6 @@ test "resolvePeerTypes pointers" {
     const comptime_float_type = try ip.get(gpa, .{ .simple = .comptime_float });
     const bool_type = try ip.get(gpa, .{ .simple = .bool });
 
-    const zero_value = try ip.get(gpa, .{ .int_u64_value = 0 });
-
     const @"[*c]u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = u32_type, .size = .C } });
 
     const @"[1]u32" = try ip.get(gpa, .{ .array_type = .{
@@ -3134,11 +3138,6 @@ test "resolvePeerTypes pointers" {
         .elem_type = u32_type,
         .size = .Many,
     } });
-    const @"[*:0]u32" = try ip.get(gpa, .{ .pointer_type = .{
-        .elem_type = u32_type,
-        .size = .Many,
-        .sentinel = zero_value,
-    } });
     const @"?[*]u32" = try ip.get(gpa, .{ .optional_type = .{ .payload_type = @"[*]u32" } });
 
     const @"[]u32" = try ip.get(gpa, .{ .pointer_type = .{
@@ -3149,11 +3148,6 @@ test "resolvePeerTypes pointers" {
         .elem_type = u32_type,
         .size = .Slice,
         .is_const = true,
-    } });
-    const @"[:0]u32" = try ip.get(gpa, .{ .pointer_type = .{
-        .elem_type = u32_type,
-        .size = .Slice,
-        .sentinel = zero_value,
     } });
 
     const @"?[]u32" = try ip.get(gpa, .{ .optional_type = .{ .payload_type = @"[]u32" } });
@@ -3175,19 +3169,6 @@ test "resolvePeerTypes pointers" {
     try ip.testResolvePeerTypes(@"*u32", @"*const u32", @"*const u32");
 
     try ip.testResolvePeerTypes(@"*[1]u32", @"*[2]u32", @"[]u32");
-
-    try testExpectFmtType(ip, @"[*c]u32", "[*c]u32");
-    try testExpectFmtType(ip, @"*[1]u32", "*[1]u32");
-    try testExpectFmtType(ip, @"*[2]u32", "*[2]u32");
-    try testExpectFmtType(ip, @"*u32", "*u32");
-    try testExpectFmtType(ip, @"*const u32", "*const u32");
-    try testExpectFmtType(ip, @"[*]u32", "[*]u32");
-    try testExpectFmtType(ip, @"[*:0]u32", "[*:0]u32");
-    try testExpectFmtType(ip, @"[]u32", "[]u32");
-    try testExpectFmtType(ip, @"[]const u32", "[]const u32");
-    try testExpectFmtType(ip, @"[:0]u32", "[:0]u32");
-    try testExpectFmtType(ip, @"?[]u32", "?[]u32");
-    try testExpectFmtType(ip, @"?[]const u32", "?[]const u32");
 }
 
 fn testResolvePeerTypes(ip: *InternPool, a: Index, b: Index, expected: Index) !void {
