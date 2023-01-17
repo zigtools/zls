@@ -1061,9 +1061,9 @@ fn deepEql(a: anytype, b: @TypeOf(a)) bool {
 
     switch (@typeInfo(T)) {
         .Struct => |info| {
-            // if (info.layout == .Packed) {
-            //     return std.mem.eql(u8, std.mem.asBytes(&a), std.mem.asBytes(&b));
-            // }
+            if (comptime std.meta.trait.hasUniqueRepresentation(T)) {
+                return std.mem.eql(u8, std.mem.asBytes(&a), std.mem.asBytes(&b));
+            }
             inline for (info.fields) |field_info| {
                 if (!deepEql(@field(a, field_info.name), @field(b, field_info.name))) return false;
             }
@@ -1147,7 +1147,7 @@ fn deepHash(hasher: anytype, key: anytype) void {
         },
 
         .Struct => |info| {
-            if (info.layout == .Packed) {
+            if (comptime std.meta.trait.hasUniqueRepresentation(Inner)) {
                 hasher.update(std.mem.asBytes(&key));
             } else {
                 inline for (info.fields) |field| {
