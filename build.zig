@@ -163,6 +163,11 @@ pub fn build(b: *std.build.Builder) !void {
     test_step.dependOn(b.getInstallStep());
 
     var tests = b.addTest("tests/tests.zig");
+    tests.setFilter(b.option(
+        []const u8,
+        "test-filter",
+        "Skip tests that do not match filter",
+    ));
 
     if (coverage) {
         const src_dir = b.pathJoin(&.{ b.build_root, "src" });
