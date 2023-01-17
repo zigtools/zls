@@ -419,16 +419,17 @@ pub const Key = union(enum) {
     }
 
     pub const TypeFormatContext = struct {
-        ty: Index,
+        ty: Key,
         options: FormatOptions = .{},
-        ip: *const InternPool,
+        ip: InternPool,
     };
 
     pub const ValueFormatContext = struct {
-        value: Index,
+        value: Key,
+        /// for most values the type is not needed which is why we use an index
         ty: Index,
         options: FormatOptions = .{},
-        ip: *const InternPool,
+        ip: InternPool,
     };
 
     // TODO implement options
@@ -437,20 +438,30 @@ pub const Key = union(enum) {
         include_declarations: bool = true,
     };
 
-    pub fn formatType(
+    fn formatType(
         ctx: TypeFormatContext,
-        comptime unused_format_string: []const u8,
+        comptime fmt: []const u8,
         options: std.fmt.FormatOptions,
         writer: anytype,
     ) @TypeOf(writer).Error!void {
-        comptime assert(unused_format_string.len == 0);
         _ = options;
-        return printType(ctx.ty, ctx.ip, writer);
+        if (fmt.len != 0) std.fmt.invalidFmtError(fmt, Key);
+        try printTypeKey(ctx.ty, ctx.ip, writer);
     }
 
-    pub fn printType(ty: Index, ip: *const InternPool, writer: anytype) @TypeOf(writer).Error!void {
-        const key: Key = ip.indexToKey(ty);
-        switch (key) {
+    fn printType(ty: Index, ip: InternPool, writer: anytype) @TypeOf(writer).Error!void {
+        try printTypeKey(ip.indexToKey(ty), ip, writer);
+    }
+
+    fn printTypeKey(ty: Key, ip: InternPool, writer: anytype) @TypeOf(writer).Error!void {
+        var key = ty;
+        while (try printTypeInternal(key, ip, writer)) |index| {
+            key = ip.indexToKey(index);
+        }
+    }
+
+    fn printTypeInternal(ty: Key, ip: InternPool, writer: anytype) @TypeOf(writer).Error!?Index {
+        switch (ty) {
             .simple => |simple| switch (simple) {
                 .f16,
                 .f32,
@@ -527,7 +538,7 @@ pub const Key = union(enum) {
                 if (pointer_info.is_volatile) try writer.writeAll("volatile ");
                 if (pointer_info.is_allowzero and pointer_info.size != .C) try writer.writeAll("allowzero ");
 
-                try printType(pointer_info.elem_type, ip, writer);
+                return pointer_info.elem_type;
             },
             .array_type => |array_info| {
                 try writer.print("[{d}", .{array_info.len});
@@ -535,18 +546,18 @@ pub const Key = union(enum) {
                     try writer.print(":{}", .{array_info.sentinel.fmtValue(array_info.child, ip)});
                 }
                 try writer.writeByte(']');
-                try printType(array_info.child, ip, writer);
+
+                return array_info.child;
             },
             .struct_type => @panic("TODO"),
             .optional_type => |optional_info| {
                 try writer.writeByte('?');
-                try printType(optional_info.payload_type, ip, writer);
+                return optional_info.payload_type;
             },
             .error_union_type => |error_union_info| {
-                try writer.print("{}!{}", .{
-                    error_union_info.error_set_type.fmtType(ip),
-                    error_union_info.payload_type.fmtType(ip),
-                });
+                try printType(error_union_info.error_set_type, ip, writer);
+                try writer.writeByte('!');
+                return error_union_info.payload_type;
             },
             .error_set_type => |error_set_info| {
                 const names = error_set_info.names;
@@ -585,10 +596,8 @@ pub const Key = union(enum) {
                 if (function_info.calling_convention != .Unspecified) {
                     try writer.print("callconv(.{s}) ", .{@tagName(function_info.calling_convention)});
                 }
-                if (function_info.alignment != 0) {
-                    try writer.print("align({d}) ", .{function_info.alignment});
-                }
-                try printType(function_info.return_type, ip, writer);
+
+                return function_info.return_type;
             },
             .union_type => @panic("TODO"),
             .tuple_type => |tuple_info| {
@@ -614,7 +623,7 @@ pub const Key = union(enum) {
             },
             .anyframe_type => |anyframe_info| {
                 try writer.writeAll("anyframe->");
-                try printType(anyframe_info.child, ip, writer);
+                return anyframe_info.child;
             },
 
             .int_u64_value,
@@ -632,27 +641,28 @@ pub const Key = union(enum) {
             .union_value,
             => unreachable,
         }
+        return null;
     }
 
-    pub fn formatValue(
+    fn formatValue(
         ctx: ValueFormatContext,
-        comptime unused_format_string: []const u8,
+        comptime fmt: []const u8,
         options: std.fmt.FormatOptions,
         writer: anytype,
     ) @TypeOf(writer).Error!void {
-        comptime assert(unused_format_string.len == 0);
+        comptime assert(fmt.len == 0);
         _ = options;
+        if (fmt.len != 0) std.fmt.invalidFmtError(fmt, Key);
         return printValue(ctx.value, ctx.ty, ctx.ip, writer);
     }
 
-    pub fn printValue(
-        value: Index,
+    fn printValue(
+        value: Key,
         ty: Index,
-        ip: *const InternPool,
+        ip: InternPool,
         writer: anytype,
     ) @TypeOf(writer).Error!void {
-        const value_key: Key = ip.indexToKey(value);
-        switch (value_key) {
+        switch (value) {
             .simple => |simple| switch (simple) {
                 .f16,
                 .f32,
@@ -729,7 +739,7 @@ pub const Key = union(enum) {
                     if (i != 0) try writer.writeAll(", ");
 
                     try writer.print(".{s} = ", .{struct_info.fields[i].name});
-                    try printValue(aggregate[i], struct_info.fields[i].ty, ip, writer);
+                    try printValue(ip.indexToKey(aggregate[i]), struct_info.fields[i].ty, ip, writer);
                 }
                 try writer.writeByte('}');
             },
@@ -737,12 +747,27 @@ pub const Key = union(enum) {
                 const union_info = ip.indexToKey(ty).union_type;
 
                 try writer.writeAll(".{ ");
-                try printValue(union_info.tag_type, union_value.tag, ip, writer);
+                try printValue(ip.indexToKey(union_info.tag_type), union_value.tag, ip, writer);
                 try writer.writeAll(" = ");
                 try printValue(union_value.val, @panic("TODO"), ip, writer);
                 try writer.writeAll(" }");
             },
         }
+    }
+
+    pub fn fmtType(ty: Key, ip: InternPool) std.fmt.Formatter(formatType) {
+        return .{ .data = .{
+            .ty = ty,
+            .ip = ip,
+        } };
+    }
+
+    pub fn fmtValue(value: Key, ty: Index, ip: InternPool) std.fmt.Formatter(formatValue) {
+        return .{ .data = .{
+            .value = value,
+            .ty = ty,
+            .ip = ip,
+        } };
     }
 };
 
@@ -761,16 +786,16 @@ pub const Index = enum(u32) {
     none = std.math.maxInt(u32),
     _,
 
-    pub fn fmtType(ty: Index, ip: *const InternPool) std.fmt.Formatter(Key.formatType) {
+    pub fn fmtType(ty: Index, ip: InternPool) std.fmt.Formatter(Key.formatType) {
         return .{ .data = .{
-            .ty = ty,
+            .ty = ip.indexToKey(ty),
             .ip = ip,
         } };
     }
 
-    pub fn fmtValue(value_index: Index, type_index: Index, ip: *const InternPool) std.fmt.Formatter(Key.formatValue) {
+    pub fn fmtValue(value_index: Index, type_index: Index, ip: InternPool) std.fmt.Formatter(Key.formatValue) {
         return .{ .data = .{
-            .value = value_index,
+            .value = ip.indexToKey(value_index),
             .ty = type_index,
             .ip = ip,
         } };

@@ -256,7 +256,7 @@ pub fn interpret(
                     try interpreter.recordError(
                         container_field.ast.type_expr,
                         "expected_type",
-                        try std.fmt.allocPrint(interpreter.allocator, "expected type 'type', found '{}'", .{init_type_value.ty.fmtType(&interpreter.ip)}),
+                        try std.fmt.allocPrint(interpreter.allocator, "expected type 'type', found '{}'", .{init_type_value.ty.fmtType(interpreter.ip)}),
                     );
                     continue;
                 }
@@ -623,7 +623,7 @@ pub fn interpret(
                         try writer.writeAll("indeterminate");
                         continue;
                     };
-                    try writer.print("@as({}, {})", .{ value.ty.fmtType(&interpreter.ip), value.val.fmtValue(value.ty, &interpreter.ip) });
+                    try writer.print("@as({}, {})", .{ value.ty.fmtType(interpreter.ip), value.val.fmtValue(value.ty, interpreter.ip) });
                     if (index != params.len - 1)
                         try writer.writeAll(", ");
                 }
@@ -981,7 +981,7 @@ pub fn call(
             try interpreter.recordError(
                 param.type_expr,
                 "expected_type",
-                std.fmt.allocPrint(interpreter.allocator, "expected type 'type', found '{}'", .{tex.ty.fmtType(&interpreter.ip)}) catch return error.CriticalAstFailure,
+                std.fmt.allocPrint(interpreter.allocator, "expected type 'type', found '{}'", .{tex.ty.fmtType(interpreter.ip)}) catch return error.CriticalAstFailure,
             );
             return error.InvalidCast;
         }

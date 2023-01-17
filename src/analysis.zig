@@ -793,7 +793,7 @@ pub fn resolveTypeOfNodeInternal(store: *DocumentStore, arena: *std.heap.ArenaAl
 
                     const type_type = try interpreter.ip.get(interpreter.allocator, ComptimeInterpreter.IPKey{ .simple = .type });
                     if (val.ty != type_type) {
-                        log.err("Not a type: {}", .{val.ty.fmtType(&interpreter.ip)});
+                        log.err("Not a type: {}", .{val.ty.fmtType(interpreter.ip)});
                         return null;
                     }
 
