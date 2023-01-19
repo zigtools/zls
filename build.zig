@@ -146,14 +146,12 @@ pub fn build(b: *std.build.Builder) !void {
 
     const gen_cmd = gen_exe.run();
     gen_cmd.addArgs(&.{
-        b.fmt("{s}/src/Config.zig", .{b.build_root}),
-        b.fmt("{s}/schema.json", .{b.build_root}),
-        b.fmt("{s}/README.md", .{b.build_root}),
+        b.pathJoin(&.{ b.build_root, "src", "Config.zig" }),
+        b.pathJoin(&.{ b.build_root, "schema.json" }),
+        b.pathJoin(&.{ b.build_root, "README.md" }),
+        b.pathJoin(&.{ b.build_root, "src", "data" }),
     });
-
-    if (b.option([]const u8, "vscode-config-path", "Output path to vscode-config")) |path| {
-        gen_cmd.addArg(b.pathFromRoot(path));
-    }
+    if (b.args) |args| gen_cmd.addArgs(args);
 
     const gen_step = b.step("gen", "Regenerate config files");
     gen_step.dependOn(&check_submodules_step.step);
