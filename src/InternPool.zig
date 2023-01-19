@@ -2581,10 +2581,10 @@ test "pointer type" {
     try testExpectFmtType(ip, @"*align(4:2:3) u32", "*align(4:2:3) u32");
     try testExpectFmtType(ip, @"*addrspace(.shared) const u32", "*addrspace(.shared) const u32");
 
-    try testExpectFmtType(ip, @"[*]u32", "[*c]u32");
-    try testExpectFmtType(ip, @"[*:0]u32", "[*c]u32");
-    try testExpectFmtType(ip, @"[]u32", "[*c]u32");
-    try testExpectFmtType(ip, @"[:0]u32", "[*c]u32");
+    try testExpectFmtType(ip, @"[*]u32", "[*]u32");
+    try testExpectFmtType(ip, @"[*:0]u32", "[*:0]u32");
+    try testExpectFmtType(ip, @"[]u32", "[]u32");
+    try testExpectFmtType(ip, @"[:0]u32", "[:0]u32");
     try testExpectFmtType(ip, @"[*c]u32", "[*c]u32");
 }
 
@@ -3105,65 +3105,91 @@ test "resolvePeerTypes pointers" {
     const comptime_float_type = try ip.get(gpa, .{ .simple = .comptime_float });
     const bool_type = try ip.get(gpa, .{ .simple = .bool });
 
+    const @"*u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = u32_type, .size = .One } });
+    const @"[*]u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = u32_type, .size = .Many } });
+    const @"[]u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = u32_type, .size = .Slice } });
     const @"[*c]u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = u32_type, .size = .C } });
 
-    const @"[1]u32" = try ip.get(gpa, .{ .array_type = .{
-        .len = 1,
-        .child = u32_type,
-        .sentinel = .none,
-    } });
-    const @"[2]u32" = try ip.get(gpa, .{ .array_type = .{
-        .len = 2,
-        .child = u32_type,
-        .sentinel = .none,
-    } });
+    const @"?*u32" = try ip.get(gpa, .{ .optional_type = .{ .payload_type = @"*u32" } });
+    const @"?[*]u32" = try ip.get(gpa, .{ .optional_type = .{ .payload_type = @"[*]u32" } });
+    const @"?[]u32" = try ip.get(gpa, .{ .optional_type = .{ .payload_type = @"[]u32" } });
+
+    const @"**u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = @"*u32", .size = .One } });
+    const @"*[*]u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = @"[*]u32", .size = .One } });
+    const @"*[]u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = @"[]u32", .size = .One } });
+    const @"*[*c]u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = @"[*c]u32", .size = .One } });
+
+    const @"?*[*]u32" = try ip.get(gpa, .{ .optional_type = .{ .payload_type = @"*[*]u32" } });
+    const @"?*[]u32" = try ip.get(gpa, .{ .optional_type = .{ .payload_type = @"*[]u32" } });
+
+    const @"[1]u32" = try ip.get(gpa, .{ .array_type = .{ .len = 1, .child = u32_type, .sentinel = .none } });
+    const @"[2]u32" = try ip.get(gpa, .{ .array_type = .{ .len = 2, .child = u32_type, .sentinel = .none } });
 
     const @"*[1]u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = @"[1]u32", .size = .One } });
     const @"*[2]u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = @"[2]u32", .size = .One } });
 
-    const @"*u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = u32_type, .size = .One } });
+    const @"?*[1]u32" = try ip.get(gpa, .{ .optional_type = .{ .payload_type = @"*[1]u32" } });
+    const @"?*[2]u32" = try ip.get(gpa, .{ .optional_type = .{ .payload_type = @"*[2]u32" } });
 
-    const @"*const u32" = try ip.get(gpa, .{ .pointer_type = .{
-        .elem_type = u32_type,
-        .size = .One,
-        .is_const = true,
-    } });
+    const @"*const u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = u32_type, .size = .One, .is_const = true } });
+    const @"[*]const u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = u32_type, .size = .Many, .is_const = true } });
+    const @"[]const u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = u32_type, .size = .Slice, .is_const = true } });
+    const @"[*c]const u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = u32_type, .size = .C, .is_const = true } });
 
-    const @"[*]u32" = try ip.get(gpa, .{ .pointer_type = .{
-        .elem_type = u32_type,
-        .size = .Many,
-    } });
-    const @"?[*]u32" = try ip.get(gpa, .{ .optional_type = .{ .payload_type = @"[*]u32" } });
-
-    const @"[]u32" = try ip.get(gpa, .{ .pointer_type = .{
-        .elem_type = u32_type,
-        .size = .Slice,
-    } });
-    const @"[]const u32" = try ip.get(gpa, .{ .pointer_type = .{
-        .elem_type = u32_type,
-        .size = .Slice,
-        .is_const = true,
-    } });
-
-    const @"?[]u32" = try ip.get(gpa, .{ .optional_type = .{ .payload_type = @"[]u32" } });
+    const @"?*const u32" = try ip.get(gpa, .{ .optional_type = .{ .payload_type = @"*const u32" } });
+    const @"?[*]const u32" = try ip.get(gpa, .{ .optional_type = .{ .payload_type = @"[*]const u32" } });
     const @"?[]const u32" = try ip.get(gpa, .{ .optional_type = .{ .payload_type = @"[]const u32" } });
+
+    _ = @"**u32";
+    _ = @"*[*c]u32";
+    _ = @"?*[]u32";
+    _ = @"?*[2]u32";
+    _ = @"?[*]const u32";
+    _ = @"?[]const u32";
+
+    // gain const
+    try ip.testResolvePeerTypes(@"*u32", @"*u32", @"*u32");
+    try ip.testResolvePeerTypes(@"*u32", @"*const u32", @"*const u32");
+    try ip.testResolvePeerTypes(@"[*]u32", @"[*]const u32", @"[*]const u32");
+    try ip.testResolvePeerTypes(@"[]u32", @"[]const u32", @"[]const u32");
+    try ip.testResolvePeerTypes(@"[*c]u32", @"[*c]const u32", @"[*c]const u32");
+
+    // array to slice
+    try ip.testResolvePeerTypes(@"*[1]u32", @"*[2]u32", @"[]u32");
+    try ip.testResolvePeerTypes(@"[]u32", @"*[1]u32", @"[]u32");
+
+    // pointer like optionals
+    try ip.testResolvePeerTypes(@"*u32", @"?*u32", @"?*u32");
+    try ip.testResolvePeerTypesInOrder(@"*u32", @"?[*]u32", @"?[*]u32");
+    try ip.testResolvePeerTypesInOrder(@"[*]u32", @"?*u32", @"?*u32");
 
     try ip.testResolvePeerTypes(@"[*c]u32", comptime_int_type, @"[*c]u32");
     try ip.testResolvePeerTypes(@"[*c]u32", u32_type, @"[*c]u32");
     try ip.testResolvePeerTypes(@"[*c]u32", comptime_float_type, Index.none);
     try ip.testResolvePeerTypes(@"[*c]u32", bool_type, Index.none);
 
-    try ip.testResolvePeerTypes(@"[*]u32", @"*[2]u32", @"[*]u32");
-    try ip.testResolvePeerTypes(@"[]u32", @"*[2]u32", @"[]u32");
+    try ip.testResolvePeerTypes(@"[*c]u32", @"*u32", @"[*c]u32");
+    try ip.testResolvePeerTypes(@"[*c]u32", @"[*]u32", @"[*c]u32");
+    try ip.testResolvePeerTypes(@"[*c]u32", @"[]u32", @"[*c]u32");
+
+    try ip.testResolvePeerTypes(@"[*c]u32", @"*[1]u32", Index.none);
+    try ip.testResolvePeerTypesInOrder(@"[*c]u32", @"?*[1]u32", @"?*[1]u32");
+    try ip.testResolvePeerTypesInOrder(@"?*[1]u32", @"[*c]u32", Index.none);
+    try ip.testResolvePeerTypes(@"[*c]u32", @"*[*]u32", Index.none);
+    try ip.testResolvePeerTypesInOrder(@"[*c]u32", @"?*[*]u32", @"?*[*]u32");
+    try ip.testResolvePeerTypesInOrder(@"?*[*]u32", @"[*c]u32", Index.none);
+    try ip.testResolvePeerTypes(@"[*c]u32", @"[]u32", @"[*c]u32");
+    // TODO try ip.testResolvePeerTypesInOrder(@"[*c]u32", @"?[]u32", @"?[]u32");
+    // TODO try ip.testResolvePeerTypesInOrder(@"?[]u32", @"[*c]u32", Index.none);
+
+    // TODO try ip.testResolvePeerTypesInOrder(@"*u32", @"?[*]const u32", @"?[*]const u32");
+    try ip.testResolvePeerTypesInOrder(@"*const u32", @"?[*]u32", @"?[*]u32");
+    try ip.testResolvePeerTypesInOrder(@"[*]const u32", @"?*u32", @"?*u32");
+    try ip.testResolvePeerTypesInOrder(@"[*]u32", @"?*const u32", @"?*const u32");
+
     try ip.testResolvePeerTypes(@"?[*]u32", @"*[2]u32", @"?[*]u32");
     try ip.testResolvePeerTypes(@"?[]u32", @"*[2]u32", @"?[]u32");
-    try ip.testResolvePeerTypes(@"?[]u32", @"?[]const u32", @"?[]const u32");
-
-    try ip.testResolvePeerTypes(@"*u32", @"*u32", @"*u32");
-    try ip.testResolvePeerTypes(@"*u32", @"*u32", @"*u32");
-    try ip.testResolvePeerTypes(@"*u32", @"*const u32", @"*const u32");
-
-    try ip.testResolvePeerTypes(@"*[1]u32", @"*[2]u32", @"[]u32");
+    try ip.testResolvePeerTypes(@"[*]u32", @"*[2]u32", @"[*]u32");
 }
 
 fn testResolvePeerTypes(ip: *InternPool, a: Index, b: Index, expected: Index) !void {
