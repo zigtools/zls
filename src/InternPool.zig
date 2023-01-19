@@ -3026,6 +3026,9 @@ test "resolvePeerTypes integers and floats" {
     try ip.testResolvePeerTypes(u16_type, usize_type, usize_type);
     try ip.testResolvePeerTypes(u16_type, isize_type, isize_type);
 
+    try ip.testResolvePeerTypes(c_short_type, usize_type, usize_type);
+    try ip.testResolvePeerTypes(c_short_type, isize_type, isize_type);
+
     try ip.testResolvePeerTypes(i16_type, c_long_type, c_long_type);
     try ip.testResolvePeerTypes(i16_type, c_long_type, c_long_type);
     try ip.testResolvePeerTypes(u16_type, c_long_type, c_long_type);
@@ -3190,6 +3193,31 @@ test "resolvePeerTypes pointers" {
     try ip.testResolvePeerTypes(@"?[*]u32", @"*[2]u32", @"?[*]u32");
     try ip.testResolvePeerTypes(@"?[]u32", @"*[2]u32", @"?[]u32");
     try ip.testResolvePeerTypes(@"[*]u32", @"*[2]u32", @"[*]u32");
+}
+
+test "resolvePeerTypes function pointers" {
+    const gpa = std.testing.allocator;
+
+    var ip: InternPool = .{};
+    defer ip.deinit(gpa);
+
+    const void_type = try ip.get(gpa, .{ .simple = .void });
+    const u32_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .unsigned, .bits = 32 } });
+    const @"*u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = u32_type, .size = .One } });
+    const @"*const u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = u32_type, .size = .One, .is_const = true } });
+
+    const @"fn(*u32) void" = try ip.get(gpa, .{ .function_type = .{
+        .args = &.{@"*u32"},
+        .return_type = void_type,
+    } });
+
+    const @"fn(*const u32) void" = try ip.get(gpa, .{ .function_type = .{
+        .args = &.{@"*const u32"},
+        .return_type = void_type,
+    } });
+
+    try ip.testResolvePeerTypes(@"fn(*u32) void", @"fn(*u32) void", @"fn(*u32) void");
+    try ip.testResolvePeerTypes(@"fn(*u32) void", @"fn(*const u32) void", @"fn(*u32) void");
 }
 
 fn testResolvePeerTypes(ip: *InternPool, a: Index, b: Index, expected: Index) !void {
