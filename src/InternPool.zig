@@ -1195,11 +1195,11 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
     var arena = arena_allocator.allocator();
 
     var chosen = types[0];
-    // // If this is non-null then it does the following thing, depending on the chosen zigTypeTag().
-    // //  * ErrorSet: this is an override
-    // //  * ErrorUnion: this is an override of the error set only
-    // //  * other: at the end we make an ErrorUnion with the other thing and this
-    // var err_set_ty: Index = Index.none;
+    // If this is non-null then it does the following thing, depending on the chosen zigTypeTag().
+    //  * ErrorSet: this is an override
+    //  * ErrorUnion: this is an override of the error set only
+    //  * other: at the end we make an ErrorUnion with the other thing and this
+    var err_set_ty: Index = Index.none;
     var any_are_null = false;
     var seen_const = false;
     var convert_to_slice = false;
@@ -1610,12 +1610,11 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
 
         const new_ptr_ty = try ip.get(gpa, .{ .pointer_type = info });
         const opt_ptr_ty = if (any_are_null) try ip.get(gpa, .{ .optional_type = .{ .payload_type = new_ptr_ty } }) else new_ptr_ty;
-        return opt_ptr_ty;
-        // const set_ty = if(err_set_ty != .none) err_set_ty else return opt_ptr_ty;
-        // return try ip.get(gpa, .{ .error_union_type = .{
-        //     .error_set_type = set_ty,
-        //     .payload_type = opt_ptr_ty,
-        // } });
+        const set_ty = if (err_set_ty != .none) err_set_ty else return opt_ptr_ty;
+        return try ip.get(gpa, .{ .error_union_type = .{
+            .error_set_type = set_ty,
+            .payload_type = opt_ptr_ty,
+        } });
     }
 
     if (seen_const) {
@@ -1627,8 +1626,7 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
 
                 const new_ptr_ty = try ip.get(gpa, .{ .pointer_type = info });
                 const opt_ptr_ty = if (any_are_null) try ip.get(gpa, .{ .optional_type = .{ .payload_type = new_ptr_ty } }) else new_ptr_ty;
-                // const set_ty = if(err_set_ty != .none) err_set_ty else error_union_info.error_set_type;
-                const set_ty = error_union_info.error_set_type;
+                const set_ty = if (err_set_ty != .none) err_set_ty else error_union_info.error_set_type;
                 return try ip.get(gpa, .{ .error_union_type = .{
                     .error_set_type = set_ty,
                     .payload_type = opt_ptr_ty,
@@ -1640,12 +1638,11 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
 
                 const new_ptr_ty = try ip.get(gpa, .{ .pointer_type = info });
                 const opt_ptr_ty = if (any_are_null) try ip.get(gpa, .{ .optional_type = .{ .payload_type = new_ptr_ty } }) else new_ptr_ty;
-                return opt_ptr_ty;
-                // const set_ty = if(err_set_ty != .none) err_set_ty else return opt_ptr_ty;
-                // return try ip.get(gpa, .{ .error_union_type = .{
-                //     .error_set_type = set_ty,
-                //     .payload_type = opt_ptr_ty,
-                // } });
+                const set_ty = if (err_set_ty != .none) err_set_ty else return opt_ptr_ty;
+                return try ip.get(gpa, .{ .error_union_type = .{
+                    .error_set_type = set_ty,
+                    .payload_type = opt_ptr_ty,
+                } });
             },
             else => return chosen,
         }
@@ -1660,12 +1657,11 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
             .optional_type => chosen,
             else => try ip.get(gpa, .{ .optional_type = .{ .payload_type = chosen } }),
         };
-        return opt_ty;
-        // const set_ty = if(err_set_ty != .none) err_set_ty else return opt_ty;
-        // return try ip.get(gpa, .{ .error_union_type = .{
-        //     .error_set_type = set_ty,
-        //     .payload_type = opt_ty,
-        // } });
+        const set_ty = if (err_set_ty != .none) err_set_ty else return opt_ty;
+        return try ip.get(gpa, .{ .error_union_type = .{
+            .error_set_type = set_ty,
+            .payload_type = opt_ty,
+        } });
     }
 
     return chosen;
@@ -2155,36 +2151,35 @@ fn coerceInMemoryAllowedFns(
         } };
     }
 
-    // TODO
+    if (!dest_info.args_is_noalias.eql(src_info.args_is_noalias)) {
+        return InMemoryCoercionResult{ .fn_param_noalias = .{
+            .actual = src_info.args_is_noalias.mask,
+            .wanted = dest_info.args_is_noalias.mask,
+        } };
+    }
 
-    // if (dest_info.noalias_bits != src_info.noalias_bits) {
-    //     return InMemoryCoercionResult{ .fn_param_noalias = .{
-    //         .actual = src_info.noalias_bits,
-    //         .wanted = dest_info.noalias_bits,
-    //     } };
-    // }
+    for (dest_info.args) |dest_param_ty, i| {
+        const src_param_ty = src_info.args[i];
 
-    // for (dest_info.param_types) |dest_param_ty, i| {
-    //     const src_param_ty = src_info.param_types[i];
+        // TODO move outside of loop
+        if (i < 32 and dest_info.args_is_comptime.isSet(i) != src_info.args_is_comptime.isSet(i)) {
+            return InMemoryCoercionResult{ .fn_param_comptime = .{
+                .index = i,
+                .wanted = dest_info.args_is_comptime.isSet(i),
+            } };
+        }
 
-    //     if (dest_info.comptime_params[i] != src_info.comptime_params[i]) {
-    //         return InMemoryCoercionResult{ .fn_param_comptime = .{
-    //             .index = i,
-    //             .wanted = dest_info.comptime_params[i],
-    //         } };
-    //     }
-
-    //     // Note: Cast direction is reversed here.
-    //     const param = try ip.coerceInMemoryAllowed(gpa, src_param_ty, dest_param_ty, true, target);
-    //     if (param != .ok) {
-    //         return InMemoryCoercionResult{ .fn_param = .{
-    //             .child = try param.dupe(arena),
-    //             .actual = src_param_ty,
-    //             .wanted = dest_param_ty,
-    //             .index = i,
-    //         } };
-    //     }
-    // }
+        // Note: Cast direction is reversed here.
+        const param = try ip.coerceInMemoryAllowed(gpa, arena, src_param_ty, dest_param_ty, true, target);
+        if (param != .ok) {
+            return InMemoryCoercionResult{ .fn_param = .{
+                .child = try param.dupe(arena),
+                .actual = src_param_ty,
+                .wanted = dest_param_ty,
+                .index = i,
+            } };
+        }
+    }
 
     return .ok;
 }
@@ -2266,8 +2261,8 @@ fn coerceInMemoryAllowedPtrs(
     const ok_sent = dest_info.sentinel == .none or src_info.size == .C or dest_info.sentinel == src_info.sentinel; // is this enough for a value equality check?
     if (!ok_sent) {
         return InMemoryCoercionResult{ .ptr_sentinel = .{
-            .actual = if (src_info.sentinel != .none) src_info.sentinel else try ip.get(gpa, .{ .simple = .unreachable_value }),
-            .wanted = if (dest_info.sentinel != .none) dest_info.sentinel else try ip.get(gpa, .{ .simple = .unreachable_value }),
+            .actual = src_info.sentinel,
+            .wanted = dest_info.sentinel,
             .ty = dest_info.elem_type,
         } };
     }
