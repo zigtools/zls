@@ -446,6 +446,10 @@ pub const Key = union(enum) {
     }
 
     fn printType(ty: Index, ip: InternPool, writer: anytype) @TypeOf(writer).Error!void {
+        if (builtin.is_test and ty == .none) {
+            try writer.writeAll(@tagName(Index.none));
+            return;
+        }
         try printTypeKey(ip.indexToKey(ty), ip, writer);
     }
 
@@ -3178,5 +3182,8 @@ fn testResolvePeerTypes(ip: *InternPool, a: Index, b: Index, expected: Index) !v
 
 fn testResolvePeerTypesInOrder(ip: *InternPool, lhs: Index, rhs: Index, expected: Index) !void {
     const actual = try resolvePeerTypes(ip, std.testing.allocator, &.{ lhs, rhs }, builtin.target);
-    try std.testing.expectEqual(expected, actual);
+    if (expected != actual) {
+        std.debug.print("expected {}, found {}\n", .{ expected.fmtType(ip.*), actual.fmtType(ip.*) });
+        return error.TestExpectedEqual;
+    }
 }
