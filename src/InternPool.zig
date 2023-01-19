@@ -446,10 +446,6 @@ pub const Key = union(enum) {
     }
 
     fn printType(ty: Index, ip: InternPool, writer: anytype) @TypeOf(writer).Error!void {
-        if (builtin.is_test and ty == .none) {
-            try writer.writeAll(@tagName(Index.none));
-            return;
-        }
         try printTypeKey(ip.indexToKey(ty), ip, writer);
     }
 
@@ -3177,8 +3173,18 @@ fn testResolvePeerTypes(ip: *InternPool, a: Index, b: Index, expected: Index) !v
 
 fn testResolvePeerTypesInOrder(ip: *InternPool, lhs: Index, rhs: Index, expected: Index) !void {
     const actual = try resolvePeerTypes(ip, std.testing.allocator, &.{ lhs, rhs }, builtin.target);
-    if (expected != actual) {
-        std.debug.print("expected {}, found {}\n", .{ expected.fmtType(ip.*), actual.fmtType(ip.*) });
-        return error.TestExpectedEqual;
-    }
+    try expectEqualTypes(ip, expected, actual);
+}
+
+fn expectEqualTypes(ip: *InternPool, expected: Index, actual: Index) !void {
+    if (expected == actual) return;
+    const allocator = std.testing.allocator;
+
+    const expected_type = if (expected == .none) @tagName(Index.none) else try std.fmt.allocPrint(allocator, "{}", .{expected.fmtType(ip.*)});
+    defer if (expected != .none) allocator.free(expected_type);
+    const actual_type = if (actual == .none) @tagName(Index.none) else try std.fmt.allocPrint(allocator, "{}", .{actual.fmtType(ip.*)});
+    defer if (actual != .none) allocator.free(actual_type);
+
+    std.debug.print("expected `{s}`, found `{s}`\n", .{ expected_type, actual_type });
+    return error.TestExpectedEqual;
 }
