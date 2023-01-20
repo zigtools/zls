@@ -11,6 +11,40 @@ const Key = InternPool.Key;
 
 const allocator: std.mem.Allocator = std.testing.allocator;
 
+test "ComptimeInterpreter - primitive types" {
+    try testExprCheck("true", .{ .simple = .bool }, .{ .simple = .bool_true });
+    try testExprCheck("false", .{ .simple = .bool }, .{ .simple = .bool_false });
+    try testExprCheck("5", .{ .simple = .comptime_int }, .{ .int_u64_value = 5 });
+    // TODO try testExprCheck("-2", .{ .simple = .comptime_int }, .{ .int_i64_value = -2 });
+    try testExprCheck("3.0", .{ .simple = .comptime_float }, null);
+
+    if (true) return error.SkipZigTest; // TODO
+    try testExprCheck("null", .{ .simple = .null_type }, .{ .simple = .null_value });
+    try testExprCheck("void", .{ .simple = .void }, .{ .simple = .void_value });
+    try testExprCheck("undefined", .{ .simple = .undefined_type }, .{ .simple = .undefined_value });
+    try testExprCheck("noreturn", .{ .simple = .noreturn }, .{ .simple = .unreachable_value });
+}
+
+test "ComptimeInterpreter - expressions" {
+    if (true) return error.SkipZigTest; // TODO
+    try testExprCheck("5 + 3", .{ .simple = .comptime_int }, .{ .int_u64_value = 8 });
+    try testExprCheck("5.2 + 4.2", .{ .simple = .comptime_float }, null);
+
+    try testExprCheck("3 == 3", .{ .simple = .bool }, .{ .simple = .bool_true });
+    try testExprCheck("5.2 == 2.1", .{ .simple = .bool }, .{ .simple = .bool_false });
+
+    try testExprCheck("@as(?bool, null) orelse true", .{ .simple = .bool }, .{ .simple = .bool_true });
+}
+
+test "ComptimeInterpreter - builtins" {
+    if (true) return error.SkipZigTest; // TODO
+    try testExprCheck("@as(bool, true)", .{ .simple = .bool }, .{ .simple = .bool_true });
+    try testExprCheck("@as(u32, 3)", .{ .int_type = .{
+        .signedness = .unsigned,
+        .bits = 32,
+    } }, .{ .int_u64_value = 3 });
+}
+
 test "ComptimeInterpreter - call return primitive type" {
     try testCallCheck(
         \\pub fn Foo() type {
@@ -48,7 +82,9 @@ test "ComptimeInterpreter - call return struct" {
         \\}
     , &.{});
     defer result.deinit();
-    const struct_info = result.key.struct_type;
+    try std.testing.expect(result.ty == .simple);
+    try std.testing.expect(result.ty.simple == .type);
+    const struct_info = result.val.struct_type;
     try std.testing.expectEqual(Index.none, struct_info.backing_int_ty);
     try std.testing.expectEqual(std.builtin.Type.ContainerLayout.Auto, struct_info.layout);
     try std.testing.expectEqual(@as(usize, 1), struct_info.fields.len);
@@ -72,7 +108,9 @@ test "ComptimeInterpreter - call comptime argument" {
         },
     });
     defer result1.deinit();
-    try std.testing.expectEqual(Key{ .int_type = .{ .signedness = .unsigned, .bits = 8 } }, result1.key);
+    try std.testing.expect(result1.ty == .simple);
+    try std.testing.expect(result1.ty.simple == .type);
+    try std.testing.expectEqual(Key{ .int_type = .{ .signedness = .unsigned, .bits = 8 } }, result1.val);
 
     var result2 = try testCall(source, &.{
         Value{
@@ -81,18 +119,21 @@ test "ComptimeInterpreter - call comptime argument" {
         },
     });
     defer result2.deinit();
-    try std.testing.expectEqual(Key{ .int_type = .{ .signedness = .unsigned, .bits = 69 } }, result2.key);
+    try std.testing.expect(result2.ty == .simple);
+    try std.testing.expect(result2.ty.simple == .type);
+    try std.testing.expectEqual(Key{ .int_type = .{ .signedness = .unsigned, .bits = 69 } }, result2.val);
 }
 
 //
 // Helper functions
 //
 
-const CallResult = struct {
+const Result = struct {
     interpreter: ComptimeInterpreter,
-    key: Key,
+    ty: Key,
+    val: Key,
 
-    pub fn deinit(self: *CallResult) void {
+    pub fn deinit(self: *Result) void {
         self.interpreter.deinit();
     }
 };
@@ -102,7 +143,7 @@ const Value = struct {
     val: Key,
 };
 
-fn testCall(source: []const u8, arguments: []const Value) !CallResult {
+fn testCall(source: []const u8, arguments: []const Value) !Result {
     var config = zls.Config{};
     var doc_store = zls.DocumentStore{
         .allocator = allocator,
@@ -144,20 +185,89 @@ fn testCall(source: []const u8, arguments: []const Value) !CallResult {
 
     const call_result = try interpreter.call(.none, func_node, args, .{});
 
-    try std.testing.expectEqual(Key{ .simple = .type }, interpreter.ip.indexToKey(call_result.result.value.ty));
-
-    return CallResult{
+    return Result{
         .interpreter = interpreter,
-        .key = interpreter.ip.indexToKey(call_result.result.value.val),
+        .ty = interpreter.ip.indexToKey(call_result.result.value.ty),
+        .val = interpreter.ip.indexToKey(call_result.result.value.val),
     };
 }
 
 fn testCallCheck(
     source: []const u8,
     arguments: []const Value,
-    expected: Key,
+    expected_ty: Key,
 ) !void {
     var result = try testCall(source, arguments);
     defer result.deinit();
-    try std.testing.expectEqual(expected, result.key);
+    try std.testing.expect(result.ty == .simple);
+    try std.testing.expect(result.ty.simple == .type);
+    if (!expected_ty.eql(result.val)) {
+        std.debug.print("expected type `{}`, found `{}`\n", .{ expected_ty.fmtType(result.interpreter.ip), result.val.fmtType(result.interpreter.ip) });
+        return error.TestExpectedEqual;
+    }
+}
+
+fn testInterpret(source: []const u8, node_idx: Ast.Node.Index) !Result {
+    var config = zls.Config{};
+    var doc_store = zls.DocumentStore{
+        .allocator = allocator,
+        .config = &config,
+    };
+    defer doc_store.deinit();
+
+    const test_uri: []const u8 = switch (builtin.os.tag) {
+        .windows => "file:///C:\\test.zig",
+        else => "file:///test.zig",
+    };
+
+    const handle = try doc_store.openDocument(test_uri, source);
+
+    var interpreter = ComptimeInterpreter{
+        .allocator = allocator,
+        .document_store = &doc_store,
+        .uri = handle.uri,
+    };
+    errdefer interpreter.deinit();
+
+    _ = try interpreter.interpret(0, .none, .{});
+
+    const result = try interpreter.interpret(node_idx, .none, .{});
+
+    return Result{
+        .interpreter = interpreter,
+        .ty = interpreter.ip.indexToKey(result.value.ty),
+        .val = interpreter.ip.indexToKey(result.value.val),
+    };
+}
+
+fn testExprCheck(
+    expr: []const u8,
+    expected_ty: Key,
+    expected_val: ?Key,
+) !void {
+    const source = try std.fmt.allocPrint(allocator,
+        \\const foobarbaz = {s};
+    , .{expr});
+    defer allocator.free(source);
+
+    var result = try testInterpret(source, 1);
+    defer result.deinit();
+    var ip: *InternPool = &result.interpreter.ip;
+
+    if (!expected_ty.eql(result.ty)) {
+        std.debug.print("expected type `{}`, found `{}`\n", .{ expected_ty.fmtType(ip.*), result.ty.fmtType(ip.*) });
+        return error.TestExpectedEqual;
+    }
+
+    if (expected_val) |expected_value| {
+        if (!expected_value.eql(result.val)) {
+            const expected_ty_index = try ip.get(allocator, expected_ty);
+            const actual_ty_index = try ip.get(allocator, result.ty);
+            std.debug.print("expected value `{}`, found `{}`\n", .{
+                expected_value.fmtValue(expected_ty_index, ip.*),
+                result.val.fmtValue(actual_ty_index, ip.*),
+            });
+            return error.TestExpectedEqual;
+        }
+    }
 }

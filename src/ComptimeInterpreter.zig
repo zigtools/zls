@@ -727,12 +727,14 @@ pub fn interpret(
 
                 if (as_type.ty != type_type) return error.InvalidBuiltin;
 
-                return InterpretResult{ .value = Value{
-                    .interpreter = interpreter,
-                    .node_idx = node_idx,
-                    .ty = type_type,
-                    .val = try interpreter.cast(node_idx, as_type.val, value.val),
-                } };
+                return InterpretResult{
+                    .value = Value{
+                        .interpreter = interpreter,
+                        .node_idx = node_idx,
+                        .ty = as_type.val,
+                        .val = value.val, // TODO port Sema.coerceExtra to InternPool
+                    },
+                };
             }
 
             log.err("Builtin not implemented: {s}", .{call_name});

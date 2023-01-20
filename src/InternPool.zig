@@ -63,7 +63,7 @@ pub const ErrorSet = struct {
     names: []const []const u8,
 
     pub fn sort(self: *ErrorSet) void {
-        std.sort.sort([][]const u8, self.names, u8, std.mem.lessThan);
+        std.sort.sort([]const []const u8, self.names, u8, std.mem.lessThan);
     }
 };
 
