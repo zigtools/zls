@@ -8,6 +8,8 @@ const ComptimeInterpreter = zls.ComptimeInterpreter;
 const InternPool = zls.InternPool;
 const Index = InternPool.Index;
 const Key = InternPool.Key;
+const ast = zls.ast;
+const offsets = zls.offsets;
 
 const allocator: std.mem.Allocator = std.testing.allocator;
 
@@ -201,7 +203,7 @@ fn testCall(source: []const u8, arguments: []const Value) !Result {
     };
     errdefer interpreter.deinit();
 
-    _ = try interpreter.interpret(0, .none, .{});
+    _ = try interpretReportErrors(&interpreter, 0, .none);
 
     var args = try allocator.alloc(ComptimeInterpreter.Value, arguments.len);
     defer allocator.free(args);
@@ -265,7 +267,7 @@ fn testInterpret(source: []const u8, node_idx: Ast.Node.Index) !Result {
     };
     errdefer interpreter.deinit();
 
-    _ = try interpreter.interpret(0, .none, .{});
+    _ = try interpretReportErrors(&interpreter, 0, .none);
 
     const result = try interpreter.interpret(node_idx, .none, .{});
 
@@ -309,4 +311,25 @@ fn testExprCheck(
             return error.TestExpectedEqual;
         }
     }
+}
+
+fn interpretReportErrors(
+    interpreter: *ComptimeInterpreter,
+    node_idx: Ast.Node.Index,
+    namespace: InternPool.NamespaceIndex,
+) !ComptimeInterpreter.InterpretResult {
+    const result = interpreter.interpret(node_idx, namespace, .{});
+
+    // TODO use ErrorBuilder
+    var err_it = interpreter.errors.iterator();
+    if (interpreter.errors.count() != 0) {
+        const handle = interpreter.getHandle();
+        std.debug.print("\n{s}\n", .{handle.text});
+        while (err_it.next()) |entry| {
+            const token = handle.tree.firstToken(entry.key_ptr.*);
+            const position = offsets.tokenToPosition(handle.tree, token, .@"utf-8");
+            std.debug.print("{d}:{d}: {s}\n", .{ position.line, position.character, entry.value_ptr.message });
+        }
+    }
+    return result;
 }
