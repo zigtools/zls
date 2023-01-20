@@ -10,6 +10,10 @@ on:
   schedule:
     - cron: "0 0 * * *"
   workflow_dispatch:
+    inputs:
+      bypass_tracy_and_artifacts:
+        type: boolean
+        description: Bypass Tracy and artifact builds (much faster)
 
 jobs:
   build:
@@ -33,14 +37,14 @@ jobs:
         run: zig build
 
       - name: Build with Tracy
-        if: ${{ matrix.os != 'macos-latest' }}
+        if: ${{ matrix.os != 'macos-latest' && github.event.inputs.bypass_tracy_and_artifacts != 'true' }}
         run: zig build -Denable_tracy -Denable_tracy_allocation
 
       - name: Run Tests
         run: zig build test
 
       - name: Build artifacts
-        if: ${{ matrix.os == 'ubuntu-latest' }}
+        if: ${{ matrix.os == 'ubuntu-latest' && github.event.inputs.bypass_tracy_and_artifacts != 'true' }}
         run: |
           declare -a targets=("x86_64-windows" "x86_64-linux" "x86_64-macos" "x86-windows" "x86-linux" "aarch64-linux" "aarch64-macos")
           mkdir -p "artifacts/"
@@ -60,49 +64,49 @@ jobs:
           done
 
       - name: Upload x86_64-windows artifact
-        if: ${{ matrix.os == 'ubuntu-latest' }}
+        if: ${{ matrix.os == 'ubuntu-latest' && github.event.inputs.bypass_tracy_and_artifacts != 'true' }}
         uses: actions/upload-artifact@v3
         with:
           name: zls-x86_64-windows
           path: artifacts/x86_64-windows/
 
       - name: Upload x86_64-linux artifact
-        if: ${{ matrix.os == 'ubuntu-latest' }}
+        if: ${{ matrix.os == 'ubuntu-latest' && github.event.inputs.bypass_tracy_and_artifacts != 'true' }}
         uses: actions/upload-artifact@v3
         with:
           name: zls-x86_64-linux
           path: artifacts/x86_64-linux/
 
       - name: Upload x86_64-macos artifact
-        if: ${{ matrix.os == 'ubuntu-latest' }}
+        if: ${{ matrix.os == 'ubuntu-latest' && github.event.inputs.bypass_tracy_and_artifacts != 'true' }}
         uses: actions/upload-artifact@v3
         with:
           name: zls-x86_64-macos
           path: artifacts/x86_64-macos/
 
       - name: Upload x86-windows artifact
-        if: ${{ matrix.os == 'ubuntu-latest' }}
+        if: ${{ matrix.os == 'ubuntu-latest' && github.event.inputs.bypass_tracy_and_artifacts != 'true' }}
         uses: actions/upload-artifact@v3
         with:
           name: zls-x86-windows
           path: artifacts/x86-windows/
 
       - name: Upload x86-linux artifact
-        if: ${{ matrix.os == 'ubuntu-latest' }}
+        if: ${{ matrix.os == 'ubuntu-latest' && github.event.inputs.bypass_tracy_and_artifacts != 'true' }}
         uses: actions/upload-artifact@v3
         with:
           name: zls-x86-linux
           path: artifacts/x86-linux/
 
       - name: Upload aarch64-linux artifact
-        if: ${{ matrix.os == 'ubuntu-latest' }}
+        if: ${{ matrix.os == 'ubuntu-latest' && github.event.inputs.bypass_tracy_and_artifacts != 'true' }}
         uses: actions/upload-artifact@v3
         with:
           name: zls-aarch64-linux
           path: artifacts/aarch64-linux/
 
       - name: Upload aarch64-macos artifact
-        if: ${{ matrix.os == 'ubuntu-latest' }}
+        if: ${{ matrix.os == 'ubuntu-latest' && github.event.inputs.bypass_tracy_and_artifacts != 'true' }}
         uses: actions/upload-artifact@v3
         with:
           name: zls-aarch64-macos
@@ -118,3 +122,19 @@ jobs:
           REMOTE_HOST: ${{ secrets.WEBSITE_DEPLOY_HOST }}
           REMOTE_USER: ${{ secrets.WEBSITE_DEPLOY_USER }}
           TARGET: ${{ secrets.WEBSITE_DEPLOY_FOLDER }}
+
+      - name: Instruct fuzzing server to pull latest zls
+        if: ${{ matrix.os == 'ubuntu-latest' && github.ref == 'refs/heads/master' && github.repository_owner == 'zigtools' }}
+        uses: appleboy/ssh-action@v0.1.7
+        with:
+          host: fuzzing.zigtools.org
+          username: ${{ secrets.FUZZING_SSH_USERNAME }}
+          key: ${{ secrets.FUZZING_SSH_PRIVKEY }}
+          script: |
+            systemctl stop fuzzing
+            systemctl stop fuzzing-web
+            cd /root/sus
+            ./script/setup.sh
+            systemctl start fuzzing
+            sleep 5s
+            systemctl start fuzzing-web

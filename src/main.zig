@@ -11,28 +11,30 @@ const debug = @import("debug.zig");
 
 const logger = std.log.scoped(.main);
 
-// Always set this to debug to make std.log call into our handler, then control the runtime
-// value in the definition below.
-pub const log_level = .debug;
-
 var actual_log_level: std.log.Level = switch (zig_builtin.mode) {
     .Debug => .debug,
     else => @intToEnum(std.log.Level, @enumToInt(build_options.log_level)), // temporary fix to build failing on release-safe due to a Zig bug
 };
 
-pub fn log(
-    comptime level: std.log.Level,
-    comptime scope: @TypeOf(.EnumLiteral),
-    comptime format: []const u8,
-    args: anytype,
-) void {
-    if (@enumToInt(level) > @enumToInt(actual_log_level)) return;
+pub const std_options = struct {
+    // Always set this to debug to make std.log call into our handler, then control the runtime
+    // value in the definition below.
+    pub const log_level = .debug;
 
-    const level_txt = comptime level.asText();
+    pub fn logFn(
+        comptime level: std.log.Level,
+        comptime scope: @TypeOf(.EnumLiteral),
+        comptime format: []const u8,
+        args: anytype,
+    ) void {
+        if (@enumToInt(level) > @enumToInt(actual_log_level)) return;
 
-    std.debug.print("{s:<5}: ({s:^6}): ", .{ level_txt, @tagName(scope) });
-    std.debug.print(format ++ "\n", args);
-}
+        const level_txt = comptime level.asText();
+
+        std.debug.print("{s:<5}: ({s:^6}): ", .{ level_txt, @tagName(scope) });
+        std.debug.print(format ++ "\n", args);
+    }
+};
 
 fn loop(
     server: *Server,
@@ -48,9 +50,18 @@ fn loop(
     var buffered_writer = std.io.bufferedWriter(std_out);
     const writer = buffered_writer.writer();
 
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+
     while (true) {
-        var arena = std.heap.ArenaAllocator.init(server.allocator);
-        defer arena.deinit();
+        defer {
+            // Mom, can we have garbage collection?
+            // No, we already have garbage collection at home.
+            // at home:
+            if (arena.queryCapacity() > 128 * 1024) {
+                _ = arena.reset(.free_all);
+            }
+        }
 
         // write server -> client messages
         for (server.outgoing_messages.items) |outgoing_message| {
@@ -76,6 +87,8 @@ fn loop(
         }
 
         server.processJsonRpc(&arena, json_message);
+
+        if (server.status == .exiting_success or server.status == .exiting_failure) return;
     }
 }
 
@@ -338,7 +351,7 @@ const stack_frames = switch (zig_builtin.mode) {
 
 pub fn main() !void {
     var gpa_state = std.heap.GeneralPurposeAllocator(.{ .stack_trace_frames = stack_frames }){};
-    defer _ = gpa_state.deinit();
+    defer std.debug.assert(!gpa_state.deinit());
 
     var tracy_state = if (tracy.enable_allocation) tracy.tracyAllocator(gpa_state.allocator()) else void{};
     const inner_allocator: std.mem.Allocator = if (tracy.enable_allocation) tracy_state.allocator() else gpa_state.allocator();
@@ -387,4 +400,8 @@ pub fn main() !void {
     defer server.deinit();
 
     try loop(&server, record_file, replay_file);
+
+    if (server.status == .exiting_failure) {
+        std.process.exit(1);
+    }
 }

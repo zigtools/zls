@@ -268,19 +268,16 @@ test "completion - union" {
 }
 
 test "completion - enum" {
-    // TODO: Fix
-    return error.SkipZigTest;
-    // try testCompletion(
-    //     \\const E = enum {
-    //     \\    alpha,
-    //     \\    beta,
-    //     \\};
-    //     \\const foo = E.<cursor>
-    // , &.{
-    //     // TODO kind should be Enum
-    //     .{ .label = "alpha", .kind = .Field },
-    //     .{ .label = "beta", .kind = .Field },
-    // });
+    try testCompletion(
+        \\const E = enum {
+        \\    alpha,
+        \\    beta,
+        \\};
+        \\const foo = E.<cursor>
+    , &.{
+        .{ .label = "alpha", .kind = .Enum },
+        .{ .label = "beta", .kind = .Enum },
+    });
 }
 
 test "completion - error union" {
@@ -291,21 +288,20 @@ test "completion - error union" {
         \\};
         \\const baz = error.<cursor>
     , &.{
-        .{ .label = "Foo", .kind = .Constant },
-        .{ .label = "Bar", .kind = .Constant },
+        .{ .label = "Foo", .kind = .Constant, .detail = "error.Foo" },
+        .{ .label = "Bar", .kind = .Constant, .detail = "error.Bar" },
     });
 
-    // TODO implement completion for error unions
-    // try testCompletion(
-    //     \\const E = error {
-    //     \\    foo,
-    //     \\    bar,
-    //     \\};
-    //     \\const baz = E.<cursor>
-    // , &.{
-    //     .{ .label = "foo", .kind = .Constant },
-    //     .{ .label = "bar", .kind = .Constant },
-    // });
+    try testCompletion(
+        \\const E = error {
+        \\    foo,
+        \\    bar,
+        \\};
+        \\const baz = E.<cursor>
+    , &.{
+        .{ .label = "foo", .kind = .Constant, .detail = "error.foo" },
+        .{ .label = "bar", .kind = .Constant, .detail = "error.bar" },
+    });
 
     try testCompletion(
         \\const S = struct { alpha: u32 };

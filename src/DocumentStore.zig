@@ -224,7 +224,7 @@ pub fn applySave(self: *DocumentStore, handle: *const Handle) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    if (isBuildFile(handle.uri)) {
+    if (std.process.can_spawn and isBuildFile(handle.uri)) {
         const build_file = self.build_files.getPtr(handle.uri).?;
 
         const build_config = loadBuildConfiguration(self.allocator, build_file.*, self.config.*) catch |err| {
@@ -431,6 +431,7 @@ fn loadBuildConfiguration(
     const zig_run_result = try std.ChildProcess.exec(.{
         .allocator = arena_allocator,
         .argv = args.items,
+        .cwd = try std.fs.path.resolve(arena_allocator, &.{ config.zig_exe_path.?, "../" }),
     });
 
     defer {
@@ -647,7 +648,9 @@ fn createDocument(self: *DocumentStore, uri: Uri, text: [:0]u8, open: bool) erro
     handle.import_uris = try self.collectImportUris(handle);
     handle.cimports = try self.collectCIncludes(handle);
 
-    if (self.config.zig_exe_path != null and isBuildFile(handle.uri) and !isInStd(handle.uri)) {
+    if (!std.process.can_spawn or self.config.zig_exe_path == null) return handle;
+
+    if (isBuildFile(handle.uri) and !isInStd(handle.uri)) {
         const gop = try self.build_files.getOrPut(self.allocator, uri);
         errdefer |err| {
             self.build_files.swapRemoveAt(gop.index);
@@ -658,7 +661,7 @@ fn createDocument(self: *DocumentStore, uri: Uri, text: [:0]u8, open: bool) erro
             gop.value_ptr.* = try self.createBuildFile(duped_uri);
             gop.key_ptr.* = gop.value_ptr.uri;
         }
-    } else if (self.config.zig_exe_path != null and !isBuiltinFile(handle.uri) and !isInStd(handle.uri)) blk: {
+    } else if (!isBuiltinFile(handle.uri) and !isInStd(handle.uri)) blk: {
         // log.debug("Going to walk down the tree towards: {s}", .{uri});
 
         // walk down the tree towards the uri. When we hit build.zig files
@@ -691,7 +694,7 @@ fn createDocument(self: *DocumentStore, uri: Uri, text: [:0]u8, open: bool) erro
                 handle.associated_build_file = gop.key_ptr.*;
                 break;
             } else if (handle.associated_build_file == null) {
-                handle.associated_build_file = build_file_uri;
+                handle.associated_build_file = gop.key_ptr.*;
             }
         }
     }
@@ -831,6 +834,8 @@ pub fn resolveCImport(self: *DocumentStore, handle: Handle, node: Ast.Node.Index
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
+    if (!std.process.can_spawn) return null;
+
     const index = std.mem.indexOfScalar(Ast.Node.Index, handle.cimports.items(.node), node).?;
 
     const hash: Hash = handle.cimports.items(.hash)[index];
@@ -921,7 +926,7 @@ pub fn uriFromImportStr(self: *const DocumentStore, allocator: std.mem.Allocator
     }
 }
 
-fn tagStoreCompletionItems(self: DocumentStore, arena: std.mem.Allocator, handle: Handle, comptime name: []const u8) ![]types.CompletionItem {
+fn tagStoreCompletionItems(self: DocumentStore, arena: std.mem.Allocator, handle: Handle, comptime name: []const u8) error{OutOfMemory}![]types.CompletionItem {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -944,11 +949,11 @@ fn tagStoreCompletionItems(self: DocumentStore, arena: std.mem.Allocator, handle
     return result_set.entries.items(.key);
 }
 
-pub fn errorCompletionItems(self: DocumentStore, arena: std.mem.Allocator, handle: Handle) ![]types.CompletionItem {
+pub fn errorCompletionItems(self: DocumentStore, arena: std.mem.Allocator, handle: Handle) error{OutOfMemory}![]types.CompletionItem {
     return try self.tagStoreCompletionItems(arena, handle, "error_completions");
 }
 
-pub fn enumCompletionItems(self: DocumentStore, arena: std.mem.Allocator, handle: Handle) ![]types.CompletionItem {
+pub fn enumCompletionItems(self: DocumentStore, arena: std.mem.Allocator, handle: Handle) error{OutOfMemory}![]types.CompletionItem {
     return try self.tagStoreCompletionItems(arena, handle, "enum_completions");
 }
 

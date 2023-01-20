@@ -3,6 +3,7 @@ const DocumentStore = @import("DocumentStore.zig");
 const Ast = std.zig.Ast;
 const types = @import("lsp.zig");
 const offsets = @import("offsets.zig");
+const URI = @import("uri.zig");
 const log = std.log.scoped(.analysis);
 const ast = @import("ast.zig");
 const ComptimeInterpreter = @import("ComptimeInterpreter.zig");
@@ -292,9 +293,12 @@ pub fn getDeclNameToken(tree: Ast, node: Ast.Node.Index) ?Ast.TokenIndex {
         },
 
         // containers
-        .container_field, .container_field_init, .container_field_align => {
+        .container_field,
+        .container_field_init,
+        .container_field_align,
+        => {
             const field = ast.containerField(tree, node).?.ast;
-            return if (field.tuple_like) null else field.main_token;
+            return field.main_token;
         },
 
         .identifier => main_token,
@@ -973,6 +977,30 @@ pub fn resolveTypeOfNodeInternal(store: *DocumentStore, arena: *std.heap.ArenaAl
                 if (resolved_type.type.is_type_val) return null;
                 resolved_type.type.is_type_val = true;
                 return resolved_type;
+            }
+
+            if (std.mem.eql(u8, call_name, "@typeInfo")) {
+                const zig_lib_path = try URI.fromPath(arena.allocator(), store.config.zig_lib_path orelse return null);
+
+                const builtin_uri = URI.pathRelative(arena.allocator(), zig_lib_path, "/std/builtin.zig") catch |err| switch (err) {
+                    error.OutOfMemory => |e| return e,
+                    else => return null,
+                };
+
+                const new_handle = store.getOrLoadHandle(builtin_uri) orelse return null;
+                const root_scope = new_handle.document_scope.scopes.items[0];
+                const decl = root_scope.decls.get("Type") orelse return null;
+                if (decl != .ast_node) return null;
+
+                const var_decl = ast.varDecl(new_handle.tree, decl.ast_node) orelse return null;
+
+                return TypeWithHandle{
+                    .type = .{
+                        .data = .{ .other = var_decl.ast.init_node },
+                        .is_type_val = false,
+                    },
+                    .handle = new_handle,
+                };
             }
 
             if (std.mem.eql(u8, call_name, "@import")) {
@@ -1693,7 +1721,7 @@ pub fn getPositionContext(allocator: std.mem.Allocator, text: []const u8, doc_in
     return if (tok.tag == .identifier) PositionContext{ .var_access = tok.loc } else .empty;
 }
 
-fn addOutlineNodes(allocator: std.mem.Allocator, tree: Ast, child: Ast.Node.Index, context: *GetDocumentSymbolsContext) anyerror!void {
+fn addOutlineNodes(allocator: std.mem.Allocator, tree: Ast, child: Ast.Node.Index, context: *GetDocumentSymbolsContext) error{OutOfMemory}!void {
     switch (tree.nodes.items(.tag)[child]) {
         .string_literal,
         .number_literal,
@@ -1838,7 +1866,7 @@ const GetDocumentSymbolsContext = struct {
     encoding: offsets.Encoding,
 };
 
-fn getDocumentSymbolsInternal(allocator: std.mem.Allocator, tree: Ast, node: Ast.Node.Index, context: *GetDocumentSymbolsContext) anyerror!void {
+fn getDocumentSymbolsInternal(allocator: std.mem.Allocator, tree: Ast, node: Ast.Node.Index, context: *GetDocumentSymbolsContext) error{OutOfMemory}!void {
     const name = getDeclName(tree, node) orelse return;
     if (name.len == 0)
         return;
@@ -1950,6 +1978,8 @@ pub const Declaration = union(enum) {
         label: Ast.TokenIndex,
         block: Ast.Node.Index,
     },
+    /// always an identifier
+    error_token: Ast.Node.Index,
 };
 
 pub const DeclWithHandle = struct {
@@ -1966,6 +1996,7 @@ pub const DeclWithHandle = struct {
             .array_index => |ai| ai,
             .switch_payload => |sp| sp.node,
             .label_decl => |ld| ld.label,
+            .error_token => |et| et,
         };
     }
 
@@ -2065,6 +2096,7 @@ pub const DeclWithHandle = struct {
                 }
                 return null;
             },
+            .error_token => return null,
         };
     }
 };
@@ -2408,6 +2440,7 @@ pub const DocumentScope = struct {
         }
         self.scopes.deinit(allocator);
         for (self.error_completions.entries.items(.key)) |item| {
+            if (item.detail) |detail| allocator.free(detail);
             switch (item.documentation orelse continue) {
                 .string => |str| allocator.free(str),
                 .MarkupContent => |content| allocator.free(content.value),
@@ -2415,6 +2448,7 @@ pub const DocumentScope = struct {
         }
         self.error_completions.deinit(allocator);
         for (self.enum_completions.entries.items(.key)) |item| {
+            if (item.detail) |detail| allocator.free(detail);
             switch (item.documentation orelse continue) {
                 .string => |str| allocator.free(str),
                 .MarkupContent => |content| allocator.free(content.value),
@@ -2488,9 +2522,6 @@ fn makeInnerScope(allocator: std.mem.Allocator, context: ScopeContext, node_idx:
     const main_tokens = tree.nodes.items(.main_token);
     const node_tag = tags[node_idx];
 
-    var buf: [2]Ast.Node.Index = undefined;
-    const ast_decls = ast.declMembers(tree, node_idx, &buf);
-
     var scope = try scopes.addOne(allocator);
     scope.* = .{
         .loc = offsets.nodeToLoc(tree, node_idx),
@@ -2503,26 +2534,26 @@ fn makeInnerScope(allocator: std.mem.Allocator, context: ScopeContext, node_idx:
         var i = main_tokens[node_idx];
         while (i < data[node_idx].rhs) : (i += 1) {
             if (token_tags[i] == .identifier) {
-                try context.errors.put(allocator, .{
-                    .label = tree.tokenSlice(i),
+                const name = offsets.tokenToSlice(tree, i);
+                if (try scopes.items[scope_idx].decls.fetchPut(allocator, name, .{ .error_token = i })) |_| {
+                    // TODO Record a redefinition error.
+                }
+                const gop = try context.errors.getOrPut(allocator, .{
+                    .label = name,
                     .kind = .Constant,
-                    .insertText = tree.tokenSlice(i),
+                    //.detail =
+                    .insertText = name,
                     .insertTextFormat = .PlainText,
-                }, {});
+                });
+                if (!gop.found_existing) {
+                    gop.key_ptr.detail = try std.fmt.allocPrint(allocator, "error.{s}", .{name});
+                }
             }
         }
     }
 
-    var buffer: [2]Ast.Node.Index = undefined;
-    const container_decl = ast.containerDecl(tree, node_idx, &buffer);
-
-    // Only tagged unions and enums should pass this
-    const can_have_enum_completions = if (container_decl) |container| blk: {
-        const kind = token_tags[container.ast.main_token];
-        break :blk kind != .keyword_struct and
-            (kind != .keyword_union or container.ast.enum_token != null or container.ast.arg != 0);
-    } else false;
-
+    var buf: [2]Ast.Node.Index = undefined;
+    const ast_decls = ast.declMembers(tree, node_idx, &buf);
     for (ast_decls) |decl| {
         if (tags[decl] == .@"usingnamespace") {
             try scopes.items[scope_idx].uses.append(allocator, decl);
@@ -2541,31 +2572,23 @@ fn makeInnerScope(allocator: std.mem.Allocator, context: ScopeContext, node_idx:
             // TODO Record a redefinition error.
         }
 
-        if (!can_have_enum_completions)
-            continue;
+        var buffer: [2]Ast.Node.Index = undefined;
+        const container_decl = ast.containerDecl(tree, node_idx, &buffer) orelse continue;
 
-        const container_field = switch (tags[decl]) {
-            .container_field => tree.containerField(decl),
-            .container_field_align => tree.containerFieldAlign(decl),
-            .container_field_init => tree.containerFieldInit(decl),
-            else => null,
-        };
+        if (container_decl.ast.enum_token != null) {
+            if (std.mem.eql(u8, name, "_")) return;
+            const Documentation = @TypeOf(@as(types.CompletionItem, undefined).documentation);
 
-        if (container_field) |_| {
-            if (!std.mem.eql(u8, name, "_")) {
-                const Documentation = @TypeOf(@as(types.CompletionItem, undefined).documentation);
-
-                var doc: Documentation = if (try getDocComments(allocator, tree, decl, .markdown)) |docs| .{ .MarkupContent = types.MarkupContent{ .kind = .markdown, .value = docs } } else null;
-                var gop_res = try context.enums.getOrPut(allocator, .{
-                    .label = name,
-                    .kind = .Constant,
-                    .insertText = name,
-                    .insertTextFormat = .PlainText,
-                    .documentation = doc,
-                });
-                if (gop_res.found_existing) {
-                    if (doc) |d| allocator.free(d.MarkupContent.value);
-                }
+            var doc: Documentation = if (try getDocComments(allocator, tree, decl, .markdown)) |docs| .{ .MarkupContent = types.MarkupContent{ .kind = .markdown, .value = docs } } else null;
+            var gop_res = try context.enums.getOrPut(allocator, .{
+                .label = name,
+                .kind = .Constant,
+                .insertText = name,
+                .insertTextFormat = .PlainText,
+                .documentation = doc,
+            });
+            if (gop_res.found_existing) {
+                if (doc) |d| allocator.free(d.MarkupContent.value);
             }
         }
     }

@@ -5,10 +5,13 @@ const shared = @import("src/shared.zig");
 const zls_version = std.builtin.Version{ .major = 0, .minor = 11, .patch = 0 };
 
 pub fn build(b: *std.build.Builder) !void {
-    const current_zig = builtin.zig_version;
-    const min_zig = std.SemanticVersion.parse("0.11.0-dev.874+40ed6ae84") catch return; // Changes to builtin.Type API
-    if (current_zig.order(min_zig).compare(.lt)) @panic(b.fmt("Your Zig version v{} does not meet the minimum build requirement of v{}", .{ current_zig, min_zig }));
-
+    comptime {
+        const current_zig = builtin.zig_version;
+        const min_zig = std.SemanticVersion.parse("0.11.0-dev.874+40ed6ae84") catch return; // Changes to builtin.Type API
+        if (current_zig.order(min_zig) == .lt) {
+            @compileError(std.fmt.comptimePrint("Your Zig version v{} does not meet the minimum build requirement of v{}", .{ current_zig, min_zig }));
+        }
+    }
     const target = b.standardTargetOptions(.{});
 
     const mode = b.standardReleaseOptions();
@@ -108,6 +111,12 @@ pub fn build(b: *std.build.Builder) !void {
     const tres_path = b.option([]const u8, "tres", "Path to tres package (default: " ++ TRES_DEFAULT_PATH ++ ")") orelse TRES_DEFAULT_PATH;
     exe.addPackage(.{ .name = "tres", .source = .{ .path = tres_path } });
 
+    const check_submodules_step = CheckSubmodulesStep.init(b, &.{
+        known_folders_path,
+        tres_path,
+    });
+    b.getInstallStep().dependOn(&check_submodules_step.step);
+
     if (enable_tracy) {
         const client_cpp = "src/tracy/TracyClient.cpp";
 
@@ -133,26 +142,30 @@ pub fn build(b: *std.build.Builder) !void {
     exe.install();
 
     const gen_exe = b.addExecutable("zls_gen", "src/config_gen/config_gen.zig");
-    gen_exe.addPackage(.{ .name = "tres", .source = .{ .path = "src/tres/tres.zig" } });
+    gen_exe.addPackage(.{ .name = "tres", .source = .{ .path = tres_path } });
 
     const gen_cmd = gen_exe.run();
     gen_cmd.addArgs(&.{
-        b.fmt("{s}/src/Config.zig", .{b.build_root}),
-        b.fmt("{s}/schema.json", .{b.build_root}),
-        b.fmt("{s}/README.md", .{b.build_root}),
+        b.pathJoin(&.{ b.build_root, "src", "Config.zig" }),
+        b.pathJoin(&.{ b.build_root, "schema.json" }),
+        b.pathJoin(&.{ b.build_root, "README.md" }),
+        b.pathJoin(&.{ b.build_root, "src", "data" }),
     });
-
-    if (b.option([]const u8, "vscode-config-path", "Output path to vscode-config")) |path| {
-        gen_cmd.addArg(b.pathFromRoot(path));
-    }
+    if (b.args) |args| gen_cmd.addArgs(args);
 
     const gen_step = b.step("gen", "Regenerate config files");
+    gen_step.dependOn(&check_submodules_step.step);
     gen_step.dependOn(&gen_cmd.step);
 
     const test_step = b.step("test", "Run all the tests");
     test_step.dependOn(b.getInstallStep());
 
     var tests = b.addTest("tests/tests.zig");
+    tests.setFilter(b.option(
+        []const u8,
+        "test-filter",
+        "Skip tests that do not match filter",
+    ));
 
     if (coverage) {
         const src_dir = b.pathJoin(&.{ b.build_root, "src" });
@@ -177,3 +190,35 @@ pub fn build(b: *std.build.Builder) !void {
     src_tests.setTarget(target);
     test_step.dependOn(&src_tests.step);
 }
+
+const CheckSubmodulesStep = struct {
+    step: std.build.Step,
+    builder: *std.build.Builder,
+    submodules: []const []const u8,
+
+    pub fn init(builder: *std.build.Builder, submodules: []const []const u8) *CheckSubmodulesStep {
+        var self = builder.allocator.create(CheckSubmodulesStep) catch unreachable;
+        self.* = CheckSubmodulesStep{
+            .builder = builder,
+            .step = std.build.Step.init(.custom, "Check Submodules", builder.allocator, make),
+            .submodules = builder.allocator.dupe([]const u8, submodules) catch unreachable,
+        };
+        return self;
+    }
+
+    fn make(step: *std.build.Step) anyerror!void {
+        const self = @fieldParentPtr(CheckSubmodulesStep, "step", step);
+        for (self.submodules) |path| {
+            const access = std.fs.accessAbsolute(self.builder.pathFromRoot(path), .{});
+            if (access == error.FileNotFound) {
+                std.debug.print(
+                    \\Did you clone ZLS with `git clone --recurse-submodules https://github.com/zigtools/zls`?
+                    \\If not you can fix this with `git submodule update --init --recursive`.
+                    \\
+                    \\
+                , .{});
+                break;
+            }
+        }
+    }
+};

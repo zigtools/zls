@@ -34,7 +34,7 @@ config: *Config,
 allocator: std.mem.Allocator = undefined,
 arena: *std.heap.ArenaAllocator = undefined,
 document_store: DocumentStore = undefined,
-builtin_completions: std.ArrayListUnmanaged(types.CompletionItem),
+builtin_completions: ?std.ArrayListUnmanaged(types.CompletionItem),
 client_capabilities: ClientCapabilities = .{},
 outgoing_messages: std.ArrayListUnmanaged([]const u8) = .{},
 recording_enabled: bool,
@@ -49,6 +49,10 @@ status: enum {
     initialized,
     /// the server has been shutdown and can't handle any more requests
     shutdown,
+    /// the server is received a `exit` notification and has been shutdown
+    exiting_success,
+    /// the server is received a `exit` notification but has not been shutdown
+    exiting_failure,
 },
 
 // Code was based off of https://github.com/andersfr/zig-lsp/blob/master/server.zig
@@ -66,8 +70,7 @@ const ClientCapabilities = packed struct {
     supports_configuration: bool = false,
 };
 
-/// TODO remove anyerror
-pub const Error = anyerror || std.mem.Allocator.Error || error{
+pub const Error = std.mem.Allocator.Error || error{
     ParseError,
     InvalidRequest,
     MethodNotFound,
@@ -138,7 +141,7 @@ fn sendInternal(
     maybe_err: ?types.ResponseError,
     extra_name: []const u8,
     extra: anytype,
-) !void {
+) error{OutOfMemory}!void {
     var buffer = std.ArrayListUnmanaged(u8){};
     var writer = buffer.writer(server.allocator);
     try writer.writeAll(
@@ -185,13 +188,19 @@ fn showMessage(
     args: anytype,
 ) void {
     const message = std.fmt.allocPrint(server.arena.allocator(), fmt, args) catch return;
+    switch (message_type) {
+        .Error => log.err("{s}", .{message}),
+        .Warning => log.warn("{s}", .{message}),
+        .Info => log.info("{s}", .{message}),
+        .Log => log.debug("{s}", .{message}),
+    }
     server.sendNotification("window/showMessage", types.ShowMessageParams{
         .type = message_type,
         .message = message,
     });
 }
 
-fn generateDiagnostics(server: *Server, handle: DocumentStore.Handle) !types.PublishDiagnosticsParams {
+fn generateDiagnostics(server: *Server, handle: DocumentStore.Handle) error{OutOfMemory}!types.PublishDiagnosticsParams {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -205,7 +214,7 @@ fn generateDiagnostics(server: *Server, handle: DocumentStore.Handle) !types.Pub
     for (tree.errors) |err| {
         var mem_buffer: [256]u8 = undefined;
         var fbs = std.io.fixedBufferStream(&mem_buffer);
-        try tree.renderError(err, fbs.writer());
+        tree.renderError(err, fbs.writer()) catch if (std.debug.runtime_safety) unreachable else continue; // if an error occurs here increase buffer size
 
         try diagnostics.append(allocator, .{
             .range = offsets.tokenToRange(tree, err.token, server.offset_encoding),
@@ -218,7 +227,9 @@ fn generateDiagnostics(server: *Server, handle: DocumentStore.Handle) !types.Pub
     }
 
     if (server.config.enable_ast_check_diagnostics and tree.errors.len == 0) {
-        try getAstCheckDiagnostics(server, handle, &diagnostics);
+        getAstCheckDiagnostics(server, handle, &diagnostics) catch |err| {
+            log.err("failed to run ast-check: {}", .{err});
+        };
     }
 
     if (server.config.warn_style) {
@@ -485,12 +496,14 @@ fn getAutofixMode(server: *Server) enum {
 }
 
 /// caller owns returned memory.
-fn autofix(server: *Server, allocator: std.mem.Allocator, handle: *const DocumentStore.Handle) !std.ArrayListUnmanaged(types.TextEdit) {
+fn autofix(server: *Server, allocator: std.mem.Allocator, handle: *const DocumentStore.Handle) error{OutOfMemory}!std.ArrayListUnmanaged(types.TextEdit) {
     if (!server.config.enable_ast_check_diagnostics) return .{};
 
     if (handle.tree.errors.len != 0) return .{};
     var diagnostics = std.ArrayListUnmanaged(types.Diagnostic){};
-    try getAstCheckDiagnostics(server, handle.*, &diagnostics);
+    getAstCheckDiagnostics(server, handle.*, &diagnostics) catch |err| {
+        log.err("failed to run ast-check: {}", .{err});
+    };
 
     var builder = code_actions.Builder{
         .arena = server.arena,
@@ -720,16 +733,14 @@ fn nodeToCompletion(
         .container_field_init,
         => {
             const field = ast.containerField(tree, node).?;
-            if (!field.ast.tuple_like) {
-                try list.append(allocator, .{
-                    .label = handle.tree.tokenSlice(field.ast.main_token),
-                    .kind = .Field,
-                    .documentation = doc,
-                    .detail = analysis.getContainerFieldSignature(handle.tree, field),
-                    .insertText = tree.tokenSlice(field.ast.main_token),
-                    .insertTextFormat = .PlainText,
-                });
-            }
+            try list.append(allocator, .{
+                .label = handle.tree.tokenSlice(field.ast.main_token),
+                .kind = if (field.ast.tuple_like) .Enum else .Field,
+                .documentation = doc,
+                .detail = analysis.getContainerFieldSignature(handle.tree, field),
+                .insertText = tree.tokenSlice(field.ast.main_token),
+                .insertTextFormat = .PlainText,
+            });
         },
         .array_type,
         .array_type_sentinel,
@@ -908,7 +919,13 @@ fn hoverSymbol(server: *Server, decl_handle: analysis.DeclWithHandle) error{OutO
             const end = offsets.tokenToLoc(tree, last_token).end;
             break :def tree.source[start..end];
         },
-        .pointer_payload, .array_payload, .array_index, .switch_payload, .label_decl => tree.tokenSlice(decl_handle.nameToken()),
+        .pointer_payload,
+        .array_payload,
+        .array_index,
+        .switch_payload,
+        .label_decl,
+        .error_token,
+        => tree.tokenSlice(decl_handle.nameToken()),
     };
 
     var bound_type_params = analysis.BoundTypeParams{};
@@ -1078,7 +1095,7 @@ fn getSymbolFieldAccess(
     handle: *const DocumentStore.Handle,
     source_index: usize,
     loc: offsets.Loc,
-) !?analysis.DeclWithHandle {
+) error{OutOfMemory}!?analysis.DeclWithHandle {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -1159,7 +1176,7 @@ const DeclToCompletionContext = struct {
     parent_is_type_val: ?bool = null,
 };
 
-fn declToCompletion(context: DeclToCompletionContext, decl_handle: analysis.DeclWithHandle) !void {
+fn declToCompletion(context: DeclToCompletionContext, decl_handle: analysis.DeclWithHandle) error{OutOfMemory}!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -1212,6 +1229,17 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: analysis.Decl
                 .insertTextFormat = .PlainText,
             });
         },
+        .error_token => {
+            const name = tree.tokenSlice(decl_handle.decl.error_token);
+
+            try context.completions.append(allocator, .{
+                .label = name,
+                .kind = .Constant,
+                .detail = try std.fmt.allocPrint(allocator, "error.{s}", .{name}),
+                .insertText = name,
+                .insertTextFormat = .PlainText,
+            });
+        },
     }
 }
 
@@ -1219,7 +1247,7 @@ fn completeLabel(
     server: *Server,
     pos_index: usize,
     handle: *const DocumentStore.Handle,
-) ![]types.CompletionItem {
+) error{OutOfMemory}![]types.CompletionItem {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -1259,7 +1287,50 @@ fn populateSnippedCompletions(
     }
 }
 
-fn completeGlobal(server: *Server, pos_index: usize, handle: *const DocumentStore.Handle) ![]types.CompletionItem {
+fn completeBuiltin(server: *Server) error{OutOfMemory}!?[]types.CompletionItem {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    const allocator = server.arena.allocator();
+
+    const builtin_completions = if (server.builtin_completions) |completions|
+        return completions.items
+    else blk: {
+        server.builtin_completions = try std.ArrayListUnmanaged(types.CompletionItem).initCapacity(server.allocator, data.builtins.len);
+        break :blk &server.builtin_completions.?;
+    };
+
+    for (data.builtins) |builtin| {
+        const insert_text = if (server.config.enable_snippets) builtin.snippet else builtin.name;
+        builtin_completions.appendAssumeCapacity(.{
+            .label = builtin.name,
+            .kind = .Function,
+            .filterText = builtin.name[1..],
+            .detail = builtin.signature,
+            .insertText = if (server.config.include_at_in_builtins) insert_text else insert_text[1..],
+            .insertTextFormat = if (server.config.enable_snippets) .Snippet else .PlainText,
+            .documentation = .{
+                .MarkupContent = .{
+                    .kind = .markdown,
+                    .value = builtin.documentation,
+                },
+            },
+        });
+    }
+
+    var completions = try allocator.alloc(types.CompletionItem, builtin_completions.items.len);
+
+    if (server.client_capabilities.label_details_support) {
+        for (builtin_completions.items) |item, i| {
+            completions[i] = item;
+            try formatDetailledLabel(&completions[i], allocator);
+        }
+    }
+
+    return completions;
+}
+
+fn completeGlobal(server: *Server, pos_index: usize, handle: *const DocumentStore.Handle) error{OutOfMemory}![]types.CompletionItem {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -1282,7 +1353,7 @@ fn completeGlobal(server: *Server, pos_index: usize, handle: *const DocumentStor
     return completions.toOwnedSlice(server.arena.allocator());
 }
 
-fn completeFieldAccess(server: *Server, handle: *const DocumentStore.Handle, source_index: usize, loc: offsets.Loc) !?[]types.CompletionItem {
+fn completeFieldAccess(server: *Server, handle: *const DocumentStore.Handle, source_index: usize, loc: offsets.Loc) error{OutOfMemory}!?[]types.CompletionItem {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -1304,7 +1375,7 @@ fn completeFieldAccess(server: *Server, handle: *const DocumentStore.Handle, sou
     return try completions.toOwnedSlice(allocator);
 }
 
-fn formatDetailledLabel(item: *types.CompletionItem, alloc: std.mem.Allocator) !void {
+fn formatDetailledLabel(item: *types.CompletionItem, arena: std.mem.Allocator) error{OutOfMemory}!void {
     // NOTE: this is not ideal, we should build a detailled label like we do for label/detail
     // because this implementation is very loose, nothing is formated properly so we need to clean
     // things a little bit, wich is quite messy
@@ -1315,7 +1386,7 @@ fn formatDetailledLabel(item: *types.CompletionItem, alloc: std.mem.Allocator) !
         return;
 
     var detailLen: usize = item.detail.?.len;
-    var it: []u8 = try alloc.alloc(u8, detailLen);
+    var it: []u8 = try arena.alloc(u8, detailLen);
 
     detailLen -= std.mem.replace(u8, item.detail.?, "    ", " ", it) * 3;
     it = it[0..detailLen];
@@ -1470,7 +1541,7 @@ fn formatDetailledLabel(item: *types.CompletionItem, alloc: std.mem.Allocator) !
     //     logger.info("labelDetails: {s}  ::  {s}", .{item.labelDetails.?.detail, item.labelDetails.?.description});
 }
 
-fn completeError(server: *Server, handle: *const DocumentStore.Handle) ![]types.CompletionItem {
+fn completeError(server: *Server, handle: *const DocumentStore.Handle) error{OutOfMemory}![]types.CompletionItem {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -1505,7 +1576,7 @@ fn kindToSortScore(kind: types.CompletionItemKind) ?[]const u8 {
     };
 }
 
-fn completeDot(server: *Server, handle: *const DocumentStore.Handle) ![]types.CompletionItem {
+fn completeDot(server: *Server, handle: *const DocumentStore.Handle) error{OutOfMemory}![]types.CompletionItem {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -1570,7 +1641,7 @@ fn completeFileSystemStringLiteral(allocator: std.mem.Allocator, store: *const D
     return completions.toOwnedSlice(allocator);
 }
 
-fn initializeHandler(server: *Server, request: types.InitializeParams) !types.InitializeResult {
+fn initializeHandler(server: *Server, request: types.InitializeParams) Error!types.InitializeResult {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -1661,14 +1732,6 @@ fn initializeHandler(server: *Server, request: types.InitializeParams) !types.In
         }
     }
 
-    // NOTE: everything is initialized, we got the client capabilities
-    // so we can now format the prebuilt builtins items for labelDetails
-    if (server.client_capabilities.label_details_support) {
-        for (server.builtin_completions.items) |*item| {
-            try formatDetailledLabel(item, std.heap.page_allocator);
-        }
-    }
-
     if (request.capabilities.workspace) |workspace| {
         server.client_capabilities.supports_apply_edits = workspace.applyEdit orelse false;
         server.client_capabilities.supports_configuration = workspace.configuration orelse false;
@@ -1686,17 +1749,38 @@ fn initializeHandler(server: *Server, request: types.InitializeParams) !types.In
     server.status = .initializing;
 
     if (server.config.zig_exe_path) |exe_path| blk: {
+        if (!std.process.can_spawn) break :blk;
         // TODO avoid having to call getZigEnv twice
         // once in init and here
         const env = configuration.getZigEnv(server.allocator, exe_path) orelse break :blk;
         defer std.json.parseFree(configuration.Env, env, .{ .allocator = server.allocator });
 
-        const zig_exe_version = std.SemanticVersion.parse(env.version) catch break :blk;
+        const zig_version = std.SemanticVersion.parse(env.version) catch break :blk;
+        const zls_version = comptime std.SemanticVersion.parse(build_options.version) catch unreachable;
 
-        if (zig_builtin.zig_version.order(zig_exe_version) == .gt) {
-            server.showMessage(.Warning,
-                \\ZLS was built with Zig {}, but your Zig version is {s}. Update Zig to avoid unexpected behavior.
-            , .{ zig_builtin.zig_version, env.version });
+        const zig_version_simple = std.SemanticVersion{
+            .major = zig_version.major,
+            .minor = zig_version.minor,
+            .patch = 0,
+        };
+        const zls_version_simple = std.SemanticVersion{
+            .major = zls_version.major,
+            .minor = zls_version.minor,
+            .patch = 0,
+        };
+
+        switch (zig_version_simple.order(zls_version_simple)) {
+            .lt => {
+                server.showMessage(.Warning,
+                    \\Zig `{}` is older than ZLS `{}`. Update Zig to avoid unexpected behavior.
+                , .{ zig_version, zls_version });
+            },
+            .eq => {},
+            .gt => {
+                server.showMessage(.Warning,
+                    \\Zig `{}` is newer than ZLS `{}`. Update ZLS to avoid unexpected behavior.
+                , .{ zig_version, zls_version });
+            },
         }
     } else {
         server.showMessage(.Warning,
@@ -1786,7 +1870,7 @@ fn initializeHandler(server: *Server, request: types.InitializeParams) !types.In
     };
 }
 
-fn initializedHandler(server: *Server, notification: types.InitializedParams) !void {
+fn initializedHandler(server: *Server, notification: types.InitializedParams) Error!void {
     _ = notification;
 
     if (server.status != .initializing) {
@@ -1799,32 +1883,28 @@ fn initializedHandler(server: *Server, notification: types.InitializedParams) !v
         try server.requestConfiguration();
 }
 
-fn shutdownHandler(server: *Server, _: void) !?void {
+fn shutdownHandler(server: *Server, _: void) Error!?void {
+    defer server.status = .shutdown;
     if (server.status != .initialized) return error.InvalidRequest; // received a shutdown request but the server is not initialized!
 
-    // Technically we should deinitialize first and send possible errors to the client
     return null;
 }
 
-fn exitHandler(server: *Server, _: void) noreturn {
-    log.info("Server exiting...", .{});
-    // Technically we should deinitialize first and send possible errors to the client
-
-    const error_code: u8 = switch (server.status) {
-        .uninitialized, .shutdown => 0,
-        else => 1,
+fn exitHandler(server: *Server, _: void) Error!void {
+    server.status = switch (server.status) {
+        .initialized => .exiting_failure,
+        .shutdown => .exiting_success,
+        else => unreachable,
     };
-
-    std.os.exit(error_code);
 }
 
-fn cancelRequestHandler(server: *Server, request: types.CancelParams) !void {
+fn cancelRequestHandler(server: *Server, request: types.CancelParams) Error!void {
     _ = server;
     _ = request;
     // TODO implement $/cancelRequest
 }
 
-fn registerCapability(server: *Server, method: []const u8) !void {
+fn registerCapability(server: *Server, method: []const u8) Error!void {
     const allocator = server.arena.allocator();
 
     const id = try std.fmt.allocPrint(allocator, "register-{s}", .{method});
@@ -1843,7 +1923,7 @@ fn registerCapability(server: *Server, method: []const u8) !void {
     );
 }
 
-fn requestConfiguration(server: *Server) !void {
+fn requestConfiguration(server: *Server) Error!void {
     if (server.recording_enabled) {
         log.info("workspace/configuration are disabled during a recording session!", .{});
         return;
@@ -1930,19 +2010,20 @@ fn handleConfiguration(server: *Server, json: std.json.Value) error{OutOfMemory}
     };
 }
 
-fn openDocumentHandler(server: *Server, notification: types.DidOpenTextDocumentParams) !void {
+fn openDocumentHandler(server: *Server, notification: types.DidOpenTextDocumentParams) Error!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
     const handle = try server.document_store.openDocument(notification.textDocument.uri, notification.textDocument.text);
 
-    if (server.client_capabilities.supports_publish_diagnostics) {
+    if (server.client_capabilities.supports_publish_diagnostics) blk: {
+        if (!std.process.can_spawn) break :blk;
         const diagnostics = try server.generateDiagnostics(handle);
         server.sendNotification("textDocument/publishDiagnostics", diagnostics);
     }
 }
 
-fn changeDocumentHandler(server: *Server, notification: types.DidChangeTextDocumentParams) !void {
+fn changeDocumentHandler(server: *Server, notification: types.DidChangeTextDocumentParams) Error!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -1952,13 +2033,14 @@ fn changeDocumentHandler(server: *Server, notification: types.DidChangeTextDocum
 
     try server.document_store.refreshDocument(handle.uri, new_text);
 
-    if (server.client_capabilities.supports_publish_diagnostics) {
+    if (server.client_capabilities.supports_publish_diagnostics) blk: {
+        if (!std.process.can_spawn) break :blk;
         const diagnostics = try server.generateDiagnostics(handle.*);
         server.sendNotification("textDocument/publishDiagnostics", diagnostics);
     }
 }
 
-fn saveDocumentHandler(server: *Server, notification: types.DidSaveTextDocumentParams) !void {
+fn saveDocumentHandler(server: *Server, notification: types.DidSaveTextDocumentParams) Error!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -1968,7 +2050,7 @@ fn saveDocumentHandler(server: *Server, notification: types.DidSaveTextDocumentP
     const handle = server.document_store.getHandle(uri) orelse return;
     try server.document_store.applySave(handle);
 
-    if (server.getAutofixMode() == .on_save) {
+    if (std.process.can_spawn and server.getAutofixMode() == .on_save) {
         var text_edits = try server.autofix(allocator, handle);
 
         var workspace_edit = types.WorkspaceEdit{ .changes = .{} };
@@ -1992,7 +2074,7 @@ fn closeDocumentHandler(server: *Server, notification: types.DidCloseTextDocumen
     server.document_store.closeDocument(notification.textDocument.uri);
 }
 
-fn willSaveWaitUntilHandler(server: *Server, request: types.WillSaveTextDocumentParams) !?[]types.TextEdit {
+fn willSaveWaitUntilHandler(server: *Server, request: types.WillSaveTextDocumentParams) Error!?[]types.TextEdit {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -2002,12 +2084,13 @@ fn willSaveWaitUntilHandler(server: *Server, request: types.WillSaveTextDocument
 
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
 
+    if (!std.process.can_spawn) return null;
     var text_edits = try server.autofix(allocator, handle);
 
     return try text_edits.toOwnedSlice(allocator);
 }
 
-fn semanticTokensFullHandler(server: *Server, request: types.SemanticTokensParams) !?types.SemanticTokens {
+fn semanticTokensFullHandler(server: *Server, request: types.SemanticTokensParams) Error!?types.SemanticTokens {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -2020,7 +2103,7 @@ fn semanticTokensFullHandler(server: *Server, request: types.SemanticTokensParam
     return .{ .data = token_array };
 }
 
-fn completionHandler(server: *Server, request: types.CompletionParams) !?types.CompletionList {
+fn completionHandler(server: *Server, request: types.CompletionParams) Error!?types.CompletionList {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -2037,7 +2120,7 @@ fn completionHandler(server: *Server, request: types.CompletionParams) !?types.C
     const pos_context = try analysis.getPositionContext(server.arena.allocator(), handle.text, source_index);
 
     const maybe_completions = switch (pos_context) {
-        .builtin => server.builtin_completions.items,
+        .builtin => try server.completeBuiltin(),
         .var_access, .empty => try server.completeGlobal(source_index, handle),
         .field_access => |loc| try server.completeFieldAccess(handle, source_index, loc),
         .global_error_set => try server.completeError(handle),
@@ -2048,7 +2131,10 @@ fn completionHandler(server: *Server, request: types.CompletionParams) !?types.C
 
             const completing = offsets.locToSlice(handle.tree.source, loc);
             const is_import = pos_context == .import_string_literal;
-            break :blk try completeFileSystemStringLiteral(server.arena.allocator(), &server.document_store, handle, completing, is_import);
+            break :blk completeFileSystemStringLiteral(server.arena.allocator(), &server.document_store, handle, completing, is_import) catch |err| {
+                log.err("failed to get file system completions: {}", .{err});
+                return null;
+            };
         },
         else => null,
     };
@@ -2074,7 +2160,7 @@ fn completionHandler(server: *Server, request: types.CompletionParams) !?types.C
     return .{ .isIncomplete = false, .items = completions };
 }
 
-fn signatureHelpHandler(server: *Server, request: types.SignatureHelpParams) !?types.SignatureHelp {
+fn signatureHelpHandler(server: *Server, request: types.SignatureHelpParams) Error!?types.SignatureHelp {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -2103,7 +2189,7 @@ fn signatureHelpHandler(server: *Server, request: types.SignatureHelpParams) !?t
     };
 }
 
-fn gotoHandler(server: *Server, request: types.TextDocumentPositionParams, resolve_alias: bool) !?types.Location {
+fn gotoHandler(server: *Server, request: types.TextDocumentPositionParams, resolve_alias: bool) Error!?types.Location {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -2126,7 +2212,7 @@ fn gotoHandler(server: *Server, request: types.TextDocumentPositionParams, resol
 fn gotoDefinitionHandler(
     server: *Server,
     request: types.TextDocumentPositionParams,
-) !?types.Location {
+) Error!?types.Location {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -2136,14 +2222,14 @@ fn gotoDefinitionHandler(
 fn gotoDeclarationHandler(
     server: *Server,
     request: types.TextDocumentPositionParams,
-) !?types.Location {
+) Error!?types.Location {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
     return try server.gotoHandler(request, false);
 }
 
-fn hoverHandler(server: *Server, request: types.HoverParams) !?types.Hover {
+fn hoverHandler(server: *Server, request: types.HoverParams) Error!?types.Hover {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -2163,7 +2249,8 @@ fn hoverHandler(server: *Server, request: types.HoverParams) !?types.Hover {
     };
 
     // TODO: Figure out a better solution for comptime interpreter diags
-    if (server.client_capabilities.supports_publish_diagnostics) {
+    if (server.client_capabilities.supports_publish_diagnostics) blk: {
+        if (!std.process.can_spawn) break :blk;
         const diagnostics = try server.generateDiagnostics(handle.*);
         server.sendNotification("textDocument/publishDiagnostics", diagnostics);
     }
@@ -2171,7 +2258,7 @@ fn hoverHandler(server: *Server, request: types.HoverParams) !?types.Hover {
     return response;
 }
 
-fn documentSymbolsHandler(server: *Server, request: types.DocumentSymbolParams) !?[]types.DocumentSymbol {
+fn documentSymbolsHandler(server: *Server, request: types.DocumentSymbolParams) Error!?[]types.DocumentSymbol {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -2180,7 +2267,7 @@ fn documentSymbolsHandler(server: *Server, request: types.DocumentSymbolParams) 
     return try analysis.getDocumentSymbols(server.arena.allocator(), handle.tree, server.offset_encoding);
 }
 
-fn formattingHandler(server: *Server, request: types.DocumentFormattingParams) !?[]types.TextEdit {
+fn formattingHandler(server: *Server, request: types.DocumentFormattingParams) Error!?[]types.TextEdit {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -2188,35 +2275,25 @@ fn formattingHandler(server: *Server, request: types.DocumentFormattingParams) !
 
     if (handle.tree.errors.len != 0) return null;
 
-    const formatted = try handle.tree.render(server.allocator);
-    defer server.allocator.free(formatted);
+    const allocator = server.arena.allocator();
+
+    const formatted = try handle.tree.render(allocator);
 
     if (std.mem.eql(u8, handle.text, formatted)) return null;
 
-    // avoid computing diffs if the output is small
-    const maybe_edits = if (formatted.len <= 512) null else diff.edits(server.arena.allocator(), handle.text, formatted) catch null;
-
-    const edits = maybe_edits orelse {
-        // if edits have been computed we replace the entire file with the formatted text
-        return &[1]types.TextEdit{.{
+    if (formatted.len <= 512) {
+        var text_edits = try allocator.alloc(types.TextEdit, 1);
+        text_edits[0] = .{
             .range = offsets.locToRange(handle.text, .{ .start = 0, .end = handle.text.len }, server.offset_encoding),
             .newText = formatted,
-        }};
-    };
-
-    // Convert from `[]diff.Edit` to `[]types.TextEdit`
-    var text_edits = try std.ArrayListUnmanaged(types.TextEdit).initCapacity(server.arena.allocator(), edits.items.len);
-    for (edits.items) |edit| {
-        text_edits.appendAssumeCapacity(.{
-            .range = edit.range,
-            .newText = edit.newText.items,
-        });
+        };
+        return text_edits;
     }
 
-    return text_edits.items;
+    return if (diff.edits(allocator, handle.text, formatted)) |text_edits| text_edits.items else |_| null;
 }
 
-fn didChangeConfigurationHandler(server: *Server, request: configuration.DidChangeConfigurationParams) !void {
+fn didChangeConfigurationHandler(server: *Server, request: configuration.DidChangeConfigurationParams) Error!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -2236,13 +2313,15 @@ fn didChangeConfigurationHandler(server: *Server, request: configuration.DidChan
             }
         }
 
-        try configuration.configChanged(server.config, server.allocator, null);
+        configuration.configChanged(server.config, server.allocator, null) catch |err| {
+            log.err("failed to update config: {}", .{err});
+        };
     } else if (server.client_capabilities.supports_configuration) {
         try server.requestConfiguration();
     }
 }
 
-fn renameHandler(server: *Server, request: types.RenameParams) !?types.WorkspaceEdit {
+fn renameHandler(server: *Server, request: types.RenameParams) Error!?types.WorkspaceEdit {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -2250,7 +2329,7 @@ fn renameHandler(server: *Server, request: types.RenameParams) !?types.Workspace
     return if (response) |rep| rep.rename else null;
 }
 
-fn referencesHandler(server: *Server, request: types.ReferenceParams) !?[]types.Location {
+fn referencesHandler(server: *Server, request: types.ReferenceParams) Error!?[]types.Location {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -2258,7 +2337,7 @@ fn referencesHandler(server: *Server, request: types.ReferenceParams) !?[]types.
     return if (response) |rep| rep.references else null;
 }
 
-fn documentHighlightHandler(server: *Server, request: types.DocumentHighlightParams) !?[]types.DocumentHighlight {
+fn documentHighlightHandler(server: *Server, request: types.DocumentHighlightParams) Error!?[]types.DocumentHighlight {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -2294,7 +2373,7 @@ const GeneralReferencesResponse = union {
     highlight: []types.DocumentHighlight,
 };
 
-fn generalReferencesHandler(server: *Server, request: GeneralReferencesRequest) !?GeneralReferencesResponse {
+fn generalReferencesHandler(server: *Server, request: GeneralReferencesRequest) Error!?GeneralReferencesResponse {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -2379,7 +2458,7 @@ fn isPositionBefore(lhs: types.Position, rhs: types.Position) bool {
     }
 }
 
-fn inlayHintHandler(server: *Server, request: types.InlayHintParams) !?[]types.InlayHint {
+fn inlayHintHandler(server: *Server, request: types.InlayHintParams) Error!?[]types.InlayHint {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -2421,7 +2500,7 @@ fn inlayHintHandler(server: *Server, request: types.InlayHintParams) !?[]types.I
     return visible_hints;
 }
 
-fn codeActionHandler(server: *Server, request: types.CodeActionParams) !?[]types.CodeAction {
+fn codeActionHandler(server: *Server, request: types.CodeActionParams) Error!?[]types.CodeAction {
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
 
     var builder = code_actions.Builder{
@@ -2433,8 +2512,12 @@ fn codeActionHandler(server: *Server, request: types.CodeActionParams) !?[]types
 
     // as of right now, only ast-check errors may get a code action
     var diagnostics = std.ArrayListUnmanaged(types.Diagnostic){};
-    if (server.config.enable_ast_check_diagnostics and handle.tree.errors.len == 0) {
-        try getAstCheckDiagnostics(server, handle.*, &diagnostics);
+    if (server.config.enable_ast_check_diagnostics and handle.tree.errors.len == 0) blk: {
+        if (!std.process.can_spawn) break :blk;
+        getAstCheckDiagnostics(server, handle.*, &diagnostics) catch |err| {
+            log.err("failed to run ast-check: {}", .{err});
+            return error.InternalError;
+        };
     }
 
     var actions = std.ArrayListUnmanaged(types.CodeAction){};
@@ -2445,7 +2528,7 @@ fn codeActionHandler(server: *Server, request: types.CodeActionParams) !?[]types
     return actions.items;
 }
 
-fn foldingRangeHandler(server: *Server, request: types.FoldingRangeParams) !?[]types.FoldingRange {
+fn foldingRangeHandler(server: *Server, request: types.FoldingRangeParams) Error!?[]types.FoldingRange {
     const Token = std.zig.Token;
     const Node = Ast.Node;
     const allocator = server.arena.allocator();
@@ -2708,7 +2791,7 @@ pub const SelectionRange = struct {
     parent: ?*SelectionRange,
 };
 
-fn selectionRangeHandler(server: *Server, request: types.SelectionRangeParams) !?[]*SelectionRange {
+fn selectionRangeHandler(server: *Server, request: types.SelectionRangeParams) Error!?[]*SelectionRange {
     const allocator = server.arena.allocator();
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
 
@@ -2898,26 +2981,23 @@ pub fn processJsonRpc(
     var parser = std.json.Parser.init(server.arena.allocator(), false);
     defer parser.deinit();
 
-    var tree = parser.parse(json) catch {
-        log.err("failed to parse message!", .{});
+    var tree = parser.parse(json) catch |err| {
+        log.err("failed to parse message: {}", .{err});
         return; // maybe panic?
     };
     defer tree.deinit();
 
-    const message = Message.fromJsonValueTree(tree) catch {
-        log.err("failed to parse message!", .{});
+    const message = Message.fromJsonValueTree(tree) catch |err| {
+        log.err("failed to parse message: {}", .{err});
         return; // maybe panic?
     };
 
-    server.processMessage(message) catch |err| {
-        log.err("got {} while processing message!", .{err}); // TODO include message information
-        switch (message) {
-            .RequestMessage => |request| server.sendResponseError(request.id, .{
-                .code = @errorToInt(err),
-                .message = @errorName(err),
-            }),
-            else => {},
-        }
+    server.processMessage(message) catch |err| switch (message) {
+        .RequestMessage => |request| server.sendResponseError(request.id, .{
+            .code = @errorToInt(err),
+            .message = @errorName(err),
+        }),
+        else => {},
     };
 }
 
@@ -2969,12 +3049,15 @@ fn processMessage(server: *Server, message: Message) Error!void {
 
             return error.InvalidRequest; // server received a request after shutdown!
         },
+        .exiting_success,
+        .exiting_failure,
+        => unreachable,
     }
 
     const start_time = std.time.milliTimestamp();
     defer {
         // makes `zig build test` look nice
-        if (!zig_builtin.is_test and !std.mem.eql(u8, method, "shutdown")) {
+        if (!zig_builtin.is_test) {
             const end_time = std.time.milliTimestamp();
             log.debug("Took {}ms to process method {s}", .{ end_time - start_time, method });
         }
@@ -3031,7 +3114,13 @@ fn processMessage(server: *Server, message: Message) Error!void {
             const ParamsType = handler_info.params[1].type.?; // TODO add error message on null
 
             const params: ParamsType = tres.parse(ParamsType, message.params().?, server.arena.allocator()) catch return error.InternalError;
-            const response = handler(server, params) catch return error.InternalError;
+            const response = handler(server, params) catch |err| {
+                log.err("got {} error while handling {s}", .{ err, method });
+                if (@errorReturnTrace()) |trace| {
+                    std.debug.dumpStackTrace(trace.*);
+                }
+                return error.InternalError;
+            };
 
             if (@TypeOf(response) == void) return;
 
@@ -3070,32 +3159,11 @@ pub fn init(
     };
     errdefer document_store.deinit();
 
-    var builtin_completions = try std.ArrayListUnmanaged(types.CompletionItem).initCapacity(allocator, data.builtins.len);
-    errdefer builtin_completions.deinit(allocator);
-
-    for (data.builtins) |builtin| {
-        const insert_text = if (config.enable_snippets) builtin.snippet else builtin.name;
-        builtin_completions.appendAssumeCapacity(.{
-            .label = builtin.name,
-            .kind = .Function,
-            .filterText = builtin.name[1..],
-            .detail = builtin.signature,
-            .insertText = if (config.include_at_in_builtins) insert_text else insert_text[1..],
-            .insertTextFormat = if (config.enable_snippets) .Snippet else .PlainText,
-            .documentation = .{
-                .MarkupContent = .{
-                    .kind = .markdown,
-                    .value = builtin.documentation,
-                },
-            },
-        });
-    }
-
     return Server{
         .config = config,
         .allocator = allocator,
         .document_store = document_store,
-        .builtin_completions = builtin_completions,
+        .builtin_completions = null,
         .recording_enabled = recording_enabled,
         .replay_enabled = replay_enabled,
         .status = .uninitialized,
@@ -3106,7 +3174,7 @@ pub fn deinit(server: *Server) void {
     server.document_store.deinit();
     analysis.deinit();
 
-    server.builtin_completions.deinit(server.allocator);
+    if (server.builtin_completions) |*completions| completions.deinit(server.allocator);
 
     for (server.outgoing_messages.items) |message| {
         server.allocator.free(message);
