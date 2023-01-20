@@ -44,6 +44,43 @@ test "ComptimeInterpreter - builtins" {
     } }, .{ .int_u64_value = 3 });
 }
 
+test "ComptimeInterpreter - string literal" {
+    if (true) return error.SkipZigTest; // TODO
+    const source =
+        \\const foobarbaz = "hello world!";
+        \\
+    ;
+
+    var result = try testInterpret(source, 1);
+    defer result.deinit();
+
+    try std.testing.expect(result.ty == .pointer_type);
+    try std.testing.expect(result.val == .bytes);
+
+    try std.testing.expectEqualStrings("hello world!", result.val.bytes);
+}
+
+test "ComptimeInterpreter - labeled block" {
+    try testExprCheck(
+        \\blk: {
+        \\    break :blk true;
+        \\}
+    , .{ .simple = .bool }, .{ .simple = .bool_true });
+}
+
+test "ComptimeInterpreter - if" {
+    try testExprCheck(
+        \\blk: {
+        \\    break :blk if (true) true else false;
+        \\}
+    , .{ .simple = .bool }, .{ .simple = .bool_true });
+    try testExprCheck(
+        \\blk: {
+        \\    break :blk if (false) true else false;
+        \\}
+    , .{ .simple = .bool }, .{ .simple = .bool_false });
+}
+
 test "ComptimeInterpreter - call return primitive type" {
     try testCallCheck(
         \\pub fn Foo() type {
@@ -231,6 +268,9 @@ fn testInterpret(source: []const u8, node_idx: Ast.Node.Index) !Result {
     _ = try interpreter.interpret(0, .none, .{});
 
     const result = try interpreter.interpret(node_idx, .none, .{});
+
+    try std.testing.expect(result.value.ty != .none);
+    try std.testing.expect(result.value.val != .none);
 
     return Result{
         .interpreter = interpreter,
