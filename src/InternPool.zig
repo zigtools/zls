@@ -414,6 +414,121 @@ pub const Key = union(enum) {
         };
     }
 
+    pub fn onePossibleValue(ty: Key, ip: InternPool) ?Key {
+        switch (ty) {
+            .simple => |simple| switch (simple) {
+                .f16,
+                .f32,
+                .f64,
+                .f80,
+                .f128,
+                .usize,
+                .isize,
+                .c_short,
+                .c_ushort,
+                .c_int,
+                .c_uint,
+                .c_long,
+                .c_ulong,
+                .c_longlong,
+                .c_ulonglong,
+                .c_longdouble,
+                .anyopaque,
+                .bool,
+                .type,
+                .anyerror,
+                .comptime_int,
+                .comptime_float,
+                .@"anyframe",
+                .enum_literal_type,
+                => return null,
+
+                .void => return Key{ .simple = .void_value },
+                .noreturn => return Key{ .simple = .unreachable_value },
+                .null_type => return Key{ .simple = .null_value },
+                .undefined_type => return Key{ .simple = .undefined_value },
+
+                // values
+                .undefined_value,
+                .void_value,
+                .unreachable_value,
+                .null_value,
+                .bool_true,
+                .bool_false,
+                => unreachable,
+            },
+            .int_type => |int_info| {
+                if (int_info.bits == 0) {
+                    switch (int_info.signedness) {
+                        .unsigned => return Key{ .int_u64_value = 0 },
+                        .signed => return Key{ .int_i64_value = 0 },
+                    }
+                }
+                return null;
+            },
+            .pointer_type => return null,
+            .array_type => |array_info| {
+                if (array_info.len == 0) {
+                    @panic("TODO return empty array value");
+                } else if (ip.indexToKey(array_info.child).onePossibleValue(ip)) |value| {
+                    return value;
+                }
+                return null;
+            },
+            .struct_type => |struct_info| {
+                for (struct_info.fields) |field| {
+                    if (field.is_comptime) continue;
+                    if (ip.indexToKey(field.ty).onePossibleValue(ip) != null) continue;
+                    return null;
+                }
+                @panic("TODO return empty struct value");
+            },
+            .optional_type => |optional_info| {
+                const child = ip.indexToKey(optional_info.payload_type);
+                if (child == .simple and child.simple == .noreturn) {
+                    return Key{ .simple = .null_value };
+                }
+                return null;
+            },
+            .error_union_type => return null,
+            .error_set_type => return null,
+            .enum_type => |enum_info| {
+                switch (enum_info.fields.len) {
+                    0 => return Key{ .simple = .unreachable_value },
+                    1 => return ip.indexToKey(enum_info.fields[0].val),
+                    else => return null,
+                }
+            },
+            .function_type => return null,
+            .union_type => @panic("TODO"),
+            .tuple_type => @panic("TODO"),
+            .vector_type => |vector_info| {
+                if (vector_info.len == 0) {
+                    @panic("TODO return empty array value");
+                } else if (ip.indexToKey(vector_info.child).onePossibleValue(ip)) |value| {
+                    return value;
+                }
+                return null;
+            },
+            .anyframe_type => return null,
+
+            .int_u64_value,
+            .int_i64_value,
+            .int_big_value,
+            .float_16_value,
+            .float_32_value,
+            .float_64_value,
+            .float_80_value,
+            .float_128_value,
+            => unreachable,
+
+            .bytes,
+            .aggregate,
+            .union_value,
+            => unreachable,
+        }
+    }
+
     pub const TypeFormatContext = struct {
         ty: Key,
         options: FormatOptions = .{},
@@ -2314,10 +2429,8 @@ fn optionalPtrTy(
                 .Many, .One => {
                     if (child_ptr_key.is_allowzero) return Index.none;
 
-                    // TODO optionals of zero sized types behave like bools, not pointers
-                    // if ((try sema.typeHasOnePossibleValue(child_type)) != null) {
-                    //     return null;
-                    // }
+                    // optionals of zero sized types behave like bools, not pointers
+                    if (child_key.onePossibleValue(ip) != null) return Index.none;
 
                     return child_type;
                 },
