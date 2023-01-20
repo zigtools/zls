@@ -548,7 +548,13 @@ pub fn interpret(
                     } else IPKey{
                         .int_u64_value = try std.fmt.parseInt(u64, s, 0),
                     },
-                    .big_int => @panic("TODO: implement big int"),
+                    .big_int => |base| blk: {
+                        var big_int = try std.math.big.int.Managed.init(interpreter.allocator);
+                        defer big_int.deinit();
+                        const prefix_length: usize = if (base != .decimal) 2 else 0;
+                        try big_int.setString(@enumToInt(base), s[prefix_length..]);
+                        break :blk IPKey{ .int_big_value = big_int.toConst() };
+                    },
                     .failure => return error.CriticalAstFailure,
                 },
             );
