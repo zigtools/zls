@@ -13,3 +13,8 @@ pub const URI = @import("uri.zig");
 pub const DocumentStore = @import("DocumentStore.zig");
 pub const ComptimeInterpreter = @import("ComptimeInterpreter.zig");
 pub const InternPool = @import("InternPool.zig");
+
+comptime {
+    const std = @import("std");
+    std.testing.refAllDecls(@This());
+}

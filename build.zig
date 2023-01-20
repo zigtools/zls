@@ -49,7 +49,7 @@ pub fn build(b: *std.build.Builder) !void {
         "enable_tracy_callstack",
         b.option(bool, "enable_tracy_callstack", "Enable callstack graphs.") orelse false,
     );
-    
+
     exe_options.addOption(
         bool,
         "enable_failing_allocator",
@@ -171,4 +171,9 @@ pub fn build(b: *std.build.Builder) !void {
     tests.setBuildMode(.Debug);
     tests.setTarget(target);
     test_step.dependOn(&tests.step);
+
+    var src_tests = b.addTest("src/zls.zig");
+    src_tests.setBuildMode(.Debug);
+    src_tests.setTarget(target);
+    test_step.dependOn(&src_tests.step);
 }
