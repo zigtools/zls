@@ -3084,6 +3084,38 @@ test "bytes value" {
     try std.testing.expectEqualStrings("https://www.duckduckgo.com", ip.indexToKey(bytes_value3).bytes);
 }
 
+test "coerceInMemoryAllowed integers and floats" {
+    const gpa = std.testing.allocator;
+
+    var arena_allocator = std.heap.ArenaAllocator.init(gpa);
+    defer arena_allocator.deinit();
+    const arena = arena_allocator.allocator();
+
+    var ip: InternPool = .{};
+    defer ip.deinit(gpa);
+
+    const u32_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .unsigned, .bits = 32 } });
+    const u16_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .unsigned, .bits = 16 } });
+    const i32_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .signed, .bits = 32 } });
+    const i16_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .signed, .bits = 16 } });
+
+    const f32_type = try ip.get(gpa, .{ .simple = .f32 });
+    const f64_type = try ip.get(gpa, .{ .simple = .f64 });
+
+    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, u32_type, u32_type, true, builtin.target) == .ok);
+    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, u32_type, u16_type, true, builtin.target) == .ok);
+    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, u16_type, u32_type, true, builtin.target) == .int_not_coercible);
+    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, i32_type, u32_type, true, builtin.target) == .int_not_coercible);
+    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, u32_type, i32_type, true, builtin.target) == .int_not_coercible);
+    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, u32_type, i16_type, true, builtin.target) == .int_not_coercible);
+
+    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, f32_type, f32_type, true, builtin.target) == .ok);
+    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, f64_type, f32_type, true, builtin.target) == .no_match);
+    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, f32_type, f64_type, true, builtin.target) == .no_match);
+    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, u32_type, f32_type, true, builtin.target) == .no_match);
+    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, f32_type, u32_type, true, builtin.target) == .no_match);
+}
+
 test "resolvePeerTypes" {
     const gpa = std.testing.allocator;
 
