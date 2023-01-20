@@ -83,6 +83,39 @@ test "ComptimeInterpreter - if" {
     , .{ .simple = .bool }, .{ .simple = .bool_false });
 }
 
+test "ComptimeInterpreter - field access" {
+    if (true) return error.SkipZigTest; // TODO
+    try testExprCheck(
+        \\blk: {
+        \\    const foo = struct {alpha: u32, beta: bool} = undefined;
+        \\    break :blk foo.beta;
+        \\}
+    , .{ .simple = .bool }, null);
+}
+
+test "ComptimeInterpreter - pointer operations" {
+    if (true) return error.SkipZigTest; // TODO
+    try testExprCheck(
+        \\blk: {
+        \\    const foo: []const u8 = "";
+        \\    break :blk foo.len;
+        \\}
+    , .{ .simple = .usize }, .{ .bytes = "" });
+    try testExprCheck(
+        \\blk: {
+        \\    const foo = true;
+        \\    break :blk &foo;
+        \\}
+    , @panic("TODO"), .{ .simple = .bool_true });
+    try testExprCheck(
+        \\blk: {
+        \\    const foo = true;
+        \\    const bar = &foo;
+        \\    break :blk bar.*;
+        \\}
+    , @panic("TODO"), .{ .simple = .bool_true });
+}
+
 test "ComptimeInterpreter - call return primitive type" {
     try testCallCheck(
         \\pub fn Foo() type {
