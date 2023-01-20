@@ -1889,14 +1889,12 @@ const InMemoryCoercionResult = union(enum) {
     }
 };
 
-/// If pointers have the same representation in runtime memory
-/// * `const` attribute can be gained
-/// * `volatile` attribute can be gained
-/// * `allowzero` attribute can be gained (whether from explicit attribute, C pointer, or optional pointer) but only if dest_is_const
-/// * alignment can be decreased
-/// * bit offset attributes must match exactly
-/// * `*`/`[*]` must match exactly, but `[*c]` matches either one
-/// * sentinel-terminated pointers can coerce into `[*]`
+/// If types have the same representation in runtime memory
+/// * int/float: same number of bits
+/// * pointer: see `coerceInMemoryAllowedPtrs`
+/// * error union: coerceable error set and payload
+/// * error set: sub-set to super-set
+/// * array: same shape and coerceable child
 fn coerceInMemoryAllowed(
     ip: *InternPool,
     gpa: Allocator,
@@ -1928,12 +1926,19 @@ fn coerceInMemoryAllowed(
 
             if (dest_info.signedness == src_info.signedness and dest_info.bits == src_info.bits) return .ok;
 
-            return InMemoryCoercionResult{ .int_not_coercible = .{
-                .actual_signedness = src_info.signedness,
-                .wanted_signedness = dest_info.signedness,
-                .actual_bits = src_info.bits,
-                .wanted_bits = dest_info.bits,
-            } };
+            if ((src_info.signedness == dest_info.signedness and dest_info.bits < src_info.bits) or
+                // small enough unsigned ints can get casted to large enough signed ints
+                (dest_info.signedness == .signed and (src_info.signedness == .unsigned or dest_info.bits <= src_info.bits)) or
+                (dest_info.signedness == .unsigned and src_info.signedness == .signed))
+            {
+                return InMemoryCoercionResult{ .int_not_coercible = .{
+                    .actual_signedness = src_info.signedness,
+                    .wanted_signedness = dest_info.signedness,
+                    .actual_bits = src_info.bits,
+                    .wanted_bits = dest_info.bits,
+                } };
+            }
+            return .ok;
         },
         .Float => {
             const dest_bits = dest_key.floatBits(target);
@@ -2225,7 +2230,7 @@ fn coerceInMemoryAllowedFns(
     dest_info: Function,
     src_info: Function,
     target: std.Target,
-) !InMemoryCoercionResult {
+) error{OutOfMemory}!InMemoryCoercionResult {
     if (dest_info.is_var_args != src_info.is_var_args) {
         return InMemoryCoercionResult{ .fn_var_args = dest_info.is_var_args };
     }
@@ -2269,24 +2274,24 @@ fn coerceInMemoryAllowedFns(
         } };
     }
 
-    for (dest_info.args) |dest_param_ty, i| {
-        const src_param_ty = src_info.args[i];
+    if (!dest_info.args_is_comptime.eql(src_info.args_is_comptime)) {
+        const index = dest_info.args_is_comptime.xorWith(src_info.args_is_comptime).findFirstSet().?;
+        return InMemoryCoercionResult{ .fn_param_comptime = .{
+            .index = index,
+            .wanted = dest_info.args_is_comptime.isSet(index),
+        } };
+    }
 
-        // TODO move outside of loop
-        if (i < 32 and dest_info.args_is_comptime.isSet(i) != src_info.args_is_comptime.isSet(i)) {
-            return InMemoryCoercionResult{ .fn_param_comptime = .{
-                .index = i,
-                .wanted = dest_info.args_is_comptime.isSet(i),
-            } };
-        }
+    for (dest_info.args) |dest_arg_ty, i| {
+        const src_arg_ty = src_info.args[i];
 
         // Note: Cast direction is reversed here.
-        const param = try ip.coerceInMemoryAllowed(gpa, arena, src_param_ty, dest_param_ty, true, target);
+        const param = try ip.coerceInMemoryAllowed(gpa, arena, src_arg_ty, dest_arg_ty, true, target);
         if (param != .ok) {
             return InMemoryCoercionResult{ .fn_param = .{
                 .child = try param.dupe(arena),
-                .actual = src_param_ty,
-                .wanted = dest_param_ty,
+                .actual = src_arg_ty,
+                .wanted = dest_arg_ty,
                 .index = i,
             } };
         }
@@ -2295,6 +2300,14 @@ fn coerceInMemoryAllowedFns(
     return .ok;
 }
 
+/// If pointers have the same representation in runtime memory
+/// * `const` attribute can be gained
+/// * `volatile` attribute can be gained
+/// * `allowzero` attribute can be gained (whether from explicit attribute, C pointer, or optional pointer) but only if dest_is_const
+/// * alignment can be decreased
+/// * bit offset attributes must match exactly
+/// * `*`/`[*]` must match exactly, but `[*c]` matches either one
+/// * sentinel-terminated pointers can coerce into `[*]`
 fn coerceInMemoryAllowedPtrs(
     ip: *InternPool,
     gpa: Allocator,
@@ -2305,7 +2318,7 @@ fn coerceInMemoryAllowedPtrs(
     src_ptr_info: Key,
     dest_is_const: bool,
     target: std.Target,
-) !InMemoryCoercionResult {
+) error{OutOfMemory}!InMemoryCoercionResult {
     const dest_info = dest_ptr_info.pointer_type;
     const src_info = src_ptr_info.pointer_type;
 
