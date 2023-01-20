@@ -40,10 +40,16 @@ pub const InterpreterError = struct {
 };
 
 /// `message` must be allocated with interpreter allocator
-pub fn recordError(interpreter: *ComptimeInterpreter, node_idx: Ast.Node.Index, code: []const u8, message: []const u8) error{OutOfMemory}!void {
+pub fn recordError(
+    interpreter: *ComptimeInterpreter,
+    node_idx: Ast.Node.Index,
+    code: []const u8,
+    comptime fmt: []const u8,
+    args: anytype,
+) error{OutOfMemory}!void {
     try interpreter.errors.put(interpreter.allocator, node_idx, .{
         .code = code,
-        .message = message,
+        .message = try std.fmt.allocPrint(interpreter.allocator, fmt, args),
     });
 }
 
@@ -244,7 +250,8 @@ pub fn interpret(
                     try interpreter.recordError(
                         container_field.ast.type_expr,
                         "expected_type",
-                        try std.fmt.allocPrint(interpreter.allocator, "expected type 'type', found '{}'", .{init_type_value.ty.fmtType(interpreter.ip)}),
+                        "expected type 'type', found '{}'",
+                        .{init_type_value.ty.fmtType(interpreter.ip)},
                     );
                     continue;
                 }
@@ -429,7 +436,8 @@ pub fn interpret(
                     try interpreter.recordError(
                         node_idx,
                         "undeclared_identifier",
-                        try std.fmt.allocPrint(interpreter.allocator, "use of undeclared identifier '{s}'", .{value}),
+                        "use of undeclared identifier '{s}'",
+                        .{value},
                     );
                     return e;
                 },
@@ -456,7 +464,8 @@ pub fn interpret(
                     try interpreter.recordError(
                         node_idx,
                         "undeclared_identifier",
-                        try std.fmt.allocPrint(interpreter.allocator, "use of undeclared identifier '{s}'", .{rhs_str}),
+                        "`{}` has no member '{s}'",
+                        .{ irv.ty.fmtType(interpreter.ip), rhs_str },
                     );
                     return e;
                 },
@@ -620,14 +629,15 @@ pub fn interpret(
                     if (index != params.len - 1)
                         try writer.writeAll(", ");
                 }
-                try interpreter.recordError(node_idx, "compile_log", try final.toOwnedSlice());
+                try interpreter.recordError(node_idx, "compile_log", "{s}", .{try final.toOwnedSlice()});
 
                 return InterpretResult{ .nothing = {} };
             }
 
             if (std.mem.eql(u8, call_name, "@compileError")) {
-                // TODO: Add message
-                try interpreter.recordError(node_idx, "compile_error", try std.fmt.allocPrint(interpreter.allocator, "compile error", .{}));
+                if (params.len != 0) return error.InvalidBuiltin;
+                const message = offsets.nodeToSlice(tree, params[0]);
+                try interpreter.recordError(node_idx, "compile_error", "{s}", .{message});
                 return InterpretResult{ .@"return" = {} };
             }
 
@@ -865,7 +875,12 @@ pub fn interpret(
             const value = try result.getValue();
 
             if (value.ty != bool_type) {
-                try interpreter.recordError(node_idx, "invalid_deref", try std.fmt.allocPrint(interpreter.allocator, "expected type `bool` but got `{}`", .{value.ty.fmtType(interpreter.ip)}));
+                try interpreter.recordError(
+                    node_idx,
+                    "invalid_deref",
+                    "expected type `bool` but got `{}`",
+                    .{value.ty.fmtType(interpreter.ip)},
+                );
                 return error.InvalidOperation;
             }
 
@@ -912,7 +927,7 @@ pub fn interpret(
             const type_key = interpreter.ip.indexToKey(value.ty);
 
             if (type_key != .pointer_type) {
-                try interpreter.recordError(node_idx, "invalid_deref", try std.fmt.allocPrint(interpreter.allocator, "cannot deference non-pointer", .{}));
+                try interpreter.recordError(node_idx, "invalid_deref", "cannot deference non-pointer", .{});
                 return error.InvalidOperation;
             }
 
@@ -973,7 +988,8 @@ pub fn call(
             try interpreter.recordError(
                 param.type_expr,
                 "expected_type",
-                std.fmt.allocPrint(interpreter.allocator, "expected type 'type', found '{}'", .{tex.ty.fmtType(interpreter.ip)}) catch return error.CriticalAstFailure,
+                "expected type 'type', found '{}'",
+                .{tex.ty.fmtType(interpreter.ip)},
             );
             return error.InvalidCast;
         }
