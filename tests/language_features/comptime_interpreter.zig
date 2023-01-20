@@ -18,11 +18,10 @@ test "ComptimeInterpreter - primitive types" {
     // TODO try testExprCheck("-2", .{ .simple = .comptime_int }, .{ .int_i64_value = -2 });
     try testExprCheck("3.0", .{ .simple = .comptime_float }, null);
 
-    if (true) return error.SkipZigTest; // TODO
     try testExprCheck("null", .{ .simple = .null_type }, .{ .simple = .null_value });
-    try testExprCheck("void", .{ .simple = .void }, .{ .simple = .void_value });
+    try testExprCheck("void", .{ .simple = .type }, .{ .simple = .void });
     try testExprCheck("undefined", .{ .simple = .undefined_type }, .{ .simple = .undefined_value });
-    try testExprCheck("noreturn", .{ .simple = .noreturn }, .{ .simple = .unreachable_value });
+    try testExprCheck("noreturn", .{ .simple = .type }, .{ .simple = .noreturn });
 }
 
 test "ComptimeInterpreter - expressions" {

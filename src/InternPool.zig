@@ -1052,6 +1052,48 @@ pub const Simple = enum(u32) {
     null_value,
     bool_true,
     bool_false,
+
+    pub fn toType(self: Simple) Simple {
+        return switch (self) {
+            .f16,
+            .f32,
+            .f64,
+            .f80,
+            .f128,
+            .usize,
+            .isize,
+            .c_short,
+            .c_ushort,
+            .c_int,
+            .c_uint,
+            .c_long,
+            .c_ulong,
+            .c_longlong,
+            .c_ulonglong,
+            .c_longdouble,
+            .anyopaque,
+            .bool,
+            .void,
+            .type,
+            .anyerror,
+            .comptime_int,
+            .comptime_float,
+            .noreturn,
+            .@"anyframe",
+            .null_type,
+            .undefined_type,
+            .enum_literal_type,
+            => .type,
+
+            // values
+            .undefined_value => .undefined_type,
+            .void_value => .void,
+            .unreachable_value => .noreturn,
+            .null_value => .null_type,
+            .bool_true => .bool,
+            .bool_false => .bool,
+        };
+    }
 };
 
 pub fn deinit(ip: *InternPool, gpa: Allocator) void {

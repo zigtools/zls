@@ -378,56 +378,58 @@ pub fn interpret(
         .identifier => {
             const value = offsets.nodeToSlice(tree, node_idx);
 
-            if (std.mem.eql(u8, "bool", value)) {
+            const simples = std.ComptimeStringMap(InternPool.Simple, .{
+                .{ "anyerror", .anyerror },
+                .{ "anyframe", .@"anyframe" },
+                .{ "anyopaque", .anyopaque },
+                .{ "bool", .bool },
+                .{ "c_int", .c_int },
+                .{ "c_long", .c_long },
+                .{ "c_longdouble", .c_longdouble },
+                .{ "c_longlong", .c_longlong },
+                .{ "c_short", .c_short },
+                .{ "c_uint", .c_uint },
+                .{ "c_ulong", .c_ulong },
+                .{ "c_ulonglong", .c_ulonglong },
+                .{ "c_ushort", .c_ushort },
+                .{ "comptime_float", .comptime_float },
+                .{ "comptime_int", .comptime_int },
+                .{ "f128", .f128 },
+                .{ "f16", .f16 },
+                .{ "f32", .f32 },
+                .{ "f64", .f64 },
+                .{ "f80", .f80 },
+                .{ "false", .bool_false },
+                .{ "isize", .isize },
+                .{ "noreturn", .noreturn },
+                .{ "null", .null_value },
+                .{ "true", .bool_true },
+                .{ "type", .type },
+                .{ "undefined", .undefined_value },
+                .{ "usize", .usize },
+                .{ "void", .void },
+            });
+
+            if (simples.get(value)) |simple| {
                 return InterpretResult{ .value = Value{
                     .interpreter = interpreter,
                     .node_idx = node_idx,
-                    .ty = try interpreter.ip.get(interpreter.allocator, IPKey{ .simple = .type }),
-                    .val = try interpreter.ip.get(interpreter.allocator, IPKey{ .simple = .bool }),
+                    .ty = try interpreter.ip.get(interpreter.allocator, IPKey{ .simple = simple.toType() }),
+                    .val = try interpreter.ip.get(interpreter.allocator, IPKey{ .simple = simple }),
                 } };
-            } else if (std.mem.eql(u8, "true", value)) {
-                return InterpretResult{ .value = Value{
-                    .interpreter = interpreter,
-                    .node_idx = node_idx,
-                    .ty = try interpreter.ip.get(interpreter.allocator, IPKey{ .simple = .bool }),
-                    .val = try interpreter.ip.get(interpreter.allocator, IPKey{ .simple = .bool_true }),
-                } };
-            } else if (std.mem.eql(u8, "false", value)) {
-                return InterpretResult{ .value = Value{
-                    .interpreter = interpreter,
-                    .node_idx = node_idx,
-                    .ty = try interpreter.ip.get(interpreter.allocator, IPKey{ .simple = .bool }),
-                    .val = try interpreter.ip.get(interpreter.allocator, IPKey{ .simple = .bool_false }),
-                } };
-            } else if (std.mem.eql(u8, "usize", value) or std.mem.eql(u8, "isize", value)) {
-                return InterpretResult{ .value = Value{
-                    .interpreter = interpreter,
-                    .node_idx = node_idx,
-                    .ty = try interpreter.ip.get(interpreter.allocator, IPKey{ .simple = .type }),
-                    .val = try interpreter.ip.get(interpreter.allocator, IPKey{
-                        .simple = if (value[0] == 'u') .usize else .isize,
-                    }),
-                } };
-            } else if (std.mem.eql(u8, "type", value)) {
-                return InterpretResult{ .value = Value{
-                    .interpreter = interpreter,
-                    .node_idx = node_idx,
-                    .ty = try interpreter.ip.get(interpreter.allocator, IPKey{ .simple = .type }),
-                    .val = try interpreter.ip.get(interpreter.allocator, IPKey{ .simple = .type }),
-                } };
-            } else if (value.len >= 2 and (value[0] == 'u' or value[0] == 'i')) int: {
+            }
+
+            if (value.len >= 2 and (value[0] == 'u' or value[0] == 'i')) blk: {
                 return InterpretResult{ .value = Value{
                     .interpreter = interpreter,
                     .node_idx = node_idx,
                     .ty = try interpreter.ip.get(interpreter.allocator, IPKey{ .simple = .type }),
                     .val = try interpreter.ip.get(interpreter.allocator, IPKey{ .int_type = .{
                         .signedness = if (value[0] == 'u') .unsigned else .signed,
-                        .bits = std.fmt.parseInt(u16, value[1..], 10) catch break :int,
+                        .bits = std.fmt.parseInt(u16, value[1..], 10) catch break :blk,
                     } }),
                 } };
             }
-
-            // TODO: Floats
 
             // Logic to find identifiers in accessible scopes
             const decl = interpreter.huntItDown(namespace, value, options) catch |err| switch (err) {
