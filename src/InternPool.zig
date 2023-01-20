@@ -315,7 +315,7 @@ pub const Key = union(enum) {
                 else => unreachable,
             },
             .int_type => |int_info| return int_info,
-            .enum_type => @panic("TODO"),
+            .enum_type => return panicOrElse("TODO", .{ .signedness = .unsigned, .bits = 0 }),
             .struct_type => |struct_info| {
                 assert(struct_info.layout == .Packed);
                 key = ip.indexToKey(struct_info.backing_int_ty);
@@ -383,7 +383,7 @@ pub const Key = union(enum) {
     pub fn elemType2(ty: Key) Index {
         return switch (ty) {
             .simple => |simple| switch (simple) {
-                .@"anyframe" => @panic("TODO: return void type"),
+                .@"anyframe" => panicOrElse("TODO: return void type", Index.none),
                 else => unreachable,
             },
             .pointer_type => |pointer_info| pointer_info.elem_type,
@@ -469,7 +469,7 @@ pub const Key = union(enum) {
             .pointer_type => return null,
             .array_type => |array_info| {
                 if (array_info.len == 0) {
-                    @panic("TODO return empty array value");
+                    return panicOrElse("TODO return empty array value", null);
                 } else if (ip.indexToKey(array_info.child).onePossibleValue(ip)) |value| {
                     return value;
                 }
@@ -481,7 +481,7 @@ pub const Key = union(enum) {
                     if (ip.indexToKey(field.ty).onePossibleValue(ip) != null) continue;
                     return null;
                 }
-                @panic("TODO return empty struct value");
+                return panicOrElse("TODO return empty struct value", null);
             },
             .optional_type => |optional_info| {
                 const child = ip.indexToKey(optional_info.payload_type);
@@ -500,11 +500,11 @@ pub const Key = union(enum) {
                 }
             },
             .function_type => return null,
-            .union_type => @panic("TODO"),
-            .tuple_type => @panic("TODO"),
+            .union_type => return panicOrElse("TODO", null),
+            .tuple_type => return panicOrElse("TODO", null),
             .vector_type => |vector_info| {
                 if (vector_info.len == 0) {
-                    @panic("TODO return empty array value");
+                    return panicOrElse("TODO return empty array value", null);
                 } else if (ip.indexToKey(vector_info.child).onePossibleValue(ip)) |value| {
                     return value;
                 }
@@ -660,7 +660,7 @@ pub const Key = union(enum) {
 
                 return array_info.child;
             },
-            .struct_type => @panic("TODO"),
+            .struct_type => panicOrElse("TODO", null),
             .optional_type => |optional_info| {
                 try writer.writeByte('?');
                 return optional_info.payload_type;
@@ -679,7 +679,7 @@ pub const Key = union(enum) {
                 }
                 try writer.writeByte('}');
             },
-            .enum_type => @panic("TODO"),
+            .enum_type => panicOrElse("TODO", null),
             .function_type => |function_info| {
                 try writer.writeAll("fn(");
 
@@ -715,7 +715,7 @@ pub const Key = union(enum) {
 
                 return function_info.return_type;
             },
-            .union_type => @panic("TODO"),
+            .union_type => panicOrElse("TODO", null),
             .tuple_type => |tuple_info| {
                 try writer.writeAll("tuple{");
                 for (tuple_info.types) |field_ty, i| {
@@ -2451,6 +2451,14 @@ fn optionalPtrTy(
         },
         else => unreachable,
     }
+}
+
+/// will panic in debug mode or in tests else will return `value`
+inline fn panicOrElse(message: []const u8, value: anytype) @TypeOf(value) {
+    if (builtin.is_test or builtin.mode == .Debug) {
+        @panic(message);
+    }
+    return null;
 }
 
 // ---------------------------------------------
