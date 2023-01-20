@@ -171,17 +171,6 @@ pub fn huntItDown(
     return error.IdentifierNotFound;
 }
 
-pub fn cast(
-    interpreter: *ComptimeInterpreter,
-    node_idx: Ast.Node.Index,
-    destination_ty: IPIndex,
-    source_ty: IPIndex,
-) error{ OutOfMemory, InvalidCast }!IPIndex {
-    _ = node_idx;
-    // TODO return errors
-    return try interpreter.ip.cast(interpreter.allocator, destination_ty, source_ty, builtin.target);
-}
-
 // Might be useful in the future
 pub const InterpretOptions = struct {};
 
@@ -223,7 +212,6 @@ pub fn interpret(
         // .tagged_union_enum_tag,
         // .tagged_union_enum_tag_trailing,
         .root,
-        // .error_set_decl, // TODO
         => {
             const type_type = try interpreter.ip.get(interpreter.allocator, IPKey{ .simple = .type });
 
@@ -288,6 +276,10 @@ pub fn interpret(
                 .ty = type_type,
                 .val = struct_type,
             } };
+        },
+        .error_set_decl => {
+            // TODO
+            return InterpretResult{ .nothing = {} };
         },
         .global_var_decl,
         .local_var_decl,
@@ -496,10 +488,10 @@ pub fn interpret(
         .@"if",
         .if_simple,
         => {
-            const iff = ast.ifFull(tree, node_idx);
+            const if_info = ast.ifFull(tree, node_idx);
             // TODO: Don't evaluate runtime ifs
             // if (options.observe_values) {
-            const ir = try interpreter.interpret(iff.ast.cond_expr, namespace, options);
+            const ir = try interpreter.interpret(if_info.ast.cond_expr, namespace, options);
 
             const false_value = try interpreter.ip.get(interpreter.allocator, IPKey{ .simple = .bool_false });
             const true_value = try interpreter.ip.get(interpreter.allocator, IPKey{ .simple = .bool_true });
@@ -507,10 +499,10 @@ pub fn interpret(
             const condition = (try ir.getValue()).val;
             std.debug.assert(condition == false_value or condition == true_value);
             if (condition == true_value) {
-                return try interpreter.interpret(iff.ast.then_expr, namespace, options);
+                return try interpreter.interpret(if_info.ast.then_expr, namespace, options);
             } else {
-                if (iff.ast.else_expr != 0) {
-                    return try interpreter.interpret(iff.ast.else_expr, namespace, options);
+                if (if_info.ast.else_expr != 0) {
+                    return try interpreter.interpret(if_info.ast.else_expr, namespace, options);
                 } else return InterpretResult{ .nothing = {} };
             }
         },
@@ -525,8 +517,6 @@ pub fn interpret(
                     .val = try interpreter.ip.get(interpreter.allocator, IPKey{ .simple = if (a.value.val == b.value.val) .bool_true else .bool_false }), // TODO eql function required?
                 },
             };
-
-            // a.getValue().eql(b.getValue())
         },
         .number_literal => {
             const s = tree.getNodeSource(node_idx);
@@ -534,7 +524,7 @@ pub fn interpret(
 
             if (nl == .failure) return error.CriticalAstFailure;
 
-            const comptime_int_type = try interpreter.ip.get(interpreter.allocator, IPKey{
+            const number_type = try interpreter.ip.get(interpreter.allocator, IPKey{
                 .simple = if (nl == .float) .comptime_float else .comptime_int,
             });
 
@@ -542,7 +532,7 @@ pub fn interpret(
                 interpreter.allocator,
                 switch (nl) {
                     .float => IPKey{
-                        .float_64_value = try std.fmt.parseFloat(f64, s), // shouldn't this be f128?
+                        .float_128_value = try std.fmt.parseFloat(f128, s),
                     },
                     .int => if (s[0] == '-') IPKey{
                         .int_i64_value = try std.fmt.parseInt(i64, s, 0),
@@ -557,7 +547,7 @@ pub fn interpret(
             return InterpretResult{ .value = Value{
                 .interpreter = interpreter,
                 .node_idx = node_idx,
-                .ty = comptime_int_type,
+                .ty = number_type,
                 .val = value,
             } };
         },
@@ -587,7 +577,8 @@ pub fn interpret(
             var to_value = try ir.getValue();
             var from_value = (try (try interpreter.interpret(data[node_idx].rhs, namespace, options)).getValue());
 
-            _ = try interpreter.cast(undefined, to_value.ty, from_value.ty);
+            // TODO report error
+            _ = try interpreter.ip.cast(interpreter.allocator, to_value.ty, from_value.ty, builtin.target);
 
             return InterpretResult{ .nothing = {} };
         },
@@ -658,7 +649,7 @@ pub fn interpret(
                             .fields = &.{},
                             .namespace = .none,
                             .layout = .Auto,
-                            .backing_int_ty = IPIndex.none,
+                            .backing_int_ty = .none,
                         } }),
                         .val = try interpreter.ip.get(interpreter.allocator, IPKey{ .simple = .undefined_value }),
                     } };
@@ -675,7 +666,7 @@ pub fn interpret(
                         .interpreter = interpreter,
                         .node_idx = node_idx,
                         .ty = try interpreter.ip.get(interpreter.allocator, IPKey{ .simple = .type }),
-                        .val = undefined, // TODO
+                        .val = .none, // TODO
                     },
                 };
             }
@@ -763,14 +754,12 @@ pub fn interpret(
                 .address_space = .generic,
             } });
 
-            var val = Value{
+            return InterpretResult{ .value = Value{
                 .interpreter = interpreter,
                 .node_idx = node_idx,
                 .ty = string_literal_type,
                 .val = try interpreter.ip.get(interpreter.allocator, IPKey{ .bytes = str }),
-            };
-
-            return InterpretResult{ .value = val };
+            } };
         },
         // TODO: Add comptime autodetection; e.g. const MyArrayList = std.ArrayList(u8)
         .@"comptime" => {
@@ -874,23 +863,22 @@ pub fn interpret(
             const result = try interpreter.interpret(data[node_idx].lhs, namespace, .{});
             const bool_type = try interpreter.ip.get(interpreter.allocator, IPKey{ .simple = .bool });
             const value = try result.getValue();
-            if (value.ty == bool_type) {
-                const false_value = try interpreter.ip.get(interpreter.allocator, IPKey{ .simple = .bool_false });
-                const true_value = try interpreter.ip.get(interpreter.allocator, IPKey{ .simple = .bool_true });
 
-                const not_value = if (value.val == false_value) true_value else if (value.val == true_value) false_value else return error.InvalidOperation;
-                return InterpretResult{
-                    .value = .{
-                        .interpreter = interpreter,
-                        .node_idx = node_idx,
-                        .ty = bool_type,
-                        .val = not_value,
-                    },
-                };
-            } else {
-                // TODO
+            if (value.ty != bool_type) {
+                try interpreter.recordError(node_idx, "invalid_deref", try std.fmt.allocPrint(interpreter.allocator, "expected type `bool` but got `{}`", .{value.ty.fmtType(interpreter.ip)}));
                 return error.InvalidOperation;
             }
+
+            const false_value = try interpreter.ip.get(interpreter.allocator, IPKey{ .simple = .bool_false });
+            const true_value = try interpreter.ip.get(interpreter.allocator, IPKey{ .simple = .bool_true });
+
+            std.debug.assert(value.val == false_value or value.val == true_value);
+            return InterpretResult{ .value = .{
+                .interpreter = interpreter,
+                .node_idx = node_idx,
+                .ty = bool_type,
+                .val = if (value.val == false_value) true_value else false_value,
+            } };
         },
         .address_of => {
             // TODO: Make const pointers if we're drawing from a const;
