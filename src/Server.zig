@@ -2508,6 +2508,9 @@ fn inlayHintHandler(server: *Server, request: types.InlayHintParams) Error!?[]ty
 }
 
 fn codeActionHandler(server: *Server, request: types.CodeActionParams) Error!?[]types.CodeAction {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
 
     var builder = code_actions.Builder{
@@ -2536,6 +2539,9 @@ fn codeActionHandler(server: *Server, request: types.CodeActionParams) Error!?[]
 }
 
 fn foldingRangeHandler(server: *Server, request: types.FoldingRangeParams) Error!?[]types.FoldingRange {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const Token = std.zig.Token;
     const Node = Ast.Node;
     const allocator = server.arena.allocator();
@@ -2543,37 +2549,26 @@ fn foldingRangeHandler(server: *Server, request: types.FoldingRangeParams) Error
 
     const helper = struct {
         const Inclusivity = enum { inclusive, exclusive };
-        /// Returns true if added.
-        fn maybeAddTokRange(
-            p_ranges: *std.ArrayList(types.FoldingRange),
-            tree: Ast,
-            start: Ast.TokenIndex,
-            end: Ast.TokenIndex,
-            end_reach: Inclusivity,
-            encoding: offsets.Encoding,
-        ) std.mem.Allocator.Error!bool {
-            const can_add = start < end and !tree.tokensOnSameLine(start, end);
-            if (can_add) {
-                try addTokRange(p_ranges, tree, start, end, end_reach, encoding);
-            }
-            return can_add;
-        }
+
         fn addTokRange(
             p_ranges: *std.ArrayList(types.FoldingRange),
             tree: Ast,
             start: Ast.TokenIndex,
             end: Ast.TokenIndex,
             end_reach: Inclusivity,
-            encoding: offsets.Encoding,
         ) std.mem.Allocator.Error!void {
-            std.debug.assert(!std.debug.runtime_safety or !tree.tokensOnSameLine(start, end));
+            if (tree.tokensOnSameLine(start, end)) return;
+            std.debug.assert(start <= end);
 
-            const start_line = offsets.tokenToPosition(tree, start, encoding).line;
-            const end_line = offsets.tokenToPosition(tree, end, encoding).line;
+            const start_index = offsets.tokenToIndex(tree, start);
+            const end_index = offsets.tokenToIndex(tree, end);
+
+            const start_line = std.mem.count(u8, tree.source[0..start_index], "\n");
+            const end_line = start_line + std.mem.count(u8, tree.source[start_index..end_index], "\n");
 
             try p_ranges.append(.{
-                .startLine = start_line,
-                .endLine = end_line - @boolToInt(end_reach == .exclusive),
+                .startLine = @intCast(u32, start_line),
+                .endLine = @intCast(u32, end_line) - @boolToInt(end_reach == .exclusive),
             });
         }
     };
@@ -2604,6 +2599,7 @@ fn foldingRangeHandler(server: *Server, request: types.FoldingRangeParams) Error
         const node = @intCast(Node.Index, i);
 
         switch (node_tag) {
+            .root => continue,
             // only fold the expression pertaining to the if statement, and the else statement, each respectively.
             // TODO: Should folding multiline condition expressions also be supported? Ditto for the other control flow structures.
             .@"if", .if_simple => {
@@ -2611,14 +2607,14 @@ fn foldingRangeHandler(server: *Server, request: types.FoldingRangeParams) Error
 
                 const start_tok_1 = ast.lastToken(handle.tree, if_full.ast.cond_expr);
                 const end_tok_1 = ast.lastToken(handle.tree, if_full.ast.then_expr);
-                _ = try helper.maybeAddTokRange(&ranges, handle.tree, start_tok_1, end_tok_1, .inclusive, server.offset_encoding);
+                try helper.addTokRange(&ranges, handle.tree, start_tok_1, end_tok_1, .inclusive);
 
                 if (if_full.ast.else_expr == 0) continue;
 
                 const start_tok_2 = if_full.else_token;
                 const end_tok_2 = ast.lastToken(handle.tree, if_full.ast.else_expr);
 
-                _ = try helper.maybeAddTokRange(&ranges, handle.tree, start_tok_2, end_tok_2, .inclusive, server.offset_encoding);
+                try helper.addTokRange(&ranges, handle.tree, start_tok_2, end_tok_2, .inclusive);
             },
 
             // same as if/else
@@ -2632,13 +2628,13 @@ fn foldingRangeHandler(server: *Server, request: types.FoldingRangeParams) Error
 
                 const start_tok_1 = ast.lastToken(handle.tree, loop_full.ast.cond_expr);
                 const end_tok_1 = ast.lastToken(handle.tree, loop_full.ast.then_expr);
-                _ = try helper.maybeAddTokRange(&ranges, handle.tree, start_tok_1, end_tok_1, .inclusive, server.offset_encoding);
+                try helper.addTokRange(&ranges, handle.tree, start_tok_1, end_tok_1, .inclusive);
 
                 if (loop_full.ast.else_expr == 0) continue;
 
                 const start_tok_2 = loop_full.else_token;
                 const end_tok_2 = ast.lastToken(handle.tree, loop_full.ast.else_expr);
-                _ = try helper.maybeAddTokRange(&ranges, handle.tree, start_tok_2, end_tok_2, .inclusive, server.offset_encoding);
+                try helper.addTokRange(&ranges, handle.tree, start_tok_2, end_tok_2, .inclusive);
             },
 
             .global_var_decl,
@@ -2666,7 +2662,7 @@ fn foldingRangeHandler(server: *Server, request: types.FoldingRangeParams) Error
                         start_doc_tok -= 1;
                     }
 
-                    _ = try helper.maybeAddTokRange(&ranges, handle.tree, start_doc_tok, end_doc_tok, .inclusive, server.offset_encoding);
+                    try helper.addTokRange(&ranges, handle.tree, start_doc_tok, end_doc_tok, .inclusive);
                 }
 
                 // Function prototype folding regions
@@ -2678,10 +2674,7 @@ fn foldingRangeHandler(server: *Server, request: types.FoldingRangeParams) Error
                 const list_end_tok: Ast.TokenIndex = ast.lastToken(handle.tree, fn_proto.ast.proto_node);
 
                 if (handle.tree.tokensOnSameLine(list_start_tok, list_end_tok)) break :decl_node_blk;
-                try ranges.ensureUnusedCapacity(1 + fn_proto.ast.params.len); // best guess, doesn't include anytype params
-                helper.addTokRange(&ranges, handle.tree, list_start_tok, list_end_tok, .exclusive, server.offset_encoding) catch |err| switch (err) {
-                    error.OutOfMemory => unreachable,
-                };
+                try helper.addTokRange(&ranges, handle.tree, list_start_tok, list_end_tok, .exclusive);
 
                 var it = fn_proto.iterate(&handle.tree);
                 while (ast.nextFnParam(&it)) |param| {
@@ -2691,7 +2684,7 @@ fn foldingRangeHandler(server: *Server, request: types.FoldingRangeParams) Error
                     while (token_tags[doc_end_tok + 1] == .doc_comment)
                         doc_end_tok += 1;
 
-                    _ = try helper.maybeAddTokRange(&ranges, handle.tree, doc_start_tok, doc_end_tok, .inclusive, server.offset_encoding);
+                    try helper.addTokRange(&ranges, handle.tree, doc_start_tok, doc_end_tok, .inclusive);
                 }
             },
 
@@ -2703,7 +2696,7 @@ fn foldingRangeHandler(server: *Server, request: types.FoldingRangeParams) Error
             => {
                 const start_tok = handle.tree.firstToken(node);
                 const end_tok = ast.lastToken(handle.tree, node);
-                _ = try helper.maybeAddTokRange(&ranges, handle.tree, start_tok, end_tok, .inclusive, server.offset_encoding);
+                try helper.addTokRange(&ranges, handle.tree, start_tok, end_tok, .inclusive);
             },
 
             // most other trivial cases can go through here.
@@ -2750,7 +2743,7 @@ fn foldingRangeHandler(server: *Server, request: types.FoldingRangeParams) Error
 
                 const start_tok = handle.tree.firstToken(node);
                 const end_tok = ast.lastToken(handle.tree, node);
-                _ = try helper.maybeAddTokRange(&ranges, handle.tree, start_tok, end_tok, .exclusive, server.offset_encoding);
+                try helper.addTokRange(&ranges, handle.tree, start_tok, end_tok, .exclusive);
             },
         }
     }
@@ -2799,6 +2792,9 @@ pub const SelectionRange = struct {
 };
 
 fn selectionRangeHandler(server: *Server, request: types.SelectionRangeParams) Error!?[]*SelectionRange {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const allocator = server.arena.allocator();
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
 
