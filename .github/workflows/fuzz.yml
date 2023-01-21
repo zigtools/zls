@@ -1,0 +1,92 @@
+name: Sus Fuzzing
+
+on:
+  push:
+    branches:
+      - master
+  schedule:
+    - cron: "0 0 * * *"
+  workflow_dispatch:
+    inputs:
+      fuzzing_duration:
+        type: string
+        description: How long should fuzzing last? (sleep time argument)
+        default: 15m
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set Swap Space
+        uses: pierotofy/set-swap-space@master
+        with:
+          swap-size-gb: 10
+
+      - name: Grab zig
+        uses: goto-bus-stop/setup-zig@v1
+        with:
+          version: master
+
+      - run: zig version
+      - run: zig env
+
+      - name: Checkout zig
+        uses: actions/checkout@v3
+        with:
+          path: zig
+          repository: "ziglang/zig"
+          fetch-depth: 0
+
+      - name: Checkout zls
+        uses: actions/checkout@v3
+        with:
+          path: zls
+          fetch-depth: 0
+          submodules: true
+
+      - name: Build zls
+        run: |
+          cd $GITHUB_WORKSPACE/zls
+          pwd
+          zig build
+
+      - name: Checkout sus
+        uses: actions/checkout@v3
+        with:
+          path: sus
+          repository: "zigtools/sus"
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Build sus
+        run: |
+          cd $GITHUB_WORKSPACE/sus
+          pwd
+          zig build -Drelease-fast
+
+      - name: Run sus
+        continue-on-error: true
+        run: |
+          cd $GITHUB_WORKSPACE/sus
+          FUZZING_DURATION=${{ github.event.inputs.fuzzing_duration }}
+          { sleep ${FUZZING_DURATION:-1h}; pkill -9 sus; } &
+          ./zig-out/bin/sus $GITHUB_WORKSPACE/zls/zig-out/bin/zls markov $GITHUB_WORKSPACE/zig/lib/std
+
+      - name: Upload saved logs
+        uses: actions/upload-artifact@v3
+        with:
+          name: saved-logs
+          path: sus/saved_logs/
+
+      - uses: BetaHuhn/do-spaces-action@v2
+        with:
+          access_key: ${{ secrets.DO_SPACES_ACCESS_KEY }}
+          secret_key: ${{ secrets.DO_SPACES_SECRET_KEY }}
+          space_name: fuzzing-output
+          space_region: nyc3
+          source: sus/saved_logs/
+          out_dir: ${{ github.repository_owner }}-${{ github.event.repository.name }}/${{ github.ref_name }}/${{ github.sha }}
+
+
+  
