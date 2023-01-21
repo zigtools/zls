@@ -1332,6 +1332,10 @@ fn completeBuiltin(server: *Server) error{OutOfMemory}!?[]types.CompletionItem {
         for (completions.items) |*item| {
             try formatDetailledLabel(item, allocator);
         }
+    } else {
+        for (builtin_completions.items) |item, i| {
+            completions[i] = item;
+        }
     }
 
     return completions.items;
