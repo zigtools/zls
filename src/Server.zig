@@ -1326,16 +1326,15 @@ fn completeBuiltin(server: *Server) error{OutOfMemory}!?[]types.CompletionItem {
         });
     }
 
-    var completions = try allocator.alloc(types.CompletionItem, builtin_completions.items.len);
+    var completions = try builtin_completions.clone(allocator);
 
     if (server.client_capabilities.label_details_support) {
-        for (builtin_completions.items) |item, i| {
-            completions[i] = item;
-            try formatDetailledLabel(&completions[i], allocator);
+        for (completions.items) |*item| {
+            try formatDetailledLabel(item, allocator);
         }
     }
 
-    return completions;
+    return completions.items;
 }
 
 fn completeGlobal(server: *Server, pos_index: usize, handle: *const DocumentStore.Handle) error{OutOfMemory}![]types.CompletionItem {
