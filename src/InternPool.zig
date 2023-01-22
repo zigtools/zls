@@ -2904,6 +2904,36 @@ test "struct type" {
     try std.testing.expect(struct_type_0 == struct_type_1);
 }
 
+test "struct value" {
+    const gpa = std.testing.allocator;
+
+    var ip: InternPool = .{};
+    defer ip.deinit(gpa);
+
+    const i32_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .signed, .bits = 32 } });
+    const bool_type = try ip.get(gpa, .{ .simple = .bool });
+
+    const foo_name = try ip.get(gpa, .{ .bytes = "foo" });
+    const bar_name = try ip.get(gpa, .{ .bytes = "bar" });
+
+    const field1 = Struct.Field{ .name = foo_name, .ty = i32_type };
+    const field2 = Struct.Field{ .name = bar_name, .ty = bool_type };
+
+    const struct_type = try ip.get(gpa, .{ .struct_type = .{
+        .fields = &.{ field1, field2 },
+        .namespace = .none,
+        .layout = .Auto,
+        .backing_int_ty = .none,
+    } });
+
+    const one_value = try ip.get(gpa, .{ .int_i64_value = 1 });
+    const true_value = try ip.get(gpa, .{ .simple = .bool_true });
+
+    const aggregate_value = try ip.get(gpa, Key{ .aggregate = &.{ one_value, true_value } });
+
+    try ip.testExpectFmtValue(aggregate_value, struct_type, ".{.foo = 1, .bar = true}");
+}
+
 test "enum type" {
     const gpa = std.testing.allocator;
 
