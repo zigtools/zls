@@ -47,7 +47,6 @@ test "ComptimeInterpreter - builtins" {
 }
 
 test "ComptimeInterpreter - string literal" {
-    if (true) return error.SkipZigTest; // TODO
     const source =
         \\const foobarbaz = "hello world!";
         \\
@@ -158,9 +157,13 @@ test "ComptimeInterpreter - call return struct" {
     const struct_info = result.val.struct_type;
     try std.testing.expectEqual(Index.none, struct_info.backing_int_ty);
     try std.testing.expectEqual(std.builtin.Type.ContainerLayout.Auto, struct_info.layout);
+
+    const field_name = result.interpreter.ip.indexToKey(struct_info.fields[0].name).bytes;
+    const bool_type = try result.interpreter.ip.get(allocator, .{ .simple = .bool });
+
     try std.testing.expectEqual(@as(usize, 1), struct_info.fields.len);
-    // try std.testing.expectEqualStrings("slay", struct_info.fields[0].name);
-    // try std.testing.expect(struct_info.fields[0].ty != .none); // TODO check for bool
+    try std.testing.expectEqualStrings("slay", field_name);
+    try std.testing.expect(struct_info.fields[0].ty == bool_type);
 }
 
 test "ComptimeInterpreter - call comptime argument" {
