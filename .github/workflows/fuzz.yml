@@ -27,7 +27,7 @@ permissions: read-all
 
 jobs:
   fuzz:
-    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'pr:fuzz')
+    if: github.event_name != 'pull_request_target' || contains(github.event.pull_request.labels.*.name, 'pr:fuzz')
     runs-on: ubuntu-latest
 
     steps:
@@ -37,12 +37,12 @@ jobs:
           swap-size-gb: 10
 
       - name: Default fuzzing duration
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request_target'
         run: |
           echo "FUZZING_DURATION=${{ github.event.inputs.fuzzing_duration }}" >> $GITHUB_ENV
 
       - name: PR fuzzing duration
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request_target'
         run: |
           echo "FUZZING_DURATION=15m" >> $GITHUB_ENV
 
