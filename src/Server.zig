@@ -2144,6 +2144,29 @@ fn completionHandler(server: *Server, request: types.CompletionParams) Error!?ty
 
     const completions = maybe_completions orelse return null;
 
+    // The cursor is in the middle of a word or before a @, so we can replace
+    // the remaining identifier with the completion instead of just inserting.
+    // TODO Identify function call/struct init and replace the whole thing.
+    const lookahead_context = try analysis.getPositionContext(server.arena.allocator(), handle.text, source_index, true);
+    if (server.client_capabilities.supports_apply_edits and pos_context.loc() != null and lookahead_context.loc() != null and pos_context.loc().?.end != lookahead_context.loc().?.end) {
+        var end = lookahead_context.loc().?.end;
+        while (end < handle.text.len and (std.ascii.isAlphanumeric(handle.text[end]) or handle.text[end] == '"')) {
+            end += 1;
+        }
+
+        const replaceLoc = offsets.Loc{ .start = lookahead_context.loc().?.start, .end = end };
+        const replaceRange = offsets.locToRange(handle.text, replaceLoc, server.offset_encoding);
+
+        for (completions) |*item| {
+            item.textEdit = .{
+                .TextEdit = .{
+                    .newText = item.insertText orelse item.label,
+                    .range = replaceRange,
+                },
+            };
+        }
+    }
+
     // truncate completions
     for (completions) |*item| {
         if (item.detail) |det| {
