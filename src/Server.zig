@@ -600,10 +600,11 @@ fn typeToCompletion(
             switch (key) {
                 .struct_type => |struct_info| {
                     for (struct_info.fields) |field| {
+                        const field_name = co.interpreter.ip.indexToKey(field.name).bytes;
                         try list.append(allocator, .{
-                            .label = field.name,
+                            .label = field_name,
                             .kind = .Field,
-                            .insertText = field.name,
+                            .insertText = field_name,
                             .insertTextFormat = .PlainText,
                         });
                     }

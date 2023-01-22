@@ -255,9 +255,11 @@ pub fn interpret(
                     );
                     continue;
                 }
-
+                const field_name = try interpreter.ip.get(interpreter.allocator, .{
+                    .bytes = tree.tokenSlice(container_field.ast.main_token),
+                });
                 const field: InternPool.Struct.Field = .{
-                    .name = tree.tokenSlice(container_field.ast.main_token),
+                    .name = field_name,
                     .ty = init_type_value.val,
                     .default_value = default_value,
                     .alignment = 0, // TODO,

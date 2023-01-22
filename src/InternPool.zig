@@ -10,6 +10,8 @@ const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 
+const encoding = @import("encoding.zig");
+
 pub const Int = packed struct {
     signedness: std.builtin.Signedness,
     bits: u16,
@@ -40,8 +42,8 @@ pub const Struct = struct {
     layout: std.builtin.Type.ContainerLayout = .Auto,
     backing_int_ty: Index,
 
-    pub const Field = struct {
-        name: []const u8,
+    pub const Field = packed struct {
+        name: Index,
         ty: Index,
         default_value: Index = .none,
         alignment: u16 = 0,
@@ -59,12 +61,7 @@ pub const ErrorUnion = packed struct {
 };
 
 pub const ErrorSet = struct {
-    /// must be sorted
-    names: []const []const u8,
-
-    pub fn sort(self: *ErrorSet) void {
-        std.sort.sort([]const []const u8, self.names, u8, std.mem.lessThan);
-    }
+    names: []const Index,
 };
 
 pub const Enum = struct {
@@ -73,8 +70,8 @@ pub const Enum = struct {
     namespace: NamespaceIndex,
     tag_type_infered: bool,
 
-    pub const Field = struct {
-        name: []const u8,
+    pub const Field = packed struct {
+        name: Index,
         val: Index,
     };
 };
@@ -97,8 +94,8 @@ pub const Union = struct {
     namespace: NamespaceIndex,
     layout: std.builtin.Type.ContainerLayout = .Auto,
 
-    pub const Field = struct {
-        name: []const u8,
+    pub const Field = packed struct {
+        name: Index,
         ty: Index,
         alignment: u16,
     };
@@ -675,7 +672,7 @@ pub const Key = union(enum) {
                 try writer.writeAll("error{");
                 for (names) |name, i| {
                     if (i != 0) try writer.writeByte(',');
-                    try writer.writeAll(name);
+                    try writer.writeAll(ip.indexToKey(name).bytes);
                 }
                 try writer.writeByte('}');
             },
@@ -853,7 +850,8 @@ pub const Key = union(enum) {
                 while (i < aggregate.len) : (i += 1) {
                     if (i != 0) try writer.writeAll(", ");
 
-                    try writer.print(".{s} = ", .{struct_info.fields[i].name});
+                    const field_name = ip.indexToKey(struct_info.fields[i].name).bytes;
+                    try writer.print(".{s} = ", .{field_name});
                     try printValue(ip.indexToKey(aggregate[i]), struct_info.fields[i].ty, ip, writer);
                 }
                 try writer.writeByte('}');
@@ -861,9 +859,9 @@ pub const Key = union(enum) {
             .union_value => |union_value| {
                 const union_info = ip.indexToKey(ty).union_type;
 
+                const name = ip.indexToKey(union_info.fields[union_value.field_index].name).bytes;
                 try writer.print(".{{ .{} = {} }}", .{
-                    std.zig.fmtId(union_info.fields[union_value.field_index].name),
-                    // union_value.tag.fmtValue(union_info.tag_type, ip),
+                    std.zig.fmtId(name),
                     union_value.val.fmtValue(union_info.fields[union_value.field_index].ty, ip),
                 });
             },
@@ -1182,20 +1180,21 @@ pub fn get(ip: *InternPool, gpa: Allocator, key: Key) Allocator.Error!Index {
 }
 
 fn addExtra(ip: *InternPool, gpa: Allocator, extra: anytype) Allocator.Error!u32 {
-    comptime if (@sizeOf(@TypeOf(extra)) <= 4) {
-        @compileError(@typeName(@TypeOf(extra)) ++ " fits into a u32! Consider directly storing this extra in Item's data field");
+    const T = @TypeOf(extra);
+    comptime if (@sizeOf(T) <= 4) {
+        @compileError(@typeName(T) ++ " fits into a u32! Consider directly storing this extra in Item's data field");
     };
 
-    // TODO this doesn't correctly store types with slices like `Struct` `Aggregate`
     const result = @intCast(u32, ip.extra.items.len);
-    try ip.extra.appendSlice(gpa, &std.mem.toBytes(extra));
+    var managed = ip.extra.toManaged(gpa);
+    defer ip.extra = managed.moveToUnmanaged();
+    try encoding.encode(&managed, T, extra);
     return result;
 }
 
 fn extraData(ip: InternPool, comptime T: type, index: usize) T {
-    const size = @sizeOf(T);
-    const bytes = @ptrCast(*const [size]u8, ip.extra.items.ptr + index);
-    return std.mem.bytesToValue(T, bytes);
+    var bytes: []const u8 = ip.extra.items[index..];
+    return encoding.decode(&bytes, T);
 }
 
 const KeyAdapter = struct {
@@ -1217,7 +1216,7 @@ fn deepEql(a: anytype, b: @TypeOf(a)) bool {
 
     switch (@typeInfo(T)) {
         .Struct => |info| {
-            if (comptime std.meta.trait.hasUniqueRepresentation(T)) {
+            if (info.layout == .Packed and comptime std.meta.trait.hasUniqueRepresentation(T)) {
                 return std.mem.eql(u8, std.mem.asBytes(&a), std.mem.asBytes(&b));
             }
             inline for (info.fields) |field_info| {
@@ -1239,40 +1238,39 @@ fn deepEql(a: anytype, b: @TypeOf(a)) bool {
             }
             return false;
         },
-        .Pointer => |info| {
-            if (info.size != .Slice) {
-                @compileError("cannot compare non slice pointer type " ++ @typeName(T));
-            }
+        .Pointer => |info| switch (info.size) {
+            .One => return deepEql(a.*, b.*),
+            .Slice => {
+                if (a.len != b.len) return false;
 
-            if (@typeInfo(info.child) == .Int) {
-                return std.mem.eql(info.child, a, b);
-            }
-            if (a.len != b.len) return false;
-
-            var i: usize = 0;
-            while (i < a.len) : (i += 1) {
-                if (!deepEql(a[i], b[i])) return false;
-            }
-            return true;
+                var i: usize = 0;
+                while (i < a.len) : (i += 1) {
+                    if (!deepEql(a[i], b[i])) return false;
+                }
+                return true;
+            },
+            .Many,
+            .C,
+            => @compileError("Unable to equality compare pointer " ++ @typeName(T)),
         },
         .Bool,
         .Int,
         .Float,
         .Enum,
         => return a == b,
-        else => unreachable,
+        else => @compileError("Unable to equality compare type " ++ @typeName(T)),
     }
 }
 
 fn deepHash(hasher: anytype, key: anytype) void {
-    const Inner = @TypeOf(key);
+    const T = @TypeOf(key);
 
-    switch (@typeInfo(Inner)) {
+    switch (@typeInfo(T)) {
         .Int => {
-            if (comptime std.meta.trait.hasUniqueRepresentation(Inner)) {
+            if (comptime std.meta.trait.hasUniqueRepresentation(Tuple)) {
                 hasher.update(std.mem.asBytes(&key));
             } else {
-                const byte_size = comptime std.math.divCeil(comptime_int, @bitSizeOf(Inner), 8) catch unreachable;
+                const byte_size = comptime std.math.divCeil(comptime_int, @bitSizeOf(T), 8) catch unreachable;
                 hasher.update(std.mem.asBytes(&key)[0..byte_size]);
             }
         },
@@ -1288,22 +1286,25 @@ fn deepHash(hasher: anytype, key: anytype) void {
             else => unreachable,
         }),
 
-        .Pointer => |info| {
-            if (info.size != .Slice) {
-                @compileError("");
-            }
-
-            if (comptime std.meta.trait.hasUniqueRepresentation(info.child)) {
-                hasher.update(std.mem.sliceAsBytes(key));
-            } else {
-                for (key) |item| {
-                    deepHash(hasher, item);
+        .Pointer => |info| switch (info.size) {
+            .One => {
+                deepHash(hasher, key.*);
+            },
+            .Slice => {
+                if (info.child == u8) {
+                    hasher.update(key);
+                } else {
+                    for (key) |item| {
+                        deepHash(hasher, item);
+                    }
                 }
-            }
+            },
+            .Many,
+            .C,
+            => @compileError("Unable to hash pointer " ++ @typeName(T)),
         },
-
         .Struct => |info| {
-            if (comptime std.meta.trait.hasUniqueRepresentation(Inner)) {
+            if (info.layout == .Packed and comptime std.meta.trait.hasUniqueRepresentation(T)) {
                 hasher.update(std.mem.asBytes(&key));
             } else {
                 inline for (info.fields) |field| {
@@ -1324,7 +1325,7 @@ fn deepHash(hasher: anytype, key: anytype) void {
                 }
             }
         },
-        else => unreachable,
+        else => @compileError("Unable to hash type " ++ @typeName(T)),
     }
 }
 
@@ -2797,23 +2798,26 @@ test "error set type" {
     var ip: InternPool = .{};
     defer ip.deinit(gpa);
 
+    const foo_name = try ip.get(gpa, .{ .bytes = "foo" });
+    const bar_name = try ip.get(gpa, .{ .bytes = "bar" });
+    const baz_name = try ip.get(gpa, .{ .bytes = "baz" });
+
     const empty_error_set = try ip.get(gpa, .{ .error_set_type = .{ .names = &.{} } });
 
     const error_set_0 = try ip.get(gpa, .{ .error_set_type = .{
-        .names = &.{ "foo", "bar", "baz" },
+        .names = &.{ foo_name, bar_name, baz_name },
     } });
 
-    const foo: [3]u8 = "foo".*;
-
     const error_set_1 = try ip.get(gpa, .{ .error_set_type = .{
-        .names = &.{ &foo, "bar", "baz" },
+        .names = &.{ foo_name, bar_name },
     } });
 
     try std.testing.expect(empty_error_set != error_set_0);
-    try std.testing.expect(error_set_0 == error_set_1);
+    try std.testing.expect(error_set_0 != error_set_1);
 
     try testExpectFmtType(ip, empty_error_set, "error{}");
     try testExpectFmtType(ip, error_set_0, "error{foo,bar,baz}");
+    try testExpectFmtType(ip, error_set_1, "error{foo,bar}");
 }
 
 test "error union type" {
@@ -2875,9 +2879,13 @@ test "struct type" {
     const u64_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .unsigned, .bits = 64 } });
     const bool_type = try ip.get(gpa, .{ .simple = .bool });
 
-    const field1 = Struct.Field{ .name = "foo", .ty = u64_type };
-    const field2 = Struct.Field{ .name = "bar", .ty = i32_type };
-    const field3 = Struct.Field{ .name = "baz", .ty = bool_type };
+    const foo_name = try ip.get(gpa, .{ .bytes = "foo" });
+    const bar_name = try ip.get(gpa, .{ .bytes = "bar" });
+    const baz_name = try ip.get(gpa, .{ .bytes = "baz" });
+
+    const field1 = Struct.Field{ .name = foo_name, .ty = u64_type };
+    const field2 = Struct.Field{ .name = bar_name, .ty = i32_type };
+    const field3 = Struct.Field{ .name = baz_name, .ty = bool_type };
 
     const struct_type_0 = try ip.get(gpa, .{ .struct_type = .{
         .fields = &.{ field1, field2, field3 },
@@ -2902,6 +2910,9 @@ test "enum type" {
     var ip: InternPool = .{};
     defer ip.deinit(gpa);
 
+    const zig_name = try ip.get(gpa, .{ .bytes = "zig" });
+    const cpp_name = try ip.get(gpa, .{ .bytes = "cpp" });
+
     const empty_enum1 = try ip.get(gpa, .{ .enum_type = .{
         .tag_type = .none,
         .fields = &.{},
@@ -2916,8 +2927,8 @@ test "enum type" {
         .tag_type_infered = true,
     } });
 
-    const field1 = Enum.Field{ .name = "zig", .val = .none };
-    const field2 = Enum.Field{ .name = "cpp", .val = .none };
+    const field1 = Enum.Field{ .name = zig_name, .val = .none };
+    const field2 = Enum.Field{ .name = cpp_name, .val = .none };
 
     const enum1 = try ip.get(gpa, .{ .enum_type = .{
         .tag_type = .none,
@@ -2992,8 +3003,11 @@ test "union type" {
     const u32_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .unsigned, .bits = 32 } });
     const void_type = try ip.get(gpa, .{ .simple = .void });
 
-    var field1 = Union.Field{ .name = "Ok", .ty = u32_type, .alignment = 0 };
-    var field2 = Union.Field{ .name = "Err", .ty = void_type, .alignment = 0 };
+    const ok_name = try ip.get(gpa, .{ .bytes = "Ok" });
+    const err_name = try ip.get(gpa, .{ .bytes = "Err" });
+
+    var field1 = Union.Field{ .name = ok_name, .ty = u32_type, .alignment = 0 };
+    var field2 = Union.Field{ .name = err_name, .ty = void_type, .alignment = 0 };
 
     const union_type1 = try ip.get(gpa, .{
         .union_type = .{
@@ -3026,8 +3040,11 @@ test "union value" {
     const int_value = try ip.get(gpa, .{ .int_u64_value = 1 });
     const f16_value = try ip.get(gpa, .{ .float_16_value = 0.25 });
 
-    var field1 = Union.Field{ .name = "int", .ty = u32_type, .alignment = 0 };
-    var field2 = Union.Field{ .name = "float", .ty = f16_type, .alignment = 0 };
+    const int_name = try ip.get(gpa, .{ .bytes = "int" });
+    const float_name = try ip.get(gpa, .{ .bytes = "float" });
+
+    var field1 = Union.Field{ .name = int_name, .ty = u32_type, .alignment = 0 };
+    var field2 = Union.Field{ .name = float_name, .ty = f16_type, .alignment = 0 };
 
     const union_type = try ip.get(gpa, .{
         .union_type = .{
@@ -3093,22 +3110,18 @@ test "vector type" {
 }
 
 test "bytes value" {
-    if (true) return error.SkipZigTest; // TODO
-
     const gpa = std.testing.allocator;
 
     var ip: InternPool = .{};
     defer ip.deinit(gpa);
 
     var str1: [43]u8 = "https://www.youtube.com/watch?v=dQw4w9WgXcQ".*;
-
     const bytes_value1 = try ip.get(gpa, .{ .bytes = &str1 });
     @memset(&str1, 0, str1.len);
 
     var str2: [43]u8 = "https://www.youtube.com/watch?v=dQw4w9WgXcQ".*;
-    @memset(&str2, 0, str2.len);
-
     const bytes_value2 = try ip.get(gpa, .{ .bytes = &str2 });
+    @memset(&str2, 0, str2.len);
 
     var str3: [26]u8 = "https://www.duckduckgo.com".*;
     const bytes_value3 = try ip.get(gpa, .{ .bytes = &str3 });
@@ -3117,9 +3130,11 @@ test "bytes value" {
     try std.testing.expect(bytes_value1 == bytes_value2);
     try std.testing.expect(bytes_value2 != bytes_value3);
 
-    try std.testing.expect(str1 != ip.indexToKey(bytes_value1).bytes);
-    try std.testing.expect(str2 != ip.indexToKey(bytes_value2).bytes);
-    try std.testing.expect(str3 != ip.indexToKey(bytes_value3).bytes);
+    try std.testing.expect(@ptrToInt(&str1) != @ptrToInt(ip.indexToKey(bytes_value1).bytes.ptr));
+    try std.testing.expect(@ptrToInt(&str2) != @ptrToInt(ip.indexToKey(bytes_value2).bytes.ptr));
+    try std.testing.expect(@ptrToInt(&str3) != @ptrToInt(ip.indexToKey(bytes_value3).bytes.ptr));
+
+    try std.testing.expectEqual(ip.indexToKey(bytes_value1).bytes.ptr, ip.indexToKey(bytes_value2).bytes.ptr);
 
     try std.testing.expectEqualStrings("https://www.youtube.com/watch?v=dQw4w9WgXcQ", ip.indexToKey(bytes_value1).bytes);
     try std.testing.expectEqualStrings("https://www.youtube.com/watch?v=dQw4w9WgXcQ", ip.indexToKey(bytes_value2).bytes);
