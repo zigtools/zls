@@ -86,7 +86,7 @@ jobs:
           space_name: fuzzing-output
           space_region: nyc3
           source: sus/saved_logs/
-          out_dir: ${{ github.repository_owner }}-${{ github.event.repository.name }}/${{ github.ref_name }}/${{ github.sha }}
+          out_dir: ${{ github.repository_owner }}/${{ github.event.repository.name }}/${{ github.ref_name }}/${{ github.sha }}
 
 
   
