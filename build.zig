@@ -160,12 +160,13 @@ pub fn build(b: *std.build.Builder) !void {
     const test_step = b.step("test", "Run all the tests");
     test_step.dependOn(b.getInstallStep());
 
-    var tests = b.addTest("tests/tests.zig");
-    tests.setFilter(b.option(
+    const test_filter = b.option(
         []const u8,
         "test-filter",
         "Skip tests that do not match filter",
-    ));
+    );
+    var tests = b.addTest("tests/tests.zig");
+    tests.setFilter(test_filter);
 
     if (coverage) {
         const src_dir = b.pathJoin(&.{ b.build_root, "src" });
@@ -186,6 +187,7 @@ pub fn build(b: *std.build.Builder) !void {
     test_step.dependOn(&tests.step);
 
     var src_tests = b.addTest("src/zls.zig");
+    src_tests.setFilter(test_filter);
     src_tests.setBuildMode(.Debug);
     src_tests.setTarget(target);
     test_step.dependOn(&src_tests.step);
