@@ -1562,7 +1562,13 @@ pub fn isSymbolChar(char: u8) bool {
 /// Classification is based on the lexical structure -- we fetch the line containin index, tokenize it,
 /// and look at the sequence of tokens just before the cursor. Due to the nice way zig is designed (only line
 /// comments, etc) lexing just a single line is always correct.
-pub fn getPositionContext(allocator: std.mem.Allocator, text: []const u8, doc_index: usize, lookahead: bool) !PositionContext {
+pub fn getPositionContext(
+    allocator: std.mem.Allocator,
+    text: []const u8,
+    doc_index: usize,
+    /// Should we look to the end of the current context? Yes for goto def, no for completions
+    lookahead: bool,
+) !PositionContext {
     var new_index = doc_index;
     if (lookahead and new_index < text.len and isSymbolChar(text[new_index])) {
         new_index += 1;
@@ -1570,9 +1576,9 @@ pub fn getPositionContext(allocator: std.mem.Allocator, text: []const u8, doc_in
         new_index += 2;
     }
 
-    const line_loc = offsets.lineLocAtIndex(text, new_index);
+    const line_loc = if (!lookahead) offsets.lineLocAtIndex(text, new_index) else offsets.lineLocUntilIndex(text, new_index);
     const line = offsets.locToSlice(text, line_loc);
-    const prev_char = if (doc_index > 0) text[doc_index - 1] else 0;
+    const prev_char = if (new_index > 0) text[new_index - 1] else 0;
 
     const is_comment = std.mem.startsWith(u8, std.mem.trimLeft(u8, line, " \t"), "//");
     if (is_comment) return .comment;
@@ -1593,8 +1599,8 @@ pub fn getPositionContext(allocator: std.mem.Allocator, text: []const u8, doc_in
         while (true) {
             const tok = tokenizer.next();
             // Early exits.
-            if (tok.loc.start > doc_index) break;
-            if (tok.loc.start == doc_index) {
+            if (tok.loc.start > new_index) break;
+            if (tok.loc.start == new_index) {
                 // Tie-breaking, the curosr is exactly between two tokens, and
                 // `tok` is the latter of the two.
                 if (tok.tag != .identifier) break;

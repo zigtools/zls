@@ -344,13 +344,13 @@ test "position context - import/embedfile string literal" {
         \\const std = @import("st<cursor>");
     ,
         .import_string_literal,
-        "\"st\"", // maybe report just "st"
+        "\"st", // maybe report just "st"
     );
     try testContext(
         \\const std = @embedFile("file.<cursor>");
     ,
         .embedfile_string_literal,
-        "\"file.\"", // maybe report just "file."
+        "\"file.", // maybe report just "file."
     );
     try testContext(
         \\const std = @embedFile("file<cursor>.");
@@ -371,7 +371,7 @@ test "position context - string literal" {
         \\var foo = \\hell<cursor>o;
     ,
         .string_literal,
-        "\\\\hello;", // maybe report just "hello;"
+        "\\\\hello", // maybe report just "hello;"
     );
 }
 
