@@ -1,7 +1,11 @@
 name: Sus Fuzzing
 
 on:
+  pull_request:
+    types: [labeled, synchronize]
   push:
+    paths:
+      - "**.zig"
     branches:
       - master
   schedule:
@@ -15,6 +19,7 @@ on:
 
 jobs:
   fuzz:
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'pr:fuzz')
     runs-on: ubuntu-latest
 
     steps:
@@ -22,6 +27,16 @@ jobs:
         uses: pierotofy/set-swap-space@master
         with:
           swap-size-gb: 10
+
+      - name: Default fuzzing duration
+        if: github.event_name != 'pull_request'
+        run: |
+          FUZZING_DURATION=${{ github.event.inputs.fuzzing_duration }}
+
+      - name: PR fuzzing duration
+        if: github.event_name == 'pull_request'
+        run: |
+          FUZZING_DURATION=15m
 
       - name: Grab zig
         uses: goto-bus-stop/setup-zig@v1
@@ -69,7 +84,6 @@ jobs:
         continue-on-error: true
         run: |
           cd $GITHUB_WORKSPACE/sus
-          FUZZING_DURATION=${{ github.event.inputs.fuzzing_duration }}
           { sleep ${FUZZING_DURATION:-1h}; pkill -9 sus; } &
           ./zig-out/bin/sus $GITHUB_WORKSPACE/zls/zig-out/bin/zls markov $GITHUB_WORKSPACE/zig/lib/std
 

@@ -122,19 +122,3 @@ jobs:
           REMOTE_HOST: ${{ secrets.WEBSITE_DEPLOY_HOST }}
           REMOTE_USER: ${{ secrets.WEBSITE_DEPLOY_USER }}
           TARGET: ${{ secrets.WEBSITE_DEPLOY_FOLDER }}
-
-      - name: Instruct fuzzing server to pull latest zls
-        if: ${{ matrix.os == 'ubuntu-latest' && github.ref == 'refs/heads/master' && github.repository_owner == 'zigtools' }}
-        uses: appleboy/ssh-action@v0.1.7
-        with:
-          host: fuzzing.zigtools.org
-          username: ${{ secrets.FUZZING_SSH_USERNAME }}
-          key: ${{ secrets.FUZZING_SSH_PRIVKEY }}
-          script: |
-            systemctl stop fuzzing
-            systemctl stop fuzzing-web
-            cd /root/sus
-            ./script/setup.sh
-            systemctl start fuzzing
-            sleep 5s
-            systemctl start fuzzing-web
