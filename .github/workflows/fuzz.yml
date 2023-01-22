@@ -1,7 +1,13 @@
 name: Sus Fuzzing
 
 on:
-  pull_request:
+  # pull_request_target can be dangerous but necessary here to access secrets.
+  # I'm pretty comfortable using it because:
+  # - We limit all permissions (including GITHUB_TOKEN) to read-only
+  # - We limit runs to labelled PRs only which prevents random exploitation
+  # - We don't expose secrets in environment variables which makes exploitation much more difficult
+  # - The secrets that we reference aren't all that important anyways (they can only access our DigitalOcean Space)
+  pull_request_target:
     types: [labeled, synchronize]
   push:
     paths:
@@ -16,6 +22,8 @@ on:
         type: string
         description: How long should fuzzing last? (sleep time argument)
         default: 15m
+
+permissions: read-all
 
 jobs:
   fuzz:
