@@ -31,12 +31,12 @@ jobs:
       - name: Default fuzzing duration
         if: github.event_name != 'pull_request'
         run: |
-          FUZZING_DURATION=${{ github.event.inputs.fuzzing_duration }}
+          echo "FUZZING_DURATION=${{ github.event.inputs.fuzzing_duration }}" >> $GITHUB_ENV
 
       - name: PR fuzzing duration
         if: github.event_name == 'pull_request'
         run: |
-          FUZZING_DURATION=15m
+          echo "FUZZING_DURATION=15m" >> $GITHUB_ENV
 
       - name: Grab zig
         uses: goto-bus-stop/setup-zig@v1
@@ -84,6 +84,7 @@ jobs:
         continue-on-error: true
         run: |
           cd $GITHUB_WORKSPACE/sus
+          FUZZING_DURATION=${{ env.FUZZING_DURATION }}
           { sleep ${FUZZING_DURATION:-1h}; pkill -9 sus; } &
           ./zig-out/bin/sus $GITHUB_WORKSPACE/zls/zig-out/bin/zls markov $GITHUB_WORKSPACE/zig/lib/std
 
