@@ -837,21 +837,17 @@ pub fn identifierFromPosition(pos_index: usize, handle: DocumentStore.Handle) []
     if (pos_index + 1 >= handle.text.len) return "";
     var start_idx = pos_index;
 
-    while (start_idx > 0 and isSymbolChar(handle.text[start_idx - 1])) {
+    while (start_idx > 0 and analysis.isSymbolChar(handle.text[start_idx - 1])) {
         start_idx -= 1;
     }
 
     var end_idx = pos_index;
-    while (end_idx < handle.text.len and isSymbolChar(handle.text[end_idx])) {
+    while (end_idx < handle.text.len and analysis.isSymbolChar(handle.text[end_idx])) {
         end_idx += 1;
     }
 
     if (end_idx <= start_idx) return "";
     return handle.text[start_idx..end_idx];
-}
-
-fn isSymbolChar(char: u8) bool {
-    return std.ascii.isAlphanumeric(char) or char == '_';
 }
 
 fn gotoDefinitionSymbol(
@@ -2124,7 +2120,7 @@ fn completionHandler(server: *Server, request: types.CompletionParams) Error!?ty
     }
 
     const source_index = offsets.positionToIndex(handle.text, request.position, server.offset_encoding);
-    const pos_context = try analysis.getPositionContext(server.arena.allocator(), handle.text, source_index);
+    const pos_context = try analysis.getPositionContext(server.arena.allocator(), handle.text, source_index, false);
 
     const maybe_completions = switch (pos_context) {
         .builtin => try server.completeBuiltin(),
@@ -2205,7 +2201,7 @@ fn gotoHandler(server: *Server, request: types.TextDocumentPositionParams, resol
     if (request.position.character == 0) return null;
 
     const source_index = offsets.positionToIndex(handle.text, request.position, server.offset_encoding);
-    const pos_context = try analysis.getPositionContext(server.arena.allocator(), handle.text, source_index);
+    const pos_context = try analysis.getPositionContext(server.arena.allocator(), handle.text, source_index, true);
 
     return switch (pos_context) {
         .var_access => try server.gotoDefinitionGlobal(source_index, handle, resolve_alias),
@@ -2245,7 +2241,7 @@ fn hoverHandler(server: *Server, request: types.HoverParams) Error!?types.Hover 
     if (request.position.character == 0) return null;
 
     const source_index = offsets.positionToIndex(handle.text, request.position, server.offset_encoding);
-    const pos_context = try analysis.getPositionContext(server.arena.allocator(), handle.text, source_index);
+    const pos_context = try analysis.getPositionContext(server.arena.allocator(), handle.text, source_index, true);
 
     const response = switch (pos_context) {
         .builtin => try server.hoverDefinitionBuiltin(source_index, handle),
@@ -2391,7 +2387,7 @@ fn generalReferencesHandler(server: *Server, request: GeneralReferencesRequest) 
     if (request.position().character <= 0) return null;
 
     const source_index = offsets.positionToIndex(handle.text, request.position(), server.offset_encoding);
-    const pos_context = try analysis.getPositionContext(server.arena.allocator(), handle.text, source_index);
+    const pos_context = try analysis.getPositionContext(server.arena.allocator(), handle.text, source_index, true);
 
     const decl = switch (pos_context) {
         .var_access => try server.getSymbolGlobal(source_index, handle),
