@@ -1,6 +1,6 @@
 const std = @import("std");
-const InternPool = @import("InternPool.zig");
-const types = @import("lsp.zig");
+const InternPool = @import("../InternPool.zig");
+const types = @import("../lsp.zig");
 
 const Ast = std.zig.Ast;
 
@@ -8,56 +8,74 @@ pub fn dotCompletions(
     arena: std.mem.Allocator,
     ip: *InternPool,
     ty: InternPool.Index,
-    /// used for extracting doc comments
-    node: ?Ast.Node.Index,
-) error{OutOfMemory}![]types.CompletionItem {
-    return try dotCompletionsInternal(arena, ip, ty, node);
-}
-
-pub fn dotCompletionsInternal(
-    arena: std.mem.Allocator,
-    ip: *InternPool,
-    ty: InternPool.Index,
-    node: ?Ast.Node.Index,
-    follow_one_pointer: bool,
+    val: InternPool.Index,
+    node: ?Ast.Node.Index
 ) error{OutOfMemory}![]types.CompletionItem {
     _ = node;
 
     var completions = std.ArrayListUnmanaged(types.CompletionItem){};
-    switch (ip.indexToKey(ty)) {
-        .simple => {},
 
-        .int_type => {},
+    const key = ip.indexToKey(ty);
+    const inner_key = switch (key) {
+        .pointer_type => |info| if (info.size == .One) ip.indexToKey(info.elem_type) else key,
+        else => key,
+    };
+
+    switch (inner_key) {
+        .simple => |simple| switch (simple) {
+            .type => {
+                const ty_key = ip.indexToKey(val);
+                if (ty_key.getNamespace()) {
+                    // TODO lookup in namespace
+                }
+                switch (ty_key) {
+                    .error_set_type => |error_set_info| {
+                        for (error_set_info.names) |name| {
+                            const error_name = ip.indexToKey(name).bytes;
+                            try completions.append(arena, .{
+                                .label = error_name,
+                                .kind = .Constant,
+                                .detail = std.fmt.allocPrint(arena, "error.{s}", .{std.zig.fmtId(error_name)}),
+                            });
+                        }
+                    },
+                    .union_type => {}, // TODO
+                    .enum_type => |enum_info|{
+                        for (enum_info.fields) |field| {
+                            const field_name = ip.indexToKey(field.name).bytes;
+                            try completions.append(arena, .{
+                                .label = field_name,
+                                .kind = .Constant,
+                                // include field.val?
+                            });
+                        }
+                    },
+                    else => {},
+                }
+            },
+            else => false,
+        },
         .pointer_type => |pointer_info| {
-            switch (pointer_info.size) {
-                .One => {
-                    try completions.append(arena, .{
-                        .label = "*",
-                        .kind = .Operator,
-                        .detail = std.fmt.allocPrint(arena, "{}", .{pointer_info.elem_type.fmtType(ip)}),
-                    });
-                    if (follow_one_pointer) {
-                        try dotCompletionsInternal(arena, ip, pointer_info.elem_type, false);
-                    }
-                },
-                .Slice => {
-                    var many_ptr_info = InternPool.Key{ .pointer_type = pointer_info };
-                    many_ptr_info.pointer_info.size = .Many;
+            if (pointer_info == .Slice) {
+                var many_ptr_info = InternPool.Key{ .pointer_type = pointer_info };
+                many_ptr_info.pointer_type.size = .Many;
 
-                    try completions.append(arena, .{
-                        .label = "ptr",
-                        .kind = .Field,
-                        .detail = std.fmt.allocPrint(arena, "{}", .{many_ptr_info.fmtType(ip)}),
-                    });
-                    try completions.append(arena, .{
-                        .label = "len",
-                        .kind = .Field,
-                        .detail = "usize",
-                    });
-                },
-                .Many,
-                .C,
-                => {},
+                try completions.append(arena, .{
+                    .label = "ptr",
+                    .kind = .Field,
+                    .detail = std.fmt.allocPrint(arena, "{}", .{many_ptr_info.fmtType(ip)}),
+                });
+                try completions.append(arena, .{
+                    .label = "len",
+                    .kind = .Field,
+                    .detail = "usize",
+                });
+            } else if(ip.indexToKey(pointer_info.elem_type) == .array_type) {
+                try completions.append(arena, .{
+                    .label = "len",
+                    .kind = .Field,
+                    .detail = "usize",
+                });
             }
         },
         .array_type => |array_info| {
@@ -70,14 +88,14 @@ pub fn dotCompletionsInternal(
         },
         .struct_type => |struct_info| {
             for (struct_info.fields) |field| {
+                const field_name = ip.indexToKey(field.name).bytes;
                 try completions.append(arena, types.CompletionItem{
-                    .label = field.name,
+                    .label = field_name,
                     .kind = .Field,
                     // TODO include alignment and comptime
                     .detail = std.fmt.allocPrint(arena, "{}", .{field.ty.fmtType(ip)}),
                 });
             }
-            // TODO namespace
         },
         .optional_type => |optional_info| {
             try completions.append(arena, .{
@@ -86,31 +104,21 @@ pub fn dotCompletionsInternal(
                 .detail = std.fmt.allocPrint(arena, "{}", .{optional_info.payload_type.fmtType(ip)}),
             });
         },
-        .error_union_type => {},
-        .error_set_type => |error_set_info| {
-            for (error_set_info.names) |name| {
-                try completions.append(arena, .{
-                    .label = name,
-                    .kind = .Constant,
-                    .detail = std.fmt.allocPrint(arena, "error.{s}", .{name}),
-                });
-            }
-        },
         .enum_type => |enum_info| {
             for (enum_info.fields) |field| {
+                const field_name = ip.indexToKey(field.name).bytes;
                 try completions.append(arena, .{
-                    .label = field.name,
+                    .label = field_name,
                     .kind = .Field,
                     .detail = std.fmt.allocPrint(arena, "{}", .{field.ty.fmtType(ip)}),
                 });
             }
-            // TODO namespace
         },
-        .function_type => {},
         .union_type => |union_info| {
             for (union_info.fields) |field| {
+                const field_name = ip.indexToKey(field.name).bytes;
                 try completions.append(arena, .{
-                    .label = field.name,
+                    .label = field_name,
                     .kind = .Field,
                     .detail = if (field.alignment != 0)
                         std.fmt.allocPrint(arena, "align({d}) {}", .{ field.alignment, field.ty.fmtType(ip) })
@@ -118,12 +126,20 @@ pub fn dotCompletionsInternal(
                         std.fmt.allocPrint(arena, "{}", .{field.ty.fmtType(ip)}),
                 });
             }
-            // TODO namespace
         },
-        .tuple_type => {
-            // TODO
+        .tuple_type => |tuple_info| {
+            for (tuple_info.types) |tuple_ty,i| {
+                try completions.append(arena, .{
+                    .label = std.fmt.allocPrint(arena, "{d}", .{i}),
+                    .kind = .Field,
+                    .detail = std.fmt.allocPrint(arena, "{}", .{tuple_ty.fmtType(ip)}),
+                });
+            }
         },
-        .vector_type => {},
+        .int_type,
+        .error_union_type,
+        .function_type,
+        .vector_type,
         .anyframe_type => {},
 
         .int_u64_value,
@@ -134,12 +150,12 @@ pub fn dotCompletionsInternal(
         .float_64_value,
         .float_80_value,
         .float_128_value,
-        => {},
+        => unreachable,
 
         .bytes,
         .aggregate,
         .union_value,
-        => {},
+        => unreachable,
     }
     return try completions.toOwnedSlice(arena);
 }
