@@ -31,6 +31,7 @@ pub const Pointer = packed struct {
 };
 
 pub const Array = packed struct {
+    // TODO change to Index
     len: u32,
     child: Index,
     sentinel: Index = .none,
@@ -275,15 +276,89 @@ pub const Key = union(enum) {
             .float_64_value,
             .float_80_value,
             .float_128_value,
-            // .type_value,
             => unreachable,
 
             .bytes,
-            // .one_pointer,
             .aggregate,
             .union_value,
             => unreachable,
         };
+    }
+
+    pub fn isType(key: Key) bool {
+        return switch (key) {
+            .simple => |simple| switch (simple) {
+                .f16,
+                .f32,
+                .f64,
+                .f80,
+                .f128,
+                .c_longdouble,
+                .usize,
+                .isize,
+                .c_short,
+                .c_ushort,
+                .c_int,
+                .c_uint,
+                .c_long,
+                .c_ulong,
+                .c_longlong,
+                .c_ulonglong,
+                .comptime_int,
+                .comptime_float,
+                .anyopaque,
+                .bool,
+                .void,
+                .type,
+                .anyerror,
+                .noreturn,
+                .@"anyframe",
+                .null_type,
+                .undefined_type,
+                .enum_literal_type, => true,
+
+                .undefined_value,
+                .void_value,
+                .unreachable_value,
+                .null_value,
+                .bool_true,
+                .bool_false,
+                => false,
+            },
+
+            .int_type,
+            .pointer_type,
+            .array_type,
+            .struct_type,
+            .optional_type,
+            .error_union_type,
+            .error_set_type,
+            .enum_type,
+            .function_type,
+            .union_type,
+            .tuple_type,
+            .vector_type,
+            .anyframe_type, => true,
+
+            .int_u64_value,
+            .int_i64_value,
+            .int_big_value,
+            .float_16_value,
+            .float_32_value,
+            .float_64_value,
+            .float_80_value,
+            .float_128_value,
+            => false,
+
+            .bytes,
+            .aggregate,
+            .union_value,
+            => false,
+        };
+    }
+
+    pub fn isValue(key: Key) bool {
+        return !key.isValue();
     }
 
     /// Asserts the type is an integer, enum, error set, packed struct, or vector of one of them.
@@ -657,7 +732,7 @@ pub const Key = union(enum) {
 
                 return array_info.child;
             },
-            .struct_type => panicOrElse("TODO", null),
+            .struct_type => return panicOrElse("TODO", null),
             .optional_type => |optional_info| {
                 try writer.writeByte('?');
                 return optional_info.payload_type;
@@ -676,7 +751,7 @@ pub const Key = union(enum) {
                 }
                 try writer.writeByte('}');
             },
-            .enum_type => panicOrElse("TODO", null),
+            .enum_type => return panicOrElse("TODO", null),
             .function_type => |function_info| {
                 try writer.writeAll("fn(");
 
@@ -712,7 +787,7 @@ pub const Key = union(enum) {
 
                 return function_info.return_type;
             },
-            .union_type => panicOrElse("TODO", null),
+            .union_type => return panicOrElse("TODO", null),
             .tuple_type => |tuple_info| {
                 try writer.writeAll("tuple{");
                 for (tuple_info.types) |field_ty, i| {
@@ -1177,6 +1252,12 @@ pub fn get(ip: *InternPool, gpa: Allocator, key: Key) Allocator.Error!Index {
         .data = data,
     });
     return @intToEnum(Index, ip.items.len - 1);
+}
+
+pub fn contains(ip: InternPool, key: Key) ?Index {
+    const adapter: KeyAdapter = .{ .ip = &ip };
+    const index = ip.map.getIndexAdapted(key, adapter) orelse return null;
+    return @intToEnum(Index, index);
 }
 
 fn addExtra(ip: *InternPool, gpa: Allocator, extra: anytype) Allocator.Error!u32 {
@@ -2501,7 +2582,7 @@ inline fn panicOrElse(message: []const u8, value: anytype) @TypeOf(value) {
     if (builtin.is_test or builtin.mode == .Debug) {
         @panic(message);
     }
-    return null;
+    return value;
 }
 
 // ---------------------------------------------
