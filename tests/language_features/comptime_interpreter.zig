@@ -5,7 +5,7 @@ const builtin = @import("builtin");
 const Ast = std.zig.Ast;
 
 const ComptimeInterpreter = zls.ComptimeInterpreter;
-const InternPool = zls.InternPool;
+const InternPool = zls.analyser.InternPool;
 const Index = InternPool.Index;
 const Key = InternPool.Key;
 const ast = zls.ast;

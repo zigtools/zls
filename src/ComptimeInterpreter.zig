@@ -12,7 +12,7 @@ const analysis = @import("analysis.zig");
 const offsets = @import("offsets.zig");
 const DocumentStore = @import("DocumentStore.zig");
 
-pub const InternPool = @import("InternPool.zig");
+pub const InternPool = @import("analyser/InternPool.zig");
 pub const Index = InternPool.Index;
 pub const Key = InternPool.Key;
 pub const ComptimeInterpreter = @This();

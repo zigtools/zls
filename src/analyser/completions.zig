@@ -1,5 +1,5 @@
 const std = @import("std");
-const InternPool = @import("../InternPool.zig");
+const InternPool = @import("InternPool.zig");
 const types = @import("../lsp.zig");
 
 const Ast = std.zig.Ast;
