@@ -31,8 +31,7 @@ pub const Pointer = packed struct {
 };
 
 pub const Array = packed struct {
-    // TODO change to Index
-    len: u32,
+    len: u64,
     child: Index,
     sentinel: Index = .none,
 };

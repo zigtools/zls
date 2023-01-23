@@ -787,7 +787,7 @@ pub fn resolveTypeOfNodeInternal(store: *DocumentStore, arena: *std.heap.ArenaAl
                         }
                         return null;
                     };
-                    const val = result.getValue() catch |err| {
+                    const value = result.getValue() catch |err| {
                         log.err("Interpreter error: {s}", .{@errorName(err)});
                         if (@errorReturnTrace()) |trace| {
                             std.debug.dumpStackTrace(trace.*);
@@ -795,23 +795,16 @@ pub fn resolveTypeOfNodeInternal(store: *DocumentStore, arena: *std.heap.ArenaAl
                         return null;
                     };
 
-                    const type_type = try interpreter.ip.get(interpreter.allocator, ComptimeInterpreter.IPKey{ .simple = .type });
-                    if (val.ty != type_type) {
-                        log.err("Not a type: {}", .{val.ty.fmtType(interpreter.ip)});
-                        return null;
-                    }
+                    const type_type = try interpreter.ip.get(interpreter.allocator, ComptimeInterpreter.Key{ .simple = .type });
+                    const is_type_val = value.ty == type_type;
 
                     return TypeWithHandle{
                         .type = .{
                             .data = .{ .@"comptime" = .{
                                 .interpreter = interpreter,
-                                .type = ComptimeInterpreter.Type{
-                                    .interpreter = interpreter,
-                                    .node_idx = val.node_idx,
-                                    .ty = val.val,
-                                },
+                                .value = value,
                             } },
-                            .is_type_val = true,
+                            .is_type_val = is_type_val,
                         },
                         .handle = node_handle.handle,
                     };
@@ -1064,7 +1057,7 @@ pub const Type = struct {
         array_index,
         @"comptime": struct {
             interpreter: *ComptimeInterpreter,
-            type: ComptimeInterpreter.Type,
+            value: ComptimeInterpreter.Value,
         },
     },
     /// If true, the type `type`, the attached data is the value of the type value.

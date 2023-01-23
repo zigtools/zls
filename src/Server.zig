@@ -20,6 +20,7 @@ const tracy = @import("tracy.zig");
 const uri_utils = @import("uri.zig");
 const diff = @import("diff.zig");
 const ComptimeInterpreter = @import("ComptimeInterpreter.zig");
+const analyser_completions = @import("analyser/completions.zig");
 
 const data = @import("data/data.zig");
 const snipped_data = @import("data/snippets.zig");
@@ -595,24 +596,8 @@ fn typeToCompletion(
         ),
         .primitive, .array_index => {},
         .@"comptime" => |co| {
-            const key = co.interpreter.ip.indexToKey(co.type.ty);
-
-            switch (key) {
-                .struct_type => |struct_info| {
-                    for (struct_info.fields) |field| {
-                        const field_name = co.interpreter.ip.indexToKey(field.name).bytes;
-                        try list.append(allocator, .{
-                            .label = field_name,
-                            .kind = .Field,
-                            .insertText = field_name,
-                            .insertTextFormat = .PlainText,
-                        });
-                    }
-
-                    // TODO declaration completion
-                },
-                else => {},
-            }
+            const items = try analyser_completions.dotCompletions(allocator, &co.interpreter.ip, co.value.ty, co.value.val, co.value.node_idx);
+            try list.appendSlice(allocator, items);
         },
     }
 }
@@ -934,7 +919,7 @@ fn hoverSymbol(server: *Server, decl_handle: analysis.DeclWithHandle) error{OutO
 
     const resolved_type_str = if (resolved_type) |rt|
         if (rt.type.is_type_val) switch (rt.type.data) {
-            .@"comptime" => |*co| try std.fmt.allocPrint(server.arena.allocator(), "{}", .{co.type.ty.fmtType(co.interpreter.ip)}),
+            .@"comptime" => |co| try std.fmt.allocPrint(server.arena.allocator(), "{}", .{co.value.ty.fmtType(co.interpreter.ip)}),
             else => "type",
         } else switch (rt.type.data) { // TODO: Investigate random weird numbers like 897 that cause index of bounds
             .pointer,
