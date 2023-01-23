@@ -27,7 +27,7 @@ permissions: read-all
 
 jobs:
   fuzz:
-    if: github.event_name != 'pull_request_target' || contains(github.event.pull_request.labels.*.name, 'pr:fuzz')
+    if: github.repository_owner == 'zigtools' && (github.event_name != 'pull_request_target' || contains(github.event.pull_request.labels.*.name, 'pr:fuzz'))
     runs-on: ubuntu-latest
 
     steps:
@@ -109,7 +109,7 @@ jobs:
           space_name: fuzzing-output
           space_region: nyc3
           source: sus/saved_logs/
-          out_dir: ${{ github.repository_owner }}/${{ github.event.repository.name }}/${{ github.head_ref || github.ref_name }}/${{ github.sha }}
+          out_dir: ${{ github.event.pull_request.head.repo.full_name || github.repository }}/${{ github.head_ref || github.ref_name }}/${{ github.event.pull_request.head.sha || github.sha }}
 
 
   
