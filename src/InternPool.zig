@@ -44,6 +44,7 @@ pub const Struct = struct {
     backing_int_ty: Index,
 
     pub const Field = packed struct {
+        /// guaranteed to be .bytes
         name: Index,
         ty: Index,
         default_value: Index = .none,
@@ -62,6 +63,7 @@ pub const ErrorUnion = packed struct {
 };
 
 pub const ErrorSet = struct {
+    /// every element is guaranteed to be .bytes
     names: []const Index,
 };
 
@@ -72,6 +74,7 @@ pub const Enum = struct {
     tag_type_infered: bool,
 
     pub const Field = packed struct {
+        /// guaranteed to be .bytes
         name: Index,
         val: Index,
     };
@@ -79,8 +82,11 @@ pub const Enum = struct {
 
 pub const Function = struct {
     args: []const Index,
+    /// zig only lets the first 32 arguments be `comptime`
     args_is_comptime: std.StaticBitSet(32) = std.StaticBitSet(32).initEmpty(),
+    /// zig only lets the first 32 arguments be generic
     args_is_generic: std.StaticBitSet(32) = std.StaticBitSet(32).initEmpty(),
+    /// zig only lets the first 32 arguments be `noalias`
     args_is_noalias: std.StaticBitSet(32) = std.StaticBitSet(32).initEmpty(),
     return_type: Index,
     alignment: u16 = 0,
@@ -96,6 +102,7 @@ pub const Union = struct {
     layout: std.builtin.Type.ContainerLayout = .Auto,
 
     pub const Field = packed struct {
+        /// guaranteed to be .bytes
         name: Index,
         ty: Index,
         alignment: u16,
@@ -1226,6 +1233,7 @@ pub fn indexToKey(ip: InternPool, index: Index) Key {
     };
 }
 
+/// TODO rename to getOrPut
 pub fn get(ip: *InternPool, gpa: Allocator, key: Key) Allocator.Error!Index {
     const adapter: KeyAdapter = .{ .ip = ip };
     const gop = try ip.map.getOrPutAdapted(gpa, key, adapter);
@@ -1254,6 +1262,7 @@ pub fn get(ip: *InternPool, gpa: Allocator, key: Key) Allocator.Error!Index {
     return @intToEnum(Index, ip.items.len - 1);
 }
 
+/// TODO rename to get
 pub fn contains(ip: InternPool, key: Key) ?Index {
     const adapter: KeyAdapter = .{ .ip = &ip };
     const index = ip.map.getIndexAdapted(key, adapter) orelse return null;
