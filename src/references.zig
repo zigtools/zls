@@ -494,10 +494,10 @@ pub fn symbolReferences(
         .param_payload => |pay| blk: {
             // Rename the param tok.
             const param = pay.param;
-            for (curr_handle.document_scope.scopes.items) |scope| {
-                if (scope.data != .function) continue;
+            for (curr_handle.document_scope.scopes.items(.data)) |scope_data| {
+                if (scope_data != .function) continue;
 
-                const proto = scope.data.function;
+                const proto = scope_data.function;
 
                 var buf: [1]Ast.Node.Index = undefined;
                 const fn_proto = curr_handle.tree.fullFnProto(&buf, proto).?;
