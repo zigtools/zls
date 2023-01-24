@@ -1342,9 +1342,12 @@ fn deepEql(a: anytype, b: @TypeOf(a)) bool {
             .C,
             => @compileError("Unable to equality compare pointer " ++ @typeName(T)),
         },
+        .Float => {
+            const I = std.meta.Int(.unsigned, @bitSizeOf(T));
+            return @bitCast(I, a) == @bitCast(I, b);
+        },
         .Bool,
         .Int,
-        .Float,
         .Enum,
         => return a == b,
         else => @compileError("Unable to equality compare type " ++ @typeName(T)),
@@ -2757,16 +2760,50 @@ test "float value" {
     const f80_value = try ip.get(gpa, .{ .float_80_value = 2.0 });
     const f128_value = try ip.get(gpa, .{ .float_128_value = 2.75 });
 
+    const f32_nan_value = try ip.get(gpa, .{ .float_32_value = std.math.nan_f32 });
+    const f32_qnan_value = try ip.get(gpa, .{ .float_32_value = std.math.qnan_f32 });
+
+    const f32_inf_value = try ip.get(gpa, .{ .float_32_value = std.math.inf_f32 });
+    const f32_ninf_value = try ip.get(gpa, .{ .float_32_value = -std.math.inf_f32 });
+
+    const f32_zero_value = try ip.get(gpa, .{ .float_32_value = 0.0 });
+    const f32_nzero_value = try ip.get(gpa, .{ .float_32_value = -0.0 });
+
     try std.testing.expect(f16_value != f32_value);
     try std.testing.expect(f32_value != f64_value);
     try std.testing.expect(f64_value != f80_value);
     try std.testing.expect(f80_value != f128_value);
+
+    try std.testing.expect(f32_nan_value != f32_qnan_value);
+    try std.testing.expect(f32_inf_value != f32_ninf_value);
+    try std.testing.expect(f32_zero_value != f32_nzero_value);
+
+    try std.testing.expect(!ip.indexToKey(f16_value).eql(ip.indexToKey(f32_value)));
+    try std.testing.expect(ip.indexToKey(f32_value).eql(ip.indexToKey(f32_value)));
+
+    try std.testing.expect(ip.indexToKey(f32_nan_value).eql(ip.indexToKey(f32_nan_value)));
+    try std.testing.expect(!ip.indexToKey(f32_nan_value).eql(ip.indexToKey(f32_qnan_value)));
+
+    try std.testing.expect(ip.indexToKey(f32_inf_value).eql(ip.indexToKey(f32_inf_value)));
+    try std.testing.expect(!ip.indexToKey(f32_inf_value).eql(ip.indexToKey(f32_ninf_value)));
+
+    try std.testing.expect(ip.indexToKey(f32_zero_value).eql(ip.indexToKey(f32_zero_value)));
+    try std.testing.expect(!ip.indexToKey(f32_zero_value).eql(ip.indexToKey(f32_nzero_value)));
 
     try testExpectFmtValue(ip, f16_value, undefined, "0.25");
     try testExpectFmtValue(ip, f32_value, undefined, "0.5");
     try testExpectFmtValue(ip, f64_value, undefined, "1");
     try testExpectFmtValue(ip, f80_value, undefined, "2");
     try testExpectFmtValue(ip, f128_value, undefined, "2.75");
+
+    try testExpectFmtValue(ip, f32_nan_value, undefined, "nan");
+    try testExpectFmtValue(ip, f32_qnan_value, undefined, "nan");
+
+    try testExpectFmtValue(ip, f32_inf_value, undefined, "inf");
+    try testExpectFmtValue(ip, f32_ninf_value, undefined, "-inf");
+
+    try testExpectFmtValue(ip, f32_zero_value, undefined, "0");
+    try testExpectFmtValue(ip, f32_nzero_value, undefined, "-0");
 }
 
 test "pointer type" {
