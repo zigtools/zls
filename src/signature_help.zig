@@ -275,7 +275,7 @@ pub fn getSignatureInfo(document_store: *DocumentStore, arena: *std.heap.ArenaAl
                     };
 
                     var buf: [1]Ast.Node.Index = undefined;
-                    if (ast.fnProto(type_handle.handle.tree, node, &buf)) |proto| {
+                    if (type_handle.handle.tree.fullFnProto(&buf, node)) |proto| {
                         return try fnProtoToSignatureInfo(
                             document_store,
                             arena,
@@ -327,7 +327,7 @@ pub fn getSignatureInfo(document_store: *DocumentStore, arena: *std.heap.ArenaAl
                         }
                     }
 
-                    if (ast.fnProto(res_handle.tree, node, &buf)) |proto| {
+                    if (res_handle.tree.fullFnProto(&buf, node)) |proto| {
                         return try fnProtoToSignatureInfo(
                             document_store,
                             arena,

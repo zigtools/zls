@@ -339,7 +339,7 @@ fn writeNodeTokens(builder: *Builder, maybe_node: ?Ast.Node.Index) WriteTokensEr
         .simple_var_decl,
         .aligned_var_decl,
         => {
-            const var_decl = ast.varDecl(tree, node).?;
+            const var_decl = tree.fullVarDecl(node).?;
             if (analysis.getDocCommentTokenIndex(token_tags, main_token)) |comment_idx|
                 try writeDocComments(builder, tree, comment_idx);
 
@@ -386,7 +386,7 @@ fn writeNodeTokens(builder: *Builder, maybe_node: ?Ast.Node.Index) WriteTokensEr
         .tagged_union_two_trailing,
         => {
             var buf: [2]Ast.Node.Index = undefined;
-            const decl: Ast.full.ContainerDecl = ast.containerDecl(tree, node, &buf).?;
+            const decl: Ast.full.ContainerDecl = tree.fullContainerDecl(&buf, node).?;
 
             try writeToken(builder, decl.layout_token, .keyword);
             try writeToken(builder, decl.ast.main_token, .keyword);
@@ -446,7 +446,7 @@ fn writeNodeTokens(builder: *Builder, maybe_node: ?Ast.Node.Index) WriteTokensEr
         .fn_decl,
         => {
             var buf: [1]Ast.Node.Index = undefined;
-            const fn_proto: Ast.full.FnProto = ast.fnProto(tree, node, &buf).?;
+            const fn_proto: Ast.full.FnProto = tree.fullFnProto(&buf, node).?;
             if (analysis.getDocCommentTokenIndex(token_tags, main_token)) |docs|
                 try writeDocComments(builder, tree, docs);
 
@@ -541,7 +541,7 @@ fn writeNodeTokens(builder: *Builder, maybe_node: ?Ast.Node.Index) WriteTokensEr
         .for_simple,
         .@"for",
         => {
-            const while_node = ast.whileAst(tree, node).?;
+            const while_node = ast.fullWhile(tree, node).?;
             try writeToken(builder, while_node.label_token, .label);
             try writeToken(builder, while_node.inline_token, .keyword);
             try writeToken(builder, while_node.ast.while_token, .keyword);
@@ -575,7 +575,7 @@ fn writeNodeTokens(builder: *Builder, maybe_node: ?Ast.Node.Index) WriteTokensEr
         .@"if",
         .if_simple,
         => {
-            const if_node = ast.ifFull(tree, node);
+            const if_node = ast.fullIf(tree, node).?;
 
             try writeToken(builder, if_node.ast.if_token, .keyword);
             try callWriteNodeTokens(allocator, .{ builder, if_node.ast.cond_expr });
@@ -609,13 +609,7 @@ fn writeNodeTokens(builder: *Builder, maybe_node: ?Ast.Node.Index) WriteTokensEr
         .array_init_dot_two_comma,
         => {
             var buf: [2]Ast.Node.Index = undefined;
-            const array_init: Ast.full.ArrayInit = switch (tag) {
-                .array_init, .array_init_comma => tree.arrayInit(node),
-                .array_init_one, .array_init_one_comma => tree.arrayInitOne(buf[0..1], node),
-                .array_init_dot, .array_init_dot_comma => tree.arrayInitDot(node),
-                .array_init_dot_two, .array_init_dot_two_comma => tree.arrayInitDotTwo(&buf, node),
-                else => unreachable,
-            };
+            const array_init: Ast.full.ArrayInit = tree.fullArrayInit(&buf, node).?;
 
             try callWriteNodeTokens(allocator, .{ builder, array_init.ast.type_expr });
             for (array_init.ast.elements) |elem| try callWriteNodeTokens(allocator, .{ builder, elem });
@@ -630,13 +624,7 @@ fn writeNodeTokens(builder: *Builder, maybe_node: ?Ast.Node.Index) WriteTokensEr
         .struct_init_dot_two_comma,
         => {
             var buf: [2]Ast.Node.Index = undefined;
-            const struct_init: Ast.full.StructInit = switch (tag) {
-                .struct_init, .struct_init_comma => tree.structInit(node),
-                .struct_init_dot, .struct_init_dot_comma => tree.structInitDot(node),
-                .struct_init_one, .struct_init_one_comma => tree.structInitOne(buf[0..1], node),
-                .struct_init_dot_two, .struct_init_dot_two_comma => tree.structInitDotTwo(&buf, node),
-                else => unreachable,
-            };
+            const struct_init: Ast.full.StructInit = tree.fullStructInit(&buf, node).?;
 
             var field_token_type: ?TokenType = null;
 
@@ -674,7 +662,7 @@ fn writeNodeTokens(builder: *Builder, maybe_node: ?Ast.Node.Index) WriteTokensEr
         .async_call_one_comma,
         => {
             var params: [1]Ast.Node.Index = undefined;
-            const call = ast.callFull(tree, node, &params).?;
+            const call = tree.fullCall(&params, node).?;
 
             try writeToken(builder, call.async_token, .keyword);
             try callWriteNodeTokens(allocator, .{ builder, call.ast.fn_expr });
@@ -690,12 +678,7 @@ fn writeNodeTokens(builder: *Builder, maybe_node: ?Ast.Node.Index) WriteTokensEr
         .slice_open,
         .slice_sentinel,
         => {
-            const slice: Ast.full.Slice = switch (tag) {
-                .slice => tree.slice(node),
-                .slice_open => tree.sliceOpen(node),
-                .slice_sentinel => tree.sliceSentinel(node),
-                else => unreachable,
-            };
+            const slice: Ast.full.Slice = tree.fullSlice(node).?;
 
             try callWriteNodeTokens(allocator, .{ builder, slice.ast.sliced });
             try callWriteNodeTokens(allocator, .{ builder, slice.ast.start });
@@ -772,11 +755,7 @@ fn writeNodeTokens(builder: *Builder, maybe_node: ?Ast.Node.Index) WriteTokensEr
         .asm_input,
         .asm_simple,
         => {
-            const asm_node: Ast.full.Asm = switch (tag) {
-                .@"asm" => tree.asmFull(node),
-                .asm_simple => tree.asmSimple(node),
-                else => return, // TODO Inputs, outputs
-            };
+            const asm_node: Ast.full.Asm = tree.fullAsm(node).?;
 
             try writeToken(builder, main_token, .keyword);
             try writeToken(builder, asm_node.volatile_token, .keyword);
@@ -920,7 +899,7 @@ fn writeNodeTokens(builder: *Builder, maybe_node: ?Ast.Node.Index) WriteTokensEr
         .ptr_type_bit_range,
         .ptr_type_sentinel,
         => {
-            const ptr_type = ast.ptrType(tree, node).?;
+            const ptr_type = ast.fullPtrType(tree, node).?;
 
             if (ptr_type.size == .One and token_tags[main_token] == .asterisk_asterisk and
                 main_token == main_tokens[ptr_type.ast.child_type])
@@ -955,10 +934,7 @@ fn writeNodeTokens(builder: *Builder, maybe_node: ?Ast.Node.Index) WriteTokensEr
         .array_type,
         .array_type_sentinel,
         => {
-            const array_type: Ast.full.ArrayType = if (tag == .array_type)
-                tree.arrayType(node)
-            else
-                tree.arrayTypeSentinel(node);
+            const array_type: Ast.full.ArrayType = tree.fullArrayType(node).?;
 
             try callWriteNodeTokens(allocator, .{ builder, array_type.ast.elem_count });
             try callWriteNodeTokens(allocator, .{ builder, array_type.ast.sentinel });
@@ -988,7 +964,7 @@ fn writeNodeTokens(builder: *Builder, maybe_node: ?Ast.Node.Index) WriteTokensEr
 
 fn writeContainerField(builder: *Builder, node: Ast.Node.Index, field_token_type: ?TokenType) !void {
     const tree = builder.handle.tree;
-    const container_field = ast.containerField(tree, node).?;
+    const container_field = tree.fullContainerField(node).?;
     const base = tree.nodes.items(.main_token)[node];
     const tokens = tree.tokens.items(.tag);
 
@@ -1033,8 +1009,7 @@ pub fn writeAllSemanticTokens(
     var builder = Builder.init(arena, store, handle, encoding);
 
     // reverse the ast from the root declarations
-    var buf: [2]Ast.Node.Index = undefined;
-    for (ast.declMembers(handle.tree, 0, &buf)) |child| {
+    for (handle.tree.rootDecls()) |child| {
         writeNodeTokens(&builder, child) catch |err| switch (err) {
             error.MovedBackwards => break,
             else => |e| return e,

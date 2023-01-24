@@ -325,7 +325,7 @@ pub const Declaration = struct {
                 .aligned_var_decl,
                 .simple_var_decl,
                 => {
-                    const var_decl = ast.varDecl(tree, decl.node_idx).?;
+                    const var_decl = tree.fullVarDecl(decl.node_idx).?;
                     if (var_decl.ast.init_node == 0)
                         return error.CriticalAstFailure;
 
@@ -361,7 +361,7 @@ pub const Declaration = struct {
             .aligned_var_decl,
             .simple_var_decl,
             => {
-                return tree.tokenSlice(ast.varDecl(tree, declaration.node_idx).?.ast.mut_token).len != 3;
+                return tree.tokenSlice(tree.fullVarDecl(declaration.node_idx).?.ast.mut_token).len != 3;
             },
             else => false,
         };
@@ -496,24 +496,7 @@ pub const InterpreterScope = struct {
     pub const ScopeKind = enum { container, block, function };
     pub fn scopeKind(scope: InterpreterScope) ScopeKind {
         const tree = scope.interpreter.getHandle().tree;
-        return switch (tree.nodes.items(.tag)[scope.node_idx]) {
-            .container_decl,
-            .container_decl_trailing,
-            .container_decl_arg,
-            .container_decl_arg_trailing,
-            .container_decl_two,
-            .container_decl_two_trailing,
-            .tagged_union,
-            .tagged_union_trailing,
-            .tagged_union_two,
-            .tagged_union_two_trailing,
-            .tagged_union_enum_tag,
-            .tagged_union_enum_tag_trailing,
-            .root,
-            .error_set_decl,
-            => .container,
-            else => .block,
-        };
+        return if (ast.isContainer(tree, scope.node_idx)) .container else .block;
     }
 
     pub fn getLabel(scope: InterpreterScope) ?Ast.TokenIndex {
@@ -601,11 +584,10 @@ pub const InterpretResult = union(enum) {
 
 fn getDeclCount(tree: Ast, node_idx: Ast.Node.Index) usize {
     var buffer: [2]Ast.Node.Index = undefined;
-    const members = ast.declMembers(tree, node_idx, &buffer);
+    const container_decl = tree.fullContainerDecl(&buffer, node_idx).?;
 
     var count: usize = 0;
-
-    for (members) |member| {
+    for (container_decl.ast.members) |member| {
         switch (tree.nodes.items(.tag)[member]) {
             .global_var_decl,
             .local_var_decl,
@@ -638,9 +620,9 @@ pub fn huntItDown(
             log.info("Order-independent evaluating {s}...", .{decl_name});
 
             var buffer: [2]Ast.Node.Index = undefined;
-            const members = ast.declMembers(tree, pscope.node_idx, &buffer);
+            const container_decl = tree.fullContainerDecl(&buffer, pscope.node_idx).?;
 
-            for (members) |member| {
+            for (container_decl.ast.members) |member| {
                 switch (tags[member]) {
                     .global_var_decl,
                     .local_var_decl,
@@ -751,7 +733,6 @@ pub fn interpret(
         // .tagged_union_enum_tag,
         // .tagged_union_enum_tag_trailing,
         .root,
-        .error_set_decl,
         => {
             var container_scope = try interpreter.newScope(scope, node_idx);
             var type_info = TypeInfo{
@@ -764,55 +745,47 @@ pub fn interpret(
             if (node_idx == 0) interpreter.root_type = cont_type;
 
             var buffer: [2]Ast.Node.Index = undefined;
-            const members = ast.declMembers(tree, node_idx, &buffer);
+            const container_decl = tree.fullContainerDecl(&buffer, node_idx).?;
 
-            var field_idx: usize = 0;
-            for (members) |member| {
-                const maybe_container_field: ?zig.Ast.full.ContainerField = switch (tags[member]) {
-                    .container_field => tree.containerField(member),
-                    .container_field_align => tree.containerFieldAlign(member),
-                    .container_field_init => tree.containerFieldInit(member),
-                    else => null,
+            for (container_decl.ast.members) |member| {
+                const container_field = tree.fullContainerField(member) orelse {
+                    _ = try interpreter.interpret(member, container_scope, options);
+                    continue;
                 };
 
-                if (maybe_container_field) |field_info| {
-                    var init_type_value = try (try interpreter.interpret(field_info.ast.type_expr, container_scope, .{})).getValue();
-                    var default_value = if (field_info.ast.value_expr == 0)
-                        null
-                    else
-                        try (try interpreter.interpret(field_info.ast.value_expr, container_scope, .{})).getValue();
+                var init_type_value = try (try interpreter.interpret(container_field.ast.type_expr, container_scope, .{})).getValue();
+                var default_value = if (container_field.ast.value_expr == 0)
+                    null
+                else
+                    try (try interpreter.interpret(container_field.ast.value_expr, container_scope, .{})).getValue();
 
-                    if (init_type_value.type.getTypeInfo() != .type) {
-                        try interpreter.recordError(
-                            field_info.ast.type_expr,
-                            "expected_type",
-                            try std.fmt.allocPrint(interpreter.allocator, "expected type 'type', found '{s}'", .{interpreter.formatTypeInfo(init_type_value.type.getTypeInfo())}),
-                        );
-                        continue;
-                    }
-
-                    const name = if (field_info.ast.tuple_like)
-                        &[0]u8{}
-                    else
-                        tree.tokenSlice(field_info.ast.main_token);
-                    const field = FieldDefinition{
-                        .node_idx = member,
-                        .name = name,
-                        .type = init_type_value.value_data.type,
-                        .default_value = default_value,
-                        // TODO: Default values
-                        // .@"type" = T: {
-                        //     var value = (try interpreter.interpret(field_info.ast.type_expr, scope_idx, true)).?.value;
-                        //     break :T @ptrCast(*Type, @alignCast(@alignOf(*Type), value)).*;
-                        // },
-                        // .value = null,
-                    };
-
-                    try cont_type.getTypeInfoMutable().@"struct".fields.put(interpreter.allocator, name, field);
-                    field_idx += 1;
-                } else {
-                    _ = try interpreter.interpret(member, container_scope, options);
+                if (init_type_value.type.getTypeInfo() != .type) {
+                    try interpreter.recordError(
+                        container_field.ast.type_expr,
+                        "expected_type",
+                        try std.fmt.allocPrint(interpreter.allocator, "expected type 'type', found '{s}'", .{interpreter.formatTypeInfo(init_type_value.type.getTypeInfo())}),
+                    );
+                    continue;
                 }
+
+                const name = if (container_field.ast.tuple_like)
+                    &[0]u8{}
+                else
+                    tree.tokenSlice(container_field.ast.main_token);
+                const field = FieldDefinition{
+                    .node_idx = member,
+                    .name = name,
+                    .type = init_type_value.value_data.type,
+                    .default_value = default_value,
+                    // TODO: Default values
+                    // .@"type" = T: {
+                    //     var value = (try interpreter.interpret(container_field.ast.type_expr, scope_idx, true)).?.value;
+                    //     break :T @ptrCast(*Type, @alignCast(@alignOf(*Type), value)).*;
+                    // },
+                    // .value = null,
+                };
+
+                try cont_type.getTypeInfoMutable().@"struct".fields.put(interpreter.allocator, name, field);
             }
 
             return InterpretResult{ .value = Value{
@@ -821,6 +794,9 @@ pub fn interpret(
                 .type = try interpreter.createType(node_idx, .{ .type = {} }),
                 .value_data = try interpreter.createValueData(.{ .type = cont_type }),
             } };
+        },
+        .error_set_decl => {
+            return InterpretResult{ .nothing = {} };
         },
         .global_var_decl,
         .local_var_decl,
@@ -832,7 +808,7 @@ pub fn interpret(
             if (scope.?.declarations.contains(name))
                 return InterpretResult{ .nothing = {} };
 
-            const decl = ast.varDecl(tree, node_idx).?;
+            const decl = tree.fullVarDecl(node_idx).?;
             if (decl.ast.init_node == 0)
                 return InterpretResult{ .nothing = {} };
 
@@ -1009,16 +985,18 @@ pub fn interpret(
             else
                 InterpretResult{ .return_with_value = try (try interpreter.interpret(data[node_idx].lhs, scope, options)).getValue() };
         },
-        .@"if", .if_simple => {
-            const iff = ast.ifFull(tree, node_idx);
+        .@"if",
+        .if_simple,
+        => {
+            const if_node = ast.fullIf(tree, node_idx).?;
             // TODO: Don't evaluate runtime ifs
             // if (options.observe_values) {
-            const ir = try interpreter.interpret(iff.ast.cond_expr, scope, options);
+            const ir = try interpreter.interpret(if_node.ast.cond_expr, scope, options);
             if ((try ir.getValue()).value_data.bool) {
-                return try interpreter.interpret(iff.ast.then_expr, scope, options);
+                return try interpreter.interpret(if_node.ast.then_expr, scope, options);
             } else {
-                if (iff.ast.else_expr != 0) {
-                    return try interpreter.interpret(iff.ast.else_expr, scope, options);
+                if (if_node.ast.else_expr != 0) {
+                    return try interpreter.interpret(if_node.ast.else_expr, scope, options);
                 } else return InterpretResult{ .nothing = {} };
             }
         },
@@ -1254,7 +1232,7 @@ pub fn interpret(
         // .fn_proto_simple,
         .fn_decl => {
             // var buf: [1]Ast.Node.Index = undefined;
-            // const func = ast.fnProto(tree, node_idx, &buf).?;
+            // const func = tree.fullFnProto(node_idx, &buf).?;
 
             // TODO: Add params
 
@@ -1315,7 +1293,7 @@ pub fn interpret(
         .async_call_one_comma,
         => {
             var params: [1]Ast.Node.Index = undefined;
-            const call_full = ast.callFull(tree, node_idx, &params) orelse unreachable;
+            const call_full = tree.fullCall(&params, node_idx) orelse unreachable;
 
             var args = try std.ArrayListUnmanaged(Value).initCapacity(interpreter.allocator, call_full.ast.params.len);
             defer args.deinit(interpreter.allocator);
@@ -1433,7 +1411,7 @@ pub fn call(
     var fn_scope = try interpreter.newScope(scope, func_node_idx);
 
     var buf: [1]Ast.Node.Index = undefined;
-    var proto = ast.fnProto(tree, func_node_idx, &buf).?;
+    var proto = tree.fullFnProto(&buf, func_node_idx).?;
 
     var arg_it = proto.iterate(&tree);
     var arg_index: usize = 0;
