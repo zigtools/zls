@@ -10,7 +10,7 @@ pub fn dotCompletions(
     ip: *InternPool,
     ty: InternPool.Index,
     val: InternPool.Index,
-    node: ?Ast.Node.Index
+    node: ?Ast.Node.Index,
 ) error{OutOfMemory}!void {
     _ = node;
 
@@ -40,7 +40,7 @@ pub fn dotCompletions(
                         }
                     },
                     .union_type => {}, // TODO
-                    .enum_type => |enum_info|{
+                    .enum_type => |enum_info| {
                         for (enum_info.fields) |field| {
                             const field_name = ip.indexToKey(field.name).bytes;
                             try completions.append(arena, .{
@@ -70,7 +70,7 @@ pub fn dotCompletions(
                     .kind = .Field,
                     .detail = "usize",
                 });
-            } else if(ip.indexToKey(pointer_info.elem_type) == .array_type) {
+            } else if (ip.indexToKey(pointer_info.elem_type) == .array_type) {
                 try completions.append(arena, .{
                     .label = "len",
                     .kind = .Field,
@@ -127,7 +127,7 @@ pub fn dotCompletions(
             }
         },
         .tuple_type => |tuple_info| {
-            for (tuple_info.types) |tuple_ty,i| {
+            for (tuple_info.types) |tuple_ty, i| {
                 try completions.append(arena, .{
                     .label = try std.fmt.allocPrint(arena, "{d}", .{i}),
                     .kind = .Field,
@@ -140,7 +140,8 @@ pub fn dotCompletions(
         .error_union_type,
         .function_type,
         .vector_type,
-        .anyframe_type => {},
+        .anyframe_type,
+        => {},
 
         .int_u64_value,
         .int_i64_value,

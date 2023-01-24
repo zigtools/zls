@@ -361,7 +361,7 @@ fn generateDiagnostics(server: *Server, handle: DocumentStore.Handle) error{OutO
         var err_it = int.errors.iterator();
 
         while (err_it.next()) |err| {
-            try diagnostics.append(allocator, .{
+            diagnostics.appendAssumeCapacity(.{
                 .range = offsets.nodeToRange(tree, err.key_ptr.*, server.offset_encoding),
                 .severity = .Error,
                 .code = .{ .string = err.value_ptr.code },

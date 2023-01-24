@@ -321,7 +321,8 @@ pub const Key = union(enum) {
                 .@"anyframe",
                 .null_type,
                 .undefined_type,
-                .enum_literal_type, => true,
+                .enum_literal_type,
+                => true,
 
                 .undefined_value,
                 .void_value,
@@ -344,7 +345,8 @@ pub const Key = union(enum) {
             .union_type,
             .tuple_type,
             .vector_type,
-            .anyframe_type, => true,
+            .anyframe_type,
+            => true,
 
             .int_u64_value,
             .int_i64_value,

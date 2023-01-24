@@ -68,6 +68,10 @@ pub const Handle = struct {
     associated_build_file: ?Uri = null,
 
     pub fn deinit(self: *Handle, allocator: std.mem.Allocator) void {
+        if (self.interpreter) |interpreter| {
+            interpreter.deinit();
+            allocator.destroy(interpreter);
+        }
         self.document_scope.deinit(allocator);
         self.tree.deinit(allocator);
         allocator.free(self.text);

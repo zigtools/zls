@@ -46,15 +46,19 @@ pub fn recordError(
     comptime fmt: []const u8,
     args: anytype,
 ) error{OutOfMemory}!void {
-    try interpreter.errors.put(interpreter.allocator, node_idx, .{
+    const message = try std.fmt.allocPrint(interpreter.allocator, fmt, args);
+    errdefer interpreter.allocator.free(message);
+    const previous = try interpreter.errors.fetchPut(interpreter.allocator, node_idx, .{
         .code = code,
-        .message = try std.fmt.allocPrint(interpreter.allocator, fmt, args),
+        .message = message,
     });
+    if (previous != null) interpreter.allocator.free(message);
 }
 
 pub fn deinit(interpreter: *ComptimeInterpreter) void {
-    var err_it = interpreter.errors.iterator();
-    while (err_it.next()) |entry| interpreter.allocator.free(entry.value_ptr.message);
+    for (interpreter.errors.values()) |err| {
+        interpreter.allocator.free(err.message);
+    }
 
     interpreter.errors.deinit(interpreter.allocator);
     interpreter.ip.deinit(interpreter.allocator);
@@ -302,8 +306,8 @@ pub fn interpret(
 
             const decl = ast.varDecl(tree, node_idx).?;
 
-            const type_value = if (decl.ast.type_node != 0) try ((try interpreter.interpret(decl.ast.type_node, namespace, .{})).getValue()) else null;
-            const init_value = if (decl.ast.init_node != 0) try ((try interpreter.interpret(decl.ast.init_node, namespace, .{})).getValue()) else null;
+            const type_value = if (decl.ast.type_node != 0) (try interpreter.interpret(decl.ast.type_node, namespace, .{})).maybeGetValue() else null;
+            const init_value = if (decl.ast.init_node != 0) (try interpreter.interpret(decl.ast.init_node, namespace, .{})).maybeGetValue() else null;
 
             if (type_value == null and init_value == null) return InterpretResult{ .nothing = {} };
 
@@ -470,6 +474,8 @@ pub fn interpret(
             const can_have_fields: bool = switch (inner_lhs) {
                 .simple => |simple| switch (simple) {
                     .type => blk: {
+                        if (irv.val == .none) break :blk true;
+
                         const ty_key = interpreter.ip.indexToKey(irv.val);
                         if (interpreter.huntItDown(ty_key.getNamespace(), field_name, options)) |decl| {
                             return InterpretResult{ .value = Value{
