@@ -20,7 +20,7 @@ const tracy = @import("tracy.zig");
 const uri_utils = @import("uri.zig");
 const diff = @import("diff.zig");
 const ComptimeInterpreter = @import("ComptimeInterpreter.zig");
-const analyser_completions = @import("analyser/completions.zig");
+const analyser = @import("analyser/analyser.zig");
 
 const data = @import("data/data.zig");
 const snipped_data = @import("data/snippets.zig");
@@ -596,8 +596,7 @@ fn typeToCompletion(
         ),
         .primitive, .array_index => {},
         .@"comptime" => |co| {
-            const items = try analyser_completions.dotCompletions(allocator, &co.interpreter.ip, co.value.ty, co.value.val, co.value.node_idx);
-            try list.appendSlice(allocator, items);
+            try analyser.completions.dotCompletions(allocator, list, &co.interpreter.ip, co.value.ty, co.value.val, co.value.node_idx);
         },
     }
 }

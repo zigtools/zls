@@ -4,18 +4,15 @@ const types = @import("../lsp.zig");
 
 const Ast = std.zig.Ast;
 
-
-/// TODO use std.ArrayListUnmanaged instead of returning a slice
 pub fn dotCompletions(
     arena: std.mem.Allocator,
+    completions: *std.ArrayListUnmanaged(types.CompletionItem),
     ip: *InternPool,
     ty: InternPool.Index,
     val: InternPool.Index,
     node: ?Ast.Node.Index
-) error{OutOfMemory}![]types.CompletionItem {
+) error{OutOfMemory}!void {
     _ = node;
-
-    var completions = std.ArrayListUnmanaged(types.CompletionItem){};
 
     const key = ip.indexToKey(ty);
     const inner_key = switch (key) {
@@ -160,5 +157,4 @@ pub fn dotCompletions(
         .union_value,
         => unreachable,
     }
-    return try completions.toOwnedSlice(arena);
 }
