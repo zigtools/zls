@@ -2580,29 +2580,6 @@ fn makeInnerScope(allocator: std.mem.Allocator, context: ScopeContext, node_idx:
     });
     const scope_index = scopes.len - 1;
 
-    if (node_tag == .error_set_decl) {
-        // All identifiers in main_token..data.lhs are error fields.
-        var i = main_tokens[node_idx];
-        while (i < data[node_idx].rhs) : (i += 1) {
-            if (token_tags[i] == .identifier) {
-                const name = offsets.tokenToSlice(tree, i);
-                if (try scopes.items(.decls)[scope_index].fetchPut(allocator, name, .{ .error_token = i })) |_| {
-                    // TODO Record a redefinition error.
-                }
-                const gop = try context.errors.getOrPut(allocator, .{
-                    .label = name,
-                    .kind = .Constant,
-                    //.detail =
-                    .insertText = name,
-                    .insertTextFormat = .PlainText,
-                });
-                if (!gop.found_existing) {
-                    gop.key_ptr.detail = try std.fmt.allocPrint(allocator, "error.{s}", .{name});
-                }
-            }
-        }
-    }
-
     var buf: [2]Ast.Node.Index = undefined;
     const container_decl = tree.fullContainerDecl(&buf, node_idx).?;
     for (container_decl.ast.members) |decl| {
@@ -2678,19 +2655,18 @@ fn makeScopeInternal(allocator: std.mem.Allocator, context: ScopeContext, node_i
             try makeInnerScope(allocator, context, node_idx);
         },
         .error_set_decl => {
-            var scope = try scopes.addOne(allocator);
-            scope.* = .{
+            try scopes.append(allocator, .{
                 .loc = offsets.nodeToLoc(tree, node_idx),
                 .data = .{ .container = node_idx },
-            };
-            const scope_idx = scopes.items.len - 1;
+            });
+            const scope_index = scopes.len - 1;
 
             // All identifiers in main_token..data.lhs are error fields.
             var i = main_tokens[node_idx];
             while (i < data[node_idx].rhs) : (i += 1) {
                 if (token_tags[i] == .identifier) {
                     const name = offsets.tokenToSlice(tree, i);
-                    if (try scopes.items[scope_idx].decls.fetchPut(allocator, name, .{ .error_token = i })) |_| {
+                    if (try scopes.items(.decls)[scope_index].fetchPut(allocator, name, .{ .error_token = i })) |_| {
                         // TODO Record a redefinition error.
                     }
                     const gop = try context.errors.getOrPut(allocator, .{
