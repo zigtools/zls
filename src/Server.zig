@@ -273,7 +273,7 @@ fn generateDiagnostics(server: *Server, handle: DocumentStore.Handle) error{OutO
                     .fn_decl,
                     => blk: {
                         var buf: [1]Ast.Node.Index = undefined;
-                        const func = ast.fnProto(tree, decl_idx, &buf).?;
+                        const func = tree.fullFnProto(&buf, decl_idx).?;
                         if (func.extern_export_inline_token != null) break :blk;
 
                         if (func.name_token) |name_token| {
@@ -689,7 +689,7 @@ fn nodeToCompletion(
         .fn_decl,
         => {
             var buf: [1]Ast.Node.Index = undefined;
-            const func = ast.fnProto(tree, node, &buf).?;
+            const func = tree.fullFnProto(&buf, node).?;
             if (func.name_token) |name_token| {
                 const use_snippets = server.config.enable_snippets and server.client_capabilities.supports_snippets;
                 const insert_text = if (use_snippets) blk: {
@@ -715,7 +715,7 @@ fn nodeToCompletion(
         .aligned_var_decl,
         .simple_var_decl,
         => {
-            const var_decl = ast.varDecl(tree, node).?;
+            const var_decl = tree.fullVarDecl(node).?;
             const is_const = token_tags[var_decl.ast.mut_token] == .keyword_const;
 
             if (try analysis.resolveVarDeclAlias(&server.document_store, server.arena, node_handle)) |result| {
@@ -740,7 +740,7 @@ fn nodeToCompletion(
         .container_field_align,
         .container_field_init,
         => {
-            const field = ast.containerField(tree, node).?;
+            const field = tree.fullContainerField(node).?;
             try list.append(allocator, .{
                 .label = handle.tree.tokenSlice(field.ast.main_token),
                 .kind = if (field.ast.tuple_like) .Enum else .Field,
@@ -766,7 +766,7 @@ fn nodeToCompletion(
         .ptr_type_bit_range,
         .ptr_type_sentinel,
         => {
-            const ptr_type = ast.ptrType(tree, node).?;
+            const ptr_type = ast.fullPtrType(tree, node).?;
 
             switch (ptr_type.size) {
                 .One, .C, .Many => if (server.config.operator_completions) {
@@ -900,11 +900,11 @@ fn hoverSymbol(server: *Server, decl_handle: analysis.DeclWithHandle) error{OutO
 
             var buf: [1]Ast.Node.Index = undefined;
 
-            if (ast.varDecl(tree, node)) |var_decl| {
+            if (tree.fullVarDecl(node)) |var_decl| {
                 break :def analysis.getVariableSignature(tree, var_decl);
-            } else if (ast.fnProto(tree, node, &buf)) |fn_proto| {
+            } else if (tree.fullFnProto(&buf, node)) |fn_proto| {
                 break :def analysis.getFunctionSignature(tree, fn_proto);
-            } else if (ast.containerField(tree, node)) |field| {
+            } else if (tree.fullContainerField(node)) |field| {
                 break :def analysis.getContainerFieldSignature(tree, field);
             } else {
                 break :def analysis.nodeToString(tree, node) orelse return null;
@@ -2621,8 +2621,10 @@ fn foldingRangeHandler(server: *Server, request: types.FoldingRangeParams) Error
             .root => continue,
             // only fold the expression pertaining to the if statement, and the else statement, each respectively.
             // TODO: Should folding multiline condition expressions also be supported? Ditto for the other control flow structures.
-            .@"if", .if_simple => {
-                const if_full = ast.ifFull(handle.tree, node);
+            .@"if",
+            .if_simple,
+            => {
+                const if_full = ast.fullIf(handle.tree, node).?;
 
                 const start_tok_1 = ast.lastToken(handle.tree, if_full.ast.cond_expr);
                 const end_tok_1 = ast.lastToken(handle.tree, if_full.ast.then_expr);
@@ -2643,7 +2645,7 @@ fn foldingRangeHandler(server: *Server, request: types.FoldingRangeParams) Error
             .while_cont,
             .while_simple,
             => {
-                const loop_full = ast.whileAst(handle.tree, node).?;
+                const loop_full = ast.fullWhile(handle.tree, node).?;
 
                 const start_tok_1 = ast.lastToken(handle.tree, loop_full.ast.cond_expr);
                 const end_tok_1 = ast.lastToken(handle.tree, loop_full.ast.then_expr);
@@ -2685,8 +2687,8 @@ fn foldingRangeHandler(server: *Server, request: types.FoldingRangeParams) Error
                 }
 
                 // Function prototype folding regions
-                var fn_proto_buffer: [1]Node.Index = undefined;
-                const fn_proto = ast.fnProto(handle.tree, node, fn_proto_buffer[0..]) orelse
+                var buffer: [1]Node.Index = undefined;
+                const fn_proto = handle.tree.fullFnProto(&buffer, node) orelse
                     break :decl_node_blk;
 
                 const list_start_tok: Ast.TokenIndex = fn_proto.lparen;
