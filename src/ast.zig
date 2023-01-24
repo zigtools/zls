@@ -512,7 +512,9 @@ pub fn lastToken(tree: Ast, node: Ast.Node.Index) Ast.TokenIndex {
                 n = tree.extra_data[cases.end - 1]; // last case
             }
         },
-        .container_decl_arg => {
+        .container_decl_arg,
+        .container_decl_arg_trailing,
+         => {
             const members = tree.extraData(datas[n].rhs, Node.SubRange);
             if (members.end - members.start == 0) {
                 end_offset += 3; // for the rparen + lbrace + rbrace
@@ -536,7 +538,6 @@ pub fn lastToken(tree: Ast, node: Ast.Node.Index) Ast.TokenIndex {
         },
         .array_init_comma,
         .struct_init_comma,
-        .container_decl_arg_trailing,
         .switch_comma,
         => {
             if (datas[n].rhs != 0) {
