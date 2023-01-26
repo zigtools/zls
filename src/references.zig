@@ -118,18 +118,19 @@ fn symbolReferencesInternal(
         .tagged_union_enum_tag,
         .tagged_union_enum_tag_trailing,
         .root,
-        .error_set_decl,
         => {
             var buf: [2]Ast.Node.Index = undefined;
-            for (ast.declMembers(tree, node, &buf)) |member|
+            const container_decl = tree.fullContainerDecl(&buf, node).?;
+            for (container_decl.ast.members) |member|
                 try symbolReferencesInternal(builder, member, handle, false);
         },
+        .error_set_decl => {},
         .global_var_decl,
         .local_var_decl,
         .simple_var_decl,
         .aligned_var_decl,
         => {
-            const var_decl = ast.varDecl(tree, node).?;
+            const var_decl = tree.fullVarDecl(node).?;
             try symbolReferencesInternal(builder, var_decl.ast.type_node, handle, false);
             try symbolReferencesInternal(builder, var_decl.ast.init_node, handle, false);
         },
@@ -137,7 +138,7 @@ fn symbolReferencesInternal(
         .container_field_align,
         .container_field_init,
         => {
-            const field = ast.containerField(tree, node).?;
+            const field = tree.fullContainerField(node).?;
             try symbolReferencesInternal(builder, field.ast.type_expr, handle, false);
             try symbolReferencesInternal(builder, field.ast.value_expr, handle, false);
         },
@@ -152,7 +153,7 @@ fn symbolReferencesInternal(
         .fn_decl,
         => {
             var buf: [1]Ast.Node.Index = undefined;
-            const fn_proto = ast.fnProto(tree, node, &buf).?;
+            const fn_proto = tree.fullFnProto(&buf, node).?;
             var it = fn_proto.iterate(&tree);
             while (ast.nextFnParam(&it)) |param| {
                 try symbolReferencesInternal(builder, param.type_expr, handle, false);
@@ -179,16 +180,10 @@ fn symbolReferencesInternal(
         },
         .switch_case_one,
         .switch_case_inline_one,
-        => {
-            const case_one = tree.switchCaseOne(node);
-            try symbolReferencesInternal(builder, case_one.ast.target_expr, handle, false);
-            for (case_one.ast.values) |val|
-                try symbolReferencesInternal(builder, val, handle, false);
-        },
         .switch_case,
         .switch_case_inline,
         => {
-            const case = tree.switchCase(node);
+            const case = tree.fullSwitchCase(node).?;
             try symbolReferencesInternal(builder, case.ast.target_expr, handle, false);
             for (case.ast.values) |val|
                 try symbolReferencesInternal(builder, val, handle, false);
@@ -199,7 +194,7 @@ fn symbolReferencesInternal(
         .for_simple,
         .@"for",
         => {
-            const loop = ast.whileAst(tree, node).?;
+            const loop = ast.fullWhile(tree, node).?;
             try symbolReferencesInternal(builder, loop.ast.cond_expr, handle, false);
             try symbolReferencesInternal(builder, loop.ast.then_expr, handle, false);
             try symbolReferencesInternal(builder, loop.ast.cont_expr, handle, false);
@@ -208,7 +203,7 @@ fn symbolReferencesInternal(
         .@"if",
         .if_simple,
         => {
-            const if_node = ast.ifFull(tree, node);
+            const if_node = ast.fullIf(tree, node).?;
             try symbolReferencesInternal(builder, if_node.ast.cond_expr, handle, false);
             try symbolReferencesInternal(builder, if_node.ast.then_expr, handle, false);
             try symbolReferencesInternal(builder, if_node.ast.else_expr, handle, false);
@@ -218,7 +213,7 @@ fn symbolReferencesInternal(
         .ptr_type_bit_range,
         .ptr_type_sentinel,
         => {
-            const ptr_type = ast.ptrType(tree, node).?;
+            const ptr_type = ast.fullPtrType(tree, node).?;
 
             if (ptr_type.ast.align_node != 0) {
                 try symbolReferencesInternal(builder, ptr_type.ast.align_node, handle, false);
@@ -239,15 +234,10 @@ fn symbolReferencesInternal(
         .array_init_one_comma,
         .array_init_dot_two,
         .array_init_dot_two_comma,
-        => |tag| {
+        => {
             var buf: [2]Ast.Node.Index = undefined;
-            const array_init = switch (tag) {
-                .array_init, .array_init_comma => tree.arrayInit(node),
-                .array_init_dot, .array_init_dot_comma => tree.arrayInitDot(node),
-                .array_init_one, .array_init_one_comma => tree.arrayInitOne(buf[0..1], node),
-                .array_init_dot_two, .array_init_dot_two_comma => tree.arrayInitDotTwo(&buf, node),
-                else => unreachable,
-            };
+            const array_init = tree.fullArrayInit(&buf, node).?;
+
             try symbolReferencesInternal(builder, array_init.ast.type_expr, handle, false);
             for (array_init.ast.elements) |e|
                 try symbolReferencesInternal(builder, e, handle, false);
@@ -260,15 +250,10 @@ fn symbolReferencesInternal(
         .struct_init_dot_two_comma,
         .struct_init_one,
         .struct_init_one_comma,
-        => |tag| {
+        => {
             var buf: [2]Ast.Node.Index = undefined;
-            const struct_init: Ast.full.StructInit = switch (tag) {
-                .struct_init, .struct_init_comma => tree.structInit(node),
-                .struct_init_dot, .struct_init_dot_comma => tree.structInitDot(node),
-                .struct_init_one, .struct_init_one_comma => tree.structInitOne(buf[0..1], node),
-                .struct_init_dot_two, .struct_init_dot_two_comma => tree.structInitDotTwo(&buf, node),
-                else => unreachable,
-            };
+            const struct_init: Ast.full.StructInit = tree.fullStructInit(&buf, node).?;
+
             try symbolReferencesInternal(builder, struct_init.ast.type_expr, handle, false);
             for (struct_init.ast.fields) |field|
                 try symbolReferencesInternal(builder, field, handle, false);
@@ -283,7 +268,7 @@ fn symbolReferencesInternal(
         .async_call_one_comma,
         => {
             var buf: [1]Ast.Node.Index = undefined;
-            const call = ast.callFull(tree, node, &buf).?;
+            const call = tree.fullCall(&buf, node).?;
 
             try symbolReferencesInternal(builder, call.ast.fn_expr, handle, false);
 
@@ -294,13 +279,8 @@ fn symbolReferencesInternal(
         .slice,
         .slice_sentinel,
         .slice_open,
-        => |tag| {
-            const slice: Ast.full.Slice = switch (tag) {
-                .slice => tree.slice(node),
-                .slice_open => tree.sliceOpen(node),
-                .slice_sentinel => tree.sliceSentinel(node),
-                else => unreachable,
-            };
+        => {
+            const slice: Ast.full.Slice = tree.fullSlice(node).?;
 
             try symbolReferencesInternal(builder, slice.ast.sliced, handle, false);
             try symbolReferencesInternal(builder, slice.ast.start, handle, false);
@@ -520,7 +500,7 @@ pub fn symbolReferences(
                 const proto = scope_data.function;
 
                 var buf: [1]Ast.Node.Index = undefined;
-                const fn_proto = ast.fnProto(curr_handle.tree, proto, &buf).?;
+                const fn_proto = curr_handle.tree.fullFnProto(&buf, proto).?;
 
                 var it = fn_proto.iterate(&curr_handle.tree);
                 while (ast.nextFnParam(&it)) |candidate| {

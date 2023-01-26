@@ -84,7 +84,7 @@ fn writeCallHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *Doc
     switch (decl.*) {
         .ast_node => |fn_node| {
             var buffer: [1]Ast.Node.Index = undefined;
-            if (ast.fnProto(decl_tree, fn_node, &buffer)) |fn_proto| {
+            if (decl_tree.fullFnProto(&buffer, fn_node)) |fn_proto| {
                 var i: usize = 0;
                 var it = fn_proto.iterate(&decl_tree);
 
@@ -282,7 +282,7 @@ fn writeNodeInlayHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store:
         .async_call_comma,
         => {
             var params: [1]Ast.Node.Index = undefined;
-            const call = ast.callFull(tree, node, &params).?;
+            const call = tree.fullCall(&params, node).?;
             try writeCallNodeHint(builder, arena, store, call);
 
             for (call.ast.params) |param| {
@@ -351,7 +351,7 @@ fn writeNodeInlayHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store:
         .ptr_type,
         .ptr_type_bit_range,
         => {
-            const ptr_type: Ast.full.PtrType = ast.ptrType(tree, node).?;
+            const ptr_type: Ast.full.PtrType = ast.fullPtrType(tree, node).?;
 
             if (ptr_type.ast.sentinel != 0) {
                 return try callWriteNodeInlayHint(allocator, .{ builder, arena, store, ptr_type.ast.sentinel, range });
@@ -458,12 +458,7 @@ fn writeNodeInlayHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store:
         .slice,
         .slice_sentinel,
         => {
-            const slice: Ast.full.Slice = switch (tag) {
-                .slice => tree.slice(node),
-                .slice_open => tree.sliceOpen(node),
-                .slice_sentinel => tree.sliceSentinel(node),
-                else => unreachable,
-            };
+            const slice: Ast.full.Slice = tree.fullSlice(node).?;
 
             try callWriteNodeInlayHint(allocator, .{ builder, arena, store, slice.ast.sliced, range });
             try callWriteNodeInlayHint(allocator, .{ builder, arena, store, slice.ast.start, range });
@@ -481,13 +476,7 @@ fn writeNodeInlayHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store:
         .array_init_comma,
         => {
             var buffer: [2]Ast.Node.Index = undefined;
-            const array_init: Ast.full.ArrayInit = switch (tag) {
-                .array_init, .array_init_comma => tree.arrayInit(node),
-                .array_init_one, .array_init_one_comma => tree.arrayInitOne(buffer[0..1], node),
-                .array_init_dot, .array_init_dot_comma => tree.arrayInitDot(node),
-                .array_init_dot_two, .array_init_dot_two_comma => tree.arrayInitDotTwo(&buffer, node),
-                else => unreachable,
-            };
+            const array_init: Ast.full.ArrayInit = tree.fullArrayInit(&buffer, node).?;
 
             try callWriteNodeInlayHint(allocator, .{ builder, arena, store, array_init.ast.type_expr, range });
             for (array_init.ast.elements) |elem| {
@@ -505,13 +494,7 @@ fn writeNodeInlayHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store:
         .struct_init_comma,
         => {
             var buffer: [2]Ast.Node.Index = undefined;
-            const struct_init: Ast.full.StructInit = switch (tag) {
-                .struct_init, .struct_init_comma => tree.structInit(node),
-                .struct_init_dot, .struct_init_dot_comma => tree.structInitDot(node),
-                .struct_init_one, .struct_init_one_comma => tree.structInitOne(buffer[0..1], node),
-                .struct_init_dot_two, .struct_init_dot_two_comma => tree.structInitDotTwo(&buffer, node),
-                else => unreachable,
-            };
+            const struct_init: Ast.full.StructInit = tree.fullStructInit(&buffer, node).?;
 
             try callWriteNodeInlayHint(allocator, .{ builder, arena, store, struct_init.ast.type_expr, range });
 
@@ -546,7 +529,7 @@ fn writeNodeInlayHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store:
         .switch_case_inline_one,
         .switch_case_inline,
         => {
-            const switch_case = if (tag == .switch_case or tag == .switch_case_inline) tree.switchCase(node) else tree.switchCaseOne(node);
+            const switch_case = tree.fullSwitchCase(node).?;
 
             try callWriteNodeInlayHint(allocator, .{ builder, arena, store, switch_case.ast.target_expr, range });
         },
@@ -557,7 +540,7 @@ fn writeNodeInlayHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store:
         .for_simple,
         .@"for",
         => {
-            const while_node = ast.whileAst(tree, node).?;
+            const while_node = ast.fullWhile(tree, node).?;
 
             try callWriteNodeInlayHint(allocator, .{ builder, arena, store, while_node.ast.cond_expr, range });
             try callWriteNodeInlayHint(allocator, .{ builder, arena, store, while_node.ast.cont_expr, range });
@@ -571,7 +554,7 @@ fn writeNodeInlayHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store:
         .if_simple,
         .@"if",
         => {
-            const if_node = ast.ifFull(tree, node);
+            const if_node = ast.fullIf(tree, node).?;
             try callWriteNodeInlayHint(allocator, .{ builder, arena, store, if_node.ast.cond_expr, range });
             try callWriteNodeInlayHint(allocator, .{ builder, arena, store, if_node.ast.then_expr, range });
             try callWriteNodeInlayHint(allocator, .{ builder, arena, store, if_node.ast.else_expr, range });
@@ -584,7 +567,7 @@ fn writeNodeInlayHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store:
         .fn_decl,
         => {
             var buffer: [1]Ast.Node.Index = undefined;
-            const fn_proto: Ast.full.FnProto = ast.fnProto(tree, node, &buffer).?;
+            const fn_proto: Ast.full.FnProto = tree.fullFnProto(&buffer, node).?;
 
             var it = fn_proto.iterate(&tree);
             while (ast.nextFnParam(&it)) |param_decl| {
@@ -617,7 +600,7 @@ fn writeNodeInlayHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store:
         .tagged_union_enum_tag_trailing,
         => {
             var buffer: [2]Ast.Node.Index = undefined;
-            const decl: Ast.full.ContainerDecl = ast.containerDecl(tree, node, &buffer).?;
+            const decl: Ast.full.ContainerDecl = tree.fullContainerDecl(&buffer, node).?;
 
             try callWriteNodeInlayHint(allocator, .{ builder, arena, store, decl.ast.arg, range });
 
@@ -634,7 +617,7 @@ fn writeNodeInlayHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store:
         .container_field_align,
         .container_field,
         => {
-            const container_field = ast.containerField(tree, node).?;
+            const container_field = tree.fullContainerField(node).?;
 
             try callWriteNodeInlayHint(allocator, .{ builder, arena, store, container_field.ast.value_expr, range });
             try callWriteNodeInlayHint(allocator, .{ builder, arena, store, container_field.ast.align_expr, range });
@@ -666,11 +649,7 @@ fn writeNodeInlayHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store:
         .asm_output,
         .asm_input,
         => {
-            const asm_node: Ast.full.Asm = switch (tag) {
-                .@"asm" => tree.asmFull(node),
-                .asm_simple => tree.asmSimple(node),
-                else => return,
-            };
+            const asm_node: Ast.full.Asm = tree.fullAsm(node) orelse return;
 
             try callWriteNodeInlayHint(allocator, .{ builder, arena, store, asm_node.ast.template, range });
         },
@@ -700,8 +679,7 @@ pub fn writeRangeInlayHint(
         .encoding = encoding,
     };
 
-    var buf: [2]Ast.Node.Index = undefined;
-    for (ast.declMembers(handle.tree, 0, &buf)) |child| {
+    for (handle.tree.rootDecls()) |child| {
         if (!isNodeInRange(handle.tree, child, range)) continue;
         try writeNodeInlayHint(&builder, arena, store, child, range);
     }
