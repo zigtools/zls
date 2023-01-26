@@ -254,29 +254,29 @@ pub fn forFull(tree: Ast, node: Node.Index) full.While {
 
 pub fn fullPtrType(tree: Ast, node: Node.Index) ?full.PtrType {
     return switch (tree.nodes.items(.tag)[node]) {
-        .ptr_type_aligned => tree.ptrTypeAligned(node),
-        .ptr_type_sentinel => tree.ptrTypeSentinel(node),
-        .ptr_type => tree.ptrType(node),
-        .ptr_type_bit_range => tree.ptrTypeBitRange(node),
+        .ptr_type_aligned => ptrTypeAligned(tree, node),
+        .ptr_type_sentinel => ptrTypeSentinel(tree, node),
+        .ptr_type => ptrTypeSimple(tree, node),
+        .ptr_type_bit_range => ptrTypeBitRange(tree, node),
         else => null,
     };
 }
 
 pub fn fullIf(tree: Ast, node: Node.Index) ?full.If {
     return switch (tree.nodes.items(.tag)[node]) {
-        .if_simple => tree.ifSimple(node),
-        .@"if" => tree.ifFull(node),
+        .if_simple => ifSimple(tree, node),
+        .@"if" => ifFull(tree, node),
         else => null,
     };
 }
 
 pub fn fullWhile(tree: Ast, node: Node.Index) ?full.While {
     return switch (tree.nodes.items(.tag)[node]) {
-        .while_simple => tree.whileSimple(node),
-        .while_cont => tree.whileCont(node),
-        .@"while" => tree.whileFull(node),
-        .for_simple => tree.forSimple(node),
-        .@"for" => tree.forFull(node),
+        .while_simple => whileSimple(tree, node),
+        .while_cont => whileCont(tree, node),
+        .@"while" => whileFull(tree, node),
+        .for_simple => forSimple(tree, node),
+        .@"for" => forFull(tree, node),
         else => null,
     };
 }
