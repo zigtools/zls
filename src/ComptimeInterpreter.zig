@@ -235,9 +235,10 @@ pub fn interpret(
             defer fields.deinit(interpreter.allocator);
 
             var buffer: [2]Ast.Node.Index = undefined;
-            const members = ast.declMembers(tree, node_idx, &buffer);
-            for (members) |member| {
-                const container_field = ast.containerField(tree, member) orelse {
+
+            const container_decl = tree.fullContainerDecl(&buffer, node_idx).?;
+            for (container_decl.ast.members) |member| {
+                const container_field = tree.fullContainerField(member) orelse {
                     _ = try interpreter.interpret(member, container_namespace, options);
                     continue;
                 };
@@ -304,7 +305,7 @@ pub fn interpret(
             if (decls.contains(name))
                 return InterpretResult{ .nothing = {} };
 
-            const decl = ast.varDecl(tree, node_idx).?;
+            const decl = tree.fullVarDecl(node_idx).?;
 
             const type_value = if (decl.ast.type_node != 0) (try interpreter.interpret(decl.ast.type_node, namespace, .{})).maybeGetValue() else null;
             const init_value = if (decl.ast.init_node != 0) (try interpreter.interpret(decl.ast.init_node, namespace, .{})).maybeGetValue() else null;
@@ -651,7 +652,7 @@ pub fn interpret(
         .@"if",
         .if_simple,
         => {
-            const if_info = ast.ifFull(tree, node_idx);
+            const if_info = ast.fullIf(tree, node_idx).?;
             // TODO: Don't evaluate runtime ifs
             // if (options.observe_values) {
             const ir = try interpreter.interpret(if_info.ast.cond_expr, namespace, options);
@@ -942,7 +943,7 @@ pub fn interpret(
         .fn_decl,
         => {
             var buf: [1]Ast.Node.Index = undefined;
-            const func = ast.fnProto(tree, node_idx, &buf).?;
+            const func = tree.fullFnProto(&buf, node_idx).?;
 
             // TODO: Resolve function type
 
@@ -1008,7 +1009,7 @@ pub fn interpret(
         .async_call_one_comma,
         => {
             var params: [1]Ast.Node.Index = undefined;
-            const call_full = ast.callFull(tree, node_idx, &params).?;
+            const call_full = tree.fullCall(&params, node_idx) orelse unreachable;
 
             var args = try std.ArrayListUnmanaged(Value).initCapacity(interpreter.allocator, call_full.ast.params.len);
             defer args.deinit(interpreter.allocator);
@@ -1127,7 +1128,7 @@ pub fn call(
     const tree = interpreter.getHandle().tree;
 
     var buf: [1]Ast.Node.Index = undefined;
-    var proto = ast.fnProto(tree, func_node_idx, &buf) orelse return error.CriticalAstFailure;
+    var proto = tree.fullFnProto(&buf, func_node_idx) orelse return error.CriticalAstFailure;
 
     // TODO: Make argument namespace to evaluate arguments in
     try interpreter.namespaces.append(interpreter.allocator, .{
