@@ -764,30 +764,26 @@ pub fn resolveTypeOfNodeInternal(store: *DocumentStore, arena: *std.heap.ArenaAl
                     log.info("Invoking interpreter!", .{});
 
                     store.ensureInterpreterExists(handle.uri) catch |err| {
-                        log.err("Interpreter error: {s}", .{@errorName(err)});
+                        log.err("Failed to interpret file: {s}", .{@errorName(err)});
                         if (@errorReturnTrace()) |trace| {
                             std.debug.dumpStackTrace(trace.*);
                         }
                         return null;
                     };
-                    var interpreter = handle.interpreter.?;
+                    var interpreter: *ComptimeInterpreter = handle.interpreter.?;
 
-                    try interpreter.namespaces.append(interpreter.allocator, .{
-                        .parent = .none,
-                        .node_idx = 0,
-                        .ty = .none,
-                    });
+                    const root_namespace = @intToEnum(ComptimeInterpreter.NamespaceIndex, 0);
 
                     // TODO: Start from current/nearest-current scope
-                    const result = interpreter.interpret(node, .none, .{}) catch |err| {
-                        log.err("Interpreter error: {s}", .{@errorName(err)});
+                    const result = interpreter.interpret(node, root_namespace, .{}) catch |err| {
+                        log.err("Failed to interpret node: {s}", .{@errorName(err)});
                         if (@errorReturnTrace()) |trace| {
                             std.debug.dumpStackTrace(trace.*);
                         }
                         return null;
                     };
                     const value = result.getValue() catch |err| {
-                        log.err("Interpreter error: {s}", .{@errorName(err)});
+                        log.err("interpreter return no result: {s}", .{@errorName(err)});
                         if (@errorReturnTrace()) |trace| {
                             std.debug.dumpStackTrace(trace.*);
                         }

@@ -52,7 +52,7 @@ pub fn recordError(
         .code = code,
         .message = message,
     });
-    if (previous != null) interpreter.allocator.free(message);
+    if (previous) |p| interpreter.allocator.free(p.value.message);
 }
 
 pub fn deinit(interpreter: *ComptimeInterpreter) void {
