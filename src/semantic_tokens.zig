@@ -74,9 +74,7 @@ const Builder = struct {
         const starts = tree.tokens.items(.start);
         const next_start = starts[token];
 
-        if (next_start < self.previous_position) {
-            return error.MovedBackwards;
-        }
+        if (next_start < self.previous_position) return;
 
         if (self.previous_token) |prev| {
             // Highlight gaps between AST nodes. These can contain comments or malformed code.
@@ -182,6 +180,8 @@ const Builder = struct {
     }
 
     fn addDirect(self: *Builder, tok_type: TokenType, tok_mod: TokenModifiers, start: usize, length: usize) !void {
+        if (start < self.previous_position) return;
+
         const text = self.handle.tree.source[self.previous_position..start];
         const delta = offsets.indexToPosition(text, text.len, self.encoding);
 
@@ -261,13 +261,8 @@ fn colorIdentifierBasedOnType(builder: *Builder, type_node: analysis.TypeWithHan
     }
 }
 
-const WriteTokensError = error{
-    OutOfMemory,
-    MovedBackwards,
-};
-
 /// HACK self-hosted has not implemented async yet
-fn callWriteNodeTokens(allocator: std.mem.Allocator, args: anytype) WriteTokensError!void {
+fn callWriteNodeTokens(allocator: std.mem.Allocator, args: anytype) error{OutOfMemory}!void {
     if (zig_builtin.zig_backend == .other or zig_builtin.zig_backend == .stage1) {
         const FrameSize = @sizeOf(@Frame(writeNodeTokens));
         var child_frame = try allocator.alignedAlloc(u8, std.Target.stack_align, FrameSize);
@@ -280,7 +275,7 @@ fn callWriteNodeTokens(allocator: std.mem.Allocator, args: anytype) WriteTokensE
     }
 }
 
-fn writeNodeTokens(builder: *Builder, maybe_node: ?Ast.Node.Index) WriteTokensError!void {
+fn writeNodeTokens(builder: *Builder, maybe_node: ?Ast.Node.Index) error{OutOfMemory}!void {
     const node = maybe_node orelse return;
 
     const handle = builder.handle;
@@ -1035,10 +1030,7 @@ pub fn writeAllSemanticTokens(
     // reverse the ast from the root declarations
     var buf: [2]Ast.Node.Index = undefined;
     for (ast.declMembers(handle.tree, 0, &buf)) |child| {
-        writeNodeTokens(&builder, child) catch |err| switch (err) {
-            error.MovedBackwards => break,
-            else => |e| return e,
-        };
+        try writeNodeTokens(&builder, child);
     }
     try builder.finish();
     return builder.toOwnedSlice();
