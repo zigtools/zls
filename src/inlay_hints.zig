@@ -55,7 +55,7 @@ const Builder = struct {
 
         try self.hints.append(self.arena, .{
             .position = position,
-            .label = .{ .string = label },
+            .label = .{ .string = try std.fmt.allocPrint(self.arena, "{s}:", .{label}) },
             .kind = types.InlayHintKind.Parameter,
             .tooltip = .{ .MarkupContent = .{
                 .kind = self.hover_kind,
