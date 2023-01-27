@@ -1,7 +1,13 @@
 name: Sus Fuzzing
 
 on:
-  pull_request:
+  # pull_request_target can be dangerous but necessary here to access secrets.
+  # I'm pretty comfortable using it because:
+  # - We limit all permissions (including GITHUB_TOKEN) to read-only
+  # - We limit runs to labelled PRs only which prevents random exploitation
+  # - We don't expose secrets in environment variables which makes exploitation much more difficult
+  # - The secrets that we reference aren't all that important anyways (they can only access our DigitalOcean Space)
+  pull_request_target:
     types: [labeled, synchronize]
   push:
     paths:
@@ -17,9 +23,11 @@ on:
         description: How long should fuzzing last? (sleep time argument)
         default: 15m
 
+permissions: read-all
+
 jobs:
   fuzz:
-    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'pr:fuzz')
+    if: github.repository_owner == 'zigtools' && (github.event_name != 'pull_request_target' || contains(github.event.pull_request.labels.*.name, 'pr:fuzz'))
     runs-on: ubuntu-latest
 
     steps:
@@ -29,14 +37,14 @@ jobs:
           swap-size-gb: 10
 
       - name: Default fuzzing duration
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request_target'
         run: |
-          FUZZING_DURATION=${{ github.event.inputs.fuzzing_duration }}
+          echo "FUZZING_DURATION=${{ github.event.inputs.fuzzing_duration }}" >> $GITHUB_ENV
 
       - name: PR fuzzing duration
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request_target'
         run: |
-          FUZZING_DURATION=15m
+          echo "FUZZING_DURATION=15m" >> $GITHUB_ENV
 
       - name: Grab zig
         uses: goto-bus-stop/setup-zig@v1
@@ -84,6 +92,7 @@ jobs:
         continue-on-error: true
         run: |
           cd $GITHUB_WORKSPACE/sus
+          FUZZING_DURATION=${{ env.FUZZING_DURATION }}
           { sleep ${FUZZING_DURATION:-1h}; pkill -9 sus; } &
           ./zig-out/bin/sus $GITHUB_WORKSPACE/zls/zig-out/bin/zls markov $GITHUB_WORKSPACE/zig/lib/std
 
@@ -100,7 +109,7 @@ jobs:
           space_name: fuzzing-output
           space_region: nyc3
           source: sus/saved_logs/
-          out_dir: ${{ github.repository_owner }}/${{ github.event.repository.name }}/${{ github.ref_name }}/${{ github.sha }}
+          out_dir: ${{ github.event.pull_request.head.repo.full_name || github.repository }}/${{ github.head_ref || github.ref_name }}/${{ github.event.pull_request.head.sha || github.sha }}
 
 
   

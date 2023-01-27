@@ -69,8 +69,8 @@ fn convertCIncludeInternal(
     var writer = output.writer(allocator);
 
     var buffer: [2]Ast.Node.Index = undefined;
-    if (ast.isBlock(tree, node)) {
-        for (ast.blockStatements(tree, node, &buffer).?) |statement| {
+    if (ast.blockStatements(tree, node, &buffer)) |statements| {
+        for (statements) |statement| {
             try callConvertCIncludeInternal(stack_allocator, .{ allocator, stack_allocator, tree, statement, output });
         }
     } else if (ast.builtinCallParams(tree, node, &buffer)) |params| {
