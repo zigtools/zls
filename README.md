@@ -50,7 +50,7 @@ You can replace `master` with a specific zig version like `0.10.0`. Which versio
 ### Configuration Options
 
 You can configure zls by editing your `zls.json` configuration file.
-Running `zls --show-config-path` will a path to an already existing `zls.json` or a path to the local configuration folder instead.
+Running `zls --show-config-path` will show a path to an already existing `zls.json` or a path to the local configuration folder instead.
 
 zls will look for a `zls.json` configuration file in multiple locations with the following priority:
 - In the local configuration folder of your OS (as provided by [known-folders](https://github.com/ziglibs/known-folders/blob/master/RESOURCES.md#folder-list))
@@ -112,8 +112,7 @@ When `value` is present, the option will be passed the same as in `zig build -Dn
 
 ## Features
 
-`zls` supports most language features, including simple type function support, using namespace, payload capture type resolution, custom packages, `cImport` and others.
-Currently there is no support for compile time evaluation.
+`zls` supports most language features, including simple type function support, using namespace, payload capture type resolution, custom packages, cImport and others. Support for comptime and semantic analysis is Work-in-Progress.
 
 The following LSP features are supported:
 - Completions
@@ -123,8 +122,11 @@ The following LSP features are supported:
 - Find references
 - Rename symbol
 - Formatting using `zig fmt`
-- Semantic token highlighting (implemented by a few clients including VS Code, kak and emacs lsp-mode)
-- Inlay hints (implemented by VS Code)
+- Semantic token highlighting
+- Inlay hints
+- Code actions
+- Selection ranges
+- Folding regions
 
 ## Related Projects
 
