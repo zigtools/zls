@@ -23,7 +23,6 @@ allocator: std.mem.Allocator,
 ip: InternPool = .{},
 document_store: *DocumentStore,
 uri: DocumentStore.Uri,
-decls: std.ArrayListUnmanaged(Decl) = .{},
 namespaces: std.MultiArrayList(Namespace) = .{},
 
 /// Interpreter diagnostic errors
@@ -69,7 +68,6 @@ pub fn deinit(interpreter: *ComptimeInterpreter) void {
         interpreter.namespaces.items(.usingnamespaces)[i].deinit(interpreter.allocator);
     }
     interpreter.namespaces.deinit(interpreter.allocator);
-    interpreter.decls.deinit(interpreter.allocator);
 }
 
 pub const Type = struct {
@@ -86,29 +84,18 @@ pub const Value = struct {
     ty: Index,
     val: Index,
 };
-
-pub const Decl = struct {
-    name: []const u8,
-    ty: Index,
-    val: Index,
-    alignment: u16,
-    address_space: std.builtin.AddressSpace,
-    is_pub: bool,
-    is_exported: bool,
-};
-
 // pub const Comptimeness = enum { @"comptime", runtime };
-
-pub const NamespaceIndex = InternPool.NamespaceIndex;
 
 pub const Namespace = struct {
     /// always points to Namespace or Index.none
-    parent: NamespaceIndex,
+    parent: Namespace.Index,
     node_idx: Ast.Node.Index,
     /// Will be a struct, enum, union, opaque or .none
-    ty: Index,
-    decls: std.StringArrayHashMapUnmanaged(Decl) = .{},
-    usingnamespaces: std.ArrayListUnmanaged(NamespaceIndex) = .{},
+    ty: InternPool.Index,
+    decls: std.StringArrayHashMapUnmanaged(InternPool.DeclIndex) = .{},
+    usingnamespaces: std.ArrayListUnmanaged(InternPool.DeclIndex) = .{},
+
+    pub const Index = InternPool.NamespaceIndex;
 
     // TODO: Actually use this value
     // comptimeness: Comptimeness,
@@ -161,15 +148,15 @@ pub const InterpretResult = union(enum) {
 
 pub fn huntItDown(
     interpreter: *ComptimeInterpreter,
-    namespace: NamespaceIndex,
+    namespace: Namespace.Index,
     decl_name: []const u8,
     options: InterpretOptions,
-) ?Decl {
+) ?InternPool.DeclIndex {
     _ = options;
 
     var current_namespace = namespace;
     while (current_namespace != .none) {
-        const decls: std.StringArrayHashMapUnmanaged(Decl) = interpreter.namespaces.items(.decls)[@enumToInt(current_namespace)];
+        const decls = interpreter.namespaces.items(.decls)[@enumToInt(current_namespace)];
         defer current_namespace = interpreter.namespaces.items(.parent)[@enumToInt(current_namespace)];
 
         if (decls.get(decl_name)) |decl| {
@@ -199,7 +186,7 @@ pub const InterpretError = std.mem.Allocator.Error || std.fmt.ParseIntError || s
 pub fn interpret(
     interpreter: *ComptimeInterpreter,
     node_idx: Ast.Node.Index,
-    namespace: NamespaceIndex,
+    namespace: Namespace.Index,
     options: InterpretOptions,
 ) InterpretError!InterpretResult {
     const tree = interpreter.getHandle().tree;
@@ -229,10 +216,16 @@ pub fn interpret(
                 .node_idx = node_idx,
                 .ty = undefined,
             });
-            const container_namespace = @intToEnum(NamespaceIndex, interpreter.namespaces.len - 1);
+            const container_namespace = @intToEnum(Namespace.Index, interpreter.namespaces.len - 1);
 
-            var fields = std.ArrayListUnmanaged(InternPool.Struct.Field){};
-            defer fields.deinit(interpreter.allocator);
+            const struct_index = try interpreter.ip.createStruct(interpreter.allocator, .{
+                .fields = .{},
+                .namespace = container_namespace,
+                .layout = .Auto, // TODO
+                .backing_int_ty = .none, // TODO
+                .status = .none, // TODO
+            });
+            var struct_info = interpreter.ip.getStruct(struct_index);
 
             var buffer: [2]Ast.Node.Index = undefined;
 
@@ -259,28 +252,18 @@ pub fn interpret(
                     );
                     continue;
                 }
-                const field_name = try interpreter.ip.get(interpreter.allocator, .{
-                    .bytes = tree.tokenSlice(container_field.ast.main_token),
-                });
-                const field: InternPool.Struct.Field = .{
-                    .name = field_name,
+
+                const field_name = tree.tokenSlice(container_field.ast.main_token);
+
+                try struct_info.fields.put(interpreter.allocator, field_name, .{
                     .ty = init_type_value.val,
                     .default_value = default_value,
                     .alignment = 0, // TODO,
                     .is_comptime = false, // TODO
-                };
-
-                try fields.append(interpreter.allocator, field);
+                });
             }
 
-            const struct_type = try interpreter.ip.get(interpreter.allocator, Key{
-                .struct_type = .{
-                    .fields = fields.items,
-                    .namespace = namespace,
-                    .layout = .Auto, // TODO
-                    .backing_int_ty = .none, // TODO
-                },
-            });
+            const struct_type = try interpreter.ip.get(interpreter.allocator, Key{ .struct_type = struct_index }); // TODO potential double free on struct_info.field
             interpreter.namespaces.items(.ty)[@enumToInt(container_namespace)] = struct_type;
 
             return InterpretResult{ .value = Value{
@@ -317,7 +300,7 @@ pub fn interpret(
                 if (v.ty != type_type) return InterpretResult{ .nothing = {} };
             }
 
-            try decls.putNoClobber(interpreter.allocator, name, .{
+            const decl_index = try interpreter.ip.createDecl(interpreter.allocator, .{
                 .name = name,
                 .ty = if (type_value) |v| v.val else init_value.?.ty,
                 .val = if (init_value) |init| init.val else .none,
@@ -326,6 +309,7 @@ pub fn interpret(
                 .is_pub = true, // TODO
                 .is_exported = false, // TODO
             });
+            try decls.putNoClobber(interpreter.allocator, name, decl_index);
 
             // TODO: Am I a dumbo shrimp? (e.g. is this tree shaking correct? works on my machine so like...)
 
@@ -345,7 +329,7 @@ pub fn interpret(
                 .node_idx = node_idx,
                 .ty = .none,
             });
-            const block_namespace = @intToEnum(NamespaceIndex, interpreter.namespaces.len - 1);
+            const block_namespace = @intToEnum(Namespace.Index, interpreter.namespaces.len - 1);
 
             var buffer: [2]Ast.Node.Index = undefined;
             const statements = ast.blockStatements(tree, node_idx, &buffer).?;
@@ -442,7 +426,8 @@ pub fn interpret(
             }
 
             // Logic to find identifiers in accessible scopes
-            if (interpreter.huntItDown(namespace, identifier, options)) |decl| {
+            if (interpreter.huntItDown(namespace, identifier, options)) |decl_index| {
+                const decl = interpreter.ip.getDecl(decl_index);
                 return InterpretResult{ .value = Value{
                     .interpreter = interpreter,
                     .node_idx = node_idx,
@@ -478,7 +463,8 @@ pub fn interpret(
                         if (irv.val == .none) break :blk true;
 
                         const ty_key = interpreter.ip.indexToKey(irv.val);
-                        if (interpreter.huntItDown(ty_key.getNamespace(), field_name, options)) |decl| {
+                        if (interpreter.huntItDown(ty_key.getNamespace(interpreter.ip), field_name, options)) |decl_index| {
+                            const decl = interpreter.ip.getDecl(decl_index);
                             return InterpretResult{ .value = Value{
                                 .interpreter = interpreter,
                                 .node_idx = node_idx,
@@ -492,19 +478,18 @@ pub fn interpret(
                                 _ = error_set_info;
                             },
                             .union_type => {}, // TODO
-                            .enum_type => |enum_info| { // TODO
-                                if (interpreter.ip.contains(Key{ .bytes = field_name })) |field_name_index| {
-                                    for (enum_info.fields) |field| {
-                                        if (field.name != field_name_index) continue;
-                                        return InterpretResult{
-                                            .value = Value{
-                                                .interpreter = interpreter,
-                                                .node_idx = data[node_idx].rhs,
-                                                .ty = irv.val,
-                                                .val = .none, // TODO resolve enum value
-                                            },
-                                        };
-                                    }
+                            .enum_type => |enum_index| { // TODO
+                                const enum_info = interpreter.ip.getEnum(enum_index);
+                                if (enum_info.fields.get(field_name)) |field| {
+                                    _ = field;
+                                    return InterpretResult{
+                                        .value = Value{
+                                            .interpreter = interpreter,
+                                            .node_idx = data[node_idx].rhs,
+                                            .ty = irv.val,
+                                            .val = .none, // TODO resolve enum value
+                                        },
+                                    };
                                 }
                             },
                             else => break :blk false,
@@ -583,17 +568,15 @@ pub fn interpret(
                         } };
                     }
                 },
-                .struct_type => |struct_info| blk: {
-                    // if the intern pool does not contain the field name, it is impossible that there is a field with the given name
-                    const field_name_index = interpreter.ip.contains(Key{ .bytes = field_name }) orelse break :blk true;
-
-                    for (struct_info.fields) |field, i| {
-                        if (field.name != field_name_index) continue;
+                .struct_type => |struct_index| blk: {
+                    const struct_info = interpreter.ip.getStruct(struct_index);
+                    if (struct_info.fields.getIndex(field_name)) |field_index| {
+                        const field = struct_info.fields.values()[field_index];
                         const val = found_val: {
                             if (irv.val == .none) break :found_val .none;
                             const val_key = interpreter.ip.indexToKey(irv.val);
                             if (val_key != .aggregate) break :found_val .none;
-                            break :found_val val_key.aggregate[i];
+                            break :found_val val_key.aggregate[field_index];
                         };
 
                         return InterpretResult{ .value = Value{
@@ -813,15 +796,17 @@ pub fn interpret(
 
                 // TODO: Implement root support
                 if (std.mem.eql(u8, import_str[1 .. import_str.len - 1], "root")) {
+                    const struct_index = try interpreter.ip.createStruct(interpreter.allocator, .{
+                        .fields = .{},
+                        .namespace = .none,
+                        .layout = .Auto,
+                        .backing_int_ty = .none,
+                        .status = .none,
+                    });
                     return InterpretResult{ .value = Value{
                         .interpreter = interpreter,
                         .node_idx = node_idx,
-                        .ty = try interpreter.ip.get(interpreter.allocator, Key{ .struct_type = .{
-                            .fields = &.{},
-                            .namespace = .none,
-                            .layout = .Auto,
-                            .backing_int_ty = .none,
-                        } }),
+                        .ty = try interpreter.ip.get(interpreter.allocator, Key{ .struct_type = struct_index }),
                         .val = try interpreter.ip.get(interpreter.allocator, Key{ .simple = .undefined_value }),
                     } };
                 }
@@ -865,7 +850,7 @@ pub fn interpret(
                 if (value.ty != type_type) return error.InvalidBuiltin;
                 if (interpreter.ip.indexToKey(field_name.ty) != .pointer_type) return error.InvalidBuiltin; // Check if it's a []const u8
 
-                const value_namespace = interpreter.ip.indexToKey(value.val).getNamespace();
+                const value_namespace = interpreter.ip.indexToKey(value.val).getNamespace(interpreter.ip);
                 if (value_namespace == .none) return error.InvalidBuiltin;
 
                 const name = interpreter.ip.indexToKey(field_name.val).bytes; // TODO add checks
@@ -986,7 +971,8 @@ pub fn interpret(
 
             if (namespace != .none) {
                 const decls = &interpreter.namespaces.items(.decls)[@enumToInt(namespace)];
-                try decls.put(interpreter.allocator, name, .{
+
+                const decl_index = try interpreter.ip.createDecl(interpreter.allocator, .{
                     .name = name,
                     .ty = type_type,
                     .val = function_type,
@@ -995,6 +981,7 @@ pub fn interpret(
                     .is_pub = false, // TODO
                     .is_exported = false, // TODO
                 });
+                try decls.putNoClobber(interpreter.allocator, name, decl_index);
             }
 
             return InterpretResult{ .nothing = {} };
@@ -1107,7 +1094,7 @@ pub fn interpret(
 }
 
 pub const CallResult = struct {
-    namespace: NamespaceIndex,
+    namespace: Namespace.Index,
     result: union(enum) {
         value: Value,
         nothing,
@@ -1116,7 +1103,7 @@ pub const CallResult = struct {
 
 pub fn call(
     interpreter: *ComptimeInterpreter,
-    namespace: NamespaceIndex,
+    namespace: Namespace.Index,
     func_node_idx: Ast.Node.Index,
     arguments: []const Value,
     options: InterpretOptions,
@@ -1136,7 +1123,7 @@ pub fn call(
         .node_idx = func_node_idx,
         .ty = .none,
     });
-    const fn_namespace = @intToEnum(NamespaceIndex, interpreter.namespaces.len - 1);
+    const fn_namespace = @intToEnum(Namespace.Index, interpreter.namespaces.len - 1);
 
     const type_type = try interpreter.ip.get(interpreter.allocator, Key{ .simple = .type });
 
@@ -1157,7 +1144,8 @@ pub fn call(
         if (param.name_token) |name_token| {
             const name = offsets.tokenToSlice(tree, name_token);
 
-            try interpreter.namespaces.items(.decls)[@enumToInt(fn_namespace)].put(interpreter.allocator, name, .{
+            const decls = &interpreter.namespaces.items(.decls)[@enumToInt(fn_namespace)];
+            const decl_index = try interpreter.ip.createDecl(interpreter.allocator, .{
                 .name = name,
                 .ty = tex.val,
                 .val = arguments[arg_index].val,
@@ -1166,6 +1154,7 @@ pub fn call(
                 .is_pub = true, // TODO
                 .is_exported = false, // TODO
             });
+            try decls.putNoClobber(interpreter.allocator, name, decl_index);
             arg_index += 1;
         }
     }

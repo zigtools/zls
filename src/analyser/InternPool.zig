@@ -4,6 +4,11 @@ map: std.AutoArrayHashMapUnmanaged(void, void) = .{},
 items: std.MultiArrayList(Item) = .{},
 extra: std.ArrayListUnmanaged(u8) = .{},
 
+decls: std.ArrayListUnmanaged(InternPool.Decl) = .{},
+structs: std.ArrayListUnmanaged(InternPool.Struct) = .{},
+enums: std.ArrayListUnmanaged(InternPool.Enum) = .{},
+unions: std.ArrayListUnmanaged(InternPool.Union) = .{},
+
 const InternPool = @This();
 const std = @import("std");
 const builtin = @import("builtin");
@@ -36,15 +41,26 @@ pub const Array = packed struct {
     sentinel: Index = .none,
 };
 
+pub const FieldStatus = enum {
+    none,
+    field_types_wip,
+    have_field_types,
+    layout_wip,
+    have_layout,
+    fully_resolved_wip,
+    fully_resolved,
+};
+
+pub const StructIndex = enum(u32) { _ };
+
 pub const Struct = struct {
-    fields: []const Field,
+    fields: std.StringArrayHashMapUnmanaged(Field),
     namespace: NamespaceIndex,
     layout: std.builtin.Type.ContainerLayout = .Auto,
     backing_int_ty: Index,
+    status: FieldStatus,
 
     pub const Field = packed struct {
-        /// guaranteed to be .bytes
-        name: Index,
         ty: Index,
         default_value: Index = .none,
         alignment: u16 = 0,
@@ -66,17 +82,14 @@ pub const ErrorSet = struct {
     names: []const Index,
 };
 
+pub const EnumIndex = enum(u32) { _ };
+
 pub const Enum = struct {
     tag_type: Index,
-    fields: []const Field,
+    fields: std.StringArrayHashMapUnmanaged(void),
+    values: std.AutoArrayHashMapUnmanaged(Index, void),
     namespace: NamespaceIndex,
     tag_type_infered: bool,
-
-    pub const Field = packed struct {
-        /// guaranteed to be .bytes
-        name: Index,
-        val: Index,
-    };
 };
 
 pub const Function = struct {
@@ -94,15 +107,16 @@ pub const Function = struct {
     is_var_args: bool = false,
 };
 
+pub const UnionIndex = enum(u32) { _ };
+
 pub const Union = struct {
     tag_type: Index,
-    fields: []const Field,
+    fields: std.StringArrayHashMapUnmanaged(Field),
     namespace: NamespaceIndex,
     layout: std.builtin.Type.ContainerLayout = .Auto,
+    status: FieldStatus,
 
     pub const Field = packed struct {
-        /// guaranteed to be .bytes
-        name: Index,
         ty: Index,
         alignment: u16,
     };
@@ -134,19 +148,34 @@ pub const UnionValue = packed struct {
     val: Index,
 };
 
+pub const DeclIndex = enum(u32) { _ };
+
+pub const Decl = struct {
+    name: []const u8,
+    ty: Index,
+    val: Index,
+    alignment: u16,
+    address_space: std.builtin.AddressSpace,
+    is_pub: bool,
+    is_exported: bool,
+};
+
 pub const Key = union(enum) {
     simple: Simple,
 
     int_type: Int,
     pointer_type: Pointer,
     array_type: Array,
-    struct_type: Struct,
+    /// TODO consider *Struct instead of StructIndex
+    struct_type: StructIndex,
     optional_type: Optional,
     error_union_type: ErrorUnion,
     error_set_type: ErrorSet,
-    enum_type: Enum,
+    /// TODO consider *Enum instead of EnumIndex
+    enum_type: EnumIndex,
     function_type: Function,
-    union_type: Union,
+    /// TODO consider *Union instead of UnionIndex
+    union_type: UnionIndex,
     tuple_type: Tuple,
     vector_type: Vector,
     anyframe_type: AnyFrame,
@@ -396,7 +425,8 @@ pub const Key = union(enum) {
             },
             .int_type => |int_info| return int_info,
             .enum_type => return panicOrElse("TODO", .{ .signedness = .unsigned, .bits = 0 }),
-            .struct_type => |struct_info| {
+            .struct_type => |struct_index| {
+                const struct_info = ip.getStruct(struct_index);
                 assert(struct_info.layout == .Packed);
                 key = ip.indexToKey(struct_info.backing_int_ty);
             },
@@ -485,11 +515,11 @@ pub const Key = union(enum) {
         };
     }
 
-    pub fn getNamespace(ty: Key) NamespaceIndex {
+    pub fn getNamespace(ty: Key, ip: InternPool) NamespaceIndex {
         return switch (ty) {
-            .struct_type => |struct_info| struct_info.namespace,
-            .enum_type => |enum_info| enum_info.namespace,
-            .union_type => |union_info| union_info.namespace,
+            .struct_type => |struct_index| ip.getStruct(struct_index).namespace,
+            .enum_type => |enum_index| ip.getEnum(enum_index).namespace,
+            .union_type => |union_index| ip.getUnion(union_index).namespace,
             else => .none,
         };
     }
@@ -555,10 +585,12 @@ pub const Key = union(enum) {
                 }
                 return null;
             },
-            .struct_type => |struct_info| {
-                for (struct_info.fields) |field| {
-                    if (field.is_comptime) continue;
-                    if (ip.indexToKey(field.ty).onePossibleValue(ip) != null) continue;
+            .struct_type => |struct_index| {
+                const struct_info = ip.getStruct(struct_index);
+                var field_it = struct_info.fields.iterator();
+                while (field_it.next()) |entry| {
+                    if (entry.value_ptr.is_comptime) continue;
+                    if (ip.indexToKey(entry.value_ptr.ty).onePossibleValue(ip) != null) continue;
                     return null;
                 }
                 return panicOrElse("TODO return empty struct value", null);
@@ -572,10 +604,11 @@ pub const Key = union(enum) {
             },
             .error_union_type => return null,
             .error_set_type => return null,
-            .enum_type => |enum_info| {
-                switch (enum_info.fields.len) {
+            .enum_type => |enum_index| {
+                const enum_info = ip.getEnum(enum_index);
+                switch (enum_info.fields.count()) {
                     0 => return Key{ .simple = .unreachable_value },
-                    1 => return ip.indexToKey(enum_info.fields[0].val),
+                    1 => return ip.indexToKey(enum_info.values.keys()[0]),
                     else => return null,
                 }
             },
@@ -623,11 +656,7 @@ pub const Key = union(enum) {
         ip: InternPool,
     };
 
-    // TODO implement options
-    pub const FormatOptions = struct {
-        include_fields: bool = true,
-        include_declarations: bool = true,
-    };
+    pub const FormatOptions = struct {};
 
     fn formatType(
         ctx: TypeFormatContext,
@@ -925,27 +954,27 @@ pub const Key = union(enum) {
 
             .bytes => |bytes| try writer.print("\"{}\"", .{std.zig.fmtEscapes(bytes)}),
             .aggregate => |aggregate| {
-                const struct_info = ip.indexToKey(ty).struct_type;
-                assert(aggregate.len == struct_info.fields.len);
+                const struct_info = ip.getStruct(ip.indexToKey(ty).struct_type);
+                assert(aggregate.len == struct_info.fields.count());
 
                 try writer.writeAll(".{");
                 var i: u32 = 0;
                 while (i < aggregate.len) : (i += 1) {
                     if (i != 0) try writer.writeAll(", ");
 
-                    const field_name = ip.indexToKey(struct_info.fields[i].name).bytes;
+                    const field_name = struct_info.fields.keys()[i];
                     try writer.print(".{s} = ", .{field_name});
-                    try printValue(ip.indexToKey(aggregate[i]), struct_info.fields[i].ty, ip, writer);
+                    try printValue(ip.indexToKey(aggregate[i]), struct_info.fields.values()[i].ty, ip, writer);
                 }
                 try writer.writeByte('}');
             },
             .union_value => |union_value| {
-                const union_info = ip.indexToKey(ty).union_type;
+                const union_info = ip.getUnion(ip.indexToKey(ty).union_type);
 
-                const name = ip.indexToKey(union_info.fields[union_value.field_index].name).bytes;
+                const name = union_info.fields.keys()[union_value.field_index];
                 try writer.print(".{{ .{} = {} }}", .{
                     std.zig.fmtId(name),
-                    union_value.val.fmtValue(union_info.fields[union_value.field_index].ty, ip),
+                    union_value.val.fmtValue(union_info.fields.values()[union_value.field_index].ty, ip),
                 });
             },
         }
@@ -978,6 +1007,7 @@ pub const Item = struct {
 /// Two values which have the same type can be equality compared simply
 /// by checking if their indexes are equal, provided they are both in
 /// the same `InternPool`.
+/// TODO split this into an Optional and non-Optional Index
 pub const Index = enum(u32) {
     none = std.math.maxInt(u32),
     _,
@@ -1181,6 +1211,21 @@ pub fn deinit(ip: *InternPool, gpa: Allocator) void {
     ip.map.deinit(gpa);
     ip.items.deinit(gpa);
     ip.extra.deinit(gpa);
+
+    for (ip.structs.items) |*item| {
+        item.fields.deinit(gpa);
+    }
+    for (ip.enums.items) |*item| {
+        item.fields.deinit(gpa);
+        item.values.deinit(gpa);
+    }
+    for (ip.unions.items) |*item| {
+        item.fields.deinit(gpa);
+    }
+    ip.decls.deinit(gpa);
+    ip.structs.deinit(gpa);
+    ip.enums.deinit(gpa);
+    ip.unions.deinit(gpa);
 }
 
 pub fn indexToKey(ip: InternPool, index: Index) Key {
@@ -1199,16 +1244,17 @@ pub fn indexToKey(ip: InternPool, index: Index) Key {
         } },
         .type_pointer => .{ .pointer_type = ip.extraData(Pointer, data) },
         .type_array => .{ .array_type = ip.extraData(Array, data) },
-        .type_struct => .{ .struct_type = ip.extraData(Struct, data) },
         .type_optional => .{ .optional_type = .{ .payload_type = @intToEnum(Index, data) } },
         .type_anyframe => .{ .anyframe_type = .{ .child = @intToEnum(Index, data) } },
         .type_error_union => .{ .error_union_type = ip.extraData(ErrorUnion, data) },
         .type_error_set => .{ .error_set_type = ip.extraData(ErrorSet, data) },
-        .type_enum => .{ .enum_type = ip.extraData(Enum, data) },
         .type_function => .{ .function_type = ip.extraData(Function, data) },
-        .type_union => .{ .union_type = ip.extraData(Union, data) },
         .type_tuple => .{ .tuple_type = ip.extraData(Tuple, data) },
         .type_vector => .{ .vector_type = ip.extraData(Vector, data) },
+
+        .type_struct => .{ .struct_type = @intToEnum(StructIndex, data) },
+        .type_enum => .{ .enum_type = @intToEnum(EnumIndex, data) },
+        .type_union => .{ .union_type = @intToEnum(UnionIndex, data) },
 
         .int_u32 => .{ .int_u64_value = @intCast(u32, data) },
         .int_i32 => .{ .int_i64_value = @bitCast(i32, data) },
@@ -1248,6 +1294,10 @@ pub fn get(ip: *InternPool, gpa: Allocator, key: Key) Allocator.Error!Index {
         .optional_type => |optional_ty| @enumToInt(optional_ty.payload_type),
         .anyframe_type => |anyframe_ty| @enumToInt(anyframe_ty.child),
 
+        .struct_type => |struct_index| @enumToInt(struct_index),
+        .enum_type => |enum_index| @enumToInt(enum_index),
+        .union_type => |union_index| @enumToInt(union_index),
+
         .int_u64_value => |int_val| if (tag == .int_u32) @intCast(u32, int_val) else try ip.addExtra(gpa, int_val),
         .int_i64_value => |int_val| if (tag == .int_i32) @bitCast(u32, @intCast(u32, int_val)) else try ip.addExtra(gpa, int_val),
         .int_big_value => |big_int_val| try ip.addExtra(gpa, big_int_val.limbs),
@@ -1268,6 +1318,36 @@ pub fn contains(ip: InternPool, key: Key) ?Index {
     const adapter: KeyAdapter = .{ .ip = &ip };
     const index = ip.map.getIndexAdapted(key, adapter) orelse return null;
     return @intToEnum(Index, index);
+}
+
+pub fn getDecl(ip: *InternPool, index: InternPool.DeclIndex) *InternPool.Decl {
+    return &ip.decls.items[@enumToInt(index)];
+}
+pub fn getStruct(ip: InternPool, index: InternPool.StructIndex) *InternPool.Struct {
+    return &ip.structs.items[@enumToInt(index)];
+}
+pub fn getEnum(ip: InternPool, index: InternPool.EnumIndex) *InternPool.Enum {
+    return &ip.enums.items[@enumToInt(index)];
+}
+pub fn getUnion(ip: InternPool, index: InternPool.UnionIndex) *InternPool.Union {
+    return &ip.unions.items[@enumToInt(index)];
+}
+
+pub fn createDecl(ip: *InternPool, gpa: Allocator, decl: InternPool.Decl) error{OutOfMemory}!InternPool.DeclIndex {
+    try ip.decls.append(gpa, decl);
+    return @intToEnum(InternPool.DeclIndex, ip.decls.items.len - 1);
+}
+pub fn createStruct(ip: *InternPool, gpa: Allocator, struct_info: InternPool.Struct) error{OutOfMemory}!InternPool.StructIndex {
+    try ip.structs.append(gpa, struct_info);
+    return @intToEnum(InternPool.StructIndex, ip.structs.items.len - 1);
+}
+pub fn createEnum(ip: *InternPool, gpa: Allocator, enum_info: InternPool.Enum) error{OutOfMemory}!InternPool.EnumIndex {
+    try ip.enums.append(gpa, enum_info);
+    return @intToEnum(InternPool.EnumIndex, ip.enums.items.len - 1);
+}
+pub fn createUnion(ip: *InternPool, gpa: Allocator, union_info: InternPool.Union) error{OutOfMemory}!InternPool.UnionIndex {
+    try ip.unions.append(gpa, union_info);
+    return @intToEnum(InternPool.UnionIndex, ip.unions.items.len - 1);
 }
 
 fn addExtra(ip: *InternPool, gpa: Allocator, extra: anytype) Allocator.Error!u32 {
@@ -2997,41 +3077,6 @@ test "array type" {
     try testExpectFmtType(ip, u32_0_0_array_type, "[3:0]u32");
 }
 
-test "struct type" {
-    const gpa = std.testing.allocator;
-
-    var ip: InternPool = .{};
-    defer ip.deinit(gpa);
-
-    const i32_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .signed, .bits = 32 } });
-    const u64_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .unsigned, .bits = 64 } });
-    const bool_type = try ip.get(gpa, .{ .simple = .bool });
-
-    const foo_name = try ip.get(gpa, .{ .bytes = "foo" });
-    const bar_name = try ip.get(gpa, .{ .bytes = "bar" });
-    const baz_name = try ip.get(gpa, .{ .bytes = "baz" });
-
-    const field1 = Struct.Field{ .name = foo_name, .ty = u64_type };
-    const field2 = Struct.Field{ .name = bar_name, .ty = i32_type };
-    const field3 = Struct.Field{ .name = baz_name, .ty = bool_type };
-
-    const struct_type_0 = try ip.get(gpa, .{ .struct_type = .{
-        .fields = &.{ field1, field2, field3 },
-        .namespace = .none,
-        .layout = .Auto,
-        .backing_int_ty = .none,
-    } });
-
-    const struct_type_1 = try ip.get(gpa, .{ .struct_type = .{
-        .fields = &.{ field1, field2, field3 },
-        .namespace = .none,
-        .layout = .Auto,
-        .backing_int_ty = .none,
-    } });
-
-    try std.testing.expect(struct_type_0 == struct_type_1);
-}
-
 test "struct value" {
     const gpa = std.testing.allocator;
 
@@ -3041,18 +3086,17 @@ test "struct value" {
     const i32_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .signed, .bits = 32 } });
     const bool_type = try ip.get(gpa, .{ .simple = .bool });
 
-    const foo_name = try ip.get(gpa, .{ .bytes = "foo" });
-    const bar_name = try ip.get(gpa, .{ .bytes = "bar" });
-
-    const field1 = Struct.Field{ .name = foo_name, .ty = i32_type };
-    const field2 = Struct.Field{ .name = bar_name, .ty = bool_type };
-
-    const struct_type = try ip.get(gpa, .{ .struct_type = .{
-        .fields = &.{ field1, field2 },
+    const struct_index = try ip.createStruct(gpa, .{
+        .fields = .{},
         .namespace = .none,
         .layout = .Auto,
         .backing_int_ty = .none,
-    } });
+        .status = .none,
+    });
+    const struct_type = try ip.get(gpa, .{ .struct_type = struct_index });
+    const struct_info = ip.getStruct(struct_index);
+    try struct_info.fields.put(gpa, "foo", .{ .ty = i32_type });
+    try struct_info.fields.put(gpa, "bar", .{ .ty = bool_type });
 
     const one_value = try ip.get(gpa, .{ .int_i64_value = 1 });
     const true_value = try ip.get(gpa, .{ .simple = .bool_true });
@@ -3060,50 +3104,6 @@ test "struct value" {
     const aggregate_value = try ip.get(gpa, Key{ .aggregate = &.{ one_value, true_value } });
 
     try ip.testExpectFmtValue(aggregate_value, struct_type, ".{.foo = 1, .bar = true}");
-}
-
-test "enum type" {
-    const gpa = std.testing.allocator;
-
-    var ip: InternPool = .{};
-    defer ip.deinit(gpa);
-
-    const zig_name = try ip.get(gpa, .{ .bytes = "zig" });
-    const cpp_name = try ip.get(gpa, .{ .bytes = "cpp" });
-
-    const empty_enum1 = try ip.get(gpa, .{ .enum_type = .{
-        .tag_type = .none,
-        .fields = &.{},
-        .namespace = .none,
-        .tag_type_infered = true,
-    } });
-
-    const empty_enum2 = try ip.get(gpa, .{ .enum_type = .{
-        .tag_type = .none,
-        .fields = &.{},
-        .namespace = .none,
-        .tag_type_infered = true,
-    } });
-
-    const field1 = Enum.Field{ .name = zig_name, .val = .none };
-    const field2 = Enum.Field{ .name = cpp_name, .val = .none };
-
-    const enum1 = try ip.get(gpa, .{ .enum_type = .{
-        .tag_type = .none,
-        .fields = &.{ field1, field2 },
-        .namespace = .none,
-        .tag_type_infered = true,
-    } });
-    const enum2 = try ip.get(gpa, .{ .enum_type = .{
-        .tag_type = .none,
-        .fields = &.{ field2, field1 },
-        .namespace = .none,
-        .tag_type_infered = true,
-    } });
-
-    try std.testing.expect(empty_enum1 == empty_enum2);
-    try std.testing.expect(empty_enum2 != enum1);
-    try std.testing.expect(enum1 != enum2);
 }
 
 test "function type" {
@@ -3152,40 +3152,6 @@ test "function type" {
     try testExpectFmtType(ip, @"fn() align(4) callconv(.C) type", "fn() align(4) callconv(.C) type");
 }
 
-test "union type" {
-    const gpa = std.testing.allocator;
-
-    var ip: InternPool = .{};
-    defer ip.deinit(gpa);
-
-    const u32_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .unsigned, .bits = 32 } });
-    const void_type = try ip.get(gpa, .{ .simple = .void });
-
-    const ok_name = try ip.get(gpa, .{ .bytes = "Ok" });
-    const err_name = try ip.get(gpa, .{ .bytes = "Err" });
-
-    var field1 = Union.Field{ .name = ok_name, .ty = u32_type, .alignment = 0 };
-    var field2 = Union.Field{ .name = err_name, .ty = void_type, .alignment = 0 };
-
-    const union_type1 = try ip.get(gpa, .{
-        .union_type = .{
-            .tag_type = .none,
-            .fields = &.{ field1, field2 },
-            .namespace = .none,
-        },
-    });
-
-    const union_type2 = try ip.get(gpa, .{
-        .union_type = .{
-            .tag_type = .none,
-            .fields = &.{ field2, field1 },
-            .namespace = .none,
-        },
-    });
-
-    try std.testing.expect(union_type1 != union_type2);
-}
-
 test "union value" {
     const gpa = std.testing.allocator;
 
@@ -3198,19 +3164,17 @@ test "union value" {
     const int_value = try ip.get(gpa, .{ .int_u64_value = 1 });
     const f16_value = try ip.get(gpa, .{ .float_16_value = 0.25 });
 
-    const int_name = try ip.get(gpa, .{ .bytes = "int" });
-    const float_name = try ip.get(gpa, .{ .bytes = "float" });
-
-    var field1 = Union.Field{ .name = int_name, .ty = u32_type, .alignment = 0 };
-    var field2 = Union.Field{ .name = float_name, .ty = f16_type, .alignment = 0 };
-
-    const union_type = try ip.get(gpa, .{
-        .union_type = .{
-            .tag_type = .none,
-            .fields = &.{ field1, field2 },
-            .namespace = .none,
-        },
+    const union_index = try ip.createUnion(gpa, .{
+        .tag_type = .none,
+        .fields = .{},
+        .namespace = .none,
+        .layout = .Auto,
+        .status = .none,
     });
+    const union_type = try ip.get(gpa, .{ .union_type = union_index });
+    const union_info = ip.getUnion(union_index);
+    try union_info.fields.put(gpa, "int", .{ .ty = u32_type, .alignment = 0 });
+    try union_info.fields.put(gpa, "float", .{ .ty = f16_type, .alignment = 0 });
 
     const union_value1 = try ip.get(gpa, .{ .union_value = .{
         .field_index = 0,

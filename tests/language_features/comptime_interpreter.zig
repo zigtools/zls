@@ -169,16 +169,15 @@ test "ComptimeInterpreter - call return struct" {
 
     try std.testing.expect(result.ty == .simple);
     try std.testing.expect(result.ty.simple == .type);
-    const struct_info = result.val.?.struct_type;
+    const struct_info = context.interpreter.ip.getStruct(result.val.?.struct_type);
     try std.testing.expectEqual(Index.none, struct_info.backing_int_ty);
     try std.testing.expectEqual(std.builtin.Type.ContainerLayout.Auto, struct_info.layout);
 
-    const field_name = context.interpreter.ip.indexToKey(struct_info.fields[0].name).bytes;
     const bool_type = try context.interpreter.ip.get(allocator, .{ .simple = .bool });
 
-    try std.testing.expectEqual(@as(usize, 1), struct_info.fields.len);
-    try std.testing.expectEqualStrings("slay", field_name);
-    try std.testing.expect(struct_info.fields[0].ty == bool_type);
+    try std.testing.expectEqual(@as(usize, 1), struct_info.fields.count());
+    try std.testing.expectEqualStrings("slay", struct_info.fields.keys()[0]);
+    try std.testing.expect(struct_info.fields.values()[0].ty == bool_type);
 }
 
 test "ComptimeInterpreter - call comptime argument" {
@@ -284,7 +283,7 @@ const Context = struct {
             };
         }
 
-        const namespace = @intToEnum(ComptimeInterpreter.NamespaceIndex, 0); // root namespace
+        const namespace = @intToEnum(ComptimeInterpreter.Namespace.Index, 0); // root namespace
         const result = (try self.interpreter.call(namespace, func_node, args, .{})).result;
 
         try std.testing.expect(result == .value);
@@ -297,7 +296,7 @@ const Context = struct {
     }
 
     pub fn interpret(self: *Context, node: Ast.Node.Index) !KV {
-        const namespace = @intToEnum(ComptimeInterpreter.NamespaceIndex, 0); // root namespace
+        const namespace = @intToEnum(ComptimeInterpreter.Namespace.Index, 0); // root namespace
         const result = try (try self.interpreter.interpret(node, namespace, .{})).getValue();
 
         try std.testing.expect(result.ty != .none);

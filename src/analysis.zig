@@ -772,7 +772,7 @@ pub fn resolveTypeOfNodeInternal(store: *DocumentStore, arena: *std.heap.ArenaAl
                     };
                     var interpreter: *ComptimeInterpreter = handle.interpreter.?;
 
-                    const root_namespace = @intToEnum(ComptimeInterpreter.NamespaceIndex, 0);
+                    const root_namespace = @intToEnum(ComptimeInterpreter.Namespace.Index, 0);
 
                     // TODO: Start from current/nearest-current scope
                     const result = interpreter.interpret(node, root_namespace, .{}) catch |err| {

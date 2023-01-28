@@ -24,7 +24,7 @@ pub fn dotCompletions(
         .simple => |simple| switch (simple) {
             .type => {
                 const ty_key = ip.indexToKey(val);
-                const namespace = ty_key.getNamespace();
+                const namespace = ty_key.getNamespace(ip.*);
                 if (namespace != .none) {
                     // TODO lookup in namespace
                 }
@@ -40,11 +40,12 @@ pub fn dotCompletions(
                         }
                     },
                     .union_type => {}, // TODO
-                    .enum_type => |enum_info| {
-                        for (enum_info.fields) |field| {
-                            const field_name = ip.indexToKey(field.name).bytes;
+                    .enum_type => |enum_index| {
+                        const enum_info = ip.getEnum(enum_index);
+                        var field_it = enum_info.fields.iterator();
+                        while (field_it.next()) |entry| {
                             try completions.append(arena, .{
-                                .label = field_name,
+                                .label = entry.key_ptr.*,
                                 .kind = .Constant,
                                 // include field.val?
                             });
@@ -85,14 +86,15 @@ pub fn dotCompletions(
                 .detail = try std.fmt.allocPrint(arena, "usize ({d})", .{array_info.len}), // TODO how should this be displayed
             });
         },
-        .struct_type => |struct_info| {
-            for (struct_info.fields) |field| {
-                const field_name = ip.indexToKey(field.name).bytes;
+        .struct_type => |struct_index| {
+            const struct_info = ip.getStruct(struct_index);
+            var field_it = struct_info.fields.iterator();
+            while (field_it.next()) |entry| {
                 try completions.append(arena, types.CompletionItem{
-                    .label = field_name,
+                    .label = entry.key_ptr.*,
                     .kind = .Field,
                     // TODO include alignment and comptime
-                    .detail = try std.fmt.allocPrint(arena, "{}", .{field.ty.fmtType(ip.*)}),
+                    .detail = try std.fmt.allocPrint(arena, "{}", .{entry.value_ptr.ty.fmtType(ip.*)}),
                 });
             }
         },
@@ -103,26 +105,28 @@ pub fn dotCompletions(
                 .detail = try std.fmt.allocPrint(arena, "{}", .{optional_info.payload_type.fmtType(ip.*)}),
             });
         },
-        .enum_type => |enum_info| {
-            for (enum_info.fields) |field| {
-                const field_name = ip.indexToKey(field.name).bytes;
+        .enum_type => |enum_index| {
+            const enum_info = ip.getEnum(enum_index);
+            for (enum_info.fields.keys()) |field_name, i| {
+                const field_val = enum_info.values.keys()[i];
                 try completions.append(arena, .{
                     .label = field_name,
                     .kind = .Field,
-                    .detail = try std.fmt.allocPrint(arena, "{}", .{field.val.fmtValue(enum_info.tag_type, ip.*)}),
+                    .detail = try std.fmt.allocPrint(arena, "{}", .{field_val.fmtValue(enum_info.tag_type, ip.*)}),
                 });
             }
         },
-        .union_type => |union_info| {
-            for (union_info.fields) |field| {
-                const field_name = ip.indexToKey(field.name).bytes;
+        .union_type => |union_index| {
+            const union_info = ip.getUnion(union_index);
+            var field_it = union_info.fields.iterator();
+            while (field_it.next()) |entry| {
                 try completions.append(arena, .{
-                    .label = field_name,
+                    .label = entry.key_ptr.*,
                     .kind = .Field,
-                    .detail = if (field.alignment != 0)
-                        try std.fmt.allocPrint(arena, "align({d}) {}", .{ field.alignment, field.ty.fmtType(ip.*) })
+                    .detail = if (entry.value_ptr.alignment != 0)
+                        try std.fmt.allocPrint(arena, "align({d}) {}", .{ entry.value_ptr.alignment, entry.value_ptr.ty.fmtType(ip.*) })
                     else
-                        try std.fmt.allocPrint(arena, "{}", .{field.ty.fmtType(ip.*)}),
+                        try std.fmt.allocPrint(arena, "{}", .{entry.value_ptr.ty.fmtType(ip.*)}),
                 });
             }
         },
