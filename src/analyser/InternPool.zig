@@ -4,10 +4,10 @@ map: std.AutoArrayHashMapUnmanaged(void, void) = .{},
 items: std.MultiArrayList(Item) = .{},
 extra: std.ArrayListUnmanaged(u8) = .{},
 
-decls: std.ArrayListUnmanaged(InternPool.Decl) = .{},
-structs: std.ArrayListUnmanaged(InternPool.Struct) = .{},
-enums: std.ArrayListUnmanaged(InternPool.Enum) = .{},
-unions: std.ArrayListUnmanaged(InternPool.Union) = .{},
+decls: std.SegmentedList(InternPool.Decl, 0) = .{},
+structs: std.SegmentedList(InternPool.Struct, 0) = .{},
+enums: std.SegmentedList(InternPool.Enum, 0) = .{},
+unions: std.SegmentedList(InternPool.Union, 0) = .{},
 
 const InternPool = @This();
 const std = @import("std");
@@ -1212,14 +1212,17 @@ pub fn deinit(ip: *InternPool, gpa: Allocator) void {
     ip.items.deinit(gpa);
     ip.extra.deinit(gpa);
 
-    for (ip.structs.items) |*item| {
+    var struct_it = ip.structs.iterator(0);
+    while (struct_it.next()) |item| {
         item.fields.deinit(gpa);
     }
-    for (ip.enums.items) |*item| {
+    var enum_it = ip.enums.iterator(0);
+    while (enum_it.next()) |item| {
         item.fields.deinit(gpa);
         item.values.deinit(gpa);
     }
-    for (ip.unions.items) |*item| {
+    var union_it = ip.unions.iterator(0);
+    while (union_it.next()) |item| {
         item.fields.deinit(gpa);
     }
     ip.decls.deinit(gpa);
@@ -1320,34 +1323,38 @@ pub fn contains(ip: InternPool, key: Key) ?Index {
     return @intToEnum(Index, index);
 }
 
-pub fn getDecl(ip: *InternPool, index: InternPool.DeclIndex) *InternPool.Decl {
-    return &ip.decls.items[@enumToInt(index)];
+pub fn getDecl(ip: InternPool, index: InternPool.DeclIndex) *InternPool.Decl {
+    var decls = ip.decls;
+    return decls.at(@enumToInt(index));
 }
 pub fn getStruct(ip: InternPool, index: InternPool.StructIndex) *InternPool.Struct {
-    return &ip.structs.items[@enumToInt(index)];
+    var structs = ip.structs;
+    return structs.at(@enumToInt(index));
 }
 pub fn getEnum(ip: InternPool, index: InternPool.EnumIndex) *InternPool.Enum {
-    return &ip.enums.items[@enumToInt(index)];
+    var enums = ip.enums;
+    return enums.at(@enumToInt(index));
 }
 pub fn getUnion(ip: InternPool, index: InternPool.UnionIndex) *InternPool.Union {
-    return &ip.unions.items[@enumToInt(index)];
+    var unions = ip.unions;
+    return unions.at(@enumToInt(index));
 }
 
 pub fn createDecl(ip: *InternPool, gpa: Allocator, decl: InternPool.Decl) error{OutOfMemory}!InternPool.DeclIndex {
     try ip.decls.append(gpa, decl);
-    return @intToEnum(InternPool.DeclIndex, ip.decls.items.len - 1);
+    return @intToEnum(InternPool.DeclIndex, ip.decls.count() - 1);
 }
 pub fn createStruct(ip: *InternPool, gpa: Allocator, struct_info: InternPool.Struct) error{OutOfMemory}!InternPool.StructIndex {
     try ip.structs.append(gpa, struct_info);
-    return @intToEnum(InternPool.StructIndex, ip.structs.items.len - 1);
+    return @intToEnum(InternPool.StructIndex, ip.structs.count() - 1);
 }
 pub fn createEnum(ip: *InternPool, gpa: Allocator, enum_info: InternPool.Enum) error{OutOfMemory}!InternPool.EnumIndex {
     try ip.enums.append(gpa, enum_info);
-    return @intToEnum(InternPool.EnumIndex, ip.enums.items.len - 1);
+    return @intToEnum(InternPool.EnumIndex, ip.enums.count() - 1);
 }
 pub fn createUnion(ip: *InternPool, gpa: Allocator, union_info: InternPool.Union) error{OutOfMemory}!InternPool.UnionIndex {
     try ip.unions.append(gpa, union_info);
-    return @intToEnum(InternPool.UnionIndex, ip.unions.items.len - 1);
+    return @intToEnum(InternPool.UnionIndex, ip.unions.count() - 1);
 }
 
 fn addExtra(ip: *InternPool, gpa: Allocator, extra: anytype) Allocator.Error!u32 {
