@@ -94,6 +94,16 @@ test "ComptimeInterpreter - variable lookup" {
         \\    break :blk bar;
         \\}
     , .{ .simple = .comptime_int }, .{ .int_u64_value = 2 });
+
+    var context = try Context.init(
+        \\const bar = foo;
+        \\const foo = 3;
+    );
+    defer context.deinit();
+
+    const result = try context.interpret(context.findVar("bar"));
+    try expectEqualKey(context.interpreter.ip, .{ .simple = .comptime_int }, result.ty);
+    try expectEqualKey(context.interpreter.ip, .{ .int_u64_value = 3 }, result.val);
 }
 
 test "ComptimeInterpreter - field access" {

@@ -214,7 +214,7 @@ pub fn interpret(
             try interpreter.namespaces.append(interpreter.allocator, .{
                 .parent = namespace,
                 .node_idx = node_idx,
-                .ty = undefined,
+                .ty = .none,
             });
             const container_namespace = @intToEnum(Namespace.Index, interpreter.namespaces.len - 1);
 
@@ -263,7 +263,7 @@ pub fn interpret(
                 });
             }
 
-            const struct_type = try interpreter.ip.get(interpreter.allocator, Key{ .struct_type = struct_index }); // TODO potential double free on struct_info.field
+            const struct_type = try interpreter.ip.get(interpreter.allocator, Key{ .struct_type = struct_index });
             interpreter.namespaces.items(.ty)[@enumToInt(container_namespace)] = struct_type;
 
             return InterpretResult{ .value = Value{
@@ -282,16 +282,36 @@ pub fn interpret(
         .aligned_var_decl,
         .simple_var_decl,
         => {
-            var decls = &interpreter.namespaces.items(.decls)[@enumToInt(namespace)];
+            var decls: *std.StringArrayHashMapUnmanaged(InternPool.DeclIndex) = &interpreter.namespaces.items(.decls)[@enumToInt(namespace)];
 
             const name = analysis.getDeclName(tree, node_idx).?;
-            if (decls.contains(name))
+            const decl_index = try interpreter.ip.createDecl(interpreter.allocator, .{
+                .name = name,
+                .ty = .none,
+                .val = .none,
+                .alignment = 0, // TODO
+                .address_space = .generic, // TODO
+                .is_pub = true, // TODO
+                .is_exported = false, // TODO
+            });
+
+            const gop = try decls.getOrPutValue(interpreter.allocator, name, decl_index);
+            if (gop.found_existing) {
                 return InterpretResult{ .nothing = {} };
+            }
 
-            const decl = tree.fullVarDecl(node_idx).?;
+            const var_decl = tree.fullVarDecl(node_idx).?;
 
-            const type_value = if (decl.ast.type_node != 0) (try interpreter.interpret(decl.ast.type_node, namespace, .{})).maybeGetValue() else null;
-            const init_value = if (decl.ast.init_node != 0) (try interpreter.interpret(decl.ast.init_node, namespace, .{})).maybeGetValue() else null;
+            const type_value = blk: {
+                if (var_decl.ast.type_node == 0) break :blk null;
+                const result = interpreter.interpret(var_decl.ast.type_node, namespace, .{}) catch break :blk null;
+                break :blk result.maybeGetValue();
+            };
+            const init_value = blk: {
+                if (var_decl.ast.init_node == 0) break :blk null;
+                const result = interpreter.interpret(var_decl.ast.init_node, namespace, .{}) catch break :blk null;
+                break :blk result.maybeGetValue();
+            };
 
             if (type_value == null and init_value == null) return InterpretResult{ .nothing = {} };
 
@@ -300,16 +320,9 @@ pub fn interpret(
                 if (v.ty != type_type) return InterpretResult{ .nothing = {} };
             }
 
-            const decl_index = try interpreter.ip.createDecl(interpreter.allocator, .{
-                .name = name,
-                .ty = if (type_value) |v| v.val else init_value.?.ty,
-                .val = if (init_value) |init| init.val else .none,
-                .alignment = 0, // TODO
-                .address_space = .generic, // TODO
-                .is_pub = true, // TODO
-                .is_exported = false, // TODO
-            });
-            try decls.putNoClobber(interpreter.allocator, name, decl_index);
+            const decl = interpreter.ip.getDecl(decl_index);
+            decl.ty = if (type_value) |v| v.val else init_value.?.ty;
+            decl.val = if (init_value) |init| init.val else .none;
 
             // TODO: Am I a dumbo shrimp? (e.g. is this tree shaking correct? works on my machine so like...)
 
@@ -428,6 +441,7 @@ pub fn interpret(
             // Logic to find identifiers in accessible scopes
             if (interpreter.huntItDown(namespace, identifier, options)) |decl_index| {
                 const decl = interpreter.ip.getDecl(decl_index);
+                if(decl.ty == .none) return InterpretResult{ .nothing = {} };
                 return InterpretResult{ .value = Value{
                     .interpreter = interpreter,
                     .node_idx = node_idx,
@@ -656,12 +670,14 @@ pub fn interpret(
         .equal_equal => {
             var a = try interpreter.interpret(data[node_idx].lhs, namespace, options);
             var b = try interpreter.interpret(data[node_idx].rhs, namespace, options);
+            const a_value = a.maybeGetValue() orelse return InterpretResult{ .nothing = {} };
+            const b_value = b.maybeGetValue() orelse return InterpretResult{ .nothing = {} };
             return InterpretResult{
                 .value = Value{
                     .interpreter = interpreter,
                     .node_idx = node_idx,
                     .ty = try interpreter.ip.get(interpreter.allocator, Key{ .simple = .bool }),
-                    .val = try interpreter.ip.get(interpreter.allocator, Key{ .simple = if (a.value.val == b.value.val) .bool_true else .bool_false }), // TODO eql function required?
+                    .val = try interpreter.ip.get(interpreter.allocator, Key{ .simple = if (a_value.val == b_value.val) .bool_true else .bool_false }), // TODO eql function required?
                 },
             };
         },
@@ -847,9 +863,10 @@ pub fn interpret(
 
                 const type_type = try interpreter.ip.get(interpreter.allocator, Key{ .simple = .type });
 
-                if (value.ty != type_type) return error.InvalidBuiltin;
+                if (value.ty != type_type or value.ty == .none) return error.InvalidBuiltin;
                 if (interpreter.ip.indexToKey(field_name.ty) != .pointer_type) return error.InvalidBuiltin; // Check if it's a []const u8
-
+                if (value.val == .none) return error.InvalidBuiltin;
+                
                 const value_namespace = interpreter.ip.indexToKey(value.val).getNamespace(interpreter.ip);
                 if (value_namespace == .none) return error.InvalidBuiltin;
 
@@ -930,6 +947,9 @@ pub fn interpret(
             var buf: [1]Ast.Node.Index = undefined;
             const func = tree.fullFnProto(&buf, node_idx).?;
 
+            if (func.name_token == null) return InterpretResult{ .nothing = {} };
+            const name = offsets.tokenToSlice(tree, func.name_token.?);
+            
             // TODO: Resolve function type
 
             const type_type = try interpreter.ip.get(interpreter.allocator, Key{ .simple = .type });
@@ -966,8 +986,6 @@ pub fn interpret(
 
             // if ((try interpreter.interpret(func.ast.return_type, func_scope_idx, .{ .observe_values = true, .is_comptime = true })).maybeGetValue()) |value|
             //     fnd.return_type = value.value_data.@"type";
-
-            const name = offsets.tokenToSlice(tree, func.name_token.?);
 
             if (namespace != .none) {
                 const decls = &interpreter.namespaces.items(.decls)[@enumToInt(namespace)];
