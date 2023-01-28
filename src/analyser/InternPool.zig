@@ -2677,9 +2677,9 @@ fn optionalPtrTy(
     }
 }
 
-/// will panic in debug mode or in tests else will return `value`
+/// will panic in during testing else will return `value`
 inline fn panicOrElse(message: []const u8, value: anytype) @TypeOf(value) {
-    if (builtin.is_test or builtin.mode == .Debug) {
+    if (builtin.is_test) {
         @panic(message);
     }
     return value;

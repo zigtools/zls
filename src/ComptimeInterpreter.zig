@@ -441,7 +441,7 @@ pub fn interpret(
             // Logic to find identifiers in accessible scopes
             if (interpreter.huntItDown(namespace, identifier, options)) |decl_index| {
                 const decl = interpreter.ip.getDecl(decl_index);
-                if(decl.ty == .none) return InterpretResult{ .nothing = {} };
+                if (decl.ty == .none) return InterpretResult{ .nothing = {} };
                 return InterpretResult{ .value = Value{
                     .interpreter = interpreter,
                     .node_idx = node_idx,
@@ -613,20 +613,23 @@ pub fn interpret(
                 else => false,
             };
 
-            if (can_have_fields) {
-                try interpreter.recordError(
-                    node_idx,
-                    "undeclared_identifier",
-                    "`{}` has no member '{s}'",
-                    .{ irv.ty.fmtType(interpreter.ip), field_name },
-                );
-            } else {
-                try interpreter.recordError(
-                    node_idx,
-                    "invalid_field_access",
-                    "`{}` does not support field access",
-                    .{irv.ty.fmtType(interpreter.ip)},
-                );
+            const accessed_ty = if (inner_lhs == .simple and inner_lhs.simple == .type) irv.val else irv.ty;
+            if (accessed_ty != .none) {
+                if (can_have_fields) {
+                    try interpreter.recordError(
+                        node_idx,
+                        "undeclared_identifier",
+                        "`{}` has no member '{s}'",
+                        .{ accessed_ty.fmtType(interpreter.ip), field_name },
+                    );
+                } else {
+                    try interpreter.recordError(
+                        node_idx,
+                        "invalid_field_access",
+                        "`{}` does not support field access",
+                        .{accessed_ty.fmtType(interpreter.ip)},
+                    );
+                }
             }
             return error.InvalidOperation;
         },
@@ -866,7 +869,7 @@ pub fn interpret(
                 if (value.ty != type_type or value.ty == .none) return error.InvalidBuiltin;
                 if (interpreter.ip.indexToKey(field_name.ty) != .pointer_type) return error.InvalidBuiltin; // Check if it's a []const u8
                 if (value.val == .none) return error.InvalidBuiltin;
-                
+
                 const value_namespace = interpreter.ip.indexToKey(value.val).getNamespace(interpreter.ip);
                 if (value_namespace == .none) return error.InvalidBuiltin;
 
@@ -949,7 +952,7 @@ pub fn interpret(
 
             if (func.name_token == null) return InterpretResult{ .nothing = {} };
             const name = offsets.tokenToSlice(tree, func.name_token.?);
-            
+
             // TODO: Resolve function type
 
             const type_type = try interpreter.ip.get(interpreter.allocator, Key{ .simple = .type });
