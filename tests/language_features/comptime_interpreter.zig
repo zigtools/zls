@@ -83,9 +83,30 @@ test "ComptimeInterpreter - if" {
         \\    break :blk if (false) true else false;
         \\}
     , .{ .simple = .bool }, .{ .simple = .bool_false });
+    try testExpr(
+        \\blk: {
+        \\    if (false) break :blk true;
+        \\    break :blk false;
+        \\}
+    , .{ .simple = .bool }, .{ .simple = .bool_false });
+    // TODO
+    // try testExpr(
+    //     \\outer: {
+    //     \\    if (:inner {
+    //     \\        break :inner true;
+    //     \\    }) break :outer true;
+    //     \\    break :outer false;
+    //     \\}
+    // , .{ .simple = .bool }, .{ .simple = .bool_true });
 }
 
 test "ComptimeInterpreter - variable lookup" {
+    try testExpr(
+        \\blk: {
+        \\    var foo = 42;
+        \\    break :blk foo;
+        \\}
+    , .{ .simple = .comptime_int }, .{ .int_u64_value = 42 });
     try testExpr(
         \\blk: {
         \\    var foo = 1;
@@ -113,6 +134,31 @@ test "ComptimeInterpreter - field access" {
         \\    break :blk foo.beta;
         \\}
     , .{ .simple = .bool }, null);
+    try testExpr(
+        \\blk: {
+        \\    const foo: struct {alpha: u64, beta: bool} = undefined;
+        \\    break :blk foo.alpha;
+        \\}
+    , .{ .int_type = .{
+        .signedness = .unsigned,
+        .bits = 64,
+    } }, null);
+}
+
+test "ComptimeInterpreter - optional operations" {
+    if (true) return error.SkipZigTest; // TODO
+    try testExpr(
+        \\blk: {
+        \\    const foo: ?bool = true;
+        \\    break :blk foo.?;
+        \\}
+    , .{ .simple = .bool }, .{ .simple = .bool_true });
+    try testExpr(
+        \\blk: {
+        \\    const foo: ?bool = true;
+        \\    break :blk foo == null;
+        \\}
+    , .{ .simple = .bool }, .{ .simple = .bool_false });
 }
 
 test "ComptimeInterpreter - pointer operations" {
