@@ -531,7 +531,14 @@ fn collectBuiltinData(allocator: std.mem.Allocator, version: []const u8, langref
                     switch (tokenizer.next().id) {
                         .Separator => {
                             std.debug.assert(tokenizer.next().id == .TagContent);
-                            std.debug.assert(tokenizer.next().id == .BracketClose);
+                            switch (tokenizer.next().id) {
+                                .Separator => {
+                                    std.debug.assert(tokenizer.next().id == .TagContent);
+                                    std.debug.assert(tokenizer.next().id == .BracketClose);
+                                },
+                                .BracketClose => {},
+                                else => unreachable,
+                            }
                         },
                         .BracketClose => {},
                         else => unreachable,
@@ -865,7 +872,7 @@ const Response = union(enum) {
 
 fn httpGET(allocator: std.mem.Allocator, uri: std.Uri) !Response {
     var client = std.http.Client{ .allocator = allocator };
-    defer client.deinit(allocator);
+    defer client.deinit();
     try client.ca_bundle.rescan(allocator);
 
     var request = try client.request(uri, .{}, .{});
