@@ -1254,11 +1254,6 @@ pub fn iterateChildren(
         .async_call_one,
         .async_call_one_comma,
         .switch_range,
-        .while_simple,
-        .for_simple,
-        .if_simple,
-        .fn_proto_simple,
-        .fn_decl,
         .builtin_call_two,
         .builtin_call_two_comma,
         .container_decl_two,
@@ -1299,7 +1294,7 @@ pub fn iterateChildren(
         .simple_var_decl,
         .aligned_var_decl,
         => {
-            const var_decl = tree.fullVarDecl(node).?.ast; // TODO order
+            const var_decl = tree.fullVarDecl(node).?.ast;
             try callback(context, var_decl.type_node);
             try callback(context, var_decl.align_node);
             try callback(context, var_decl.addrspace_node);
@@ -1320,11 +1315,11 @@ pub fn iterateChildren(
         .ptr_type_bit_range,
         => {
             const ptr_type = fullPtrType(tree, node).?.ast;
-            try callback(context, ptr_type.align_node);
-            try callback(context, ptr_type.addrspace_node);
             try callback(context, ptr_type.sentinel);
+            try callback(context, ptr_type.align_node);
             try callback(context, ptr_type.bit_range_start);
             try callback(context, ptr_type.bit_range_end);
+            try callback(context, ptr_type.addrspace_node);
             try callback(context, ptr_type.child_type);
         },
 
@@ -1395,8 +1390,10 @@ pub fn iterateChildren(
             try callback(context, switch_case.target_expr);
         },
 
+        .while_simple,
         .while_cont,
         .@"while",
+        .for_simple,
         .@"for",
         => {
             const while_ast = fullWhile(tree, node).?.ast;
@@ -1406,29 +1403,32 @@ pub fn iterateChildren(
             try callback(context, while_ast.else_expr);
         },
 
-        .@"if" => {
+        .@"if",
+        .if_simple,
+        => {
             const if_ast = ifFull(tree, node).ast;
             try callback(context, if_ast.cond_expr);
             try callback(context, if_ast.then_expr);
             try callback(context, if_ast.else_expr);
         },
 
+        .fn_proto_simple,
         .fn_proto_multi,
         .fn_proto_one,
         .fn_proto,
+        .fn_decl,
         => {
             var buffer: [1]Node.Index = undefined;
-            const fn_proto = tree.fullFnProto(&buffer, node).?; // TODO order
-
-            try callback(context, fn_proto.ast.return_type);
-            try callback(context, fn_proto.ast.align_expr);
-            try callback(context, fn_proto.ast.addrspace_expr);
-            try callback(context, fn_proto.ast.section_expr);
-            try callback(context, fn_proto.ast.callconv_expr);
+            const fn_proto = tree.fullFnProto(&buffer, node).?;
 
             for (fn_proto.ast.params) |child| {
                 try callback(context, child);
             }
+            try callback(context, fn_proto.ast.align_expr);
+            try callback(context, fn_proto.ast.addrspace_expr);
+            try callback(context, fn_proto.ast.section_expr);
+            try callback(context, fn_proto.ast.callconv_expr);
+            try callback(context, fn_proto.ast.return_type);
         },
 
         .container_decl_arg,
