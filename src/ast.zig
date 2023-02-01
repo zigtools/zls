@@ -3,6 +3,7 @@
 //! when there are parser errors.
 
 const std = @import("std");
+const offsets = @import("offsets.zig");
 const Ast = std.zig.Ast;
 const Node = Ast.Node;
 const full = Ast.full;
@@ -545,7 +546,7 @@ pub fn lastToken(tree: Ast, node: Ast.Node.Index) Ast.TokenIndex {
         },
         .container_decl_arg,
         .container_decl_arg_trailing,
-         => {
+        => {
             const members = tree.extraData(datas[n].rhs, Node.SubRange);
             if (members.end - members.start == 0) {
                 end_offset += 3; // for the rparen + lbrace + rbrace
@@ -1138,5 +1139,454 @@ pub fn nextFnParam(it: *Ast.full.FnProto.Iterator) ?Ast.full.FnProto.Param {
             };
         }
         it.tok_flag = false;
+    }
+}
+
+/// returns an Iterator that yields every child of the given node.
+/// see `nodeChildrenAlloc` for a non-iterator allocating variant.
+/// the order in which children are given corresponds to the order in which they are found in the source text
+pub fn iterateChildren(
+    tree: Ast,
+    node: Ast.Node.Index,
+    context: anytype,
+    comptime Error: type,
+    comptime callback: fn (@TypeOf(context), Ast.Node.Index) Error!void,
+) Error!void {
+    const node_tags = tree.nodes.items(.tag);
+    const node_data = tree.nodes.items(.data);
+
+    if (node > tree.nodes.len) return;
+
+    const tag = node_tags[node];
+    switch (tag) {
+        .@"usingnamespace",
+        .field_access,
+        .unwrap_optional,
+        .bool_not,
+        .negation,
+        .bit_not,
+        .negation_wrap,
+        .address_of,
+        .@"try",
+        .@"await",
+        .optional_type,
+        .deref,
+        .@"suspend",
+        .@"resume",
+        .@"return",
+        .grouped_expression,
+        .@"comptime",
+        .@"nosuspend",
+        .asm_simple,
+        => {
+            try callback(context, node_data[node].lhs);
+        },
+
+        .test_decl,
+        .@"errdefer",
+        .@"defer",
+        .@"break",
+        .anyframe_type,
+        => {
+            try callback(context, node_data[node].rhs);
+        },
+
+        .@"catch",
+        .equal_equal,
+        .bang_equal,
+        .less_than,
+        .greater_than,
+        .less_or_equal,
+        .greater_or_equal,
+        .assign_mul,
+        .assign_div,
+        .assign_mod,
+        .assign_add,
+        .assign_sub,
+        .assign_shl,
+        .assign_shl_sat,
+        .assign_shr,
+        .assign_bit_and,
+        .assign_bit_xor,
+        .assign_bit_or,
+        .assign_mul_wrap,
+        .assign_add_wrap,
+        .assign_sub_wrap,
+        .assign_mul_sat,
+        .assign_add_sat,
+        .assign_sub_sat,
+        .assign,
+        .merge_error_sets,
+        .mul,
+        .div,
+        .mod,
+        .array_mult,
+        .mul_wrap,
+        .mul_sat,
+        .add,
+        .sub,
+        .array_cat,
+        .add_wrap,
+        .sub_wrap,
+        .add_sat,
+        .sub_sat,
+        .shl,
+        .shl_sat,
+        .shr,
+        .bit_and,
+        .bit_xor,
+        .bit_or,
+        .@"orelse",
+        .bool_and,
+        .bool_or,
+        .array_type,
+        .array_access,
+        .array_init_one,
+        .array_init_one_comma,
+        .array_init_dot_two,
+        .array_init_dot_two_comma,
+        .struct_init_one,
+        .struct_init_one_comma,
+        .struct_init_dot_two,
+        .struct_init_dot_two_comma,
+        .call_one,
+        .call_one_comma,
+        .async_call_one,
+        .async_call_one_comma,
+        .switch_range,
+        .while_simple,
+        .for_simple,
+        .if_simple,
+        .fn_proto_simple,
+        .fn_decl,
+        .builtin_call_two,
+        .builtin_call_two_comma,
+        .container_decl_two,
+        .container_decl_two_trailing,
+        .tagged_union_two,
+        .tagged_union_two_trailing,
+        .container_field_init,
+        .container_field_align,
+        .block_two,
+        .block_two_semicolon,
+        .error_union,
+        => {
+            try callback(context, node_data[node].lhs);
+            try callback(context, node_data[node].rhs);
+        },
+
+        .root,
+        .array_init_dot,
+        .array_init_dot_comma,
+        .struct_init_dot,
+        .struct_init_dot_comma,
+        .builtin_call,
+        .builtin_call_comma,
+        .container_decl,
+        .container_decl_trailing,
+        .tagged_union,
+        .tagged_union_trailing,
+        .block,
+        .block_semicolon,
+        => {
+            for (tree.extra_data[node_data[node].lhs..node_data[node].rhs]) |child| {
+                try callback(context, child);
+            }
+        },
+
+        .global_var_decl,
+        .local_var_decl,
+        .simple_var_decl,
+        .aligned_var_decl,
+        => {
+            const var_decl = tree.fullVarDecl(node).?.ast; // TODO order
+            try callback(context, var_decl.type_node);
+            try callback(context, var_decl.align_node);
+            try callback(context, var_decl.addrspace_node);
+            try callback(context, var_decl.section_node);
+            try callback(context, var_decl.init_node);
+        },
+
+        .array_type_sentinel => {
+            const array_type = tree.arrayTypeSentinel(node).ast;
+            try callback(context, array_type.elem_count);
+            try callback(context, array_type.sentinel);
+            try callback(context, array_type.elem_type);
+        },
+
+        .ptr_type_aligned,
+        .ptr_type_sentinel,
+        .ptr_type,
+        .ptr_type_bit_range,
+        => {
+            const ptr_type = fullPtrType(tree, node).?.ast;
+            try callback(context, ptr_type.align_node);
+            try callback(context, ptr_type.addrspace_node);
+            try callback(context, ptr_type.sentinel);
+            try callback(context, ptr_type.bit_range_start);
+            try callback(context, ptr_type.bit_range_end);
+            try callback(context, ptr_type.child_type);
+        },
+
+        .slice_open,
+        .slice,
+        .slice_sentinel,
+        => {
+            const slice = tree.fullSlice(node).?;
+            try callback(context, slice.ast.sliced);
+            try callback(context, slice.ast.start);
+            try callback(context, slice.ast.end);
+            try callback(context, slice.ast.sentinel);
+        },
+
+        .array_init,
+        .array_init_comma,
+        => {
+            const array_init = tree.arrayInit(node).ast;
+            try callback(context, array_init.type_expr);
+            for (array_init.elements) |child| {
+                try callback(context, child);
+            }
+        },
+
+        .struct_init,
+        .struct_init_comma,
+        => {
+            const struct_init = tree.structInit(node).ast;
+            try callback(context, struct_init.type_expr);
+            for (struct_init.fields) |child| {
+                try callback(context, child);
+            }
+        },
+
+        .call,
+        .call_comma,
+        .async_call,
+        .async_call_comma,
+        => {
+            const call = tree.callFull(node).ast;
+            try callback(context, call.fn_expr);
+            for (call.params) |child| {
+                try callback(context, child);
+            }
+        },
+
+        .@"switch",
+        .switch_comma,
+        => {
+            const cond = node_data[node].lhs;
+            const extra = tree.extraData(node_data[node].rhs, Ast.Node.SubRange);
+            const cases = tree.extra_data[extra.start..extra.end];
+            try callback(context, cond);
+            for (cases) |child| {
+                try callback(context, child);
+            }
+        },
+
+        .switch_case_one,
+        .switch_case_inline_one,
+        .switch_case,
+        .switch_case_inline,
+        => {
+            const switch_case = tree.fullSwitchCase(node).?.ast;
+            for (switch_case.values) |child| {
+                try callback(context, child);
+            }
+            try callback(context, switch_case.target_expr);
+        },
+
+        .while_cont,
+        .@"while",
+        .@"for",
+        => {
+            const while_ast = fullWhile(tree, node).?.ast;
+            try callback(context, while_ast.cond_expr);
+            try callback(context, while_ast.cont_expr);
+            try callback(context, while_ast.then_expr);
+            try callback(context, while_ast.else_expr);
+        },
+
+        .@"if" => {
+            const if_ast = ifFull(tree, node).ast;
+            try callback(context, if_ast.cond_expr);
+            try callback(context, if_ast.then_expr);
+            try callback(context, if_ast.else_expr);
+        },
+
+        .fn_proto_multi,
+        .fn_proto_one,
+        .fn_proto,
+        => {
+            var buffer: [1]Node.Index = undefined;
+            const fn_proto = tree.fullFnProto(&buffer, node).?; // TODO order
+
+            try callback(context, fn_proto.ast.return_type);
+            try callback(context, fn_proto.ast.align_expr);
+            try callback(context, fn_proto.ast.addrspace_expr);
+            try callback(context, fn_proto.ast.section_expr);
+            try callback(context, fn_proto.ast.callconv_expr);
+
+            for (fn_proto.ast.params) |child| {
+                try callback(context, child);
+            }
+        },
+
+        .container_decl_arg,
+        .container_decl_arg_trailing,
+        => {
+            const decl = tree.containerDeclArg(node).ast;
+            try callback(context, decl.arg);
+            for (decl.members) |child| {
+                try callback(context, child);
+            }
+        },
+
+        .tagged_union_enum_tag,
+        .tagged_union_enum_tag_trailing,
+        => {
+            const decl = tree.taggedUnionEnumTag(node).ast;
+            try callback(context, decl.arg);
+            for (decl.members) |child| {
+                try callback(context, child);
+            }
+        },
+
+        .container_field => {
+            const field = tree.containerField(node).ast;
+            try callback(context, field.type_expr);
+            try callback(context, field.align_expr);
+            try callback(context, field.value_expr);
+        },
+
+        .@"asm" => {
+            const asm_ast = tree.asmFull(node).ast;
+            try callback(context, asm_ast.template);
+            for (asm_ast.items) |child| {
+                try callback(context, child);
+            }
+        },
+
+        .asm_output,
+        .asm_input,
+        => {}, // TODO
+
+        .@"continue",
+        .anyframe_literal,
+        .char_literal,
+        .number_literal,
+        .unreachable_literal,
+        .identifier,
+        .enum_literal,
+        .string_literal,
+        .multiline_string_literal,
+        .error_set_decl,
+        .error_value,
+        => {},
+    }
+}
+
+/// returns an Iterator that recursively yields every child of the given node.
+/// see `nodeChildrenRecursiveAlloc` for a non-iterator allocating variant.
+pub fn iterateChildrenRecursive(
+    tree: Ast,
+    node: Ast.Node.Index,
+    context: anytype,
+    comptime Error: type,
+    comptime callback: fn (@TypeOf(context), Ast.Node.Index) Error!void,
+) Error!void {
+    const RecursiveContext = struct {
+        tree: Ast,
+        context: @TypeOf(context),
+
+        fn recursive_callback(self: @This(), child_node: Ast.Node.Index) Error!void {
+            if (child_node == 0) return;
+            try callback(self.context, child_node);
+            try iterateChildrenRecursive(self.tree, child_node, self.context, Error, callback);
+        }
+    };
+
+    try iterateChildren(tree, node, RecursiveContext{
+        .tree = tree,
+        .context = context,
+    }, Error, RecursiveContext.recursive_callback);
+}
+
+/// returns the children of the given node.
+/// see `iterateChildren` for a callback variant
+/// caller owns the returned memory
+pub fn nodeChildrenAlloc(allocator: std.mem.Allocator, tree: Ast, node: Ast.Node.Index) error{OutOfMemory}![]Ast.Node.Index {
+    const Context = struct {
+        children: *std.ArrayList(Ast.Node.Index),
+        fn callback(self: @This(), child_node: Ast.Node.Index) error{OutOfMemory}!void {
+            if (child_node == 0) return;
+            try self.children.append(child_node);
+        }
+    };
+
+    var children = std.ArrayList(Ast.Node.Index).init(allocator);
+    errdefer children.deinit();
+    try iterateChildren(tree, node, Context{ .children = &children }, error{OutOfMemory}, Context.callback);
+    return children.toOwnedSlice();
+}
+
+/// returns the children of the given node.
+/// see `iterateChildrenRecursive` for a callback variant
+/// caller owns the returned memory
+pub fn nodeChildrenRecursiveAlloc(allocator: std.mem.Allocator, tree: Ast, node: Ast.Node.Index) error{OutOfMemory}![]Ast.Node.Index {
+    const Context = struct {
+        children: *std.ArrayList(Ast.Node.Index),
+        fn callback(self: @This(), child_node: Ast.Node.Index) error{OutOfMemory}!void {
+            if (child_node == 0) return;
+            try self.children.append(child_node);
+        }
+    };
+
+    var children = std.ArrayList(Ast.Node.Index).init(allocator);
+    errdefer children.deinit();
+    try iterateChildrenRecursive(tree, node, .{ .children = &children }, Context.callback);
+    return children.toOwnedSlice(allocator);
+}
+
+/// returns a list of nodes that together encloses the given source code range
+/// caller owns the returned memory
+pub fn nodesAtLoc(allocator: std.mem.Allocator, tree: Ast, loc: offsets.Loc) error{OutOfMemory}![]Ast.Node.Index {
+    std.debug.assert(loc.start <= loc.end and loc.end <= tree.source.len);
+
+    var nodes = std.ArrayListUnmanaged(Ast.Node.Index){};
+    errdefer nodes.deinit(allocator);
+    var parent: Ast.Node.Index = 0; // root node
+
+    try nodes.ensureTotalCapacity(allocator, 32);
+
+    while (true) {
+        const children = try nodeChildrenAlloc(allocator, tree, parent);
+        defer allocator.free(children);
+
+        var children_loc: ?offsets.Loc = null;
+        for (children) |child_node| {
+            const child_loc = offsets.nodeToLoc(tree, child_node);
+
+            const merge_child = offsets.locIntersect(loc, child_loc) or offsets.locInside(child_loc, loc);
+
+            if (merge_child) {
+                children_loc = if (children_loc) |l| offsets.locMerge(l, child_loc) else child_loc;
+                try nodes.append(allocator, child_node);
+            } else {
+                if (nodes.items.len != 0) break;
+            }
+        }
+
+        if (children_loc == null or !offsets.locInside(loc, children_loc.?)) {
+            nodes.clearRetainingCapacity();
+            nodes.appendAssumeCapacity(parent); // capacity is never 0
+            return try nodes.toOwnedSlice(allocator);
+        }
+
+        if (nodes.items.len == 1) {
+            parent = nodes.items[0];
+            nodes.clearRetainingCapacity();
+        } else {
+            return try nodes.toOwnedSlice(allocator);
+        }
     }
 }
