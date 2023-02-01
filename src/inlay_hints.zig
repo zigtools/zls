@@ -16,123 +16,112 @@ const Config = @import("Config.zig");
 /// non-configurable at runtime
 pub const inlay_hints_exclude_builtins: []const u8 = &.{};
 
-/// max number of children in a declaration/array-init/struct-init or similar
-/// that will not get a visibility check
-pub const inlay_hints_max_inline_children = 12;
-
-/// checks whether node is inside the range
-fn isNodeInRange(tree: Ast, node: Ast.Node.Index, range: types.Range) bool {
-    const endLocation = tree.tokenLocation(0, ast.lastToken(tree, node));
-    if (endLocation.line < range.start.line) return false;
-
-    const beginLocation = tree.tokenLocation(0, tree.firstToken(node));
-    if (beginLocation.line > range.end.line) return false;
-
-    return true;
-}
+pub const InlayHint = struct {
+    token_index: Ast.TokenIndex,
+    label: []const u8,
+    kind: types.InlayHintKind,
+    tooltip: types.MarkupContent,
+};
 
 const Builder = struct {
-    arena: std.mem.Allocator,
+    arena: *std.heap.ArenaAllocator,
+    store: *DocumentStore,
     config: *const Config,
     handle: *const DocumentStore.Handle,
-    hints: std.ArrayListUnmanaged(types.InlayHint),
+    hints: std.ArrayListUnmanaged(InlayHint),
     hover_kind: types.MarkupKind,
-    encoding: offsets.Encoding,
 
-    fn appendParameterHint(self: *Builder, position: types.Position, label: []const u8, tooltip: []const u8, tooltip_noalias: bool, tooltip_comptime: bool) !void {
-        // TODO allocation could be avoided by extending InlayHint.jsonStringify
+    fn appendParameterHint(self: *Builder, token_index: Ast.TokenIndex, label: []const u8, tooltip: []const u8, tooltip_noalias: bool, tooltip_comptime: bool) !void {
         // adding tooltip_noalias & tooltip_comptime to InlayHint should be enough
         const tooltip_text = blk: {
             if (tooltip.len == 0) break :blk "";
             const prefix = if (tooltip_noalias) if (tooltip_comptime) "noalias comptime " else "noalias " else if (tooltip_comptime) "comptime " else "";
 
             if (self.hover_kind == .markdown) {
-                break :blk try std.fmt.allocPrint(self.arena, "```zig\n{s}{s}\n```", .{ prefix, tooltip });
+                break :blk try std.fmt.allocPrint(self.arena.allocator(), "```zig\n{s}{s}\n```", .{ prefix, tooltip });
             }
 
-            break :blk try std.fmt.allocPrint(self.arena, "{s}{s}", .{ prefix, tooltip });
+            break :blk try std.fmt.allocPrint(self.arena.allocator(), "{s}{s}", .{ prefix, tooltip });
         };
 
-        try self.hints.append(self.arena, .{
-            .position = position,
-            .label = .{ .string = try std.fmt.allocPrint(self.arena, "{s}:", .{label}) },
-            .kind = types.InlayHintKind.Parameter,
-            .tooltip = .{ .MarkupContent = .{
+        try self.hints.append(self.arena.allocator(), .{
+            .token_index = token_index,
+            .label = try std.fmt.allocPrint(self.arena.allocator(), "{s}:", .{label}),
+            .kind = .Parameter,
+            .tooltip = .{
                 .kind = self.hover_kind,
                 .value = tooltip_text,
-            } },
-            .paddingLeft = false,
-            .paddingRight = true,
+            },
         });
     }
 
-    fn toOwnedSlice(self: *Builder) error{OutOfMemory}![]types.InlayHint {
-        return self.hints.toOwnedSlice(self.arena);
+    fn toOwnedSlice(self: *Builder) error{OutOfMemory}![]InlayHint {
+        return self.hints.toOwnedSlice(self.arena.allocator());
     }
 };
 
 /// `call` is the function call
 /// `decl_handle` should be a function protototype
 /// writes parameter hints into `builder.hints`
-fn writeCallHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *DocumentStore, call: Ast.full.Call, decl_handle: analysis.DeclWithHandle) !void {
+fn writeCallHint(builder: *Builder, call: Ast.full.Call, decl_handle: analysis.DeclWithHandle) !void {
     const handle = builder.handle;
     const tree = handle.tree;
 
     const decl = decl_handle.decl;
     const decl_tree = decl_handle.handle.tree;
 
-    switch (decl.*) {
-        .ast_node => |fn_node| {
-            var buffer: [1]Ast.Node.Index = undefined;
-            if (decl_tree.fullFnProto(&buffer, fn_node)) |fn_proto| {
-                var i: usize = 0;
-                var it = fn_proto.iterate(&decl_tree);
+    const fn_node = switch (decl.*) {
+        .ast_node => |fn_node| fn_node,
+        else => return,
+    };
 
-                if (try analysis.hasSelfParam(arena, store, decl_handle.handle, fn_proto)) {
-                    _ = ast.nextFnParam(&it);
-                }
+    var buffer: [1]Ast.Node.Index = undefined;
+    const fn_proto = decl_tree.fullFnProto(&buffer, fn_node) orelse return;
 
-                while (ast.nextFnParam(&it)) |param| : (i += 1) {
-                    if (i >= call.ast.params.len) break;
-                    const name_token = param.name_token orelse continue;
-                    const name = decl_tree.tokenSlice(name_token);
+    var i: usize = 0;
+    var it = fn_proto.iterate(&decl_tree);
 
-                    if (builder.config.inlay_hints_hide_redundant_param_names or builder.config.inlay_hints_hide_redundant_param_names_last_token) {
-                        const last_param_token = tree.lastToken(call.ast.params[i]);
-                        const param_name = tree.tokenSlice(last_param_token);
+    if (try analysis.hasSelfParam(builder.arena, builder.store, decl_handle.handle, fn_proto)) {
+        _ = ast.nextFnParam(&it);
+    }
 
-                        if (std.mem.eql(u8, param_name, name)) {
-                            if (tree.firstToken(call.ast.params[i]) == last_param_token) {
-                                if (builder.config.inlay_hints_hide_redundant_param_names)
-                                    continue;
-                            } else {
-                                if (builder.config.inlay_hints_hide_redundant_param_names_last_token)
-                                    continue;
-                            }
-                        }
-                    }
+    while (ast.nextFnParam(&it)) |param| : (i += 1) {
+        if (i >= call.ast.params.len) break;
+        const name_token = param.name_token orelse continue;
+        const name = decl_tree.tokenSlice(name_token);
 
-                    const token_tags = decl_tree.tokens.items(.tag);
+        if (builder.config.inlay_hints_hide_redundant_param_names or builder.config.inlay_hints_hide_redundant_param_names_last_token) {
+            const last_param_token = tree.lastToken(call.ast.params[i]);
+            const param_name = tree.tokenSlice(last_param_token);
 
-                    const no_alias = if (param.comptime_noalias) |t| token_tags[t] == .keyword_noalias or token_tags[t - 1] == .keyword_noalias else false;
-                    const comp_time = if (param.comptime_noalias) |t| token_tags[t] == .keyword_comptime or token_tags[t - 1] == .keyword_comptime else false;
-
-                    const tooltip = if (param.anytype_ellipsis3) |token|
-                        if (token_tags[token] == .keyword_anytype) "anytype" else ""
-                    else
-                        offsets.nodeToSlice(decl_tree, param.type_expr);
-
-                    try builder.appendParameterHint(
-                        offsets.tokenToPosition(tree, tree.firstToken(call.ast.params[i]), builder.encoding),
-                        name,
-                        tooltip,
-                        no_alias,
-                        comp_time,
-                    );
+            if (std.mem.eql(u8, param_name, name)) {
+                if (tree.firstToken(call.ast.params[i]) == last_param_token) {
+                    if (builder.config.inlay_hints_hide_redundant_param_names)
+                        continue;
+                } else {
+                    if (builder.config.inlay_hints_hide_redundant_param_names_last_token)
+                        continue;
                 }
             }
-        },
-        else => {},
+        }
+
+        const token_tags = decl_tree.tokens.items(.tag);
+
+        const no_alias = if (param.comptime_noalias) |t| token_tags[t] == .keyword_noalias or token_tags[t - 1] == .keyword_noalias else false;
+        const comp_time = if (param.comptime_noalias) |t| token_tags[t] == .keyword_comptime or token_tags[t - 1] == .keyword_comptime else false;
+
+        const tooltip = if (param.anytype_ellipsis3) |token|
+            if (token_tags[token] == .keyword_anytype) "anytype" else ""
+        else
+            offsets.nodeToSlice(decl_tree, param.type_expr);
+
+        try builder.appendParameterHint(
+            tree.firstToken(call.ast.params[i]),
+            name,
+            tooltip,
+            no_alias,
+            comp_time,
+        );
     }
 }
 
@@ -164,7 +153,7 @@ fn writeBuiltinHint(builder: *Builder, parameters: []const Ast.Node.Index, argum
         }
 
         try builder.appendParameterHint(
-            offsets.tokenToPosition(tree, tree.firstToken(parameters[i]), builder.encoding),
+            tree.firstToken(parameters[i]),
             label orelse "",
             std.mem.trim(u8, type_expr, " \t\n"),
             no_alias,
@@ -174,7 +163,7 @@ fn writeBuiltinHint(builder: *Builder, parameters: []const Ast.Node.Index, argum
 }
 
 /// takes a Ast.full.Call (a function call), analysis its function expression, finds its declaration and writes parameter hints into `builder.hints`
-fn writeCallNodeHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *DocumentStore, call: Ast.full.Call) !void {
+fn writeCallNodeHint(builder: *Builder, call: Ast.full.Call) !void {
     if (call.ast.params.len == 0) return;
     if (builder.config.inlay_hints_exclude_single_argument and call.ast.params.len == 1) return;
 
@@ -187,14 +176,11 @@ fn writeCallNodeHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store: 
 
     switch (node_tags[call.ast.fn_expr]) {
         .identifier => {
-            const location = tree.tokenLocation(0, main_tokens[call.ast.fn_expr]);
+            const source_index = offsets.tokenToIndex(tree, main_tokens[call.ast.fn_expr]);
+            const name = offsets.tokenToSlice(tree, main_tokens[call.ast.fn_expr]);
 
-            const absolute_index = location.line_start + location.column;
-
-            const name = tree.tokenSlice(main_tokens[call.ast.fn_expr]);
-
-            if (try analysis.lookupSymbolGlobal(store, arena, handle, name, absolute_index)) |decl_handle| {
-                try writeCallHint(builder, arena, store, call, decl_handle);
+            if (try analysis.lookupSymbolGlobal(builder.store, builder.arena, handle, name, source_index)) |decl_handle| {
+                try writeCallHint(builder, call, decl_handle);
             }
         },
         .field_access => {
@@ -205,23 +191,23 @@ fn writeCallNodeHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store: 
             const start = offsets.tokenToIndex(tree, lhsToken);
             const rhs_loc = offsets.tokenToLoc(tree, rhsToken);
 
-            var held_range = try arena.allocator().dupeZ(u8, handle.text[start..rhs_loc.end]);
+            var held_range = try builder.arena.allocator().dupeZ(u8, handle.text[start..rhs_loc.end]);
             var tokenizer = std.zig.Tokenizer.init(held_range);
 
             // note: we have the ast node, traversing it would probably yield better results
             // than trying to re-tokenize and re-parse it
-            if (try analysis.getFieldAccessType(store, arena, handle, rhs_loc.end, &tokenizer)) |result| {
+            if (try analysis.getFieldAccessType(builder.store, builder.arena, handle, rhs_loc.end, &tokenizer)) |result| {
                 const container_handle = result.unwrapped orelse result.original;
                 switch (container_handle.type.data) {
                     .other => |container_handle_node| {
                         if (try analysis.lookupSymbolContainer(
-                            store,
-                            arena,
+                            builder.store,
+                            builder.arena,
                             .{ .node = container_handle_node, .handle = container_handle.handle },
                             tree.tokenSlice(rhsToken),
                             true,
                         )) |decl_handle| {
-                            try writeCallHint(builder, arena, store, call, decl_handle);
+                            try writeCallHint(builder, call, decl_handle);
                         }
                     },
                     else => {},
@@ -234,44 +220,18 @@ fn writeCallNodeHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store: 
     }
 }
 
-/// HACK self-hosted has not implemented async yet
-fn callWriteNodeInlayHint(allocator: std.mem.Allocator, args: anytype) error{OutOfMemory}!void {
-    if (zig_builtin.zig_backend == .other or zig_builtin.zig_backend == .stage1) {
-        const FrameSize = @sizeOf(@Frame(writeNodeInlayHint));
-        var child_frame = try allocator.alignedAlloc(u8, std.Target.stack_align, FrameSize);
-        defer allocator.free(child_frame);
-        return await @asyncCall(child_frame, {}, writeNodeInlayHint, args);
-    } else {
-        // TODO find a non recursive solution
-        return @call(.auto, writeNodeInlayHint, args);
-    }
-}
-
-/// iterates over the ast and writes parameter hints into `builder.hints` for every function call and builtin call
-/// nodes outside the given range are excluded
-fn writeNodeInlayHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store: *DocumentStore, maybe_node: ?Ast.Node.Index, range: types.Range) error{OutOfMemory}!void {
-    const node = maybe_node orelse return;
-
+fn writeNodeInlayHint(
+    builder: *Builder,
+    node: Ast.Node.Index,
+) error{OutOfMemory}!void {
     const handle = builder.handle;
     const tree = handle.tree;
     const node_tags = tree.nodes.items(.tag);
-    const node_data = tree.nodes.items(.data);
     const main_tokens = tree.nodes.items(.main_token);
-
-    // std.log.info("max: {d} | curr: {d}", .{ node_data.len, node });
-    // if (node == 0 or node >= node_data.len) return;
-    if (node == 0) return;
-    // std.log.info("tag: {any}", .{node_tags[node]});
-    // std.log.info("src: {s}", .{tree.getNodeSource(node)});
-
-    var allocator = arena.allocator();
 
     const tag = node_tags[node];
 
-    // NOTE traversing the ast instead of iterating over all nodes allows using visibility
-    // checks based on the given range which reduce runtimes by orders of magnitude for large files
     switch (tag) {
-        .root => unreachable,
         .call_one,
         .call_one_comma,
         .async_call_one,
@@ -283,406 +243,61 @@ fn writeNodeInlayHint(builder: *Builder, arena: *std.heap.ArenaAllocator, store:
         => {
             var params: [1]Ast.Node.Index = undefined;
             const call = tree.fullCall(&params, node).?;
-            try writeCallNodeHint(builder, arena, store, call);
-
-            for (call.ast.params) |param| {
-                if (call.ast.params.len > inlay_hints_max_inline_children) {
-                    if (!isNodeInRange(tree, param, range)) continue;
-                }
-
-                try callWriteNodeInlayHint(allocator, .{ builder, arena, store, param, range });
-            }
+            try writeCallNodeHint(builder, call);
         },
 
         .builtin_call_two,
         .builtin_call_two_comma,
         .builtin_call,
         .builtin_call_comma,
-        => {
+        => blk: {
             var buffer: [2]Ast.Node.Index = undefined;
             const params = ast.builtinCallParams(tree, node, &buffer).?;
 
-            if (builder.config.inlay_hints_show_builtin and params.len > 1) {
-                const name = tree.tokenSlice(main_tokens[node]);
+            if (!builder.config.inlay_hints_show_builtin or params.len <= 1) break :blk;
 
-                outer: for (data.builtins) |builtin| {
-                    if (!std.mem.eql(u8, builtin.name, name)) continue;
+            const name = tree.tokenSlice(main_tokens[node]);
 
-                    for (inlay_hints_exclude_builtins) |builtin_name| {
-                        if (std.mem.eql(u8, builtin_name, name)) break :outer;
-                    }
+            outer: for (data.builtins) |builtin| {
+                if (!std.mem.eql(u8, builtin.name, name)) continue;
 
-                    try writeBuiltinHint(builder, params, builtin.arguments);
-                }
-            }
-
-            for (params) |param| {
-                if (params.len > inlay_hints_max_inline_children) {
-                    if (!isNodeInRange(tree, param, range)) continue;
+                for (inlay_hints_exclude_builtins) |builtin_name| {
+                    if (std.mem.eql(u8, builtin_name, name)) break :outer;
                 }
 
-                try callWriteNodeInlayHint(allocator, .{ builder, arena, store, param, range });
+                try writeBuiltinHint(builder, params, builtin.arguments);
             }
         },
-
-        .optional_type,
-        .array_type,
-        .@"continue",
-        .anyframe_type,
-        .anyframe_literal,
-        .char_literal,
-        .number_literal,
-        .unreachable_literal,
-        .identifier,
-        .enum_literal,
-        .string_literal,
-        .multiline_string_literal,
-        .error_set_decl,
-        => {},
-
-        .array_type_sentinel => {
-            const array_type = tree.arrayTypeSentinel(node);
-
-            try callWriteNodeInlayHint(allocator, .{ builder, arena, store, array_type.ast.sentinel, range });
-        },
-
-        .ptr_type_aligned,
-        .ptr_type_sentinel,
-        .ptr_type,
-        .ptr_type_bit_range,
-        => {
-            const ptr_type: Ast.full.PtrType = ast.fullPtrType(tree, node).?;
-
-            if (ptr_type.ast.sentinel != 0) {
-                return try callWriteNodeInlayHint(allocator, .{ builder, arena, store, ptr_type.ast.sentinel, range });
-            }
-
-            if (ptr_type.ast.align_node != 0) {
-                try callWriteNodeInlayHint(allocator, .{ builder, arena, store, ptr_type.ast.align_node, range });
-
-                if (ptr_type.ast.bit_range_start != 0) {
-                    try callWriteNodeInlayHint(allocator, .{ builder, arena, store, ptr_type.ast.bit_range_start, range });
-                    try callWriteNodeInlayHint(allocator, .{ builder, arena, store, ptr_type.ast.bit_range_end, range });
-                }
-            }
-
-            try callWriteNodeInlayHint(allocator, .{ builder, arena, store, ptr_type.ast.child_type, range });
-        },
-
-        .@"usingnamespace",
-        .field_access,
-        .unwrap_optional,
-        .bool_not,
-        .negation,
-        .bit_not,
-        .negation_wrap,
-        .address_of,
-        .@"try",
-        .@"await",
-        .deref,
-        .@"suspend",
-        .@"resume",
-        .@"return",
-        .grouped_expression,
-        .@"comptime",
-        .@"nosuspend",
-        => try callWriteNodeInlayHint(allocator, .{ builder, arena, store, node_data[node].lhs, range }),
-
-        .test_decl,
-        .global_var_decl,
-        .local_var_decl,
-        .simple_var_decl,
-        .aligned_var_decl,
-        .@"errdefer",
-        .@"defer",
-        .@"break",
-        => try callWriteNodeInlayHint(allocator, .{ builder, arena, store, node_data[node].rhs, range }),
-
-        .@"catch",
-        .equal_equal,
-        .bang_equal,
-        .less_than,
-        .greater_than,
-        .less_or_equal,
-        .greater_or_equal,
-        .assign_mul,
-        .assign_div,
-        .assign_mod,
-        .assign_add,
-        .assign_sub,
-        .assign_shl,
-        .assign_shl_sat,
-        .assign_shr,
-        .assign_bit_and,
-        .assign_bit_xor,
-        .assign_bit_or,
-        .assign_mul_wrap,
-        .assign_add_wrap,
-        .assign_sub_wrap,
-        .assign_mul_sat,
-        .assign_add_sat,
-        .assign_sub_sat,
-        .assign,
-        .merge_error_sets,
-        .mul,
-        .div,
-        .mod,
-        .array_mult,
-        .mul_wrap,
-        .mul_sat,
-        .add,
-        .sub,
-        .array_cat,
-        .add_wrap,
-        .sub_wrap,
-        .add_sat,
-        .sub_sat,
-        .shl,
-        .shl_sat,
-        .shr,
-        .bit_and,
-        .bit_xor,
-        .bit_or,
-        .@"orelse",
-        .bool_and,
-        .bool_or,
-        .array_access,
-        .switch_range,
-        .error_union,
-        => {
-            try callWriteNodeInlayHint(allocator, .{ builder, arena, store, node_data[node].lhs, range });
-            try callWriteNodeInlayHint(allocator, .{ builder, arena, store, node_data[node].rhs, range });
-        },
-
-        .slice_open,
-        .slice,
-        .slice_sentinel,
-        => {
-            const slice: Ast.full.Slice = tree.fullSlice(node).?;
-
-            try callWriteNodeInlayHint(allocator, .{ builder, arena, store, slice.ast.sliced, range });
-            try callWriteNodeInlayHint(allocator, .{ builder, arena, store, slice.ast.start, range });
-            try callWriteNodeInlayHint(allocator, .{ builder, arena, store, slice.ast.end, range });
-            try callWriteNodeInlayHint(allocator, .{ builder, arena, store, slice.ast.sentinel, range });
-        },
-
-        .array_init_one,
-        .array_init_one_comma,
-        .array_init_dot_two,
-        .array_init_dot_two_comma,
-        .array_init_dot,
-        .array_init_dot_comma,
-        .array_init,
-        .array_init_comma,
-        => {
-            var buffer: [2]Ast.Node.Index = undefined;
-            const array_init: Ast.full.ArrayInit = tree.fullArrayInit(&buffer, node).?;
-
-            try callWriteNodeInlayHint(allocator, .{ builder, arena, store, array_init.ast.type_expr, range });
-            for (array_init.ast.elements) |elem| {
-                try callWriteNodeInlayHint(allocator, .{ builder, arena, store, elem, range });
-            }
-        },
-
-        .struct_init_one,
-        .struct_init_one_comma,
-        .struct_init_dot_two,
-        .struct_init_dot_two_comma,
-        .struct_init_dot,
-        .struct_init_dot_comma,
-        .struct_init,
-        .struct_init_comma,
-        => {
-            var buffer: [2]Ast.Node.Index = undefined;
-            const struct_init: Ast.full.StructInit = tree.fullStructInit(&buffer, node).?;
-
-            try callWriteNodeInlayHint(allocator, .{ builder, arena, store, struct_init.ast.type_expr, range });
-
-            for (struct_init.ast.fields) |field_init| {
-                if (struct_init.ast.fields.len > inlay_hints_max_inline_children) {
-                    if (!isNodeInRange(tree, field_init, range)) continue;
-                }
-
-                try callWriteNodeInlayHint(allocator, .{ builder, arena, store, field_init, range });
-            }
-        },
-
-        .@"switch",
-        .switch_comma,
-        => {
-            try callWriteNodeInlayHint(allocator, .{ builder, arena, store, node_data[node].lhs, range });
-
-            const extra = tree.extraData(node_data[node].rhs, Ast.Node.SubRange);
-            const cases = tree.extra_data[extra.start..extra.end];
-
-            for (cases) |case_node| {
-                if (cases.len > inlay_hints_max_inline_children) {
-                    if (!isNodeInRange(tree, case_node, range)) continue;
-                }
-
-                try callWriteNodeInlayHint(allocator, .{ builder, arena, store, case_node, range });
-            }
-        },
-
-        .switch_case_one,
-        .switch_case,
-        .switch_case_inline_one,
-        .switch_case_inline,
-        => {
-            const switch_case = tree.fullSwitchCase(node).?;
-
-            try callWriteNodeInlayHint(allocator, .{ builder, arena, store, switch_case.ast.target_expr, range });
-        },
-
-        .while_simple,
-        .while_cont,
-        .@"while",
-        .for_simple,
-        .@"for",
-        => {
-            const while_node = ast.fullWhile(tree, node).?;
-
-            try callWriteNodeInlayHint(allocator, .{ builder, arena, store, while_node.ast.cond_expr, range });
-            try callWriteNodeInlayHint(allocator, .{ builder, arena, store, while_node.ast.cont_expr, range });
-            try callWriteNodeInlayHint(allocator, .{ builder, arena, store, while_node.ast.then_expr, range });
-
-            if (while_node.ast.else_expr != 0) {
-                try callWriteNodeInlayHint(allocator, .{ builder, arena, store, while_node.ast.else_expr, range });
-            }
-        },
-
-        .if_simple,
-        .@"if",
-        => {
-            const if_node = ast.fullIf(tree, node).?;
-            try callWriteNodeInlayHint(allocator, .{ builder, arena, store, if_node.ast.cond_expr, range });
-            try callWriteNodeInlayHint(allocator, .{ builder, arena, store, if_node.ast.then_expr, range });
-            try callWriteNodeInlayHint(allocator, .{ builder, arena, store, if_node.ast.else_expr, range });
-        },
-
-        .fn_proto_simple,
-        .fn_proto_multi,
-        .fn_proto_one,
-        .fn_proto,
-        .fn_decl,
-        => {
-            var buffer: [1]Ast.Node.Index = undefined;
-            const fn_proto: Ast.full.FnProto = tree.fullFnProto(&buffer, node).?;
-
-            var it = fn_proto.iterate(&tree);
-            while (ast.nextFnParam(&it)) |param_decl| {
-                try callWriteNodeInlayHint(allocator, .{ builder, arena, store, param_decl.type_expr, range });
-            }
-
-            try callWriteNodeInlayHint(allocator, .{ builder, arena, store, fn_proto.ast.align_expr, range });
-            try callWriteNodeInlayHint(allocator, .{ builder, arena, store, fn_proto.ast.addrspace_expr, range });
-            try callWriteNodeInlayHint(allocator, .{ builder, arena, store, fn_proto.ast.section_expr, range });
-            try callWriteNodeInlayHint(allocator, .{ builder, arena, store, fn_proto.ast.callconv_expr, range });
-
-            try callWriteNodeInlayHint(allocator, .{ builder, arena, store, fn_proto.ast.return_type, range });
-
-            if (tag == .fn_decl) {
-                try callWriteNodeInlayHint(allocator, .{ builder, arena, store, node_data[node].rhs, range });
-            }
-        },
-
-        .container_decl,
-        .container_decl_trailing,
-        .container_decl_two,
-        .container_decl_two_trailing,
-        .container_decl_arg,
-        .container_decl_arg_trailing,
-        .tagged_union,
-        .tagged_union_trailing,
-        .tagged_union_two,
-        .tagged_union_two_trailing,
-        .tagged_union_enum_tag,
-        .tagged_union_enum_tag_trailing,
-        => {
-            var buffer: [2]Ast.Node.Index = undefined;
-            const decl: Ast.full.ContainerDecl = tree.fullContainerDecl(&buffer, node).?;
-
-            try callWriteNodeInlayHint(allocator, .{ builder, arena, store, decl.ast.arg, range });
-
-            for (decl.ast.members) |child| {
-                if (decl.ast.members.len > inlay_hints_max_inline_children) {
-                    if (!isNodeInRange(tree, child, range)) continue;
-                }
-
-                try callWriteNodeInlayHint(allocator, .{ builder, arena, store, child, range });
-            }
-        },
-
-        .container_field_init,
-        .container_field_align,
-        .container_field,
-        => {
-            const container_field = tree.fullContainerField(node).?;
-
-            try callWriteNodeInlayHint(allocator, .{ builder, arena, store, container_field.ast.value_expr, range });
-            try callWriteNodeInlayHint(allocator, .{ builder, arena, store, container_field.ast.align_expr, range });
-        },
-
-        .block_two,
-        .block_two_semicolon,
-        => {
-            try callWriteNodeInlayHint(allocator, .{ builder, arena, store, node_data[node].lhs, range });
-            try callWriteNodeInlayHint(allocator, .{ builder, arena, store, node_data[node].rhs, range });
-        },
-
-        .block,
-        .block_semicolon,
-        => {
-            const subrange = tree.extra_data[node_data[node].lhs..node_data[node].rhs];
-
-            for (subrange) |child| {
-                if (subrange.len > inlay_hints_max_inline_children) {
-                    if (!isNodeInRange(tree, child, range)) continue;
-                }
-
-                try callWriteNodeInlayHint(allocator, .{ builder, arena, store, child, range });
-            }
-        },
-
-        .asm_simple,
-        .@"asm",
-        .asm_output,
-        .asm_input,
-        => {
-            const asm_node: Ast.full.Asm = tree.fullAsm(node) orelse return;
-
-            try callWriteNodeInlayHint(allocator, .{ builder, arena, store, asm_node.ast.template, range });
-        },
-
-        .error_value => {},
+        else => {},
     }
 }
 
 /// creates a list of `InlayHint`'s from the given document
 /// only parameter hints are created
-/// only hints in the given range are created
+/// only hints in the given loc are created
 pub fn writeRangeInlayHint(
     arena: *std.heap.ArenaAllocator,
     config: Config,
     store: *DocumentStore,
     handle: *const DocumentStore.Handle,
-    range: types.Range,
+    loc: offsets.Loc,
     hover_kind: types.MarkupKind,
-    encoding: offsets.Encoding,
-) error{OutOfMemory}![]types.InlayHint {
+) error{OutOfMemory}![]InlayHint {
     var builder: Builder = .{
-        .arena = arena.allocator(),
+        .arena = arena,
+        .store = store,
         .config = &config,
         .handle = handle,
         .hints = .{},
         .hover_kind = hover_kind,
-        .encoding = encoding,
     };
 
-    for (handle.tree.rootDecls()) |child| {
-        if (!isNodeInRange(handle.tree, child, range)) continue;
-        try writeNodeInlayHint(&builder, arena, store, child, range);
+    const nodes = try ast.nodesAtLoc(arena.allocator(), handle.tree, loc);
+
+    for (nodes) |child| {
+        try writeNodeInlayHint(&builder, child);
+        try ast.iterateChildrenRecursive(handle.tree, child, &builder, error{OutOfMemory}, writeNodeInlayHint);
     }
 
-    return builder.toOwnedSlice();
+    return try builder.toOwnedSlice();
 }

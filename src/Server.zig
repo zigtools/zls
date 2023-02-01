@@ -2493,6 +2493,7 @@ fn inlayHintHandler(server: *Server, request: types.InlayHintParams) Error!?[]ty
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
 
     const hover_kind: types.MarkupKind = if (server.client_capabilities.hover_supports_md) .markdown else .plaintext;
+    const loc = offsets.rangeToLoc(handle.text, request.range, server.offset_encoding);
 
     // TODO cache hints per document
     // because the function could be stored in a different document
@@ -2503,27 +2504,44 @@ fn inlayHintHandler(server: *Server, request: types.InlayHintParams) Error!?[]ty
         server.config.*,
         &server.document_store,
         handle,
-        request.range,
+        loc,
         hover_kind,
-        server.offset_encoding,
     );
 
-    // and only convert and return all hints in range for every request
-    var visible_hints = hints;
+    const helper = struct {
+        fn lessThan(_: void, lhs: inlay_hints.InlayHint, rhs: inlay_hints.InlayHint) bool {
+            return lhs.token_index < rhs.token_index;
+        }
+    };
 
-    // small_hints should roughly be sorted by position
+    std.sort.sort(inlay_hints.InlayHint, hints, {}, helper.lessThan);
+
+    var last_index: usize = 0;
+    var last_position: types.Position = .{ .line = 0, .character = 0 };
+
+    var converted_hints = try server.arena.allocator().alloc(types.InlayHint, hints.len);
     for (hints) |hint, i| {
-        if (isPositionBefore(hint.position, request.range.start)) continue;
-        visible_hints = hints[i..];
-        break;
-    }
-    for (visible_hints) |hint, i| {
-        if (isPositionBefore(hint.position, request.range.end)) continue;
-        visible_hints = visible_hints[0..i];
-        break;
+        const index = offsets.tokenToIndex(handle.tree, hint.token_index);
+        const position = offsets.advancePosition(
+            handle.tree.source,
+            last_position,
+            last_index,
+            index,
+            server.offset_encoding,
+        );
+        defer last_index = index;
+        defer last_position = position;
+        converted_hints[i] = types.InlayHint{
+            .position = position,
+            .label = .{ .string = hint.label },
+            .kind = hint.kind,
+            .tooltip = .{ .MarkupContent = hint.tooltip },
+            .paddingLeft = false,
+            .paddingRight = true,
+        };
     }
 
-    return visible_hints;
+    return converted_hints;
 }
 
 fn codeActionHandler(server: *Server, request: types.CodeActionParams) Error!?[]types.CodeAction {
