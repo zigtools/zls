@@ -1406,7 +1406,7 @@ pub fn iterateChildren(
         .@"if",
         .if_simple,
         => {
-            const if_ast = ifFull(tree, node).ast;
+            const if_ast = fullIf(tree, node).?.ast;
             try callback(context, if_ast.cond_expr);
             try callback(context, if_ast.then_expr);
             try callback(context, if_ast.else_expr);
