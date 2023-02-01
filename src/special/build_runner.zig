@@ -91,11 +91,11 @@ pub fn main() !void {
     var include_dirs: std.StringArrayHashMapUnmanaged(void) = .{};
     defer include_dirs.deinit(allocator);
 
-    // This scans the graph of Steps to find all `OptionsStep`s then reifies them
+    // This scans the graph of Steps to find all `OptionsStep`s and custom steps then reifies them
     // Doing this before the loop to find packages ensures their `GeneratedFile`s have been given paths
     for (builder.top_level_steps.items) |tls| {
         for (tls.step.dependencies.items) |step| {
-            try reifyOptions(step);
+            try reifyOptionsAndCustomSteps(step);
         }
     }
 
@@ -118,7 +118,7 @@ pub fn main() !void {
     );
 }
 
-fn reifyOptions(step: *std.build.Step) anyerror!void {
+fn reifyOptionsAndCustomSteps(step: *std.build.Step) anyerror!void {
     // Support Zig 0.9.1
     if (!@hasDecl(OptionsStep, "base_id")) return;
 
@@ -129,8 +129,12 @@ fn reifyOptions(step: *std.build.Step) anyerror!void {
         }
     }
 
+    if (step.id == .custom) {
+        try step.make();
+    }
+
     for (step.dependencies.items) |unknown_step| {
-        try reifyOptions(unknown_step);
+        try reifyOptionsAndCustomSteps(unknown_step);
     }
 }
 
