@@ -48,13 +48,26 @@ pub fn main() !void {
         return error.InvalidArgs;
     };
 
-    const builder = try Builder.create(
-        allocator,
-        zig_exe,
-        build_root,
-        cache_root,
-        global_cache_root,
-    );
+    const builder = blk: {
+        // Zig 0.11.0-dev.1524+
+        if (@hasDecl(std, "Build")) {
+            const host = try std.zig.system.NativeTargetInfo.detect(.{});
+            break :blk try Builder.create(
+                allocator,
+                zig_exe,
+                build_root,
+                cache_root,
+                global_cache_root,
+                host,
+            );
+        } else break :blk try Builder.create(
+            allocator,
+            zig_exe,
+            build_root,
+            cache_root,
+            global_cache_root,
+        );
+    };
 
     defer builder.destroy();
 
