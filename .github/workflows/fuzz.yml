@@ -67,6 +67,8 @@ jobs:
           path: zls
           fetch-depth: 0
           submodules: true
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
 
       - name: Build zls
         run: |
