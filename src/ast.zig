@@ -976,32 +976,6 @@ pub fn isBuiltinCall(tree: Ast, node: Ast.Node.Index) bool {
     };
 }
 
-pub fn isCall(tree: Ast, node: Ast.Node.Index) bool {
-    return switch (tree.nodes.items(.tag)[node]) {
-        .call,
-        .call_comma,
-        .call_one,
-        .call_one_comma,
-        .async_call,
-        .async_call_comma,
-        .async_call_one,
-        .async_call_one_comma,
-        => true,
-        else => false,
-    };
-}
-
-pub fn isBlock(tree: Ast, node: Ast.Node.Index) bool {
-    return switch (tree.nodes.items(.tag)[node]) {
-        .block_two,
-        .block_two_semicolon,
-        .block,
-        .block_semicolon,
-        => true,
-        else => false,
-    };
-}
-
 /// returns a list of parameters
 pub fn builtinCallParams(tree: Ast, node: Ast.Node.Index, buf: *[2]Ast.Node.Index) ?[]const Node.Index {
     const node_data = tree.nodes.items(.data);
@@ -1406,7 +1380,7 @@ pub fn iterateChildren(
         .@"if",
         .if_simple,
         => {
-            const if_ast = ifFull(tree, node).ast;
+            const if_ast = fullIf(tree, node).?.ast;
             try callback(context, if_ast.cond_expr);
             try callback(context, if_ast.then_expr);
             try callback(context, if_ast.else_expr);
