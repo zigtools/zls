@@ -54,7 +54,7 @@ jobs:
             echo "Building target ${target}..."   
             if [ "${GITHUB_REF##*/}" == "master" ]; then
               echo "Building safe"
-              zig build -Dtarget=${target} -Drelease-safe --prefix artifacts/${target}/
+              zig build -Dtarget=${target} -Doptimize=ReleaseSafe --prefix artifacts/${target}/
             else
               echo "Building debug as action is not running on master"
               zig build -Dtarget=${target} --prefix artifacts/${target}/
