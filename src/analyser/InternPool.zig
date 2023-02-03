@@ -407,16 +407,15 @@ pub const Key = union(enum) {
                 .usize => return .{ .signedness = .signed, .bits = target.cpu.arch.ptrBitWidth() },
                 .isize => return .{ .signedness = .unsigned, .bits = target.cpu.arch.ptrBitWidth() },
 
-                // TODO correctly resolve size based on `target`
-                .c_short => return .{ .signedness = .signed, .bits = @bitSizeOf(c_short) },
-                .c_ushort => return .{ .signedness = .unsigned, .bits = @bitSizeOf(c_ushort) },
-                .c_int => return .{ .signedness = .signed, .bits = @bitSizeOf(c_int) },
-                .c_uint => return .{ .signedness = .unsigned, .bits = @bitSizeOf(c_uint) },
-                .c_long => return .{ .signedness = .signed, .bits = @bitSizeOf(c_long) },
-                .c_ulong => return .{ .signedness = .unsigned, .bits = @bitSizeOf(c_ulong) },
-                .c_longlong => return .{ .signedness = .signed, .bits = @bitSizeOf(c_longlong) },
-                .c_ulonglong => return .{ .signedness = .unsigned, .bits = @bitSizeOf(c_ulonglong) },
-                .c_longdouble => return .{ .signedness = .signed, .bits = @bitSizeOf(c_longdouble) },
+                .c_short => return .{ .signedness = .signed, .bits = target.c_type_bit_size(.short) },
+                .c_ushort => return .{ .signedness = .unsigned, .bits = target.c_type_bit_size(.ushort) },
+                .c_int => return .{ .signedness = .signed, .bits = target.c_type_bit_size(.int) },
+                .c_uint => return .{ .signedness = .unsigned, .bits = target.c_type_bit_size(.uint) },
+                .c_long => return .{ .signedness = .signed, .bits = target.c_type_bit_size(.long) },
+                .c_ulong => return .{ .signedness = .unsigned, .bits = target.c_type_bit_size(.ulong) },
+                .c_longlong => return .{ .signedness = .signed, .bits = target.c_type_bit_size(.longlong) },
+                .c_ulonglong => return .{ .signedness = .unsigned, .bits = target.c_type_bit_size(.ulonglong) },
+                .c_longdouble => return .{ .signedness = .signed, .bits = target.c_type_bit_size(.longdouble) },
 
                 // TODO revisit this when error sets support custom int types (comment taken from zig codebase)
                 .anyerror => return .{ .signedness = .unsigned, .bits = 16 },
@@ -443,15 +442,13 @@ pub const Key = union(enum) {
     /// Asserts the type is a fixed-size float or comptime_float.
     /// Returns 128 for comptime_float types.
     pub fn floatBits(ty: Key, target: std.Target) u16 {
-        _ = target;
         return switch (ty.simple) {
             .f16 => 16,
             .f32 => 32,
             .f64 => 64,
             .f80 => 80,
             .f128, .comptime_float => 128,
-            // TODO correctly resolve size based on `target`
-            .c_longdouble => @bitSizeOf(c_longdouble),
+            .c_longdouble => target.c_type_bit_size(.longdouble),
 
             else => unreachable,
         };
