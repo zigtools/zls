@@ -181,6 +181,8 @@ pub fn generateFoldingRanges(allocator: std.mem.Allocator, tree: Ast, encoding: 
                 const list_start_tok = fn_proto.lparen;
                 const list_end_tok = ast.lastToken(tree, node) -| 1;
 
+                if (list_start_tok > list_end_tok) continue; // Incomplete, ie `fn a()`
+
                 try builder.add(null, list_start_tok, list_end_tok, .exclusive, .exclusive);
             },
 
