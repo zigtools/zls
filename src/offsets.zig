@@ -240,6 +240,29 @@ pub fn convertRangeEncoding(text: []const u8, range: types.Range, from_encoding:
     };
 }
 
+// returns true if a and b intersect
+pub fn locIntersect(a: Loc, b: Loc) bool {
+    std.debug.assert(a.start <= a.end and b.start <= b.end);
+    const a_start_in_b = b.start <= a.start and a.start <= b.end;
+    const a_end_in_b = b.start <= a.end and a.end <= b.end;
+    return a_start_in_b or a_end_in_b;
+}
+
+// returns true if a is inside b
+pub fn locInside(inner: Loc, outer: Loc) bool {
+    std.debug.assert(inner.start <= inner.end and outer.start <= outer.end);
+    return outer.start <= inner.start and inner.end <= outer.end;
+}
+
+// returns the union of a and b
+pub fn locMerge(a: Loc, b: Loc) Loc {
+    std.debug.assert(a.start <= a.end and b.start <= b.end);
+    return .{
+        .start = @min(a.start, b.start),
+        .end = @max(a.end, b.end),
+    };
+}
+
 // Helper functions
 
 /// advance `position` which starts at `from_index` to `to_index` accounting for line breaks

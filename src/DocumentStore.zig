@@ -626,8 +626,18 @@ fn createDocument(self: *DocumentStore, uri: Uri, text: [:0]u8, open: bool) erro
         var tree = try std.zig.parse(self.allocator, text);
         errdefer tree.deinit(self.allocator);
 
+        var nodes = tree.nodes.toMultiArrayList();
+        try nodes.setCapacity(self.allocator, nodes.len);
+        tree.nodes = nodes.slice();
+
+        var tokens = tree.tokens.toMultiArrayList();
+        try tokens.setCapacity(self.allocator, tokens.len);
+        tree.tokens = tokens.slice();
+
         var document_scope = try analysis.makeDocumentScope(self.allocator, tree);
         errdefer document_scope.deinit(self.allocator);
+
+        try document_scope.scopes.setCapacity(self.allocator, document_scope.scopes.len);
 
         break :blk Handle{
             .open = open,

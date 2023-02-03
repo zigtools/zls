@@ -14,6 +14,7 @@ const offsets = @import("offsets.zig");
 const semantic_tokens = @import("semantic_tokens.zig");
 const inlay_hints = @import("inlay_hints.zig");
 const code_actions = @import("code_actions.zig");
+const folding_range = @import("folding_range.zig");
 const shared = @import("shared.zig");
 const Ast = std.zig.Ast;
 const tracy = @import("tracy.zig");
@@ -2470,6 +2471,7 @@ fn inlayHintHandler(server: *Server, request: types.InlayHintParams) Error!?[]ty
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
 
     const hover_kind: types.MarkupKind = if (server.client_capabilities.hover_supports_md) .markdown else .plaintext;
+    const loc = offsets.rangeToLoc(handle.text, request.range, server.offset_encoding);
 
     // TODO cache hints per document
     // because the function could be stored in a different document
@@ -2480,27 +2482,44 @@ fn inlayHintHandler(server: *Server, request: types.InlayHintParams) Error!?[]ty
         server.config.*,
         &server.document_store,
         handle,
-        request.range,
+        loc,
         hover_kind,
-        server.offset_encoding,
     );
 
-    // and only convert and return all hints in range for every request
-    var visible_hints = hints;
+    const helper = struct {
+        fn lessThan(_: void, lhs: inlay_hints.InlayHint, rhs: inlay_hints.InlayHint) bool {
+            return lhs.token_index < rhs.token_index;
+        }
+    };
 
-    // small_hints should roughly be sorted by position
+    std.sort.sort(inlay_hints.InlayHint, hints, {}, helper.lessThan);
+
+    var last_index: usize = 0;
+    var last_position: types.Position = .{ .line = 0, .character = 0 };
+
+    var converted_hints = try server.arena.allocator().alloc(types.InlayHint, hints.len);
     for (hints) |hint, i| {
-        if (isPositionBefore(hint.position, request.range.start)) continue;
-        visible_hints = hints[i..];
-        break;
-    }
-    for (visible_hints) |hint, i| {
-        if (isPositionBefore(hint.position, request.range.end)) continue;
-        visible_hints = visible_hints[0..i];
-        break;
+        const index = offsets.tokenToIndex(handle.tree, hint.token_index);
+        const position = offsets.advancePosition(
+            handle.tree.source,
+            last_position,
+            last_index,
+            index,
+            server.offset_encoding,
+        );
+        defer last_index = index;
+        defer last_position = position;
+        converted_hints[i] = types.InlayHint{
+            .position = position,
+            .label = .{ .string = hint.label },
+            .kind = hint.kind,
+            .tooltip = .{ .MarkupContent = hint.tooltip },
+            .paddingLeft = false,
+            .paddingRight = true,
+        };
     }
 
-    return visible_hints;
+    return converted_hints;
 }
 
 fn codeActionHandler(server: *Server, request: types.CodeActionParams) Error!?[]types.CodeAction {
@@ -2538,250 +2557,10 @@ fn foldingRangeHandler(server: *Server, request: types.FoldingRangeParams) Error
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const Token = std.zig.Token;
-    const Node = Ast.Node;
-    const allocator = server.arena.allocator();
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
+    const allocator = server.arena.allocator();
 
-    const helper = struct {
-        const Inclusivity = enum { inclusive, exclusive };
-
-        fn addTokRange(
-            p_ranges: *std.ArrayList(types.FoldingRange),
-            tree: Ast,
-            start: Ast.TokenIndex,
-            end: Ast.TokenIndex,
-            end_reach: Inclusivity,
-        ) std.mem.Allocator.Error!void {
-            if (tree.tokensOnSameLine(start, end)) return;
-            std.debug.assert(start <= end);
-
-            const start_index = offsets.tokenToIndex(tree, start);
-            const end_index = offsets.tokenToIndex(tree, end);
-
-            const start_line = std.mem.count(u8, tree.source[0..start_index], "\n");
-            const end_line = start_line + std.mem.count(u8, tree.source[start_index..end_index], "\n");
-
-            try p_ranges.append(.{
-                .startLine = @intCast(u32, start_line),
-                .endLine = @intCast(u32, end_line) - @boolToInt(end_reach == .exclusive),
-            });
-        }
-    };
-
-    // Used to store the result
-    var ranges = std.ArrayList(types.FoldingRange).init(allocator);
-
-    const token_tags: []const Token.Tag = handle.tree.tokens.items(.tag);
-    const node_tags: []const Node.Tag = handle.tree.nodes.items(.tag);
-
-    if (token_tags.len == 0) return null;
-    if (token_tags[0] == .container_doc_comment) {
-        var tok: Ast.TokenIndex = 1;
-        while (tok < token_tags.len) : (tok += 1) {
-            if (token_tags[tok] != .container_doc_comment) {
-                break;
-            }
-        }
-        if (tok > 1) { // each container doc comment has its own line, so each one counts for a line
-            try ranges.append(.{
-                .startLine = 0,
-                .endLine = tok - 1,
-            });
-        }
-    }
-
-    for (node_tags) |node_tag, i| {
-        const node = @intCast(Node.Index, i);
-
-        switch (node_tag) {
-            .root => continue,
-            // only fold the expression pertaining to the if statement, and the else statement, each respectively.
-            // TODO: Should folding multiline condition expressions also be supported? Ditto for the other control flow structures.
-            .@"if",
-            .if_simple,
-            => {
-                const if_full = ast.fullIf(handle.tree, node).?;
-
-                const start_tok_1 = ast.lastToken(handle.tree, if_full.ast.cond_expr);
-                const end_tok_1 = ast.lastToken(handle.tree, if_full.ast.then_expr);
-                try helper.addTokRange(&ranges, handle.tree, start_tok_1, end_tok_1, .inclusive);
-
-                if (if_full.ast.else_expr == 0) continue;
-
-                const start_tok_2 = if_full.else_token;
-                const end_tok_2 = ast.lastToken(handle.tree, if_full.ast.else_expr);
-
-                try helper.addTokRange(&ranges, handle.tree, start_tok_2, end_tok_2, .inclusive);
-            },
-
-            // same as if/else
-            .@"for",
-            .for_simple,
-            .@"while",
-            .while_cont,
-            .while_simple,
-            => {
-                const loop_full = ast.fullWhile(handle.tree, node).?;
-
-                const start_tok_1 = ast.lastToken(handle.tree, loop_full.ast.cond_expr);
-                const end_tok_1 = ast.lastToken(handle.tree, loop_full.ast.then_expr);
-                try helper.addTokRange(&ranges, handle.tree, start_tok_1, end_tok_1, .inclusive);
-
-                if (loop_full.ast.else_expr == 0) continue;
-
-                const start_tok_2 = loop_full.else_token;
-                const end_tok_2 = ast.lastToken(handle.tree, loop_full.ast.else_expr);
-                try helper.addTokRange(&ranges, handle.tree, start_tok_2, end_tok_2, .inclusive);
-            },
-
-            .global_var_decl,
-            .simple_var_decl,
-            .aligned_var_decl,
-            .container_field_init,
-            .container_field_align,
-            .container_field,
-            .fn_proto,
-            .fn_proto_multi,
-            .fn_proto_one,
-            .fn_proto_simple,
-            .fn_decl,
-            => decl_node_blk: {
-                doc_comment_range: {
-                    const first_tok: Ast.TokenIndex = handle.tree.firstToken(node);
-                    if (first_tok == 0) break :doc_comment_range;
-
-                    const end_doc_tok = first_tok - 1;
-                    if (token_tags[end_doc_tok] != .doc_comment) break :doc_comment_range;
-
-                    var start_doc_tok = end_doc_tok;
-                    while (start_doc_tok != 0) {
-                        if (token_tags[start_doc_tok - 1] != .doc_comment) break;
-                        start_doc_tok -= 1;
-                    }
-
-                    try helper.addTokRange(&ranges, handle.tree, start_doc_tok, end_doc_tok, .inclusive);
-                }
-
-                // Function prototype folding regions
-                var buffer: [1]Node.Index = undefined;
-                const fn_proto = handle.tree.fullFnProto(&buffer, node) orelse
-                    break :decl_node_blk;
-
-                const list_start_tok: Ast.TokenIndex = fn_proto.lparen;
-                const list_end_tok: Ast.TokenIndex = ast.lastToken(handle.tree, fn_proto.ast.proto_node);
-
-                if (handle.tree.tokensOnSameLine(list_start_tok, list_end_tok)) break :decl_node_blk;
-                try helper.addTokRange(&ranges, handle.tree, list_start_tok, list_end_tok, .exclusive);
-
-                var it = fn_proto.iterate(&handle.tree);
-                while (ast.nextFnParam(&it)) |param| {
-                    const doc_start_tok = param.first_doc_comment orelse continue;
-                    var doc_end_tok = doc_start_tok;
-
-                    while (token_tags[doc_end_tok + 1] == .doc_comment)
-                        doc_end_tok += 1;
-
-                    try helper.addTokRange(&ranges, handle.tree, doc_start_tok, doc_end_tok, .inclusive);
-                }
-            },
-
-            .@"catch",
-            .@"orelse",
-            .multiline_string_literal,
-            // TODO: Similar to condition expressions in control flow structures, should folding multiline grouped expressions be enabled?
-            // .grouped_expression,
-            => {
-                const start_tok = handle.tree.firstToken(node);
-                const end_tok = ast.lastToken(handle.tree, node);
-                try helper.addTokRange(&ranges, handle.tree, start_tok, end_tok, .inclusive);
-            },
-
-            // most other trivial cases can go through here.
-            else => {
-                switch (node_tag) {
-                    .array_init,
-                    .array_init_one,
-                    .array_init_dot_two,
-                    .array_init_one_comma,
-                    .array_init_dot_two_comma,
-                    .array_init_dot,
-                    .array_init_dot_comma,
-                    .array_init_comma,
-
-                    .struct_init,
-                    .struct_init_one,
-                    .struct_init_one_comma,
-                    .struct_init_dot_two,
-                    .struct_init_dot_two_comma,
-                    .struct_init_dot,
-                    .struct_init_dot_comma,
-                    .struct_init_comma,
-
-                    .@"switch",
-                    .switch_comma,
-                    => {},
-
-                    else => disallow_fold: {
-                        if (ast.isBlock(handle.tree, node))
-                            break :disallow_fold;
-
-                        if (ast.isCall(handle.tree, node))
-                            break :disallow_fold;
-
-                        if (ast.isBuiltinCall(handle.tree, node))
-                            break :disallow_fold;
-
-                        if (ast.isContainer(handle.tree, node) and node_tag != .root)
-                            break :disallow_fold;
-
-                        continue; // no conditions met, continue iterating without adding this potential folding range
-                    },
-                }
-
-                const start_tok = handle.tree.firstToken(node);
-                const end_tok = ast.lastToken(handle.tree, node);
-                try helper.addTokRange(&ranges, handle.tree, start_tok, end_tok, .exclusive);
-            },
-        }
-    }
-
-    // Iterate over the source code and look for code regions with #region #endregion
-    {
-        // We add opened folding regions to a stack as we go and pop one off when we find a closing brace.
-        // As an optimization we start with a reasonable capacity, which should work well in most cases since
-        // people will almost never have nesting that deep.
-        var stack = try std.ArrayList(u32).initCapacity(allocator, 10);
-
-        var i: usize = 0;
-        var lines_count: u32 = 0;
-        while (i < handle.tree.source.len) : (i += 1) {
-            const slice = handle.tree.source[i..];
-
-            if (slice[0] == '\n') {
-                lines_count += 1;
-            }
-
-            if (std.mem.startsWith(u8, slice, "//#region")) {
-                try stack.append(lines_count);
-            }
-
-            if (std.mem.startsWith(u8, slice, "//#endregion") and stack.items.len > 0) {
-                const start_line = stack.pop();
-                const end_line = lines_count;
-
-                // Add brace pairs but discard those from the same line, no need to waste memory on them
-                if (start_line != end_line) {
-                    try ranges.append(.{
-                        .startLine = start_line,
-                        .endLine = end_line,
-                    });
-                }
-            }
-        }
-    }
-
-    return ranges.items;
+    return try folding_range.generateFoldingRanges(allocator, handle.tree, server.offset_encoding);
 }
 
 pub const SelectionRange = struct {

@@ -7,15 +7,22 @@ const zls_version = std.builtin.Version{ .major = 0, .minor = 11, .patch = 0 };
 pub fn build(b: *std.build.Builder) !void {
     comptime {
         const current_zig = builtin.zig_version;
-        const min_zig = std.SemanticVersion.parse("0.11.0-dev.1254+1f8f79cd5") catch return; // add helper functions to std.zig.Ast
+        const min_zig = std.SemanticVersion.parse("0.11.0-dev.1524+efa25e7d5") catch return; // build API changes
         if (current_zig.order(min_zig) == .lt) {
             @compileError(std.fmt.comptimePrint("Your Zig version v{} does not meet the minimum build requirement of v{}", .{ current_zig, min_zig }));
         }
     }
-    const target = b.standardTargetOptions(.{});
 
-    const mode = b.standardReleaseOptions();
-    const exe = b.addExecutable("zls", "src/main.zig");
+    const target = b.standardTargetOptions(.{});
+    const optimize = b.standardOptimizeOption(.{});
+
+    const exe = b.addExecutable(.{
+        .name = "zls",
+        .root_source_file = .{ .path = "src/main.zig" },
+        .target = target,
+        .optimize = optimize,
+    });
+
     const exe_options = b.addOptions();
     exe.addOptions("build_options", exe_options);
 
@@ -105,11 +112,17 @@ pub fn build(b: *std.build.Builder) !void {
 
     const KNOWN_FOLDERS_DEFAULT_PATH = "src/known-folders/known-folders.zig";
     const known_folders_path = b.option([]const u8, "known-folders", "Path to known-folders package (default: " ++ KNOWN_FOLDERS_DEFAULT_PATH ++ ")") orelse KNOWN_FOLDERS_DEFAULT_PATH;
-    exe.addPackage(.{ .name = "known-folders", .source = .{ .path = known_folders_path } });
+    exe.addPackage(.{
+        .name = "known-folders",
+        .source = .{ .path = known_folders_path },
+    });
 
     const TRES_DEFAULT_PATH = "src/tres/tres.zig";
     const tres_path = b.option([]const u8, "tres", "Path to tres package (default: " ++ TRES_DEFAULT_PATH ++ ")") orelse TRES_DEFAULT_PATH;
-    exe.addPackage(.{ .name = "tres", .source = .{ .path = tres_path } });
+    exe.addPackage(.{
+        .name = "tres",
+        .source = .{ .path = tres_path },
+    });
 
     const check_submodules_step = CheckSubmodulesStep.init(b, &.{
         known_folders_path,
@@ -137,12 +150,16 @@ pub fn build(b: *std.build.Builder) !void {
         }
     }
 
-    exe.setTarget(target);
-    exe.setBuildMode(mode);
     exe.install();
 
-    const gen_exe = b.addExecutable("zls_gen", "src/config_gen/config_gen.zig");
-    gen_exe.addPackage(.{ .name = "tres", .source = .{ .path = tres_path } });
+    const gen_exe = b.addExecutable(.{
+        .name = "zls_gen",
+        .root_source_file = .{ .path = "src/config_gen/config_gen.zig" },
+    });
+    gen_exe.addPackage(.{
+        .name = "tres",
+        .source = .{ .path = tres_path },
+    });
 
     const gen_cmd = gen_exe.run();
     gen_cmd.addArgs(&.{
@@ -165,7 +182,13 @@ pub fn build(b: *std.build.Builder) !void {
         "test-filter",
         "Skip tests that do not match filter",
     );
-    var tests = b.addTest("tests/tests.zig");
+    
+    var tests = b.addTest(.{
+        .root_source_file = .{ .path = "tests/tests.zig" },
+        .target = target,
+        .optimize = .Debug,
+    });
+
     tests.setFilter(test_filter);
 
     if (coverage) {
@@ -180,35 +203,42 @@ pub fn build(b: *std.build.Builder) !void {
         });
     }
 
-    tests.addPackage(.{ .name = "zls", .source = .{ .path = "src/zls.zig" }, .dependencies = exe.packages.items });
-    tests.addPackage(.{ .name = "tres", .source = .{ .path = tres_path } });
-    tests.setBuildMode(.Debug);
-    tests.setTarget(target);
+    tests.addPackage(.{
+        .name = "zls",
+        .source = .{ .path = "src/zls.zig" },
+        .dependencies = exe.packages.items,
+    });
+    tests.addPackage(.{
+        .name = "tres",
+        .source = .{ .path = tres_path },
+    });
     test_step.dependOn(&tests.step);
 
-    var src_tests = b.addTest("src/zls.zig");
+    var src_tests = b.addTest(.{
+        .root_source_file = .{ .path = "src/zls.zig" },
+        .target = target,
+        .optimize = .Debug,
+    });
     src_tests.setFilter(test_filter);
-    src_tests.setBuildMode(.Debug);
-    src_tests.setTarget(target);
     test_step.dependOn(&src_tests.step);
 }
 
 const CheckSubmodulesStep = struct {
-    step: std.build.Step,
-    builder: *std.build.Builder,
+    step: std.Build.Step,
+    builder: *std.Build,
     submodules: []const []const u8,
 
-    pub fn init(builder: *std.build.Builder, submodules: []const []const u8) *CheckSubmodulesStep {
+    pub fn init(builder: *std.Build, submodules: []const []const u8) *CheckSubmodulesStep {
         var self = builder.allocator.create(CheckSubmodulesStep) catch unreachable;
         self.* = CheckSubmodulesStep{
             .builder = builder,
-            .step = std.build.Step.init(.custom, "Check Submodules", builder.allocator, make),
+            .step = std.Build.Step.init(.custom, "Check Submodules", builder.allocator, make),
             .submodules = builder.allocator.dupe([]const u8, submodules) catch unreachable,
         };
         return self;
     }
 
-    fn make(step: *std.build.Step) anyerror!void {
+    fn make(step: *std.Build.Step) anyerror!void {
         const self = @fieldParentPtr(CheckSubmodulesStep, "step", step);
         for (self.submodules) |path| {
             const access = std.fs.accessAbsolute(self.builder.pathFromRoot(path), .{});

@@ -120,7 +120,10 @@ fn testInlayHints(source: []const u8) !void {
         for (hints) |hint| {
             if (position.line != hint.position.line or position.character != hint.position.character) continue;
 
-            const actual_label = hint.label[0..hint.label.len];
+            if(!std.mem.endsWith(u8, hint.label, ":")) {
+                try error_builder.msgAtLoc("label `{s}` must end with a colon!", new_loc, .err, .{ hint.label });
+            }
+            const actual_label = hint.label[0..hint.label.len - 1];
 
             if (!std.mem.eql(u8, expected_label, actual_label)) {
                 try error_builder.msgAtLoc("expected label `{s}` here but got `{s}`!", new_loc, .err, .{ expected_label, actual_label });
