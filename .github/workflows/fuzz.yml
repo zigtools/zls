@@ -88,7 +88,7 @@ jobs:
         run: |
           cd $GITHUB_WORKSPACE/sus
           pwd
-          zig build -Drelease-fast
+          zig build -Doptimize=ReleaseFast
 
       - name: Run sus
         continue-on-error: true
