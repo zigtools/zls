@@ -1067,24 +1067,47 @@ fn hoverDefinitionBuiltin(server: *Server, pos_index: usize, handle: *const Docu
     const name = identifierFromPosition(pos_index, handle.*);
     if (name.len == 0) return null;
 
-    for (data.builtins) |builtin| {
+    const builtin = for (data.builtins) |builtin| {
         if (std.mem.eql(u8, builtin.name[1..], name)) {
-            return types.Hover{
-                .contents = .{
-                    .MarkupContent = .{
-                        .kind = .markdown,
-                        .value = try std.fmt.allocPrint(
-                            server.arena.allocator(),
-                            "```zig\n{s}\n```\n{s}",
-                            .{ builtin.signature, builtin.documentation },
-                        ),
-                    },
-                },
-            };
+            break builtin;
         }
+    } else return null;
+
+    var contents: std.ArrayListUnmanaged(u8) = .{};
+    var writer = contents.writer(server.arena.allocator());
+
+    if (std.mem.eql(u8, name, "cImport")) blk: {
+        const index = for (handle.cimports.items(.node)) |cimport_node, index| {
+            const main_token = handle.tree.nodes.items(.main_token)[cimport_node];
+            const cimport_loc = offsets.tokenToLoc(handle.tree, main_token);
+            if (cimport_loc.start <= pos_index and pos_index <= cimport_loc.end) break index;
+        } else break :blk;
+
+        const source = handle.cimports.items(.source)[index];
+
+        try writer.print(
+            \\```c
+            \\{s}
+            \\```
+            \\
+        , .{source});
     }
 
-    return null;
+    try writer.print(
+        \\```zig
+        \\{s}
+        \\```
+        \\{s}
+    , .{ builtin.signature, builtin.documentation });
+
+    return types.Hover{
+        .contents = .{
+            .MarkupContent = .{
+                .kind = .markdown,
+                .value = contents.items,
+            },
+        },
+    };
 }
 
 fn hoverDefinitionGlobal(server: *Server, pos_index: usize, handle: *const DocumentStore.Handle) error{OutOfMemory}!?types.Hover {
