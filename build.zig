@@ -7,7 +7,7 @@ const zls_version = std.builtin.Version{ .major = 0, .minor = 11, .patch = 0 };
 pub fn build(b: *std.build.Builder) !void {
     comptime {
         const current_zig = builtin.zig_version;
-        const min_zig = std.SemanticVersion.parse("0.11.0-dev.1524+efa25e7d5") catch return; // build API changes
+        const min_zig = std.SemanticVersion.parse("0.11.0-dev.1567+60935decd") catch return; // std.zig.parse(alloc, src) -> std.zig.Ast.parse(alloc, src, Ast.Mode)
         if (current_zig.order(min_zig) == .lt) {
             @compileError(std.fmt.comptimePrint("Your Zig version v{} does not meet the minimum build requirement of v{}", .{ current_zig, min_zig }));
         }
