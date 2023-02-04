@@ -196,7 +196,7 @@ pub fn refreshDocument(self: *DocumentStore, uri: Uri, new_text: [:0]const u8) !
     self.allocator.free(handle.text);
     handle.text = new_text;
 
-    var new_tree = try std.zig.parse(self.allocator, handle.text);
+    var new_tree = try Ast.parse(self.allocator, handle.text, .zig);
     handle.tree.deinit(self.allocator);
     handle.tree = new_tree;
 
@@ -619,7 +619,7 @@ fn createDocument(self: *DocumentStore, uri: Uri, text: [:0]u8, open: bool) erro
         var duped_uri = try self.allocator.dupe(u8, uri);
         errdefer self.allocator.free(duped_uri);
 
-        var tree = try std.zig.parse(self.allocator, text);
+        var tree = try Ast.parse(self.allocator, text, .zig);
         errdefer tree.deinit(self.allocator);
 
         var nodes = tree.nodes.toMultiArrayList();
