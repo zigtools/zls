@@ -1249,6 +1249,13 @@ pub const builtins = [_]Builtin{
         \\Converts a pointer of one type to a pointer of another type.
         \\
         \\[Optional Pointers](https://ziglang.org/documentation/master/#Optional-Pointers) are allowed. Casting an optional pointer which is [null](https://ziglang.org/documentation/master/#null) to a non-optional pointer invokes safety-checked [Undefined Behavior](https://ziglang.org/documentation/master/#Undefined-Behavior).
+        \\
+        \\`@ptrCast` cannot be used for:
+        \\
+        \\ - Removing `const` or `volatile` qualifier, use [@qualCast](https://ziglang.org/documentation/master/#qualCast).
+        \\ - Changing pointer address space, use [@addrSpaceCast](https://ziglang.org/documentation/master/#addrSpaceCast).
+        \\ - Increasing pointer alignment, use [@alignCast](https://ziglang.org/documentation/master/#alignCast).
+        \\ - Casting a non-slice pointer to a slice, use slicing syntax `ptr[start..end]`.
         ,
         .arguments = &.{
             "comptime DestType: type",
@@ -1265,6 +1272,18 @@ pub const builtins = [_]Builtin{
         \\To convert the other way, use [@intToPtr](https://ziglang.org/documentation/master/#intToPtr)
         ,
         .arguments = &.{
+            "value: anytype",
+        },
+    },
+    .{
+        .name = "@qualCast",
+        .signature = "@qualCast(comptime DestType: type, value: anytype) DestType",
+        .snippet = "@qualCast(${1:comptime DestType: type}, ${2:value: anytype})",
+        .documentation =
+        \\Remove `const` or `volatile` qualifier from a pointer.
+        ,
+        .arguments = &.{
+            "comptime DestType: type",
             "value: anytype",
         },
     },
@@ -1613,8 +1632,7 @@ pub const builtins = [_]Builtin{
         .documentation =
         \\Performs the square root of a floating point number. Uses a dedicated hardware instruction when available.
         \\
-        \\Supports [Floats](https://ziglang.org/documentation/master/#Floats) and [Vectors](https://ziglang.org/documentation/master/#Vectors) of floats, with the caveat that
-        \\[some float operations are not yet implemented for all float types](https://github.com/ziglang/zig/issues/4026).
+        \\Supports [Floats](https://ziglang.org/documentation/master/#Floats) and [Vectors](https://ziglang.org/documentation/master/#Vectors) of floats.
         ,
         .arguments = &.{
             "value: anytype",
@@ -1627,8 +1645,7 @@ pub const builtins = [_]Builtin{
         .documentation =
         \\Sine trigonometric function on a floating point number. Uses a dedicated hardware instruction when available.
         \\
-        \\Supports [Floats](https://ziglang.org/documentation/master/#Floats) and [Vectors](https://ziglang.org/documentation/master/#Vectors) of floats, with the caveat that
-        \\[some float operations are not yet implemented for all float types](https://github.com/ziglang/zig/issues/4026).
+        \\Supports [Floats](https://ziglang.org/documentation/master/#Floats) and [Vectors](https://ziglang.org/documentation/master/#Vectors) of floats.
         ,
         .arguments = &.{
             "value: anytype",
@@ -1641,8 +1658,7 @@ pub const builtins = [_]Builtin{
         .documentation =
         \\Cosine trigonometric function on a floating point number. Uses a dedicated hardware instruction when available.
         \\
-        \\Supports [Floats](https://ziglang.org/documentation/master/#Floats) and [Vectors](https://ziglang.org/documentation/master/#Vectors) of floats, with the caveat that
-        \\[some float operations are not yet implemented for all float types](https://github.com/ziglang/zig/issues/4026).
+        \\Supports [Floats](https://ziglang.org/documentation/master/#Floats) and [Vectors](https://ziglang.org/documentation/master/#Vectors) of floats.
         ,
         .arguments = &.{
             "value: anytype",
@@ -1655,8 +1671,7 @@ pub const builtins = [_]Builtin{
         .documentation =
         \\Tangent trigonometric function on a floating point number. Uses a dedicated hardware instruction when available.
         \\
-        \\Supports [Floats](https://ziglang.org/documentation/master/#Floats) and [Vectors](https://ziglang.org/documentation/master/#Vectors) of floats, with the caveat that
-        \\[some float operations are not yet implemented for all float types](https://github.com/ziglang/zig/issues/4026).
+        \\Supports [Floats](https://ziglang.org/documentation/master/#Floats) and [Vectors](https://ziglang.org/documentation/master/#Vectors) of floats.
         ,
         .arguments = &.{
             "value: anytype",
@@ -1669,8 +1684,7 @@ pub const builtins = [_]Builtin{
         .documentation =
         \\Base-e exponential function on a floating point number. Uses a dedicated hardware instruction when available.
         \\
-        \\Supports [Floats](https://ziglang.org/documentation/master/#Floats) and [Vectors](https://ziglang.org/documentation/master/#Vectors) of floats, with the caveat that
-        \\[some float operations are not yet implemented for all float types](https://github.com/ziglang/zig/issues/4026).
+        \\Supports [Floats](https://ziglang.org/documentation/master/#Floats) and [Vectors](https://ziglang.org/documentation/master/#Vectors) of floats.
         ,
         .arguments = &.{
             "value: anytype",
@@ -1683,8 +1697,7 @@ pub const builtins = [_]Builtin{
         .documentation =
         \\Base-2 exponential function on a floating point number. Uses a dedicated hardware instruction when available.
         \\
-        \\Supports [Floats](https://ziglang.org/documentation/master/#Floats) and [Vectors](https://ziglang.org/documentation/master/#Vectors) of floats, with the caveat that
-        \\[some float operations are not yet implemented for all float types](https://github.com/ziglang/zig/issues/4026).
+        \\Supports [Floats](https://ziglang.org/documentation/master/#Floats) and [Vectors](https://ziglang.org/documentation/master/#Vectors) of floats.
         ,
         .arguments = &.{
             "value: anytype",
@@ -1697,8 +1710,7 @@ pub const builtins = [_]Builtin{
         .documentation =
         \\Returns the natural logarithm of a floating point number. Uses a dedicated hardware instruction when available.
         \\
-        \\Supports [Floats](https://ziglang.org/documentation/master/#Floats) and [Vectors](https://ziglang.org/documentation/master/#Vectors) of floats, with the caveat that
-        \\[some float operations are not yet implemented for all float types](https://github.com/ziglang/zig/issues/4026).
+        \\Supports [Floats](https://ziglang.org/documentation/master/#Floats) and [Vectors](https://ziglang.org/documentation/master/#Vectors) of floats.
         ,
         .arguments = &.{
             "value: anytype",
@@ -1711,8 +1723,7 @@ pub const builtins = [_]Builtin{
         .documentation =
         \\Returns the logarithm to the base 2 of a floating point number. Uses a dedicated hardware instruction when available.
         \\
-        \\Supports [Floats](https://ziglang.org/documentation/master/#Floats) and [Vectors](https://ziglang.org/documentation/master/#Vectors) of floats, with the caveat that
-        \\[some float operations are not yet implemented for all float types](https://github.com/ziglang/zig/issues/4026).
+        \\Supports [Floats](https://ziglang.org/documentation/master/#Floats) and [Vectors](https://ziglang.org/documentation/master/#Vectors) of floats.
         ,
         .arguments = &.{
             "value: anytype",
@@ -1725,8 +1736,7 @@ pub const builtins = [_]Builtin{
         .documentation =
         \\Returns the logarithm to the base 10 of a floating point number. Uses a dedicated hardware instruction when available.
         \\
-        \\Supports [Floats](https://ziglang.org/documentation/master/#Floats) and [Vectors](https://ziglang.org/documentation/master/#Vectors) of floats, with the caveat that
-        \\[some float operations are not yet implemented for all float types](https://github.com/ziglang/zig/issues/4026).
+        \\Supports [Floats](https://ziglang.org/documentation/master/#Floats) and [Vectors](https://ziglang.org/documentation/master/#Vectors) of floats.
         ,
         .arguments = &.{
             "value: anytype",
@@ -1739,8 +1749,7 @@ pub const builtins = [_]Builtin{
         .documentation =
         \\Returns the absolute value of a floating point number. Uses a dedicated hardware instruction when available.
         \\
-        \\Supports [Floats](https://ziglang.org/documentation/master/#Floats) and [Vectors](https://ziglang.org/documentation/master/#Vectors) of floats, with the caveat that
-        \\[some float operations are not yet implemented for all float types](https://github.com/ziglang/zig/issues/4026).
+        \\Supports [Floats](https://ziglang.org/documentation/master/#Floats) and [Vectors](https://ziglang.org/documentation/master/#Vectors) of floats.
         ,
         .arguments = &.{
             "value: anytype",
@@ -1753,8 +1762,7 @@ pub const builtins = [_]Builtin{
         .documentation =
         \\Returns the largest integral value not greater than the given floating point number. Uses a dedicated hardware instruction when available.
         \\
-        \\Supports [Floats](https://ziglang.org/documentation/master/#Floats) and [Vectors](https://ziglang.org/documentation/master/#Vectors) of floats, with the caveat that
-        \\[some float operations are not yet implemented for all float types](https://github.com/ziglang/zig/issues/4026).
+        \\Supports [Floats](https://ziglang.org/documentation/master/#Floats) and [Vectors](https://ziglang.org/documentation/master/#Vectors) of floats.
         ,
         .arguments = &.{
             "value: anytype",
@@ -1767,8 +1775,7 @@ pub const builtins = [_]Builtin{
         .documentation =
         \\Returns the smallest integral value not less than the given floating point number. Uses a dedicated hardware instruction when available.
         \\
-        \\Supports [Floats](https://ziglang.org/documentation/master/#Floats) and [Vectors](https://ziglang.org/documentation/master/#Vectors) of floats, with the caveat that
-        \\[some float operations are not yet implemented for all float types](https://github.com/ziglang/zig/issues/4026).
+        \\Supports [Floats](https://ziglang.org/documentation/master/#Floats) and [Vectors](https://ziglang.org/documentation/master/#Vectors) of floats.
         ,
         .arguments = &.{
             "value: anytype",
@@ -1781,8 +1788,7 @@ pub const builtins = [_]Builtin{
         .documentation =
         \\Rounds the given floating point number to an integer, towards zero. Uses a dedicated hardware instruction when available.
         \\
-        \\Supports [Floats](https://ziglang.org/documentation/master/#Floats) and [Vectors](https://ziglang.org/documentation/master/#Vectors) of floats, with the caveat that
-        \\[some float operations are not yet implemented for all float types](https://github.com/ziglang/zig/issues/4026).
+        \\Supports [Floats](https://ziglang.org/documentation/master/#Floats) and [Vectors](https://ziglang.org/documentation/master/#Vectors) of floats.
         ,
         .arguments = &.{
             "value: anytype",
@@ -1795,8 +1801,7 @@ pub const builtins = [_]Builtin{
         .documentation =
         \\Rounds the given floating point number to an integer, away from zero. Uses a dedicated hardware instruction when available.
         \\
-        \\Supports [Floats](https://ziglang.org/documentation/master/#Floats) and [Vectors](https://ziglang.org/documentation/master/#Vectors) of floats, with the caveat that
-        \\[some float operations are not yet implemented for all float types](https://github.com/ziglang/zig/issues/4026).
+        \\Supports [Floats](https://ziglang.org/documentation/master/#Floats) and [Vectors](https://ziglang.org/documentation/master/#Vectors) of floats.
         ,
         .arguments = &.{
             "value: anytype",
