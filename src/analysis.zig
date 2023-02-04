@@ -1461,47 +1461,11 @@ fn nodeContainsSourceIndex(tree: Ast, node: Ast.Node.Index, source_index: usize)
     return source_index >= loc.start and source_index <= loc.end;
 }
 
-pub fn getImportStr(tree: Ast, node: Ast.Node.Index, source_index: usize) ?[]const u8 {
-    const node_tags = tree.nodes.items(.tag);
-
-    var buf: [2]Ast.Node.Index = undefined;
-    if (tree.fullContainerDecl(&buf, node)) |container_decl| {
-        for (container_decl.ast.members) |decl_idx| {
-            if (getImportStr(tree, decl_idx, source_index)) |name| {
-                return name;
-            }
-        }
-        return null;
-    } else if (tree.fullVarDecl(node)) |var_decl| {
-        return getImportStr(tree, var_decl.ast.init_node, source_index);
-    } else if (node_tags[node] == .@"usingnamespace") {
-        return getImportStr(tree, tree.nodes.items(.data)[node].lhs, source_index);
-    }
-
-    if (!nodeContainsSourceIndex(tree, node, source_index)) return null;
-
-    if (!ast.isBuiltinCall(tree, node)) return null;
-
-    const builtin_token = tree.nodes.items(.main_token)[node];
-    const call_name = tree.tokenSlice(builtin_token);
-
-    if (!std.mem.eql(u8, call_name, "@import")) return null;
-
-    var buffer: [2]Ast.Node.Index = undefined;
-    const params = ast.builtinCallParams(tree, node, &buffer).?;
-
-    if (params.len != 1) return null;
-
-    if (node_tags[params[0]] != .string_literal) return null;
-
-    const import_str = tree.tokenSlice(tree.nodes.items(.main_token)[params[0]]);
-    return import_str[1 .. import_str.len - 1];
-}
-
 pub const PositionContext = union(enum) {
     builtin: offsets.Loc,
     comment,
     import_string_literal: offsets.Loc,
+    cinclude_string_literal: offsets.Loc,
     embedfile_string_literal: offsets.Loc,
     string_literal: offsets.Loc,
     field_access: offsets.Loc,
@@ -1518,6 +1482,7 @@ pub const PositionContext = union(enum) {
             .builtin => |r| r,
             .comment => null,
             .import_string_literal => |r| r,
+            .cinclude_string_literal => |r| r,
             .embedfile_string_literal => |r| r,
             .string_literal => |r| r,
             .field_access => |r| r,
@@ -1634,8 +1599,10 @@ pub fn getPositionContext(
                                 if (std.mem.eql(u8, builtin_name, "@import")) {
                                     curr_ctx.ctx = .{ .import_string_literal = tok.loc };
                                     break :string_lit_block;
-                                }
-                                if (std.mem.eql(u8, builtin_name, "@embedFile")) {
+                                } else if (std.mem.eql(u8, builtin_name, "@cInclude")) {
+                                    curr_ctx.ctx = .{ .cinclude_string_literal = tok.loc };
+                                    break :string_lit_block;
+                                } else if (std.mem.eql(u8, builtin_name, "@embedFile")) {
                                     curr_ctx.ctx = .{ .embedfile_string_literal = tok.loc };
                                     break :string_lit_block;
                                 }
