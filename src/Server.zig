@@ -1052,6 +1052,38 @@ fn gotoDefinitionGlobal(
     return try server.gotoDefinitionSymbol(decl, resolve_alias);
 }
 
+fn gotoDefinitionBuiltin(
+    server: *Server,
+    handle: *const DocumentStore.Handle,
+    loc: offsets.Loc,
+) error{OutOfMemory}!?types.Location {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    const name = offsets.tokenIndexToSlice(handle.tree.source, loc.start);
+    if (std.mem.eql(u8, name, "@cImport")) {
+        const index = for (handle.cimports.items(.node)) |cimport_node, index| {
+            const main_token = handle.tree.nodes.items(.main_token)[cimport_node];
+            if (loc.start == offsets.tokenToIndex(handle.tree, main_token)) break index;
+        } else return null;
+        const hash = handle.cimports.items(.hash)[index];
+
+        const result = server.document_store.cimports.get(hash) orelse return null;
+        switch (result) {
+            .failure => return null,
+            .success => |uri| return types.Location{
+                .uri = uri,
+                .range = .{
+                    .start = .{ .line = 0, .character = 0 },
+                    .end = .{ .line = 0, .character = 0 },
+                },
+            },
+        }
+    }
+
+    return null;
+}
+
 fn hoverDefinitionLabel(server: *Server, pos_index: usize, handle: *const DocumentStore.Handle) error{OutOfMemory}!?types.Hover {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
@@ -1067,24 +1099,47 @@ fn hoverDefinitionBuiltin(server: *Server, pos_index: usize, handle: *const Docu
     const name = identifierFromPosition(pos_index, handle.*);
     if (name.len == 0) return null;
 
-    for (data.builtins) |builtin| {
+    const builtin = for (data.builtins) |builtin| {
         if (std.mem.eql(u8, builtin.name[1..], name)) {
-            return types.Hover{
-                .contents = .{
-                    .MarkupContent = .{
-                        .kind = .markdown,
-                        .value = try std.fmt.allocPrint(
-                            server.arena.allocator(),
-                            "```zig\n{s}\n```\n{s}",
-                            .{ builtin.signature, builtin.documentation },
-                        ),
-                    },
-                },
-            };
+            break builtin;
         }
+    } else return null;
+
+    var contents: std.ArrayListUnmanaged(u8) = .{};
+    var writer = contents.writer(server.arena.allocator());
+
+    if (std.mem.eql(u8, name, "cImport")) blk: {
+        const index = for (handle.cimports.items(.node)) |cimport_node, index| {
+            const main_token = handle.tree.nodes.items(.main_token)[cimport_node];
+            const cimport_loc = offsets.tokenToLoc(handle.tree, main_token);
+            if (cimport_loc.start <= pos_index and pos_index <= cimport_loc.end) break index;
+        } else break :blk;
+
+        const source = handle.cimports.items(.source)[index];
+
+        try writer.print(
+            \\```c
+            \\{s}
+            \\```
+            \\
+        , .{source});
     }
 
-    return null;
+    try writer.print(
+        \\```zig
+        \\{s}
+        \\```
+        \\{s}
+    , .{ builtin.signature, builtin.documentation });
+
+    return types.Hover{
+        .contents = .{
+            .MarkupContent = .{
+                .kind = .markdown,
+                .value = contents.items,
+            },
+        },
+    };
 }
 
 fn hoverDefinitionGlobal(server: *Server, pos_index: usize, handle: *const DocumentStore.Handle) error{OutOfMemory}!?types.Hover {
@@ -2289,6 +2344,7 @@ fn gotoHandler(server: *Server, request: types.TextDocumentPositionParams, resol
     const pos_context = try analysis.getPositionContext(server.arena.allocator(), handle.text, source_index, true);
 
     return switch (pos_context) {
+        .builtin => |loc| try server.gotoDefinitionBuiltin(handle, loc),
         .var_access => try server.gotoDefinitionGlobal(source_index, handle, resolve_alias),
         .field_access => |loc| try server.gotoDefinitionFieldAccess(handle, source_index, loc, resolve_alias),
         .import_string_literal,

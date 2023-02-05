@@ -78,6 +78,9 @@ pub const Handle = struct {
         }
         self.import_uris.deinit(allocator);
 
+        for (self.cimports.items(.source)) |source| {
+            allocator.free(source);
+        }
         self.cimports.deinit(allocator);
     }
 };
@@ -196,7 +199,7 @@ pub fn refreshDocument(self: *DocumentStore, uri: Uri, new_text: [:0]const u8) !
     self.allocator.free(handle.text);
     handle.text = new_text;
 
-    var new_tree = try std.zig.parse(self.allocator, handle.text);
+    var new_tree = try Ast.parse(self.allocator, handle.text, .zig);
     handle.tree.deinit(self.allocator);
     handle.tree = new_tree;
 
@@ -208,16 +211,26 @@ pub fn refreshDocument(self: *DocumentStore, uri: Uri, new_text: [:0]const u8) !
     for (handle.import_uris.items) |import_uri| {
         self.allocator.free(import_uri);
     }
+    const old_import_count = handle.import_uris.items.len;
+    const new_import_count = new_import_uris.items.len;
     handle.import_uris.deinit(self.allocator);
     handle.import_uris = new_import_uris;
 
     var new_cimports = try self.collectCIncludes(handle.*);
+    const old_cimport_count = handle.cimports.len;
+    const new_cimport_count = new_cimports.len;
+    for (handle.cimports.items(.source)) |source| {
+        self.allocator.free(source);
+    }
     handle.cimports.deinit(self.allocator);
     handle.cimports = new_cimports;
 
-    // a include could have been removed but it would increase latency
-    // try self.garbageCollectionImports();
-    // try self.garbageCollectionCImports();
+    if (old_import_count != new_import_count or
+        old_cimport_count != new_cimport_count)
+    {
+        self.garbageCollectionImports() catch {};
+        self.garbageCollectionCImports() catch {};
+    }
 }
 
 pub fn applySave(self: *DocumentStore, handle: *const Handle) !void {
@@ -238,7 +251,7 @@ pub fn applySave(self: *DocumentStore, handle: *const Handle) !void {
 }
 
 /// The `DocumentStore` represents a graph structure where every
-/// handle/document is a node and every `@import` & `@cImport` represent
+/// handle/document is a node and every `@import` and `@cImport` represent
 /// a directed edge.
 /// We can remove every document which cannot be reached from
 /// another document that is `open` (see `Handle.open`)
@@ -249,97 +262,103 @@ fn garbageCollectionImports(self: *DocumentStore) error{OutOfMemory}!void {
     var arena = std.heap.ArenaAllocator.init(self.allocator);
     defer arena.deinit();
 
-    var reachable_handles = std.StringHashMapUnmanaged(void){};
-    defer reachable_handles.deinit(arena.allocator());
+    var reachable = try std.DynamicBitSetUnmanaged.initEmpty(arena.allocator(), self.handles.count());
 
     var queue = std.ArrayListUnmanaged(Uri){};
 
-    for (self.handles.values()) |handle| {
+    for (self.handles.values()) |handle, handle_index| {
         if (!handle.open) continue;
 
-        try reachable_handles.put(arena.allocator(), handle.uri, {});
+        reachable.set(handle_index);
 
         try self.collectDependencies(arena.allocator(), handle.*, &queue);
     }
 
     while (queue.popOrNull()) |uri| {
-        const gop = try reachable_handles.getOrPut(arena.allocator(), uri);
-        if (gop.found_existing) continue;
+        const handle_index = self.handles.getIndex(uri) orelse continue;
+        if (reachable.isSet(handle_index)) continue;
+        reachable.set(handle_index);
 
-        const handle = self.handles.get(uri) orelse continue;
+        const handle = self.handles.values()[handle_index];
 
         try self.collectDependencies(arena.allocator(), handle.*, &queue);
     }
 
-    var i: usize = 0;
-    while (i < self.handles.count()) {
-        const handle = self.handles.values()[i];
-        if (reachable_handles.contains(handle.uri)) {
-            i += 1;
-            continue;
-        }
+    var it = reachable.iterator(.{
+        .kind = .unset,
+        .direction = .reverse,
+    });
+
+    while (it.next()) |handle_index| {
+        const handle = self.handles.values()[handle_index];
         log.debug("Closing document {s}", .{handle.uri});
-        var kv = self.handles.fetchSwapRemove(handle.uri).?;
-        kv.value.deinit(self.allocator);
-        self.allocator.destroy(kv.value);
+        self.handles.swapRemoveAt(handle_index);
+        handle.deinit(self.allocator);
+        self.allocator.destroy(handle);
     }
 }
 
+/// see `garbageCollectionImports`
 fn garbageCollectionCImports(self: *DocumentStore) error{OutOfMemory}!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
     if (self.cimports.count() == 0) return;
 
-    var reachable_hashes = std.AutoArrayHashMapUnmanaged(Hash, void){};
-    defer reachable_hashes.deinit(self.allocator);
+    var reachable = try std.DynamicBitSetUnmanaged.initEmpty(self.allocator, self.cimports.count());
+    defer reachable.deinit(self.allocator);
 
     for (self.handles.values()) |handle| {
         for (handle.cimports.items(.hash)) |hash| {
-            try reachable_hashes.put(self.allocator, hash, {});
+            const index = self.cimports.getIndex(hash).?;
+            reachable.set(index);
         }
     }
 
-    var i: usize = 0;
-    while (i < self.cimports.count()) {
-        const hash = self.cimports.keys()[i];
-        if (reachable_hashes.contains(hash)) {
-            i += 1;
-            continue;
-        }
-        var kv = self.cimports.fetchSwapRemove(hash).?;
-        const message = switch (kv.value) {
+    var it = reachable.iterator(.{
+        .kind = .unset,
+        .direction = .reverse,
+    });
+
+    while (it.next()) |cimport_index| {
+        var result = self.cimports.values()[cimport_index];
+        const message = switch (result) {
             .failure => "",
             .success => |uri| uri,
         };
         log.debug("Destroying cimport {s}", .{message});
-        kv.value.deinit(self.allocator);
+        self.cimports.swapRemoveAt(cimport_index);
+        result.deinit(self.allocator);
     }
 }
 
+/// see `garbageCollectionImports`
 fn garbageCollectionBuildFiles(self: *DocumentStore) error{OutOfMemory}!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    var reachable_build_files = std.StringHashMapUnmanaged(void){};
-    defer reachable_build_files.deinit(self.allocator);
+    if (self.build_files.count() == 0) return;
+
+    var reachable = try std.DynamicBitSetUnmanaged.initEmpty(self.allocator, self.build_files.count());
+    defer reachable.deinit(self.allocator);
 
     for (self.handles.values()) |handle| {
         const build_file_uri = handle.associated_build_file orelse continue;
+        const build_file_index = self.build_files.getIndex(build_file_uri).?;
 
-        try reachable_build_files.put(self.allocator, build_file_uri, {});
+        reachable.set(build_file_index);
     }
 
-    var i: usize = 0;
-    while (i < self.build_files.count()) {
-        const hash = self.build_files.keys()[i];
-        if (reachable_build_files.contains(hash)) {
-            i += 1;
-            continue;
-        }
-        var kv = self.build_files.fetchSwapRemove(hash).?;
-        log.debug("Destroying build file {s}", .{kv.value.uri});
-        kv.value.deinit(self.allocator);
+    var it = reachable.iterator(.{
+        .kind = .unset,
+        .direction = .reverse,
+    });
+
+    while (it.next()) |build_file_index| {
+        var build_file = self.build_files.values()[build_file_index];
+        log.debug("Destroying build file {s}", .{build_file.uri});
+        self.build_files.swapRemoveAt(build_file_index);
+        build_file.deinit(self.allocator);
     }
 }
 
@@ -619,7 +638,7 @@ fn createDocument(self: *DocumentStore, uri: Uri, text: [:0]u8, open: bool) erro
         var duped_uri = try self.allocator.dupe(u8, uri);
         errdefer self.allocator.free(duped_uri);
 
-        var tree = try std.zig.parse(self.allocator, text);
+        var tree = try Ast.parse(self.allocator, text, .zig);
         errdefer tree.deinit(self.allocator);
 
         var nodes = tree.nodes.toMultiArrayList();
@@ -811,12 +830,11 @@ pub fn collectDependencies(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    try dependencies.ensureUnusedCapacity(allocator, handle.import_uris.items.len);
+    try dependencies.ensureUnusedCapacity(allocator, handle.import_uris.items.len + handle.cimports.len);
     for (handle.import_uris.items) |uri| {
         dependencies.appendAssumeCapacity(try allocator.dupe(u8, uri));
     }
 
-    try dependencies.ensureUnusedCapacity(allocator, handle.cimports.len);
     for (handle.cimports.items(.hash)) |hash| {
         const result = store.cimports.get(hash) orelse continue;
         switch (result) {
@@ -872,7 +890,7 @@ pub fn resolveCImport(self: *DocumentStore, handle: Handle, node: Ast.Node.Index
 
     if (!std.process.can_spawn) return null;
 
-    const index = std.mem.indexOfScalar(Ast.Node.Index, handle.cimports.items(.node), node).?;
+    const index = std.mem.indexOfScalar(Ast.Node.Index, handle.cimports.items(.node), node) orelse return null;
 
     const hash: Hash = handle.cimports.items(.hash)[index];
 

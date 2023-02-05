@@ -7,7 +7,7 @@ const zls_version = std.builtin.Version{ .major = 0, .minor = 11, .patch = 0 };
 pub fn build(b: *std.build.Builder) !void {
     comptime {
         const current_zig = builtin.zig_version;
-        const min_zig = std.SemanticVersion.parse("0.11.0-dev.1524+efa25e7d5") catch return; // build API changes
+        const min_zig = std.SemanticVersion.parse("0.11.0-dev.1570+693b12f8e") catch return; // addPackage -> addModule
         if (current_zig.order(min_zig) == .lt) {
             @compileError(std.fmt.comptimePrint("Your Zig version v{} does not meet the minimum build requirement of v{}", .{ current_zig, min_zig }));
         }
@@ -112,17 +112,13 @@ pub fn build(b: *std.build.Builder) !void {
 
     const KNOWN_FOLDERS_DEFAULT_PATH = "src/known-folders/known-folders.zig";
     const known_folders_path = b.option([]const u8, "known-folders", "Path to known-folders package (default: " ++ KNOWN_FOLDERS_DEFAULT_PATH ++ ")") orelse KNOWN_FOLDERS_DEFAULT_PATH;
-    exe.addPackage(.{
-        .name = "known-folders",
-        .source = .{ .path = known_folders_path },
-    });
+    const known_folders_module = b.createModule(.{ .source_file = .{ .path = known_folders_path } });
+    exe.addModule("known-folders", known_folders_module);
 
     const TRES_DEFAULT_PATH = "src/tres/tres.zig";
     const tres_path = b.option([]const u8, "tres", "Path to tres package (default: " ++ TRES_DEFAULT_PATH ++ ")") orelse TRES_DEFAULT_PATH;
-    exe.addPackage(.{
-        .name = "tres",
-        .source = .{ .path = tres_path },
-    });
+    const tres_module = b.createModule(.{ .source_file = .{ .path = tres_path } });
+    exe.addModule("tres", tres_module);
 
     const check_submodules_step = CheckSubmodulesStep.init(b, &.{
         known_folders_path,
@@ -156,10 +152,7 @@ pub fn build(b: *std.build.Builder) !void {
         .name = "zls_gen",
         .root_source_file = .{ .path = "src/config_gen/config_gen.zig" },
     });
-    gen_exe.addPackage(.{
-        .name = "tres",
-        .source = .{ .path = tres_path },
-    });
+    gen_exe.addModule("tres", tres_module);
 
     const gen_cmd = gen_exe.run();
     gen_cmd.addArgs(&.{
@@ -201,15 +194,19 @@ pub fn build(b: *std.build.Builder) !void {
         });
     }
 
-    tests.addPackage(.{
-        .name = "zls",
-        .source = .{ .path = "src/zls.zig" },
-        .dependencies = exe.packages.items,
+    const build_options_module = exe_options.createModule();
+
+    const zls_module = b.createModule(.{
+        .source_file = .{ .path = "src/zls.zig" },
+        .dependencies = &.{
+            .{ .name = "known-folders", .module = known_folders_module },
+            .{ .name = "tres", .module = tres_module },
+            .{ .name = "build_options", .module = build_options_module },
+        },
     });
-    tests.addPackage(.{
-        .name = "tres",
-        .source = .{ .path = tres_path },
-    });
+    tests.addModule("zls", zls_module);
+    tests.addModule("tres", tres_module);
+
     test_step.dependOn(&tests.step);
 }
 
