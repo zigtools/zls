@@ -112,17 +112,18 @@ pub fn build(b: *std.build.Builder) !void {
 
     const KNOWN_FOLDERS_DEFAULT_PATH = "src/known-folders/known-folders.zig";
     const known_folders_path = b.option([]const u8, "known-folders", "Path to known-folders package (default: " ++ KNOWN_FOLDERS_DEFAULT_PATH ++ ")") orelse KNOWN_FOLDERS_DEFAULT_PATH;
-    exe.addPackage(.{
-        .name = "known-folders",
-        .source = .{ .path = known_folders_path },
+
+    b.addModule(.{
+        .name = "known-folders", .source_file = .{ .path = known_folders_path }
     });
+    exe.addModule("known-folders", b.modules.get("known-folders").?);
 
     const TRES_DEFAULT_PATH = "src/tres/tres.zig";
     const tres_path = b.option([]const u8, "tres", "Path to tres package (default: " ++ TRES_DEFAULT_PATH ++ ")") orelse TRES_DEFAULT_PATH;
-    exe.addPackage(.{
-        .name = "tres",
-        .source = .{ .path = tres_path },
+    b.addModule(.{
+        .name = "tres", .source_file = .{ .path = tres_path }
     });
+    exe.addModule("tres", b.modules.get("tres").?);
 
     const check_submodules_step = CheckSubmodulesStep.init(b, &.{
         known_folders_path,
@@ -156,9 +157,8 @@ pub fn build(b: *std.build.Builder) !void {
         .name = "zls_gen",
         .root_source_file = .{ .path = "src/config_gen/config_gen.zig" },
     });
-    gen_exe.addPackage(.{
-        .name = "tres",
-        .source = .{ .path = tres_path },
+    gen_exe.addAnonymousModule("tres", .{
+        .source_file = .{ .path = tres_path },
     });
 
     const gen_cmd = gen_exe.run();
@@ -201,15 +201,17 @@ pub fn build(b: *std.build.Builder) !void {
         });
     }
 
-    tests.addPackage(.{
+    b.addModule(.{
         .name = "zls",
-        .source = .{ .path = "src/zls.zig" },
-        .dependencies = exe.packages.items,
+        .source_file = .{ .path = "src/zls.zig" },
+        .dependencies = &.{
+            .{ .name = "known-folders", .module = b.modules.get("known-folders").? },
+            .{ .name = "tres", .module = b.modules.get("tres").? },
+        },
     });
-    tests.addPackage(.{
-        .name = "tres",
-        .source = .{ .path = tres_path },
-    });
+
+    tests.addModule("zls", b.modules.get("zls").?);
+    tests.addModule("tres", b.modules.get("tres").?);
     test_step.dependOn(&tests.step);
 }
 
