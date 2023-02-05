@@ -854,6 +854,7 @@ pub fn collectDependencies(
     }
 }
 
+/// TODO resolve relative paths
 pub fn collectIncludeDirs(
     store: *const DocumentStore,
     allocator: std.mem.Allocator,
@@ -969,8 +970,11 @@ pub fn uriFromImportStr(self: *const DocumentStore, allocator: std.mem.Allocator
         }
         return null;
     } else {
-        const seperator_index = std.mem.lastIndexOfScalar(u8, handle.uri, std.fs.path.sep);
-        const base = handle.uri[0..if (seperator_index) |i| i else 0];
+        var seperator_index = handle.uri.len;
+        while (seperator_index > 0) : (seperator_index -= 1) {
+            if (std.fs.path.isSep(handle.uri[seperator_index - 1])) break;
+        }
+        const base = handle.uri[0..seperator_index];
 
         return URI.pathRelative(allocator, base, import_str) catch |err| switch (err) {
             error.OutOfMemory => return error.OutOfMemory,

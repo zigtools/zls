@@ -1231,19 +1231,23 @@ fn gotoDefinitionString(
         .import_string_literal,
         .embedfile_string_literal,
         => try server.document_store.uriFromImportStr(allocator, handle.*, import_str),
-        .cinclude_string_literal => if (std.fs.path.isAbsolute(import_str)) import_str else blk: {
-            var include_dirs: std.ArrayListUnmanaged([]const u8) = .{};
-            server.document_store.collectIncludeDirs(allocator, handle.*, &include_dirs) catch |err| {
-                log.err("failed to resolve include paths: {}", .{err});
+        .cinclude_string_literal => try uri_utils.fromPath(
+            allocator,
+            blk: {
+                if (std.fs.path.isAbsolute(import_str)) break :blk import_str;
+                var include_dirs: std.ArrayListUnmanaged([]const u8) = .{};
+                server.document_store.collectIncludeDirs(allocator, handle.*, &include_dirs) catch |err| {
+                    log.err("failed to resolve include paths: {}", .{err});
+                    return null;
+                };
+                for (include_dirs.items) |dir| {
+                    const path = try std.fs.path.join(allocator, &.{ dir, import_str });
+                    std.fs.accessAbsolute(path, .{}) catch continue;
+                    break :blk path;
+                }
                 return null;
-            };
-            for (include_dirs.items) |dir| {
-                const path = try std.fs.path.join(allocator, &.{ dir, import_str });
-                std.fs.accessAbsolute(path, .{}) catch continue;
-                break :blk try uri_utils.fromPath(allocator, path);
-            }
-            return null;
-        },
+            },
+        ),
         else => unreachable,
     };
 
@@ -1680,13 +1684,13 @@ fn completeFileSystemStringLiteral(
     var completions: analysis.CompletionSet = .{};
 
     const loc = pos_context.loc().?;
-    var completing = offsets.locToSlice(handle.tree.source, .{
-        .start = loc.start + 1,
-        .end = loc.end - 1,
-    });
+    var completing = handle.tree.source[loc.start + 1 .. loc.end - 1];
 
-    const seperator_index = std.mem.lastIndexOfScalar(u8, completing, std.fs.path.sep);
-    completing = completing[0..if (seperator_index) |i| i + 1 else 0];
+    var seperator_index = completing.len;
+    while (seperator_index > 0) : (seperator_index -= 1) {
+        if (std.fs.path.isSep(completing[seperator_index - 1])) break;
+    }
+    completing = completing[0..seperator_index];
 
     var search_paths: std.ArrayListUnmanaged([]const u8) = .{};
     if (std.fs.path.isAbsolute(completing) and pos_context != .import_string_literal) {
@@ -1702,6 +1706,7 @@ fn completeFileSystemStringLiteral(
     }
 
     for (search_paths.items) |path| {
+        if (!std.fs.path.isAbsolute(path)) continue;
         const dir_path = if (std.fs.path.isAbsolute(completing)) path else try std.fs.path.join(arena, &.{ path, completing });
 
         var iterable_dir = std.fs.openIterableDirAbsolute(dir_path, .{}) catch continue;
