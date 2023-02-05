@@ -164,8 +164,15 @@ fn processStep(
 
         try processIncludeDirs(allocator, include_dirs, install_exe.artifact.include_dirs.items);
         try processPkgConfig(allocator, include_dirs, install_exe.artifact);
-        for (install_exe.artifact.packages.items) |pkg| {
-            try processPackage(allocator, packages, pkg);
+        if (@hasField(LibExeObjStep, "modules")) {
+            var modules_it = install_exe.artifact.modules.iterator();
+            while (modules_it.next()) |module_entry| {
+                try processModule(allocator, packages, module_entry);
+            }
+        } else { // assuming @hasField(LibExeObjStep, "packages")
+            for (install_exe.artifact.packages.items) |pkg| {
+                try processPackage(allocator, packages, pkg);
+            }
         }
     } else if (step.cast(LibExeObjStep)) |exe| {
         if (exe.root_src) |src| {
@@ -177,13 +184,44 @@ fn processStep(
         }
         try processIncludeDirs(allocator, include_dirs, exe.include_dirs.items);
         try processPkgConfig(allocator, include_dirs, exe);
-        for (exe.packages.items) |pkg| {
-            try processPackage(allocator, packages, pkg);
+        if (@hasField(LibExeObjStep, "modules")) {
+            var modules_it = exe.modules.iterator();
+            while (modules_it.next()) |module_entry| {
+                try processModule(allocator, packages, module_entry);
+            }
+        } else { // assuming @hasField(LibExeObjStep, "packages")
+            for (exe.packages.items) |pkg| {
+                try processPackage(allocator, packages, pkg);
+            }
         }
     } else {
         for (step.dependencies.items) |unknown_step| {
             try processStep(allocator, packages, include_dirs, unknown_step);
         }
+    }
+}
+
+fn processModule(
+    allocator: std.mem.Allocator,
+    packages: *std.ArrayListUnmanaged(BuildConfig.Pkg),
+    module: std.StringArrayHashMap(*std.Build.Module).Entry,
+) !void {
+    for (packages.items) |package| {
+        if (std.mem.eql(u8, package.name, module.key_ptr.*)) return;
+    }
+
+    const maybe_path = switch (module.value_ptr.*.source_file) {
+        .path => |path| path,
+        .generated => |generated| generated.path,
+    };
+
+    if (maybe_path) |path| {
+        try packages.append(allocator, .{ .name = module.key_ptr.*, .path = path });
+    }
+
+    var deps_it = module.value_ptr.*.dependencies.iterator();
+    while (deps_it.next()) |module_dep| {
+        try processModule(allocator, packages, module_dep);
     }
 }
 
