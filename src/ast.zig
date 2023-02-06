@@ -1395,14 +1395,18 @@ pub fn iterateChildren(
             var buffer: [1]Node.Index = undefined;
             const fn_proto = tree.fullFnProto(&buffer, node).?;
 
-            for (fn_proto.ast.params) |child| {
-                try callback(context, child);
+            var it = fn_proto.iterate(&tree);
+            while (nextFnParam(&it)) |param| {
+                try callback(context, param.type_expr);
             }
             try callback(context, fn_proto.ast.align_expr);
             try callback(context, fn_proto.ast.addrspace_expr);
             try callback(context, fn_proto.ast.section_expr);
             try callback(context, fn_proto.ast.callconv_expr);
             try callback(context, fn_proto.ast.return_type);
+            if (node_tags[node] == .fn_decl) {
+                try callback(context, node_data[node].rhs);
+            }
         },
 
         .container_decl_arg,
