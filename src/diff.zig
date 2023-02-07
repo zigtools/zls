@@ -271,16 +271,18 @@ fn splitLines(allocator: std.mem.Allocator, str: []const u8) error{OutOfMemory}!
             index = null;
             break :blk str.len;
         };
-        if (!(index == null and start == end)) {
-            // std.log.err("'{s}'", .{str[start..end]});
-            try lines.append(allocator, str[start..end]);
-        }
+        try lines.append(allocator, str[start..end]);
     }
+
+    if (lines.items[lines.items.len - 1].len == 0) _ = lines.pop();
 
     return lines.toOwnedSlice(allocator);
 }
 
-// Caller owns returned memory.
+/// Caller owns returned memory.
+/// NOTE: As far as I know, this implementation is actually incorrect
+/// as we use intermediate state, but at the same time, it works so
+/// I really don't want to touch it right now. TODO: Investigate + fix.
 pub fn applyContentChanges(
     allocator: std.mem.Allocator,
     text: []const u8,
@@ -315,17 +317,40 @@ pub fn applyContentChanges(
     return try text_array.toOwnedSliceSentinel(allocator, 0);
 }
 
-// Caller owns returned memory.
+// https://cs.opensource.google/go/x/tools/+/master:internal/lsp/diff/diff.go;l=40
+
+fn textEditLessThan(_: void, lhs: types.TextEdit, rhs: types.TextEdit) bool {
+    return offsets.rangeLessThan(lhs.range, rhs.range);
+}
+
+/// Caller owns returned memory.
 pub fn applyTextEdits(
     allocator: std.mem.Allocator,
     text: []const u8,
     text_edits: []const types.TextEdit,
     encoding: offsets.Encoding,
-) ![:0]const u8 {
-    var content_changes = try std.ArrayListUnmanaged(types.TextDocumentContentChangeEvent).initCapacity(allocator, text_edits.len);
-    defer content_changes.deinit(allocator);
+) ![]const u8 {
+    var text_edits_sortable = try allocator.alloc(types.TextEdit, text_edits.len);
+    defer allocator.free(text_edits_sortable);
 
-    for (text_edits) |te| try content_changes.append(allocator, .{ .literal_0 = .{ .range = te.range, .text = te.newText } });
+    std.mem.copy(types.TextEdit, text_edits_sortable, text_edits);
+    std.sort.sort(types.TextEdit, text_edits_sortable, {}, textEditLessThan);
 
-    return applyContentChanges(allocator, text, content_changes.items, encoding);
+    var final_text = std.ArrayListUnmanaged(u8){};
+
+    var last: usize = 0;
+    for (text_edits_sortable) |te| {
+        const start = offsets.maybePositionToIndex(text, te.range.start, encoding) orelse text.len;
+        if (start > last) {
+            try final_text.appendSlice(allocator, text[last..start]);
+            last = start;
+        }
+        try final_text.appendSlice(allocator, te.newText);
+        last = offsets.maybePositionToIndex(text, te.range.end, encoding) orelse text.len;
+    }
+    if (last < text.len) {
+        try final_text.appendSlice(allocator, text[last..]);
+    }
+
+    return try final_text.toOwnedSlice(allocator);
 }

@@ -17,6 +17,25 @@ pub fn indexToPosition(text: []const u8, index: usize, encoding: Encoding) types
     };
 }
 
+pub fn maybePositionToIndex(text: []const u8, position: types.Position, encoding: Encoding) ?usize {
+    var line: u32 = 0;
+    var line_start_index: usize = 0;
+    for (text) |c, i| {
+        if (line == position.line) break;
+        if (c == '\n') {
+            line += 1;
+            line_start_index = i + 1;
+        }
+    }
+
+    if (line != position.line) return null;
+
+    const line_text = std.mem.sliceTo(text[line_start_index..], '\n');
+    const line_byte_length = getNCodeUnitByteCount(line_text, position.character, encoding);
+
+    return line_start_index + line_byte_length;
+}
+
 pub fn positionToIndex(text: []const u8, position: types.Position, encoding: Encoding) usize {
     var line: u32 = 0;
     var line_start_index: usize = 0;
@@ -332,4 +351,23 @@ pub fn getNCodeUnitByteCount(text: []const u8, n: usize, encoding: Encoding) usi
             return i;
         },
     }
+}
+
+pub fn rangeLessThan(a: types.Range, b: types.Range) bool {
+    return positionLessThan(a.start, b.start) or positionLessThan(a.end, b.end);
+}
+
+pub fn positionLessThan(a: types.Position, b: types.Position) bool {
+    if (a.line < b.line) {
+        return true;
+    }
+    if (a.line > b.line) {
+        return false;
+    }
+
+    if (a.character < b.character) {
+        return true;
+    }
+
+    return false;
 }
