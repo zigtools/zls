@@ -344,7 +344,7 @@ fn writeNodeTokens(builder: *Builder, maybe_node: ?Ast.Node.Index) error{OutOfMe
             try writeToken(builder, var_decl.comptime_token, .keyword);
             try writeToken(builder, var_decl.ast.mut_token, .keyword);
 
-            if (try analysis.resolveTypeOfNode(builder.store, builder.arena, .{ .node = node, .handle = handle })) |decl_type| {
+            if (try analysis.resolveTypeOfNode(builder.store, .{ .node = node, .handle = handle })) |decl_type| {
                 try colorIdentifierBasedOnType(builder, decl_type, var_decl.ast.mut_token + 1, .{ .declaration = true });
             } else {
                 try writeTokenMod(builder, var_decl.ast.mut_token + 1, .variable, .{ .declaration = true });
@@ -418,7 +418,6 @@ fn writeNodeTokens(builder: *Builder, maybe_node: ?Ast.Node.Index) error{OutOfMe
 
             if (try analysis.lookupSymbolGlobal(
                 builder.store,
-                builder.arena,
                 handle,
                 name,
                 tree.tokens.items(.start)[main_token],
@@ -427,7 +426,9 @@ fn writeNodeTokens(builder: *Builder, maybe_node: ?Ast.Node.Index) error{OutOfMe
                     return try writeToken(builder, main_token, .parameter);
                 }
                 var bound_type_params = analysis.BoundTypeParams{};
-                if (try child.resolveType(builder.store, builder.arena, &bound_type_params)) |decl_type| {
+                defer bound_type_params.deinit(builder.store.allocator);
+
+                if (try child.resolveType(builder.store, &bound_type_params)) |decl_type| {
                     try colorIdentifierBasedOnType(builder, decl_type, main_token, .{});
                 } else {
                     try writeTokenMod(builder, main_token, .variable, .{});
@@ -628,7 +629,6 @@ fn writeNodeTokens(builder: *Builder, maybe_node: ?Ast.Node.Index) error{OutOfMe
 
                 field_token_type = if (try analysis.resolveTypeOfNode(
                     builder.store,
-                    builder.arena,
                     .{ .node = struct_init.ast.type_expr, .handle = handle },
                 )) |struct_type| switch (struct_type.type.data) {
                     .other => |type_node| if (ast.isContainer(struct_type.handle.tree, type_node))
@@ -843,12 +843,12 @@ fn writeNodeTokens(builder: *Builder, maybe_node: ?Ast.Node.Index) error{OutOfMe
             //      writeToken code.
             // Maybe we can hook into it insead? Also applies to Identifier and VarDecl
             var bound_type_params = analysis.BoundTypeParams{};
+            defer bound_type_params.deinit(builder.store.allocator);
+            
             const lhs_type = try analysis.resolveFieldAccessLhsType(
                 builder.store,
-                builder.arena,
                 (try analysis.resolveTypeOfNodeInternal(
                     builder.store,
-                    builder.arena,
                     .{ .node = data.lhs, .handle = handle },
                     &bound_type_params,
                 )) orelse return,
@@ -860,7 +860,6 @@ fn writeNodeTokens(builder: *Builder, maybe_node: ?Ast.Node.Index) error{OutOfMe
             };
             if (try analysis.lookupSymbolContainer(
                 builder.store,
-                builder.arena,
                 .{ .node = left_type_node, .handle = lhs_type.handle },
                 tree.tokenSlice(data.rhs),
                 !lhs_type.type.is_type_val,
@@ -884,7 +883,7 @@ fn writeNodeTokens(builder: *Builder, maybe_node: ?Ast.Node.Index) error{OutOfMe
                     else => {},
                 }
 
-                if (try decl_type.resolveType(builder.store, builder.arena, &bound_type_params)) |resolved_type| {
+                if (try decl_type.resolveType(builder.store, &bound_type_params)) |resolved_type| {
                     try colorIdentifierBasedOnType(builder, resolved_type, data.rhs, .{});
                 }
             }
