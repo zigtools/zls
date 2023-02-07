@@ -33,7 +33,7 @@ Building `zls` is very easy. You will need [a build of Zig master](https://zigla
 ```bash
 git clone --recurse-submodules https://github.com/zigtools/zls
 cd zls
-zig build -Drelease-safe
+zig build -Doptimize=ReleaseSafe
 ```
 
 #### Build Options
