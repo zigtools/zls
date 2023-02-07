@@ -9,7 +9,7 @@ const types = @import("lsp.zig");
 const offsets = @import("offsets.zig");
 
 pub const Builder = struct {
-    arena: *std.heap.ArenaAllocator,
+    arena: std.mem.Allocator,
     document_store: *DocumentStore,
     handle: *const DocumentStore.Handle,
     offset_encoding: offsets.Encoding,
@@ -54,9 +54,8 @@ pub const Builder = struct {
     }
 
     pub fn createWorkspaceEdit(self: *Builder, edits: []const types.TextEdit) error{OutOfMemory}!types.WorkspaceEdit {
-        const allocator = self.arena.allocator();
         var workspace_edit = types.WorkspaceEdit{ .changes = .{} };
-        try workspace_edit.changes.?.putNoClobber(allocator, self.handle.uri, try allocator.dupe(types.TextEdit, edits));
+        try workspace_edit.changes.?.putNoClobber(self.arena, self.handle.uri, try self.arena.dupe(types.TextEdit, edits));
 
         return workspace_edit;
     }
@@ -67,7 +66,7 @@ fn handleNonCamelcaseFunction(builder: *Builder, actions: *std.ArrayListUnmanage
 
     if (std.mem.allEqual(u8, identifier_name, '_')) return;
 
-    const new_text = try createCamelcaseText(builder.arena.allocator(), identifier_name);
+    const new_text = try createCamelcaseText(builder.arena, identifier_name);
 
     const action1 = types.CodeAction{
         .title = "make function name camelCase",
@@ -76,7 +75,7 @@ fn handleNonCamelcaseFunction(builder: *Builder, actions: *std.ArrayListUnmanage
         .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditLoc(loc, new_text)}),
     };
 
-    try actions.append(builder.arena.allocator(), action1);
+    try actions.append(builder.arena, action1);
 }
 
 fn handleUnusedFunctionParameter(builder: *Builder, actions: *std.ArrayListUnmanaged(types.CodeAction), loc: offsets.Loc) !void {
@@ -91,7 +90,6 @@ fn handleUnusedFunctionParameter(builder: *Builder, actions: *std.ArrayListUnman
 
     const decl = (try analysis.lookupSymbolGlobal(
         builder.document_store,
-        builder.arena,
         builder.handle,
         identifier_name,
         loc.start,
@@ -125,7 +123,7 @@ fn handleUnusedFunctionParameter(builder: *Builder, actions: *std.ArrayListUnman
         .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditLoc(getParamRemovalRange(tree, payload.param), "")}),
     };
 
-    try actions.appendSlice(builder.arena.allocator(), &.{ action1, action2 });
+    try actions.appendSlice(builder.arena, &.{ action1, action2 });
 }
 
 fn handleUnusedVariableOrConstant(builder: *Builder, actions: *std.ArrayListUnmanaged(types.CodeAction), loc: offsets.Loc) !void {
@@ -137,7 +135,6 @@ fn handleUnusedVariableOrConstant(builder: *Builder, actions: *std.ArrayListUnma
 
     const decl = (try analysis.lookupSymbolGlobal(
         builder.document_store,
-        builder.arena,
         builder.handle,
         identifier_name,
         loc.start,
@@ -157,7 +154,7 @@ fn handleUnusedVariableOrConstant(builder: *Builder, actions: *std.ArrayListUnma
 
     const index = token_starts[last_token] + 1;
 
-    try actions.append(builder.arena.allocator(), .{
+    try actions.append(builder.arena, .{
         .title = "discard value",
         .kind = .@"source.fixAll",
         .isPreferred = true,
@@ -174,7 +171,7 @@ fn handleUnusedIndexCapture(builder: *Builder, actions: *std.ArrayListUnmanaged(
     if (is_value_discarded) {
         // |_, i| ->
         // TODO fix formatting
-        try actions.append(builder.arena.allocator(), .{
+        try actions.append(builder.arena, .{
             .title = "remove capture",
             .kind = .quickfix,
             .isPreferred = true,
@@ -183,7 +180,7 @@ fn handleUnusedIndexCapture(builder: *Builder, actions: *std.ArrayListUnmanaged(
     } else {
         // |v, i| -> |v|
         // |v, _| -> |v|
-        try actions.append(builder.arena.allocator(), .{
+        try actions.append(builder.arena, .{
             .title = "remove index capture",
             .kind = .quickfix,
             .isPreferred = true,
@@ -202,7 +199,7 @@ fn handleUnusedCapture(builder: *Builder, actions: *std.ArrayListUnmanaged(types
     // by adding a discard in the block scope
     if (capture_locs.index != null) {
         // |v, i| -> |_, i|
-        try actions.append(builder.arena.allocator(), .{
+        try actions.append(builder.arena, .{
             .title = "discard capture",
             .kind = .quickfix,
             .isPreferred = true,
@@ -211,7 +208,7 @@ fn handleUnusedCapture(builder: *Builder, actions: *std.ArrayListUnmanaged(types
     } else {
         // |v|    ->
         // TODO fix formatting
-        try actions.append(builder.arena.allocator(), .{
+        try actions.append(builder.arena, .{
             .title = "remove capture",
             .kind = .quickfix,
             .isPreferred = true,
@@ -223,7 +220,7 @@ fn handleUnusedCapture(builder: *Builder, actions: *std.ArrayListUnmanaged(types
 fn handlePointlessDiscard(builder: *Builder, actions: *std.ArrayListUnmanaged(types.CodeAction), loc: offsets.Loc) !void {
     const edit_loc = getDiscardLoc(builder.handle.text, loc) orelse return;
 
-    try actions.append(builder.arena.allocator(), .{
+    try actions.append(builder.arena, .{
         .title = "remove pointless discard",
         .kind = .@"source.fixAll",
         .isPreferred = true,
@@ -300,10 +297,8 @@ fn createDiscardText(builder: *Builder, identifier_name: []const u8, declaration
     };
     const additional_indent = if (add_block_indentation) detectIndentation(builder.handle.text) else "";
 
-    const allocator = builder.arena.allocator();
     const new_text_len = 1 + indent.len + additional_indent.len + "_ = ;".len + identifier_name.len;
-    var new_text = try std.ArrayListUnmanaged(u8).initCapacity(allocator, new_text_len);
-    errdefer new_text.deinit(allocator);
+    var new_text = try std.ArrayListUnmanaged(u8).initCapacity(builder.arena, new_text_len);
 
     new_text.appendAssumeCapacity('\n');
     new_text.appendSliceAssumeCapacity(indent);
@@ -312,7 +307,7 @@ fn createDiscardText(builder: *Builder, identifier_name: []const u8, declaration
     new_text.appendSliceAssumeCapacity(identifier_name);
     new_text.appendAssumeCapacity(';');
 
-    return new_text.toOwnedSlice(allocator);
+    return new_text.toOwnedSlice(builder.arena);
 }
 
 fn getParamRemovalRange(tree: Ast, param: Ast.full.FnProto.Param) offsets.Loc {

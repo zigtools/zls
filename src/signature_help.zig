@@ -16,7 +16,7 @@ fn fnProtoToSignatureInfo(document_store: *DocumentStore, arena: *std.heap.Arena
     const proto_comments = (try analysis.getDocComments(alloc, tree, fn_node, .markdown)) orelse "";
 
     const arg_idx = if (skip_self_param) blk: {
-        const has_self_param = try analysis.hasSelfParam(arena, document_store, handle, proto);
+        const has_self_param = try analysis.hasSelfParam(document_store, handle, proto);
         break :blk commas + @boolToInt(has_self_param);
     } else commas;
 
@@ -260,7 +260,6 @@ pub fn getSignatureInfo(document_store: *DocumentStore, arena: *std.heap.ArenaAl
                 var tokenizer = std.zig.Tokenizer.init(held_expr);
                 if (try analysis.getFieldAccessType(
                     document_store,
-                    arena,
                     handle,
                     expr_start,
                     &tokenizer,
@@ -296,7 +295,6 @@ pub fn getSignatureInfo(document_store: *DocumentStore, arena: *std.heap.ArenaAl
                     const skip_self_param = !type_handle.type.is_type_val;
                     const decl_handle = (try analysis.lookupSymbolContainer(
                         document_store,
-                        arena,
                         .{ .node = node, .handle = type_handle.handle },
                         name,
                         true,
@@ -315,7 +313,6 @@ pub fn getSignatureInfo(document_store: *DocumentStore, arena: *std.heap.ArenaAl
 
                     if (try analysis.resolveVarDeclAlias(
                         document_store,
-                        arena,
                         .{ .node = node, .handle = decl_handle.handle },
                     )) |resolved| {
                         switch (resolved.decl.*) {

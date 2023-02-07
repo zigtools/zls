@@ -24,7 +24,7 @@ pub const InlayHint = struct {
 };
 
 const Builder = struct {
-    arena: *std.heap.ArenaAllocator,
+    arena: std.mem.Allocator,
     store: *DocumentStore,
     config: *const Config,
     handle: *const DocumentStore.Handle,
@@ -38,15 +38,15 @@ const Builder = struct {
             const prefix = if (tooltip_noalias) if (tooltip_comptime) "noalias comptime " else "noalias " else if (tooltip_comptime) "comptime " else "";
 
             if (self.hover_kind == .markdown) {
-                break :blk try std.fmt.allocPrint(self.arena.allocator(), "```zig\n{s}{s}\n```", .{ prefix, tooltip });
+                break :blk try std.fmt.allocPrint(self.arena, "```zig\n{s}{s}\n```", .{ prefix, tooltip });
             }
 
-            break :blk try std.fmt.allocPrint(self.arena.allocator(), "{s}{s}", .{ prefix, tooltip });
+            break :blk try std.fmt.allocPrint(self.arena, "{s}{s}", .{ prefix, tooltip });
         };
 
-        try self.hints.append(self.arena.allocator(), .{
+        try self.hints.append(self.arena, .{
             .token_index = token_index,
-            .label = try std.fmt.allocPrint(self.arena.allocator(), "{s}:", .{label}),
+            .label = try std.fmt.allocPrint(self.arena, "{s}:", .{label}),
             .kind = .Parameter,
             .tooltip = .{
                 .kind = self.hover_kind,
@@ -56,7 +56,7 @@ const Builder = struct {
     }
 
     fn toOwnedSlice(self: *Builder) error{OutOfMemory}![]InlayHint {
-        return self.hints.toOwnedSlice(self.arena.allocator());
+        return self.hints.toOwnedSlice(self.arena);
     }
 };
 
@@ -81,7 +81,7 @@ fn writeCallHint(builder: *Builder, call: Ast.full.Call, decl_handle: analysis.D
     var i: usize = 0;
     var it = fn_proto.iterate(&decl_tree);
 
-    if (try analysis.hasSelfParam(builder.arena, builder.store, decl_handle.handle, fn_proto)) {
+    if (try analysis.hasSelfParam(builder.store, decl_handle.handle, fn_proto)) {
         _ = ast.nextFnParam(&it);
     }
 
@@ -179,7 +179,7 @@ fn writeCallNodeHint(builder: *Builder, call: Ast.full.Call) !void {
             const source_index = offsets.tokenToIndex(tree, main_tokens[call.ast.fn_expr]);
             const name = offsets.tokenToSlice(tree, main_tokens[call.ast.fn_expr]);
 
-            if (try analysis.lookupSymbolGlobal(builder.store, builder.arena, handle, name, source_index)) |decl_handle| {
+            if (try analysis.lookupSymbolGlobal(builder.store, handle, name, source_index)) |decl_handle| {
                 try writeCallHint(builder, call, decl_handle);
             }
         },
@@ -191,18 +191,17 @@ fn writeCallNodeHint(builder: *Builder, call: Ast.full.Call) !void {
             const start = offsets.tokenToIndex(tree, lhsToken);
             const rhs_loc = offsets.tokenToLoc(tree, rhsToken);
 
-            var held_range = try builder.arena.allocator().dupeZ(u8, handle.text[start..rhs_loc.end]);
+            var held_range = try builder.arena.dupeZ(u8, handle.text[start..rhs_loc.end]);
             var tokenizer = std.zig.Tokenizer.init(held_range);
 
             // note: we have the ast node, traversing it would probably yield better results
             // than trying to re-tokenize and re-parse it
-            if (try analysis.getFieldAccessType(builder.store, builder.arena, handle, rhs_loc.end, &tokenizer)) |result| {
+            if (try analysis.getFieldAccessType(builder.store, handle, rhs_loc.end, &tokenizer)) |result| {
                 const container_handle = result.unwrapped orelse result.original;
                 switch (container_handle.type.data) {
                     .other => |container_handle_node| {
                         if (try analysis.lookupSymbolContainer(
                             builder.store,
-                            builder.arena,
                             .{ .node = container_handle_node, .handle = container_handle.handle },
                             tree.tokenSlice(rhsToken),
                             true,
@@ -276,7 +275,7 @@ fn writeNodeInlayHint(
 /// only parameter hints are created
 /// only hints in the given loc are created
 pub fn writeRangeInlayHint(
-    arena: *std.heap.ArenaAllocator,
+    arena: std.mem.Allocator,
     config: Config,
     store: *DocumentStore,
     handle: *const DocumentStore.Handle,
@@ -292,7 +291,7 @@ pub fn writeRangeInlayHint(
         .hover_kind = hover_kind,
     };
 
-    const nodes = try ast.nodesAtLoc(arena.allocator(), handle.tree, loc);
+    const nodes = try ast.nodesAtLoc(arena, handle.tree, loc);
 
     for (nodes) |child| {
         try writeNodeInlayHint(&builder, child);
