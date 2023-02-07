@@ -13,3 +13,4 @@ pub const types = @import("lsp.zig");
 pub const URI = @import("uri.zig");
 pub const DocumentStore = @import("DocumentStore.zig");
 pub const ComptimeInterpreter = @import("ComptimeInterpreter.zig");
+pub const diff = @import("diff.zig");

@@ -2,357 +2,295 @@ const std = @import("std");
 const types = @import("lsp.zig");
 const offsets = @import("offsets.zig");
 
-pub const Error = error{ OutOfMemory, InvalidRange };
+pub const Error = error{ OutOfMemory, InvalidRange, UnknownError };
 
-// Whether the `Change` is an addition, deletion, or no change from the
-// original string to the new string
-const Operation = enum { Deletion, Addition, Nothing };
+// https://cs.opensource.google/go/x/tools/+/master:internal/lsp/diff/myers/diff.go
 
-/// A single character difference between two strings
-const Change = struct {
-    operation: Operation,
-    pos: usize,
-    value: ?u8,
+pub const Operation = struct {
+    pub const Kind = enum {
+        delete,
+        insert,
+        equal,
+    };
+
+    kind: Kind,
+    /// content from b
+    content: []const []const u8,
+
+    // indices of the line in a
+    i_1: isize,
+    i_2: isize,
+    // indices of the line in b, j_2 implied by len(content)
+    j_1: isize,
 };
 
-/// Given two input strings, `a` and `b`, return a list of Edits that
-/// describe the changes from `a` to `b`
 pub fn edits(
     allocator: std.mem.Allocator,
-    a: []const u8,
-    b: []const u8,
+    before: []const u8,
+    after: []const u8,
 ) Error!std.ArrayListUnmanaged(types.TextEdit) {
-    // Given the input strings A and B, we skip over the first N characters
-    // where A[0..N] == B[0..N]. We want to trim the start (and end) of the
-    // strings that have the same text. This decreases the size of the LCS
-    // table and makes the diff comparison more efficient
-    var a_trim: []const u8 = a;
-    var b_trim: []const u8 = b;
-    const a_trim_offset = trim_input(&a_trim, &b_trim);
+    var ops = try operations(allocator, try splitLines(allocator, before), try splitLines(allocator, after)) orelse return error.UnknownError;
+    var eds = std.ArrayListUnmanaged(types.TextEdit){};
 
-    const rows = a_trim.len + 1;
-    const cols = b_trim.len + 1;
-
-    var lcs = try Array2D.new(allocator, rows, cols);
-    defer lcs.deinit();
-
-    calculate_lcs(&lcs, a_trim, b_trim);
-
-    return try get_changes(
-        &lcs,
-        a,
-        a_trim_offset,
-        a_trim,
-        b_trim,
-        allocator,
-    );
-}
-
-fn trim_input(a_out: *[]const u8, b_out: *[]const u8) usize {
-    if (a_out.len == 0 or b_out.len == 0) return 0;
-
-    var a: []const u8 = a_out.*;
-    var b: []const u8 = b_out.*;
-
-    // Trim the beginning of the string
-    var start: usize = 0;
-    while (start < a.len and start < b.len and a[start] == b[start]) : ({
-        start += 1;
-    }) {}
-
-    // Trim the end of the string
-    var end: usize = 1;
-    while (end < a.len and end < b.len and a[a.len - end] == b[b.len - end]) : ({
-        end += 1;
-    }) {}
-    end -= 1;
-
-    var a_start = start;
-    var a_end = a.len - end;
-    var b_start = start;
-    var b_end = b.len - end;
-
-    // In certain situations, the trimmed range can be "negative" where
-    // `a_start` ends up being after `a_end` in the byte stream. If you
-    // consider the following inputs:
-    //     a: "xx    gg  xx"
-    //     b: "xx  gg  xx"
-    //
-    // This will lead to the following calculations:
-    //     a_start: 4
-    //     a_end: 4
-    //     b_start: 4
-    //     b_end: 2
-    //
-    // In negative range situations, we add the absolute value of the
-    // the negative range's length (`b_start - b_end` in this case) to the
-    // other range's length (a_end + (b_start - b_end)), and then set the
-    // negative range end to the negative range start (b_end = b_start)
-    if (a_start > a_end) {
-        const difference = a_start - a_end;
-        a_end = a_start;
-        b_end += difference;
-    }
-    if (b_start > b_end) {
-        const difference = b_start - b_end;
-        b_end = b_start;
-        a_end += difference;
-    }
-
-    a_out.* = a[a_start..a_end];
-    b_out.* = b[b_start..b_end];
-
-    return start;
-}
-
-/// A 2D array that is addressable as a[row, col]
-pub const Array2D = struct {
-    const Self = @This();
-
-    data: [*]usize,
-    allocator: std.mem.Allocator,
-    rows: usize,
-    cols: usize,
-
-    pub fn new(
-        allocator: std.mem.Allocator,
-        rows: usize,
-        cols: usize,
-    ) error{OutOfMemory}!Self {
-        const data = try allocator.alloc(usize, rows * cols);
-
-        return Self{
-            .data = data.ptr,
-            .allocator = allocator,
-            .rows = rows,
-            .cols = cols,
+    for (ops) |op| {
+        const s = types.Range{
+            .start = .{
+                .line = @intCast(u32, op.i_1),
+                .character = 0,
+            },
+            .end = .{
+                .line = @intCast(u32, op.i_2),
+                .character = 0,
+            },
         };
+        switch (op.kind) {
+            .delete => try eds.append(allocator, .{ .range = s, .newText = "" }),
+            .insert => {
+                // Insert: formatted[j_1..j_2] is inserted at unformatted[i_1..i_1].
+                const content = try std.mem.join(allocator, "", op.content);
+                if (content.len != 0) {
+                    try eds.append(allocator, .{ .range = s, .newText = content });
+                }
+            },
+            else => {},
+        }
     }
+    return eds;
+}
 
-    pub fn deinit(self: *Self) void {
-        self.allocator.free(self.data[0 .. self.rows * self.cols]);
-    }
-
-    pub fn get(self: *Self, row: usize, col: usize) *usize {
-        return @ptrCast(*usize, self.data + (row * self.cols) + col);
-    }
-};
-
-/// Build a Longest Common Subsequence table
-fn calculate_lcs(
-    lcs: *Array2D,
-    astr: []const u8,
-    bstr: []const u8,
+fn add(
+    solution: []Operation,
+    op: ?*Operation,
+    i_2: isize,
+    j_2: isize,
+    b: []const []const u8,
+    i: *usize,
 ) void {
-    const rows = astr.len + 1;
-    const cols = bstr.len + 1;
+    if (op == null) {
+        return;
+    }
+    op.?.i_2 = i_2;
+    if (op.?.kind == .insert) {
+        op.?.content = b[@intCast(usize, op.?.j_1)..@intCast(usize, j_2)];
+    }
+    solution[i.*] = op.?.*;
+    i.* += 1;
+}
 
-    std.mem.set(usize, lcs.data[0 .. rows * cols], 0);
+// operations returns the list of operations to convert a into b, consolidating
+// operations for multiple lines and not including equal lines.
+fn operations(allocator: std.mem.Allocator, a: []const []const u8, b: []const []const u8) Error!?[]Operation {
+    if (a.len == 0 and b.len == 0) {
+        return null;
+    }
 
-    // This approach is a dynamic programming technique to calculate the
-    // longest common subsequence between two strings, `a` and `b`. We start
-    // at 1 for `i` and `j` because the first column and first row are always
-    // set to zero
-    //
-    // You can find more information about this at the following url:
-    // https://en.wikipedia.org/wiki/Longest_common_subsequence_problem
-    var i: usize = 1;
-    while (i < rows) : (i += 1) {
-        var j: usize = 1;
-        while (j < cols) : (j += 1) {
-            if (astr[i - 1] == bstr[j - 1]) {
-                lcs.get(i, j).* = lcs.get(i - 1, j - 1).* + 1;
+    const ses_res = try shortestEditSequence(allocator, a, b);
+    var trace = ses_res[0] orelse return null;
+    var offset = ses_res[1];
+
+    var snakes = try backtrack(allocator, trace, @intCast(isize, a.len), @intCast(isize, b.len), offset);
+
+    var m = a.len;
+    var n = b.len;
+
+    var i: usize = 0;
+    var solution = try allocator.alloc(Operation, a.len + b.len);
+
+    var x: isize = 0;
+    var y: isize = 0;
+
+    for (snakes) |maybe_snake| {
+        if (maybe_snake == null) {
+            continue;
+        }
+
+        const snake = maybe_snake.?;
+
+        var op: ?Operation = null;
+        // delete (horizontal)
+        while (snake[0] - snake[1] > x - y) {
+            if (op == null) {
+                op = .{
+                    .kind = .delete,
+                    .i_1 = x,
+                    .i_2 = 0,
+                    .j_1 = y,
+                    .content = &.{},
+                };
+            }
+            x += 1;
+            if (x == m) {
+                break;
+            }
+        }
+        //     solution: []Operation,
+        // op: *?Operation,
+        // i_2: isize,
+        // j_2: isize,
+        // b: []const []const u8,
+        // i: *isize,
+        add(solution, if (op) |*o| o else null, x, y, b, &i);
+        op = null;
+        // insert (vertical)
+        while (snake[0] - snake[1] < x - y) {
+            if (op == null) {
+                op = .{
+                    .kind = .insert,
+                    .i_1 = x,
+                    .i_2 = 0,
+                    .j_1 = y,
+                    .content = &.{},
+                };
+            }
+            y += 1;
+        }
+        add(solution, if (op) |*o| o else null, x, y, b, &i);
+        op = null;
+        // equal (diagonal)
+        while (x < snake[0]) {
+            x += 1;
+            y += 1;
+        }
+        if (x >= m and y >= n) {
+            break;
+        }
+    }
+    return solution[0..i];
+}
+
+// backtrack uses the trace for the edit sequence computation and returns the
+// "snakes" that make up the solution. A "snake" is a single deletion or
+// insertion followed by zero or diagonals.
+fn backtrack(
+    allocator: std.mem.Allocator,
+    trace: []const ?[]const isize,
+    x_in: isize,
+    y_in: isize,
+    offset: isize,
+) Error![]const ?[2]isize {
+    var snakes = try allocator.alloc(?[2]isize, trace.len);
+    for (snakes) |*s| s.* = null;
+
+    var x = x_in;
+    var y = y_in;
+    var d = @intCast(isize, trace.len) - 1;
+
+    while (x > 0 and y > 0 and d > 0) : (d -= 1) {
+        const v_m = trace[@intCast(usize, d)];
+        if (v_m == null)
+            continue;
+
+        const v = v_m.?;
+        snakes[@intCast(usize, d)] = .{ x, y };
+
+        const k = x - y;
+        var kPrev: isize = 0;
+
+        if (k == -d or (k != d and v[@intCast(usize, k - 1 + offset)] < v[@intCast(usize, k + 1 + offset)])) {
+            kPrev = k + 1;
+        } else {
+            kPrev = k - 1;
+        }
+
+        x = v[@intCast(usize, kPrev + offset)];
+        y = x - kPrev;
+    }
+
+    if (x < 0 or y < 0) {
+        return snakes;
+    }
+
+    snakes[@intCast(usize, d)] = .{ x, y };
+    return snakes;
+}
+
+// shortestEditSequence returns the shortest edit sequence that converts a into b.
+const SesTuple = struct { ?[]const ?[]const isize, isize };
+fn shortestEditSequence(
+    allocator: std.mem.Allocator,
+    a: []const []const u8,
+    b: []const []const u8,
+) Error!SesTuple {
+    var m = a.len;
+    var n = b.len;
+
+    var v = try allocator.alloc(isize, 2 * (n + m) + 1);
+    for (v) |*z| z.* = 0;
+    var offset = @intCast(isize, n + m);
+    var trace = try allocator.alloc(?[]isize, n + m + 1);
+    for (trace) |*z| z.* = null;
+
+    // Iterate through the maximum possible length of the SES (N+M).
+    var d: usize = 0;
+    while (d <= n + m) : (d += 1) {
+        var copyV = try allocator.alloc(isize, v.len);
+        for (copyV) |*z| z.* = 0;
+
+        // k lines are represented by the equation y = x - k. We move in
+        // increments of 2 because end points for even d are on even k lines.
+        var k: isize = -@intCast(isize, d);
+        while (k <= d) : (k += 2) {
+            // At each point, we either go down or to the right. We go down if
+            // k == -d, and we go to the right if k == d. We also prioritize
+            // the maximum x value, because we prefer deletions to insertions.
+            var x: isize = 0;
+            if (k == -@intCast(isize, d) or (k != @intCast(isize, d) and v[@intCast(usize, k - 1 + offset)] < v[@intCast(usize, k + 1 + offset)])) {
+                x = v[@intCast(usize, k + 1 + offset)]; // down
             } else {
-                lcs.get(i, j).* = std.math.max(
-                    lcs.get(i - 1, j).*,
-                    lcs.get(i, j - 1).*,
-                );
+                x = v[@intCast(usize, k - 1 + offset)] + 1; // right
+            }
+
+            var y = x - k;
+
+            // Diagonal moves while we have equal contents.
+            while (x < m and y < n and std.mem.eql(u8, a[@intCast(usize, x)], b[@intCast(usize, y)])) {
+                x += 1;
+                y += 1;
+            }
+
+            v[@intCast(usize, k + offset)] = x;
+
+            // Return if we've exceeded the maximum values.
+            if (x == m and y == n) {
+                // Makes sure to save the state of the array before returning.
+                std.mem.copy(isize, copyV, v);
+                trace[d] = copyV;
+                return .{ trace, offset };
             }
         }
+
+        // Save the state of the array.
+        std.mem.copy(isize, copyV, v);
+        trace[d] = copyV;
     }
+    return .{ null, 0 };
 }
 
-pub fn get_changes(
-    lcs: *Array2D,
-    a: []const u8,
-    a_trim_offset: usize,
-    a_trim: []const u8,
-    b_trim: []const u8,
-    allocator: std.mem.Allocator,
-) Error!std.ArrayListUnmanaged(types.TextEdit) {
-    // First we get a list of changes between strings at the character level:
-    // "addition", "deletion", and "no change" for each character
-    var changes = try std.ArrayListUnmanaged(Change).initCapacity(allocator, a_trim.len);
-    defer changes.deinit(allocator);
-    try recur_changes(
-        lcs,
-        &changes,
-        a_trim,
-        b_trim,
-        @intCast(i64, a_trim.len),
-        @intCast(i64, b_trim.len),
-        allocator,
-    );
+fn splitLines(allocator: std.mem.Allocator, str: []const u8) error{OutOfMemory}![]const []const u8 {
+    var lines = std.ArrayListUnmanaged([]const u8){};
 
-    // We want to group runs of deletions and additions, and separate them by
-    // runs of `.Nothing` changes. This will allow us to calculate the
-    // `TextEdit` ranges
-    var groups = std.ArrayListUnmanaged([]Change){};
-    defer groups.deinit(allocator);
+    var index: ?usize = 0;
 
-    var active_change: ?[]Change = null;
-    for (changes.items) |ch, i| {
-        switch (ch.operation) {
-            .Addition, .Deletion => {
-                if (active_change == null) {
-                    active_change = changes.items[i..];
-                }
-            },
-            .Nothing => {
-                if (active_change) |*ac| {
-                    ac.* = ac.*[0..(i - (changes.items.len - ac.*.len))];
-                    try groups.append(allocator, ac.*);
-                    active_change = null;
-                }
-            },
-        }
-    }
-    if (active_change) |*ac| {
-        ac.* = ac.*[0..(changes.items.len - (changes.items.len - ac.*.len))];
-        try groups.append(allocator, ac.*);
-    }
-
-    // The LCS algorithm works "in reverse", so we're putting everything back
-    // in ascending order
-    var a_lines = std.mem.split(u8, a, "\n");
-    std.mem.reverse([]Change, groups.items);
-    for (groups.items) |group| std.mem.reverse(Change, group);
-
-    var edit_results = try std.ArrayListUnmanaged(types.TextEdit).initCapacity(allocator, groups.items.len);
-    errdefer {
-        for (edit_results.items) |edit| {
-            allocator.free(edit.newText);
-        }
-        edit_results.deinit(allocator);
-    }
-
-    // Convert our grouped changes into `Edit`s
-    for (groups.items) |group| {
-        var range_start = group[0].pos;
-        var range_len: usize = 0;
-        var newText = std.ArrayListUnmanaged(u8){};
-        errdefer newText.deinit(allocator);
-        for (group) |ch| {
-            switch (ch.operation) {
-                .Addition => try newText.append(allocator, ch.value.?),
-                .Deletion => range_len += 1,
-                else => {},
-            }
-        }
-        var range = try char_pos_to_range(
-            &a_lines,
-            a_trim_offset + range_start,
-            a_trim_offset + range_start + range_len,
-        );
-        a_lines.reset();
-        edit_results.appendAssumeCapacity(.{
-            .range = range,
-            .newText = try newText.toOwnedSlice(allocator),
-        });
-    }
-
-    return edit_results;
-}
-
-fn recur_changes(
-    lcs: *Array2D,
-    changes: *std.ArrayListUnmanaged(Change),
-    a: []const u8,
-    b: []const u8,
-    i: i64,
-    j: i64,
-    allocator: std.mem.Allocator,
-) error{OutOfMemory}!void {
-    // This function recursively works backwards through the LCS table in
-    // order to figure out what kind of changes took place to transform `a`
-    // into `b`
-
-    const ii = @intCast(usize, i);
-    const jj = @intCast(usize, j);
-
-    if (i > 0 and j > 0 and a[ii - 1] == b[jj - 1]) {
-        try changes.append(allocator, .{
-            .operation = .Nothing,
-            .pos = ii - 1,
-            .value = null,
-        });
-        try recur_changes(lcs, changes, a, b, i - 1, j - 1, allocator);
-    } else if (j > 0 and (i == 0 or lcs.get(ii, jj - 1).* >= lcs.get(ii - 1, jj).*)) {
-        try changes.append(allocator, .{
-            .operation = .Addition,
-            .pos = ii,
-            .value = b[jj - 1],
-        });
-        try recur_changes(lcs, changes, a, b, i, j - 1, allocator);
-    } else if (i > 0 and (j == 0 or lcs.get(ii, jj - 1).* < lcs.get(ii - 1, jj).*)) {
-        try changes.append(allocator, .{
-            .operation = .Deletion,
-            .pos = ii - 1,
-            .value = a[ii - 1],
-        });
-        try recur_changes(lcs, changes, a, b, i - 1, j, allocator);
-    }
-}
-
-/// Accept a range that is solely based on buffer/character position and
-/// convert it to line number & character position range
-fn char_pos_to_range(
-    lines: *std.mem.SplitIterator(u8),
-    start: usize,
-    end: usize,
-) Error!types.Range {
-    var char_pos: usize = 0;
-    var line_pos: usize = 0;
-    var result_start_pos: ?types.Position = null;
-    var result_end_pos: ?types.Position = null;
-
-    while (lines.next()) |line| : ({
-        char_pos += line.len + 1;
-        line_pos += 1;
-    }) {
-        if (start >= char_pos and start <= char_pos + line.len) {
-            result_start_pos = .{
-                .line = @intCast(u32, line_pos),
-                .character = @intCast(u32, start - char_pos),
-            };
-        }
-        if (end >= char_pos and end <= char_pos + line.len) {
-            result_end_pos = .{
-                .line = @intCast(u32, line_pos),
-                .character = @intCast(u32, end - char_pos),
-            };
-        }
-    }
-
-    if (result_start_pos == null) return error.InvalidRange;
-
-    // If we did not find an end position, it is outside the range of the
-    // string for some reason so clamp it to the string end position
-    if (result_end_pos == null) {
-        result_end_pos = types.Position{
-            .line = @intCast(u32, line_pos),
-            .character = @intCast(u32, char_pos),
+    while (true) {
+        const start = index orelse break;
+        const end = if (std.mem.indexOfPos(u8, str, start, "\n")) |delim_start| blk: {
+            index = delim_start + 1;
+            break :blk delim_start + 1;
+        } else blk: {
+            index = null;
+            break :blk str.len;
         };
+        if (!(index == null and start == end)) {
+            // std.log.err("'{s}'", .{str[start..end]});
+            try lines.append(allocator, str[start..end]);
+        }
     }
 
-    return types.Range{
-        .start = result_start_pos.?,
-        .end = result_end_pos.?,
-    };
+    return lines.toOwnedSlice(allocator);
 }
 
 // Caller owns returned memory.
-pub fn applyTextEdits(
+pub fn applyContentChanges(
     allocator: std.mem.Allocator,
     text: []const u8,
     content_changes: []const types.TextDocumentContentChangeEvent,
@@ -384,4 +322,19 @@ pub fn applyTextEdits(
     }
 
     return try text_array.toOwnedSliceSentinel(allocator, 0);
+}
+
+// Caller owns returned memory.
+pub fn applyTextEdits(
+    allocator: std.mem.Allocator,
+    text: []const u8,
+    text_edits: []const types.TextEdit,
+    encoding: offsets.Encoding,
+) ![:0]const u8 {
+    var content_changes = try std.ArrayListUnmanaged(types.TextDocumentContentChangeEvent).initCapacity(allocator, text_edits.len);
+    defer content_changes.deinit(allocator);
+
+    for (text_edits) |te| try content_changes.append(allocator, .{ .literal_0 = .{ .range = te.range, .text = te.newText } });
+
+    return applyContentChanges(allocator, text, content_changes.items, encoding);
 }

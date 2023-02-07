@@ -2088,7 +2088,7 @@ fn changeDocumentHandler(server: *Server, notification: types.DidChangeTextDocum
 
     const handle = server.document_store.getHandle(notification.textDocument.uri) orelse return;
 
-    const new_text = try diff.applyTextEdits(server.allocator, handle.text, notification.contentChanges, server.offset_encoding);
+    const new_text = try diff.applyContentChanges(server.allocator, handle.text, notification.contentChanges, server.offset_encoding);
 
     try server.document_store.refreshDocument(handle.uri, new_text);
 
