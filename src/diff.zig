@@ -123,12 +123,6 @@ fn operations(allocator: std.mem.Allocator, a: []const []const u8, b: []const []
                 break;
             }
         }
-        //     solution: []Operation,
-        // op: *?Operation,
-        // i_2: isize,
-        // j_2: isize,
-        // b: []const []const u8,
-        // i: *isize,
         add(solution, if (op) |*o| o else null, x, y, b, &i);
         op = null;
         // insert (vertical)
@@ -176,12 +170,9 @@ fn backtrack(
     var d = @intCast(isize, trace.len) - 1;
 
     while (x > 0 and y > 0 and d > 0) : (d -= 1) {
-        const v_m = trace[@intCast(usize, d)];
-        if (v_m == null)
-            continue;
-
-        const v = v_m.?;
-        snakes[@intCast(usize, d)] = .{ x, y };
+        const cast_d = @intCast(usize, d);
+        const v = trace[cast_d] orelse continue;
+        snakes[cast_d] = .{ x, y };
 
         const k = x - y;
         var kPrev: isize = 0;
