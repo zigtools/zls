@@ -111,6 +111,7 @@ const Builder = struct {
             },
             .field_access => {
                 var bound_type_params = analysis.BoundTypeParams{};
+                defer bound_type_params.deinit(builder.store.allocator);
                 const left_type = try analysis.resolveFieldAccessLhsType(
                     builder.store,
                     (try analysis.resolveTypeOfNodeInternal(
