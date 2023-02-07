@@ -201,7 +201,7 @@ pub fn symbolReferences(
                 }
                 try store.collectDependencies(allocator, handle.*, &handle_dependencies);
 
-                try dependencies.ensureTotalCapacity(allocator, handle_dependencies.items.len);
+                try dependencies.ensureUnusedCapacity(allocator, handle_dependencies.items.len);
                 for (handle_dependencies.items) |uri| {
                     dependencies.putAssumeCapacity(uri, {});
                 }
