@@ -115,10 +115,6 @@ test "references - label" {
 }
 
 fn testReferences(source: []const u8) !void {
-    const file_uri: []const u8 = switch (builtin.os.tag) {
-        .windows => "file:///C:\\test.zig",
-        else => "file:///test.zig",
-    };
     const new_name = "placeholder";
 
     var phr = try helper.collectReplacePlaceholders(allocator, source, new_name);
@@ -127,7 +123,7 @@ fn testReferences(source: []const u8) !void {
     var ctx = try Context.init();
     defer ctx.deinit();
 
-    try ctx.requestDidOpen(file_uri, phr.new_source);
+    const file_uri = try ctx.addDocument(phr.new_source);
 
     try std.testing.expect(phr.locations.len != 0);
 

@@ -844,7 +844,7 @@ fn writeNodeTokens(builder: *Builder, maybe_node: ?Ast.Node.Index) error{OutOfMe
             // Maybe we can hook into it insead? Also applies to Identifier and VarDecl
             var bound_type_params = analysis.BoundTypeParams{};
             defer bound_type_params.deinit(builder.store.allocator);
-            
+
             const lhs_type = try analysis.resolveFieldAccessLhsType(
                 builder.store,
                 (try analysis.resolveTypeOfNodeInternal(

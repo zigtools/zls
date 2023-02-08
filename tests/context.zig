@@ -1,5 +1,6 @@
 const std = @import("std");
 const zls = @import("zls");
+const builtin = @import("builtin");
 
 const tres = @import("tres");
 
@@ -7,7 +8,6 @@ const Header = zls.Header;
 const Config = zls.Config;
 const Server = zls.Server;
 const types = zls.types;
-
 
 /// initialize request taken from Visual Studio Code with the following changes:
 /// - removed locale, rootPath, rootUri, trace, workspaceFolders
@@ -149,7 +149,12 @@ pub const Context = struct {
     }
 
     // helper
-    pub fn requestDidOpen(self: *Context, uri: []const u8, source: []const u8) !void {
+    pub fn addDocument(self: *Context, source: []const u8) ![]const u8 {
+        const uri: []const u8 = switch (builtin.os.tag) {
+            .windows => "file:///C:\\test.zig",
+            else => "file:///test.zig",
+        };
+
         const open_document = types.DidOpenTextDocumentParams{
             .textDocument = .{
                 .uri = uri,
@@ -160,7 +165,9 @@ pub const Context = struct {
         };
         const params = try std.json.stringifyAlloc(allocator, open_document, .{});
         defer allocator.free(params);
+
         try self.notification("textDocument/didOpen", params);
+        return uri;
     }
 
     pub fn Response(comptime Result: type) type {

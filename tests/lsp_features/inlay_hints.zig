@@ -73,12 +73,7 @@ fn testInlayHints(source: []const u8) !void {
     var ctx = try Context.init();
     defer ctx.deinit();
 
-    const test_uri: []const u8 = switch (builtin.os.tag) {
-        .windows => "file:///C:\\test.zig",
-        else => "file:///test.zig",
-    };
-
-    try ctx.requestDidOpen(test_uri, phr.new_source);
+    const test_uri = try ctx.addDocument(phr.new_source);
 
     const range = types.Range{
         .start = types.Position{ .line = 0, .character = 0 },
@@ -120,10 +115,10 @@ fn testInlayHints(source: []const u8) !void {
         for (hints) |hint| {
             if (position.line != hint.position.line or position.character != hint.position.character) continue;
 
-            if(!std.mem.endsWith(u8, hint.label, ":")) {
-                try error_builder.msgAtLoc("label `{s}` must end with a colon!", new_loc, .err, .{ hint.label });
+            if (!std.mem.endsWith(u8, hint.label, ":")) {
+                try error_builder.msgAtLoc("label `{s}` must end with a colon!", new_loc, .err, .{hint.label});
             }
-            const actual_label = hint.label[0..hint.label.len - 1];
+            const actual_label = hint.label[0 .. hint.label.len - 1];
 
             if (!std.mem.eql(u8, expected_label, actual_label)) {
                 try error_builder.msgAtLoc("expected label `{s}` here but got `{s}`!", new_loc, .err, .{ expected_label, actual_label });

@@ -31,12 +31,7 @@ fn testSelectionRange(source: []const u8, want: []const []const u8) !void {
     var ctx = try Context.init();
     defer ctx.deinit();
 
-    const test_uri: []const u8 = switch (builtin.os.tag) {
-        .windows => "file:///C:\\test.zig",
-        else => "file:///test.zig",
-    };
-
-    try ctx.requestDidOpen(test_uri, phr.new_source);
+    const test_uri = try ctx.addDocument(phr.new_source);
 
     const position = offsets.locToRange(phr.new_source, phr.locations.items(.new)[0], .@"utf-16").start;
 
