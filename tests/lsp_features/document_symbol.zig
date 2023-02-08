@@ -22,6 +22,19 @@ test "documentSymbol - smoke" {
     );
 }
 
+// FIXME: https://github.com/zigtools/zls/issues/986
+test "documentSymbol - nested struct with self" {
+    try testDocumentSymbol(
+        \\const Foo = struct {
+        \\    const Self = @This();
+        \\    pub fn foo() !Self {}
+        \\    const Bar = struct {};
+        \\};
+    ,
+        \\Variable Foo
+    );
+}
+
 fn testDocumentSymbol(source: []const u8, want: []const u8) !void {
     var ctx = try Context.init();
     defer ctx.deinit();
