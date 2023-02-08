@@ -14,32 +14,32 @@ const offsets = zls.offsets;
 const allocator: std.mem.Allocator = std.testing.allocator;
 
 test "ComptimeInterpreter - primitive types" {
-    try testExpr("true", .{ .simple = .bool }, .{ .simple = .bool_true });
-    try testExpr("false", .{ .simple = .bool }, .{ .simple = .bool_false });
-    try testExpr("5", .{ .simple = .comptime_int }, .{ .int_u64_value = 5 });
-    // TODO try testExpr("-2", .{ .simple = .comptime_int }, .{ .int_i64_value = -2 });
-    try testExpr("3.0", .{ .simple = .comptime_float }, null);
+    try testExpr("true", .{ .simple_type = .bool }, .{ .simple_value = .bool_true });
+    try testExpr("false", .{ .simple_type = .bool }, .{ .simple_value = .bool_false });
+    try testExpr("5", .{ .simple_type = .comptime_int }, .{ .int_u64_value = 5 });
+    // TODO try testExpr("-2", .{ .simple_type = .comptime_int }, .{ .int_i64_value = -2 });
+    try testExpr("3.0", .{ .simple_type = .comptime_float }, null);
 
-    try testExpr("null", .{ .simple = .null_type }, .{ .simple = .null_value });
-    try testExpr("void", .{ .simple = .type }, .{ .simple = .void });
-    try testExpr("undefined", .{ .simple = .undefined_type }, .{ .simple = .undefined_value });
-    try testExpr("noreturn", .{ .simple = .type }, .{ .simple = .noreturn });
+    try testExpr("null", .{ .simple_type = .null_type }, .{ .simple_value = .null_value });
+    try testExpr("void", .{ .simple_type = .type }, .{ .simple_type = .void });
+    try testExpr("undefined", .{ .simple_type = .undefined_type }, .{ .simple_value = .undefined_value });
+    try testExpr("noreturn", .{ .simple_type = .type }, .{ .simple_type = .noreturn });
 }
 
 test "ComptimeInterpreter - expressions" {
     if (true) return error.SkipZigTest; // TODO
-    try testExpr("5 + 3", .{ .simple = .comptime_int }, .{ .int_u64_value = 8 });
-    try testExpr("5.2 + 4.2", .{ .simple = .comptime_float }, null);
+    try testExpr("5 + 3", .{ .simple_type = .comptime_int }, .{ .int_u64_value = 8 });
+    try testExpr("5.2 + 4.2", .{ .simple_type = .comptime_float }, null);
 
-    try testExpr("3 == 3", .{ .simple = .bool }, .{ .simple = .bool_true });
-    try testExpr("5.2 == 2.1", .{ .simple = .bool }, .{ .simple = .bool_false });
+    try testExpr("3 == 3", .{ .simple_type = .bool }, .{ .simple_valueclear = .bool_true });
+    try testExpr("5.2 == 2.1", .{ .simple_type = .bool }, .{ .simple_value = .bool_false });
 
-    try testExpr("@as(?bool, null) orelse true", .{ .simple = .bool }, .{ .simple = .bool_true });
+    try testExpr("@as(?bool, null) orelse true", .{ .simple_type = .bool }, .{ .simple_value = .bool_true });
 }
 
 test "ComptimeInterpreter - builtins" {
     if (true) return error.SkipZigTest; // TODO
-    try testExpr("@as(bool, true)", .{ .simple = .bool }, .{ .simple = .bool_true });
+    try testExpr("@as(bool, true)", .{ .simple_type = .bool }, .{ .simple_value = .bool_true });
     try testExpr("@as(u32, 3)", .{ .int_type = .{
         .signedness = .unsigned,
         .bits = 32,
@@ -64,12 +64,12 @@ test "ComptimeInterpreter - labeled block" {
         \\blk: {
         \\    break :blk true;
         \\}
-    , .{ .simple = .bool }, .{ .simple = .bool_true });
+    , .{ .simple_type = .bool }, .{ .simple_value = .bool_true });
     try testExpr(
         \\blk: {
         \\    break :blk 3;
         \\}
-    , .{ .simple = .comptime_int }, .{ .int_u64_value = 3 });
+    , .{ .simple_type = .comptime_int }, .{ .int_u64_value = 3 });
 }
 
 test "ComptimeInterpreter - if" {
@@ -77,18 +77,18 @@ test "ComptimeInterpreter - if" {
         \\blk: {
         \\    break :blk if (true) true else false;
         \\}
-    , .{ .simple = .bool }, .{ .simple = .bool_true });
+    , .{ .simple_type = .bool }, .{ .simple_value = .bool_true });
     try testExpr(
         \\blk: {
         \\    break :blk if (false) true else false;
         \\}
-    , .{ .simple = .bool }, .{ .simple = .bool_false });
+    , .{ .simple_type = .bool }, .{ .simple_value = .bool_false });
     try testExpr(
         \\blk: {
         \\    if (false) break :blk true;
         \\    break :blk false;
         \\}
-    , .{ .simple = .bool }, .{ .simple = .bool_false });
+    , .{ .simple_type = .bool }, .{ .simple_value = .bool_false });
     // TODO
     // try testExpr(
     //     \\outer: {
@@ -97,7 +97,7 @@ test "ComptimeInterpreter - if" {
     //     \\    }) break :outer true;
     //     \\    break :outer false;
     //     \\}
-    // , .{ .simple = .bool }, .{ .simple = .bool_true });
+    // , .{ .simple_type = .bool }, .{ .simple_value = .bool_true });
 }
 
 test "ComptimeInterpreter - variable lookup" {
@@ -106,7 +106,7 @@ test "ComptimeInterpreter - variable lookup" {
         \\    var foo = 42;
         \\    break :blk foo;
         \\}
-    , .{ .simple = .comptime_int }, .{ .int_u64_value = 42 });
+    , .{ .simple_type = .comptime_int }, .{ .int_u64_value = 42 });
     try testExpr(
         \\blk: {
         \\    var foo = 1;
@@ -114,7 +114,7 @@ test "ComptimeInterpreter - variable lookup" {
         \\    var baz = 3;
         \\    break :blk bar;
         \\}
-    , .{ .simple = .comptime_int }, .{ .int_u64_value = 2 });
+    , .{ .simple_type = .comptime_int }, .{ .int_u64_value = 2 });
 
     var context = try Context.init(
         \\const bar = foo;
@@ -123,7 +123,7 @@ test "ComptimeInterpreter - variable lookup" {
     defer context.deinit();
 
     const result = try context.interpret(context.findVar("bar"));
-    try expectEqualKey(context.interpreter.ip, .{ .simple = .comptime_int }, result.ty);
+    try expectEqualKey(context.interpreter.ip, .{ .simple_type = .comptime_int }, result.ty);
     try expectEqualKey(context.interpreter.ip, .{ .int_u64_value = 3 }, result.val);
 }
 
@@ -133,7 +133,7 @@ test "ComptimeInterpreter - field access" {
         \\    const foo: struct {alpha: u64, beta: bool} = undefined;
         \\    break :blk foo.beta;
         \\}
-    , .{ .simple = .bool }, null);
+    , .{ .simple_type = .bool }, null);
     try testExpr(
         \\blk: {
         \\    const foo: struct {alpha: u64, beta: bool} = undefined;
@@ -152,13 +152,13 @@ test "ComptimeInterpreter - optional operations" {
         \\    const foo: ?bool = true;
         \\    break :blk foo.?;
         \\}
-    , .{ .simple = .bool }, .{ .simple = .bool_true });
+    , .{ .simple_type = .bool }, .{ .simple_value = .bool_true });
     try testExpr(
         \\blk: {
         \\    const foo: ?bool = true;
         \\    break :blk foo == null;
         \\}
-    , .{ .simple = .bool }, .{ .simple = .bool_false });
+    , .{ .simple_type = .bool }, .{ .simple_value = .bool_false });
 }
 
 test "ComptimeInterpreter - pointer operations" {
@@ -168,20 +168,20 @@ test "ComptimeInterpreter - pointer operations" {
         \\    const foo: []const u8 = "";
         \\    break :blk foo.len;
         \\}
-    , .{ .simple = .usize }, .{ .bytes = "" });
+    , .{ .simple_type = .usize }, .{ .bytes = "" });
     try testExpr(
         \\blk: {
         \\    const foo = true;
         \\    break :blk &foo;
         \\}
-    , @panic("TODO"), .{ .simple = .bool_true });
+    , @panic("TODO"), .{ .simple_value = .bool_true });
     try testExpr(
         \\blk: {
         \\    const foo = true;
         \\    const bar = &foo;
         \\    break :blk bar.*;
         \\}
-    , @panic("TODO"), .{ .simple = .bool_true });
+    , @panic("TODO"), .{ .simple_value = .bool_true });
 }
 
 test "ComptimeInterpreter - call return primitive type" {
@@ -189,7 +189,7 @@ test "ComptimeInterpreter - call return primitive type" {
         \\pub fn Foo() type {
         \\    return bool;
         \\}
-    , &.{}, .{ .simple = .bool });
+    , &.{}, .{ .simple_type = .bool });
 
     try testCall(
         \\pub fn Foo() type {
@@ -223,17 +223,15 @@ test "ComptimeInterpreter - call return struct" {
     defer context.deinit();
     const result = try context.call(context.findFn("Foo"), &.{});
 
-    try std.testing.expect(result.ty == .simple);
-    try std.testing.expect(result.ty.simple == .type);
+    try std.testing.expect(result.ty == .simple_type);
+    try std.testing.expect(result.ty.simple_type == .type);
     const struct_info = context.interpreter.ip.getStruct(result.val.?.struct_type);
     try std.testing.expectEqual(Index.none, struct_info.backing_int_ty);
     try std.testing.expectEqual(std.builtin.Type.ContainerLayout.Auto, struct_info.layout);
 
-    const bool_type = try context.interpreter.ip.get(allocator, .{ .simple = .bool });
-
     try std.testing.expectEqual(@as(usize, 1), struct_info.fields.count());
     try std.testing.expectEqualStrings("slay", struct_info.fields.keys()[0]);
-    try std.testing.expect(struct_info.fields.values()[0].ty == bool_type);
+    try std.testing.expect(struct_info.fields.values()[0].ty == Index.bool);
 }
 
 test "ComptimeInterpreter - call comptime argument" {
@@ -247,19 +245,19 @@ test "ComptimeInterpreter - call comptime argument" {
     defer context.deinit();
 
     const result1 = try context.call(context.findFn("Foo"), &.{KV{
-        .ty = .{ .simple = .bool },
-        .val = .{ .simple = .bool_true },
+        .ty = .{ .simple_type = .bool },
+        .val = .{ .simple_value = .bool_true },
     }});
-    try std.testing.expect(result1.ty == .simple);
-    try std.testing.expect(result1.ty.simple == .type);
+    try std.testing.expect(result1.ty == .simple_type);
+    try std.testing.expect(result1.ty.simple_type == .type);
     try std.testing.expectEqual(Key{ .int_type = .{ .signedness = .unsigned, .bits = 8 } }, result1.val.?);
 
     var result2 = try context.call(context.findFn("Foo"), &.{KV{
-        .ty = .{ .simple = .bool },
-        .val = .{ .simple = .bool_false },
+        .ty = .{ .simple_type = .bool },
+        .val = .{ .simple_value = .bool_false },
     }});
-    try std.testing.expect(result2.ty == .simple);
-    try std.testing.expect(result2.ty.simple == .type);
+    try std.testing.expect(result2.ty == .simple_type);
+    try std.testing.expect(result2.ty.simple_type == .type);
     try std.testing.expectEqual(Key{ .int_type = .{ .signedness = .unsigned, .bits = 69 } }, result2.val.?);
 }
 
@@ -303,6 +301,7 @@ const Context = struct {
 
         interpreter.* = .{
             .allocator = allocator,
+            .ip = try InternPool.init(allocator),
             .document_store = document_store,
             .uri = handle.uri,
         };
@@ -399,7 +398,7 @@ fn testCall(
 
     const result = try context.call(context.findFn("Foo"), arguments);
 
-    try expectEqualKey(context.interpreter.ip, Key{ .simple = .type }, result.ty);
+    try expectEqualKey(context.interpreter.ip, Key{ .simple_type = .type }, result.ty);
     try expectEqualKey(context.interpreter.ip, expected_ty, result.val);
 }
 

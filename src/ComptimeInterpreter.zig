@@ -20,7 +20,7 @@ pub const ComptimeInterpreter = @This();
 const log = std.log.scoped(.comptime_interpreter);
 
 allocator: std.mem.Allocator,
-ip: InternPool = .{},
+ip: InternPool,
 document_store: *DocumentStore,
 uri: DocumentStore.Uri,
 namespaces: std.MultiArrayList(Namespace) = .{},
@@ -209,8 +209,6 @@ pub fn interpret(
         // .tagged_union_enum_tag_trailing,
         .root,
         => {
-            const type_type = try interpreter.ip.get(interpreter.allocator, Key{ .simple = .type });
-
             try interpreter.namespaces.append(interpreter.allocator, .{
                 .parent = namespace,
                 .node_idx = node_idx,
@@ -243,7 +241,7 @@ pub fn interpret(
                 else
                     (try (try interpreter.interpret(container_field.ast.value_expr, container_namespace, .{})).getValue()).val; // TODO check ty
 
-                if (init_type_value.ty != type_type) {
+                if (init_type_value.ty != Index.type) {
                     try interpreter.recordError(
                         container_field.ast.type_expr,
                         "expected_type",
@@ -269,7 +267,7 @@ pub fn interpret(
             return InterpretResult{ .value = Value{
                 .interpreter = interpreter,
                 .node_idx = node_idx,
-                .ty = type_type,
+                .ty = Index.type,
                 .val = struct_type,
             } };
         },
@@ -316,8 +314,7 @@ pub fn interpret(
             if (type_value == null and init_value == null) return InterpretResult{ .nothing = {} };
 
             if (type_value) |v| {
-                const type_type = try interpreter.ip.get(interpreter.allocator, Key{ .simple = .type });
-                if (v.ty != type_type) return InterpretResult{ .nothing = {} };
+                if (v.ty != Index.type) return InterpretResult{ .nothing = {} };
             }
 
             const decl = interpreter.ip.getDecl(decl_index);
@@ -385,44 +382,53 @@ pub fn interpret(
         .identifier => {
             const identifier = offsets.nodeToSlice(tree, node_idx);
 
-            const simples = std.ComptimeStringMap(InternPool.Simple, .{
-                .{ "anyerror", .anyerror },
-                .{ "anyframe", .@"anyframe" },
-                .{ "anyopaque", .anyopaque },
-                .{ "bool", .bool },
-                .{ "c_int", .c_int },
-                .{ "c_long", .c_long },
-                .{ "c_longdouble", .c_longdouble },
-                .{ "c_longlong", .c_longlong },
-                .{ "c_short", .c_short },
-                .{ "c_uint", .c_uint },
-                .{ "c_ulong", .c_ulong },
-                .{ "c_ulonglong", .c_ulonglong },
-                .{ "c_ushort", .c_ushort },
-                .{ "comptime_float", .comptime_float },
-                .{ "comptime_int", .comptime_int },
-                .{ "f128", .f128 },
-                .{ "f16", .f16 },
-                .{ "f32", .f32 },
-                .{ "f64", .f64 },
-                .{ "f80", .f80 },
-                .{ "false", .bool_false },
-                .{ "isize", .isize },
-                .{ "noreturn", .noreturn },
-                .{ "null", .null_value },
-                .{ "true", .bool_true },
-                .{ "type", .type },
-                .{ "undefined", .undefined_value },
-                .{ "usize", .usize },
-                .{ "void", .void },
+            const simples = std.ComptimeStringMap(Index, .{
+                .{ "anyerror", Index.anyerror },
+                .{ "anyframe", Index.@"anyframe" },
+                .{ "anyopaque", Index.anyopaque },
+                .{ "bool", Index.bool },
+                .{ "c_int", Index.c_int },
+                .{ "c_long", Index.c_long },
+                .{ "c_longdouble", Index.c_longdouble },
+                .{ "c_longlong", Index.c_longlong },
+                .{ "c_short", Index.c_short },
+                .{ "c_uint", Index.c_uint },
+                .{ "c_ulong", Index.c_ulong },
+                .{ "c_ulonglong", Index.c_ulonglong },
+                .{ "c_ushort", Index.c_ushort },
+                .{ "comptime_float", Index.comptime_float },
+                .{ "comptime_int", Index.comptime_int },
+                .{ "f128", Index.f128 },
+                .{ "f16", Index.f16 },
+                .{ "f32", Index.f32 },
+                .{ "f64", Index.f64 },
+                .{ "f80", Index.f80 },
+                .{ "false", Index.bool_false },
+                .{ "isize", Index.isize },
+                .{ "noreturn", Index.noreturn },
+                .{ "null", Index.null_value },
+                .{ "true", Index.bool_true },
+                .{ "type", Index.type },
+                .{ "undefined", Index.undefined_value },
+                .{ "usize", Index.usize },
+                .{ "void", Index.void },
             });
 
-            if (simples.get(identifier)) |simple| {
+            if (simples.get(identifier)) |index| {
+                const ty: Index = switch (index) {
+                    .undefined_value => .undefined_type,
+                    .void_value => .void,
+                    .unreachable_value => .noreturn,
+                    .null_value => .null_type,
+                    .bool_true => .bool,
+                    .bool_false => .bool,
+                    else => .type,
+                };
                 return InterpretResult{ .value = Value{
                     .interpreter = interpreter,
                     .node_idx = node_idx,
-                    .ty = try interpreter.ip.get(interpreter.allocator, Key{ .simple = simple.toType() }),
-                    .val = try interpreter.ip.get(interpreter.allocator, Key{ .simple = simple }),
+                    .ty = ty,
+                    .val = index,
                 } };
             }
 
@@ -430,7 +436,7 @@ pub fn interpret(
                 return InterpretResult{ .value = Value{
                     .interpreter = interpreter,
                     .node_idx = node_idx,
-                    .ty = try interpreter.ip.get(interpreter.allocator, Key{ .simple = .type }),
+                    .ty = Index.type,
                     .val = try interpreter.ip.get(interpreter.allocator, Key{ .int_type = .{
                         .signedness = if (identifier[0] == 'u') .unsigned else .signed,
                         .bits = std.fmt.parseInt(u16, identifier[1..], 10) catch break :blk,
@@ -456,7 +462,8 @@ pub fn interpret(
                 "use of undeclared identifier '{s}'",
                 .{identifier},
             );
-            return error.IdentifierNotFound;
+            // return error.IdentifierNotFound;
+            return InterpretResult{ .nothing = {} };
         },
         .field_access => {
             if (data[node_idx].rhs == 0) return error.CriticalAstFailure;
@@ -472,7 +479,7 @@ pub fn interpret(
             };
 
             const can_have_fields: bool = switch (inner_lhs) {
-                .simple => |simple| switch (simple) {
+                .simple_type => |simple| switch (simple) {
                     .type => blk: {
                         if (irv.val == .none) break :blk true;
 
@@ -530,7 +537,7 @@ pub fn interpret(
                                 .value = Value{
                                     .interpreter = interpreter,
                                     .node_idx = data[node_idx].rhs,
-                                    .ty = try interpreter.ip.get(interpreter.allocator, .{ .simple = .usize }),
+                                    .ty = Index.usize,
                                     .val = .none, // TODO resolve length of Slice
                                 },
                             };
@@ -541,7 +548,7 @@ pub fn interpret(
                                 .value = Value{
                                     .interpreter = interpreter,
                                     .node_idx = data[node_idx].rhs,
-                                    .ty = try interpreter.ip.get(interpreter.allocator, .{ .simple = .usize }),
+                                    .ty = Index.usize,
                                     .val = .none, // TODO resolve length of Slice
                                 },
                             };
@@ -556,7 +563,7 @@ pub fn interpret(
                         return InterpretResult{ .value = Value{
                             .interpreter = interpreter,
                             .node_idx = data[node_idx].rhs,
-                            .ty = try interpreter.ip.get(interpreter.allocator, .{ .simple = .comptime_int }),
+                            .ty = Index.comptime_int,
                             .val = len_value,
                         } };
                     }
@@ -564,8 +571,7 @@ pub fn interpret(
                 },
                 .optional_type => |optional_info| blk: {
                     if (!std.mem.eql(u8, field_name, "?")) break :blk false;
-                    const null_value = try interpreter.ip.get(interpreter.allocator, .{ .simple = .null_value });
-                    if (irv.val == null_value) {
+                    if (irv.val == Index.null_value) {
                         try interpreter.recordError(
                             node_idx,
                             "null_unwrap",
@@ -613,7 +619,7 @@ pub fn interpret(
                 else => false,
             };
 
-            const accessed_ty = if (inner_lhs == .simple and inner_lhs.simple == .type) irv.val else irv.ty;
+            const accessed_ty = if (inner_lhs == .simple_type and inner_lhs.simple_type == .type) irv.val else irv.ty;
             if (accessed_ty != .none) {
                 if (can_have_fields) {
                     try interpreter.recordError(
@@ -657,12 +663,9 @@ pub fn interpret(
             // if (options.observe_values) {
             const ir = try interpreter.interpret(if_info.ast.cond_expr, namespace, options);
 
-            const false_value = try interpreter.ip.get(interpreter.allocator, Key{ .simple = .bool_false });
-            const true_value = try interpreter.ip.get(interpreter.allocator, Key{ .simple = .bool_true });
-
             const condition = (try ir.getValue()).val;
-            std.debug.assert(condition == false_value or condition == true_value);
-            if (condition == true_value) {
+            std.debug.assert(condition == Index.bool_false or condition == Index.bool_true);
+            if (condition == Index.bool_true) {
                 return try interpreter.interpret(if_info.ast.then_expr, namespace, options);
             } else {
                 if (if_info.ast.else_expr != 0) {
@@ -679,8 +682,8 @@ pub fn interpret(
                 .value = Value{
                     .interpreter = interpreter,
                     .node_idx = node_idx,
-                    .ty = try interpreter.ip.get(interpreter.allocator, Key{ .simple = .bool }),
-                    .val = try interpreter.ip.get(interpreter.allocator, Key{ .simple = if (a_value.val == b_value.val) .bool_true else .bool_false }), // TODO eql function required?
+                    .ty = Index.bool,
+                    .val = if (a_value.val == b_value.val) Index.bool_true else Index.bool_false, // TODO eql function required?
                 },
             };
         },
@@ -690,9 +693,7 @@ pub fn interpret(
 
             if (nl == .failure) return error.CriticalAstFailure;
 
-            const number_type = try interpreter.ip.get(interpreter.allocator, Key{
-                .simple = if (nl == .float) .comptime_float else .comptime_int,
-            });
+            const number_type = if (nl == .float) Index.comptime_float else Index.comptime_int;
 
             const value = try interpreter.ip.get(
                 interpreter.allocator,
@@ -826,7 +827,7 @@ pub fn interpret(
                         .interpreter = interpreter,
                         .node_idx = node_idx,
                         .ty = try interpreter.ip.get(interpreter.allocator, Key{ .struct_type = struct_index }),
-                        .val = try interpreter.ip.get(interpreter.allocator, Key{ .simple = .undefined_value }),
+                        .val = Index.undefined_value,
                     } };
                 }
 
@@ -834,13 +835,13 @@ pub fn interpret(
                 defer interpreter.allocator.free(import_uri);
 
                 var handle = interpreter.document_store.getOrLoadHandle(import_uri) orelse return error.ImportFailure;
-                try interpreter.document_store.ensureInterpreterExists(handle.uri);
+                _ = try interpreter.document_store.ensureInterpreterExists(handle.uri);
 
                 return InterpretResult{
                     .value = Value{
                         .interpreter = interpreter,
                         .node_idx = node_idx,
-                        .ty = try interpreter.ip.get(interpreter.allocator, Key{ .simple = .type }),
+                        .ty = Index.type,
                         .val = .none, // TODO
                     },
                 };
@@ -853,7 +854,7 @@ pub fn interpret(
                 return InterpretResult{ .value = Value{
                     .interpreter = interpreter,
                     .node_idx = node_idx,
-                    .ty = try interpreter.ip.get(interpreter.allocator, Key{ .simple = .type }),
+                    .ty = Index.type,
                     .val = value.ty,
                 } };
             }
@@ -864,9 +865,7 @@ pub fn interpret(
                 const value = try (try interpreter.interpret(params[0], namespace, options)).getValue();
                 const field_name = try (try interpreter.interpret(params[1], namespace, options)).getValue();
 
-                const type_type = try interpreter.ip.get(interpreter.allocator, Key{ .simple = .type });
-
-                if (value.ty != type_type or value.ty == .none) return error.InvalidBuiltin;
+                if (value.ty != Index.type or value.ty == .none) return error.InvalidBuiltin;
                 if (interpreter.ip.indexToKey(field_name.ty) != .pointer_type) return error.InvalidBuiltin; // Check if it's a []const u8
                 if (value.val == .none) return error.InvalidBuiltin;
 
@@ -881,8 +880,8 @@ pub fn interpret(
                 return InterpretResult{ .value = Value{
                     .interpreter = interpreter,
                     .node_idx = node_idx,
-                    .ty = try interpreter.ip.get(interpreter.allocator, Key{ .simple = .bool }),
-                    .val = try interpreter.ip.get(interpreter.allocator, Key{ .simple = if (has_decl) .bool_true else .bool_false }),
+                    .ty = Index.bool,
+                    .val = if (has_decl) Index.bool_true else Index.bool_false,
                 } };
             }
 
@@ -892,9 +891,7 @@ pub fn interpret(
                 const as_type = try (try interpreter.interpret(params[0], namespace, options)).getValue();
                 const value = try (try interpreter.interpret(params[1], namespace, options)).getValue();
 
-                const type_type = try interpreter.ip.get(interpreter.allocator, Key{ .simple = .type });
-
-                if (as_type.ty != type_type) return error.InvalidBuiltin;
+                if (as_type.ty != Index.type) return error.InvalidBuiltin;
 
                 return InterpretResult{
                     .value = Value{
@@ -955,8 +952,6 @@ pub fn interpret(
 
             // TODO: Resolve function type
 
-            const type_type = try interpreter.ip.get(interpreter.allocator, Key{ .simple = .type });
-
             const function_type = try interpreter.ip.get(interpreter.allocator, Key{ .function_type = .{
                 .calling_convention = .Unspecified,
                 .alignment = 0,
@@ -995,7 +990,7 @@ pub fn interpret(
 
                 const decl_index = try interpreter.ip.createDecl(interpreter.allocator, .{
                     .name = name,
-                    .ty = type_type,
+                    .ty = Index.type,
                     .val = function_type,
                     .alignment = 0, // TODO
                     .address_space = .generic, // TODO
@@ -1040,10 +1035,9 @@ pub fn interpret(
         },
         .bool_not => {
             const result = try interpreter.interpret(data[node_idx].lhs, namespace, .{});
-            const bool_type = try interpreter.ip.get(interpreter.allocator, Key{ .simple = .bool });
             const value = try result.getValue();
 
-            if (value.ty != bool_type) {
+            if (value.ty != Index.bool) {
                 try interpreter.recordError(
                     node_idx,
                     "invalid_deref",
@@ -1053,15 +1047,12 @@ pub fn interpret(
                 return error.InvalidOperation;
             }
 
-            const false_value = try interpreter.ip.get(interpreter.allocator, Key{ .simple = .bool_false });
-            const true_value = try interpreter.ip.get(interpreter.allocator, Key{ .simple = .bool_true });
-
-            std.debug.assert(value.val == false_value or value.val == true_value);
+            std.debug.assert(value.val == Index.bool_false or value.val == Index.bool_true);
             return InterpretResult{ .value = .{
                 .interpreter = interpreter,
                 .node_idx = node_idx,
-                .ty = bool_type,
-                .val = if (value.val == false_value) true_value else false_value,
+                .ty = Index.bool,
+                .val = if (value.val == Index.bool_false) Index.bool_true else Index.bool_false,
             } };
         },
         .address_of => {
@@ -1146,14 +1137,12 @@ pub fn call(
     });
     const fn_namespace = @intToEnum(Namespace.Index, interpreter.namespaces.len - 1);
 
-    const type_type = try interpreter.ip.get(interpreter.allocator, Key{ .simple = .type });
-
     var arg_it = proto.iterate(&tree);
     var arg_index: usize = 0;
     while (ast.nextFnParam(&arg_it)) |param| {
         if (arg_index >= arguments.len) return error.MissingArguments;
         var tex = try (try interpreter.interpret(param.type_expr, fn_namespace, options)).getValue();
-        if (tex.ty != type_type) {
+        if (tex.ty != Index.type) {
             try interpreter.recordError(
                 param.type_expr,
                 "expected_type",

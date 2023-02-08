@@ -989,16 +989,26 @@ pub fn enumCompletionItems(self: DocumentStore, arena: std.mem.Allocator, handle
     return try self.tagStoreCompletionItems(arena, handle, "enum_completions");
 }
 
-pub fn ensureInterpreterExists(self: *DocumentStore, uri: Uri) !void {
+pub fn ensureInterpreterExists(self: *DocumentStore, uri: Uri) !*ComptimeInterpreter {
     var handle = self.handles.get(uri).?;
-    if (handle.interpreter == null) {
-        var int = try self.allocator.create(ComptimeInterpreter);
-        int.* = ComptimeInterpreter{
+    if (handle.interpreter != null) return handle.interpreter.?;
+
+    {
+        var interpreter = try self.allocator.create(ComptimeInterpreter);
+        errdefer self.allocator.destroy(interpreter);
+
+        var ip = try ComptimeInterpreter.InternPool.init(self.allocator);
+        errdefer ip.deinit(self.allocator);
+
+        interpreter.* = ComptimeInterpreter{
             .allocator = self.allocator,
+            .ip = ip,
             .document_store = self,
             .uri = uri,
         };
-        handle.interpreter = int;
-        _ = try int.interpret(0, .none, .{});
+        handle.interpreter = interpreter;
     }
+
+    _ = try handle.interpreter.?.interpret(0, .none, .{});
+    return handle.interpreter.?;
 }

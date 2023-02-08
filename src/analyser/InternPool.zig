@@ -161,7 +161,8 @@ pub const Decl = struct {
 };
 
 pub const Key = union(enum) {
-    simple: Simple,
+    simple_type: SimpleType,
+    simple_value: SimpleValue,
 
     int_type: Int,
     pointer_type: Pointer,
@@ -209,7 +210,8 @@ pub const Key = union(enum) {
 
     pub fn tag(key: Key) Tag {
         return switch (key) {
-            .simple => .simple,
+            .simple_type => .simple_type,
+            .simple_value => .simple_value,
 
             .int_type => |int_info| switch (int_info.signedness) {
                 .signed => .type_int_signed,
@@ -245,7 +247,7 @@ pub const Key = union(enum) {
 
     pub fn zigTypeTag(key: Key) std.builtin.TypeId {
         return switch (key) {
-            .simple => |simple| switch (simple) {
+            .simple_type => |simple| switch (simple) {
                 .f16,
                 .f32,
                 .f64,
@@ -279,14 +281,6 @@ pub const Key = union(enum) {
                 .null_type => .Null,
                 .undefined_type => .Undefined,
                 .enum_literal_type => .EnumLiteral,
-
-                .undefined_value,
-                .void_value,
-                .unreachable_value,
-                .null_value,
-                .bool_true,
-                .bool_false,
-                => unreachable,
             },
 
             .int_type => .Int,
@@ -303,6 +297,7 @@ pub const Key = union(enum) {
             .vector_type => .Vector,
             .anyframe_type => .AnyFrame,
 
+            .simple_value,
             .int_u64_value,
             .int_i64_value,
             .int_big_value,
@@ -322,46 +317,7 @@ pub const Key = union(enum) {
 
     pub fn isType(key: Key) bool {
         return switch (key) {
-            .simple => |simple| switch (simple) {
-                .f16,
-                .f32,
-                .f64,
-                .f80,
-                .f128,
-                .c_longdouble,
-                .usize,
-                .isize,
-                .c_short,
-                .c_ushort,
-                .c_int,
-                .c_uint,
-                .c_long,
-                .c_ulong,
-                .c_longlong,
-                .c_ulonglong,
-                .comptime_int,
-                .comptime_float,
-                .anyopaque,
-                .bool,
-                .void,
-                .type,
-                .anyerror,
-                .noreturn,
-                .@"anyframe",
-                .null_type,
-                .undefined_type,
-                .enum_literal_type,
-                => true,
-
-                .undefined_value,
-                .void_value,
-                .unreachable_value,
-                .null_value,
-                .bool_true,
-                .bool_false,
-                => false,
-            },
-
+            .simple_type,
             .int_type,
             .pointer_type,
             .array_type,
@@ -377,6 +333,7 @@ pub const Key = union(enum) {
             .anyframe_type,
             => true,
 
+            .simple_value,
             .int_u64_value,
             .int_i64_value,
             .int_big_value,
@@ -403,7 +360,7 @@ pub const Key = union(enum) {
         var key: Key = ty;
 
         while (true) switch (key) {
-            .simple => |simple| switch (simple) {
+            .simple_type => |simple| switch (simple) {
                 .usize => return .{ .signedness = .signed, .bits = target.cpu.arch.ptrBitWidth() },
                 .isize => return .{ .signedness = .unsigned, .bits = target.cpu.arch.ptrBitWidth() },
 
@@ -442,7 +399,7 @@ pub const Key = union(enum) {
     /// Asserts the type is a fixed-size float or comptime_float.
     /// Returns 128 for comptime_float types.
     pub fn floatBits(ty: Key, target: std.Target) u16 {
-        return switch (ty.simple) {
+        return switch (ty.simple_type) {
             .f16 => 16,
             .f32 => 32,
             .f64 => 64,
@@ -489,8 +446,8 @@ pub const Key = union(enum) {
 
     pub fn elemType2(ty: Key) Index {
         return switch (ty) {
-            .simple => |simple| switch (simple) {
-                .@"anyframe" => panicOrElse("TODO: return void type", Index.none),
+            .simple_type => |simple| switch (simple) {
+                .@"anyframe" => Index.void,
                 else => unreachable,
             },
             .pointer_type => |pointer_info| pointer_info.elem_type,
@@ -521,9 +478,9 @@ pub const Key = union(enum) {
         };
     }
 
-    pub fn onePossibleValue(ty: Key, ip: InternPool) ?Key {
-        switch (ty) {
-            .simple => |simple| switch (simple) {
+    pub fn onePossibleValue(ty: Key, ip: InternPool) Index {
+        return switch (ty) {
+            .simple_type => |simple| switch (simple) {
                 .f16,
                 .f32,
                 .f64,
@@ -548,80 +505,67 @@ pub const Key = union(enum) {
                 .comptime_float,
                 .@"anyframe",
                 .enum_literal_type,
-                => return null,
+                => Index.none,
 
-                .void => return Key{ .simple = .void_value },
-                .noreturn => return Key{ .simple = .unreachable_value },
-                .null_type => return Key{ .simple = .null_value },
-                .undefined_type => return Key{ .simple = .undefined_value },
-
-                // values
-                .undefined_value,
-                .void_value,
-                .unreachable_value,
-                .null_value,
-                .bool_true,
-                .bool_false,
-                => unreachable,
+                .void => Index.void_value,
+                .noreturn => Index.unreachable_value,
+                .null_type => Index.null_value,
+                .undefined_type => Index.undefined_value,
             },
             .int_type => |int_info| {
                 if (int_info.bits == 0) {
                     switch (int_info.signedness) {
-                        .unsigned => return Key{ .int_u64_value = 0 },
-                        .signed => return Key{ .int_i64_value = 0 },
+                        .unsigned => return Index.zero,
+                        .signed => return Index.zero, // do we need a signed zero?
                     }
                 }
-                return null;
+                return Index.none;
             },
-            .pointer_type => return null,
+            .pointer_type => Index.none,
             .array_type => |array_info| {
                 if (array_info.len == 0) {
-                    return panicOrElse("TODO return empty array value", null);
-                } else if (ip.indexToKey(array_info.child).onePossibleValue(ip)) |value| {
-                    return value;
+                    return panicOrElse("TODO return empty array value", Index.none);
                 }
-                return null;
+                return ip.indexToKey(array_info.child).onePossibleValue(ip);
             },
             .struct_type => |struct_index| {
                 const struct_info = ip.getStruct(struct_index);
                 var field_it = struct_info.fields.iterator();
                 while (field_it.next()) |entry| {
                     if (entry.value_ptr.is_comptime) continue;
-                    if (ip.indexToKey(entry.value_ptr.ty).onePossibleValue(ip) != null) continue;
-                    return null;
+                    if (ip.indexToKey(entry.value_ptr.ty).onePossibleValue(ip) != Index.none) continue;
+                    return Index.none;
                 }
-                return panicOrElse("TODO return empty struct value", null);
+                return panicOrElse("TODO return empty struct value", Index.none);
             },
             .optional_type => |optional_info| {
-                const child = ip.indexToKey(optional_info.payload_type);
-                if (child == .simple and child.simple == .noreturn) {
-                    return Key{ .simple = .null_value };
+                if (optional_info.payload_type == Index.noreturn) {
+                    return Index.null_value;
                 }
-                return null;
+                return Index.none;
             },
-            .error_union_type => return null,
-            .error_set_type => return null,
+            .error_union_type => Index.none,
+            .error_set_type => Index.none,
             .enum_type => |enum_index| {
                 const enum_info = ip.getEnum(enum_index);
-                switch (enum_info.fields.count()) {
-                    0 => return Key{ .simple = .unreachable_value },
-                    1 => return ip.indexToKey(enum_info.values.keys()[0]),
-                    else => return null,
-                }
+                return switch (enum_info.fields.count()) {
+                    0 => Index.unreachable_value,
+                    1 => enum_info.values.keys()[0],
+                    else => Index.none,
+                };
             },
-            .function_type => return null,
-            .union_type => return panicOrElse("TODO", null),
-            .tuple_type => return panicOrElse("TODO", null),
+            .function_type => Index.none,
+            .union_type => panicOrElse("TODO", Index.none),
+            .tuple_type => panicOrElse("TODO", Index.none),
             .vector_type => |vector_info| {
                 if (vector_info.len == 0) {
-                    return panicOrElse("TODO return empty array value", null);
-                } else if (ip.indexToKey(vector_info.child).onePossibleValue(ip)) |value| {
-                    return value;
+                    return panicOrElse("TODO return empty array value", Index.none);
                 }
-                return null;
+                return ip.indexToKey(vector_info.child).onePossibleValue(ip);
             },
-            .anyframe_type => return null,
+            .anyframe_type => Index.none,
 
+            .simple_value,
             .int_u64_value,
             .int_i64_value,
             .int_big_value,
@@ -636,7 +580,7 @@ pub const Key = union(enum) {
             .aggregate,
             .union_value,
             => unreachable,
-        }
+        };
     }
 
     pub const TypeFormatContext = struct {
@@ -679,7 +623,7 @@ pub const Key = union(enum) {
 
     fn printTypeInternal(ty: Key, ip: InternPool, writer: anytype) @TypeOf(writer).Error!?Index {
         switch (ty) {
-            .simple => |simple| switch (simple) {
+            .simple_type => |simple| switch (simple) {
                 .f16,
                 .f32,
                 .f64,
@@ -710,14 +654,6 @@ pub const Key = union(enum) {
                 .null_type => try writer.writeAll("@TypeOf(null)"),
                 .undefined_type => try writer.writeAll("@TypeOf(undefined)"),
                 .enum_literal_type => try writer.writeAll("@TypeOf(.enum_literal)"),
-
-                .undefined_value,
-                .void_value,
-                .unreachable_value,
-                .null_value,
-                .bool_true,
-                .bool_false,
-                => unreachable,
             },
             .int_type => |int_info| switch (int_info.signedness) {
                 .signed => try writer.print("i{}", .{int_info.bits}),
@@ -848,6 +784,7 @@ pub const Key = union(enum) {
                 return anyframe_info.child;
             },
 
+            .simple_value,
             .int_u64_value,
             .int_i64_value,
             .int_big_value,
@@ -884,7 +821,7 @@ pub const Key = union(enum) {
         writer: anytype,
     ) @TypeOf(writer).Error!void {
         switch (value) {
-            .simple => |simple| switch (simple) {
+            .simple_type => |simple| switch (simple) {
                 .f16,
                 .f32,
                 .f64,
@@ -915,8 +852,8 @@ pub const Key = union(enum) {
                 .null_type => try writer.writeAll("@TypeOf(null)"),
                 .undefined_type => try writer.writeAll("@TypeOf(undefined)"),
                 .enum_literal_type => try writer.writeAll("@TypeOf(.enum_literal)"),
-
-                // values
+            },
+            .simple_value => |simple| switch (simple) {
                 .undefined_value => try writer.writeAll("@Type(.Undefined)"),
                 .void_value => try writer.writeAll("void"),
                 .unreachable_value => try writer.writeAll("unreachable"),
@@ -1006,6 +943,44 @@ pub const Item = struct {
 /// the same `InternPool`.
 /// TODO split this into an Optional and non-Optional Index
 pub const Index = enum(u32) {
+    f16,
+    f32,
+    f64,
+    f80,
+    f128,
+    usize,
+    isize,
+    c_short,
+    c_ushort,
+    c_int,
+    c_uint,
+    c_long,
+    c_ulong,
+    c_longlong,
+    c_ulonglong,
+    c_longdouble,
+    anyopaque,
+    bool,
+    void,
+    type,
+    anyerror,
+    comptime_int,
+    comptime_float,
+    noreturn,
+    @"anyframe",
+    null_type,
+    undefined_type,
+    enum_literal_type,
+
+    undefined_value,
+    void_value,
+    unreachable_value,
+    null_value,
+    bool_true,
+    bool_false,
+
+    zero,
+
     none = std.math.maxInt(u32),
     _,
 
@@ -1031,9 +1006,12 @@ pub const NamespaceIndex = enum(u32) {
 };
 
 pub const Tag = enum(u8) {
-    /// A type or value that can be represented with only an enum tag.
-    /// data is Simple enum value
-    simple,
+    /// A type that can be represented with only an enum tag.
+    /// data is SimpleType enum value
+    simple_type,
+    /// A value that can be represented with only an enum tag.
+    /// data is SimpleValue enum value
+    simple_value,
 
     /// An integer type.
     /// data is number of bits
@@ -1123,7 +1101,7 @@ pub const Tag = enum(u8) {
     union_value,
 };
 
-pub const Simple = enum(u32) {
+pub const SimpleType = enum(u32) {
     f16,
     f32,
     f64,
@@ -1152,57 +1130,72 @@ pub const Simple = enum(u32) {
     null_type,
     undefined_type,
     enum_literal_type,
+};
 
-    // values
+pub const SimpleValue = enum(u32) {
     undefined_value,
     void_value,
     unreachable_value,
     null_value,
     bool_true,
     bool_false,
-
-    pub fn toType(self: Simple) Simple {
-        return switch (self) {
-            .f16,
-            .f32,
-            .f64,
-            .f80,
-            .f128,
-            .usize,
-            .isize,
-            .c_short,
-            .c_ushort,
-            .c_int,
-            .c_uint,
-            .c_long,
-            .c_ulong,
-            .c_longlong,
-            .c_ulonglong,
-            .c_longdouble,
-            .anyopaque,
-            .bool,
-            .void,
-            .type,
-            .anyerror,
-            .comptime_int,
-            .comptime_float,
-            .noreturn,
-            .@"anyframe",
-            .null_type,
-            .undefined_type,
-            .enum_literal_type,
-            => .type,
-
-            // values
-            .undefined_value => .undefined_type,
-            .void_value => .void,
-            .unreachable_value => .noreturn,
-            .null_value => .null_type,
-            .bool_true => .bool,
-            .bool_false => .bool,
-        };
-    }
 };
+
+comptime {
+    std.debug.assert(@sizeOf(SimpleType) == @sizeOf(SimpleValue));
+}
+
+pub fn init(gpa: Allocator) Allocator.Error!InternPool {
+    var ip: InternPool = .{};
+
+    const simple_count = std.meta.fields(SimpleType).len + std.meta.fields(SimpleValue).len;
+    const count = simple_count + 1;
+    const extra_count = @sizeOf(u64);
+
+    try ip.map.ensureTotalCapacity(gpa, count);
+    try ip.items.ensureTotalCapacity(gpa, count);
+    try ip.extra.ensureTotalCapacity(gpa, extra_count);
+
+    _ = ip.get(undefined, .{ .simple_type = .f16 }) catch unreachable;
+    _ = ip.get(undefined, .{ .simple_type = .f32 }) catch unreachable;
+    _ = ip.get(undefined, .{ .simple_type = .f64 }) catch unreachable;
+    _ = ip.get(undefined, .{ .simple_type = .f80 }) catch unreachable;
+    _ = ip.get(undefined, .{ .simple_type = .f128 }) catch unreachable;
+    _ = ip.get(undefined, .{ .simple_type = .usize }) catch unreachable;
+    _ = ip.get(undefined, .{ .simple_type = .isize }) catch unreachable;
+    _ = ip.get(undefined, .{ .simple_type = .c_short }) catch unreachable;
+    _ = ip.get(undefined, .{ .simple_type = .c_ushort }) catch unreachable;
+    _ = ip.get(undefined, .{ .simple_type = .c_int }) catch unreachable;
+    _ = ip.get(undefined, .{ .simple_type = .c_uint }) catch unreachable;
+    _ = ip.get(undefined, .{ .simple_type = .c_long }) catch unreachable;
+    _ = ip.get(undefined, .{ .simple_type = .c_ulong }) catch unreachable;
+    _ = ip.get(undefined, .{ .simple_type = .c_longlong }) catch unreachable;
+    _ = ip.get(undefined, .{ .simple_type = .c_ulonglong }) catch unreachable;
+    _ = ip.get(undefined, .{ .simple_type = .c_longdouble }) catch unreachable;
+    _ = ip.get(undefined, .{ .simple_type = .anyopaque }) catch unreachable;
+    _ = ip.get(undefined, .{ .simple_type = .bool }) catch unreachable;
+    _ = ip.get(undefined, .{ .simple_type = .void }) catch unreachable;
+    _ = ip.get(undefined, .{ .simple_type = .type }) catch unreachable;
+    _ = ip.get(undefined, .{ .simple_type = .anyerror }) catch unreachable;
+    _ = ip.get(undefined, .{ .simple_type = .comptime_int }) catch unreachable;
+    _ = ip.get(undefined, .{ .simple_type = .comptime_float }) catch unreachable;
+    _ = ip.get(undefined, .{ .simple_type = .noreturn }) catch unreachable;
+    _ = ip.get(undefined, .{ .simple_type = .@"anyframe" }) catch unreachable;
+    _ = ip.get(undefined, .{ .simple_type = .null_type }) catch unreachable;
+    _ = ip.get(undefined, .{ .simple_type = .undefined_type }) catch unreachable;
+    _ = ip.get(undefined, .{ .simple_type = .enum_literal_type }) catch unreachable;
+
+    _ = ip.get(undefined, .{ .simple_value = .undefined_value }) catch unreachable;
+    _ = ip.get(undefined, .{ .simple_value = .void_value }) catch unreachable;
+    _ = ip.get(undefined, .{ .simple_value = .unreachable_value }) catch unreachable;
+    _ = ip.get(undefined, .{ .simple_value = .null_value }) catch unreachable;
+    _ = ip.get(undefined, .{ .simple_value = .bool_true }) catch unreachable;
+    _ = ip.get(undefined, .{ .simple_value = .bool_false }) catch unreachable;
+
+    _ = ip.get(undefined, .{ .int_u64_value = 0 }) catch unreachable;
+
+    return ip;
+}
 
 pub fn deinit(ip: *InternPool, gpa: Allocator) void {
     ip.map.deinit(gpa);
@@ -1232,7 +1225,8 @@ pub fn indexToKey(ip: InternPool, index: Index) Key {
     const item = ip.items.get(@enumToInt(index));
     const data = item.data;
     return switch (item.tag) {
-        .simple => .{ .simple = @intToEnum(Simple, data) },
+        .simple_type => .{ .simple_type = @intToEnum(SimpleType, data) },
+        .simple_value => .{ .simple_value = @intToEnum(SimpleValue, data) },
 
         .type_int_signed => .{ .int_type = .{
             .signedness = .signed,
@@ -1280,7 +1274,50 @@ pub fn indexToKey(ip: InternPool, index: Index) Key {
     };
 }
 
-/// TODO rename to getOrPut
+pub fn indexToTag(ip: InternPool, index: Index) std.builtin.TypeId {
+    const item = ip.items.get(@enumToInt(index));
+    const data = item.data;
+    return switch (item.tag) {
+        .simple_type => {
+            const key = Key{ .simple_type = @intToEnum(SimpleType, data) };
+            return key.zigTypeTag();
+        },
+
+        .type_int_signed => .Int,
+        .type_int_unsigned => .Int,
+        .type_pointer => .Pointer,
+        .type_array => .Array,
+        .type_struct => .Struct,
+        .type_optional => .Optional,
+        .type_anyframe => .AnyFrame,
+        .type_error_union => .ErrorUnion,
+        .type_error_set => .ErrorSet,
+        .type_enum => .Enum,
+        .type_function => .Fn,
+        .type_union => .Union,
+        .type_tuple => .Struct,
+        .type_vector => .Vector,
+
+        .simple_value,
+        .int_u32,
+        .int_i32,
+        .int_u64,
+        .int_i64,
+        .int_big_positive,
+        .int_big_negative,
+        .float_f16,
+        .float_f32,
+        .float_f64,
+        .float_f80,
+        .float_f128,
+        => unreachable,
+
+        .bytes => unreachable,
+        .aggregate => unreachable,
+        .union_value => unreachable,
+    };
+}
+
 pub fn get(ip: *InternPool, gpa: Allocator, key: Key) Allocator.Error!Index {
     const adapter: KeyAdapter = .{ .ip = ip };
     const gop = try ip.map.getOrPutAdapted(gpa, key, adapter);
@@ -1288,7 +1325,8 @@ pub fn get(ip: *InternPool, gpa: Allocator, key: Key) Allocator.Error!Index {
 
     const tag: Tag = key.tag();
     const data: u32 = switch (key) {
-        .simple => |simple| @enumToInt(simple),
+        .simple_type => |simple| @enumToInt(simple),
+        .simple_value => |simple| @enumToInt(simple),
 
         .int_type => |int_ty| int_ty.bits,
         .optional_type => |optional_ty| @enumToInt(optional_ty.payload_type),
@@ -1313,7 +1351,6 @@ pub fn get(ip: *InternPool, gpa: Allocator, key: Key) Allocator.Error!Index {
     return @intToEnum(Index, ip.items.len - 1);
 }
 
-/// TODO rename to get
 pub fn contains(ip: InternPool, key: Key) ?Index {
     const adapter: KeyAdapter = .{ .ip = &ip };
     const index = ip.map.getIndexAdapted(key, adapter) orelse return null;
@@ -1517,7 +1554,7 @@ pub fn cast(ip: *InternPool, gpa: Allocator, destination_ty: Index, source_ty: I
 
 pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, target: std.Target) Allocator.Error!Index {
     switch (types.len) {
-        0 => return try ip.get(gpa, .{ .simple = .noreturn }),
+        0 => return Index.noreturn,
         1 => return types[0],
         else => {},
     }
@@ -1554,9 +1591,9 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
         }
 
         switch (candidate_key) {
-            .simple => |candidate_simple| switch (candidate_simple) {
+            .simple_type => |candidate_simple| switch (candidate_simple) {
                 .f16, .f32, .f64, .f80, .f128 => switch (chosen_key) {
-                    .simple => |chosen_simple| switch (chosen_simple) {
+                    .simple_type => |chosen_simple| switch (chosen_simple) {
                         .f16, .f32, .f64, .f80, .f128 => {
                             if (chosen_key.floatBits(target) < candidate_key.floatBits(target)) {
                                 chosen = candidate;
@@ -1586,7 +1623,7 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
                 .c_ulonglong,
                 .c_longdouble,
                 => switch (chosen_key) {
-                    .simple => |chosen_simple| switch (chosen_simple) {
+                    .simple_type => |chosen_simple| switch (chosen_simple) {
                         .usize,
                         .isize,
                         .c_short,
@@ -1629,7 +1666,7 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
                 .noreturn, .undefined_type => continue,
 
                 .comptime_int => switch (chosen_key) {
-                    .simple => |chosen_simple| switch (chosen_simple) {
+                    .simple_type => |chosen_simple| switch (chosen_simple) {
                         .f16,
                         .f32,
                         .f64,
@@ -1656,7 +1693,7 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
                     else => {},
                 },
                 .comptime_float => switch (chosen_key) {
-                    .simple => |chosen_simple| switch (chosen_simple) {
+                    .simple_type => |chosen_simple| switch (chosen_simple) {
                         .f16, .f32, .f64, .f80, .f128 => continue,
                         .comptime_int => {
                             chosen = candidate;
@@ -1675,7 +1712,7 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
                 else => {},
             },
             .int_type => |candidate_info| switch (chosen_key) {
-                .simple => |chosen_simple| switch (chosen_simple) {
+                .simple_type => |chosen_simple| switch (chosen_simple) {
                     .usize,
                     .isize,
                     .c_short,
@@ -1715,7 +1752,7 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
                 else => {},
             },
             .pointer_type => |candidate_info| switch (chosen_key) {
-                .simple => |chosen_simple| switch (chosen_simple) {
+                .simple_type => |chosen_simple| switch (chosen_simple) {
                     .comptime_int => {
                         if (candidate_info.size == .C) {
                             chosen = candidate;
@@ -1890,7 +1927,7 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
         }
 
         switch (chosen_key) {
-            .simple => |simple| switch (simple) {
+            .simple_type => |simple| switch (simple) {
                 .noreturn,
                 .undefined_type,
                 => {
@@ -1982,7 +2019,7 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
 
     if (any_are_null) {
         const opt_ty = switch (chosen_key) {
-            .simple => |simple| switch (simple) {
+            .simple_type => |simple| switch (simple) {
                 .null_type => chosen,
                 else => try ip.get(gpa, .{ .optional_type = .{ .payload_type = chosen } }),
             },
@@ -2467,10 +2504,7 @@ fn coerceInMemoryAllowedFns(
         } };
     }
 
-    const return_type_key = ip.indexToKey(src_info.return_type);
-    const is_noreturn = return_type_key == .simple and return_type_key.simple == .noreturn;
-
-    if (!is_noreturn) {
+    if (src_info.return_type != Index.noreturn) {
         const rt = try ip.coerceInMemoryAllowed(gpa, arena, dest_info.return_type, src_info.return_type, true, target);
         if (rt != .ok) {
             return InMemoryCoercionResult{ .fn_return_type = .{
@@ -2664,7 +2698,7 @@ fn optionalPtrTy(
                     if (child_ptr_key.is_allowzero) return Index.none;
 
                     // optionals of zero sized types behave like bools, not pointers
-                    if (child_key.onePossibleValue(ip) != null) return Index.none;
+                    if (child_key.onePossibleValue(ip) != Index.none) return Index.none;
 
                     return child_type;
                 },
@@ -2697,18 +2731,19 @@ fn testExpectFmtValue(ip: InternPool, val: Index, ty: Index, expected: []const u
 test "simple types" {
     const gpa = std.testing.allocator;
 
-    var ip: InternPool = .{};
+    var ip = try InternPool.init(gpa);
     defer ip.deinit(gpa);
 
-    const null_type = try ip.get(gpa, .{ .simple = .null_type });
-    const undefined_type = try ip.get(gpa, .{ .simple = .undefined_type });
-    const enum_literal_type = try ip.get(gpa, .{ .simple = .enum_literal_type });
-    const undefined_value = try ip.get(gpa, .{ .simple = .undefined_value });
-    const void_value = try ip.get(gpa, .{ .simple = .void_value });
-    const unreachable_value = try ip.get(gpa, .{ .simple = .unreachable_value });
-    const null_value = try ip.get(gpa, .{ .simple = .null_value });
-    const bool_true = try ip.get(gpa, .{ .simple = .bool_true });
-    const bool_false = try ip.get(gpa, .{ .simple = .bool_false });
+    const null_type = try ip.get(gpa, .{ .simple_type = .null_type });
+    const undefined_type = try ip.get(gpa, .{ .simple_type = .undefined_type });
+    const enum_literal_type = try ip.get(gpa, .{ .simple_type = .enum_literal_type });
+
+    const undefined_value = try ip.get(gpa, .{ .simple_value = .undefined_value });
+    const void_value = try ip.get(gpa, .{ .simple_value = .void_value });
+    const unreachable_value = try ip.get(gpa, .{ .simple_value = .unreachable_value });
+    const null_value = try ip.get(gpa, .{ .simple_value = .null_value });
+    const bool_true = try ip.get(gpa, .{ .simple_value = .bool_true });
+    const bool_false = try ip.get(gpa, .{ .simple_value = .bool_false });
 
     try testExpectFmtType(ip, null_type, "@TypeOf(null)");
     try testExpectFmtType(ip, undefined_type, "@TypeOf(undefined)");
@@ -2725,7 +2760,7 @@ test "simple types" {
 test "int type" {
     const gpa = std.testing.allocator;
 
-    var ip: InternPool = .{};
+    var ip = try InternPool.init(gpa);
     defer ip.deinit(gpa);
 
     const i32_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .signed, .bits = 32 } });
@@ -2747,7 +2782,7 @@ test "int type" {
 test "int value" {
     const gpa = std.testing.allocator;
 
-    var ip: InternPool = .{};
+    var ip = try InternPool.init(gpa);
     defer ip.deinit(gpa);
 
     const unsigned_zero_value = try ip.get(gpa, .{ .int_u64_value = 0 });
@@ -2787,7 +2822,7 @@ test "int value" {
 test "big int value" {
     const gpa = std.testing.allocator;
 
-    var ip: InternPool = .{};
+    var ip = try InternPool.init(gpa);
     defer ip.deinit(gpa);
 
     var result = try std.math.big.int.Managed.init(gpa);
@@ -2807,17 +2842,17 @@ test "big int value" {
 test "float type" {
     const gpa = std.testing.allocator;
 
-    var ip: InternPool = .{};
+    var ip = try InternPool.init(gpa);
     defer ip.deinit(gpa);
 
-    const f16_type = try ip.get(gpa, .{ .simple = .f16 });
-    const f32_type = try ip.get(gpa, .{ .simple = .f32 });
-    const f64_type = try ip.get(gpa, .{ .simple = .f64 });
-    const f80_type = try ip.get(gpa, .{ .simple = .f80 });
-    const f128_type = try ip.get(gpa, .{ .simple = .f128 });
+    const f16_type = try ip.get(gpa, .{ .simple_type = .f16 });
+    const f32_type = try ip.get(gpa, .{ .simple_type = .f32 });
+    const f64_type = try ip.get(gpa, .{ .simple_type = .f64 });
+    const f80_type = try ip.get(gpa, .{ .simple_type = .f80 });
+    const f128_type = try ip.get(gpa, .{ .simple_type = .f128 });
 
-    const another_f32_type = try ip.get(gpa, .{ .simple = .f32 });
-    const another_f64_type = try ip.get(gpa, .{ .simple = .f64 });
+    const another_f32_type = try ip.get(gpa, .{ .simple_type = .f32 });
+    const another_f64_type = try ip.get(gpa, .{ .simple_type = .f64 });
 
     try std.testing.expect(f16_type != f32_type);
     try std.testing.expect(f32_type != f64_type);
@@ -2837,7 +2872,7 @@ test "float type" {
 test "float value" {
     const gpa = std.testing.allocator;
 
-    var ip: InternPool = .{};
+    var ip = try InternPool.init(gpa);
     defer ip.deinit(gpa);
 
     const f16_value = try ip.get(gpa, .{ .float_16_value = 0.25 });
@@ -2895,7 +2930,7 @@ test "float value" {
 test "pointer type" {
     const gpa = std.testing.allocator;
 
-    var ip: InternPool = .{};
+    var ip = try InternPool.init(gpa);
     defer ip.deinit(gpa);
 
     const i32_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .signed, .bits = 32 } });
@@ -2980,14 +3015,14 @@ test "pointer type" {
 test "optional type" {
     const gpa = std.testing.allocator;
 
-    var ip: InternPool = .{};
+    var ip = try InternPool.init(gpa);
     defer ip.deinit(gpa);
 
     const i32_type_0 = try ip.get(gpa, .{ .int_type = .{ .signedness = .signed, .bits = 32 } });
     const i32_type_1 = try ip.get(gpa, .{ .int_type = .{ .signedness = .signed, .bits = 32 } });
     const u32_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .unsigned, .bits = 32 } });
 
-    const null_value = try ip.get(gpa, .{ .simple = .null_value });
+    const null_value = try ip.get(gpa, .{ .simple_value = .null_value });
     const u64_42_value = try ip.get(gpa, .{ .int_u64_value = 42 });
 
     const i32_optional_type_0 = try ip.get(gpa, .{ .optional_type = .{ .payload_type = i32_type_0 } });
@@ -3007,7 +3042,7 @@ test "optional type" {
 test "error set type" {
     const gpa = std.testing.allocator;
 
-    var ip: InternPool = .{};
+    var ip = try InternPool.init(gpa);
     defer ip.deinit(gpa);
 
     const foo_name = try ip.get(gpa, .{ .bytes = "foo" });
@@ -3035,11 +3070,11 @@ test "error set type" {
 test "error union type" {
     const gpa = std.testing.allocator;
 
-    var ip: InternPool = .{};
+    var ip = try InternPool.init(gpa);
     defer ip.deinit(gpa);
 
     const empty_error_set = try ip.get(gpa, .{ .error_set_type = .{ .names = &.{} } });
-    const bool_type = try ip.get(gpa, .{ .simple = .bool });
+    const bool_type = try ip.get(gpa, .{ .simple_type = .bool });
 
     const @"error{}!bool" = try ip.get(gpa, .{ .error_union_type = .{
         .error_set_type = empty_error_set,
@@ -3052,7 +3087,7 @@ test "error union type" {
 test "array type" {
     const gpa = std.testing.allocator;
 
-    var ip: InternPool = .{};
+    var ip = try InternPool.init(gpa);
     defer ip.deinit(gpa);
 
     const i32_type_0 = try ip.get(gpa, .{ .int_type = .{ .signedness = .signed, .bits = 32 } });
@@ -3084,11 +3119,11 @@ test "array type" {
 test "struct value" {
     const gpa = std.testing.allocator;
 
-    var ip: InternPool = .{};
+    var ip = try InternPool.init(gpa);
     defer ip.deinit(gpa);
 
     const i32_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .signed, .bits = 32 } });
-    const bool_type = try ip.get(gpa, .{ .simple = .bool });
+    const bool_type = try ip.get(gpa, .{ .simple_type = .bool });
 
     const struct_index = try ip.createStruct(gpa, .{
         .fields = .{},
@@ -3103,7 +3138,7 @@ test "struct value" {
     try struct_info.fields.put(gpa, "bar", .{ .ty = bool_type });
 
     const one_value = try ip.get(gpa, .{ .int_i64_value = 1 });
-    const true_value = try ip.get(gpa, .{ .simple = .bool_true });
+    const true_value = try ip.get(gpa, .{ .simple_value = .bool_true });
 
     const aggregate_value = try ip.get(gpa, Key{ .aggregate = &.{ one_value, true_value } });
 
@@ -3113,12 +3148,12 @@ test "struct value" {
 test "function type" {
     const gpa = std.testing.allocator;
 
-    var ip: InternPool = .{};
+    var ip = try InternPool.init(gpa);
     defer ip.deinit(gpa);
 
     const i32_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .signed, .bits = 32 } });
-    const bool_type = try ip.get(gpa, .{ .simple = .bool });
-    const type_type = try ip.get(gpa, .{ .simple = .type });
+    const bool_type = try ip.get(gpa, .{ .simple_type = .bool });
+    const type_type = try ip.get(gpa, .{ .simple_type = .type });
 
     const @"fn(i32) bool" = try ip.get(gpa, .{ .function_type = .{
         .args = &.{i32_type},
@@ -3159,11 +3194,11 @@ test "function type" {
 test "union value" {
     const gpa = std.testing.allocator;
 
-    var ip: InternPool = .{};
+    var ip = try InternPool.init(gpa);
     defer ip.deinit(gpa);
 
     const u32_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .unsigned, .bits = 32 } });
-    const f16_type = try ip.get(gpa, .{ .simple = .f16 });
+    const f16_type = try ip.get(gpa, .{ .simple_type = .f16 });
 
     const int_value = try ip.get(gpa, .{ .int_u64_value = 1 });
     const f16_value = try ip.get(gpa, .{ .float_16_value = 0.25 });
@@ -3196,11 +3231,11 @@ test "union value" {
 test "anyframe type" {
     const gpa = std.testing.allocator;
 
-    var ip: InternPool = .{};
+    var ip = try InternPool.init(gpa);
     defer ip.deinit(gpa);
 
     const i32_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .signed, .bits = 32 } });
-    const bool_type = try ip.get(gpa, .{ .simple = .bool });
+    const bool_type = try ip.get(gpa, .{ .simple_type = .bool });
 
     const @"anyframe->i32" = try ip.get(gpa, .{ .anyframe_type = .{ .child = i32_type } });
     const @"anyframe->bool" = try ip.get(gpa, .{ .anyframe_type = .{ .child = bool_type } });
@@ -3214,11 +3249,11 @@ test "anyframe type" {
 test "vector type" {
     const gpa = std.testing.allocator;
 
-    var ip: InternPool = .{};
+    var ip = try InternPool.init(gpa);
     defer ip.deinit(gpa);
 
     const u32_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .unsigned, .bits = 32 } });
-    const bool_type = try ip.get(gpa, .{ .simple = .bool });
+    const bool_type = try ip.get(gpa, .{ .simple_type = .bool });
 
     const @"@Vector(2,u32)" = try ip.get(gpa, .{ .vector_type = .{
         .len = 2,
@@ -3238,7 +3273,7 @@ test "vector type" {
 test "bytes value" {
     const gpa = std.testing.allocator;
 
-    var ip: InternPool = .{};
+    var ip = try InternPool.init(gpa);
     defer ip.deinit(gpa);
 
     var str1: [43]u8 = "https://www.youtube.com/watch?v=dQw4w9WgXcQ".*;
@@ -3274,7 +3309,7 @@ test "coerceInMemoryAllowed integers and floats" {
     defer arena_allocator.deinit();
     const arena = arena_allocator.allocator();
 
-    var ip: InternPool = .{};
+    var ip = try InternPool.init(gpa);
     defer ip.deinit(gpa);
 
     const u32_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .unsigned, .bits = 32 } });
@@ -3282,8 +3317,8 @@ test "coerceInMemoryAllowed integers and floats" {
     const i32_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .signed, .bits = 32 } });
     const i16_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .signed, .bits = 16 } });
 
-    const f32_type = try ip.get(gpa, .{ .simple = .f32 });
-    const f64_type = try ip.get(gpa, .{ .simple = .f64 });
+    const f32_type = try ip.get(gpa, .{ .simple_type = .f32 });
+    const f64_type = try ip.get(gpa, .{ .simple_type = .f64 });
 
     try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, u32_type, u32_type, true, builtin.target) == .ok);
     try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, u32_type, u16_type, true, builtin.target) == .ok);
@@ -3302,13 +3337,13 @@ test "coerceInMemoryAllowed integers and floats" {
 test "resolvePeerTypes" {
     const gpa = std.testing.allocator;
 
-    var ip: InternPool = .{};
+    var ip = try InternPool.init(gpa);
     defer ip.deinit(gpa);
 
-    const bool_type = try ip.get(gpa, .{ .simple = .bool });
-    const type_type = try ip.get(gpa, .{ .simple = .type });
-    const noreturn_type = try ip.get(gpa, .{ .simple = .noreturn });
-    const undefined_type = try ip.get(gpa, .{ .simple = .undefined_type });
+    const bool_type = try ip.get(gpa, .{ .simple_type = .bool });
+    const type_type = try ip.get(gpa, .{ .simple_type = .type });
+    const noreturn_type = try ip.get(gpa, .{ .simple_type = .noreturn });
+    const undefined_type = try ip.get(gpa, .{ .simple_type = .undefined_type });
 
     try std.testing.expect(noreturn_type == try ip.resolvePeerTypes(std.testing.allocator, &.{}, builtin.target));
     try std.testing.expect(type_type == try ip.resolvePeerTypes(std.testing.allocator, &.{type_type}, builtin.target));
@@ -3324,7 +3359,7 @@ test "resolvePeerTypes" {
 test "resolvePeerTypes integers and floats" {
     const gpa = std.testing.allocator;
 
-    var ip: InternPool = .{};
+    var ip = try InternPool.init(gpa);
     defer ip.deinit(gpa);
 
     const i16_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .signed, .bits = 16 } });
@@ -3334,21 +3369,21 @@ test "resolvePeerTypes integers and floats" {
     const u32_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .unsigned, .bits = 32 } });
     const u64_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .unsigned, .bits = 64 } });
 
-    const usize_type = try ip.get(gpa, .{ .simple = .usize });
-    const isize_type = try ip.get(gpa, .{ .simple = .isize });
+    const usize_type = try ip.get(gpa, .{ .simple_type = .usize });
+    const isize_type = try ip.get(gpa, .{ .simple_type = .isize });
 
-    const c_short_type = try ip.get(gpa, .{ .simple = .c_short });
-    const c_int_type = try ip.get(gpa, .{ .simple = .c_int });
-    const c_long_type = try ip.get(gpa, .{ .simple = .c_long });
+    const c_short_type = try ip.get(gpa, .{ .simple_type = .c_short });
+    const c_int_type = try ip.get(gpa, .{ .simple_type = .c_int });
+    const c_long_type = try ip.get(gpa, .{ .simple_type = .c_long });
 
-    const comptime_int_type = try ip.get(gpa, .{ .simple = .comptime_int });
-    const comptime_float_type = try ip.get(gpa, .{ .simple = .comptime_float });
+    const comptime_int_type = try ip.get(gpa, .{ .simple_type = .comptime_int });
+    const comptime_float_type = try ip.get(gpa, .{ .simple_type = .comptime_float });
 
-    const f16_type = try ip.get(gpa, .{ .simple = .f16 });
-    const f32_type = try ip.get(gpa, .{ .simple = .f32 });
-    const f64_type = try ip.get(gpa, .{ .simple = .f64 });
+    const f16_type = try ip.get(gpa, .{ .simple_type = .f16 });
+    const f32_type = try ip.get(gpa, .{ .simple_type = .f32 });
+    const f64_type = try ip.get(gpa, .{ .simple_type = .f64 });
 
-    const bool_type = try ip.get(gpa, .{ .simple = .bool });
+    const bool_type = try ip.get(gpa, .{ .simple_type = .bool });
 
     try ip.testResolvePeerTypes(i16_type, i16_type, i16_type);
     try ip.testResolvePeerTypes(i16_type, i32_type, i32_type);
@@ -3432,12 +3467,12 @@ test "resolvePeerTypes integers and floats" {
 test "resolvePeerTypes optionals" {
     const gpa = std.testing.allocator;
 
-    var ip: InternPool = .{};
+    var ip = try InternPool.init(gpa);
     defer ip.deinit(gpa);
 
     const u32_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .unsigned, .bits = 32 } });
-    const null_type = try ip.get(gpa, .{ .simple = .null_type });
-    const bool_type = try ip.get(gpa, .{ .simple = .bool });
+    const null_type = try ip.get(gpa, .{ .simple_type = .null_type });
+    const bool_type = try ip.get(gpa, .{ .simple_type = .bool });
 
     const @"?u32" = try ip.get(gpa, .{ .optional_type = .{ .payload_type = u32_type } });
     const @"?bool" = try ip.get(gpa, .{ .optional_type = .{ .payload_type = bool_type } });
@@ -3449,13 +3484,13 @@ test "resolvePeerTypes optionals" {
 test "resolvePeerTypes pointers" {
     const gpa = std.testing.allocator;
 
-    var ip: InternPool = .{};
+    var ip = try InternPool.init(gpa);
     defer ip.deinit(gpa);
 
     const u32_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .unsigned, .bits = 32 } });
-    const comptime_int_type = try ip.get(gpa, .{ .simple = .comptime_int });
-    const comptime_float_type = try ip.get(gpa, .{ .simple = .comptime_float });
-    const bool_type = try ip.get(gpa, .{ .simple = .bool });
+    const comptime_int_type = try ip.get(gpa, .{ .simple_type = .comptime_int });
+    const comptime_float_type = try ip.get(gpa, .{ .simple_type = .comptime_float });
+    const bool_type = try ip.get(gpa, .{ .simple_type = .bool });
 
     const @"*u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = u32_type, .size = .One } });
     const @"[*]u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = u32_type, .size = .Many } });
@@ -3547,10 +3582,10 @@ test "resolvePeerTypes pointers" {
 test "resolvePeerTypes function pointers" {
     const gpa = std.testing.allocator;
 
-    var ip: InternPool = .{};
+    var ip = try InternPool.init(gpa);
     defer ip.deinit(gpa);
 
-    const void_type = try ip.get(gpa, .{ .simple = .void });
+    const void_type = try ip.get(gpa, .{ .simple_type = .void });
     const u32_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .unsigned, .bits = 32 } });
     const @"*u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = u32_type, .size = .One } });
     const @"*const u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = u32_type, .size = .One, .is_const = true } });

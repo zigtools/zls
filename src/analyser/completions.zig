@@ -21,7 +21,7 @@ pub fn dotCompletions(
     };
 
     switch (inner_key) {
-        .simple => |simple| switch (simple) {
+        .simple_type => |simple| switch (simple) {
             .type => {
                 const ty_key = ip.indexToKey(val);
                 const namespace = ty_key.getNamespace(ip.*);
@@ -147,6 +147,7 @@ pub fn dotCompletions(
         .anyframe_type,
         => {},
 
+        .simple_value,
         .int_u64_value,
         .int_i64_value,
         .int_big_value,

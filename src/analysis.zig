@@ -7,6 +7,7 @@ const URI = @import("uri.zig");
 const log = std.log.scoped(.analysis);
 const ast = @import("ast.zig");
 const ComptimeInterpreter = @import("ComptimeInterpreter.zig");
+const InternPool = ComptimeInterpreter.InternPool;
 
 var using_trail: std.ArrayList([*]const u8) = undefined;
 var resolve_trail: std.ArrayList(NodeWithHandle) = undefined;
@@ -765,14 +766,13 @@ pub fn resolveTypeOfNodeInternal(store: *DocumentStore, arena: *std.heap.ArenaAl
 
                     log.info("Invoking interpreter!", .{});
 
-                    store.ensureInterpreterExists(handle.uri) catch |err| {
+                    const interpreter = store.ensureInterpreterExists(handle.uri) catch |err| {
                         log.err("Failed to interpret file: {s}", .{@errorName(err)});
                         if (@errorReturnTrace()) |trace| {
                             std.debug.dumpStackTrace(trace.*);
                         }
                         return null;
                     };
-                    var interpreter: *ComptimeInterpreter = handle.interpreter.?;
 
                     const root_namespace = @intToEnum(ComptimeInterpreter.Namespace.Index, 0);
 
@@ -792,16 +792,13 @@ pub fn resolveTypeOfNodeInternal(store: *DocumentStore, arena: *std.heap.ArenaAl
                         return null;
                     };
 
-                    const type_type = try interpreter.ip.get(interpreter.allocator, ComptimeInterpreter.Key{ .simple = .type });
-                    const is_type_val = value.ty == type_type;
-
                     return TypeWithHandle{
                         .type = .{
                             .data = .{ .@"comptime" = .{
                                 .interpreter = interpreter,
                                 .value = value,
                             } },
-                            .is_type_val = is_type_val,
+                            .is_type_val = value.ty == InternPool.Index.type,
                         },
                         .handle = node_handle.handle,
                     };
