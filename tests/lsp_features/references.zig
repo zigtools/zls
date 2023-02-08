@@ -11,9 +11,6 @@ const offsets = zls.offsets;
 
 const allocator: std.mem.Allocator = std.testing.allocator;
 
-// TODO fix references so that we can stop skipping these tests
-const skip_references_tests = true;
-
 test "references" {
     try testReferences(
         \\const <0> = 0;
@@ -59,7 +56,7 @@ test "references - local scope" {
         \\    return <0> + bar;
         \\}
     );
-    if (skip_references_tests) return error.SkipZigTest;
+    if (true) return error.SkipZigTest; // TODO
     try testReferences(
         \\const foo = blk: {
         \\    _ = blk: {
@@ -73,6 +70,32 @@ test "references - local scope" {
     );
 }
 
+test "references - struct field access" {
+    if (true) return error.SkipZigTest; // TODO
+    try testReferences(
+        \\const S = struct {placeholder: u32 = 3};
+        \\pub fn foo() bool {
+        \\    const s: S = .{};
+        \\    return s.<0> == s.<0>;
+        \\}
+    );
+}
+
+test "references - struct decl access" {
+    try testReferences(
+        \\const S = struct {
+        \\    fn <0>() void {}
+        \\};
+        \\pub fn foo() bool {
+        \\    const s: S = .{};
+        \\    s.<0>();
+        \\    s.<0>();
+        \\    <1>();
+        \\}
+        \\fn <1>() void {}
+    );
+}
+
 test "references - while continue expression" {
     try testReferences(
         \\ pub fn foo() void {
@@ -83,7 +106,7 @@ test "references - while continue expression" {
 }
 
 test "references - label" {
-    if (skip_references_tests) return error.SkipZigTest;
+    if (true) return error.SkipZigTest; // TODO
     try testReferences(
         \\const foo = <0>: {
         \\    break :<0> 0;
@@ -106,6 +129,8 @@ fn testReferences(source: []const u8) !void {
 
     try ctx.requestDidOpen(file_uri, phr.new_source);
 
+    try std.testing.expect(phr.locations.len != 0);
+
     var i: usize = 0;
     while (i < phr.locations.len) : (i += 1) {
         const var_loc = phr.locations.items(.old)[i];
@@ -119,6 +144,14 @@ fn testReferences(source: []const u8) !void {
         };
 
         const response = try ctx.requestGetResponse(?[]types.Location, "textDocument/references", params);
+
+        var error_builder = ErrorBuilder.init(allocator, phr.new_source);
+        defer error_builder.deinit();
+        errdefer {
+            const note_loc = phr.locations.items(.new)[i];
+            error_builder.msgAtLoc("asked for references here", note_loc, .info, .{}) catch {};
+            error_builder.writeDebug();
+        }
 
         const locations: []types.Location = response.result orelse {
             std.debug.print("Server returned `null` as the result\n", .{});
@@ -149,14 +182,6 @@ fn testReferences(source: []const u8) !void {
             break :blk try locs.toOwnedSlice(allocator);
         };
         defer allocator.free(expected_locs);
-
-        var error_builder = ErrorBuilder.init(allocator, phr.new_source);
-        defer error_builder.deinit();
-        errdefer {
-            const note_loc = phr.locations.items(.new)[i];
-            error_builder.msgAtLoc("asked for references here", note_loc, .info, .{}) catch {};
-            error_builder.writeDebug();
-        }
 
         // keeps track of expected locations that have been given by the server
         // used to detect double references and missing references

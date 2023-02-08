@@ -38,7 +38,7 @@
           dontInstall = true;
           buildPhase = ''
             mkdir -p $out
-            zig build install -Dcpu=baseline -Drelease-safe=true -Ddata_version=master -Dtres=${tres}/tres.zig -Dknown-folders=${known-folders}/known-folders.zig --prefix $out
+            zig build install -Dcpu=baseline -Doptimize=ReleaseSafe -Ddata_version=master -Dtres=${tres}/tres.zig -Dknown-folders=${known-folders}/known-folders.zig --prefix $out
           '';
           XDG_CACHE_HOME = ".cache";
         };

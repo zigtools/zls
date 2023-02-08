@@ -4,6 +4,8 @@ const zls = @import("zls");
 const types = zls.types;
 const offsets = zls.offsets;
 
+const Ast = std.zig.Ast;
+
 test "offsets - index <-> Position" {
     try testIndexPosition("", 0, 0, .{ 0, 0, 0 });
 
@@ -116,8 +118,8 @@ fn testIndexPosition(text: []const u8, index: usize, line: u32, characters: [3]u
     try std.testing.expectEqual(index, offsets.positionToIndex(text, position32, .@"utf-32"));
 }
 
-fn testTokenToLoc(text: [:0]const u8, token_index: std.zig.Ast.TokenIndex, start: usize, end: usize) !void {
-    var tree = try std.zig.parse(std.testing.allocator, text);
+fn testTokenToLoc(text: [:0]const u8, token_index: Ast.TokenIndex, start: usize, end: usize) !void {
+    var tree = try Ast.parse(std.testing.allocator, text, .zig);
     defer tree.deinit(std.testing.allocator);
 
     const actual = offsets.tokenToLoc(tree, token_index);

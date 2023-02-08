@@ -39,6 +39,7 @@ pub fn getDocComments(allocator: std.mem.Allocator, tree: Ast, node: Ast.Node.In
         .aligned_var_decl,
         .simple_var_decl,
         .container_field_init,
+        .container_field,
         => {
             if (getDocCommentTokenIndex(tokens, base)) |doc_comment_index|
                 return try collectDocComments(allocator, tree, doc_comment_index, format, false);
@@ -58,6 +59,7 @@ pub fn getDocCommentTokenIndex(tokens: []const std.zig.Token.Tag, base_token: As
     if (tokens[idx] == .keyword_extern and idx > 0) idx -= 1;
     if (tokens[idx] == .keyword_export and idx > 0) idx -= 1;
     if (tokens[idx] == .keyword_inline and idx > 0) idx -= 1;
+    if (tokens[idx] == .identifier and idx > 0) idx -= 1;
     if (tokens[idx] == .keyword_pub and idx > 0) idx -= 1;
 
     // Find first doc comment token
