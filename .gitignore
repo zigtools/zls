@@ -3,3 +3,6 @@ zig-*
 debug
 release
 *.zlsreplay
+
+# Editor-specific ignores
+.vscode
