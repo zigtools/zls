@@ -1851,6 +1851,7 @@ fn addOutlineNodes(allocator: std.mem.Allocator, tree: Ast, child: Ast.Node.Inde
         .error_set_decl,
         => return,
         .container_decl,
+        .container_decl_trailing,
         .container_decl_arg,
         .container_decl_arg_trailing,
         .container_decl_two,

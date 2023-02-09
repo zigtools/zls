@@ -32,6 +32,9 @@ test "documentSymbol - nested struct with self" {
         \\};
     ,
         \\Variable Foo
+        \\  Variable Self
+        \\  Function foo
+        \\  Variable Bar
     );
 }
 
