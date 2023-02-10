@@ -556,9 +556,11 @@ pub const Key = union(enum) {
             .pointer_type => Index.none,
             .array_type => |array_info| {
                 if (array_info.len == 0) {
-                    return panicOrElse("TODO return empty array value", Index.none);
+                    return Index.empty_aggregate;
+                } else if (ip.indexToKey(array_info.child).onePossibleValue(ip) != Index.none) {
+                    return Index.the_only_possible_value;
                 }
-                return ip.indexToKey(array_info.child).onePossibleValue(ip);
+                return Index.none;
             },
             .struct_type => |struct_index| {
                 const struct_info = ip.getStruct(struct_index);
@@ -568,7 +570,7 @@ pub const Key = union(enum) {
                     if (ip.indexToKey(entry.value_ptr.ty).onePossibleValue(ip) != Index.none) continue;
                     return Index.none;
                 }
-                return Index.empty_struct;
+                return Index.empty_aggregate;
             },
             .optional_type => |optional_info| {
                 if (optional_info.payload_type == Index.noreturn_type) {
@@ -874,6 +876,7 @@ pub const Key = union(enum) {
                 .null_value => try writer.writeAll("null"),
                 .bool_true => try writer.writeAll("true"),
                 .bool_false => try writer.writeAll("false"),
+                .the_only_possible_value => try writer.writeAll("(the only possible value)"),
                 .generic_poison => unreachable,
             },
 
@@ -1036,7 +1039,8 @@ pub const Index = enum(u32) {
     /// `false`
     bool_false,
     /// `.{}` (untyped)
-    empty_struct,
+    empty_aggregate,
+    the_only_possible_value,
     generic_poison,
 
     unknown = std.math.maxInt(u32) - 1,
@@ -1212,6 +1216,7 @@ pub const SimpleValue = enum(u32) {
     null_value,
     bool_true,
     bool_false,
+    the_only_possible_value,
     generic_poison,
 };
 
@@ -1296,7 +1301,8 @@ pub fn init(gpa: Allocator) Allocator.Error!InternPool {
         .{ .index = .bool_true, .key = .{ .simple_value = .bool_true } },
         .{ .index = .bool_false, .key = .{ .simple_value = .bool_false } },
 
-        .{ .index = .empty_struct, .key = .{ .aggregate = &.{} } },
+        .{ .index = .empty_aggregate, .key = .{ .aggregate = &.{} } },
+        .{ .index = .the_only_possible_value, .key = .{ .simple_value = .the_only_possible_value } },
         .{ .index = .generic_poison, .key = .{ .simple_value = .generic_poison } },
     };
 
