@@ -277,10 +277,24 @@ pub const Key = union(enum) {
                 .type => .Type,
                 .anyerror => .ErrorSet,
                 .noreturn => .NoReturn,
-                .@"anyframe" => .AnyFrame,
+                .anyframe_type => .AnyFrame,
                 .null_type => .Null,
                 .undefined_type => .Undefined,
                 .enum_literal_type => .EnumLiteral,
+
+                .atomic_order => .Enum,
+                .atomic_rmw_op => .Enum,
+                .calling_convention => .Enum,
+                .address_space => .Enum,
+                .float_mode => .Enum,
+                .reduce_op => .Enum,
+                .modifier => .Enum,
+                .prefetch_options => .Struct,
+                .export_options => .Struct,
+                .extern_options => .Struct,
+                .type_info => .Union,
+
+                .generic_poison => unreachable,
             },
 
             .int_type => .Int,
@@ -293,7 +307,7 @@ pub const Key = union(enum) {
             .enum_type => .Enum,
             .function_type => .Fn,
             .union_type => .Union,
-            .tuple_type => .Struct, // TODO this correct?
+            .tuple_type => .Struct,
             .vector_type => .Vector,
             .anyframe_type => .AnyFrame,
 
@@ -447,7 +461,7 @@ pub const Key = union(enum) {
     pub fn elemType2(ty: Key) Index {
         return switch (ty) {
             .simple_type => |simple| switch (simple) {
-                .@"anyframe" => Index.void,
+                .anyframe_type => Index.void_type,
                 else => unreachable,
             },
             .pointer_type => |pointer_info| pointer_info.elem_type,
@@ -503,7 +517,7 @@ pub const Key = union(enum) {
                 .anyerror,
                 .comptime_int,
                 .comptime_float,
-                .@"anyframe",
+                .anyframe_type,
                 .enum_literal_type,
                 => Index.none,
 
@@ -511,6 +525,21 @@ pub const Key = union(enum) {
                 .noreturn => Index.unreachable_value,
                 .null_type => Index.null_value,
                 .undefined_type => Index.undefined_value,
+
+                .atomic_order,
+                .atomic_rmw_op,
+                .calling_convention,
+                .address_space,
+                .float_mode,
+                .reduce_op,
+                .modifier,
+                .prefetch_options,
+                .export_options,
+                .extern_options,
+                .type_info,
+                => Index.none,
+
+                .generic_poison => unreachable,
             },
             .int_type => |int_info| {
                 if (int_info.bits == 0) {
@@ -536,10 +565,10 @@ pub const Key = union(enum) {
                     if (ip.indexToKey(entry.value_ptr.ty).onePossibleValue(ip) != Index.none) continue;
                     return Index.none;
                 }
-                return panicOrElse("TODO return empty struct value", Index.none);
+                return Index.empty_struct;
             },
             .optional_type => |optional_info| {
-                if (optional_info.payload_type == Index.noreturn) {
+                if (optional_info.payload_type == Index.noreturn_type) {
                     return Index.null_value;
                 }
                 return Index.none;
@@ -648,12 +677,25 @@ pub const Key = union(enum) {
                 .comptime_int,
                 .comptime_float,
                 .noreturn,
-                .@"anyframe",
+                .anyframe_type,
                 => try writer.writeAll(@tagName(simple)),
 
                 .null_type => try writer.writeAll("@TypeOf(null)"),
                 .undefined_type => try writer.writeAll("@TypeOf(undefined)"),
                 .enum_literal_type => try writer.writeAll("@TypeOf(.enum_literal)"),
+
+                .atomic_order => try writer.writeAll("std.builtin.AtomicOrder"),
+                .atomic_rmw_op => try writer.writeAll("std.builtin.AtomicRmwOp"),
+                .calling_convention => try writer.writeAll("std.builtin.CallingConvention"),
+                .address_space => try writer.writeAll("std.builtin.AddressSpace"),
+                .float_mode => try writer.writeAll("std.builtin.FloatMode"),
+                .reduce_op => try writer.writeAll("std.builtin.ReduceOp"),
+                .modifier => try writer.writeAll("std.builtin.CallModifier"),
+                .prefetch_options => try writer.writeAll("std.builtin.PrefetchOptions"),
+                .export_options => try writer.writeAll("std.builtin.ExportOptions"),
+                .extern_options => try writer.writeAll("std.builtin.ExternOptions"),
+                .type_info => try writer.writeAll("std.builtin.Type"),
+                .generic_poison => unreachable,
             },
             .int_type => |int_info| switch (int_info.signedness) {
                 .signed => try writer.print("i{}", .{int_info.bits}),
@@ -821,45 +863,15 @@ pub const Key = union(enum) {
         writer: anytype,
     ) @TypeOf(writer).Error!void {
         switch (value) {
-            .simple_type => |simple| switch (simple) {
-                .f16,
-                .f32,
-                .f64,
-                .f80,
-                .f128,
-                .usize,
-                .isize,
-                .c_short,
-                .c_ushort,
-                .c_int,
-                .c_uint,
-                .c_long,
-                .c_ulong,
-                .c_longlong,
-                .c_ulonglong,
-                .c_longdouble,
-                .anyopaque,
-                .bool,
-                .void,
-                .type,
-                .anyerror,
-                .comptime_int,
-                .comptime_float,
-                .noreturn,
-                .@"anyframe",
-                => try writer.writeAll(@tagName(simple)),
-
-                .null_type => try writer.writeAll("@TypeOf(null)"),
-                .undefined_type => try writer.writeAll("@TypeOf(undefined)"),
-                .enum_literal_type => try writer.writeAll("@TypeOf(.enum_literal)"),
-            },
+            .simple_type => try printType(ty, ip, writer),
             .simple_value => |simple| switch (simple) {
-                .undefined_value => try writer.writeAll("@Type(.Undefined)"),
-                .void_value => try writer.writeAll("void"),
+                .undefined_value => try writer.writeAll("undefined"),
+                .void_value => try writer.writeAll("{}"),
                 .unreachable_value => try writer.writeAll("unreachable"),
                 .null_value => try writer.writeAll("null"),
                 .bool_true => try writer.writeAll("true"),
                 .bool_false => try writer.writeAll("false"),
+                .generic_poison => unreachable,
             },
 
             .int_type,
@@ -943,44 +955,89 @@ pub const Item = struct {
 /// the same `InternPool`.
 /// TODO split this into an Optional and non-Optional Index
 pub const Index = enum(u32) {
-    f16,
-    f32,
-    f64,
-    f80,
-    f128,
-    usize,
-    isize,
-    c_short,
-    c_ushort,
-    c_int,
-    c_uint,
-    c_long,
-    c_ulong,
-    c_longlong,
-    c_ulonglong,
-    c_longdouble,
-    anyopaque,
-    bool,
-    void,
-    type,
-    anyerror,
-    comptime_int,
-    comptime_float,
-    noreturn,
-    @"anyframe",
+    u1_type,
+    u8_type,
+    i8_type,
+    u16_type,
+    i16_type,
+    u29_type,
+    u32_type,
+    i32_type,
+    u64_type,
+    i64_type,
+    u128_type,
+    i128_type,
+    usize_type,
+    isize_type,
+    c_short_type,
+    c_ushort_type,
+    c_int_type,
+    c_uint_type,
+    c_long_type,
+    c_ulong_type,
+    c_longlong_type,
+    c_ulonglong_type,
+    c_longdouble_type,
+    f16_type,
+    f32_type,
+    f64_type,
+    f80_type,
+    f128_type,
+    anyopaque_type,
+    bool_type,
+    void_type,
+    type_type,
+    anyerror_type,
+    comptime_int_type,
+    comptime_float_type,
+    noreturn_type,
+    anyframe_type,
     null_type,
     undefined_type,
     enum_literal_type,
+    atomic_order_type,
+    atomic_rmw_op_type,
+    calling_convention_type,
+    address_space_type,
+    float_mode_type,
+    reduce_op_type,
+    modifier_type,
+    prefetch_options_type,
+    export_options_type,
+    extern_options_type,
+    type_info_type,
+    manyptr_u8_type,
+    manyptr_const_u8_type,
+    fn_noreturn_no_args_type,
+    fn_void_no_args_type,
+    fn_naked_noreturn_no_args_type,
+    fn_ccc_void_no_args_type,
+    single_const_pointer_to_comptime_int_type,
+    const_slice_u8_type,
+    anyerror_void_error_union_type,
+    generic_poison_type,
 
+    /// `undefined` (untyped)
     undefined_value,
-    void_value,
-    unreachable_value,
-    null_value,
-    bool_true,
-    bool_false,
-
+    /// `0` (comptime_int)
     zero,
+    /// `1` (comptime_int)
+    one,
+    /// `{}`
+    void_value,
+    /// `unreachable` (noreturn type)
+    unreachable_value,
+    /// `null` (untyped)
+    null_value,
+    /// `true`
+    bool_true,
+    /// `false`
+    bool_false,
+    /// `.{}` (untyped)
+    empty_struct,
+    generic_poison,
 
+    unknown = std.math.maxInt(u32) - 1,
     none = std.math.maxInt(u32),
     _,
 
@@ -1126,10 +1183,24 @@ pub const SimpleType = enum(u32) {
     comptime_int,
     comptime_float,
     noreturn,
-    @"anyframe",
+    anyframe_type,
     null_type,
     undefined_type,
     enum_literal_type,
+
+    atomic_order,
+    atomic_rmw_op,
+    calling_convention,
+    address_space,
+    float_mode,
+    reduce_op,
+    modifier,
+    prefetch_options,
+    export_options,
+    extern_options,
+    type_info,
+
+    generic_poison,
 };
 
 pub const SimpleValue = enum(u32) {
@@ -1139,6 +1210,7 @@ pub const SimpleValue = enum(u32) {
     null_value,
     bool_true,
     bool_false,
+    generic_poison,
 };
 
 comptime {
@@ -1148,51 +1220,98 @@ comptime {
 pub fn init(gpa: Allocator) Allocator.Error!InternPool {
     var ip: InternPool = .{};
 
-    const simple_count = std.meta.fields(SimpleType).len + std.meta.fields(SimpleValue).len;
-    const count = simple_count + 1;
-    const extra_count = @sizeOf(u64);
+    const items = [_]struct { index: Index, key: Key }{
+        .{ .index = .u1_type, .key = .{ .int_type = .{ .signedness = .unsigned, .bits = 1 } } },
+        .{ .index = .u8_type, .key = .{ .int_type = .{ .signedness = .unsigned, .bits = 8 } } },
+        .{ .index = .i8_type, .key = .{ .int_type = .{ .signedness = .signed, .bits = 8 } } },
+        .{ .index = .u16_type, .key = .{ .int_type = .{ .signedness = .unsigned, .bits = 16 } } },
+        .{ .index = .i16_type, .key = .{ .int_type = .{ .signedness = .signed, .bits = 16 } } },
+        .{ .index = .u29_type, .key = .{ .int_type = .{ .signedness = .unsigned, .bits = 29 } } },
+        .{ .index = .u32_type, .key = .{ .int_type = .{ .signedness = .unsigned, .bits = 32 } } },
+        .{ .index = .i32_type, .key = .{ .int_type = .{ .signedness = .signed, .bits = 32 } } },
+        .{ .index = .u64_type, .key = .{ .int_type = .{ .signedness = .unsigned, .bits = 64 } } },
+        .{ .index = .i64_type, .key = .{ .int_type = .{ .signedness = .signed, .bits = 64 } } },
+        .{ .index = .u128_type, .key = .{ .int_type = .{ .signedness = .unsigned, .bits = 128 } } },
+        .{ .index = .i128_type, .key = .{ .int_type = .{ .signedness = .signed, .bits = 128 } } },
 
-    try ip.map.ensureTotalCapacity(gpa, count);
-    try ip.items.ensureTotalCapacity(gpa, count);
+        .{ .index = .usize_type, .key = .{ .simple_type = .usize } },
+        .{ .index = .isize_type, .key = .{ .simple_type = .isize } },
+        .{ .index = .c_short_type, .key = .{ .simple_type = .c_short } },
+        .{ .index = .c_ushort_type, .key = .{ .simple_type = .c_ushort } },
+        .{ .index = .c_int_type, .key = .{ .simple_type = .c_int } },
+        .{ .index = .c_uint_type, .key = .{ .simple_type = .c_uint } },
+        .{ .index = .c_long_type, .key = .{ .simple_type = .c_long } },
+        .{ .index = .c_ulong_type, .key = .{ .simple_type = .c_ulong } },
+        .{ .index = .c_longlong_type, .key = .{ .simple_type = .c_longlong } },
+        .{ .index = .c_ulonglong_type, .key = .{ .simple_type = .c_ulonglong } },
+        .{ .index = .c_longdouble_type, .key = .{ .simple_type = .c_longdouble } },
+        .{ .index = .f16_type, .key = .{ .simple_type = .f16 } },
+        .{ .index = .f32_type, .key = .{ .simple_type = .f32 } },
+        .{ .index = .f64_type, .key = .{ .simple_type = .f64 } },
+        .{ .index = .f80_type, .key = .{ .simple_type = .f80 } },
+        .{ .index = .f128_type, .key = .{ .simple_type = .f128 } },
+        .{ .index = .anyopaque_type, .key = .{ .simple_type = .anyopaque } },
+        .{ .index = .bool_type, .key = .{ .simple_type = .bool } },
+        .{ .index = .void_type, .key = .{ .simple_type = .void } },
+        .{ .index = .type_type, .key = .{ .simple_type = .type } },
+        .{ .index = .anyerror_type, .key = .{ .simple_type = .anyerror } },
+        .{ .index = .comptime_int_type, .key = .{ .simple_type = .comptime_int } },
+        .{ .index = .comptime_float_type, .key = .{ .simple_type = .comptime_float } },
+        .{ .index = .noreturn_type, .key = .{ .simple_type = .noreturn } },
+        .{ .index = .anyframe_type, .key = .{ .simple_type = .anyframe_type } },
+        .{ .index = .null_type, .key = .{ .simple_type = .null_type } },
+        .{ .index = .undefined_type, .key = .{ .simple_type = .undefined_type } },
+        .{ .index = .enum_literal_type, .key = .{ .simple_type = .enum_literal_type } },
+
+        .{ .index = .atomic_order_type, .key = .{ .simple_type = .atomic_order } },
+        .{ .index = .atomic_rmw_op_type, .key = .{ .simple_type = .atomic_rmw_op } },
+        .{ .index = .calling_convention_type, .key = .{ .simple_type = .calling_convention } },
+        .{ .index = .address_space_type, .key = .{ .simple_type = .address_space } },
+        .{ .index = .float_mode_type, .key = .{ .simple_type = .float_mode } },
+        .{ .index = .reduce_op_type, .key = .{ .simple_type = .reduce_op } },
+        .{ .index = .modifier_type, .key = .{ .simple_type = .modifier } },
+        .{ .index = .prefetch_options_type, .key = .{ .simple_type = .prefetch_options } },
+        .{ .index = .export_options_type, .key = .{ .simple_type = .export_options } },
+        .{ .index = .extern_options_type, .key = .{ .simple_type = .extern_options } },
+        .{ .index = .type_info_type, .key = .{ .simple_type = .type_info } },
+        .{ .index = .manyptr_u8_type, .key = .{ .pointer_type = .{ .elem_type = .u8_type, .size = .Many } } },
+        .{ .index = .manyptr_const_u8_type, .key = .{ .pointer_type = .{ .elem_type = .u8_type, .size = .Many, .is_const = true } } },
+        .{ .index = .fn_noreturn_no_args_type, .key = .{ .function_type = .{ .args = &.{}, .return_type = .noreturn_type } } },
+        .{ .index = .fn_void_no_args_type, .key = .{ .function_type = .{ .args = &.{}, .return_type = .void_type } } },
+        .{ .index = .fn_naked_noreturn_no_args_type, .key = .{ .function_type = .{ .args = &.{}, .return_type = .void_type, .calling_convention = .Naked } } },
+        .{ .index = .fn_ccc_void_no_args_type, .key = .{ .function_type = .{ .args = &.{}, .return_type = .void_type, .calling_convention = .C } } },
+        .{ .index = .single_const_pointer_to_comptime_int_type, .key = .{ .pointer_type = .{ .elem_type = .comptime_int_type, .size = .One, .is_const = true } } },
+        .{ .index = .const_slice_u8_type, .key = .{ .pointer_type = .{ .elem_type = .u8_type, .size = .Slice, .is_const = true } } },
+        .{ .index = .anyerror_void_error_union_type, .key = .{ .error_union_type = .{ .error_set_type = .anyerror_type, .payload_type = .void_type } } },
+        .{ .index = .generic_poison_type, .key = .{ .simple_type = .generic_poison } },
+
+        .{ .index = .undefined_value, .key = .{ .simple_value = .undefined_value } },
+        .{ .index = .zero, .key = .{ .int_u64_value = 0 } },
+        .{ .index = .one, .key = .{ .int_u64_value = 1 } },
+        .{ .index = .void_value, .key = .{ .simple_value = .void_value } },
+        .{ .index = .unreachable_value, .key = .{ .simple_value = .unreachable_value } },
+        .{ .index = .null_value, .key = .{ .simple_value = .null_value } },
+        .{ .index = .bool_true, .key = .{ .simple_value = .bool_true } },
+        .{ .index = .bool_false, .key = .{ .simple_value = .bool_false } },
+
+        .{ .index = .empty_struct, .key = .{ .aggregate = &.{} } },
+        .{ .index = .generic_poison, .key = .{ .simple_value = .generic_poison } },
+    };
+
+    const extra_count = 4 * @sizeOf(Pointer) + @sizeOf(ErrorUnion) + 4 * @sizeOf(Function);
+
+    try ip.map.ensureTotalCapacity(gpa, items.len);
+    try ip.items.ensureTotalCapacity(gpa, items.len);
     try ip.extra.ensureTotalCapacity(gpa, extra_count);
 
-    _ = ip.get(undefined, .{ .simple_type = .f16 }) catch unreachable;
-    _ = ip.get(undefined, .{ .simple_type = .f32 }) catch unreachable;
-    _ = ip.get(undefined, .{ .simple_type = .f64 }) catch unreachable;
-    _ = ip.get(undefined, .{ .simple_type = .f80 }) catch unreachable;
-    _ = ip.get(undefined, .{ .simple_type = .f128 }) catch unreachable;
-    _ = ip.get(undefined, .{ .simple_type = .usize }) catch unreachable;
-    _ = ip.get(undefined, .{ .simple_type = .isize }) catch unreachable;
-    _ = ip.get(undefined, .{ .simple_type = .c_short }) catch unreachable;
-    _ = ip.get(undefined, .{ .simple_type = .c_ushort }) catch unreachable;
-    _ = ip.get(undefined, .{ .simple_type = .c_int }) catch unreachable;
-    _ = ip.get(undefined, .{ .simple_type = .c_uint }) catch unreachable;
-    _ = ip.get(undefined, .{ .simple_type = .c_long }) catch unreachable;
-    _ = ip.get(undefined, .{ .simple_type = .c_ulong }) catch unreachable;
-    _ = ip.get(undefined, .{ .simple_type = .c_longlong }) catch unreachable;
-    _ = ip.get(undefined, .{ .simple_type = .c_ulonglong }) catch unreachable;
-    _ = ip.get(undefined, .{ .simple_type = .c_longdouble }) catch unreachable;
-    _ = ip.get(undefined, .{ .simple_type = .anyopaque }) catch unreachable;
-    _ = ip.get(undefined, .{ .simple_type = .bool }) catch unreachable;
-    _ = ip.get(undefined, .{ .simple_type = .void }) catch unreachable;
-    _ = ip.get(undefined, .{ .simple_type = .type }) catch unreachable;
-    _ = ip.get(undefined, .{ .simple_type = .anyerror }) catch unreachable;
-    _ = ip.get(undefined, .{ .simple_type = .comptime_int }) catch unreachable;
-    _ = ip.get(undefined, .{ .simple_type = .comptime_float }) catch unreachable;
-    _ = ip.get(undefined, .{ .simple_type = .noreturn }) catch unreachable;
-    _ = ip.get(undefined, .{ .simple_type = .@"anyframe" }) catch unreachable;
-    _ = ip.get(undefined, .{ .simple_type = .null_type }) catch unreachable;
-    _ = ip.get(undefined, .{ .simple_type = .undefined_type }) catch unreachable;
-    _ = ip.get(undefined, .{ .simple_type = .enum_literal_type }) catch unreachable;
-
-    _ = ip.get(undefined, .{ .simple_value = .undefined_value }) catch unreachable;
-    _ = ip.get(undefined, .{ .simple_value = .void_value }) catch unreachable;
-    _ = ip.get(undefined, .{ .simple_value = .unreachable_value }) catch unreachable;
-    _ = ip.get(undefined, .{ .simple_value = .null_value }) catch unreachable;
-    _ = ip.get(undefined, .{ .simple_value = .bool_true }) catch unreachable;
-    _ = ip.get(undefined, .{ .simple_value = .bool_false }) catch unreachable;
-
-    _ = ip.get(undefined, .{ .int_u64_value = 0 }) catch unreachable;
+    for (items) |item| {
+        if (builtin.is_test or builtin.mode == .Debug) {
+            var failing_allocator = std.testing.FailingAllocator.init(undefined, 0);
+            std.testing.expectEqual(item.index, ip.get(failing_allocator.allocator(), item.key) catch unreachable) catch unreachable;
+        } else {
+            std.debug.assert(item.index == ip.get(undefined, item.key) catch unreachable);
+        }
+    }
 
     return ip;
 }
@@ -1222,6 +1341,8 @@ pub fn deinit(ip: *InternPool, gpa: Allocator) void {
 }
 
 pub fn indexToKey(ip: InternPool, index: Index) Key {
+    std.debug.assert(index != .none);
+    std.debug.assert(index != .unknown);
     const item = ip.items.get(@enumToInt(index));
     const data = item.data;
     return switch (item.tag) {
@@ -1554,7 +1675,7 @@ pub fn cast(ip: *InternPool, gpa: Allocator, destination_ty: Index, source_ty: I
 
 pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, target: std.Target) Allocator.Error!Index {
     switch (types.len) {
-        0 => return Index.noreturn,
+        0 => return Index.noreturn_type,
         1 => return types[0],
         else => {},
     }
@@ -2504,7 +2625,7 @@ fn coerceInMemoryAllowedFns(
         } };
     }
 
-    if (src_info.return_type != Index.noreturn) {
+    if (src_info.return_type != Index.noreturn_type) {
         const rt = try ip.coerceInMemoryAllowed(gpa, arena, dest_info.return_type, src_info.return_type, true, target);
         if (rt != .ok) {
             return InMemoryCoercionResult{ .fn_return_type = .{
@@ -2749,8 +2870,8 @@ test "simple types" {
     try testExpectFmtType(ip, undefined_type, "@TypeOf(undefined)");
     try testExpectFmtType(ip, enum_literal_type, "@TypeOf(.enum_literal)");
 
-    try testExpectFmtValue(ip, undefined_value, Index.none, "@Type(.Undefined)");
-    try testExpectFmtValue(ip, void_value, Index.none, "void");
+    try testExpectFmtValue(ip, undefined_value, Index.none, "undefined");
+    try testExpectFmtValue(ip, void_value, Index.none, "{}");
     try testExpectFmtValue(ip, unreachable_value, Index.none, "unreachable");
     try testExpectFmtValue(ip, null_value, Index.none, "null");
     try testExpectFmtValue(ip, bool_true, Index.none, "true");

@@ -798,7 +798,7 @@ pub fn resolveTypeOfNodeInternal(store: *DocumentStore, arena: *std.heap.ArenaAl
                                 .interpreter = interpreter,
                                 .value = value,
                             } },
-                            .is_type_val = value.ty == InternPool.Index.type,
+                            .is_type_val = value.ty == InternPool.Index.type_type,
                         },
                         .handle = node_handle.handle,
                     };
