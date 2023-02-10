@@ -64,18 +64,18 @@ pub fn dotCompletions(
                 try completions.append(arena, .{
                     .label = "ptr",
                     .kind = .Field,
-                    .detail = try std.fmt.allocPrint(arena, "{}", .{many_ptr_info.fmtType(ip.*)}),
+                    .detail = try std.fmt.allocPrint(arena, "ptr: {}", .{many_ptr_info.fmtType(ip.*)}),
                 });
                 try completions.append(arena, .{
                     .label = "len",
                     .kind = .Field,
-                    .detail = "usize",
+                    .detail = "len: usize",
                 });
             } else if (ip.indexToKey(pointer_info.elem_type) == .array_type) {
                 try completions.append(arena, .{
                     .label = "len",
                     .kind = .Field,
-                    .detail = "usize",
+                    .detail = "len: usize",
                 });
             }
         },
@@ -83,18 +83,23 @@ pub fn dotCompletions(
             try completions.append(arena, types.CompletionItem{
                 .label = "len",
                 .kind = .Field,
-                .detail = try std.fmt.allocPrint(arena, "usize ({d})", .{array_info.len}), // TODO how should this be displayed
+                .detail = try std.fmt.allocPrint(arena, "const len: usize ({d})", .{array_info.len}), // TODO how should this be displayed
             });
         },
         .struct_type => |struct_index| {
             const struct_info = ip.getStruct(struct_index);
+            try completions.ensureUnusedCapacity(arena, struct_info.fields.count());
             var field_it = struct_info.fields.iterator();
             while (field_it.next()) |entry| {
-                try completions.append(arena, types.CompletionItem{
-                    .label = entry.key_ptr.*,
+                const label = entry.key_ptr.*;
+                const field = entry.value_ptr.*;
+                completions.appendAssumeCapacity(types.CompletionItem{
+                    .label = label,
                     .kind = .Field,
-                    // TODO include alignment and comptime
-                    .detail = try std.fmt.allocPrint(arena, "{}", .{entry.value_ptr.ty.fmtType(ip.*)}),
+                    .detail = try std.fmt.allocPrint(arena, "{s}: {}", .{
+                        label,
+                        fmtFieldDetail(field, ip),
+                    }),
                 });
             }
         },
@@ -120,13 +125,15 @@ pub fn dotCompletions(
             const union_info = ip.getUnion(union_index);
             var field_it = union_info.fields.iterator();
             while (field_it.next()) |entry| {
+                const label = entry.key_ptr.*;
+                const field = entry.value_ptr.*;
                 try completions.append(arena, .{
-                    .label = entry.key_ptr.*,
+                    .label = label,
                     .kind = .Field,
-                    .detail = if (entry.value_ptr.alignment != 0)
-                        try std.fmt.allocPrint(arena, "align({d}) {}", .{ entry.value_ptr.alignment, entry.value_ptr.ty.fmtType(ip.*) })
+                    .detail = if (field.alignment != 0)
+                        try std.fmt.allocPrint(arena, "{s}: align({d}) {}", .{ label, field.alignment, field.ty.fmtType(ip.*) })
                     else
-                        try std.fmt.allocPrint(arena, "{}", .{entry.value_ptr.ty.fmtType(ip.*)}),
+                        try std.fmt.allocPrint(arena, "{s}: {}", .{ label, field.ty.fmtType(ip.*) }),
                 });
             }
         },
@@ -135,7 +142,7 @@ pub fn dotCompletions(
                 try completions.append(arena, .{
                     .label = try std.fmt.allocPrint(arena, "{d}", .{i}),
                     .kind = .Field,
-                    .detail = try std.fmt.allocPrint(arena, "{}", .{tuple_ty.fmtType(ip.*)}),
+                    .detail = try std.fmt.allocPrint(arena, "{d}: {}", .{ i, tuple_ty.fmtType(ip.*) }),
                 });
             }
         },
@@ -163,4 +170,40 @@ pub fn dotCompletions(
         .union_value,
         => unreachable,
     }
+}
+
+fn FormatContext(comptime T: type) type {
+    return struct {
+        ip: *InternPool,
+        item: T,
+    };
+}
+
+fn formatFieldDetail(
+    ctx: FormatContext(InternPool.Struct.Field),
+    comptime fmt: []const u8,
+    options: std.fmt.FormatOptions,
+    writer: anytype,
+) @TypeOf(writer).Error!void {
+    _ = options;
+    if (fmt.len != 0) std.fmt.invalidFmtError(fmt, InternPool.Struct.Field);
+
+    const field = ctx.item;
+    if (field.is_comptime) {
+        try writer.writeAll("comptime ");
+    }
+    if (field.alignment != 0) {
+        try writer.print("align({d}) ", .{field.alignment});
+    }
+    try writer.print("{}", .{field.ty.fmtType(ctx.ip.*)});
+    if (field.default_value != .none) {
+        try writer.print(" = {},", .{field.default_value.fmtValue(field.ty, ctx.ip.*)});
+    }
+}
+
+pub fn fmtFieldDetail(field: InternPool.Struct.Field, ip: *InternPool) std.fmt.Formatter(formatFieldDetail) {
+    return .{ .data = .{
+        .ip = ip,
+        .item = field,
+    } };
 }

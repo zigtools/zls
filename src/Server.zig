@@ -597,7 +597,11 @@ fn typeToCompletion(
         ),
         .primitive, .array_index => {},
         .@"comptime" => |co| {
-            try analyser.completions.dotCompletions(allocator, list, &co.interpreter.ip, co.value.ty, co.value.val, co.value.node_idx);
+            if (type_handle.type.is_type_val) {
+                try analyser.completions.dotCompletions(allocator, list, &co.interpreter.ip, co.value.ty, co.value.val, co.value.node_idx);
+            } else {
+                try analyser.completions.dotCompletions(allocator, list, &co.interpreter.ip, co.value.val, .none, co.value.node_idx);
+            }
         },
     }
 }
