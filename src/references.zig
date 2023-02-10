@@ -54,7 +54,7 @@ pub fn labelReferences(
 }
 
 const Builder = struct {
-    arena: *std.heap.ArenaAllocator,
+    allocator: std.mem.Allocator,
     locations: std.ArrayListUnmanaged(types.Location) = .{},
     /// this is the declaration we are searching for
     decl_handle: analysis.DeclWithHandle,
@@ -66,8 +66,12 @@ const Builder = struct {
         handle: *const DocumentStore.Handle,
     };
 
+    pub fn deinit(self: *Builder) void {
+        self.locations.deinit(self.allocator);
+    }
+
     pub fn add(self: *Builder, handle: *const DocumentStore.Handle, token_index: Ast.TokenIndex) error{OutOfMemory}!void {
-        try self.locations.append(self.arena.allocator(), .{
+        try self.locations.append(self.allocator, .{
             .uri = handle.uri,
             .range = offsets.tokenToRange(handle.tree, token_index, self.encoding),
         });
@@ -96,7 +100,6 @@ const Builder = struct {
 
                 const child = (try analysis.lookupSymbolGlobal(
                     builder.store,
-                    builder.arena,
                     handle,
                     offsets.tokenToSlice(handle.tree, identifier_token),
                     starts[identifier_token],
@@ -108,12 +111,11 @@ const Builder = struct {
             },
             .field_access => {
                 var bound_type_params = analysis.BoundTypeParams{};
+                defer bound_type_params.deinit(builder.store.allocator);
                 const left_type = try analysis.resolveFieldAccessLhsType(
                     builder.store,
-                    builder.arena,
                     (try analysis.resolveTypeOfNodeInternal(
                         builder.store,
-                        builder.arena,
                         .{ .node = datas[node].lhs, .handle = handle },
                         &bound_type_params,
                     )) orelse return,
@@ -127,7 +129,6 @@ const Builder = struct {
 
                 const child = (try analysis.lookupSymbolContainer(
                     builder.store,
-                    builder.arena,
                     .{ .node = left_type_node, .handle = left_type.handle },
                     offsets.tokenToSlice(handle.tree, datas[node].rhs),
                     !left_type.type.is_type_val,
@@ -143,7 +144,7 @@ const Builder = struct {
 };
 
 pub fn symbolReferences(
-    arena: *std.heap.ArenaAllocator,
+    allocator: std.mem.Allocator,
     store: *DocumentStore,
     decl_handle: analysis.DeclWithHandle,
     encoding: offsets.Encoding,
@@ -157,11 +158,12 @@ pub fn symbolReferences(
     std.debug.assert(decl_handle.decl.* != .label_decl); // use `labelReferences` instead
 
     var builder = Builder{
-        .arena = arena,
+        .allocator = allocator,
         .store = store,
         .decl_handle = decl_handle,
         .encoding = encoding,
     };
+    errdefer builder.deinit();
 
     const curr_handle = decl_handle.handle;
     if (include_decl) try builder.add(curr_handle, decl_handle.nameToken());
@@ -178,6 +180,12 @@ pub fn symbolReferences(
             if (decl_handle.decl.* != .ast_node or !workspace) return builder.locations;
 
             var dependencies = std.StringArrayHashMapUnmanaged(void){};
+            defer {
+                for (dependencies.keys()) |uri| {
+                    allocator.free(uri);
+                }
+                dependencies.deinit(allocator);
+            }
 
             for (store.handles.values()) |handle| {
                 if (skip_std_references and std.mem.indexOf(u8, handle.uri, "std") != null) {
@@ -186,10 +194,17 @@ pub fn symbolReferences(
                 }
 
                 var handle_dependencies = std.ArrayListUnmanaged([]const u8){};
-                try store.collectDependencies(arena.allocator(), handle.*, &handle_dependencies);
+                defer {
+                    for (handle_dependencies.items) |uri| {
+                        allocator.free(uri);
+                    }
+                    handle_dependencies.deinit(allocator);
+                }
+                try store.collectDependencies(allocator, handle.*, &handle_dependencies);
 
+                try dependencies.ensureUnusedCapacity(allocator, handle_dependencies.items.len);
                 for (handle_dependencies.items) |uri| {
-                    try dependencies.put(arena.allocator(), uri, {});
+                    dependencies.putAssumeCapacity(uri, {});
                 }
             }
 
