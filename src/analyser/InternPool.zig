@@ -152,6 +152,7 @@ pub const DeclIndex = enum(u32) { _ };
 
 pub const Decl = struct {
     name: []const u8,
+    node_idx: u32,
     ty: Index,
     val: Index,
     alignment: u16,

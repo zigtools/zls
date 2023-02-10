@@ -285,6 +285,7 @@ pub fn interpret(
             const name = analysis.getDeclName(tree, node_idx).?;
             const decl_index = try interpreter.ip.createDecl(interpreter.allocator, .{
                 .name = name,
+                .node_idx = node_idx,
                 .ty = .none,
                 .val = .none,
                 .alignment = 0, // TODO
@@ -450,7 +451,7 @@ pub fn interpret(
                 if (decl.ty == .none) return InterpretResult{ .nothing = {} };
                 return InterpretResult{ .value = Value{
                     .interpreter = interpreter,
-                    .node_idx = node_idx,
+                    .node_idx = decl.node_idx,
                     .ty = decl.ty,
                     .val = decl.val,
                 } };
@@ -987,6 +988,7 @@ pub fn interpret(
 
                 const decl_index = try interpreter.ip.createDecl(interpreter.allocator, .{
                     .name = name,
+                    .node_idx = node_idx,
                     .ty = Index.type_type,
                     .val = function_type,
                     .alignment = 0, // TODO
@@ -1122,6 +1124,9 @@ pub fn call(
     // TODO: type check args
 
     const tree = interpreter.getHandle().tree;
+    const node_tags = tree.nodes.items(.tag);
+
+    if (node_tags[func_node_idx] != .fn_decl) return error.CriticalAstFailure;
 
     var buf: [1]Ast.Node.Index = undefined;
     var proto = tree.fullFnProto(&buf, func_node_idx) orelse return error.CriticalAstFailure;
@@ -1154,6 +1159,7 @@ pub fn call(
             const decls = &interpreter.namespaces.items(.decls)[@enumToInt(fn_namespace)];
             const decl_index = try interpreter.ip.createDecl(interpreter.allocator, .{
                 .name = name,
+                .node_idx = name_token,
                 .ty = tex.val,
                 .val = arguments[arg_index].val,
                 .alignment = 0, // TODO

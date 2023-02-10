@@ -261,6 +261,17 @@ test "ComptimeInterpreter - call comptime argument" {
     try std.testing.expectEqual(Key{ .int_type = .{ .signedness = .unsigned, .bits = 69 } }, result2.val.?);
 }
 
+test "ComptimeInterpreter - call inner function" {
+    try testCall(
+        \\pub fn Inner() type {
+        \\    return bool;
+        \\}
+        \\pub fn Foo() type {
+        \\    return Inner();
+        \\}
+    , &.{}, .{ .simple_type = .bool });
+}
+
 //
 // Helper functions
 //
@@ -298,6 +309,8 @@ const Context = struct {
         };
 
         const handle = try document_store.openDocument(test_uri, source);
+
+        // TODO handle handle.tree.errors
 
         interpreter.* = .{
             .allocator = allocator,
