@@ -2878,12 +2878,12 @@ test "simple types" {
     try testExpectFmtType(ip, undefined_type, "@TypeOf(undefined)");
     try testExpectFmtType(ip, enum_literal_type, "@TypeOf(.enum_literal)");
 
-    try testExpectFmtValue(ip, undefined_value, Index.none, "undefined");
-    try testExpectFmtValue(ip, void_value, Index.none, "{}");
-    try testExpectFmtValue(ip, unreachable_value, Index.none, "unreachable");
-    try testExpectFmtValue(ip, null_value, Index.none, "null");
-    try testExpectFmtValue(ip, bool_true, Index.none, "true");
-    try testExpectFmtValue(ip, bool_false, Index.none, "false");
+    try testExpectFmtValue(ip, undefined_value, .none, "undefined");
+    try testExpectFmtValue(ip, void_value, .none, "{}");
+    try testExpectFmtValue(ip, unreachable_value, .none, "unreachable");
+    try testExpectFmtValue(ip, null_value, .none, "null");
+    try testExpectFmtValue(ip, bool_true, .none, "true");
+    try testExpectFmtValue(ip, bool_false, .none, "false");
 }
 
 test "int type" {
@@ -2964,8 +2964,8 @@ test "big int value" {
     const positive_big_int_value = try ip.get(gpa, .{ .int_big_value = result.toConst() });
     const negative_big_int_value = try ip.get(gpa, .{ .int_big_value = result.toConst().negate() });
 
-    try testExpectFmtValue(ip, positive_big_int_value, Index.none, "340282366920938463463374607431768211456");
-    try testExpectFmtValue(ip, negative_big_int_value, Index.none, "-340282366920938463463374607431768211456");
+    try testExpectFmtValue(ip, positive_big_int_value, .none, "340282366920938463463374607431768211456");
+    try testExpectFmtValue(ip, negative_big_int_value, .none, "-340282366920938463463374607431768211456");
 }
 
 test "float type" {
@@ -3062,59 +3062,54 @@ test "pointer type" {
     var ip = try InternPool.init(gpa);
     defer ip.deinit(gpa);
 
-    const i32_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .signed, .bits = 32 } });
-    const u32_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .unsigned, .bits = 32 } });
-
-    const zero_value = try ip.get(gpa, .{ .int_u64_value = 0 });
-
     const @"*i32" = try ip.get(gpa, .{ .pointer_type = .{
-        .elem_type = i32_type,
+        .elem_type = .i32_type,
         .size = .One,
     } });
     const @"*u32" = try ip.get(gpa, .{ .pointer_type = .{
-        .elem_type = u32_type,
+        .elem_type = .u32_type,
         .size = .One,
     } });
     const @"*const volatile u32" = try ip.get(gpa, .{ .pointer_type = .{
-        .elem_type = u32_type,
+        .elem_type = .u32_type,
         .size = .One,
         .is_const = true,
         .is_volatile = true,
     } });
     const @"*align(4:2:3) u32" = try ip.get(gpa, .{ .pointer_type = .{
-        .elem_type = u32_type,
+        .elem_type = .u32_type,
         .size = .One,
         .alignment = 4,
         .bit_offset = 2,
         .host_size = 3,
     } });
     const @"*addrspace(.shared) const u32" = try ip.get(gpa, .{ .pointer_type = .{
-        .elem_type = u32_type,
+        .elem_type = .u32_type,
         .size = .One,
         .is_const = true,
         .address_space = .shared,
     } });
 
     const @"[*]u32" = try ip.get(gpa, .{ .pointer_type = .{
-        .elem_type = u32_type,
+        .elem_type = .u32_type,
         .size = .Many,
     } });
     const @"[*:0]u32" = try ip.get(gpa, .{ .pointer_type = .{
-        .elem_type = u32_type,
+        .elem_type = .u32_type,
         .size = .Many,
-        .sentinel = zero_value,
+        .sentinel = .zero,
     } });
     const @"[]u32" = try ip.get(gpa, .{ .pointer_type = .{
-        .elem_type = u32_type,
+        .elem_type = .u32_type,
         .size = .Slice,
     } });
     const @"[:0]u32" = try ip.get(gpa, .{ .pointer_type = .{
-        .elem_type = u32_type,
+        .elem_type = .u32_type,
         .size = .Slice,
-        .sentinel = zero_value,
+        .sentinel = .zero,
     } });
     const @"[*c]u32" = try ip.get(gpa, .{ .pointer_type = .{
-        .elem_type = u32_type,
+        .elem_type = .u32_type,
         .size = .C,
     } });
 
@@ -3147,24 +3142,17 @@ test "optional type" {
     var ip = try InternPool.init(gpa);
     defer ip.deinit(gpa);
 
-    const i32_type_0 = try ip.get(gpa, .{ .int_type = .{ .signedness = .signed, .bits = 32 } });
-    const i32_type_1 = try ip.get(gpa, .{ .int_type = .{ .signedness = .signed, .bits = 32 } });
-    const u32_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .unsigned, .bits = 32 } });
-
-    const null_value = try ip.get(gpa, .{ .simple_value = .null_value });
     const u64_42_value = try ip.get(gpa, .{ .int_u64_value = 42 });
 
-    const i32_optional_type_0 = try ip.get(gpa, .{ .optional_type = .{ .payload_type = i32_type_0 } });
-    const i32_optional_type_1 = try ip.get(gpa, .{ .optional_type = .{ .payload_type = i32_type_1 } });
-    const u32_optional_type = try ip.get(gpa, .{ .optional_type = .{ .payload_type = u32_type } });
+    const i32_optional_type = try ip.get(gpa, .{ .optional_type = .{ .payload_type = .i32_type } });
+    const u32_optional_type = try ip.get(gpa, .{ .optional_type = .{ .payload_type = .u32_type } });
 
-    try std.testing.expect(i32_optional_type_0 == i32_optional_type_1);
-    try std.testing.expect(i32_optional_type_0 != u32_optional_type);
+    try std.testing.expect(i32_optional_type != u32_optional_type);
 
-    try testExpectFmtType(ip, i32_optional_type_0, "?i32");
+    try testExpectFmtType(ip, i32_optional_type, "?i32");
     try testExpectFmtType(ip, u32_optional_type, "?u32");
 
-    try testExpectFmtValue(ip, null_value, u32_optional_type, "null");
+    try testExpectFmtValue(ip, .null_value, u32_optional_type, "null");
     try testExpectFmtValue(ip, u64_42_value, u32_optional_type, "42");
 }
 
@@ -3219,29 +3207,19 @@ test "array type" {
     var ip = try InternPool.init(gpa);
     defer ip.deinit(gpa);
 
-    const i32_type_0 = try ip.get(gpa, .{ .int_type = .{ .signedness = .signed, .bits = 32 } });
-    const i32_type_1 = try ip.get(gpa, .{ .int_type = .{ .signedness = .signed, .bits = 32 } });
-    const u32_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .unsigned, .bits = 32 } });
-    const zero_value = try ip.get(gpa, .{ .int_u64_value = 0 });
-
-    const i32_3_array_type_0 = try ip.get(gpa, .{ .array_type = .{
+    const i32_3_array_type = try ip.get(gpa, .{ .array_type = .{
         .len = 3,
-        .child = i32_type_0,
-    } });
-    const i32_3_array_type_1 = try ip.get(gpa, .{ .array_type = .{
-        .len = 3,
-        .child = i32_type_1,
+        .child = .i32_type,
     } });
     const u32_0_0_array_type = try ip.get(gpa, .{ .array_type = .{
         .len = 3,
-        .child = u32_type,
-        .sentinel = zero_value,
+        .child = .u32_type,
+        .sentinel = .zero,
     } });
 
-    try std.testing.expect(i32_3_array_type_0 == i32_3_array_type_1);
-    try std.testing.expect(i32_3_array_type_1 != u32_0_0_array_type);
+    try std.testing.expect(i32_3_array_type != u32_0_0_array_type);
 
-    try testExpectFmtType(ip, i32_3_array_type_0, "[3]i32");
+    try testExpectFmtType(ip, i32_3_array_type, "[3]i32");
     try testExpectFmtType(ip, u32_0_0_array_type, "[3:0]u32");
 }
 
@@ -3250,9 +3228,6 @@ test "struct value" {
 
     var ip = try InternPool.init(gpa);
     defer ip.deinit(gpa);
-
-    const i32_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .signed, .bits = 32 } });
-    const bool_type = try ip.get(gpa, .{ .simple_type = .bool });
 
     const struct_index = try ip.createStruct(gpa, .{
         .fields = .{},
@@ -3263,13 +3238,13 @@ test "struct value" {
     });
     const struct_type = try ip.get(gpa, .{ .struct_type = struct_index });
     const struct_info = ip.getStruct(struct_index);
-    try struct_info.fields.put(gpa, "foo", .{ .ty = i32_type });
-    try struct_info.fields.put(gpa, "bar", .{ .ty = bool_type });
+    try struct_info.fields.put(gpa, "foo", .{ .ty = .i32_type });
+    try struct_info.fields.put(gpa, "bar", .{ .ty = .bool_type });
 
     const one_value = try ip.get(gpa, .{ .int_i64_value = 1 });
     const true_value = try ip.get(gpa, .{ .simple_value = .bool_true });
 
-    const aggregate_value = try ip.get(gpa, Key{ .aggregate = &.{ one_value, true_value } });
+    const aggregate_value = try ip.get(gpa, .{ .aggregate = &.{ one_value, true_value } });
 
     try ip.testExpectFmtValue(aggregate_value, struct_type, ".{.foo = 1, .bar = true}");
 }
@@ -3280,13 +3255,9 @@ test "function type" {
     var ip = try InternPool.init(gpa);
     defer ip.deinit(gpa);
 
-    const i32_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .signed, .bits = 32 } });
-    const bool_type = try ip.get(gpa, .{ .simple_type = .bool });
-    const type_type = try ip.get(gpa, .{ .simple_type = .type });
-
     const @"fn(i32) bool" = try ip.get(gpa, .{ .function_type = .{
-        .args = &.{i32_type},
-        .return_type = bool_type,
+        .args = &.{.i32_type},
+        .return_type = .bool_type,
     } });
 
     var args_is_comptime = std.StaticBitSet(32).initEmpty();
@@ -3295,21 +3266,21 @@ test "function type" {
     args_is_noalias.set(1);
 
     const @"fn(comptime type, noalias i32) type" = try ip.get(gpa, .{ .function_type = .{
-        .args = &.{ type_type, i32_type },
+        .args = &.{ .type_type, .i32_type },
         .args_is_comptime = args_is_comptime,
         .args_is_noalias = args_is_noalias,
-        .return_type = type_type,
+        .return_type = .type_type,
     } });
 
     const @"fn(i32, ...) type" = try ip.get(gpa, .{ .function_type = .{
-        .args = &.{i32_type},
-        .return_type = type_type,
+        .args = &.{.i32_type},
+        .return_type = .type_type,
         .is_var_args = true,
     } });
 
     const @"fn() align(4) callconv(.C) type" = try ip.get(gpa, .{ .function_type = .{
         .args = &.{},
-        .return_type = type_type,
+        .return_type = .type_type,
         .alignment = 4,
         .calling_convention = .C,
     } });
@@ -3326,9 +3297,6 @@ test "union value" {
     var ip = try InternPool.init(gpa);
     defer ip.deinit(gpa);
 
-    const u32_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .unsigned, .bits = 32 } });
-    const f16_type = try ip.get(gpa, .{ .simple_type = .f16 });
-
     const int_value = try ip.get(gpa, .{ .int_u64_value = 1 });
     const f16_value = try ip.get(gpa, .{ .float_16_value = 0.25 });
 
@@ -3341,8 +3309,8 @@ test "union value" {
     });
     const union_type = try ip.get(gpa, .{ .union_type = union_index });
     const union_info = ip.getUnion(union_index);
-    try union_info.fields.put(gpa, "int", .{ .ty = u32_type, .alignment = 0 });
-    try union_info.fields.put(gpa, "float", .{ .ty = f16_type, .alignment = 0 });
+    try union_info.fields.put(gpa, "int", .{ .ty = .u32_type, .alignment = 0 });
+    try union_info.fields.put(gpa, "float", .{ .ty = .f16_type, .alignment = 0 });
 
     const union_value1 = try ip.get(gpa, .{ .union_value = .{
         .field_index = 0,
@@ -3363,11 +3331,8 @@ test "anyframe type" {
     var ip = try InternPool.init(gpa);
     defer ip.deinit(gpa);
 
-    const i32_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .signed, .bits = 32 } });
-    const bool_type = try ip.get(gpa, .{ .simple_type = .bool });
-
-    const @"anyframe->i32" = try ip.get(gpa, .{ .anyframe_type = .{ .child = i32_type } });
-    const @"anyframe->bool" = try ip.get(gpa, .{ .anyframe_type = .{ .child = bool_type } });
+    const @"anyframe->i32" = try ip.get(gpa, .{ .anyframe_type = .{ .child = .i32_type } });
+    const @"anyframe->bool" = try ip.get(gpa, .{ .anyframe_type = .{ .child = .bool_type } });
 
     try std.testing.expect(@"anyframe->i32" != @"anyframe->bool");
 
@@ -3381,16 +3346,13 @@ test "vector type" {
     var ip = try InternPool.init(gpa);
     defer ip.deinit(gpa);
 
-    const u32_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .unsigned, .bits = 32 } });
-    const bool_type = try ip.get(gpa, .{ .simple_type = .bool });
-
     const @"@Vector(2,u32)" = try ip.get(gpa, .{ .vector_type = .{
         .len = 2,
-        .child = u32_type,
+        .child = .u32_type,
     } });
     const @"@Vector(2,bool)" = try ip.get(gpa, .{ .vector_type = .{
         .len = 2,
-        .child = bool_type,
+        .child = .bool_type,
     } });
 
     try std.testing.expect(@"@Vector(2,u32)" != @"@Vector(2,bool)");
@@ -3441,26 +3403,18 @@ test "coerceInMemoryAllowed integers and floats" {
     var ip = try InternPool.init(gpa);
     defer ip.deinit(gpa);
 
-    const u32_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .unsigned, .bits = 32 } });
-    const u16_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .unsigned, .bits = 16 } });
-    const i32_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .signed, .bits = 32 } });
-    const i16_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .signed, .bits = 16 } });
+    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, .u32_type, .u32_type, true, builtin.target) == .ok);
+    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, .u32_type, .u16_type, true, builtin.target) == .ok);
+    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, .u16_type, .u32_type, true, builtin.target) == .int_not_coercible);
+    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, .i32_type, .u32_type, true, builtin.target) == .int_not_coercible);
+    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, .u32_type, .i32_type, true, builtin.target) == .int_not_coercible);
+    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, .u32_type, .i16_type, true, builtin.target) == .int_not_coercible);
 
-    const f32_type = try ip.get(gpa, .{ .simple_type = .f32 });
-    const f64_type = try ip.get(gpa, .{ .simple_type = .f64 });
-
-    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, u32_type, u32_type, true, builtin.target) == .ok);
-    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, u32_type, u16_type, true, builtin.target) == .ok);
-    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, u16_type, u32_type, true, builtin.target) == .int_not_coercible);
-    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, i32_type, u32_type, true, builtin.target) == .int_not_coercible);
-    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, u32_type, i32_type, true, builtin.target) == .int_not_coercible);
-    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, u32_type, i16_type, true, builtin.target) == .int_not_coercible);
-
-    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, f32_type, f32_type, true, builtin.target) == .ok);
-    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, f64_type, f32_type, true, builtin.target) == .no_match);
-    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, f32_type, f64_type, true, builtin.target) == .no_match);
-    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, u32_type, f32_type, true, builtin.target) == .no_match);
-    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, f32_type, u32_type, true, builtin.target) == .no_match);
+    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, .f32_type, .f32_type, true, builtin.target) == .ok);
+    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, .f64_type, .f32_type, true, builtin.target) == .no_match);
+    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, .f32_type, .f64_type, true, builtin.target) == .no_match);
+    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, .u32_type, .f32_type, true, builtin.target) == .no_match);
+    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, .f32_type, .u32_type, true, builtin.target) == .no_match);
 }
 
 test "resolvePeerTypes" {
@@ -3469,20 +3423,15 @@ test "resolvePeerTypes" {
     var ip = try InternPool.init(gpa);
     defer ip.deinit(gpa);
 
-    const bool_type = try ip.get(gpa, .{ .simple_type = .bool });
-    const type_type = try ip.get(gpa, .{ .simple_type = .type });
-    const noreturn_type = try ip.get(gpa, .{ .simple_type = .noreturn });
-    const undefined_type = try ip.get(gpa, .{ .simple_type = .undefined_type });
+    try std.testing.expect(.noreturn_type == try ip.resolvePeerTypes(std.testing.allocator, &.{}, builtin.target));
+    try std.testing.expect(.type_type == try ip.resolvePeerTypes(std.testing.allocator, &.{.type_type}, builtin.target));
 
-    try std.testing.expect(noreturn_type == try ip.resolvePeerTypes(std.testing.allocator, &.{}, builtin.target));
-    try std.testing.expect(type_type == try ip.resolvePeerTypes(std.testing.allocator, &.{type_type}, builtin.target));
-
-    try ip.testResolvePeerTypes(Index.none, Index.none, Index.none);
-    try ip.testResolvePeerTypes(bool_type, bool_type, bool_type);
-    try ip.testResolvePeerTypes(bool_type, noreturn_type, bool_type);
-    try ip.testResolvePeerTypes(bool_type, undefined_type, bool_type);
-    try ip.testResolvePeerTypes(type_type, noreturn_type, type_type);
-    try ip.testResolvePeerTypes(type_type, undefined_type, type_type);
+    try ip.testResolvePeerTypes(.none, .none, .none);
+    try ip.testResolvePeerTypes(.bool_type, .bool_type, .bool_type);
+    try ip.testResolvePeerTypes(.bool_type, .noreturn_type, .bool_type);
+    try ip.testResolvePeerTypes(.bool_type, .undefined_type, .bool_type);
+    try ip.testResolvePeerTypes(.type_type, .noreturn_type, .type_type);
+    try ip.testResolvePeerTypes(.type_type, .undefined_type, .type_type);
 }
 
 test "resolvePeerTypes integers and floats" {
@@ -3491,106 +3440,83 @@ test "resolvePeerTypes integers and floats" {
     var ip = try InternPool.init(gpa);
     defer ip.deinit(gpa);
 
-    const i16_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .signed, .bits = 16 } });
-    const i32_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .signed, .bits = 32 } });
-    const i64_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .signed, .bits = 64 } });
-    const u16_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .unsigned, .bits = 16 } });
-    const u32_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .unsigned, .bits = 32 } });
-    const u64_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .unsigned, .bits = 64 } });
+    try ip.testResolvePeerTypes(.i16_type, .i16_type, .i16_type);
+    try ip.testResolvePeerTypes(.i16_type, .i32_type, .i32_type);
+    try ip.testResolvePeerTypes(.i32_type, .i64_type, .i64_type);
 
-    const usize_type = try ip.get(gpa, .{ .simple_type = .usize });
-    const isize_type = try ip.get(gpa, .{ .simple_type = .isize });
+    try ip.testResolvePeerTypes(.u16_type, .u16_type, .u16_type);
+    try ip.testResolvePeerTypes(.u16_type, .u32_type, .u32_type);
+    try ip.testResolvePeerTypes(.u32_type, .u64_type, .u64_type);
 
-    const c_short_type = try ip.get(gpa, .{ .simple_type = .c_short });
-    const c_int_type = try ip.get(gpa, .{ .simple_type = .c_int });
-    const c_long_type = try ip.get(gpa, .{ .simple_type = .c_long });
+    try ip.testResolvePeerTypesInOrder(.i16_type, .u16_type, .i16_type);
+    try ip.testResolvePeerTypesInOrder(.u16_type, .i16_type, .u16_type);
+    try ip.testResolvePeerTypesInOrder(.i32_type, .u32_type, .i32_type);
+    try ip.testResolvePeerTypesInOrder(.u32_type, .i32_type, .u32_type);
+    try ip.testResolvePeerTypesInOrder(.isize_type, .usize_type, .isize_type);
+    try ip.testResolvePeerTypesInOrder(.usize_type, .isize_type, .usize_type);
 
-    const comptime_int_type = try ip.get(gpa, .{ .simple_type = .comptime_int });
-    const comptime_float_type = try ip.get(gpa, .{ .simple_type = .comptime_float });
+    try ip.testResolvePeerTypes(.i16_type, .u32_type, .u32_type);
+    try ip.testResolvePeerTypes(.u16_type, .i32_type, .i32_type);
+    try ip.testResolvePeerTypes(.i32_type, .u64_type, .u64_type);
+    try ip.testResolvePeerTypes(.u32_type, .i64_type, .i64_type);
 
-    const f16_type = try ip.get(gpa, .{ .simple_type = .f16 });
-    const f32_type = try ip.get(gpa, .{ .simple_type = .f32 });
-    const f64_type = try ip.get(gpa, .{ .simple_type = .f64 });
+    try ip.testResolvePeerTypes(.i16_type, .usize_type, .usize_type);
+    try ip.testResolvePeerTypes(.i16_type, .isize_type, .isize_type);
+    try ip.testResolvePeerTypes(.u16_type, .usize_type, .usize_type);
+    try ip.testResolvePeerTypes(.u16_type, .isize_type, .isize_type);
 
-    const bool_type = try ip.get(gpa, .{ .simple_type = .bool });
+    try ip.testResolvePeerTypes(.c_short_type, .usize_type, .usize_type);
+    try ip.testResolvePeerTypes(.c_short_type, .isize_type, .isize_type);
 
-    try ip.testResolvePeerTypes(i16_type, i16_type, i16_type);
-    try ip.testResolvePeerTypes(i16_type, i32_type, i32_type);
-    try ip.testResolvePeerTypes(i32_type, i64_type, i64_type);
+    try ip.testResolvePeerTypes(.i16_type, .c_long_type, .c_long_type);
+    try ip.testResolvePeerTypes(.i16_type, .c_long_type, .c_long_type);
+    try ip.testResolvePeerTypes(.u16_type, .c_long_type, .c_long_type);
+    try ip.testResolvePeerTypes(.u16_type, .c_long_type, .c_long_type);
 
-    try ip.testResolvePeerTypes(u16_type, u16_type, u16_type);
-    try ip.testResolvePeerTypes(u16_type, u32_type, u32_type);
-    try ip.testResolvePeerTypes(u32_type, u64_type, u64_type);
+    try ip.testResolvePeerTypes(.comptime_int_type, .i16_type, .i16_type);
+    try ip.testResolvePeerTypes(.comptime_int_type, .u64_type, .u64_type);
+    try ip.testResolvePeerTypes(.comptime_int_type, .isize_type, .isize_type);
+    try ip.testResolvePeerTypes(.comptime_int_type, .usize_type, .usize_type);
+    try ip.testResolvePeerTypes(.comptime_int_type, .c_short_type, .c_short_type);
+    try ip.testResolvePeerTypes(.comptime_int_type, .c_int_type, .c_int_type);
+    try ip.testResolvePeerTypes(.comptime_int_type, .c_long_type, .c_long_type);
 
-    try ip.testResolvePeerTypesInOrder(i16_type, u16_type, i16_type);
-    try ip.testResolvePeerTypesInOrder(u16_type, i16_type, u16_type);
-    try ip.testResolvePeerTypesInOrder(i32_type, u32_type, i32_type);
-    try ip.testResolvePeerTypesInOrder(u32_type, i32_type, u32_type);
-    try ip.testResolvePeerTypesInOrder(isize_type, usize_type, isize_type);
-    try ip.testResolvePeerTypesInOrder(usize_type, isize_type, usize_type);
+    try ip.testResolvePeerTypes(.comptime_float_type, .i16_type, .none);
+    try ip.testResolvePeerTypes(.comptime_float_type, .u64_type, .none);
+    try ip.testResolvePeerTypes(.comptime_float_type, .isize_type, .none);
+    try ip.testResolvePeerTypes(.comptime_float_type, .usize_type, .none);
+    try ip.testResolvePeerTypes(.comptime_float_type, .c_short_type, .none);
+    try ip.testResolvePeerTypes(.comptime_float_type, .c_int_type, .none);
+    try ip.testResolvePeerTypes(.comptime_float_type, .c_long_type, .none);
 
-    try ip.testResolvePeerTypes(i16_type, u32_type, u32_type);
-    try ip.testResolvePeerTypes(u16_type, i32_type, i32_type);
-    try ip.testResolvePeerTypes(i32_type, u64_type, u64_type);
-    try ip.testResolvePeerTypes(u32_type, i64_type, i64_type);
+    try ip.testResolvePeerTypes(.comptime_float_type, .comptime_int_type, .comptime_float_type);
 
-    try ip.testResolvePeerTypes(i16_type, usize_type, usize_type);
-    try ip.testResolvePeerTypes(i16_type, isize_type, isize_type);
-    try ip.testResolvePeerTypes(u16_type, usize_type, usize_type);
-    try ip.testResolvePeerTypes(u16_type, isize_type, isize_type);
+    try ip.testResolvePeerTypes(.f16_type, .f32_type, .f32_type);
+    try ip.testResolvePeerTypes(.f32_type, .f64_type, .f64_type);
 
-    try ip.testResolvePeerTypes(c_short_type, usize_type, usize_type);
-    try ip.testResolvePeerTypes(c_short_type, isize_type, isize_type);
+    try ip.testResolvePeerTypes(.comptime_int_type, .f16_type, .f16_type);
+    try ip.testResolvePeerTypes(.comptime_int_type, .f32_type, .f32_type);
+    try ip.testResolvePeerTypes(.comptime_int_type, .f64_type, .f64_type);
 
-    try ip.testResolvePeerTypes(i16_type, c_long_type, c_long_type);
-    try ip.testResolvePeerTypes(i16_type, c_long_type, c_long_type);
-    try ip.testResolvePeerTypes(u16_type, c_long_type, c_long_type);
-    try ip.testResolvePeerTypes(u16_type, c_long_type, c_long_type);
+    try ip.testResolvePeerTypes(.comptime_float_type, .f16_type, .f16_type);
+    try ip.testResolvePeerTypes(.comptime_float_type, .f32_type, .f32_type);
+    try ip.testResolvePeerTypes(.comptime_float_type, .f64_type, .f64_type);
 
-    try ip.testResolvePeerTypes(comptime_int_type, i16_type, i16_type);
-    try ip.testResolvePeerTypes(comptime_int_type, u64_type, u64_type);
-    try ip.testResolvePeerTypes(comptime_int_type, isize_type, isize_type);
-    try ip.testResolvePeerTypes(comptime_int_type, usize_type, usize_type);
-    try ip.testResolvePeerTypes(comptime_int_type, c_short_type, c_short_type);
-    try ip.testResolvePeerTypes(comptime_int_type, c_int_type, c_int_type);
-    try ip.testResolvePeerTypes(comptime_int_type, c_long_type, c_long_type);
+    try ip.testResolvePeerTypes(.f16_type, .i16_type, .none);
+    try ip.testResolvePeerTypes(.f32_type, .u64_type, .none);
+    try ip.testResolvePeerTypes(.f64_type, .isize_type, .none);
+    try ip.testResolvePeerTypes(.f16_type, .usize_type, .none);
+    try ip.testResolvePeerTypes(.f32_type, .c_short_type, .none);
+    try ip.testResolvePeerTypes(.f64_type, .c_int_type, .none);
+    try ip.testResolvePeerTypes(.f64_type, .c_long_type, .none);
 
-    try ip.testResolvePeerTypes(comptime_float_type, i16_type, Index.none);
-    try ip.testResolvePeerTypes(comptime_float_type, u64_type, Index.none);
-    try ip.testResolvePeerTypes(comptime_float_type, isize_type, Index.none);
-    try ip.testResolvePeerTypes(comptime_float_type, usize_type, Index.none);
-    try ip.testResolvePeerTypes(comptime_float_type, c_short_type, Index.none);
-    try ip.testResolvePeerTypes(comptime_float_type, c_int_type, Index.none);
-    try ip.testResolvePeerTypes(comptime_float_type, c_long_type, Index.none);
-
-    try ip.testResolvePeerTypes(comptime_float_type, comptime_int_type, comptime_float_type);
-
-    try ip.testResolvePeerTypes(f16_type, f32_type, f32_type);
-    try ip.testResolvePeerTypes(f32_type, f64_type, f64_type);
-
-    try ip.testResolvePeerTypes(comptime_int_type, f16_type, f16_type);
-    try ip.testResolvePeerTypes(comptime_int_type, f32_type, f32_type);
-    try ip.testResolvePeerTypes(comptime_int_type, f64_type, f64_type);
-
-    try ip.testResolvePeerTypes(comptime_float_type, f16_type, f16_type);
-    try ip.testResolvePeerTypes(comptime_float_type, f32_type, f32_type);
-    try ip.testResolvePeerTypes(comptime_float_type, f64_type, f64_type);
-
-    try ip.testResolvePeerTypes(f16_type, i16_type, Index.none);
-    try ip.testResolvePeerTypes(f32_type, u64_type, Index.none);
-    try ip.testResolvePeerTypes(f64_type, isize_type, Index.none);
-    try ip.testResolvePeerTypes(f16_type, usize_type, Index.none);
-    try ip.testResolvePeerTypes(f32_type, c_short_type, Index.none);
-    try ip.testResolvePeerTypes(f64_type, c_int_type, Index.none);
-    try ip.testResolvePeerTypes(f64_type, c_long_type, Index.none);
-
-    try ip.testResolvePeerTypes(bool_type, i16_type, Index.none);
-    try ip.testResolvePeerTypes(bool_type, u64_type, Index.none);
-    try ip.testResolvePeerTypes(bool_type, usize_type, Index.none);
-    try ip.testResolvePeerTypes(bool_type, c_int_type, Index.none);
-    try ip.testResolvePeerTypes(bool_type, comptime_int_type, Index.none);
-    try ip.testResolvePeerTypes(bool_type, comptime_float_type, Index.none);
-    try ip.testResolvePeerTypes(bool_type, f32_type, Index.none);
+    try ip.testResolvePeerTypes(.bool_type, .i16_type, .none);
+    try ip.testResolvePeerTypes(.bool_type, .u64_type, .none);
+    try ip.testResolvePeerTypes(.bool_type, .usize_type, .none);
+    try ip.testResolvePeerTypes(.bool_type, .c_int_type, .none);
+    try ip.testResolvePeerTypes(.bool_type, .comptime_int_type, .none);
+    try ip.testResolvePeerTypes(.bool_type, .comptime_float_type, .none);
+    try ip.testResolvePeerTypes(.bool_type, .f32_type, .none);
 }
 
 test "resolvePeerTypes optionals" {
@@ -3599,15 +3525,11 @@ test "resolvePeerTypes optionals" {
     var ip = try InternPool.init(gpa);
     defer ip.deinit(gpa);
 
-    const u32_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .unsigned, .bits = 32 } });
-    const null_type = try ip.get(gpa, .{ .simple_type = .null_type });
-    const bool_type = try ip.get(gpa, .{ .simple_type = .bool });
+    const @"?u32" = try ip.get(gpa, .{ .optional_type = .{ .payload_type = .u32_type } });
+    const @"?bool" = try ip.get(gpa, .{ .optional_type = .{ .payload_type = .bool_type } });
 
-    const @"?u32" = try ip.get(gpa, .{ .optional_type = .{ .payload_type = u32_type } });
-    const @"?bool" = try ip.get(gpa, .{ .optional_type = .{ .payload_type = bool_type } });
-
-    try ip.testResolvePeerTypes(u32_type, null_type, @"?u32");
-    try ip.testResolvePeerTypes(bool_type, null_type, @"?bool");
+    try ip.testResolvePeerTypes(.u32_type, .null_type, @"?u32");
+    try ip.testResolvePeerTypes(.bool_type, .null_type, @"?bool");
 }
 
 test "resolvePeerTypes pointers" {
@@ -3616,15 +3538,10 @@ test "resolvePeerTypes pointers" {
     var ip = try InternPool.init(gpa);
     defer ip.deinit(gpa);
 
-    const u32_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .unsigned, .bits = 32 } });
-    const comptime_int_type = try ip.get(gpa, .{ .simple_type = .comptime_int });
-    const comptime_float_type = try ip.get(gpa, .{ .simple_type = .comptime_float });
-    const bool_type = try ip.get(gpa, .{ .simple_type = .bool });
-
-    const @"*u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = u32_type, .size = .One } });
-    const @"[*]u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = u32_type, .size = .Many } });
-    const @"[]u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = u32_type, .size = .Slice } });
-    const @"[*c]u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = u32_type, .size = .C } });
+    const @"*u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = .u32_type, .size = .One } });
+    const @"[*]u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = .u32_type, .size = .Many } });
+    const @"[]u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = .u32_type, .size = .Slice } });
+    const @"[*c]u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = .u32_type, .size = .C } });
 
     const @"?*u32" = try ip.get(gpa, .{ .optional_type = .{ .payload_type = @"*u32" } });
     const @"?[*]u32" = try ip.get(gpa, .{ .optional_type = .{ .payload_type = @"[*]u32" } });
@@ -3638,8 +3555,8 @@ test "resolvePeerTypes pointers" {
     const @"?*[*]u32" = try ip.get(gpa, .{ .optional_type = .{ .payload_type = @"*[*]u32" } });
     const @"?*[]u32" = try ip.get(gpa, .{ .optional_type = .{ .payload_type = @"*[]u32" } });
 
-    const @"[1]u32" = try ip.get(gpa, .{ .array_type = .{ .len = 1, .child = u32_type, .sentinel = .none } });
-    const @"[2]u32" = try ip.get(gpa, .{ .array_type = .{ .len = 2, .child = u32_type, .sentinel = .none } });
+    const @"[1]u32" = try ip.get(gpa, .{ .array_type = .{ .len = 1, .child = .u32_type, .sentinel = .none } });
+    const @"[2]u32" = try ip.get(gpa, .{ .array_type = .{ .len = 2, .child = .u32_type, .sentinel = .none } });
 
     const @"*[1]u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = @"[1]u32", .size = .One } });
     const @"*[2]u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = @"[2]u32", .size = .One } });
@@ -3647,10 +3564,10 @@ test "resolvePeerTypes pointers" {
     const @"?*[1]u32" = try ip.get(gpa, .{ .optional_type = .{ .payload_type = @"*[1]u32" } });
     const @"?*[2]u32" = try ip.get(gpa, .{ .optional_type = .{ .payload_type = @"*[2]u32" } });
 
-    const @"*const u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = u32_type, .size = .One, .is_const = true } });
-    const @"[*]const u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = u32_type, .size = .Many, .is_const = true } });
-    const @"[]const u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = u32_type, .size = .Slice, .is_const = true } });
-    const @"[*c]const u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = u32_type, .size = .C, .is_const = true } });
+    const @"*const u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = .u32_type, .size = .One, .is_const = true } });
+    const @"[*]const u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = .u32_type, .size = .Many, .is_const = true } });
+    const @"[]const u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = .u32_type, .size = .Slice, .is_const = true } });
+    const @"[*c]const u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = .u32_type, .size = .C, .is_const = true } });
 
     const @"?*const u32" = try ip.get(gpa, .{ .optional_type = .{ .payload_type = @"*const u32" } });
     const @"?[*]const u32" = try ip.get(gpa, .{ .optional_type = .{ .payload_type = @"[*]const u32" } });
@@ -3679,21 +3596,21 @@ test "resolvePeerTypes pointers" {
     try ip.testResolvePeerTypesInOrder(@"*u32", @"?[*]u32", @"?[*]u32");
     try ip.testResolvePeerTypesInOrder(@"[*]u32", @"?*u32", @"?*u32");
 
-    try ip.testResolvePeerTypes(@"[*c]u32", comptime_int_type, @"[*c]u32");
-    try ip.testResolvePeerTypes(@"[*c]u32", u32_type, @"[*c]u32");
-    try ip.testResolvePeerTypes(@"[*c]u32", comptime_float_type, Index.none);
-    try ip.testResolvePeerTypes(@"[*c]u32", bool_type, Index.none);
+    try ip.testResolvePeerTypes(@"[*c]u32", .comptime_int_type, @"[*c]u32");
+    try ip.testResolvePeerTypes(@"[*c]u32", .u32_type, @"[*c]u32");
+    try ip.testResolvePeerTypes(@"[*c]u32", .comptime_float_type, .none);
+    try ip.testResolvePeerTypes(@"[*c]u32", .bool_type, .none);
 
     try ip.testResolvePeerTypes(@"[*c]u32", @"*u32", @"[*c]u32");
     try ip.testResolvePeerTypes(@"[*c]u32", @"[*]u32", @"[*c]u32");
     try ip.testResolvePeerTypes(@"[*c]u32", @"[]u32", @"[*c]u32");
 
-    try ip.testResolvePeerTypes(@"[*c]u32", @"*[1]u32", Index.none);
+    try ip.testResolvePeerTypes(@"[*c]u32", @"*[1]u32", .none);
     try ip.testResolvePeerTypesInOrder(@"[*c]u32", @"?*[1]u32", @"?*[1]u32");
-    try ip.testResolvePeerTypesInOrder(@"?*[1]u32", @"[*c]u32", Index.none);
-    try ip.testResolvePeerTypes(@"[*c]u32", @"*[*]u32", Index.none);
+    try ip.testResolvePeerTypesInOrder(@"?*[1]u32", @"[*c]u32", .none);
+    try ip.testResolvePeerTypes(@"[*c]u32", @"*[*]u32", .none);
     try ip.testResolvePeerTypesInOrder(@"[*c]u32", @"?*[*]u32", @"?*[*]u32");
-    try ip.testResolvePeerTypesInOrder(@"?*[*]u32", @"[*c]u32", Index.none);
+    try ip.testResolvePeerTypesInOrder(@"?*[*]u32", @"[*c]u32", .none);
     try ip.testResolvePeerTypes(@"[*c]u32", @"[]u32", @"[*c]u32");
     // TODO try ip.testResolvePeerTypesInOrder(@"[*c]u32", @"?[]u32", @"?[]u32");
     // TODO try ip.testResolvePeerTypesInOrder(@"?[]u32", @"[*c]u32", Index.none);
@@ -3714,19 +3631,17 @@ test "resolvePeerTypes function pointers" {
     var ip = try InternPool.init(gpa);
     defer ip.deinit(gpa);
 
-    const void_type = try ip.get(gpa, .{ .simple_type = .void });
-    const u32_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .unsigned, .bits = 32 } });
-    const @"*u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = u32_type, .size = .One } });
-    const @"*const u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = u32_type, .size = .One, .is_const = true } });
+    const @"*u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = .u32_type, .size = .One } });
+    const @"*const u32" = try ip.get(gpa, .{ .pointer_type = .{ .elem_type = .u32_type, .size = .One, .is_const = true } });
 
     const @"fn(*u32) void" = try ip.get(gpa, .{ .function_type = .{
         .args = &.{@"*u32"},
-        .return_type = void_type,
+        .return_type = .void_type,
     } });
 
     const @"fn(*const u32) void" = try ip.get(gpa, .{ .function_type = .{
         .args = &.{@"*const u32"},
-        .return_type = void_type,
+        .return_type = .void_type,
     } });
 
     try ip.testResolvePeerTypes(@"fn(*u32) void", @"fn(*u32) void", @"fn(*u32) void");
