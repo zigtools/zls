@@ -394,7 +394,10 @@ pub const Key = union(enum) {
                 else => unreachable,
             },
             .int_type => |int_info| return int_info,
-            .enum_type => return panicOrElse("TODO", .{ .signedness = .unsigned, .bits = 0 }),
+            .enum_type => |enum_index| {
+                const enum_info = ip.getEnum(enum_index);
+                key = ip.indexToKey(enum_info.tag_type);
+            },
             .struct_type => |struct_index| {
                 const struct_info = ip.getStruct(struct_index);
                 assert(struct_info.layout == .Packed);
@@ -953,7 +956,6 @@ pub const Item = struct {
 /// Two values which have the same type can be equality compared simply
 /// by checking if their indexes are equal, provided they are both in
 /// the same `InternPool`.
-/// TODO split this into an Optional and non-Optional Index
 pub const Index = enum(u32) {
     u1_type,
     u8_type,
@@ -1214,7 +1216,7 @@ pub const SimpleValue = enum(u32) {
 };
 
 comptime {
-    std.debug.assert(@sizeOf(SimpleType) == @sizeOf(SimpleValue));
+    assert(@sizeOf(SimpleType) == @sizeOf(SimpleValue));
 }
 
 pub fn init(gpa: Allocator) Allocator.Error!InternPool {
@@ -1309,7 +1311,7 @@ pub fn init(gpa: Allocator) Allocator.Error!InternPool {
             var failing_allocator = std.testing.FailingAllocator.init(undefined, 0);
             std.testing.expectEqual(item.index, ip.get(failing_allocator.allocator(), item.key) catch unreachable) catch unreachable;
         } else {
-            std.debug.assert(item.index == ip.get(undefined, item.key) catch unreachable);
+            assert(item.index == ip.get(undefined, item.key) catch unreachable);
         }
     }
 
@@ -1341,8 +1343,8 @@ pub fn deinit(ip: *InternPool, gpa: Allocator) void {
 }
 
 pub fn indexToKey(ip: InternPool, index: Index) Key {
-    std.debug.assert(index != .none);
-    std.debug.assert(index != .unknown);
+    assert(index != .none);
+    assert(index != .unknown);
     const item = ip.items.get(@enumToInt(index));
     const data = item.data;
     return switch (item.tag) {
