@@ -14,6 +14,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
+const expect = std.testing.expect;
 
 const encoding = @import("encoding.zig");
 
@@ -1504,19 +1505,19 @@ pub fn getUnion(ip: InternPool, index: InternPool.UnionIndex) *InternPool.Union 
     return unions.at(@enumToInt(index));
 }
 
-pub fn createDecl(ip: *InternPool, gpa: Allocator, decl: InternPool.Decl) error{OutOfMemory}!InternPool.DeclIndex {
+pub fn createDecl(ip: *InternPool, gpa: Allocator, decl: InternPool.Decl) Allocator.Error!InternPool.DeclIndex {
     try ip.decls.append(gpa, decl);
     return @intToEnum(InternPool.DeclIndex, ip.decls.count() - 1);
 }
-pub fn createStruct(ip: *InternPool, gpa: Allocator, struct_info: InternPool.Struct) error{OutOfMemory}!InternPool.StructIndex {
+pub fn createStruct(ip: *InternPool, gpa: Allocator, struct_info: InternPool.Struct) Allocator.Error!InternPool.StructIndex {
     try ip.structs.append(gpa, struct_info);
     return @intToEnum(InternPool.StructIndex, ip.structs.count() - 1);
 }
-pub fn createEnum(ip: *InternPool, gpa: Allocator, enum_info: InternPool.Enum) error{OutOfMemory}!InternPool.EnumIndex {
+pub fn createEnum(ip: *InternPool, gpa: Allocator, enum_info: InternPool.Enum) Allocator.Error!InternPool.EnumIndex {
     try ip.enums.append(gpa, enum_info);
     return @intToEnum(InternPool.EnumIndex, ip.enums.count() - 1);
 }
-pub fn createUnion(ip: *InternPool, gpa: Allocator, union_info: InternPool.Union) error{OutOfMemory}!InternPool.UnionIndex {
+pub fn createUnion(ip: *InternPool, gpa: Allocator, union_info: InternPool.Union) Allocator.Error!InternPool.UnionIndex {
     try ip.unions.append(gpa, union_info);
     return @intToEnum(InternPool.UnionIndex, ip.unions.count() - 1);
 }
@@ -2291,7 +2292,7 @@ fn coerceInMemoryAllowed(
     src_ty: Index,
     dest_is_const: bool,
     target: std.Target,
-) error{OutOfMemory}!InMemoryCoercionResult {
+) Allocator.Error!InMemoryCoercionResult {
     if (dest_ty == src_ty) return .ok;
 
     const dest_key = ip.indexToKey(dest_ty);
@@ -2499,7 +2500,7 @@ fn coerceInMemoryAllowedFns(
     dest_info: Function,
     src_info: Function,
     target: std.Target,
-) error{OutOfMemory}!InMemoryCoercionResult {
+) Allocator.Error!InMemoryCoercionResult {
     if (dest_info.is_var_args != src_info.is_var_args) {
         return InMemoryCoercionResult{ .fn_var_args = dest_info.is_var_args };
     }
@@ -2584,7 +2585,7 @@ fn coerceInMemoryAllowedPtrs(
     src_ptr_info: Key,
     dest_is_const: bool,
     target: std.Target,
-) error{OutOfMemory}!InMemoryCoercionResult {
+) Allocator.Error!InMemoryCoercionResult {
     const dest_info = dest_ptr_info.pointer_type;
     const src_info = src_ptr_info.pointer_type;
 
@@ -2779,11 +2780,11 @@ test "int type" {
     const u7_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .unsigned, .bits = 7 } });
     const another_i32_type = try ip.get(gpa, .{ .int_type = .{ .signedness = .signed, .bits = 32 } });
 
-    try std.testing.expect(i32_type == another_i32_type);
-    try std.testing.expect(i32_type != u7_type);
+    try expect(i32_type == another_i32_type);
+    try expect(i32_type != u7_type);
 
-    try std.testing.expect(i16_type != another_i32_type);
-    try std.testing.expect(i16_type != u7_type);
+    try expect(i16_type != another_i32_type);
+    try expect(i16_type != u7_type);
 
     try testExpectFmtType(ip, i32_type, "i32");
     try testExpectFmtType(ip, i16_type, "i16");
@@ -2806,19 +2807,19 @@ test "int value" {
     const i64_min_value = try ip.get(gpa, .{ .int_i64_value = std.math.minInt(i64) });
 
     const tags = ip.items.items(.tag);
-    try std.testing.expect(tags[@enumToInt(unsigned_one_value)] == .int_u32);
-    try std.testing.expect(tags[@enumToInt(signed_one_value)] == .int_i32);
-    try std.testing.expect(tags[@enumToInt(u64_max_value)] == .int_u64);
-    try std.testing.expect(tags[@enumToInt(i64_max_value)] == .int_i64);
-    try std.testing.expect(tags[@enumToInt(i64_min_value)] == .int_i64);
+    try expect(tags[@enumToInt(unsigned_one_value)] == .int_u32);
+    try expect(tags[@enumToInt(signed_one_value)] == .int_i32);
+    try expect(tags[@enumToInt(u64_max_value)] == .int_u64);
+    try expect(tags[@enumToInt(i64_max_value)] == .int_i64);
+    try expect(tags[@enumToInt(i64_min_value)] == .int_i64);
 
-    try std.testing.expect(unsigned_zero_value != unsigned_one_value);
-    try std.testing.expect(unsigned_one_value != signed_zero_value);
-    try std.testing.expect(signed_zero_value != signed_one_value);
+    try expect(unsigned_zero_value != unsigned_one_value);
+    try expect(unsigned_one_value != signed_zero_value);
+    try expect(signed_zero_value != signed_one_value);
 
-    try std.testing.expect(signed_one_value != u64_max_value);
-    try std.testing.expect(u64_max_value != i64_max_value);
-    try std.testing.expect(i64_max_value != i64_min_value);
+    try expect(signed_one_value != u64_max_value);
+    try expect(u64_max_value != i64_max_value);
+    try expect(i64_max_value != i64_min_value);
 
     try testExpectFmtValue(ip, unsigned_zero_value, undefined, "0");
     try testExpectFmtValue(ip, unsigned_one_value, undefined, "1");
@@ -2865,13 +2866,13 @@ test "float type" {
     const another_f32_type = try ip.get(gpa, .{ .simple_type = .f32 });
     const another_f64_type = try ip.get(gpa, .{ .simple_type = .f64 });
 
-    try std.testing.expect(f16_type != f32_type);
-    try std.testing.expect(f32_type != f64_type);
-    try std.testing.expect(f64_type != f80_type);
-    try std.testing.expect(f80_type != f128_type);
+    try expect(f16_type != f32_type);
+    try expect(f32_type != f64_type);
+    try expect(f64_type != f80_type);
+    try expect(f80_type != f128_type);
 
-    try std.testing.expect(f32_type == another_f32_type);
-    try std.testing.expect(f64_type == another_f64_type);
+    try expect(f32_type == another_f32_type);
+    try expect(f64_type == another_f64_type);
 
     try testExpectFmtType(ip, f16_type, "f16");
     try testExpectFmtType(ip, f32_type, "f32");
@@ -2901,26 +2902,26 @@ test "float value" {
     const f32_zero_value = try ip.get(gpa, .{ .float_32_value = 0.0 });
     const f32_nzero_value = try ip.get(gpa, .{ .float_32_value = -0.0 });
 
-    try std.testing.expect(f16_value != f32_value);
-    try std.testing.expect(f32_value != f64_value);
-    try std.testing.expect(f64_value != f80_value);
-    try std.testing.expect(f80_value != f128_value);
+    try expect(f16_value != f32_value);
+    try expect(f32_value != f64_value);
+    try expect(f64_value != f80_value);
+    try expect(f80_value != f128_value);
 
-    try std.testing.expect(f32_nan_value != f32_qnan_value);
-    try std.testing.expect(f32_inf_value != f32_ninf_value);
-    try std.testing.expect(f32_zero_value != f32_nzero_value);
+    try expect(f32_nan_value != f32_qnan_value);
+    try expect(f32_inf_value != f32_ninf_value);
+    try expect(f32_zero_value != f32_nzero_value);
 
-    try std.testing.expect(!ip.indexToKey(f16_value).eql(ip.indexToKey(f32_value)));
-    try std.testing.expect(ip.indexToKey(f32_value).eql(ip.indexToKey(f32_value)));
+    try expect(!ip.indexToKey(f16_value).eql(ip.indexToKey(f32_value)));
+    try expect(ip.indexToKey(f32_value).eql(ip.indexToKey(f32_value)));
 
-    try std.testing.expect(ip.indexToKey(f32_nan_value).eql(ip.indexToKey(f32_nan_value)));
-    try std.testing.expect(!ip.indexToKey(f32_nan_value).eql(ip.indexToKey(f32_qnan_value)));
+    try expect(ip.indexToKey(f32_nan_value).eql(ip.indexToKey(f32_nan_value)));
+    try expect(!ip.indexToKey(f32_nan_value).eql(ip.indexToKey(f32_qnan_value)));
 
-    try std.testing.expect(ip.indexToKey(f32_inf_value).eql(ip.indexToKey(f32_inf_value)));
-    try std.testing.expect(!ip.indexToKey(f32_inf_value).eql(ip.indexToKey(f32_ninf_value)));
+    try expect(ip.indexToKey(f32_inf_value).eql(ip.indexToKey(f32_inf_value)));
+    try expect(!ip.indexToKey(f32_inf_value).eql(ip.indexToKey(f32_ninf_value)));
 
-    try std.testing.expect(ip.indexToKey(f32_zero_value).eql(ip.indexToKey(f32_zero_value)));
-    try std.testing.expect(!ip.indexToKey(f32_zero_value).eql(ip.indexToKey(f32_nzero_value)));
+    try expect(ip.indexToKey(f32_zero_value).eql(ip.indexToKey(f32_zero_value)));
+    try expect(!ip.indexToKey(f32_zero_value).eql(ip.indexToKey(f32_nzero_value)));
 
     try testExpectFmtValue(ip, f16_value, undefined, "0.25");
     try testExpectFmtValue(ip, f32_value, undefined, "0.5");
@@ -2995,15 +2996,15 @@ test "pointer type" {
         .size = .C,
     } });
 
-    try std.testing.expect(@"*i32" != @"*u32");
-    try std.testing.expect(@"*u32" != @"*const volatile u32");
-    try std.testing.expect(@"*const volatile u32" != @"*align(4:2:3) u32");
-    try std.testing.expect(@"*align(4:2:3) u32" != @"*addrspace(.shared) const u32");
+    try expect(@"*i32" != @"*u32");
+    try expect(@"*u32" != @"*const volatile u32");
+    try expect(@"*const volatile u32" != @"*align(4:2:3) u32");
+    try expect(@"*align(4:2:3) u32" != @"*addrspace(.shared) const u32");
 
-    try std.testing.expect(@"[*]u32" != @"[*:0]u32");
-    try std.testing.expect(@"[*:0]u32" != @"[]u32");
-    try std.testing.expect(@"[*:0]u32" != @"[:0]u32");
-    try std.testing.expect(@"[:0]u32" != @"[*c]u32");
+    try expect(@"[*]u32" != @"[*:0]u32");
+    try expect(@"[*:0]u32" != @"[]u32");
+    try expect(@"[*:0]u32" != @"[:0]u32");
+    try expect(@"[:0]u32" != @"[*c]u32");
 
     try testExpectFmtType(ip, @"*i32", "*i32");
     try testExpectFmtType(ip, @"*u32", "*u32");
@@ -3029,7 +3030,7 @@ test "optional type" {
     const i32_optional_type = try ip.get(gpa, .{ .optional_type = .{ .payload_type = .i32_type } });
     const u32_optional_type = try ip.get(gpa, .{ .optional_type = .{ .payload_type = .u32_type } });
 
-    try std.testing.expect(i32_optional_type != u32_optional_type);
+    try expect(i32_optional_type != u32_optional_type);
 
     try testExpectFmtType(ip, i32_optional_type, "?i32");
     try testExpectFmtType(ip, u32_optional_type, "?u32");
@@ -3050,20 +3051,20 @@ test "error set type" {
 
     const empty_error_set = try ip.get(gpa, .{ .error_set_type = .{ .names = &.{} } });
 
-    const error_set_0 = try ip.get(gpa, .{ .error_set_type = .{
+    const foo_bar_baz_set = try ip.get(gpa, .{ .error_set_type = .{
         .names = &.{ foo_name, bar_name, baz_name },
     } });
 
-    const error_set_1 = try ip.get(gpa, .{ .error_set_type = .{
+    const foo_bar_set = try ip.get(gpa, .{ .error_set_type = .{
         .names = &.{ foo_name, bar_name },
     } });
 
-    try std.testing.expect(empty_error_set != error_set_0);
-    try std.testing.expect(error_set_0 != error_set_1);
+    try expect(empty_error_set != foo_bar_baz_set);
+    try expect(foo_bar_baz_set != foo_bar_set);
 
     try testExpectFmtType(ip, empty_error_set, "error{}");
-    try testExpectFmtType(ip, error_set_0, "error{foo,bar,baz}");
-    try testExpectFmtType(ip, error_set_1, "error{foo,bar}");
+    try testExpectFmtType(ip, foo_bar_baz_set, "error{foo,bar,baz}");
+    try testExpectFmtType(ip, foo_bar_set, "error{foo,bar}");
 }
 
 test "error union type" {
@@ -3099,7 +3100,7 @@ test "array type" {
         .sentinel = .zero,
     } });
 
-    try std.testing.expect(i32_3_array_type != u32_0_0_array_type);
+    try expect(i32_3_array_type != u32_0_0_array_type);
 
     try testExpectFmtType(ip, i32_3_array_type, "[3]i32");
     try testExpectFmtType(ip, u32_0_0_array_type, "[3:0]u32");
@@ -3216,7 +3217,7 @@ test "anyframe type" {
     const @"anyframe->i32" = try ip.get(gpa, .{ .anyframe_type = .{ .child = .i32_type } });
     const @"anyframe->bool" = try ip.get(gpa, .{ .anyframe_type = .{ .child = .bool_type } });
 
-    try std.testing.expect(@"anyframe->i32" != @"anyframe->bool");
+    try expect(@"anyframe->i32" != @"anyframe->bool");
 
     try testExpectFmtType(ip, @"anyframe->i32", "anyframe->i32");
     try testExpectFmtType(ip, @"anyframe->bool", "anyframe->bool");
@@ -3237,7 +3238,7 @@ test "vector type" {
         .child = .bool_type,
     } });
 
-    try std.testing.expect(@"@Vector(2,u32)" != @"@Vector(2,bool)");
+    try expect(@"@Vector(2,u32)" != @"@Vector(2,bool)");
 
     try testExpectFmtType(ip, @"@Vector(2,u32)", "@Vector(2,u32)");
     try testExpectFmtType(ip, @"@Vector(2,bool)", "@Vector(2,bool)");
@@ -3261,12 +3262,12 @@ test "bytes value" {
     const bytes_value3 = try ip.get(gpa, .{ .bytes = &str3 });
     @memset(&str3, 0, str3.len);
 
-    try std.testing.expect(bytes_value1 == bytes_value2);
-    try std.testing.expect(bytes_value2 != bytes_value3);
+    try expect(bytes_value1 == bytes_value2);
+    try expect(bytes_value2 != bytes_value3);
 
-    try std.testing.expect(@ptrToInt(&str1) != @ptrToInt(ip.indexToKey(bytes_value1).bytes.ptr));
-    try std.testing.expect(@ptrToInt(&str2) != @ptrToInt(ip.indexToKey(bytes_value2).bytes.ptr));
-    try std.testing.expect(@ptrToInt(&str3) != @ptrToInt(ip.indexToKey(bytes_value3).bytes.ptr));
+    try expect(@ptrToInt(&str1) != @ptrToInt(ip.indexToKey(bytes_value1).bytes.ptr));
+    try expect(@ptrToInt(&str2) != @ptrToInt(ip.indexToKey(bytes_value2).bytes.ptr));
+    try expect(@ptrToInt(&str3) != @ptrToInt(ip.indexToKey(bytes_value3).bytes.ptr));
 
     try std.testing.expectEqual(ip.indexToKey(bytes_value1).bytes.ptr, ip.indexToKey(bytes_value2).bytes.ptr);
 
@@ -3285,18 +3286,18 @@ test "coerceInMemoryAllowed integers and floats" {
     var ip = try InternPool.init(gpa);
     defer ip.deinit(gpa);
 
-    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, .u32_type, .u32_type, true, builtin.target) == .ok);
-    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, .u32_type, .u16_type, true, builtin.target) == .ok);
-    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, .u16_type, .u32_type, true, builtin.target) == .int_not_coercible);
-    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, .i32_type, .u32_type, true, builtin.target) == .int_not_coercible);
-    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, .u32_type, .i32_type, true, builtin.target) == .int_not_coercible);
-    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, .u32_type, .i16_type, true, builtin.target) == .int_not_coercible);
+    try expect(try ip.coerceInMemoryAllowed(gpa, arena, .u32_type, .u32_type, true, builtin.target) == .ok);
+    try expect(try ip.coerceInMemoryAllowed(gpa, arena, .u32_type, .u16_type, true, builtin.target) == .ok);
+    try expect(try ip.coerceInMemoryAllowed(gpa, arena, .u16_type, .u32_type, true, builtin.target) == .int_not_coercible);
+    try expect(try ip.coerceInMemoryAllowed(gpa, arena, .i32_type, .u32_type, true, builtin.target) == .int_not_coercible);
+    try expect(try ip.coerceInMemoryAllowed(gpa, arena, .u32_type, .i32_type, true, builtin.target) == .int_not_coercible);
+    try expect(try ip.coerceInMemoryAllowed(gpa, arena, .u32_type, .i16_type, true, builtin.target) == .int_not_coercible);
 
-    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, .f32_type, .f32_type, true, builtin.target) == .ok);
-    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, .f64_type, .f32_type, true, builtin.target) == .no_match);
-    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, .f32_type, .f64_type, true, builtin.target) == .no_match);
-    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, .u32_type, .f32_type, true, builtin.target) == .no_match);
-    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, .f32_type, .u32_type, true, builtin.target) == .no_match);
+    try expect(try ip.coerceInMemoryAllowed(gpa, arena, .f32_type, .f32_type, true, builtin.target) == .ok);
+    try expect(try ip.coerceInMemoryAllowed(gpa, arena, .f64_type, .f32_type, true, builtin.target) == .no_match);
+    try expect(try ip.coerceInMemoryAllowed(gpa, arena, .f32_type, .f64_type, true, builtin.target) == .no_match);
+    try expect(try ip.coerceInMemoryAllowed(gpa, arena, .u32_type, .f32_type, true, builtin.target) == .no_match);
+    try expect(try ip.coerceInMemoryAllowed(gpa, arena, .f32_type, .u32_type, true, builtin.target) == .no_match);
 }
 
 test "coerceInMemoryAllowed error set" {
@@ -3309,40 +3310,40 @@ test "coerceInMemoryAllowed error set" {
     var ip = try InternPool.init(gpa);
     defer ip.deinit(gpa);
 
-    const foo = try ip.get(gpa, .{ .bytes = "foo" });
-    const bar = try ip.get(gpa, .{ .bytes = "bar" });
-    const baz = try ip.get(gpa, .{ .bytes = "baz" });
+    const foo_name = try ip.get(gpa, .{ .bytes = "foo" });
+    const bar_name = try ip.get(gpa, .{ .bytes = "bar" });
+    const baz_name = try ip.get(gpa, .{ .bytes = "baz" });
 
-    const foo_bar_baz_set = try ip.get(gpa, .{ .error_set_type = .{ .names = &.{ baz, bar, foo } } });
-    const foo_bar_set = try ip.get(gpa, .{ .error_set_type = .{ .names = &.{ foo, bar } } });
-    const foo_set = try ip.get(gpa, .{ .error_set_type = .{ .names = &.{foo} } });
+    const foo_bar_baz_set = try ip.get(gpa, .{ .error_set_type = .{ .names = &.{ baz_name, bar_name, foo_name } } });
+    const foo_bar_set = try ip.get(gpa, .{ .error_set_type = .{ .names = &.{ foo_name, bar_name } } });
+    const foo_set = try ip.get(gpa, .{ .error_set_type = .{ .names = &.{foo_name} } });
     const empty_set = try ip.get(gpa, .{ .error_set_type = .{ .names = &.{} } });
 
-    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, .anyerror_type, foo_bar_baz_set, true, builtin.target) == .ok);
-    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, .anyerror_type, foo_bar_set, true, builtin.target) == .ok);
-    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, .anyerror_type, foo_set, true, builtin.target) == .ok);
-    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, .anyerror_type, empty_set, true, builtin.target) == .ok);
-    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, .anyerror_type, .anyerror_type, true, builtin.target) == .ok);
+    try expect(try ip.coerceInMemoryAllowed(gpa, arena, .anyerror_type, foo_bar_baz_set, true, builtin.target) == .ok);
+    try expect(try ip.coerceInMemoryAllowed(gpa, arena, .anyerror_type, foo_bar_set, true, builtin.target) == .ok);
+    try expect(try ip.coerceInMemoryAllowed(gpa, arena, .anyerror_type, foo_set, true, builtin.target) == .ok);
+    try expect(try ip.coerceInMemoryAllowed(gpa, arena, .anyerror_type, empty_set, true, builtin.target) == .ok);
+    try expect(try ip.coerceInMemoryAllowed(gpa, arena, .anyerror_type, .anyerror_type, true, builtin.target) == .ok);
 
-    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, foo_bar_baz_set, .anyerror_type, true, builtin.target) == .from_anyerror);
-    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, empty_set, .anyerror_type, true, builtin.target) == .from_anyerror);
+    try expect(try ip.coerceInMemoryAllowed(gpa, arena, foo_bar_baz_set, .anyerror_type, true, builtin.target) == .from_anyerror);
+    try expect(try ip.coerceInMemoryAllowed(gpa, arena, empty_set, .anyerror_type, true, builtin.target) == .from_anyerror);
 
-    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, foo_bar_baz_set, foo_bar_baz_set, true, builtin.target) == .ok);
-    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, foo_bar_baz_set, foo_bar_set, true, builtin.target) == .ok);
-    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, foo_bar_baz_set, foo_set, true, builtin.target) == .ok);
-    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, foo_bar_baz_set, empty_set, true, builtin.target) == .ok);
-    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, foo_bar_set, foo_bar_set, true, builtin.target) == .ok);
-    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, foo_bar_set, foo_set, true, builtin.target) == .ok);
-    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, foo_bar_set, empty_set, true, builtin.target) == .ok);
-    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, foo_set, foo_set, true, builtin.target) == .ok);
-    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, foo_set, empty_set, true, builtin.target) == .ok);
-    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, empty_set, empty_set, true, builtin.target) == .ok);
+    try expect(try ip.coerceInMemoryAllowed(gpa, arena, foo_bar_baz_set, foo_bar_baz_set, true, builtin.target) == .ok);
+    try expect(try ip.coerceInMemoryAllowed(gpa, arena, foo_bar_baz_set, foo_bar_set, true, builtin.target) == .ok);
+    try expect(try ip.coerceInMemoryAllowed(gpa, arena, foo_bar_baz_set, foo_set, true, builtin.target) == .ok);
+    try expect(try ip.coerceInMemoryAllowed(gpa, arena, foo_bar_baz_set, empty_set, true, builtin.target) == .ok);
+    try expect(try ip.coerceInMemoryAllowed(gpa, arena, foo_bar_set, foo_bar_set, true, builtin.target) == .ok);
+    try expect(try ip.coerceInMemoryAllowed(gpa, arena, foo_bar_set, foo_set, true, builtin.target) == .ok);
+    try expect(try ip.coerceInMemoryAllowed(gpa, arena, foo_bar_set, empty_set, true, builtin.target) == .ok);
+    try expect(try ip.coerceInMemoryAllowed(gpa, arena, foo_set, foo_set, true, builtin.target) == .ok);
+    try expect(try ip.coerceInMemoryAllowed(gpa, arena, foo_set, empty_set, true, builtin.target) == .ok);
+    try expect(try ip.coerceInMemoryAllowed(gpa, arena, empty_set, empty_set, true, builtin.target) == .ok);
 
-    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, empty_set, foo_set, true, builtin.target) == .missing_error);
-    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, empty_set, foo_bar_baz_set, true, builtin.target) == .missing_error);
-    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, foo_set, foo_bar_set, true, builtin.target) == .missing_error);
-    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, foo_set, foo_bar_baz_set, true, builtin.target) == .missing_error);
-    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, foo_bar_set, foo_bar_baz_set, true, builtin.target) == .missing_error);
+    try expect(try ip.coerceInMemoryAllowed(gpa, arena, empty_set, foo_set, true, builtin.target) == .missing_error);
+    try expect(try ip.coerceInMemoryAllowed(gpa, arena, empty_set, foo_bar_baz_set, true, builtin.target) == .missing_error);
+    try expect(try ip.coerceInMemoryAllowed(gpa, arena, foo_set, foo_bar_set, true, builtin.target) == .missing_error);
+    try expect(try ip.coerceInMemoryAllowed(gpa, arena, foo_set, foo_bar_baz_set, true, builtin.target) == .missing_error);
+    try expect(try ip.coerceInMemoryAllowed(gpa, arena, foo_bar_set, foo_bar_baz_set, true, builtin.target) == .missing_error);
 }
 
 test "resolvePeerTypes" {
@@ -3351,8 +3352,8 @@ test "resolvePeerTypes" {
     var ip = try InternPool.init(gpa);
     defer ip.deinit(gpa);
 
-    try std.testing.expect(.noreturn_type == try ip.resolvePeerTypes(std.testing.allocator, &.{}, builtin.target));
-    try std.testing.expect(.type_type == try ip.resolvePeerTypes(std.testing.allocator, &.{.type_type}, builtin.target));
+    try expect(.noreturn_type == try ip.resolvePeerTypes(std.testing.allocator, &.{}, builtin.target));
+    try expect(.type_type == try ip.resolvePeerTypes(std.testing.allocator, &.{.type_type}, builtin.target));
 
     try ip.testResolvePeerTypes(.none, .none, .none);
     try ip.testResolvePeerTypes(.bool_type, .bool_type, .bool_type);
