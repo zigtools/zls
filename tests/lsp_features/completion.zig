@@ -400,12 +400,7 @@ fn testCompletion(source: []const u8, expected_completions: []const Completion) 
     var ctx = try Context.init();
     defer ctx.deinit();
 
-    const test_uri: []const u8 = switch (builtin.os.tag) {
-        .windows => "file:///C:\\test.zig",
-        else => "file:///test.zig",
-    };
-
-    try ctx.requestDidOpen(test_uri, text);
+    const test_uri = try ctx.addDocument(text);
 
     const params = types.CompletionParams{
         .textDocument = .{ .uri = test_uri },
