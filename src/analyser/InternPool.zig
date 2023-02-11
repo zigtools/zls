@@ -2179,7 +2179,7 @@ const InMemoryCoercionResult = union(enum) {
     optional_shape: Pair,
     optional_child: PairAndChild,
     from_anyerror,
-    missing_error: []const []const u8,
+    missing_error: []const Index,
     /// true if wanted is var args
     fn_var_args: bool,
     /// true if wanted is generic
@@ -2332,7 +2332,6 @@ fn coerceInMemoryAllowed(
             const dest_bits = dest_key.floatBits(target);
             const src_bits = src_key.floatBits(target);
             if (dest_bits == src_bits) return .ok;
-            // TODO return float_not_coercible
             return InMemoryCoercionResult{ .no_match = .{
                 .actual = dest_ty,
                 .wanted = src_ty,
@@ -2391,9 +2390,7 @@ fn coerceInMemoryAllowed(
             return try ip.coerceInMemoryAllowed(gpa, arena, dest_set, src_set, dest_is_const, target);
         },
         .ErrorSet => {
-            return .ok;
-            // TODO: implement coerceInMemoryAllowedErrorSets
-            // return try ip.coerceInMemoryAllowedErrorSets(dest_ty, src_ty);
+            return try ip.coerceInMemoryAllowedErrorSets(gpa, arena, dest_ty, src_ty);
         },
         .Array => {
             const dest_info = dest_key.array_type;
@@ -2460,156 +2457,40 @@ fn coerceInMemoryAllowed(
     }
 }
 
-// fn coerceInMemoryAllowedErrorSets(
-//     ip: *InternPool,
-//     gpa: Allocator,
-//     arena: Allocator,
-//     dest_ty: Index,
-//     src_ty: Index,
-// ) !InMemoryCoercionResult {
-//     if(dest_ty == src_ty) return .ok;
+fn coerceInMemoryAllowedErrorSets(
+    ip: *InternPool,
+    gpa: Allocator,
+    arena: Allocator,
+    dest_ty: Index,
+    src_ty: Index,
+) !InMemoryCoercionResult {
+    if (dest_ty == src_ty) return .ok;
 
-//     const dest_key = ip.indexToKey(dest_ty);
+    const dest_key = ip.indexToKey(dest_ty);
+    assert(dest_key.zigTypeTag() == .ErrorSet);
 
-//     // Coercion to `anyerror`. Note that this check can return false negatives
-//     // in case the error sets did not get resolved.
-//     if(dest_key.simple) |simple| if(simple == .anyerror) return .ok;
+    if (dest_ty == .anyerror_type) return .ok;
 
-//     const src_key = ip.indexToKey(src_ty);
+    const src_key = ip.indexToKey(src_ty);
+    assert(src_key.zigTypeTag() == .ErrorSet);
 
-//     // const dest_tag = dest_key.zigTypeTag();
-//     // const src_tag = src_key.zigTypeTag();
+    if (src_ty == .anyerror_type) return .from_anyerror;
 
-//     if (dest_ty.castTag(.error_set_inferred)) |dst_payload| {
-//         const dst_ies = dst_payload.data;
-//         // We will make an effort to return `ok` without resolving either error set, to
-//         // avoid unnecessary "unable to resolve error set" dependency loop errors.
-//         switch (src_ty.tag()) {
-//             .error_set_inferred => {
-//                 // If both are inferred error sets of functions, and
-//                 // the dest includes the source function, the coercion is OK.
-//                 // This check is important because it works without forcing a full resolution
-//                 // of inferred error sets.
-//                 const src_ies = src_ty.castTag(.error_set_inferred).?.data;
+    var missing_error_buf = std.ArrayListUnmanaged(Index){};
+    defer missing_error_buf.deinit(gpa);
 
-//                 if (dst_ies.inferred_error_sets.contains(src_ies)) {
-//                     return .ok;
-//                 }
-//             },
-//             .error_set_single => {
-//                 const name = src_ty.castTag(.error_set_single).?.data;
-//                 if (dst_ies.errors.contains(name)) return .ok;
-//             },
-//             .error_set_merged => {
-//                 const names = src_ty.castTag(.error_set_merged).?.data.keys();
-//                 for (names) |name| {
-//                     if (!dst_ies.errors.contains(name)) break;
-//                 } else return .ok;
-//             },
-//             .error_set => {
-//                 const names = src_ty.castTag(.error_set).?.data.names.keys();
-//                 for (names) |name| {
-//                     if (!dst_ies.errors.contains(name)) break;
-//                 } else return .ok;
-//             },
-//             .anyerror => {},
-//             else => unreachable,
-//         }
+    for (src_key.error_set_type.names) |name| {
+        if (std.mem.indexOfScalar(Index, dest_key.error_set_type.names, name) == null) {
+            try missing_error_buf.append(gpa, name);
+        }
+    }
 
-//         if (dst_ies.func == sema.owner_func) {
-//             // We are trying to coerce an error set to the current function's
-//             // inferred error set.
-//             try dst_ies.addErrorSet(sema.gpa, src_ty);
-//             return .ok;
-//         }
+    if (missing_error_buf.items.len == 0) return .ok;
 
-//         try sema.resolveInferredErrorSet(block, dest_src, dst_payload.data);
-//         // isAnyError might have changed from a false negative to a true positive after resolution.
-//         if (dest_ty.isAnyError()) {
-//             return .ok;
-//         }
-//     }
-
-//     var missing_error_buf = std.ArrayList([]const u8).init(sema.gpa);
-//     defer missing_error_buf.deinit();
-
-//     switch (src_ty.tag()) {
-//         .error_set_inferred => {
-//             const src_data = src_ty.castTag(.error_set_inferred).?.data;
-
-//             try sema.resolveInferredErrorSet(block, src_src, src_data);
-//             // src anyerror status might have changed after the resolution.
-//             if (src_ty.isAnyError()) {
-//                 // dest_ty.isAnyError() == true is already checked for at this point.
-//                 return .from_anyerror;
-//             }
-
-//             for (src_data.errors.keys()) |key| {
-//                 if (!dest_ty.errorSetHasField(key)) {
-//                     try missing_error_buf.append(key);
-//                 }
-//             }
-
-//             if (missing_error_buf.items.len != 0) {
-//                 return InMemoryCoercionResult{
-//                     .missing_error = try sema.arena.dupe([]const u8, missing_error_buf.items),
-//                 };
-//             }
-
-//             return .ok;
-//         },
-//         .error_set_single => {
-//             const name = src_ty.castTag(.error_set_single).?.data;
-//             if (dest_ty.errorSetHasField(name)) {
-//                 return .ok;
-//             }
-//             const list = try sema.arena.alloc([]const u8, 1);
-//             list[0] = name;
-//             return InMemoryCoercionResult{ .missing_error = list };
-//         },
-//         .error_set_merged => {
-//             const names = src_ty.castTag(.error_set_merged).?.data.keys();
-//             for (names) |name| {
-//                 if (!dest_ty.errorSetHasField(name)) {
-//                     try missing_error_buf.append(name);
-//                 }
-//             }
-
-//             if (missing_error_buf.items.len != 0) {
-//                 return InMemoryCoercionResult{
-//                     .missing_error = try sema.arena.dupe([]const u8, missing_error_buf.items),
-//                 };
-//             }
-
-//             return .ok;
-//         },
-//         .error_set => {
-//             const names = src_ty.castTag(.error_set).?.data.names.keys();
-//             for (names) |name| {
-//                 if (!dest_ty.errorSetHasField(name)) {
-//                     try missing_error_buf.append(name);
-//                 }
-//             }
-
-//             if (missing_error_buf.items.len != 0) {
-//                 return InMemoryCoercionResult{
-//                     .missing_error = try sema.arena.dupe([]const u8, missing_error_buf.items),
-//                 };
-//             }
-
-//             return .ok;
-//         },
-//         .anyerror => switch (dest_ty.tag()) {
-//             .error_set_inferred => unreachable, // Caught by dest_ty.isAnyError() above.
-//             .error_set_single, .error_set_merged, .error_set => return .from_anyerror,
-//             .anyerror => unreachable, // Filtered out above.
-//             else => unreachable,
-//         },
-//         else => unreachable,
-//     }
-
-//     unreachable;
-// }
+    return InMemoryCoercionResult{
+        .missing_error = try arena.dupe(Index, missing_error_buf.items),
+    };
+}
 
 fn coerceInMemoryAllowedFns(
     ip: *InternPool,
@@ -3416,6 +3297,52 @@ test "coerceInMemoryAllowed integers and floats" {
     try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, .f32_type, .f64_type, true, builtin.target) == .no_match);
     try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, .u32_type, .f32_type, true, builtin.target) == .no_match);
     try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, .f32_type, .u32_type, true, builtin.target) == .no_match);
+}
+
+test "coerceInMemoryAllowed error set" {
+    const gpa = std.testing.allocator;
+
+    var arena_allocator = std.heap.ArenaAllocator.init(gpa);
+    defer arena_allocator.deinit();
+    const arena = arena_allocator.allocator();
+
+    var ip = try InternPool.init(gpa);
+    defer ip.deinit(gpa);
+
+    const foo = try ip.get(gpa, .{ .bytes = "foo" });
+    const bar = try ip.get(gpa, .{ .bytes = "bar" });
+    const baz = try ip.get(gpa, .{ .bytes = "baz" });
+
+    const foo_bar_baz_set = try ip.get(gpa, .{ .error_set_type = .{ .names = &.{ baz, bar, foo } } });
+    const foo_bar_set = try ip.get(gpa, .{ .error_set_type = .{ .names = &.{ foo, bar } } });
+    const foo_set = try ip.get(gpa, .{ .error_set_type = .{ .names = &.{foo} } });
+    const empty_set = try ip.get(gpa, .{ .error_set_type = .{ .names = &.{} } });
+
+    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, .anyerror_type, foo_bar_baz_set, true, builtin.target) == .ok);
+    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, .anyerror_type, foo_bar_set, true, builtin.target) == .ok);
+    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, .anyerror_type, foo_set, true, builtin.target) == .ok);
+    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, .anyerror_type, empty_set, true, builtin.target) == .ok);
+    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, .anyerror_type, .anyerror_type, true, builtin.target) == .ok);
+
+    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, foo_bar_baz_set, .anyerror_type, true, builtin.target) == .from_anyerror);
+    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, empty_set, .anyerror_type, true, builtin.target) == .from_anyerror);
+
+    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, foo_bar_baz_set, foo_bar_baz_set, true, builtin.target) == .ok);
+    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, foo_bar_baz_set, foo_bar_set, true, builtin.target) == .ok);
+    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, foo_bar_baz_set, foo_set, true, builtin.target) == .ok);
+    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, foo_bar_baz_set, empty_set, true, builtin.target) == .ok);
+    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, foo_bar_set, foo_bar_set, true, builtin.target) == .ok);
+    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, foo_bar_set, foo_set, true, builtin.target) == .ok);
+    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, foo_bar_set, empty_set, true, builtin.target) == .ok);
+    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, foo_set, foo_set, true, builtin.target) == .ok);
+    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, foo_set, empty_set, true, builtin.target) == .ok);
+    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, empty_set, empty_set, true, builtin.target) == .ok);
+
+    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, empty_set, foo_set, true, builtin.target) == .missing_error);
+    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, empty_set, foo_bar_baz_set, true, builtin.target) == .missing_error);
+    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, foo_set, foo_bar_set, true, builtin.target) == .missing_error);
+    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, foo_set, foo_bar_baz_set, true, builtin.target) == .missing_error);
+    try std.testing.expect(try ip.coerceInMemoryAllowed(gpa, arena, foo_bar_set, foo_bar_baz_set, true, builtin.target) == .missing_error);
 }
 
 test "resolvePeerTypes" {
