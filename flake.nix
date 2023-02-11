@@ -13,6 +13,9 @@
     known-folders.url = "github:ziglibs/known-folders";
     known-folders.flake = false;
 
+    diffz.url = "github:ziglibs/diffz";
+    diffz.flake = false;
+
     tres.url = "github:ziglibs/tres";
     tres.flake = false;
   };
@@ -38,7 +41,7 @@
           dontInstall = true;
           buildPhase = ''
             mkdir -p $out
-            zig build install -Dcpu=baseline -Doptimize=ReleaseSafe -Ddata_version=master -Dtres=${tres}/tres.zig -Dknown-folders=${known-folders}/known-folders.zig --prefix $out
+            zig build install -Dcpu=baseline -Doptimize=ReleaseSafe -Ddata_version=master -Dtres=${tres}/tres.zig -Dknown-folders=${known-folders}/known-folders.zig -Ddiffz=${diffz}/DiffMatchPatch.zig --prefix $out
           '';
           XDG_CACHE_HOME = ".cache";
         };
