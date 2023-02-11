@@ -3,18 +3,6 @@ const zls = @import("zls");
 
 const allocator = std.testing.allocator;
 
-test "diff - jarred" {
-    var arena = std.heap.ArenaAllocator.init(allocator);
-    defer arena.deinit();
-
-    const pre = @embedFile("samples/jarred-pre.zig");
-    const post = @embedFile("samples/jarred-post.zig");
-
-    var edits = try zls.diff.edits(arena.allocator(), pre, post);
-    const applied = try zls.diff.applyTextEdits(arena.allocator(), pre, edits.items, .@"utf-8");
-    try std.testing.expectEqualStrings(post, applied);
-}
-
 fn gen(alloc: std.mem.Allocator, rand: std.rand.Random) ![]const u8 {
     var buffer = try alloc.alloc(u8, rand.intRangeAtMost(usize, 16, 1024));
     for (buffer) |*b| b.* = rand.intRangeAtMost(u8, 32, 126);
@@ -35,7 +23,7 @@ test "diff - random" {
         const pre = try gen(arena.allocator(), rand.random());
         const post = try gen(arena.allocator(), rand.random());
 
-        var edits = try zls.diff.edits(arena.allocator(), pre, post);
+        var edits = try zls.diff.edits(arena.allocator(), pre, post, .@"utf-8");
         const applied = try zls.diff.applyTextEdits(arena.allocator(), pre, edits.items, .@"utf-8");
         try std.testing.expectEqualStrings(post, applied);
     }

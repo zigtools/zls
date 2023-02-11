@@ -13,6 +13,7 @@ pub fn edits(
     allocator: std.mem.Allocator,
     before: []const u8,
     after: []const u8,
+    encoding: offsets.Encoding,
 ) Error!std.ArrayListUnmanaged(types.TextEdit) {
     var diffs = try dmp.diff(allocator, before, after, true);
     var eds = std.ArrayListUnmanaged(types.TextEdit){};
@@ -23,13 +24,13 @@ pub fn edits(
         switch (diff.operation) {
             .delete => {
                 offset += diff.text.len;
-                try eds.append(allocator, .{ .range = offsets.locToRange(before, .{ .start = start, .end = offset }, .@"utf-8"), .newText = "" });
+                try eds.append(allocator, .{ .range = offsets.locToRange(before, .{ .start = start, .end = offset }, encoding), .newText = "" });
             },
             .equal => {
                 offset += diff.text.len;
             },
             .insert => {
-                try eds.append(allocator, .{ .range = offsets.locToRange(before, .{ .start = start, .end = start }, .@"utf-8"), .newText = diff.text });
+                try eds.append(allocator, .{ .range = offsets.locToRange(before, .{ .start = start, .end = start }, encoding), .newText = diff.text });
             },
         }
     }
