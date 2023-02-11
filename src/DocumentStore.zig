@@ -854,6 +854,33 @@ pub fn collectDependencies(
     }
 }
 
+/// TODO resolve relative paths
+pub fn collectIncludeDirs(
+    store: *const DocumentStore,
+    allocator: std.mem.Allocator,
+    handle: Handle,
+    include_dirs: *std.ArrayListUnmanaged([]const u8),
+) !void {
+    const target_info = try std.zig.system.NativeTargetInfo.detect(.{});
+    var native_paths = try std.zig.system.NativePaths.detect(allocator, target_info);
+    defer native_paths.deinit();
+
+    const build_file_includes_paths: []const []const u8 = if (handle.associated_build_file) |build_file_uri|
+        store.build_files.get(build_file_uri).?.config.include_dirs
+    else
+        &.{};
+
+    try include_dirs.ensureTotalCapacity(allocator, native_paths.include_dirs.items.len + build_file_includes_paths.len);
+
+    const native_include_dirs = try native_paths.include_dirs.toOwnedSlice();
+    defer allocator.free(native_include_dirs);
+    include_dirs.appendSliceAssumeCapacity(native_include_dirs);
+
+    for (build_file_includes_paths) |include_path| {
+        include_dirs.appendAssumeCapacity(try allocator.dupe(u8, include_path));
+    }
+}
+
 /// returns the document behind `@cImport()` where `node` is the `cImport` node
 /// if a cImport can't be translated e.g. requires computing a
 /// comptime value `resolveCImport` will return null
@@ -872,15 +899,22 @@ pub fn resolveCImport(self: *DocumentStore, handle: Handle, node: Ast.Node.Index
     const result = self.cimports.get(hash) orelse blk: {
         const source: []const u8 = handle.cimports.items(.source)[index];
 
-        const include_dirs: []const []const u8 = if (handle.associated_build_file) |build_file_uri|
-            self.build_files.get(build_file_uri).?.config.include_dirs
-        else
-            &.{};
+        var include_dirs: std.ArrayListUnmanaged([]const u8) = .{};
+        defer {
+            for (include_dirs.items) |path| {
+                self.allocator.free(path);
+            }
+            include_dirs.deinit(self.allocator);
+        }
+        self.collectIncludeDirs(self.allocator, handle, &include_dirs) catch |err| {
+            log.err("failed to resolve include paths: {}", .{err});
+            return null;
+        };
 
         var result = (try translate_c.translate(
             self.allocator,
             self.config.*,
-            include_dirs,
+            include_dirs.items,
             source,
         )) orelse return null;
 
@@ -936,18 +970,13 @@ pub fn uriFromImportStr(self: *const DocumentStore, allocator: std.mem.Allocator
         }
         return null;
     } else {
-        const base = handle.uri;
-        var base_len = base.len;
-        while (base[base_len - 1] != '/' and base_len > 0) {
-            base_len -= 1;
+        var seperator_index = handle.uri.len;
+        while (seperator_index > 0) : (seperator_index -= 1) {
+            if (std.fs.path.isSep(handle.uri[seperator_index - 1])) break;
         }
-        base_len -= 1;
-        if (base_len <= 0) {
-            return null;
-            // return error.UriBadScheme;
-        }
+        const base = handle.uri[0 .. seperator_index - 1];
 
-        return URI.pathRelative(allocator, base[0..base_len], import_str) catch |err| switch (err) {
+        return URI.pathRelative(allocator, base, import_str) catch |err| switch (err) {
             error.OutOfMemory => return error.OutOfMemory,
             error.UriBadScheme => return null,
         };

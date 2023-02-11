@@ -147,20 +147,6 @@ pub fn translate(allocator: std.mem.Allocator, config: Config, include_dirs: []c
         return null;
     };
 
-    const base_include_dirs = blk: {
-        const target_info = std.zig.system.NativeTargetInfo.detect(.{}) catch break :blk null;
-        var native_paths = std.zig.system.NativePaths.detect(allocator, target_info) catch break :blk null;
-        defer native_paths.deinit();
-
-        break :blk try native_paths.include_dirs.toOwnedSlice();
-    };
-    defer if (base_include_dirs) |dirs| {
-        for (dirs) |path| {
-            allocator.free(path);
-        }
-        allocator.free(dirs);
-    };
-
     const base_args = &[_][]const u8{
         config.zig_exe_path orelse return null,
         "translate-c",
@@ -172,18 +158,11 @@ pub fn translate(allocator: std.mem.Allocator, config: Config, include_dirs: []c
         "-lc",
     };
 
-    const argc = base_args.len + 2 * (include_dirs.len + if (base_include_dirs) |dirs| dirs.len else 0) + 1;
+    const argc = base_args.len + 2 * include_dirs.len + 1;
     var argv = try std.ArrayListUnmanaged([]const u8).initCapacity(allocator, argc);
     defer argv.deinit(allocator);
 
     argv.appendSliceAssumeCapacity(base_args);
-
-    if (base_include_dirs) |dirs| {
-        for (dirs) |include_dir| {
-            argv.appendAssumeCapacity("-I");
-            argv.appendAssumeCapacity(include_dir);
-        }
-    }
 
     for (include_dirs) |include_dir| {
         argv.appendAssumeCapacity("-I");
