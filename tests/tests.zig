@@ -13,6 +13,7 @@ comptime {
     // LSP features
     _ = @import("lsp_features/completion.zig");
     _ = @import("lsp_features/definition.zig");
+    _ = @import("lsp_features/document_symbol.zig");
     _ = @import("lsp_features/folding_range.zig");
     _ = @import("lsp_features/inlay_hints.zig");
     _ = @import("lsp_features/references.zig");
