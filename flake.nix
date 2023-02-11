@@ -20,7 +20,7 @@
     tres.flake = false;
   };
 
-  outputs = { self, nixpkgs, zig-overlay, gitignore, flake-utils, known-folders, tres }:
+  outputs = { self, nixpkgs, zig-overlay, gitignore, flake-utils, known-folders, tres, diffz }:
     let
       systems = [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
       inherit (gitignore.lib) gitignoreSource;
