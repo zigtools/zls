@@ -120,9 +120,15 @@ pub fn build(b: *std.build.Builder) !void {
     const tres_module = b.createModule(.{ .source_file = .{ .path = tres_path } });
     exe.addModule("tres", tres_module);
 
+    const DIFFZ_DEFAULT_PATH = "src/diffz/DiffMatchPatch.zig";
+    const diffz_path = b.option([]const u8, "diffz", "Path to diffz package (default: " ++ DIFFZ_DEFAULT_PATH ++ ")") orelse DIFFZ_DEFAULT_PATH;
+    const diffz_module = b.createModule(.{ .source_file = .{ .path = diffz_path } });
+    exe.addModule("diffz", diffz_module);
+
     const check_submodules_step = CheckSubmodulesStep.init(b, &.{
         known_folders_path,
         tres_path,
+        diffz_path,
     });
     b.getInstallStep().dependOn(&check_submodules_step.step);
 
@@ -201,11 +207,13 @@ pub fn build(b: *std.build.Builder) !void {
         .dependencies = &.{
             .{ .name = "known-folders", .module = known_folders_module },
             .{ .name = "tres", .module = tres_module },
+            .{ .name = "diffz", .module = diffz_module },
             .{ .name = "build_options", .module = build_options_module },
         },
     });
     tests.addModule("zls", zls_module);
     tests.addModule("tres", tres_module);
+    tests.addModule("diffz", diffz_module);
 
     test_step.dependOn(&tests.step);
 }

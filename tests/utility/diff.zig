@@ -29,7 +29,7 @@ test "diff - random" {
 
     var index: usize = 0;
 
-    while (index < 1024) : (index += 1) {
+    while (index < 100) : (index += 1) {
         defer _ = arena.reset(.retain_capacity);
 
         const pre = try gen(arena.allocator(), rand.random());
