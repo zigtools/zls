@@ -5,6 +5,7 @@ comptime {
     _ = @import("utility/offsets.zig");
     _ = @import("utility/position_context.zig");
     _ = @import("utility/uri.zig");
+    _ = @import("utility/diff.zig");
 
     // TODO Lifecycle Messages
 

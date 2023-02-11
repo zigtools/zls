@@ -2087,7 +2087,7 @@ fn changeDocumentHandler(server: *Server, notification: types.DidChangeTextDocum
 
     const handle = server.document_store.getHandle(notification.textDocument.uri) orelse return;
 
-    const new_text = try diff.applyTextEdits(server.allocator, handle.text, notification.contentChanges, server.offset_encoding);
+    const new_text = try diff.applyContentChanges(server.allocator, handle.text, notification.contentChanges, server.offset_encoding);
 
     try server.document_store.refreshDocument(handle.uri, new_text);
 
@@ -2372,7 +2372,7 @@ fn formattingHandler(server: *Server, request: types.DocumentFormattingParams) E
         return text_edits;
     }
 
-    return if (diff.edits(allocator, handle.text, formatted)) |text_edits| text_edits.items else |_| null;
+    return if (diff.edits(allocator, handle.text, formatted, server.offset_encoding)) |text_edits| text_edits.items else |_| null;
 }
 
 fn didChangeConfigurationHandler(server: *Server, request: configuration.DidChangeConfigurationParams) Error!void {

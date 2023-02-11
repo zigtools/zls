@@ -7,3 +7,6 @@
 [submodule "src/tres"]
 	path = src/tres
 	url = https://github.com/ziglibs/tres.git
+[submodule "src/diffz"]
+	path = src/diffz
+	url = https://github.com/ziglibs/diffz
