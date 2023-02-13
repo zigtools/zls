@@ -1557,7 +1557,7 @@ pub fn getPositionContext(
         };
 
         while (true) {
-            const tok = tokenizer.next();
+            var tok = tokenizer.next();
             // Early exits.
             if (tok.loc.start > new_index) break;
             if (tok.loc.start == new_index) {
@@ -1576,7 +1576,12 @@ pub fn getPositionContext(
                             },
                         };
                     }
-                    return .other;
+                    const q = std.mem.lastIndexOf(u8, held_line, "\"") orelse return .other;
+                    if (held_line[q - 1] == '@') {
+                        tok.tag = .identifier;
+                    } else {
+                        tok.tag = .string_literal;
+                    }
                 },
                 .doc_comment, .container_doc_comment => return .comment,
                 .eof => break,
