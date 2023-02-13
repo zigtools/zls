@@ -69,6 +69,7 @@ const ClientCapabilities = packed struct {
     completion_doc_supports_md: bool = false,
     label_details_support: bool = false,
     supports_configuration: bool = false,
+    supports_workspace_did_change_configuration_dynamic_registration: bool = false,
 };
 
 pub const Error = std.mem.Allocator.Error || error{
@@ -1853,7 +1854,7 @@ fn initializeHandler(server: *Server, request: types.InitializeParams) Error!typ
         server.client_capabilities.supports_configuration = workspace.configuration orelse false;
         if (workspace.didChangeConfiguration) |did_change| {
             if (did_change.dynamicRegistration orelse false) {
-                try server.registerCapability("workspace/didChangeConfiguration");
+                server.client_capabilities.supports_workspace_did_change_configuration_dynamic_registration = true;
             }
         }
     }
@@ -1995,6 +1996,10 @@ fn initializedHandler(server: *Server, notification: types.InitializedParams) Er
 
     server.status = .initialized;
 
+    if (server.client_capabilities.supports_workspace_did_change_configuration_dynamic_registration) {
+        try server.registerCapability("workspace/didChangeConfiguration");
+    }
+
     if (server.client_capabilities.supports_configuration)
         try server.requestConfiguration();
 }
@@ -2090,27 +2095,37 @@ fn handleConfiguration(server: *Server, json: std.json.Value) error{OutOfMemory}
             const new_value: field.type = switch (ft) {
                 []const u8 => switch (value) {
                     .String => |s| blk: {
-                        if (s.len == 0) {
-                            if (field.type == ?[]const u8) {
-                                break :blk null;
-                            } else {
-                                break :blk s;
-                            }
+                        const trimmed = std.mem.trim(u8, s, " ");
+                        if (trimmed.len == 0 or std.mem.eql(u8, trimmed, "nil")) {
+                            log.warn("Ignoring new value for \"zls.{s}\": the given new value is invalid", .{field.name});
+                            break :blk @field(server.config, field.name);
                         }
-                        var nv = try server.allocator.dupe(u8, s);
+                        var nv = try server.allocator.dupe(u8, trimmed);
                         if (@field(server.config, field.name)) |prev_val| server.allocator.free(prev_val);
                         break :blk nv;
-                    }, // TODO: Allocation model? (same with didChangeConfiguration); imo this isn't *that* bad but still
-                    else => @panic("Invalid configuration value"), // TODO: Handle this
+                    },
+                    else => blk: {
+                        log.warn("Ignoring new value for \"zls.{s}\": the given new value has an invalid type", .{field.name});
+                        break :blk @field(server.config, field.name);
+                    },
                 },
                 else => switch (ti) {
                     .Int => switch (value) {
-                        .Integer => |s| std.math.cast(ft, s) orelse @panic("Invalid configuration value"),
-                        else => @panic("Invalid configuration value"), // TODO: Handle this
+                        .Integer => |val| std.math.cast(ft, val) orelse blk: {
+                            log.warn("Ignoring new value for \"zls.{s}\": the given new value is invalid", .{field.name});
+                            break :blk @field(server.config, field.name);
+                        },
+                        else => blk: {
+                            log.warn("Ignoring new value for \"zls.{s}\": the given new value has an invalid type", .{field.name});
+                            break :blk @field(server.config, field.name);
+                        },
                     },
                     .Bool => switch (value) {
                         .Bool => |b| b,
-                        else => @panic("Invalid configuration value"), // TODO: Handle this
+                        else => blk: {
+                            log.warn("Ignoring new value for \"zls.{s}\": the given new value has an invalid type", .{field.name});
+                            break :blk @field(server.config, field.name);
+                        },
                     },
                     else => @compileError("Not implemented for " ++ @typeName(ft)),
                 },
@@ -2941,7 +2956,12 @@ fn processMessage(server: *Server, message: Message) Error!void {
         },
         .ResponseMessage => |response| {
             if (response.id != .string) return;
-            if (std.mem.startsWith(u8, response.id.string, "register")) return;
+            if (std.mem.startsWith(u8, response.id.string, "register")) {
+                if (response.@"error") |err| {
+                    log.err("Error response for '{s}': {}, {s}", .{ response.id.string, err.code, err.message });
+                }
+                return;
+            }
             if (std.mem.eql(u8, response.id.string, "apply_edit")) return;
 
             if (std.mem.eql(u8, response.id.string, "i_haz_configuration")) {
