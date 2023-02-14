@@ -70,6 +70,7 @@ const ClientCapabilities = packed struct {
     completion_doc_supports_md: bool = false,
     label_details_support: bool = false,
     supports_configuration: bool = false,
+    supports_workspace_did_change_configuration_dynamic_registration: bool = false,
 };
 
 pub const Error = std.mem.Allocator.Error || error{
@@ -1191,14 +1192,45 @@ fn hoverDefinitionFieldAccess(
 
 fn gotoDefinitionString(
     server: *Server,
-    pos_index: usize,
+    pos_context: analysis.PositionContext,
     handle: *const DocumentStore.Handle,
 ) error{OutOfMemory}!?types.Location {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const import_str = analysis.getImportStr(handle.tree, 0, pos_index) orelse return null;
-    const uri = try server.document_store.uriFromImportStr(server.arena.allocator(), handle.*, import_str);
+    const allocator = server.arena.allocator();
+
+    const loc = pos_context.loc().?;
+    const import_str_loc = offsets.tokenIndexToLoc(handle.tree.source, loc.start);
+    if (import_str_loc.end - import_str_loc.start < 2) return null;
+    var import_str = offsets.locToSlice(handle.tree.source, .{
+        .start = import_str_loc.start + 1,
+        .end = import_str_loc.end - 1,
+    });
+
+    const uri = switch (pos_context) {
+        .import_string_literal,
+        .embedfile_string_literal,
+        => try server.document_store.uriFromImportStr(allocator, handle.*, import_str),
+        .cinclude_string_literal => try uri_utils.fromPath(
+            allocator,
+            blk: {
+                if (std.fs.path.isAbsolute(import_str)) break :blk import_str;
+                var include_dirs: std.ArrayListUnmanaged([]const u8) = .{};
+                server.document_store.collectIncludeDirs(allocator, handle.*, &include_dirs) catch |err| {
+                    log.err("failed to resolve include paths: {}", .{err});
+                    return null;
+                };
+                for (include_dirs.items) |dir| {
+                    const path = try std.fs.path.join(allocator, &.{ dir, import_str });
+                    std.fs.accessAbsolute(path, .{}) catch continue;
+                    break :blk path;
+                }
+                return null;
+            },
+        ),
+        else => unreachable,
+    };
 
     return types.Location{
         .uri = uri orelse return null,
@@ -1624,60 +1656,87 @@ fn completeDot(server: *Server, handle: *const DocumentStore.Handle) error{OutOf
     return completions;
 }
 
-fn completeFileSystemStringLiteral(allocator: std.mem.Allocator, store: *const DocumentStore, handle: *const DocumentStore.Handle, completing: []const u8, is_import: bool) ![]types.CompletionItem {
-    var subpath_present = false;
-    var completions = std.ArrayListUnmanaged(types.CompletionItem){};
+fn completeFileSystemStringLiteral(
+    arena: std.mem.Allocator,
+    store: DocumentStore,
+    handle: DocumentStore.Handle,
+    pos_context: analysis.PositionContext,
+) ![]types.CompletionItem {
+    var completions: analysis.CompletionSet = .{};
 
-    fsc: {
-        var document_path = try uri_utils.parse(allocator, handle.uri);
-        var document_dir_path = std.fs.openIterableDirAbsolute(std.fs.path.dirname(document_path) orelse break :fsc, .{}) catch break :fsc;
-        defer document_dir_path.close();
+    const loc = pos_context.loc().?;
+    var completing = handle.tree.source[loc.start + 1 .. loc.end - 1];
 
-        if (std.mem.lastIndexOfScalar(u8, completing, '/')) |subpath_index| {
-            var subpath = completing[0..subpath_index];
+    var seperator_index = completing.len;
+    while (seperator_index > 0) : (seperator_index -= 1) {
+        if (std.fs.path.isSep(completing[seperator_index - 1])) break;
+    }
+    completing = completing[0..seperator_index];
 
-            if (std.mem.startsWith(u8, subpath, "./") and subpath_index > 2) {
-                subpath = completing[2..subpath_index];
-            } else if (std.mem.startsWith(u8, subpath, ".") and subpath_index > 1) {
-                subpath = completing[1..subpath_index];
+    var search_paths: std.ArrayListUnmanaged([]const u8) = .{};
+    if (std.fs.path.isAbsolute(completing) and pos_context != .import_string_literal) {
+        try search_paths.append(arena, completing);
+    } else if (pos_context == .cinclude_string_literal) {
+        store.collectIncludeDirs(arena, handle, &search_paths) catch |err| {
+            log.err("failed to resolve include paths: {}", .{err});
+            return &.{};
+        };
+    } else {
+        var document_path = try uri_utils.parse(arena, handle.uri);
+        try search_paths.append(arena, std.fs.path.dirname(document_path).?);
+    }
+
+    for (search_paths.items) |path| {
+        if (!std.fs.path.isAbsolute(path)) continue;
+        const dir_path = if (std.fs.path.isAbsolute(completing)) path else try std.fs.path.join(arena, &.{ path, completing });
+
+        var iterable_dir = std.fs.openIterableDirAbsolute(dir_path, .{}) catch continue;
+        defer iterable_dir.close();
+        var it = iterable_dir.iterateAssumeFirstIteration();
+
+        while (it.next() catch null) |entry| {
+            const expected_extension = switch (pos_context) {
+                .import_string_literal => ".zig",
+                .cinclude_string_literal => ".h",
+                .embedfile_string_literal => null,
+                else => unreachable,
+            };
+            switch (entry.kind) {
+                .File => if (expected_extension) |expected| {
+                    const actual_extension = std.fs.path.extension(entry.name);
+                    if (!std.mem.eql(u8, actual_extension, expected)) continue;
+                },
+                .Directory => {},
+                else => continue,
             }
 
-            var old = document_dir_path;
-            document_dir_path = document_dir_path.dir.openIterableDir(subpath, .{}) catch break :fsc; // NOTE: Is this even safe lol?
-            old.close();
-
-            subpath_present = true;
-        }
-
-        var dir_iterator = document_dir_path.iterate();
-        while (try dir_iterator.next()) |entry| {
-            if (std.mem.startsWith(u8, entry.name, ".")) continue;
-            if (entry.kind == .File and is_import and !std.mem.endsWith(u8, entry.name, ".zig")) continue;
-
-            const l = try allocator.dupe(u8, entry.name);
-            try completions.append(allocator, types.CompletionItem{
-                .label = l,
-                .insertText = l,
+            _ = try completions.getOrPut(arena, types.CompletionItem{
+                .label = try arena.dupe(u8, entry.name),
+                .detail = if (pos_context == .cinclude_string_literal) path else null,
+                .insertText = if (entry.kind == .Directory)
+                    try std.fmt.allocPrint(arena, "{s}/", .{entry.name})
+                else
+                    null,
                 .kind = if (entry.kind == .File) .File else .Folder,
             });
         }
     }
 
-    if (!subpath_present and is_import) {
+    if (completing.len == 0 and pos_context == .import_string_literal) {
         if (handle.associated_build_file) |uri| {
             const build_file = store.build_files.get(uri).?;
-            try completions.ensureUnusedCapacity(allocator, build_file.config.packages.len);
+            try completions.ensureUnusedCapacity(arena, build_file.config.packages.len);
 
             for (build_file.config.packages) |pkg| {
-                completions.appendAssumeCapacity(.{
+                completions.putAssumeCapacity(.{
                     .label = pkg.name,
                     .kind = .Module,
-                });
+                }, {});
             }
         }
     }
 
-    return completions.toOwnedSlice(allocator);
+    return completions.keys();
 }
 
 fn initializeHandler(server: *Server, request: types.InitializeParams) Error!types.InitializeResult {
@@ -1776,7 +1835,7 @@ fn initializeHandler(server: *Server, request: types.InitializeParams) Error!typ
         server.client_capabilities.supports_configuration = workspace.configuration orelse false;
         if (workspace.didChangeConfiguration) |did_change| {
             if (did_change.dynamicRegistration orelse false) {
-                try server.registerCapability("workspace/didChangeConfiguration");
+                server.client_capabilities.supports_workspace_did_change_configuration_dynamic_registration = true;
             }
         }
     }
@@ -1856,7 +1915,7 @@ fn initializeHandler(server: *Server, request: types.InitializeParams) Error!typ
             .renameProvider = .{ .bool = true },
             .completionProvider = .{
                 .resolveProvider = false,
-                .triggerCharacters = &[_][]const u8{ ".", ":", "@", "]" },
+                .triggerCharacters = &[_][]const u8{ ".", ":", "@", "]", "/" },
                 .completionItem = .{ .labelDetailsSupport = true },
             },
             .documentHighlightProvider = .{ .bool = true },
@@ -1917,6 +1976,10 @@ fn initializedHandler(server: *Server, notification: types.InitializedParams) Er
     }
 
     server.status = .initialized;
+
+    if (server.client_capabilities.supports_workspace_did_change_configuration_dynamic_registration) {
+        try server.registerCapability("workspace/didChangeConfiguration");
+    }
 
     if (server.client_capabilities.supports_configuration)
         try server.requestConfiguration();
@@ -2013,27 +2076,37 @@ fn handleConfiguration(server: *Server, json: std.json.Value) error{OutOfMemory}
             const new_value: field.type = switch (ft) {
                 []const u8 => switch (value) {
                     .String => |s| blk: {
-                        if (s.len == 0) {
-                            if (field.type == ?[]const u8) {
-                                break :blk null;
-                            } else {
-                                break :blk s;
-                            }
+                        const trimmed = std.mem.trim(u8, s, " ");
+                        if (trimmed.len == 0 or std.mem.eql(u8, trimmed, "nil")) {
+                            log.warn("Ignoring new value for \"zls.{s}\": the given new value is invalid", .{field.name});
+                            break :blk @field(server.config, field.name);
                         }
-                        var nv = try server.allocator.dupe(u8, s);
+                        var nv = try server.allocator.dupe(u8, trimmed);
                         if (@field(server.config, field.name)) |prev_val| server.allocator.free(prev_val);
                         break :blk nv;
-                    }, // TODO: Allocation model? (same with didChangeConfiguration); imo this isn't *that* bad but still
-                    else => @panic("Invalid configuration value"), // TODO: Handle this
+                    },
+                    else => blk: {
+                        log.warn("Ignoring new value for \"zls.{s}\": the given new value has an invalid type", .{field.name});
+                        break :blk @field(server.config, field.name);
+                    },
                 },
                 else => switch (ti) {
                     .Int => switch (value) {
-                        .Integer => |s| std.math.cast(ft, s) orelse @panic("Invalid configuration value"),
-                        else => @panic("Invalid configuration value"), // TODO: Handle this
+                        .Integer => |val| std.math.cast(ft, val) orelse blk: {
+                            log.warn("Ignoring new value for \"zls.{s}\": the given new value is invalid", .{field.name});
+                            break :blk @field(server.config, field.name);
+                        },
+                        else => blk: {
+                            log.warn("Ignoring new value for \"zls.{s}\": the given new value has an invalid type", .{field.name});
+                            break :blk @field(server.config, field.name);
+                        },
                     },
                     .Bool => switch (value) {
                         .Bool => |b| b,
-                        else => @panic("Invalid configuration value"), // TODO: Handle this
+                        else => blk: {
+                            log.warn("Ignoring new value for \"zls.{s}\": the given new value has an invalid type", .{field.name});
+                            break :blk @field(server.config, field.name);
+                        },
                     },
                     else => @compileError("Not implemented for " ++ @typeName(ft)),
                 },
@@ -2068,7 +2141,7 @@ fn changeDocumentHandler(server: *Server, notification: types.DidChangeTextDocum
 
     const handle = server.document_store.getHandle(notification.textDocument.uri) orelse return;
 
-    const new_text = try diff.applyTextEdits(server.allocator, handle.text, notification.contentChanges, server.offset_encoding);
+    const new_text = try diff.applyContentChanges(server.allocator, handle.text, notification.contentChanges, server.offset_encoding);
 
     try server.document_store.refreshDocument(handle.uri, new_text);
 
@@ -2165,12 +2238,13 @@ fn completionHandler(server: *Server, request: types.CompletionParams) Error!?ty
         .global_error_set => try server.completeError(handle),
         .enum_literal => try server.completeDot(handle),
         .label => try server.completeLabel(source_index, handle),
-        .import_string_literal, .embedfile_string_literal => |loc| blk: {
+        .import_string_literal,
+        .cinclude_string_literal,
+        .embedfile_string_literal,
+        => blk: {
             if (!server.config.enable_import_embedfile_argument_completions) break :blk null;
 
-            const completing = offsets.locToSlice(handle.tree.source, loc);
-            const is_import = pos_context == .import_string_literal;
-            break :blk completeFileSystemStringLiteral(server.arena.allocator(), &server.document_store, handle, completing, is_import) catch |err| {
+            break :blk completeFileSystemStringLiteral(server.arena.allocator(), server.document_store, handle.*, pos_context) catch |err| {
                 log.err("failed to get file system completions: {}", .{err});
                 return null;
             };
@@ -2184,7 +2258,14 @@ fn completionHandler(server: *Server, request: types.CompletionParams) Error!?ty
     // the remaining identifier with the completion instead of just inserting.
     // TODO Identify function call/struct init and replace the whole thing.
     const lookahead_context = try analysis.getPositionContext(server.arena.allocator(), handle.text, source_index, true);
-    if (server.client_capabilities.supports_apply_edits and pos_context.loc() != null and lookahead_context.loc() != null and pos_context.loc().?.end != lookahead_context.loc().?.end) {
+    if (server.client_capabilities.supports_apply_edits and
+        pos_context != .import_string_literal and
+        pos_context != .cinclude_string_literal and
+        pos_context != .embedfile_string_literal and
+        pos_context.loc() != null and
+        lookahead_context.loc() != null and
+        pos_context.loc().?.end != lookahead_context.loc().?.end)
+    {
         var end = lookahead_context.loc().?.end;
         while (end < handle.text.len and (std.ascii.isAlphanumeric(handle.text[end]) or handle.text[end] == '"')) {
             end += 1;
@@ -2266,7 +2347,10 @@ fn gotoHandler(server: *Server, request: types.TextDocumentPositionParams, resol
         .builtin => |loc| try server.gotoDefinitionBuiltin(handle, loc),
         .var_access => try server.gotoDefinitionGlobal(source_index, handle, resolve_alias),
         .field_access => |loc| try server.gotoDefinitionFieldAccess(handle, source_index, loc, resolve_alias),
-        .import_string_literal => try server.gotoDefinitionString(source_index, handle),
+        .import_string_literal,
+        .cinclude_string_literal,
+        .embedfile_string_literal,
+        => try server.gotoDefinitionString(pos_context, handle),
         .label => try server.gotoDefinitionLabel(source_index, handle),
         else => null,
     };
@@ -2353,7 +2437,7 @@ fn formattingHandler(server: *Server, request: types.DocumentFormattingParams) E
         return text_edits;
     }
 
-    return if (diff.edits(allocator, handle.text, formatted)) |text_edits| text_edits.items else |_| null;
+    return if (diff.edits(allocator, handle.text, formatted, server.offset_encoding)) |text_edits| text_edits.items else |_| null;
 }
 
 fn didChangeConfigurationHandler(server: *Server, request: configuration.DidChangeConfigurationParams) Error!void {
@@ -2853,7 +2937,12 @@ fn processMessage(server: *Server, message: Message) Error!void {
         },
         .ResponseMessage => |response| {
             if (response.id != .string) return;
-            if (std.mem.startsWith(u8, response.id.string, "register")) return;
+            if (std.mem.startsWith(u8, response.id.string, "register")) {
+                if (response.@"error") |err| {
+                    log.err("Error response for '{s}': {}, {s}", .{ response.id.string, err.code, err.message });
+                }
+                return;
+            }
             if (std.mem.eql(u8, response.id.string, "apply_edit")) return;
 
             if (std.mem.eql(u8, response.id.string, "i_haz_configuration")) {

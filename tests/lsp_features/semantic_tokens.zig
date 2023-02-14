@@ -44,16 +44,11 @@ test "semantic tokens - string literals" {
     );
 }
 
-const file_uri = switch (builtin.os.tag) {
-    .windows => "file:///C:/test.zig",
-    else => "file:///test.zig",
-};
-
 fn testSemanticTokens(source: []const u8, expected: []const u32) !void {
     var ctx = try Context.init();
     defer ctx.deinit();
 
-    try ctx.requestDidOpen(file_uri, source);
+    const file_uri = try ctx.addDocument(source);
 
     const Response = struct {
         data: []const u32,
@@ -62,9 +57,12 @@ fn testSemanticTokens(source: []const u8, expected: []const u32) !void {
     const expected_bytes = try std.json.stringifyAlloc(allocator, Response{ .data = expected }, .{});
     defer allocator.free(expected_bytes);
 
+    const params = try std.json.stringifyAlloc(allocator, .{ .textDocument = .{ .uri = file_uri } }, .{});
+    defer allocator.free(params);
+
     try ctx.request(
         "textDocument/semanticTokens/full",
-        "{\"textDocument\":{\"uri\":\"" ++ file_uri ++ "\"}}",
+        params,
         expected_bytes,
     );
 }

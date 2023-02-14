@@ -66,6 +66,9 @@ pub fn pathRelative(allocator: std.mem.Allocator, base: []const u8, rel: []const
         if (std.mem.eql(u8, component, ".")) {
             continue;
         } else if (std.mem.eql(u8, component, "..")) {
+            while ((result.getLastOrNull() orelse return error.UriBadScheme) == '/') {
+                _ = result.pop();
+            }
             while (true) {
                 const char = result.popOrNull() orelse return error.UriBadScheme;
                 if (char == '/') break;

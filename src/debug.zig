@@ -44,7 +44,7 @@ pub fn printDocumentScope(doc_scope: analysis.DocumentScope) void {
     if (!std.debug.runtime_safety) @compileError("this function should only be used in debug mode!");
 
     var index: usize = 0;
-    while(index < doc_scope.scopes.len) : (index += 1) {
+    while (index < doc_scope.scopes.len) : (index += 1) {
         const scope = doc_scope.scopes.get(index);
         if (index != 0) std.debug.print("\n\n", .{});
         std.debug.print(
