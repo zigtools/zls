@@ -1,4 +1,11 @@
 //! Ingests an AST and produces ZIR code.
+//!
+//! TODO
+//! In contrast to the upstream zig codebase, generating Zir
+//! will not fail after encountering compile errors but will
+//! instead try to ignore or patch these errors.
+//! If this is not possible, an `unknown` instructions will be emitted.
+
 const AstGen = @This();
 
 const std = @import("std");

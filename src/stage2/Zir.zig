@@ -2065,10 +2065,6 @@ pub const Inst = struct {
     /// The tag type is specified so that it is safe to bitcast between `[]u32`
     /// and `[]Ref`.
     pub const Ref = enum(u32) {
-        /// This Ref does not correspond to any ZIR instruction or constant
-        /// value and may instead be used as a sentinel to indicate null.
-        none,
-
         u1_type,
         u8_type,
         i8_type,
@@ -2130,6 +2126,7 @@ pub const Inst = struct {
         const_slice_u8_type,
         anyerror_void_error_union_type,
         generic_poison_type,
+        unknown_type,
 
         /// `undefined` (untyped)
         undef,
@@ -2160,9 +2157,13 @@ pub const Inst = struct {
         /// Used for generic parameters where the type and value
         /// is not known until generic function instantiation.
         generic_poison,
+        unknown,
 
         ref_start_index,
 
+        /// This Ref does not correspond to any ZIR instruction or constant
+        /// value and may instead be used as a sentinel to indicate null.
+        none = std.math.maxInt(u32),
         _,
     };
 
@@ -3839,7 +3840,7 @@ pub fn getFnInfo(zir: Zir, fn_inst: Inst.Index) FnInfo {
     };
 }
 
-const ref_start_index: u32 = @enumToInt(Inst.Ref.ref_start_index);
+pub const ref_start_index: u32 = @enumToInt(Inst.Ref.ref_start_index);
 
 pub fn indexToRef(inst: Inst.Index) Inst.Ref {
     return @intToEnum(Inst.Ref, ref_start_index + inst);
