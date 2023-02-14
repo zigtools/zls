@@ -61,6 +61,9 @@ skip_std_references: bool = false,
 /// The detail field of completions is truncated to be no longer than this (in bytes)
 max_detail_length: usize = 1048576,
 
+/// Can be used in conjuction with `enable_ast_check_diagnostics` to favor using `zig ast-check` instead of ZLS's fork
+prefer_ast_check_as_child_process: bool = true,
+
 /// When true, zls will record all request is receives and write in into `record_session_path`, so that they can replayed with `zls replay`
 record_session: bool = false,
 
