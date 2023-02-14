@@ -72,12 +72,14 @@ pub fn build(b: *std.build.Builder) !void {
         b.option(u32, "enable_failing_allocator_likelihood", "The chance that an allocation will fail is `1/likelihood`") orelse 256,
     );
 
+    const build_root_path = b.pathFromRoot(".");
+
     const version = v: {
         const version_string = b.fmt("{d}.{d}.{d}", .{ zls_version.major, zls_version.minor, zls_version.patch });
 
         var code: u8 = undefined;
         const git_describe_untrimmed = b.execAllowFail(&[_][]const u8{
-            "git", "-C", b.build_root, "describe", "--match", "*.*.*", "--tags",
+            "git", "-C", build_root_path, "describe", "--match", "*.*.*", "--tags",
         }, &code, .Ignore) catch break :v version_string;
 
         const git_describe = std.mem.trim(u8, git_describe_untrimmed, " \n\r");
@@ -162,10 +164,10 @@ pub fn build(b: *std.build.Builder) !void {
 
     const gen_cmd = gen_exe.run();
     gen_cmd.addArgs(&.{
-        b.pathJoin(&.{ b.build_root, "src", "Config.zig" }),
-        b.pathJoin(&.{ b.build_root, "schema.json" }),
-        b.pathJoin(&.{ b.build_root, "README.md" }),
-        b.pathJoin(&.{ b.build_root, "src", "data" }),
+        b.pathJoin(&.{ build_root_path, "src", "Config.zig" }),
+        b.pathJoin(&.{ build_root_path, "schema.json" }),
+        b.pathJoin(&.{ build_root_path, "README.md" }),
+        b.pathJoin(&.{ build_root_path, "src", "data" }),
     });
     if (b.args) |args| gen_cmd.addArgs(args);
 
@@ -189,7 +191,7 @@ pub fn build(b: *std.build.Builder) !void {
     ));
 
     if (coverage) {
-        const src_dir = b.pathJoin(&.{ b.build_root, "src" });
+        const src_dir = b.pathJoin(&.{ build_root_path, "src" });
         const include_pattern = b.fmt("--include-pattern={s}", .{src_dir});
 
         tests.setExecCmd(&[_]?[]const u8{
