@@ -5,6 +5,7 @@ const tracy = @import("tracy.zig");
 const known_folders = @import("known-folders");
 
 const Config = @import("Config.zig");
+const offsets = @import("offsets.zig");
 
 const logger = std.log.scoped(.config);
 
@@ -27,9 +28,14 @@ pub fn loadFromFile(allocator: std.mem.Allocator, file_path: []const u8) ?Config
     var token_stream = std.json.TokenStream.init(file_buf);
     const parse_options = std.json.ParseOptions{ .allocator = allocator, .ignore_unknown_fields = true };
 
-    // TODO: Better errors? Doesn't seem like std.json can provide us positions or context.
+    // TODO: use a better error reporting system or use ZON instead of JSON
+    // TODO: report errors using "textDocument/publishDiagnostics"
     var config = std.json.parse(Config, &token_stream, parse_options) catch |err| {
-        logger.warn("Error while parsing configuration file: {}", .{err});
+        const loc = std.zig.findLineColumn(file_buf, token_stream.i);
+        logger.warn("{s}:{d}:{d}: Error while parsing configuration file {}", .{ file_path, loc.line + 1, loc.column, err });
+        if (err == error.InvalidValueBegin) {
+            logger.warn("Maybe your configuration file contains a trailing comma", .{});
+        }
         return null;
     };
 
