@@ -72,7 +72,9 @@ pub fn main() !void {
 
     const global_cache_directory = if (has_cache) Cache.Directory{
         .path = global_cache_root,
-        .handle = try std.fs.cwd().makeOpenPath(global_cache_root, .{}),
+        // I don't know if with the incomming changes around caching whether `openDir` is correct,
+        // but `makeOpenPath` which zig build runner uses causes access denied
+        .handle = try std.fs.cwd().openDir(global_cache_root, .{}),
     } else global_cache_root;
 
     var cache = if (has_cache) Cache{
