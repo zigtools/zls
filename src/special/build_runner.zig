@@ -17,6 +17,12 @@ pub const BuildConfig = struct {
     };
 };
 
+// 0.11.0-dev.1637+4e6f21e2c
+const Cache = if (@hasDecl(std, "Build") and @hasDecl(std.Build, "Cache"))
+    std.Build.Cache
+else
+    void;
+
 ///! This is a modified build runner to extract information out of build.zig
 ///! Modified version of lib/build_runner.zig
 pub fn main() !void {
@@ -48,34 +54,48 @@ pub fn main() !void {
         return error.InvalidArgs;
     };
 
-    const build_root_directory: std.Build.Cache.Directory = .{
+    const build_root_directory = if (Cache != void) Cache.Directory{
         .path = build_root,
         .handle = try std.fs.cwd().openDir(build_root, .{}),
-    };
+    } else build_root;
 
-    const local_cache_directory: std.Build.Cache.Directory = .{
+    const local_cache_directory = if (Cache != void) Cache.Directory{
         .path = cache_root,
         .handle = try std.fs.cwd().makeOpenPath(cache_root, .{}),
-    };
+    } else cache_root;
 
-    const global_cache_directory: std.Build.Cache.Directory = .{
+    const global_cache_directory = if (Cache != void) Cache.Directory{
         .path = global_cache_root,
         .handle = try std.fs.cwd().makeOpenPath(global_cache_root, .{}),
-    };
+    } else global_cache_root;
 
-    var cache: std.Build.Cache = .{
+    var cache = if (Cache != void) Cache{
         .gpa = allocator,
         .manifest_dir = try local_cache_directory.handle.makeOpenPath("h", .{}),
-    };
-    cache.addPrefix(.{ .path = null, .handle = std.fs.cwd() });
-    cache.addPrefix(build_root_directory);
-    cache.addPrefix(local_cache_directory);
-    cache.addPrefix(global_cache_directory);
+    } else {};
+    if (Cache != void) {
+        cache.addPrefix(.{ .path = null, .handle = std.fs.cwd() });
+        cache.addPrefix(build_root_directory);
+        cache.addPrefix(local_cache_directory);
+        cache.addPrefix(global_cache_directory);
+    }
 
     const builder = blk: {
         // Zig 0.11.0-dev.1524+
         if (@hasDecl(std, "Build")) {
             const host = try std.zig.system.NativeTargetInfo.detect(.{});
+
+            if (Cache == void) {
+                break :blk try Builder.create(
+                    allocator,
+                    zig_exe,
+                    build_root_directory,
+                    local_cache_directory,
+                    global_cache_directory,
+                    host,
+                );
+            }
+
             break :blk try Builder.create(
                 allocator,
                 zig_exe,
