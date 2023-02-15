@@ -48,6 +48,30 @@ pub fn main() !void {
         return error.InvalidArgs;
     };
 
+    const build_root_directory: std.Build.Cache.Directory = .{
+        .path = build_root,
+        .handle = try std.fs.cwd().openDir(build_root, .{}),
+    };
+
+    const local_cache_directory: std.Build.Cache.Directory = .{
+        .path = cache_root,
+        .handle = try std.fs.cwd().makeOpenPath(cache_root, .{}),
+    };
+
+    const global_cache_directory: std.Build.Cache.Directory = .{
+        .path = global_cache_root,
+        .handle = try std.fs.cwd().makeOpenPath(global_cache_root, .{}),
+    };
+
+    var cache: std.Build.Cache = .{
+        .gpa = allocator,
+        .manifest_dir = try local_cache_directory.handle.makeOpenPath("h", .{}),
+    };
+    cache.addPrefix(.{ .path = null, .handle = std.fs.cwd() });
+    cache.addPrefix(build_root_directory);
+    cache.addPrefix(local_cache_directory);
+    cache.addPrefix(global_cache_directory);
+
     const builder = blk: {
         // Zig 0.11.0-dev.1524+
         if (@hasDecl(std, "Build")) {
@@ -55,10 +79,11 @@ pub fn main() !void {
             break :blk try Builder.create(
                 allocator,
                 zig_exe,
-                build_root,
-                cache_root,
-                global_cache_root,
+                build_root_directory,
+                local_cache_directory,
+                global_cache_directory,
                 host,
+                &cache,
             );
         } else break :blk try Builder.create(
             allocator,
