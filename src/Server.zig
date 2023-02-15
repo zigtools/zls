@@ -21,6 +21,7 @@ const tracy = @import("tracy.zig");
 const uri_utils = @import("uri.zig");
 const diff = @import("diff.zig");
 const ComptimeInterpreter = @import("ComptimeInterpreter.zig");
+const analyser = @import("analyser/analyser.zig");
 
 const data = @import("data/data.zig");
 const snipped_data = @import("data/snippets.zig");
@@ -362,7 +363,7 @@ fn generateDiagnostics(server: *Server, handle: DocumentStore.Handle) error{OutO
         var err_it = int.errors.iterator();
 
         while (err_it.next()) |err| {
-            try diagnostics.append(allocator, .{
+            diagnostics.appendAssumeCapacity(.{
                 .range = offsets.nodeToRange(tree, err.key_ptr.*, server.offset_encoding),
                 .severity = .Error,
                 .code = .{ .string = err.value_ptr.code },
@@ -597,30 +598,10 @@ fn typeToCompletion(
         ),
         .primitive, .array_index => {},
         .@"comptime" => |co| {
-            const ti = co.type.getTypeInfo();
-            switch (ti) {
-                .@"struct" => |st| {
-                    var fit = st.fields.iterator();
-                    while (fit.next()) |entry| {
-                        try list.append(allocator, .{
-                            .label = entry.key_ptr.*,
-                            .kind = .Field,
-                            .insertText = entry.key_ptr.*,
-                            .insertTextFormat = .PlainText,
-                        });
-                    }
-
-                    var it = st.scope.declarations.iterator();
-                    while (it.next()) |entry| {
-                        try list.append(allocator, .{
-                            .label = entry.key_ptr.*,
-                            .kind = if (entry.value_ptr.isConstant()) .Constant else .Variable,
-                            .insertText = entry.key_ptr.*,
-                            .insertTextFormat = .PlainText,
-                        });
-                    }
-                },
-                else => {},
+            if (type_handle.type.is_type_val) {
+                try analyser.completions.dotCompletions(allocator, list, &co.interpreter.ip, co.value.ty, co.value.val, co.value.node_idx);
+            } else {
+                try analyser.completions.dotCompletions(allocator, list, &co.interpreter.ip, co.value.val, .none, co.value.node_idx);
             }
         },
     }
@@ -939,7 +920,7 @@ fn hoverSymbol(server: *Server, decl_handle: analysis.DeclWithHandle) error{OutO
 
     const resolved_type_str = if (resolved_type) |rt|
         if (rt.type.is_type_val) switch (rt.type.data) {
-            .@"comptime" => |*co| try std.fmt.allocPrint(server.arena.allocator(), "{ }", .{co.interpreter.formatTypeInfo(co.type.getTypeInfo())}),
+            .@"comptime" => |co| try std.fmt.allocPrint(server.arena.allocator(), "{}", .{co.value.ty.fmtType(co.interpreter.ip)}),
             else => "type",
         } else switch (rt.type.data) { // TODO: Investigate random weird numbers like 897 that cause index of bounds
             .pointer,

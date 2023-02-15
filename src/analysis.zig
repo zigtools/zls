@@ -7,6 +7,7 @@ const URI = @import("uri.zig");
 const log = std.log.scoped(.analysis);
 const ast = @import("ast.zig");
 const ComptimeInterpreter = @import("ComptimeInterpreter.zig");
+const InternPool = ComptimeInterpreter.InternPool;
 
 var using_trail: std.ArrayList([*]const u8) = undefined;
 var resolve_trail: std.ArrayList(NodeWithHandle) = undefined;
@@ -762,41 +763,39 @@ pub fn resolveTypeOfNodeInternal(store: *DocumentStore, node_handle: NodeWithHan
 
                     log.info("Invoking interpreter!", .{});
 
-                    store.ensureInterpreterExists(handle.uri) catch |err| {
-                        log.err("Interpreter error: {s}", .{@errorName(err)});
+                    const interpreter = store.ensureInterpreterExists(handle.uri) catch |err| {
+                        log.err("Failed to interpret file: {s}", .{@errorName(err)});
                         if (@errorReturnTrace()) |trace| {
                             std.debug.dumpStackTrace(trace.*);
                         }
                         return null;
                     };
-                    var interpreter = handle.interpreter.?;
+
+                    const root_namespace = @intToEnum(ComptimeInterpreter.Namespace.Index, 0);
 
                     // TODO: Start from current/nearest-current scope
-                    const result = interpreter.interpret(node, interpreter.root_type.?.getTypeInfo().getScopeOfType().?, .{}) catch |err| {
-                        log.err("Interpreter error: {s}", .{@errorName(err)});
+                    const result = interpreter.interpret(node, root_namespace, .{}) catch |err| {
+                        log.err("Failed to interpret node: {s}", .{@errorName(err)});
                         if (@errorReturnTrace()) |trace| {
                             std.debug.dumpStackTrace(trace.*);
                         }
                         return null;
                     };
-                    const val = result.getValue() catch |err| {
-                        log.err("Interpreter error: {s}", .{@errorName(err)});
+                    const value = result.getValue() catch |err| {
+                        log.err("interpreter return no result: {s}", .{@errorName(err)});
                         if (@errorReturnTrace()) |trace| {
                             std.debug.dumpStackTrace(trace.*);
                         }
                         return null;
                     };
-
-                    const ti = val.type.getTypeInfo();
-                    if (ti != .type) {
-                        log.err("Not a type: { }", .{interpreter.formatTypeInfo(ti)});
-                        return null;
-                    }
 
                     return TypeWithHandle{
                         .type = .{
-                            .data = .{ .@"comptime" = .{ .interpreter = interpreter, .type = val.value_data.type } },
-                            .is_type_val = true,
+                            .data = .{ .@"comptime" = .{
+                                .interpreter = interpreter,
+                                .value = value,
+                            } },
+                            .is_type_val = value.ty == InternPool.Index.type_type,
                         },
                         .handle = node_handle.handle,
                     };
@@ -1050,7 +1049,7 @@ pub const Type = struct {
         array_index,
         @"comptime": struct {
             interpreter: *ComptimeInterpreter,
-            type: ComptimeInterpreter.Type,
+            value: ComptimeInterpreter.Value,
         },
     },
     /// If true, the type `type`, the attached data is the value of the type value.

@@ -178,17 +178,19 @@ pub fn build(b: *std.build.Builder) !void {
     const test_step = b.step("test", "Run all the tests");
     test_step.dependOn(b.getInstallStep());
 
+    const test_filter = b.option(
+        []const u8,
+        "test-filter",
+        "Skip tests that do not match filter",
+    );
+    
     var tests = b.addTest(.{
         .root_source_file = .{ .path = "tests/tests.zig" },
         .target = target,
         .optimize = .Debug,
     });
 
-    tests.setFilter(b.option(
-        []const u8,
-        "test-filter",
-        "Skip tests that do not match filter",
-    ));
+    tests.setFilter(test_filter);
 
     if (coverage) {
         const src_dir = b.pathJoin(&.{ build_root_path, "src" });
@@ -218,6 +220,14 @@ pub fn build(b: *std.build.Builder) !void {
     tests.addModule("diffz", diffz_module);
 
     test_step.dependOn(&tests.step);
+
+    var src_tests = b.addTest(.{
+        .root_source_file = .{ .path = "src/zls.zig" },
+        .target = target,
+        .optimize = .Debug,
+    });
+    src_tests.setFilter(test_filter);
+    test_step.dependOn(&src_tests.step);
 }
 
 const CheckSubmodulesStep = struct {
