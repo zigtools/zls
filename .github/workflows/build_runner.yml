@@ -15,7 +15,7 @@ jobs:
   check_build_runner:
     strategy:
       matrix:
-        zig_version: [0.9.1, 0.10.0, master]
+        zig_version: [0.9.1, 0.10.1, master]
 
     runs-on: ubuntu-latest
 
