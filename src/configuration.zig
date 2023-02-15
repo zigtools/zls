@@ -78,14 +78,21 @@ pub fn configChanged(config: *Config, allocator: std.mem.Allocator, builtin_crea
     if (config.zig_exe_path) |exe_path| blk: {
         logger.info("Using zig executable {s}", .{exe_path});
 
-        if (config.zig_lib_path != null) break :blk;
+        if (config.zig_lib_path != null and config.build_runner_global_cache_path != null) break :blk;
 
         var env = getZigEnv(allocator, exe_path) orelse break :blk;
         defer std.json.parseFree(Env, env, .{ .allocator = allocator });
 
-        // Make sure the path is absolute
-        config.zig_lib_path = try std.fs.realpathAlloc(allocator, env.lib_dir.?);
-        logger.info("Using zig lib path '{s}'", .{config.zig_lib_path.?});
+        if (config.zig_lib_path == null) {
+            // Make sure the path is absolute
+            config.zig_lib_path = try std.fs.realpathAlloc(allocator, env.lib_dir.?);
+            logger.info("Using zig lib path '{s}'", .{config.zig_lib_path.?});
+        }
+
+        if (config.build_runner_global_cache_path == null) {
+            config.build_runner_global_cache_path = try allocator.dupe(u8, env.global_cache_dir);
+            logger.info("Using build runner global cache path '{s}'", .{config.build_runner_global_cache_path.?});
+        }
     } else {
         logger.warn("Zig executable path not specified in zls.json and could not be found in PATH", .{});
     }
