@@ -1576,8 +1576,9 @@ pub fn getPositionContext(
                             },
                         };
                     }
-                    const q = std.mem.lastIndexOf(u8, held_line, "\"") orelse return .other;
-                    if (held_line[q -| 1] == '@') {
+                    const s = held_line[tok.loc.start..tok.loc.end];
+                    const q = std.mem.indexOf(u8, s, "\"") orelse return .other;
+                    if (s[q -| 1] == '@') {
                         tok.tag = .identifier;
                     } else {
                         tok.tag = .string_literal;
