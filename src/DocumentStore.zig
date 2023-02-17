@@ -419,9 +419,6 @@ fn loadBuildConfiguration(
 
     // TODO extract this option from `BuildAssociatedConfig.BuildOption`
     const zig_cache_root: []const u8 = try std.fs.path.join(arena_allocator, &.{ directory_path, "zig-cache" });
-    // Since we don't compile anything and no packages should put their
-    // files there this path can be ignored
-    const zig_global_cache_root: []const u8 = "ZLS_DONT_CARE";
 
     const standard_args = [_][]const u8{
         config.zig_exe_path.?,
@@ -437,7 +434,7 @@ fn loadBuildConfiguration(
         config.zig_exe_path.?,
         directory_path,
         zig_cache_root,
-        zig_global_cache_root,
+        config.build_runner_global_cache_path.?,
     };
 
     const arg_length = standard_args.len + if (build_file.build_associated_config) |cfg| if (cfg.build_options) |options| options.len else 0 else 0;

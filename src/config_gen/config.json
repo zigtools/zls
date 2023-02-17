@@ -146,7 +146,13 @@
         },
         {
             "name": "global_cache_path",
-            "description": "Path to a directroy that will be used as zig's cache. null is equivalent to `${KnownFloders.Cache}/zls`",
+            "description": "Path to a directory that will be used as zig's cache. null is equivalent to `${KnownFloders.Cache}/zls`",
+            "type": "?[]const u8",
+            "default": "null"
+        },
+        {
+            "name": "build_runner_global_cache_path",
+            "description": "Path to a directory that will be used as the global cache path when executing a projects build.zig. null is equivalent to the path shown by `zig env`",
             "type": "?[]const u8",
             "default": "null"
         }
