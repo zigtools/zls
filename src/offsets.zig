@@ -20,7 +20,7 @@ pub fn indexToPosition(text: []const u8, index: usize, encoding: Encoding) types
 pub fn maybePositionToIndex(text: []const u8, position: types.Position, encoding: Encoding) ?usize {
     var line: u32 = 0;
     var line_start_index: usize = 0;
-    for (text) |c, i| {
+    for (text, 0..) |c, i| {
         if (line == position.line) break;
         if (c == '\n') {
             line += 1;
@@ -39,7 +39,7 @@ pub fn maybePositionToIndex(text: []const u8, position: types.Position, encoding
 pub fn positionToIndex(text: []const u8, position: types.Position, encoding: Encoding) usize {
     var line: u32 = 0;
     var line_start_index: usize = 0;
-    for (text) |c, i| {
+    for (text, 0..) |c, i| {
         if (line == position.line) break;
         if (c == '\n') {
             line += 1;

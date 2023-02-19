@@ -41,7 +41,7 @@ fn testDefinition(source: []const u8) !void {
     var cursor: offsets.Loc = .{ .start = 0, .end = 0 };
     var def_start: offsets.Loc = .{ .start = 0, .end = 0 };
     var def_end: offsets.Loc = .{ .start = 0, .end = 0 };
-    for (phr.locations.items(.old)) |loc, i| {
+    for (phr.locations.items(.old), 0..) |loc, i| {
         if (mem.eql(u8, source[loc.start..loc.end], "<>")) cursor = phr.locations.items(.new)[i];
         if (mem.eql(u8, source[loc.start..loc.end], "<def>")) def_start = phr.locations.items(.new)[i];
         if (mem.eql(u8, source[loc.start..loc.end], "</def>")) def_end = phr.locations.items(.new)[i];

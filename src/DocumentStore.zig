@@ -270,7 +270,7 @@ fn garbageCollectionImports(self: *DocumentStore) error{OutOfMemory}!void {
 
     var queue = std.ArrayListUnmanaged(Uri){};
 
-    for (self.handles.values()) |handle, handle_index| {
+    for (self.handles.values(), 0..) |handle, handle_index| {
         if (!handle.open) continue;
 
         reachable.set(handle_index);

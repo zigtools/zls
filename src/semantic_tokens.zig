@@ -37,7 +37,7 @@ pub const TokenModifiers = packed struct {
 
     fn toInt(self: TokenModifiers) u32 {
         var res: u32 = 0;
-        inline for (std.meta.fields(TokenModifiers)) |field, i| {
+        inline for (std.meta.fields(TokenModifiers), 0..) |field, i| {
             if (@field(self, field.name)) {
                 res |= 1 << i;
             }

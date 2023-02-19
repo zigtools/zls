@@ -57,7 +57,7 @@ const Builder = struct {
         var result = try builder.allocator.alloc(types.FoldingRange, builder.locations.items.len);
         errdefer builder.allocator.free(result);
 
-        for (result) |*r, i| {
+        for (result, 0..) |*r, i| {
             r.* = .{
                 .startLine = undefined,
                 .endLine = undefined,
@@ -88,7 +88,7 @@ const Builder = struct {
         var items = try builder.allocator.alloc(Item, builder.locations.items.len * 2);
         defer builder.allocator.free(items);
 
-        for (builder.locations.items) |*folding_range, i| {
+        for (builder.locations.items, 0..) |*folding_range, i| {
             items[2 * i + 0] = .{ .output = &result[i], .input = folding_range, .where = .start };
             items[2 * i + 1] = .{ .output = &result[i], .input = folding_range, .where = .end };
         }
@@ -135,7 +135,7 @@ pub fn generateFoldingRanges(allocator: std.mem.Allocator, tree: Ast, encoding: 
 
     var start_doc_comment: ?Ast.TokenIndex = null;
     var end_doc_comment: ?Ast.TokenIndex = null;
-    for (token_tags) |tag, i| {
+    for (token_tags, 0..) |tag, i| {
         const token = @intCast(Ast.TokenIndex, i);
         switch (tag) {
             .doc_comment,
@@ -162,7 +162,7 @@ pub fn generateFoldingRanges(allocator: std.mem.Allocator, tree: Ast, encoding: 
 
     // TODO add folding range for top level `@Import()`
 
-    for (node_tags) |node_tag, i| {
+    for (node_tags, 0..) |node_tag, i| {
         const node = @intCast(Ast.Node.Index, i);
 
         switch (node_tag) {

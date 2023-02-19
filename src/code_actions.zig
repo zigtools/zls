@@ -288,7 +288,7 @@ fn createCamelcaseText(allocator: std.mem.Allocator, identifier: []const u8) ![]
 fn createDiscardText(builder: *Builder, identifier_name: []const u8, declaration_start: usize, add_block_indentation: bool) ![]const u8 {
     const indent = find_indent: {
         const line = offsets.lineSliceUntilIndex(builder.handle.text, declaration_start);
-        for (line) |char, i| {
+        for (line, 0..) |char, i| {
             if (!std.ascii.isWhitespace(char)) {
                 break :find_indent line[0..i];
             }

@@ -132,7 +132,7 @@ fn writeBuiltinHint(builder: *Builder, parameters: []const Ast.Node.Index, argum
     const handle = builder.handle;
     const tree = handle.tree;
 
-    for (arguments) |arg, i| {
+    for (arguments, 0..) |arg, i| {
         if (i >= parameters.len) break;
         if (arg.len == 0) continue;
 

@@ -188,7 +188,7 @@ fn testReferences(source: []const u8) !void {
             const actual_loc = offsets.rangeToLoc(phr.new_source, response_location.range, ctx.server.offset_encoding);
 
             const index = found_index: {
-                for (expected_locs) |expected_loc, idx| {
+                for (expected_locs, 0..) |expected_loc, idx| {
                     if (expected_loc.start != actual_loc.start) continue;
                     if (expected_loc.end != actual_loc.end) continue;
                     break :found_index idx;

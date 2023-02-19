@@ -764,7 +764,7 @@ pub const Key = union(enum) {
             .error_set_type => |error_set_info| {
                 const names = error_set_info.names;
                 try writer.writeAll("error{");
-                for (names) |name, i| {
+                for (names, 0..) |name, i| {
                     if (i != 0) try writer.writeByte(',');
                     try writer.writeAll(ip.indexToKey(name).bytes);
                 }
@@ -774,7 +774,7 @@ pub const Key = union(enum) {
             .function_type => |function_info| {
                 try writer.writeAll("fn(");
 
-                for (function_info.args) |arg_ty, i| {
+                for (function_info.args, 0..) |arg_ty, i| {
                     if (i != 0) try writer.writeAll(", ");
 
                     if (i < 32) {
@@ -809,7 +809,7 @@ pub const Key = union(enum) {
             .union_type => return panicOrElse("TODO", null),
             .tuple_type => |tuple_info| {
                 try writer.writeAll("tuple{");
-                for (tuple_info.types) |field_ty, i| {
+                for (tuple_info.types, 0..) |field_ty, i| {
                     if (i != 0) try writer.writeAll(", ");
                     const val = tuple_info.values[i];
                     if (val != Index.none) {
@@ -1704,7 +1704,7 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
     var seen_const = false;
     var convert_to_slice = false;
     var chosen_i: usize = 0;
-    for (types[1..]) |candidate, candidate_i| {
+    for (types[1..], 0..) |candidate, candidate_i| {
         if (candidate == chosen) continue;
 
         const candidate_key: Key = ip.indexToKey(candidate);
@@ -2549,7 +2549,7 @@ fn coerceInMemoryAllowedFns(
         } };
     }
 
-    for (dest_info.args) |dest_arg_ty, i| {
+    for (dest_info.args, 0..) |dest_arg_ty, i| {
         const src_arg_ty = src_info.args[i];
 
         // Note: Cast direction is reversed here.

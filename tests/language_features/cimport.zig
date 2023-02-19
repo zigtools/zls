@@ -59,7 +59,7 @@ fn testConvertCInclude(cimport_source: []const u8, expected: []const u8) !void {
     const main_tokens = ast.nodes.items(.main_token);
 
     const node: Ast.Node.Index = blk: {
-        for (ast.nodes.items(.tag)) |tag, index| {
+        for (ast.nodes.items(.tag), 0..) |tag, index| {
             switch (tag) {
                 .builtin_call_two,
                 .builtin_call_two_comma,

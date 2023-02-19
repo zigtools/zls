@@ -2086,7 +2086,7 @@ fn findContainerScopeIndex(container_handle: NodeWithHandle) ?usize {
 
     if (!ast.isContainer(handle.tree, container)) return null;
 
-    return for (handle.document_scope.scopes.items(.data)) |data, scope_index| {
+    return for (handle.document_scope.scopes.items(.data), 0..) |data, scope_index| {
         switch (data) {
             .container => |node| if (node == container) {
                 break scope_index;

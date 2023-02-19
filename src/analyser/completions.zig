@@ -112,7 +112,7 @@ pub fn dotCompletions(
         },
         .enum_type => |enum_index| {
             const enum_info = ip.getEnum(enum_index);
-            for (enum_info.fields.keys()) |field_name, i| {
+            for (enum_info.fields.keys(), 0..) |field_name, i| {
                 const field_val = enum_info.values.keys()[i];
                 try completions.append(arena, .{
                     .label = field_name,
@@ -138,7 +138,7 @@ pub fn dotCompletions(
             }
         },
         .tuple_type => |tuple_info| {
-            for (tuple_info.types) |tuple_ty, i| {
+            for (tuple_info.types, 0..) |tuple_ty, i| {
                 try completions.append(arena, .{
                     .label = try std.fmt.allocPrint(arena, "{d}", .{i}),
                     .kind = .Field,
