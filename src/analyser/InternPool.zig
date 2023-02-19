@@ -1377,50 +1377,6 @@ pub fn indexToKey(ip: InternPool, index: Index) Key {
     };
 }
 
-pub fn indexToTag(ip: InternPool, index: Index) std.builtin.TypeId {
-    const item = ip.items.get(@enumToInt(index));
-    const data = item.data;
-    return switch (item.tag) {
-        .simple_type => {
-            const key = Key{ .simple_type = @intToEnum(SimpleType, data) };
-            return key.zigTypeTag();
-        },
-
-        .type_int_signed => .Int,
-        .type_int_unsigned => .Int,
-        .type_pointer => .Pointer,
-        .type_array => .Array,
-        .type_struct => .Struct,
-        .type_optional => .Optional,
-        .type_anyframe => .AnyFrame,
-        .type_error_union => .ErrorUnion,
-        .type_error_set => .ErrorSet,
-        .type_enum => .Enum,
-        .type_function => .Fn,
-        .type_union => .Union,
-        .type_tuple => .Struct,
-        .type_vector => .Vector,
-
-        .simple_value,
-        .int_u32,
-        .int_i32,
-        .int_u64,
-        .int_i64,
-        .int_big_positive,
-        .int_big_negative,
-        .float_f16,
-        .float_f32,
-        .float_f64,
-        .float_f80,
-        .float_f128,
-        => unreachable,
-
-        .bytes => unreachable,
-        .aggregate => unreachable,
-        .union_value => unreachable,
-    };
-}
-
 pub fn get(ip: *InternPool, gpa: Allocator, key: Key) Allocator.Error!Index {
     const adapter: KeyAdapter = .{ .ip = ip };
     const gop = try ip.map.getOrPutAdapted(gpa, key, adapter);
