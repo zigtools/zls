@@ -173,6 +173,11 @@ pub const UnionValue = packed struct {
     val: Index,
 };
 
+pub const OptionalValue = packed struct {
+    ty: Index,
+    val: Index,
+};
+
 pub const DeclIndex = enum(u32) { _ };
 
 pub const Decl = struct {
@@ -222,6 +227,7 @@ pub const Key = union(enum) {
     float_128_value: f128,
 
     bytes: Bytes,
+    optional_value: OptionalValue,
     aggregate: Aggregate,
     slice: Slice,
     union_value: UnionValue,
@@ -272,6 +278,7 @@ pub const Key = union(enum) {
             .float_128_value => .float_f128,
 
             .bytes => .bytes,
+            .optional_value => .optional_value,
             .aggregate => .aggregate,
             .slice => .slice,
             .union_value => .union_value,
@@ -356,6 +363,7 @@ pub const Key = union(enum) {
             => unreachable,
 
             .bytes,
+            .optional_value,
             .aggregate,
             .slice,
             .union_value,
@@ -402,6 +410,7 @@ pub const Key = union(enum) {
             .float_128_value => .f128_type,
 
             .bytes => @panic("TODO"),
+            .optional_value => |optional_info| optional_info.ty,
             .slice => |slice_info| slice_info.ty,
             .aggregate => |aggregate_info| aggregate_info.ty,
             .union_value => |union_info| union_info.ty,
@@ -649,6 +658,7 @@ pub const Key = union(enum) {
             => unreachable,
 
             .bytes,
+            .optional_value,
             .aggregate,
             .slice,
             .union_value,
@@ -878,6 +888,9 @@ pub const Key = union(enum) {
             .float_128_value => |float| try writer.print("{d}", .{@floatCast(f64, float)}),
 
             .bytes => |bytes| try writer.print("\"{}\"", .{std.zig.fmtEscapes(bytes)}),
+            .optional_value => |optional| {
+                return optional.val;
+            },
             .aggregate => |aggregate| {
                 if (aggregate.values.len == 0) {
                     try writer.writeAll(".{}");
@@ -1122,6 +1135,9 @@ pub const Tag = enum(u8) {
     /// A byte sequence value.
     /// data is payload to data begin and length.
     bytes,
+    /// A optional value that is not null.
+    /// data is index to OptionalValue.
+    optional_value,
     /// A aggregate (struct) value.
     /// data is index to Aggregate.
     aggregate,
@@ -1371,6 +1387,7 @@ pub fn indexToKey(ip: InternPool, index: Index) Key {
         .float_f128 => .{ .float_128_value = ip.extraData(f128, data) },
 
         .bytes => .{ .bytes = ip.extraData([]const u8, data) },
+        .optional_value => .{ .optional_value = ip.extraData(OptionalValue, data) },
         .aggregate => .{ .aggregate = ip.extraData(Aggregate, data) },
         .slice => .{ .slice = ip.extraData(Slice, data) },
         .union_value => .{ .union_value = ip.extraData(UnionValue, data) },
@@ -2945,9 +2962,6 @@ test "optional type" {
     var ip = try InternPool.init(gpa);
     defer ip.deinit(gpa);
 
-    const u64_42_value = try ip.get(gpa, .{ .int_u64_value = .{ .ty = .u64_type, .int = 42 } });
-    _ = u64_42_value;
-
     const i32_optional_type = try ip.get(gpa, .{ .optional_type = .{ .payload_type = .i32_type } });
     const u32_optional_type = try ip.get(gpa, .{ .optional_type = .{ .payload_type = .u32_type } });
 
@@ -2955,11 +2969,20 @@ test "optional type" {
 
     try expectFmt("?i32", "{}", .{i32_optional_type.fmt(ip)});
     try expectFmt("?u32", "{}", .{u32_optional_type.fmt(ip)});
+}
 
-    // TODO rework represenation of optional types
+test "optional value" {
+    const gpa = std.testing.allocator;
 
-    // try expectFmt(.null_value, "null");
-    // try expectFmt(u64_42_value, "42");
+    var ip = try InternPool.init(gpa);
+    defer ip.deinit(gpa);
+
+    const u32_optional_type = try ip.get(gpa, .{ .optional_type = .{ .payload_type = .u32_type } });
+
+    const u64_42_value = try ip.get(gpa, .{ .int_u64_value = .{ .ty = .u64_type, .int = 42 } });
+    const optional_42_value = try ip.get(gpa, .{ .optional_value = .{ .ty = u32_optional_type, .val = u64_42_value } });
+
+    try expectFmt("42", "{}", .{optional_42_value.fmt(ip)});
 }
 
 test "error set type" {
