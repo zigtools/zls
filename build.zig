@@ -26,7 +26,7 @@ pub fn build(b: *std.build.Builder) !void {
     const exe_options = b.addOptions();
     exe.addOptions("build_options", exe_options);
 
-    const pie = b.option(bool, "pie", "Build a Position Independent Executable") orelse false;
+    const pie = b.option(bool, "pie", "Build a Position Independent Executable");
     const enable_tracy = b.option(bool, "enable_tracy", "Whether tracy should be enabled.") orelse false;
     const coverage = b.option(bool, "generate_coverage", "Generate coverage data with kcov") orelse false;
     const coverage_output_dir = b.option([]const u8, "coverage_output_dir", "Output directory for coverage data") orelse b.pathJoin(&.{ b.install_prefix, "kcov" });
