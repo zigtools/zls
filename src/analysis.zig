@@ -2821,11 +2821,8 @@ fn makeScopeInternal(allocator: std.mem.Allocator, context: ScopeContext, node_i
         .@"while",
         .while_simple,
         .while_cont,
-        .@"for",
-        .for_simple,
         => {
             const while_node = ast.fullWhile(tree, node_idx).?;
-            const is_for = node_tag == .@"for" or node_tag == .for_simple;
 
             if (while_node.label_token) |label| {
                 std.debug.assert(token_tags[label] == .identifier);
@@ -2858,12 +2855,7 @@ fn makeScopeInternal(allocator: std.mem.Allocator, context: ScopeContext, node_i
                 std.debug.assert(token_tags[name_token] == .identifier);
 
                 const name = tree.tokenSlice(name_token);
-                try scopes.items(.decls)[scope_index].putNoClobber(allocator, name, if (is_for) .{
-                    .array_payload = .{
-                        .identifier = name_token,
-                        .array_expr = while_node.ast.cond_expr,
-                    },
-                } else .{
+                try scopes.items(.decls)[scope_index].putNoClobber(allocator, name, .{
                     .pointer_payload = .{
                         .name = name_token,
                         .condition = while_node.ast.cond_expr,
@@ -2902,6 +2894,58 @@ fn makeScopeInternal(allocator: std.mem.Allocator, context: ScopeContext, node_i
                     try scopes.items(.decls)[scope_index].putNoClobber(allocator, name, .{ .ast_node = while_node.ast.else_expr });
                 }
                 try makeScopeInternal(allocator, context, while_node.ast.else_expr);
+            }
+        },
+        .@"for",
+        .for_simple,
+        => {
+            const for_node = ast.fullFor(tree, node_idx).?;
+
+            if (for_node.label_token) |label| {
+                std.debug.assert(token_tags[label] == .identifier);
+                try scopes.append(allocator, .{
+                    .loc = .{
+                        .start = offsets.tokenToIndex(tree, for_node.ast.for_token),
+                        .end = offsets.tokenToLoc(tree, ast.lastToken(tree, node_idx)).end,
+                    },
+                    .data = .other,
+                });
+                const scope_index = scopes.len - 1;
+
+                try scopes.items(.decls)[scope_index].putNoClobber(allocator, tree.tokenSlice(label), .{ .label_decl = .{
+                    .label = label,
+                    .block = for_node.ast.then_expr,
+                } });
+            }
+
+            try scopes.append(allocator, .{
+                .loc = .{
+                    .start = offsets.tokenToIndex(tree, for_node.payload_token),
+                    .end = offsets.tokenToLoc(tree, ast.lastToken(tree, for_node.ast.then_expr)).end,
+                },
+                .data = .other,
+            });
+            const scope_index = scopes.len - 1;
+
+            var capture_token = for_node.payload_token;
+            for (for_node.ast.inputs) |input| {
+                const capture_is_ref = token_tags[capture_token] == .asterisk;
+                const name_token = capture_token + @boolToInt(capture_is_ref);
+                capture_token = name_token + 2;
+
+                const name = offsets.tokenToSlice(tree, name_token);
+                try scopes.items(.decls)[scope_index].putNoClobber(allocator, name, .{
+                    .array_payload = .{
+                        .identifier = name_token,
+                        .array_expr = input,
+                    },
+                });
+            }
+
+            try makeScopeInternal(allocator, context, for_node.ast.then_expr);
+
+            if (for_node.ast.else_expr != 0) {
+                try makeScopeInternal(allocator, context, for_node.ast.else_expr);
             }
         },
         .@"switch",
@@ -3171,6 +3215,7 @@ fn makeScopeInternal(allocator: std.mem.Allocator, context: ScopeContext, node_i
         .array_type,
         .array_access,
         .error_union,
+        .for_range,
         => {
             try makeScopeInternal(allocator, context, data[node_idx].lhs);
             try makeScopeInternal(allocator, context, data[node_idx].rhs);
