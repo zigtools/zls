@@ -1704,7 +1704,7 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
     var seen_const = false;
     var convert_to_slice = false;
     var chosen_i: usize = 0;
-    for (types[1..], 0..) |candidate, candidate_i| {
+    for (types[1..], 1..) |candidate, candidate_i| {
         if (candidate == chosen) continue;
 
         const candidate_key: Key = ip.indexToKey(candidate);
@@ -1717,7 +1717,7 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
         }
         if ((try ip.coerceInMemoryAllowed(gpa, arena, candidate, chosen, true, target)) == .ok) {
             chosen = candidate;
-            chosen_i = candidate_i + 1;
+            chosen_i = candidate_i;
             continue;
         }
 
@@ -1728,13 +1728,13 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
                         .f16, .f32, .f64, .f80, .f128 => {
                             if (chosen_key.floatBits(target) < candidate_key.floatBits(target)) {
                                 chosen = candidate;
-                                chosen_i = candidate_i + 1;
+                                chosen_i = candidate_i;
                             }
                             continue;
                         },
                         .comptime_int, .comptime_float => {
                             chosen = candidate;
-                            chosen_i = candidate_i + 1;
+                            chosen_i = candidate_i;
                             continue;
                         },
                         else => {},
@@ -1772,13 +1772,13 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
 
                             if (chosen_bits < candidate_bits) {
                                 chosen = candidate;
-                                chosen_i = candidate_i + 1;
+                                chosen_i = candidate_i;
                             }
                             continue;
                         },
                         .comptime_int => {
                             chosen = candidate;
-                            chosen_i = candidate_i + 1;
+                            chosen_i = candidate_i;
                             continue;
                         },
                         else => {},
@@ -1786,7 +1786,7 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
                     .int_type => |chosen_info| {
                         if (chosen_info.bits < candidate_key.intInfo(target, ip).bits) {
                             chosen = candidate;
-                            chosen_i = candidate_i + 1;
+                            chosen_i = candidate_i;
                         }
                         continue;
                     },
@@ -1828,7 +1828,7 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
                         .f16, .f32, .f64, .f80, .f128 => continue,
                         .comptime_int => {
                             chosen = candidate;
-                            chosen_i = candidate_i + 1;
+                            chosen_i = candidate_i;
                             continue;
                         },
                         .comptime_float => unreachable,
@@ -1861,13 +1861,13 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
 
                         if (chosen_bits < candidate_bits) {
                             chosen = candidate;
-                            chosen_i = candidate_i + 1;
+                            chosen_i = candidate_i;
                         }
                         continue;
                     },
                     .comptime_int => {
                         chosen = candidate;
-                        chosen_i = candidate_i + 1;
+                        chosen_i = candidate_i;
                         continue;
                     },
                     else => {},
@@ -1875,7 +1875,7 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
                 .int_type => |chosen_info| {
                     if (chosen_info.bits < candidate_info.bits) {
                         chosen = candidate;
-                        chosen_i = candidate_i + 1;
+                        chosen_i = candidate_i;
                     }
                     continue;
                 },
@@ -1887,7 +1887,7 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
                     .comptime_int => {
                         if (candidate_info.size == .C) {
                             chosen = candidate;
-                            chosen_i = candidate_i + 1;
+                            chosen_i = candidate_i;
                             continue;
                         }
                     },
@@ -1908,7 +1908,7 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
                         // In case we see i.e.: `*[1]T`, `*[2]T`, `[*]T`
                         convert_to_slice = false;
                         chosen = candidate;
-                        chosen_i = candidate_i + 1;
+                        chosen_i = candidate_i;
                         continue;
                     }
                     if (candidate_info.size == .One and
@@ -1941,7 +1941,7 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
                         if (cand_ok) {
                             convert_to_slice = true;
                             chosen = candidate;
-                            chosen_i = candidate_i + 1;
+                            chosen_i = candidate_i;
                             continue;
                         }
 
@@ -1963,7 +1963,7 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
                         if (cand_ok) {
                             if (!chosen_ok or chosen_info.size != .C) {
                                 chosen = candidate;
-                                chosen_i = candidate_i + 1;
+                                chosen_i = candidate_i;
                             }
                             continue;
                         } else {
@@ -1979,7 +1979,7 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
                 .int_type => {
                     if (candidate_info.size == .C) {
                         chosen = candidate;
-                        chosen_i = candidate_i + 1;
+                        chosen_i = candidate_i;
                         continue;
                     }
                 },
@@ -2022,7 +2022,7 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
                             .ok == try ip.coerceInMemoryAllowedFns(gpa, arena, chosen_info, candidate_elem_key.function_type, target))
                         {
                             chosen = candidate;
-                            chosen_i = candidate_i + 1;
+                            chosen_i = candidate_i;
                             continue;
                         }
                     }
@@ -2043,13 +2043,13 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
                 seen_const = seen_const or chosen_key.isConstPtr();
                 any_are_null = false;
                 chosen = candidate;
-                chosen_i = candidate_i + 1;
+                chosen_i = candidate_i;
                 continue;
             },
             .vector_type => switch (chosen_key) {
                 .array_type => {
                     chosen = candidate;
-                    chosen_i = candidate_i + 1;
+                    chosen_i = candidate_i;
                     continue;
                 },
                 else => {},
@@ -2063,13 +2063,13 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
                 .undefined_type,
                 => {
                     chosen = candidate;
-                    chosen_i = candidate_i + 1;
+                    chosen_i = candidate_i;
                     continue;
                 },
                 .null_type => {
                     any_are_null = true;
                     chosen = candidate;
-                    chosen_i = candidate_i + 1;
+                    chosen_i = candidate_i;
                     continue;
                 },
                 else => {},
@@ -2081,7 +2081,7 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
                 if ((try ip.coerceInMemoryAllowed(gpa, arena, candidate, chosen_info.payload_type, true, target)) == .ok) {
                     any_are_null = true;
                     chosen = candidate;
-                    chosen_i = candidate_i + 1;
+                    chosen_i = candidate_i;
                     continue;
                 }
             },
@@ -2549,9 +2549,7 @@ fn coerceInMemoryAllowedFns(
         } };
     }
 
-    for (dest_info.args, 0..) |dest_arg_ty, i| {
-        const src_arg_ty = src_info.args[i];
-
+    for (dest_info.args, src_info.args, 0..) |dest_arg_ty, src_arg_ty, i| {
         // Note: Cast direction is reversed here.
         const param = try ip.coerceInMemoryAllowed(gpa, arena, src_arg_ty, dest_arg_ty, true, target);
         if (param != .ok) {

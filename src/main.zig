@@ -225,7 +225,9 @@ fn parseArgs(allocator: std.mem.Allocator) !ParseArgsResult {
         const fields = @typeInfo(ArgId).Enum.fields;
         const KV = struct { []const u8, ArgId };
         var pairs: [fields.len]KV = undefined;
-        for (&pairs, 0..) |*pair, i| pair.* = .{ fields[i].name, @intToEnum(ArgId, fields[i].value) };
+        for (&pairs, fields) |*pair, field| {
+            pair.* = .{ field.name, @intToEnum(ArgId, field.value) };
+        }
         break :blk pairs[0..];
     });
     const help_message: []const u8 = comptime help_message: {

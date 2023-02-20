@@ -3,6 +3,7 @@ const zls = @import("zls");
 
 const Ast = std.zig.Ast;
 
+const offsets = zls.offsets;
 const translate_c = zls.translate_c;
 
 const allocator: std.mem.Allocator = std.testing.allocator;
@@ -53,13 +54,14 @@ fn testConvertCInclude(cimport_source: []const u8, expected: []const u8) !void {
     const source: [:0]u8 = try std.fmt.allocPrintZ(allocator, "const c = {s};", .{cimport_source});
     defer allocator.free(source);
 
-    var ast = try Ast.parse(allocator, source, .zig);
-    defer ast.deinit(allocator);
+    var tree = try Ast.parse(allocator, source, .zig);
+    defer tree.deinit(allocator);
 
-    const main_tokens = ast.nodes.items(.main_token);
+    const node_tags = tree.nodes.items(.tag);
+    const main_tokens = tree.nodes.items(.main_token);
 
     const node: Ast.Node.Index = blk: {
-        for (ast.nodes.items(.tag), 0..) |tag, index| {
+        for (node_tags, main_tokens, 0..) |tag, token, i| {
             switch (tag) {
                 .builtin_call_two,
                 .builtin_call_two_comma,
@@ -69,14 +71,14 @@ fn testConvertCInclude(cimport_source: []const u8, expected: []const u8) !void {
                 else => continue,
             }
 
-            if (!std.mem.eql(u8, ast.tokenSlice(main_tokens[index]), "@cImport")) continue;
+            if (!std.mem.eql(u8, offsets.tokenToSlice(tree, token), "@cImport")) continue;
 
-            break :blk @intCast(Ast.Node.Index, index);
+            break :blk @intCast(Ast.Node.Index, i);
         }
         return error.TestUnexpectedResult; // source doesn't contain a cImport
     };
 
-    const output = try translate_c.convertCInclude(allocator, ast, node);
+    const output = try translate_c.convertCInclude(allocator, tree, node);
     defer allocator.free(output);
 
     const trimmed_output = std.mem.trimRight(u8, output, &.{'\n'});

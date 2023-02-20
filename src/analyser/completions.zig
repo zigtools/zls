@@ -112,12 +112,11 @@ pub fn dotCompletions(
         },
         .enum_type => |enum_index| {
             const enum_info = ip.getEnum(enum_index);
-            for (enum_info.fields.keys(), 0..) |field_name, i| {
-                const field_val = enum_info.values.keys()[i];
+            for (enum_info.fields.keys(), enum_info.values.keys()) |field_name, field_value| {
                 try completions.append(arena, .{
                     .label = field_name,
                     .kind = .Field,
-                    .detail = try std.fmt.allocPrint(arena, "{}", .{field_val.fmtValue(enum_info.tag_type, ip.*)}),
+                    .detail = try std.fmt.allocPrint(arena, "{}", .{field_value.fmtValue(enum_info.tag_type, ip.*)}),
                 });
             }
         },

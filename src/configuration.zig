@@ -210,10 +210,10 @@ pub const DidChangeConfigurationParams = struct {
 fn getConfigurationType() type {
     var config_info: std.builtin.Type = @typeInfo(Config);
     var fields: [config_info.Struct.fields.len]std.builtin.Type.StructField = undefined;
-    for (config_info.Struct.fields, 0..) |field, i| {
-        fields[i] = field;
+    for (config_info.Struct.fields, &fields) |field, *new_field| {
+        new_field.* = field;
         if (@typeInfo(field.type) != .Optional) {
-            fields[i].type = @Type(std.builtin.Type{
+            new_field.type = @Type(std.builtin.Type{
                 .Optional = .{ .child = field.type },
             });
         }
