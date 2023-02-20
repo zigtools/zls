@@ -183,8 +183,30 @@ test "completion - captures" {
     try testCompletion(
         \\const S = struct { alpha: u32 };
         \\fn foo(items: []S) void {
-        \\    for (items) |bar, i| {
+        \\    for (items, 0..) |bar, i| {
         \\        bar.<cursor>
+        \\    }
+        \\}
+    , &.{
+        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+    });
+    
+    try testCompletion(
+        \\const S = struct { alpha: u32 };
+        \\fn foo(items: [2]S) void {
+        \\    for (items) |bar| {
+        \\        bar.<cursor>
+        \\    }
+        \\}
+    , &.{
+        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+    });
+
+    try testCompletion(
+        \\const S = struct { alpha: u32 };
+        \\fn foo(items: []S) void {
+        \\    for (items, items) |_, baz| {
+        \\        baz.<cursor>
         \\    }
         \\}
     , &.{
