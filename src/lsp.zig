@@ -712,7 +712,7 @@ pub const CodeActionKind = enum {
 
         // Some clients (nvim) may report these by the enumeration names rather than the
         // actual strings, so let's check those names here
-        const aliases = [_]struct { []const u8, CodeActionKind }{
+        const aliases = std.ComptimeStringMap(CodeActionKind, .{
             .{ "Empty", .empty },
             .{ "QuickFix", .quickfix },
             .{ "Refactor", .refactor },
@@ -722,15 +722,15 @@ pub const CodeActionKind = enum {
             .{ "Source", .source },
             .{ "SourceOrganizeImports", .@"source.organizeImports" },
             .{ "SourceFixAll", .@"source.fixAll" },
-        };
+        });
 
-        for (aliases) |alias| {
-            if (std.mem.eql(u8, json_value.String, alias[0])) {
-                return alias[1];
-            }
+        if (aliases.get(json_value.String)) |alias| {
+            return alias;
         }
 
-        return error.InvalidEnumTag;
+        // Strictly speaking, CodeActionKind is a string an not a enum which means that
+        // a client may report a unknown kind which can safely be ignored
+        return .empty;
     }
 };
 
