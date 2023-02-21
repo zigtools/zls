@@ -2929,12 +2929,13 @@ fn makeScopeInternal(allocator: std.mem.Allocator, context: ScopeContext, node_i
 
             var capture_token = for_node.payload_token;
             for (for_node.ast.inputs) |input| {
+                if (capture_token + 1 >= tree.tokens.len) break;
                 const capture_is_ref = token_tags[capture_token] == .asterisk;
                 const name_token = capture_token + @boolToInt(capture_is_ref);
                 capture_token = name_token + 2;
 
                 const name = offsets.tokenToSlice(tree, name_token);
-                try scopes.items(.decls)[scope_index].putNoClobber(allocator, name, .{
+                try scopes.items(.decls)[scope_index].put(allocator, name, .{
                     .array_payload = .{
                         .identifier = name_token,
                         .array_expr = input,
