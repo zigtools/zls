@@ -195,6 +195,33 @@ fn fullWhileComponents(tree: Ast, info: full.While.Components) full.While {
     return result;
 }
 
+fn fullForComponents(tree: Ast, info: full.For.Components) full.For {
+    const token_tags = tree.tokens.items(.tag);
+    var result: full.For = .{
+        .ast = info,
+        .inline_token = null,
+        .label_token = null,
+        .payload_token = undefined,
+        .else_token = undefined,
+    };
+    var tok_i = info.for_token -| 1;
+    if (token_tags[tok_i] == .keyword_inline) {
+        result.inline_token = tok_i;
+        tok_i -|= 1;
+    }
+    if (token_tags[tok_i] == .colon and
+        token_tags[tok_i -| 1] == .identifier)
+    {
+        result.label_token = tok_i -| 1;
+    }
+    const last_cond_token = lastToken(tree, info.inputs[info.inputs.len - 1]);
+    result.payload_token = last_cond_token + 3 + @boolToInt(token_tags[last_cond_token + 1] == .comma);
+    if (info.else_expr != 0) {
+        result.else_token = lastToken(tree, info.then_expr) + 1;
+    }
+    return result;
+}
+
 pub fn whileSimple(tree: Ast, node: Node.Index) full.While {
     const data = tree.nodes.items(.data)[node];
     return fullWhileComponents(tree, .{
@@ -230,26 +257,28 @@ pub fn whileFull(tree: Ast, node: Node.Index) full.While {
     });
 }
 
-pub fn forSimple(tree: Ast, node: Node.Index) full.While {
-    const data = tree.nodes.items(.data)[node];
-    return fullWhileComponents(tree, .{
-        .while_token = tree.nodes.items(.main_token)[node],
-        .cond_expr = data.lhs,
-        .cont_expr = 0,
+pub fn forSimple(tree: Ast, node: Node.Index) full.For {
+    const data = &tree.nodes.items(.data)[node];
+    const inputs: *[1]Node.Index = &data.lhs;
+    return fullForComponents(tree, .{
+        .for_token = tree.nodes.items(.main_token)[node],
+        .inputs = inputs[0..1],
         .then_expr = data.rhs,
         .else_expr = 0,
     });
 }
 
-pub fn forFull(tree: Ast, node: Node.Index) full.While {
+pub fn forFull(tree: Ast, node: Node.Index) full.For {
     const data = tree.nodes.items(.data)[node];
-    const extra = tree.extraData(data.rhs, Node.If);
-    return fullWhileComponents(tree, .{
-        .while_token = tree.nodes.items(.main_token)[node],
-        .cond_expr = data.lhs,
-        .cont_expr = 0,
-        .then_expr = extra.then_expr,
-        .else_expr = extra.else_expr,
+    const extra = @bitCast(Node.For, data.rhs);
+    const inputs = tree.extra_data[data.lhs..][0..extra.inputs];
+    const then_expr = tree.extra_data[data.lhs + extra.inputs];
+    const else_expr = if (extra.has_else) tree.extra_data[data.lhs + extra.inputs + 1] else 0;
+    return fullForComponents(tree, .{
+        .for_token = tree.nodes.items(.main_token)[node],
+        .inputs = inputs,
+        .then_expr = then_expr,
+        .else_expr = else_expr,
     });
 }
 
@@ -276,6 +305,12 @@ pub fn fullWhile(tree: Ast, node: Node.Index) ?full.While {
         .while_simple => whileSimple(tree, node),
         .while_cont => whileCont(tree, node),
         .@"while" => whileFull(tree, node),
+        else => null,
+    };
+}
+
+pub fn fullFor(tree: Ast, node: Node.Index) ?full.For {
+    return switch (tree.nodes.items(.tag)[node]) {
         .for_simple => forSimple(tree, node),
         .@"for" => forFull(tree, node),
         else => null,
@@ -503,6 +538,12 @@ pub fn lastToken(tree: Ast, node: Ast.Node.Index) Ast.TokenIndex {
 
         .@"return" => if (datas[n].lhs != 0) {
             n = datas[n].lhs;
+        } else {
+            return main_tokens[n] + end_offset;
+        },
+
+        .for_range => if (datas[n].rhs != 0) {
+            n = datas[n].rhs;
         } else {
             return main_tokens[n] + end_offset;
         },
@@ -914,10 +955,14 @@ pub fn lastToken(tree: Ast, node: Ast.Node.Index) Ast.TokenIndex {
             std.debug.assert(extra.else_expr != 0);
             n = extra.else_expr;
         },
-        .@"if", .@"for" => {
+        .@"if" => {
             const extra = tree.extraData(datas[n].rhs, Node.If);
             std.debug.assert(extra.else_expr != 0);
             n = extra.else_expr;
+        },
+        .@"for" => {
+            const extra = @bitCast(Node.For, datas[n].rhs);
+            n = tree.extra_data[datas[n].lhs + extra.inputs + @boolToInt(extra.has_else)];
         },
         .@"suspend" => {
             if (datas[n].lhs != 0) {
@@ -1239,6 +1284,7 @@ pub fn iterateChildren(
         .block_two,
         .block_two_semicolon,
         .error_union,
+        .for_range,
         => {
             try callback(context, node_data[node].lhs);
             try callback(context, node_data[node].rhs);
@@ -1367,14 +1413,22 @@ pub fn iterateChildren(
         .while_simple,
         .while_cont,
         .@"while",
-        .for_simple,
-        .@"for",
         => {
             const while_ast = fullWhile(tree, node).?.ast;
             try callback(context, while_ast.cond_expr);
             try callback(context, while_ast.cont_expr);
             try callback(context, while_ast.then_expr);
             try callback(context, while_ast.else_expr);
+        },
+        .for_simple,
+        .@"for",
+        => {
+            const for_ast = fullFor(tree, node).?.ast;
+            for (for_ast.inputs) |child| {
+                try callback(context, child);
+            }
+            try callback(context, for_ast.then_expr);
+            try callback(context, for_ast.else_expr);
         },
 
         .@"if",

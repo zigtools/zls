@@ -41,10 +41,10 @@ fn testDefinition(source: []const u8) !void {
     var cursor: offsets.Loc = .{ .start = 0, .end = 0 };
     var def_start: offsets.Loc = .{ .start = 0, .end = 0 };
     var def_end: offsets.Loc = .{ .start = 0, .end = 0 };
-    for (phr.locations.items(.old)) |loc, i| {
-        if (mem.eql(u8, source[loc.start..loc.end], "<>")) cursor = phr.locations.items(.new)[i];
-        if (mem.eql(u8, source[loc.start..loc.end], "<def>")) def_start = phr.locations.items(.new)[i];
-        if (mem.eql(u8, source[loc.start..loc.end], "</def>")) def_end = phr.locations.items(.new)[i];
+    for (phr.locations.items(.old), phr.locations.items(.new)) |old, new| {
+        if (mem.eql(u8, source[old.start..old.end], "<>")) cursor = new;
+        if (mem.eql(u8, source[old.start..old.end], "<def>")) def_start = new;
+        if (mem.eql(u8, source[old.start..old.end], "</def>")) def_end = new;
     }
 
     const cursor_lsp = offsets.locToRange(phr.new_source, cursor, .@"utf-16").start;

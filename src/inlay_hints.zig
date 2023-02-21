@@ -127,13 +127,11 @@ fn writeCallHint(builder: *Builder, call: Ast.full.Call, decl_handle: analysis.D
 
 /// takes parameter nodes from the ast and function parameter names from `Builtin.arguments` and writes parameter hints into `builder.hints`
 fn writeBuiltinHint(builder: *Builder, parameters: []const Ast.Node.Index, arguments: []const []const u8) !void {
-    if (parameters.len == 0) return;
-
     const handle = builder.handle;
     const tree = handle.tree;
 
-    for (arguments) |arg, i| {
-        if (i >= parameters.len) break;
+    const len = @min(arguments.len, parameters.len);
+    for (arguments[0..len], parameters[0..len]) |arg, parameter| {
         if (arg.len == 0) continue;
 
         const colonIndex = std.mem.indexOfScalar(u8, arg, ':');
@@ -153,7 +151,7 @@ fn writeBuiltinHint(builder: *Builder, parameters: []const Ast.Node.Index, argum
         }
 
         try builder.appendParameterHint(
-            tree.firstToken(parameters[i]),
+            tree.firstToken(parameter),
             label orelse "",
             std.mem.trim(u8, type_expr, " \t\n"),
             no_alias,

@@ -785,7 +785,7 @@ pub fn interpret(
                 var writer = final.writer();
                 try writer.writeAll("log: ");
 
-                for (params) |param, index| {
+                for (params, 0..) |param, index| {
                     var value = (try interpreter.interpret(param, namespace, options)).maybeGetValue() orelse {
                         try writer.writeAll("indeterminate");
                         continue;

@@ -39,7 +39,7 @@ test "semantic tokens - string literals" {
         \\"",// 
         \\"": 
     ,
-        // no idea if this output is correct but at least it doesn't crash
+    // no idea if this output is correct but at least it doesn't crash
         &.{ 1, 3, 3, 8, 0, 1, 0, 2, 4, 0, 0, 0, 2, 9, 0 },
     );
 }

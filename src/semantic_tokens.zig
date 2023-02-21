@@ -37,7 +37,7 @@ pub const TokenModifiers = packed struct {
 
     fn toInt(self: TokenModifiers) u32 {
         var res: u32 = 0;
-        inline for (std.meta.fields(TokenModifiers)) |field, i| {
+        inline for (std.meta.fields(TokenModifiers), 0..) |field, i| {
             if (@field(self, field.name)) {
                 res |= 1 << i;
             }
@@ -534,8 +534,6 @@ fn writeNodeTokens(builder: *Builder, maybe_node: ?Ast.Node.Index) error{OutOfMe
         .@"while",
         .while_simple,
         .while_cont,
-        .for_simple,
-        .@"for",
         => {
             const while_node = ast.fullWhile(tree, node).?;
             try writeToken(builder, while_node.label_token, .label);
@@ -566,6 +564,39 @@ fn writeNodeTokens(builder: *Builder, maybe_node: ?Ast.Node.Index) error{OutOfMe
                     try writeToken(builder, err_token + 1, .operator);
                 }
                 try callWriteNodeTokens(allocator, .{ builder, while_node.ast.else_expr });
+            }
+        },
+        .for_simple,
+        .@"for",
+        => {
+            const for_node = ast.fullFor(tree, node).?;
+            try writeToken(builder, for_node.label_token, .label);
+            try writeToken(builder, for_node.inline_token, .keyword);
+            try writeToken(builder, for_node.ast.for_token, .keyword);
+
+            for (for_node.ast.inputs) |input_node| {
+                try callWriteNodeTokens(allocator, .{ builder, input_node });
+            }
+
+            var capture_token = for_node.payload_token;
+            for (for_node.ast.inputs) |_| {
+                const capture_is_ref = token_tags[capture_token] == .asterisk;
+                const name_token = capture_token + @boolToInt(capture_is_ref);
+                capture_token = name_token + 2;
+
+                if (capture_is_ref) {
+                    try writeToken(builder, capture_token, .operator);
+                }
+                try writeToken(builder, name_token, .variable);
+                if (token_tags[name_token + 1] == .pipe) {
+                    try writeToken(builder, name_token + 1, .operator);
+                }
+            }
+            try callWriteNodeTokens(allocator, .{ builder, for_node.ast.then_expr });
+
+            if (for_node.ast.else_expr != 0) {
+                try writeToken(builder, for_node.else_token, .keyword);
+                try callWriteNodeTokens(allocator, .{ builder, for_node.ast.else_expr });
             }
         },
         .@"if",
@@ -823,6 +854,7 @@ fn writeNodeTokens(builder: *Builder, maybe_node: ?Ast.Node.Index) error{OutOfMe
         .sub_wrap,
         .sub_sat,
         .@"orelse",
+        .for_range,
         => {
             try callWriteNodeTokens(allocator, .{ builder, node_data[node].lhs });
             const token_type: TokenType = switch (tag) {

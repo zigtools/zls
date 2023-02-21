@@ -54,14 +54,14 @@ const Builder = struct {
     }
 
     pub fn getRanges(builder: Builder) error{OutOfMemory}![]types.FoldingRange {
-        var result = try builder.allocator.alloc(types.FoldingRange, builder.locations.items.len);
-        errdefer builder.allocator.free(result);
+        var result_locations = try builder.allocator.alloc(types.FoldingRange, builder.locations.items.len);
+        errdefer builder.allocator.free(result_locations);
 
-        for (result) |*r, i| {
-            r.* = .{
+        for (builder.locations.items, result_locations) |folding_range, *result| {
+            result.* = .{
                 .startLine = undefined,
                 .endLine = undefined,
-                .kind = builder.locations.items[i].kind,
+                .kind = folding_range.kind,
             };
         }
 
@@ -88,9 +88,9 @@ const Builder = struct {
         var items = try builder.allocator.alloc(Item, builder.locations.items.len * 2);
         defer builder.allocator.free(items);
 
-        for (builder.locations.items) |*folding_range, i| {
-            items[2 * i + 0] = .{ .output = &result[i], .input = folding_range, .where = .start };
-            items[2 * i + 1] = .{ .output = &result[i], .input = folding_range, .where = .end };
+        for (builder.locations.items, result_locations, 0..) |*folding_range, *result, i| {
+            items[2 * i + 0] = .{ .output = result, .input = folding_range, .where = .start };
+            items[2 * i + 1] = .{ .output = result, .input = folding_range, .where = .end };
         }
 
         // sort items based on their source position
@@ -116,7 +116,7 @@ const Builder = struct {
             }
         }
 
-        return result;
+        return result_locations;
     }
 };
 
@@ -135,7 +135,7 @@ pub fn generateFoldingRanges(allocator: std.mem.Allocator, tree: Ast, encoding: 
 
     var start_doc_comment: ?Ast.TokenIndex = null;
     var end_doc_comment: ?Ast.TokenIndex = null;
-    for (token_tags) |tag, i| {
+    for (token_tags, 0..) |tag, i| {
         const token = @intCast(Ast.TokenIndex, i);
         switch (tag) {
             .doc_comment,
@@ -162,7 +162,7 @@ pub fn generateFoldingRanges(allocator: std.mem.Allocator, tree: Ast, encoding: 
 
     // TODO add folding range for top level `@Import()`
 
-    for (node_tags) |node_tag, i| {
+    for (node_tags, 0..) |node_tag, i| {
         const node = @intCast(Ast.Node.Index, i);
 
         switch (node_tag) {

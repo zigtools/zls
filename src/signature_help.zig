@@ -195,9 +195,9 @@ pub fn getSignatureInfo(document_store: *DocumentStore, arena: *std.heap.ArenaAl
                                 types.ParameterInformation,
                                 builtin.arguments.len,
                             );
-                            for (param_infos) |*info, i| {
+                            for (param_infos, builtin.arguments) |*info, argument| {
                                 info.* = .{
-                                    .label = .{ .string = builtin.arguments[i] },
+                                    .label = .{ .string = argument },
                                     .documentation = null,
                                 };
                             }

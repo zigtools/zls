@@ -342,7 +342,7 @@ const Context = struct {
         var args = try allocator.alloc(ComptimeInterpreter.Value, arguments.len);
         defer allocator.free(args);
 
-        for (arguments) |argument, i| {
+        for (arguments, 0..) |argument, i| {
             args[i] = .{
                 .interpreter = self.interpreter,
                 .node_idx = 0,
@@ -377,7 +377,7 @@ const Context = struct {
 
     pub fn findFn(self: Context, name: []const u8) Ast.Node.Index {
         const handle = self.interpreter.getHandle();
-        for (handle.tree.nodes.items(.tag)) |tag, i| {
+        for (handle.tree.nodes.items(.tag), 0..) |tag, i| {
             if (tag != .fn_decl) continue;
             const node = @intCast(Ast.Node.Index, i);
             var buffer: [1]Ast.Node.Index = undefined;

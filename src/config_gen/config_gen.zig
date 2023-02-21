@@ -634,7 +634,7 @@ fn writeMarkdownFromHtmlInternal(html: []const u8, single_line: bool, depth: u32
         const tags: []const []const u8 = &.{ "pre", "p", "em", "ul", "li", "a", "code" };
         const opening_tags: []const []const u8 = &.{ "<pre>", "<p>", "<em>", "<ul>", "<li>", "<a>", "<code>" };
         const closing_tags: []const []const u8 = &.{ "</pre>", "</p>", "</em>", "</ul>", "</li>", "</a>", "</code>" };
-        const tag_index = for (tags) |tag_name, i| {
+        const tag_index = for (tags, 0..) |tag_name, i| {
             if (std.mem.startsWith(u8, html[tag_start_index + 1 ..], tag_name)) break i;
         } else {
             index += 1;

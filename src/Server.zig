@@ -308,7 +308,7 @@ fn generateDiagnostics(server: *Server, handle: DocumentStore.Handle) error{OutO
         }
     }
 
-    for (handle.cimports.items(.hash)) |hash, i| {
+    for (handle.cimports.items(.hash), handle.cimports.items(.node)) |hash, node| {
         const result = server.document_store.cimports.get(hash) orelse continue;
         if (result != .failure) continue;
         const stderr = std.mem.trim(u8, result.failure, " ");
@@ -318,7 +318,6 @@ fn generateDiagnostics(server: *Server, handle: DocumentStore.Handle) error{OutO
         _ = pos_and_diag_iterator.next(); // skip line
         _ = pos_and_diag_iterator.next(); // skip character
 
-        const node = handle.cimports.items(.node)[i];
         try diagnostics.append(allocator, .{
             .range = offsets.nodeToRange(handle.tree, node, server.offset_encoding),
             .severity = .Error,
@@ -1044,7 +1043,7 @@ fn gotoDefinitionBuiltin(
 
     const name = offsets.tokenIndexToSlice(handle.tree.source, loc.start);
     if (std.mem.eql(u8, name, "@cImport")) {
-        const index = for (handle.cimports.items(.node)) |cimport_node, index| {
+        const index = for (handle.cimports.items(.node), 0..) |cimport_node, index| {
             const main_token = handle.tree.nodes.items(.main_token)[cimport_node];
             if (loc.start == offsets.tokenToIndex(handle.tree, main_token)) break index;
         } else return null;
@@ -1091,7 +1090,7 @@ fn hoverDefinitionBuiltin(server: *Server, pos_index: usize, handle: *const Docu
     var writer = contents.writer(server.arena.allocator());
 
     if (std.mem.eql(u8, name, "cImport")) blk: {
-        const index = for (handle.cimports.items(.node)) |cimport_node, index| {
+        const index = for (handle.cimports.items(.node), 0..) |cimport_node, index| {
             const main_token = handle.tree.nodes.items(.main_token)[cimport_node];
             const cimport_loc = offsets.tokenToLoc(handle.tree, main_token);
             if (cimport_loc.start <= pos_index and pos_index <= cimport_loc.end) break index;
@@ -1947,16 +1946,16 @@ fn initializeHandler(server: *Server, request: types.InitializeParams) Error!typ
                         .tokenTypes = comptime block: {
                             const tokTypeFields = std.meta.fields(semantic_tokens.TokenType);
                             var names: [tokTypeFields.len][]const u8 = undefined;
-                            for (tokTypeFields) |field, i| {
-                                names[i] = field.name;
+                            for (tokTypeFields, &names) |field, *name| {
+                                name.* = field.name;
                             }
                             break :block &names;
                         },
                         .tokenModifiers = comptime block: {
                             const tokModFields = std.meta.fields(semantic_tokens.TokenModifiers);
                             var names: [tokModFields.len][]const u8 = undefined;
-                            for (tokModFields) |field, i| {
-                                names[i] = field.name;
+                            for (tokModFields, &names) |field, *name| {
+                                name.* = field.name;
                             }
                             break :block &names;
                         },
@@ -2033,7 +2032,7 @@ fn requestConfiguration(server: *Server) Error!void {
 
     const configuration_items = comptime confi: {
         var comp_confi: [std.meta.fields(Config).len]types.ConfigurationItem = undefined;
-        inline for (std.meta.fields(Config)) |field, index| {
+        inline for (std.meta.fields(Config), 0..) |field, index| {
             comp_confi[index] = .{
                 .section = "zls." ++ field.name,
             };
@@ -2064,8 +2063,7 @@ fn handleConfiguration(server: *Server, json: std.json.Value) error{OutOfMemory}
 
     const result = json.Array;
 
-    inline for (std.meta.fields(Config)) |field, index| {
-        const value = result.items[index];
+    inline for (std.meta.fields(Config), result.items) |field, value| {
         const ft = if (@typeInfo(field.type) == .Optional)
             @typeInfo(field.type).Optional.child
         else
@@ -2641,7 +2639,7 @@ fn inlayHintHandler(server: *Server, request: types.InlayHintParams) Error!?[]ty
     var last_position: types.Position = .{ .line = 0, .character = 0 };
 
     var converted_hints = try server.arena.allocator().alloc(types.InlayHint, hints.len);
-    for (hints) |hint, i| {
+    for (hints, 0..) |hint, i| {
         const index = offsets.tokenToIndex(handle.tree, hint.token_index);
         const position = offsets.advancePosition(
             handle.tree.source,
@@ -2727,11 +2725,11 @@ fn selectionRangeHandler(server: *Server, request: types.SelectionRangeParams) E
     // descending into the child containing the position at every step.
     var result = try allocator.alloc(*SelectionRange, request.positions.len);
     var locs = try std.ArrayListUnmanaged(offsets.Loc).initCapacity(allocator, 32);
-    for (request.positions) |position, position_index| {
+    for (request.positions, result) |position, *out| {
         const index = offsets.positionToIndex(handle.text, position, server.offset_encoding);
 
         locs.clearRetainingCapacity();
-        for (handle.tree.nodes.items(.data)) |_, i| {
+        for (0..handle.tree.nodes.len) |i| {
             const node = @intCast(Ast.Node.Index, i);
             const loc = offsets.nodeToLoc(handle.tree, node);
             if (loc.start <= index and index <= loc.end) {
@@ -2752,11 +2750,11 @@ fn selectionRangeHandler(server: *Server, request: types.SelectionRangeParams) E
         }
 
         var selection_ranges = try allocator.alloc(SelectionRange, locs.items.len);
-        for (selection_ranges) |*range, i| {
+        for (selection_ranges, 0..) |*range, i| {
             range.range = offsets.locToRange(handle.text, locs.items[i], server.offset_encoding);
             range.parent = if (i + 1 < selection_ranges.len) &selection_ranges[i + 1] else null;
         }
-        result[position_index] = &selection_ranges[0];
+        out.* = &selection_ranges[0];
     }
 
     return result;
@@ -2770,8 +2768,8 @@ fn shorterLocsFirst(_: void, lhs: offsets.Loc, rhs: offsets.Loc) bool {
 fn requestMethodExists(method: []const u8) bool {
     const methods = comptime blk: {
         var methods: [types.request_metadata.len][]const u8 = undefined;
-        for (types.request_metadata) |meta, i| {
-            methods[i] = meta.method;
+        for (types.request_metadata, &methods) |meta, *out| {
+            out.* = meta.method;
         }
         break :blk methods;
     };
@@ -2785,7 +2783,7 @@ fn requestMethodExists(method: []const u8) bool {
 fn notificationMethodExists(method: []const u8) bool {
     const methods = comptime blk: {
         var methods: [types.notification_metadata.len][]const u8 = undefined;
-        for (types.notification_metadata) |meta, i| {
+        for (types.notification_metadata, 0..) |meta, i| {
             methods[i] = meta.method;
         }
         break :blk methods;
