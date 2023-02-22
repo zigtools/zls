@@ -31,47 +31,13 @@ pub fn build(b: *std.build.Builder) !void {
     const coverage = b.option(bool, "generate_coverage", "Generate coverage data with kcov") orelse false;
     const coverage_output_dir = b.option([]const u8, "coverage_output_dir", "Output directory for coverage data") orelse b.pathJoin(&.{ b.install_prefix, "kcov" });
 
-    exe_options.addOption(
-        shared.ZigVersion,
-        "data_version",
-        b.option(shared.ZigVersion, "data_version", "The Zig version your compiler is.") orelse .master,
-    );
-
-    exe_options.addOption(
-        std.log.Level,
-        "log_level",
-        b.option(std.log.Level, "log_level", "The Log Level to be used.") orelse .info,
-    );
-
-    exe_options.addOption(
-        bool,
-        "enable_tracy",
-        enable_tracy,
-    );
-
-    exe_options.addOption(
-        bool,
-        "enable_tracy_allocation",
-        b.option(bool, "enable_tracy_allocation", "Enable using TracyAllocator to monitor allocations.") orelse false,
-    );
-
-    exe_options.addOption(
-        bool,
-        "enable_tracy_callstack",
-        b.option(bool, "enable_tracy_callstack", "Enable callstack graphs.") orelse false,
-    );
-
-    exe_options.addOption(
-        bool,
-        "enable_failing_allocator",
-        b.option(bool, "enable_failing_allocator", "Whether to use a randomly failing allocator.") orelse false,
-    );
-
-    exe_options.addOption(
-        u32,
-        "enable_failing_allocator_likelihood",
-        b.option(u32, "enable_failing_allocator_likelihood", "The chance that an allocation will fail is `1/likelihood`") orelse 256,
-    );
+    exe_options.addOption(shared.ZigVersion, "data_version", b.option(shared.ZigVersion, "data_version", "The Zig version your compiler is.") orelse .master);
+    exe_options.addOption(std.log.Level, "log_level", b.option(std.log.Level, "log_level", "The Log Level to be used.") orelse .info);
+    exe_options.addOption(bool, "enable_tracy", enable_tracy);
+    exe_options.addOption(bool, "enable_tracy_allocation", b.option(bool, "enable_tracy_allocation", "Enable using TracyAllocator to monitor allocations.") orelse false);
+    exe_options.addOption(bool, "enable_tracy_callstack", b.option(bool, "enable_tracy_callstack", "Enable callstack graphs.") orelse false);
+    exe_options.addOption(bool, "enable_failing_allocator", b.option(bool, "enable_failing_allocator", "Whether to use a randomly failing allocator.") orelse false);
+    exe_options.addOption(u32, "enable_failing_allocator_likelihood", b.option(u32, "enable_failing_allocator_likelihood", "The chance that an allocation will fail is `1/likelihood`") orelse 256);
 
     const build_root_path = b.pathFromRoot(".");
 
