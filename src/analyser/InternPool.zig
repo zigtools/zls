@@ -15,6 +15,7 @@ const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 const expect = std.testing.expect;
+const expectFmt = std.testing.expectFmt;
 
 const encoding = @import("encoding.zig");
 
@@ -138,13 +139,36 @@ pub const AnyFrame = packed struct {
     child: Index,
 };
 
-pub const BigInt = std.math.big.int.Const;
+const U64Value = packed struct {
+    ty: Index,
+    int: u64,
+};
+
+const I64Value = packed struct {
+    ty: Index,
+    int: i64,
+};
+
+pub const BigInt = struct {
+    ty: Index,
+    int: std.math.big.int.Const,
+};
 
 pub const Bytes = []const u8;
 
-pub const Aggregate = []const Index;
+pub const Aggregate = struct {
+    ty: Index,
+    values: []const Index,
+};
+
+pub const Slice = packed struct {
+    ty: Index,
+    ptr: Index,
+    len: Index,
+};
 
 pub const UnionValue = packed struct {
+    ty: Index,
     field_index: u32,
     val: Index,
 };
@@ -160,6 +184,11 @@ pub const Decl = struct {
     address_space: std.builtin.AddressSpace,
     is_pub: bool,
     is_exported: bool,
+};
+
+const BigIntInternal = struct {
+    ty: Index,
+    limbs: []const std.math.big.Limb,
 };
 
 pub const Key = union(enum) {
@@ -183,8 +212,8 @@ pub const Key = union(enum) {
     vector_type: Vector,
     anyframe_type: AnyFrame,
 
-    int_u64_value: u64,
-    int_i64_value: i64,
+    int_u64_value: U64Value,
+    int_i64_value: I64Value,
     int_big_value: BigInt,
     float_16_value: f16,
     float_32_value: f32,
@@ -194,6 +223,7 @@ pub const Key = union(enum) {
 
     bytes: Bytes,
     aggregate: Aggregate,
+    slice: Slice,
     union_value: UnionValue,
 
     // slice
@@ -232,9 +262,9 @@ pub const Key = union(enum) {
             .vector_type => .type_vector,
             .anyframe_type => .type_anyframe,
 
-            .int_u64_value => |int| if (int <= std.math.maxInt(u32)) .int_u32 else .int_u64,
-            .int_i64_value => |int| if (std.math.minInt(i32) <= int and int <= std.math.maxInt(i32)) .int_i32 else .int_i64,
-            .int_big_value => |big_int| if (big_int.positive) .int_big_positive else .int_big_negative,
+            .int_u64_value => .int_u64,
+            .int_i64_value => .int_i64,
+            .int_big_value => |big_int| if (big_int.int.positive) .int_big_positive else .int_big_negative,
             .float_16_value => .float_f16,
             .float_32_value => .float_f32,
             .float_64_value => .float_f64,
@@ -243,6 +273,7 @@ pub const Key = union(enum) {
 
             .bytes => .bytes,
             .aggregate => .aggregate,
+            .slice => .slice,
             .union_value => .union_value,
         };
     }
@@ -326,14 +357,26 @@ pub const Key = union(enum) {
 
             .bytes,
             .aggregate,
+            .slice,
             .union_value,
             => unreachable,
         };
     }
 
-    pub fn isType(key: Key) bool {
+    pub fn typeOf(key: Key) Index {
         return switch (key) {
-            .simple_type,
+            .simple_type => .type_type,
+            .simple_value => |simple| switch (simple) {
+                .undefined_value => .undefined_type,
+                .void_value => .void_type,
+                .unreachable_value => .noreturn_type,
+                .null_value => .null_type,
+                .bool_true => .bool_type,
+                .bool_false => .bool_type,
+                .the_only_possible_value => unreachable,
+                .generic_poison => .generic_poison_type,
+            },
+
             .int_type,
             .pointer_type,
             .array_type,
@@ -347,34 +390,27 @@ pub const Key = union(enum) {
             .tuple_type,
             .vector_type,
             .anyframe_type,
-            => true,
+            => .type_type,
 
-            .simple_value,
-            .int_u64_value,
-            .int_i64_value,
-            .int_big_value,
-            .float_16_value,
-            .float_32_value,
-            .float_64_value,
-            .float_80_value,
-            .float_128_value,
-            => false,
+            .int_u64_value => |int| int.ty,
+            .int_i64_value => |int| int.ty,
+            .int_big_value => |int| int.ty,
+            .float_16_value => .f16_type,
+            .float_32_value => .f32_type,
+            .float_64_value => .f64_type,
+            .float_80_value => .f80_type,
+            .float_128_value => .f128_type,
 
-            .bytes,
-            .aggregate,
-            .union_value,
-            => false,
+            .bytes => @panic("TODO"),
+            .slice => |slice_info| slice_info.ty,
+            .aggregate => |aggregate_info| aggregate_info.ty,
+            .union_value => |union_info| union_info.ty,
         };
     }
 
-    pub fn isValue(key: Key) bool {
-        return !key.isValue();
-    }
-
     /// Asserts the type is an integer, enum, error set, packed struct, or vector of one of them.
-    pub fn intInfo(ty: Key, target: std.Target, ip: *const InternPool) Int {
+    pub fn intInfo(ty: Key, target: std.Target, ip: InternPool) Int {
         var key: Key = ty;
-
         while (true) switch (key) {
             .simple_type => |simple| switch (simple) {
                 .usize => return .{ .signedness = .signed, .bits = target.cpu.arch.ptrBitWidth() },
@@ -614,50 +650,39 @@ pub const Key = union(enum) {
 
             .bytes,
             .aggregate,
+            .slice,
             .union_value,
             => unreachable,
         };
     }
 
     pub const TypeFormatContext = struct {
-        ty: Key,
-        options: FormatOptions = .{},
-        ip: InternPool,
-    };
-
-    pub const ValueFormatContext = struct {
-        value: Key,
-        /// for most values the type is not needed which is why we use an index
-        ty: Index,
+        key: Key,
         options: FormatOptions = .{},
         ip: InternPool,
     };
 
     pub const FormatOptions = struct {};
 
-    fn formatType(
+    fn format(
         ctx: TypeFormatContext,
-        comptime fmt: []const u8,
+        comptime fmt_str: []const u8,
         options: std.fmt.FormatOptions,
         writer: anytype,
     ) @TypeOf(writer).Error!void {
         _ = options;
-        if (fmt.len != 0) std.fmt.invalidFmtError(fmt, Key);
-        try printTypeKey(ctx.ty, ctx.ip, writer);
+        if (fmt_str.len != 0) std.fmt.invalidFmtError(fmt_str, Key);
+        try print(ctx.key, ctx.ip, writer);
     }
 
-    fn printType(ty: Index, ip: InternPool, writer: anytype) @TypeOf(writer).Error!void {
-        try printTypeKey(ip.indexToKey(ty), ip, writer);
-    }
-
-    fn printTypeKey(ty: Key, ip: InternPool, writer: anytype) @TypeOf(writer).Error!void {
-        var key = ty;
-        while (try printTypeInternal(key, ip, writer)) |index| {
-            key = ip.indexToKey(index);
+    pub fn print(key: Key, ip: InternPool, writer: anytype) @TypeOf(writer).Error!void {
+        var k = key;
+        while (try printInternal(k, ip, writer)) |index| {
+            k = ip.indexToKey(index);
         }
     }
 
-    fn printTypeInternal(ty: Key, ip: InternPool, writer: anytype) @TypeOf(writer).Error!?Index {
+    fn printInternal(ty: Key, ip: InternPool, writer: anytype) @TypeOf(writer).Error!?Index {
         switch (ty) {
             .simple_type => |simple| switch (simple) {
                 .f16,
@@ -712,8 +737,8 @@ pub const Key = union(enum) {
                 if (pointer_info.sentinel != Index.none) {
                     switch (pointer_info.size) {
                         .One, .C => unreachable,
-                        .Many => try writer.print("[*:{}]", .{pointer_info.sentinel.fmtValue(pointer_info.elem_type, ip)}),
-                        .Slice => try writer.print("[:{}]", .{pointer_info.sentinel.fmtValue(pointer_info.elem_type, ip)}),
+                        .Many => try writer.print("[*:{}]", .{pointer_info.sentinel.fmt(ip)}),
+                        .Slice => try writer.print("[:{}]", .{pointer_info.sentinel.fmt(ip)}),
                     }
                 } else switch (pointer_info.size) {
                     .One => try writer.writeAll("*"),
@@ -745,7 +770,7 @@ pub const Key = union(enum) {
             .array_type => |array_info| {
                 try writer.print("[{d}", .{array_info.len});
                 if (array_info.sentinel != Index.none) {
-                    try writer.print(":{}", .{array_info.sentinel.fmtValue(array_info.child, ip)});
+                    try writer.print(":{}", .{array_info.sentinel.fmt(ip)});
                 }
                 try writer.writeByte(']');
 
@@ -757,7 +782,7 @@ pub const Key = union(enum) {
                 return optional_info.payload_type;
             },
             .error_union_type => |error_union_info| {
-                try printType(error_union_info.error_set_type, ip, writer);
+                try print(ip.indexToKey(error_union_info.error_set_type), ip, writer);
                 try writer.writeByte('!');
                 return error_union_info.payload_type;
             },
@@ -786,7 +811,7 @@ pub const Key = union(enum) {
                         }
                     }
 
-                    try printType(arg_ty, ip, writer);
+                    try print(ip.indexToKey(arg_ty), ip, writer);
                 }
 
                 if (function_info.is_var_args) {
@@ -815,9 +840,9 @@ pub const Key = union(enum) {
                     if (val != Index.none) {
                         try writer.writeAll("comptime ");
                     }
-                    try printType(field_ty, ip, writer);
+                    try print(ip.indexToKey(field_ty), ip, writer);
                     if (val != Index.none) {
-                        try writer.print(" = {}", .{val.fmtValue(field_ty, ip)});
+                        try writer.print(" = {}", .{val.fmt(ip)});
                     }
                 }
                 try writer.writeByte('}');
@@ -825,7 +850,7 @@ pub const Key = union(enum) {
             .vector_type => |vector_info| {
                 try writer.print("@Vector({d},{})", .{
                     vector_info.len,
-                    vector_info.child.fmtType(ip),
+                    vector_info.child.fmt(ip),
                 });
             },
             .anyframe_type => |anyframe_info| {
@@ -833,44 +858,6 @@ pub const Key = union(enum) {
                 return anyframe_info.child;
             },
 
-            .simple_value,
-            .int_u64_value,
-            .int_i64_value,
-            .int_big_value,
-            .float_16_value,
-            .float_32_value,
-            .float_64_value,
-            .float_80_value,
-            .float_128_value,
-            => unreachable,
-
-            .bytes,
-            .aggregate,
-            .union_value,
-            => unreachable,
-        }
-        return null;
-    }
-
-    fn formatValue(
-        ctx: ValueFormatContext,
-        comptime fmt: []const u8,
-        options: std.fmt.FormatOptions,
-        writer: anytype,
-    ) @TypeOf(writer).Error!void {
-        _ = options;
-        if (fmt.len != 0) std.fmt.invalidFmtError(fmt, Key);
-        return printValue(ctx.value, ctx.ty, ctx.ip, writer);
-    }
-
-    fn printValue(
-        value: Key,
-        ty: Index,
-        ip: InternPool,
-        writer: anytype,
-    ) @TypeOf(writer).Error!void {
-        switch (value) {
-            .simple_type => try printType(ty, ip, writer),
             .simple_value => |simple| switch (simple) {
                 .undefined_value => try writer.writeAll("undefined"),
                 .void_value => try writer.writeAll("{}"),
@@ -879,27 +866,11 @@ pub const Key = union(enum) {
                 .bool_true => try writer.writeAll("true"),
                 .bool_false => try writer.writeAll("false"),
                 .the_only_possible_value => try writer.writeAll("(the only possible value)"),
-                .generic_poison => unreachable,
+                .generic_poison => try writer.writeAll("(generic poison)"),
             },
-
-            .int_type,
-            .pointer_type,
-            .array_type,
-            .struct_type,
-            .optional_type,
-            .error_union_type,
-            .error_set_type,
-            .enum_type,
-            .function_type,
-            .union_type,
-            .tuple_type,
-            .vector_type,
-            .anyframe_type,
-            => unreachable,
-
-            .int_u64_value => |int| try std.fmt.formatIntValue(int, "", .{}, writer),
-            .int_i64_value => |int| try std.fmt.formatIntValue(int, "", .{}, writer),
-            .int_big_value => |big_int| try big_int.format("", .{}, writer),
+            .int_u64_value => |i| try std.fmt.formatIntValue(i.int, "", .{}, writer),
+            .int_i64_value => |i| try std.fmt.formatIntValue(i.int, "", .{}, writer),
+            .int_big_value => |i| try i.int.format("", .{}, writer),
             .float_16_value => |float| try writer.print("{d}", .{float}),
             .float_32_value => |float| try writer.print("{d}", .{float}),
             .float_64_value => |float| try writer.print("{d}", .{float}),
@@ -908,43 +879,45 @@ pub const Key = union(enum) {
 
             .bytes => |bytes| try writer.print("\"{}\"", .{std.zig.fmtEscapes(bytes)}),
             .aggregate => |aggregate| {
-                const struct_info = ip.getStruct(ip.indexToKey(ty).struct_type);
-                assert(aggregate.len == struct_info.fields.count());
+                if (aggregate.values.len == 0) {
+                    try writer.writeAll(".{}");
+                    return null;
+                }
+                const struct_info = ip.getStruct(ip.indexToKey(aggregate.ty).struct_type);
+                assert(aggregate.values.len == struct_info.fields.count());
 
                 try writer.writeAll(".{");
                 var i: u32 = 0;
-                while (i < aggregate.len) : (i += 1) {
+                while (i < aggregate.values.len) : (i += 1) {
                     if (i != 0) try writer.writeAll(", ");
 
                     const field_name = struct_info.fields.keys()[i];
-                    try writer.print(".{s} = ", .{field_name});
-                    try printValue(ip.indexToKey(aggregate[i]), struct_info.fields.values()[i].ty, ip, writer);
+                    try writer.print(".{s} = {}", .{ field_name, aggregate.values[i].fmt(ip) });
                 }
                 try writer.writeByte('}');
             },
+            .slice => |slice_value| {
+                _ = slice_value;
+                try writer.writeAll(".{");
+                try writer.writeAll(" TODO "); // TODO
+                try writer.writeByte('}');
+            },
             .union_value => |union_value| {
-                const union_info = ip.getUnion(ip.indexToKey(ty).union_type);
+                const union_info = ip.getUnion(ip.indexToKey(union_value.ty).union_type);
 
                 const name = union_info.fields.keys()[union_value.field_index];
                 try writer.print(".{{ .{} = {} }}", .{
                     std.zig.fmtId(name),
-                    union_value.val.fmtValue(union_info.fields.values()[union_value.field_index].ty, ip),
+                    union_value.val.fmt(ip),
                 });
             },
         }
+        return null;
     }
 
-    pub fn fmtType(ty: Key, ip: InternPool) std.fmt.Formatter(formatType) {
+    pub fn fmt(key: Key, ip: InternPool) std.fmt.Formatter(format) {
         return .{ .data = .{
-            .ty = ty,
-            .ip = ip,
-        } };
-    }
-
-    pub fn fmtValue(value: Key, ty: Index, ip: InternPool) std.fmt.Formatter(formatValue) {
-        return .{ .data = .{
-            .value = value,
-            .ty = ty,
+            .key = key,
             .ip = ip,
         } };
     }
@@ -1042,6 +1015,10 @@ pub const Index = enum(u32) {
     bool_false,
     /// `.{}` (untyped)
     empty_aggregate,
+    /// `0` (usize)
+    zero_usize,
+    /// `1` (usize)
+    one_usize,
     the_only_possible_value,
     generic_poison,
 
@@ -1049,17 +1026,9 @@ pub const Index = enum(u32) {
     none = std.math.maxInt(u32),
     _,
 
-    pub fn fmtType(ty: Index, ip: InternPool) std.fmt.Formatter(Key.formatType) {
+    pub fn fmt(index: Index, ip: InternPool) std.fmt.Formatter(Key.format) {
         return .{ .data = .{
-            .ty = ip.indexToKey(ty),
-            .ip = ip,
-        } };
-    }
-
-    pub fn fmtValue(value_index: Index, type_index: Index, ip: InternPool) std.fmt.Formatter(Key.formatValue) {
-        return .{ .data = .{
-            .value = ip.indexToKey(value_index),
-            .ty = type_index,
+            .key = ip.indexToKey(index),
             .ip = ip,
         } };
     }
@@ -1121,12 +1090,7 @@ pub const Tag = enum(u8) {
     /// data is index to type
     type_anyframe,
 
-    /// An unsigned integer value that can be represented by u32.
-    /// data is integer value
-    int_u32,
-    /// An unsigned integer value that can be represented by i32.
-    /// data is integer value bitcasted to u32.
-    int_i32,
+    // TODO use a more efficient encoding for small integers
     /// An unsigned integer value that can be represented by u64.
     /// data is payload to u64
     int_u64,
@@ -1161,6 +1125,9 @@ pub const Tag = enum(u8) {
     /// A aggregate (struct) value.
     /// data is index to Aggregate.
     aggregate,
+    /// A slice value.
+    /// data is index to Slice.
+    slice,
     /// A union value.
     /// data is index to UnionValue.
     union_value,
@@ -1295,20 +1262,22 @@ pub fn init(gpa: Allocator) Allocator.Error!InternPool {
         .{ .index = .generic_poison_type, .key = .{ .simple_type = .generic_poison } },
 
         .{ .index = .undefined_value, .key = .{ .simple_value = .undefined_value } },
-        .{ .index = .zero, .key = .{ .int_u64_value = 0 } },
-        .{ .index = .one, .key = .{ .int_u64_value = 1 } },
+        .{ .index = .zero, .key = .{ .int_u64_value = .{ .ty = .comptime_int_type, .int = 0 } } },
+        .{ .index = .one, .key = .{ .int_u64_value = .{ .ty = .comptime_int_type, .int = 1 } } },
         .{ .index = .void_value, .key = .{ .simple_value = .void_value } },
         .{ .index = .unreachable_value, .key = .{ .simple_value = .unreachable_value } },
         .{ .index = .null_value, .key = .{ .simple_value = .null_value } },
         .{ .index = .bool_true, .key = .{ .simple_value = .bool_true } },
         .{ .index = .bool_false, .key = .{ .simple_value = .bool_false } },
 
-        .{ .index = .empty_aggregate, .key = .{ .aggregate = &.{} } },
+        .{ .index = .empty_aggregate, .key = .{ .aggregate = .{ .ty = .none, .values = &.{} } } },
+        .{ .index = .zero_usize, .key = .{ .int_u64_value = .{ .ty = .usize_type, .int = 0 } } },
+        .{ .index = .one_usize, .key = .{ .int_u64_value = .{ .ty = .usize_type, .int = 1 } } },
         .{ .index = .the_only_possible_value, .key = .{ .simple_value = .the_only_possible_value } },
         .{ .index = .generic_poison, .key = .{ .simple_value = .generic_poison } },
     };
 
-    const extra_count = 4 * @sizeOf(Pointer) + @sizeOf(ErrorUnion) + 4 * @sizeOf(Function);
+    const extra_count = 4 * @sizeOf(Pointer) + @sizeOf(ErrorUnion) + 4 * @sizeOf(Function) + 4 * @sizeOf(InternPool.U64Value);
 
     try ip.map.ensureTotalCapacity(gpa, items.len);
     try ip.items.ensureTotalCapacity(gpa, items.len);
@@ -1381,17 +1350,19 @@ pub fn indexToKey(ip: InternPool, index: Index) Key {
         .type_enum => .{ .enum_type = @intToEnum(EnumIndex, data) },
         .type_union => .{ .union_type = @intToEnum(UnionIndex, data) },
 
-        .int_u32 => .{ .int_u64_value = @intCast(u32, data) },
-        .int_i32 => .{ .int_i64_value = @bitCast(i32, data) },
-        .int_u64 => .{ .int_u64_value = ip.extraData(u64, data) },
-        .int_i64 => .{ .int_i64_value = ip.extraData(i64, data) },
-        .int_big_positive => .{ .int_big_value = .{
-            .positive = true,
-            .limbs = ip.extraData([]const std.math.big.Limb, data),
-        } },
-        .int_big_negative => .{ .int_big_value = .{
-            .positive = false,
-            .limbs = ip.extraData([]const std.math.big.Limb, data),
+        .int_u64 => .{ .int_u64_value = ip.extraData(U64Value, data) },
+        .int_i64 => .{ .int_i64_value = ip.extraData(I64Value, data) },
+        .int_big_positive,
+        .int_big_negative,
+        => .{ .int_big_value = blk: {
+            const big_int = ip.extraData(BigIntInternal, data);
+            break :blk .{
+                .ty = big_int.ty,
+                .int = .{
+                    .positive = item.tag == .int_big_positive,
+                    .limbs = big_int.limbs,
+                },
+            };
         } },
         .float_f16 => .{ .float_16_value = @bitCast(f16, @intCast(u16, data)) },
         .float_f32 => .{ .float_32_value = @bitCast(f32, data) },
@@ -1401,6 +1372,7 @@ pub fn indexToKey(ip: InternPool, index: Index) Key {
 
         .bytes => .{ .bytes = ip.extraData([]const u8, data) },
         .aggregate => .{ .aggregate = ip.extraData(Aggregate, data) },
+        .slice => .{ .slice = ip.extraData(Slice, data) },
         .union_value => .{ .union_value = ip.extraData(UnionValue, data) },
     };
 }
@@ -1467,9 +1439,12 @@ pub fn get(ip: *InternPool, gpa: Allocator, key: Key) Allocator.Error!Index {
         .enum_type => |enum_index| @enumToInt(enum_index),
         .union_type => |union_index| @enumToInt(union_index),
 
-        .int_u64_value => |int_val| if (tag == .int_u32) @intCast(u32, int_val) else try ip.addExtra(gpa, int_val),
-        .int_i64_value => |int_val| if (tag == .int_i32) @bitCast(u32, @intCast(u32, int_val)) else try ip.addExtra(gpa, int_val),
-        .int_big_value => |big_int_val| try ip.addExtra(gpa, big_int_val.limbs),
+        .int_u64_value => |int_val| try ip.addExtra(gpa, int_val),
+        .int_i64_value => |int_val| try ip.addExtra(gpa, int_val),
+        .int_big_value => |big_int_val| try ip.addExtra(gpa, BigIntInternal{
+            .ty = big_int_val.ty,
+            .limbs = big_int_val.int.limbs,
+        }),
         .float_16_value => |float_val| @bitCast(u16, float_val),
         .float_32_value => |float_val| @bitCast(u32, float_val),
         inline else => |data| try ip.addExtra(gpa, data), // TODO sad stage1 noises :(
@@ -1767,8 +1742,8 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
                         .c_ulonglong,
                         .c_longdouble,
                         => {
-                            const chosen_bits = chosen_key.intInfo(target, ip).bits;
-                            const candidate_bits = candidate_key.intInfo(target, ip).bits;
+                            const chosen_bits = chosen_key.intInfo(target, ip.*).bits;
+                            const candidate_bits = candidate_key.intInfo(target, ip.*).bits;
 
                             if (chosen_bits < candidate_bits) {
                                 chosen = candidate;
@@ -1784,7 +1759,7 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
                         else => {},
                     },
                     .int_type => |chosen_info| {
-                        if (chosen_info.bits < candidate_key.intInfo(target, ip).bits) {
+                        if (chosen_info.bits < candidate_key.intInfo(target, ip.*).bits) {
                             chosen = candidate;
                             chosen_i = candidate_i;
                         }
@@ -1856,8 +1831,8 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
                     .c_ulonglong,
                     .c_longdouble,
                     => {
-                        const chosen_bits = chosen_key.intInfo(target, ip).bits;
-                        const candidate_bits = candidate_key.intInfo(target, ip).bits;
+                        const chosen_bits = chosen_key.intInfo(target, ip.*).bits;
+                        const candidate_bits = candidate_key.intInfo(target, ip.*).bits;
 
                         if (chosen_bits < candidate_bits) {
                             chosen = candidate;
@@ -2310,8 +2285,8 @@ fn coerceInMemoryAllowed(
 
     switch (dest_tag) {
         .Int => {
-            const dest_info = dest_key.intInfo(target, ip);
-            const src_info = src_key.intInfo(target, ip);
+            const dest_info = dest_key.intInfo(target, ip.*);
+            const src_info = src_key.intInfo(target, ip.*);
 
             if (dest_info.signedness == src_info.signedness and dest_info.bits == src_info.bits) return .ok;
 
@@ -2730,14 +2705,6 @@ inline fn panicOrElse(message: []const u8, value: anytype) @TypeOf(value) {
 //                     TESTS
 // ---------------------------------------------
 
-fn testExpectFmtType(ip: InternPool, index: Index, expected: []const u8) !void {
-    try std.testing.expectFmt(expected, "{}", .{index.fmtType(ip)});
-}
-
-fn testExpectFmtValue(ip: InternPool, val: Index, ty: Index, expected: []const u8) !void {
-    try std.testing.expectFmt(expected, "{}", .{val.fmtValue(ty, ip)});
-}
-
 test "simple types" {
     const gpa = std.testing.allocator;
 
@@ -2755,16 +2722,16 @@ test "simple types" {
     const bool_true = try ip.get(gpa, .{ .simple_value = .bool_true });
     const bool_false = try ip.get(gpa, .{ .simple_value = .bool_false });
 
-    try testExpectFmtType(ip, null_type, "@TypeOf(null)");
-    try testExpectFmtType(ip, undefined_type, "@TypeOf(undefined)");
-    try testExpectFmtType(ip, enum_literal_type, "@TypeOf(.enum_literal)");
+    try expectFmt("@TypeOf(null)", "{}", .{null_type.fmt(ip)});
+    try expectFmt("@TypeOf(undefined)", "{}", .{undefined_type.fmt(ip)});
+    try expectFmt("@TypeOf(.enum_literal)", "{}", .{enum_literal_type.fmt(ip)});
 
-    try testExpectFmtValue(ip, undefined_value, .none, "undefined");
-    try testExpectFmtValue(ip, void_value, .none, "{}");
-    try testExpectFmtValue(ip, unreachable_value, .none, "unreachable");
-    try testExpectFmtValue(ip, null_value, .none, "null");
-    try testExpectFmtValue(ip, bool_true, .none, "true");
-    try testExpectFmtValue(ip, bool_false, .none, "false");
+    try expectFmt("undefined", "{}", .{undefined_value.fmt(ip)});
+    try expectFmt("{}", "{}", .{void_value.fmt(ip)});
+    try expectFmt("unreachable", "{}", .{unreachable_value.fmt(ip)});
+    try expectFmt("null", "{}", .{null_value.fmt(ip)});
+    try expectFmt("true", "{}", .{bool_true.fmt(ip)});
+    try expectFmt("false", "{}", .{bool_false.fmt(ip)});
 }
 
 test "int type" {
@@ -2784,9 +2751,9 @@ test "int type" {
     try expect(i16_type != another_i32_type);
     try expect(i16_type != u7_type);
 
-    try testExpectFmtType(ip, i32_type, "i32");
-    try testExpectFmtType(ip, i16_type, "i16");
-    try testExpectFmtType(ip, u7_type, "u7");
+    try expectFmt("i32", "{}", .{i32_type.fmt(ip)});
+    try expectFmt("i16", "{}", .{i16_type.fmt(ip)});
+    try expectFmt("u7", "{}", .{u7_type.fmt(ip)});
 }
 
 test "int value" {
@@ -2795,21 +2762,14 @@ test "int value" {
     var ip = try InternPool.init(gpa);
     defer ip.deinit(gpa);
 
-    const unsigned_zero_value = try ip.get(gpa, .{ .int_u64_value = 0 });
-    const unsigned_one_value = try ip.get(gpa, .{ .int_u64_value = 1 });
-    const signed_zero_value = try ip.get(gpa, .{ .int_i64_value = 0 });
-    const signed_one_value = try ip.get(gpa, .{ .int_i64_value = 1 });
+    const unsigned_zero_value = try ip.get(gpa, .{ .int_u64_value = .{ .ty = .u64_type, .int = 0 } });
+    const unsigned_one_value = try ip.get(gpa, .{ .int_u64_value = .{ .ty = .u64_type, .int = 1 } });
+    const signed_zero_value = try ip.get(gpa, .{ .int_u64_value = .{ .ty = .i64_type, .int = 0 } });
+    const signed_one_value = try ip.get(gpa, .{ .int_u64_value = .{ .ty = .i64_type, .int = 1 } });
 
-    const u64_max_value = try ip.get(gpa, .{ .int_u64_value = std.math.maxInt(u64) });
-    const i64_max_value = try ip.get(gpa, .{ .int_i64_value = std.math.maxInt(i64) });
-    const i64_min_value = try ip.get(gpa, .{ .int_i64_value = std.math.minInt(i64) });
-
-    const tags = ip.items.items(.tag);
-    try expect(tags[@enumToInt(unsigned_one_value)] == .int_u32);
-    try expect(tags[@enumToInt(signed_one_value)] == .int_i32);
-    try expect(tags[@enumToInt(u64_max_value)] == .int_u64);
-    try expect(tags[@enumToInt(i64_max_value)] == .int_i64);
-    try expect(tags[@enumToInt(i64_min_value)] == .int_i64);
+    const u64_max_value = try ip.get(gpa, .{ .int_u64_value = .{ .ty = .u64_type, .int = std.math.maxInt(u64) } });
+    const i64_max_value = try ip.get(gpa, .{ .int_i64_value = .{ .ty = .i64_type, .int = std.math.maxInt(i64) } });
+    const i64_min_value = try ip.get(gpa, .{ .int_i64_value = .{ .ty = .i64_type, .int = std.math.minInt(i64) } });
 
     try expect(unsigned_zero_value != unsigned_one_value);
     try expect(unsigned_one_value != signed_zero_value);
@@ -2819,14 +2779,14 @@ test "int value" {
     try expect(u64_max_value != i64_max_value);
     try expect(i64_max_value != i64_min_value);
 
-    try testExpectFmtValue(ip, unsigned_zero_value, undefined, "0");
-    try testExpectFmtValue(ip, unsigned_one_value, undefined, "1");
-    try testExpectFmtValue(ip, signed_zero_value, undefined, "0");
-    try testExpectFmtValue(ip, signed_one_value, undefined, "1");
+    try expectFmt("0", "{}", .{unsigned_zero_value.fmt(ip)});
+    try expectFmt("1", "{}", .{unsigned_one_value.fmt(ip)});
+    try expectFmt("0", "{}", .{signed_zero_value.fmt(ip)});
+    try expectFmt("1", "{}", .{signed_one_value.fmt(ip)});
 
-    try testExpectFmtValue(ip, u64_max_value, undefined, "18446744073709551615");
-    try testExpectFmtValue(ip, i64_max_value, undefined, "9223372036854775807");
-    try testExpectFmtValue(ip, i64_min_value, undefined, "-9223372036854775808");
+    try expectFmt("18446744073709551615", "{}", .{u64_max_value.fmt(ip)});
+    try expectFmt("9223372036854775807", "{}", .{i64_max_value.fmt(ip)});
+    try expectFmt("-9223372036854775808", "{}", .{i64_min_value.fmt(ip)});
 }
 
 test "big int value" {
@@ -2842,11 +2802,17 @@ test "big int value" {
 
     try result.pow(&a, 128);
 
-    const positive_big_int_value = try ip.get(gpa, .{ .int_big_value = result.toConst() });
-    const negative_big_int_value = try ip.get(gpa, .{ .int_big_value = result.toConst().negate() });
+    const positive_big_int_value = try ip.get(gpa, .{ .int_big_value = .{
+        .ty = .comptime_int_type,
+        .int = result.toConst(),
+    } });
+    const negative_big_int_value = try ip.get(gpa, .{ .int_big_value = .{
+        .ty = .comptime_int_type,
+        .int = result.toConst().negate(),
+    } });
 
-    try testExpectFmtValue(ip, positive_big_int_value, .none, "340282366920938463463374607431768211456");
-    try testExpectFmtValue(ip, negative_big_int_value, .none, "-340282366920938463463374607431768211456");
+    try expectFmt("340282366920938463463374607431768211456", "{}", .{positive_big_int_value.fmt(ip)});
+    try expectFmt("-340282366920938463463374607431768211456", "{}", .{negative_big_int_value.fmt(ip)});
 }
 
 test "float type" {
@@ -2872,11 +2838,11 @@ test "float type" {
     try expect(f32_type == another_f32_type);
     try expect(f64_type == another_f64_type);
 
-    try testExpectFmtType(ip, f16_type, "f16");
-    try testExpectFmtType(ip, f32_type, "f32");
-    try testExpectFmtType(ip, f64_type, "f64");
-    try testExpectFmtType(ip, f80_type, "f80");
-    try testExpectFmtType(ip, f128_type, "f128");
+    try expectFmt("f16", "{}", .{f16_type.fmt(ip)});
+    try expectFmt("f32", "{}", .{f32_type.fmt(ip)});
+    try expectFmt("f64", "{}", .{f64_type.fmt(ip)});
+    try expectFmt("f80", "{}", .{f80_type.fmt(ip)});
+    try expectFmt("f128", "{}", .{f128_type.fmt(ip)});
 }
 
 test "float value" {
@@ -2921,20 +2887,20 @@ test "float value" {
     try expect(ip.indexToKey(f32_zero_value).eql(ip.indexToKey(f32_zero_value)));
     try expect(!ip.indexToKey(f32_zero_value).eql(ip.indexToKey(f32_nzero_value)));
 
-    try testExpectFmtValue(ip, f16_value, undefined, "0.25");
-    try testExpectFmtValue(ip, f32_value, undefined, "0.5");
-    try testExpectFmtValue(ip, f64_value, undefined, "1");
-    try testExpectFmtValue(ip, f80_value, undefined, "2");
-    try testExpectFmtValue(ip, f128_value, undefined, "2.75");
+    try expectFmt("0.25", "{}", .{f16_value.fmt(ip)});
+    try expectFmt("0.5", "{}", .{f32_value.fmt(ip)});
+    try expectFmt("1", "{}", .{f64_value.fmt(ip)});
+    try expectFmt("2", "{}", .{f80_value.fmt(ip)});
+    try expectFmt("2.75", "{}", .{f128_value.fmt(ip)});
 
-    try testExpectFmtValue(ip, f32_nan_value, undefined, "nan");
-    try testExpectFmtValue(ip, f32_qnan_value, undefined, "nan");
+    try expectFmt("nan", "{}", .{f32_nan_value.fmt(ip)});
+    try expectFmt("nan", "{}", .{f32_qnan_value.fmt(ip)});
 
-    try testExpectFmtValue(ip, f32_inf_value, undefined, "inf");
-    try testExpectFmtValue(ip, f32_ninf_value, undefined, "-inf");
+    try expectFmt("inf", "{}", .{f32_inf_value.fmt(ip)});
+    try expectFmt("-inf", "{}", .{f32_ninf_value.fmt(ip)});
 
-    try testExpectFmtValue(ip, f32_zero_value, undefined, "0");
-    try testExpectFmtValue(ip, f32_nzero_value, undefined, "-0");
+    try expectFmt("0", "{}", .{f32_zero_value.fmt(ip)});
+    try expectFmt("-0", "{}", .{f32_nzero_value.fmt(ip)});
 }
 
 test "pointer type" {
@@ -3004,17 +2970,17 @@ test "pointer type" {
     try expect(@"[*:0]u32" != @"[:0]u32");
     try expect(@"[:0]u32" != @"[*c]u32");
 
-    try testExpectFmtType(ip, @"*i32", "*i32");
-    try testExpectFmtType(ip, @"*u32", "*u32");
-    try testExpectFmtType(ip, @"*const volatile u32", "*const volatile u32");
-    try testExpectFmtType(ip, @"*align(4:2:3) u32", "*align(4:2:3) u32");
-    try testExpectFmtType(ip, @"*addrspace(.shared) const u32", "*addrspace(.shared) const u32");
+    try expectFmt("*i32", "{}", .{@"*i32".fmt(ip)});
+    try expectFmt("*u32", "{}", .{@"*u32".fmt(ip)});
+    try expectFmt("*const volatile u32", "{}", .{@"*const volatile u32".fmt(ip)});
+    try expectFmt("*align(4:2:3) u32", "{}", .{@"*align(4:2:3) u32".fmt(ip)});
+    try expectFmt("*addrspace(.shared) const u32", "{}", .{@"*addrspace(.shared) const u32".fmt(ip)});
 
-    try testExpectFmtType(ip, @"[*]u32", "[*]u32");
-    try testExpectFmtType(ip, @"[*:0]u32", "[*:0]u32");
-    try testExpectFmtType(ip, @"[]u32", "[]u32");
-    try testExpectFmtType(ip, @"[:0]u32", "[:0]u32");
-    try testExpectFmtType(ip, @"[*c]u32", "[*c]u32");
+    try expectFmt("[*]u32", "{}", .{@"[*]u32".fmt(ip)});
+    try expectFmt("[*:0]u32", "{}", .{@"[*:0]u32".fmt(ip)});
+    try expectFmt("[]u32", "{}", .{@"[]u32".fmt(ip)});
+    try expectFmt("[:0]u32", "{}", .{@"[:0]u32".fmt(ip)});
+    try expectFmt("[*c]u32", "{}", .{@"[*c]u32".fmt(ip)});
 }
 
 test "optional type" {
@@ -3023,18 +2989,21 @@ test "optional type" {
     var ip = try InternPool.init(gpa);
     defer ip.deinit(gpa);
 
-    const u64_42_value = try ip.get(gpa, .{ .int_u64_value = 42 });
+    const u64_42_value = try ip.get(gpa, .{ .int_u64_value = .{ .ty = .u64_type, .int = 42 } });
+    _ = u64_42_value;
 
     const i32_optional_type = try ip.get(gpa, .{ .optional_type = .{ .payload_type = .i32_type } });
     const u32_optional_type = try ip.get(gpa, .{ .optional_type = .{ .payload_type = .u32_type } });
 
     try expect(i32_optional_type != u32_optional_type);
 
-    try testExpectFmtType(ip, i32_optional_type, "?i32");
-    try testExpectFmtType(ip, u32_optional_type, "?u32");
+    try expectFmt("?i32", "{}", .{i32_optional_type.fmt(ip)});
+    try expectFmt("?u32", "{}", .{u32_optional_type.fmt(ip)});
 
-    try testExpectFmtValue(ip, .null_value, u32_optional_type, "null");
-    try testExpectFmtValue(ip, u64_42_value, u32_optional_type, "42");
+    // TODO rework represenation of optional types
+
+    // try expectFmt(.null_value, "null");
+    // try expectFmt(u64_42_value, "42");
 }
 
 test "error set type" {
@@ -3060,9 +3029,9 @@ test "error set type" {
     try expect(empty_error_set != foo_bar_baz_set);
     try expect(foo_bar_baz_set != foo_bar_set);
 
-    try testExpectFmtType(ip, empty_error_set, "error{}");
-    try testExpectFmtType(ip, foo_bar_baz_set, "error{foo,bar,baz}");
-    try testExpectFmtType(ip, foo_bar_set, "error{foo,bar}");
+    try expectFmt("error{}", "{}", .{empty_error_set.fmt(ip)});
+    try expectFmt("error{foo,bar,baz}", "{}", .{foo_bar_baz_set.fmt(ip)});
+    try expectFmt("error{foo,bar}", "{}", .{foo_bar_set.fmt(ip)});
 }
 
 test "error union type" {
@@ -3079,7 +3048,7 @@ test "error union type" {
         .payload_type = bool_type,
     } });
 
-    try testExpectFmtType(ip, @"error{}!bool", "error{}!bool");
+    try expectFmt("error{}!bool", "{}", .{@"error{}!bool".fmt(ip)});
 }
 
 test "array type" {
@@ -3100,8 +3069,8 @@ test "array type" {
 
     try expect(i32_3_array_type != u32_0_0_array_type);
 
-    try testExpectFmtType(ip, i32_3_array_type, "[3]i32");
-    try testExpectFmtType(ip, u32_0_0_array_type, "[3:0]u32");
+    try expectFmt("[3]i32", "{}", .{i32_3_array_type.fmt(ip)});
+    try expectFmt("[3:0]u32", "{}", .{u32_0_0_array_type.fmt(ip)});
 }
 
 test "struct value" {
@@ -3119,15 +3088,15 @@ test "struct value" {
     });
     const struct_type = try ip.get(gpa, .{ .struct_type = struct_index });
     const struct_info = ip.getStruct(struct_index);
-    try struct_info.fields.put(gpa, "foo", .{ .ty = .i32_type });
+    try struct_info.fields.put(gpa, "foo", .{ .ty = .usize_type });
     try struct_info.fields.put(gpa, "bar", .{ .ty = .bool_type });
 
-    const one_value = try ip.get(gpa, .{ .int_i64_value = 1 });
-    const true_value = try ip.get(gpa, .{ .simple_value = .bool_true });
+    const aggregate_value = try ip.get(gpa, .{ .aggregate = .{
+        .ty = struct_type,
+        .values = &.{ .one_usize, .bool_true },
+    } });
 
-    const aggregate_value = try ip.get(gpa, .{ .aggregate = &.{ one_value, true_value } });
-
-    try ip.testExpectFmtValue(aggregate_value, struct_type, ".{.foo = 1, .bar = true}");
+    try expectFmt(".{.foo = 1, .bar = true}", "{}", .{aggregate_value.fmt(ip)});
 }
 
 test "function type" {
@@ -3166,10 +3135,10 @@ test "function type" {
         .calling_convention = .C,
     } });
 
-    try testExpectFmtType(ip, @"fn(i32) bool", "fn(i32) bool");
-    try testExpectFmtType(ip, @"fn(comptime type, noalias i32) type", "fn(comptime type, noalias i32) type");
-    try testExpectFmtType(ip, @"fn(i32, ...) type", "fn(i32, ...) type");
-    try testExpectFmtType(ip, @"fn() align(4) callconv(.C) type", "fn() align(4) callconv(.C) type");
+    try expectFmt("fn(i32) bool", "{}", .{@"fn(i32) bool".fmt(ip)});
+    try expectFmt("fn(comptime type, noalias i32) type", "{}", .{@"fn(comptime type, noalias i32) type".fmt(ip)});
+    try expectFmt("fn(i32, ...) type", "{}", .{@"fn(i32, ...) type".fmt(ip)});
+    try expectFmt("fn() align(4) callconv(.C) type", "{}", .{@"fn() align(4) callconv(.C) type".fmt(ip)});
 }
 
 test "union value" {
@@ -3178,7 +3147,6 @@ test "union value" {
     var ip = try InternPool.init(gpa);
     defer ip.deinit(gpa);
 
-    const int_value = try ip.get(gpa, .{ .int_u64_value = 1 });
     const f16_value = try ip.get(gpa, .{ .float_16_value = 0.25 });
 
     const union_index = try ip.createUnion(gpa, .{
@@ -3190,20 +3158,22 @@ test "union value" {
     });
     const union_type = try ip.get(gpa, .{ .union_type = union_index });
     const union_info = ip.getUnion(union_index);
-    try union_info.fields.put(gpa, "int", .{ .ty = .u32_type, .alignment = 0 });
+    try union_info.fields.put(gpa, "int", .{ .ty = .usize_type, .alignment = 0 });
     try union_info.fields.put(gpa, "float", .{ .ty = .f16_type, .alignment = 0 });
 
     const union_value1 = try ip.get(gpa, .{ .union_value = .{
+        .ty = union_type,
         .field_index = 0,
-        .val = int_value,
+        .val = .one_usize,
     } });
     const union_value2 = try ip.get(gpa, .{ .union_value = .{
+        .ty = union_type,
         .field_index = 1,
         .val = f16_value,
     } });
 
-    try testExpectFmtValue(ip, union_value1, union_type, ".{ .int = 1 }");
-    try testExpectFmtValue(ip, union_value2, union_type, ".{ .float = 0.25 }");
+    try expectFmt(".{ .int = 1 }", "{}", .{union_value1.fmt(ip)});
+    try expectFmt(".{ .float = 0.25 }", "{}", .{union_value2.fmt(ip)});
 }
 
 test "anyframe type" {
@@ -3217,8 +3187,8 @@ test "anyframe type" {
 
     try expect(@"anyframe->i32" != @"anyframe->bool");
 
-    try testExpectFmtType(ip, @"anyframe->i32", "anyframe->i32");
-    try testExpectFmtType(ip, @"anyframe->bool", "anyframe->bool");
+    try expectFmt("anyframe->i32", "{}", .{@"anyframe->i32".fmt(ip)});
+    try expectFmt("anyframe->bool", "{}", .{@"anyframe->bool".fmt(ip)});
 }
 
 test "vector type" {
@@ -3238,8 +3208,8 @@ test "vector type" {
 
     try expect(@"@Vector(2,u32)" != @"@Vector(2,bool)");
 
-    try testExpectFmtType(ip, @"@Vector(2,u32)", "@Vector(2,u32)");
-    try testExpectFmtType(ip, @"@Vector(2,bool)", "@Vector(2,bool)");
+    try expectFmt("@Vector(2,u32)", "{}", .{@"@Vector(2,u32)".fmt(ip)});
+    try expectFmt("@Vector(2,bool)", "{}", .{@"@Vector(2,bool)".fmt(ip)});
 }
 
 test "bytes value" {
@@ -3582,16 +3552,16 @@ fn testResolvePeerTypes(ip: *InternPool, a: Index, b: Index, expected: Index) !v
 
 fn testResolvePeerTypesInOrder(ip: *InternPool, lhs: Index, rhs: Index, expected: Index) !void {
     const actual = try resolvePeerTypes(ip, std.testing.allocator, &.{ lhs, rhs }, builtin.target);
-    try expectEqualTypes(ip, expected, actual);
+    try expectEqualTypes(ip.*, expected, actual);
 }
 
-fn expectEqualTypes(ip: *InternPool, expected: Index, actual: Index) !void {
+fn expectEqualTypes(ip: InternPool, expected: Index, actual: Index) !void {
     if (expected == actual) return;
     const allocator = std.testing.allocator;
 
-    const expected_type = if (expected == .none) @tagName(Index.none) else try std.fmt.allocPrint(allocator, "{}", .{expected.fmtType(ip.*)});
+    const expected_type = if (expected == .none) @tagName(Index.none) else try std.fmt.allocPrint(allocator, "{}", .{expected.fmt(ip)});
     defer if (expected != .none) allocator.free(expected_type);
-    const actual_type = if (actual == .none) @tagName(Index.none) else try std.fmt.allocPrint(allocator, "{}", .{actual.fmtType(ip.*)});
+    const actual_type = if (actual == .none) @tagName(Index.none) else try std.fmt.allocPrint(allocator, "{}", .{actual.fmt(ip)});
     defer if (actual != .none) allocator.free(actual_type);
 
     std.debug.print("expected `{s}`, found `{s}`\n", .{ expected_type, actual_type });

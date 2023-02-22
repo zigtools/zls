@@ -64,7 +64,7 @@ pub fn dotCompletions(
                 try completions.append(arena, .{
                     .label = "ptr",
                     .kind = .Field,
-                    .detail = try std.fmt.allocPrint(arena, "ptr: {}", .{many_ptr_info.fmtType(ip.*)}),
+                    .detail = try std.fmt.allocPrint(arena, "ptr: {}", .{many_ptr_info.fmt(ip.*)}),
                 });
                 try completions.append(arena, .{
                     .label = "len",
@@ -107,7 +107,7 @@ pub fn dotCompletions(
             try completions.append(arena, .{
                 .label = "?",
                 .kind = .Operator,
-                .detail = try std.fmt.allocPrint(arena, "{}", .{optional_info.payload_type.fmtType(ip.*)}),
+                .detail = try std.fmt.allocPrint(arena, "{}", .{optional_info.payload_type.fmt(ip.*)}),
             });
         },
         .enum_type => |enum_index| {
@@ -116,7 +116,7 @@ pub fn dotCompletions(
                 try completions.append(arena, .{
                     .label = field_name,
                     .kind = .Field,
-                    .detail = try std.fmt.allocPrint(arena, "{}", .{field_value.fmtValue(enum_info.tag_type, ip.*)}),
+                    .detail = try std.fmt.allocPrint(arena, "{}", .{field_value.fmt(ip.*)}),
                 });
             }
         },
@@ -130,9 +130,9 @@ pub fn dotCompletions(
                     .label = label,
                     .kind = .Field,
                     .detail = if (field.alignment != 0)
-                        try std.fmt.allocPrint(arena, "{s}: align({d}) {}", .{ label, field.alignment, field.ty.fmtType(ip.*) })
+                        try std.fmt.allocPrint(arena, "{s}: align({d}) {}", .{ label, field.alignment, field.ty.fmt(ip.*) })
                     else
-                        try std.fmt.allocPrint(arena, "{s}: {}", .{ label, field.ty.fmtType(ip.*) }),
+                        try std.fmt.allocPrint(arena, "{s}: {}", .{ label, field.ty.fmt(ip.*) }),
                 });
             }
         },
@@ -141,7 +141,7 @@ pub fn dotCompletions(
                 try completions.append(arena, .{
                     .label = try std.fmt.allocPrint(arena, "{d}", .{i}),
                     .kind = .Field,
-                    .detail = try std.fmt.allocPrint(arena, "{d}: {}", .{ i, tuple_ty.fmtType(ip.*) }),
+                    .detail = try std.fmt.allocPrint(arena, "{d}: {}", .{ i, tuple_ty.fmt(ip.*) }),
                 });
             }
         },
@@ -166,6 +166,7 @@ pub fn dotCompletions(
 
         .bytes,
         .aggregate,
+        .slice,
         .union_value,
         => unreachable,
     }
@@ -194,9 +195,9 @@ fn formatFieldDetail(
     if (field.alignment != 0) {
         try writer.print("align({d}) ", .{field.alignment});
     }
-    try writer.print("{}", .{field.ty.fmtType(ctx.ip.*)});
+    try writer.print("{}", .{field.ty.fmt(ctx.ip.*)});
     if (field.default_value != .none) {
-        try writer.print(" = {},", .{field.default_value.fmtValue(field.ty, ctx.ip.*)});
+        try writer.print(" = {},", .{field.default_value.fmt(ctx.ip.*)});
     }
 }
 

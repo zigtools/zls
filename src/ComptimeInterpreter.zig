@@ -246,7 +246,7 @@ pub fn interpret(
                         container_field.ast.type_expr,
                         "expected_type",
                         "expected type 'type', found '{}'",
-                        .{init_type_value.ty.fmtType(interpreter.ip)},
+                        .{init_type_value.ty.fmt(interpreter.ip)},
                     );
                     continue;
                 }
@@ -416,19 +416,10 @@ pub fn interpret(
             });
 
             if (simples.get(identifier)) |index| {
-                const ty: Index = switch (index) {
-                    .undefined_value => .undefined_type,
-                    .void_value => .void_type,
-                    .unreachable_value => .noreturn_type,
-                    .null_value => .null_type,
-                    .bool_true => .bool_type,
-                    .bool_false => .bool_type,
-                    else => .type_type,
-                };
                 return InterpretResult{ .value = Value{
                     .interpreter = interpreter,
                     .node_idx = node_idx,
-                    .ty = ty,
+                    .ty = interpreter.ip.indexToKey(index).typeOf(),
                     .val = index,
                 } };
             }
@@ -558,7 +549,10 @@ pub fn interpret(
                     break :blk true;
                 },
                 .array_type => |array_info| blk: {
-                    const len_value = try interpreter.ip.get(interpreter.allocator, .{ .int_u64_value = array_info.len });
+                    const len_value = try interpreter.ip.get(interpreter.allocator, .{ .int_u64_value = .{
+                        .ty = .comptime_int_type,
+                        .int = array_info.len,
+                    } });
 
                     if (std.mem.eql(u8, field_name, "len")) {
                         return InterpretResult{ .value = Value{
@@ -577,7 +571,7 @@ pub fn interpret(
                             node_idx,
                             "null_unwrap",
                             "tried to unwrap optional of type `{}` which was null",
-                            .{irv.ty.fmtType(interpreter.ip)},
+                            .{irv.ty.fmt(interpreter.ip)},
                         );
                         return error.InvalidOperation;
                     } else {
@@ -597,7 +591,7 @@ pub fn interpret(
                             if (irv.val == .none) break :found_val .none;
                             const val_key = interpreter.ip.indexToKey(irv.val);
                             if (val_key != .aggregate) break :found_val .none;
-                            break :found_val val_key.aggregate[field_index];
+                            break :found_val val_key.aggregate.values[field_index];
                         };
 
                         return InterpretResult{ .value = Value{
@@ -627,14 +621,14 @@ pub fn interpret(
                         node_idx,
                         "undeclared_identifier",
                         "`{}` has no member '{s}'",
-                        .{ accessed_ty.fmtType(interpreter.ip), field_name },
+                        .{ accessed_ty.fmt(interpreter.ip), field_name },
                     );
                 } else {
                     try interpreter.recordError(
                         node_idx,
                         "invalid_field_access",
                         "`{}` does not support field access",
-                        .{accessed_ty.fmtType(interpreter.ip)},
+                        .{accessed_ty.fmt(interpreter.ip)},
                     );
                 }
             }
@@ -703,16 +697,23 @@ pub fn interpret(
                         .float_128_value = try std.fmt.parseFloat(f128, s),
                     },
                     .int => if (s[0] == '-') Key{
-                        .int_i64_value = try std.fmt.parseInt(i64, s, 0),
+                        .int_i64_value = .{
+                            .ty = number_type,
+                            .int = try std.fmt.parseInt(i64, s, 0),
+                        },
                     } else Key{
-                        .int_u64_value = try std.fmt.parseInt(u64, s, 0),
+                        .int_u64_value = .{
+                            .ty = number_type,
+                            .int = try std.fmt.parseInt(u64, s, 0),
+                        },
                     },
                     .big_int => |base| blk: {
                         var big_int = try std.math.big.int.Managed.init(interpreter.allocator);
                         defer big_int.deinit();
                         const prefix_length: usize = if (base != .decimal) 2 else 0;
                         try big_int.setString(@enumToInt(base), s[prefix_length..]);
-                        break :blk Key{ .int_big_value = big_int.toConst() };
+                        std.debug.assert(number_type == .comptime_int_type);
+                        break :blk Key{ .int_big_value = .{ .ty = number_type, .int = big_int.toConst() } };
                     },
                     .failure => return error.CriticalAstFailure,
                 },
@@ -790,7 +791,7 @@ pub fn interpret(
                         try writer.writeAll("indeterminate");
                         continue;
                     };
-                    try writer.print("@as({}, {})", .{ value.ty.fmtType(interpreter.ip), value.val.fmtValue(value.ty, interpreter.ip) });
+                    try writer.print("@as({}, {})", .{ value.ty.fmt(interpreter.ip), value.val.fmt(interpreter.ip) });
                     if (index != params.len - 1)
                         try writer.writeAll(", ");
                 }
@@ -914,7 +915,7 @@ pub fn interpret(
                 .elem_type = try interpreter.ip.get(interpreter.allocator, Key{ .array_type = .{
                     .child = Index.u8_type,
                     .len = @intCast(u64, str.len),
-                    .sentinel = try interpreter.ip.get(interpreter.allocator, Key{ .int_u64_value = 0 }),
+                    .sentinel = try interpreter.ip.get(interpreter.allocator, Key{ .int_u64_value = .{ .ty = .u8_type, .int = 0 } }),
                 } }),
                 .sentinel = .none,
                 .alignment = 0,
@@ -1041,7 +1042,7 @@ pub fn interpret(
                     node_idx,
                     "invalid_deref",
                     "expected type `bool` but got `{}`",
-                    .{value.ty.fmtType(interpreter.ip)},
+                    .{value.ty.fmt(interpreter.ip)},
                 );
                 return error.InvalidOperation;
             }
@@ -1149,7 +1150,7 @@ pub fn call(
                 param.type_expr,
                 "expected_type",
                 "expected type 'type', found '{}'",
-                .{tex.ty.fmtType(interpreter.ip)},
+                .{tex.ty.fmt(interpreter.ip)},
             );
             return error.InvalidCast;
         }
