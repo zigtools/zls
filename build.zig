@@ -79,27 +79,14 @@ pub fn build(b: *std.build.Builder) !void {
 
     exe_options.addOption([:0]const u8, "version", try b.allocator.dupeZ(u8, version));
 
-    const KNOWN_FOLDERS_DEFAULT_PATH = "src/known-folders/known-folders.zig";
-    const known_folders_path = b.option([]const u8, "known-folders", "Path to known-folders package (default: " ++ KNOWN_FOLDERS_DEFAULT_PATH ++ ")") orelse KNOWN_FOLDERS_DEFAULT_PATH;
-    const known_folders_module = b.createModule(.{ .source_file = .{ .path = known_folders_path } });
+    const known_folders_module = b.dependency("known_folders", .{}).module("known-folders");
     exe.addModule("known-folders", known_folders_module);
 
-    const TRES_DEFAULT_PATH = "src/tres/tres.zig";
-    const tres_path = b.option([]const u8, "tres", "Path to tres package (default: " ++ TRES_DEFAULT_PATH ++ ")") orelse TRES_DEFAULT_PATH;
-    const tres_module = b.createModule(.{ .source_file = .{ .path = tres_path } });
+    const tres_module = b.dependency("tres", .{}).module("tres");
     exe.addModule("tres", tres_module);
 
-    const DIFFZ_DEFAULT_PATH = "src/diffz/DiffMatchPatch.zig";
-    const diffz_path = b.option([]const u8, "diffz", "Path to diffz package (default: " ++ DIFFZ_DEFAULT_PATH ++ ")") orelse DIFFZ_DEFAULT_PATH;
-    const diffz_module = b.createModule(.{ .source_file = .{ .path = diffz_path } });
+    const diffz_module = b.dependency("diffz", .{}).module("diffz");
     exe.addModule("diffz", diffz_module);
-
-    const check_submodules_step = CheckSubmodulesStep.init(b, &.{
-        known_folders_path,
-        tres_path,
-        diffz_path,
-    });
-    b.getInstallStep().dependOn(&check_submodules_step.step);
 
     if (enable_tracy) {
         const client_cpp = "src/tracy/TracyClient.cpp";
@@ -140,7 +127,6 @@ pub fn build(b: *std.build.Builder) !void {
     if (b.args) |args| gen_cmd.addArgs(args);
 
     const gen_step = b.step("gen", "Regenerate config files");
-    gen_step.dependOn(&check_submodules_step.step);
     gen_step.dependOn(&gen_cmd.step);
 
     const test_step = b.step("test", "Run all the tests");
@@ -197,35 +183,3 @@ pub fn build(b: *std.build.Builder) !void {
     src_tests.setFilter(test_filter);
     test_step.dependOn(&src_tests.step);
 }
-
-const CheckSubmodulesStep = struct {
-    step: std.Build.Step,
-    builder: *std.Build,
-    submodules: []const []const u8,
-
-    pub fn init(builder: *std.Build, submodules: []const []const u8) *CheckSubmodulesStep {
-        var self = builder.allocator.create(CheckSubmodulesStep) catch unreachable;
-        self.* = CheckSubmodulesStep{
-            .builder = builder,
-            .step = std.Build.Step.init(.custom, "Check Submodules", builder.allocator, make),
-            .submodules = builder.allocator.dupe([]const u8, submodules) catch unreachable,
-        };
-        return self;
-    }
-
-    fn make(step: *std.Build.Step) anyerror!void {
-        const self = @fieldParentPtr(CheckSubmodulesStep, "step", step);
-        for (self.submodules) |path| {
-            const access = std.fs.accessAbsolute(self.builder.pathFromRoot(path), .{});
-            if (access == error.FileNotFound) {
-                std.debug.print(
-                    \\Did you clone ZLS with `git clone --recurse-submodules https://github.com/zigtools/zls`?
-                    \\If not you can fix this with `git submodule update --init --recursive`.
-                    \\
-                    \\
-                , .{});
-                break;
-            }
-        }
-    }
-};
