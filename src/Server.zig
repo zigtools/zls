@@ -1364,30 +1364,32 @@ fn completeBuiltin(server: *Server) error{OutOfMemory}!?[]types.CompletionItem {
 
     const allocator = server.arena.allocator();
 
-    const builtin_completions = if (server.builtin_completions) |completions|
-        return completions.items
-    else blk: {
-        server.builtin_completions = try std.ArrayListUnmanaged(types.CompletionItem).initCapacity(server.allocator, data.builtins.len);
-        break :blk &server.builtin_completions.?;
+    const builtin_completions = blk: {
+        if (server.builtin_completions) |completions| {
+            break :blk completions;
+        } else {
+            server.builtin_completions = try std.ArrayListUnmanaged(types.CompletionItem).initCapacity(server.allocator, data.builtins.len);
+            for (data.builtins) |builtin| {
+                const use_snippets = server.config.enable_snippets and server.client_capabilities.supports_snippets;
+                const insert_text = if (use_snippets) builtin.snippet else builtin.name;
+                server.builtin_completions.?.appendAssumeCapacity(.{
+                    .label = builtin.name,
+                    .kind = .Function,
+                    .filterText = builtin.name[1..],
+                    .detail = builtin.signature,
+                    .insertText = if (server.config.include_at_in_builtins) insert_text else insert_text[1..],
+                    .insertTextFormat = if (use_snippets) .Snippet else .PlainText,
+                    .documentation = .{
+                        .MarkupContent = .{
+                            .kind = .markdown,
+                            .value = builtin.documentation,
+                        },
+                    },
+                });
+            }
+            break :blk server.builtin_completions.?;
+        }
     };
-
-    for (data.builtins) |builtin| {
-        const insert_text = if (server.config.enable_snippets) builtin.snippet else builtin.name;
-        builtin_completions.appendAssumeCapacity(.{
-            .label = builtin.name,
-            .kind = .Function,
-            .filterText = builtin.name[1..],
-            .detail = builtin.signature,
-            .insertText = if (server.config.include_at_in_builtins) insert_text else insert_text[1..],
-            .insertTextFormat = if (server.config.enable_snippets) .Snippet else .PlainText,
-            .documentation = .{
-                .MarkupContent = .{
-                    .kind = .markdown,
-                    .value = builtin.documentation,
-                },
-            },
-        });
-    }
 
     var completions = try builtin_completions.clone(allocator);
 
@@ -1984,11 +1986,9 @@ fn initializedHandler(server: *Server, notification: types.InitializedParams) Er
         try server.requestConfiguration();
 }
 
-fn shutdownHandler(server: *Server, _: void) Error!?void {
+fn shutdownHandler(server: *Server, _: void) Error!void {
     defer server.status = .shutdown;
     if (server.status != .initialized) return error.InvalidRequest; // received a shutdown request but the server is not initialized!
-
-    return null;
 }
 
 fn exitHandler(server: *Server, _: void) Error!void {
