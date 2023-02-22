@@ -392,16 +392,16 @@ pub fn main() !void {
 
     try updateConfig(allocator, &config.config, record_file, replay_file);
 
-    var server = try Server.init(
+    const server = try Server.create(
         allocator,
         &config.config,
         config.config_path,
         record_file != null,
         replay_file != null,
     );
-    defer server.deinit();
+    defer server.destroy();
 
-    try loop(&server, record_file, replay_file);
+    try loop(server, record_file, replay_file);
 
     if (server.status == .exiting_failure) {
         std.process.exit(1);

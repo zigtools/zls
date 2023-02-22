@@ -1,6 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
+const ZigVersionWrapper = @import("ZigVersionWrapper.zig");
 const tracy = @import("tracy.zig");
 const known_folders = @import("known-folders");
 
@@ -60,7 +61,7 @@ pub fn loadFromFolder(allocator: std.mem.Allocator, folder_path: []const u8) ?Co
 }
 
 /// Invoke this once all config values have been changed.
-pub fn configChanged(config: *Config, allocator: std.mem.Allocator, builtin_creation_dir: ?[]const u8) !void {
+pub fn configChanged(config: *Config, runtime_zig_version: *?ZigVersionWrapper, allocator: std.mem.Allocator, builtin_creation_dir: ?[]const u8) !void {
     if (!std.process.can_spawn) return;
     // Find the zig executable in PATH
     find_zig: {
@@ -78,22 +79,34 @@ pub fn configChanged(config: *Config, allocator: std.mem.Allocator, builtin_crea
     if (config.zig_exe_path) |exe_path| blk: {
         logger.info("Using zig executable {s}", .{exe_path});
 
-        if (config.zig_lib_path != null and config.build_runner_global_cache_path != null) break :blk;
-
         var env = getZigEnv(allocator, exe_path) orelse break :blk;
         defer std.json.parseFree(Env, env, .{ .allocator = allocator });
 
-        if (config.zig_lib_path == null) {
-            // Make sure the path is absolute
-            config.zig_lib_path = try std.fs.realpathAlloc(allocator, env.lib_dir.?);
-            logger.info("Using zig lib path '{s}'", .{config.zig_lib_path.?});
-        }
+        if (config.zig_lib_path) |lib_path| allocator.free(lib_path);
+        // Make sure the path is absolute
+        config.zig_lib_path = try std.fs.realpathAlloc(allocator, env.lib_dir.?);
+        logger.info("Using zig lib path '{s}'", .{config.zig_lib_path.?});
 
-        if (config.build_runner_global_cache_path == null) {
-            config.build_runner_global_cache_path = try allocator.dupe(u8, env.global_cache_dir);
-            logger.info("Using build runner global cache path '{s}'", .{config.build_runner_global_cache_path.?});
-        }
+        if (config.build_runner_global_cache_path) |global_cache_path| allocator.free(global_cache_path);
+        config.build_runner_global_cache_path = try allocator.dupe(u8, env.global_cache_dir);
+        logger.info("Using build runner global cache path '{s}'", .{config.build_runner_global_cache_path.?});
+
+        if (runtime_zig_version.*) |current_version| current_version.free();
+        errdefer runtime_zig_version.* = null;
+
+        const duped_zig_version_string = try allocator.dupe(u8, env.version);
+        errdefer allocator.free(duped_zig_version_string);
+
+        logger.info("Detected runtime zig version: '{s}'", .{duped_zig_version_string});
+
+        runtime_zig_version.* = .{
+            .version = try std.SemanticVersion.parse(duped_zig_version_string),
+            .allocator = allocator,
+            .raw_string = duped_zig_version_string,
+        };
     } else {
+        if (runtime_zig_version.*) |version| version.free();
+        runtime_zig_version.* = null;
         logger.warn("Zig executable path not specified in zls.json and could not be found in PATH", .{});
     }
 

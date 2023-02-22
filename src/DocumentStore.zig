@@ -10,6 +10,7 @@ const BuildAssociatedConfig = @import("BuildAssociatedConfig.zig");
 const BuildConfig = @import("special/build_runner.zig").BuildConfig;
 const tracy = @import("tracy.zig");
 const Config = @import("Config.zig");
+const ZigVersionWrapper = @import("ZigVersionWrapper.zig");
 const translate_c = @import("translate_c.zig");
 const ComptimeInterpreter = @import("ComptimeInterpreter.zig");
 
@@ -91,6 +92,7 @@ pub const Handle = struct {
 
 allocator: std.mem.Allocator,
 config: *const Config,
+runtime_zig_version: *const ?ZigVersionWrapper,
 handles: std.StringArrayHashMapUnmanaged(*Handle) = .{},
 build_files: std.StringArrayHashMapUnmanaged(BuildFile) = .{},
 cimports: std.AutoArrayHashMapUnmanaged(Hash, translate_c.Result) = .{},
@@ -244,7 +246,12 @@ pub fn applySave(self: *DocumentStore, handle: *const Handle) !void {
     if (std.process.can_spawn and isBuildFile(handle.uri)) {
         const build_file = self.build_files.getPtr(handle.uri).?;
 
-        const build_config = loadBuildConfiguration(self.allocator, build_file.*, self.config.*) catch |err| {
+        const build_config = loadBuildConfiguration(
+            self.allocator,
+            build_file.*,
+            self.config.*,
+            self.runtime_zig_version.*.?, // if we have the path to zig we should have the zig version
+        ) catch |err| {
             log.err("Failed to load build configuration for {s} (error: {})", .{ build_file.uri, err });
             return;
         };
@@ -406,6 +413,7 @@ fn loadBuildConfiguration(
     allocator: std.mem.Allocator,
     build_file: BuildFile,
     config: Config,
+    runtime_zig_version: ZigVersionWrapper,
 ) !BuildConfig {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
@@ -420,18 +428,39 @@ fn loadBuildConfiguration(
     // TODO extract this option from `BuildAssociatedConfig.BuildOption`
     const zig_cache_root: []const u8 = try std.fs.path.join(arena_allocator, &.{ directory_path, "zig-cache" });
 
-    const build_module = try std.fmt.allocPrint(arena_allocator, "@build@::{s}", .{build_file_path});
+    // introduction of modified module cli arguments https://github.com/ziglang/zig/pull/14664
+    const module_version = comptime std.SemanticVersion.parse("0.11.0-dev.1782+b52be973d") catch unreachable;
+    const use_new_module_cli = runtime_zig_version.version.order(module_version) != .lt;
 
-    const standard_args = [_][]const u8{
+    const standard_args = if (use_new_module_cli) blk: {
+        const build_module = try std.fmt.allocPrint(arena_allocator, "@build@::{s}", .{build_file_path});
+
+        break :blk [_][]const u8{
+            config.zig_exe_path.?,
+            "run",
+            config.build_runner_path.?,
+            "--cache-dir",
+            config.global_cache_path.?,
+            "--mod",
+            build_module,
+            "--deps",
+            "@build@",
+            "--",
+            config.zig_exe_path.?,
+            directory_path,
+            zig_cache_root,
+            config.build_runner_global_cache_path.?,
+        };
+    } else [_][]const u8{
         config.zig_exe_path.?,
         "run",
         config.build_runner_path.?,
         "--cache-dir",
         config.global_cache_path.?,
-        "--mod",
-        build_module,
-        "--deps",
+        "--pkg-begin",
         "@build@",
+        build_file_path,
+        "--pkg-end",
         "--",
         config.zig_exe_path.?,
         directory_path,
@@ -563,7 +592,12 @@ fn createBuildFile(self: *const DocumentStore, uri: Uri) error{OutOfMemory}!Buil
 
     // TODO: Do this in a separate thread?
     // It can take quite long.
-    if (loadBuildConfiguration(self.allocator, build_file, self.config.*)) |build_config| {
+    if (loadBuildConfiguration(
+        self.allocator,
+        build_file,
+        self.config.*,
+        self.runtime_zig_version.*.?, // if we have the path to zig we should have the zig version
+    )) |build_config| {
         build_file.config = build_config;
     } else |err| {
         log.err("Failed to load build configuration for {s} (error: {})", .{ build_file.uri, err });
