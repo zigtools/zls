@@ -420,16 +420,18 @@ fn loadBuildConfiguration(
     // TODO extract this option from `BuildAssociatedConfig.BuildOption`
     const zig_cache_root: []const u8 = try std.fs.path.join(arena_allocator, &.{ directory_path, "zig-cache" });
 
+    const build_module = try std.fmt.allocPrint(arena_allocator, "@build@::{s}", .{build_file_path});
+
     const standard_args = [_][]const u8{
         config.zig_exe_path.?,
         "run",
         config.build_runner_path.?,
         "--cache-dir",
         config.global_cache_path.?,
-        "--pkg-begin",
+        "--mod",
+        build_module,
+        "--deps",
         "@build@",
-        build_file_path,
-        "--pkg-end",
         "--",
         config.zig_exe_path.?,
         directory_path,
