@@ -523,6 +523,17 @@ pub const builtins = [_]Builtin{
         },
     },
     .{
+        .name = "@constCast",
+        .signature = "@constCast(value: anytype) DestType",
+        .snippet = "@constCast(${1:value: anytype})",
+        .documentation =
+        \\Remove `const` qualifier from a pointer.
+        ,
+        .arguments = &.{
+            "value: anytype",
+        },
+    },
+    .{
         .name = "@ctz",
         .signature = "@ctz(operand: anytype)",
         .snippet = "@ctz(${1:operand: anytype})",
@@ -1045,7 +1056,7 @@ pub const builtins = [_]Builtin{
         \\
         \\This function is a low level intrinsic with no safety mechanisms. Most code should not use this function, instead using something like this:
         \\
-        \\`for (source[0..byte_count]) |b, i| dest[i] = b;`
+        \\`for (dest, source[0..byte_count]) |*d, s| d.* = s;`
         \\The optimizer is intelligent enough to turn the above snippet into a memcpy.
         \\
         \\There is also a standard library function for this:
@@ -1252,7 +1263,8 @@ pub const builtins = [_]Builtin{
         \\
         \\`@ptrCast` cannot be used for:
         \\
-        \\ - Removing `const` or `volatile` qualifier, use [@qualCast](https://ziglang.org/documentation/master/#qualCast).
+        \\ - Removing `const` qualifier, use [@constCast](https://ziglang.org/documentation/master/#constCast).
+        \\ - Removing `volatile` qualifier, use [@volatileCast](https://ziglang.org/documentation/master/#volatileCast).
         \\ - Changing pointer address space, use [@addrSpaceCast](https://ziglang.org/documentation/master/#addrSpaceCast).
         \\ - Increasing pointer alignment, use [@alignCast](https://ziglang.org/documentation/master/#alignCast).
         \\ - Casting a non-slice pointer to a slice, use slicing syntax `ptr[start..end]`.
@@ -1272,18 +1284,6 @@ pub const builtins = [_]Builtin{
         \\To convert the other way, use [@intToPtr](https://ziglang.org/documentation/master/#intToPtr)
         ,
         .arguments = &.{
-            "value: anytype",
-        },
-    },
-    .{
-        .name = "@qualCast",
-        .signature = "@qualCast(comptime DestType: type, value: anytype) DestType",
-        .snippet = "@qualCast(${1:comptime DestType: type}, ${2:value: anytype})",
-        .documentation =
-        \\Remove `const` or `volatile` qualifier from a pointer.
-        ,
-        .arguments = &.{
-            "comptime DestType: type",
             "value: anytype",
         },
     },
@@ -2005,6 +2005,17 @@ pub const builtins = [_]Builtin{
         .arguments = &.{
             "len: comptime_int",
             "Element: type",
+        },
+    },
+    .{
+        .name = "@volatileCast",
+        .signature = "@volatileCast(value: anytype) DestType",
+        .snippet = "@volatileCast(${1:value: anytype})",
+        .documentation =
+        \\Remove `volatile` qualifier from a pointer.
+        ,
+        .arguments = &.{
+            "value: anytype",
         },
     },
 };
