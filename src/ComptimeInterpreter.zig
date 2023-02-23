@@ -311,12 +311,12 @@ pub fn interpret(
                     return InterpretResult{ .nothing = {} };
                 }
             }
-            // TODO validate that init_value has the type of type_value
+            // TODO coerce `init_value` into `type_value`
 
             const decl = interpreter.ip.getDecl(decl_index);
-            decl.index = if (init_value) |init| init.index else try interpreter.ip.get(interpreter.allocator, .{
-                .unknown_value = .{ .ty = type_value.?.index },
-            });
+            decl.index = if (type_value) |v| try interpreter.ip.get(interpreter.allocator, .{
+                .unknown_value = .{ .ty = v.index },
+            }) else init_value.?.index;
 
             // TODO: Am I a dumbo shrimp? (e.g. is this tree shaking correct? works on my machine so like...)
 
@@ -467,14 +467,6 @@ pub fn interpret(
                 else => ty,
             };
 
-            if (val == .unknown_value) {
-                return InterpretResult{ .value = Value{
-                    .interpreter = interpreter,
-                    .node_idx = data[node_idx].rhs,
-                    .index = .unknown_unknown,
-                } };
-            }
-
             const can_have_fields: bool = switch (inner_ty) {
                 .simple_type => |simple| switch (simple) {
                     .type => blk: {
@@ -486,6 +478,15 @@ pub fn interpret(
                                 .index = decl.index,
                             } };
                         }
+
+                        if (val == .unknown_value) {
+                            return InterpretResult{ .value = Value{
+                                .interpreter = interpreter,
+                                .node_idx = data[node_idx].rhs,
+                                .index = .unknown_unknown,
+                            } };
+                        }
+
                         switch (val) {
                             .error_set_type => |error_set_info| { // TODO
                                 _ = error_set_info;

@@ -125,22 +125,21 @@ test "ComptimeInterpreter - variable lookup" {
 }
 
 test "ComptimeInterpreter - field access" {
-    if (true) return error.SkipZigTest; // TODO
     try testExpr(
         \\blk: {
         \\    const foo: struct {alpha: u64, beta: bool} = undefined;
-        \\    break :blk foo.beta;
+        \\    break :blk @TypeOf(foo.beta);
         \\}
-    , .{ .simple_type = .bool }, null);
+    , .{ .simple_type = .bool });
     try testExpr(
         \\blk: {
         \\    const foo: struct {alpha: u64, beta: bool} = undefined;
-        \\    break :blk foo.alpha;
+        \\    break :blk @TypeOf(foo.alpha);
         \\}
     , .{ .int_type = .{
         .signedness = .unsigned,
         .bits = 64,
-    } }, null);
+    } });
 }
 
 test "ComptimeInterpreter - optional operations" {
