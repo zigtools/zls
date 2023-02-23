@@ -229,6 +229,7 @@ pub const Key = union(enum) {
     float_64_value: f64,
     float_80_value: f80,
     float_128_value: f128,
+    float_comptime_value: f128,
 
     bytes: Bytes,
     optional_value: OptionalValue,
@@ -280,6 +281,7 @@ pub const Key = union(enum) {
             .float_64_value => .float_f64,
             .float_80_value => .float_f80,
             .float_128_value => .float_f128,
+            .float_comptime_value => .float_comptime,
 
             .bytes => .bytes,
             .optional_value => .optional_value,
@@ -366,6 +368,7 @@ pub const Key = union(enum) {
             .float_64_value,
             .float_80_value,
             .float_128_value,
+            .float_comptime_value,
             => unreachable,
 
             .bytes,
@@ -415,6 +418,7 @@ pub const Key = union(enum) {
             .float_64_value => .f64_type,
             .float_80_value => .f80_type,
             .float_128_value => .f128_type,
+            .float_comptime_value => .comptime_float_type,
 
             .bytes => .unknown_type, // TODO
             .optional_value => |optional_info| optional_info.ty,
@@ -664,6 +668,7 @@ pub const Key = union(enum) {
             .float_64_value,
             .float_80_value,
             .float_128_value,
+            .float_comptime_value,
             => unreachable,
 
             .bytes,
@@ -897,7 +902,9 @@ pub const Key = union(enum) {
             .float_32_value => |float| try writer.print("{d}", .{float}),
             .float_64_value => |float| try writer.print("{d}", .{float}),
             .float_80_value => |float| try writer.print("{d}", .{@floatCast(f64, float)}),
-            .float_128_value => |float| try writer.print("{d}", .{@floatCast(f64, float)}),
+            .float_128_value,
+            .float_comptime_value,
+            => |float| try writer.print("{d}", .{@floatCast(f64, float)}),
 
             .bytes => |bytes| try writer.print("\"{}\"", .{std.zig.fmtEscapes(bytes)}),
             .optional_value => |optional| {
@@ -1146,6 +1153,9 @@ pub const Tag = enum(u8) {
     /// A float value that can be represented by f128.
     /// data is payload to f128.
     float_f128,
+    /// A comptime float value.
+    /// data is payload to f128.
+    float_comptime,
 
     /// A byte sequence value.
     /// data is payload to data begin and length.
@@ -1405,6 +1415,7 @@ pub fn indexToKey(ip: InternPool, index: Index) Key {
         .float_f64 => .{ .float_64_value = ip.extraData(f64, data) },
         .float_f80 => .{ .float_80_value = ip.extraData(f80, data) },
         .float_f128 => .{ .float_128_value = ip.extraData(f128, data) },
+        .float_comptime => .{ .float_comptime_value = ip.extraData(f128, data) },
 
         .bytes => .{ .bytes = ip.extraData([]const u8, data) },
         .optional_value => .{ .optional_value = ip.extraData(OptionalValue, data) },

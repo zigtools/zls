@@ -637,6 +637,7 @@ pub fn interpret(
                 .float_64_value,
                 .float_80_value,
                 .float_128_value,
+                .float_comptime_value,
                 => unreachable,
 
                 .bytes,
@@ -745,7 +746,7 @@ pub fn interpret(
                 interpreter.allocator,
                 switch (nl) {
                     .float => Key{
-                        .float_128_value = try std.fmt.parseFloat(f128, s),
+                        .float_comptime_value = try std.fmt.parseFloat(f128, s),
                     },
                     .int => if (s[0] == '-') Key{
                         .int_i64_value = .{

@@ -18,7 +18,7 @@ test "ComptimeInterpreter - primitive types" {
     try testExpr("false", .{ .simple_value = .bool_false });
     try testExpr("5", .{ .int_u64_value = .{ .ty = .comptime_int_type, .int = 5 } });
     // TODO try testExpr("-2", .{ .int_i64_value = .{ .ty = .comptime_int, .int = -2 } });
-    // try testExpr("3.0", .{ .simple_type = .comptime_float }, null);
+    try testExpr("3.0", .{ .float_comptime_value = 3.0 });
 
     try testExpr("null", .{ .simple_value = .null_value });
     try testExpr("void", .{ .simple_type = .void });

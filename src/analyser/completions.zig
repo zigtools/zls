@@ -167,6 +167,7 @@ pub fn dotCompletions(
         .float_64_value,
         .float_80_value,
         .float_128_value,
+        .float_comptime_value,
         => unreachable,
 
         .bytes,
