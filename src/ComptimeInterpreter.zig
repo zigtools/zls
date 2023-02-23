@@ -909,13 +909,35 @@ pub fn interpret(
             }
 
             if (std.mem.eql(u8, call_name, "@TypeOf")) {
-                if (params.len != 1) return error.InvalidBuiltin;
+                if (params.len == 0) return error.InvalidBuiltin;
 
-                const value = try (try interpreter.interpret(params[0], namespace, options)).getValue();
+                const types: []Index = try interpreter.allocator.alloc(Index, params.len);
+                defer interpreter.allocator.free(types);
+
+                for (params, types) |param, *out_type| {
+                    const value = try (try interpreter.interpret(param, namespace, options)).getValue();
+                    out_type.* = interpreter.ip.indexToKey(value.index).typeOf();
+                }
+
+                const peer_type = try interpreter.ip.resolvePeerTypes(interpreter.allocator, types, builtin.target);
+
+                if (peer_type == .none) {
+                    var output = std.ArrayListUnmanaged(u8){};
+                    var writer = output.writer(interpreter.allocator);
+                    try writer.writeAll("incompatible types: ");
+                    for (types, 0..) |ty, i| {
+                        if (i != 0) try writer.writeAll(", ");
+                        try writer.print("`{}`", .{ty.fmt(interpreter.ip)});
+                    }
+
+                    try interpreter.recordError(node_idx, "invalid_typeof", "{s}", .{output.items});
+                    return error.InvalidOperation;
+                }
+
                 return InterpretResult{ .value = Value{
                     .interpreter = interpreter,
                     .node_idx = node_idx,
-                    .index = interpreter.ip.indexToKey(value.index).typeOf(),
+                    .index = peer_type,
                 } };
             }
 

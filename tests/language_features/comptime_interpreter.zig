@@ -43,6 +43,19 @@ test "ComptimeInterpreter - builtins" {
     try testExpr("@as(u32, 3)", .{ .int_u64_value = .{ .ty = .u32_type, .int = 3 } });
 }
 
+test "ComptimeInterpreter - @TypeOf" {
+    try testExpr("@TypeOf(bool)", .{ .simple_type = .type });
+    try testExpr("@TypeOf(5)", .{ .simple_type = .comptime_int });
+    try testExpr("@TypeOf(3.14)", .{ .simple_type = .comptime_float });
+
+    try testExpr("@TypeOf(bool, u32)", .{ .simple_type = .type });
+    try testExpr("@TypeOf(true, false)", .{ .simple_type = .bool });
+    try testExpr("@TypeOf(3, 2)", .{ .simple_type = .comptime_int });
+    try testExpr("@TypeOf(3.14, 2)", .{ .simple_type = .comptime_float });
+
+    try testExpr("@TypeOf(null, 2)", .{ .optional_type = .{ .payload_type = .comptime_int_type } });
+}
+
 test "ComptimeInterpreter - string literal" {
     if (true) return error.SkipZigTest; // TODO
     var context = try Context.init(
