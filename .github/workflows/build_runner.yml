@@ -3,9 +3,11 @@ name: BuildRunner
 on:
   push:
     paths:
+      - ".github/workflows/build_runner.yml"
       - "src/special/build_runner.zig"
   pull_request:
     paths:
+      - ".github/workflows/build_runner.yml"
       - "src/special/build_runner.zig"
   schedule:
     - cron: '0 0 * * *'
@@ -37,5 +39,10 @@ jobs:
           cd $RUNNER_TEMP/TEMP_ZIG_PROJECT
           zig init-exe
 
-      - name: Check build_runner builds
+      - name: Check build_runner builds on master
+        if: ${{ matrix.zig_version == 'master' }}
+        run: zig build-exe $GITHUB_WORKSPACE/src/special/build_runner.zig --mod @build@::$RUNNER_TEMP/TEMP_ZIG_PROJECT/build.zig --deps @build@
+
+      - name: Check build_runner builds on older tagged releases
+        if: ${{ matrix.zig_version != 'master' }}
         run: zig build-exe $GITHUB_WORKSPACE/src/special/build_runner.zig --pkg-begin @build@ $RUNNER_TEMP/TEMP_ZIG_PROJECT/build.zig --pkg-end

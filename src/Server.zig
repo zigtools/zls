@@ -22,6 +22,7 @@ const uri_utils = @import("uri.zig");
 const diff = @import("diff.zig");
 const ComptimeInterpreter = @import("ComptimeInterpreter.zig");
 const analyser = @import("analyser/analyser.zig");
+const ZigVersionWrapper = @import("ZigVersionWrapper.zig");
 
 const data = @import("data/data.zig");
 const snipped_data = @import("data/snippets.zig");
@@ -38,6 +39,7 @@ arena: *std.heap.ArenaAllocator = undefined,
 document_store: DocumentStore = undefined,
 builtin_completions: ?std.ArrayListUnmanaged(types.CompletionItem),
 client_capabilities: ClientCapabilities = .{},
+runtime_zig_version: ?ZigVersionWrapper,
 outgoing_messages: std.ArrayListUnmanaged([]const u8) = .{},
 recording_enabled: bool,
 replay_enabled: bool,
@@ -1847,14 +1849,8 @@ fn initializeHandler(server: *Server, request: types.InitializeParams) Error!typ
 
     server.status = .initializing;
 
-    if (server.config.zig_exe_path) |exe_path| blk: {
-        if (!std.process.can_spawn) break :blk;
-        // TODO avoid having to call getZigEnv twice
-        // once in init and here
-        const env = configuration.getZigEnv(server.allocator, exe_path) orelse break :blk;
-        defer std.json.parseFree(configuration.Env, env, .{ .allocator = server.allocator });
-
-        const zig_version = std.SemanticVersion.parse(env.version) catch break :blk;
+    if (server.runtime_zig_version) |zig_version_wrapper| {
+        const zig_version = zig_version_wrapper.version;
         const zls_version = comptime std.SemanticVersion.parse(build_options.version) catch unreachable;
 
         const zig_version_simple = std.SemanticVersion{
@@ -1881,10 +1877,6 @@ fn initializeHandler(server: *Server, request: types.InitializeParams) Error!typ
                 , .{ zig_version, zls_version });
             },
         }
-    } else {
-        server.showMessage(.Warning,
-            \\ZLS failed to find Zig. Please add Zig to your PATH or set the zig_exe_path config option in your zls.json.
-        , .{});
     }
 
     if (server.recording_enabled) {
@@ -2115,7 +2107,7 @@ fn handleConfiguration(server: *Server, json: std.json.Value) error{OutOfMemory}
     }
     log.debug("{}", .{server.client_capabilities});
 
-    configuration.configChanged(server.config, server.allocator, null) catch |err| {
+    configuration.configChanged(server.config, &server.runtime_zig_version, server.allocator, null) catch |err| {
         log.err("failed to update configuration: {}", .{err});
     };
 }
@@ -2458,7 +2450,7 @@ fn didChangeConfigurationHandler(server: *Server, request: configuration.DidChan
             }
         }
 
-        configuration.configChanged(server.config, server.allocator, null) catch |err| {
+        configuration.configChanged(server.config, &server.runtime_zig_version, server.allocator, null) catch |err| {
             log.err("failed to update config: {}", .{err});
         };
     } else if (server.client_capabilities.supports_configuration) {
@@ -3065,38 +3057,40 @@ fn processMessage(server: *Server, message: Message) Error!void {
     }
 }
 
-pub fn init(
+pub fn create(
     allocator: std.mem.Allocator,
     config: *Config,
     config_path: ?[]const u8,
     recording_enabled: bool,
     replay_enabled: bool,
-) !Server {
+) !*Server {
     // TODO replace global with something like an Analyser struct
     // which contains using_trail & resolve_trail and place it inside Server
     // see: https://github.com/zigtools/zls/issues/536
     analysis.init(allocator);
 
-    try configuration.configChanged(config, allocator, config_path);
-
-    var document_store = DocumentStore{
-        .allocator = allocator,
+    const server = try allocator.create(Server);
+    server.* = Server{
         .config = config,
-    };
-    errdefer document_store.deinit();
-
-    return Server{
-        .config = config,
+        .runtime_zig_version = null,
         .allocator = allocator,
-        .document_store = document_store,
+        .document_store = .{
+            .allocator = allocator,
+            .config = config,
+            .runtime_zig_version = &server.runtime_zig_version,
+        },
         .builtin_completions = null,
         .recording_enabled = recording_enabled,
         .replay_enabled = replay_enabled,
         .status = .uninitialized,
     };
+
+    try configuration.configChanged(config, &server.runtime_zig_version, allocator, config_path);
+
+    return server;
 }
 
-pub fn deinit(server: *Server) void {
+pub fn destroy(server: *Server) void {
     server.document_store.deinit();
     analysis.deinit();
 
@@ -3106,4 +3100,10 @@ pub fn deinit(server: *Server) void {
         server.allocator.free(message);
     }
     server.outgoing_messages.deinit(server.allocator);
+
+    if (server.runtime_zig_version) |zig_version| {
+        zig_version.free();
+    }
+
+    server.allocator.destroy(server);
 }

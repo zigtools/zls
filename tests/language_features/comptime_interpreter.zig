@@ -3,7 +3,7 @@ const zls = @import("zls");
 const builtin = @import("builtin");
 
 const Ast = std.zig.Ast;
-
+const ZigVersionWrapper = zls.ZigVersionWrapper;
 const ComptimeInterpreter = zls.ComptimeInterpreter;
 const InternPool = zls.analyser.InternPool;
 const Index = InternPool.Index;
@@ -286,7 +286,14 @@ const Context = struct {
     document_store: *zls.DocumentStore,
     interpreter: *ComptimeInterpreter,
 
+    // this is very annoying and ugly
+    boxed_null: *const ?ZigVersionWrapper,
+
     pub fn init(source: []const u8) !Context {
+        var boxed_null = try allocator.create(?ZigVersionWrapper);
+        errdefer allocator.destroy(boxed_null);
+        boxed_null.* = null;
+
         var config = try allocator.create(zls.Config);
         errdefer allocator.destroy(config);
 
@@ -300,6 +307,7 @@ const Context = struct {
         document_store.* = .{
             .allocator = allocator,
             .config = config,
+            .runtime_zig_version = boxed_null,
         };
         errdefer document_store.deinit();
 
@@ -326,6 +334,8 @@ const Context = struct {
             .config = config,
             .document_store = document_store,
             .interpreter = interpreter,
+
+            .boxed_null = boxed_null,
         };
     }
 
@@ -336,6 +346,7 @@ const Context = struct {
         allocator.destroy(self.config);
         allocator.destroy(self.document_store);
         allocator.destroy(self.interpreter);
+        allocator.destroy(self.boxed_null);
     }
 
     pub fn call(self: *Context, func_node: Ast.Node.Index, arguments: []const KV) !KV {

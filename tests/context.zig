@@ -29,7 +29,7 @@ const default_config: Config = .{
 const allocator = std.testing.allocator;
 
 pub const Context = struct {
-    server: Server,
+    server: *Server,
     arena: std.heap.ArenaAllocator,
     config: *Config,
     request_id: u32 = 1,
@@ -40,8 +40,8 @@ pub const Context = struct {
 
         config.* = default_config;
 
-        var server = try Server.init(allocator, config, null, false, false);
-        errdefer server.deinit();
+        const server = try Server.create(allocator, config, null, false, false);
+        errdefer server.destroy();
 
         var context: Context = .{
             .server = server,
@@ -63,7 +63,7 @@ pub const Context = struct {
         allocator.destroy(self.config);
 
         self.request("shutdown", "{}", null) catch {};
-        self.server.deinit();
+        self.server.destroy();
         self.arena.deinit();
     }
 

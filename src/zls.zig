@@ -16,6 +16,8 @@ pub const ComptimeInterpreter = @import("ComptimeInterpreter.zig");
 pub const diff = @import("diff.zig");
 pub const analyser = @import("analyser/analyser.zig");
 
+pub const ZigVersionWrapper = @import("ZigVersionWrapper.zig");
+
 comptime {
     const std = @import("std");
     std.testing.refAllDecls(@This());
