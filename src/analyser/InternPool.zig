@@ -187,8 +187,8 @@ pub const DeclIndex = enum(u32) { _ };
 pub const Decl = struct {
     name: []const u8,
     node_idx: u32,
-    ty: Index,
-    val: Index,
+    /// this stores both the type and the value
+    index: Index,
     alignment: u16,
     address_space: std.builtin.AddressSpace,
     is_pub: bool,
@@ -416,7 +416,7 @@ pub const Key = union(enum) {
             .float_80_value => .f80_type,
             .float_128_value => .f128_type,
 
-            .bytes => @panic("TODO"),
+            .bytes => .unknown_type, // TODO
             .optional_value => |optional_info| optional_info.ty,
             .slice => |slice_info| slice_info.ty,
             .aggregate => |aggregate_info| aggregate_info.ty,
@@ -748,7 +748,7 @@ pub const Key = union(enum) {
                 .export_options => try writer.writeAll("std.builtin.ExportOptions"),
                 .extern_options => try writer.writeAll("std.builtin.ExternOptions"),
                 .type_info => try writer.writeAll("std.builtin.Type"),
-                .unknown => try writer.writeAll("?"),
+                .unknown => try writer.writeAll("(unknown type)"),
                 .generic_poison => unreachable,
             },
             .int_type => |int_info| switch (int_info.signedness) {
@@ -936,7 +936,7 @@ pub const Key = union(enum) {
                     union_value.val.fmt(ip),
                 });
             },
-            .unknown_value => try writer.print("?", .{}),
+            .unknown_value => try writer.print("(unknown value)", .{}),
         }
         return null;
     }
@@ -1311,7 +1311,7 @@ pub fn init(gpa: Allocator) Allocator.Error!InternPool {
         .{ .index = .one_usize, .key = .{ .int_u64_value = .{ .ty = .usize_type, .int = 1 } } },
         .{ .index = .the_only_possible_value, .key = .{ .simple_value = .the_only_possible_value } },
         .{ .index = .generic_poison, .key = .{ .simple_value = .generic_poison } },
-        .{ .index = .unknown_unknown, .key = .{ .unknown_value = .{.ty = .unknown_type} } },
+        .{ .index = .unknown_unknown, .key = .{ .unknown_value = .{ .ty = .unknown_type } } },
     };
 
     const extra_count = 4 * @sizeOf(Pointer) + @sizeOf(ErrorUnion) + 4 * @sizeOf(Function) + 4 * @sizeOf(InternPool.U64Value);
@@ -1411,7 +1411,7 @@ pub fn indexToKey(ip: InternPool, index: Index) Key {
         .slice => .{ .slice = ip.extraData(Slice, data) },
         .aggregate => .{ .aggregate = ip.extraData(Aggregate, data) },
         .union_value => .{ .union_value = ip.extraData(UnionValue, data) },
-        .unknown_value => .{ .unknown_value = .{.ty = @intToEnum(Index, data)} },
+        .unknown_value => .{ .unknown_value = .{ .ty = @intToEnum(Index, data) } },
     };
 }
 

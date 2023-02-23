@@ -596,13 +596,14 @@ fn typeToCompletion(
             null,
         ),
         .primitive, .array_index => {},
-        .@"comptime" => |co| {
-            if (type_handle.type.is_type_val) {
-                try analyser.completions.dotCompletions(allocator, list, &co.interpreter.ip, co.value.ty, co.value.val, co.value.node_idx);
-            } else {
-                try analyser.completions.dotCompletions(allocator, list, &co.interpreter.ip, co.value.val, .none, co.value.node_idx);
-            }
-        },
+        .@"comptime" => |co| try analyser.completions.dotCompletions(
+            allocator,
+            list,
+            &co.interpreter.ip,
+            co.value.index,
+            type_handle.type.is_type_val,
+            co.value.node_idx,
+        ),
     }
 }
 
@@ -919,7 +920,7 @@ fn hoverSymbol(server: *Server, decl_handle: analysis.DeclWithHandle) error{OutO
 
     const resolved_type_str = if (resolved_type) |rt|
         if (rt.type.is_type_val) switch (rt.type.data) {
-            .@"comptime" => |co| try std.fmt.allocPrint(server.arena.allocator(), "{}", .{co.value.ty.fmt(co.interpreter.ip)}),
+            .@"comptime" => |co| try std.fmt.allocPrint(server.arena.allocator(), "{}", .{co.value.index.fmt(co.interpreter.ip)}),
             else => "type",
         } else switch (rt.type.data) { // TODO: Investigate random weird numbers like 897 that cause index of bounds
             .pointer,
