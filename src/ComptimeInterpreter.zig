@@ -686,20 +686,39 @@ pub fn interpret(
         .if_simple,
         => {
             const if_info = ast.fullIf(tree, node_idx).?;
-            // TODO: Don't evaluate runtime ifs
             // if (options.observe_values) {
             const ir = try interpreter.interpret(if_info.ast.cond_expr, namespace, options);
 
             const condition = (try ir.getValue()).index;
-            std.debug.assert(condition == .bool_false or condition == .bool_true);
+            const condition_val = interpreter.ip.indexToKey(condition);
+            const condition_ty = condition_val.typeOf();
 
+            switch (condition_ty) {
+                .bool_type => {},
+                .unknown_type => return InterpretResult{ .nothing = {} },
+                else => {
+                    try interpreter.recordError(
+                        if_info.ast.cond_expr,
+                        "invalid_if_condition",
+                        "expected `bool` but found `{}`",
+                        .{condition_ty.fmt(interpreter.ip)},
+                    );
+                    return error.InvalidOperation;
+                },
+            }
+            if (condition_val == .unknown_value) {
+                return InterpretResult{ .nothing = {} };
+            }
+
+            std.debug.assert(condition == .bool_false or condition == .bool_true);
             if (condition == .bool_true) {
                 return try interpreter.interpret(if_info.ast.then_expr, namespace, options);
             } else {
                 if (if_info.ast.else_expr != 0) {
                     return try interpreter.interpret(if_info.ast.else_expr, namespace, options);
-                } else return InterpretResult{ .nothing = {} };
+                }
             }
+            return InterpretResult{ .nothing = {} };
         },
         .equal_equal => {
             var a = try interpreter.interpret(data[node_idx].lhs, namespace, options);
