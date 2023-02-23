@@ -429,7 +429,7 @@ fn loadBuildConfiguration(
     const zig_cache_root: []const u8 = try std.fs.path.join(arena_allocator, &.{ directory_path, "zig-cache" });
 
     // introduction of modified module cli arguments https://github.com/ziglang/zig/pull/14664
-    const module_version = comptime std.SemanticVersion.parse("0.11.0-dev.1782+b52be973d") catch unreachable;
+    const module_version = comptime std.SemanticVersion.parse("0.11.0-dev.1718+2737dce84") catch unreachable;
     const use_new_module_cli = runtime_zig_version.version.order(module_version) != .lt;
 
     const standard_args = if (use_new_module_cli) blk: {
