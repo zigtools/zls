@@ -3,9 +3,11 @@ name: CI
 on:
   push:
     paths:
+      - ".github/workflows/main.yml"
       - "**.zig"
   pull_request:
     paths:
+      - ".github/workflows/main.yml"
       - "**.zig"
   schedule:
     - cron: "0 0 * * *"
