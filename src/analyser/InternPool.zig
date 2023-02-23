@@ -27,8 +27,8 @@ pub const Int = packed struct {
 pub const Pointer = packed struct {
     elem_type: Index,
     sentinel: Index = .none,
-    alignment: u16 = 0,
     size: std.builtin.Type.Pointer.Size,
+    alignment: u16 = 0,
     bit_offset: u16 = 0,
     host_size: u16 = 0,
     is_const: bool = false,
@@ -156,9 +156,9 @@ pub const BigInt = struct {
 
 pub const Bytes = []const u8;
 
-pub const Aggregate = struct {
+pub const OptionalValue = packed struct {
     ty: Index,
-    values: []const Index,
+    val: Index,
 };
 
 pub const Slice = packed struct {
@@ -167,15 +167,19 @@ pub const Slice = packed struct {
     len: Index,
 };
 
+pub const Aggregate = struct {
+    ty: Index,
+    values: []const Index,
+};
+
 pub const UnionValue = packed struct {
     ty: Index,
     field_index: u32,
     val: Index,
 };
 
-pub const OptionalValue = packed struct {
+pub const UnknownValue = packed struct {
     ty: Index,
-    val: Index,
 };
 
 pub const DeclIndex = enum(u32) { _ };
@@ -228,11 +232,11 @@ pub const Key = union(enum) {
 
     bytes: Bytes,
     optional_value: OptionalValue,
-    aggregate: Aggregate,
     slice: Slice,
+    aggregate: Aggregate,
     union_value: UnionValue,
+    unknown_value: UnknownValue,
 
-    // slice
     // error
     // error union
 
@@ -279,9 +283,10 @@ pub const Key = union(enum) {
 
             .bytes => .bytes,
             .optional_value => .optional_value,
-            .aggregate => .aggregate,
             .slice => .slice,
+            .aggregate => .aggregate,
             .union_value => .union_value,
+            .unknown_value => .unknown_value,
         };
     }
 
@@ -334,6 +339,7 @@ pub const Key = union(enum) {
                 .extern_options => .Struct,
                 .type_info => .Union,
 
+                .unknown => unreachable,
                 .generic_poison => unreachable,
             },
 
@@ -364,9 +370,10 @@ pub const Key = union(enum) {
 
             .bytes,
             .optional_value,
-            .aggregate,
             .slice,
+            .aggregate,
             .union_value,
+            .unknown_value,
             => unreachable,
         };
     }
@@ -414,6 +421,7 @@ pub const Key = union(enum) {
             .slice => |slice_info| slice_info.ty,
             .aggregate => |aggregate_info| aggregate_info.ty,
             .union_value => |union_info| union_info.ty,
+            .unknown_value => |unknown_info| unknown_info.ty,
         };
     }
 
@@ -589,6 +597,7 @@ pub const Key = union(enum) {
                 .type_info,
                 => Index.none,
 
+                .unknown => Index.unknown_unknown,
                 .generic_poison => unreachable,
             },
             .int_type => |int_info| {
@@ -659,23 +668,25 @@ pub const Key = union(enum) {
 
             .bytes,
             .optional_value,
-            .aggregate,
             .slice,
+            .aggregate,
             .union_value,
+            .unknown_value,
             => unreachable,
         };
     }
 
-    pub const TypeFormatContext = struct {
+    pub const FormatContext = struct {
         key: Key,
         options: FormatOptions = .{},
         ip: InternPool,
     };
 
+    // TODO add options for controling how types show be formatted
     pub const FormatOptions = struct {};
 
     fn format(
-        ctx: TypeFormatContext,
+        ctx: FormatContext,
         comptime fmt_str: []const u8,
         options: std.fmt.FormatOptions,
         writer: anytype,
@@ -737,6 +748,7 @@ pub const Key = union(enum) {
                 .export_options => try writer.writeAll("std.builtin.ExportOptions"),
                 .extern_options => try writer.writeAll("std.builtin.ExternOptions"),
                 .type_info => try writer.writeAll("std.builtin.Type"),
+                .unknown => try writer.writeAll("?"),
                 .generic_poison => unreachable,
             },
             .int_type => |int_info| switch (int_info.signedness) {
@@ -891,6 +903,12 @@ pub const Key = union(enum) {
             .optional_value => |optional| {
                 return optional.val;
             },
+            .slice => |slice_value| {
+                _ = slice_value;
+                try writer.writeAll(".{");
+                try writer.writeAll(" TODO "); // TODO
+                try writer.writeByte('}');
+            },
             .aggregate => |aggregate| {
                 if (aggregate.values.len == 0) {
                     try writer.writeAll(".{}");
@@ -909,12 +927,6 @@ pub const Key = union(enum) {
                 }
                 try writer.writeByte('}');
             },
-            .slice => |slice_value| {
-                _ = slice_value;
-                try writer.writeAll(".{");
-                try writer.writeAll(" TODO "); // TODO
-                try writer.writeByte('}');
-            },
             .union_value => |union_value| {
                 const union_info = ip.getUnion(ip.indexToKey(union_value.ty).union_type);
 
@@ -924,6 +936,7 @@ pub const Key = union(enum) {
                     union_value.val.fmt(ip),
                 });
             },
+            .unknown_value => try writer.print("?", .{}),
         }
         return null;
     }
@@ -1009,6 +1022,7 @@ pub const Index = enum(u32) {
     const_slice_u8_type,
     anyerror_void_error_union_type,
     generic_poison_type,
+    unknown_type,
 
     /// `undefined` (untyped)
     undefined_value,
@@ -1034,8 +1048,9 @@ pub const Index = enum(u32) {
     one_usize,
     the_only_possible_value,
     generic_poison,
+    // unknown value of unknown type
+    unknown_unknown,
 
-    unknown = std.math.maxInt(u32) - 1,
     none = std.math.maxInt(u32),
     _,
 
@@ -1147,6 +1162,9 @@ pub const Tag = enum(u8) {
     /// A union value.
     /// data is index to UnionValue.
     union_value,
+    /// A unknown value.
+    /// data is index to type which may also be unknown.
+    unknown_value,
 };
 
 pub const SimpleType = enum(u32) {
@@ -1191,6 +1209,7 @@ pub const SimpleType = enum(u32) {
     extern_options,
     type_info,
 
+    unknown,
     generic_poison,
 };
 
@@ -1276,6 +1295,7 @@ pub fn init(gpa: Allocator) Allocator.Error!InternPool {
         .{ .index = .const_slice_u8_type, .key = .{ .pointer_type = .{ .elem_type = .u8_type, .size = .Slice, .is_const = true } } },
         .{ .index = .anyerror_void_error_union_type, .key = .{ .error_union_type = .{ .error_set_type = .anyerror_type, .payload_type = .void_type } } },
         .{ .index = .generic_poison_type, .key = .{ .simple_type = .generic_poison } },
+        .{ .index = .unknown_type, .key = .{ .simple_type = .unknown } },
 
         .{ .index = .undefined_value, .key = .{ .simple_value = .undefined_value } },
         .{ .index = .zero, .key = .{ .int_u64_value = .{ .ty = .comptime_int_type, .int = 0 } } },
@@ -1291,6 +1311,7 @@ pub fn init(gpa: Allocator) Allocator.Error!InternPool {
         .{ .index = .one_usize, .key = .{ .int_u64_value = .{ .ty = .usize_type, .int = 1 } } },
         .{ .index = .the_only_possible_value, .key = .{ .simple_value = .the_only_possible_value } },
         .{ .index = .generic_poison, .key = .{ .simple_value = .generic_poison } },
+        .{ .index = .unknown_unknown, .key = .{ .unknown_value = .{.ty = .unknown_type} } },
     };
 
     const extra_count = 4 * @sizeOf(Pointer) + @sizeOf(ErrorUnion) + 4 * @sizeOf(Function) + 4 * @sizeOf(InternPool.U64Value);
@@ -1337,7 +1358,6 @@ pub fn deinit(ip: *InternPool, gpa: Allocator) void {
 
 pub fn indexToKey(ip: InternPool, index: Index) Key {
     assert(index != .none);
-    assert(index != .unknown);
     const item = ip.items.get(@enumToInt(index));
     const data = item.data;
     return switch (item.tag) {
@@ -1388,9 +1408,10 @@ pub fn indexToKey(ip: InternPool, index: Index) Key {
 
         .bytes => .{ .bytes = ip.extraData([]const u8, data) },
         .optional_value => .{ .optional_value = ip.extraData(OptionalValue, data) },
-        .aggregate => .{ .aggregate = ip.extraData(Aggregate, data) },
         .slice => .{ .slice = ip.extraData(Slice, data) },
+        .aggregate => .{ .aggregate = ip.extraData(Aggregate, data) },
         .union_value => .{ .union_value = ip.extraData(UnionValue, data) },
+        .unknown_value => .{ .unknown_value = .{.ty = @intToEnum(Index, data)} },
     };
 }
 
@@ -1420,6 +1441,7 @@ pub fn get(ip: *InternPool, gpa: Allocator, key: Key) Allocator.Error!Index {
         }),
         .float_16_value => |float_val| @bitCast(u16, float_val),
         .float_32_value => |float_val| @bitCast(u32, float_val),
+        .unknown_value => |unknown_val| @enumToInt(unknown_val.ty),
         inline else => |data| try ip.addExtra(gpa, data), // TODO sad stage1 noises :(
     };
 

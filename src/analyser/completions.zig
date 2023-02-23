@@ -166,9 +166,10 @@ pub fn dotCompletions(
 
         .bytes,
         .optional_value,
-        .aggregate,
         .slice,
+        .aggregate,
         .union_value,
+        .unknown_value,
         => unreachable,
     }
 }
