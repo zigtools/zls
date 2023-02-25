@@ -115,12 +115,15 @@ test "foldingRange - function" {
     try testFoldingRange(
         \\fn main(
         \\  a: ?u32,
-        \\) u32 {
+        \\) !u32 {
         \\    return 1 + 1;
         \\}
     , &.{
-        .{ .startLine = 0, .startCharacter = 8, .endLine = 2, .endCharacter = 0 },
-        .{ .startLine = 2, .startCharacter = 7, .endLine = 4, .endCharacter = 0 },
+        .{ .startLine = 0, .startCharacter = 8, .endLine = 1, .endCharacter = 10 },
+        .{ .startLine = 2, .startCharacter = 8, .endLine = 4, .endCharacter = 0 },
+        // TODO investigate why VS-Code doesn't show the second folding range
+        // .{ .startLine = 0, .startCharacter = 8, .endLine = 2, .endCharacter = 0 },
+        // .{ .startLine = 2, .startCharacter = 8, .endLine = 4, .endCharacter = 0 },
     });
 }
 
@@ -138,7 +141,7 @@ test "foldingRange - function with doc comment" {
     , &.{
         .{ .startLine = 0, .startCharacter = 0, .endLine = 1, .endCharacter = 14, .kind = .comment },
         .{ .startLine = 5, .startCharacter = 4, .endLine = 6, .endCharacter = 33, .kind = .comment },
-        .{ .startLine = 2, .startCharacter = 7, .endLine = 8, .endCharacter = 0 },
+        .{ .startLine = 2, .startCharacter = 7, .endLine = 7, .endCharacter = 11 },
     });
 }
 
