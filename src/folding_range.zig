@@ -232,7 +232,13 @@ pub fn generateFoldingRanges(allocator: std.mem.Allocator, tree: Ast, encoding: 
                 const container_decl = tree.fullContainerDecl(&buffer, node).?;
                 if (container_decl.ast.members.len != 0) {
                     const first_member = container_decl.ast.members[0];
-                    const start_tok = tree.firstToken(first_member) -| 1;
+                    var start_tok = tree.firstToken(first_member) -| 1;
+                    while (start_tok != 0 and
+                        (token_tags[start_tok] == .doc_comment or
+                        token_tags[start_tok] == .container_doc_comment))
+                    {
+                        start_tok -= 1;
+                    }
                     const end_tok = ast.lastToken(tree, node);
                     try builder.add(null, start_tok, end_tok, .exclusive, .exclusive);
                 }

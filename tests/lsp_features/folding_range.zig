@@ -152,6 +152,15 @@ test "foldingRange - container decl" {
         .{ .startLine = 0, .startCharacter = 20, .endLine = 3, .endCharacter = 0 },
     });
     try testFoldingRange(
+        \\const Foo = struct {
+        \\  /// doc comment
+        \\  alpha: u32,
+        \\  beta: []const u8,
+        \\};
+    , &.{
+        .{ .startLine = 0, .startCharacter = 20, .endLine = 4, .endCharacter = 0 },
+    });
+    try testFoldingRange(
         \\const Foo = packed struct(u32) {
         \\  alpha: u16,
         \\  beta: u16,
