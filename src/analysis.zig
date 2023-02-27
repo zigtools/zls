@@ -788,6 +788,7 @@ pub fn resolveTypeOfNodeInternal(store: *DocumentStore, node_handle: NodeWithHan
                         }
                         return null;
                     };
+                    const is_type_val = interpreter.ip.indexToKey(value.index).typeOf() == .type_type;
 
                     return TypeWithHandle{
                         .type = .{
@@ -795,7 +796,7 @@ pub fn resolveTypeOfNodeInternal(store: *DocumentStore, node_handle: NodeWithHan
                                 .interpreter = interpreter,
                                 .value = value,
                             } },
-                            .is_type_val = value.ty == InternPool.Index.type_type,
+                            .is_type_val = is_type_val,
                         },
                         .handle = node_handle.handle,
                     };
