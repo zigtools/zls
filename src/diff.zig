@@ -7,7 +7,7 @@ const dmp = DiffMatchPatch{
     .diff_timeout = 250,
 };
 
-pub const Error = error{ OutOfMemory, InvalidRange, UnknownError };
+pub const Error = error{OutOfMemory};
 
 pub fn edits(
     allocator: std.mem.Allocator,
@@ -15,8 +15,25 @@ pub fn edits(
     after: []const u8,
     encoding: offsets.Encoding,
 ) Error!std.ArrayListUnmanaged(types.TextEdit) {
-    var diffs = try dmp.diff(allocator, before, after, true);
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    var diffs = try dmp.diff(arena.allocator(), before, after, true);
+
+    var edit_count: usize = 0;
+    for (diffs.items) |diff| {
+        switch (diff.operation) {
+            .delete => edit_count += 1,
+            .equal => continue,
+            .insert => edit_count += 1,
+        }
+    }
+
     var eds = std.ArrayListUnmanaged(types.TextEdit){};
+    try eds.ensureTotalCapacity(allocator, edit_count);
+    errdefer {
+        for (eds.items) |edit| allocator.free(edit.newText);
+        eds.deinit(allocator);
+    }
 
     var offset: usize = 0;
     for (diffs.items) |diff| {
@@ -24,13 +41,19 @@ pub fn edits(
         switch (diff.operation) {
             .delete => {
                 offset += diff.text.len;
-                try eds.append(allocator, .{ .range = offsets.locToRange(before, .{ .start = start, .end = offset }, encoding), .newText = "" });
+                eds.appendAssumeCapacity(.{
+                    .range = offsets.locToRange(before, .{ .start = start, .end = offset }, encoding),
+                    .newText = "",
+                });
             },
             .equal => {
                 offset += diff.text.len;
             },
             .insert => {
-                try eds.append(allocator, .{ .range = offsets.locToRange(before, .{ .start = start, .end = start }, encoding), .newText = diff.text });
+                eds.appendAssumeCapacity(.{
+                    .range = offsets.locToRange(before, .{ .start = start, .end = start }, encoding),
+                    .newText = try allocator.dupe(u8, diff.text),
+                });
             },
         }
     }
@@ -95,6 +118,7 @@ pub fn applyTextEdits(
     std.sort.sort(types.TextEdit, text_edits_sortable, {}, textEditLessThan);
 
     var final_text = std.ArrayListUnmanaged(u8){};
+    errdefer final_text.deinit(allocator);
 
     var last: usize = 0;
     for (text_edits_sortable) |te| {
