@@ -261,6 +261,29 @@ pub fn applySave(self: *DocumentStore, handle: *const Handle) !void {
     }
 }
 
+/// Invalidates all build files. Used to rerun
+/// upon changing the zig exe path via a configuration request.
+pub fn invalidateBuildFiles(self: *DocumentStore) void {
+    var it = self.build_files.iterator();
+
+    while (it.next()) |entry| {
+        const build_file = entry.value_ptr;
+
+        const build_config = loadBuildConfiguration(
+            self.allocator,
+            build_file.*,
+            self.config.*,
+            self.runtime_zig_version.*.?, // if we have the path to zig we should have the zig version
+        ) catch |err| {
+            log.err("Failed to load build configuration for {s} (error: {})", .{ build_file.uri, err });
+            return;
+        };
+
+        std.json.parseFree(BuildConfig, build_file.config, .{ .allocator = self.allocator });
+        build_file.config = build_config;
+    }
+}
+
 /// The `DocumentStore` represents a graph structure where every
 /// handle/document is a node and every `@import` and `@cImport` represent
 /// a directed edge.

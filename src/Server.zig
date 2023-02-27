@@ -2053,6 +2053,7 @@ fn handleConfiguration(server: *Server, json: std.json.Value) error{OutOfMemory}
     // Yes, String ids are officially supported by LSP
     // but not sure how standard this "standard" really is
 
+    var new_zig_exe = false;
     const result = json.Array;
 
     inline for (std.meta.fields(Config), result.items) |field, value| {
@@ -2072,7 +2073,15 @@ fn handleConfiguration(server: *Server, json: std.json.Value) error{OutOfMemory}
                             break :blk @field(server.config, field.name);
                         }
                         var nv = try server.allocator.dupe(u8, trimmed);
+
+                        if (comptime std.mem.eql(u8, field.name, "zig_exe_path")) {
+                            if (server.config.zig_exe_path == null or !std.mem.eql(u8, nv, server.config.zig_exe_path.?)) {
+                                new_zig_exe = true;
+                            }
+                        }
+
                         if (@field(server.config, field.name)) |prev_val| server.allocator.free(prev_val);
+
                         break :blk nv;
                     },
                     else => blk: {
@@ -2110,6 +2119,9 @@ fn handleConfiguration(server: *Server, json: std.json.Value) error{OutOfMemory}
     configuration.configChanged(server.config, &server.runtime_zig_version, server.allocator, null) catch |err| {
         log.err("failed to update configuration: {}", .{err});
     };
+
+    if (new_zig_exe)
+        server.document_store.invalidateBuildFiles();
 }
 
 fn openDocumentHandler(server: *Server, notification: types.DidOpenTextDocumentParams) Error!void {
@@ -2434,6 +2446,8 @@ fn didChangeConfigurationHandler(server: *Server, request: configuration.DidChan
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
+    var new_zig_exe = false;
+
     // NOTE: VS Code seems to always respond with null
     if (request.settings) |cfg| {
         inline for (std.meta.fields(configuration.Configuration)) |field| {
@@ -2444,7 +2458,19 @@ fn didChangeConfigurationHandler(server: *Server, request: configuration.DidChan
                             break :blk;
                         }
                     }
-                    @field(server.config, field.name) = if (@TypeOf(value) == []const u8) try server.allocator.dupe(u8, value) else value;
+
+                    if (comptime std.mem.eql(u8, field.name, "zig_exe_path")) {
+                        if (cfg.zig_exe_path == null or !std.mem.eql(u8, value, cfg.zig_exe_path.?)) {
+                            new_zig_exe = true;
+                        }
+                    }
+
+                    if (@TypeOf(value) == []const u8) {
+                        if (@field(server.config, field.name)) |existing| server.allocator.free(existing);
+                        @field(server.config, field.name) = try server.allocator.dupe(u8, value);
+                    } else {
+                        @field(server.config, field.name) = value;
+                    }
                     log.debug("setting configuration option '{s}' to '{any}'", .{ field.name, value });
                 }
             }
@@ -2453,6 +2479,9 @@ fn didChangeConfigurationHandler(server: *Server, request: configuration.DidChan
         configuration.configChanged(server.config, &server.runtime_zig_version, server.allocator, null) catch |err| {
             log.err("failed to update config: {}", .{err});
         };
+
+        if (new_zig_exe)
+            server.document_store.invalidateBuildFiles();
     } else if (server.client_capabilities.supports_configuration) {
         try server.requestConfiguration();
     }
