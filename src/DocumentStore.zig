@@ -436,7 +436,7 @@ fn loadBuildConfiguration(
     allocator: std.mem.Allocator,
     build_file: BuildFile,
     config: Config,
-    runtime_zig_version: ZigVersionWrapper,
+    _: ZigVersionWrapper,
 ) !BuildConfig {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
@@ -448,52 +448,11 @@ fn loadBuildConfiguration(
     const build_file_path = try URI.parse(arena_allocator, build_file.uri);
     const directory_path = try std.fs.path.resolve(arena_allocator, &.{ build_file_path, "../" });
 
-    // TODO extract this option from `BuildAssociatedConfig.BuildOption`
-    const zig_cache_root: []const u8 = try std.fs.path.join(arena_allocator, &.{ directory_path, "zig-cache" });
+    // NOTE: This used to be backwards compatible
+    // but then I came in like a wrecking ball
 
-    // introduction of modified module cli arguments https://github.com/ziglang/zig/pull/14664
-    const module_version = comptime std.SemanticVersion.parse("0.11.0-dev.1718+2737dce84") catch unreachable;
-    const use_new_module_cli = runtime_zig_version.version.order(module_version) != .lt;
-
-    const standard_args = if (use_new_module_cli) blk: {
-        const build_module = try std.fmt.allocPrint(arena_allocator, "@build@::{s}", .{build_file_path});
-
-        break :blk [_][]const u8{
-            config.zig_exe_path.?,
-            "run",
-            config.build_runner_path.?,
-            "--cache-dir",
-            config.global_cache_path.?,
-            "--mod",
-            build_module,
-            "--deps",
-            "@build@",
-            "--",
-            config.zig_exe_path.?,
-            directory_path,
-            zig_cache_root,
-            config.build_runner_global_cache_path.?,
-        };
-    } else [_][]const u8{
-        config.zig_exe_path.?,
-        "run",
-        config.build_runner_path.?,
-        "--cache-dir",
-        config.global_cache_path.?,
-        "--pkg-begin",
-        "@build@",
-        build_file_path,
-        "--pkg-end",
-        "--",
-        config.zig_exe_path.?,
-        directory_path,
-        zig_cache_root,
-        config.build_runner_global_cache_path.?,
-    };
-
-    const arg_length = standard_args.len + if (build_file.build_associated_config) |cfg| if (cfg.build_options) |options| options.len else 0 else 0;
-    var args = try std.ArrayListUnmanaged([]const u8).initCapacity(arena_allocator, arg_length);
-    args.appendSliceAssumeCapacity(standard_args[0..]);
+    var args = std.ArrayListUnmanaged([]const u8){};
+    try args.appendSlice(allocator, &.{ "zig", "build", "--build-runner", config.build_runner_path.? });
     if (build_file.build_associated_config) |cfg| {
         if (cfg.build_options) |options| {
             for (options) |opt| {
@@ -505,7 +464,7 @@ fn loadBuildConfiguration(
     const zig_run_result = try std.ChildProcess.exec(.{
         .allocator = arena_allocator,
         .argv = args.items,
-        .cwd = try std.fs.path.resolve(arena_allocator, &.{ config.zig_exe_path.?, "../" }),
+        .cwd = try std.fs.path.resolve(arena_allocator, &.{directory_path}),
     });
 
     defer {

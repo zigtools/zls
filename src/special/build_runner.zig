@@ -1,7 +1,9 @@
-const root = @import("@build@");
+const root = @import("@build");
 const std = @import("std");
 const log = std.log;
 const process = std.process;
+
+pub const dependencies = @import("@dependencies");
 
 // Zig 0.11.0-dev.1524+
 const Build = if (@hasDecl(std, "Build")) std.Build else std.build;
@@ -301,8 +303,8 @@ fn processPackage(
         try packages.append(allocator, .{ .name = pkg.name, .path = path });
     }
 
-    if (pkg.dependencies) |dependencies| {
-        for (dependencies) |dep| {
+    if (pkg.dependencies) |deez| {
+        for (deez) |dep| {
             try processPackage(allocator, packages, dep);
         }
     }
