@@ -2129,7 +2129,7 @@ fn openDocumentHandler(server: *Server, notification: types.DidOpenTextDocumentP
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const handle = try server.document_store.openDocument(notification.textDocument.uri, notification.textDocument.text);
+    const handle = try server.document_store.openDocument(notification.textDocument.uri, try server.document_store.allocator.dupeZ(u8, notification.textDocument.text));
 
     if (server.client_capabilities.supports_publish_diagnostics) blk: {
         if (!std.process.can_spawn) break :blk;

@@ -115,13 +115,13 @@ pub fn deinit(self: *DocumentStore) void {
     self.cimports.deinit(self.allocator);
 }
 
-/// returns a handle to the given document
+/// Returns a handle to the given document
 pub fn getHandle(self: *DocumentStore, uri: Uri) ?*const Handle {
     return self.handles.get(uri);
 }
 
-/// returns a handle to the given document
-/// will load the document from disk if it hasn't been already
+/// Returns a handle to the given document
+/// Will load the document from disk if it hasn't been already
 pub fn getOrLoadHandle(self: *DocumentStore, uri: Uri) ?*const Handle {
     return self.getOrLoadHandleInternal(uri) catch null;
 }
@@ -141,7 +141,9 @@ fn getOrLoadHandleInternal(self: *DocumentStore, uri: Uri) !?*const Handle {
     return gop.value_ptr.*;
 }
 
-pub fn openDocument(self: *DocumentStore, uri: Uri, text: []const u8) error{OutOfMemory}!Handle {
+/// Takes ownership of `new_text` which has to be allocated
+/// with this DocumentStore's allocator
+pub fn openDocument(self: *DocumentStore, uri: Uri, text: [:0]const u8) error{OutOfMemory}!Handle {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -157,9 +159,7 @@ pub fn openDocument(self: *DocumentStore, uri: Uri, text: []const u8) error{OutO
     var handle = try self.allocator.create(Handle);
     errdefer self.allocator.destroy(handle);
 
-    const duped_text = try self.allocator.dupeZ(u8, text);
-
-    handle.* = try self.createDocument(uri, duped_text, true);
+    handle.* = try self.createDocument(uri, text, true);
     errdefer handle.deinit(self.allocator);
 
     try self.handles.putNoClobber(self.allocator, handle.uri, handle);
@@ -189,7 +189,8 @@ pub fn closeDocument(self: *DocumentStore, uri: Uri) void {
     self.garbageCollectionBuildFiles() catch {};
 }
 
-/// takes ownership of `new_text` which has to be allocated with `self.allocator`
+/// Takes ownership of `new_text` which has to be allocated
+/// with this DocumentStore's allocator
 pub fn refreshDocument(self: *DocumentStore, uri: Uri, new_text: [:0]const u8) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
@@ -486,7 +487,14 @@ fn loadBuildConfiguration(
         else => return error.RunFailed,
     }
 
-    const parse_options = std.json.ParseOptions{ .allocator = allocator };
+    const parse_options = std.json.ParseOptions{
+        .allocator = allocator,
+        // We ignore unknown fields so people can roll
+        // their own build runners in libraries with
+        // the only requirement being general adherance
+        // to the BuildConfig type
+        .ignore_unknown_fields = true,
+    };
     var token_stream = std.json.TokenStream.init(zig_run_result.stdout);
     var build_config = std.json.parse(BuildConfig, &token_stream, parse_options) catch return error.RunFailed;
     errdefer std.json.parseFree(BuildConfig, build_config, parse_options);
@@ -647,7 +655,7 @@ fn uriInImports(
 }
 
 /// takes ownership of the text passed in.
-pub fn createDocument(self: *DocumentStore, uri: Uri, text: [:0]u8, open: bool) error{OutOfMemory}!Handle {
+fn createDocument(self: *DocumentStore, uri: Uri, text: [:0]const u8, open: bool) error{OutOfMemory}!Handle {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -750,26 +758,12 @@ pub fn createDocument(self: *DocumentStore, uri: Uri, text: [:0]u8, open: bool) 
     return handle;
 }
 
-pub fn createDocumentFromURI(self: *DocumentStore, uri: Uri, open: bool) error{OutOfMemory}!?Handle {
+fn createDocumentFromURI(self: *DocumentStore, uri: Uri, open: bool) error{OutOfMemory}!?Handle {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
     const file_path = URI.parse(self.allocator, uri) catch return null;
     defer self.allocator.free(file_path);
-
-    var file = std.fs.openFileAbsolute(file_path, .{}) catch return null;
-    defer file.close();
-
-    const file_contents = file.readToEndAllocOptions(self.allocator, std.math.maxInt(usize), null, @alignOf(u8), 0) catch return null;
-
-    return try self.createDocument(uri, file_contents, open);
-}
-
-pub fn createDocumentFromPath(self: *DocumentStore, file_path: []const u8, open: bool) error{OutOfMemory}!?Handle {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    const uri = URI.fromPath(self.allocator, file_path) catch return null;
 
     var file = std.fs.openFileAbsolute(file_path, .{}) catch return null;
     defer file.close();
