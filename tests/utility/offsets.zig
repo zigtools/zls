@@ -80,6 +80,35 @@ test "offsets - convertPositionEncoding" {
     try testConvertPositionEncoding("a¶↉🠁", 0, 10, .{ 10, 5, 4 });
     try testConvertPositionEncoding("a¶↉🠁\na¶↉🠁", 1, 6, .{ 6, 3, 3 });
 }
+test "offsets - locIntersect" {
+    const a = offsets.Loc{ .start = 2, .end = 5 };
+    try std.testing.expect(offsets.locIntersect(a, .{ .start = 0, .end = 2 }) == false);
+    try std.testing.expect(offsets.locIntersect(a, .{ .start = 1, .end = 3 }) == true);
+    try std.testing.expect(offsets.locIntersect(a, .{ .start = 2, .end = 4 }) == true);
+    try std.testing.expect(offsets.locIntersect(a, .{ .start = 3, .end = 5 }) == true);
+    try std.testing.expect(offsets.locIntersect(a, .{ .start = 4, .end = 6 }) == true);
+    try std.testing.expect(offsets.locIntersect(a, .{ .start = 5, .end = 7 }) == false);
+}
+
+test "offsets - locInside" {
+    const outer = offsets.Loc{ .start = 2, .end = 5 };
+    try std.testing.expect(offsets.locInside(.{ .start = 0, .end = 2 }, outer) == false);
+    try std.testing.expect(offsets.locInside(.{ .start = 1, .end = 3 }, outer) == false);
+    try std.testing.expect(offsets.locInside(.{ .start = 2, .end = 4 }, outer) == true);
+    try std.testing.expect(offsets.locInside(.{ .start = 3, .end = 5 }, outer) == true);
+    try std.testing.expect(offsets.locInside(.{ .start = 4, .end = 6 }, outer) == false);
+    try std.testing.expect(offsets.locInside(.{ .start = 5, .end = 7 }, outer) == false);
+}
+
+test "offsets - locMerge" {
+    const a = offsets.Loc{ .start = 2, .end = 5 };
+    try std.testing.expectEqualDeep(offsets.locMerge(a, .{ .start = 0, .end = 2 }), .{ .start = 0, .end = 5 });
+    try std.testing.expectEqualDeep(offsets.locMerge(a, .{ .start = 1, .end = 3 }), .{ .start = 1, .end = 5 });
+    try std.testing.expectEqualDeep(offsets.locMerge(a, .{ .start = 2, .end = 4 }), .{ .start = 2, .end = 5 });
+    try std.testing.expectEqualDeep(offsets.locMerge(a, .{ .start = 3, .end = 5 }), .{ .start = 2, .end = 5 });
+    try std.testing.expectEqualDeep(offsets.locMerge(a, .{ .start = 4, .end = 6 }), .{ .start = 2, .end = 6 });
+    try std.testing.expectEqualDeep(offsets.locMerge(a, .{ .start = 5, .end = 7 }), .{ .start = 2, .end = 7 });
+}
 
 test "offsets - advancePosition" {
     try testAdvancePosition("", 0, 0, 0, 0, 0, 0);
