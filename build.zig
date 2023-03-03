@@ -7,7 +7,7 @@ const zls_version = std.builtin.Version{ .major = 0, .minor = 11, .patch = 0 };
 pub fn build(b: *std.build.Builder) !void {
     comptime {
         const current_zig = builtin.zig_version;
-        const min_zig = std.SemanticVersion.parse("0.11.0-dev.1681+0bb178bbb") catch return; // implement multi-object for loops
+        const min_zig = std.SemanticVersion.parse("0.11.0-dev.1817+f6c934677") catch return; // package manager hashes made consistent on windows
         if (current_zig.order(min_zig) == .lt) {
             @compileError(std.fmt.comptimePrint("Your Zig version v{} does not meet the minimum build requirement of v{}", .{ current_zig, min_zig }));
         }
@@ -31,47 +31,13 @@ pub fn build(b: *std.build.Builder) !void {
     const coverage = b.option(bool, "generate_coverage", "Generate coverage data with kcov") orelse false;
     const coverage_output_dir = b.option([]const u8, "coverage_output_dir", "Output directory for coverage data") orelse b.pathJoin(&.{ b.install_prefix, "kcov" });
 
-    exe_options.addOption(
-        shared.ZigVersion,
-        "data_version",
-        b.option(shared.ZigVersion, "data_version", "The Zig version your compiler is.") orelse .master,
-    );
-
-    exe_options.addOption(
-        std.log.Level,
-        "log_level",
-        b.option(std.log.Level, "log_level", "The Log Level to be used.") orelse .info,
-    );
-
-    exe_options.addOption(
-        bool,
-        "enable_tracy",
-        enable_tracy,
-    );
-
-    exe_options.addOption(
-        bool,
-        "enable_tracy_allocation",
-        b.option(bool, "enable_tracy_allocation", "Enable using TracyAllocator to monitor allocations.") orelse false,
-    );
-
-    exe_options.addOption(
-        bool,
-        "enable_tracy_callstack",
-        b.option(bool, "enable_tracy_callstack", "Enable callstack graphs.") orelse false,
-    );
-
-    exe_options.addOption(
-        bool,
-        "enable_failing_allocator",
-        b.option(bool, "enable_failing_allocator", "Whether to use a randomly failing allocator.") orelse false,
-    );
-
-    exe_options.addOption(
-        u32,
-        "enable_failing_allocator_likelihood",
-        b.option(u32, "enable_failing_allocator_likelihood", "The chance that an allocation will fail is `1/likelihood`") orelse 256,
-    );
+    exe_options.addOption(shared.ZigVersion, "data_version", b.option(shared.ZigVersion, "data_version", "The Zig version your compiler is.") orelse .master);
+    exe_options.addOption(std.log.Level, "log_level", b.option(std.log.Level, "log_level", "The Log Level to be used.") orelse .info);
+    exe_options.addOption(bool, "enable_tracy", enable_tracy);
+    exe_options.addOption(bool, "enable_tracy_allocation", b.option(bool, "enable_tracy_allocation", "Enable using TracyAllocator to monitor allocations.") orelse false);
+    exe_options.addOption(bool, "enable_tracy_callstack", b.option(bool, "enable_tracy_callstack", "Enable callstack graphs.") orelse false);
+    exe_options.addOption(bool, "enable_failing_allocator", b.option(bool, "enable_failing_allocator", "Whether to use a randomly failing allocator.") orelse false);
+    exe_options.addOption(u32, "enable_failing_allocator_likelihood", b.option(u32, "enable_failing_allocator_likelihood", "The chance that an allocation will fail is `1/likelihood`") orelse 256);
 
     const build_root_path = b.pathFromRoot(".");
 
@@ -113,27 +79,14 @@ pub fn build(b: *std.build.Builder) !void {
 
     exe_options.addOption([:0]const u8, "version", try b.allocator.dupeZ(u8, version));
 
-    const KNOWN_FOLDERS_DEFAULT_PATH = "src/known-folders/known-folders.zig";
-    const known_folders_path = b.option([]const u8, "known-folders", "Path to known-folders package (default: " ++ KNOWN_FOLDERS_DEFAULT_PATH ++ ")") orelse KNOWN_FOLDERS_DEFAULT_PATH;
-    const known_folders_module = b.createModule(.{ .source_file = .{ .path = known_folders_path } });
+    const known_folders_module = b.dependency("known_folders", .{}).module("known-folders");
     exe.addModule("known-folders", known_folders_module);
 
-    const TRES_DEFAULT_PATH = "src/tres/tres.zig";
-    const tres_path = b.option([]const u8, "tres", "Path to tres package (default: " ++ TRES_DEFAULT_PATH ++ ")") orelse TRES_DEFAULT_PATH;
-    const tres_module = b.createModule(.{ .source_file = .{ .path = tres_path } });
+    const tres_module = b.dependency("tres", .{}).module("tres");
     exe.addModule("tres", tres_module);
 
-    const DIFFZ_DEFAULT_PATH = "src/diffz/DiffMatchPatch.zig";
-    const diffz_path = b.option([]const u8, "diffz", "Path to diffz package (default: " ++ DIFFZ_DEFAULT_PATH ++ ")") orelse DIFFZ_DEFAULT_PATH;
-    const diffz_module = b.createModule(.{ .source_file = .{ .path = diffz_path } });
+    const diffz_module = b.dependency("diffz", .{}).module("diffz");
     exe.addModule("diffz", diffz_module);
-
-    const check_submodules_step = CheckSubmodulesStep.init(b, &.{
-        known_folders_path,
-        tres_path,
-        diffz_path,
-    });
-    b.getInstallStep().dependOn(&check_submodules_step.step);
 
     if (enable_tracy) {
         const client_cpp = "src/tracy/TracyClient.cpp";
@@ -174,7 +127,6 @@ pub fn build(b: *std.build.Builder) !void {
     if (b.args) |args| gen_cmd.addArgs(args);
 
     const gen_step = b.step("gen", "Regenerate config files");
-    gen_step.dependOn(&check_submodules_step.step);
     gen_step.dependOn(&gen_cmd.step);
 
     const test_step = b.step("test", "Run all the tests");
@@ -231,35 +183,3 @@ pub fn build(b: *std.build.Builder) !void {
     src_tests.setFilter(test_filter);
     test_step.dependOn(&src_tests.step);
 }
-
-const CheckSubmodulesStep = struct {
-    step: std.Build.Step,
-    builder: *std.Build,
-    submodules: []const []const u8,
-
-    pub fn init(builder: *std.Build, submodules: []const []const u8) *CheckSubmodulesStep {
-        var self = builder.allocator.create(CheckSubmodulesStep) catch unreachable;
-        self.* = CheckSubmodulesStep{
-            .builder = builder,
-            .step = std.Build.Step.init(.custom, "Check Submodules", builder.allocator, make),
-            .submodules = builder.allocator.dupe([]const u8, submodules) catch unreachable,
-        };
-        return self;
-    }
-
-    fn make(step: *std.Build.Step) anyerror!void {
-        const self = @fieldParentPtr(CheckSubmodulesStep, "step", step);
-        for (self.submodules) |path| {
-            const access = std.fs.accessAbsolute(self.builder.pathFromRoot(path), .{});
-            if (access == error.FileNotFound) {
-                std.debug.print(
-                    \\Did you clone ZLS with `git clone --recurse-submodules https://github.com/zigtools/zls`?
-                    \\If not you can fix this with `git submodule update --init --recursive`.
-                    \\
-                    \\
-                , .{});
-                break;
-            }
-        }
-    }
-};

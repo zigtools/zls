@@ -1,12 +1,3 @@
-[submodule "src/known-folders"]
-	path = src/known-folders
-	url = https://github.com/ziglibs/known-folders
 [submodule "src/tracy"]
 	path = src/tracy
 	url = https://github.com/wolfpld/tracy
-[submodule "src/tres"]
-	path = src/tres
-	url = https://github.com/ziglibs/tres.git
-[submodule "src/diffz"]
-	path = src/diffz
-	url = https://github.com/ziglibs/diffz
