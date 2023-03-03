@@ -15,6 +15,7 @@ pub const DocumentStore = @import("DocumentStore.zig");
 pub const ComptimeInterpreter = @import("ComptimeInterpreter.zig");
 pub const diff = @import("diff.zig");
 pub const analyser = @import("analyser/analyser.zig");
+pub const configuration = @import("configuration.zig");
 
 pub const ZigVersionWrapper = @import("ZigVersionWrapper.zig");
 

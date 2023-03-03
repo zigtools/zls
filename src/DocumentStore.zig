@@ -647,7 +647,7 @@ fn uriInImports(
 }
 
 /// takes ownership of the text passed in.
-fn createDocument(self: *DocumentStore, uri: Uri, text: [:0]u8, open: bool) error{OutOfMemory}!Handle {
+pub fn createDocument(self: *DocumentStore, uri: Uri, text: [:0]u8, open: bool) error{OutOfMemory}!Handle {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -750,12 +750,26 @@ fn createDocument(self: *DocumentStore, uri: Uri, text: [:0]u8, open: bool) erro
     return handle;
 }
 
-fn createDocumentFromURI(self: *DocumentStore, uri: Uri, open: bool) error{OutOfMemory}!?Handle {
+pub fn createDocumentFromURI(self: *DocumentStore, uri: Uri, open: bool) error{OutOfMemory}!?Handle {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
     const file_path = URI.parse(self.allocator, uri) catch return null;
     defer self.allocator.free(file_path);
+
+    var file = std.fs.openFileAbsolute(file_path, .{}) catch return null;
+    defer file.close();
+
+    const file_contents = file.readToEndAllocOptions(self.allocator, std.math.maxInt(usize), null, @alignOf(u8), 0) catch return null;
+
+    return try self.createDocument(uri, file_contents, open);
+}
+
+pub fn createDocumentFromPath(self: *DocumentStore, file_path: []const u8, open: bool) error{OutOfMemory}!?Handle {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    const uri = URI.fromPath(self.allocator, file_path) catch return null;
 
     var file = std.fs.openFileAbsolute(file_path, .{}) catch return null;
     defer file.close();

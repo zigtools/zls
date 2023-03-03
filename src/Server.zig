@@ -500,7 +500,7 @@ fn getAutofixMode(server: *Server) enum {
 }
 
 /// caller owns returned memory.
-fn autofix(server: *Server, allocator: std.mem.Allocator, handle: *const DocumentStore.Handle) error{OutOfMemory}!std.ArrayListUnmanaged(types.TextEdit) {
+pub fn autofix(server: *Server, allocator: std.mem.Allocator, handle: *const DocumentStore.Handle) error{OutOfMemory}!std.ArrayListUnmanaged(types.TextEdit) {
     if (!server.config.enable_ast_check_diagnostics) return .{};
 
     if (handle.tree.errors.len != 0) return .{};
@@ -540,7 +540,7 @@ fn autofix(server: *Server, allocator: std.mem.Allocator, handle: *const Documen
     return text_edits;
 }
 
-fn typeToCompletion(
+pub fn typeToCompletion(
     server: *Server,
     list: *std.ArrayListUnmanaged(types.CompletionItem),
     field_access: analysis.FieldAccessReturn,
@@ -609,7 +609,7 @@ fn typeToCompletion(
     }
 }
 
-fn nodeToCompletion(
+pub fn nodeToCompletion(
     server: *Server,
     list: *std.ArrayListUnmanaged(types.CompletionItem),
     node_handle: analysis.NodeWithHandle,
@@ -834,7 +834,7 @@ pub fn identifierFromPosition(pos_index: usize, handle: DocumentStore.Handle) []
     return handle.text[start_idx..end_idx];
 }
 
-fn gotoDefinitionSymbol(
+pub fn gotoDefinitionSymbol(
     server: *Server,
     decl_handle: analysis.DeclWithHandle,
     resolve_alias: bool,
@@ -865,7 +865,7 @@ fn gotoDefinitionSymbol(
     };
 }
 
-fn hoverSymbol(server: *Server, decl_handle: analysis.DeclWithHandle) error{OutOfMemory}!?types.Hover {
+pub fn hoverSymbol(server: *Server, decl_handle: analysis.DeclWithHandle) error{OutOfMemory}!?types.Hover {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -987,7 +987,7 @@ fn hoverSymbol(server: *Server, decl_handle: analysis.DeclWithHandle) error{OutO
     };
 }
 
-fn getLabelGlobal(pos_index: usize, handle: *const DocumentStore.Handle) error{OutOfMemory}!?analysis.DeclWithHandle {
+pub fn getLabelGlobal(pos_index: usize, handle: *const DocumentStore.Handle) error{OutOfMemory}!?analysis.DeclWithHandle {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -997,7 +997,7 @@ fn getLabelGlobal(pos_index: usize, handle: *const DocumentStore.Handle) error{O
     return try analysis.lookupLabel(handle, name, pos_index);
 }
 
-fn getSymbolGlobal(
+pub fn getSymbolGlobal(
     server: *Server,
     pos_index: usize,
     handle: *const DocumentStore.Handle,
@@ -1011,7 +1011,7 @@ fn getSymbolGlobal(
     return try analysis.lookupSymbolGlobal(&server.document_store, handle, name, pos_index);
 }
 
-fn gotoDefinitionLabel(
+pub fn gotoDefinitionLabel(
     server: *Server,
     pos_index: usize,
     handle: *const DocumentStore.Handle,
@@ -1023,7 +1023,7 @@ fn gotoDefinitionLabel(
     return try server.gotoDefinitionSymbol(decl, false);
 }
 
-fn gotoDefinitionGlobal(
+pub fn gotoDefinitionGlobal(
     server: *Server,
     pos_index: usize,
     handle: *const DocumentStore.Handle,
@@ -1036,7 +1036,7 @@ fn gotoDefinitionGlobal(
     return try server.gotoDefinitionSymbol(decl, resolve_alias);
 }
 
-fn gotoDefinitionBuiltin(
+pub fn gotoDefinitionBuiltin(
     server: *Server,
     handle: *const DocumentStore.Handle,
     loc: offsets.Loc,
@@ -1068,7 +1068,7 @@ fn gotoDefinitionBuiltin(
     return null;
 }
 
-fn hoverDefinitionLabel(server: *Server, pos_index: usize, handle: *const DocumentStore.Handle) error{OutOfMemory}!?types.Hover {
+pub fn hoverDefinitionLabel(server: *Server, pos_index: usize, handle: *const DocumentStore.Handle) error{OutOfMemory}!?types.Hover {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -1076,7 +1076,7 @@ fn hoverDefinitionLabel(server: *Server, pos_index: usize, handle: *const Docume
     return try server.hoverSymbol(decl);
 }
 
-fn hoverDefinitionBuiltin(server: *Server, pos_index: usize, handle: *const DocumentStore.Handle) error{OutOfMemory}!?types.Hover {
+pub fn hoverDefinitionBuiltin(server: *Server, pos_index: usize, handle: *const DocumentStore.Handle) error{OutOfMemory}!?types.Hover {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -1126,7 +1126,7 @@ fn hoverDefinitionBuiltin(server: *Server, pos_index: usize, handle: *const Docu
     };
 }
 
-fn hoverDefinitionGlobal(server: *Server, pos_index: usize, handle: *const DocumentStore.Handle) error{OutOfMemory}!?types.Hover {
+pub fn hoverDefinitionGlobal(server: *Server, pos_index: usize, handle: *const DocumentStore.Handle) error{OutOfMemory}!?types.Hover {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -1134,7 +1134,7 @@ fn hoverDefinitionGlobal(server: *Server, pos_index: usize, handle: *const Docum
     return try server.hoverSymbol(decl);
 }
 
-fn getSymbolFieldAccess(
+pub fn getSymbolFieldAccess(
     server: *Server,
     handle: *const DocumentStore.Handle,
     source_index: usize,
@@ -1165,7 +1165,7 @@ fn getSymbolFieldAccess(
     return null;
 }
 
-fn gotoDefinitionFieldAccess(
+pub fn gotoDefinitionFieldAccess(
     server: *Server,
     handle: *const DocumentStore.Handle,
     source_index: usize,
@@ -1179,7 +1179,7 @@ fn gotoDefinitionFieldAccess(
     return try server.gotoDefinitionSymbol(decl, resolve_alias);
 }
 
-fn hoverDefinitionFieldAccess(
+pub fn hoverDefinitionFieldAccess(
     server: *Server,
     handle: *const DocumentStore.Handle,
     source_index: usize,
@@ -1192,7 +1192,7 @@ fn hoverDefinitionFieldAccess(
     return try server.hoverSymbol(decl);
 }
 
-fn gotoDefinitionString(
+pub fn gotoDefinitionString(
     server: *Server,
     pos_context: analysis.PositionContext,
     handle: *const DocumentStore.Handle,
@@ -1250,7 +1250,7 @@ const DeclToCompletionContext = struct {
     parent_is_type_val: ?bool = null,
 };
 
-fn declToCompletion(context: DeclToCompletionContext, decl_handle: analysis.DeclWithHandle) error{OutOfMemory}!void {
+pub fn declToCompletion(context: DeclToCompletionContext, decl_handle: analysis.DeclWithHandle) error{OutOfMemory}!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -1317,7 +1317,7 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: analysis.Decl
     }
 }
 
-fn completeLabel(
+pub fn completeLabel(
     server: *Server,
     pos_index: usize,
     handle: *const DocumentStore.Handle,
@@ -1337,7 +1337,7 @@ fn completeLabel(
     return completions.toOwnedSlice(server.arena.allocator());
 }
 
-fn populateSnippedCompletions(
+pub fn populateSnippedCompletions(
     allocator: std.mem.Allocator,
     completions: *std.ArrayListUnmanaged(types.CompletionItem),
     snippets: []const snipped_data.Snipped,
@@ -1361,7 +1361,7 @@ fn populateSnippedCompletions(
     }
 }
 
-fn completeBuiltin(server: *Server) error{OutOfMemory}!?[]types.CompletionItem {
+pub fn completeBuiltin(server: *Server) error{OutOfMemory}!?[]types.CompletionItem {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -1405,7 +1405,7 @@ fn completeBuiltin(server: *Server) error{OutOfMemory}!?[]types.CompletionItem {
     return completions.items;
 }
 
-fn completeGlobal(server: *Server, pos_index: usize, handle: *const DocumentStore.Handle) error{OutOfMemory}![]types.CompletionItem {
+pub fn completeGlobal(server: *Server, pos_index: usize, handle: *const DocumentStore.Handle) error{OutOfMemory}![]types.CompletionItem {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -1428,7 +1428,7 @@ fn completeGlobal(server: *Server, pos_index: usize, handle: *const DocumentStor
     return completions.toOwnedSlice(server.arena.allocator());
 }
 
-fn completeFieldAccess(server: *Server, handle: *const DocumentStore.Handle, source_index: usize, loc: offsets.Loc) error{OutOfMemory}!?[]types.CompletionItem {
+pub fn completeFieldAccess(server: *Server, handle: *const DocumentStore.Handle, source_index: usize, loc: offsets.Loc) error{OutOfMemory}!?[]types.CompletionItem {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -1450,7 +1450,7 @@ fn completeFieldAccess(server: *Server, handle: *const DocumentStore.Handle, sou
     return try completions.toOwnedSlice(allocator);
 }
 
-fn formatDetailledLabel(item: *types.CompletionItem, arena: std.mem.Allocator) error{OutOfMemory}!void {
+pub fn formatDetailledLabel(item: *types.CompletionItem, arena: std.mem.Allocator) error{OutOfMemory}!void {
     // NOTE: this is not ideal, we should build a detailled label like we do for label/detail
     // because this implementation is very loose, nothing is formated properly so we need to clean
     // things a little bit, wich is quite messy
@@ -1616,14 +1616,14 @@ fn formatDetailledLabel(item: *types.CompletionItem, arena: std.mem.Allocator) e
     //     logger.info("labelDetails: {s}  ::  {s}", .{item.labelDetails.?.detail, item.labelDetails.?.description});
 }
 
-fn completeError(server: *Server, handle: *const DocumentStore.Handle) error{OutOfMemory}![]types.CompletionItem {
+pub fn completeError(server: *Server, handle: *const DocumentStore.Handle) error{OutOfMemory}![]types.CompletionItem {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
     return try server.document_store.errorCompletionItems(server.arena.allocator(), handle.*);
 }
 
-fn kindToSortScore(kind: types.CompletionItemKind) ?[]const u8 {
+pub fn kindToSortScore(kind: types.CompletionItemKind) ?[]const u8 {
     return switch (kind) {
         .Module => "1_", // use for packages
         .Folder => "2_",
@@ -1651,7 +1651,7 @@ fn kindToSortScore(kind: types.CompletionItemKind) ?[]const u8 {
     };
 }
 
-fn completeDot(server: *Server, handle: *const DocumentStore.Handle) error{OutOfMemory}![]types.CompletionItem {
+pub fn completeDot(server: *Server, handle: *const DocumentStore.Handle) error{OutOfMemory}![]types.CompletionItem {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -1660,7 +1660,7 @@ fn completeDot(server: *Server, handle: *const DocumentStore.Handle) error{OutOf
     return completions;
 }
 
-fn completeFileSystemStringLiteral(
+pub fn completeFileSystemStringLiteral(
     arena: std.mem.Allocator,
     store: DocumentStore,
     handle: DocumentStore.Handle,
@@ -2218,7 +2218,7 @@ fn semanticTokensFullHandler(server: *Server, request: types.SemanticTokensParam
     return .{ .data = token_array };
 }
 
-fn completionHandler(server: *Server, request: types.CompletionParams) Error!?types.CompletionList {
+pub fn completionHandler(server: *Server, request: types.CompletionParams) Error!?types.CompletionList {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -2306,7 +2306,7 @@ fn completionHandler(server: *Server, request: types.CompletionParams) Error!?ty
     return .{ .isIncomplete = false, .items = completions };
 }
 
-fn signatureHelpHandler(server: *Server, request: types.SignatureHelpParams) Error!?types.SignatureHelp {
+pub fn signatureHelpHandler(server: *Server, request: types.SignatureHelpParams) Error!?types.SignatureHelp {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -2335,7 +2335,7 @@ fn signatureHelpHandler(server: *Server, request: types.SignatureHelpParams) Err
     };
 }
 
-fn gotoHandler(server: *Server, request: types.TextDocumentPositionParams, resolve_alias: bool) Error!?types.Location {
+pub fn gotoHandler(server: *Server, request: types.TextDocumentPositionParams, resolve_alias: bool) Error!?types.Location {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -2379,7 +2379,7 @@ fn gotoDeclarationHandler(
     return try server.gotoHandler(request, false);
 }
 
-fn hoverHandler(server: *Server, request: types.HoverParams) Error!?types.Hover {
+pub fn hoverHandler(server: *Server, request: types.HoverParams) Error!?types.Hover {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -2408,7 +2408,7 @@ fn hoverHandler(server: *Server, request: types.HoverParams) Error!?types.Hover 
     return response;
 }
 
-fn documentSymbolsHandler(server: *Server, request: types.DocumentSymbolParams) Error!?[]types.DocumentSymbol {
+pub fn documentSymbolsHandler(server: *Server, request: types.DocumentSymbolParams) Error!?[]types.DocumentSymbol {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -2417,7 +2417,7 @@ fn documentSymbolsHandler(server: *Server, request: types.DocumentSymbolParams) 
     return try analysis.getDocumentSymbols(server.arena.allocator(), handle.tree, server.offset_encoding);
 }
 
-fn formattingHandler(server: *Server, request: types.DocumentFormattingParams) Error!?[]types.TextEdit {
+pub fn formattingHandler(server: *Server, request: types.DocumentFormattingParams) Error!?[]types.TextEdit {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -2488,7 +2488,7 @@ fn didChangeConfigurationHandler(server: *Server, request: configuration.DidChan
     }
 }
 
-fn renameHandler(server: *Server, request: types.RenameParams) Error!?types.WorkspaceEdit {
+pub fn renameHandler(server: *Server, request: types.RenameParams) Error!?types.WorkspaceEdit {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -2496,7 +2496,7 @@ fn renameHandler(server: *Server, request: types.RenameParams) Error!?types.Work
     return if (response) |rep| rep.rename else null;
 }
 
-fn referencesHandler(server: *Server, request: types.ReferenceParams) Error!?[]types.Location {
+pub fn referencesHandler(server: *Server, request: types.ReferenceParams) Error!?[]types.Location {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -2504,7 +2504,7 @@ fn referencesHandler(server: *Server, request: types.ReferenceParams) Error!?[]t
     return if (response) |rep| rep.references else null;
 }
 
-fn documentHighlightHandler(server: *Server, request: types.DocumentHighlightParams) Error!?[]types.DocumentHighlight {
+pub fn documentHighlightHandler(server: *Server, request: types.DocumentHighlightParams) Error!?[]types.DocumentHighlight {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -2540,7 +2540,7 @@ const GeneralReferencesResponse = union {
     highlight: []types.DocumentHighlight,
 };
 
-fn generalReferencesHandler(server: *Server, request: GeneralReferencesRequest) Error!?GeneralReferencesResponse {
+pub fn generalReferencesHandler(server: *Server, request: GeneralReferencesRequest) Error!?GeneralReferencesResponse {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 

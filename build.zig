@@ -13,11 +13,6 @@ pub fn build(b: *std.build.Builder) !void {
         }
     }
 
-    b.addModule(.{
-        .name = "zls",
-        .source_file = .{ .path = "src/zls.zig" },
-    });
-
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
@@ -187,4 +182,6 @@ pub fn build(b: *std.build.Builder) !void {
     });
     src_tests.setFilter(test_filter);
     test_step.dependOn(&src_tests.step);
+
+    b.modules.put(b.dupe("zls"), zls_module) catch @panic("OOM");
 }
