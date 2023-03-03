@@ -29,7 +29,7 @@ const snipped_data = @import("data/snippets.zig");
 
 const tres = @import("tres");
 
-const log = std.log.scoped(.server);
+const log = std.log.scoped(.zls_server);
 
 // Server fields
 

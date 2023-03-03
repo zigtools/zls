@@ -9,7 +9,7 @@ const Server = @import("Server.zig");
 const Header = @import("Header.zig");
 const debug = @import("debug.zig");
 
-const logger = std.log.scoped(.main);
+const logger = std.log.scoped(.zls_main);
 
 var actual_log_level: std.log.Level = switch (zig_builtin.mode) {
     .Debug => .debug,
@@ -30,8 +30,9 @@ pub const std_options = struct {
         if (@enumToInt(level) > @enumToInt(actual_log_level)) return;
 
         const level_txt = comptime level.asText();
+        const scope_txt = comptime @tagName(scope);
 
-        std.debug.print("{s:<5}: ({s:^6}): ", .{ level_txt, @tagName(scope) });
+        std.debug.print("{s:<5}: ({s:^6}): ", .{ level_txt, if (comptime std.mem.startsWith(u8, scope_txt, "zls_")) scope_txt[4..] else scope_txt });
         std.debug.print(format ++ "\n", args);
     }
 };
