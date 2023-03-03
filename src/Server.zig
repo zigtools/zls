@@ -34,9 +34,9 @@ const log = std.log.scoped(.server);
 // Server fields
 
 config: *Config,
-allocator: std.mem.Allocator = undefined,
-arena: *std.heap.ArenaAllocator = undefined,
-document_store: DocumentStore = undefined,
+allocator: std.mem.Allocator,
+arena: std.heap.ArenaAllocator,
+document_store: DocumentStore,
 builtin_completions: ?std.ArrayListUnmanaged(types.CompletionItem),
 client_capabilities: ClientCapabilities = .{},
 runtime_zig_version: ?ZigVersionWrapper,
@@ -2213,7 +2213,7 @@ fn semanticTokensFullHandler(server: *Server, request: types.SemanticTokensParam
 
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
 
-    const token_array = try semantic_tokens.writeAllSemanticTokens(server.arena, &server.document_store, handle, server.offset_encoding);
+    const token_array = try semantic_tokens.writeAllSemanticTokens(server.arena.allocator(), &server.document_store, handle, server.offset_encoding);
 
     return .{ .data = token_array };
 }
@@ -2319,7 +2319,7 @@ pub fn signatureHelpHandler(server: *Server, request: types.SignatureHelpParams)
 
     const signature_info = (try getSignatureInfo(
         &server.document_store,
-        server.arena,
+        server.arena.allocator(),
         handle,
         source_index,
         data,
@@ -2913,13 +2913,10 @@ const Message = union(enum) {
 
 pub fn processJsonRpc(
     server: *Server,
-    arena: *std.heap.ArenaAllocator,
     json: []const u8,
 ) void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
-
-    server.arena = arena;
 
     var parser = std.json.Parser.init(server.arena.allocator(), false);
     defer parser.deinit();
@@ -2944,7 +2941,16 @@ pub fn processJsonRpc(
     };
 }
 
-fn processMessage(server: *Server, message: Message) Error!void {
+pub fn maybeFreeArena(server: *Server) void {
+    // Mom, can we have garbage collection?
+    // No, we already have garbage collection at home.
+    // at home:
+    if (server.arena.queryCapacity() > 128 * 1024) {
+        _ = server.arena.reset(.free_all);
+    }
+}
+
+pub fn processMessage(server: *Server, message: Message) Error!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -3104,6 +3110,7 @@ pub fn create(
         .config = config,
         .runtime_zig_version = null,
         .allocator = allocator,
+        .arena = std.heap.ArenaAllocator.init(allocator),
         .document_store = .{
             .allocator = allocator,
             .config = config,
@@ -3134,6 +3141,8 @@ pub fn destroy(server: *Server) void {
     if (server.runtime_zig_version) |zig_version| {
         zig_version.free();
     }
+
+    server.arena.deinit();
 
     server.allocator.destroy(server);
 }

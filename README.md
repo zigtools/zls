@@ -17,6 +17,7 @@ The Zig Language Server (zls) is a tool that implements Microsoft's Language Ser
   - [Per-build Configuration Options](#per-build-configuration-options)
     - [`BuildOption`](#buildoption)
 - [Features](#features)
+- [Using as a library](#using-as-a-library)
 - [Related Projects](#related-projects)
 - [Quick Thanks :)](#quick-thanks-)
 - [License](#license)
@@ -129,6 +130,10 @@ The following LSP features are supported:
 - Selection ranges
 - Folding regions
 
+## Using as a library
+
+You can use zls as a library! [Check out this demo repo](https://github.com/zigtools/zls-as-lib-demo) for a good reference.
+
 ## Related Projects
 
 - [`sublime-zig-language` by @prime31](https://github.com/prime31/sublime-zig-language)
@@ -139,7 +144,7 @@ The following LSP features are supported:
 - [`known-folders` by @ziglibs](https://github.com/ziglibs/known-folders)
   - Provides API to access known folders on Linux, Windows and Mac OS
 - [`zls` by @zigtools](https://github.com/zigtools/zls)
-  - Used by many zls developers to more efficently work on zls
+  - Used by many zls developers to more efficiently work on zls
 
 ## Quick Thanks :)
 

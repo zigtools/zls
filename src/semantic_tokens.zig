@@ -51,7 +51,7 @@ pub const TokenModifiers = packed struct {
 };
 
 const Builder = struct {
-    arena: *std.heap.ArenaAllocator,
+    arena: std.mem.Allocator,
     store: *DocumentStore,
     handle: *const DocumentStore.Handle,
     previous_position: usize = 0,
@@ -59,7 +59,7 @@ const Builder = struct {
     arr: std.ArrayListUnmanaged(u32),
     encoding: offsets.Encoding,
 
-    fn init(arena: *std.heap.ArenaAllocator, store: *DocumentStore, handle: *const DocumentStore.Handle, encoding: offsets.Encoding) Builder {
+    fn init(arena: std.mem.Allocator, store: *DocumentStore, handle: *const DocumentStore.Handle, encoding: offsets.Encoding) Builder {
         return Builder{
             .arena = arena,
             .store = store,
@@ -185,7 +185,7 @@ const Builder = struct {
         const text = self.handle.tree.source[self.previous_position..start];
         const delta = offsets.indexToPosition(text, text.len, self.encoding);
 
-        try self.arr.appendSlice(self.arena.allocator(), &.{
+        try self.arr.appendSlice(self.arena, &.{
             @truncate(u32, delta.line),
             @truncate(u32, delta.character),
             @truncate(u32, length),
@@ -196,7 +196,7 @@ const Builder = struct {
     }
 
     fn toOwnedSlice(self: *Builder) error{OutOfMemory}![]u32 {
-        return self.arr.toOwnedSlice(self.arena.allocator());
+        return self.arr.toOwnedSlice(self.arena);
     }
 };
 
@@ -286,7 +286,7 @@ fn writeNodeTokens(builder: *Builder, maybe_node: ?Ast.Node.Index) error{OutOfMe
     const main_tokens = tree.nodes.items(.main_token);
     if (node == 0 or node >= node_data.len) return;
 
-    var allocator = builder.arena.allocator();
+    var allocator = builder.arena;
 
     const tag = node_tags[node];
     const main_token = main_tokens[node];
@@ -994,7 +994,7 @@ fn writeContainerField(builder: *Builder, node: Ast.Node.Index, field_token_type
     const base = tree.nodes.items(.main_token)[node];
     const tokens = tree.tokens.items(.tag);
 
-    var allocator = builder.arena.allocator();
+    var allocator = builder.arena;
 
     if (analysis.getDocCommentTokenIndex(tokens, base)) |docs|
         try writeDocComments(builder, tree, docs);
@@ -1027,7 +1027,7 @@ fn writeContainerField(builder: *Builder, node: Ast.Node.Index, field_token_type
 
 // TODO Range version, edit version.
 pub fn writeAllSemanticTokens(
-    arena: *std.heap.ArenaAllocator,
+    arena: std.mem.Allocator,
     store: *DocumentStore,
     handle: *const DocumentStore.Handle,
     encoding: offsets.Encoding,
