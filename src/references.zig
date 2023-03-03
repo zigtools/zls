@@ -85,14 +85,14 @@ const Builder = struct {
         try ast.iterateChildrenRecursive(handle.tree, node, &context, error{OutOfMemory}, referenceNode);
     }
 
-    fn referenceNode(self: *const Context, node: Ast.Node.Index) error{OutOfMemory}!void {
+    fn referenceNode(self: *const Context, tree: Ast, node: Ast.Node.Index) error{OutOfMemory}!void {
         const builder = self.builder;
         const handle = self.handle;
 
-        const node_tags = handle.tree.nodes.items(.tag);
-        const datas = handle.tree.nodes.items(.data);
-        const main_tokens = handle.tree.nodes.items(.main_token);
-        const starts = handle.tree.tokens.items(.start);
+        const node_tags = tree.nodes.items(.tag);
+        const datas = tree.nodes.items(.data);
+        const main_tokens = tree.nodes.items(.main_token);
+        const starts = tree.tokens.items(.start);
 
         switch (node_tags[node]) {
             .identifier => {
@@ -101,7 +101,7 @@ const Builder = struct {
                 const child = (try analysis.lookupSymbolGlobal(
                     builder.store,
                     handle,
-                    offsets.tokenToSlice(handle.tree, identifier_token),
+                    offsets.tokenToSlice(tree, identifier_token),
                     starts[identifier_token],
                 )) orelse return;
 
@@ -130,7 +130,7 @@ const Builder = struct {
                 const child = (try analysis.lookupSymbolContainer(
                     builder.store,
                     .{ .node = left_type_node, .handle = left_type.handle },
-                    offsets.tokenToSlice(handle.tree, datas[node].rhs),
+                    offsets.tokenToSlice(tree, datas[node].rhs),
                     !left_type.type.is_type_val,
                 )) orelse return;
 
