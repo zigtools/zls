@@ -7,11 +7,16 @@ const zls_version = std.builtin.Version{ .major = 0, .minor = 11, .patch = 0 };
 pub fn build(b: *std.build.Builder) !void {
     comptime {
         const current_zig = builtin.zig_version;
-        const min_zig = std.SemanticVersion.parse("0.11.0-dev.1817+f6c934677") catch return; // package manager hashes made consistent on windows
+        const min_zig = std.SemanticVersion.parse("0.11.0-dev.1836+28364166e") catch return; // package manager stuff + --build-runner + zls as a library
         if (current_zig.order(min_zig) == .lt) {
             @compileError(std.fmt.comptimePrint("Your Zig version v{} does not meet the minimum build requirement of v{}", .{ current_zig, min_zig }));
         }
     }
+
+    b.addModule(.{
+        .name = "zls",
+        .source_file = .{ .path = "src/zls.zig" },
+    });
 
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
