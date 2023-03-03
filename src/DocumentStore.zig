@@ -431,9 +431,41 @@ fn loadBuildAssociatedConfiguration(allocator: std.mem.Allocator, build_file: Bu
     return try std.json.parse(BuildAssociatedConfig, &token_stream, .{ .allocator = allocator });
 }
 
-/// runs the build.zig and extracts include directories and packages
-/// has to be freed with `std.json.parseFree`
-fn loadBuildConfiguration(
+/// Caller owns returned memory!
+pub fn populateBuildConfigurationArgs(
+    allocator: std.mem.Allocator,
+    args: *std.ArrayListUnmanaged([]const u8),
+    zig_exe_path: []const u8,
+    build_runner_path: []const u8,
+) error{OutOfMemory}!void {
+    try args.appendSlice(allocator, &.{ zig_exe_path, "build", "--build-runner", build_runner_path });
+}
+
+/// Runs the build.zig and returns the run result
+/// Args should be the output of `createBuildConfigurationArgs`
+/// plus any additional custom arguments
+/// Arena recommended
+pub fn executeBuildRunner(
+    allocator: std.mem.Allocator,
+    build_file_path: []const u8,
+    args: []const []const u8,
+) !std.ChildProcess.ExecResult {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    const build_file_directory_path = try std.fs.path.resolve(allocator, &.{ build_file_path, "../" });
+    defer allocator.free(build_file_directory_path);
+
+    return try std.ChildProcess.exec(.{
+        .allocator = allocator,
+        .argv = args,
+        .cwd = build_file_directory_path,
+    });
+}
+
+/// Runs the build.zig and extracts include directories and packages
+/// Has to be freed with `std.json.parseFree`
+pub fn loadBuildConfiguration(
     allocator: std.mem.Allocator,
     build_file: BuildFile,
     config: Config,
@@ -447,13 +479,14 @@ fn loadBuildConfiguration(
     const arena_allocator = arena.allocator();
 
     const build_file_path = try URI.parse(arena_allocator, build_file.uri);
-    const directory_path = try std.fs.path.resolve(arena_allocator, &.{ build_file_path, "../" });
 
     // NOTE: This used to be backwards compatible
     // but then I came in like a wrecking ball
 
-    var args = std.ArrayListUnmanaged([]const u8){};
-    try args.appendSlice(allocator, &.{ "zig", "build", "--build-runner", config.build_runner_path.? });
+    const arg_length = 4 + if (build_file.build_associated_config) |cfg| if (cfg.build_options) |options| options.len else 0 else 0;
+    var args = try std.ArrayListUnmanaged([]const u8).initCapacity(arena_allocator, arg_length);
+    try populateBuildConfigurationArgs(arena_allocator, &args, config.zig_exe_path.?, config.build_runner_path.?);
+
     if (build_file.build_associated_config) |cfg| {
         if (cfg.build_options) |options| {
             for (options) |opt| {
@@ -462,16 +495,7 @@ fn loadBuildConfiguration(
         }
     }
 
-    const zig_run_result = try std.ChildProcess.exec(.{
-        .allocator = arena_allocator,
-        .argv = args.items,
-        .cwd = try std.fs.path.resolve(arena_allocator, &.{directory_path}),
-    });
-
-    defer {
-        arena_allocator.free(zig_run_result.stdout);
-        arena_allocator.free(zig_run_result.stderr);
-    }
+    var zig_run_result = try executeBuildRunner(arena_allocator, build_file_path, args.items);
 
     errdefer blk: {
         const joined = std.mem.join(arena_allocator, " ", args.items) catch break :blk;
@@ -500,7 +524,7 @@ fn loadBuildConfiguration(
     errdefer std.json.parseFree(BuildConfig, build_config, parse_options);
 
     for (build_config.packages) |*pkg| {
-        const pkg_abs_path = try std.fs.path.resolve(allocator, &[_][]const u8{ directory_path, pkg.path });
+        const pkg_abs_path = try std.fs.path.resolve(allocator, &[_][]const u8{ build_file_path, "..", pkg.path });
         allocator.free(pkg.path);
         pkg.path = pkg_abs_path;
     }
