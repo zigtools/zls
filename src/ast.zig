@@ -1163,15 +1163,16 @@ pub fn nextFnParam(it: *Ast.full.FnProto.Iterator) ?Ast.full.FnProto.Param {
     }
 }
 
-/// returns an Iterator that yields every child of the given node.
-/// see `nodeChildrenAlloc` for a non-iterator allocating variant.
+/// calls the given `callback` on every child of the given node
+/// see `nodeChildrenAlloc` for a non-callback, allocating variant.
+/// see `iterateChildrenRecursive` for recursive-iteration.
 /// the order in which children are given corresponds to the order in which they are found in the source text
 pub fn iterateChildren(
     tree: Ast,
     node: Ast.Node.Index,
     context: anytype,
     comptime Error: type,
-    comptime callback: fn (@TypeOf(context), Ast.Node.Index) Error!void,
+    comptime callback: fn (@TypeOf(context), Ast, Ast.Node.Index) Error!void,
 ) Error!void {
     const node_tags = tree.nodes.items(.tag);
     const node_data = tree.nodes.items(.data);
@@ -1200,7 +1201,7 @@ pub fn iterateChildren(
         .@"nosuspend",
         .asm_simple,
         => {
-            try callback(context, node_data[node].lhs);
+            try callback(context, tree, node_data[node].lhs);
         },
 
         .test_decl,
@@ -1209,7 +1210,7 @@ pub fn iterateChildren(
         .@"break",
         .anyframe_type,
         => {
-            try callback(context, node_data[node].rhs);
+            try callback(context, tree, node_data[node].rhs);
         },
 
         .@"catch",
@@ -1288,8 +1289,8 @@ pub fn iterateChildren(
         .error_union,
         .for_range,
         => {
-            try callback(context, node_data[node].lhs);
-            try callback(context, node_data[node].rhs);
+            try callback(context, tree, node_data[node].lhs);
+            try callback(context, tree, node_data[node].rhs);
         },
 
         .root,
@@ -1307,7 +1308,7 @@ pub fn iterateChildren(
         .block_semicolon,
         => {
             for (tree.extra_data[node_data[node].lhs..node_data[node].rhs]) |child| {
-                try callback(context, child);
+                try callback(context, tree, child);
             }
         },
 
@@ -1317,18 +1318,18 @@ pub fn iterateChildren(
         .aligned_var_decl,
         => {
             const var_decl = tree.fullVarDecl(node).?.ast;
-            try callback(context, var_decl.type_node);
-            try callback(context, var_decl.align_node);
-            try callback(context, var_decl.addrspace_node);
-            try callback(context, var_decl.section_node);
-            try callback(context, var_decl.init_node);
+            try callback(context, tree, var_decl.type_node);
+            try callback(context, tree, var_decl.align_node);
+            try callback(context, tree, var_decl.addrspace_node);
+            try callback(context, tree, var_decl.section_node);
+            try callback(context, tree, var_decl.init_node);
         },
 
         .array_type_sentinel => {
             const array_type = tree.arrayTypeSentinel(node).ast;
-            try callback(context, array_type.elem_count);
-            try callback(context, array_type.sentinel);
-            try callback(context, array_type.elem_type);
+            try callback(context, tree, array_type.elem_count);
+            try callback(context, tree, array_type.sentinel);
+            try callback(context, tree, array_type.elem_type);
         },
 
         .ptr_type_aligned,
@@ -1337,12 +1338,12 @@ pub fn iterateChildren(
         .ptr_type_bit_range,
         => {
             const ptr_type = fullPtrType(tree, node).?.ast;
-            try callback(context, ptr_type.sentinel);
-            try callback(context, ptr_type.align_node);
-            try callback(context, ptr_type.bit_range_start);
-            try callback(context, ptr_type.bit_range_end);
-            try callback(context, ptr_type.addrspace_node);
-            try callback(context, ptr_type.child_type);
+            try callback(context, tree, ptr_type.sentinel);
+            try callback(context, tree, ptr_type.align_node);
+            try callback(context, tree, ptr_type.bit_range_start);
+            try callback(context, tree, ptr_type.bit_range_end);
+            try callback(context, tree, ptr_type.addrspace_node);
+            try callback(context, tree, ptr_type.child_type);
         },
 
         .slice_open,
@@ -1350,19 +1351,19 @@ pub fn iterateChildren(
         .slice_sentinel,
         => {
             const slice = tree.fullSlice(node).?;
-            try callback(context, slice.ast.sliced);
-            try callback(context, slice.ast.start);
-            try callback(context, slice.ast.end);
-            try callback(context, slice.ast.sentinel);
+            try callback(context, tree, slice.ast.sliced);
+            try callback(context, tree, slice.ast.start);
+            try callback(context, tree, slice.ast.end);
+            try callback(context, tree, slice.ast.sentinel);
         },
 
         .array_init,
         .array_init_comma,
         => {
             const array_init = tree.arrayInit(node).ast;
-            try callback(context, array_init.type_expr);
+            try callback(context, tree, array_init.type_expr);
             for (array_init.elements) |child| {
-                try callback(context, child);
+                try callback(context, tree, child);
             }
         },
 
@@ -1370,9 +1371,9 @@ pub fn iterateChildren(
         .struct_init_comma,
         => {
             const struct_init = tree.structInit(node).ast;
-            try callback(context, struct_init.type_expr);
+            try callback(context, tree, struct_init.type_expr);
             for (struct_init.fields) |child| {
-                try callback(context, child);
+                try callback(context, tree, child);
             }
         },
 
@@ -1382,9 +1383,9 @@ pub fn iterateChildren(
         .async_call_comma,
         => {
             const call = tree.callFull(node).ast;
-            try callback(context, call.fn_expr);
+            try callback(context, tree, call.fn_expr);
             for (call.params) |child| {
-                try callback(context, child);
+                try callback(context, tree, child);
             }
         },
 
@@ -1394,9 +1395,9 @@ pub fn iterateChildren(
             const cond = node_data[node].lhs;
             const extra = tree.extraData(node_data[node].rhs, Ast.Node.SubRange);
             const cases = tree.extra_data[extra.start..extra.end];
-            try callback(context, cond);
+            try callback(context, tree, cond);
             for (cases) |child| {
-                try callback(context, child);
+                try callback(context, tree, child);
             }
         },
 
@@ -1407,9 +1408,9 @@ pub fn iterateChildren(
         => {
             const switch_case = tree.fullSwitchCase(node).?.ast;
             for (switch_case.values) |child| {
-                try callback(context, child);
+                try callback(context, tree, child);
             }
-            try callback(context, switch_case.target_expr);
+            try callback(context, tree, switch_case.target_expr);
         },
 
         .while_simple,
@@ -1417,29 +1418,29 @@ pub fn iterateChildren(
         .@"while",
         => {
             const while_ast = fullWhile(tree, node).?.ast;
-            try callback(context, while_ast.cond_expr);
-            try callback(context, while_ast.cont_expr);
-            try callback(context, while_ast.then_expr);
-            try callback(context, while_ast.else_expr);
+            try callback(context, tree, while_ast.cond_expr);
+            try callback(context, tree, while_ast.cont_expr);
+            try callback(context, tree, while_ast.then_expr);
+            try callback(context, tree, while_ast.else_expr);
         },
         .for_simple,
         .@"for",
         => {
             const for_ast = fullFor(tree, node).?.ast;
             for (for_ast.inputs) |child| {
-                try callback(context, child);
+                try callback(context, tree, child);
             }
-            try callback(context, for_ast.then_expr);
-            try callback(context, for_ast.else_expr);
+            try callback(context, tree, for_ast.then_expr);
+            try callback(context, tree, for_ast.else_expr);
         },
 
         .@"if",
         .if_simple,
         => {
             const if_ast = fullIf(tree, node).?.ast;
-            try callback(context, if_ast.cond_expr);
-            try callback(context, if_ast.then_expr);
-            try callback(context, if_ast.else_expr);
+            try callback(context, tree, if_ast.cond_expr);
+            try callback(context, tree, if_ast.then_expr);
+            try callback(context, tree, if_ast.else_expr);
         },
 
         .fn_proto_simple,
@@ -1453,15 +1454,15 @@ pub fn iterateChildren(
 
             var it = fn_proto.iterate(&tree);
             while (nextFnParam(&it)) |param| {
-                try callback(context, param.type_expr);
+                try callback(context, tree, param.type_expr);
             }
-            try callback(context, fn_proto.ast.align_expr);
-            try callback(context, fn_proto.ast.addrspace_expr);
-            try callback(context, fn_proto.ast.section_expr);
-            try callback(context, fn_proto.ast.callconv_expr);
-            try callback(context, fn_proto.ast.return_type);
+            try callback(context, tree, fn_proto.ast.align_expr);
+            try callback(context, tree, fn_proto.ast.addrspace_expr);
+            try callback(context, tree, fn_proto.ast.section_expr);
+            try callback(context, tree, fn_proto.ast.callconv_expr);
+            try callback(context, tree, fn_proto.ast.return_type);
             if (node_tags[node] == .fn_decl) {
-                try callback(context, node_data[node].rhs);
+                try callback(context, tree, node_data[node].rhs);
             }
         },
 
@@ -1469,9 +1470,9 @@ pub fn iterateChildren(
         .container_decl_arg_trailing,
         => {
             const decl = tree.containerDeclArg(node).ast;
-            try callback(context, decl.arg);
+            try callback(context, tree, decl.arg);
             for (decl.members) |child| {
-                try callback(context, child);
+                try callback(context, tree, child);
             }
         },
 
@@ -1479,24 +1480,24 @@ pub fn iterateChildren(
         .tagged_union_enum_tag_trailing,
         => {
             const decl = tree.taggedUnionEnumTag(node).ast;
-            try callback(context, decl.arg);
+            try callback(context, tree, decl.arg);
             for (decl.members) |child| {
-                try callback(context, child);
+                try callback(context, tree, child);
             }
         },
 
         .container_field => {
             const field = tree.containerField(node).ast;
-            try callback(context, field.type_expr);
-            try callback(context, field.align_expr);
-            try callback(context, field.value_expr);
+            try callback(context, tree, field.type_expr);
+            try callback(context, tree, field.align_expr);
+            try callback(context, tree, field.value_expr);
         },
 
         .@"asm" => {
             const asm_ast = tree.asmFull(node).ast;
-            try callback(context, asm_ast.template);
+            try callback(context, tree, asm_ast.template);
             for (asm_ast.items) |child| {
-                try callback(context, child);
+                try callback(context, tree, child);
             }
         },
 
@@ -1519,39 +1520,35 @@ pub fn iterateChildren(
     }
 }
 
-/// returns an Iterator that recursively yields every child of the given node.
+/// calls the given `callback` on every child of the given node and their children
 /// see `nodeChildrenRecursiveAlloc` for a non-iterator allocating variant.
 pub fn iterateChildrenRecursive(
     tree: Ast,
     node: Ast.Node.Index,
     context: anytype,
     comptime Error: type,
-    comptime callback: fn (@TypeOf(context), Ast.Node.Index) Error!void,
+    comptime callback: fn (@TypeOf(context), Ast, Ast.Node.Index) Error!void,
 ) Error!void {
     const RecursiveContext = struct {
-        tree: Ast,
-        context: @TypeOf(context),
-
-        fn recursive_callback(self: @This(), child_node: Ast.Node.Index) Error!void {
+        fn recursive_callback(ctx: @TypeOf(context), ast: Ast, child_node: Ast.Node.Index) Error!void {
             if (child_node == 0) return;
-            try callback(self.context, child_node);
-            try iterateChildrenRecursive(self.tree, child_node, self.context, Error, callback);
+            try callback(ctx, ast, child_node);
+            try iterateChildren(ast, child_node, ctx, Error, recursive_callback);
         }
     };
 
-    try iterateChildren(tree, node, RecursiveContext{
-        .tree = tree,
-        .context = context,
-    }, Error, RecursiveContext.recursive_callback);
+    try iterateChildren(tree, node, context, Error, RecursiveContext.recursive_callback);
 }
 
 /// returns the children of the given node.
 /// see `iterateChildren` for a callback variant
+/// see `nodeChildrenRecursiveAlloc` for a recursive variant.
 /// caller owns the returned memory
 pub fn nodeChildrenAlloc(allocator: std.mem.Allocator, tree: Ast, node: Ast.Node.Index) error{OutOfMemory}![]Ast.Node.Index {
     const Context = struct {
         children: *std.ArrayList(Ast.Node.Index),
-        fn callback(self: @This(), child_node: Ast.Node.Index) error{OutOfMemory}!void {
+        fn callback(self: @This(), ast: Ast, child_node: Ast.Node.Index) error{OutOfMemory}!void {
+            _ = ast;
             if (child_node == 0) return;
             try self.children.append(child_node);
         }
@@ -1569,7 +1566,8 @@ pub fn nodeChildrenAlloc(allocator: std.mem.Allocator, tree: Ast, node: Ast.Node
 pub fn nodeChildrenRecursiveAlloc(allocator: std.mem.Allocator, tree: Ast, node: Ast.Node.Index) error{OutOfMemory}![]Ast.Node.Index {
     const Context = struct {
         children: *std.ArrayList(Ast.Node.Index),
-        fn callback(self: @This(), child_node: Ast.Node.Index) error{OutOfMemory}!void {
+        fn callback(self: @This(), ast: Ast, child_node: Ast.Node.Index) error{OutOfMemory}!void {
+            _ = ast;
             if (child_node == 0) return;
             try self.children.append(child_node);
         }

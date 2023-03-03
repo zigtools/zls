@@ -220,10 +220,9 @@ fn writeCallNodeHint(builder: *Builder, call: Ast.full.Call) !void {
 
 fn writeNodeInlayHint(
     builder: *Builder,
+    tree: Ast,
     node: Ast.Node.Index,
 ) error{OutOfMemory}!void {
-    const handle = builder.handle;
-    const tree = handle.tree;
     const node_tags = tree.nodes.items(.tag);
     const main_tokens = tree.nodes.items(.main_token);
 
@@ -293,7 +292,7 @@ pub fn writeRangeInlayHint(
     const nodes = try ast.nodesAtLoc(arena, handle.tree, loc);
 
     for (nodes) |child| {
-        try writeNodeInlayHint(&builder, child);
+        try writeNodeInlayHint(&builder, handle.tree, child);
         try ast.iterateChildrenRecursive(handle.tree, child, &builder, error{OutOfMemory}, writeNodeInlayHint);
     }
 
