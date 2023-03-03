@@ -267,13 +267,15 @@ fn processModule(
         if (std.mem.eql(u8, package.name, module.key_ptr.*)) return;
     }
 
+    const builder = module.value_ptr.*.builder;
+
     const maybe_path = switch (module.value_ptr.*.source_file) {
         .path => |path| path,
         .generated => |generated| generated.path,
     };
 
     if (maybe_path) |path| {
-        try packages.append(allocator, .{ .name = module.key_ptr.*, .path = path });
+        try packages.append(allocator, .{ .name = module.key_ptr.*, .path = builder.pathFromRoot(path) });
     }
 
     var deps_it = module.value_ptr.*.dependencies.iterator();
