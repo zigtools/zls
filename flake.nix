@@ -1,27 +1,29 @@
 {
-  inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+  inputs =
+    {
+      nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
 
-    zig-overlay.url = "github:mitchellh/zig-overlay";
-    zig-overlay.inputs.nixpkgs.follows = "nixpkgs";
+      zig-overlay.url = "github:mitchellh/zig-overlay";
+      zig-overlay.inputs.nixpkgs.follows = "nixpkgs";
 
-    gitignore.url = "github:hercules-ci/gitignore.nix";
-    gitignore.inputs.nixpkgs.follows = "nixpkgs";
+      gitignore.url = "github:hercules-ci/gitignore.nix";
+      gitignore.inputs.nixpkgs.follows = "nixpkgs";
 
-    flake-utils.url = "github:numtide/flake-utils";
+      flake-utils.url = "github:numtide/flake-utils";
 
-    known-folders.url = "github:ziglibs/known-folders";
-    known-folders.flake = false;
+      known_folders.url = "https://github.com/ziglibs/known-folders/archive/53fe3b676f32e59d46f4fd201d7ab200e5f6cb98.tar.gz";
+      known_folders.flake = false;
 
-    diffz.url = "github:ziglibs/diffz";
-    diffz.flake = false;
+      tres.url = "https://github.com/ziglibs/tres/archive/d8b0c24a945da02fffdae731edd1903c6889e73c.tar.gz";
+      tres.flake = false;
 
-    tres.url = "github:ziglibs/tres";
-    tres.flake = false;
-  };
+      diffz.url = "https://github.com/ziglibs/diffz/archive/efc91679b000a2d7f86fb40930f0a95a0d349bff.tar.gz";
+      diffz.flake = false;
+    };
 
-  outputs = { self, nixpkgs, zig-overlay, gitignore, flake-utils, known-folders, tres, diffz }:
+  outputs = inputs:
     let
+      inherit (inputs) nixpkgs zig-overlay gitignore flake-utils;
       systems = [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
       inherit (gitignore.lib) gitignoreSource;
     in
@@ -29,6 +31,21 @@
       let
         pkgs = nixpkgs.legacyPackages.${system};
         zig = zig-overlay.packages.${system}.master;
+        zon = builtins.fromJSON (
+          builtins.concatStringsSep "" [
+            "{"
+            (builtins.replaceStrings [ "}, " ] [ "}" ]
+              (builtins.replaceStrings [ " ." " =" "\n" ", }" ] [ "\"" "\" :" "" "}" ]
+                (builtins.replaceStrings [ ".{" ] [ "{" ]
+                  (builtins.concatStringsSep " "
+                    (builtins.filter builtins.isString
+                      (builtins.split "[ \n]+"
+                        (builtins.elemAt
+                          (builtins.match ".*dependencies = .[{](.*)[}].*" (builtins.readFile ./build.zig.zon))
+                          0)))))))
+          ]
+        );
+        cp-phase = builtins.concatStringsSep ";" (builtins.attrValues (builtins.mapAttrs (k: v: "cp -r ${inputs.${k}} .cache/p/${v.hash}") zon));
       in
       rec {
         packages.default = packages.zls;
@@ -41,9 +58,10 @@
           dontInstall = true;
           buildPhase = ''
             mkdir -p $out
-            zig build install -Dcpu=baseline -Doptimize=ReleaseSafe -Ddata_version=master -Dtres=${tres}/tres.zig -Dknown-folders=${known-folders}/known-folders.zig -Ddiffz=${diffz}/DiffMatchPatch.zig --prefix $out
+            mkdir -p .cache/{p,z,tmp}
+            ${cp-phase}
+            zig build install --cache-dir $(pwd)/zig-cache --global-cache-dir $(pwd)/.cache -Dcpu=baseline -Doptimize=ReleaseSafe -Ddata_version=master --prefix $out
           '';
-          XDG_CACHE_HOME = ".cache";
         };
       }
     );
