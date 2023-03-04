@@ -32,7 +32,10 @@ pub fn loadFromFile(allocator: std.mem.Allocator, file_path: []const u8) ?Config
     // TODO: use a better error reporting system or use ZON instead of JSON
     // TODO: report errors using "textDocument/publishDiagnostics"
     var config = std.json.parse(Config, &token_stream, parse_options) catch |err| {
-        const loc = std.zig.findLineColumn(file_buf, token_stream.i);
+        const loc = if (token_stream.slice.len == 0)
+            std.zig.Loc{ .line = 0, .column = 0, .source_line = "" }
+        else
+            std.zig.findLineColumn(file_buf, token_stream.i);
         logger.warn("{s}:{d}:{d}: Error while parsing configuration file {}", .{ file_path, loc.line + 1, loc.column, err });
         if (err == error.InvalidValueBegin) {
             logger.warn("Maybe your configuration file contains a trailing comma", .{});
