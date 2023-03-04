@@ -545,6 +545,7 @@ pub fn typeToCompletion(
     list: *std.ArrayListUnmanaged(types.CompletionItem),
     field_access: analysis.FieldAccessReturn,
     orig_handle: *const DocumentStore.Handle,
+    either_descriptor: ?[]const u8,
 ) error{OutOfMemory}!void {
     var allocator = server.arena.allocator();
 
@@ -587,6 +588,7 @@ pub fn typeToCompletion(
                 orig_handle,
                 type_handle.type.is_type_val,
                 null,
+                either_descriptor,
             );
         },
         .other => |n| try server.nodeToCompletion(
@@ -596,6 +598,7 @@ pub fn typeToCompletion(
             orig_handle,
             type_handle.type.is_type_val,
             null,
+            either_descriptor,
         ),
         .primitive, .array_index => {},
         .@"comptime" => |co| try analyser.completions.dotCompletions(
@@ -608,7 +611,7 @@ pub fn typeToCompletion(
         ),
         .either => |bruh| {
             for (bruh) |a|
-                try server.typeToCompletion(list, .{ .original = a }, orig_handle);
+                try server.typeToCompletion(list, .{ .original = a.type_with_handle }, orig_handle, a.descriptor);
         },
     }
 }
@@ -621,6 +624,7 @@ pub fn nodeToCompletion(
     orig_handle: *const DocumentStore.Handle,
     is_type_val: bool,
     parent_is_type_val: ?bool,
+    either_descriptor: ?[]const u8,
 ) error{OutOfMemory}!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
@@ -647,7 +651,10 @@ pub fn nodeToCompletion(
         doc_kind,
     )) |doc_comments| .{ .MarkupContent = types.MarkupContent{
         .kind = doc_kind,
-        .value = doc_comments,
+        .value = if (either_descriptor) |ed|
+            try std.fmt.allocPrint(allocator, "`Conditionally available: {s}`\n\n{s}", .{ ed, doc_comments })
+        else
+            doc_comments,
     } } else null;
 
     if (ast.isContainer(handle.tree, node)) {
@@ -656,6 +663,7 @@ pub fn nodeToCompletion(
             .completions = list,
             .orig_handle = orig_handle,
             .parent_is_type_val = is_type_val,
+            .either_descriptor = either_descriptor,
         };
         try analysis.iterateSymbolsContainer(
             allocator,
@@ -712,6 +720,7 @@ pub fn nodeToCompletion(
                     .server = server,
                     .completions = list,
                     .orig_handle = orig_handle,
+                    .either_descriptor = either_descriptor,
                 };
                 return try declToCompletion(context, result);
             }
@@ -785,7 +794,7 @@ pub fn nodeToCompletion(
             }
 
             if (unwrapped) |actual_type| {
-                try server.typeToCompletion(list, .{ .original = actual_type }, orig_handle);
+                try server.typeToCompletion(list, .{ .original = actual_type }, orig_handle, either_descriptor);
             }
             return;
         },
@@ -1254,6 +1263,7 @@ const DeclToCompletionContext = struct {
     completions: *std.ArrayListUnmanaged(types.CompletionItem),
     orig_handle: *const DocumentStore.Handle,
     parent_is_type_val: ?bool = null,
+    either_descriptor: ?[]const u8 = null,
 };
 
 pub fn declToCompletion(context: DeclToCompletionContext, decl_handle: analysis.DeclWithHandle) error{OutOfMemory}!void {
@@ -1271,6 +1281,7 @@ pub fn declToCompletion(context: DeclToCompletionContext, decl_handle: analysis.
             context.orig_handle,
             false,
             context.parent_is_type_val,
+            context.either_descriptor,
         ),
         .param_payload => |pay| {
             const Documentation = @TypeOf(@as(types.CompletionItem, undefined).documentation);
@@ -1279,7 +1290,10 @@ pub fn declToCompletion(context: DeclToCompletionContext, decl_handle: analysis.
             const doc_kind: types.MarkupKind = if (context.server.client_capabilities.completion_doc_supports_md) .markdown else .plaintext;
             const doc: Documentation = if (param.first_doc_comment) |doc_comments| .{ .MarkupContent = types.MarkupContent{
                 .kind = doc_kind,
-                .value = try analysis.collectDocComments(allocator, tree, doc_comments, doc_kind, false),
+                .value = if (context.either_descriptor) |ed|
+                    try std.fmt.allocPrint(allocator, "`Conditionally available: {s}`\n\n{s}", .{ ed, try analysis.collectDocComments(allocator, tree, doc_comments, doc_kind, false) })
+                else
+                    try analysis.collectDocComments(allocator, tree, doc_comments, doc_kind, false),
             } } else null;
 
             const first_token = ast.paramFirstToken(tree, param);
@@ -1446,7 +1460,7 @@ pub fn completeFieldAccess(server: *Server, handle: *const DocumentStore.Handle,
     var tokenizer = std.zig.Tokenizer.init(held_loc);
 
     const result = (try analysis.getFieldAccessType(allocator, &server.document_store, handle, source_index, &tokenizer)) orelse return null;
-    try server.typeToCompletion(&completions, result, handle);
+    try server.typeToCompletion(&completions, result, handle, null);
     if (server.client_capabilities.label_details_support) {
         for (completions.items) |*item| {
             try formatDetailledLabel(item, allocator);

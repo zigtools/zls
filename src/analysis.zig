@@ -1047,11 +1047,11 @@ pub fn resolveTypeOfNodeInternal(
             const if_node = ast.fullIf(tree, node).?;
 
             // TODO: Fix allocator need
-            var either = std.ArrayList(TypeWithHandle).init(arena);
+            var either = std.ArrayList(Type.EitherEntry).init(arena);
             if (try resolveTypeOfNodeInternal(arena, store, .{ .handle = handle, .node = if_node.ast.then_expr }, bound_type_params)) |t|
-                try either.append(t);
+                try either.append(.{ .type_with_handle = t, .descriptor = "bruh" });
             if (try resolveTypeOfNodeInternal(arena, store, .{ .handle = handle, .node = if_node.ast.else_expr }, bound_type_params)) |t|
-                try either.append(t);
+                try either.append(.{ .type_with_handle = t, .descriptor = "bruh" });
 
             return TypeWithHandle{
                 .type = .{ .data = .{ .either = try either.toOwnedSlice() }, .is_type_val = false },
@@ -1064,12 +1064,22 @@ pub fn resolveTypeOfNodeInternal(
             const extra = tree.extraData(datas[node].rhs, Ast.Node.SubRange);
             const cases = tree.extra_data[extra.start..extra.end];
 
-            var either = std.ArrayList(TypeWithHandle).init(arena);
+            var either = std.ArrayList(Type.EitherEntry).init(arena);
 
             for (cases) |case| {
-                const switch_case: Ast.full.SwitchCase = tree.fullSwitchCase(case).?;
+                const switch_case = tree.fullSwitchCase(case).?;
+                var descriptor = std.ArrayList(u8).init(arena);
+
+                for (switch_case.ast.values, 0..) |vals, index| {
+                    try descriptor.appendSlice(tree.getNodeSource(vals));
+                    if (index != switch_case.ast.values.len - 1) try descriptor.appendSlice(", ");
+                }
+
                 if (try resolveTypeOfNodeInternal(arena, store, .{ .handle = handle, .node = switch_case.ast.target_expr }, bound_type_params)) |t|
-                    try either.append(t);
+                    try either.append(.{
+                        .type_with_handle = t,
+                        .descriptor = try descriptor.toOwnedSlice(),
+                    });
             }
 
             return TypeWithHandle{
@@ -1085,13 +1095,18 @@ pub fn resolveTypeOfNodeInternal(
 // TODO Reorganize this file, perhaps split into a couple as well
 // TODO Make this better, nested levels of type vals
 pub const Type = struct {
+    pub const EitherEntry = struct {
+        type_with_handle: TypeWithHandle,
+        descriptor: []const u8,
+    };
+
     data: union(enum) {
         pointer: Ast.Node.Index,
         slice: Ast.Node.Index,
         error_union: Ast.Node.Index,
         other: Ast.Node.Index,
         primitive: Ast.Node.Index,
-        either: []const TypeWithHandle,
+        either: []const EitherEntry,
         array_index,
         @"comptime": struct {
             interpreter: *ComptimeInterpreter,
