@@ -99,6 +99,7 @@ const Builder = struct {
                 const identifier_token = main_tokens[node];
 
                 const child = (try analysis.lookupSymbolGlobal(
+                    builder.allocator,
                     builder.store,
                     handle,
                     offsets.tokenToSlice(handle.tree, identifier_token),
@@ -113,8 +114,10 @@ const Builder = struct {
                 var bound_type_params = analysis.BoundTypeParams{};
                 defer bound_type_params.deinit(builder.store.allocator);
                 const left_type = try analysis.resolveFieldAccessLhsType(
+                    builder.allocator,
                     builder.store,
                     (try analysis.resolveTypeOfNodeInternal(
+                        builder.allocator,
                         builder.store,
                         .{ .node = datas[node].lhs, .handle = handle },
                         &bound_type_params,
@@ -128,6 +131,7 @@ const Builder = struct {
                 };
 
                 const child = (try analysis.lookupSymbolContainer(
+                    self.builder.allocator,
                     builder.store,
                     .{ .node = left_type_node, .handle = left_type.handle },
                     offsets.tokenToSlice(handle.tree, datas[node].rhs),

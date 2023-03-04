@@ -15,7 +15,7 @@ fn fnProtoToSignatureInfo(document_store: *DocumentStore, alloc: std.mem.Allocat
     const proto_comments = (try analysis.getDocComments(alloc, tree, fn_node, .markdown)) orelse "";
 
     const arg_idx = if (skip_self_param) blk: {
-        const has_self_param = try analysis.hasSelfParam(document_store, handle, proto);
+        const has_self_param = try analysis.hasSelfParam(alloc, document_store, handle, proto);
         break :blk commas + @boolToInt(has_self_param);
     } else commas;
 
@@ -257,6 +257,7 @@ pub fn getSignatureInfo(document_store: *DocumentStore, alloc: std.mem.Allocator
                 // Resolve the expression.
                 var tokenizer = std.zig.Tokenizer.init(held_expr);
                 if (try analysis.getFieldAccessType(
+                    alloc,
                     document_store,
                     handle,
                     expr_start,
@@ -292,6 +293,7 @@ pub fn getSignatureInfo(document_store: *DocumentStore, alloc: std.mem.Allocator
 
                     const skip_self_param = !type_handle.type.is_type_val;
                     const decl_handle = (try analysis.lookupSymbolContainer(
+                        alloc,
                         document_store,
                         .{ .node = node, .handle = type_handle.handle },
                         name,
@@ -310,6 +312,7 @@ pub fn getSignatureInfo(document_store: *DocumentStore, alloc: std.mem.Allocator
                     };
 
                     if (try analysis.resolveVarDeclAlias(
+                        alloc,
                         document_store,
                         .{ .node = node, .handle = decl_handle.handle },
                     )) |resolved| {

@@ -81,7 +81,7 @@ fn writeCallHint(builder: *Builder, call: Ast.full.Call, decl_handle: analysis.D
     var i: usize = 0;
     var it = fn_proto.iterate(&decl_tree);
 
-    if (try analysis.hasSelfParam(builder.store, decl_handle.handle, fn_proto)) {
+    if (try analysis.hasSelfParam(builder.arena, builder.store, decl_handle.handle, fn_proto)) {
         _ = ast.nextFnParam(&it);
     }
 
@@ -177,7 +177,7 @@ fn writeCallNodeHint(builder: *Builder, call: Ast.full.Call) !void {
             const source_index = offsets.tokenToIndex(tree, main_tokens[call.ast.fn_expr]);
             const name = offsets.tokenToSlice(tree, main_tokens[call.ast.fn_expr]);
 
-            if (try analysis.lookupSymbolGlobal(builder.store, handle, name, source_index)) |decl_handle| {
+            if (try analysis.lookupSymbolGlobal(builder.arena, builder.store, handle, name, source_index)) |decl_handle| {
                 try writeCallHint(builder, call, decl_handle);
             }
         },
@@ -194,11 +194,12 @@ fn writeCallNodeHint(builder: *Builder, call: Ast.full.Call) !void {
 
             // note: we have the ast node, traversing it would probably yield better results
             // than trying to re-tokenize and re-parse it
-            if (try analysis.getFieldAccessType(builder.store, handle, rhs_loc.end, &tokenizer)) |result| {
+            if (try analysis.getFieldAccessType(builder.arena, builder.store, handle, rhs_loc.end, &tokenizer)) |result| {
                 const container_handle = result.unwrapped orelse result.original;
                 switch (container_handle.type.data) {
                     .other => |container_handle_node| {
                         if (try analysis.lookupSymbolContainer(
+                            builder.arena,
                             builder.store,
                             .{ .node = container_handle_node, .handle = container_handle.handle },
                             tree.tokenSlice(rhsToken),

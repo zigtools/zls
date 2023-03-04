@@ -606,6 +606,10 @@ pub fn typeToCompletion(
             type_handle.type.is_type_val,
             co.value.node_idx,
         ),
+        .either => |bruh| {
+            for (bruh) |a|
+                try server.typeToCompletion(list, .{ .original = a }, orig_handle);
+        },
     }
 }
 
@@ -654,6 +658,7 @@ pub fn nodeToCompletion(
             .parent_is_type_val = is_type_val,
         };
         try analysis.iterateSymbolsContainer(
+            allocator,
             &server.document_store,
             node_handle,
             orig_handle,
@@ -678,7 +683,7 @@ pub fn nodeToCompletion(
                 const use_snippets = server.config.enable_snippets and server.client_capabilities.supports_snippets;
                 const insert_text = if (use_snippets) blk: {
                     const skip_self_param = !(parent_is_type_val orelse true) and
-                        try analysis.hasSelfParam(&server.document_store, handle, func);
+                        try analysis.hasSelfParam(allocator, &server.document_store, handle, func);
                     break :blk try analysis.getFunctionSnippet(server.arena.allocator(), tree, func, skip_self_param);
                 } else tree.tokenSlice(func.name_token.?);
 
@@ -702,7 +707,7 @@ pub fn nodeToCompletion(
             const var_decl = tree.fullVarDecl(node).?;
             const is_const = token_tags[var_decl.ast.mut_token] == .keyword_const;
 
-            if (try analysis.resolveVarDeclAlias(&server.document_store, node_handle)) |result| {
+            if (try analysis.resolveVarDeclAlias(allocator, &server.document_store, node_handle)) |result| {
                 const context = DeclToCompletionContext{
                     .server = server,
                     .completions = list,
@@ -847,7 +852,7 @@ pub fn gotoDefinitionSymbol(
     const name_token = switch (decl_handle.decl.*) {
         .ast_node => |node| block: {
             if (resolve_alias) {
-                if (try analysis.resolveVarDeclAlias(&server.document_store, .{ .node = node, .handle = handle })) |result| {
+                if (try analysis.resolveVarDeclAlias(server.arena.allocator(), &server.document_store, .{ .node = node, .handle = handle })) |result| {
                     handle = result.handle;
 
                     break :block result.nameToken();
@@ -877,7 +882,7 @@ pub fn hoverSymbol(server: *Server, decl_handle: analysis.DeclWithHandle) error{
 
     const def_str = switch (decl_handle.decl.*) {
         .ast_node => |node| def: {
-            if (try analysis.resolveVarDeclAlias(&server.document_store, .{ .node = node, .handle = handle })) |result| {
+            if (try analysis.resolveVarDeclAlias(server.arena.allocator(), &server.document_store, .{ .node = node, .handle = handle })) |result| {
                 return try server.hoverSymbol(result);
             }
             doc_str = try analysis.getDocComments(server.arena.allocator(), tree, node, hover_kind);
@@ -918,7 +923,7 @@ pub fn hoverSymbol(server: *Server, decl_handle: analysis.DeclWithHandle) error{
 
     var bound_type_params = analysis.BoundTypeParams{};
     defer bound_type_params.deinit(server.document_store.allocator);
-    const resolved_type = try decl_handle.resolveType(&server.document_store, &bound_type_params);
+    const resolved_type = try decl_handle.resolveType(server.arena.allocator(), &server.document_store, &bound_type_params);
 
     const resolved_type_str = if (resolved_type) |rt|
         if (rt.type.is_type_val) switch (rt.type.data) {
@@ -1008,7 +1013,7 @@ pub fn getSymbolGlobal(
     const name = identifierFromPosition(pos_index, handle.*);
     if (name.len == 0) return null;
 
-    return try analysis.lookupSymbolGlobal(&server.document_store, handle, name, pos_index);
+    return try analysis.lookupSymbolGlobal(server.arena.allocator(), &server.document_store, handle, name, pos_index);
 }
 
 pub fn gotoDefinitionLabel(
@@ -1149,13 +1154,14 @@ pub fn getSymbolFieldAccess(
     var held_range = try server.arena.allocator().dupeZ(u8, offsets.locToSlice(handle.text, loc));
     var tokenizer = std.zig.Tokenizer.init(held_range);
 
-    if (try analysis.getFieldAccessType(&server.document_store, handle, source_index, &tokenizer)) |result| {
+    if (try analysis.getFieldAccessType(server.arena.allocator(), &server.document_store, handle, source_index, &tokenizer)) |result| {
         const container_handle = result.unwrapped orelse result.original;
         const container_handle_node = switch (container_handle.type.data) {
             .other => |n| n,
             else => return null,
         };
         return try analysis.lookupSymbolContainer(
+            server.arena.allocator(),
             &server.document_store,
             .{ .node = container_handle_node, .handle = container_handle.handle },
             name,
@@ -1416,7 +1422,7 @@ pub fn completeGlobal(server: *Server, pos_index: usize, handle: *const Document
         .completions = &completions,
         .orig_handle = handle,
     };
-    try analysis.iterateSymbolsGlobal(&server.document_store, handle, pos_index, declToCompletion, context);
+    try analysis.iterateSymbolsGlobal(server.arena.allocator(), &server.document_store, handle, pos_index, declToCompletion, context);
     try populateSnippedCompletions(server.arena.allocator(), &completions, &snipped_data.generic, server.config.*, null);
 
     if (server.client_capabilities.label_details_support) {
@@ -1439,7 +1445,7 @@ pub fn completeFieldAccess(server: *Server, handle: *const DocumentStore.Handle,
     var held_loc = try allocator.dupeZ(u8, offsets.locToSlice(handle.text, loc));
     var tokenizer = std.zig.Tokenizer.init(held_loc);
 
-    const result = (try analysis.getFieldAccessType(&server.document_store, handle, source_index, &tokenizer)) orelse return null;
+    const result = (try analysis.getFieldAccessType(allocator, &server.document_store, handle, source_index, &tokenizer)) orelse return null;
     try server.typeToCompletion(&completions, result, handle);
     if (server.client_capabilities.label_details_support) {
         for (completions.items) |*item| {

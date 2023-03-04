@@ -89,6 +89,7 @@ fn handleUnusedFunctionParameter(builder: *Builder, actions: *std.ArrayListUnman
     const token_starts = tree.tokens.items(.start);
 
     const decl = (try analysis.lookupSymbolGlobal(
+        builder.arena,
         builder.document_store,
         builder.handle,
         identifier_name,
@@ -134,6 +135,7 @@ fn handleUnusedVariableOrConstant(builder: *Builder, actions: *std.ArrayListUnma
     const token_starts = tree.tokens.items(.start);
 
     const decl = (try analysis.lookupSymbolGlobal(
+        builder.arena,
         builder.document_store,
         builder.handle,
         identifier_name,
