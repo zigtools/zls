@@ -655,7 +655,13 @@ pub fn nodeToCompletion(
             try std.fmt.allocPrint(allocator, "`Conditionally available: {s}`\n\n{s}", .{ ed, doc_comments })
         else
             doc_comments,
-    } } else null;
+    } } else (if (either_descriptor) |ed|
+        .{ .MarkupContent = types.MarkupContent{
+            .kind = doc_kind,
+            .value = try std.fmt.allocPrint(allocator, "`Conditionally available: {s}`", .{ed}),
+        } }
+    else
+        null);
 
     if (ast.isContainer(handle.tree, node)) {
         const context = DeclToCompletionContext{

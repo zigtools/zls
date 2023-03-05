@@ -1049,9 +1049,9 @@ pub fn resolveTypeOfNodeInternal(
             // TODO: Fix allocator need
             var either = std.ArrayList(Type.EitherEntry).init(arena);
             if (try resolveTypeOfNodeInternal(arena, store, .{ .handle = handle, .node = if_node.ast.then_expr }, bound_type_params)) |t|
-                try either.append(.{ .type_with_handle = t, .descriptor = "bruh" });
+                try either.append(.{ .type_with_handle = t, .descriptor = tree.getNodeSource(if_node.ast.cond_expr) });
             if (try resolveTypeOfNodeInternal(arena, store, .{ .handle = handle, .node = if_node.ast.else_expr }, bound_type_params)) |t|
-                try either.append(.{ .type_with_handle = t, .descriptor = "bruh" });
+                try either.append(.{ .type_with_handle = t, .descriptor = try std.fmt.allocPrint(arena, "!({s})", .{tree.getNodeSource(if_node.ast.cond_expr)}) });
 
             return TypeWithHandle{
                 .type = .{ .data = .{ .either = try either.toOwnedSlice() }, .is_type_val = false },
