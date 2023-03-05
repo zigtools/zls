@@ -8,7 +8,7 @@ const known_folders = @import("known-folders");
 const Config = @import("Config.zig");
 const offsets = @import("offsets.zig");
 
-const logger = std.log.scoped(.config);
+const logger = std.log.scoped(.zls_config);
 
 pub fn loadFromFile(allocator: std.mem.Allocator, file_path: []const u8) ?Config {
     const tracy_zone = tracy.trace(@src());

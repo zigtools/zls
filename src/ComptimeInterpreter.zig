@@ -17,7 +17,7 @@ pub const Index = InternPool.Index;
 pub const Key = InternPool.Key;
 pub const ComptimeInterpreter = @This();
 
-const log = std.log.scoped(.comptime_interpreter);
+const log = std.log.scoped(.zls_comptime_interpreter);
 
 allocator: std.mem.Allocator,
 ip: InternPool,

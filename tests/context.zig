@@ -82,7 +82,7 @@ pub const Context = struct {
         defer allocator.free(req);
 
         //  send the request to the server
-        self.server.processJsonRpc(&self.arena, req);
+        self.server.processJsonRpc(req);
 
         for (self.server.outgoing_messages.items) |outgoing_message| {
             self.server.allocator.free(outgoing_message);
@@ -103,7 +103,7 @@ pub const Context = struct {
         defer allocator.free(req);
 
         //  send the request to the server
-        self.server.processJsonRpc(&self.arena, req);
+        self.server.processJsonRpc(req);
 
         const messages = self.server.outgoing_messages.items;
 

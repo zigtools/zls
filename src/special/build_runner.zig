@@ -1,20 +1,13 @@
-const root = @import("@build@");
+const root = @import("@build");
 const std = @import("std");
 const log = std.log;
 const process = std.process;
 
-// Zig 0.11.0-dev.1524+
-const Build = if (@hasDecl(std, "Build")) std.Build else std.build;
+pub const dependencies = @import("@dependencies");
 
-// Zig 0.11.0-dev.1524+
-const Builder = if (@hasDecl(std, "Build")) std.Build else std.build.Builder;
-
-// Zig 0.11.0-dev.1637+
-const Cache = if (@hasDecl(Build, "Cache")) std.Build.Cache else void;
-const has_cache = Cache != void;
-
-// Zig 0.11.0-dev.1524+
-const CompileStep = if (@hasDecl(Build, "CompileStep")) Build.CompileStep else Build.LibExeObjStep;
+const Build = std.Build;
+const Cache = std.Build.Cache;
+const CompileStep = Build.CompileStep;
 
 const InstallArtifactStep = Build.InstallArtifactStep;
 const OptionsStep = Build.OptionsStep;
@@ -60,31 +53,30 @@ pub fn main() !void {
         return error.InvalidArgs;
     };
 
-    const build_root_directory = if (has_cache) Cache.Directory{
+    const build_root_directory = Cache.Directory{
         .path = build_root,
         .handle = try std.fs.cwd().openDir(build_root, .{}),
-    } else build_root;
+    };
 
-    const local_cache_directory = if (has_cache) Cache.Directory{
+    const local_cache_directory = Cache.Directory{
         .path = cache_root,
         .handle = try std.fs.cwd().makeOpenPath(cache_root, .{}),
-    } else cache_root;
+    };
 
-    const global_cache_directory = if (has_cache) Cache.Directory{
+    const global_cache_directory = Cache.Directory{
         .path = global_cache_root,
         .handle = try std.fs.cwd().makeOpenPath(global_cache_root, .{}),
-    } else global_cache_root;
+    };
 
-    var cache = if (has_cache) Cache{
+    var cache = Cache{
         .gpa = allocator,
         .manifest_dir = try local_cache_directory.handle.makeOpenPath("h", .{}),
-    } else {};
-    if (has_cache) {
-        cache.addPrefix(.{ .path = null, .handle = std.fs.cwd() });
-        cache.addPrefix(build_root_directory);
-        cache.addPrefix(local_cache_directory);
-        cache.addPrefix(global_cache_directory);
-    }
+    };
+
+    cache.addPrefix(.{ .path = null, .handle = std.fs.cwd() });
+    cache.addPrefix(build_root_directory);
+    cache.addPrefix(local_cache_directory);
+    cache.addPrefix(global_cache_directory);
 
     const builder = blk: {
         // Zig 0.11.0-dev.1524+
@@ -93,29 +85,18 @@ pub fn main() !void {
         const host = if (does_builder_need_host) try std.zig.system.NativeTargetInfo.detect(.{}) else {};
 
         if (does_builder_need_host) {
-            if (has_cache) {
-                break :blk try Builder.create(
-                    allocator,
-                    zig_exe,
-                    build_root_directory,
-                    local_cache_directory,
-                    global_cache_directory,
-                    host,
-                    &cache,
-                );
-            }
-
-            break :blk try Builder.create(
+            break :blk try Build.create(
                 allocator,
                 zig_exe,
                 build_root_directory,
                 local_cache_directory,
                 global_cache_directory,
                 host,
+                &cache,
             );
         }
 
-        break :blk try Builder.create(
+        break :blk try Build.create(
             allocator,
             zig_exe,
             build_root,
@@ -150,7 +131,7 @@ pub fn main() !void {
         }
     }
 
-    builder.resolveInstallPrefix(null, Builder.DirList{});
+    builder.resolveInstallPrefix(null, Build.DirList{});
     try runBuild(builder);
 
     var packages = std.ArrayListUnmanaged(BuildConfig.Pkg){};
@@ -219,15 +200,10 @@ fn processStep(
 
         try processIncludeDirs(allocator, include_dirs, install_exe.artifact.include_dirs.items);
         try processPkgConfig(allocator, include_dirs, install_exe.artifact);
-        if (@hasField(CompileStep, "modules")) {
-            var modules_it = install_exe.artifact.modules.iterator();
-            while (modules_it.next()) |module_entry| {
-                try processModule(allocator, packages, module_entry);
-            }
-        } else { // assuming @hasField(LibExeObjStep, "packages")
-            for (install_exe.artifact.packages.items) |pkg| {
-                try processPackage(allocator, packages, pkg);
-            }
+
+        var modules_it = install_exe.artifact.modules.iterator();
+        while (modules_it.next()) |module_entry| {
+            try processModule(allocator, packages, module_entry);
         }
     } else if (step.cast(CompileStep)) |exe| {
         if (exe.root_src) |src| {
@@ -239,15 +215,10 @@ fn processStep(
         }
         try processIncludeDirs(allocator, include_dirs, exe.include_dirs.items);
         try processPkgConfig(allocator, include_dirs, exe);
-        if (@hasField(CompileStep, "modules")) {
-            var modules_it = exe.modules.iterator();
-            while (modules_it.next()) |module_entry| {
-                try processModule(allocator, packages, module_entry);
-            }
-        } else { // assuming @hasField(LibExeObjStep, "packages")
-            for (exe.packages.items) |pkg| {
-                try processPackage(allocator, packages, pkg);
-            }
+
+        var modules_it = exe.modules.iterator();
+        while (modules_it.next()) |module_entry| {
+            try processModule(allocator, packages, module_entry);
         }
     } else {
         for (step.dependencies.items) |unknown_step| {
@@ -265,46 +236,20 @@ fn processModule(
         if (std.mem.eql(u8, package.name, module.key_ptr.*)) return;
     }
 
+    const builder = module.value_ptr.*.builder;
+
     const maybe_path = switch (module.value_ptr.*.source_file) {
         .path => |path| path,
         .generated => |generated| generated.path,
     };
 
     if (maybe_path) |path| {
-        try packages.append(allocator, .{ .name = module.key_ptr.*, .path = path });
+        try packages.append(allocator, .{ .name = module.key_ptr.*, .path = builder.pathFromRoot(path) });
     }
 
     var deps_it = module.value_ptr.*.dependencies.iterator();
     while (deps_it.next()) |module_dep| {
         try processModule(allocator, packages, module_dep);
-    }
-}
-
-fn processPackage(
-    allocator: std.mem.Allocator,
-    packages: *std.ArrayListUnmanaged(BuildConfig.Pkg),
-    pkg: Build.Pkg,
-) anyerror!void {
-    for (packages.items) |package| {
-        if (std.mem.eql(u8, package.name, pkg.name)) return;
-    }
-
-    // Support Zig 0.9.1
-    const source = if (@hasField(Build.Pkg, "source")) pkg.source else pkg.path;
-
-    const maybe_path = switch (source) {
-        .path => |path| path,
-        .generated => |generated| generated.path,
-    };
-
-    if (maybe_path) |path| {
-        try packages.append(allocator, .{ .name = pkg.name, .path = path });
-    }
-
-    if (pkg.dependencies) |dependencies| {
-        for (dependencies) |dep| {
-            try processPackage(allocator, packages, dep);
-        }
     }
 }
 
@@ -376,7 +321,7 @@ fn getPkgConfigIncludes(
     } else |err| return err;
 }
 
-fn runBuild(builder: *Builder) anyerror!void {
+fn runBuild(builder: *Build) anyerror!void {
     switch (@typeInfo(@typeInfo(@TypeOf(root.build)).Fn.return_type.?)) {
         .Void => root.build(builder),
         .ErrorUnion => try root.build(builder),

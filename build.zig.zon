@@ -4,16 +4,16 @@
 
     .dependencies = .{
         .known_folders = .{
-            .url = "https://github.com/ziglibs/known-folders/archive/53fe3b676f32e59d46f4fd201d7ab200e5f6cb98.tar.gz",
-            .hash = "12203e18503cd0fa097a4404b0c4f8535a68536886b536ae51c786455238ba5f183b",
+            .url = "https://github.com/ziglibs/known-folders/archive/d13ba6137084e55f873f6afb67447fe8906cc951.tar.gz",
+            .hash = "122028c00915d9b37296059be8a3883c718dbb5bd174350caedf152fed1f46f99607",
         },
         .tres = .{
-            .url = "https://github.com/ziglibs/tres/archive/d8b0c24a945da02fffdae731edd1903c6889e73c.tar.gz",
-            .hash = "12209914477ef8c4ef99accb293c4a7ec90acdd9e77d3f60f5e056449cbfad3a7fd8",
+            .url = "https://github.com/ziglibs/tres/archive/707a09313b42e05d6ae22d1590499eece5f968ce.tar.gz",
+            .hash = "1220beaae8d152baa941a10b7ef3d3a59d093b257047035e2373c3c2f876ad29ccc8",
         },
         .diffz = .{
-            .url = "https://github.com/ziglibs/diffz/archive/efc91679b000a2d7f86fb40930f0a95a0d349bff.tar.gz",
-            .hash = "122019f94ec81a7cf6e9810983603dbacfc65ed30aea8f277f05ba0ce7c1511fff3d",
+            .url = "https://github.com/ziglibs/diffz/archive/b966296b4489eb082b0831ec9a37d6f5e1906040.tar.gz",
+            .hash = "1220ed4aed884221108ad39f2658b69a91653e0bbc8ce429bc7f1bc4e58f6a751553",
         },
     },
 }

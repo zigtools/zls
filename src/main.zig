@@ -9,7 +9,7 @@ const Server = @import("Server.zig");
 const Header = @import("Header.zig");
 const debug = @import("debug.zig");
 
-const logger = std.log.scoped(.main);
+const logger = std.log.scoped(.zls_main);
 
 var actual_log_level: std.log.Level = switch (zig_builtin.mode) {
     .Debug => .debug,
@@ -30,8 +30,9 @@ pub const std_options = struct {
         if (@enumToInt(level) > @enumToInt(actual_log_level)) return;
 
         const level_txt = comptime level.asText();
+        const scope_txt = comptime @tagName(scope);
 
-        std.debug.print("{s:<5}: ({s:^6}): ", .{ level_txt, @tagName(scope) });
+        std.debug.print("{s:<5}: ({s:^6}): ", .{ level_txt, if (comptime std.mem.startsWith(u8, scope_txt, "zls_")) scope_txt[4..] else scope_txt });
         std.debug.print(format ++ "\n", args);
     }
 };
@@ -50,18 +51,8 @@ fn loop(
     var buffered_writer = std.io.bufferedWriter(std_out);
     const writer = buffered_writer.writer();
 
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-
     while (true) {
-        defer {
-            // Mom, can we have garbage collection?
-            // No, we already have garbage collection at home.
-            // at home:
-            if (arena.queryCapacity() > 128 * 1024) {
-                _ = arena.reset(.free_all);
-            }
-        }
+        defer server.maybeFreeArena();
 
         // write server -> client messages
         for (server.outgoing_messages.items) |outgoing_message| {
@@ -76,9 +67,9 @@ fn loop(
         server.outgoing_messages.clearRetainingCapacity();
 
         // read and handle client -> server message
-        const header = try Header.parse(arena.allocator(), replay_file == null, reader);
+        const header = try Header.parse(server.arena.allocator(), replay_file == null, reader);
 
-        const json_message = try arena.allocator().alloc(u8, header.content_length);
+        const json_message = try server.arena.allocator().alloc(u8, header.content_length);
         try reader.readNoEof(json_message);
 
         if (record_file) |file| {
@@ -86,7 +77,7 @@ fn loop(
             try file.writeAll(json_message);
         }
 
-        server.processJsonRpc(&arena, json_message);
+        server.processJsonRpc(json_message);
 
         if (server.status == .exiting_success or server.status == .exiting_failure) return;
     }
