@@ -160,7 +160,7 @@ pub fn build(b: *std.build.Builder) !void {
 
     const build_options_module = exe_options.createModule();
 
-    const zls_module = b.createModule(.{
+    const zls_module = b.addModule("zls", .{
         .source_file = .{ .path = "src/zls.zig" },
         .dependencies = &.{
             .{ .name = "known-folders", .module = known_folders_module },
@@ -182,6 +182,4 @@ pub fn build(b: *std.build.Builder) !void {
     });
     src_tests.setFilter(test_filter);
     test_step.dependOn(&src_tests.step);
-
-    b.modules.put(b.dupe("zls"), zls_module) catch @panic("OOM");
 }
