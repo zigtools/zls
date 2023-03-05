@@ -1,5 +1,5 @@
-// Used by tests as a package, can be used by tools such as
-// zigbot9001 to take advantage of zls' tools
+//! Used by tests as a package, can be used by tools such as
+//! zigbot9001 to take advantage of zls' tools
 
 pub const ast = @import("ast.zig");
 pub const analysis = @import("analysis.zig");
@@ -15,6 +15,8 @@ pub const DocumentStore = @import("DocumentStore.zig");
 pub const ComptimeInterpreter = @import("ComptimeInterpreter.zig");
 pub const diff = @import("diff.zig");
 pub const analyser = @import("analyser/analyser.zig");
+pub const configuration = @import("configuration.zig");
+pub const references = @import("references.zig");
 
 pub const ZigVersionWrapper = @import("ZigVersionWrapper.zig");
 

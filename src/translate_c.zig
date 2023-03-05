@@ -5,7 +5,7 @@ const Config = @import("Config.zig");
 const ast = @import("ast.zig");
 const Ast = std.zig.Ast;
 const URI = @import("uri.zig");
-const log = std.log.scoped(.translate_c);
+const log = std.log.scoped(.zls_translate_c);
 
 /// converts a `@cInclude` node into an equivalent c header file
 /// which can then be handed over to `zig translate-c`

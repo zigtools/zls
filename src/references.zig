@@ -4,7 +4,7 @@ const DocumentStore = @import("DocumentStore.zig");
 const analysis = @import("analysis.zig");
 const types = @import("lsp.zig");
 const offsets = @import("offsets.zig");
-const log = std.log.scoped(.references);
+const log = std.log.scoped(.zls_references);
 const ast = @import("ast.zig");
 
 pub fn labelReferences(

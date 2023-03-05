@@ -8,10 +8,9 @@ const Token = std.zig.Token;
 const identifierFromPosition = @import("Server.zig").identifierFromPosition;
 const ast = @import("ast.zig");
 
-fn fnProtoToSignatureInfo(document_store: *DocumentStore, arena: *std.heap.ArenaAllocator, commas: u32, skip_self_param: bool, handle: *const DocumentStore.Handle, fn_node: Ast.Node.Index, proto: Ast.full.FnProto) !types.SignatureInformation {
+fn fnProtoToSignatureInfo(document_store: *DocumentStore, alloc: std.mem.Allocator, commas: u32, skip_self_param: bool, handle: *const DocumentStore.Handle, fn_node: Ast.Node.Index, proto: Ast.full.FnProto) !types.SignatureInformation {
     const tree = handle.tree;
     const token_starts = tree.tokens.items(.start);
-    const alloc = arena.allocator();
     const label = analysis.getFunctionSignature(tree, proto);
     const proto_comments = (try analysis.getDocComments(alloc, tree, fn_node, .markdown)) orelse "";
 
@@ -71,7 +70,7 @@ fn fnProtoToSignatureInfo(document_store: *DocumentStore, arena: *std.heap.Arena
     };
 }
 
-pub fn getSignatureInfo(document_store: *DocumentStore, arena: *std.heap.ArenaAllocator, handle: *const DocumentStore.Handle, absolute_index: usize, comptime data: type) !?types.SignatureInformation {
+pub fn getSignatureInfo(document_store: *DocumentStore, alloc: std.mem.Allocator, handle: *const DocumentStore.Handle, absolute_index: usize, comptime data: type) !?types.SignatureInformation {
     const innermost_block = analysis.innermostBlockScope(handle.*, absolute_index);
     const tree = handle.tree;
     const token_tags = tree.tokens.items(.tag);
@@ -123,7 +122,6 @@ pub fn getSignatureInfo(document_store: *DocumentStore, arena: *std.heap.ArenaAl
             };
         }
     };
-    const alloc = arena.allocator();
     var symbol_stack = try std.ArrayListUnmanaged(StackSymbol).initCapacity(alloc, 8);
     var curr_commas: u32 = 0;
     var comma_stack = try std.ArrayListUnmanaged(u32).initCapacity(alloc, 4);
@@ -277,7 +275,7 @@ pub fn getSignatureInfo(document_store: *DocumentStore, arena: *std.heap.ArenaAl
                     if (type_handle.handle.tree.fullFnProto(&buf, node)) |proto| {
                         return try fnProtoToSignatureInfo(
                             document_store,
-                            arena,
+                            alloc,
                             paren_commas,
                             false,
                             type_handle.handle,
@@ -327,7 +325,7 @@ pub fn getSignatureInfo(document_store: *DocumentStore, arena: *std.heap.ArenaAl
                     if (res_handle.tree.fullFnProto(&buf, node)) |proto| {
                         return try fnProtoToSignatureInfo(
                             document_store,
-                            arena,
+                            alloc,
                             paren_commas,
                             skip_self_param,
                             res_handle,
