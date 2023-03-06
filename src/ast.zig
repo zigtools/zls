@@ -1582,41 +1582,92 @@ pub fn nodeChildrenRecursiveAlloc(allocator: std.mem.Allocator, tree: Ast, node:
 pub fn nodesAtLoc(allocator: std.mem.Allocator, tree: Ast, loc: offsets.Loc) error{OutOfMemory}![]Ast.Node.Index {
     std.debug.assert(loc.start <= loc.end and loc.end <= tree.source.len);
 
-    var nodes = std.ArrayListUnmanaged(Ast.Node.Index){};
-    errdefer nodes.deinit(allocator);
+    const Context = struct {
+        allocator: std.mem.Allocator,
+        nodes: std.ArrayListUnmanaged(Ast.Node.Index) = .{},
+        locs: std.ArrayListUnmanaged(offsets.Loc) = .{},
+
+        pub fn append(self: *@This(), ast: Ast, node: Ast.Node.Index) !void {
+            if (node == 0) return;
+            try self.nodes.append(self.allocator, node);
+            try self.locs.append(self.allocator, offsets.nodeToLoc(ast, node));
+        }
+    };
+    var context: Context = .{ .allocator = allocator };
+    defer context.nodes.deinit(allocator);
+    defer context.locs.deinit(allocator);
+
+    try context.nodes.ensureTotalCapacity(allocator, 32);
+
     var parent: Ast.Node.Index = 0; // root node
-
-    try nodes.ensureTotalCapacity(allocator, 32);
-
     while (true) {
-        const children = try nodeChildrenAlloc(allocator, tree, parent);
-        defer allocator.free(children);
+        try iterateChildren(tree, parent, &context, error{OutOfMemory}, Context.append);
 
-        var children_loc: ?offsets.Loc = null;
-        for (children) |child_node| {
-            const child_loc = offsets.nodeToLoc(tree, child_node);
-
-            const merge_child = offsets.locIntersect(loc, child_loc) or offsets.locInside(child_loc, loc);
-
-            if (merge_child) {
-                children_loc = if (children_loc) |l| offsets.locMerge(l, child_loc) else child_loc;
-                try nodes.append(allocator, child_node);
-            } else {
-                if (nodes.items.len != 0) break;
+        if (smallestEnclosingSubrange(context.locs.items, loc)) |subslice| {
+            std.debug.assert(subslice.len != 0);
+            const nodes = context.nodes.items[subslice.start .. subslice.start + subslice.len];
+            if (nodes.len == 1) { // recurse over single child node
+                parent = nodes[0];
+                context.nodes.clearRetainingCapacity();
+                context.locs.clearRetainingCapacity();
+                continue;
+            } else { // end-condition: found enclosing children
+                return try allocator.dupe(Ast.Node.Index, nodes);
             }
-        }
-
-        if (children_loc == null or !offsets.locInside(loc, children_loc.?)) {
-            nodes.clearRetainingCapacity();
-            nodes.appendAssumeCapacity(parent); // capacity is never 0
-            return try nodes.toOwnedSlice(allocator);
-        }
-
-        if (nodes.items.len == 1) {
-            parent = nodes.items[0];
-            nodes.clearRetainingCapacity();
-        } else {
-            return try nodes.toOwnedSlice(allocator);
+        } else { // the children cannot enclose the given source location
+            context.nodes.clearRetainingCapacity();
+            context.nodes.appendAssumeCapacity(parent); // capacity is never 0
+            return try context.nodes.toOwnedSlice(allocator);
         }
     }
+}
+
+/// the following code can be described as the the following problem:
+/// @param children a non-intersecting list of source ranges
+/// @param loc be a source range
+///
+/// @return a slice of #children
+///
+/// Return the smallest possible subrange of #children whose
+/// combined source range is inside #loc.
+/// If #children cannot contain #loc i.e #loc is too large, return null.
+/// @see tests/utility.ast.zig for usage examples
+pub fn smallestEnclosingSubrange(children: []const offsets.Loc, loc: offsets.Loc) ?struct {
+    start: usize,
+    len: usize,
+} {
+    switch (children.len) {
+        0 => return null,
+        1 => return if (offsets.locInside(loc, children[0])) .{ .start = 0, .len = 1 } else null,
+        else => {
+            for (children[0 .. children.len - 1], children[1..]) |previous_loc, current_loc| {
+                std.debug.assert(previous_loc.end <= current_loc.start); // must by sorted
+                std.debug.assert(!offsets.locIntersect(previous_loc, current_loc)); // must be non-intersecting
+            }
+        },
+    }
+
+    var i: usize = 0;
+    const start: usize = while (i < children.len) : (i += 1) {
+        const child_loc = children[i];
+        if (child_loc.end < loc.start) continue;
+
+        if (child_loc.start <= loc.start) {
+            break i;
+        } else if (i != 0) {
+            break i - 1;
+        } else {
+            return null;
+        }
+    } else return null;
+
+    const end = while (i < children.len) : (i += 1) {
+        const child_loc = children[i];
+        if (loc.end <= child_loc.end) break i + 1;
+    } else return null;
+
+    return .{
+        .start = start,
+        .len = end - start,
+    };
 }
