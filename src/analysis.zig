@@ -1139,13 +1139,10 @@ pub const TypeWithHandle = struct {
     }
 
     pub fn getAllTypesWithHandlesArrayList(ty: TypeWithHandle, arena: std.mem.Allocator, all_types: *std.ArrayListUnmanaged(TypeWithHandle)) !void {
-        return switch (ty.type.data) {
-            .pointer, .slice, .error_union, .other, .primitive => try all_types.append(arena, ty),
+        switch (ty.type.data) {
             .either => |e| for (e) |i| try i.type_with_handle.getAllTypesWithHandlesArrayList(arena, all_types),
-            .array_index, .@"comptime" => {
-                // TODO
-            },
-        };
+            else => try all_types.append(arena, ty),
+        }
     }
 
     fn instanceTypeVal(self: TypeWithHandle) ?TypeWithHandle {
