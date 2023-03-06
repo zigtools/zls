@@ -885,22 +885,21 @@ pub fn gotoDefinitionSymbol(
     };
 }
 
-pub fn hoverSymbol(server: *Server, decl_handle: analysis.DeclWithHandle) error{OutOfMemory}!?types.Hover {
+pub fn hoverSymbol(server: *Server, decl_handle: analysis.DeclWithHandle, markup_kind: types.MarkupKind) error{OutOfMemory}!?[]const u8 {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
     const handle = decl_handle.handle;
     const tree = handle.tree;
 
-    const hover_kind: types.MarkupKind = if (server.client_capabilities.hover_supports_md) .markdown else .plaintext;
     var doc_str: ?[]const u8 = null;
 
     const def_str = switch (decl_handle.decl.*) {
         .ast_node => |node| def: {
             if (try analysis.resolveVarDeclAlias(server.arena.allocator(), &server.document_store, .{ .node = node, .handle = handle })) |result| {
-                return try server.hoverSymbol(result);
+                return try server.hoverSymbol(result, markup_kind);
             }
-            doc_str = try analysis.getDocComments(server.arena.allocator(), tree, node, hover_kind);
+            doc_str = try analysis.getDocComments(server.arena.allocator(), tree, node, markup_kind);
 
             var buf: [1]Ast.Node.Index = undefined;
 
@@ -917,7 +916,7 @@ pub fn hoverSymbol(server: *Server, decl_handle: analysis.DeclWithHandle) error{
         .param_payload => |pay| def: {
             const param = pay.param;
             if (param.first_doc_comment) |doc_comments| {
-                doc_str = try analysis.collectDocComments(server.arena.allocator(), handle.tree, doc_comments, hover_kind, false);
+                doc_str = try analysis.collectDocComments(server.arena.allocator(), handle.tree, doc_comments, markup_kind, false);
             }
 
             const first_token = ast.paramFirstToken(tree, param);
@@ -985,7 +984,7 @@ pub fn hoverSymbol(server: *Server, decl_handle: analysis.DeclWithHandle) error{
         "unknown";
 
     var hover_text: []const u8 = undefined;
-    if (hover_kind == .markdown) {
+    if (markup_kind == .markdown) {
         hover_text =
             if (doc_str) |doc|
             try std.fmt.allocPrint(server.arena.allocator(), "```zig\n{s}\n```\n```zig\n({s})\n```\n{s}", .{ def_str, resolved_type_str, doc })
@@ -999,12 +998,7 @@ pub fn hoverSymbol(server: *Server, decl_handle: analysis.DeclWithHandle) error{
             try std.fmt.allocPrint(server.arena.allocator(), "{s} ({s})", .{ def_str, resolved_type_str });
     }
 
-    return types.Hover{
-        .contents = .{ .MarkupContent = .{
-            .kind = hover_kind,
-            .value = hover_text,
-        } },
-    };
+    return hover_text;
 }
 
 pub fn getLabelGlobal(pos_index: usize, handle: *const DocumentStore.Handle) error{OutOfMemory}!?analysis.DeclWithHandle {
@@ -1092,8 +1086,17 @@ pub fn hoverDefinitionLabel(server: *Server, pos_index: usize, handle: *const Do
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
+    const markup_kind: types.MarkupKind = if (server.client_capabilities.hover_supports_md) .markdown else .plaintext;
     const decl = (try getLabelGlobal(pos_index, handle)) orelse return null;
-    return try server.hoverSymbol(decl);
+
+    return .{
+        .contents = .{
+            .MarkupContent = .{
+                .kind = markup_kind,
+                .value = (try server.hoverSymbol(decl, markup_kind)) orelse return null,
+            },
+        },
+    };
 }
 
 pub fn hoverDefinitionBuiltin(server: *Server, pos_index: usize, handle: *const DocumentStore.Handle) error{OutOfMemory}!?types.Hover {
@@ -1150,8 +1153,17 @@ pub fn hoverDefinitionGlobal(server: *Server, pos_index: usize, handle: *const D
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
+    const markup_kind: types.MarkupKind = if (server.client_capabilities.hover_supports_md) .markdown else .plaintext;
     const decl = (try server.getSymbolGlobal(pos_index, handle)) orelse return null;
-    return try server.hoverSymbol(decl);
+
+    return .{
+        .contents = .{
+            .MarkupContent = .{
+                .kind = markup_kind,
+                .value = (try server.hoverSymbol(decl, markup_kind)) orelse return null,
+            },
+        },
+    };
 }
 
 /// Multiple when using branched types
@@ -1230,9 +1242,24 @@ pub fn hoverDefinitionFieldAccess(
 
     _ = .{ server, handle, source_index, loc };
 
-    // const decl = (try server.getSymbolFieldAccess(handle, source_index, loc)) orelse return null;
-    // return try server.hoverSymbol(decl);
-    return null;
+    const markup_kind: types.MarkupKind = if (server.client_capabilities.hover_supports_md) .markdown else .plaintext;
+    const decls = (try server.getSymbolFieldAccesses(handle, source_index, loc)) orelse return null;
+
+    var content = std.ArrayListUnmanaged(types.MarkedString){};
+
+    for (decls) |decl| {
+        try content.append(server.arena.allocator(), .{
+            .string = (try server.hoverSymbol(decl, markup_kind)) orelse continue,
+        });
+    }
+
+    // Yes, this is deprecated; the issue is that there's no better
+    // solution for multiple hover entries :(
+    return .{
+        .contents = .{
+            .array_of_MarkedString = try content.toOwnedSlice(server.arena.allocator()),
+        },
+    };
 }
 
 pub fn gotoDefinitionString(
