@@ -208,7 +208,7 @@ pub const builtins = [_]Builtin{
         .signature = "@breakpoint()",
         .snippet = "@breakpoint()",
         .documentation =
-        \\This function inserts a platform-specific debug trap instruction which causes debuggers to break there.
+        \\This function inserts a platform-specific debug trap instruction which causes debuggers to break there. Unlike for `@trap()`, execution may continue after this point if the program is resumed.
         \\
         \\This function is only valid within function scope.
         ,
@@ -1858,6 +1858,17 @@ pub const builtins = [_]Builtin{
         \\}
         \\```
         \\When `@This()` is used at file scope, it returns a reference to the struct that corresponds to the current file.
+        ,
+        .arguments = &.{},
+    },
+    .{
+        .name = "@trap",
+        .signature = "@trap() noreturn",
+        .snippet = "@trap()",
+        .documentation =
+        \\This function inserts a platform-specific trap/jam instruction which can be used to exit the program abnormally. This may be implemented by explicitly emitting an invalid instruction which may cause an illegal instruction exception of some sort. Unlike for `@breakpoint()`, execution does not continue after this point.
+        \\
+        \\Outside function scope, this builtin causes a compile error.
         ,
         .arguments = &.{},
     },
