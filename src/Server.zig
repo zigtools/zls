@@ -2009,7 +2009,7 @@ fn initializeHandler(server: *Server, request: types.InitializeParams) Error!typ
             .semanticTokensProvider = .{
                 .SemanticTokensOptions = .{
                     .full = .{ .bool = true },
-                    .range = .{ .bool = false },
+                    .range = .{ .bool = true },
                     .legend = .{
                         .tokenTypes = comptime block: {
                             const tokTypeFields = std.meta.fields(semantic_tokens.TokenType);
@@ -2286,9 +2286,19 @@ fn semanticTokensFullHandler(server: *Server, request: types.SemanticTokensParam
 
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
 
-    const token_array = try semantic_tokens.writeAllSemanticTokens(server.arena.allocator(), &server.document_store, handle, server.offset_encoding);
+    return try semantic_tokens.writeSemanticTokens(server.arena.allocator(), &server.document_store, handle, null, server.offset_encoding);
+}
 
-    return .{ .data = token_array };
+fn semanticTokensRangeHandler(server: *Server, request: types.SemanticTokensRangeParams) Error!?types.SemanticTokens {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    if (!server.config.enable_semantic_tokens) return null;
+
+    const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
+    const loc = offsets.rangeToLoc(handle.tree.source, request.range, server.offset_encoding);
+
+    return try semantic_tokens.writeSemanticTokens(server.arena.allocator(), &server.document_store, handle, loc, server.offset_encoding);
 }
 
 pub fn completionHandler(server: *Server, request: types.CompletionParams) Error!?types.CompletionList {
@@ -3110,6 +3120,7 @@ pub fn processMessage(server: *Server, message: Message) Error!void {
         .{ "textDocument/didClose", closeDocumentHandler },
         .{ "textDocument/willSaveWaitUntil", willSaveWaitUntilHandler },
         .{ "textDocument/semanticTokens/full", semanticTokensFullHandler },
+        .{ "textDocument/semanticTokens/range", semanticTokensRangeHandler },
         .{ "textDocument/inlayHint", inlayHintHandler },
         .{ "textDocument/completion", completionHandler },
         .{ "textDocument/signatureHelp", signatureHelpHandler },

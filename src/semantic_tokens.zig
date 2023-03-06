@@ -5,6 +5,7 @@ const DocumentStore = @import("DocumentStore.zig");
 const analysis = @import("analysis.zig");
 const Ast = std.zig.Ast;
 const ast = @import("ast.zig");
+const types = @import("lsp.zig");
 
 pub const TokenType = enum(u32) {
     type,
@@ -1030,19 +1031,24 @@ fn writeContainerField(builder: *Builder, node: Ast.Node.Index, field_token_type
     }
 }
 
-// TODO Range version, edit version.
-pub fn writeAllSemanticTokens(
+/// If `loc` is `null`, semantic tokens will be computed for the entire source range
+/// Otherwise only tokens in the give source range will be returned
+/// TODO edit version.
+pub fn writeSemanticTokens(
     arena: std.mem.Allocator,
     store: *DocumentStore,
     handle: *const DocumentStore.Handle,
+    loc: ?offsets.Loc,
     encoding: offsets.Encoding,
-) ![]u32 {
+) !types.SemanticTokens {
     var builder = Builder.init(arena, store, handle, encoding);
 
+    const nodes = if (loc) |l| try ast.nodesAtLoc(arena, handle.tree, l) else handle.tree.rootDecls();
+
     // reverse the ast from the root declarations
-    for (handle.tree.rootDecls()) |child| {
+    for (nodes) |child| {
         try writeNodeTokens(&builder, child);
     }
     try builder.finish();
-    return builder.toOwnedSlice();
+    return .{ .data = try builder.toOwnedSlice() };
 }
