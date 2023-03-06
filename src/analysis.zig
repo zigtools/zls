@@ -1131,6 +1131,23 @@ pub const TypeWithHandle = struct {
         };
     }
 
+    /// Resolves possible types of a type (single for all except array_index and either)
+    pub fn getAllTypesWithHandles(ty: TypeWithHandle, arena: std.mem.Allocator) ![]const TypeWithHandle {
+        var all_types = std.ArrayListUnmanaged(TypeWithHandle){};
+        try ty.getAllTypesWithHandlesArrayList(arena, &all_types);
+        return try all_types.toOwnedSlice(arena);
+    }
+
+    pub fn getAllTypesWithHandlesArrayList(ty: TypeWithHandle, arena: std.mem.Allocator, all_types: *std.ArrayListUnmanaged(TypeWithHandle)) !void {
+        return switch (ty.type.data) {
+            .pointer, .slice, .error_union, .other, .primitive => try all_types.append(arena, ty),
+            .either => |e| for (e) |i| try i.type_with_handle.getAllTypesWithHandlesArrayList(arena, all_types),
+            .array_index, .@"comptime" => {
+                // TODO
+            },
+        };
+    }
+
     fn instanceTypeVal(self: TypeWithHandle) ?TypeWithHandle {
         if (!self.type.is_type_val) return null;
         return TypeWithHandle{
@@ -1353,24 +1370,33 @@ pub fn getFieldAccessType(arena: std.mem.Allocator, store: *DocumentStore, handl
 
                         current_type = try resolveFieldAccessLhsType(arena, store, current_type orelse return null, &bound_type_params);
 
-                        const current_type_node = switch (current_type.?.type.data) {
-                            .other => |n| n,
-                            else => return null,
-                        };
+                        const current_type_nodes = try current_type.?.getAllTypesWithHandles(arena);
 
-                        if (try lookupSymbolContainer(
-                            arena,
-                            store,
-                            .{ .node = current_type_node, .handle = current_type.?.handle },
-                            tokenizer.buffer[after_period.loc.start..after_period.loc.end],
-                            !current_type.?.type.is_type_val,
-                        )) |child| {
-                            current_type.? = (try child.resolveType(
+                        // TODO: Return all options instead of first valid one
+                        // (this would require a huge rewrite and im lazy)
+                        for (current_type_nodes) |ty| {
+                            const current_type_node = switch (ty.type.data) {
+                                .other => |n| n,
+                                else => continue,
+                            };
+
+                            if (try lookupSymbolContainer(
                                 arena,
                                 store,
-                                &bound_type_params,
-                            )) orelse return null;
-                        } else return null;
+                                .{ .node = current_type_node, .handle = ty.handle },
+                                tokenizer.buffer[after_period.loc.start..after_period.loc.end],
+                                !current_type.?.type.is_type_val,
+                            )) |child| {
+                                current_type.? = (try child.resolveType(
+                                    arena,
+                                    store,
+                                    &bound_type_params,
+                                )) orelse continue;
+                                break;
+                            } else continue;
+                        } else {
+                            return null;
+                        }
                     },
                     .question_mark => {
                         current_type = (try resolveUnwrapOptionalType(

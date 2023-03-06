@@ -1154,12 +1154,13 @@ pub fn hoverDefinitionGlobal(server: *Server, pos_index: usize, handle: *const D
     return try server.hoverSymbol(decl);
 }
 
-pub fn getSymbolFieldAccess(
+/// Multiple when using branched types
+pub fn getSymbolFieldAccesses(
     server: *Server,
     handle: *const DocumentStore.Handle,
     source_index: usize,
     loc: offsets.Loc,
-) error{OutOfMemory}!?analysis.DeclWithHandle {
+) error{OutOfMemory}!?[]const analysis.DeclWithHandle {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -1169,21 +1170,29 @@ pub fn getSymbolFieldAccess(
     var held_range = try server.arena.allocator().dupeZ(u8, offsets.locToSlice(handle.text, loc));
     var tokenizer = std.zig.Tokenizer.init(held_range);
 
+    var decls_with_handles = std.ArrayListUnmanaged(analysis.DeclWithHandle){};
+
     if (try analysis.getFieldAccessType(server.arena.allocator(), &server.document_store, handle, source_index, &tokenizer)) |result| {
         const container_handle = result.unwrapped orelse result.original;
-        const container_handle_node = switch (container_handle.type.data) {
-            .other => |n| n,
-            else => return null,
-        };
-        return try analysis.lookupSymbolContainer(
-            server.arena.allocator(),
-            &server.document_store,
-            .{ .node = container_handle_node, .handle = container_handle.handle },
-            name,
-            true,
-        );
+
+        const container_handle_nodes = try container_handle.getAllTypesWithHandles(server.arena.allocator());
+
+        for (container_handle_nodes) |ty| {
+            const container_handle_node = switch (ty.type.data) {
+                .other => |n| n,
+                else => continue,
+            };
+            try decls_with_handles.append(server.arena.allocator(), (try analysis.lookupSymbolContainer(
+                server.arena.allocator(),
+                &server.document_store,
+                .{ .node = container_handle_node, .handle = ty.handle },
+                name,
+                true,
+            )) orelse continue);
+        }
     }
-    return null;
+
+    return try decls_with_handles.toOwnedSlice(server.arena.allocator());
 }
 
 pub fn gotoDefinitionFieldAccess(
@@ -1192,12 +1201,22 @@ pub fn gotoDefinitionFieldAccess(
     source_index: usize,
     loc: offsets.Loc,
     resolve_alias: bool,
-) error{OutOfMemory}!?types.Location {
+) error{OutOfMemory}!?[]const types.Location {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const decl = (try server.getSymbolFieldAccess(handle, source_index, loc)) orelse return null;
-    return try server.gotoDefinitionSymbol(decl, resolve_alias);
+    const accesses = (try server.getSymbolFieldAccesses(handle, source_index, loc)) orelse return null;
+    var locs = std.ArrayListUnmanaged(types.Location){};
+
+    for (accesses) |access| {
+        if (try server.gotoDefinitionSymbol(access, resolve_alias)) |l|
+            try locs.append(server.arena.allocator(), l);
+    }
+
+    if (locs.items.len == 0)
+        return null;
+
+    return try locs.toOwnedSlice(server.arena.allocator());
 }
 
 pub fn hoverDefinitionFieldAccess(
@@ -1209,8 +1228,11 @@ pub fn hoverDefinitionFieldAccess(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const decl = (try server.getSymbolFieldAccess(handle, source_index, loc)) orelse return null;
-    return try server.hoverSymbol(decl);
+    _ = .{ server, handle, source_index, loc };
+
+    // const decl = (try server.getSymbolFieldAccess(handle, source_index, loc)) orelse return null;
+    // return try server.hoverSymbol(decl);
+    return null;
 }
 
 pub fn gotoDefinitionString(
@@ -2361,7 +2383,7 @@ pub fn signatureHelpHandler(server: *Server, request: types.SignatureHelpParams)
     };
 }
 
-pub fn gotoHandler(server: *Server, request: types.TextDocumentPositionParams, resolve_alias: bool) Error!?types.Location {
+pub fn gotoHandler(server: *Server, request: types.TextDocumentPositionParams, resolve_alias: bool) Error!?types.Definition {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -2373,14 +2395,14 @@ pub fn gotoHandler(server: *Server, request: types.TextDocumentPositionParams, r
     const pos_context = try analysis.getPositionContext(server.arena.allocator(), handle.text, source_index, true);
 
     return switch (pos_context) {
-        .builtin => |loc| try server.gotoDefinitionBuiltin(handle, loc),
-        .var_access => try server.gotoDefinitionGlobal(source_index, handle, resolve_alias),
-        .field_access => |loc| try server.gotoDefinitionFieldAccess(handle, source_index, loc, resolve_alias),
+        .builtin => |loc| .{ .Location = (try server.gotoDefinitionBuiltin(handle, loc)) orelse return null },
+        .var_access => .{ .Location = (try server.gotoDefinitionGlobal(source_index, handle, resolve_alias)) orelse return null },
+        .field_access => |loc| .{ .array_of_Location = (try server.gotoDefinitionFieldAccess(handle, source_index, loc, resolve_alias)) orelse return null },
         .import_string_literal,
         .cinclude_string_literal,
         .embedfile_string_literal,
-        => try server.gotoDefinitionString(pos_context, handle),
-        .label => try server.gotoDefinitionLabel(source_index, handle),
+        => .{ .Location = (try server.gotoDefinitionString(pos_context, handle)) orelse return null },
+        .label => .{ .Location = (try server.gotoDefinitionLabel(source_index, handle)) orelse return null },
         else => null,
     };
 }
@@ -2388,7 +2410,7 @@ pub fn gotoHandler(server: *Server, request: types.TextDocumentPositionParams, r
 fn gotoDefinitionHandler(
     server: *Server,
     request: types.TextDocumentPositionParams,
-) Error!?types.Location {
+) Error!?types.Definition {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -2398,7 +2420,7 @@ fn gotoDefinitionHandler(
 fn gotoDeclarationHandler(
     server: *Server,
     request: types.TextDocumentPositionParams,
-) Error!?types.Location {
+) Error!?types.Definition {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -2570,77 +2592,82 @@ pub fn generalReferencesHandler(server: *Server, request: GeneralReferencesReque
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const allocator = server.arena.allocator();
+    _ = server;
+    _ = request;
 
-    const handle = server.document_store.getHandle(request.uri()) orelse return null;
+    return null;
 
-    if (request.position().character <= 0) return null;
+    // const allocator = server.arena.allocator();
 
-    const source_index = offsets.positionToIndex(handle.text, request.position(), server.offset_encoding);
-    const pos_context = try analysis.getPositionContext(server.arena.allocator(), handle.text, source_index, true);
+    // const handle = server.document_store.getHandle(request.uri()) orelse return null;
 
-    const decl = switch (pos_context) {
-        .var_access => try server.getSymbolGlobal(source_index, handle),
-        .field_access => |range| try server.getSymbolFieldAccess(handle, source_index, range),
-        .label => try getLabelGlobal(source_index, handle),
-        else => null,
-    } orelse return null;
+    // if (request.position().character <= 0) return null;
 
-    const include_decl = switch (request) {
-        .references => |ref| ref.context.includeDeclaration,
-        else => true,
-    };
+    // const source_index = offsets.positionToIndex(handle.text, request.position(), server.offset_encoding);
+    // const pos_context = try analysis.getPositionContext(server.arena.allocator(), handle.text, source_index, true);
 
-    const locations = if (pos_context == .label)
-        try references.labelReferences(allocator, decl, server.offset_encoding, include_decl)
-    else
-        try references.symbolReferences(
-            allocator,
-            &server.document_store,
-            decl,
-            server.offset_encoding,
-            include_decl,
-            server.config.skip_std_references,
-            request != .highlight, // scan the entire workspace except for highlight
-        );
+    // const decl = switch (pos_context) {
+    //     .var_access => try server.getSymbolGlobal(source_index, handle),
+    //     .field_access => |range| try server.getSymbolFieldAccess(handle, source_index, range),
+    //     .label => try getLabelGlobal(source_index, handle),
+    //     else => null,
+    // } orelse return null;
 
-    switch (request) {
-        .rename => |rename| {
-            var changes = std.StringArrayHashMapUnmanaged(std.ArrayListUnmanaged(types.TextEdit)){};
+    // const include_decl = switch (request) {
+    //     .references => |ref| ref.context.includeDeclaration,
+    //     else => true,
+    // };
 
-            for (locations.items) |loc| {
-                const gop = try changes.getOrPutValue(allocator, loc.uri, .{});
-                try gop.value_ptr.append(allocator, .{
-                    .range = loc.range,
-                    .newText = rename.newName,
-                });
-            }
+    // const locations = if (pos_context == .label)
+    //     try references.labelReferences(allocator, decl, server.offset_encoding, include_decl)
+    // else
+    //     try references.symbolReferences(
+    //         allocator,
+    //         &server.document_store,
+    //         decl,
+    //         server.offset_encoding,
+    //         include_decl,
+    //         server.config.skip_std_references,
+    //         request != .highlight, // scan the entire workspace except for highlight
+    //     );
 
-            // TODO can we avoid having to move map from `changes` to `new_changes`?
-            var new_changes: types.Map(types.DocumentUri, []const types.TextEdit) = .{};
-            try new_changes.ensureTotalCapacity(allocator, @intCast(u32, changes.count()));
+    // switch (request) {
+    //     .rename => |rename| {
+    //         var changes = std.StringArrayHashMapUnmanaged(std.ArrayListUnmanaged(types.TextEdit)){};
 
-            var changes_it = changes.iterator();
-            while (changes_it.next()) |entry| {
-                new_changes.putAssumeCapacityNoClobber(entry.key_ptr.*, try entry.value_ptr.toOwnedSlice(allocator));
-            }
+    //         for (locations.items) |loc| {
+    //             const gop = try changes.getOrPutValue(allocator, loc.uri, .{});
+    //             try gop.value_ptr.append(allocator, .{
+    //                 .range = loc.range,
+    //                 .newText = rename.newName,
+    //             });
+    //         }
 
-            return .{ .rename = .{ .changes = new_changes } };
-        },
-        .references => return .{ .references = locations.items },
-        .highlight => {
-            var highlights = try std.ArrayListUnmanaged(types.DocumentHighlight).initCapacity(allocator, locations.items.len);
-            const uri = handle.uri;
-            for (locations.items) |loc| {
-                if (!std.mem.eql(u8, loc.uri, uri)) continue;
-                highlights.appendAssumeCapacity(.{
-                    .range = loc.range,
-                    .kind = .Text,
-                });
-            }
-            return .{ .highlight = highlights.items };
-        },
-    }
+    //         // TODO can we avoid having to move map from `changes` to `new_changes`?
+    //         var new_changes: types.Map(types.DocumentUri, []const types.TextEdit) = .{};
+    //         try new_changes.ensureTotalCapacity(allocator, @intCast(u32, changes.count()));
+
+    //         var changes_it = changes.iterator();
+    //         while (changes_it.next()) |entry| {
+    //             new_changes.putAssumeCapacityNoClobber(entry.key_ptr.*, try entry.value_ptr.toOwnedSlice(allocator));
+    //         }
+
+    //         return .{ .rename = .{ .changes = new_changes } };
+    //     },
+    //     .references => return .{ .references = locations.items },
+    //     .highlight => {
+    //         var highlights = try std.ArrayListUnmanaged(types.DocumentHighlight).initCapacity(allocator, locations.items.len);
+    //         const uri = handle.uri;
+    //         for (locations.items) |loc| {
+    //             if (!std.mem.eql(u8, loc.uri, uri)) continue;
+    //             highlights.appendAssumeCapacity(.{
+    //                 .range = loc.range,
+    //                 .kind = .Text,
+    //             });
+    //         }
+    //         return .{ .highlight = highlights.items };
+    //     },
+    // }
 }
 
 fn isPositionBefore(lhs: types.Position, rhs: types.Position) bool {
