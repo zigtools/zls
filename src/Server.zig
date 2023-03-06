@@ -1979,7 +1979,7 @@ fn initializedHandler(server: *Server, notification: types.InitializedParams) Er
         try server.requestConfiguration();
 }
 
-fn shutdownHandler(server: *Server, _: void) Error!void {
+fn shutdownHandler(server: *Server, _: void) Error!?void {
     defer server.status = .shutdown;
     if (server.status != .initialized) return error.InvalidRequest; // received a shutdown request but the server is not initialized!
 }
