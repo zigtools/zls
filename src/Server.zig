@@ -1240,8 +1240,6 @@ pub fn hoverDefinitionFieldAccess(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    _ = .{ server, handle, source_index, loc };
-
     const markup_kind: types.MarkupKind = if (server.client_capabilities.hover_supports_md) .markdown else .plaintext;
     const decls = (try server.getSymbolFieldAccesses(handle, source_index, loc)) orelse return null;
 
@@ -2619,82 +2617,85 @@ pub fn generalReferencesHandler(server: *Server, request: GeneralReferencesReque
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    _ = server;
-    _ = request;
+    const allocator = server.arena.allocator();
 
-    return null;
+    const handle = server.document_store.getHandle(request.uri()) orelse return null;
 
-    // const allocator = server.arena.allocator();
+    if (request.position().character <= 0) return null;
 
-    // const handle = server.document_store.getHandle(request.uri()) orelse return null;
+    const source_index = offsets.positionToIndex(handle.text, request.position(), server.offset_encoding);
+    const pos_context = try analysis.getPositionContext(server.arena.allocator(), handle.text, source_index, true);
 
-    // if (request.position().character <= 0) return null;
+    // TODO: Make this work with branching types
+    const decl = switch (pos_context) {
+        .var_access => try server.getSymbolGlobal(source_index, handle),
+        .field_access => |range| z: {
+            const a = try server.getSymbolFieldAccesses(handle, source_index, range);
+            if (a) |b| {
+                if (b.len != 0) break :z b[0];
+            }
 
-    // const source_index = offsets.positionToIndex(handle.text, request.position(), server.offset_encoding);
-    // const pos_context = try analysis.getPositionContext(server.arena.allocator(), handle.text, source_index, true);
+            break :z null;
+        },
+        .label => try getLabelGlobal(source_index, handle),
+        else => null,
+    } orelse return null;
 
-    // const decl = switch (pos_context) {
-    //     .var_access => try server.getSymbolGlobal(source_index, handle),
-    //     .field_access => |range| try server.getSymbolFieldAccess(handle, source_index, range),
-    //     .label => try getLabelGlobal(source_index, handle),
-    //     else => null,
-    // } orelse return null;
+    const include_decl = switch (request) {
+        .references => |ref| ref.context.includeDeclaration,
+        else => true,
+    };
 
-    // const include_decl = switch (request) {
-    //     .references => |ref| ref.context.includeDeclaration,
-    //     else => true,
-    // };
+    const locations = if (pos_context == .label)
+        try references.labelReferences(allocator, decl, server.offset_encoding, include_decl)
+    else
+        try references.symbolReferences(
+            allocator,
+            &server.document_store,
+            decl,
+            server.offset_encoding,
+            include_decl,
+            server.config.skip_std_references,
+            request != .highlight, // scan the entire workspace except for highlight
+        );
 
-    // const locations = if (pos_context == .label)
-    //     try references.labelReferences(allocator, decl, server.offset_encoding, include_decl)
-    // else
-    //     try references.symbolReferences(
-    //         allocator,
-    //         &server.document_store,
-    //         decl,
-    //         server.offset_encoding,
-    //         include_decl,
-    //         server.config.skip_std_references,
-    //         request != .highlight, // scan the entire workspace except for highlight
-    //     );
+    switch (request) {
+        .rename => |rename| {
+            var changes = std.StringArrayHashMapUnmanaged(std.ArrayListUnmanaged(types.TextEdit)){};
 
-    // switch (request) {
-    //     .rename => |rename| {
-    //         var changes = std.StringArrayHashMapUnmanaged(std.ArrayListUnmanaged(types.TextEdit)){};
+            for (locations.items) |loc| {
+                const gop = try changes.getOrPutValue(allocator, loc.uri, .{});
+                try gop.value_ptr.append(allocator, .{
+                    .range = loc.range,
+                    .newText = rename.newName,
+                });
+            }
 
-    //         for (locations.items) |loc| {
-    //             const gop = try changes.getOrPutValue(allocator, loc.uri, .{});
-    //             try gop.value_ptr.append(allocator, .{
-    //                 .range = loc.range,
-    //                 .newText = rename.newName,
-    //             });
-    //         }
+            // TODO can we avoid having to move map from `changes` to `new_changes`?
+            var new_changes: types.Map(types.DocumentUri, []const types.TextEdit) = .{};
+            try new_changes.ensureTotalCapacity(allocator, @intCast(u32, changes.count()));
 
-    //         // TODO can we avoid having to move map from `changes` to `new_changes`?
-    //         var new_changes: types.Map(types.DocumentUri, []const types.TextEdit) = .{};
-    //         try new_changes.ensureTotalCapacity(allocator, @intCast(u32, changes.count()));
+            var changes_it = changes.iterator();
+            while (changes_it.next()) |entry| {
+                new_changes.putAssumeCapacityNoClobber(entry.key_ptr.*, try entry.value_ptr.toOwnedSlice(allocator));
+            }
 
-    //         var changes_it = changes.iterator();
-    //         while (changes_it.next()) |entry| {
-    //             new_changes.putAssumeCapacityNoClobber(entry.key_ptr.*, try entry.value_ptr.toOwnedSlice(allocator));
-    //         }
-
-    //         return .{ .rename = .{ .changes = new_changes } };
-    //     },
-    //     .references => return .{ .references = locations.items },
-    //     .highlight => {
-    //         var highlights = try std.ArrayListUnmanaged(types.DocumentHighlight).initCapacity(allocator, locations.items.len);
-    //         const uri = handle.uri;
-    //         for (locations.items) |loc| {
-    //             if (!std.mem.eql(u8, loc.uri, uri)) continue;
-    //             highlights.appendAssumeCapacity(.{
-    //                 .range = loc.range,
-    //                 .kind = .Text,
-    //             });
-    //         }
-    //         return .{ .highlight = highlights.items };
-    //     },
-    // }
+            return .{ .rename = .{ .changes = new_changes } };
+        },
+        .references => return .{ .references = locations.items },
+        .highlight => {
+            var highlights = try std.ArrayListUnmanaged(types.DocumentHighlight).initCapacity(allocator, locations.items.len);
+            const uri = handle.uri;
+            for (locations.items) |loc| {
+                if (!std.mem.eql(u8, loc.uri, uri)) continue;
+                highlights.appendAssumeCapacity(.{
+                    .range = loc.range,
+                    .kind = .Text,
+                });
+            }
+            return .{ .highlight = highlights.items };
+        },
+    }
 }
 
 fn isPositionBefore(lhs: types.Position, rhs: types.Position) bool {
