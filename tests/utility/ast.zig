@@ -13,6 +13,12 @@ const allocator = std.testing.allocator;
 
 test "nodesAtLoc" {
     try testNodesAtLoc(
+        \\<outer><inner><inner><outer>
+    );
+    try testNodesAtLoc(
+        \\<outer><inner>var alpha = 1<inner><outer>;
+    );
+    try testNodesAtLoc(
         \\<outer>const<inner> foo<inner> = 5<outer>;
     );
     try testNodesAtLoc(
@@ -25,6 +31,104 @@ test "nodesAtLoc" {
     try testNodesAtLoc(
         \\<outer><inner>fn foo(alpha: u32) void {}
         \\const _ = foo(5);<inner><outer>
+    );
+    try testNodesAtLoc(
+        \\var alpha = 1;
+        \\var beta = alpha + alpha;
+        \\<outer>var gamma<inner> = beta * alpha;
+        \\var delta = gamma - 2;
+        \\var epsilon = delta - <inner>beta<outer>;
+        \\var zeta = epsilon * epsilon;
+    );
+    try testNodesAtLoc(
+        \\<outer><inner>var alpha = 1;
+        \\var beta = alpha + alpha;<inner>
+        \\var gamma = beta * alpha<outer>;
+        \\var epsilon = delta - beta;
+    );
+    try testNodesAtLoc(
+        \\fn foo() void {
+        \\
+        \\}
+        \\<outer>fn <inner>bar() void {
+        \\    <inner>
+        \\}<outer>
+        \\fn baz() void {
+        \\
+        \\}
+    );
+    try testNodesAtLoc(
+        \\var alpha = 1;
+        \\<outer>var beta = alpha + alpha;
+        \\// some comment
+        \\// <inner>because it is<inner>
+        \\// not a node
+        \\var gamma = beta * alpha<outer>;
+        \\var epsilon = delta - beta;
+    );
+}
+
+test "smallestEnclosingSubrange" {
+    const children = &[_]offsets.Loc{
+        .{ .start = 0, .end = 5 },
+        .{ .start = 5, .end = 10 },
+        .{ .start = 12, .end = 18 },
+        .{ .start = 18, .end = 22 },
+        .{ .start = 25, .end = 28 },
+    };
+
+    try std.testing.expect(ast.smallestEnclosingSubrange(&.{}, undefined) == null);
+
+    // children  <-->
+    // loc       <--->
+    // result    null
+    try std.testing.expect(
+        ast.smallestEnclosingSubrange(&.{.{ .start = 0, .end = 4 }}, .{ .start = 0, .end = 5 }) == null,
+    );
+
+    // children  <---><--->  <----><-->   <->
+    // loc       <---------------------------->
+    // result    null
+    try std.testing.expect(ast.smallestEnclosingSubrange(children, .{ .start = 0, .end = 30 }) == null);
+
+    // children  <---><--->  <----><-->   <->
+    // loc             <--------->
+    // result         <--->  <---->
+    const result1 = ast.smallestEnclosingSubrange(children, .{ .start = 6, .end = 17 }).?;
+    try std.testing.expectEqualSlices(
+        offsets.Loc,
+        children[1..3],
+        children[result1.start .. result1.start + result1.len],
+    );
+
+    // children  <---><--->  <----><-->   <->
+    // loc            <------------->
+    // result         <--->  <----><-->
+    const result2 = ast.smallestEnclosingSubrange(children, .{ .start = 6, .end = 20 }).?;
+    try std.testing.expectEqualSlices(
+        offsets.Loc,
+        children[1..4],
+        children[result2.start .. result2.start + result2.len],
+    );
+
+    // children  <---><--->  <----><-->   <->
+    // loc                 <----------->
+    // result         <--->  <----><-->   <->
+    const result3 = ast.smallestEnclosingSubrange(children, .{ .start = 10, .end = 23 }).?;
+    try std.testing.expectEqualSlices(
+        offsets.Loc,
+        children[1..5],
+        children[result3.start .. result3.start + result3.len],
+    );
+
+    // children  <---><--->  <----><-->   <->
+    // loc                 <>
+    // result         <--->  <---->
+    const result4 = ast.smallestEnclosingSubrange(children, .{ .start = 10, .end = 12 }).?;
+    try std.testing.expectEqualSlices(
+        offsets.Loc,
+        children[1..3],
+        children[result4.start .. result4.start + result4.len],
     );
 }
 
