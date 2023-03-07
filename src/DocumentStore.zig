@@ -345,7 +345,7 @@ fn garbageCollectionCImports(self: *DocumentStore) error{OutOfMemory}!void {
 
     for (self.handles.values()) |handle| {
         for (handle.cimports.items(.hash)) |hash| {
-            const index = self.cimports.getIndex(hash).?;
+            const index = self.cimports.getIndex(hash) orelse continue;
             reachable.set(index);
         }
     }
