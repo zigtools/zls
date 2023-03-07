@@ -572,7 +572,9 @@ pub fn lastToken(tree: Ast, node: Ast.Node.Index) Ast.TokenIndex {
         => {
             end_offset += 2; // for the comma/semicolon + rparen/rbrace
             const params = tree.extraData(datas[n].rhs, Node.SubRange);
-            std.debug.assert(params.end > params.start);
+            if (params.end - params.start == 0) {
+                return main_tokens[n] + end_offset;
+            }
             n = tree.extra_data[params.end - 1]; // last parameter
         },
         .@"switch" => {
