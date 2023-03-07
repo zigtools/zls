@@ -186,7 +186,7 @@ pub fn getFunctionSnippet(allocator: std.mem.Allocator, tree: Ast, func: Ast.ful
     return buffer.toOwnedSlice(allocator);
 }
 
-pub fn hasSelfParam(document_store: *DocumentStore, handle: *const DocumentStore.Handle, func: Ast.full.FnProto) !bool {
+pub fn hasSelfParam(arena: std.mem.Allocator, document_store: *DocumentStore, handle: *const DocumentStore.Handle, func: Ast.full.FnProto) !bool {
     // Non-decl prototypes cannot have a self parameter.
     if (func.name_token == null) return false;
     if (func.ast.params.len == 0) return false;
@@ -199,7 +199,7 @@ pub fn hasSelfParam(document_store: *DocumentStore, handle: *const DocumentStore
     const token_starts = tree.tokens.items(.start);
     const in_container = innermostContainer(handle, token_starts[func.ast.fn_token]);
 
-    if (try resolveTypeOfNode(document_store, .{
+    if (try resolveTypeOfNode(arena, document_store, .{
         .node = param.type_expr,
         .handle = handle,
     })) |resolved_type| {
@@ -208,7 +208,7 @@ pub fn hasSelfParam(document_store: *DocumentStore, handle: *const DocumentStore
     }
 
     if (ast.fullPtrType(tree, param.type_expr)) |ptr_type| {
-        if (try resolveTypeOfNode(document_store, .{
+        if (try resolveTypeOfNode(arena, document_store, .{
             .node = ptr_type.ast.child_type,
             .handle = handle,
         })) |resolved_prefix_op| {
@@ -323,7 +323,7 @@ pub fn getDeclName(tree: Ast, node: Ast.Node.Index) ?[]const u8 {
     };
 }
 
-fn resolveVarDeclAliasInternal(store: *DocumentStore, node_handle: NodeWithHandle, root: bool) error{OutOfMemory}!?DeclWithHandle {
+fn resolveVarDeclAliasInternal(arena: std.mem.Allocator, store: *DocumentStore, node_handle: NodeWithHandle, root: bool) error{OutOfMemory}!?DeclWithHandle {
     _ = root;
     const handle = node_handle.handle;
     const tree = handle.tree;
@@ -334,6 +334,7 @@ fn resolveVarDeclAliasInternal(store: *DocumentStore, node_handle: NodeWithHandl
     if (node_tags[node_handle.node] == .identifier) {
         const token = main_tokens[node_handle.node];
         return try lookupSymbolGlobal(
+            arena,
             store,
             handle,
             tree.tokenSlice(token),
@@ -349,13 +350,13 @@ fn resolveVarDeclAliasInternal(store: *DocumentStore, node_handle: NodeWithHandl
             if (!std.mem.eql(u8, name, "@import") and !std.mem.eql(u8, name, "@cImport"))
                 return null;
 
-            const inner_node = (try resolveTypeOfNode(store, .{ .node = lhs, .handle = handle })) orelse return null;
+            const inner_node = (try resolveTypeOfNode(arena, store, .{ .node = lhs, .handle = handle })) orelse return null;
             // assert root node
             std.debug.assert(inner_node.type.data.other == 0);
             break :block NodeWithHandle{ .node = inner_node.type.data.other, .handle = inner_node.handle };
-        } else if (try resolveVarDeclAliasInternal(store, .{ .node = lhs, .handle = handle }, false)) |decl_handle| block: {
+        } else if (try resolveVarDeclAliasInternal(arena, store, .{ .node = lhs, .handle = handle }, false)) |decl_handle| block: {
             if (decl_handle.decl.* != .ast_node) return null;
-            const resolved = (try resolveTypeOfNode(store, .{ .node = decl_handle.decl.ast_node, .handle = decl_handle.handle })) orelse return null;
+            const resolved = (try resolveTypeOfNode(arena, store, .{ .node = decl_handle.decl.ast_node, .handle = decl_handle.handle })) orelse return null;
             const resolved_node = switch (resolved.type.data) {
                 .other => |n| n,
                 else => return null,
@@ -364,7 +365,7 @@ fn resolveVarDeclAliasInternal(store: *DocumentStore, node_handle: NodeWithHandl
             break :block NodeWithHandle{ .node = resolved_node, .handle = resolved.handle };
         } else return null;
 
-        return try lookupSymbolContainer(store, container_node, tree.tokenSlice(datas[node_handle.node].rhs), false);
+        return try lookupSymbolContainer(arena, store, container_node, tree.tokenSlice(datas[node_handle.node].rhs), false);
     }
     return null;
 }
@@ -375,7 +376,7 @@ fn resolveVarDeclAliasInternal(store: *DocumentStore, node_handle: NodeWithHandl
 /// const decl = @import("decl-file.zig").decl;
 /// const other = decl.middle.other;
 ///```
-pub fn resolveVarDeclAlias(store: *DocumentStore, decl_handle: NodeWithHandle) !?DeclWithHandle {
+pub fn resolveVarDeclAlias(arena: std.mem.Allocator, store: *DocumentStore, decl_handle: NodeWithHandle) !?DeclWithHandle {
     const decl = decl_handle.node;
     const handle = decl_handle.handle;
     const tree = handle.tree;
@@ -392,7 +393,7 @@ pub fn resolveVarDeclAlias(store: *DocumentStore, decl_handle: NodeWithHandle) !
             if (!std.mem.eql(u8, tree.tokenSlice(var_decl.ast.mut_token + 1), name))
                 return null;
 
-            return try resolveVarDeclAliasInternal(store, .{ .node = base_exp, .handle = handle }, true);
+            return try resolveVarDeclAliasInternal(arena, store, .{ .node = base_exp, .handle = handle }, true);
         }
     }
 
@@ -440,7 +441,7 @@ fn findReturnStatement(tree: Ast, fn_decl: Ast.full.FnProto, body: Ast.Node.Inde
     return findReturnStatementInternal(tree, fn_decl, body, &already_found);
 }
 
-pub fn resolveReturnType(store: *DocumentStore, fn_decl: Ast.full.FnProto, handle: *const DocumentStore.Handle, bound_type_params: *BoundTypeParams, fn_body: ?Ast.Node.Index) !?TypeWithHandle {
+pub fn resolveReturnType(arena: std.mem.Allocator, store: *DocumentStore, fn_decl: Ast.full.FnProto, handle: *const DocumentStore.Handle, bound_type_params: *BoundTypeParams, fn_body: ?Ast.Node.Index) !?TypeWithHandle {
     const tree = handle.tree;
     if (isTypeFunction(tree, fn_decl) and fn_body != null) {
         // If this is a type function and it only contains a single return statement that returns
@@ -448,7 +449,7 @@ pub fn resolveReturnType(store: *DocumentStore, fn_decl: Ast.full.FnProto, handl
         const ret = findReturnStatement(tree, fn_decl, fn_body.?) orelse return null;
         const data = tree.nodes.items(.data)[ret];
         if (data.lhs != 0) {
-            return try resolveTypeOfNodeInternal(store, .{
+            return try resolveTypeOfNodeInternal(arena, store, .{
                 .node = data.lhs,
                 .handle = handle,
             }, bound_type_params);
@@ -460,7 +461,7 @@ pub fn resolveReturnType(store: *DocumentStore, fn_decl: Ast.full.FnProto, handl
     if (fn_decl.ast.return_type == 0) return null;
     const return_type = fn_decl.ast.return_type;
     const ret = .{ .node = return_type, .handle = handle };
-    const child_type = (try resolveTypeOfNodeInternal(store, ret, bound_type_params)) orelse
+    const child_type = (try resolveTypeOfNodeInternal(arena, store, ret, bound_type_params)) orelse
         return null;
 
     const is_inferred_error = tree.tokens.items(.tag)[tree.firstToken(return_type) - 1] == .bang;
@@ -477,14 +478,14 @@ pub fn resolveReturnType(store: *DocumentStore, fn_decl: Ast.full.FnProto, handl
 }
 
 /// Resolves the child type of an optional type
-fn resolveUnwrapOptionalType(store: *DocumentStore, opt: TypeWithHandle, bound_type_params: *BoundTypeParams) !?TypeWithHandle {
+fn resolveUnwrapOptionalType(arena: std.mem.Allocator, store: *DocumentStore, opt: TypeWithHandle, bound_type_params: *BoundTypeParams) !?TypeWithHandle {
     const opt_node = switch (opt.type.data) {
         .other => |n| n,
         else => return null,
     };
 
     if (opt.handle.tree.nodes.items(.tag)[opt_node] == .optional_type) {
-        return ((try resolveTypeOfNodeInternal(store, .{
+        return ((try resolveTypeOfNodeInternal(arena, store, .{
             .node = opt.handle.tree.nodes.items(.data)[opt_node].lhs,
             .handle = opt.handle,
         }, bound_type_params)) orelse return null).instanceTypeVal();
@@ -493,18 +494,18 @@ fn resolveUnwrapOptionalType(store: *DocumentStore, opt: TypeWithHandle, bound_t
     return null;
 }
 
-fn resolveUnwrapErrorType(store: *DocumentStore, rhs: TypeWithHandle, bound_type_params: *BoundTypeParams) !?TypeWithHandle {
+fn resolveUnwrapErrorType(arena: std.mem.Allocator, store: *DocumentStore, rhs: TypeWithHandle, bound_type_params: *BoundTypeParams) !?TypeWithHandle {
     const rhs_node = switch (rhs.type.data) {
         .other => |n| n,
         .error_union => |n| return TypeWithHandle{
             .type = .{ .data = .{ .other = n }, .is_type_val = rhs.type.is_type_val },
             .handle = rhs.handle,
         },
-        .primitive, .slice, .pointer, .array_index, .@"comptime" => return null,
+        .primitive, .slice, .pointer, .array_index, .@"comptime", .either => return null,
     };
 
     if (rhs.handle.tree.nodes.items(.tag)[rhs_node] == .error_union) {
-        return ((try resolveTypeOfNodeInternal(store, .{
+        return ((try resolveTypeOfNodeInternal(arena, store, .{
             .node = rhs.handle.tree.nodes.items(.data)[rhs_node].rhs,
             .handle = rhs.handle,
         }, bound_type_params)) orelse return null).instanceTypeVal();
@@ -514,7 +515,7 @@ fn resolveUnwrapErrorType(store: *DocumentStore, rhs: TypeWithHandle, bound_type
 }
 
 /// Resolves the child type of a deref type
-fn resolveDerefType(store: *DocumentStore, deref: TypeWithHandle, bound_type_params: *BoundTypeParams) !?TypeWithHandle {
+fn resolveDerefType(arena: std.mem.Allocator, store: *DocumentStore, deref: TypeWithHandle, bound_type_params: *BoundTypeParams) !?TypeWithHandle {
     const deref_node = switch (deref.type.data) {
         .other => |n| n,
         .pointer => |n| return TypeWithHandle{
@@ -533,7 +534,7 @@ fn resolveDerefType(store: *DocumentStore, deref: TypeWithHandle, bound_type_par
     if (ast.fullPtrType(tree, deref_node)) |ptr_type| {
         switch (token_tag) {
             .asterisk => {
-                return ((try resolveTypeOfNodeInternal(store, .{
+                return ((try resolveTypeOfNodeInternal(arena, store, .{
                     .node = ptr_type.ast.child_type,
                     .handle = deref.handle,
                 }, bound_type_params)) orelse return null).instanceTypeVal();
@@ -546,7 +547,7 @@ fn resolveDerefType(store: *DocumentStore, deref: TypeWithHandle, bound_type_par
 }
 
 /// Resolves slicing and array access
-fn resolveBracketAccessType(store: *DocumentStore, lhs: TypeWithHandle, rhs: enum { Single, Range }, bound_type_params: *BoundTypeParams) !?TypeWithHandle {
+fn resolveBracketAccessType(arena: std.mem.Allocator, store: *DocumentStore, lhs: TypeWithHandle, rhs: enum { Single, Range }, bound_type_params: *BoundTypeParams) !?TypeWithHandle {
     const lhs_node = switch (lhs.type.data) {
         .other => |n| n,
         else => return null,
@@ -559,7 +560,7 @@ fn resolveBracketAccessType(store: *DocumentStore, lhs: TypeWithHandle, rhs: enu
 
     if (tag == .array_type or tag == .array_type_sentinel) {
         if (rhs == .Single)
-            return ((try resolveTypeOfNodeInternal(store, .{
+            return ((try resolveTypeOfNodeInternal(arena, store, .{
                 .node = data.rhs,
                 .handle = lhs.handle,
             }, bound_type_params)) orelse return null).instanceTypeVal();
@@ -570,7 +571,7 @@ fn resolveBracketAccessType(store: *DocumentStore, lhs: TypeWithHandle, rhs: enu
     } else if (ast.fullPtrType(tree, lhs_node)) |ptr_type| {
         if (ptr_type.size == .Slice) {
             if (rhs == .Single) {
-                return ((try resolveTypeOfNodeInternal(store, .{
+                return ((try resolveTypeOfNodeInternal(arena, store, .{
                     .node = ptr_type.ast.child_type,
                     .handle = lhs.handle,
                 }, bound_type_params)) orelse return null).instanceTypeVal();
@@ -583,8 +584,8 @@ fn resolveBracketAccessType(store: *DocumentStore, lhs: TypeWithHandle, rhs: enu
 }
 
 /// Called to remove one level of pointerness before a field access
-pub fn resolveFieldAccessLhsType(store: *DocumentStore, lhs: TypeWithHandle, bound_type_params: *BoundTypeParams) !TypeWithHandle {
-    return (try resolveDerefType(store, lhs, bound_type_params)) orelse lhs;
+pub fn resolveFieldAccessLhsType(arena: std.mem.Allocator, store: *DocumentStore, lhs: TypeWithHandle, bound_type_params: *BoundTypeParams) !TypeWithHandle {
+    return (try resolveDerefType(arena, store, lhs, bound_type_params)) orelse lhs;
 }
 
 pub const BoundTypeParams = std.AutoHashMapUnmanaged(Ast.full.FnProto.Param, TypeWithHandle);
@@ -622,7 +623,12 @@ pub fn isTypeIdent(text: []const u8) bool {
 }
 
 /// Resolves the type of a node
-pub fn resolveTypeOfNodeInternal(store: *DocumentStore, node_handle: NodeWithHandle, bound_type_params: *BoundTypeParams) error{OutOfMemory}!?TypeWithHandle {
+pub fn resolveTypeOfNodeInternal(
+    arena: std.mem.Allocator,
+    store: *DocumentStore,
+    node_handle: NodeWithHandle,
+    bound_type_params: *BoundTypeParams,
+) error{OutOfMemory}!?TypeWithHandle {
     // If we were asked to resolve this node before,
     // it is self-referential and we cannot resolve it.
     for (resolve_trail.items) |i| {
@@ -651,14 +657,14 @@ pub fn resolveTypeOfNodeInternal(store: *DocumentStore, node_handle: NodeWithHan
             const var_decl = tree.fullVarDecl(node).?;
             if (var_decl.ast.type_node != 0) {
                 const decl_type = .{ .node = var_decl.ast.type_node, .handle = handle };
-                if (try resolveTypeOfNodeInternal(store, decl_type, bound_type_params)) |typ|
+                if (try resolveTypeOfNodeInternal(arena, store, decl_type, bound_type_params)) |typ|
                     return typ.instanceTypeVal();
             }
             if (var_decl.ast.init_node == 0)
                 return null;
 
             const value = .{ .node = var_decl.ast.init_node, .handle = handle };
-            return try resolveTypeOfNodeInternal(store, value, bound_type_params);
+            return try resolveTypeOfNodeInternal(arena, store, value, bound_type_params);
         },
         .identifier => {
             const name = offsets.nodeToSlice(tree, node);
@@ -671,6 +677,7 @@ pub fn resolveTypeOfNodeInternal(store: *DocumentStore, node_handle: NodeWithHan
             }
 
             if (try lookupSymbolGlobal(
+                arena,
                 store,
                 handle,
                 name,
@@ -686,7 +693,7 @@ pub fn resolveTypeOfNodeInternal(store: *DocumentStore, node_handle: NodeWithHan
                     },
                     else => {},
                 }
-                return try child.resolveType(store, bound_type_params);
+                return try child.resolveType(arena, store, bound_type_params);
             }
             return null;
         },
@@ -703,7 +710,7 @@ pub fn resolveTypeOfNodeInternal(store: *DocumentStore, node_handle: NodeWithHan
             const call = tree.fullCall(&params, node) orelse unreachable;
 
             const callee = .{ .node = call.ast.fn_expr, .handle = handle };
-            const decl = (try resolveTypeOfNodeInternal(store, callee, bound_type_params)) orelse
+            const decl = (try resolveTypeOfNodeInternal(arena, store, callee, bound_type_params)) orelse
                 return null;
 
             if (decl.type.is_type_val) return null;
@@ -720,7 +727,7 @@ pub fn resolveTypeOfNodeInternal(store: *DocumentStore, node_handle: NodeWithHan
                 // TODO: Back-parse to extract the self argument?
                 var it = fn_decl.iterate(&decl.handle.tree);
                 if (token_tags[call.ast.lparen - 2] == .period) {
-                    if (try hasSelfParam(store, decl.handle, fn_decl)) {
+                    if (try hasSelfParam(arena, store, decl.handle, fn_decl)) {
                         _ = ast.nextFnParam(&it);
                         expected_params -= 1;
                     }
@@ -736,6 +743,7 @@ pub fn resolveTypeOfNodeInternal(store: *DocumentStore, node_handle: NodeWithHan
 
                     const argument = .{ .node = call.ast.params[i], .handle = handle };
                     const argument_type = (try resolveTypeOfNodeInternal(
+                        arena,
                         store,
                         argument,
                         bound_type_params,
@@ -748,7 +756,7 @@ pub fn resolveTypeOfNodeInternal(store: *DocumentStore, node_handle: NodeWithHan
 
                 const has_body = decl.handle.tree.nodes.items(.tag)[decl_node] == .fn_decl;
                 const body = decl.handle.tree.nodes.items(.data)[decl_node].rhs;
-                if (try resolveReturnType(store, fn_decl, decl.handle, bound_type_params, if (has_body) body else null)) |ret| {
+                if (try resolveReturnType(arena, store, fn_decl, decl.handle, bound_type_params, if (has_body) body else null)) |ret| {
                     return ret;
                 } else if (store.config.use_comptime_interpreter) {
                     // TODO: Better case-by-case; we just use the ComptimeInterpreter when all else fails,
@@ -826,7 +834,7 @@ pub fn resolveTypeOfNodeInternal(store: *DocumentStore, node_handle: NodeWithHan
         .address_of,
         => {
             const base = .{ .node = datas[node].lhs, .handle = handle };
-            const base_type = (try resolveTypeOfNodeInternal(store, base, bound_type_params)) orelse
+            const base_type = (try resolveTypeOfNodeInternal(arena, store, base, bound_type_params)) orelse
                 return null;
             return switch (node_tags[node]) {
                 .@"comptime",
@@ -844,13 +852,13 @@ pub fn resolveTypeOfNodeInternal(store: *DocumentStore, node_handle: NodeWithHan
                 .slice,
                 .slice_sentinel,
                 .slice_open,
-                => try resolveBracketAccessType(store, base_type, .Range, bound_type_params),
-                .deref => try resolveDerefType(store, base_type, bound_type_params),
-                .unwrap_optional => try resolveUnwrapOptionalType(store, base_type, bound_type_params),
-                .array_access => try resolveBracketAccessType(store, base_type, .Single, bound_type_params),
-                .@"orelse" => try resolveUnwrapOptionalType(store, base_type, bound_type_params),
-                .@"catch" => try resolveUnwrapErrorType(store, base_type, bound_type_params),
-                .@"try" => try resolveUnwrapErrorType(store, base_type, bound_type_params),
+                => try resolveBracketAccessType(arena, store, base_type, .Range, bound_type_params),
+                .deref => try resolveDerefType(arena, store, base_type, bound_type_params),
+                .unwrap_optional => try resolveUnwrapOptionalType(arena, store, base_type, bound_type_params),
+                .array_access => try resolveBracketAccessType(arena, store, base_type, .Single, bound_type_params),
+                .@"orelse" => try resolveUnwrapOptionalType(arena, store, base_type, bound_type_params),
+                .@"catch" => try resolveUnwrapErrorType(arena, store, base_type, bound_type_params),
+                .@"try" => try resolveUnwrapErrorType(arena, store, base_type, bound_type_params),
                 .address_of => {
                     const lhs_node = switch (base_type.type.data) {
                         .other => |n| n,
@@ -869,8 +877,9 @@ pub fn resolveTypeOfNodeInternal(store: *DocumentStore, node_handle: NodeWithHan
 
             // If we are accessing a pointer type, remove one pointerness level :)
             const left_type = try resolveFieldAccessLhsType(
+                arena,
                 store,
-                (try resolveTypeOfNodeInternal(store, .{
+                (try resolveTypeOfNodeInternal(arena, store, .{
                     .node = datas[node].lhs,
                     .handle = handle,
                 }, bound_type_params)) orelse return null,
@@ -883,12 +892,13 @@ pub fn resolveTypeOfNodeInternal(store: *DocumentStore, node_handle: NodeWithHan
             };
 
             if (try lookupSymbolContainer(
+                arena,
                 store,
                 .{ .node = left_type_node, .handle = left_type.handle },
                 tree.tokenSlice(datas[node].rhs),
                 !left_type.type.is_type_val,
             )) |child| {
-                return try child.resolveType(store, bound_type_params);
+                return try child.resolveType(arena, store, bound_type_params);
             } else return null;
         },
         .array_type,
@@ -942,7 +952,7 @@ pub fn resolveTypeOfNodeInternal(store: *DocumentStore, node_handle: NodeWithHan
             });
             if (cast_map.has(call_name)) {
                 if (params.len < 1) return null;
-                return ((try resolveTypeOfNodeInternal(store, .{
+                return ((try resolveTypeOfNodeInternal(arena, store, .{
                     .node = params[0],
                     .handle = handle,
                 }, bound_type_params)) orelse return null).instanceTypeVal();
@@ -952,7 +962,7 @@ pub fn resolveTypeOfNodeInternal(store: *DocumentStore, node_handle: NodeWithHan
             // TODO Do peer type resolution, we just keep the first for now.
             if (std.mem.eql(u8, call_name, "@TypeOf")) {
                 if (params.len < 1) return null;
-                var resolved_type = (try resolveTypeOfNodeInternal(store, .{
+                var resolved_type = (try resolveTypeOfNodeInternal(arena, store, .{
                     .node = params[0],
                     .handle = handle,
                 }, bound_type_params)) orelse return null;
@@ -1033,6 +1043,50 @@ pub fn resolveTypeOfNodeInternal(store: *DocumentStore, node_handle: NodeWithHan
             .type = .{ .data = .{ .other = node }, .is_type_val = false },
             .handle = handle,
         },
+        .@"if", .if_simple => {
+            const if_node = ast.fullIf(tree, node).?;
+
+            // TODO: Fix allocator need
+            var either = std.ArrayList(Type.EitherEntry).init(arena);
+            if (try resolveTypeOfNodeInternal(arena, store, .{ .handle = handle, .node = if_node.ast.then_expr }, bound_type_params)) |t|
+                try either.append(.{ .type_with_handle = t, .descriptor = tree.getNodeSource(if_node.ast.cond_expr) });
+            if (try resolveTypeOfNodeInternal(arena, store, .{ .handle = handle, .node = if_node.ast.else_expr }, bound_type_params)) |t|
+                try either.append(.{ .type_with_handle = t, .descriptor = try std.fmt.allocPrint(arena, "!({s})", .{tree.getNodeSource(if_node.ast.cond_expr)}) });
+
+            return TypeWithHandle{
+                .type = .{ .data = .{ .either = try either.toOwnedSlice() }, .is_type_val = false },
+                .handle = handle,
+            };
+        },
+        .@"switch",
+        .switch_comma,
+        => {
+            const extra = tree.extraData(datas[node].rhs, Ast.Node.SubRange);
+            const cases = tree.extra_data[extra.start..extra.end];
+
+            var either = std.ArrayList(Type.EitherEntry).init(arena);
+
+            for (cases) |case| {
+                const switch_case = tree.fullSwitchCase(case).?;
+                var descriptor = std.ArrayList(u8).init(arena);
+
+                for (switch_case.ast.values, 0..) |vals, index| {
+                    try descriptor.appendSlice(tree.getNodeSource(vals));
+                    if (index != switch_case.ast.values.len - 1) try descriptor.appendSlice(", ");
+                }
+
+                if (try resolveTypeOfNodeInternal(arena, store, .{ .handle = handle, .node = switch_case.ast.target_expr }, bound_type_params)) |t|
+                    try either.append(.{
+                        .type_with_handle = t,
+                        .descriptor = try descriptor.toOwnedSlice(),
+                    });
+            }
+
+            return TypeWithHandle{
+                .type = .{ .data = .{ .either = try either.toOwnedSlice() }, .is_type_val = false },
+                .handle = handle,
+            };
+        },
         else => {},
     }
     return null;
@@ -1041,12 +1095,18 @@ pub fn resolveTypeOfNodeInternal(store: *DocumentStore, node_handle: NodeWithHan
 // TODO Reorganize this file, perhaps split into a couple as well
 // TODO Make this better, nested levels of type vals
 pub const Type = struct {
+    pub const EitherEntry = struct {
+        type_with_handle: TypeWithHandle,
+        descriptor: []const u8,
+    };
+
     data: union(enum) {
         pointer: Ast.Node.Index,
         slice: Ast.Node.Index,
         error_union: Ast.Node.Index,
         other: Ast.Node.Index,
         primitive: Ast.Node.Index,
+        either: []const EitherEntry,
         array_index,
         @"comptime": struct {
             interpreter: *ComptimeInterpreter,
@@ -1069,6 +1129,20 @@ pub const TypeWithHandle = struct {
             },
             .handle = node_handle.handle,
         };
+    }
+
+    /// Resolves possible types of a type (single for all except array_index and either)
+    pub fn getAllTypesWithHandles(ty: TypeWithHandle, arena: std.mem.Allocator) ![]const TypeWithHandle {
+        var all_types = std.ArrayListUnmanaged(TypeWithHandle){};
+        try ty.getAllTypesWithHandlesArrayList(arena, &all_types);
+        return try all_types.toOwnedSlice(arena);
+    }
+
+    pub fn getAllTypesWithHandlesArrayList(ty: TypeWithHandle, arena: std.mem.Allocator, all_types: *std.ArrayListUnmanaged(TypeWithHandle)) !void {
+        switch (ty.type.data) {
+            .either => |e| for (e) |i| try i.type_with_handle.getAllTypesWithHandlesArrayList(arena, all_types),
+            else => try all_types.append(arena, ty),
+        }
     }
 
     fn instanceTypeVal(self: TypeWithHandle) ?TypeWithHandle {
@@ -1166,10 +1240,14 @@ pub const TypeWithHandle = struct {
     }
 };
 
-pub fn resolveTypeOfNode(store: *DocumentStore, node_handle: NodeWithHandle) error{OutOfMemory}!?TypeWithHandle {
+pub fn resolveTypeOfNode(
+    arena: std.mem.Allocator,
+    store: *DocumentStore,
+    node_handle: NodeWithHandle,
+) error{OutOfMemory}!?TypeWithHandle {
     var bound_type_params = BoundTypeParams{};
     defer bound_type_params.deinit(store.allocator);
-    return resolveTypeOfNodeInternal(store, node_handle, &bound_type_params);
+    return resolveTypeOfNodeInternal(arena, store, node_handle, &bound_type_params);
 }
 
 /// Collects all `@import`'s we can find into a slice of import paths (without quotes).
@@ -1235,7 +1313,7 @@ pub const FieldAccessReturn = struct {
     unwrapped: ?TypeWithHandle = null,
 };
 
-pub fn getFieldAccessType(store: *DocumentStore, handle: *const DocumentStore.Handle, source_index: usize, tokenizer: *std.zig.Tokenizer) !?FieldAccessReturn {
+pub fn getFieldAccessType(arena: std.mem.Allocator, store: *DocumentStore, handle: *const DocumentStore.Handle, source_index: usize, tokenizer: *std.zig.Tokenizer) !?FieldAccessReturn {
     var current_type: ?TypeWithHandle = null;
 
     var bound_type_params = BoundTypeParams{};
@@ -1246,17 +1324,18 @@ pub fn getFieldAccessType(store: *DocumentStore, handle: *const DocumentStore.Ha
         switch (tok.tag) {
             .eof => return FieldAccessReturn{
                 .original = current_type orelse return null,
-                .unwrapped = try resolveDerefType(store, current_type orelse return null, &bound_type_params),
+                .unwrapped = try resolveDerefType(arena, store, current_type orelse return null, &bound_type_params),
             },
             .identifier => {
                 const ct_handle = if (current_type) |c| c.handle else handle;
                 if (try lookupSymbolGlobal(
+                    arena,
                     store,
                     ct_handle,
                     tokenizer.buffer[tok.loc.start..tok.loc.end],
                     source_index,
                 )) |child| {
-                    current_type = (try child.resolveType(store, &bound_type_params)) orelse return null;
+                    current_type = (try child.resolveType(arena, store, &bound_type_params)) orelse return null;
                 } else return null;
             },
             .period => {
@@ -1268,7 +1347,7 @@ pub fn getFieldAccessType(store: *DocumentStore, handle: *const DocumentStore.Ha
                             if (ct.isFunc()) return null;
                             return FieldAccessReturn{
                                 .original = ct,
-                                .unwrapped = try resolveDerefType(store, ct, &bound_type_params),
+                                .unwrapped = try resolveDerefType(arena, store, ct, &bound_type_params),
                             };
                         } else {
                             return null;
@@ -1279,34 +1358,46 @@ pub fn getFieldAccessType(store: *DocumentStore, handle: *const DocumentStore.Ha
                             if (current_type) |ct| {
                                 return FieldAccessReturn{
                                     .original = ct,
-                                    .unwrapped = try resolveDerefType(store, ct, &bound_type_params),
+                                    .unwrapped = try resolveDerefType(arena, store, ct, &bound_type_params),
                                 };
                             } else {
                                 return null;
                             }
                         }
 
-                        current_type = try resolveFieldAccessLhsType(store, current_type orelse return null, &bound_type_params);
+                        current_type = try resolveFieldAccessLhsType(arena, store, current_type orelse return null, &bound_type_params);
 
-                        const current_type_node = switch (current_type.?.type.data) {
-                            .other => |n| n,
-                            else => return null,
-                        };
+                        const current_type_nodes = try current_type.?.getAllTypesWithHandles(arena);
 
-                        if (try lookupSymbolContainer(
-                            store,
-                            .{ .node = current_type_node, .handle = current_type.?.handle },
-                            tokenizer.buffer[after_period.loc.start..after_period.loc.end],
-                            !current_type.?.type.is_type_val,
-                        )) |child| {
-                            current_type.? = (try child.resolveType(
+                        // TODO: Return all options instead of first valid one
+                        // (this would require a huge rewrite and im lazy)
+                        for (current_type_nodes) |ty| {
+                            const current_type_node = switch (ty.type.data) {
+                                .other => |n| n,
+                                else => continue,
+                            };
+
+                            if (try lookupSymbolContainer(
+                                arena,
                                 store,
-                                &bound_type_params,
-                            )) orelse return null;
-                        } else return null;
+                                .{ .node = current_type_node, .handle = ty.handle },
+                                tokenizer.buffer[after_period.loc.start..after_period.loc.end],
+                                !current_type.?.type.is_type_val,
+                            )) |child| {
+                                current_type.? = (try child.resolveType(
+                                    arena,
+                                    store,
+                                    &bound_type_params,
+                                )) orelse continue;
+                                break;
+                            } else continue;
+                        } else {
+                            return null;
+                        }
                     },
                     .question_mark => {
                         current_type = (try resolveUnwrapOptionalType(
+                            arena,
                             store,
                             current_type orelse return null,
                             &bound_type_params,
@@ -1320,6 +1411,7 @@ pub fn getFieldAccessType(store: *DocumentStore, handle: *const DocumentStore.Ha
             },
             .period_asterisk => {
                 current_type = (try resolveDerefType(
+                    arena,
                     store,
                     current_type orelse return null,
                     &bound_type_params,
@@ -1346,7 +1438,7 @@ pub fn getFieldAccessType(store: *DocumentStore, handle: *const DocumentStore.Ha
                     const body = cur_tree.nodes.items(.data)[current_type_node].rhs;
 
                     // TODO Actually bind params here when calling functions instead of just skipping args.
-                    if (try resolveReturnType(store, func, current_type.?.handle, &bound_type_params, if (has_body) body else null)) |ret| {
+                    if (try resolveReturnType(arena, store, func, current_type.?.handle, &bound_type_params, if (has_body) body else null)) |ret| {
                         current_type = ret;
                         // Skip to the right paren
                         var paren_count: usize = 1;
@@ -1377,7 +1469,7 @@ pub fn getFieldAccessType(store: *DocumentStore, handle: *const DocumentStore.Ha
                     }
                 } else return null;
 
-                current_type = (try resolveBracketAccessType(store, current_type orelse return null, if (is_range) .Range else .Single, &bound_type_params)) orelse return null;
+                current_type = (try resolveBracketAccessType(arena, store, current_type orelse return null, if (is_range) .Range else .Single, &bound_type_params)) orelse return null;
             },
             else => {
                 log.debug("Unimplemented token: {}", .{tok.tag});
@@ -1389,7 +1481,7 @@ pub fn getFieldAccessType(store: *DocumentStore, handle: *const DocumentStore.Ha
     if (current_type) |ct| {
         return FieldAccessReturn{
             .original = ct,
-            .unwrapped = try resolveDerefType(store, ct, &bound_type_params),
+            .unwrapped = try resolveDerefType(arena, store, ct, &bound_type_params),
         };
     } else {
         return null;
@@ -1991,12 +2083,13 @@ pub const DeclWithHandle = struct {
         };
     }
 
-    pub fn resolveType(self: DeclWithHandle, store: *DocumentStore, bound_type_params: *BoundTypeParams) !?TypeWithHandle {
+    pub fn resolveType(self: DeclWithHandle, arena: std.mem.Allocator, store: *DocumentStore, bound_type_params: *BoundTypeParams) !?TypeWithHandle {
         const tree = self.handle.tree;
         const node_tags = tree.nodes.items(.tag);
         const main_tokens = tree.nodes.items(.main_token);
         return switch (self.decl.*) {
             .ast_node => |node| try resolveTypeOfNodeInternal(
+                arena,
                 store,
                 .{ .node = node, .handle = self.handle },
                 bound_type_params,
@@ -2016,22 +2109,25 @@ pub const DeclWithHandle = struct {
                     }
                 }
                 return ((try resolveTypeOfNodeInternal(
+                    arena,
                     store,
                     .{ .node = param_decl.type_expr, .handle = self.handle },
                     bound_type_params,
                 )) orelse return null).instanceTypeVal();
             },
             .pointer_payload => |pay| try resolveUnwrapOptionalType(
+                arena,
                 store,
-                (try resolveTypeOfNodeInternal(store, .{
+                (try resolveTypeOfNodeInternal(arena, store, .{
                     .node = pay.condition,
                     .handle = self.handle,
                 }, bound_type_params)) orelse return null,
                 bound_type_params,
             ),
             .array_payload => |pay| try resolveBracketAccessType(
+                arena,
                 store,
-                (try resolveTypeOfNodeInternal(store, .{
+                (try resolveTypeOfNodeInternal(arena, store, .{
                     .node = pay.array_expr,
                     .handle = self.handle,
                 }, bound_type_params)) orelse return null,
@@ -2046,7 +2142,7 @@ pub const DeclWithHandle = struct {
             .switch_payload => |pay| {
                 if (pay.items.len == 0) return null;
                 // TODO Peer type resolution, we just use the first item for now.
-                const switch_expr_type = (try resolveTypeOfNodeInternal(store, .{
+                const switch_expr_type = (try resolveTypeOfNodeInternal(arena, store, .{
                     .node = pay.switch_expr,
                     .handle = self.handle,
                 }, bound_type_params)) orelse return null;
@@ -2065,6 +2161,7 @@ pub const DeclWithHandle = struct {
                         if (switch_expr_type.handle.tree.fullContainerField(node)) |container_field| {
                             if (container_field.ast.type_expr != 0) {
                                 return ((try resolveTypeOfNodeInternal(
+                                    arena,
                                     store,
                                     .{ .node = container_field.ast.type_expr, .handle = switch_expr_type.handle },
                                     bound_type_params,
@@ -2097,7 +2194,7 @@ fn findContainerScopeIndex(container_handle: NodeWithHandle) ?usize {
     } else null;
 }
 
-fn iterateSymbolsContainerInternal(store: *DocumentStore, container_handle: NodeWithHandle, orig_handle: *const DocumentStore.Handle, comptime callback: anytype, context: anytype, instance_access: bool, use_trail: *std.ArrayList(Ast.Node.Index)) error{OutOfMemory}!void {
+fn iterateSymbolsContainerInternal(arena: std.mem.Allocator, store: *DocumentStore, container_handle: NodeWithHandle, orig_handle: *const DocumentStore.Handle, comptime callback: anytype, context: anytype, instance_access: bool, use_trail: *std.ArrayList(Ast.Node.Index)) error{OutOfMemory}!void {
     const container = container_handle.node;
     const handle = container_handle.handle;
 
@@ -2144,7 +2241,7 @@ fn iterateSymbolsContainerInternal(store: *DocumentStore, container_handle: Node
         try use_trail.append(use);
 
         const lhs = tree.nodes.items(.data)[use].lhs;
-        const use_expr = (try resolveTypeOfNode(store, .{
+        const use_expr = (try resolveTypeOfNode(arena, store, .{
             .node = lhs,
             .handle = handle,
         })) orelse continue;
@@ -2154,6 +2251,7 @@ fn iterateSymbolsContainerInternal(store: *DocumentStore, container_handle: Node
             else => continue,
         };
         try iterateSymbolsContainerInternal(
+            arena,
             store,
             .{ .node = use_expr_node, .handle = use_expr.handle },
             orig_handle,
@@ -2195,10 +2293,10 @@ pub fn iterateEnclosingScopes(document_scope: DocumentScope, source_index: usize
     };
 }
 
-pub fn iterateSymbolsContainer(store: *DocumentStore, container_handle: NodeWithHandle, orig_handle: *const DocumentStore.Handle, comptime callback: anytype, context: anytype, instance_access: bool) error{OutOfMemory}!void {
+pub fn iterateSymbolsContainer(arena: std.mem.Allocator, store: *DocumentStore, container_handle: NodeWithHandle, orig_handle: *const DocumentStore.Handle, comptime callback: anytype, context: anytype, instance_access: bool) error{OutOfMemory}!void {
     var use_trail = std.ArrayList(Ast.Node.Index).init(store.allocator);
     defer use_trail.deinit();
-    return try iterateSymbolsContainerInternal(store, container_handle, orig_handle, callback, context, instance_access, &use_trail);
+    return try iterateSymbolsContainerInternal(arena, store, container_handle, orig_handle, callback, context, instance_access, &use_trail);
 }
 
 pub fn iterateLabels(handle: *const DocumentStore.Handle, source_index: usize, comptime callback: anytype, context: anytype) error{OutOfMemory}!void {
@@ -2217,7 +2315,7 @@ pub fn iterateLabels(handle: *const DocumentStore.Handle, source_index: usize, c
     }
 }
 
-fn iterateSymbolsGlobalInternal(store: *DocumentStore, handle: *const DocumentStore.Handle, source_index: usize, comptime callback: anytype, context: anytype, use_trail: *std.ArrayList(Ast.Node.Index)) error{OutOfMemory}!void {
+fn iterateSymbolsGlobalInternal(arena: std.mem.Allocator, store: *DocumentStore, handle: *const DocumentStore.Handle, source_index: usize, comptime callback: anytype, context: anytype, use_trail: *std.ArrayList(Ast.Node.Index)) error{OutOfMemory}!void {
     const scope_decls = handle.document_scope.scopes.items(.decls);
     const scope_uses = handle.document_scope.scopes.items(.uses);
 
@@ -2236,6 +2334,7 @@ fn iterateSymbolsGlobalInternal(store: *DocumentStore, handle: *const DocumentSt
             try use_trail.append(use);
 
             const use_expr = (try resolveTypeOfNode(
+                arena,
                 store,
                 .{ .node = handle.tree.nodes.items(.data)[use].lhs, .handle = handle },
             )) orelse continue;
@@ -2244,6 +2343,7 @@ fn iterateSymbolsGlobalInternal(store: *DocumentStore, handle: *const DocumentSt
                 else => continue,
             };
             try iterateSymbolsContainerInternal(
+                arena,
                 store,
                 .{ .node = use_expr_node, .handle = use_expr.handle },
                 handle,
@@ -2256,10 +2356,10 @@ fn iterateSymbolsGlobalInternal(store: *DocumentStore, handle: *const DocumentSt
     }
 }
 
-pub fn iterateSymbolsGlobal(store: *DocumentStore, handle: *const DocumentStore.Handle, source_index: usize, comptime callback: anytype, context: anytype) error{OutOfMemory}!void {
+pub fn iterateSymbolsGlobal(arena: std.mem.Allocator, store: *DocumentStore, handle: *const DocumentStore.Handle, source_index: usize, comptime callback: anytype, context: anytype) error{OutOfMemory}!void {
     var use_trail = std.ArrayList(Ast.Node.Index).init(store.allocator);
     defer use_trail.deinit();
-    return try iterateSymbolsGlobalInternal(store, handle, source_index, callback, context, &use_trail);
+    return try iterateSymbolsGlobalInternal(arena, store, handle, source_index, callback, context, &use_trail);
 }
 
 pub fn innermostBlockScopeIndex(handle: DocumentStore.Handle, source_index: usize) usize {
@@ -2304,7 +2404,7 @@ pub fn innermostContainer(handle: *const DocumentStore.Handle, source_index: usi
     return TypeWithHandle.typeVal(.{ .node = current, .handle = handle });
 }
 
-fn resolveUse(store: *DocumentStore, uses: []const Ast.Node.Index, symbol: []const u8, handle: *const DocumentStore.Handle) error{OutOfMemory}!?DeclWithHandle {
+fn resolveUse(arena: std.mem.Allocator, store: *DocumentStore, uses: []const Ast.Node.Index, symbol: []const u8, handle: *const DocumentStore.Handle) error{OutOfMemory}!?DeclWithHandle {
     if (uses.len == 0) return null;
 
     // If we were asked to resolve this symbol before,
@@ -2318,7 +2418,7 @@ fn resolveUse(store: *DocumentStore, uses: []const Ast.Node.Index, symbol: []con
         if (handle.tree.nodes.items(.data).len <= index) continue;
 
         const expr = .{ .node = handle.tree.nodes.items(.data)[index].lhs, .handle = handle };
-        const expr_type_node = (try resolveTypeOfNode(store, expr)) orelse
+        const expr_type_node = (try resolveTypeOfNode(arena, store, expr)) orelse
             continue;
 
         const expr_type = .{
@@ -2329,7 +2429,7 @@ fn resolveUse(store: *DocumentStore, uses: []const Ast.Node.Index, symbol: []con
             .handle = expr_type_node.handle,
         };
 
-        if (try lookupSymbolContainer(store, expr_type, symbol, false)) |candidate| {
+        if (try lookupSymbolContainer(arena, store, expr_type, symbol, false)) |candidate| {
             if (candidate.handle == handle or candidate.isPublic()) {
                 return candidate;
             }
@@ -2338,7 +2438,11 @@ fn resolveUse(store: *DocumentStore, uses: []const Ast.Node.Index, symbol: []con
     return null;
 }
 
-pub fn lookupLabel(handle: *const DocumentStore.Handle, symbol: []const u8, source_index: usize) error{OutOfMemory}!?DeclWithHandle {
+pub fn lookupLabel(
+    handle: *const DocumentStore.Handle,
+    symbol: []const u8,
+    source_index: usize,
+) error{OutOfMemory}!?DeclWithHandle {
     const scope_decls = handle.document_scope.scopes.items(.decls);
 
     var scope_iterator = iterateEnclosingScopes(handle.document_scope, source_index);
@@ -2357,7 +2461,7 @@ pub fn lookupLabel(handle: *const DocumentStore.Handle, symbol: []const u8, sour
     return null;
 }
 
-pub fn lookupSymbolGlobal(store: *DocumentStore, handle: *const DocumentStore.Handle, symbol: []const u8, source_index: usize) error{OutOfMemory}!?DeclWithHandle {
+pub fn lookupSymbolGlobal(arena: std.mem.Allocator, store: *DocumentStore, handle: *const DocumentStore.Handle, symbol: []const u8, source_index: usize) error{OutOfMemory}!?DeclWithHandle {
     const innermost_scope_idx = innermostBlockScopeIndex(handle.*, source_index);
 
     const scope_locs = handle.document_scope.scopes.items(.loc);
@@ -2381,7 +2485,7 @@ pub fn lookupSymbolGlobal(store: *DocumentStore, handle: *const DocumentStore.Ha
                     .handle = handle,
                 };
             }
-            if (try resolveUse(store, scope_uses[curr].items, symbol, handle)) |result| return result;
+            if (try resolveUse(arena, store, scope_uses[curr].items, symbol, handle)) |result| return result;
         }
         if (curr == 0) break;
     }
@@ -2389,6 +2493,7 @@ pub fn lookupSymbolGlobal(store: *DocumentStore, handle: *const DocumentStore.Ha
 }
 
 pub fn lookupSymbolContainer(
+    arena: std.mem.Allocator,
     store: *DocumentStore,
     container_handle: NodeWithHandle,
     symbol: []const u8,
@@ -2422,7 +2527,7 @@ pub fn lookupSymbolContainer(
             return DeclWithHandle{ .decl = candidate.value_ptr, .handle = handle };
         }
 
-        if (try resolveUse(store, scope_uses[container_scope_index].items, symbol, handle)) |result| return result;
+        if (try resolveUse(arena, store, scope_uses[container_scope_index].items, symbol, handle)) |result| return result;
     }
 
     return null;
@@ -2723,7 +2828,7 @@ fn makeScopeInternal(allocator: std.mem.Allocator, context: ScopeContext, node_i
 
             try scopes.append(allocator, .{
                 .loc = offsets.nodeToLoc(tree, node_idx),
-                .data = .{ .container = node_idx },
+                .data = .{ .block = node_idx },
             });
             const scope_index = scopes.len - 1;
 
@@ -2731,11 +2836,6 @@ fn makeScopeInternal(allocator: std.mem.Allocator, context: ScopeContext, node_i
             const statements = ast.blockStatements(tree, node_idx, &buffer).?;
 
             for (statements) |idx| {
-                if (tags[idx] == .@"usingnamespace") {
-                    try scopes.items(.uses)[scope_index].append(allocator, idx);
-                    continue;
-                }
-
                 try makeScopeInternal(allocator, context, idx);
                 if (tree.fullVarDecl(idx)) |var_decl| {
                     const name = tree.tokenSlice(var_decl.ast.mut_token + 1);

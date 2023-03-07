@@ -545,6 +545,7 @@ pub fn typeToCompletion(
     list: *std.ArrayListUnmanaged(types.CompletionItem),
     field_access: analysis.FieldAccessReturn,
     orig_handle: *const DocumentStore.Handle,
+    either_descriptor: ?[]const u8,
 ) error{OutOfMemory}!void {
     var allocator = server.arena.allocator();
 
@@ -587,6 +588,7 @@ pub fn typeToCompletion(
                 orig_handle,
                 type_handle.type.is_type_val,
                 null,
+                either_descriptor,
             );
         },
         .other => |n| try server.nodeToCompletion(
@@ -596,6 +598,7 @@ pub fn typeToCompletion(
             orig_handle,
             type_handle.type.is_type_val,
             null,
+            either_descriptor,
         ),
         .primitive, .array_index => {},
         .@"comptime" => |co| try analyser.completions.dotCompletions(
@@ -606,6 +609,10 @@ pub fn typeToCompletion(
             type_handle.type.is_type_val,
             co.value.node_idx,
         ),
+        .either => |bruh| {
+            for (bruh) |a|
+                try server.typeToCompletion(list, .{ .original = a.type_with_handle }, orig_handle, a.descriptor);
+        },
     }
 }
 
@@ -617,6 +624,7 @@ pub fn nodeToCompletion(
     orig_handle: *const DocumentStore.Handle,
     is_type_val: bool,
     parent_is_type_val: ?bool,
+    either_descriptor: ?[]const u8,
 ) error{OutOfMemory}!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
@@ -643,8 +651,17 @@ pub fn nodeToCompletion(
         doc_kind,
     )) |doc_comments| .{ .MarkupContent = types.MarkupContent{
         .kind = doc_kind,
-        .value = doc_comments,
-    } } else null;
+        .value = if (either_descriptor) |ed|
+            try std.fmt.allocPrint(allocator, "`Conditionally available: {s}`\n\n{s}", .{ ed, doc_comments })
+        else
+            doc_comments,
+    } } else (if (either_descriptor) |ed|
+        .{ .MarkupContent = types.MarkupContent{
+            .kind = doc_kind,
+            .value = try std.fmt.allocPrint(allocator, "`Conditionally available: {s}`", .{ed}),
+        } }
+    else
+        null);
 
     if (ast.isContainer(handle.tree, node)) {
         const context = DeclToCompletionContext{
@@ -652,8 +669,10 @@ pub fn nodeToCompletion(
             .completions = list,
             .orig_handle = orig_handle,
             .parent_is_type_val = is_type_val,
+            .either_descriptor = either_descriptor,
         };
         try analysis.iterateSymbolsContainer(
+            allocator,
             &server.document_store,
             node_handle,
             orig_handle,
@@ -678,7 +697,7 @@ pub fn nodeToCompletion(
                 const use_snippets = server.config.enable_snippets and server.client_capabilities.supports_snippets;
                 const insert_text = if (use_snippets) blk: {
                     const skip_self_param = !(parent_is_type_val orelse true) and
-                        try analysis.hasSelfParam(&server.document_store, handle, func);
+                        try analysis.hasSelfParam(allocator, &server.document_store, handle, func);
                     break :blk try analysis.getFunctionSnippet(server.arena.allocator(), tree, func, skip_self_param);
                 } else tree.tokenSlice(func.name_token.?);
 
@@ -702,11 +721,12 @@ pub fn nodeToCompletion(
             const var_decl = tree.fullVarDecl(node).?;
             const is_const = token_tags[var_decl.ast.mut_token] == .keyword_const;
 
-            if (try analysis.resolveVarDeclAlias(&server.document_store, node_handle)) |result| {
+            if (try analysis.resolveVarDeclAlias(allocator, &server.document_store, node_handle)) |result| {
                 const context = DeclToCompletionContext{
                     .server = server,
                     .completions = list,
                     .orig_handle = orig_handle,
+                    .either_descriptor = either_descriptor,
                 };
                 return try declToCompletion(context, result);
             }
@@ -780,7 +800,7 @@ pub fn nodeToCompletion(
             }
 
             if (unwrapped) |actual_type| {
-                try server.typeToCompletion(list, .{ .original = actual_type }, orig_handle);
+                try server.typeToCompletion(list, .{ .original = actual_type }, orig_handle, either_descriptor);
             }
             return;
         },
@@ -847,7 +867,7 @@ pub fn gotoDefinitionSymbol(
     const name_token = switch (decl_handle.decl.*) {
         .ast_node => |node| block: {
             if (resolve_alias) {
-                if (try analysis.resolveVarDeclAlias(&server.document_store, .{ .node = node, .handle = handle })) |result| {
+                if (try analysis.resolveVarDeclAlias(server.arena.allocator(), &server.document_store, .{ .node = node, .handle = handle })) |result| {
                     handle = result.handle;
 
                     break :block result.nameToken();
@@ -865,22 +885,21 @@ pub fn gotoDefinitionSymbol(
     };
 }
 
-pub fn hoverSymbol(server: *Server, decl_handle: analysis.DeclWithHandle) error{OutOfMemory}!?types.Hover {
+pub fn hoverSymbol(server: *Server, decl_handle: analysis.DeclWithHandle, markup_kind: types.MarkupKind) error{OutOfMemory}!?[]const u8 {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
     const handle = decl_handle.handle;
     const tree = handle.tree;
 
-    const hover_kind: types.MarkupKind = if (server.client_capabilities.hover_supports_md) .markdown else .plaintext;
     var doc_str: ?[]const u8 = null;
 
     const def_str = switch (decl_handle.decl.*) {
         .ast_node => |node| def: {
-            if (try analysis.resolveVarDeclAlias(&server.document_store, .{ .node = node, .handle = handle })) |result| {
-                return try server.hoverSymbol(result);
+            if (try analysis.resolveVarDeclAlias(server.arena.allocator(), &server.document_store, .{ .node = node, .handle = handle })) |result| {
+                return try server.hoverSymbol(result, markup_kind);
             }
-            doc_str = try analysis.getDocComments(server.arena.allocator(), tree, node, hover_kind);
+            doc_str = try analysis.getDocComments(server.arena.allocator(), tree, node, markup_kind);
 
             var buf: [1]Ast.Node.Index = undefined;
 
@@ -897,7 +916,7 @@ pub fn hoverSymbol(server: *Server, decl_handle: analysis.DeclWithHandle) error{
         .param_payload => |pay| def: {
             const param = pay.param;
             if (param.first_doc_comment) |doc_comments| {
-                doc_str = try analysis.collectDocComments(server.arena.allocator(), handle.tree, doc_comments, hover_kind, false);
+                doc_str = try analysis.collectDocComments(server.arena.allocator(), handle.tree, doc_comments, markup_kind, false);
             }
 
             const first_token = ast.paramFirstToken(tree, param);
@@ -918,7 +937,7 @@ pub fn hoverSymbol(server: *Server, decl_handle: analysis.DeclWithHandle) error{
 
     var bound_type_params = analysis.BoundTypeParams{};
     defer bound_type_params.deinit(server.document_store.allocator);
-    const resolved_type = try decl_handle.resolveType(&server.document_store, &bound_type_params);
+    const resolved_type = try decl_handle.resolveType(server.arena.allocator(), &server.document_store, &bound_type_params);
 
     const resolved_type_str = if (resolved_type) |rt|
         if (rt.type.is_type_val) switch (rt.type.data) {
@@ -965,7 +984,7 @@ pub fn hoverSymbol(server: *Server, decl_handle: analysis.DeclWithHandle) error{
         "unknown";
 
     var hover_text: []const u8 = undefined;
-    if (hover_kind == .markdown) {
+    if (markup_kind == .markdown) {
         hover_text =
             if (doc_str) |doc|
             try std.fmt.allocPrint(server.arena.allocator(), "```zig\n{s}\n```\n```zig\n({s})\n```\n{s}", .{ def_str, resolved_type_str, doc })
@@ -979,12 +998,7 @@ pub fn hoverSymbol(server: *Server, decl_handle: analysis.DeclWithHandle) error{
             try std.fmt.allocPrint(server.arena.allocator(), "{s} ({s})", .{ def_str, resolved_type_str });
     }
 
-    return types.Hover{
-        .contents = .{ .MarkupContent = .{
-            .kind = hover_kind,
-            .value = hover_text,
-        } },
-    };
+    return hover_text;
 }
 
 pub fn getLabelGlobal(pos_index: usize, handle: *const DocumentStore.Handle) error{OutOfMemory}!?analysis.DeclWithHandle {
@@ -1008,7 +1022,7 @@ pub fn getSymbolGlobal(
     const name = identifierFromPosition(pos_index, handle.*);
     if (name.len == 0) return null;
 
-    return try analysis.lookupSymbolGlobal(&server.document_store, handle, name, pos_index);
+    return try analysis.lookupSymbolGlobal(server.arena.allocator(), &server.document_store, handle, name, pos_index);
 }
 
 pub fn gotoDefinitionLabel(
@@ -1072,8 +1086,17 @@ pub fn hoverDefinitionLabel(server: *Server, pos_index: usize, handle: *const Do
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
+    const markup_kind: types.MarkupKind = if (server.client_capabilities.hover_supports_md) .markdown else .plaintext;
     const decl = (try getLabelGlobal(pos_index, handle)) orelse return null;
-    return try server.hoverSymbol(decl);
+
+    return .{
+        .contents = .{
+            .MarkupContent = .{
+                .kind = markup_kind,
+                .value = (try server.hoverSymbol(decl, markup_kind)) orelse return null,
+            },
+        },
+    };
 }
 
 pub fn hoverDefinitionBuiltin(server: *Server, pos_index: usize, handle: *const DocumentStore.Handle) error{OutOfMemory}!?types.Hover {
@@ -1130,16 +1153,26 @@ pub fn hoverDefinitionGlobal(server: *Server, pos_index: usize, handle: *const D
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
+    const markup_kind: types.MarkupKind = if (server.client_capabilities.hover_supports_md) .markdown else .plaintext;
     const decl = (try server.getSymbolGlobal(pos_index, handle)) orelse return null;
-    return try server.hoverSymbol(decl);
+
+    return .{
+        .contents = .{
+            .MarkupContent = .{
+                .kind = markup_kind,
+                .value = (try server.hoverSymbol(decl, markup_kind)) orelse return null,
+            },
+        },
+    };
 }
 
-pub fn getSymbolFieldAccess(
+/// Multiple when using branched types
+pub fn getSymbolFieldAccesses(
     server: *Server,
     handle: *const DocumentStore.Handle,
     source_index: usize,
     loc: offsets.Loc,
-) error{OutOfMemory}!?analysis.DeclWithHandle {
+) error{OutOfMemory}!?[]const analysis.DeclWithHandle {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -1149,20 +1182,29 @@ pub fn getSymbolFieldAccess(
     var held_range = try server.arena.allocator().dupeZ(u8, offsets.locToSlice(handle.text, loc));
     var tokenizer = std.zig.Tokenizer.init(held_range);
 
-    if (try analysis.getFieldAccessType(&server.document_store, handle, source_index, &tokenizer)) |result| {
+    var decls_with_handles = std.ArrayListUnmanaged(analysis.DeclWithHandle){};
+
+    if (try analysis.getFieldAccessType(server.arena.allocator(), &server.document_store, handle, source_index, &tokenizer)) |result| {
         const container_handle = result.unwrapped orelse result.original;
-        const container_handle_node = switch (container_handle.type.data) {
-            .other => |n| n,
-            else => return null,
-        };
-        return try analysis.lookupSymbolContainer(
-            &server.document_store,
-            .{ .node = container_handle_node, .handle = container_handle.handle },
-            name,
-            true,
-        );
+
+        const container_handle_nodes = try container_handle.getAllTypesWithHandles(server.arena.allocator());
+
+        for (container_handle_nodes) |ty| {
+            const container_handle_node = switch (ty.type.data) {
+                .other => |n| n,
+                else => continue,
+            };
+            try decls_with_handles.append(server.arena.allocator(), (try analysis.lookupSymbolContainer(
+                server.arena.allocator(),
+                &server.document_store,
+                .{ .node = container_handle_node, .handle = ty.handle },
+                name,
+                true,
+            )) orelse continue);
+        }
     }
-    return null;
+
+    return try decls_with_handles.toOwnedSlice(server.arena.allocator());
 }
 
 pub fn gotoDefinitionFieldAccess(
@@ -1171,12 +1213,22 @@ pub fn gotoDefinitionFieldAccess(
     source_index: usize,
     loc: offsets.Loc,
     resolve_alias: bool,
-) error{OutOfMemory}!?types.Location {
+) error{OutOfMemory}!?[]const types.Location {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const decl = (try server.getSymbolFieldAccess(handle, source_index, loc)) orelse return null;
-    return try server.gotoDefinitionSymbol(decl, resolve_alias);
+    const accesses = (try server.getSymbolFieldAccesses(handle, source_index, loc)) orelse return null;
+    var locs = std.ArrayListUnmanaged(types.Location){};
+
+    for (accesses) |access| {
+        if (try server.gotoDefinitionSymbol(access, resolve_alias)) |l|
+            try locs.append(server.arena.allocator(), l);
+    }
+
+    if (locs.items.len == 0)
+        return null;
+
+    return try locs.toOwnedSlice(server.arena.allocator());
 }
 
 pub fn hoverDefinitionFieldAccess(
@@ -1188,8 +1240,24 @@ pub fn hoverDefinitionFieldAccess(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const decl = (try server.getSymbolFieldAccess(handle, source_index, loc)) orelse return null;
-    return try server.hoverSymbol(decl);
+    const markup_kind: types.MarkupKind = if (server.client_capabilities.hover_supports_md) .markdown else .plaintext;
+    const decls = (try server.getSymbolFieldAccesses(handle, source_index, loc)) orelse return null;
+
+    var content = std.ArrayListUnmanaged(types.MarkedString){};
+
+    for (decls) |decl| {
+        try content.append(server.arena.allocator(), .{
+            .string = (try server.hoverSymbol(decl, markup_kind)) orelse continue,
+        });
+    }
+
+    // Yes, this is deprecated; the issue is that there's no better
+    // solution for multiple hover entries :(
+    return .{
+        .contents = .{
+            .array_of_MarkedString = try content.toOwnedSlice(server.arena.allocator()),
+        },
+    };
 }
 
 pub fn gotoDefinitionString(
@@ -1248,6 +1316,7 @@ const DeclToCompletionContext = struct {
     completions: *std.ArrayListUnmanaged(types.CompletionItem),
     orig_handle: *const DocumentStore.Handle,
     parent_is_type_val: ?bool = null,
+    either_descriptor: ?[]const u8 = null,
 };
 
 pub fn declToCompletion(context: DeclToCompletionContext, decl_handle: analysis.DeclWithHandle) error{OutOfMemory}!void {
@@ -1265,6 +1334,7 @@ pub fn declToCompletion(context: DeclToCompletionContext, decl_handle: analysis.
             context.orig_handle,
             false,
             context.parent_is_type_val,
+            context.either_descriptor,
         ),
         .param_payload => |pay| {
             const Documentation = @TypeOf(@as(types.CompletionItem, undefined).documentation);
@@ -1273,7 +1343,10 @@ pub fn declToCompletion(context: DeclToCompletionContext, decl_handle: analysis.
             const doc_kind: types.MarkupKind = if (context.server.client_capabilities.completion_doc_supports_md) .markdown else .plaintext;
             const doc: Documentation = if (param.first_doc_comment) |doc_comments| .{ .MarkupContent = types.MarkupContent{
                 .kind = doc_kind,
-                .value = try analysis.collectDocComments(allocator, tree, doc_comments, doc_kind, false),
+                .value = if (context.either_descriptor) |ed|
+                    try std.fmt.allocPrint(allocator, "`Conditionally available: {s}`\n\n{s}", .{ ed, try analysis.collectDocComments(allocator, tree, doc_comments, doc_kind, false) })
+                else
+                    try analysis.collectDocComments(allocator, tree, doc_comments, doc_kind, false),
             } } else null;
 
             const first_token = ast.paramFirstToken(tree, param);
@@ -1416,7 +1489,7 @@ pub fn completeGlobal(server: *Server, pos_index: usize, handle: *const Document
         .completions = &completions,
         .orig_handle = handle,
     };
-    try analysis.iterateSymbolsGlobal(&server.document_store, handle, pos_index, declToCompletion, context);
+    try analysis.iterateSymbolsGlobal(server.arena.allocator(), &server.document_store, handle, pos_index, declToCompletion, context);
     try populateSnippedCompletions(server.arena.allocator(), &completions, &snipped_data.generic, server.config.*, null);
 
     if (server.client_capabilities.label_details_support) {
@@ -1439,8 +1512,8 @@ pub fn completeFieldAccess(server: *Server, handle: *const DocumentStore.Handle,
     var held_loc = try allocator.dupeZ(u8, offsets.locToSlice(handle.text, loc));
     var tokenizer = std.zig.Tokenizer.init(held_loc);
 
-    const result = (try analysis.getFieldAccessType(&server.document_store, handle, source_index, &tokenizer)) orelse return null;
-    try server.typeToCompletion(&completions, result, handle);
+    const result = (try analysis.getFieldAccessType(allocator, &server.document_store, handle, source_index, &tokenizer)) orelse return null;
+    try server.typeToCompletion(&completions, result, handle, null);
     if (server.client_capabilities.label_details_support) {
         for (completions.items) |*item| {
             try formatDetailledLabel(item, allocator);
@@ -2335,7 +2408,7 @@ pub fn signatureHelpHandler(server: *Server, request: types.SignatureHelpParams)
     };
 }
 
-pub fn gotoHandler(server: *Server, request: types.TextDocumentPositionParams, resolve_alias: bool) Error!?types.Location {
+pub fn gotoHandler(server: *Server, request: types.TextDocumentPositionParams, resolve_alias: bool) Error!?types.Definition {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -2347,14 +2420,14 @@ pub fn gotoHandler(server: *Server, request: types.TextDocumentPositionParams, r
     const pos_context = try analysis.getPositionContext(server.arena.allocator(), handle.text, source_index, true);
 
     return switch (pos_context) {
-        .builtin => |loc| try server.gotoDefinitionBuiltin(handle, loc),
-        .var_access => try server.gotoDefinitionGlobal(source_index, handle, resolve_alias),
-        .field_access => |loc| try server.gotoDefinitionFieldAccess(handle, source_index, loc, resolve_alias),
+        .builtin => |loc| .{ .Location = (try server.gotoDefinitionBuiltin(handle, loc)) orelse return null },
+        .var_access => .{ .Location = (try server.gotoDefinitionGlobal(source_index, handle, resolve_alias)) orelse return null },
+        .field_access => |loc| .{ .array_of_Location = (try server.gotoDefinitionFieldAccess(handle, source_index, loc, resolve_alias)) orelse return null },
         .import_string_literal,
         .cinclude_string_literal,
         .embedfile_string_literal,
-        => try server.gotoDefinitionString(pos_context, handle),
-        .label => try server.gotoDefinitionLabel(source_index, handle),
+        => .{ .Location = (try server.gotoDefinitionString(pos_context, handle)) orelse return null },
+        .label => .{ .Location = (try server.gotoDefinitionLabel(source_index, handle)) orelse return null },
         else => null,
     };
 }
@@ -2362,7 +2435,7 @@ pub fn gotoHandler(server: *Server, request: types.TextDocumentPositionParams, r
 fn gotoDefinitionHandler(
     server: *Server,
     request: types.TextDocumentPositionParams,
-) Error!?types.Location {
+) Error!?types.Definition {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -2372,7 +2445,7 @@ fn gotoDefinitionHandler(
 fn gotoDeclarationHandler(
     server: *Server,
     request: types.TextDocumentPositionParams,
-) Error!?types.Location {
+) Error!?types.Definition {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -2553,9 +2626,17 @@ pub fn generalReferencesHandler(server: *Server, request: GeneralReferencesReque
     const source_index = offsets.positionToIndex(handle.text, request.position(), server.offset_encoding);
     const pos_context = try analysis.getPositionContext(server.arena.allocator(), handle.text, source_index, true);
 
+    // TODO: Make this work with branching types
     const decl = switch (pos_context) {
         .var_access => try server.getSymbolGlobal(source_index, handle),
-        .field_access => |range| try server.getSymbolFieldAccess(handle, source_index, range),
+        .field_access => |range| z: {
+            const a = try server.getSymbolFieldAccesses(handle, source_index, range);
+            if (a) |b| {
+                if (b.len != 0) break :z b[0];
+            }
+
+            break :z null;
+        },
         .label => try getLabelGlobal(source_index, handle),
         else => null,
     } orelse return null;
