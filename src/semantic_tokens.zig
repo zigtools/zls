@@ -443,11 +443,10 @@ fn writeNodeTokens(builder: *Builder, maybe_node: ?Ast.Node.Index) error{OutOfMe
                 defer bound_type_params.deinit(builder.store.allocator);
 
                 if (try child.resolveType(allocator, builder.store, &bound_type_params)) |decl_type| {
-                    try colorIdentifierBasedOnType(builder, decl_type, main_token, .{});
-                } else {
-                    try writeTokenMod(builder, main_token, .variable, .{});
+                    return try colorIdentifierBasedOnType(builder, decl_type, main_token, .{});
                 }
             }
+            return try writeToken(builder, main_token, .variable);
         },
         .fn_proto,
         .fn_proto_one,
