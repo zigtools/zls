@@ -141,7 +141,7 @@ fn getOrLoadHandleInternal(self: *DocumentStore, uri: Uri) !?*const Handle {
     return gop.value_ptr.*;
 }
 
-/// Takes ownership of `new_text` which has to be allocated
+/// Takes ownership of `text` which has to be allocated
 /// with this DocumentStore's allocator
 pub fn openDocument(self: *DocumentStore, uri: Uri, text: [:0]const u8) error{OutOfMemory}!Handle {
     const tracy_zone = tracy.trace(@src());
@@ -153,10 +153,14 @@ pub fn openDocument(self: *DocumentStore, uri: Uri, text: [:0]const u8) error{Ou
         } else {
             handle.open = true;
         }
+        self.allocator.free(text);
         return handle.*;
     }
 
-    var handle = try self.allocator.create(Handle);
+    var handle = self.allocator.create(Handle) catch |err| {
+        self.allocator.free(text);
+        return err;
+    };
     errdefer self.allocator.destroy(handle);
 
     handle.* = try self.createDocument(uri, text, true);
