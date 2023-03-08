@@ -2730,24 +2730,28 @@ fn makeScopeInternal(allocator: std.mem.Allocator, context: ScopeContext, node_i
             });
             const scope_index = scopes.len - 1;
 
-            // All identifiers in main_token..data.lhs are error fields.
-            var i = main_tokens[node_idx];
-            while (i < data[node_idx].rhs) : (i += 1) {
-                if (token_tags[i] == .identifier) {
-                    const name = offsets.tokenToSlice(tree, i);
-                    if (try scopes.items(.decls)[scope_index].fetchPut(allocator, name, .{ .error_token = i })) |_| {
-                        // TODO Record a redefinition error.
-                    }
-                    const gop = try context.errors.getOrPut(allocator, .{
-                        .label = name,
-                        .kind = .Constant,
-                        //.detail =
-                        .insertText = name,
-                        .insertTextFormat = .PlainText,
-                    });
-                    if (!gop.found_existing) {
-                        gop.key_ptr.detail = try std.fmt.allocPrint(allocator, "error.{s}", .{name});
-                    }
+            // All identifiers in main_token..data.rhs are error fields.
+            var tok_i = main_tokens[node_idx] + 2;
+            while (tok_i < data[node_idx].rhs) : (tok_i += 1) {
+                switch (token_tags[tok_i]) {
+                    .doc_comment, .comma => {},
+                    .identifier => {
+                        const name = offsets.tokenToSlice(tree, tok_i);
+                        if (try scopes.items(.decls)[scope_index].fetchPut(allocator, name, .{ .error_token = tok_i })) |_| {
+                            // TODO Record a redefinition error.
+                        }
+                        const gop = try context.errors.getOrPut(allocator, .{
+                            .label = name,
+                            .kind = .Constant,
+                            //.detail =
+                            .insertText = name,
+                            .insertTextFormat = .PlainText,
+                        });
+                        if (!gop.found_existing) {
+                            gop.key_ptr.detail = try std.fmt.allocPrint(allocator, "error.{s}", .{name});
+                        }
+                    },
+                    else => {},
                 }
             }
         },

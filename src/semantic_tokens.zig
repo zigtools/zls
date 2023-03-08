@@ -402,6 +402,18 @@ fn writeNodeTokens(builder: *Builder, maybe_node: ?Ast.Node.Index) error{OutOfMe
                 }
             }
         },
+        .error_set_decl => {
+            try writeToken(builder, main_token, .keyword);
+
+            var tok_i = main_tokens[node] + 2;
+            while (tok_i < node_data[node].rhs) : (tok_i += 1) {
+                switch (token_tags[tok_i]) {
+                    .doc_comment, .comma => {},
+                    .identifier => try writeToken(builder, tok_i, .errorTag),
+                    else => {},
+                }
+            }
+        },
         .error_value => {
             if (node_data[node].lhs > 0) {
                 try writeToken(builder, node_data[node].lhs - 1, .keyword);
@@ -775,9 +787,6 @@ fn writeNodeTokens(builder: *Builder, maybe_node: ?Ast.Node.Index) error{OutOfMe
         },
         .unreachable_literal => {
             try writeToken(builder, main_token, .keywordLiteral);
-        },
-        .error_set_decl => {
-            try writeToken(builder, main_token, .keyword);
         },
         .@"asm",
         .asm_output,
