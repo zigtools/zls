@@ -812,8 +812,11 @@ fn writeNodeTokens(builder: *Builder, maybe_node: ?Ast.Node.Index) error{OutOfMe
         .@"catch" => {
             try callWriteNodeTokens(allocator, .{ builder, node_data[node].lhs });
             try writeToken(builder, main_token, .keyword);
-            if (token_tags[main_token + 1] == .pipe)
-                try writeToken(builder, main_token + 1, .variable);
+            if (token_tags[main_token + 1] == .pipe) {
+                try writeTokenMod(builder, main_token + 2, .variable, .{
+                    .declaration = true,
+                });
+            }
             try callWriteNodeTokens(allocator, .{ builder, node_data[node].rhs });
         },
         .add,
@@ -949,7 +952,7 @@ fn writeNodeTokens(builder: *Builder, maybe_node: ?Ast.Node.Index) error{OutOfMe
 
             if (ptr_type.size == .One) try writeToken(builder, main_token, .operator);
             if (ptr_type.ast.sentinel != 0) {
-                return try callWriteNodeTokens(allocator, .{ builder, ptr_type.ast.sentinel });
+                try callWriteNodeTokens(allocator, .{ builder, ptr_type.ast.sentinel });
             }
 
             try writeToken(builder, ptr_type.allowzero_token, .keyword);
@@ -961,7 +964,6 @@ fn writeNodeTokens(builder: *Builder, maybe_node: ?Ast.Node.Index) error{OutOfMe
 
                 if (ptr_type.ast.bit_range_start != 0) {
                     try callWriteNodeTokens(allocator, .{ builder, ptr_type.ast.bit_range_start });
-                    try writeToken(builder, tree.firstToken(ptr_type.ast.bit_range_end - 1), .operator);
                     try callWriteNodeTokens(allocator, .{ builder, ptr_type.ast.bit_range_end });
                 }
             }
