@@ -487,6 +487,20 @@ pub const Key = union(enum) {
         };
     }
 
+    pub fn isSinglePointer(ty: Key) bool {
+        return switch (ty) {
+            .pointer_type => |pointer_info| pointer_info.size == .One,
+            else => false,
+        };
+    }
+
+    pub fn isCPtr(ty: Key) bool {
+        return switch (ty) {
+            .pointer_type => |pointer_info| pointer_info.size == .C,
+            else => false,
+        };
+    }
+
     pub fn isConstPtr(ty: Key) bool {
         return switch (ty) {
             .pointer_type => |pointer_info| pointer_info.is_const,
@@ -518,6 +532,23 @@ pub const Key = union(enum) {
             .pointer_type => |pointer_info| return pointer_info.size == .C,
             else => return false,
         }
+    }
+
+    pub fn isPtrAtRuntime(ty: Key, ip: *const InternPool) bool {
+        return switch (ty) {
+            .pointer_type => |pointer_info| pointer_info.size != .Slice,
+            .optional_type => |optional_info| {
+                const child_type = ip.indexToKey(optional_info.payload_type);
+                switch (child_type) {
+                    .pointer_type => |pointer_info| switch (pointer_info.size) {
+                        .Slice, .C => return false,
+                        .Many, .One => return !pointer_info.is_allowzero,
+                    },
+                    else => return false,
+                }
+            },
+            else => false,
+        };
     }
 
     pub fn elemType2(ty: Key) Index {
@@ -678,6 +709,26 @@ pub const Key = union(enum) {
             .union_value,
             .unknown_value,
             => unreachable,
+        };
+    }
+
+    pub fn isNull(val: Key) bool {
+        return switch (val) {
+            .simple_value => |simple| switch (simple) {
+                .null_value => true,
+                .bool_true => false,
+                .bool_false => true,
+                .the_only_possible_value => true,
+                else => unreachable,
+            },
+            .int_u64_value => |int_value| int_value.int == 0,
+            .int_i64_value => |int_value| int_value.int == 0,
+            .int_big_value => |int_value| int_value.int.orderAgainstScalar(0).compare(.eq),
+
+            .optional_value => false,
+            .unknown_value => unreachable,
+
+            else => unreachable,
         };
     }
 
@@ -1066,6 +1117,34 @@ pub const Index = enum(u32) {
             .key = ip.indexToKey(index),
             .ip = ip,
         } };
+    }
+
+    pub fn fmtDebug(index: Index, ip: InternPool) std.fmt.Formatter(formatDebug) {
+        return .{ .data = .{
+            .index = index,
+            .ip = ip,
+        } };
+    }
+
+    const FormatContext = struct {
+        index: Index,
+        ip: InternPool,
+    };
+
+    fn formatDebug(
+        ctx: FormatContext,
+        comptime fmt_str: []const u8,
+        options: std.fmt.FormatOptions,
+        writer: anytype,
+    ) @TypeOf(writer).Error!void {
+        if (ctx.index == .none) {
+            return writer.writeAll(".none");
+        } else {
+            return Key.format(.{
+                .key = ctx.ip.indexToKey(ctx.index),
+                .ip = ctx.ip,
+            }, fmt_str, options, writer);
+        }
     }
 };
 
@@ -2180,6 +2259,7 @@ const InMemoryCoercionResult = union(enum) {
     ptr_allowzero: Pair,
     ptr_bit_range: BitRange,
     ptr_alignment: IntPair,
+    double_ptr_to_anyopaque: Pair,
 
     const Pair = struct {
         actual: Index, // type
@@ -2275,9 +2355,12 @@ fn coerceInMemoryAllowed(
     target: std.Target,
 ) Allocator.Error!InMemoryCoercionResult {
     if (dest_ty == src_ty) return .ok;
+    if (dest_ty == .unknown_type or src_ty == .unknown_type) return .ok;
 
     const dest_key = ip.indexToKey(dest_ty);
     const src_key = ip.indexToKey(src_ty);
+    assert(dest_key.typeOf() == .type_type);
+    assert(src_key.typeOf() == .type_type);
 
     const dest_tag = dest_key.zigTypeTag();
     const src_tag = src_key.zigTypeTag();
