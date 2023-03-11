@@ -1533,10 +1533,11 @@ pub fn formatDetailledLabel(item: *types.CompletionItem, arena: std.mem.Allocato
     if (item.detail == null)
         return;
 
-    var detailLen: usize = item.detail.?.len;
+    const detail = item.detail.?[0..@min(1024, item.detail.?.len)];
+    var detailLen: usize = detail.len;
     var it: []u8 = try arena.alloc(u8, detailLen);
 
-    detailLen -= std.mem.replace(u8, item.detail.?, "    ", " ", it) * 3;
+    detailLen -= std.mem.replace(u8, detail, "    ", " ", it) * 3;
     it = it[0..detailLen];
 
     // HACK: for enums 'MyEnum.', item.detail shows everything, we don't want that
