@@ -402,6 +402,18 @@ fn writeNodeTokens(builder: *Builder, maybe_node: ?Ast.Node.Index) error{OutOfMe
                 }
             }
         },
+        .error_set_decl => {
+            try writeToken(builder, main_token, .keyword);
+
+            var tok_i = main_tokens[node] + 2;
+            while (tok_i < node_data[node].rhs) : (tok_i += 1) {
+                switch (token_tags[tok_i]) {
+                    .doc_comment, .comma => {},
+                    .identifier => try writeToken(builder, tok_i, .errorTag),
+                    else => {},
+                }
+            }
+        },
         .error_value => {
             if (node_data[node].lhs > 0) {
                 try writeToken(builder, node_data[node].lhs - 1, .keyword);
@@ -431,11 +443,10 @@ fn writeNodeTokens(builder: *Builder, maybe_node: ?Ast.Node.Index) error{OutOfMe
                 defer bound_type_params.deinit(builder.store.allocator);
 
                 if (try child.resolveType(allocator, builder.store, &bound_type_params)) |decl_type| {
-                    try colorIdentifierBasedOnType(builder, decl_type, main_token, .{});
-                } else {
-                    try writeTokenMod(builder, main_token, .variable, .{});
+                    return try colorIdentifierBasedOnType(builder, decl_type, main_token, .{});
                 }
             }
+            return try writeToken(builder, main_token, .variable);
         },
         .fn_proto,
         .fn_proto_one,
@@ -776,9 +787,6 @@ fn writeNodeTokens(builder: *Builder, maybe_node: ?Ast.Node.Index) error{OutOfMe
         .unreachable_literal => {
             try writeToken(builder, main_token, .keywordLiteral);
         },
-        .error_set_decl => {
-            try writeToken(builder, main_token, .keyword);
-        },
         .@"asm",
         .asm_output,
         .asm_input,
@@ -804,8 +812,11 @@ fn writeNodeTokens(builder: *Builder, maybe_node: ?Ast.Node.Index) error{OutOfMe
         .@"catch" => {
             try callWriteNodeTokens(allocator, .{ builder, node_data[node].lhs });
             try writeToken(builder, main_token, .keyword);
-            if (token_tags[main_token + 1] == .pipe)
-                try writeToken(builder, main_token + 1, .variable);
+            if (token_tags[main_token + 1] == .pipe) {
+                try writeTokenMod(builder, main_token + 2, .variable, .{
+                    .declaration = true,
+                });
+            }
             try callWriteNodeTokens(allocator, .{ builder, node_data[node].rhs });
         },
         .add,
@@ -941,7 +952,7 @@ fn writeNodeTokens(builder: *Builder, maybe_node: ?Ast.Node.Index) error{OutOfMe
 
             if (ptr_type.size == .One) try writeToken(builder, main_token, .operator);
             if (ptr_type.ast.sentinel != 0) {
-                return try callWriteNodeTokens(allocator, .{ builder, ptr_type.ast.sentinel });
+                try callWriteNodeTokens(allocator, .{ builder, ptr_type.ast.sentinel });
             }
 
             try writeToken(builder, ptr_type.allowzero_token, .keyword);
@@ -953,7 +964,6 @@ fn writeNodeTokens(builder: *Builder, maybe_node: ?Ast.Node.Index) error{OutOfMe
 
                 if (ptr_type.ast.bit_range_start != 0) {
                     try callWriteNodeTokens(allocator, .{ builder, ptr_type.ast.bit_range_start });
-                    try writeToken(builder, tree.firstToken(ptr_type.ast.bit_range_end - 1), .operator);
                     try callWriteNodeTokens(allocator, .{ builder, ptr_type.ast.bit_range_end });
                 }
             }
