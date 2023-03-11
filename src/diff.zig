@@ -1,6 +1,7 @@
 const std = @import("std");
 const types = @import("lsp.zig");
 const offsets = @import("offsets.zig");
+const tracy = @import("tracy.zig");
 const DiffMatchPatch = @import("diffz");
 
 const dmp = DiffMatchPatch{
@@ -15,6 +16,9 @@ pub fn edits(
     after: []const u8,
     encoding: offsets.Encoding,
 ) Error!std.ArrayListUnmanaged(types.TextEdit) {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
     var diffs = try dmp.diff(arena.allocator(), before, after, true);
@@ -70,6 +74,9 @@ pub fn applyContentChanges(
     content_changes: []const types.TextDocumentContentChangeEvent,
     encoding: offsets.Encoding,
 ) ![:0]const u8 {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     var last_full_text_change: ?usize = null;
     var i: usize = content_changes.len;
     while (i > 0) {
@@ -111,6 +118,9 @@ pub fn applyTextEdits(
     text_edits: []const types.TextEdit,
     encoding: offsets.Encoding,
 ) ![]const u8 {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     var text_edits_sortable = try allocator.alloc(types.TextEdit, text_edits.len);
     defer allocator.free(text_edits_sortable);
 

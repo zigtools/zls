@@ -2,6 +2,7 @@ const std = @import("std");
 const ast = @import("ast.zig");
 const types = @import("lsp.zig");
 const offsets = @import("offsets.zig");
+const tracy = @import("tracy.zig");
 const Ast = std.zig.Ast;
 
 const FoldingRange = struct {
@@ -54,6 +55,9 @@ const Builder = struct {
     }
 
     pub fn getRanges(builder: Builder) error{OutOfMemory}![]types.FoldingRange {
+        const tracy_zone = tracy.trace(@src());
+        defer tracy_zone.end();
+
         var result_locations = try builder.allocator.alloc(types.FoldingRange, builder.locations.items.len);
         errdefer builder.allocator.free(result_locations);
 
@@ -121,6 +125,9 @@ const Builder = struct {
 };
 
 pub fn generateFoldingRanges(allocator: std.mem.Allocator, tree: Ast, encoding: offsets.Encoding) error{OutOfMemory}![]types.FoldingRange {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     var builder = Builder{
         .allocator = allocator,
         .locations = .{},

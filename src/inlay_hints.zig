@@ -4,6 +4,7 @@ const DocumentStore = @import("DocumentStore.zig");
 const analysis = @import("analysis.zig");
 const types = @import("lsp.zig");
 const offsets = @import("offsets.zig");
+const tracy = @import("tracy.zig");
 const Ast = std.zig.Ast;
 const log = std.log.scoped(.zls_inlay_hint);
 const ast = @import("ast.zig");
@@ -64,6 +65,9 @@ const Builder = struct {
 /// `decl_handle` should be a function protototype
 /// writes parameter hints into `builder.hints`
 fn writeCallHint(builder: *Builder, call: Ast.full.Call, decl_handle: analysis.DeclWithHandle) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const handle = builder.handle;
     const tree = handle.tree;
 
@@ -127,6 +131,9 @@ fn writeCallHint(builder: *Builder, call: Ast.full.Call, decl_handle: analysis.D
 
 /// takes parameter nodes from the ast and function parameter names from `Builtin.arguments` and writes parameter hints into `builder.hints`
 fn writeBuiltinHint(builder: *Builder, parameters: []const Ast.Node.Index, arguments: []const []const u8) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const handle = builder.handle;
     const tree = handle.tree;
 
@@ -162,6 +169,9 @@ fn writeBuiltinHint(builder: *Builder, parameters: []const Ast.Node.Index, argum
 
 /// takes a Ast.full.Call (a function call), analysis its function expression, finds its declaration and writes parameter hints into `builder.hints`
 fn writeCallNodeHint(builder: *Builder, call: Ast.full.Call) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     if (call.ast.params.len == 0) return;
     if (builder.config.inlay_hints_exclude_single_argument and call.ast.params.len == 1) return;
 
@@ -280,6 +290,9 @@ pub fn writeRangeInlayHint(
     loc: offsets.Loc,
     hover_kind: types.MarkupKind,
 ) error{OutOfMemory}![]InlayHint {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     var builder: Builder = .{
         .arena = arena,
         .store = store,

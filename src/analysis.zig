@@ -6,6 +6,7 @@ const offsets = @import("offsets.zig");
 const URI = @import("uri.zig");
 const log = std.log.scoped(.zls_analysis);
 const ast = @import("ast.zig");
+const tracy = @import("tracy.zig");
 const ComptimeInterpreter = @import("ComptimeInterpreter.zig");
 const InternPool = ComptimeInterpreter.InternPool;
 
@@ -1284,6 +1285,9 @@ pub fn collectImports(allocator: std.mem.Allocator, tree: Ast) error{OutOfMemory
 /// Collects all `@cImport` nodes
 /// Caller owns returned memory.
 pub fn collectCImportNodes(allocator: std.mem.Allocator, tree: Ast) error{OutOfMemory}![]Ast.Node.Index {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     var import_nodes = std.ArrayListUnmanaged(Ast.Node.Index){};
     errdefer import_nodes.deinit(allocator);
 
@@ -1621,6 +1625,9 @@ pub fn getPositionContext(
     /// Should we look to the end of the current context? Yes for goto def, no for completions
     lookahead: bool,
 ) !PositionContext {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     var new_index = doc_index;
     if (lookahead and new_index < text.len and isSymbolChar(text[new_index])) {
         new_index += 1;
@@ -2612,6 +2619,9 @@ pub const Scope = struct {
 };
 
 pub fn makeDocumentScope(allocator: std.mem.Allocator, tree: Ast) !DocumentScope {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     var document_scope = DocumentScope{
         .scopes = .{},
         .error_completions = .{},
@@ -2639,6 +2649,9 @@ const ScopeContext = struct {
 };
 
 fn makeInnerScope(allocator: std.mem.Allocator, context: ScopeContext, node_idx: Ast.Node.Index) error{OutOfMemory}!void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const scopes = context.scopes;
     const tree = context.tree;
     const tags = tree.nodes.items(.tag);
