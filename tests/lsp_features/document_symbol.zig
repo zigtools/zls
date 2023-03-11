@@ -7,34 +7,56 @@ const tres = @import("tres");
 const Context = @import("../context.zig").Context;
 
 const types = zls.types;
-const requests = zls.requests;
 
 const allocator: std.mem.Allocator = std.testing.allocator;
 
-test "documentSymbol - smoke" {
+test "documentSymbol - container decl" {
     try testDocumentSymbol(
         \\const S = struct {
         \\    fn f() void {}
         \\};
     ,
-        \\Variable S
+        \\Constant S
+        \\  Function f
+    );
+    try testDocumentSymbol(
+        \\const S = struct {
+        \\    alpha: u32,
+        \\    fn f() void {}
+        \\};
+    ,
+        \\Constant S
+        \\  Field alpha
         \\  Function f
     );
 }
 
-// FIXME: https://github.com/zigtools/zls/issues/986
+test "documentSymbol - enum" {
+    try testDocumentSymbol(
+        \\const E = enum {
+        \\    alpha,
+        \\    beta,
+        \\};
+    ,
+        \\Constant E
+        \\  EnumMember alpha
+        \\  EnumMember beta
+    );
+}
+
+// https://github.com/zigtools/zls/issues/986
 test "documentSymbol - nested struct with self" {
     try testDocumentSymbol(
         \\const Foo = struct {
         \\    const Self = @This();
         \\    pub fn foo() !Self {}
-        \\    const Bar = struct {};
+        \\    const Bar = union {};
         \\};
     ,
-        \\Variable Foo
-        \\  Variable Self
+        \\Constant Foo
+        \\  Constant Self
         \\  Function foo
-        \\  Variable Bar
+        \\  Constant Bar
     );
 }
 

@@ -15,6 +15,7 @@ const semantic_tokens = @import("semantic_tokens.zig");
 const inlay_hints = @import("inlay_hints.zig");
 const code_actions = @import("code_actions.zig");
 const folding_range = @import("folding_range.zig");
+const document_symbol = @import("document_symbol.zig");
 const shared = @import("shared.zig");
 const Ast = std.zig.Ast;
 const tracy = @import("tracy.zig");
@@ -2497,7 +2498,7 @@ pub fn documentSymbolsHandler(server: *Server, request: types.DocumentSymbolPara
 
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
 
-    return try analysis.getDocumentSymbols(server.arena.allocator(), handle.tree, server.offset_encoding);
+    return try document_symbol.getDocumentSymbols(server.arena.allocator(), handle.tree, server.offset_encoding);
 }
 
 pub fn formattingHandler(server: *Server, request: types.DocumentFormattingParams) Error!?[]types.TextEdit {
