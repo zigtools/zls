@@ -48,6 +48,7 @@
         cp-phase = builtins.concatStringsSep ";" (builtins.attrValues (builtins.mapAttrs (k: v: "cp -r ${inputs.${k}} .cache/p/${v.hash}") zon));
       in
       rec {
+        formatter = nixpkgs.legacyPackages.${system}.nixpkgs-fmt;
         packages.default = packages.zls;
         packages.zls = pkgs.stdenvNoCC.mkDerivation {
           name = "zls";
