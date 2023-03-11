@@ -73,7 +73,7 @@ fn callback(ctx: *Context, tree: Ast, node: Ast.Node.Index) error{OutOfMemory}!v
             const detail = if (tree.fullFnProto(&buffer, node)) |fn_info| analysis.getFunctionSignature(tree, fn_info) else null;
 
             break :blk .{
-                .name = decl_name.?,
+                .name = decl_name orelse break :blk null,
                 .detail = detail,
                 .kind = kind,
                 .loc = offsets.nodeToLoc(tree, node),
