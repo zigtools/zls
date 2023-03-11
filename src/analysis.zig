@@ -275,7 +275,9 @@ pub fn isSnakeCase(name: []const u8) bool {
 
 pub fn getDeclNameToken(tree: Ast, node: Ast.Node.Index) ?Ast.TokenIndex {
     const tags = tree.nodes.items(.tag);
+    const datas = tree.nodes.items(.data);
     const main_token = tree.nodes.items(.main_token)[node];
+
     return switch (tags[node]) {
         // regular declaration names. + 1 to mut token because name comes after 'const'/'var'
         .local_var_decl,
@@ -306,21 +308,23 @@ pub fn getDeclNameToken(tree: Ast, node: Ast.Node.Index) ?Ast.TokenIndex {
         .identifier => main_token,
         .error_value => main_token + 2, // 'error'.<main_token +2>
 
-        // lhs of main token is name token, so use `node` - 1
-        .test_decl => if (tree.tokens.items(.tag)[main_token + 1] == .string_literal)
-            return main_token + 1
-        else
-            null,
+        .test_decl => datas[node].lhs,
+
         else => null,
     };
 }
 
 pub fn getDeclName(tree: Ast, node: Ast.Node.Index) ?[]const u8 {
-    const name = tree.tokenSlice(getDeclNameToken(tree, node) orelse return null);
-    return switch (tree.nodes.items(.tag)[node]) {
-        .test_decl => name[1 .. name.len - 1],
-        else => name,
-    };
+    const name_token = getDeclNameToken(tree, node) orelse return null;
+    const name = offsets.tokenToSlice(tree, name_token);
+
+    if (tree.nodes.items(.tag)[node] == .test_decl and
+        tree.tokens.items(.tag)[name_token] == .string_literal)
+    {
+        return name[1 .. name.len - 1];
+    }
+
+    return name;
 }
 
 fn resolveVarDeclAliasInternal(arena: std.mem.Allocator, store: *DocumentStore, node_handle: NodeWithHandle, root: bool) error{OutOfMemory}!?DeclWithHandle {
