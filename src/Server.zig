@@ -3045,6 +3045,15 @@ pub fn processMessage(server: *Server, message: Message) Error!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
+    if (message.method()) |name| {
+        tracy_zone.setName(name);
+    } else if (message.id()) |id| {
+        switch (id) {
+            .integer => {},
+            .string => |name| tracy_zone.setName(name),
+        }
+    }
+
     switch (message) {
         .RequestMessage => |request| {
             if (!requestMethodExists(request.method)) return error.MethodNotFound;

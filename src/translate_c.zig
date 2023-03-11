@@ -3,6 +3,7 @@ const zig_builtin = @import("builtin");
 const builtin = @import("builtin");
 const Config = @import("Config.zig");
 const ast = @import("ast.zig");
+const tracy = @import("tracy.zig");
 const Ast = std.zig.Ast;
 const URI = @import("uri.zig");
 const log = std.log.scoped(.zls_translate_c);
@@ -24,6 +25,9 @@ const log = std.log.scoped(.zls_translate_c);
 /// #include "GLFW/glfw3.h"
 /// ```
 pub fn convertCInclude(allocator: std.mem.Allocator, tree: Ast, node: Ast.Node.Index) error{ OutOfMemory, Unsupported }![]const u8 {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const main_tokens = tree.nodes.items(.main_token);
 
     std.debug.assert(ast.isBuiltinCall(tree, node));
@@ -130,6 +134,9 @@ pub const Result = union(enum) {
 /// null indicates a failure which is automatically logged
 /// Caller owns returned memory.
 pub fn translate(allocator: std.mem.Allocator, config: Config, include_dirs: []const []const u8, source: []const u8) error{OutOfMemory}!?Result {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const file_path = try std.fs.path.join(allocator, &[_][]const u8{ config.global_cache_path.?, "cimport.h" });
     defer allocator.free(file_path);
 
