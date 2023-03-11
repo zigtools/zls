@@ -98,6 +98,7 @@ fn callback(ctx: *Context, tree: Ast, node: Ast.Node.Index) error{OutOfMemory}!v
                     .keyword_struct => .Field,
                     .keyword_union => .Field,
                     .keyword_enum => .EnumMember,
+                    .keyword_opaque => break :blk null,
                     else => unreachable,
                 },
                 .tagged_union,
