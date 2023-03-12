@@ -69,53 +69,47 @@ const Builder = struct {
             };
         }
 
-        const Item = struct {
+        // a mapping from a source index to a line character pair
+        const IndexToPositionEntry = struct {
             output: *types.FoldingRange,
-            input: *const FoldingRange,
+            source_index: usize,
             where: enum { start, end },
 
             const Self = @This();
 
-            fn getInputIndex(self: Self) usize {
-                return switch (self.where) {
-                    .start => self.input.loc.start,
-                    .end => self.input.loc.end,
-                };
-            }
-
             fn lessThan(_: void, lhs: Self, rhs: Self) bool {
-                return lhs.getInputIndex() < rhs.getInputIndex();
+                return lhs.source_index < rhs.source_index;
             }
         };
 
-        // one item for every start and end position
-        var items = try builder.allocator.alloc(Item, builder.locations.items.len * 2);
-        defer builder.allocator.free(items);
+        // one mapping for every start and end position
+        var mappings = try builder.allocator.alloc(IndexToPositionEntry, builder.locations.items.len * 2);
+        defer builder.allocator.free(mappings);
 
         for (builder.locations.items, result_locations, 0..) |*folding_range, *result, i| {
-            items[2 * i + 0] = .{ .output = result, .input = folding_range, .where = .start };
-            items[2 * i + 1] = .{ .output = result, .input = folding_range, .where = .end };
+            mappings[2 * i + 0] = .{ .output = result, .source_index = folding_range.loc.start, .where = .start };
+            mappings[2 * i + 1] = .{ .output = result, .source_index = folding_range.loc.end, .where = .end };
         }
 
-        // sort items based on their source position
-        std.sort.sort(Item, items, {}, Item.lessThan);
+        // sort mappings based on their source index
+        std.sort.sort(IndexToPositionEntry, mappings, {}, IndexToPositionEntry.lessThan);
 
         var last_index: usize = 0;
         var last_position: types.Position = .{ .line = 0, .character = 0 };
-        for (items) |item| {
-            const index = item.getInputIndex();
+        for (mappings) |mapping| {
+            const index = mapping.source_index;
             const position = offsets.advancePosition(builder.tree.source, last_position, last_index, index, builder.encoding);
             defer last_index = index;
             defer last_position = position;
 
-            switch (item.where) {
+            switch (mapping.where) {
                 .start => {
-                    item.output.startLine = position.line;
-                    item.output.startCharacter = position.character;
+                    mapping.output.startLine = position.line;
+                    mapping.output.startCharacter = position.character;
                 },
                 .end => {
-                    item.output.endLine = position.line;
-                    item.output.endCharacter = position.character;
+                    mapping.output.endLine = position.line;
+                    mapping.output.endCharacter = position.character;
                 },
             }
         }
