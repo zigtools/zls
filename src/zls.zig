@@ -2,7 +2,7 @@
 //! zigbot9001 to take advantage of zls' tools
 
 pub const ast = @import("ast.zig");
-pub const analysis = @import("analysis.zig");
+pub const Analyser = @import("analysis.zig");
 pub const Header = @import("Header.zig");
 pub const debug = @import("debug.zig");
 pub const offsets = @import("offsets.zig");

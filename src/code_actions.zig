@@ -2,7 +2,7 @@ const std = @import("std");
 const Ast = std.zig.Ast;
 
 const DocumentStore = @import("DocumentStore.zig");
-const analysis = @import("analysis.zig");
+const Analyser = @import("analysis.zig");
 const ast = @import("ast.zig");
 
 const types = @import("lsp.zig");
@@ -10,7 +10,7 @@ const offsets = @import("offsets.zig");
 
 pub const Builder = struct {
     arena: std.mem.Allocator,
-    document_store: *DocumentStore,
+    analyser: *Analyser,
     handle: *const DocumentStore.Handle,
     offset_encoding: offsets.Encoding,
 
@@ -88,9 +88,7 @@ fn handleUnusedFunctionParameter(builder: *Builder, actions: *std.ArrayListUnman
 
     const token_starts = tree.tokens.items(.start);
 
-    const decl = (try analysis.lookupSymbolGlobal(
-        builder.arena,
-        builder.document_store,
+    const decl = (try builder.analyser.lookupSymbolGlobal(
         builder.handle,
         identifier_name,
         loc.start,
@@ -134,9 +132,7 @@ fn handleUnusedVariableOrConstant(builder: *Builder, actions: *std.ArrayListUnma
     const token_tags = tree.tokens.items(.tag);
     const token_starts = tree.tokens.items(.start);
 
-    const decl = (try analysis.lookupSymbolGlobal(
-        builder.arena,
-        builder.document_store,
+    const decl = (try builder.analyser.lookupSymbolGlobal(
         builder.handle,
         identifier_name,
         loc.start,

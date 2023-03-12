@@ -1,5 +1,5 @@
 const std = @import("std");
-const analysis = @import("analysis.zig");
+const Analyser = @import("analysis.zig");
 const offsets = @import("offsets.zig");
 const DocumentStore = @import("DocumentStore.zig");
 const types = @import("lsp.zig");
@@ -8,14 +8,14 @@ const Token = std.zig.Token;
 const identifierFromPosition = @import("Server.zig").identifierFromPosition;
 const ast = @import("ast.zig");
 
-fn fnProtoToSignatureInfo(document_store: *DocumentStore, alloc: std.mem.Allocator, commas: u32, skip_self_param: bool, handle: *const DocumentStore.Handle, fn_node: Ast.Node.Index, proto: Ast.full.FnProto) !types.SignatureInformation {
+fn fnProtoToSignatureInfo(analyser: *Analyser, alloc: std.mem.Allocator, commas: u32, skip_self_param: bool, handle: *const DocumentStore.Handle, fn_node: Ast.Node.Index, proto: Ast.full.FnProto) !types.SignatureInformation {
     const tree = handle.tree;
     const token_starts = tree.tokens.items(.start);
-    const label = analysis.getFunctionSignature(tree, proto);
-    const proto_comments = (try analysis.getDocComments(alloc, tree, fn_node, .markdown)) orelse "";
+    const label = Analyser.getFunctionSignature(tree, proto);
+    const proto_comments = (try Analyser.getDocComments(alloc, tree, fn_node, .markdown)) orelse "";
 
     const arg_idx = if (skip_self_param) blk: {
-        const has_self_param = try analysis.hasSelfParam(alloc, document_store, handle, proto);
+        const has_self_param = try analyser.hasSelfParam(handle, proto);
         break :blk commas + @boolToInt(has_self_param);
     } else commas;
 
@@ -23,7 +23,7 @@ fn fnProtoToSignatureInfo(document_store: *DocumentStore, alloc: std.mem.Allocat
     var param_it = proto.iterate(&tree);
     while (ast.nextFnParam(&param_it)) |param| {
         const param_comments = if (param.first_doc_comment) |dc|
-            try analysis.collectDocComments(alloc, tree, dc, .markdown, false)
+            try Analyser.collectDocComments(alloc, tree, dc, .markdown, false)
         else
             "";
 
@@ -70,8 +70,8 @@ fn fnProtoToSignatureInfo(document_store: *DocumentStore, alloc: std.mem.Allocat
     };
 }
 
-pub fn getSignatureInfo(document_store: *DocumentStore, alloc: std.mem.Allocator, handle: *const DocumentStore.Handle, absolute_index: usize, comptime data: type) !?types.SignatureInformation {
-    const innermost_block = analysis.innermostBlockScope(handle.*, absolute_index);
+pub fn getSignatureInfo(analyser: *Analyser, alloc: std.mem.Allocator, handle: *const DocumentStore.Handle, absolute_index: usize, comptime data: type) !?types.SignatureInformation {
+    const innermost_block = Analyser.innermostBlockScope(handle.*, absolute_index);
     const tree = handle.tree;
     const token_tags = tree.tokens.items(.tag);
     const token_starts = tree.tokens.items(.start);
@@ -256,9 +256,7 @@ pub fn getSignatureInfo(document_store: *DocumentStore, alloc: std.mem.Allocator
 
                 // Resolve the expression.
                 var tokenizer = std.zig.Tokenizer.init(held_expr);
-                if (try analysis.getFieldAccessType(
-                    alloc,
-                    document_store,
+                if (try analyser.getFieldAccessType(
                     handle,
                     expr_start,
                     &tokenizer,
@@ -275,7 +273,7 @@ pub fn getSignatureInfo(document_store: *DocumentStore, alloc: std.mem.Allocator
                     var buf: [1]Ast.Node.Index = undefined;
                     if (type_handle.handle.tree.fullFnProto(&buf, node)) |proto| {
                         return try fnProtoToSignatureInfo(
-                            document_store,
+                            analyser,
                             alloc,
                             paren_commas,
                             false,
@@ -292,9 +290,7 @@ pub fn getSignatureInfo(document_store: *DocumentStore, alloc: std.mem.Allocator
                     }
 
                     const skip_self_param = !type_handle.type.is_type_val;
-                    const decl_handle = (try analysis.lookupSymbolContainer(
-                        alloc,
-                        document_store,
+                    const decl_handle = (try analyser.lookupSymbolContainer(
                         .{ .node = node, .handle = type_handle.handle },
                         name,
                         true,
@@ -311,9 +307,7 @@ pub fn getSignatureInfo(document_store: *DocumentStore, alloc: std.mem.Allocator
                         },
                     };
 
-                    if (try analysis.resolveVarDeclAlias(
-                        alloc,
-                        document_store,
+                    if (try analyser.resolveVarDeclAlias(
                         .{ .node = node, .handle = decl_handle.handle },
                     )) |resolved| {
                         switch (resolved.decl.*) {
@@ -327,7 +321,7 @@ pub fn getSignatureInfo(document_store: *DocumentStore, alloc: std.mem.Allocator
 
                     if (res_handle.tree.fullFnProto(&buf, node)) |proto| {
                         return try fnProtoToSignatureInfo(
-                            document_store,
+                            analyser,
                             alloc,
                             paren_commas,
                             skip_self_param,

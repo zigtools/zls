@@ -1,7 +1,7 @@
 const std = @import("std");
 const zls = @import("zls");
 
-const analysis = zls.analysis;
+const Analyser = zls.Analyser;
 const types = zls.types;
 const offsets = zls.offsets;
 
@@ -510,12 +510,12 @@ test "position context - empty" {
     );
 }
 
-fn testContext(line: []const u8, tag: std.meta.Tag(analysis.PositionContext), maybe_range: ?[]const u8) !void {
+fn testContext(line: []const u8, tag: std.meta.Tag(Analyser.PositionContext), maybe_range: ?[]const u8) !void {
     const cursor_idx = std.mem.indexOf(u8, line, "<cursor>").?;
     const final_line = try std.mem.concat(allocator, u8, &.{ line[0..cursor_idx], line[cursor_idx + "<cursor>".len ..] });
     defer allocator.free(final_line);
 
-    const ctx = try analysis.getPositionContext(allocator, final_line, cursor_idx, true);
+    const ctx = try Analyser.getPositionContext(allocator, final_line, cursor_idx, true);
 
     if (std.meta.activeTag(ctx) != tag) {
         std.debug.print("Expected tag `{s}`, got `{s}`\n", .{ @tagName(tag), @tagName(std.meta.activeTag(ctx)) });

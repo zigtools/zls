@@ -7,7 +7,7 @@ const Config = @import("Config.zig");
 const configuration = @import("configuration.zig");
 const DocumentStore = @import("DocumentStore.zig");
 const types = @import("lsp.zig");
-const analysis = @import("analysis.zig");
+const Analyser = @import("analysis.zig");
 const ast = @import("ast.zig");
 const references = @import("references.zig");
 const offsets = @import("offsets.zig");
@@ -37,6 +37,7 @@ const log = std.log.scoped(.zls_server);
 config: *Config,
 allocator: std.mem.Allocator,
 arena: std.heap.ArenaAllocator,
+analyser: Analyser,
 document_store: DocumentStore,
 builtin_completions: ?std.ArrayListUnmanaged(types.CompletionItem),
 client_capabilities: ClientCapabilities = .{},
@@ -283,10 +284,10 @@ fn generateDiagnostics(server: *Server, handle: DocumentStore.Handle) error{OutO
                         if (func.extern_export_inline_token != null) break :blk;
 
                         if (func.name_token) |name_token| {
-                            const is_type_function = analysis.isTypeFunction(tree, func);
+                            const is_type_function = Analyser.isTypeFunction(tree, func);
 
                             const func_name = tree.tokenSlice(name_token);
-                            if (!is_type_function and !analysis.isCamelCase(func_name)) {
+                            if (!is_type_function and !Analyser.isCamelCase(func_name)) {
                                 try diagnostics.append(allocator, .{
                                     .range = offsets.tokenToRange(tree, name_token, server.offset_encoding),
                                     .severity = .Hint,
@@ -294,7 +295,7 @@ fn generateDiagnostics(server: *Server, handle: DocumentStore.Handle) error{OutO
                                     .source = "zls",
                                     .message = "Functions should be camelCase",
                                 });
-                            } else if (is_type_function and !analysis.isPascalCase(func_name)) {
+                            } else if (is_type_function and !Analyser.isPascalCase(func_name)) {
                                 try diagnostics.append(allocator, .{
                                     .range = offsets.tokenToRange(tree, name_token, server.offset_encoding),
                                     .severity = .Hint,
@@ -512,7 +513,7 @@ pub fn autofix(server: *Server, allocator: std.mem.Allocator, handle: *const Doc
 
     var builder = code_actions.Builder{
         .arena = server.arena.allocator(),
-        .document_store = &server.document_store,
+        .analyser = &server.analyser,
         .handle = handle,
         .offset_encoding = server.offset_encoding,
     };
@@ -544,7 +545,7 @@ pub fn autofix(server: *Server, allocator: std.mem.Allocator, handle: *const Doc
 pub fn typeToCompletion(
     server: *Server,
     list: *std.ArrayListUnmanaged(types.CompletionItem),
-    field_access: analysis.FieldAccessReturn,
+    field_access: Analyser.FieldAccessReturn,
     orig_handle: *const DocumentStore.Handle,
     either_descriptor: ?[]const u8,
 ) error{OutOfMemory}!void {
@@ -620,8 +621,8 @@ pub fn typeToCompletion(
 pub fn nodeToCompletion(
     server: *Server,
     list: *std.ArrayListUnmanaged(types.CompletionItem),
-    node_handle: analysis.NodeWithHandle,
-    unwrapped: ?analysis.TypeWithHandle,
+    node_handle: Analyser.NodeWithHandle,
+    unwrapped: ?Analyser.TypeWithHandle,
     orig_handle: *const DocumentStore.Handle,
     is_type_val: bool,
     parent_is_type_val: ?bool,
@@ -645,7 +646,7 @@ pub fn nodeToCompletion(
 
     const Documentation = @TypeOf(@as(types.CompletionItem, undefined).documentation);
 
-    const doc: Documentation = if (try analysis.getDocComments(
+    const doc: Documentation = if (try Analyser.getDocComments(
         allocator,
         handle.tree,
         node,
@@ -672,9 +673,7 @@ pub fn nodeToCompletion(
             .parent_is_type_val = is_type_val,
             .either_descriptor = either_descriptor,
         };
-        try analysis.iterateSymbolsContainer(
-            allocator,
-            &server.document_store,
+        try server.analyser.iterateSymbolsContainer(
             node_handle,
             orig_handle,
             declToCompletion,
@@ -698,17 +697,17 @@ pub fn nodeToCompletion(
                 const use_snippets = server.config.enable_snippets and server.client_capabilities.supports_snippets;
                 const insert_text = if (use_snippets) blk: {
                     const skip_self_param = !(parent_is_type_val orelse true) and
-                        try analysis.hasSelfParam(allocator, &server.document_store, handle, func);
-                    break :blk try analysis.getFunctionSnippet(server.arena.allocator(), tree, func, skip_self_param);
+                        try server.analyser.hasSelfParam(handle, func);
+                    break :blk try Analyser.getFunctionSnippet(server.arena.allocator(), tree, func, skip_self_param);
                 } else tree.tokenSlice(func.name_token.?);
 
-                const is_type_function = analysis.isTypeFunction(handle.tree, func);
+                const is_type_function = Analyser.isTypeFunction(handle.tree, func);
 
                 try list.append(allocator, .{
                     .label = handle.tree.tokenSlice(name_token),
                     .kind = if (is_type_function) .Struct else .Function,
                     .documentation = doc,
-                    .detail = analysis.getFunctionSignature(handle.tree, func),
+                    .detail = Analyser.getFunctionSignature(handle.tree, func),
                     .insertText = insert_text,
                     .insertTextFormat = if (use_snippets) .Snippet else .PlainText,
                 });
@@ -722,7 +721,7 @@ pub fn nodeToCompletion(
             const var_decl = tree.fullVarDecl(node).?;
             const is_const = token_tags[var_decl.ast.mut_token] == .keyword_const;
 
-            if (try analysis.resolveVarDeclAlias(allocator, &server.document_store, node_handle)) |result| {
+            if (try server.analyser.resolveVarDeclAlias(node_handle)) |result| {
                 const context = DeclToCompletionContext{
                     .server = server,
                     .completions = list,
@@ -736,7 +735,7 @@ pub fn nodeToCompletion(
                 .label = handle.tree.tokenSlice(var_decl.ast.mut_token + 1),
                 .kind = if (is_const) .Constant else .Variable,
                 .documentation = doc,
-                .detail = analysis.getVariableSignature(tree, var_decl),
+                .detail = Analyser.getVariableSignature(tree, var_decl),
                 .insertText = tree.tokenSlice(var_decl.ast.mut_token + 1),
                 .insertTextFormat = .PlainText,
             });
@@ -750,7 +749,7 @@ pub fn nodeToCompletion(
                 .label = handle.tree.tokenSlice(field.ast.main_token),
                 .kind = if (field.ast.tuple_like) .Enum else .Field,
                 .documentation = doc,
-                .detail = analysis.getContainerFieldSignature(handle.tree, field),
+                .detail = Analyser.getContainerFieldSignature(handle.tree, field),
                 .insertText = tree.tokenSlice(field.ast.main_token),
                 .insertTextFormat = .PlainText,
             });
@@ -825,7 +824,7 @@ pub fn nodeToCompletion(
                 .insertTextFormat = .PlainText,
             });
         },
-        else => if (analysis.nodeToString(tree, node)) |string| {
+        else => if (Analyser.nodeToString(tree, node)) |string| {
             try list.append(allocator, .{
                 .label = string,
                 .kind = .Field,
@@ -842,12 +841,12 @@ pub fn identifierFromPosition(pos_index: usize, handle: DocumentStore.Handle) []
     if (pos_index + 1 >= handle.text.len) return "";
     var start_idx = pos_index;
 
-    while (start_idx > 0 and analysis.isSymbolChar(handle.text[start_idx - 1])) {
+    while (start_idx > 0 and Analyser.isSymbolChar(handle.text[start_idx - 1])) {
         start_idx -= 1;
     }
 
     var end_idx = pos_index;
-    while (end_idx < handle.text.len and analysis.isSymbolChar(handle.text[end_idx])) {
+    while (end_idx < handle.text.len and Analyser.isSymbolChar(handle.text[end_idx])) {
         end_idx += 1;
     }
 
@@ -857,7 +856,7 @@ pub fn identifierFromPosition(pos_index: usize, handle: DocumentStore.Handle) []
 
 pub fn gotoDefinitionSymbol(
     server: *Server,
-    decl_handle: analysis.DeclWithHandle,
+    decl_handle: Analyser.DeclWithHandle,
     resolve_alias: bool,
 ) error{OutOfMemory}!?types.Location {
     const tracy_zone = tracy.trace(@src());
@@ -868,14 +867,14 @@ pub fn gotoDefinitionSymbol(
     const name_token = switch (decl_handle.decl.*) {
         .ast_node => |node| block: {
             if (resolve_alias) {
-                if (try analysis.resolveVarDeclAlias(server.arena.allocator(), &server.document_store, .{ .node = node, .handle = handle })) |result| {
+                if (try server.analyser.resolveVarDeclAlias(.{ .node = node, .handle = handle })) |result| {
                     handle = result.handle;
 
                     break :block result.nameToken();
                 }
             }
 
-            break :block analysis.getDeclNameToken(handle.tree, node) orelse return null;
+            break :block Analyser.getDeclNameToken(handle.tree, node) orelse return null;
         },
         else => decl_handle.nameToken(),
     };
@@ -886,7 +885,7 @@ pub fn gotoDefinitionSymbol(
     };
 }
 
-pub fn hoverSymbol(server: *Server, decl_handle: analysis.DeclWithHandle, markup_kind: types.MarkupKind) error{OutOfMemory}!?[]const u8 {
+pub fn hoverSymbol(server: *Server, decl_handle: Analyser.DeclWithHandle, markup_kind: types.MarkupKind) error{OutOfMemory}!?[]const u8 {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -897,27 +896,27 @@ pub fn hoverSymbol(server: *Server, decl_handle: analysis.DeclWithHandle, markup
 
     const def_str = switch (decl_handle.decl.*) {
         .ast_node => |node| def: {
-            if (try analysis.resolveVarDeclAlias(server.arena.allocator(), &server.document_store, .{ .node = node, .handle = handle })) |result| {
+            if (try server.analyser.resolveVarDeclAlias(.{ .node = node, .handle = handle })) |result| {
                 return try server.hoverSymbol(result, markup_kind);
             }
-            doc_str = try analysis.getDocComments(server.arena.allocator(), tree, node, markup_kind);
+            doc_str = try Analyser.getDocComments(server.arena.allocator(), tree, node, markup_kind);
 
             var buf: [1]Ast.Node.Index = undefined;
 
             if (tree.fullVarDecl(node)) |var_decl| {
-                break :def analysis.getVariableSignature(tree, var_decl);
+                break :def Analyser.getVariableSignature(tree, var_decl);
             } else if (tree.fullFnProto(&buf, node)) |fn_proto| {
-                break :def analysis.getFunctionSignature(tree, fn_proto);
+                break :def Analyser.getFunctionSignature(tree, fn_proto);
             } else if (tree.fullContainerField(node)) |field| {
-                break :def analysis.getContainerFieldSignature(tree, field);
+                break :def Analyser.getContainerFieldSignature(tree, field);
             } else {
-                break :def analysis.nodeToString(tree, node) orelse return null;
+                break :def Analyser.nodeToString(tree, node) orelse return null;
             }
         },
         .param_payload => |pay| def: {
             const param = pay.param;
             if (param.first_doc_comment) |doc_comments| {
-                doc_str = try analysis.collectDocComments(server.arena.allocator(), handle.tree, doc_comments, markup_kind, false);
+                doc_str = try Analyser.collectDocComments(server.arena.allocator(), handle.tree, doc_comments, markup_kind, false);
             }
 
             const first_token = ast.paramFirstToken(tree, param);
@@ -936,9 +935,7 @@ pub fn hoverSymbol(server: *Server, decl_handle: analysis.DeclWithHandle, markup
         => tree.tokenSlice(decl_handle.nameToken()),
     };
 
-    var bound_type_params = analysis.BoundTypeParams{};
-    defer bound_type_params.deinit(server.document_store.allocator);
-    const resolved_type = try decl_handle.resolveType(server.arena.allocator(), &server.document_store, &bound_type_params);
+    const resolved_type = try decl_handle.resolveType(&server.analyser);
 
     const resolved_type_str = if (resolved_type) |rt|
         if (rt.type.is_type_val) switch (rt.type.data) {
@@ -1002,28 +999,28 @@ pub fn hoverSymbol(server: *Server, decl_handle: analysis.DeclWithHandle, markup
     return hover_text;
 }
 
-pub fn getLabelGlobal(pos_index: usize, handle: *const DocumentStore.Handle) error{OutOfMemory}!?analysis.DeclWithHandle {
+pub fn getLabelGlobal(pos_index: usize, handle: *const DocumentStore.Handle) error{OutOfMemory}!?Analyser.DeclWithHandle {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
     const name = identifierFromPosition(pos_index, handle.*);
     if (name.len == 0) return null;
 
-    return try analysis.lookupLabel(handle, name, pos_index);
+    return try Analyser.lookupLabel(handle, name, pos_index);
 }
 
 pub fn getSymbolGlobal(
     server: *Server,
     pos_index: usize,
     handle: *const DocumentStore.Handle,
-) error{OutOfMemory}!?analysis.DeclWithHandle {
+) error{OutOfMemory}!?Analyser.DeclWithHandle {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
     const name = identifierFromPosition(pos_index, handle.*);
     if (name.len == 0) return null;
 
-    return try analysis.lookupSymbolGlobal(server.arena.allocator(), &server.document_store, handle, name, pos_index);
+    return try server.analyser.lookupSymbolGlobal(handle, name, pos_index);
 }
 
 pub fn gotoDefinitionLabel(
@@ -1173,7 +1170,7 @@ pub fn getSymbolFieldAccesses(
     handle: *const DocumentStore.Handle,
     source_index: usize,
     loc: offsets.Loc,
-) error{OutOfMemory}!?[]const analysis.DeclWithHandle {
+) error{OutOfMemory}!?[]const Analyser.DeclWithHandle {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -1183,9 +1180,9 @@ pub fn getSymbolFieldAccesses(
     var held_range = try server.arena.allocator().dupeZ(u8, offsets.locToSlice(handle.text, loc));
     var tokenizer = std.zig.Tokenizer.init(held_range);
 
-    var decls_with_handles = std.ArrayListUnmanaged(analysis.DeclWithHandle){};
+    var decls_with_handles = std.ArrayListUnmanaged(Analyser.DeclWithHandle){};
 
-    if (try analysis.getFieldAccessType(server.arena.allocator(), &server.document_store, handle, source_index, &tokenizer)) |result| {
+    if (try server.analyser.getFieldAccessType(handle, source_index, &tokenizer)) |result| {
         const container_handle = result.unwrapped orelse result.original;
 
         const container_handle_nodes = try container_handle.getAllTypesWithHandles(server.arena.allocator());
@@ -1195,9 +1192,7 @@ pub fn getSymbolFieldAccesses(
                 .other => |n| n,
                 else => continue,
             };
-            try decls_with_handles.append(server.arena.allocator(), (try analysis.lookupSymbolContainer(
-                server.arena.allocator(),
-                &server.document_store,
+            try decls_with_handles.append(server.arena.allocator(), (try server.analyser.lookupSymbolContainer(
                 .{ .node = container_handle_node, .handle = ty.handle },
                 name,
                 true,
@@ -1263,7 +1258,7 @@ pub fn hoverDefinitionFieldAccess(
 
 pub fn gotoDefinitionString(
     server: *Server,
-    pos_context: analysis.PositionContext,
+    pos_context: Analyser.PositionContext,
     handle: *const DocumentStore.Handle,
 ) error{OutOfMemory}!?types.Location {
     const tracy_zone = tracy.trace(@src());
@@ -1320,7 +1315,7 @@ const DeclToCompletionContext = struct {
     either_descriptor: ?[]const u8 = null,
 };
 
-pub fn declToCompletion(context: DeclToCompletionContext, decl_handle: analysis.DeclWithHandle) error{OutOfMemory}!void {
+pub fn declToCompletion(context: DeclToCompletionContext, decl_handle: Analyser.DeclWithHandle) error{OutOfMemory}!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -1345,9 +1340,9 @@ pub fn declToCompletion(context: DeclToCompletionContext, decl_handle: analysis.
             const doc: Documentation = if (param.first_doc_comment) |doc_comments| .{ .MarkupContent = types.MarkupContent{
                 .kind = doc_kind,
                 .value = if (context.either_descriptor) |ed|
-                    try std.fmt.allocPrint(allocator, "`Conditionally available: {s}`\n\n{s}", .{ ed, try analysis.collectDocComments(allocator, tree, doc_comments, doc_kind, false) })
+                    try std.fmt.allocPrint(allocator, "`Conditionally available: {s}`\n\n{s}", .{ ed, try Analyser.collectDocComments(allocator, tree, doc_comments, doc_kind, false) })
                 else
-                    try analysis.collectDocComments(allocator, tree, doc_comments, doc_kind, false),
+                    try Analyser.collectDocComments(allocator, tree, doc_comments, doc_kind, false),
             } } else null;
 
             const first_token = ast.paramFirstToken(tree, param);
@@ -1406,7 +1401,7 @@ pub fn completeLabel(
         .completions = &completions,
         .orig_handle = handle,
     };
-    try analysis.iterateLabels(handle, pos_index, declToCompletion, context);
+    try Analyser.iterateLabels(handle, pos_index, declToCompletion, context);
 
     return completions.toOwnedSlice(server.arena.allocator());
 }
@@ -1490,7 +1485,7 @@ pub fn completeGlobal(server: *Server, pos_index: usize, handle: *const Document
         .completions = &completions,
         .orig_handle = handle,
     };
-    try analysis.iterateSymbolsGlobal(server.arena.allocator(), &server.document_store, handle, pos_index, declToCompletion, context);
+    try server.analyser.iterateSymbolsGlobal(handle, pos_index, declToCompletion, context);
     try populateSnippedCompletions(server.arena.allocator(), &completions, &snipped_data.generic, server.config.*, null);
 
     if (server.client_capabilities.label_details_support) {
@@ -1513,7 +1508,7 @@ pub fn completeFieldAccess(server: *Server, handle: *const DocumentStore.Handle,
     var held_loc = try allocator.dupeZ(u8, offsets.locToSlice(handle.text, loc));
     var tokenizer = std.zig.Tokenizer.init(held_loc);
 
-    const result = (try analysis.getFieldAccessType(allocator, &server.document_store, handle, source_index, &tokenizer)) orelse return null;
+    const result = (try server.analyser.getFieldAccessType(handle, source_index, &tokenizer)) orelse return null;
     try server.typeToCompletion(&completions, result, handle, null);
     if (server.client_capabilities.label_details_support) {
         for (completions.items) |*item| {
@@ -1739,9 +1734,9 @@ pub fn completeFileSystemStringLiteral(
     arena: std.mem.Allocator,
     store: DocumentStore,
     handle: DocumentStore.Handle,
-    pos_context: analysis.PositionContext,
+    pos_context: Analyser.PositionContext,
 ) ![]types.CompletionItem {
-    var completions: analysis.CompletionSet = .{};
+    var completions: Analyser.CompletionSet = .{};
 
     const loc = pos_context.loc().?;
     var completing = handle.tree.source[loc.start + 1 .. loc.end - 1];
@@ -2217,6 +2212,9 @@ fn changeDocumentHandler(server: *Server, notification: types.DidChangeTextDocum
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
+    // whenever a document changes, any cached info is invalidated
+    server.analyser.invalidate();
+
     const handle = server.document_store.getHandle(notification.textDocument.uri) orelse return;
 
     const new_text = try diff.applyContentChanges(server.allocator, handle.text, notification.contentChanges, server.offset_encoding);
@@ -2288,7 +2286,7 @@ fn semanticTokensFullHandler(server: *Server, request: types.SemanticTokensParam
 
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
 
-    return try semantic_tokens.writeSemanticTokens(server.arena.allocator(), &server.document_store, handle, null, server.offset_encoding);
+    return try semantic_tokens.writeSemanticTokens(server.arena.allocator(), &server.analyser, handle, null, server.offset_encoding);
 }
 
 fn semanticTokensRangeHandler(server: *Server, request: types.SemanticTokensRangeParams) Error!?types.SemanticTokens {
@@ -2300,7 +2298,7 @@ fn semanticTokensRangeHandler(server: *Server, request: types.SemanticTokensRang
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
     const loc = offsets.rangeToLoc(handle.tree.source, request.range, server.offset_encoding);
 
-    return try semantic_tokens.writeSemanticTokens(server.arena.allocator(), &server.document_store, handle, loc, server.offset_encoding);
+    return try semantic_tokens.writeSemanticTokens(server.arena.allocator(), &server.analyser, handle, loc, server.offset_encoding);
 }
 
 pub fn completionHandler(server: *Server, request: types.CompletionParams) Error!?types.CompletionList {
@@ -2317,7 +2315,7 @@ pub fn completionHandler(server: *Server, request: types.CompletionParams) Error
     }
 
     const source_index = offsets.positionToIndex(handle.text, request.position, server.offset_encoding);
-    const pos_context = try analysis.getPositionContext(server.arena.allocator(), handle.text, source_index, false);
+    const pos_context = try Analyser.getPositionContext(server.arena.allocator(), handle.text, source_index, false);
 
     const maybe_completions = switch (pos_context) {
         .builtin => try server.completeBuiltin(),
@@ -2345,7 +2343,7 @@ pub fn completionHandler(server: *Server, request: types.CompletionParams) Error
     // The cursor is in the middle of a word or before a @, so we can replace
     // the remaining identifier with the completion instead of just inserting.
     // TODO Identify function call/struct init and replace the whole thing.
-    const lookahead_context = try analysis.getPositionContext(server.arena.allocator(), handle.text, source_index, true);
+    const lookahead_context = try Analyser.getPositionContext(server.arena.allocator(), handle.text, source_index, true);
     if (server.client_capabilities.supports_apply_edits and
         pos_context != .import_string_literal and
         pos_context != .cinclude_string_literal and
@@ -2403,7 +2401,7 @@ pub fn signatureHelpHandler(server: *Server, request: types.SignatureHelpParams)
     const source_index = offsets.positionToIndex(handle.text, request.position, server.offset_encoding);
 
     const signature_info = (try getSignatureInfo(
-        &server.document_store,
+        &server.analyser,
         server.arena.allocator(),
         handle,
         source_index,
@@ -2429,7 +2427,7 @@ pub fn gotoHandler(server: *Server, request: types.TextDocumentPositionParams, r
     if (request.position.character == 0) return null;
 
     const source_index = offsets.positionToIndex(handle.text, request.position, server.offset_encoding);
-    const pos_context = try analysis.getPositionContext(server.arena.allocator(), handle.text, source_index, true);
+    const pos_context = try Analyser.getPositionContext(server.arena.allocator(), handle.text, source_index, true);
 
     return switch (pos_context) {
         .builtin => |loc| .{ .Location = (try server.gotoDefinitionBuiltin(handle, loc)) orelse return null },
@@ -2473,7 +2471,7 @@ pub fn hoverHandler(server: *Server, request: types.HoverParams) Error!?types.Ho
     if (request.position.character == 0) return null;
 
     const source_index = offsets.positionToIndex(handle.text, request.position, server.offset_encoding);
-    const pos_context = try analysis.getPositionContext(server.arena.allocator(), handle.text, source_index, true);
+    const pos_context = try Analyser.getPositionContext(server.arena.allocator(), handle.text, source_index, true);
 
     const response = switch (pos_context) {
         .builtin => try server.hoverDefinitionBuiltin(source_index, handle),
@@ -2636,7 +2634,7 @@ pub fn generalReferencesHandler(server: *Server, request: GeneralReferencesReque
     if (request.position().character <= 0) return null;
 
     const source_index = offsets.positionToIndex(handle.text, request.position(), server.offset_encoding);
-    const pos_context = try analysis.getPositionContext(server.arena.allocator(), handle.text, source_index, true);
+    const pos_context = try Analyser.getPositionContext(server.arena.allocator(), handle.text, source_index, true);
 
     // TODO: Make this work with branching types
     const decl = switch (pos_context) {
@@ -2663,7 +2661,7 @@ pub fn generalReferencesHandler(server: *Server, request: GeneralReferencesReque
     else
         try references.symbolReferences(
             allocator,
-            &server.document_store,
+            &server.analyser,
             decl,
             server.offset_encoding,
             include_decl,
@@ -2736,7 +2734,7 @@ fn inlayHintHandler(server: *Server, request: types.InlayHintParams) Error!?[]ty
     const hints = try inlay_hints.writeRangeInlayHint(
         server.arena.allocator(),
         server.config.*,
-        &server.document_store,
+        &server.analyser,
         handle,
         loc,
         hover_kind,
@@ -2786,7 +2784,7 @@ fn codeActionHandler(server: *Server, request: types.CodeActionParams) Error!?[]
 
     var builder = code_actions.Builder{
         .arena = server.arena.allocator(),
-        .document_store = &server.document_store,
+        .analyser = &server.analyser,
         .handle = handle,
         .offset_encoding = server.offset_encoding,
     };
@@ -3203,16 +3201,12 @@ pub fn create(
     recording_enabled: bool,
     replay_enabled: bool,
 ) !*Server {
-    // TODO replace global with something like an Analyser struct
-    // which contains using_trail & resolve_trail and place it inside Server
-    // see: https://github.com/zigtools/zls/issues/536
-    analysis.init(allocator);
-
     const server = try allocator.create(Server);
     server.* = Server{
         .config = config,
         .runtime_zig_version = null,
         .allocator = allocator,
+        .analyser = undefined,
         .arena = std.heap.ArenaAllocator.init(allocator),
         .document_store = .{
             .allocator = allocator,
@@ -3224,6 +3218,7 @@ pub fn create(
         .replay_enabled = replay_enabled,
         .status = .uninitialized,
     };
+    server.analyser = Analyser.init(allocator, server.arena.allocator(), &server.document_store);
 
     try configuration.configChanged(config, &server.runtime_zig_version, allocator, config_path);
 
@@ -3232,7 +3227,7 @@ pub fn create(
 
 pub fn destroy(server: *Server) void {
     server.document_store.deinit();
-    analysis.deinit();
+    server.analyser.deinit();
 
     if (server.builtin_completions) |*completions| completions.deinit(server.allocator);
 

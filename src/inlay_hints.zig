@@ -1,7 +1,7 @@
 const std = @import("std");
 const zig_builtin = @import("builtin");
 const DocumentStore = @import("DocumentStore.zig");
-const analysis = @import("analysis.zig");
+const Analyser = @import("analysis.zig");
 const types = @import("lsp.zig");
 const offsets = @import("offsets.zig");
 const tracy = @import("tracy.zig");
@@ -26,7 +26,7 @@ pub const InlayHint = struct {
 
 const Builder = struct {
     arena: std.mem.Allocator,
-    store: *DocumentStore,
+    analyser: *Analyser,
     config: *const Config,
     handle: *const DocumentStore.Handle,
     hints: std.ArrayListUnmanaged(InlayHint),
@@ -64,7 +64,7 @@ const Builder = struct {
 /// `call` is the function call
 /// `decl_handle` should be a function protototype
 /// writes parameter hints into `builder.hints`
-fn writeCallHint(builder: *Builder, call: Ast.full.Call, decl_handle: analysis.DeclWithHandle) !void {
+fn writeCallHint(builder: *Builder, call: Ast.full.Call, decl_handle: Analyser.DeclWithHandle) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -85,7 +85,7 @@ fn writeCallHint(builder: *Builder, call: Ast.full.Call, decl_handle: analysis.D
     var i: usize = 0;
     var it = fn_proto.iterate(&decl_tree);
 
-    if (try analysis.hasSelfParam(builder.arena, builder.store, decl_handle.handle, fn_proto)) {
+    if (try builder.analyser.hasSelfParam(decl_handle.handle, fn_proto)) {
         _ = ast.nextFnParam(&it);
     }
 
@@ -187,7 +187,7 @@ fn writeCallNodeHint(builder: *Builder, call: Ast.full.Call) !void {
             const source_index = offsets.tokenToIndex(tree, main_tokens[call.ast.fn_expr]);
             const name = offsets.tokenToSlice(tree, main_tokens[call.ast.fn_expr]);
 
-            if (try analysis.lookupSymbolGlobal(builder.arena, builder.store, handle, name, source_index)) |decl_handle| {
+            if (try builder.analyser.lookupSymbolGlobal(handle, name, source_index)) |decl_handle| {
                 try writeCallHint(builder, call, decl_handle);
             }
         },
@@ -204,13 +204,11 @@ fn writeCallNodeHint(builder: *Builder, call: Ast.full.Call) !void {
 
             // note: we have the ast node, traversing it would probably yield better results
             // than trying to re-tokenize and re-parse it
-            if (try analysis.getFieldAccessType(builder.arena, builder.store, handle, rhs_loc.end, &tokenizer)) |result| {
+            if (try builder.analyser.getFieldAccessType(handle, rhs_loc.end, &tokenizer)) |result| {
                 const container_handle = result.unwrapped orelse result.original;
                 switch (container_handle.type.data) {
                     .other => |container_handle_node| {
-                        if (try analysis.lookupSymbolContainer(
-                            builder.arena,
-                            builder.store,
+                        if (try builder.analyser.lookupSymbolContainer(
                             .{ .node = container_handle_node, .handle = container_handle.handle },
                             tree.tokenSlice(rhsToken),
                             true,
@@ -285,7 +283,7 @@ fn writeNodeInlayHint(
 pub fn writeRangeInlayHint(
     arena: std.mem.Allocator,
     config: Config,
-    store: *DocumentStore,
+    analyser: *Analyser,
     handle: *const DocumentStore.Handle,
     loc: offsets.Loc,
     hover_kind: types.MarkupKind,
@@ -295,7 +293,7 @@ pub fn writeRangeInlayHint(
 
     var builder: Builder = .{
         .arena = arena,
-        .store = store,
+        .analyser = analyser,
         .config = &config,
         .handle = handle,
         .hints = .{},

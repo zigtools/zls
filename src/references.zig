@@ -1,7 +1,7 @@
 const std = @import("std");
 const Ast = std.zig.Ast;
 const DocumentStore = @import("DocumentStore.zig");
-const analysis = @import("analysis.zig");
+const Analyser = @import("analysis.zig");
 const types = @import("lsp.zig");
 const offsets = @import("offsets.zig");
 const log = std.log.scoped(.zls_references);
@@ -9,7 +9,7 @@ const ast = @import("ast.zig");
 
 pub fn labelReferences(
     allocator: std.mem.Allocator,
-    decl: analysis.DeclWithHandle,
+    decl: Analyser.DeclWithHandle,
     encoding: offsets.Encoding,
     include_decl: bool,
 ) error{OutOfMemory}!std.ArrayListUnmanaged(types.Location) {
@@ -57,8 +57,8 @@ const Builder = struct {
     allocator: std.mem.Allocator,
     locations: std.ArrayListUnmanaged(types.Location) = .{},
     /// this is the declaration we are searching for
-    decl_handle: analysis.DeclWithHandle,
-    store: *DocumentStore,
+    decl_handle: Analyser.DeclWithHandle,
+    analyser: *Analyser,
     encoding: offsets.Encoding,
 
     const Context = struct {
@@ -98,12 +98,10 @@ const Builder = struct {
             .identifier,
             .test_decl,
             => {
-                const identifier_token = analysis.getDeclNameToken(tree, node).?;
+                const identifier_token = Analyser.getDeclNameToken(tree, node).?;
                 if (token_tags[identifier_token] != .identifier) return;
 
-                const child = (try analysis.lookupSymbolGlobal(
-                    builder.allocator,
-                    builder.store,
+                const child = (try builder.analyser.lookupSymbolGlobal(
                     handle,
                     offsets.tokenToSlice(tree, identifier_token),
                     starts[identifier_token],
@@ -114,18 +112,8 @@ const Builder = struct {
                 }
             },
             .field_access => {
-                var bound_type_params = analysis.BoundTypeParams{};
-                defer bound_type_params.deinit(builder.store.allocator);
-                const left_type = try analysis.resolveFieldAccessLhsType(
-                    builder.allocator,
-                    builder.store,
-                    (try analysis.resolveTypeOfNodeInternal(
-                        builder.allocator,
-                        builder.store,
-                        .{ .node = datas[node].lhs, .handle = handle },
-                        &bound_type_params,
-                    )) orelse return,
-                    &bound_type_params,
+                const left_type = try builder.analyser.resolveFieldAccessLhsType(
+                    (try builder.analyser.resolveTypeOfNode(.{ .node = datas[node].lhs, .handle = handle })) orelse return,
                 );
 
                 const left_type_node = switch (left_type.type.data) {
@@ -133,9 +121,7 @@ const Builder = struct {
                     else => return,
                 };
 
-                const child = (try analysis.lookupSymbolContainer(
-                    self.builder.allocator,
-                    builder.store,
+                const child = (try builder.analyser.lookupSymbolContainer(
                     .{ .node = left_type_node, .handle = left_type.handle },
                     offsets.tokenToSlice(tree, datas[node].rhs),
                     !left_type.type.is_type_val,
@@ -152,8 +138,8 @@ const Builder = struct {
 
 pub fn symbolReferences(
     allocator: std.mem.Allocator,
-    store: *DocumentStore,
-    decl_handle: analysis.DeclWithHandle,
+    analyser: *Analyser,
+    decl_handle: Analyser.DeclWithHandle,
     encoding: offsets.Encoding,
     /// add `decl_handle` as a references
     include_decl: bool,
@@ -166,7 +152,7 @@ pub fn symbolReferences(
 
     var builder = Builder{
         .allocator = allocator,
-        .store = store,
+        .analyser = analyser,
         .decl_handle = decl_handle,
         .encoding = encoding,
     };
@@ -194,7 +180,7 @@ pub fn symbolReferences(
                 dependencies.deinit(allocator);
             }
 
-            for (store.handles.values()) |handle| {
+            for (analyser.store.handles.values()) |handle| {
                 if (skip_std_references and std.mem.indexOf(u8, handle.uri, "std") != null) {
                     if (!include_decl or !std.mem.eql(u8, handle.uri, curr_handle.uri))
                         continue;
@@ -207,7 +193,7 @@ pub fn symbolReferences(
                     }
                     handle_dependencies.deinit(allocator);
                 }
-                try store.collectDependencies(allocator, handle.*, &handle_dependencies);
+                try analyser.store.collectDependencies(allocator, handle.*, &handle_dependencies);
 
                 try dependencies.ensureUnusedCapacity(allocator, handle_dependencies.items.len);
                 for (handle_dependencies.items) |uri| {
@@ -217,7 +203,7 @@ pub fn symbolReferences(
 
             for (dependencies.keys()) |uri| {
                 if (std.mem.eql(u8, uri, curr_handle.uri)) continue;
-                const handle = store.getHandle(uri) orelse continue;
+                const handle = analyser.store.getHandle(uri) orelse continue;
 
                 try builder.collectReferences(handle, 0);
             }
