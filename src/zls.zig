@@ -17,6 +17,7 @@ pub const diff = @import("diff.zig");
 pub const analyser = @import("analyser/analyser.zig");
 pub const configuration = @import("configuration.zig");
 pub const references = @import("references.zig");
+pub const semantic_tokens = @import("semantic_tokens.zig");
 
 pub const ZigVersionWrapper = @import("ZigVersionWrapper.zig");
 

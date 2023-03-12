@@ -614,6 +614,16 @@ fn allDigits(str: []const u8) bool {
     return true;
 }
 
+pub fn isValueIdent(text: []const u8) bool {
+    const PrimitiveTypes = std.ComptimeStringMap(void, .{
+        .{"true"},
+        .{"false"},
+        .{"null"},
+        .{"undefined"},
+    });
+    return PrimitiveTypes.has(text);
+}
+
 pub fn isTypeIdent(text: []const u8) bool {
     const PrimitiveTypes = std.ComptimeStringMap(void, .{
         .{"isize"},        .{"usize"},
