@@ -2418,9 +2418,7 @@ pub fn makeDocumentScope(allocator: std.mem.Allocator, tree: Ast) !DocumentScope
     };
     errdefer document_scope.deinit(allocator);
 
-    // pass root node index ('0')
-    had_root = false;
-    try makeScopeInternal(allocator, .{
+    try makeInnerScope(allocator, .{
         .scopes = &document_scope.scopes,
         .errors = &document_scope.error_completions,
         .enums = &document_scope.enum_completions,
@@ -2490,9 +2488,9 @@ fn makeInnerScope(allocator: std.mem.Allocator, context: ScopeContext, node_idx:
     }
 }
 
-// Whether we have already visited the root node.
-var had_root = true;
 fn makeScopeInternal(allocator: std.mem.Allocator, context: ScopeContext, node_idx: Ast.Node.Index) error{OutOfMemory}!void {
+    if (node_idx == 0) return;
+
     const scopes = context.scopes;
     const tree = context.tree;
     const tags = tree.nodes.items(.tag);
@@ -2501,14 +2499,8 @@ fn makeScopeInternal(allocator: std.mem.Allocator, context: ScopeContext, node_i
     const main_tokens = tree.nodes.items(.main_token);
     const node_tag = tags[node_idx];
 
-    if (node_idx == 0) {
-        if (had_root)
-            return
-        else
-            had_root = true;
-    }
-
     switch (node_tag) {
+        .root => unreachable,
         .container_decl,
         .container_decl_trailing,
         .container_decl_arg,
@@ -2521,7 +2513,6 @@ fn makeScopeInternal(allocator: std.mem.Allocator, context: ScopeContext, node_i
         .tagged_union_two_trailing,
         .tagged_union_enum_tag,
         .tagged_union_enum_tag_trailing,
-        .root,
         => {
             try makeInnerScope(allocator, context, node_idx);
         },
