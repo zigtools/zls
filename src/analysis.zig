@@ -55,21 +55,21 @@ pub fn getDocComments(allocator: std.mem.Allocator, tree: Ast, node: Ast.Node.In
 pub fn getDocCommentTokenIndex(tokens: []const std.zig.Token.Tag, base_token: Ast.TokenIndex) ?Ast.TokenIndex {
     var idx = base_token;
     if (idx == 0) return null;
-    idx -= 1;
-    if (tokens[idx] == .keyword_threadlocal and idx > 0) idx -= 1;
-    if (tokens[idx] == .string_literal and idx > 1 and tokens[idx - 1] == .keyword_extern) idx -= 1;
-    if (tokens[idx] == .keyword_extern and idx > 0) idx -= 1;
-    if (tokens[idx] == .keyword_export and idx > 0) idx -= 1;
-    if (tokens[idx] == .keyword_inline and idx > 0) idx -= 1;
-    if (tokens[idx] == .identifier and idx > 0) idx -= 1;
-    if (tokens[idx] == .keyword_pub and idx > 0) idx -= 1;
+    idx -|= 1;
+    if (tokens[idx] == .keyword_threadlocal and idx > 0) idx -|= 1;
+    if (tokens[idx] == .string_literal and idx > 1 and tokens[idx -| 1] == .keyword_extern) idx -|= 1;
+    if (tokens[idx] == .keyword_extern and idx > 0) idx -|= 1;
+    if (tokens[idx] == .keyword_export and idx > 0) idx -|= 1;
+    if (tokens[idx] == .keyword_inline and idx > 0) idx -|= 1;
+    if (tokens[idx] == .identifier and idx > 0) idx -|= 1;
+    if (tokens[idx] == .keyword_pub and idx > 0) idx -|= 1;
 
     // Find first doc comment token
     if (!(tokens[idx] == .doc_comment))
         return null;
     return while (tokens[idx] == .doc_comment) {
         if (idx == 0) break 0;
-        idx -= 1;
+        idx -|= 1;
     } else idx + 1;
 }
 
@@ -285,7 +285,13 @@ pub fn getDeclNameToken(tree: Ast, node: Ast.Node.Index) ?Ast.TokenIndex {
         .global_var_decl,
         .simple_var_decl,
         .aligned_var_decl,
-        => tree.fullVarDecl(node).?.ast.mut_token + 1,
+        => {
+            const tok = tree.fullVarDecl(node).?.ast.mut_token + 1;
+            return if (tok >= tree.tokens.len)
+                null
+            else
+                tok;
+        },
         // function declaration names
         .fn_proto,
         .fn_proto_multi,
@@ -307,7 +313,13 @@ pub fn getDeclNameToken(tree: Ast, node: Ast.Node.Index) ?Ast.TokenIndex {
         },
 
         .identifier => main_token,
-        .error_value => main_token + 2, // 'error'.<main_token +2>
+        .error_value => {
+            const tok = main_token + 2;
+            return if (tok >= tree.tokens.len)
+                null
+            else
+                tok;
+        }, // 'error'.<main_token +2>
 
         .test_decl => datas[node].lhs,
 
