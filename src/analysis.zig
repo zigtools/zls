@@ -2026,7 +2026,7 @@ fn iterateSymbolsContainerInternal(
         try callback(context, decl);
     }
 
-    for (scope_uses[container_scope_index].items) |use| {
+    for (scope_uses[container_scope_index]) |use| {
         const use_token = tree.nodes.items(.main_token)[use];
         const is_pub = use_token > 0 and token_tags[use_token - 1] == .keyword_pub;
         if (handle != orig_handle and !is_pub) continue;
@@ -2132,7 +2132,7 @@ fn iterateSymbolsGlobalInternal(
             try callback(context, DeclWithHandle{ .decl = entry.value_ptr, .handle = handle });
         }
 
-        for (scope_uses[scope_index].items) |use| {
+        for (scope_uses[scope_index]) |use| {
             const gop = try analyser.using_trail.getOrPut(analyser.gpa, use);
             if (gop.found_existing) continue;
 
@@ -2282,7 +2282,7 @@ pub fn lookupSymbolGlobal(analyser: *Analyser, handle: *const DocumentStore.Hand
                     .handle = handle,
                 };
             }
-            if (try analyser.resolveUse(scope_uses[curr].items, symbol, handle)) |result| return result;
+            if (try analyser.resolveUse(scope_uses[curr], symbol, handle)) |result| return result;
         }
         if (curr == 0) break;
     }
@@ -2323,7 +2323,7 @@ pub fn lookupSymbolContainer(
             return DeclWithHandle{ .decl = candidate.value_ptr, .handle = handle };
         }
 
-        if (try analyser.resolveUse(scope_uses[container_scope_index].items, symbol, handle)) |result| return result;
+        if (try analyser.resolveUse(scope_uses[container_scope_index], symbol, handle)) |result| return result;
     }
 
     return null;
@@ -2358,11 +2358,10 @@ pub const DocumentScope = struct {
     enum_completions: CompletionSet,
 
     pub fn deinit(self: *DocumentScope, allocator: std.mem.Allocator) void {
-        var i: usize = 0;
-        while (i < self.scopes.len) : (i += 1) {
-            self.scopes.items(.decls)[i].deinit(allocator);
-            self.scopes.items(.tests)[i].deinit(allocator);
-            self.scopes.items(.uses)[i].deinit(allocator);
+        for (self.scopes.items(.decls), self.scopes.items(.tests), self.scopes.items(.uses)) |*decls, tests, uses| {
+            decls.deinit(allocator);
+            allocator.free(tests);
+            allocator.free(uses);
         }
         self.scopes.deinit(allocator);
 
@@ -2402,8 +2401,8 @@ pub const Scope = struct {
 
     loc: offsets.Loc,
     decls: std.StringHashMapUnmanaged(Declaration) = .{},
-    tests: std.ArrayListUnmanaged(Ast.Node.Index) = .{},
-    uses: std.ArrayListUnmanaged(Ast.Node.Index) = .{},
+    tests: []const Ast.Node.Index = &.{},
+    uses: []const Ast.Node.Index = &.{},
     data: Data,
 };
 
@@ -2451,9 +2450,15 @@ fn makeInnerScope(allocator: std.mem.Allocator, context: ScopeContext, node_idx:
 
     var buf: [2]Ast.Node.Index = undefined;
     const container_decl = tree.fullContainerDecl(&buf, node_idx).?;
+
+    var tests = std.ArrayListUnmanaged(Ast.Node.Index){};
+    errdefer tests.deinit(allocator);
+    var uses = std.ArrayListUnmanaged(Ast.Node.Index){};
+    errdefer uses.deinit(allocator);
+
     for (container_decl.ast.members) |decl| {
         if (tags[decl] == .@"usingnamespace") {
-            try scopes.items(.uses)[scope_index].append(allocator, decl);
+            try uses.append(allocator, decl);
             continue;
         }
 
@@ -2461,7 +2466,7 @@ fn makeInnerScope(allocator: std.mem.Allocator, context: ScopeContext, node_idx:
         const name = getDeclName(tree, decl) orelse continue;
 
         if (tags[decl] == .test_decl) {
-            try scopes.items(.tests)[scope_index].append(allocator, decl);
+            try tests.append(allocator, decl);
             continue;
         }
         if (try scopes.items(.decls)[scope_index].fetchPut(allocator, name, .{ .ast_node = decl })) |existing| {
@@ -2486,6 +2491,9 @@ fn makeInnerScope(allocator: std.mem.Allocator, context: ScopeContext, node_idx:
             }
         }
     }
+
+    scopes.items(.tests)[scope_index] = try tests.toOwnedSlice(allocator);
+    scopes.items(.uses)[scope_index] = try uses.toOwnedSlice(allocator);
 }
 
 fn makeScopeInternal(allocator: std.mem.Allocator, context: ScopeContext, node_idx: Ast.Node.Index) error{OutOfMemory}!void {
