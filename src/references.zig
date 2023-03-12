@@ -91,12 +91,15 @@ const Builder = struct {
 
         const node_tags = tree.nodes.items(.tag);
         const datas = tree.nodes.items(.data);
-        const main_tokens = tree.nodes.items(.main_token);
+        const token_tags = tree.tokens.items(.tag);
         const starts = tree.tokens.items(.start);
 
         switch (node_tags[node]) {
-            .identifier => {
-                const identifier_token = main_tokens[node];
+            .identifier,
+            .test_decl,
+            => {
+                const identifier_token = analysis.getDeclNameToken(tree, node).?;
+                if (token_tags[identifier_token] != .identifier) return;
 
                 const child = (try analysis.lookupSymbolGlobal(
                     builder.allocator,

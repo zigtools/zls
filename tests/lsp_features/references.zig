@@ -105,6 +105,13 @@ test "references - while continue expression" {
     );
 }
 
+test "references - test with identifier" {
+    try testReferences(
+        \\pub fn <0>() bool {}
+        \\test <0> {}
+    );
+}
+
 test "references - label" {
     if (true) return error.SkipZigTest; // TODO
     try testReferences(
