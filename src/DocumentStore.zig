@@ -909,7 +909,6 @@ pub fn collectDependencies(
     }
 }
 
-/// TODO resolve relative paths
 pub fn collectIncludeDirs(
     store: *const DocumentStore,
     allocator: std.mem.Allocator,
@@ -932,7 +931,17 @@ pub fn collectIncludeDirs(
     include_dirs.appendSliceAssumeCapacity(native_include_dirs);
 
     for (build_file_includes_paths) |include_path| {
-        include_dirs.appendAssumeCapacity(try allocator.dupe(u8, include_path));
+        const absolute_path = if (std.fs.path.isAbsolute(include_path))
+            try allocator.dupe(u8, include_path)
+        else blk: {
+            const build_file_uri = handle.associated_build_file.?;
+            const build_file_dir = std.fs.path.dirname(build_file_uri).?;
+            const build_file_path = try URI.parse(allocator, build_file_dir);
+            defer allocator.free(build_file_path);
+
+            break :blk try std.fs.path.join(allocator, &.{ build_file_path, include_path });
+        };
+        include_dirs.appendAssumeCapacity(absolute_path);
     }
 }
 
