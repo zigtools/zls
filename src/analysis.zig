@@ -17,7 +17,7 @@ arena: std.mem.Allocator,
 store: *DocumentStore,
 bound_type_params: std.AutoHashMapUnmanaged(Ast.full.FnProto.Param, TypeWithHandle) = .{},
 using_trail: std.AutoHashMapUnmanaged(Ast.Node.Index, void) = .{},
-resolved_nodes: std.HashMapUnmanaged(NodeWithHandle, ?TypeWithHandle, NodeWithHandle.Context, std.hash_map.default_max_load_percentage) = .{},
+resolved_nodes: std.HashMapUnmanaged(NodeWithUri, ?TypeWithHandle, NodeWithUri.Context, std.hash_map.default_max_load_percentage) = .{},
 
 pub fn init(gpa: std.mem.Allocator, arena: std.mem.Allocator, store: *DocumentStore) Analyser {
     return .{
@@ -662,14 +662,18 @@ pub fn isTypeIdent(text: []const u8) bool {
 
 /// Resolves the type of a node
 fn resolveTypeOfNodeInternal(analyser: *Analyser, node_handle: NodeWithHandle) error{OutOfMemory}!?TypeWithHandle {
-    const gop = try analyser.resolved_nodes.getOrPut(analyser.gpa, node_handle);
+    const node_with_uri = NodeWithUri{
+        .node = node_handle.node,
+        .uri = node_handle.handle.uri,
+    };
+    const gop = try analyser.resolved_nodes.getOrPut(analyser.gpa, node_with_uri);
     if (gop.found_existing) return gop.value_ptr.*;
 
     // we insert null before resolving the type so that a recursive definition doesn't result in an infinite loop
     gop.value_ptr.* = null;
 
     const type_handle = try analyser.resolveTypeOfNodeUncached(node_handle);
-    analyser.resolved_nodes.getPtr(node_handle).?.* = type_handle;
+    analyser.resolved_nodes.getPtr(node_with_uri).?.* = type_handle;
 
     return type_handle;
 
@@ -1336,25 +1340,30 @@ pub fn collectCImportNodes(allocator: std.mem.Allocator, tree: Ast) error{OutOfM
     return import_nodes.toOwnedSlice(allocator);
 }
 
-pub const NodeWithHandle = struct {
+pub const NodeWithUri = struct {
     node: Ast.Node.Index,
-    handle: *const DocumentStore.Handle,
+    uri: []const u8,
 
     const Context = struct {
-        pub fn hash(self: @This(), item: NodeWithHandle) u64 {
+        pub fn hash(self: @This(), item: NodeWithUri) u64 {
             _ = self;
             var hasher = std.hash.Wyhash.init(0);
             std.hash.autoHash(&hasher, item.node);
-            hasher.update(item.handle.uri);
+            hasher.update(item.uri);
             return hasher.final();
         }
 
-        pub fn eql(self: @This(), a: NodeWithHandle, b: NodeWithHandle) bool {
+        pub fn eql(self: @This(), a: NodeWithUri, b: NodeWithUri) bool {
             _ = self;
             if (a.node != b.node) return false;
-            return std.mem.eql(u8, a.handle.uri, b.handle.uri);
+            return std.mem.eql(u8, a.uri, b.uri);
         }
     };
+};
+
+pub const NodeWithHandle = struct {
+    node: Ast.Node.Index,
+    handle: *const DocumentStore.Handle,
 };
 
 pub const FieldAccessReturn = struct {
