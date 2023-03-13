@@ -2096,6 +2096,7 @@ pub const Inst = struct {
         comptime_float_type,
         noreturn_type,
         anyframe_type,
+        empty_struct_literal,
         null_type,
         undefined_type,
         enum_literal_type,

@@ -326,6 +326,7 @@ pub const Key = union(enum) {
                 .anyerror => .ErrorSet,
                 .noreturn => .NoReturn,
                 .anyframe_type => .AnyFrame,
+                .empty_struct_literal => .Struct,
                 .null_type => .Null,
                 .undefined_type => .Undefined,
                 .enum_literal_type => .EnumLiteral,
@@ -617,6 +618,7 @@ pub const Key = union(enum) {
                 .enum_literal_type,
                 => Index.none,
 
+                .empty_struct_literal => Index.empty_aggregate,
                 .void => Index.void_value,
                 .noreturn => Index.unreachable_value,
                 .null_type => Index.null_value,
@@ -813,6 +815,7 @@ pub const Key = union(enum) {
 
                 .null_type => try writer.writeAll("@TypeOf(null)"),
                 .undefined_type => try writer.writeAll("@TypeOf(undefined)"),
+                .empty_struct_literal => try writer.writeAll("@TypeOf(.{})"),
                 .enum_literal_type => try writer.writeAll("@TypeOf(.enum_literal)"),
 
                 .atomic_order => try writer.writeAll("std.builtin.AtomicOrder"),
@@ -1079,6 +1082,7 @@ pub const Index = enum(u32) {
     comptime_float_type,
     noreturn_type,
     anyframe_type,
+    empty_struct_literal,
     null_type,
     undefined_type,
     enum_literal_type,
@@ -1313,6 +1317,7 @@ pub const SimpleType = enum(u32) {
     comptime_float,
     noreturn,
     anyframe_type,
+    empty_struct_literal,
     null_type,
     undefined_type,
     enum_literal_type,
@@ -1391,6 +1396,7 @@ pub fn init(gpa: Allocator) Allocator.Error!InternPool {
         .{ .index = .comptime_float_type, .key = .{ .simple_type = .comptime_float } },
         .{ .index = .noreturn_type, .key = .{ .simple_type = .noreturn } },
         .{ .index = .anyframe_type, .key = .{ .simple_type = .anyframe_type } },
+        .{ .index = .empty_struct_literal, .key = .{ .simple_type = .empty_struct_literal } },
         .{ .index = .null_type, .key = .{ .simple_type = .null_type } },
         .{ .index = .undefined_type, .key = .{ .simple_type = .undefined_type } },
         .{ .index = .enum_literal_type, .key = .{ .simple_type = .enum_literal_type } },
@@ -1427,7 +1433,7 @@ pub fn init(gpa: Allocator) Allocator.Error!InternPool {
         .{ .index = .bool_true, .key = .{ .simple_value = .bool_true } },
         .{ .index = .bool_false, .key = .{ .simple_value = .bool_false } },
 
-        .{ .index = .empty_aggregate, .key = .{ .aggregate = .{ .ty = .none, .values = &.{} } } },
+        .{ .index = .empty_aggregate, .key = .{ .aggregate = .{ .ty = .empty_struct_literal, .values = &.{} } } },
         .{ .index = .zero_usize, .key = .{ .int_u64_value = .{ .ty = .usize_type, .int = 0 } } },
         .{ .index = .one_usize, .key = .{ .int_u64_value = .{ .ty = .usize_type, .int = 1 } } },
         .{ .index = .the_only_possible_value, .key = .{ .simple_value = .the_only_possible_value } },
