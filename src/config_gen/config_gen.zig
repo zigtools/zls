@@ -186,19 +186,19 @@ fn generateVSCodeConfigFile(allocator: std.mem.Allocator, config: Config, path: 
         configuration.deinit(allocator);
     }
 
-    configuration.putAssumeCapacityNoClobber("trace.server", .{
+    configuration.putAssumeCapacityNoClobber("zig.trace.server", .{
         .scope = "window",
         .type = "string",
-        .@"enum" = &.{ "off", "message", "verbose" },
+        .@"enum" = &.{ "off", "messages", "verbose" },
         .description = "Traces the communication between VS Code and the language server.",
         .default = .{ .String = "off" },
     });
-    configuration.putAssumeCapacityNoClobber("check_for_update", .{
+    configuration.putAssumeCapacityNoClobber("zig.zls.checkForUpdate", .{
         .type = "boolean",
         .description = "Whether to automatically check for new updates",
         .default = .{ .Bool = true },
     });
-    configuration.putAssumeCapacityNoClobber("path", .{
+    configuration.putAssumeCapacityNoClobber("zig.zls.path", .{
         .type = "string",
         .description = "Path to `zls` executable. Example: `C:/zls/zig-cache/bin/zls.exe`.",
         .format = "path",
@@ -206,10 +206,16 @@ fn generateVSCodeConfigFile(allocator: std.mem.Allocator, config: Config, path: 
     });
 
     for (config.options) |option| {
-        const name = try std.fmt.allocPrint(allocator, "zls.{s}", .{option.name});
+        const snake_case_name = try std.fmt.allocPrint(allocator, "zig.zls.{s}", .{option.name});
+        defer allocator.free(snake_case_name);
+        const name = try snakeCaseToCamelCase(allocator, snake_case_name);
 
         var parser = std.json.Parser.init(allocator, false);
-        const default = (try parser.parse(option.default)).root;
+        defer parser.deinit();
+
+        var value = try parser.parse(option.default);
+        defer value.deinit();
+        const default = value.root;
 
         configuration.putAssumeCapacityNoClobber(name, .{
             .type = try zigTypeToTypescript(option.type),
@@ -228,6 +234,26 @@ fn generateVSCodeConfigFile(allocator: std.mem.Allocator, config: Config, path: 
     }, writer);
 
     try buffered_writer.flush();
+}
+
+fn snakeCaseToCamelCase(allocator: std.mem.Allocator, str: []const u8) error{OutOfMemory}![]u8 {
+    const underscore_count = std.mem.count(u8, str, "_");
+    var result = try allocator.alloc(u8, str.len - underscore_count);
+    var i: usize = 0;
+    var j: usize = 0;
+    while (i < str.len) : (i += 1) {
+        if (str[i] != '_') {
+            result[j] = str[i];
+            j += 1;
+            continue;
+        }
+        if (i + 1 < str.len and 'a' <= str[i + 1] and str[i + 1] <= 'z') {
+            result[j] = std.ascii.toUpper(str[i + 1]);
+            i += 1;
+            j += 1;
+        }
+    }
+    return result;
 }
 
 /// Tokenizer for a langref.html.in file
@@ -931,10 +957,15 @@ pub fn main() !void {
                 \\
             );
         } else if (std.mem.eql(u8, argname, "--vscode-config-path")) {
-            maybe_vscode_config_path = args_it.next() orelse {
+            const vscode_config_path = args_it.next() orelse {
                 try stderr.print("Expected output path after --vscode-config-path argument.\n", .{});
                 return;
             };
+            if (!std.fs.path.isAbsolute(vscode_config_path)) {
+                try stderr.print("Expected absolute path after --vscode-config-path but got `{s}`", .{vscode_config_path});
+                return;
+            }
+            maybe_vscode_config_path = vscode_config_path;
         } else if (std.mem.eql(u8, argname, "--generate-version-data")) {
             maybe_data_file_version = args_it.next() orelse {
                 try stderr.print("Expected version after --generate-version-data argument.\n", .{});
