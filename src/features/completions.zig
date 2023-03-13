@@ -330,7 +330,23 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: Analyser.Decl
     const tree = decl_handle.handle.tree;
     const decl = decl_handle.decl.*;
 
-    switch (decl) {
+    const is_cimport = std.mem.eql(u8, std.fs.path.basename(decl_handle.handle.uri), "cimport.zig");
+    if (is_cimport) {
+        const name = tree.tokenSlice(decl_handle.nameToken());
+        if (std.mem.startsWith(u8, name, "_")) return;
+        // TODO figuring out which declarations should be excluded could be made more complete and accurate
+        // by translating an empty file to acquire all exclusions
+        const exclusions = std.ComptimeStringMap(void, .{
+            .{ "linux", {} },
+            .{ "unix", {} },
+            .{ "WIN32", {} },
+            .{ "WINNT", {} },
+            .{ "WIN64", {} },
+        });
+        if (exclusions.has("name")) return;
+    }
+
+    switch (decl_handle.decl.*) {
         .ast_node => |node| try nodeToCompletion(
             context.server,
             context.completions,
