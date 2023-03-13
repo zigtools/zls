@@ -2176,16 +2176,25 @@ pub fn iterateSymbolsGlobal(
 
 pub fn innermostBlockScopeIndex(handle: DocumentStore.Handle, source_index: usize) Scope.Index {
     var scope_iterator = iterateEnclosingScopes(handle.document_scope, source_index);
-    var current_scope: Scope.Index = .none;
+    var scope_index: Scope.Index = .none;
     while (scope_iterator.next()) |inner_scope| {
-        current_scope = inner_scope;
+        scope_index = inner_scope;
     }
-    return current_scope;
+    return scope_index;
 }
 
 pub fn innermostBlockScope(handle: DocumentStore.Handle, source_index: usize) Ast.Node.Index {
-    const scope_index = innermostBlockScopeIndex(handle, source_index);
-    return handle.document_scope.scopes.items(.data)[@enumToInt(scope_index)].toNodeIndex().?;
+    const scope_datas = handle.document_scope.scopes.items(.data);
+    const scope_parents = handle.document_scope.scopes.items(.parent);
+
+    var scope_index = innermostBlockScopeIndex(handle, source_index);
+    while (true) {
+        defer scope_index = scope_parents[@enumToInt(scope_index)];
+        switch (scope_datas[@enumToInt(scope_index)]) {
+            .container, .function, .block => return scope_datas[@enumToInt(scope_index)].toNodeIndex().?,
+            else => {},
+        }
+    }
 }
 
 pub fn innermostContainer(handle: *const DocumentStore.Handle, source_index: usize) TypeWithHandle {
