@@ -47,8 +47,21 @@ const Builder = struct {
     previous_token: ?Ast.TokenIndex = null,
     token_buffer: std.ArrayListUnmanaged(u32) = .{},
     encoding: offsets.Encoding,
+    limited: bool,
 
     fn add(self: *Builder, token: Ast.TokenIndex, token_type: TokenType, token_modifiers: TokenModifiers) !void {
+        switch (token_type) {
+            .type,
+            .parameter,
+            .variable,
+            .enumMember,
+            .field,
+            .errorTag,
+            .function,
+            .label,
+            => {},
+            else => if (self.limited) return,
+        }
         const tree = self.handle.tree;
         const starts = tree.tokens.items(.start);
 
@@ -159,6 +172,18 @@ const Builder = struct {
 
     fn addDirect(self: *Builder, tok_type: TokenType, tok_mod: TokenModifiers, start: usize, length: usize) !void {
         if (start < self.previous_source_index) return;
+        switch (tok_type) {
+            .type,
+            .parameter,
+            .variable,
+            .enumMember,
+            .field,
+            .errorTag,
+            .function,
+            .label,
+            => {},
+            else => if (self.limited) return,
+        }
 
         const text = self.handle.tree.source[self.previous_source_index..start];
         const delta = offsets.indexToPosition(text, text.len, self.encoding);
@@ -1011,12 +1036,14 @@ pub fn writeSemanticTokens(
     handle: *const DocumentStore.Handle,
     loc: ?offsets.Loc,
     encoding: offsets.Encoding,
+    limited: bool,
 ) error{OutOfMemory}!types.SemanticTokens {
     var builder = Builder{
         .arena = arena,
         .analyser = analyser,
         .handle = handle,
         .encoding = encoding,
+        .limited = limited,
     };
 
     const nodes = if (loc) |l| try ast.nodesAtLoc(arena, handle.tree, l) else handle.tree.rootDecls();

@@ -989,6 +989,19 @@ fn handleConfiguration(server: *Server, json: std.json.Value) error{OutOfMemory}
                             break :blk @field(server.config, field.name);
                         },
                     },
+                    .Enum => switch (value) {
+                        .String => |s| blk: {
+                            const trimmed = std.mem.trim(u8, s, " ");
+                            break :blk std.meta.stringToEnum(field.type, trimmed) orelse inner: {
+                                log.warn("Ignoring new value for \"zls.{s}\": the given new value is invalid", .{field.name});
+                                break :inner @field(server.config, field.name);
+                            };
+                        },
+                        else => blk: {
+                            log.warn("Ignoring new value for \"zls.{s}\": the given new value has an invalid type", .{field.name});
+                            break :blk @field(server.config, field.name);
+                        },
+                    },
                     else => @compileError("Not implemented for " ++ @typeName(ft)),
                 },
             };
@@ -1075,20 +1088,34 @@ fn willSaveWaitUntilHandler(server: *Server, request: types.WillSaveTextDocument
 }
 
 fn semanticTokensFullHandler(server: *Server, request: types.SemanticTokensParams) Error!?types.SemanticTokens {
-    if (!server.config.enable_semantic_tokens) return null;
+    if (server.config.semantic_tokens == .none) return null;
 
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
 
-    return try semantic_tokens.writeSemanticTokens(server.arena.allocator(), &server.analyser, handle, null, server.offset_encoding);
+    return try semantic_tokens.writeSemanticTokens(
+        server.arena.allocator(),
+        &server.analyser,
+        handle,
+        null,
+        server.offset_encoding,
+        server.config.semantic_tokens == .partial,
+    );
 }
 
 fn semanticTokensRangeHandler(server: *Server, request: types.SemanticTokensRangeParams) Error!?types.SemanticTokens {
-    if (!server.config.enable_semantic_tokens) return null;
+    if (server.config.semantic_tokens == .none) return null;
 
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
     const loc = offsets.rangeToLoc(handle.tree.source, request.range, server.offset_encoding);
 
-    return try semantic_tokens.writeSemanticTokens(server.arena.allocator(), &server.analyser, handle, loc, server.offset_encoding);
+    return try semantic_tokens.writeSemanticTokens(
+        server.arena.allocator(),
+        &server.analyser,
+        handle,
+        loc,
+        server.offset_encoding,
+        server.config.semantic_tokens == .partial,
+    );
 }
 
 pub fn completionHandler(server: *Server, request: types.CompletionParams) Error!?types.CompletionList {

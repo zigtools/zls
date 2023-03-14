@@ -16,8 +16,14 @@ enable_autofix: bool = true,
 /// Whether to enable import/embedFile argument completions
 enable_import_embedfile_argument_completions: bool = true,
 
-/// Enables semantic token support when the client also supports it
-enable_semantic_tokens: bool = true,
+/// Set level of semantic tokens. Partial only includes information that requires semantic analysis.
+semantic_tokens: enum {
+    none,
+    partial,
+    full,
+    
+    pub const tres_string_enum = true;
+} = .full,
 
 /// Enables inlay hint support when the client also supports it
 enable_inlay_hints: bool = true,
