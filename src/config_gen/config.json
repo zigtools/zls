@@ -25,10 +25,15 @@
             "default": "true"
         },
         {
-            "name": "enable_semantic_tokens",
-            "description": "Enables semantic token support when the client also supports it",
-            "type": "bool",
-            "default": "true"
+            "name": "semantic_tokens",
+            "description": "Set level of semantic tokens. Partial only includes information that requires semantic analysis.",
+            "type": "enum",
+            "enum": [
+                "none",
+                "partial",
+                "full"
+            ],
+            "default": "full"
         },
         {
             "name": "enable_inlay_hints",

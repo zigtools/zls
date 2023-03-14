@@ -66,7 +66,7 @@ The following options are currently available.
 | `enable_ast_check_diagnostics` | `bool` | `true` | Whether to enable ast-check diagnostics |
 | `enable_autofix` | `bool` | `true` | Whether to automatically fix errors on save. Currently supports adding and removing discards. |
 | `enable_import_embedfile_argument_completions` | `bool` | `true` | Whether to enable import/embedFile argument completions |
-| `enable_semantic_tokens` | `bool` | `true` | Enables semantic token support when the client also supports it |
+| `semantic_tokens` | `enum` | `.full` | Set level of semantic tokens. Partial only includes information that requires semantic analysis. |
 | `enable_inlay_hints` | `bool` | `true` | Enables inlay hint support when the client also supports it |
 | `inlay_hints_show_builtin` | `bool` | `true` | Enable inlay hints for builtin functions |
 | `inlay_hints_exclude_single_argument` | `bool` | `true` | Don't show inlay hints for single argument calls |

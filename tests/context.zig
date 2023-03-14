@@ -20,7 +20,7 @@ const initialize_msg =
 
 const default_config: Config = .{
     .enable_ast_check_diagnostics = false,
-    .enable_semantic_tokens = true,
+    .semantic_tokens = .full,
     .enable_inlay_hints = true,
     .inlay_hints_exclude_single_argument = false,
     .inlay_hints_show_builtin = true,

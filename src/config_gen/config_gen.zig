@@ -39,14 +39,17 @@ const ConfigOption = struct {
         _ = options;
         if (fmt.len != 0) return std.fmt.invalidFmtError(fmt, ConfigOption);
         if (config.@"enum") |enum_members| {
-            try writer.writeAll("enum {");
-            if (enum_members.len > 1) try writer.writeByte(' ');
-            for (enum_members, 0..) |member_name, i| {
-                if (i != 0) try writer.writeAll(", ");
+            try writer.writeAll("enum {\n    ");
+            for (enum_members) |member_name| {
                 try writer.writeAll(member_name);
+                try writer.writeAll(",\n    ");
             }
-            if (enum_members.len > 1) try writer.writeByte(' ');
-            try writer.writeByte('}');
+            std.debug.assert(enum_members.len > 1);
+            try writer.writeAll(
+                \\
+                \\    pub const tres_string_enum = true;
+                \\}
+            );
             return;
         }
         try writer.writeAll(config.type);
