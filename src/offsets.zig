@@ -179,14 +179,14 @@ pub fn locToRange(text: []const u8, loc: Loc, encoding: Encoding) types.Range {
     };
 }
 
-pub fn rangeToSlice(text: []const u8, range: types.Range, encodig: Encoding) []const u8 {
-    return locToSlice(text, rangeToLoc(text, range, encodig));
+pub fn rangeToSlice(text: []const u8, range: types.Range, encoding: Encoding) []const u8 {
+    return locToSlice(text, rangeToLoc(text, range, encoding));
 }
 
-pub fn rangeToLoc(text: []const u8, range: types.Range, encodig: Encoding) Loc {
+pub fn rangeToLoc(text: []const u8, range: types.Range, encoding: Encoding) Loc {
     return .{
-        .start = positionToIndex(text, range.start, encodig),
-        .end = positionToIndex(text, range.end, encodig),
+        .start = positionToIndex(text, range.start, encoding),
+        .end = positionToIndex(text, range.end, encoding),
     };
 }
 

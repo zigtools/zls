@@ -127,10 +127,10 @@ fn formatSnippetPlaceholder(
     _ = fmt;
     _ = options;
 
-    var splitit = std.mem.split(u8, data, "}");
-    while (splitit.next()) |segment| {
+    var split_it = std.mem.split(u8, data, "}");
+    while (split_it.next()) |segment| {
         try writer.writeAll(segment);
-        if (splitit.index) |index|
+        if (split_it.index) |index|
             if (data[index - 1] == '}') {
                 try writer.writeAll("\\}");
             };
@@ -1109,8 +1109,8 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 const switch_case = tree.fullSwitchCase(case).?;
                 var descriptor = std.ArrayListUnmanaged(u8){};
 
-                for (switch_case.ast.values, 0..) |vals, index| {
-                    try descriptor.appendSlice(analyser.arena, tree.getNodeSource(vals));
+                for (switch_case.ast.values, 0..) |values, index| {
+                    try descriptor.appendSlice(analyser.arena, tree.getNodeSource(values));
                     if (index != switch_case.ast.values.len - 1) try descriptor.appendSlice(analyser.arena, ", ");
                 }
 
@@ -1649,7 +1649,7 @@ pub fn isSymbolChar(char: u8) bool {
 
 /// Given a byte index in a document (typically cursor offset), classify what kind of entity is at that index.
 ///
-/// Classification is based on the lexical structure -- we fetch the line containin index, tokenize it,
+/// Classification is based on the lexical structure -- we fetch the line containing index, tokenize it,
 /// and look at the sequence of tokens just before the cursor. Due to the nice way zig is designed (only line
 /// comments, etc) lexing just a single line is always correct.
 pub fn getPositionContext(

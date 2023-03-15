@@ -5,7 +5,7 @@ pub const BuildOption = struct {
     name: []const u8,
     value: ?[]const u8 = null,
 
-    /// Frees the strings assocated with this `BuildOption` and invalidates `self`.
+    /// Frees the strings associated with this `BuildOption` and invalidates `self`.
     pub fn deinit(self: *BuildOption, allocator: std.mem.Allocator) void {
         allocator.free(self.name);
         if (self.value) |val| {

@@ -1034,11 +1034,11 @@ pub fn uriFromImportStr(self: *const DocumentStore, allocator: std.mem.Allocator
         }
         return null;
     } else {
-        var seperator_index = handle.uri.len;
-        while (seperator_index > 0) : (seperator_index -= 1) {
-            if (std.fs.path.isSep(handle.uri[seperator_index - 1])) break;
+        var separator_index = handle.uri.len;
+        while (separator_index > 0) : (separator_index -= 1) {
+            if (std.fs.path.isSep(handle.uri[separator_index - 1])) break;
         }
-        const base = handle.uri[0 .. seperator_index - 1];
+        const base = handle.uri[0 .. separator_index - 1];
 
         return URI.pathRelative(allocator, base, import_str) catch |err| switch (err) {
             error.OutOfMemory => return error.OutOfMemory,
