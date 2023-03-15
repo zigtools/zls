@@ -28,6 +28,7 @@ const document_symbol = @import("features/document_symbol.zig");
 const completions = @import("features/completions.zig");
 const goto = @import("features/goto.zig");
 const hover_handler = @import("features/hover.zig");
+const selection_range = @import("features/selection_range.zig");
 
 const tres = @import("tres");
 
@@ -1416,14 +1417,6 @@ pub fn generalReferencesHandler(server: *Server, request: GeneralReferencesReque
     }
 }
 
-fn isPositionBefore(lhs: types.Position, rhs: types.Position) bool {
-    if (lhs.line == rhs.line) {
-        return lhs.character < rhs.character;
-    } else {
-        return lhs.line < rhs.line;
-    }
-}
-
 fn inlayHintHandler(server: *Server, request: types.InlayHintParams) Error!?[]types.InlayHint {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
@@ -1525,64 +1518,14 @@ fn foldingRangeHandler(server: *Server, request: types.FoldingRangeParams) Error
     return try folding_range.generateFoldingRanges(allocator, handle.tree, server.offset_encoding);
 }
 
-pub const SelectionRange = struct {
-    range: types.Range,
-    parent: ?*SelectionRange,
-};
-
-fn selectionRangeHandler(server: *Server, request: types.SelectionRangeParams) Error!?[]*SelectionRange {
+fn selectionRangeHandler(server: *Server, request: types.SelectionRangeParams) Error!?[]*selection_range.SelectionRange {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
     const allocator = server.arena.allocator();
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
 
-    // For each of the input positions, we need to compute the stack of AST
-    // nodes/ranges which contain the position. At the moment, we do this in a
-    // super inefficient way, by iterating _all_ nodes, selecting the ones that
-    // contain position, and then sorting.
-    //
-    // A faster algorithm would be to walk the tree starting from the root,
-    // descending into the child containing the position at every step.
-    var result = try allocator.alloc(*SelectionRange, request.positions.len);
-    var locs = try std.ArrayListUnmanaged(offsets.Loc).initCapacity(allocator, 32);
-    for (request.positions, result) |position, *out| {
-        const index = offsets.positionToIndex(handle.text, position, server.offset_encoding);
-
-        locs.clearRetainingCapacity();
-        for (0..handle.tree.nodes.len) |i| {
-            const node = @intCast(Ast.Node.Index, i);
-            const loc = offsets.nodeToLoc(handle.tree, node);
-            if (loc.start <= index and index <= loc.end) {
-                try locs.append(allocator, loc);
-            }
-        }
-
-        std.sort.sort(offsets.Loc, locs.items, {}, shorterLocsFirst);
-        {
-            var i: usize = 0;
-            while (i + 1 < locs.items.len) {
-                if (std.meta.eql(locs.items[i], locs.items[i + 1])) {
-                    _ = locs.orderedRemove(i);
-                } else {
-                    i += 1;
-                }
-            }
-        }
-
-        var selection_ranges = try allocator.alloc(SelectionRange, locs.items.len);
-        for (selection_ranges, 0..) |*range, i| {
-            range.range = offsets.locToRange(handle.text, locs.items[i], server.offset_encoding);
-            range.parent = if (i + 1 < selection_ranges.len) &selection_ranges[i + 1] else null;
-        }
-        out.* = &selection_ranges[0];
-    }
-
-    return result;
-}
-
-fn shorterLocsFirst(_: void, lhs: offsets.Loc, rhs: offsets.Loc) bool {
-    return (lhs.end - lhs.start) < (rhs.end - rhs.start);
+    return try selection_range.generateSelectionRanges(allocator, handle, request.positions, server.offset_encoding);
 }
 
 /// return true if there is a request with the given method name
