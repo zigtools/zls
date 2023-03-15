@@ -1,11 +1,12 @@
 const std = @import("std");
 const zig_builtin = @import("builtin");
-const offsets = @import("offsets.zig");
-const DocumentStore = @import("DocumentStore.zig");
-const Analyser = @import("analysis.zig");
 const Ast = std.zig.Ast;
-const ast = @import("ast.zig");
-const types = @import("lsp.zig");
+
+const offsets = @import("../offsets.zig");
+const DocumentStore = @import("../DocumentStore.zig");
+const Analyser = @import("../analysis.zig");
+const ast = @import("../ast.zig");
+const types = @import("../lsp.zig");
 
 pub const TokenType = enum(u32) {
     type,

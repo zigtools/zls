@@ -1,11 +1,12 @@
 const std = @import("std");
 const Ast = std.zig.Ast;
-const DocumentStore = @import("DocumentStore.zig");
-const Analyser = @import("analysis.zig");
-const types = @import("lsp.zig");
-const offsets = @import("offsets.zig");
 const log = std.log.scoped(.zls_references);
-const ast = @import("ast.zig");
+
+const DocumentStore = @import("../DocumentStore.zig");
+const Analyser = @import("../analysis.zig");
+const types = @import("../lsp.zig");
+const offsets = @import("../offsets.zig");
+const ast = @import("../ast.zig");
 
 pub fn labelReferences(
     allocator: std.mem.Allocator,

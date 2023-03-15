@@ -1,12 +1,13 @@
 const std = @import("std");
-const Analyser = @import("analysis.zig");
-const offsets = @import("offsets.zig");
-const DocumentStore = @import("DocumentStore.zig");
-const types = @import("lsp.zig");
 const Ast = std.zig.Ast;
 const Token = std.zig.Token;
-const identifierFromPosition = @import("Server.zig").identifierFromPosition;
-const ast = @import("ast.zig");
+
+const Analyser = @import("../analysis.zig");
+const offsets = @import("../offsets.zig");
+const DocumentStore = @import("../DocumentStore.zig");
+const types = @import("../lsp.zig");
+const identifierFromPosition = @import("../Server.zig").identifierFromPosition;
+const ast = @import("../ast.zig");
 
 fn fnProtoToSignatureInfo(analyser: *Analyser, alloc: std.mem.Allocator, commas: u32, skip_self_param: bool, handle: *const DocumentStore.Handle, fn_node: Ast.Node.Index, proto: Ast.full.FnProto) !types.SignatureInformation {
     const tree = handle.tree;

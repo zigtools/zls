@@ -9,13 +9,7 @@ const DocumentStore = @import("DocumentStore.zig");
 const types = @import("lsp.zig");
 const Analyser = @import("analysis.zig");
 const ast = @import("ast.zig");
-const references = @import("references.zig");
 const offsets = @import("offsets.zig");
-const semantic_tokens = @import("semantic_tokens.zig");
-const inlay_hints = @import("inlay_hints.zig");
-const code_actions = @import("code_actions.zig");
-const folding_range = @import("folding_range.zig");
-const document_symbol = @import("document_symbol.zig");
 const shared = @import("shared.zig");
 const Ast = std.zig.Ast;
 const tracy = @import("tracy.zig");
@@ -24,6 +18,14 @@ const diff = @import("diff.zig");
 const ComptimeInterpreter = @import("ComptimeInterpreter.zig");
 const analyser = @import("analyser/analyser.zig");
 const ZigVersionWrapper = @import("ZigVersionWrapper.zig");
+
+const signature_help = @import("features/signature_help.zig");
+const references = @import("features/references.zig");
+const semantic_tokens = @import("features/semantic_tokens.zig");
+const inlay_hints = @import("features/inlay_hints.zig");
+const code_actions = @import("features/code_actions.zig");
+const folding_range = @import("features/folding_range.zig");
+const document_symbol = @import("features/document_symbol.zig");
 
 const data = @import("data/data.zig");
 const snipped_data = @import("data/snippets.zig");
@@ -2393,14 +2395,13 @@ pub fn signatureHelpHandler(server: *Server, request: types.SignatureHelpParams)
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const getSignatureInfo = @import("signature_help.zig").getSignatureInfo;
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
 
     if (request.position.character == 0) return null;
 
     const source_index = offsets.positionToIndex(handle.text, request.position, server.offset_encoding);
 
-    const signature_info = (try getSignatureInfo(
+    const signature_info = (try signature_help.getSignatureInfo(
         &server.analyser,
         server.arena.allocator(),
         handle,
@@ -3229,7 +3230,7 @@ pub fn destroy(server: *Server) void {
     server.document_store.deinit();
     server.analyser.deinit();
 
-    if (server.builtin_completions) |*completions| completions.deinit(server.allocator);
+    if (server.builtin_completions) |*items| items.deinit(server.allocator);
 
     for (server.outgoing_messages.items) |message| {
         server.allocator.free(message);

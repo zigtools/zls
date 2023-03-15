@@ -16,8 +16,14 @@ pub const ComptimeInterpreter = @import("ComptimeInterpreter.zig");
 pub const diff = @import("diff.zig");
 pub const analyser = @import("analyser/analyser.zig");
 pub const configuration = @import("configuration.zig");
-pub const references = @import("references.zig");
-pub const semantic_tokens = @import("semantic_tokens.zig");
+
+pub const signature_help = @import("features/signature_help.zig");
+pub const references = @import("features/references.zig");
+pub const semantic_tokens = @import("features/semantic_tokens.zig");
+pub const inlay_hints = @import("features/inlay_hints.zig");
+pub const code_actions = @import("features/code_actions.zig");
+pub const folding_range = @import("features/folding_range.zig");
+pub const document_symbol = @import("features/document_symbol.zig");
 
 pub const ZigVersionWrapper = @import("ZigVersionWrapper.zig");
 

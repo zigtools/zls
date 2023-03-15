@@ -1,15 +1,16 @@
 const std = @import("std");
 const zig_builtin = @import("builtin");
-const DocumentStore = @import("DocumentStore.zig");
-const Analyser = @import("analysis.zig");
-const types = @import("lsp.zig");
-const offsets = @import("offsets.zig");
-const tracy = @import("tracy.zig");
 const Ast = std.zig.Ast;
 const log = std.log.scoped(.zls_inlay_hint);
-const ast = @import("ast.zig");
-const data = @import("data/data.zig");
-const Config = @import("Config.zig");
+
+const DocumentStore = @import("../DocumentStore.zig");
+const Analyser = @import("../analysis.zig");
+const types = @import("../lsp.zig");
+const offsets = @import("../offsets.zig");
+const tracy = @import("../tracy.zig");
+const ast = @import("../ast.zig");
+const data = @import("../data/data.zig");
+const Config = @import("../Config.zig");
 
 /// don't show inlay hints for the given builtin functions
 /// builtins with one parameter are skipped automatically

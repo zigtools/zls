@@ -1,9 +1,10 @@
 const std = @import("std");
-const ast = @import("ast.zig");
-const types = @import("lsp.zig");
-const offsets = @import("offsets.zig");
-const tracy = @import("tracy.zig");
 const Ast = std.zig.Ast;
+
+const ast = @import("../ast.zig");
+const types = @import("../lsp.zig");
+const offsets = @import("../offsets.zig");
+const tracy = @import("../tracy.zig");
 
 const FoldingRange = struct {
     loc: offsets.Loc,

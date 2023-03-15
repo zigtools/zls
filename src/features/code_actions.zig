@@ -1,12 +1,11 @@
 const std = @import("std");
 const Ast = std.zig.Ast;
 
-const DocumentStore = @import("DocumentStore.zig");
-const Analyser = @import("analysis.zig");
-const ast = @import("ast.zig");
-
-const types = @import("lsp.zig");
-const offsets = @import("offsets.zig");
+const DocumentStore = @import("../DocumentStore.zig");
+const Analyser = @import("../analysis.zig");
+const ast = @import("../ast.zig");
+const types = @import("../lsp.zig");
+const offsets = @import("../offsets.zig");
 
 pub const Builder = struct {
     arena: std.mem.Allocator,
