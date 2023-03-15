@@ -32,7 +32,7 @@ The Zig Language Server (zls) is a tool that implements Microsoft's Language Ser
 Building `zls` is very easy. You will need [a build of Zig master](https://ziglang.org/download/) to build zls.
 
 ```bash
-git clone --recurse-submodules https://github.com/zigtools/zls
+git clone https://github.com/zigtools/zls
 cd zls
 zig build -Doptimize=ReleaseSafe
 ```
