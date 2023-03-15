@@ -191,7 +191,7 @@ fn convertSymbolsInternal(
     symbol_buffer: *std.ArrayListUnmanaged(types.DocumentSymbol),
     mappings: *std.ArrayListUnmanaged(IndexToPositionEntry),
 ) []types.DocumentSymbol {
-    // aquire storage for exactly `from.len` symbols
+    // acquire storage for exactly `from.len` symbols
     const prev_len = symbol_buffer.items.len;
     symbol_buffer.items.len += from.len;
     const to: []types.DocumentSymbol = symbol_buffer.items[prev_len..];

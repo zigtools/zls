@@ -49,7 +49,7 @@ offset_encoding: offsets.Encoding = .@"utf-16",
 status: enum {
     /// the server has not received a `initialize` request
     uninitialized,
-    /// the server has recieved a `initialize` request and is awaiting the `initialized` notification
+    /// the server has received a `initialize` request and is awaiting the `initialized` notification
     initializing,
     /// the server has been initialized and is ready to received requests
     initialized,
@@ -416,7 +416,7 @@ fn getAstCheckDiagnostics(
     if (term != .Exited) return;
 
     var last_diagnostic: ?types.Diagnostic = null;
-    // we dont store DiagnosticRelatedInformation in last_diagnostic instead
+    // we don't store DiagnosticRelatedInformation in last_diagnostic instead
     // its stored in last_related_diagnostics because we need an ArrayList
     var last_related_diagnostics: std.ArrayListUnmanaged(types.DiagnosticRelatedInformation) = .{};
 
@@ -1520,9 +1520,9 @@ pub fn completeFieldAccess(server: *Server, handle: *const DocumentStore.Handle,
 }
 
 pub fn formatDetailledLabel(item: *types.CompletionItem, arena: std.mem.Allocator) error{OutOfMemory}!void {
-    // NOTE: this is not ideal, we should build a detailled label like we do for label/detail
-    // because this implementation is very loose, nothing is formated properly so we need to clean
-    // things a little bit, wich is quite messy
+    // NOTE: this is not ideal, we should build a detailed label like we do for label/detail
+    // because this implementation is very loose, nothing is formatted properly so we need to clean
+    // things a little bit, which is quite messy
     // but it works, it provide decent results
 
     std.debug.assert(item.kind != null);
@@ -1553,7 +1553,7 @@ pub fn formatDetailledLabel(item: *types.CompletionItem, arena: std.mem.Allocato
         it = it[0..end];
     }
 
-    // loggerger.info("## label: {s} it: {s} kind: {} isValue: {}", .{item.label, it, item.kind, isValue});
+    // log.info("## label: {s} it: {s} kind: {} isValue: {}", .{item.label, it, item.kind, isValue});
 
     if (std.mem.startsWith(u8, it, "fn ") or std.mem.startsWith(u8, it, "@")) {
         var s: usize = std.mem.indexOf(u8, it, "(") orelse return;
@@ -1615,7 +1615,7 @@ pub fn formatDetailledLabel(item: *types.CompletionItem, arena: std.mem.Allocato
             log.warn("something wrong when trying to build label detail for a .Variable {s}", .{it});
             return;
         }
-        // loggerger.info("s: {} -> {}", .{s, e});
+        // log.info("s: {} -> {}", .{s, e});
         item.insertText = item.label;
         item.insertTextFormat = .PlainText;
         item.detail = item.label;
@@ -1638,7 +1638,7 @@ pub fn formatDetailledLabel(item: *types.CompletionItem, arena: std.mem.Allocato
             log.warn("something wrong when trying to build label detail for a .Variable {s}", .{it});
             return;
         }
-        // loggerger.info("s: {} -> {}", .{s, e});
+        // log.info("s: {} -> {}", .{s, e});
         item.insertText = item.label;
         item.insertTextFormat = .PlainText;
         item.detail = item.label;
@@ -1679,7 +1679,7 @@ pub fn formatDetailledLabel(item: *types.CompletionItem, arena: std.mem.Allocato
             .description = item.label, // right
         };
     } else {
-        // TODO: if something is missing, it neecs to be implemented here
+        // TODO: if something is missing, it needs to be implemented here
     }
 
     // if (item.labelDetails != null)
@@ -1741,11 +1741,11 @@ pub fn completeFileSystemStringLiteral(
     const loc = pos_context.loc().?;
     var completing = handle.tree.source[loc.start + 1 .. loc.end - 1];
 
-    var seperator_index = completing.len;
-    while (seperator_index > 0) : (seperator_index -= 1) {
-        if (std.fs.path.isSep(completing[seperator_index - 1])) break;
+    var separator_index = completing.len;
+    while (separator_index > 0) : (separator_index -= 1) {
+        if (std.fs.path.isSep(completing[separator_index - 1])) break;
     }
-    completing = completing[0..seperator_index];
+    completing = completing[0..separator_index];
 
     var search_paths: std.ArrayListUnmanaged([]const u8) = .{};
     if (std.fs.path.isAbsolute(completing) and pos_context != .import_string_literal) {
@@ -1895,9 +1895,9 @@ fn initializeHandler(server: *Server, request: types.InitializeParams) Error!typ
             server.client_capabilities.supports_will_save_wait_until = synchronization.willSaveWaitUntil orelse false;
         }
         if (textDocument.codeAction) |codeaction| {
-            if (codeaction.codeActionLiteralSupport) |literlSupport| {
+            if (codeaction.codeActionLiteralSupport) |literalSupport| {
                 if (!skip_set_fixall) {
-                    const fixall = std.mem.indexOfScalar(types.CodeActionKind, literlSupport.codeActionKind.valueSet, .@"source.fixAll") != null;
+                    const fixall = std.mem.indexOfScalar(types.CodeActionKind, literalSupport.codeActionKind.valueSet, .@"source.fixAll") != null;
                     server.client_capabilities.supports_code_action_fixall = fixall;
                 }
             }
@@ -2093,15 +2093,15 @@ fn requestConfiguration(server: *Server) Error!void {
         return;
     }
 
-    const configuration_items = comptime confi: {
-        var comp_confi: [std.meta.fields(Config).len]types.ConfigurationItem = undefined;
+    const configuration_items = comptime config: {
+        var comp_config: [std.meta.fields(Config).len]types.ConfigurationItem = undefined;
         inline for (std.meta.fields(Config), 0..) |field, index| {
-            comp_confi[index] = .{
+            comp_config[index] = .{
                 .section = "zls." ++ field.name,
             };
         }
 
-        break :confi comp_confi;
+        break :config comp_config;
     };
 
     server.sendRequest(
@@ -2829,9 +2829,9 @@ fn selectionRangeHandler(server: *Server, request: types.SelectionRangeParams) E
     const allocator = server.arena.allocator();
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
 
-    // For each of the input positons, we need to compute the stack of AST
+    // For each of the input positions, we need to compute the stack of AST
     // nodes/ranges which contain the position. At the moment, we do this in a
-    // super inefficient way, by iterationg _all_ nodes, selecting the ones that
+    // super inefficient way, by iterating _all_ nodes, selecting the ones that
     // contain position, and then sorting.
     //
     // A faster algorithm would be to walk the tree starting from the root,

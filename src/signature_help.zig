@@ -77,7 +77,7 @@ pub fn getSignatureInfo(analyser: *Analyser, alloc: std.mem.Allocator, handle: *
     const token_starts = tree.tokens.items(.start);
 
     // Use the innermost scope to determine the earliest token we would need
-    //   to scan up to find a function or buitin call
+    //   to scan up to find a function or builtin call
     const first_token = tree.firstToken(innermost_block);
     // We start by finding the token that includes the current cursor position
     const last_token = blk: {

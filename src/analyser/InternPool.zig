@@ -91,7 +91,7 @@ pub const Enum = struct {
     fields: std.StringArrayHashMapUnmanaged(void),
     values: std.AutoArrayHashMapUnmanaged(Index, void),
     namespace: NamespaceIndex,
-    tag_type_infered: bool,
+    tag_type_inferred: bool,
 };
 
 pub const Function = struct {

@@ -426,7 +426,7 @@ fn getDiscardLoc(text: []const u8, loc: offsets.Loc) ?offsets.Loc {
         return null;
     };
 
-    // check if the identifier is preceed by a equal sign and then an underscore
+    // check if the identifier is precede by a equal sign and then an underscore
     var i: usize = loc.start - 1;
     var found_equal_sign = false;
     const underscore_position = found: {
