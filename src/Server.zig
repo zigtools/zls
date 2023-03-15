@@ -27,6 +27,7 @@ const code_actions = @import("features/code_actions.zig");
 const folding_range = @import("features/folding_range.zig");
 const document_symbol = @import("features/document_symbol.zig");
 const completions = @import("features/completions.zig");
+const goto = @import("features/goto.zig");
 
 const data = @import("data/data.zig");
 const snipped_data = @import("data/snippets.zig");
@@ -562,37 +563,6 @@ pub fn identifierFromPosition(pos_index: usize, handle: DocumentStore.Handle) []
     return handle.text[start_idx..end_idx];
 }
 
-pub fn gotoDefinitionSymbol(
-    server: *Server,
-    decl_handle: Analyser.DeclWithHandle,
-    resolve_alias: bool,
-) error{OutOfMemory}!?types.Location {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    var handle = decl_handle.handle;
-
-    const name_token = switch (decl_handle.decl.*) {
-        .ast_node => |node| block: {
-            if (resolve_alias) {
-                if (try server.analyser.resolveVarDeclAlias(.{ .node = node, .handle = handle })) |result| {
-                    handle = result.handle;
-
-                    break :block result.nameToken();
-                }
-            }
-
-            break :block Analyser.getDeclNameToken(handle.tree, node) orelse return null;
-        },
-        else => decl_handle.nameToken(),
-    };
-
-    return types.Location{
-        .uri = handle.uri,
-        .range = offsets.tokenToRange(handle.tree, name_token, server.offset_encoding),
-    };
-}
-
 pub fn hoverSymbol(server: *Server, decl_handle: Analyser.DeclWithHandle, markup_kind: types.MarkupKind) error{OutOfMemory}!?[]const u8 {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
@@ -725,67 +695,10 @@ pub fn getSymbolGlobal(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const name = identifierFromPosition(pos_index, handle.*);
+    const name = Server.identifierFromPosition(pos_index, handle.*);
     if (name.len == 0) return null;
 
     return try server.analyser.lookupSymbolGlobal(handle, name, pos_index);
-}
-
-pub fn gotoDefinitionLabel(
-    server: *Server,
-    pos_index: usize,
-    handle: *const DocumentStore.Handle,
-) error{OutOfMemory}!?types.Location {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    const decl = (try getLabelGlobal(pos_index, handle)) orelse return null;
-    return try server.gotoDefinitionSymbol(decl, false);
-}
-
-pub fn gotoDefinitionGlobal(
-    server: *Server,
-    pos_index: usize,
-    handle: *const DocumentStore.Handle,
-    resolve_alias: bool,
-) error{OutOfMemory}!?types.Location {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    const decl = (try server.getSymbolGlobal(pos_index, handle)) orelse return null;
-    return try server.gotoDefinitionSymbol(decl, resolve_alias);
-}
-
-pub fn gotoDefinitionBuiltin(
-    server: *Server,
-    handle: *const DocumentStore.Handle,
-    loc: offsets.Loc,
-) error{OutOfMemory}!?types.Location {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    const name = offsets.tokenIndexToSlice(handle.tree.source, loc.start);
-    if (std.mem.eql(u8, name, "@cImport")) {
-        const index = for (handle.cimports.items(.node), 0..) |cimport_node, index| {
-            const main_token = handle.tree.nodes.items(.main_token)[cimport_node];
-            if (loc.start == offsets.tokenToIndex(handle.tree, main_token)) break index;
-        } else return null;
-        const hash = handle.cimports.items(.hash)[index];
-
-        const result = server.document_store.cimports.get(hash) orelse return null;
-        switch (result) {
-            .failure => return null,
-            .success => |uri| return types.Location{
-                .uri = uri,
-                .range = .{
-                    .start = .{ .line = 0, .character = 0 },
-                    .end = .{ .line = 0, .character = 0 },
-                },
-            },
-        }
-    }
-
-    return null;
 }
 
 pub fn hoverDefinitionLabel(server: *Server, pos_index: usize, handle: *const DocumentStore.Handle) error{OutOfMemory}!?types.Hover {
@@ -882,7 +795,7 @@ pub fn getSymbolFieldAccesses(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const name = identifierFromPosition(source_index, handle.*);
+    const name = Server.identifierFromPosition(source_index, handle.*);
     if (name.len == 0) return null;
 
     var held_range = try server.arena.allocator().dupeZ(u8, offsets.locToSlice(handle.text, loc));
@@ -911,30 +824,6 @@ pub fn getSymbolFieldAccesses(
     return try decls_with_handles.toOwnedSlice(server.arena.allocator());
 }
 
-pub fn gotoDefinitionFieldAccess(
-    server: *Server,
-    handle: *const DocumentStore.Handle,
-    source_index: usize,
-    loc: offsets.Loc,
-    resolve_alias: bool,
-) error{OutOfMemory}!?[]const types.Location {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    const accesses = (try server.getSymbolFieldAccesses(handle, source_index, loc)) orelse return null;
-    var locs = std.ArrayListUnmanaged(types.Location){};
-
-    for (accesses) |access| {
-        if (try server.gotoDefinitionSymbol(access, resolve_alias)) |l|
-            try locs.append(server.arena.allocator(), l);
-    }
-
-    if (locs.items.len == 0)
-        return null;
-
-    return try locs.toOwnedSlice(server.arena.allocator());
-}
-
 pub fn hoverDefinitionFieldAccess(
     server: *Server,
     handle: *const DocumentStore.Handle,
@@ -960,57 +849,6 @@ pub fn hoverDefinitionFieldAccess(
     return .{
         .contents = .{
             .array_of_MarkedString = try content.toOwnedSlice(server.arena.allocator()),
-        },
-    };
-}
-
-pub fn gotoDefinitionString(
-    server: *Server,
-    pos_context: Analyser.PositionContext,
-    handle: *const DocumentStore.Handle,
-) error{OutOfMemory}!?types.Location {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    const allocator = server.arena.allocator();
-
-    const loc = pos_context.loc().?;
-    const import_str_loc = offsets.tokenIndexToLoc(handle.tree.source, loc.start);
-    if (import_str_loc.end - import_str_loc.start < 2) return null;
-    var import_str = offsets.locToSlice(handle.tree.source, .{
-        .start = import_str_loc.start + 1,
-        .end = import_str_loc.end - 1,
-    });
-
-    const uri = switch (pos_context) {
-        .import_string_literal,
-        .embedfile_string_literal,
-        => try server.document_store.uriFromImportStr(allocator, handle.*, import_str),
-        .cinclude_string_literal => try uri_utils.fromPath(
-            allocator,
-            blk: {
-                if (std.fs.path.isAbsolute(import_str)) break :blk import_str;
-                var include_dirs: std.ArrayListUnmanaged([]const u8) = .{};
-                server.document_store.collectIncludeDirs(allocator, handle.*, &include_dirs) catch |err| {
-                    log.err("failed to resolve include paths: {}", .{err});
-                    return null;
-                };
-                for (include_dirs.items) |dir| {
-                    const path = try std.fs.path.join(allocator, &.{ dir, import_str });
-                    std.fs.accessAbsolute(path, .{}) catch continue;
-                    break :blk path;
-                }
-                return null;
-            },
-        ),
-        else => unreachable,
-    };
-
-    return types.Location{
-        .uri = uri orelse return null,
-        .range = .{
-            .start = .{ .line = 0, .character = 0 },
-            .end = .{ .line = 0, .character = 0 },
         },
     };
 }
@@ -1541,30 +1379,6 @@ pub fn signatureHelpHandler(server: *Server, request: types.SignatureHelpParams)
     };
 }
 
-pub fn gotoHandler(server: *Server, request: types.TextDocumentPositionParams, resolve_alias: bool) Error!?types.Definition {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
-
-    if (request.position.character == 0) return null;
-
-    const source_index = offsets.positionToIndex(handle.text, request.position, server.offset_encoding);
-    const pos_context = try Analyser.getPositionContext(server.arena.allocator(), handle.text, source_index, true);
-
-    return switch (pos_context) {
-        .builtin => |loc| .{ .Location = (try server.gotoDefinitionBuiltin(handle, loc)) orelse return null },
-        .var_access => .{ .Location = (try server.gotoDefinitionGlobal(source_index, handle, resolve_alias)) orelse return null },
-        .field_access => |loc| .{ .array_of_Location = (try server.gotoDefinitionFieldAccess(handle, source_index, loc, resolve_alias)) orelse return null },
-        .import_string_literal,
-        .cinclude_string_literal,
-        .embedfile_string_literal,
-        => .{ .Location = (try server.gotoDefinitionString(pos_context, handle)) orelse return null },
-        .label => .{ .Location = (try server.gotoDefinitionLabel(source_index, handle)) orelse return null },
-        else => null,
-    };
-}
-
 fn gotoDefinitionHandler(
     server: *Server,
     request: types.TextDocumentPositionParams,
@@ -1572,7 +1386,12 @@ fn gotoDefinitionHandler(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    return try server.gotoHandler(request, true);
+    if (request.position.character == 0) return null;
+
+    const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
+    const source_index = offsets.positionToIndex(handle.text, request.position, server.offset_encoding);
+
+    return try goto.goto(server, source_index, handle, true);
 }
 
 fn gotoDeclarationHandler(
@@ -1582,7 +1401,12 @@ fn gotoDeclarationHandler(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    return try server.gotoHandler(request, false);
+    if (request.position.character == 0) return null;
+
+    const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
+    const source_index = offsets.positionToIndex(handle.text, request.position, server.offset_encoding);
+
+    return try goto.goto(server, source_index, handle, false);
 }
 
 pub fn hoverHandler(server: *Server, request: types.HoverParams) Error!?types.Hover {
