@@ -9,6 +9,7 @@ const ast = @import("ast.zig");
 const tracy = @import("tracy.zig");
 const ComptimeInterpreter = @import("ComptimeInterpreter.zig");
 const InternPool = ComptimeInterpreter.InternPool;
+const references = @import("references.zig");
 
 const Analyser = @This();
 
@@ -1866,6 +1867,7 @@ pub const Declaration = union(enum) {
     /// Function parameter
     param_payload: struct {
         param: Ast.full.FnProto.Param,
+        param_idx: u16,
         func: Ast.Node.Index,
     },
     pointer_payload: struct {
@@ -1888,11 +1890,19 @@ pub const Declaration = union(enum) {
     },
     /// always an identifier
     error_token: Ast.Node.Index,
+
+    pub fn eql(a: Declaration, b: Declaration) bool {
+        return std.meta.eql(a, b);
+    }
 };
 
 pub const DeclWithHandle = struct {
     decl: *Declaration,
     handle: *const DocumentStore.Handle,
+
+    pub fn eql(a: DeclWithHandle, b: DeclWithHandle) bool {
+        return a.decl.eql(b.decl.*) and std.mem.eql(u8, a.handle.uri, b.handle.uri);
+    }
 
     pub fn nameToken(self: DeclWithHandle) Ast.TokenIndex {
         const tree = self.handle.tree;
@@ -1916,6 +1926,8 @@ pub const DeclWithHandle = struct {
     }
 
     pub fn resolveType(self: DeclWithHandle, analyser: *Analyser) !?TypeWithHandle {
+        std.log.info("TRES", .{});
+
         const tree = self.handle.tree;
         const node_tags = tree.nodes.items(.tag);
         const main_tokens = tree.nodes.items(.main_token);
@@ -1924,6 +1936,40 @@ pub const DeclWithHandle = struct {
                 .{ .node = node, .handle = self.handle },
             ),
             .param_payload => |pay| {
+                // handle anytype
+                if (pay.param.type_expr == 0) {
+                    var func_decl = Declaration{ .ast_node = pay.func };
+
+                    var refs = try references.callsiteReferences(analyser.arena, analyser, .{
+                        .decl = &func_decl,
+                        .handle = self.handle,
+                    }, false, false, true);
+
+                    var possible = std.ArrayListUnmanaged(Type.EitherEntry){};
+
+                    for (refs.items) |ref| {
+                        var handle = analyser.store.getOrLoadHandle(ref.uri).?;
+
+                        var buf: [1]Ast.Node.Index = undefined;
+                        var call = handle.tree.fullCall(&buf, ref.call_node).?;
+
+                        if (try analyser.resolveTypeOfNode(.{
+                            .node = call.ast.params[pay.param_idx], // TODO: add check + self call (-1)
+                            .handle = handle,
+                        })) |ty| {
+                            try possible.append(analyser.arena, .{ // TODO: Dedup
+                                .type_with_handle = ty,
+                                .descriptor = "TODO",
+                            });
+                        }
+                    }
+
+                    return TypeWithHandle{
+                        .type = .{ .data = .{ .either = try possible.toOwnedSlice(analyser.arena) }, .is_type_val = false },
+                        .handle = self.handle,
+                    };
+                }
+
                 const param_decl = pay.param;
                 if (isMetaType(self.handle.tree, param_decl.type_expr)) {
                     var bound_param_it = analyser.bound_type_params.iterator();
@@ -2669,7 +2715,7 @@ fn makeScopeInternal(context: ScopeContext, node_idx: Ast.Node.Index) error{OutO
                     try scopes.items(.decls)[scope_index].put(
                         allocator,
                         tree.tokenSlice(name_token),
-                        .{ .param_payload = .{ .param = param, .func = node_idx } },
+                        .{ .param_payload = .{ .param = param, .param_idx = @intCast(u16, it.param_i), .func = node_idx } },
                     );
                 }
                 // Visit parameter types to pick up any error sets and enum
