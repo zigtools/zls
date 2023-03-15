@@ -13,7 +13,6 @@ const offsets = @import("offsets.zig");
 const shared = @import("shared.zig");
 const Ast = std.zig.Ast;
 const tracy = @import("tracy.zig");
-const uri_utils = @import("uri.zig");
 const diff = @import("diff.zig");
 const ComptimeInterpreter = @import("ComptimeInterpreter.zig");
 const analyser = @import("analyser/analyser.zig");
@@ -29,9 +28,6 @@ const document_symbol = @import("features/document_symbol.zig");
 const completions = @import("features/completions.zig");
 const goto = @import("features/goto.zig");
 const hover_handler = @import("features/hover.zig");
-
-const data = @import("data/data.zig");
-const snipped_data = @import("data/snippets.zig");
 
 const tres = @import("tres");
 
@@ -1140,7 +1136,6 @@ pub fn signatureHelpHandler(server: *Server, request: types.SignatureHelpParams)
         server.arena.allocator(),
         handle,
         source_index,
-        data,
     )) orelse return null;
 
     var signatures = try server.arena.allocator().alloc(types.SignatureInformation, 1);

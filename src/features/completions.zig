@@ -10,8 +10,9 @@ const Analyser = @import("../analysis.zig");
 const ast = @import("../ast.zig");
 const offsets = @import("../offsets.zig");
 const tracy = @import("../tracy.zig");
-const uri_utils = @import("../uri.zig");
+const URI = @import("../uri.zig");
 const analyser = @import("../analyser/analyser.zig");
+
 const data = @import("../data/data.zig");
 const snipped_data = @import("../data/snippets.zig");
 
@@ -762,7 +763,7 @@ fn completeFileSystemStringLiteral(
             return &.{};
         };
     } else {
-        var document_path = try uri_utils.parse(arena, handle.uri);
+        var document_path = try URI.parse(arena, handle.uri);
         try search_paths.append(arena, std.fs.path.dirname(document_path).?);
     }
 

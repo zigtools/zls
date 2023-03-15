@@ -9,8 +9,9 @@ const types = @import("../lsp.zig");
 const offsets = @import("../offsets.zig");
 const tracy = @import("../tracy.zig");
 const ast = @import("../ast.zig");
-const data = @import("../data/data.zig");
 const Config = @import("../Config.zig");
+
+const data = @import("../data/data.zig");
 
 /// don't show inlay hints for the given builtin functions
 /// builtins with one parameter are skipped automatically

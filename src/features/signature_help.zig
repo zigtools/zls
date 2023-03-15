@@ -3,11 +3,12 @@ const Ast = std.zig.Ast;
 const Token = std.zig.Token;
 
 const Analyser = @import("../analysis.zig");
-const offsets = @import("../offsets.zig");
 const DocumentStore = @import("../DocumentStore.zig");
 const types = @import("../lsp.zig");
-const identifierFromPosition = @import("../Server.zig").identifierFromPosition;
+const Server = @import("../Server.zig");
 const ast = @import("../ast.zig");
+
+const data = @import("../data/data.zig");
 
 fn fnProtoToSignatureInfo(analyser: *Analyser, alloc: std.mem.Allocator, commas: u32, skip_self_param: bool, handle: *const DocumentStore.Handle, fn_node: Ast.Node.Index, proto: Ast.full.FnProto) !types.SignatureInformation {
     const tree = handle.tree;
@@ -71,7 +72,7 @@ fn fnProtoToSignatureInfo(analyser: *Analyser, alloc: std.mem.Allocator, commas:
     };
 }
 
-pub fn getSignatureInfo(analyser: *Analyser, alloc: std.mem.Allocator, handle: *const DocumentStore.Handle, absolute_index: usize, comptime data: type) !?types.SignatureInformation {
+pub fn getSignatureInfo(analyser: *Analyser, alloc: std.mem.Allocator, handle: *const DocumentStore.Handle, absolute_index: usize) !?types.SignatureInformation {
     const innermost_block = Analyser.innermostBlockScope(handle.*, absolute_index);
     const tree = handle.tree;
     const token_tags = tree.tokens.items(.tag);
@@ -284,7 +285,7 @@ pub fn getSignatureInfo(analyser: *Analyser, alloc: std.mem.Allocator, handle: *
                         );
                     }
 
-                    const name = identifierFromPosition(expr_end - 1, handle.*);
+                    const name = Server.identifierFromPosition(expr_end - 1, handle.*);
                     if (name.len == 0) {
                         try symbol_stack.append(alloc, .l_paren);
                         continue;
