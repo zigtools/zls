@@ -5,8 +5,6 @@ const DocumentStore = @import("../DocumentStore.zig");
 const types = @import("../lsp.zig");
 const offsets = @import("../offsets.zig");
 
-const tracy = @import("../tracy.zig");
-
 pub const SelectionRange = struct {
     range: types.Range,
     parent: ?*SelectionRange,
@@ -18,9 +16,6 @@ pub fn generateSelectionRanges(
     positions: []const types.Position,
     offset_encoding: offsets.Encoding,
 ) error{OutOfMemory}!?[]*SelectionRange {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
     // For each of the input positions, we need to compute the stack of AST
     // nodes/ranges which contain the position. At the moment, we do this in a
     // super inefficient way, by iterating _all_ nodes, selecting the ones that

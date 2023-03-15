@@ -821,9 +821,6 @@ fn completeFileSystemStringLiteral(
 }
 
 pub fn completionAtIndex(server: *Server, source_index: usize, handle: *const DocumentStore.Handle) error{OutOfMemory}!?types.CompletionList {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
     const at_line_start = offsets.lineSliceUntilIndex(handle.tree.source, source_index).len == 0;
     if (at_line_start) {
         var completions = std.ArrayListUnmanaged(types.CompletionItem){};

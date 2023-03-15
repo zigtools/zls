@@ -120,9 +120,6 @@ const Builder = struct {
 };
 
 pub fn generateFoldingRanges(allocator: std.mem.Allocator, tree: Ast, encoding: offsets.Encoding) error{OutOfMemory}![]types.FoldingRange {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
     var builder = Builder{
         .allocator = allocator,
         .locations = .{},

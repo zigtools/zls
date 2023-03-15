@@ -290,9 +290,6 @@ pub fn writeRangeInlayHint(
     loc: offsets.Loc,
     hover_kind: types.MarkupKind,
 ) error{OutOfMemory}![]InlayHint {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
     var builder: Builder = .{
         .arena = arena,
         .analyser = analyser,

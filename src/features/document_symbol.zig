@@ -223,9 +223,6 @@ pub fn getDocumentSymbols(
     tree: Ast,
     encoding: offsets.Encoding,
 ) error{OutOfMemory}![]types.DocumentSymbol {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
     var root_symbols = std.ArrayListUnmanaged(Symbol){};
     var total_symbol_count: usize = 0;
 

@@ -625,9 +625,6 @@ pub fn getSymbolFieldAccesses(
 }
 
 fn initializeHandler(server: *Server, request: types.InitializeParams) Error!types.InitializeResult {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
     var skip_set_fixall = false;
 
     if (request.clientInfo) |clientInfo| {
@@ -925,6 +922,9 @@ fn requestConfiguration(server: *Server) Error!void {
 }
 
 fn handleConfiguration(server: *Server, json: std.json.Value) error{OutOfMemory}!void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     if (server.replay_enabled) {
         log.info("workspace/configuration are disabled during a replay!", .{});
         return;
@@ -1007,9 +1007,6 @@ fn handleConfiguration(server: *Server, json: std.json.Value) error{OutOfMemory}
 }
 
 fn openDocumentHandler(server: *Server, notification: types.DidOpenTextDocumentParams) Error!void {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
     const handle = try server.document_store.openDocument(notification.textDocument.uri, try server.document_store.allocator.dupeZ(u8, notification.textDocument.text));
 
     if (server.client_capabilities.supports_publish_diagnostics) blk: {
@@ -1020,9 +1017,6 @@ fn openDocumentHandler(server: *Server, notification: types.DidOpenTextDocumentP
 }
 
 fn changeDocumentHandler(server: *Server, notification: types.DidChangeTextDocumentParams) Error!void {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
     // whenever a document changes, any cached info is invalidated
     server.analyser.invalidate();
 
@@ -1040,9 +1034,6 @@ fn changeDocumentHandler(server: *Server, notification: types.DidChangeTextDocum
 }
 
 fn saveDocumentHandler(server: *Server, notification: types.DidSaveTextDocumentParams) Error!void {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
     const allocator = server.arena.allocator();
     const uri = notification.textDocument.uri;
 
@@ -1067,16 +1058,10 @@ fn saveDocumentHandler(server: *Server, notification: types.DidSaveTextDocumentP
 }
 
 fn closeDocumentHandler(server: *Server, notification: types.DidCloseTextDocumentParams) error{}!void {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
     server.document_store.closeDocument(notification.textDocument.uri);
 }
 
 fn willSaveWaitUntilHandler(server: *Server, request: types.WillSaveTextDocumentParams) Error!?[]types.TextEdit {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
     const allocator = server.arena.allocator();
 
     if (server.getAutofixMode() != .will_save_wait_until) return null;
@@ -1090,9 +1075,6 @@ fn willSaveWaitUntilHandler(server: *Server, request: types.WillSaveTextDocument
 }
 
 fn semanticTokensFullHandler(server: *Server, request: types.SemanticTokensParams) Error!?types.SemanticTokens {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
     if (!server.config.enable_semantic_tokens) return null;
 
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
@@ -1101,9 +1083,6 @@ fn semanticTokensFullHandler(server: *Server, request: types.SemanticTokensParam
 }
 
 fn semanticTokensRangeHandler(server: *Server, request: types.SemanticTokensRangeParams) Error!?types.SemanticTokens {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
     if (!server.config.enable_semantic_tokens) return null;
 
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
@@ -1113,9 +1092,6 @@ fn semanticTokensRangeHandler(server: *Server, request: types.SemanticTokensRang
 }
 
 pub fn completionHandler(server: *Server, request: types.CompletionParams) Error!?types.CompletionList {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
 
     const source_index = offsets.positionToIndex(handle.text, request.position, server.offset_encoding);
@@ -1123,9 +1099,6 @@ pub fn completionHandler(server: *Server, request: types.CompletionParams) Error
 }
 
 pub fn signatureHelpHandler(server: *Server, request: types.SignatureHelpParams) Error!?types.SignatureHelp {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
 
     if (request.position.character == 0) return null;
@@ -1153,9 +1126,6 @@ fn gotoDefinitionHandler(
     server: *Server,
     request: types.TextDocumentPositionParams,
 ) Error!?types.Definition {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
     if (request.position.character == 0) return null;
 
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
@@ -1168,9 +1138,6 @@ fn gotoDeclarationHandler(
     server: *Server,
     request: types.TextDocumentPositionParams,
 ) Error!?types.Definition {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
     if (request.position.character == 0) return null;
 
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
@@ -1180,9 +1147,6 @@ fn gotoDeclarationHandler(
 }
 
 pub fn hoverHandler(server: *Server, request: types.HoverParams) Error!?types.Hover {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
     if (request.position.character == 0) return null;
 
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
@@ -1201,18 +1165,11 @@ pub fn hoverHandler(server: *Server, request: types.HoverParams) Error!?types.Ho
 }
 
 pub fn documentSymbolsHandler(server: *Server, request: types.DocumentSymbolParams) Error!?[]types.DocumentSymbol {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
-
     return try document_symbol.getDocumentSymbols(server.arena.allocator(), handle.tree, server.offset_encoding);
 }
 
 pub fn formattingHandler(server: *Server, request: types.DocumentFormattingParams) Error!?[]types.TextEdit {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
 
     if (handle.tree.errors.len != 0) return null;
@@ -1236,9 +1193,6 @@ pub fn formattingHandler(server: *Server, request: types.DocumentFormattingParam
 }
 
 fn didChangeConfigurationHandler(server: *Server, request: configuration.DidChangeConfigurationParams) Error!void {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
     var new_zig_exe = false;
 
     // NOTE: VS Code seems to always respond with null
@@ -1281,25 +1235,16 @@ fn didChangeConfigurationHandler(server: *Server, request: configuration.DidChan
 }
 
 pub fn renameHandler(server: *Server, request: types.RenameParams) Error!?types.WorkspaceEdit {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
     const response = try generalReferencesHandler(server, .{ .rename = request });
     return if (response) |rep| rep.rename else null;
 }
 
 pub fn referencesHandler(server: *Server, request: types.ReferenceParams) Error!?[]types.Location {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
     const response = try generalReferencesHandler(server, .{ .references = request });
     return if (response) |rep| rep.references else null;
 }
 
 pub fn documentHighlightHandler(server: *Server, request: types.DocumentHighlightParams) Error!?[]types.DocumentHighlight {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
     const response = try generalReferencesHandler(server, .{ .highlight = request });
     return if (response) |rep| rep.highlight else null;
 }
@@ -1418,9 +1363,6 @@ pub fn generalReferencesHandler(server: *Server, request: GeneralReferencesReque
 }
 
 fn inlayHintHandler(server: *Server, request: types.InlayHintParams) Error!?[]types.InlayHint {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
     if (!server.config.enable_inlay_hints) return null;
 
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
@@ -1478,9 +1420,6 @@ fn inlayHintHandler(server: *Server, request: types.InlayHintParams) Error!?[]ty
 }
 
 fn codeActionHandler(server: *Server, request: types.CodeActionParams) Error!?[]types.CodeAction {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
 
     var builder = code_actions.Builder{
@@ -1509,9 +1448,6 @@ fn codeActionHandler(server: *Server, request: types.CodeActionParams) Error!?[]
 }
 
 fn foldingRangeHandler(server: *Server, request: types.FoldingRangeParams) Error!?[]types.FoldingRange {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
     const allocator = server.arena.allocator();
 
@@ -1519,9 +1455,6 @@ fn foldingRangeHandler(server: *Server, request: types.FoldingRangeParams) Error
 }
 
 fn selectionRangeHandler(server: *Server, request: types.SelectionRangeParams) Error!?[]*selection_range.SelectionRange {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
     const allocator = server.arena.allocator();
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
 
@@ -1602,6 +1535,9 @@ const Message = union(enum) {
     }
 
     pub fn fromJsonValueTree(tree: std.json.ValueTree) error{InvalidRequest}!Message {
+        const tracy_zone = tracy.trace(@src());
+        defer tracy_zone.end();
+
         if (tree.root != .Object) return error.InvalidRequest;
         const object = tree.root.Object;
 
@@ -1695,15 +1631,6 @@ pub fn maybeFreeArena(server: *Server) void {
 pub fn processMessage(server: *Server, message: Message) Error!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
-
-    if (message.method()) |name| {
-        tracy_zone.setName(name);
-    } else if (message.id()) |id| {
-        switch (id) {
-            .integer => {},
-            .string => |name| tracy_zone.setName(name),
-        }
-    }
 
     switch (message) {
         .RequestMessage => |request| {
@@ -1820,12 +1747,19 @@ pub fn processMessage(server: *Server, message: Message) Error!void {
             const ParamsType = handler_info.params[1].type.?; // TODO add error message on null
 
             const params: ParamsType = tres.parse(ParamsType, message.params().?, server.arena.allocator()) catch return error.InternalError;
-            const response = handler(server, params) catch |err| {
-                log.err("got {} error while handling {s}", .{ err, method });
-                if (@errorReturnTrace()) |trace| {
-                    std.debug.dumpStackTrace(trace.*);
-                }
-                return error.InternalError;
+
+            const response = blk: {
+                const tracy_zone2 = tracy.trace(@src());
+                defer tracy_zone2.end();
+                tracy_zone2.setName(method);
+
+                break :blk handler(server, params) catch |err| {
+                    log.err("got {} error while handling {s}", .{ err, method });
+                    if (@errorReturnTrace()) |trace| {
+                        std.debug.dumpStackTrace(trace.*);
+                    }
+                    return error.InternalError;
+                };
             };
 
             if (@TypeOf(response) == void) return;

@@ -180,9 +180,6 @@ pub fn goto(
     handle: *const DocumentStore.Handle,
     resolve_alias: bool,
 ) !?types.Definition {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
     const pos_context = try Analyser.getPositionContext(server.arena.allocator(), handle.text, source_index, true);
 
     return switch (pos_context) {

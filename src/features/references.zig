@@ -7,6 +7,7 @@ const Analyser = @import("../analysis.zig");
 const types = @import("../lsp.zig");
 const offsets = @import("../offsets.zig");
 const ast = @import("../ast.zig");
+const tracy = @import("../tracy.zig");
 
 pub fn labelReferences(
     allocator: std.mem.Allocator,
@@ -14,6 +15,9 @@ pub fn labelReferences(
     encoding: offsets.Encoding,
     include_decl: bool,
 ) error{OutOfMemory}!std.ArrayListUnmanaged(types.Location) {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     std.debug.assert(decl.decl.* == .label_decl); // use `symbolReferences` instead
     const handle = decl.handle;
     const tree = handle.tree;
@@ -149,6 +153,9 @@ pub fn symbolReferences(
     /// search other files for references
     workspace: bool,
 ) error{OutOfMemory}!std.ArrayListUnmanaged(types.Location) {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     std.debug.assert(decl_handle.decl.* != .label_decl); // use `labelReferences` instead
 
     var builder = Builder{

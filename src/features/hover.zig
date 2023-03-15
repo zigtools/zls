@@ -242,9 +242,6 @@ pub fn hoverDefinitionFieldAccess(
 }
 
 pub fn hover(server: *Server, source_index: usize, handle: *const DocumentStore.Handle) !?types.Hover {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
     const pos_context = try Analyser.getPositionContext(server.arena.allocator(), handle.text, source_index, true);
 
     const response = switch (pos_context) {
