@@ -1926,8 +1926,6 @@ pub const DeclWithHandle = struct {
     }
 
     pub fn resolveType(self: DeclWithHandle, analyser: *Analyser) !?TypeWithHandle {
-        std.log.info("TRES", .{});
-
         const tree = self.handle.tree;
         const node_tags = tree.nodes.items(.tag);
         const main_tokens = tree.nodes.items(.main_token);
@@ -1953,13 +1951,16 @@ pub const DeclWithHandle = struct {
                         var buf: [1]Ast.Node.Index = undefined;
                         var call = handle.tree.fullCall(&buf, ref.call_node).?;
 
+                        if (pay.param_idx >= call.ast.params.len) continue;
+
                         if (try analyser.resolveTypeOfNode(.{
-                            .node = call.ast.params[pay.param_idx], // TODO: add check + self call (-1)
+                            .node = call.ast.params[pay.param_idx], // TODO: self call (-1)
                             .handle = handle,
                         })) |ty| {
+                            var loc = offsets.tokenToPosition(handle.tree, main_tokens[call.ast.params[pay.param_idx]], .@"utf-8");
                             try possible.append(analyser.arena, .{ // TODO: Dedup
                                 .type_with_handle = ty,
-                                .descriptor = "TODO",
+                                .descriptor = try std.fmt.allocPrint(analyser.arena, "{s}:{d}:{d}", .{ handle.uri, loc.line + 1, loc.character + 1 }),
                             });
                         }
                     }
@@ -2941,6 +2942,8 @@ fn makeScopeInternal(context: ScopeContext, node_idx: Ast.Node.Index) error{OutO
                             .items = switch_case.ast.values,
                         },
                     });
+
+                    try makeScopeInternal(context, switch_case.ast.target_expr);
                 } else {
                     try makeScopeInternal(context, switch_case.ast.target_expr);
                 }
