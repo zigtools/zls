@@ -86,7 +86,7 @@ The following options are currently available.
 | `zig_lib_path` | `?[]const u8` | `null` | Zig library path, e.g. `/path/to/zig/lib/zig`, used to analyze std library imports |
 | `zig_exe_path` | `?[]const u8` | `null` | Zig executable path, e.g. `/path/to/zig/zig`, used to run the custom build runner. If `null`, zig is looked up in `PATH`. Will be used to infer the zig standard library path if none is provided |
 | `build_runner_path` | `?[]const u8` | `null` | Path to the `build_runner.zig` file provided by zls. null is equivalent to `${executable_directory}/build_runner.zig` |
-| `global_cache_path` | `?[]const u8` | `null` | Path to a directory that will be used as zig's cache. null is equivalent to `${KnownFloders.Cache}/zls` |
+| `global_cache_path` | `?[]const u8` | `null` | Path to a directory that will be used as zig's cache. null is equivalent to `${KnownFolders.Cache}/zls` |
 | `build_runner_global_cache_path` | `?[]const u8` | `null` | Path to a directory that will be used as the global cache path when executing a projects build.zig. null is equivalent to the path shown by `zig env` |
 <!-- DO NOT EDIT -->
 
