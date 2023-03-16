@@ -10,8 +10,70 @@ const ConfigOption = struct {
     description: []const u8,
     /// zig type in string form. e.g "u32", "[]const u8", "?usize"
     type: []const u8,
+    /// if the zig type should be an enum, this should contain
+    /// a list of enum values and `type`
+    /// If this is set, the value `type` should to be `enum`
+    @"enum": ?[]const []const u8 = null,
     /// used in Config.zig as the default initializer
     default: []const u8,
+
+    fn getTypescriptType(self: ConfigOption) error{UnsupportedType}![]const u8 {
+        return if (std.mem.eql(u8, self.type, "?[]const u8"))
+            "string"
+        else if (std.mem.eql(u8, self.type, "bool"))
+            "boolean"
+        else if (std.mem.eql(u8, self.type, "usize"))
+            "integer"
+        else if (std.mem.eql(u8, self.type, "enum"))
+            "string"
+        else
+            error.UnsupportedType;
+    }
+
+    fn formatZigType(
+        config: ConfigOption,
+        comptime fmt: []const u8,
+        options: std.fmt.FormatOptions,
+        writer: anytype,
+    ) !void {
+        _ = options;
+        if (fmt.len != 0) return std.fmt.invalidFmtError(fmt, ConfigOption);
+        if (config.@"enum") |enum_members| {
+            try writer.writeAll("enum {");
+            if (enum_members.len > 1) try writer.writeByte(' ');
+            for (enum_members, 0..) |member_name, i| {
+                if (i != 0) try writer.writeAll(", ");
+                try writer.writeAll(member_name);
+            }
+            if (enum_members.len > 1) try writer.writeByte(' ');
+            try writer.writeByte('}');
+            return;
+        }
+        try writer.writeAll(config.type);
+    }
+
+    fn fmtZigType(self: ConfigOption) std.fmt.Formatter(formatZigType) {
+        return .{ .data = self };
+    }
+
+    fn formatDefaultValue(
+        config: ConfigOption,
+        comptime fmt: []const u8,
+        options: std.fmt.FormatOptions,
+        writer: anytype,
+    ) !void {
+        _ = options;
+        if (fmt.len != 0) return std.fmt.invalidFmtError(fmt, ConfigOption);
+        if (config.@"enum" != null) {
+            try writer.writeByte('.');
+        }
+        const default = std.mem.trim(u8, config.default, &std.ascii.whitespace);
+        try writer.writeAll(default);
+    }
+
+    fn fmtDefaultValue(self: ConfigOption) std.fmt.Formatter(formatDefaultValue) {
+        return .{ .data = self };
+    }
 };
 
 const Config = struct {
@@ -29,19 +91,9 @@ const Schema = struct {
 const SchemaEntry = struct {
     description: []const u8,
     type: []const u8,
+    @"enum": ?[]const []const u8 = null,
     default: []const u8,
 };
-
-fn zigTypeToTypescript(ty: []const u8) ![]const u8 {
-    return if (std.mem.eql(u8, ty, "?[]const u8"))
-        "string"
-    else if (std.mem.eql(u8, ty, "bool"))
-        "boolean"
-    else if (std.mem.eql(u8, ty, "usize"))
-        "integer"
-    else
-        error.UnsupportedType;
-}
 
 fn generateConfigFile(allocator: std.mem.Allocator, config: Config, path: []const u8) !void {
     _ = allocator;
@@ -64,13 +116,13 @@ fn generateConfigFile(allocator: std.mem.Allocator, config: Config, path: []cons
         try buff_out.writer().print(
             \\
             \\/// {s}
-            \\{s}: {s} = {s},
+            \\{}: {} = {},
             \\
         , .{
             std.mem.trim(u8, option.description, &std.ascii.whitespace),
-            std.mem.trim(u8, option.name, &std.ascii.whitespace),
-            std.mem.trim(u8, option.type, &std.ascii.whitespace),
-            std.mem.trim(u8, option.default, &std.ascii.whitespace),
+            std.zig.fmtId(std.mem.trim(u8, option.name, &std.ascii.whitespace)),
+            option.fmtZigType(),
+            option.fmtDefaultValue(),
         });
     }
 
@@ -98,7 +150,8 @@ fn generateSchemaFile(allocator: std.mem.Allocator, config: Config, path: []cons
     for (config.options) |option| {
         properties.putAssumeCapacityNoClobber(option.name, .{
             .description = option.description,
-            .type = try zigTypeToTypescript(option.type),
+            .type = try option.getTypescriptType(),
+            .@"enum" = option.@"enum",
             .default = option.default,
         });
     }
@@ -116,6 +169,7 @@ fn generateSchemaFile(allocator: std.mem.Allocator, config: Config, path: []cons
         .whitespace = .{
             .indent_level = 1,
         },
+        .emit_null_optional_fields = false,
     }, buff_out.writer());
 
     _ = try buff_out.write("\n}\n");
@@ -150,12 +204,12 @@ fn updateREADMEFile(allocator: std.mem.Allocator, config: Config, path: []const 
 
     for (config.options) |option| {
         try writer.print(
-            \\| `{s}` | `{s}` | `{s}` | {s} |
+            \\| `{s}` | `{s}` | `{}` | {s} |
             \\
         , .{
             std.mem.trim(u8, option.name, &std.ascii.whitespace),
             std.mem.trim(u8, option.type, &std.ascii.whitespace),
-            std.mem.trim(u8, option.default, &std.ascii.whitespace),
+            option.fmtDefaultValue(),
             std.mem.trim(u8, option.description, &std.ascii.whitespace),
         });
     }
@@ -209,19 +263,26 @@ fn generateVSCodeConfigFile(allocator: std.mem.Allocator, config: Config, path: 
         const snake_case_name = try std.fmt.allocPrint(allocator, "zig.zls.{s}", .{option.name});
         defer allocator.free(snake_case_name);
         const name = try snakeCaseToCamelCase(allocator, snake_case_name);
+        errdefer allocator.free(name);
 
-        var parser = std.json.Parser.init(allocator, false);
-        defer parser.deinit();
+        const default: ?std.json.Value = blk: {
+            if (option.@"enum" != null) break :blk .{ .String = option.default };
 
-        var value = try parser.parse(option.default);
-        defer value.deinit();
-        const default = value.root;
+            var parser = std.json.Parser.init(allocator, false);
+            defer parser.deinit();
+
+            var value = try parser.parse(option.default);
+            defer value.deinit();
+
+            break :blk if (value.root != .Null) value.root else null;
+        };
 
         configuration.putAssumeCapacityNoClobber(name, .{
-            .type = try zigTypeToTypescript(option.type),
+            .type = try option.getTypescriptType(),
             .description = option.description,
+            .@"enum" = option.@"enum",
             .format = if (std.mem.indexOf(u8, option.name, "path") != null) "path" else null,
-            .default = if (default == .Null) null else default,
+            .default = default,
         });
     }
 
@@ -1023,7 +1084,7 @@ pub fn main() !void {
 
     try stderr.writeAll(
         \\Changing configuration options may also require editing the `package.json` from zls-vscode at https://github.com/zigtools/zls-vscode/blob/master/package.json
-        \\You can use `zig build gen -Dvscode-config-path=/path/to/output/file.json` to generate the new configuration properties which you can then copy into `package.json`
+        \\You can use `zig build gen -- --vscode-config-path /path/to/output/file.json` to generate the new configuration properties which you can then copy into `package.json`
         \\
     );
 }
