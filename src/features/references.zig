@@ -112,7 +112,7 @@ const Builder = struct {
                     starts[identifier_token],
                 )) orelse return;
 
-                if (std.meta.eql(builder.decl_handle, child)) {
+                if (builder.decl_handle.eql(child)) {
                     try builder.add(handle, identifier_token);
                 }
             },
@@ -132,7 +132,7 @@ const Builder = struct {
                     !left_type.type.is_type_val,
                 )) orelse return;
 
-                if (std.meta.eql(builder.decl_handle, child)) {
+                if (builder.decl_handle.eql(child)) {
                     try builder.add(handle, datas[node].rhs);
                 }
             },
@@ -195,17 +195,15 @@ pub fn symbolReferences(
                 }
 
                 var handle_dependencies = std.ArrayListUnmanaged([]const u8){};
-                defer {
-                    for (handle_dependencies.items) |uri| {
-                        allocator.free(uri);
-                    }
-                    handle_dependencies.deinit(allocator);
-                }
+                defer handle_dependencies.deinit(allocator);
                 try analyser.store.collectDependencies(allocator, handle.*, &handle_dependencies);
 
                 try dependencies.ensureUnusedCapacity(allocator, handle_dependencies.items.len);
                 for (handle_dependencies.items) |uri| {
-                    dependencies.putAssumeCapacity(uri, {});
+                    var gop = dependencies.getOrPutAssumeCapacity(uri);
+                    if (gop.found_existing) {
+                        allocator.free(uri);
+                    }
                 }
             }
 
@@ -285,7 +283,7 @@ const CallBuilder = struct {
         const handle = self.handle;
 
         const node_tags = tree.nodes.items(.tag);
-        // const datas = tree.nodes.items(.data);
+        const datas = tree.nodes.items(.data);
         // const token_tags = tree.tokens.items(.tag);
         const starts = tree.tokens.items(.start);
 
@@ -318,7 +316,26 @@ const CallBuilder = struct {
                             try builder.add(handle, node);
                         }
                     },
-                    // TODO: Field access
+                    .field_access => {
+                        const left_type = try builder.analyser.resolveFieldAccessLhsType(
+                            (try builder.analyser.resolveTypeOfNode(.{ .node = datas[called_node].lhs, .handle = handle })) orelse return,
+                        );
+
+                        const left_type_node = switch (left_type.type.data) {
+                            .other => |n| n,
+                            else => return,
+                        };
+
+                        const child = (try builder.analyser.lookupSymbolContainer(
+                            .{ .node = left_type_node, .handle = left_type.handle },
+                            offsets.tokenToSlice(tree, datas[called_node].rhs),
+                            !left_type.type.is_type_val,
+                        )) orelse return;
+
+                        if (builder.decl_handle.eql(child)) {
+                            try builder.add(handle, node);
+                        }
+                    },
                     else => {},
                 }
             },
@@ -338,7 +355,7 @@ pub fn callsiteReferences(
     /// search other files for references
     workspace: bool,
 ) error{OutOfMemory}!std.ArrayListUnmanaged(Callsite) {
-    std.debug.assert(decl_handle.decl.* != .label_decl); // use `labelReferences` instead
+    std.debug.assert(decl_handle.decl.* == .ast_node);
 
     var builder = CallBuilder{
         .allocator = allocator,
@@ -350,76 +367,42 @@ pub fn callsiteReferences(
     const curr_handle = decl_handle.handle;
     if (include_decl) try builder.add(curr_handle, decl_handle.nameToken());
 
-    switch (decl_handle.decl.*) {
-        .ast_node,
-        .pointer_payload,
-        .switch_payload,
-        .array_payload,
-        .array_index,
-        => {
-            try builder.collectReferences(curr_handle, 0);
+    try builder.collectReferences(curr_handle, 0);
 
-            if (decl_handle.decl.* != .ast_node or !workspace) return builder.callsites;
+    if (!workspace) return builder.callsites;
 
-            var dependencies = std.StringArrayHashMapUnmanaged(void){};
-            defer {
-                for (dependencies.keys()) |uri| {
-                    allocator.free(uri);
-                }
-                dependencies.deinit(allocator);
+    var dependencies = std.StringArrayHashMapUnmanaged(void){};
+    defer {
+        for (dependencies.keys()) |uri| {
+            allocator.free(uri);
+        }
+        dependencies.deinit(allocator);
+    }
+
+    for (analyser.store.handles.values()) |handle| {
+        if (skip_std_references and std.mem.indexOf(u8, handle.uri, "std") != null) {
+            if (!include_decl or !std.mem.eql(u8, handle.uri, curr_handle.uri))
+                continue;
+        }
+
+        var handle_dependencies = std.ArrayListUnmanaged([]const u8){};
+        defer handle_dependencies.deinit(allocator);
+        try analyser.store.collectDependencies(allocator, handle.*, &handle_dependencies);
+
+        try dependencies.ensureUnusedCapacity(allocator, handle_dependencies.items.len);
+        for (handle_dependencies.items) |uri| {
+            var gop = dependencies.getOrPutAssumeCapacity(uri);
+            if (gop.found_existing) {
+                allocator.free(uri);
             }
+        }
+    }
 
-            for (analyser.store.handles.values()) |handle| {
-                if (skip_std_references and std.mem.indexOf(u8, handle.uri, "std") != null) {
-                    if (!include_decl or !std.mem.eql(u8, handle.uri, curr_handle.uri))
-                        continue;
-                }
+    for (dependencies.keys()) |uri| {
+        if (std.mem.eql(u8, uri, curr_handle.uri)) continue;
+        const handle = analyser.store.getOrLoadHandle(uri) orelse continue;
 
-                var handle_dependencies = std.ArrayListUnmanaged([]const u8){};
-                defer {
-                    for (handle_dependencies.items) |uri| {
-                        allocator.free(uri);
-                    }
-                    handle_dependencies.deinit(allocator);
-                }
-                try analyser.store.collectDependencies(allocator, handle.*, &handle_dependencies);
-
-                try dependencies.ensureUnusedCapacity(allocator, handle_dependencies.items.len);
-                for (handle_dependencies.items) |uri| {
-                    dependencies.putAssumeCapacity(uri, {});
-                }
-            }
-
-            for (dependencies.keys()) |uri| {
-                if (std.mem.eql(u8, uri, curr_handle.uri)) continue;
-                const handle = analyser.store.getHandle(uri) orelse continue;
-
-                try builder.collectReferences(handle, 0);
-            }
-        },
-        .param_payload => |payload| blk: {
-            // Rename the param tok.
-            for (curr_handle.document_scope.scopes.items(.data)) |scope_data| {
-                if (scope_data != .function) continue;
-
-                const proto = scope_data.function;
-
-                var buf: [1]Ast.Node.Index = undefined;
-                const fn_proto = curr_handle.tree.fullFnProto(&buf, proto).?;
-
-                var it = fn_proto.iterate(&curr_handle.tree);
-                while (ast.nextFnParam(&it)) |candidate| {
-                    if (!std.meta.eql(candidate, payload.param)) continue;
-
-                    if (curr_handle.tree.nodes.items(.tag)[proto] != .fn_decl) break :blk;
-                    try builder.collectReferences(curr_handle, curr_handle.tree.nodes.items(.data)[proto].rhs);
-                    break :blk;
-                }
-            }
-            log.warn("Could not find param decl's function", .{});
-        },
-        .label_decl => unreachable, // handled separately by labelReferences
-        .error_token => {},
+        try builder.collectReferences(handle, 0);
     }
 
     return builder.callsites;

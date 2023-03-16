@@ -1938,26 +1938,49 @@ pub const DeclWithHandle = struct {
                 if (pay.param.type_expr == 0) {
                     var func_decl = Declaration{ .ast_node = pay.func };
 
+                    var func_buf: [1]Ast.Node.Index = undefined;
+                    const func = tree.fullFnProto(&func_buf, pay.func).?;
+
+                    var func_params_len: usize = 0;
+
+                    var it = func.iterate(&tree);
+                    while (ast.nextFnParam(&it)) |_| {
+                        func_params_len += 1;
+                    }
+
                     var refs = try references.callsiteReferences(analyser.arena, analyser, .{
                         .decl = &func_decl,
                         .handle = self.handle,
-                    }, false, false, true);
+                    }, false, false, false);
+
+                    // TODO: Set `workspace` to true; current problems
+                    // - we gather dependencies, not dependents
+                    // - stack overflow due to cyclically anytype resolution(?)
 
                     var possible = std.ArrayListUnmanaged(Type.EitherEntry){};
 
                     for (refs.items) |ref| {
                         var handle = analyser.store.getOrLoadHandle(ref.uri).?;
 
-                        var buf: [1]Ast.Node.Index = undefined;
-                        var call = handle.tree.fullCall(&buf, ref.call_node).?;
+                        var call_buf: [1]Ast.Node.Index = undefined;
+                        var call = handle.tree.fullCall(&call_buf, ref.call_node).?;
 
-                        if (pay.param_idx >= call.ast.params.len) continue;
+                        const real_param_idx = if (func_params_len != 0 and pay.param_idx != 0 and call.ast.params.len == func_params_len - 1)
+                            pay.param_idx - 1
+                        else
+                            pay.param_idx;
+
+                        if (real_param_idx >= call.ast.params.len) continue;
 
                         if (try analyser.resolveTypeOfNode(.{
-                            .node = call.ast.params[pay.param_idx], // TODO: self call (-1)
+                            // TODO?: this is a """heuristic based approach"""
+                            // perhaps it would be better to use proper self detection
+                            // maybe it'd be a perf issue and this is fine?
+                            // you figure it out future contributor <3
+                            .node = call.ast.params[real_param_idx],
                             .handle = handle,
                         })) |ty| {
-                            var loc = offsets.tokenToPosition(handle.tree, main_tokens[call.ast.params[pay.param_idx]], .@"utf-8");
+                            var loc = offsets.tokenToPosition(handle.tree, main_tokens[call.ast.params[real_param_idx]], .@"utf-8");
                             try possible.append(analyser.arena, .{ // TODO: Dedup
                                 .type_with_handle = ty,
                                 .descriptor = try std.fmt.allocPrint(analyser.arena, "{s}:{d}:{d}", .{ handle.uri, loc.line + 1, loc.character + 1 }),
@@ -2709,6 +2732,11 @@ fn makeScopeInternal(context: ScopeContext, node_idx: Ast.Node.Index) error{OutO
             );
             defer context.popScope();
 
+            // NOTE: We count the param index ourselves
+            // as param_i stops counting; TODO: change this
+
+            var param_index: usize = 0;
+
             var it = func.iterate(&tree);
             while (ast.nextFnParam(&it)) |param| {
                 // Add parameter decls
@@ -2716,12 +2744,13 @@ fn makeScopeInternal(context: ScopeContext, node_idx: Ast.Node.Index) error{OutO
                     try scopes.items(.decls)[scope_index].put(
                         allocator,
                         tree.tokenSlice(name_token),
-                        .{ .param_payload = .{ .param = param, .param_idx = @intCast(u16, it.param_i), .func = node_idx } },
+                        .{ .param_payload = .{ .param = param, .param_idx = @intCast(u16, param_index), .func = node_idx } },
                     );
                 }
                 // Visit parameter types to pick up any error sets and enum
                 //   completions
                 try makeScopeInternal(context, param.type_expr);
+                param_index += 1;
             }
 
             if (fn_tag == .fn_decl) blk: {
