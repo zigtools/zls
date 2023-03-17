@@ -125,7 +125,7 @@
             "default": "null"
         },
         "global_cache_path": {
-            "description": "Path to a directory that will be used as zig's cache. null is equivalent to `${KnownFloders.Cache}/zls`",
+            "description": "Path to a directory that will be used as zig's cache. null is equivalent to `${KnownFolders.Cache}/zls`",
             "type": "string",
             "default": "null"
         },

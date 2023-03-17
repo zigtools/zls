@@ -76,7 +76,7 @@ zig_exe_path: ?[]const u8 = null,
 /// Path to the `build_runner.zig` file provided by zls. null is equivalent to `${executable_directory}/build_runner.zig`
 build_runner_path: ?[]const u8 = null,
 
-/// Path to a directory that will be used as zig's cache. null is equivalent to `${KnownFloders.Cache}/zls`
+/// Path to a directory that will be used as zig's cache. null is equivalent to `${KnownFolders.Cache}/zls`
 global_cache_path: ?[]const u8 = null,
 
 /// Path to a directory that will be used as the global cache path when executing a projects build.zig. null is equivalent to the path shown by `zig env`
