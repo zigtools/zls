@@ -1,12 +1,12 @@
 const std = @import("std");
 const Ast = std.zig.Ast;
 
-const DocumentStore = @import("DocumentStore.zig");
-const Analyser = @import("analysis.zig");
-const ast = @import("ast.zig");
-
-const types = @import("lsp.zig");
-const offsets = @import("offsets.zig");
+const DocumentStore = @import("../DocumentStore.zig");
+const Analyser = @import("../analysis.zig");
+const ast = @import("../ast.zig");
+const types = @import("../lsp.zig");
+const offsets = @import("../offsets.zig");
+const tracy = @import("../tracy.zig");
 
 pub const Builder = struct {
     arena: std.mem.Allocator,
@@ -79,6 +79,9 @@ fn handleNonCamelcaseFunction(builder: *Builder, actions: *std.ArrayListUnmanage
 }
 
 fn handleUnusedFunctionParameter(builder: *Builder, actions: *std.ArrayListUnmanaged(types.CodeAction), loc: offsets.Loc) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const identifier_name = offsets.locToSlice(builder.handle.text, loc);
 
     const tree = builder.handle.tree;
@@ -126,6 +129,9 @@ fn handleUnusedFunctionParameter(builder: *Builder, actions: *std.ArrayListUnman
 }
 
 fn handleUnusedVariableOrConstant(builder: *Builder, actions: *std.ArrayListUnmanaged(types.CodeAction), loc: offsets.Loc) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const identifier_name = offsets.locToSlice(builder.handle.text, loc);
 
     const tree = builder.handle.tree;
@@ -161,6 +167,9 @@ fn handleUnusedVariableOrConstant(builder: *Builder, actions: *std.ArrayListUnma
 }
 
 fn handleUnusedIndexCapture(builder: *Builder, actions: *std.ArrayListUnmanaged(types.CodeAction), loc: offsets.Loc) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const capture_locs = getCaptureLoc(builder.handle.text, loc, true) orelse return;
 
     // TODO support discarding without modifying the capture
@@ -191,6 +200,9 @@ fn handleUnusedIndexCapture(builder: *Builder, actions: *std.ArrayListUnmanaged(
 }
 
 fn handleUnusedCapture(builder: *Builder, actions: *std.ArrayListUnmanaged(types.CodeAction), loc: offsets.Loc) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const capture_locs = getCaptureLoc(builder.handle.text, loc, false) orelse return;
 
     // TODO support discarding without modifying the capture
@@ -216,6 +228,9 @@ fn handleUnusedCapture(builder: *Builder, actions: *std.ArrayListUnmanaged(types
 }
 
 fn handlePointlessDiscard(builder: *Builder, actions: *std.ArrayListUnmanaged(types.CodeAction), loc: offsets.Loc) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const edit_loc = getDiscardLoc(builder.handle.text, loc) orelse return;
 
     try actions.append(builder.arena, .{

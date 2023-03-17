@@ -1,11 +1,12 @@
 const std = @import("std");
-const types = @import("lsp.zig");
-const offsets = @import("offsets.zig");
-const ast = @import("ast.zig");
-const analysis = @import("analysis.zig");
 const Ast = std.zig.Ast;
 const log = std.log.scoped(.zls_document_symbol);
-const tracy = @import("tracy.zig");
+
+const types = @import("../lsp.zig");
+const offsets = @import("../offsets.zig");
+const ast = @import("../ast.zig");
+const analysis = @import("../analysis.zig");
+const tracy = @import("../tracy.zig");
 
 const Symbol = struct {
     name: []const u8,
@@ -222,9 +223,6 @@ pub fn getDocumentSymbols(
     tree: Ast,
     encoding: offsets.Encoding,
 ) error{OutOfMemory}![]types.DocumentSymbol {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
     var root_symbols = std.ArrayListUnmanaged(Symbol){};
     var total_symbol_count: usize = 0;
 
