@@ -2668,13 +2668,14 @@ fn makeScopeInternal(context: ScopeContext, node_idx: Ast.Node.Index) error{OutO
                     },
                     .other,
                 );
-                defer context.popScope();
 
                 try scopes.items(.decls)[scope_index].putNoClobber(allocator, tree.tokenSlice(first_token), .{ .label_decl = .{
                     .label = first_token,
                     .block = node_idx,
                 } });
             }
+
+            defer if (token_tags[first_token] == .identifier) context.popScope();
 
             const scope_index = try context.pushScope(
                 offsets.nodeToLoc(tree, node_idx),
@@ -2785,13 +2786,14 @@ fn makeScopeInternal(context: ScopeContext, node_idx: Ast.Node.Index) error{OutO
                     },
                     .other,
                 );
-                defer context.popScope();
 
                 try scopes.items(.decls)[scope_index].putNoClobber(allocator, tree.tokenSlice(label), .{ .label_decl = .{
                     .label = label,
                     .block = while_node.ast.then_expr,
                 } });
             }
+
+            defer if (while_node.label_token != null) context.popScope();
 
             if (while_node.payload_token) |payload| {
                 const scope_index = try context.pushScope(
@@ -2862,13 +2864,14 @@ fn makeScopeInternal(context: ScopeContext, node_idx: Ast.Node.Index) error{OutO
                     },
                     .other,
                 );
-                defer context.popScope();
 
                 try scopes.items(.decls)[scope_index].putNoClobber(allocator, tree.tokenSlice(label), .{ .label_decl = .{
                     .label = label,
                     .block = for_node.ast.then_expr,
                 } });
             }
+
+            defer if (for_node.label_token != null) context.popScope();
 
             const scope_index = try context.pushScope(
                 .{
