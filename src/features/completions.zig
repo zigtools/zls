@@ -728,12 +728,150 @@ fn kindToSortScore(kind: types.CompletionItemKind) ?[]const u8 {
     };
 }
 
-fn completeDot(server: *Server, handle: *const DocumentStore.Handle) error{OutOfMemory}![]types.CompletionItem {
+/// Given a decl that is an ast_node, tag .simple_var_decl, and it's rhs is a container adds the container fields to completions
+pub fn addStructInitNodeFields(server: *Server, decl: Analyser.DeclWithHandle, completions: *std.ArrayListUnmanaged(types.CompletionItem)) error{OutOfMemory}!void {
+    const node = switch (decl.decl.*) {
+        .ast_node => |ast_node| ast_node,
+        else => return,
+    };
+    const node_tags = decl.handle.tree.nodes.items(.tag);
+    if (node_tags[node] != .simple_var_decl) return;
+    const node_data = decl.handle.tree.nodes.items(.data)[node];
+    if (node_data.rhs != 0) {
+        var buffer: [2]Ast.Node.Index = undefined;
+        const container_decl = Ast.fullContainerDecl(decl.handle.tree, &buffer, node_data.rhs) orelse return;
+        for (container_decl.ast.members) |member| {
+            const field = decl.handle.tree.fullContainerField(member) orelse continue;
+            try completions.append(server.arena.allocator(), .{
+                .label = decl.handle.tree.tokenSlice(field.ast.main_token),
+                .kind = if (field.ast.tuple_like) .Enum else .Field,
+                .detail = Analyser.getContainerFieldSignature(decl.handle.tree, field),
+                .insertText = decl.handle.tree.tokenSlice(field.ast.main_token),
+                .insertTextFormat = .PlainText,
+            });
+        }
+    }
+}
+
+fn completeDot(server: *Server, handle: *const DocumentStore.Handle, source_index: usize) error{OutOfMemory}![]types.CompletionItem {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    var completions = try server.document_store.enumCompletionItems(server.arena.allocator(), handle.*);
+    const allocator = server.arena.allocator();
 
+    struct_init: {
+        const tree = handle.tree;
+        const tokens_start = tree.tokens.items(.start);
+
+        var upper_index = tokens_start.len - 1;
+        const mid = upper_index / 2;
+        const mid_tok_start = tokens_start[mid];
+        if (mid_tok_start < source_index) {
+            // std.log.debug("source_index is in upper half", .{});
+            const quart_index = mid + (mid / 2);
+            const quart_tok_start = tokens_start[quart_index];
+            if (quart_tok_start < source_index) {
+                // std.log.debug("source_index is in upper fourth", .{});
+            } else {
+                upper_index = quart_index;
+                // std.log.debug("source_index is in upper third", .{});
+            }
+        } else {
+            // std.log.debug("source_index is in lower half", .{});
+            const quart_index = mid / 2;
+            const quart_tok_start = tokens_start[quart_index];
+            if (quart_tok_start < source_index) {
+                // std.log.debug("source_index is in second quarth", .{});
+                upper_index = mid;
+            } else {
+                // std.log.debug("source_index is in first quarth", .{});
+                upper_index = quart_index;
+            }
+        }
+
+        // iterate until we find current token loc (should be a .period)
+        while (upper_index > 1) : (upper_index -= 1) {
+            if (tokens_start[upper_index] > source_index) continue;
+            upper_index -= 1;
+            break;
+        }
+
+        const token_tags = tree.tokens.items(.tag);
+
+        // look for an .l_brace (but don't extend past a .semicolon or .r_brace)
+        while (upper_index != 0 and token_tags[upper_index] != .l_brace) {
+            if (token_tags[upper_index] == .semicolon or token_tags[upper_index] == .r_brace) break :struct_init;
+            upper_index -= 1;
+        }
+
+        // the .l_brace should be preceded by an .identifier
+        if (upper_index == 0 or token_tags[upper_index - 1] != .identifier) {
+            break :struct_init;
+        }
+
+        upper_index -= 1; // identifier's index
+        var identifier_loc = offsets.tokenIndexToLoc(tree.source, tokens_start[upper_index]);
+
+        // if this is done as a field access collect all the identifiers, eg `path.to.MyStruct`
+        var identifier_original_start = identifier_loc.start;
+        while ((token_tags[upper_index] == .period or token_tags[upper_index] == .identifier) and upper_index != 0) : (upper_index -= 1) {
+            identifier_loc.start = tokens_start[upper_index];
+        }
+
+        var completions = std.ArrayListUnmanaged(types.CompletionItem){};
+
+        if (identifier_loc.start != identifier_original_start) { // field access
+            const possible_decls = (try server.getSymbolFieldAccesses(handle, identifier_loc.end, identifier_loc));
+            if (possible_decls) |decls| {
+                for (decls) |decl| {
+                    switch (decl.decl.*) {
+                        .ast_node => |node| {
+                            if (try server.analyser.resolveVarDeclAlias(.{ .node = node, .handle = decl.handle })) |result| {
+                                try addStructInitNodeFields(server, result, &completions);
+                                continue;
+                            }
+                            try addStructInitNodeFields(server, decl, &completions);
+                        },
+                        else => continue,
+                    }
+                }
+            }
+        } else { // var_access, but also field_access if the node's rhs is an alias, eg const MyStruct = path.to.MyStruct;
+            const maybe_decl = try server.analyser.lookupSymbolGlobal(handle, tree.source[identifier_loc.start..identifier_loc.end], identifier_loc.end);
+            if (maybe_decl) |local_decl| {
+                const nodes_tags = handle.tree.nodes.items(.tag);
+                const nodes_data = handle.tree.nodes.items(.data);
+                const node_data = nodes_data[local_decl.decl.ast_node];
+                if (node_data.rhs != 0) {
+                    switch (nodes_tags[node_data.rhs]) {
+                        .field_access => { // decl is an alias, ie const MyStruct = path.to.MyStruct;
+                            const node_loc = offsets.nodeToLoc(tree, node_data.rhs);
+                            const possible_decls = (try server.getSymbolFieldAccesses(handle, node_loc.end, node_loc));
+                            if (possible_decls) |decls| {
+                                for (decls) |decl| {
+                                    switch (decl.decl.*) {
+                                        .ast_node => |node| {
+                                            if (try server.analyser.resolveVarDeclAlias(.{ .node = node, .handle = decl.handle })) |result| {
+                                                try addStructInitNodeFields(server, result, &completions);
+                                                continue;
+                                            }
+                                            try addStructInitNodeFields(server, decl, &completions);
+                                        },
+                                        else => continue,
+                                    }
+                                }
+                            }
+                        },
+                        else => try addStructInitNodeFields(server, local_decl, &completions),
+                    }
+                }
+            }
+        }
+
+        if (completions.items.len != 0) return completions.toOwnedSlice(allocator);
+    }
+
+    var completions = try server.document_store.enumCompletionItems(allocator, handle.*);
     return completions;
 }
 
@@ -836,7 +974,7 @@ pub fn completionAtIndex(server: *Server, source_index: usize, handle: *const Do
         .var_access, .empty => try completeGlobal(server, source_index, handle),
         .field_access => |loc| try completeFieldAccess(server, handle, source_index, loc),
         .global_error_set => try completeError(server, handle),
-        .enum_literal => try completeDot(server, handle),
+        .enum_literal => try completeDot(server, handle, source_index),
         .label => try completeLabel(server, source_index, handle),
         .import_string_literal,
         .cinclude_string_literal,
