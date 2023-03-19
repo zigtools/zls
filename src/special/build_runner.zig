@@ -78,32 +78,17 @@ pub fn main() !void {
     cache.addPrefix(local_cache_directory);
     cache.addPrefix(global_cache_directory);
 
-    const builder = blk: {
-        // Zig 0.11.0-dev.1524+
-        const does_builder_need_host = @hasDecl(std, "Build");
+    const host = try std.zig.system.NativeTargetInfo.detect(.{});
 
-        const host = if (does_builder_need_host) try std.zig.system.NativeTargetInfo.detect(.{}) else {};
-
-        if (does_builder_need_host) {
-            break :blk try Build.create(
-                allocator,
-                zig_exe,
-                build_root_directory,
-                local_cache_directory,
-                global_cache_directory,
-                host,
-                &cache,
-            );
-        }
-
-        break :blk try Build.create(
-            allocator,
-            zig_exe,
-            build_root,
-            cache_root,
-            global_cache_root,
-        );
-    };
+    const builder = try Build.create(
+        allocator,
+        zig_exe,
+        build_root_directory,
+        local_cache_directory,
+        global_cache_directory,
+        host,
+        &cache,
+    );
 
     defer builder.destroy();
 
@@ -142,7 +127,7 @@ pub fn main() !void {
 
     // This scans the graph of Steps to find all `OptionsStep`s then reifies them
     // Doing this before the loop to find packages ensures their `GeneratedFile`s have been given paths
-    for (builder.top_level_steps.items) |tls| {
+    for (builder.top_level_steps.values()) |tls| {
         for (tls.step.dependencies.items) |step| {
             try reifyOptions(step);
         }
@@ -151,7 +136,7 @@ pub fn main() !void {
     // TODO: We currently add packages from every LibExeObj step that the install step depends on.
     //       Should we error out or keep one step or something similar?
     // We also flatten them, we should probably keep the nested structure.
-    for (builder.top_level_steps.items) |tls| {
+    for (builder.top_level_steps.values()) |tls| {
         for (tls.step.dependencies.items) |step| {
             try processStep(allocator, &packages, &include_dirs, step);
         }
@@ -168,13 +153,14 @@ pub fn main() !void {
 }
 
 fn reifyOptions(step: *Build.Step) anyerror!void {
-    // Support Zig 0.9.1
-    if (!@hasDecl(OptionsStep, "base_id")) return;
-
     if (step.cast(OptionsStep)) |option| {
         // We don't know how costly the dependency tree might be, so err on the side of caution
         if (step.dependencies.items.len == 0) {
-            try option.step.make();
+            var progress: std.Progress = .{};
+            const main_progress_node = progress.start("", 0);
+            defer main_progress_node.end();
+
+            try option.step.make(main_progress_node);
         }
     }
 
@@ -280,9 +266,6 @@ fn processPkgConfig(
         if (link_object != .system_lib) continue;
         const system_lib = link_object.system_lib;
 
-        // Support Zig 0.9.1
-        if (@TypeOf(system_lib) == []const u8) return;
-
         if (system_lib.use_pkg_config == .no) continue;
 
         getPkgConfigIncludes(allocator, include_dirs, exe, system_lib.name) catch |err| switch (err) {
@@ -311,7 +294,7 @@ fn getPkgConfigIncludes(
     exe: *CompileStep,
     name: []const u8,
 ) !void {
-    if (exe.runPkgConfig(name)) |args| {
+    if (copied_from_zig.runPkgConfig(exe, name)) |args| {
         for (args) |arg| {
             if (std.mem.startsWith(u8, arg, "-I")) {
                 const candidate = arg[2..];
@@ -321,6 +304,146 @@ fn getPkgConfigIncludes(
     } else |err| return err;
 }
 
+// TODO: Having a copy of this is not very nice
+const copied_from_zig = struct {
+    fn runPkgConfig(self: *CompileStep, lib_name: []const u8) ![]const []const u8 {
+        const b = self.step.owner;
+        const pkg_name = match: {
+            // First we have to map the library name to pkg config name. Unfortunately,
+            // there are several examples where this is not straightforward:
+            // -lSDL2 -> pkg-config sdl2
+            // -lgdk-3 -> pkg-config gdk-3.0
+            // -latk-1.0 -> pkg-config atk
+            const pkgs = try getPkgConfigList(b);
+
+            // Exact match means instant winner.
+            for (pkgs) |pkg| {
+                if (std.mem.eql(u8, pkg.name, lib_name)) {
+                    break :match pkg.name;
+                }
+            }
+
+            // Next we'll try ignoring case.
+            for (pkgs) |pkg| {
+                if (std.ascii.eqlIgnoreCase(pkg.name, lib_name)) {
+                    break :match pkg.name;
+                }
+            }
+
+            // Now try appending ".0".
+            for (pkgs) |pkg| {
+                if (std.ascii.indexOfIgnoreCase(pkg.name, lib_name)) |pos| {
+                    if (pos != 0) continue;
+                    if (std.mem.eql(u8, pkg.name[lib_name.len..], ".0")) {
+                        break :match pkg.name;
+                    }
+                }
+            }
+
+            // Trimming "-1.0".
+            if (std.mem.endsWith(u8, lib_name, "-1.0")) {
+                const trimmed_lib_name = lib_name[0 .. lib_name.len - "-1.0".len];
+                for (pkgs) |pkg| {
+                    if (std.ascii.eqlIgnoreCase(pkg.name, trimmed_lib_name)) {
+                        break :match pkg.name;
+                    }
+                }
+            }
+
+            return error.PackageNotFound;
+        };
+
+        var code: u8 = undefined;
+        const stdout = if (b.execAllowFail(&[_][]const u8{
+            "pkg-config",
+            pkg_name,
+            "--cflags",
+            "--libs",
+        }, &code, .Ignore)) |stdout| stdout else |err| switch (err) {
+            error.ProcessTerminated => return error.PkgConfigCrashed,
+            error.ExecNotSupported => return error.PkgConfigFailed,
+            error.ExitCodeFailure => return error.PkgConfigFailed,
+            error.FileNotFound => return error.PkgConfigNotInstalled,
+            else => return err,
+        };
+
+        var zig_args = std.ArrayList([]const u8).init(b.allocator);
+        defer zig_args.deinit();
+
+        var it = std.mem.tokenize(u8, stdout, " \r\n\t");
+        while (it.next()) |tok| {
+            if (std.mem.eql(u8, tok, "-I")) {
+                const dir = it.next() orelse return error.PkgConfigInvalidOutput;
+                try zig_args.appendSlice(&[_][]const u8{ "-I", dir });
+            } else if (std.mem.startsWith(u8, tok, "-I")) {
+                try zig_args.append(tok);
+            } else if (std.mem.eql(u8, tok, "-L")) {
+                const dir = it.next() orelse return error.PkgConfigInvalidOutput;
+                try zig_args.appendSlice(&[_][]const u8{ "-L", dir });
+            } else if (std.mem.startsWith(u8, tok, "-L")) {
+                try zig_args.append(tok);
+            } else if (std.mem.eql(u8, tok, "-l")) {
+                const lib = it.next() orelse return error.PkgConfigInvalidOutput;
+                try zig_args.appendSlice(&[_][]const u8{ "-l", lib });
+            } else if (std.mem.startsWith(u8, tok, "-l")) {
+                try zig_args.append(tok);
+            } else if (std.mem.eql(u8, tok, "-D")) {
+                const macro = it.next() orelse return error.PkgConfigInvalidOutput;
+                try zig_args.appendSlice(&[_][]const u8{ "-D", macro });
+            } else if (std.mem.startsWith(u8, tok, "-D")) {
+                try zig_args.append(tok);
+            } else if (b.debug_pkg_config) {
+                return self.step.fail("unknown pkg-config flag '{s}'", .{tok});
+            }
+        }
+
+        return zig_args.toOwnedSlice();
+    }
+
+    fn execPkgConfigList(self: *std.Build, out_code: *u8) (PkgConfigError || ExecError)![]const PkgConfigPkg {
+        const stdout = try self.execAllowFail(&[_][]const u8{ "pkg-config", "--list-all" }, out_code, .Ignore);
+        var list = std.ArrayList(PkgConfigPkg).init(self.allocator);
+        errdefer list.deinit();
+        var line_it = std.mem.tokenize(u8, stdout, "\r\n");
+        while (line_it.next()) |line| {
+            if (std.mem.trim(u8, line, " \t").len == 0) continue;
+            var tok_it = std.mem.tokenize(u8, line, " \t");
+            try list.append(PkgConfigPkg{
+                .name = tok_it.next() orelse return error.PkgConfigInvalidOutput,
+                .desc = tok_it.rest(),
+            });
+        }
+        return list.toOwnedSlice();
+    }
+
+    fn getPkgConfigList(self: *std.Build) ![]const PkgConfigPkg {
+        if (self.pkg_config_pkg_list) |res| {
+            return res;
+        }
+        var code: u8 = undefined;
+        if (execPkgConfigList(self, &code)) |list| {
+            self.pkg_config_pkg_list = list;
+            return list;
+        } else |err| {
+            const result = switch (err) {
+                error.ProcessTerminated => error.PkgConfigCrashed,
+                error.ExecNotSupported => error.PkgConfigFailed,
+                error.ExitCodeFailure => error.PkgConfigFailed,
+                error.FileNotFound => error.PkgConfigNotInstalled,
+                error.InvalidName => error.PkgConfigNotInstalled,
+                error.PkgConfigInvalidOutput => error.PkgConfigInvalidOutput,
+                else => return err,
+            };
+            self.pkg_config_pkg_list = result;
+            return result;
+        }
+    }
+
+    pub const ExecError = std.Build.ExecError;
+    pub const PkgConfigError = std.Build.PkgConfigError;
+    pub const PkgConfigPkg = std.Build.PkgConfigPkg;
+};
+
 fn runBuild(builder: *Build) anyerror!void {
     switch (@typeInfo(@typeInfo(@TypeOf(root.build)).Fn.return_type.?)) {
         .Void => root.build(builder),
@@ -329,7 +452,7 @@ fn runBuild(builder: *Build) anyerror!void {
     }
 }
 
-fn nextArg(args: [][]const u8, idx: *usize) ?[]const u8 {
+fn nextArg(args: [][:0]const u8, idx: *usize) ?[:0]const u8 {
     if (idx.* >= args.len) return null;
     defer idx.* += 1;
     return args[idx.*];
