@@ -7,7 +7,7 @@ const zls_version = std.builtin.Version{ .major = 0, .minor = 11, .patch = 0 };
 pub fn build(b: *std.build.Builder) !void {
     comptime {
         const current_zig = builtin.zig_version;
-        const min_zig = std.SemanticVersion.parse("0.11.0-dev.1836+28364166e") catch return; // package manager stuff + --build-runner + zls as a library
+        const min_zig = std.SemanticVersion.parse("0.11.0-dev.1836+28364166e") catch unreachable; // package manager stuff + --build-runner + zls as a library
         if (current_zig.order(min_zig) == .lt) {
             @compileError(std.fmt.comptimePrint("Your Zig version v{} does not meet the minimum build requirement of v{}", .{ current_zig, min_zig }));
         }
@@ -30,6 +30,7 @@ pub fn build(b: *std.build.Builder) !void {
     const enable_tracy = b.option(bool, "enable_tracy", "Whether tracy should be enabled.") orelse false;
     const coverage = b.option(bool, "generate_coverage", "Generate coverage data with kcov") orelse false;
     const coverage_output_dir = b.option([]const u8, "coverage_output_dir", "Output directory for coverage data") orelse b.pathJoin(&.{ b.install_prefix, "kcov" });
+    const test_filter = b.option([]const u8, "test-filter", "Skip tests that do not match filter");
 
     exe_options.addOption(shared.ZigVersion, "data_version", b.option(shared.ZigVersion, "data_version", "The Zig version your compiler is.") orelse .master);
     exe_options.addOption(std.log.Level, "log_level", b.option(std.log.Level, "log_level", "The Log Level to be used.") orelse .info);
@@ -39,10 +40,9 @@ pub fn build(b: *std.build.Builder) !void {
     exe_options.addOption(bool, "enable_failing_allocator", b.option(bool, "enable_failing_allocator", "Whether to use a randomly failing allocator.") orelse false);
     exe_options.addOption(u32, "enable_failing_allocator_likelihood", b.option(u32, "enable_failing_allocator_likelihood", "The chance that an allocation will fail is `1/likelihood`") orelse 256);
 
-    const build_root_path = b.pathFromRoot(".");
-
     const version = v: {
         const version_string = b.fmt("{d}.{d}.{d}", .{ zls_version.major, zls_version.minor, zls_version.patch });
+        const build_root_path = b.build_root.path orelse ".";
 
         var code: u8 = undefined;
         const git_describe_untrimmed = b.execAllowFail(&[_][]const u8{
@@ -77,7 +77,7 @@ pub fn build(b: *std.build.Builder) !void {
         }
     };
 
-    exe_options.addOption([:0]const u8, "version", try b.allocator.dupeZ(u8, version));
+    exe_options.addOption([]const u8, "version", version);
 
     const known_folders_module = b.dependency("known_folders", .{}).module("known-folders");
     exe.addModule("known-folders", known_folders_module);
@@ -99,7 +99,7 @@ pub fn build(b: *std.build.Builder) !void {
 
         exe.addIncludePath("src/tracy");
         exe.addCSourceFile(client_cpp, tracy_c_flags);
-        exe.linkSystemLibraryName("c++");
+        exe.linkLibCpp();
         exe.linkLibC();
 
         if (target.isWindows()) {
@@ -110,53 +110,6 @@ pub fn build(b: *std.build.Builder) !void {
 
     exe.pie = pie;
     exe.install();
-
-    const gen_exe = b.addExecutable(.{
-        .name = "zls_gen",
-        .root_source_file = .{ .path = "src/config_gen/config_gen.zig" },
-    });
-    gen_exe.addModule("tres", tres_module);
-
-    const gen_cmd = gen_exe.run();
-    gen_cmd.addArgs(&.{
-        b.pathJoin(&.{ build_root_path, "src", "Config.zig" }),
-        b.pathJoin(&.{ build_root_path, "schema.json" }),
-        b.pathJoin(&.{ build_root_path, "README.md" }),
-        b.pathJoin(&.{ build_root_path, "src", "data" }),
-    });
-    if (b.args) |args| gen_cmd.addArgs(args);
-
-    const gen_step = b.step("gen", "Regenerate config files");
-    gen_step.dependOn(&gen_cmd.step);
-
-    const test_step = b.step("test", "Run all the tests");
-    test_step.dependOn(b.getInstallStep());
-
-    const test_filter = b.option(
-        []const u8,
-        "test-filter",
-        "Skip tests that do not match filter",
-    );
-
-    var tests = b.addTest(.{
-        .root_source_file = .{ .path = "tests/tests.zig" },
-        .target = target,
-        .optimize = .Debug,
-    });
-
-    tests.setFilter(test_filter);
-
-    if (coverage) {
-        const src_dir = b.pathJoin(&.{ build_root_path, "src" });
-        const include_pattern = b.fmt("--include-pattern={s}", .{src_dir});
-
-        tests.setExecCmd(&[_]?[]const u8{
-            "kcov",
-            include_pattern,
-            coverage_output_dir,
-            null,
-        });
-    }
 
     const build_options_module = exe_options.createModule();
 
@@ -169,11 +122,39 @@ pub fn build(b: *std.build.Builder) !void {
             .{ .name = "build_options", .module = build_options_module },
         },
     });
+
+    const gen_exe = b.addExecutable(.{
+        .name = "zls_gen",
+        .root_source_file = .{ .path = "src/config_gen/config_gen.zig" },
+    });
+    gen_exe.addModule("tres", tres_module);
+
+    const gen_cmd = gen_exe.run();
+    gen_cmd.addArgs(&.{
+        b.pathFromRoot("src/Config.zig"),
+        b.pathFromRoot("schema.json"),
+        b.pathFromRoot("README.md"),
+        b.pathFromRoot("src/data"),
+    });
+    if (b.args) |args| gen_cmd.addArgs(args);
+
+    const gen_step = b.step("gen", "Regenerate config files");
+    gen_step.dependOn(&gen_cmd.step);
+
+    const test_step = b.step("test", "Run all the tests");
+    test_step.dependOn(b.getInstallStep());
+
+    var tests = b.addTest(.{
+        .root_source_file = .{ .path = "tests/tests.zig" },
+        .target = target,
+        .optimize = .Debug,
+    });
+
+    tests.setFilter(test_filter);
     tests.addModule("zls", zls_module);
     tests.addModule("tres", tres_module);
     tests.addModule("diffz", diffz_module);
-
-    test_step.dependOn(&tests.step);
+    test_step.dependOn(&b.addRunArtifact(tests).step);
 
     var src_tests = b.addTest(.{
         .root_source_file = .{ .path = "src/zls.zig" },
@@ -181,5 +162,15 @@ pub fn build(b: *std.build.Builder) !void {
         .optimize = .Debug,
     });
     src_tests.setFilter(test_filter);
-    test_step.dependOn(&src_tests.step);
+    test_step.dependOn(&b.addRunArtifact(src_tests).step);
+
+    if (coverage) {
+        const src_dir = b.pathFromRoot("src");
+        const include_pattern = b.fmt("--include-pattern={s}", .{src_dir});
+        const args = &[_]?[]const u8{ "kcov", include_pattern, coverage_output_dir, null };
+
+        tests.setExecCmd(args);
+        src_tests.setExecCmd(args);
+        // TODO merge coverage reports
+    }
 }
