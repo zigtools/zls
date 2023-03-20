@@ -190,7 +190,7 @@ test "completion - captures" {
     , &.{
         .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
     });
-    
+
     try testCompletion(
         \\const S = struct { alpha: u32 };
         \\fn foo(items: [2]S) void {
@@ -404,7 +404,6 @@ test "completion - usingnamespace" {
 }
 
 test "completion - block" {
-    if (true) return error.SkipZigTest;
     try testCompletion(
         \\const foo = blk: {
         \\    break :<cursor>
