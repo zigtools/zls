@@ -1714,7 +1714,7 @@ pub fn getPositionContext(
             // Early exits.
             if (tok.loc.start > new_index) break;
             if (tok.loc.start == new_index) {
-                // Tie-breaking, the curosr is exactly between two tokens, and
+                // Tie-breaking, the cursor is exactly between two tokens, and
                 // `tok` is the latter of the two.
                 if (tok.tag != .identifier) break;
             }
@@ -2664,9 +2664,6 @@ fn makeScopeInternal(context: ScopeContext, node_idx: Ast.Node.Index) error{OutO
             // Visit the function body
             try makeScopeInternal(context, data[node_idx].rhs);
         },
-        .test_decl => {
-            return try makeScopeInternal(context, data[node_idx].rhs);
-        },
         .block,
         .block_semicolon,
         .block_two,
@@ -2956,14 +2953,6 @@ fn makeScopeInternal(context: ScopeContext, node_idx: Ast.Node.Index) error{OutO
                 try makeScopeInternal(context, switch_case.ast.target_expr);
             }
         },
-        .switch_case,
-        .switch_case_inline,
-        .switch_case_one,
-        .switch_case_inline_one,
-        .switch_range,
-        => {
-            return;
-        },
         .global_var_decl,
         .local_var_decl,
         .aligned_var_decl,
@@ -3102,6 +3091,10 @@ fn makeScopeInternal(context: ScopeContext, node_idx: Ast.Node.Index) error{OutO
             try makeScopeInternal(context, expr);
         },
 
+        .switch_case,
+        .switch_case_inline,
+        .switch_case_one,
+        .switch_case_inline_one,
         .@"asm",
         .asm_simple,
         .asm_output,
@@ -3111,14 +3104,18 @@ fn makeScopeInternal(context: ScopeContext, node_idx: Ast.Node.Index) error{OutO
         .string_literal,
         .enum_literal,
         .identifier,
-        .anyframe_type,
         .anyframe_literal,
         .char_literal,
         .number_literal,
         .unreachable_literal,
         .@"continue",
         => {},
-        .@"break", .@"defer" => {
+
+        .test_decl,
+        .@"break",
+        .@"defer",
+        .anyframe_type,
+        => {
             try makeScopeInternal(context, data[node_idx].rhs);
         },
 
@@ -3195,6 +3192,7 @@ fn makeScopeInternal(context: ScopeContext, node_idx: Ast.Node.Index) error{OutO
         .array_access,
         .error_union,
         .for_range,
+        .switch_range,
         => {
             try makeScopeInternal(context, data[node_idx].lhs);
             try makeScopeInternal(context, data[node_idx].rhs);
