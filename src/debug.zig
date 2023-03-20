@@ -56,7 +56,7 @@ pub fn printDocumentScope(doc_scope: analysis.DocumentScope) void {
             scope.loc.start,
             scope.loc.end,
             scope.data,
-            scope.uses.items.len,
+            scope.uses.len,
         });
 
         var decl_it = scope.decls.iterator();
