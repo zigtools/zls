@@ -328,7 +328,9 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: Analyser.Decl
     var allocator = context.server.arena.allocator();
 
     const tree = decl_handle.handle.tree;
-    switch (decl_handle.decl.*) {
+    const decl = decl_handle.decl.*;
+
+    switch (decl) {
         .ast_node => |node| try nodeToCompletion(
             context.server,
             context.completions,
@@ -374,7 +376,7 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: Analyser.Decl
 
             try context.completions.append(allocator, .{
                 .label = name,
-                .kind = .Variable,
+                .kind = if (decl == .label_decl) .Text else .Variable,
                 .insertText = name,
                 .insertTextFormat = .PlainText,
             });

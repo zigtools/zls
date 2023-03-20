@@ -404,7 +404,6 @@ test "completion - usingnamespace" {
 }
 
 test "completion - block" {
-    if (true) return error.SkipZigTest;
     try testCompletion(
         \\const foo = blk: {
         \\    break :<cursor>
