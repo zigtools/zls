@@ -2712,7 +2712,6 @@ fn makeScopeInternal(context: ScopeContext, node_idx: Ast.Node.Index) error{OutO
                     },
                     .other,
                 );
-                defer context.popScope();
 
                 const name_token = payload + @boolToInt(token_tags[payload] == .asterisk);
                 std.debug.assert(token_tags[name_token] == .identifier);
@@ -2726,6 +2725,8 @@ fn makeScopeInternal(context: ScopeContext, node_idx: Ast.Node.Index) error{OutO
                 });
             }
 
+            defer if (if_node.payload_token != null) context.popScope();
+
             try makeScopeInternal(context, if_node.ast.then_expr);
 
             if (if_node.ast.else_expr != 0) {
@@ -2738,11 +2739,13 @@ fn makeScopeInternal(context: ScopeContext, node_idx: Ast.Node.Index) error{OutO
                         },
                         .other,
                     );
-                    defer context.popScope();
 
                     const name = tree.tokenSlice(err_token);
                     try scopes.items(.decls)[scope_index].putNoClobber(allocator, name, .{ .ast_node = if_node.ast.else_expr });
                 }
+
+                defer if (if_node.error_token != null) context.popScope();
+
                 try makeScopeInternal(context, if_node.ast.else_expr);
             }
         },
@@ -2803,7 +2806,6 @@ fn makeScopeInternal(context: ScopeContext, node_idx: Ast.Node.Index) error{OutO
                     },
                     .other,
                 );
-                defer context.popScope();
 
                 const name_token = payload + @boolToInt(token_tags[payload] == .asterisk);
                 std.debug.assert(token_tags[name_token] == .identifier);
@@ -2830,6 +2832,9 @@ fn makeScopeInternal(context: ScopeContext, node_idx: Ast.Node.Index) error{OutO
                     }
                 }
             }
+
+            defer if (while_node.payload_token != null) context.popScope();
+
             try makeScopeInternal(context, while_node.ast.then_expr);
 
             if (while_node.ast.else_expr != 0) {
@@ -2842,11 +2847,13 @@ fn makeScopeInternal(context: ScopeContext, node_idx: Ast.Node.Index) error{OutO
                         },
                         .other,
                     );
-                    defer context.popScope();
 
                     const name = tree.tokenSlice(err_token);
                     try scopes.items(.decls)[scope_index].putNoClobber(allocator, name, .{ .ast_node = while_node.ast.else_expr });
                 }
+
+                defer if (while_node.error_token != null) context.popScope();
+
                 try makeScopeInternal(context, while_node.ast.else_expr);
             }
         },
@@ -2922,7 +2929,6 @@ fn makeScopeInternal(context: ScopeContext, node_idx: Ast.Node.Index) error{OutO
                         },
                         .other,
                     );
-                    defer context.popScope();
 
                     // if payload is *name than get next token
                     const name_token = payload + @boolToInt(token_tags[payload] == .asterisk);
@@ -2936,6 +2942,8 @@ fn makeScopeInternal(context: ScopeContext, node_idx: Ast.Node.Index) error{OutO
                         },
                     });
                 }
+
+                defer if (switch_case.payload_token != null) context.popScope();
 
                 try makeScopeInternal(context, switch_case.ast.target_expr);
             }
@@ -3070,11 +3078,12 @@ fn makeScopeInternal(context: ScopeContext, node_idx: Ast.Node.Index) error{OutO
                     },
                     .other,
                 );
-                defer context.popScope();
 
                 const name = tree.tokenSlice(payload_token);
                 try scopes.items(.decls)[scope_index].putNoClobber(allocator, name, .{ .ast_node = expr });
             }
+
+            defer if (data[node_idx].lhs != 0) context.popScope();
 
             try makeScopeInternal(context, expr);
         },
