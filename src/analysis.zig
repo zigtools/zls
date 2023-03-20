@@ -2512,10 +2512,7 @@ fn makeInnerScope(context: ScopeContext, node_idx: Ast.Node.Index) error{OutOfMe
             try tests.append(allocator, decl);
             continue;
         }
-        if (try scopes.items(.decls)[scope_index].fetchPut(allocator, name, .{ .ast_node = decl })) |existing| {
-            _ = existing;
-            // TODO Record a redefinition error.
-        }
+        try scopes.items(.decls)[scope_index].put(allocator, name, .{ .ast_node = decl });
 
         if (container_decl.ast.enum_token != null) {
             if (std.mem.eql(u8, name, "_")) return;
@@ -2582,9 +2579,7 @@ fn makeScopeInternal(context: ScopeContext, node_idx: Ast.Node.Index) error{OutO
                     .doc_comment, .comma => {},
                     .identifier => {
                         const name = offsets.tokenToSlice(tree, tok_i);
-                        if (try scopes.items(.decls)[scope_index].fetchPut(allocator, name, .{ .error_token = tok_i })) |_| {
-                            // TODO Record a redefinition error.
-                        }
+                        try scopes.items(.decls)[scope_index].put(allocator, name, .{ .error_token = tok_i });
                         const gop = try context.errors.getOrPut(allocator, .{
                             .label = name,
                             .kind = .Constant,
@@ -2619,14 +2614,11 @@ fn makeScopeInternal(context: ScopeContext, node_idx: Ast.Node.Index) error{OutO
             while (ast.nextFnParam(&it)) |param| {
                 // Add parameter decls
                 if (param.name_token) |name_token| {
-                    if (try scopes.items(.decls)[scope_index].fetchPut(
+                    try scopes.items(.decls)[scope_index].put(
                         allocator,
                         tree.tokenSlice(name_token),
                         .{ .param_payload = .{ .param = param, .func = node_idx } },
-                    )) |existing| {
-                        _ = existing;
-                        // TODO record a redefinition error
-                    }
+                    );
                 }
                 // Visit parameter types to pick up any error sets and enum
                 //   completions
@@ -2683,10 +2675,7 @@ fn makeScopeInternal(context: ScopeContext, node_idx: Ast.Node.Index) error{OutO
                 try makeScopeInternal(context, idx);
                 if (tree.fullVarDecl(idx)) |var_decl| {
                     const name = tree.tokenSlice(var_decl.ast.mut_token + 1);
-                    if (try scopes.items(.decls)[scope_index].fetchPut(allocator, name, .{ .ast_node = idx })) |existing| {
-                        _ = existing;
-                        // TODO record a redefinition error.
-                    }
+                    try scopes.items(.decls)[scope_index].put(allocator, name, .{ .ast_node = idx });
                 }
             }
 
@@ -2780,10 +2769,11 @@ fn makeScopeInternal(context: ScopeContext, node_idx: Ast.Node.Index) error{OutO
                     .other,
                 );
 
-                try scopes.items(.decls)[scope_index].putNoClobber(allocator, tree.tokenSlice(label), .{ .label_decl = .{
-                    .label = label,
-                    .block = while_node.ast.then_expr,
-                } });
+                try scopes.items(.decls)[scope_index].putNoClobber(
+                    allocator,
+                    tree.tokenSlice(label),
+                    .{ .label_decl = .{ .label = label, .block = while_node.ast.then_expr } },
+                );
             }
 
             defer if (while_node.label_token != null) context.popScope();
@@ -2813,14 +2803,11 @@ fn makeScopeInternal(context: ScopeContext, node_idx: Ast.Node.Index) error{OutO
                 if (token_tags[name_token + 1] == .comma) {
                     const index_token = name_token + 2;
                     std.debug.assert(token_tags[index_token] == .identifier);
-                    if (try scopes.items(.decls)[scope_index].fetchPut(
+                    try scopes.items(.decls)[scope_index].put(
                         allocator,
                         tree.tokenSlice(index_token),
                         .{ .array_index = index_token },
-                    )) |existing| {
-                        _ = existing;
-                        // TODO Record a redefinition error
-                    }
+                    );
                 }
             }
             try makeScopeInternal(context, while_node.ast.then_expr);
@@ -2838,7 +2825,11 @@ fn makeScopeInternal(context: ScopeContext, node_idx: Ast.Node.Index) error{OutO
                     defer context.popScope();
 
                     const name = tree.tokenSlice(err_token);
-                    try scopes.items(.decls)[scope_index].putNoClobber(allocator, name, .{ .ast_node = while_node.ast.else_expr });
+                    try scopes.items(.decls)[scope_index].putNoClobber(
+                        allocator,
+                        name,
+                        .{ .ast_node = while_node.ast.else_expr },
+                    );
                 }
                 try makeScopeInternal(context, while_node.ast.else_expr);
             }
@@ -2858,10 +2849,11 @@ fn makeScopeInternal(context: ScopeContext, node_idx: Ast.Node.Index) error{OutO
                     .other,
                 );
 
-                try scopes.items(.decls)[scope_index].putNoClobber(allocator, tree.tokenSlice(label), .{ .label_decl = .{
-                    .label = label,
-                    .block = for_node.ast.then_expr,
-                } });
+                try scopes.items(.decls)[scope_index].putNoClobber(
+                    allocator,
+                    tree.tokenSlice(label),
+                    .{ .label_decl = .{ .label = label, .block = for_node.ast.then_expr } },
+                );
             }
 
             defer if (for_node.label_token != null) context.popScope();
