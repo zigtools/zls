@@ -2620,10 +2620,6 @@ fn makeScopeInternal(context: ScopeContext, node_idx: Ast.Node.Index) error{OutO
                 }
             }
         },
-        .array_type_sentinel => {
-            // TODO: ???
-            return;
-        },
         .fn_proto,
         .fn_proto_one,
         .fn_proto_simple,
@@ -3067,6 +3063,13 @@ fn makeScopeInternal(context: ScopeContext, node_idx: Ast.Node.Index) error{OutO
             try makeScopeInternal(context, ptr_type.ast.sentinel);
             try makeScopeInternal(context, ptr_type.ast.align_node);
             try makeScopeInternal(context, ptr_type.ast.child_type);
+        },
+        .array_type_sentinel => {
+            const array_type: Ast.full.ArrayType = tree.fullArrayType(node_idx).?;
+
+            try makeScopeInternal(context, array_type.ast.elem_count);
+            try makeScopeInternal(context, array_type.ast.elem_type);
+            try makeScopeInternal(context, array_type.ast.sentinel);
         },
         .slice,
         .slice_open,
