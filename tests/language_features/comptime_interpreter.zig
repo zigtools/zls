@@ -338,7 +338,8 @@ const Context = struct {
         };
         errdefer interpreter.deinit();
 
-        _ = try interpretReportErrors(interpreter, 0, .none);
+        _ = try interpreter.interpret(0, .none, .{});
+        // _ = reportErrors(interpreter);
 
         return .{
             .config = config,
@@ -470,13 +471,7 @@ fn expectEqualKey(ip: InternPool, expected: Key, actual: ?Key) !void {
     }
 }
 
-fn interpretReportErrors(
-    interpreter: *ComptimeInterpreter,
-    node_idx: Ast.Node.Index,
-    namespace: InternPool.NamespaceIndex,
-) !ComptimeInterpreter.InterpretResult {
-    const result = interpreter.interpret(node_idx, namespace, .{});
-
+fn reportErrors(interpreter: *ComptimeInterpreter) void {
     // TODO use ErrorBuilder
     var err_it = interpreter.errors.iterator();
     if (interpreter.errors.count() != 0) {
@@ -488,5 +483,4 @@ fn interpretReportErrors(
             std.debug.print("{d}:{d}: {s}\n", .{ position.line, position.character, entry.value_ptr.message });
         }
     }
-    return result;
 }
