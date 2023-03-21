@@ -121,106 +121,132 @@ test "references - label" {
     );
 }
 
-fn testReferences(source: []const u8) !void {
-    const new_name = "placeholder";
+test "references - cross-file reference" {
+    if (true) return error.SkipZigTest; // TODO
+    try testMFReferences(&.{
+        \\pub const <0> = struct {};
+        ,
+        \\const file = @import("file_0.zig");
+        \\const F = file.<0>;
+    });
+}
 
-    var phr = try helper.collectReplacePlaceholders(allocator, source, new_name);
-    defer phr.deinit(allocator);
+fn testReferences(source: []const u8) !void {
+    return testMFReferences(&.{source});
+}
+
+/// source files have the following name pattern: `file_{d}.zig`
+fn testMFReferences(sources: []const []const u8) !void {
+    const placeholder_name = "placeholder";
 
     var ctx = try Context.init();
     defer ctx.deinit();
 
-    const file_uri = try ctx.addDocument(phr.new_source);
+    const File = struct { source: []const u8, new_source: []const u8 };
+    const LocPair = struct { file_index: usize, old: offsets.Loc, new: offsets.Loc };
 
-    try std.testing.expect(phr.locations.len != 0);
+    var files = std.StringArrayHashMapUnmanaged(File){};
+    defer {
+        for (files.values()) |file| allocator.free(file.new_source);
+        files.deinit(allocator);
+    }
 
-    var i: usize = 0;
-    while (i < phr.locations.len) : (i += 1) {
-        const var_loc = phr.locations.items(.old)[i];
-        const var_name = offsets.locToSlice(source, var_loc);
-        const var_loc_middle = var_loc.start + (var_loc.end - var_loc.start) / 2;
+    var loc_set: std.StringArrayHashMapUnmanaged(std.MultiArrayList(LocPair)) = .{};
+    defer {
+        for (loc_set.values()) |*locs| locs.deinit(allocator);
+        loc_set.deinit(allocator);
+    }
 
-        const params = types.ReferenceParams{
-            .textDocument = .{ .uri = file_uri },
-            .position = offsets.indexToPosition(source, var_loc_middle, ctx.server.offset_encoding),
-            .context = .{ .includeDeclaration = true },
-        };
+    try files.ensureTotalCapacity(allocator, sources.len);
+    for (sources, 0..) |source, file_index| {
+        var phr = try helper.collectReplacePlaceholders(allocator, source, placeholder_name);
+        defer phr.deinit(allocator);
 
-        const response = try ctx.requestGetResponse(?[]types.Location, "textDocument/references", params);
+        const uri = try ctx.addDocument(phr.new_source);
+        files.putAssumeCapacityNoClobber(uri, .{ .source = source, .new_source = phr.new_source });
+        phr.new_source = ""; // `files` takes ownership of `new_source` from `phr`
 
-        var error_builder = ErrorBuilder.init(allocator);
-        defer error_builder.deinit();
-        errdefer {
-            const note_loc = phr.locations.items(.new)[i];
-            error_builder.msgAtLoc("asked for references here", file_uri, note_loc, .info, .{}) catch {};
-            error_builder.writeDebug();
+        for (phr.locations.items(.old), phr.locations.items(.new)) |old, new| {
+            const name = offsets.locToSlice(source, old);
+            const gop = try loc_set.getOrPutValue(allocator, name, .{});
+            try gop.value_ptr.append(allocator, .{ .file_index = file_index, .old = old, .new = new });
         }
+    }
 
-        try error_builder.addFile(file_uri, phr.new_source);
+    var error_builder = ErrorBuilder.init(allocator);
+    defer error_builder.deinit();
+    errdefer error_builder.writeDebug();
 
-        const locations: []types.Location = response.result orelse {
-            std.debug.print("Server returned `null` as the result\n", .{});
-            return error.InvalidResponse;
-        };
+    for (files.keys(), files.values()) |file_uri, file| {
+        try error_builder.addFile(file_uri, file.new_source);
+    }
 
-        for (locations) |response_location| {
-            const actual_name = offsets.rangeToSlice(phr.new_source, response_location.range, ctx.server.offset_encoding);
-            try std.testing.expectEqualStrings(file_uri, response_location.uri);
-            try std.testing.expectEqualStrings(new_name, actual_name);
-        }
+    for (loc_set.values()) |locs| {
+        error_builder.clearMessages();
 
-        // collect all new placeholder locations with the given name
-        const expected_locs: []offsets.Loc = blk: {
-            var locs = std.ArrayListUnmanaged(offsets.Loc){};
-            errdefer locs.deinit(allocator);
+        for (locs.items(.file_index), locs.items(.new)) |file_index, new_loc| {
+            const file = files.values()[file_index];
+            const file_uri = files.keys()[file_index];
 
-            var j: usize = 0;
-            while (j < phr.locations.len) : (j += 1) {
-                const old_loc = phr.locations.items(.old)[j];
-                const new_loc = phr.locations.items(.new)[j];
+            const middle = new_loc.start + (new_loc.end - new_loc.start) / 2;
+            const response = try ctx.requestGetResponse(
+                ?[]types.Location,
+                "textDocument/references",
+                types.ReferenceParams{
+                    .textDocument = .{ .uri = file_uri },
+                    .position = offsets.indexToPosition(file.new_source, middle, ctx.server.offset_encoding),
+                    .context = .{ .includeDeclaration = true },
+                },
+            );
+            try error_builder.msgAtLoc("asked for references here", file_uri, new_loc, .info, .{});
 
-                const old_loc_name = offsets.locToSlice(source, old_loc);
-                if (!std.mem.eql(u8, var_name, old_loc_name)) continue;
-                try locs.append(allocator, new_loc);
-            }
-
-            break :blk try locs.toOwnedSlice(allocator);
-        };
-        defer allocator.free(expected_locs);
-
-        // keeps track of expected locations that have been given by the server
-        // used to detect double references and missing references
-        var visited = try std.DynamicBitSetUnmanaged.initEmpty(allocator, expected_locs.len);
-        defer visited.deinit(allocator);
-
-        for (locations) |response_location| {
-            const actual_loc = offsets.rangeToLoc(phr.new_source, response_location.range, ctx.server.offset_encoding);
-
-            const index = found_index: {
-                for (expected_locs, 0..) |expected_loc, idx| {
-                    if (expected_loc.start != actual_loc.start) continue;
-                    if (expected_loc.end != actual_loc.end) continue;
-                    break :found_index idx;
-                }
-                try error_builder.msgAtLoc("server returned unexpected reference!", file_uri, actual_loc, .err, .{});
-                return error.UnexpectedReference;
+            const actual_locations: []const types.Location = response.result orelse {
+                std.debug.print("Server returned `null` as the result\n", .{});
+                return error.InvalidResponse;
             };
 
-            if (visited.isSet(index)) {
-                try error_builder.msgAtLoc("server returned duplicate reference!", file_uri, actual_loc, .err, .{});
-                return error.DuplicateReference;
-            } else {
-                visited.set(index);
+            // keeps track of expected locations that have been given by the server
+            // used to detect double references and missing references
+            var visited = try std.DynamicBitSetUnmanaged.initEmpty(allocator, locs.len);
+            defer visited.deinit(allocator);
+
+            for (actual_locations) |response_location| {
+                const actual_loc = offsets.rangeToLoc(file.new_source, response_location.range, ctx.server.offset_encoding);
+                const actual_file_index = files.getIndex(response_location.uri) orelse {
+                    std.debug.print("received location to unknown file `{s}` as the result\n", .{response_location.uri});
+                    return error.InvalidReference;
+                };
+
+                const index = found_index: {
+                    for (locs.items(.new), locs.items(.file_index), 0..) |expected_loc, expected_file_index, idx| {
+                        if (expected_file_index != actual_file_index) continue;
+                        if (expected_loc.start != actual_loc.start) continue;
+                        if (expected_loc.end != actual_loc.end) continue;
+                        break :found_index idx;
+                    }
+                    try error_builder.msgAtLoc("server returned unexpected reference!", file_uri, actual_loc, .err, .{});
+                    return error.UnexpectedReference;
+                };
+
+                if (visited.isSet(index)) {
+                    try error_builder.msgAtLoc("server returned duplicate reference!", file_uri, actual_loc, .err, .{});
+                    return error.DuplicateReference;
+                } else {
+                    visited.set(index);
+                }
             }
-        }
 
-        var has_unvisited = false;
-        var unvisited_it = visited.iterator(.{ .kind = .unset });
-        while (unvisited_it.next()) |index| {
-            try error_builder.msgAtLoc("expected reference here!", file_uri, expected_locs[index], .err, .{});
-            has_unvisited = true;
-        }
+            var has_unvisited = false;
+            var unvisited_it = visited.iterator(.{ .kind = .unset });
+            while (unvisited_it.next()) |index| {
+                const unvisited_file_index = locs.items(.file_index)[index];
+                const unvisited_uri = files.keys()[unvisited_file_index];
+                const unvisited_loc = locs.items(.new)[index];
+                try error_builder.msgAtLoc("expected reference here!", unvisited_uri, unvisited_loc, .err, .{});
+                has_unvisited = true;
+            }
 
-        if (has_unvisited) return error.ExpectedReference;
+            if (has_unvisited) return error.ExpectedReference;
+        }
     }
 }
