@@ -56,15 +56,14 @@ test "references - local scope" {
         \\    return <0> + bar;
         \\}
     );
-    if (true) return error.SkipZigTest; // TODO
     try testReferences(
-        \\const foo = blk: {
-        \\    _ = blk: {
+        \\const foo = outer: {
+        \\    _ = inner: {
         \\        const <0> = 0;
-        \\        break :blk <0>;
+        \\        break :inner <0>;
         \\    };
         \\    const <1> = 0;
-        \\    break :blk <1>;
+        \\    break :outer <1>;
         \\};
         \\const bar = foo;
     );
