@@ -9,7 +9,7 @@ const ast = @import("ast.zig");
 const tracy = @import("tracy.zig");
 const ComptimeInterpreter = @import("ComptimeInterpreter.zig");
 const InternPool = ComptimeInterpreter.InternPool;
-const references = @import("references.zig");
+const references = @import("features/references.zig");
 
 const Analyser = @This();
 
