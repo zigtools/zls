@@ -148,13 +148,15 @@ fn testReferences(source: []const u8) !void {
 
         const response = try ctx.requestGetResponse(?[]types.Location, "textDocument/references", params);
 
-        var error_builder = ErrorBuilder.init(allocator, phr.new_source);
+        var error_builder = ErrorBuilder.init(allocator);
         defer error_builder.deinit();
         errdefer {
             const note_loc = phr.locations.items(.new)[i];
-            error_builder.msgAtLoc("asked for references here", note_loc, .info, .{}) catch {};
+            error_builder.msgAtLoc("asked for references here", file_uri, note_loc, .info, .{}) catch {};
             error_builder.writeDebug();
         }
+
+        try error_builder.addFile(file_uri, phr.new_source);
 
         const locations: []types.Location = response.result orelse {
             std.debug.print("Server returned `null` as the result\n", .{});
@@ -200,12 +202,12 @@ fn testReferences(source: []const u8) !void {
                     if (expected_loc.end != actual_loc.end) continue;
                     break :found_index idx;
                 }
-                try error_builder.msgAtLoc("server returned unexpected reference!", actual_loc, .err, .{});
+                try error_builder.msgAtLoc("server returned unexpected reference!", file_uri, actual_loc, .err, .{});
                 return error.UnexpectedReference;
             };
 
             if (visited.isSet(index)) {
-                try error_builder.msgAtLoc("server returned duplicate reference!", actual_loc, .err, .{});
+                try error_builder.msgAtLoc("server returned duplicate reference!", file_uri, actual_loc, .err, .{});
                 return error.DuplicateReference;
             } else {
                 visited.set(index);
@@ -215,7 +217,7 @@ fn testReferences(source: []const u8) !void {
         var has_unvisited = false;
         var unvisited_it = visited.iterator(.{ .kind = .unset });
         while (unvisited_it.next()) |index| {
-            try error_builder.msgAtLoc("expected reference here!", expected_locs[index], .err, .{});
+            try error_builder.msgAtLoc("expected reference here!", file_uri, expected_locs[index], .err, .{});
             has_unvisited = true;
         }
 

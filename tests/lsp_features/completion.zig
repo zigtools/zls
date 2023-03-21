@@ -190,7 +190,7 @@ test "completion - captures" {
     , &.{
         .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
     });
-    
+
     try testCompletion(
         \\const S = struct { alpha: u32 };
         \\fn foo(items: [2]S) void {
@@ -452,9 +452,11 @@ fn testCompletion(source: []const u8, expected_completions: []const Completion) 
     var unexpected = try set_difference(actual, expected);
     defer unexpected.deinit(allocator);
 
-    var error_builder = ErrorBuilder.init(allocator, text);
+    var error_builder = ErrorBuilder.init(allocator);
     defer error_builder.deinit();
     errdefer error_builder.writeDebug();
+
+    try error_builder.addFile(test_uri, text);
 
     for (found.keys()) |label| {
         const actual_completion: types.CompletionItem = blk: {
@@ -472,7 +474,7 @@ fn testCompletion(source: []const u8, expected_completions: []const Completion) 
         };
 
         if (actual_completion.kind == null or expected_completion.kind != actual_completion.kind.?) {
-            try error_builder.msgAtIndex("label '{s}' should be of kind '{s}' but was '{?s}'!", cursor_idx, .err, .{
+            try error_builder.msgAtIndex("label '{s}' should be of kind '{s}' but was '{?s}'!", test_uri, cursor_idx, .err, .{
                 label,
                 @tagName(expected_completion.kind),
                 if (actual_completion.kind) |kind| @tagName(kind) else null,
@@ -483,7 +485,7 @@ fn testCompletion(source: []const u8, expected_completions: []const Completion) 
         if (expected_completion.detail == null) continue;
         if (actual_completion.detail != null and std.mem.eql(u8, expected_completion.detail.?, actual_completion.detail.?)) continue;
 
-        try error_builder.msgAtIndex("label '{s}' should have detail '{?s}' but was '{?s}'!", cursor_idx, .err, .{
+        try error_builder.msgAtIndex("label '{s}' should have detail '{?s}' but was '{?s}'!", test_uri, cursor_idx, .err, .{
             label,
             expected_completion.detail,
             actual_completion.detail,
@@ -499,7 +501,7 @@ fn testCompletion(source: []const u8, expected_completions: []const Completion) 
         try printLabels(out, found, "found");
         try printLabels(out, missing, "missing");
         try printLabels(out, unexpected, "unexpected");
-        try error_builder.msgAtIndex("invalid completions\n{s}", cursor_idx, .err, .{buffer.items});
+        try error_builder.msgAtIndex("invalid completions\n{s}", test_uri, cursor_idx, .err, .{buffer.items});
         return error.InvalidCompletions;
     }
 }

@@ -975,9 +975,11 @@ fn testSemanticTokens(source: [:0]const u8, expected_tokens: []const TokenData) 
     const actual = response.result.data;
     try std.testing.expect(actual.len % 5 == 0); // every token is represented by 5 integers
 
-    var error_builder = ErrorBuilder.init(allocator, source);
+    var error_builder = ErrorBuilder.init(allocator);
     defer error_builder.deinit();
     errdefer error_builder.writeDebug();
+
+    try error_builder.addFile(uri, source);
 
     var token_it = std.mem.window(u32, actual, 5, 5);
     var position: types.Position = .{ .line = 0, .character = 0 };
@@ -985,7 +987,7 @@ fn testSemanticTokens(source: [:0]const u8, expected_tokens: []const TokenData) 
 
     for (expected_tokens) |expected_token| {
         const token_data = token_it.next() orelse {
-            try error_builder.msgAtIndex("expected a `{s}` token here", last_token_end, .err, .{expected_token.@"0"});
+            try error_builder.msgAtIndex("expected a `{s}` token here", uri, last_token_end, .err, .{expected_token.@"0"});
             return error.ExpectedToken;
         };
 
@@ -1012,13 +1014,13 @@ fn testSemanticTokens(source: [:0]const u8, expected_tokens: []const TokenData) 
         const expected_token_modifiers = expected_token.@"2";
 
         if (!std.mem.eql(u8, expected_token_source, token_source)) {
-            try error_builder.msgAtLoc("expected `{s}` as the next token but got `{s}` here", token_loc, .err, .{ expected_token_source, token_source });
+            try error_builder.msgAtLoc("expected `{s}` as the next token but got `{s}` here", uri, token_loc, .err, .{ expected_token_source, token_source });
             return error.UnexpectedTokenContent;
         } else if (expected_token_type != token_type) {
-            try error_builder.msgAtLoc("expected token type `{s}` but got `{s}`", token_loc, .err, .{ @tagName(expected_token_type), @tagName(token_type) });
+            try error_builder.msgAtLoc("expected token type `{s}` but got `{s}`", uri, token_loc, .err, .{ @tagName(expected_token_type), @tagName(token_type) });
             return error.UnexpectedTokenType;
         } else if (!std.meta.eql(expected_token_modifiers, token_modifiers)) {
-            try error_builder.msgAtLoc("expected token modifiers `{}` but got `{}`", token_loc, .err, .{ expected_token_modifiers, token_modifiers });
+            try error_builder.msgAtLoc("expected token modifiers `{}` but got `{}`", uri, token_loc, .err, .{ expected_token_modifiers, token_modifiers });
             return error.UnexpectedTokenModifiers;
         }
     }

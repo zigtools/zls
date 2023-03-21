@@ -162,19 +162,22 @@ fn testNodesAtLoc(source: []const u8) !void {
         .end = offsets.nodeToLoc(tree, nodes[nodes.len - 1]).end,
     };
 
-    var error_builder = ErrorBuilder.init(allocator, new_source);
+    const uri = "file.zig";
+    var error_builder = ErrorBuilder.init(allocator);
     defer error_builder.deinit();
     errdefer error_builder.writeDebug();
 
+    try error_builder.addFile(uri, new_source);
+
     if (outer_loc.start != actual_loc.start) {
-        try error_builder.msgAtIndex("actual start here", actual_loc.start, .err, .{});
-        try error_builder.msgAtIndex("expected start here", outer_loc.start, .err, .{});
+        try error_builder.msgAtIndex("actual start here", uri, actual_loc.start, .err, .{});
+        try error_builder.msgAtIndex("expected start here", uri, outer_loc.start, .err, .{});
         return error.LocStartMismatch;
     }
 
     if (outer_loc.end != actual_loc.end) {
-        try error_builder.msgAtIndex("actual end here", actual_loc.end, .err, .{});
-        try error_builder.msgAtIndex("expected end here", outer_loc.end, .err, .{});
+        try error_builder.msgAtIndex("actual end here", uri, actual_loc.end, .err, .{});
+        try error_builder.msgAtIndex("expected end here", uri, outer_loc.end, .err, .{});
         return error.LocEndMismatch;
     }
 }
