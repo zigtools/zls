@@ -33,6 +33,7 @@ pub const Context = struct {
     arena: std.heap.ArenaAllocator,
     config: *Config,
     request_id: u32 = 1,
+    file_id: u32 = 0,
 
     pub fn init() !Context {
         var config = try allocator.create(Config);
@@ -150,10 +151,15 @@ pub const Context = struct {
 
     // helper
     pub fn addDocument(self: *Context, source: []const u8) ![]const u8 {
-        const uri: []const u8 = switch (builtin.os.tag) {
-            .windows => "file:///C:\\test.zig",
-            else => "file:///test.zig",
+        const fmt = switch (builtin.os.tag) {
+            .windows => "file:///C:\\test-{d}.zig",
+            else => "file:///test-{d}.zig",
         };
+        const uri = try std.fmt.allocPrint(
+            self.arena.allocator(),
+            fmt,
+            .{self.file_id},
+        );
 
         const open_document = types.DidOpenTextDocumentParams{
             .textDocument = .{
@@ -167,6 +173,8 @@ pub const Context = struct {
         defer allocator.free(params);
 
         try self.notification("textDocument/didOpen", params);
+
+        self.file_id += 1;
         return uri;
     }
 
