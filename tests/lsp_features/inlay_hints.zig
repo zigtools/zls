@@ -98,9 +98,11 @@ fn testInlayHints(source: []const u8) !void {
         return error.InvalidResponse;
     };
 
-    var error_builder = ErrorBuilder.init(allocator, phr.new_source);
+    var error_builder = ErrorBuilder.init(allocator);
     defer error_builder.deinit();
     errdefer error_builder.writeDebug();
+
+    try error_builder.addFile(test_uri, phr.new_source);
 
     var i: usize = 0;
     outer: while (i < phr.locations.len) : (i += 1) {
@@ -116,20 +118,20 @@ fn testInlayHints(source: []const u8) !void {
             if (position.line != hint.position.line or position.character != hint.position.character) continue;
 
             if (!std.mem.endsWith(u8, hint.label, ":")) {
-                try error_builder.msgAtLoc("label `{s}` must end with a colon!", new_loc, .err, .{hint.label});
+                try error_builder.msgAtLoc("label `{s}` must end with a colon!", test_uri, new_loc, .err, .{hint.label});
             }
             const actual_label = hint.label[0 .. hint.label.len - 1];
 
             if (!std.mem.eql(u8, expected_label, actual_label)) {
-                try error_builder.msgAtLoc("expected label `{s}` here but got `{s}`!", new_loc, .err, .{ expected_label, actual_label });
+                try error_builder.msgAtLoc("expected label `{s}` here but got `{s}`!", test_uri, new_loc, .err, .{ expected_label, actual_label });
             }
             if (hint.kind != types.InlayHintKind.Parameter) {
-                try error_builder.msgAtLoc("hint kind should be `{s}` but got `{s}`!", new_loc, .err, .{ @tagName(types.InlayHintKind.Parameter), @tagName(hint.kind) });
+                try error_builder.msgAtLoc("hint kind should be `{s}` but got `{s}`!", test_uri, new_loc, .err, .{ @tagName(types.InlayHintKind.Parameter), @tagName(hint.kind) });
             }
 
             continue :outer;
         }
-        try error_builder.msgAtLoc("expected hint `{s}` here", new_loc, .err, .{expected_label});
+        try error_builder.msgAtLoc("expected hint `{s}` here", test_uri, new_loc, .err, .{expected_label});
     }
 
     if (error_builder.hasMessages()) return error.InvalidResponse;
