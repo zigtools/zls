@@ -728,28 +728,44 @@ fn kindToSortScore(kind: types.CompletionItemKind) ?[]const u8 {
     };
 }
 
-/// Given a decl that is an ast_node, tag .simple_var_decl, and it's rhs is a container adds the container fields to completions
+/// Given a root node decl or a .simple_var_decl (const MyStruct = struct {..}) node decl, adds it's `.container_field*`s to completions
 pub fn addStructInitNodeFields(server: *Server, decl: Analyser.DeclWithHandle, completions: *std.ArrayListUnmanaged(types.CompletionItem)) error{OutOfMemory}!void {
     const node = switch (decl.decl.*) {
         .ast_node => |ast_node| ast_node,
         else => return,
     };
     const node_tags = decl.handle.tree.nodes.items(.tag);
-    if (node_tags[node] != .simple_var_decl) return;
-    const node_data = decl.handle.tree.nodes.items(.data)[node];
-    if (node_data.rhs != 0) {
-        var buffer: [2]Ast.Node.Index = undefined;
-        const container_decl = Ast.fullContainerDecl(decl.handle.tree, &buffer, node_data.rhs) orelse return;
-        for (container_decl.ast.members) |member| {
-            const field = decl.handle.tree.fullContainerField(member) orelse continue;
-            try completions.append(server.arena.allocator(), .{
-                .label = decl.handle.tree.tokenSlice(field.ast.main_token),
-                .kind = if (field.ast.tuple_like) .Enum else .Field,
-                .detail = Analyser.getContainerFieldSignature(decl.handle.tree, field),
-                .insertText = decl.handle.tree.tokenSlice(field.ast.main_token),
-                .insertTextFormat = .PlainText,
-            });
-        }
+    switch (node_tags[node]) {
+        .simple_var_decl => {
+            const node_data = decl.handle.tree.nodes.items(.data)[node];
+            if (node_data.rhs != 0) {
+                var buffer: [2]Ast.Node.Index = undefined;
+                const container_decl = Ast.fullContainerDecl(decl.handle.tree, &buffer, node_data.rhs) orelse return;
+                for (container_decl.ast.members) |member| {
+                    const field = decl.handle.tree.fullContainerField(member) orelse continue;
+                    try completions.append(server.arena.allocator(), .{
+                        .label = decl.handle.tree.tokenSlice(field.ast.main_token),
+                        .kind = if (field.ast.tuple_like) .Enum else .Field,
+                        .detail = Analyser.getContainerFieldSignature(decl.handle.tree, field),
+                        .insertText = decl.handle.tree.tokenSlice(field.ast.main_token),
+                        .insertTextFormat = .PlainText,
+                    });
+                }
+            }
+        },
+        .root => {
+            for (decl.handle.tree.rootDecls()) |root_node| {
+                const field = decl.handle.tree.fullContainerField(@intCast(u32, root_node)) orelse continue;
+                try completions.append(server.arena.allocator(), .{
+                    .label = decl.handle.tree.tokenSlice(field.ast.main_token),
+                    .kind = if (field.ast.tuple_like) .Enum else .Field,
+                    .detail = Analyser.getContainerFieldSignature(decl.handle.tree, field),
+                    .insertText = decl.handle.tree.tokenSlice(field.ast.main_token),
+                    .insertTextFormat = .PlainText,
+                });
+            }
+        },
+        else => {},
     }
 }
 
@@ -820,7 +836,7 @@ fn completeDot(server: *Server, handle: *const DocumentStore.Handle, source_inde
 
         var completions = std.ArrayListUnmanaged(types.CompletionItem){};
 
-        if (identifier_loc.start != identifier_original_start) { // field access
+        if (identifier_loc.start != identifier_original_start) { // path.to.MyStruct{.<cursor> => use field access resolution
             const possible_decls = (try server.getSymbolFieldAccesses(handle, identifier_loc.end, identifier_loc));
             if (possible_decls) |decls| {
                 for (decls) |decl| {
@@ -836,7 +852,7 @@ fn completeDot(server: *Server, handle: *const DocumentStore.Handle, source_inde
                     }
                 }
             }
-        } else { // var_access, but also field_access if the node's rhs is an alias, eg const MyStruct = path.to.MyStruct;
+        } else { // MyStruct{.<cursor> => use var resolution (supports only one level of indirection)
             const maybe_decl = try server.analyser.lookupSymbolGlobal(handle, tree.source[identifier_loc.start..identifier_loc.end], identifier_loc.end);
             if (maybe_decl) |local_decl| {
                 const nodes_tags = handle.tree.nodes.items(.tag);
@@ -844,7 +860,29 @@ fn completeDot(server: *Server, handle: *const DocumentStore.Handle, source_inde
                 const node_data = nodes_data[local_decl.decl.ast_node];
                 if (node_data.rhs != 0) {
                     switch (nodes_tags[node_data.rhs]) {
-                        .field_access => { // decl is an alias, ie const MyStruct = path.to.MyStruct;
+                        // decl is `const Alias = @import("MyStruct.zig");`
+                        .builtin_call_two => {
+                            var buffer: [2]Ast.Node.Index = undefined;
+                            const params = ast.builtinCallParams(tree, node_data.rhs, &buffer).?;
+
+                            const main_tokens = tree.nodes.items(.main_token);
+                            const call_name = tree.tokenSlice(main_tokens[node_data.rhs]);
+
+                            if (std.mem.eql(u8, call_name, "@import")) {
+                                if (params.len == 0) break :struct_init;
+                                const import_param = params[0];
+                                if (nodes_tags[import_param] != .string_literal) break :struct_init;
+
+                                const import_str = tree.tokenSlice(main_tokens[import_param]);
+                                const import_uri = (try server.document_store.uriFromImportStr(allocator, handle.*, import_str[1 .. import_str.len - 1])) orelse break :struct_init;
+
+                                const node_handle = server.document_store.getOrLoadHandle(import_uri) orelse break :struct_init;
+                                var decl = Analyser.Declaration{ .ast_node = 0 };
+                                try addStructInitNodeFields(server, Analyser.DeclWithHandle{ .handle = node_handle, .decl = &decl }, &completions);
+                            }
+                        },
+                        // decl is `const Alias = path.to.MyStruct` or `const Alias = @import("file.zig").MyStruct;`
+                        .field_access => {
                             const node_loc = offsets.nodeToLoc(tree, node_data.rhs);
                             const possible_decls = (try server.getSymbolFieldAccesses(handle, node_loc.end, node_loc));
                             if (possible_decls) |decls| {
@@ -862,6 +900,9 @@ fn completeDot(server: *Server, handle: *const DocumentStore.Handle, source_inde
                                 }
                             }
                         },
+                        // decl is `const AliasB = AliasA;` (alias of an alias)
+                        //.identifier => {},
+                        // decl is `const MyStruct = struct {..}` which is a .simple_var_decl (check is in addStructInitNodeFields)
                         else => try addStructInitNodeFields(server, local_decl, &completions),
                     }
                 }
