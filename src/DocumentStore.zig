@@ -955,6 +955,10 @@ pub fn resolveCImport(self: *DocumentStore, handle: Handle, node: Ast.Node.Index
 
     if (!std.process.can_spawn) return null;
 
+    // FIXME: Re-enable cimport resolution once https://github.com/ziglang/zig/issues/15025 is resolved
+    // Tracking issue: https://github.com/zigtools/zls/issues/1080
+    if (true) return null;
+
     const index = std.mem.indexOfScalar(Ast.Node.Index, handle.cimports.items(.node), node) orelse return null;
 
     const hash: Hash = handle.cimports.items(.hash)[index];
