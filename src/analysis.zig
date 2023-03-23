@@ -1513,6 +1513,26 @@ pub fn getFieldAccessType(analyser: *Analyser, handle: *const DocumentStore.Hand
 
                 current_type = (try analyser.resolveBracketAccessType(current_type orelse return null, if (is_range) .Range else .Single)) orelse return null;
             },
+            .builtin => {
+                const curr_handle = if (current_type == null) handle else current_type.?.handle;
+                if (std.mem.eql(u8, tokenizer.buffer[tok.loc.start..tok.loc.end], "@import")) {
+                    if (tokenizer.next().tag != .l_paren) return null;
+                    var import_str_tok = tokenizer.next(); // should be the .string_literal
+                    if (import_str_tok.tag != .string_literal) return null;
+                    if (import_str_tok.loc.end - import_str_tok.loc.start < 2) return null;
+                    var import_str = offsets.locToSlice(tokenizer.buffer, .{
+                        .start = import_str_tok.loc.start + 1,
+                        .end = import_str_tok.loc.end - 1,
+                    });
+                    const uri = try analyser.store.uriFromImportStr(analyser.arena, curr_handle.*, import_str) orelse return null;
+                    const node_handle = analyser.store.getOrLoadHandle(uri) orelse return null;
+                    current_type = TypeWithHandle.typeVal(NodeWithHandle{ .handle = node_handle, .node = 0 });
+                    _ = tokenizer.next(); // eat the .r_paren
+                } else {
+                    log.debug("Unhandled builtin: {s}", .{offsets.locToSlice(tokenizer.buffer, tok.loc)});
+                    return null;
+                }
+            },
             else => {
                 log.debug("Unimplemented token: {}", .{tok.tag});
                 return null;
