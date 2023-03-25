@@ -343,7 +343,7 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: Analyser.Decl
             .{ "WINNT", {} },
             .{ "WIN64", {} },
         });
-        if (exclusions.has("name")) return;
+        if (exclusions.has(name)) return;
     }
 
     switch (decl_handle.decl.*) {
