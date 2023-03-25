@@ -436,14 +436,11 @@ fn populateSnippedCompletions(
     completions: *std.ArrayListUnmanaged(types.CompletionItem),
     snippets: []const snipped_data.Snipped,
     config: Config,
-    start_with: ?[]const u8,
 ) error{OutOfMemory}!void {
     try completions.ensureUnusedCapacity(allocator, snippets.len);
 
     for (snippets) |snipped| {
-        if (start_with) |needle| {
-            if (!std.mem.startsWith(u8, snipped.label, needle)) continue;
-        }
+        if (!config.enable_snippets and snipped.kind == .Snippet) continue;
 
         completions.appendAssumeCapacity(.{
             .label = snipped.label,
@@ -511,7 +508,7 @@ fn completeGlobal(server: *Server, pos_index: usize, handle: *const DocumentStor
         .orig_handle = handle,
     };
     try server.analyser.iterateSymbolsGlobal(handle, pos_index, declToCompletion, context);
-    try populateSnippedCompletions(server.arena.allocator(), &completions, &snipped_data.generic, server.config.*, null);
+    try populateSnippedCompletions(server.arena.allocator(), &completions, &snipped_data.generic, server.config.*);
 
     if (server.client_capabilities.label_details_support) {
         for (completions.items) |*item| {
@@ -1021,7 +1018,7 @@ pub fn completionAtIndex(server: *Server, source_index: usize, handle: *const Do
     const at_line_start = offsets.lineSliceUntilIndex(handle.tree.source, source_index).len == 0;
     if (at_line_start) {
         var completions = std.ArrayListUnmanaged(types.CompletionItem){};
-        try populateSnippedCompletions(server.arena.allocator(), &completions, &snipped_data.top_level_decl_data, server.config.*, null);
+        try populateSnippedCompletions(server.arena.allocator(), &completions, &snipped_data.top_level_decl_data, server.config.*);
 
         return .{ .isIncomplete = false, .items = completions.items };
     }
