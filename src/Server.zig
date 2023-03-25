@@ -562,22 +562,8 @@ fn initializeHandler(server: *Server, request: types.InitializeParams) Error!typ
                     .full = .{ .bool = true },
                     .range = .{ .bool = true },
                     .legend = .{
-                        .tokenTypes = comptime block: {
-                            const tokTypeFields = std.meta.fields(semantic_tokens.TokenType);
-                            var names: [tokTypeFields.len][]const u8 = undefined;
-                            for (tokTypeFields, &names) |field, *name| {
-                                name.* = field.name;
-                            }
-                            break :block &names;
-                        },
-                        .tokenModifiers = comptime block: {
-                            const tokModFields = std.meta.fields(semantic_tokens.TokenModifiers);
-                            var names: [tokModFields.len][]const u8 = undefined;
-                            for (tokModFields, &names) |field, *name| {
-                                name.* = field.name;
-                            }
-                            break :block &names;
-                        },
+                        .tokenTypes = std.meta.fieldNames(semantic_tokens.TokenType),
+                        .tokenModifiers = std.meta.fieldNames(semantic_tokens.TokenModifiers),
                     },
                 },
             },
