@@ -180,37 +180,12 @@ pub fn symbolReferences(
 
             if (decl_handle.decl.* != .ast_node or !workspace) return builder.locations;
 
-            var dependencies = std.StringArrayHashMapUnmanaged(void){};
-            defer {
-                for (dependencies.keys()) |uri| {
-                    allocator.free(uri);
-                }
-                dependencies.deinit(allocator);
-            }
-
-            for (analyser.store.handles.values()) |handle| {
-                if (skip_std_references and std.mem.indexOf(u8, handle.uri, "std") != null) {
-                    if (!include_decl or !std.mem.eql(u8, handle.uri, curr_handle.uri))
+            for (curr_handle.uris_that_import_this.keys()) |uri| {
+                if (skip_std_references and std.mem.indexOf(u8, uri, "std") != null) {
+                    if (!include_decl or !std.mem.eql(u8, uri, curr_handle.uri))
                         continue;
                 }
 
-                var handle_dependencies = std.ArrayListUnmanaged([]const u8){};
-                defer {
-                    for (handle_dependencies.items) |uri| {
-                        allocator.free(uri);
-                    }
-                    handle_dependencies.deinit(allocator);
-                }
-                try analyser.store.collectDependencies(allocator, handle.*, &handle_dependencies);
-
-                try dependencies.ensureUnusedCapacity(allocator, handle_dependencies.items.len);
-                for (handle_dependencies.items) |uri| {
-                    dependencies.putAssumeCapacity(uri, {});
-                }
-            }
-
-            for (dependencies.keys()) |uri| {
-                if (std.mem.eql(u8, uri, curr_handle.uri)) continue;
                 const handle = analyser.store.getHandle(uri) orelse continue;
 
                 try builder.collectReferences(handle, 0);

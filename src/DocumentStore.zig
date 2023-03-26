@@ -59,8 +59,10 @@ pub const Handle = struct {
     /// Not null if a ComptimeInterpreter is actually used
     interpreter: ?*ComptimeInterpreter = null,
     document_scope: analysis.DocumentScope,
-    /// Contains one entry for every import in the document
+    /// Contains one entry for every import in the document (this_handle -> [other_handle_0, ...])
     import_uris: std.ArrayListUnmanaged(Uri) = .{},
+    /// Contains one entry for every document that imports this document ([other_handle_0, ...] -> this_handle)
+    uris_that_import_this: std.StringArrayHashMapUnmanaged(void) = .{},
     /// Contains one entry for every cimport in the document
     cimports: std.MultiArrayList(CImportHandle) = .{},
 
@@ -82,6 +84,7 @@ pub const Handle = struct {
             allocator.free(import_uri);
         }
         self.import_uris.deinit(allocator);
+        self.uris_that_import_this.deinit(allocator); // keys held by dependents so they are not freed
 
         for (self.cimports.items(.source)) |source| {
             allocator.free(source);
@@ -220,6 +223,8 @@ pub fn refreshDocument(self: *DocumentStore, uri: Uri, new_text: [:0]const u8) !
 
     var new_import_uris = try self.collectImportUris(handle.*);
     for (handle.import_uris.items) |import_uri| {
+        if (self.handles.get(import_uri)) |other_handle|
+            _ = other_handle.uris_that_import_this.swapRemove(uri);
         self.allocator.free(import_uri);
     }
     const old_import_count = handle.import_uris.items.len;
@@ -802,7 +807,7 @@ fn createDocumentFromURI(self: *DocumentStore, uri: Uri, open: bool) error{OutOf
 }
 
 /// Caller owns returned memory.
-fn collectImportUris(self: *const DocumentStore, handle: Handle) error{OutOfMemory}!std.ArrayListUnmanaged(Uri) {
+fn collectImportUris(self: *DocumentStore, handle: Handle) error{OutOfMemory}!std.ArrayListUnmanaged(Uri) {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -822,6 +827,8 @@ fn collectImportUris(self: *const DocumentStore, handle: Handle) error{OutOfMemo
         if (maybe_uri) |uri| {
             // The raw import strings are owned by the document and do not need to be freed here.
             imports.items[i] = uri;
+            if (self.getOrLoadHandle(uri)) |other_handle|
+                try @constCast(other_handle).uris_that_import_this.put(self.allocator, handle.uri, {});
             i += 1;
         } else {
             _ = imports.swapRemove(i);
