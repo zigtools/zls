@@ -29,6 +29,7 @@ const completions = @import("features/completions.zig");
 const goto = @import("features/goto.zig");
 const hover_handler = @import("features/hover.zig");
 const selection_range = @import("features/selection_range.zig");
+const auto_import = @import("features/auto_import.zig");
 
 const tres = @import("tres");
 
@@ -42,6 +43,7 @@ arena: std.heap.ArenaAllocator,
 analyser: Analyser,
 document_store: DocumentStore,
 builtin_completions: ?std.ArrayListUnmanaged(types.CompletionItem),
+auto_import_completions: std.ArrayListUnmanaged(types.CompletionItem),
 client_capabilities: ClientCapabilities = .{},
 runtime_zig_version: ?ZigVersionWrapper,
 outgoing_messages: std.ArrayListUnmanaged([]const u8) = .{},
@@ -1827,6 +1829,7 @@ pub fn create(
             .runtime_zig_version = &server.runtime_zig_version,
         },
         .builtin_completions = null,
+        .auto_import_completions = .{},
         .recording_enabled = recording_enabled,
         .replay_enabled = replay_enabled,
         .status = .uninitialized,
@@ -1834,6 +1837,9 @@ pub fn create(
     server.analyser = Analyser.init(allocator, server.arena.allocator(), &server.document_store);
 
     try configuration.configChanged(config, &server.runtime_zig_version, allocator, config_path);
+    try auto_import.populate(server, &server.auto_import_completions);
+
+    try server.document_store.garbageCollectionImports();
 
     return server;
 }
@@ -1843,6 +1849,10 @@ pub fn destroy(server: *Server) void {
     server.analyser.deinit();
 
     if (server.builtin_completions) |*items| items.deinit(server.allocator);
+    for (server.auto_import_completions.items) |aic| {
+        server.allocator.free(aic.label);
+    }
+    server.auto_import_completions.deinit(server.allocator);
 
     for (server.outgoing_messages.items) |message| {
         server.allocator.free(message);

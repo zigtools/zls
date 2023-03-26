@@ -294,7 +294,7 @@ pub fn invalidateBuildFiles(self: *DocumentStore) void {
 /// a directed edge.
 /// We can remove every document which cannot be reached from
 /// another document that is `open` (see `Handle.open`)
-fn garbageCollectionImports(self: *DocumentStore) error{OutOfMemory}!void {
+pub fn garbageCollectionImports(self: *DocumentStore) error{OutOfMemory}!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 

@@ -21,7 +21,7 @@ semantic_tokens: enum {
     none,
     partial,
     full,
-    
+
     pub const tres_string_enum = true;
 } = .full,
 

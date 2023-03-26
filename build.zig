@@ -123,23 +123,27 @@ pub fn build(b: *std.build.Builder) !void {
         },
     });
 
-    const gen_exe = b.addExecutable(.{
-        .name = "zls_gen",
+    // Config generation
+
+    const config_gen_exe = b.addExecutable(.{
+        .name = "config_gen",
         .root_source_file = .{ .path = "src/config_gen/config_gen.zig" },
     });
-    gen_exe.addModule("tres", tres_module);
+    config_gen_exe.addModule("tres", tres_module);
 
-    const gen_cmd = gen_exe.run();
-    gen_cmd.addArgs(&.{
+    const config_gen_cmd = config_gen_exe.run();
+    config_gen_cmd.addArgs(&.{
         b.pathFromRoot("src/Config.zig"),
         b.pathFromRoot("schema.json"),
         b.pathFromRoot("README.md"),
         b.pathFromRoot("src/data"),
     });
-    if (b.args) |args| gen_cmd.addArgs(args);
+    if (b.args) |args| config_gen_cmd.addArgs(args);
 
-    const gen_step = b.step("gen", "Regenerate config files");
-    gen_step.dependOn(&gen_cmd.step);
+    const config_gen_step = b.step("config-gen", "Regenerate config files");
+    config_gen_step.dependOn(&config_gen_cmd.step);
+
+    // Tests
 
     const test_step = b.step("test", "Run all the tests");
     test_step.dependOn(b.getInstallStep());

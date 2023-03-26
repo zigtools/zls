@@ -45,7 +45,7 @@ zig build -Doptimize=ReleaseSafe
 
 #### Updating Data Files
 
-Run `zig build gen -- --generate-version-data master` to update data files. This command will require an internet connection.
+Run `zig build config-gen -- --generate-version-data master` to update data files. This command will require an internet connection.
 You can replace `master` with a specific zig version like `0.10.0`. Which version ZLS uses can be configured by passing the `-Ddata_version` parameter when building ZLS.
 
 ### Configuration Options
