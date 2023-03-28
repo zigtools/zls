@@ -1,13 +1,13 @@
 // TODO:
 // - third party library support (progressive - only crawl
 //   them when they're found in an open file, then cache)
-// - UX improvements?
 // - add ability to decide between full "path" (std.mem.) and
 //   import+shortened (const mem = ...; ... mem.)
 
 const std = @import("std");
 const log = std.log.scoped(.zls_auto_import);
 
+const Ast = std.zig.Ast;
 const ast = @import("../ast.zig");
 const Server = @import("../Server.zig");
 const DocumentStore = @import("../DocumentStore.zig");
@@ -15,28 +15,36 @@ const Analyser = @import("../analysis.zig");
 const completions = @import("completions.zig");
 const types = @import("../lsp.zig");
 const URI = @import("../uri.zig");
+const offsets = @import("../offsets.zig");
 
-pub fn populate(server: *Server, comps: *std.ArrayListUnmanaged(types.CompletionItem)) !void {
+pub fn init(server: *Server) !Generator {
     const allocator = server.allocator;
 
-    const std_path = try std.fs.path.join(allocator, &.{ server.config.zig_lib_path orelse return, "std", "std.zig" });
+    const std_path = try std.fs.path.join(allocator, &.{ server.config.zig_lib_path orelse return .{ .server = server }, "std", "std.zig" });
     defer allocator.free(std_path);
 
     const std_uri = try URI.fromPath(allocator, std_path);
     defer allocator.free(std_uri);
 
-    var gen = Generator{ .server = server, .completions = comps };
-    try gen.handleScope(try Generator.ImportStack.fromSlice(&.{"std"}), server.document_store.getOrLoadHandle(std_uri).?, 0);
-
-    gen.name_buf.deinit(allocator);
+    var gen = Generator{ .server = server };
+    try gen.handleScope(try ImportStack.fromSlice(&.{.{ .text = "std", .kind = .import }}), server.document_store.getOrLoadHandle(std_uri).?, 0);
+    return gen;
 }
 
-pub const Generator = struct {
-    pub const ImportStack = std.BoundedArray([]const u8, 32);
+pub const ImportSection = struct {
+    text: []const u8,
+    kind: enum {
+        /// [std].[mem].Allocator
+        import,
+        /// std.mem.[Allocator]
+        other,
+    },
+};
+pub const ImportStack = std.BoundedArray(ImportSection, 32);
 
+pub const Generator = struct {
     server: *Server,
-    completions: *std.ArrayListUnmanaged(types.CompletionItem),
-    name_buf: std.ArrayListUnmanaged(u8) = .{},
+    auto_imports: std.ArrayListUnmanaged(ImportStack) = .{},
 
     /// The procedure is quite simple;
     /// Find all decls
@@ -79,16 +87,15 @@ pub const Generator = struct {
                         => .Function,
                         else => continue,
                     };
+                    _ = kind;
 
                     // TODO: Do this correctly using Analyser typeval resolution
                     // how does this impact perf?
 
                     if (!Analyser.isNodePublic(tree, node)) continue;
 
-                    var should_add = Analyser.isPascalCase(decl_name);
-
                     if (tree.fullVarDecl(node)) |full_var| b: {
-                        if (full_var.ast.init_node != 0) {
+                        if (full_var.ast.init_node != 0) c: {
                             try init_map.put(allocator, full_var.ast.init_node, decl_name);
 
                             switch (node_tags[full_var.ast.init_node]) {
@@ -97,7 +104,7 @@ pub const Generator = struct {
                                 .builtin_call_two,
                                 .builtin_call_two_comma,
                                 => {},
-                                else => break :b,
+                                else => break :c,
                             }
 
                             var buffer: [2]std.zig.Ast.Node.Index = undefined;
@@ -105,47 +112,38 @@ pub const Generator = struct {
 
                             const call_name = tree.tokenSlice(main_tokens[full_var.ast.init_node]);
 
-                            if (!std.mem.eql(u8, call_name, "@import")) break :b;
+                            if (!std.mem.eql(u8, call_name, "@import")) break :c;
 
-                            if (params.len == 0) break :b;
+                            if (params.len == 0) break :c;
                             const import_param = params[0];
-                            if (node_tags[import_param] != .string_literal) break :b;
+                            if (node_tags[import_param] != .string_literal) break :c;
 
                             const import_str = tree.tokenSlice(main_tokens[import_param]);
-                            const import_uri = (try gen.server.document_store.uriFromImportStr(allocator, handle.*, import_str[1 .. import_str.len - 1])) orelse break :b;
+                            const import_uri = (try gen.server.document_store.uriFromImportStr(allocator, handle.*, import_str[1 .. import_str.len - 1])) orelse break :c;
                             defer allocator.free(import_uri);
 
-                            const new_handle = gen.server.document_store.getOrLoadHandle(import_uri) orelse break :b;
+                            const new_handle = gen.server.document_store.getOrLoadHandle(import_uri) orelse break :c;
 
                             var new_stack = try ImportStack.fromSlice(stack.constSlice());
-                            try new_stack.append(decl_name);
+                            try new_stack.append(.{
+                                .text = try allocator.dupe(u8, decl_name),
+                                .kind = .import,
+                            });
+
+                            try gen.auto_imports.append(allocator, new_stack);
                             try gen.handleScope(new_stack, new_handle, 0);
 
-                            should_add = true;
+                            break :b;
                         }
-                    }
 
-                    if (should_add) {
-                        gen.name_buf.items.len = 0;
-
-                        for (stack.constSlice()) |part|
-                            try gen.name_buf.writer(allocator).print("{s}.", .{part});
-                        gen.name_buf.items.len -|= 1;
-
-                        const desc = try allocator.dupe(u8, gen.name_buf.items);
-                        const insert = try std.mem.join(allocator, ".", &.{ desc, decl_name });
-
-                        try gen.completions.append(allocator, .{
-                            .label = try allocator.dupe(u8, decl_name),
-                            .kind = kind,
-                            .labelDetails = .{
-                                .description = desc,
-                            },
-                            .insertText = insert,
-                            .filterText = insert,
-                            .sortText = desc,
-                            .commitCharacters = &.{"."},
-                        });
+                        if (Analyser.isPascalCase(decl_name)) {
+                            var new_stack = try ImportStack.fromSlice(stack.constSlice());
+                            try new_stack.append(.{
+                                .text = try allocator.dupe(u8, decl_name),
+                                .kind = .other,
+                            });
+                            try gen.auto_imports.append(allocator, new_stack);
+                        }
                     }
                 },
                 else => {},
@@ -157,11 +155,53 @@ pub const Generator = struct {
 
             if (init_map.get(scope_data_list[@enumToInt(idx)].toNodeIndex().?)) |name| {
                 var new_stack = try ImportStack.fromSlice(stack.constSlice());
-                try new_stack.append(name);
+                try new_stack.append(.{
+                    .text = try allocator.dupe(u8, name),
+                    .kind = .other,
+                });
                 try gen.handleScope(new_stack, handle, @enumToInt(idx));
             } else {
                 log.warn("Anon fell through @ {s} byte index {d}", .{ handle.uri, scope_range_list[@enumToInt(idx)].start });
             }
+        }
+    }
+
+    pub fn populate(gen: *Generator, arena: std.mem.Allocator, comps: *std.ArrayListUnmanaged(types.CompletionItem)) !void {
+        var name_buf = std.ArrayList(u8).init(arena);
+
+        for (gen.auto_imports.items) |im| {
+            const segments = im.constSlice();
+
+            var import_boundary = segments.len;
+
+            while (true) {
+                import_boundary -|= 1;
+                if (import_boundary == 0 or segments[import_boundary].kind == .import) break;
+            }
+
+            name_buf.items.len = 0;
+
+            for (segments[0 .. import_boundary + 1]) |e| {
+                try name_buf.appendSlice(e.text);
+                try name_buf.append('.');
+            }
+            name_buf.items.len -|= 1;
+            const pre = try arena.dupe(u8, name_buf.items);
+
+            name_buf.items.len = 0;
+
+            for (segments[import_boundary..]) |e| {
+                try name_buf.appendSlice(e.text);
+                try name_buf.append('.');
+            }
+            name_buf.items.len -|= 1;
+            const post = try arena.dupe(u8, name_buf.items);
+
+            try comps.append(arena, .{
+                .label = segments[segments.len - 1].text,
+                .kind = .Snippet,
+                .insertText = try std.fmt.allocPrint(arena, "const {s} = {s};\n{s}", .{ segments[import_boundary].text, pre, post }),
+            });
         }
     }
 };

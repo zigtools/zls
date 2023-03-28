@@ -510,23 +510,13 @@ fn completeGlobal(server: *Server, pos_index: usize, handle: *const DocumentStor
     try server.analyser.iterateSymbolsGlobal(handle, pos_index, declToCompletion, context);
     try populateSnippedCompletions(server.arena.allocator(), &completions, &snipped_data.generic, server.config.*);
 
-    // TODO: Less hack (correctness), more perf (hashmap)
-    var has_std = false;
     if (server.client_capabilities.label_details_support) {
         for (completions.items) |*item| {
-            if (std.mem.eql(u8, item.label, "std"))
-                has_std = true;
             try formatDetailedLabel(item, server.arena.allocator());
-        }
-    } else {
-        for (completions.items) |*item| {
-            if (std.mem.eql(u8, item.label, "std"))
-                has_std = true;
         }
     }
 
-    if (has_std)
-        try completions.appendSlice(server.arena.allocator(), server.auto_import_completions.items);
+    try server.auto_import_generator.populate(server.arena.allocator(), &completions);
 
     return completions.toOwnedSlice(server.arena.allocator());
 }
