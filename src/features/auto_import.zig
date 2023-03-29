@@ -20,13 +20,13 @@ const offsets = @import("../offsets.zig");
 pub fn init(server: *Server) !Generator {
     const allocator = server.allocator;
 
-    const std_path = try std.fs.path.join(allocator, &.{ server.config.zig_lib_path orelse return .{ .server = server }, "std", "std.zig" });
+    const std_path = try std.fs.path.join(allocator, &.{ server.config.zig_lib_path orelse return .{ .server = server, .arena = std.heap.ArenaAllocator.init(allocator) }, "std", "std.zig" });
     defer allocator.free(std_path);
 
     const std_uri = try URI.fromPath(allocator, std_path);
     defer allocator.free(std_uri);
 
-    var gen = Generator{ .server = server };
+    var gen = Generator{ .server = server, .arena = std.heap.ArenaAllocator.init(allocator) };
     try gen.handleScope(try ImportStack.fromSlice(&.{.{ .text = "std", .kind = .import }}), server.document_store.getOrLoadHandle(std_uri).?, 0);
     return gen;
 }
@@ -44,6 +44,7 @@ pub const ImportStack = std.BoundedArray(ImportSection, 32);
 
 pub const Generator = struct {
     server: *Server,
+    arena: std.heap.ArenaAllocator,
     auto_imports: std.ArrayListUnmanaged(ImportStack) = .{},
 
     /// The procedure is quite simple;
@@ -51,7 +52,7 @@ pub const Generator = struct {
     /// Find those with @import values
     /// Recurse with the modified stack!
     fn handleScope(gen: *Generator, stack: ImportStack, handle: *const DocumentStore.Handle, scope_idx: usize) !void {
-        const allocator = gen.server.allocator;
+        const allocator = gen.arena.allocator();
 
         const tree = handle.tree;
         var token_tags = tree.tokens.items(.tag);
@@ -166,7 +167,12 @@ pub const Generator = struct {
         }
     }
 
-    pub fn populate(gen: *Generator, arena: std.mem.Allocator, comps: *std.ArrayListUnmanaged(types.CompletionItem)) !void {
+    pub fn populate(
+        gen: *Generator,
+        arena: std.mem.Allocator,
+        handle: *const DocumentStore.Handle,
+        comps: *std.ArrayListUnmanaged(types.CompletionItem),
+    ) !void {
         var name_buf = std.ArrayList(u8).init(arena);
 
         for (gen.auto_imports.items) |im| {
@@ -197,11 +203,71 @@ pub const Generator = struct {
             name_buf.items.len -|= 1;
             const post = try arena.dupe(u8, name_buf.items);
 
+            name_buf.items.len = 0;
+
+            for (segments) |e| {
+                try name_buf.appendSlice(e.text);
+                try name_buf.append('.');
+            }
+            name_buf.items.len -|= 1;
+            const whole = try arena.dupe(u8, name_buf.items);
+
+            var ate = std.ArrayListUnmanaged(types.TextEdit){};
+            // TODO: Check if same, rename if already exists
+            // e.g. if `Allocator` is already taken, call it `Allocator_0`
+
+            const root_decls = handle.document_scope.scopes.items(.decls)[0];
+
+            if (!root_decls.contains(segments[import_boundary].text)) {
+                var lil = getLastImportLineAtTopOfFile(handle);
+
+                try ate.append(arena, .{
+                    .range = if (lil) |l| .{
+                        .start = .{ .line = l + 1, .character = 0 },
+                        .end = .{ .line = l + 1, .character = 0 },
+                    } else .{
+                        .start = .{ .line = 0, .character = 0 },
+                        .end = .{ .line = 0, .character = 0 },
+                    },
+                    .newText = if (root_decls.contains("std"))
+                        try std.fmt.allocPrint(arena, "const {s} = {s};\n{s}", .{ segments[import_boundary].text, pre, if (lil == null) "\n" else "" })
+                    else
+                        try std.fmt.allocPrint(arena, "const std = @import(\"std\");\nconst {s} = {s};\n{s}", .{ segments[import_boundary].text, pre, if (lil == null) "\n" else "" }),
+                });
+            }
+
             try comps.append(arena, .{
                 .label = segments[segments.len - 1].text,
-                .kind = .Snippet,
-                .insertText = try std.fmt.allocPrint(arena, "const {s} = {s};\n{s}", .{ segments[import_boundary].text, pre, post }),
+                .kind = .Event,
+                .insertText = try std.fmt.allocPrint(arena, "{s}", .{post}),
+                .sortText = try arena.dupe(u8, &.{ 'z', 'z', 'z', @intCast(u8, segments.len) + 97 }), // zzz puts it after all other (probably more relevant) completions
+                .filterText = whole,
+                .labelDetails = .{
+                    .description = whole,
+                },
+                .additionalTextEdits = ate.items,
             });
         }
     }
 };
+
+/// Just get the last `const abc = ...;` from a file's import block
+pub fn getLastImportLineAtTopOfFile(handle: *const DocumentStore.Handle) ?u32 {
+    const tree = handle.tree;
+
+    var last_decl: Ast.Node.Index = 0;
+
+    for (tree.rootDecls()) |decl| {
+        var full = tree.fullVarDecl(decl) orelse break;
+        if (tree.tokenSlice(full.ast.mut_token).len == 3) break;
+
+        last_decl = decl;
+    }
+
+    if (last_decl == 0) return null;
+
+    return offsets.nodeToRange(tree, last_decl, .@"utf-8").end.line;
+}
+
+// TODO: This can definitely be improved by https://github.com/zigtools/zls/pull/881's
+// awesome import management code once that's merged

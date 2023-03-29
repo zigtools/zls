@@ -516,7 +516,7 @@ fn completeGlobal(server: *Server, pos_index: usize, handle: *const DocumentStor
         }
     }
 
-    try server.auto_import_generator.populate(server.arena.allocator(), &completions);
+    try server.auto_import_generator.populate(server.arena.allocator(), handle, &completions);
 
     return completions.toOwnedSlice(server.arena.allocator());
 }

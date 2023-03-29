@@ -1849,10 +1849,7 @@ pub fn destroy(server: *Server) void {
     server.analyser.deinit();
 
     if (server.builtin_completions) |*items| items.deinit(server.allocator);
-    // for (server.auto_import_completions.items) |aic| {
-    //     server.allocator.free(aic.label);
-    // }
-    // server.auto_import_completions.deinit(server.allocator);
+    server.auto_import_generator.arena.deinit();
 
     for (server.outgoing_messages.items) |message| {
         server.allocator.free(message);
