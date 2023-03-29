@@ -1831,7 +1831,7 @@ pub fn create(
         .replay_enabled = replay_enabled,
         .status = .uninitialized,
     };
-    server.analyser = Analyser.init(allocator, server.arena.allocator(), &server.document_store);
+    server.analyser = Analyser.init(allocator, &server.document_store);
 
     try configuration.configChanged(config, &server.runtime_zig_version, allocator, config_path);
 

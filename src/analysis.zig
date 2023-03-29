@@ -13,16 +13,16 @@ const InternPool = ComptimeInterpreter.InternPool;
 const Analyser = @This();
 
 gpa: std.mem.Allocator,
-arena: std.mem.Allocator,
+arena: std.heap.ArenaAllocator,
 store: *DocumentStore,
 bound_type_params: std.AutoHashMapUnmanaged(Ast.full.FnProto.Param, TypeWithHandle) = .{},
 using_trail: std.AutoHashMapUnmanaged(Ast.Node.Index, void) = .{},
 resolved_nodes: std.HashMapUnmanaged(NodeWithUri, ?TypeWithHandle, NodeWithUri.Context, std.hash_map.default_max_load_percentage) = .{},
 
-pub fn init(gpa: std.mem.Allocator, arena: std.mem.Allocator, store: *DocumentStore) Analyser {
+pub fn init(gpa: std.mem.Allocator, store: *DocumentStore) Analyser {
     return .{
         .gpa = gpa,
-        .arena = arena,
+        .arena = std.heap.ArenaAllocator.init(gpa),
         .store = store,
     };
 }
@@ -31,12 +31,14 @@ pub fn deinit(self: *Analyser) void {
     self.bound_type_params.deinit(self.gpa);
     self.using_trail.deinit(self.gpa);
     self.resolved_nodes.deinit(self.gpa);
+    self.arena.deinit();
 }
 
 pub fn invalidate(self: *Analyser) void {
     self.bound_type_params.clearRetainingCapacity();
     self.using_trail.clearRetainingCapacity();
     self.resolved_nodes.clearRetainingCapacity();
+    _ = self.arena.reset(.free_all);
 }
 
 /// Gets a declaration's doc comments. Caller owns returned memory.
@@ -1016,9 +1018,9 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
             }
 
             if (std.mem.eql(u8, call_name, "@typeInfo")) {
-                const zig_lib_path = try URI.fromPath(analyser.arena, analyser.store.config.zig_lib_path orelse return null);
+                const zig_lib_path = try URI.fromPath(analyser.arena.allocator(), analyser.store.config.zig_lib_path orelse return null);
 
-                const builtin_uri = URI.pathRelative(analyser.arena, zig_lib_path, "/std/builtin.zig") catch |err| switch (err) {
+                const builtin_uri = URI.pathRelative(analyser.arena.allocator(), zig_lib_path, "/std/builtin.zig") catch |err| switch (err) {
                     error.OutOfMemory => |e| return e,
                     else => return null,
                 };
@@ -1045,7 +1047,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 if (node_tags[import_param] != .string_literal) return null;
 
                 const import_str = tree.tokenSlice(main_tokens[import_param]);
-                const import_uri = (try analyser.store.uriFromImportStr(analyser.arena, handle.*, import_str[1 .. import_str.len - 1])) orelse return null;
+                const import_uri = (try analyser.store.uriFromImportStr(analyser.arena.allocator(), handle.*, import_str[1 .. import_str.len - 1])) orelse return null;
 
                 const new_handle = analyser.store.getOrLoadHandle(import_uri) orelse return null;
 
@@ -1088,12 +1090,12 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
 
             var either = std.ArrayListUnmanaged(Type.EitherEntry){};
             if (try analyser.resolveTypeOfNodeInternal(.{ .handle = handle, .node = if_node.ast.then_expr })) |t|
-                try either.append(analyser.arena, .{ .type_with_handle = t, .descriptor = tree.getNodeSource(if_node.ast.cond_expr) });
+                try either.append(analyser.arena.allocator(), .{ .type_with_handle = t, .descriptor = tree.getNodeSource(if_node.ast.cond_expr) });
             if (try analyser.resolveTypeOfNodeInternal(.{ .handle = handle, .node = if_node.ast.else_expr })) |t|
-                try either.append(analyser.arena, .{ .type_with_handle = t, .descriptor = try std.fmt.allocPrint(analyser.arena, "!({s})", .{tree.getNodeSource(if_node.ast.cond_expr)}) });
+                try either.append(analyser.arena.allocator(), .{ .type_with_handle = t, .descriptor = try std.fmt.allocPrint(analyser.arena.allocator(), "!({s})", .{tree.getNodeSource(if_node.ast.cond_expr)}) });
 
             return TypeWithHandle{
-                .type = .{ .data = .{ .either = try either.toOwnedSlice(analyser.arena) }, .is_type_val = false },
+                .type = .{ .data = .{ .either = try either.toOwnedSlice(analyser.arena.allocator()) }, .is_type_val = false },
                 .handle = handle,
             };
         },
@@ -1110,19 +1112,19 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 var descriptor = std.ArrayListUnmanaged(u8){};
 
                 for (switch_case.ast.values, 0..) |values, index| {
-                    try descriptor.appendSlice(analyser.arena, tree.getNodeSource(values));
-                    if (index != switch_case.ast.values.len - 1) try descriptor.appendSlice(analyser.arena, ", ");
+                    try descriptor.appendSlice(analyser.arena.allocator(), tree.getNodeSource(values));
+                    if (index != switch_case.ast.values.len - 1) try descriptor.appendSlice(analyser.arena.allocator(), ", ");
                 }
 
                 if (try analyser.resolveTypeOfNodeInternal(.{ .handle = handle, .node = switch_case.ast.target_expr })) |t|
-                    try either.append(analyser.arena, .{
+                    try either.append(analyser.arena.allocator(), .{
                         .type_with_handle = t,
-                        .descriptor = try descriptor.toOwnedSlice(analyser.arena),
+                        .descriptor = try descriptor.toOwnedSlice(analyser.arena.allocator()),
                     });
             }
 
             return TypeWithHandle{
-                .type = .{ .data = .{ .either = try either.toOwnedSlice(analyser.arena) }, .is_type_val = false },
+                .type = .{ .data = .{ .either = try either.toOwnedSlice(analyser.arena.allocator()) }, .is_type_val = false },
                 .handle = handle,
             };
         },
@@ -1425,7 +1427,7 @@ pub fn getFieldAccessType(analyser: *Analyser, handle: *const DocumentStore.Hand
                         else
                             return null;
 
-                        const current_type_nodes = try deref_type.getAllTypesWithHandles(analyser.arena);
+                        const current_type_nodes = try deref_type.getAllTypesWithHandles(analyser.arena.allocator());
 
                         // TODO: Return all options instead of first valid one
                         // (this would require a huge rewrite and im lazy)
@@ -1524,7 +1526,7 @@ pub fn getFieldAccessType(analyser: *Analyser, handle: *const DocumentStore.Hand
                         .start = import_str_tok.loc.start + 1,
                         .end = import_str_tok.loc.end - 1,
                     });
-                    const uri = try analyser.store.uriFromImportStr(analyser.arena, curr_handle.*, import_str) orelse return null;
+                    const uri = try analyser.store.uriFromImportStr(analyser.arena.allocator(), curr_handle.*, import_str) orelse return null;
                     const node_handle = analyser.store.getOrLoadHandle(uri) orelse return null;
                     current_type = TypeWithHandle.typeVal(NodeWithHandle{ .handle = node_handle, .node = 0 });
                     _ = tokenizer.next(); // eat the .r_paren
