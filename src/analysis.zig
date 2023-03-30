@@ -1163,6 +1163,77 @@ pub const TypeWithHandle = struct {
     type: Type,
     handle: *const DocumentStore.Handle,
 
+    const Context = struct {
+        // Note that we don't hash/equate descriptors to remove
+        // duplicates
+
+        fn hashType(hasher: *std.hash.Wyhash, ty: Type) void {
+            hasher.update(&.{ @boolToInt(ty.is_type_val), @enumToInt(ty.data) });
+
+            switch (ty.data) {
+                .pointer,
+                .slice,
+                .error_union,
+                .other,
+                .primitive,
+                => |idx| hasher.update(&std.mem.toBytes(idx)),
+                .either => |entries| {
+                    for (entries) |e| {
+                        hasher.update(e.descriptor);
+                        hasher.update(e.type_with_handle.handle.uri);
+                        hashType(hasher, e.type_with_handle.type);
+                    }
+                },
+                .array_index => {},
+                .@"comptime" => {
+                    // TODO
+                },
+            }
+        }
+
+        pub fn hash(self: @This(), item: TypeWithHandle) u64 {
+            _ = self;
+            var hasher = std.hash.Wyhash.init(0);
+            hashType(&hasher, item.type);
+            hasher.update(item.handle.uri);
+            return hasher.final();
+        }
+
+        pub fn eql(self: @This(), a: TypeWithHandle, b: TypeWithHandle) bool {
+            _ = self;
+
+            if (!std.mem.eql(u8, a.handle.uri, b.handle.uri)) return false;
+            if (a.type.is_type_val != b.type.is_type_val) return false;
+            if (@enumToInt(a.type.data) != @enumToInt(b.type.data)) return false;
+
+            switch (a.type.data) {
+                inline .pointer,
+                .slice,
+                .error_union,
+                .other,
+                .primitive,
+                => |a_idx, name| {
+                    if (a_idx != @field(b.type.data, @tagName(name))) return false;
+                },
+                .either => |a_entries| {
+                    const b_entries = b.type.data.either;
+
+                    if (a_entries.len != b_entries.len) return false;
+                    for (a_entries, b_entries) |ae, be| {
+                        if (!std.mem.eql(u8, ae.descriptor, be.descriptor)) return false;
+                        if (!eql(.{}, ae.type_with_handle, be.type_with_handle)) return false;
+                    }
+                },
+                .array_index => {},
+                .@"comptime" => {
+                    // TODO
+                },
+            }
+
+            return true;
+        }
+    };
+
     pub fn typeVal(node_handle: NodeWithHandle) TypeWithHandle {
         return .{
             .type = .{
@@ -1173,7 +1244,10 @@ pub const TypeWithHandle = struct {
         };
     }
 
+    pub const Deduplicator = std.HashMapUnmanaged(TypeWithHandle, void, TypeWithHandle.Context, std.hash_map.default_max_load_percentage);
+
     /// Resolves possible types of a type (single for all except array_index and either)
+    /// Drops duplicates
     pub fn getAllTypesWithHandles(ty: TypeWithHandle, arena: std.mem.Allocator) ![]const TypeWithHandle {
         var all_types = std.ArrayListUnmanaged(TypeWithHandle){};
         try ty.getAllTypesWithHandlesArrayList(arena, &all_types);
@@ -1948,7 +2022,7 @@ pub const DeclWithHandle = struct {
                         func_params_len += 1;
                     }
 
-                    var refs = try references.callsiteReferences(analyser.arena, analyser, .{
+                    var refs = try references.callsiteReferences(analyser.arena.allocator(), analyser, .{
                         .decl = &func_decl,
                         .handle = self.handle,
                     }, false, false, false);
@@ -1958,6 +2032,8 @@ pub const DeclWithHandle = struct {
                     // - stack overflow due to cyclically anytype resolution(?)
 
                     var possible = std.ArrayListUnmanaged(Type.EitherEntry){};
+                    var deduplicator = TypeWithHandle.Deduplicator{};
+                    defer deduplicator.deinit(analyser.gpa);
 
                     for (refs.items) |ref| {
                         var handle = analyser.store.getOrLoadHandle(ref.uri).?;
@@ -1980,16 +2056,19 @@ pub const DeclWithHandle = struct {
                             .node = call.ast.params[real_param_idx],
                             .handle = handle,
                         })) |ty| {
+                            var gop = try deduplicator.getOrPut(analyser.gpa, ty);
+                            if (gop.found_existing) continue;
+
                             var loc = offsets.tokenToPosition(handle.tree, main_tokens[call.ast.params[real_param_idx]], .@"utf-8");
-                            try possible.append(analyser.arena, .{ // TODO: Dedup
+                            try possible.append(analyser.arena.allocator(), .{ // TODO: Dedup
                                 .type_with_handle = ty,
-                                .descriptor = try std.fmt.allocPrint(analyser.arena, "{s}:{d}:{d}", .{ handle.uri, loc.line + 1, loc.character + 1 }),
+                                .descriptor = try std.fmt.allocPrint(analyser.arena.allocator(), "{s}:{d}:{d}", .{ handle.uri, loc.line + 1, loc.character + 1 }),
                             });
                         }
                     }
 
                     return TypeWithHandle{
-                        .type = .{ .data = .{ .either = try possible.toOwnedSlice(analyser.arena) }, .is_type_val = false },
+                        .type = .{ .data = .{ .either = try possible.toOwnedSlice(analyser.arena.allocator()) }, .is_type_val = false },
                         .handle = self.handle,
                     };
                 }
