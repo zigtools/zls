@@ -141,6 +141,53 @@ const Builder = struct {
     }
 };
 
+fn gatherReferences(
+    allocator: std.mem.Allocator,
+    analyser: *Analyser,
+    curr_handle: *const DocumentStore.Handle,
+    skip_std_references: bool,
+    include_decl: bool,
+    builder: anytype,
+    handle_behavior: enum { get, get_or_load },
+) !void {
+    var dependencies = std.StringArrayHashMapUnmanaged(void){};
+    defer {
+        for (dependencies.keys()) |uri| {
+            allocator.free(uri);
+        }
+        dependencies.deinit(allocator);
+    }
+
+    for (analyser.store.handles.values()) |handle| {
+        if (skip_std_references and std.mem.indexOf(u8, handle.uri, "std") != null) {
+            if (!include_decl or !std.mem.eql(u8, handle.uri, curr_handle.uri))
+                continue;
+        }
+
+        var handle_dependencies = std.ArrayListUnmanaged([]const u8){};
+        defer handle_dependencies.deinit(allocator);
+        try analyser.store.collectDependencies(allocator, handle.*, &handle_dependencies);
+
+        try dependencies.ensureUnusedCapacity(allocator, handle_dependencies.items.len);
+        for (handle_dependencies.items) |uri| {
+            var gop = dependencies.getOrPutAssumeCapacity(uri);
+            if (gop.found_existing) {
+                allocator.free(uri);
+            }
+        }
+    }
+
+    for (dependencies.keys()) |uri| {
+        if (std.mem.eql(u8, uri, curr_handle.uri)) continue;
+        const handle = switch (handle_behavior) {
+            .get => analyser.store.getHandle(uri),
+            .get_or_load => analyser.store.getOrLoadHandle(uri),
+        } orelse continue;
+
+        try builder.collectReferences(handle, 0);
+    }
+}
+
 pub fn symbolReferences(
     allocator: std.mem.Allocator,
     analyser: *Analyser,
@@ -180,39 +227,7 @@ pub fn symbolReferences(
 
             if (decl_handle.decl.* != .ast_node or !workspace) return builder.locations;
 
-            var dependencies = std.StringArrayHashMapUnmanaged(void){};
-            defer {
-                for (dependencies.keys()) |uri| {
-                    allocator.free(uri);
-                }
-                dependencies.deinit(allocator);
-            }
-
-            for (analyser.store.handles.values()) |handle| {
-                if (skip_std_references and std.mem.indexOf(u8, handle.uri, "std") != null) {
-                    if (!include_decl or !std.mem.eql(u8, handle.uri, curr_handle.uri))
-                        continue;
-                }
-
-                var handle_dependencies = std.ArrayListUnmanaged([]const u8){};
-                defer handle_dependencies.deinit(allocator);
-                try analyser.store.collectDependencies(allocator, handle.*, &handle_dependencies);
-
-                try dependencies.ensureUnusedCapacity(allocator, handle_dependencies.items.len);
-                for (handle_dependencies.items) |uri| {
-                    var gop = dependencies.getOrPutAssumeCapacity(uri);
-                    if (gop.found_existing) {
-                        allocator.free(uri);
-                    }
-                }
-            }
-
-            for (dependencies.keys()) |uri| {
-                if (std.mem.eql(u8, uri, curr_handle.uri)) continue;
-                const handle = analyser.store.getHandle(uri) orelse continue;
-
-                try builder.collectReferences(handle, 0);
-            }
+            try gatherReferences(allocator, analyser, curr_handle, skip_std_references, include_decl, &builder, .get);
         },
         .param_payload => |payload| blk: {
             // Rename the param tok.
@@ -371,39 +386,7 @@ pub fn callsiteReferences(
 
     if (!workspace) return builder.callsites;
 
-    var dependencies = std.StringArrayHashMapUnmanaged(void){};
-    defer {
-        for (dependencies.keys()) |uri| {
-            allocator.free(uri);
-        }
-        dependencies.deinit(allocator);
-    }
-
-    for (analyser.store.handles.values()) |handle| {
-        if (skip_std_references and std.mem.indexOf(u8, handle.uri, "std") != null) {
-            if (!include_decl or !std.mem.eql(u8, handle.uri, curr_handle.uri))
-                continue;
-        }
-
-        var handle_dependencies = std.ArrayListUnmanaged([]const u8){};
-        defer handle_dependencies.deinit(allocator);
-        try analyser.store.collectDependencies(allocator, handle.*, &handle_dependencies);
-
-        try dependencies.ensureUnusedCapacity(allocator, handle_dependencies.items.len);
-        for (handle_dependencies.items) |uri| {
-            var gop = dependencies.getOrPutAssumeCapacity(uri);
-            if (gop.found_existing) {
-                allocator.free(uri);
-            }
-        }
-    }
-
-    for (dependencies.keys()) |uri| {
-        if (std.mem.eql(u8, uri, curr_handle.uri)) continue;
-        const handle = analyser.store.getOrLoadHandle(uri) orelse continue;
-
-        try builder.collectReferences(handle, 0);
-    }
+    try gatherReferences(allocator, analyser, curr_handle, skip_std_references, include_decl, &builder, .get_or_load);
 
     return builder.callsites;
 }
