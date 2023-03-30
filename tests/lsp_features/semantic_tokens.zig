@@ -808,6 +808,16 @@ test "semantic tokens - if" {
         .{ "err", .variable, .{ .declaration = true } },
         .{ "err", .variable, .{} },
     });
+    try testSemanticTokens(
+        \\const foo = if (null) |*value| {};
+    , &.{
+        .{ "const", .keyword, .{} },
+        .{ "foo", .variable, .{ .declaration = true } },
+        .{ "=", .operator, .{} },
+        .{ "if", .keyword, .{} },
+        .{ "null", .keywordLiteral, .{} },
+        .{ "value", .variable, .{ .declaration = true } },
+    });
 }
 
 test "semantic tokens - while" {

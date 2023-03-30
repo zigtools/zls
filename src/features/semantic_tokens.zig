@@ -516,8 +516,10 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
             try writeToken(builder, if_node.ast.if_token, .keyword);
             try callWriteNodeTokens(allocator, .{ builder, if_node.ast.cond_expr });
 
-            if (if_node.payload_token) |payload| {
-                try writeTokenMod(builder, payload, .variable, .{ .declaration = true });
+            if (if_node.payload_token) |payload_token| {
+                const capture_is_ref = token_tags[payload_token] == .asterisk;
+                const actual_payload = payload_token + @boolToInt(capture_is_ref);
+                try writeTokenMod(builder, actual_payload, .variable, .{ .declaration = true });
             }
             try callWriteNodeTokens(allocator, .{ builder, if_node.ast.then_expr });
 
