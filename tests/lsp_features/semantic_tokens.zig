@@ -226,6 +226,42 @@ test "semantic tokens - field access" {
     });
 }
 
+test "semantic tokens - call" {
+    try testSemanticTokens(
+        \\fn foo() void {}
+        \\const alpha = foo();
+    , &.{
+        .{ "fn", .keyword, .{} },
+        .{ "foo", .function, .{ .declaration = true } },
+        .{ "void", .type, .{} },
+
+        .{ "const", .keyword, .{} },
+        .{ "alpha", .variable, .{ .declaration = true } },
+        .{ "=", .operator, .{} },
+        .{ "foo", .function, .{} },
+    });
+    try testSemanticTokens(
+        \\const ns = struct {
+        \\    fn foo() void {}
+        \\};
+        \\const alpha = ns.foo();
+    , &.{
+        .{ "const", .keyword, .{} },
+        .{ "ns", .type, .{ .namespace = true, .declaration = true } },
+        .{ "=", .operator, .{} },
+        .{ "struct", .keyword, .{} },
+        .{ "fn", .keyword, .{} },
+        .{ "foo", .function, .{ .declaration = true } },
+        .{ "void", .type, .{} },
+
+        .{ "const", .keyword, .{} },
+        .{ "alpha", .variable, .{ .declaration = true } },
+        .{ "=", .operator, .{} },
+        .{ "ns", .type, .{ .namespace = true } },
+        .{ "foo", .function, .{} },
+    });
+}
+
 test "semantic tokens - catch" {
     try testSemanticTokens(
         \\var alpha = a catch b;

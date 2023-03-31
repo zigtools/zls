@@ -44,7 +44,6 @@ const Builder = struct {
     analyser: *Analyser,
     handle: *const DocumentStore.Handle,
     previous_source_index: usize = 0,
-    previous_token: ?Ast.TokenIndex = null,
     token_buffer: std.ArrayListUnmanaged(u32) = .{},
     encoding: offsets.Encoding,
     limited: bool,
@@ -595,11 +594,6 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
             try writeToken(builder, call.async_token, .keyword);
             try callWriteNodeTokens(allocator, .{ builder, call.ast.fn_expr });
 
-            if (builder.previous_token) |prev| {
-                if (prev != ast.lastToken(tree, call.ast.fn_expr) and token_tags[ast.lastToken(tree, call.ast.fn_expr)] == .identifier) {
-                    try writeToken(builder, ast.lastToken(tree, call.ast.fn_expr), .function);
-                }
-            }
             for (call.ast.params) |param| try callWriteNodeTokens(allocator, .{ builder, param });
         },
         .slice,
