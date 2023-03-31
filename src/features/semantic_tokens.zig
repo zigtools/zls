@@ -13,7 +13,7 @@ pub const TokenType = enum(u32) {
     parameter,
     variable,
     enumMember,
-    field,
+    property,
     errorTag,
     function,
     keyword,
@@ -115,7 +115,7 @@ const Builder = struct {
             .parameter,
             .variable,
             .enumMember,
-            .field,
+            .property,
             .errorTag,
             .function,
             .label,
@@ -162,8 +162,9 @@ fn fieldTokenType(container_decl: Ast.Node.Index, handle: *const DocumentStore.H
     const main_token = handle.tree.nodes.items(.main_token)[container_decl];
     if (main_token > handle.tree.tokens.len) return null;
     return @as(?TokenType, switch (handle.tree.tokens.items(.tag)[main_token]) {
-        .keyword_struct => .field,
+        .keyword_struct => .property,
         .keyword_union, .keyword_enum => .enumMember,
+        .keyword_error => .errorTag,
         else => null,
     });
 }
@@ -229,7 +230,7 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
         .container_field,
         .container_field_align,
         .container_field_init,
-        => try writeContainerField(builder, node, .field),
+        => try writeContainerField(builder, node, .property),
         .@"errdefer" => {
             try writeToken(builder, main_token, .keyword);
 
@@ -253,7 +254,7 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
 
             for (statements) |child| {
                 if (node_tags[child].isContainerField()) {
-                    try writeContainerField(builder, child, .field);
+                    try writeContainerField(builder, child, .property);
                 } else {
                     try callWriteNodeTokens(allocator, .{ builder, child });
                 }
@@ -573,8 +574,8 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
 
             for (struct_init.ast.fields) |field_init| {
                 const init_token = tree.firstToken(field_init);
-                try writeToken(builder, init_token - 3, field_token_type orelse .field); // '.'
-                try writeToken(builder, init_token - 2, field_token_type orelse .field); // name
+                try writeToken(builder, init_token - 3, field_token_type orelse .property); // '.'
+                try writeToken(builder, init_token - 2, field_token_type orelse .property); // name
                 try writeToken(builder, init_token - 1, .operator); // '='
                 try callWriteNodeTokens(allocator, .{ builder, field_init });
             }
@@ -823,7 +824,7 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
                             const tok_type: ?TokenType = if (ast.isContainer(lhs_type.handle.tree, left_type_node))
                                 fieldTokenType(decl_node, lhs_type.handle)
                             else if (left_type_node == 0)
-                                TokenType.field
+                                .property
                             else
                                 null;
 

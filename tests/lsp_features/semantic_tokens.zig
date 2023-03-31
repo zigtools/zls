@@ -516,9 +516,9 @@ test "semantic tokens - struct" {
         .{ "Foo", .type, .{ .@"struct" = true, .declaration = true } },
         .{ "=", .operator, .{} },
         .{ "struct", .keyword, .{} },
-        .{ "alpha", .field, .{} },
+        .{ "alpha", .property, .{} },
         .{ "u32", .type, .{} },
-        .{ "beta", .field, .{} },
+        .{ "beta", .property, .{} },
         .{ "void", .type, .{} },
     });
     try testSemanticTokens(
@@ -531,12 +531,12 @@ test "semantic tokens - struct" {
         .{ "Foo", .type, .{ .@"struct" = true, .declaration = true } },
         .{ "=", .operator, .{} },
         .{ "struct", .keyword, .{} },
-        .{ "alpha", .field, .{} },
+        .{ "alpha", .property, .{} },
         .{ "u32", .type, .{} },
         .{ "=", .operator, .{} },
         .{ "3", .number, .{} },
         .{ "comptime", .keyword, .{} },
-        .{ "beta", .field, .{} },
+        .{ "beta", .property, .{} },
         .{ "void", .type, .{} },
         .{ "=", .operator, .{} },
     });
@@ -592,7 +592,7 @@ test "semantic tokens - union" {
         .{ "=", .operator, .{} },
         .{ "union", .keyword, .{} },
         .{ "E", .variable, .{} },
-        .{ "alpha", .field, .{} },
+        .{ "alpha", .property, .{} },
     });
     try testSemanticTokens(
         \\const Foo = union(E) {
@@ -605,8 +605,8 @@ test "semantic tokens - union" {
         .{ "=", .operator, .{} },
         .{ "union", .keyword, .{} },
         .{ "E", .variable, .{} },
-        .{ "alpha", .field, .{} },
-        .{ "beta", .field, .{} },
+        .{ "alpha", .property, .{} },
+        .{ "beta", .property, .{} },
         .{ "void", .keyword, .{} },
     });
     try testSemanticTokens(
@@ -619,7 +619,7 @@ test "semantic tokens - union" {
         .{ "=", .operator, .{} },
         .{ "union", .keyword, .{} },
         .{ "E", .variable, .{} },
-        .{ "alpha", .field, .{} },
+        .{ "alpha", .property, .{} },
         .{ "void", .keyword, .{} },
         .{ "align", .keyword, .{} },
         .{ "2", .number, .{} },
