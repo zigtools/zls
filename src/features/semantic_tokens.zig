@@ -24,19 +24,27 @@ pub const TokenType = enum(u32) {
     builtin,
     label,
     keywordLiteral,
+    namespace,
+    @"struct",
+    @"enum",
+    @"union",
+    @"opaque",
 };
 
 pub const TokenModifiers = packed struct(u16) {
-    namespace: bool = false,
-    @"struct": bool = false,
-    @"enum": bool = false,
-    @"union": bool = false,
-    @"opaque": bool = false,
     declaration: bool = false,
+    definition: bool = false,
+    readonly: bool = false,
+    static: bool = false,
+    deprecated: bool = false,
+    abstract: bool = false,
     @"async": bool = false,
+    modification: bool = false,
     documentation: bool = false,
+    defaultLibrary: bool = false,
+
     generic: bool = false,
-    _: u7 = 0,
+    _: u5 = 0,
 };
 
 const Builder = struct {
@@ -172,18 +180,22 @@ fn fieldTokenType(container_decl: Ast.Node.Index, handle: *const DocumentStore.H
 fn colorIdentifierBasedOnType(builder: *Builder, type_node: Analyser.TypeWithHandle, target_tok: Ast.TokenIndex, tok_mod: TokenModifiers) !void {
     if (type_node.type.is_type_val) {
         var new_tok_mod = tok_mod;
-        if (type_node.isNamespace())
-            new_tok_mod.namespace = true
-        else if (type_node.isStructType())
-            new_tok_mod.@"struct" = true
-        else if (type_node.isEnumType())
-            new_tok_mod.@"enum" = true
-        else if (type_node.isUnionType())
-            new_tok_mod.@"union" = true
-        else if (type_node.isOpaqueType())
-            new_tok_mod.@"opaque" = true;
 
-        try writeTokenMod(builder, target_tok, .type, new_tok_mod);
+        const token_type: TokenType =
+            if (type_node.isNamespace())
+            .namespace
+        else if (type_node.isStructType())
+            .@"struct"
+        else if (type_node.isEnumType())
+            .@"enum"
+        else if (type_node.isUnionType())
+            .@"union"
+        else if (type_node.isOpaqueType())
+            .@"opaque"
+        else
+            .type;
+
+        try writeTokenMod(builder, target_tok, token_type, new_tok_mod);
     } else if (type_node.isTypeFunc()) {
         try writeTokenMod(builder, target_tok, .type, tok_mod);
     } else if (type_node.isFunc()) {

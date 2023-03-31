@@ -202,7 +202,7 @@ test "semantic tokens - field access" {
         \\const std = @import("std");
     , &.{
         .{ "const", .keyword, .{} },
-        .{ "std", .type, .{ .namespace = true, .declaration = true } },
+        .{ "std", .namespace, .{ .declaration = true } },
         .{ "=", .operator, .{} },
         .{ "@import", .builtin, .{} },
         .{ "\"std\"", .string, .{} },
@@ -212,17 +212,17 @@ test "semantic tokens - field access" {
         \\const Ast = std.zig.Ast;
     , &.{
         .{ "const", .keyword, .{} },
-        .{ "std", .type, .{ .namespace = true, .declaration = true } },
+        .{ "std", .namespace, .{ .declaration = true } },
         .{ "=", .operator, .{} },
         .{ "@import", .builtin, .{} },
         .{ "\"std\"", .string, .{} },
 
         .{ "const", .keyword, .{} },
-        .{ "Ast", .type, .{ .@"struct" = true, .declaration = true } },
+        .{ "Ast", .@"struct", .{ .declaration = true } },
         .{ "=", .operator, .{} },
-        .{ "std", .type, .{ .namespace = true } },
-        .{ "zig", .type, .{ .namespace = true } },
-        .{ "Ast", .type, .{ .@"struct" = true } },
+        .{ "std", .namespace, .{} },
+        .{ "zig", .namespace, .{} },
+        .{ "Ast", .@"struct", .{} },
     });
 }
 
@@ -247,7 +247,7 @@ test "semantic tokens - call" {
         \\const alpha = ns.foo();
     , &.{
         .{ "const", .keyword, .{} },
-        .{ "ns", .type, .{ .namespace = true, .declaration = true } },
+        .{ "ns", .namespace, .{ .declaration = true } },
         .{ "=", .operator, .{} },
         .{ "struct", .keyword, .{} },
         .{ "fn", .keyword, .{} },
@@ -257,7 +257,7 @@ test "semantic tokens - call" {
         .{ "const", .keyword, .{} },
         .{ "alpha", .variable, .{ .declaration = true } },
         .{ "=", .operator, .{} },
-        .{ "ns", .type, .{ .namespace = true } },
+        .{ "ns", .namespace, .{} },
         .{ "foo", .function, .{} },
     });
 }
@@ -492,7 +492,7 @@ test "semantic tokens - struct" {
         \\const Foo = struct {};
     , &.{
         .{ "const", .keyword, .{} },
-        .{ "Foo", .type, .{ .namespace = true, .declaration = true } },
+        .{ "Foo", .namespace, .{ .declaration = true } },
         .{ "=", .operator, .{} },
         .{ "struct", .keyword, .{} },
     });
@@ -500,7 +500,7 @@ test "semantic tokens - struct" {
         \\const Foo = packed struct(u32) {};
     , &.{
         .{ "const", .keyword, .{} },
-        .{ "Foo", .type, .{ .namespace = true, .declaration = true } },
+        .{ "Foo", .namespace, .{ .declaration = true } },
         .{ "=", .operator, .{} },
         .{ "packed", .keyword, .{} },
         .{ "struct", .keyword, .{} },
@@ -513,7 +513,7 @@ test "semantic tokens - struct" {
         \\};
     , &.{
         .{ "const", .keyword, .{} },
-        .{ "Foo", .type, .{ .@"struct" = true, .declaration = true } },
+        .{ "Foo", .@"struct", .{ .declaration = true } },
         .{ "=", .operator, .{} },
         .{ "struct", .keyword, .{} },
         .{ "alpha", .property, .{} },
@@ -528,7 +528,7 @@ test "semantic tokens - struct" {
         \\};
     , &.{
         .{ "const", .keyword, .{} },
-        .{ "Foo", .type, .{ .@"struct" = true, .declaration = true } },
+        .{ "Foo", .@"struct", .{ .declaration = true } },
         .{ "=", .operator, .{} },
         .{ "struct", .keyword, .{} },
         .{ "alpha", .property, .{} },
@@ -552,7 +552,7 @@ test "semantic tokens - struct" {
         .{ "=", .operator, .{} },
         .{ "u32", .type, .{} },
         .{ "const", .keyword, .{} },
-        .{ "Foo", .type, .{ .@"struct" = true, .declaration = true } },
+        .{ "Foo", .@"struct", .{ .declaration = true } },
         .{ "=", .operator, .{} },
         .{ "struct", .keyword, .{} },
         .{ "u32", .type, .{} },
@@ -567,7 +567,7 @@ test "semantic tokens - union" {
         \\const Foo = union {};
     , &.{
         .{ "const", .keyword, .{} },
-        .{ "Foo", .type, .{ .@"union" = true, .declaration = true } },
+        .{ "Foo", .@"union", .{ .declaration = true } },
         .{ "=", .operator, .{} },
         .{ "union", .keyword, .{} },
     });
@@ -575,7 +575,7 @@ test "semantic tokens - union" {
         \\const Foo = packed union(enum) {};
     , &.{
         .{ "const", .keyword, .{} },
-        .{ "Foo", .type, .{ .@"union" = true, .declaration = true } },
+        .{ "Foo", .@"union", .{ .declaration = true } },
         .{ "=", .operator, .{} },
         .{ "packed", .keyword, .{} },
         .{ "union", .keyword, .{} },
@@ -588,7 +588,7 @@ test "semantic tokens - union" {
         \\};
     , &.{
         .{ "const", .keyword, .{} },
-        .{ "Foo", .type, .{ .@"union" = true, .declaration = true } },
+        .{ "Foo", .@"union", .{ .declaration = true } },
         .{ "=", .operator, .{} },
         .{ "union", .keyword, .{} },
         .{ "E", .variable, .{} },
@@ -601,7 +601,7 @@ test "semantic tokens - union" {
         \\};
     , &.{
         .{ "const", .keyword, .{} },
-        .{ "Foo", .type, .{ .@"union" = true, .declaration = true } },
+        .{ "Foo", .@"union", .{ .declaration = true } },
         .{ "=", .operator, .{} },
         .{ "union", .keyword, .{} },
         .{ "E", .variable, .{} },
@@ -615,7 +615,7 @@ test "semantic tokens - union" {
         \\};
     , &.{
         .{ "const", .keyword, .{} },
-        .{ "Foo", .type, .{ .@"union" = true, .declaration = true } },
+        .{ "Foo", .@"union", .{ .declaration = true } },
         .{ "=", .operator, .{} },
         .{ "union", .keyword, .{} },
         .{ "E", .variable, .{} },
@@ -632,7 +632,7 @@ test "semantic tokens - enum" {
         \\const Foo = enum {};
     , &.{
         .{ "const", .keyword, .{} },
-        .{ "Foo", .type, .{ .@"enum" = true, .declaration = true } },
+        .{ "Foo", .@"enum", .{ .declaration = true } },
         .{ "=", .operator, .{} },
         .{ "enum", .keyword, .{} },
     });
@@ -643,7 +643,7 @@ test "semantic tokens - enum" {
         \\};
     , &.{
         .{ "const", .keyword, .{} },
-        .{ "Foo", .type, .{ .@"enum" = true, .declaration = true } },
+        .{ "Foo", .@"enum", .{ .declaration = true } },
         .{ "=", .operator, .{} },
         .{ "enum", .keyword, .{} },
         .{ "alpha", .enumMember, .{} },
@@ -653,7 +653,7 @@ test "semantic tokens - enum" {
         \\const Foo = enum(u4) {};
     , &.{
         .{ "const", .keyword, .{} },
-        .{ "Foo", .type, .{ .@"enum" = true, .declaration = true } },
+        .{ "Foo", .@"enum", .{ .declaration = true } },
         .{ "=", .operator, .{} },
         .{ "enum", .keyword, .{} },
         .{ "u4", .type, .{} },
@@ -687,7 +687,7 @@ test "semantic tokens - opaque" {
         \\const Foo = opaque {};
     , &.{
         .{ "const", .keyword, .{} },
-        .{ "Foo", .type, .{ .@"opaque" = true, .declaration = true } },
+        .{ "Foo", .@"opaque", .{ .declaration = true } },
         .{ "=", .operator, .{} },
         .{ "opaque", .keyword, .{} },
     });
