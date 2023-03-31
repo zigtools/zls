@@ -49,83 +49,22 @@ const Builder = struct {
     encoding: offsets.Encoding,
     limited: bool,
 
-    fn add(self: *Builder, token: Ast.TokenIndex, token_type: TokenType, token_modifiers: TokenModifiers) !void {
-        switch (token_type) {
-            .type,
-            .parameter,
-            .variable,
-            .enumMember,
-            .field,
-            .errorTag,
-            .function,
-            .label,
-            => {},
-            else => if (self.limited) return,
-        }
+    fn add(self: *Builder, token: Ast.TokenIndex, token_type: TokenType, token_modifiers: TokenModifiers) error{OutOfMemory}!void {
         const tree = self.handle.tree;
         const starts = tree.tokens.items(.start);
 
-        if (starts[token] < self.previous_source_index) return;
-
-        if (self.previous_token) |prev| {
-            // Highlight gaps between AST nodes. These can contain comments or malformed code.
-            var i = prev + 1;
-            while (i < token) : (i += 1) {
-                try handleComments(self, starts[i - 1], starts[i]);
-            }
-        }
-        self.previous_token = token;
-        try self.handleComments(starts[token -| 1], starts[token]);
-
-        const length = offsets.tokenLength(tree, token, self.encoding);
-        try self.addDirect(token_type, token_modifiers, starts[token], length);
+        try self.handleComments(self.previous_source_index, starts[token]);
+        try self.addDirect(token_type, token_modifiers, offsets.tokenToLoc(tree, token));
     }
 
     fn finish(self: *Builder) error{OutOfMemory}!types.SemanticTokens {
-        const starts = self.handle.tree.tokens.items(.start);
-
-        const last_token = self.previous_token orelse 0;
-        var i = last_token + 1;
-        while (i < starts.len) : (i += 1) {
-            try handleComments(self, starts[i - 1], starts[i]);
-        }
-        try self.handleComments(starts[starts.len - 1], self.handle.tree.source.len);
-
+        try self.handleComments(self.previous_source_index, self.handle.tree.source.len);
         return .{ .data = try self.token_buffer.toOwnedSlice(self.arena) };
     }
 
-    /// Highlight a token without semantic context.
-    fn handleToken(self: *Builder, tok: Ast.TokenIndex) !void {
-        const tree = self.handle.tree;
-        // TODO More highlighting here
-        const tok_id = tree.tokens.items(.tag)[tok];
-        const tok_type: TokenType = switch (tok_id) {
-            .keyword_unreachable => .keywordLiteral,
-            .number_literal => .number,
-            .string_literal, .multiline_string_literal_line, .char_literal => .string,
-            .period, .comma, .r_paren, .l_paren, .r_brace, .l_brace, .semicolon, .colon => return,
-
-            else => blk: {
-                const id = @enumToInt(tok_id);
-                if (id >= @enumToInt(std.zig.Token.Tag.keyword_align) and
-                    id <= @enumToInt(std.zig.Token.Tag.keyword_while))
-                    break :blk TokenType.keyword;
-                if (id >= @enumToInt(std.zig.Token.Tag.bang) and
-                    id <= @enumToInt(std.zig.Token.Tag.tilde))
-                    break :blk TokenType.operator;
-
-                return;
-            },
-        };
-        const start = tree.tokens.items(.start)[tok];
-        const length = offsets.tokenLength(tree, tok, self.encoding);
-        try self.addDirect(tok_type, .{}, start, length);
-    }
-
     /// Highlight normal comments and doc comments.
-    fn handleComments(self: *Builder, from: usize, to: usize) !void {
-        if (from == to) return;
-        std.debug.assert(from < to);
+    fn handleComments(self: *Builder, from: usize, to: usize) error{OutOfMemory}!void {
+        if (from >= to) return;
 
         const source = self.handle.tree.source;
 
@@ -165,14 +104,14 @@ const Builder = struct {
 
             while (i < to and source[i] != '\n') : (i += 1) {}
 
-            const length = offsets.locLength(self.handle.tree.source, .{ .start = comment_start, .end = i }, self.encoding);
-            try self.addDirect(TokenType.comment, mods, comment_start, length);
+            try self.addDirect(.comment, mods, .{ .start = comment_start, .end = i });
         }
     }
 
-    fn addDirect(self: *Builder, tok_type: TokenType, tok_mod: TokenModifiers, start: usize, length: usize) !void {
-        if (start < self.previous_source_index) return;
-        switch (tok_type) {
+    fn addDirect(self: *Builder, token_type: TokenType, token_modifiers: TokenModifiers, loc: offsets.Loc) error{OutOfMemory}!void {
+        std.debug.assert(loc.start <= loc.end);
+        if (loc.start < self.previous_source_index) return;
+        switch (token_type) {
             .type,
             .parameter,
             .variable,
@@ -185,17 +124,18 @@ const Builder = struct {
             else => if (self.limited) return,
         }
 
-        const text = self.handle.tree.source[self.previous_source_index..start];
-        const delta = offsets.indexToPosition(text, text.len, self.encoding);
+        const delta_text = self.handle.tree.source[self.previous_source_index..loc.start];
+        const delta = offsets.indexToPosition(delta_text, delta_text.len, self.encoding);
+        const length = offsets.locLength(self.handle.tree.source, loc, self.encoding);
 
         try self.token_buffer.appendSlice(self.arena, &.{
             @truncate(u32, delta.line),
             @truncate(u32, delta.character),
             @truncate(u32, length),
-            @enumToInt(tok_type),
-            @bitCast(u16, tok_mod),
+            @enumToInt(token_type),
+            @bitCast(u16, token_modifiers),
         });
-        self.previous_source_index = start;
+        self.previous_source_index = loc.start;
     }
 };
 
@@ -326,9 +266,6 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
         .aligned_var_decl,
         => {
             const var_decl = tree.fullVarDecl(node).?;
-            if (Analyser.getDocCommentTokenIndex(token_tags, main_token)) |comment_idx|
-                try writeDocComments(builder, tree, comment_idx);
-
             try writeToken(builder, var_decl.visib_token, .keyword);
             try writeToken(builder, var_decl.extern_export_token, .keyword);
             try writeToken(builder, var_decl.threadlocal_token, .keyword);
@@ -447,8 +384,6 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
         => {
             var buf: [1]Ast.Node.Index = undefined;
             const fn_proto: Ast.full.FnProto = tree.fullFnProto(&buf, node).?;
-            if (Analyser.getDocCommentTokenIndex(token_tags, main_token)) |docs|
-                try writeDocComments(builder, tree, docs);
 
             try writeToken(builder, fn_proto.visib_token, .keyword);
             try writeToken(builder, fn_proto.extern_export_inline_token, .keyword);
@@ -487,21 +422,9 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
             if (tag == .fn_decl)
                 try callWriteNodeTokens(allocator, .{ builder, node_data[node].rhs });
         },
-        .anyframe_type => {
+        .anyframe_type, .@"defer" => {
             try writeToken(builder, main_token, .keyword);
             try callWriteNodeTokens(allocator, .{ builder, node_data[node].rhs });
-        },
-        .@"defer" => {
-            try writeToken(builder, main_token, .keyword);
-            try callWriteNodeTokens(allocator, .{ builder, node_data[node].rhs });
-        },
-        .@"comptime",
-        .@"nosuspend",
-        => {
-            if (Analyser.getDocCommentTokenIndex(token_tags, main_token)) |doc|
-                try writeDocComments(builder, tree, doc);
-            try writeToken(builder, main_token, .keyword);
-            try callWriteNodeTokens(allocator, .{ builder, node_data[node].lhs });
         },
         .@"switch",
         .switch_comma,
@@ -712,7 +635,7 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
             if (node_data[node].lhs != 0)
                 try writeToken(builder, node_data[node].lhs, .label);
         },
-        .@"suspend", .@"return" => {
+        .@"comptime", .@"nosuspend", .@"suspend", .@"return" => {
             try writeToken(builder, main_token, .keyword);
             try callWriteNodeTokens(allocator, .{ builder, node_data[node].lhs });
         },
@@ -797,9 +720,6 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
         .asm_input,
         => unreachable,
         .test_decl => {
-            if (Analyser.getDocCommentTokenIndex(token_tags, main_token)) |doc|
-                try writeDocComments(builder, tree, doc);
-
             try writeToken(builder, main_token, .keyword);
             switch (token_tags[node_data[node].lhs]) {
                 .string_literal => try writeToken(builder, node_data[node].lhs, .string),
@@ -996,13 +916,8 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
 fn writeContainerField(builder: *Builder, node: Ast.Node.Index, field_token_type: ?TokenType) !void {
     const tree = builder.handle.tree;
     const container_field = tree.fullContainerField(node).?;
-    const base = tree.nodes.items(.main_token)[node];
-    const tokens = tree.tokens.items(.tag);
 
     var allocator = builder.arena;
-
-    if (Analyser.getDocCommentTokenIndex(tokens, base)) |docs|
-        try writeDocComments(builder, tree, docs);
 
     try writeToken(builder, container_field.comptime_token, .keyword);
     if (!container_field.ast.tuple_like) {

@@ -15,7 +15,6 @@ test "semantic tokens - empty" {
 }
 
 test "semantic tokens - comment" {
-    if (true) return error.SkipZigTest; // TODO
     try testSemanticTokens(
         \\// hello world
     , &.{
@@ -26,6 +25,14 @@ test "semantic tokens - comment" {
         \\
     , &.{
         .{ "//! hello world", .comment, .{ .documentation = true } },
+    });
+    try testSemanticTokens(
+        \\//! first line
+        \\//! second line
+        \\
+    , &.{
+        .{ "//! first line", .comment, .{ .documentation = true } },
+        .{ "//! second line", .comment, .{ .documentation = true } },
     });
     try testSemanticTokens(
         \\/// hello world
