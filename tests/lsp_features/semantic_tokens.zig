@@ -581,7 +581,6 @@ test "semantic tokens - union" {
         .{ "union", .keyword, .{} },
         .{ "enum", .keyword, .{} },
     });
-    if (true) return error.SkipZigTest; // TODO
     try testSemanticTokens(
         \\const Foo = union(E) {
         \\    alpha,
@@ -607,7 +606,7 @@ test "semantic tokens - union" {
         .{ "E", .variable, .{} },
         .{ "alpha", .property, .{} },
         .{ "beta", .property, .{} },
-        .{ "void", .keyword, .{} },
+        .{ "void", .type, .{} },
     });
     try testSemanticTokens(
         \\const Foo = union(E) {
@@ -620,14 +619,13 @@ test "semantic tokens - union" {
         .{ "union", .keyword, .{} },
         .{ "E", .variable, .{} },
         .{ "alpha", .property, .{} },
-        .{ "void", .keyword, .{} },
+        .{ "void", .type, .{} },
         .{ "align", .keyword, .{} },
         .{ "2", .number, .{} },
     });
 }
 
 test "semantic tokens - enum" {
-    if (true) return error.SkipZigTest; // TODO
     try testSemanticTokens(
         \\const Foo = enum {};
     , &.{
@@ -638,7 +636,7 @@ test "semantic tokens - enum" {
     });
     try testSemanticTokens(
         \\const Foo = enum {
-        \\    alpha,
+        \\    alpha = 3,
         \\    beta,
         \\};
     , &.{
@@ -647,6 +645,8 @@ test "semantic tokens - enum" {
         .{ "=", .operator, .{} },
         .{ "enum", .keyword, .{} },
         .{ "alpha", .enumMember, .{} },
+        .{ "=", .operator, .{} },
+        .{ "3", .number, .{} },
         .{ "beta", .enumMember, .{} },
     });
     try testSemanticTokens(

@@ -170,8 +170,8 @@ fn fieldTokenType(container_decl: Ast.Node.Index, handle: *const DocumentStore.H
     const main_token = handle.tree.nodes.items(.main_token)[container_decl];
     if (main_token > handle.tree.tokens.len) return null;
     return @as(?TokenType, switch (handle.tree.tokens.items(.tag)[main_token]) {
-        .keyword_struct => .property,
-        .keyword_union, .keyword_enum => .enumMember,
+        .keyword_struct, .keyword_union => .property,
+        .keyword_enum => .enumMember,
         .keyword_error => .errorTag,
         else => null,
     });
@@ -242,7 +242,7 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
         .container_field,
         .container_field_align,
         .container_field_init,
-        => try writeContainerField(builder, node, .property),
+        => try writeContainerField(builder, node, 0),
         .@"errdefer" => {
             try writeToken(builder, main_token, .keyword);
 
@@ -265,11 +265,7 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
             const statements = ast.blockStatements(tree, node, &buffer).?;
 
             for (statements) |child| {
-                if (node_tags[child].isContainerField()) {
-                    try writeContainerField(builder, child, .property);
-                } else {
-                    try callWriteNodeTokens(allocator, .{ builder, child });
-                }
+                try callWriteNodeTokens(allocator, .{ builder, child });
             }
         },
         .global_var_decl,
@@ -336,10 +332,9 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
                     try writeToken(builder, enum_token, .keyword);
             } else try callWriteNodeTokens(allocator, .{ builder, decl.ast.arg });
 
-            const field_token_type = fieldTokenType(node, handle);
             for (decl.ast.members) |child| {
                 if (node_tags[child].isContainerField()) {
-                    try writeContainerField(builder, child, field_token_type);
+                    try writeContainerField(builder, child, node);
                 } else {
                     try callWriteNodeTokens(allocator, .{ builder, child });
                 }
@@ -922,15 +917,23 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
     }
 }
 
-fn writeContainerField(builder: *Builder, node: Ast.Node.Index, field_token_type: ?TokenType) !void {
+fn writeContainerField(builder: *Builder, node: Ast.Node.Index, container_decl: Ast.Node.Index) !void {
     const tree = builder.handle.tree;
-    const container_field = tree.fullContainerField(node).?;
-
     var allocator = builder.arena;
+
+    var container_field = tree.fullContainerField(node).?;
+    const field_token_type = fieldTokenType(container_decl, builder.handle) orelse .property;
+
+    const token_tags = tree.tokens.items(.tag);
+    const main_tokens = tree.nodes.items(.main_token);
+
+    if (container_decl != 0 and token_tags[main_tokens[container_decl]] != .keyword_struct) {
+        container_field.convertToNonTupleLike(tree.nodes);
+    }
 
     try writeToken(builder, container_field.comptime_token, .keyword);
     if (!container_field.ast.tuple_like) {
-        if (field_token_type) |tok_type| try writeToken(builder, container_field.ast.main_token, tok_type);
+        try writeToken(builder, container_field.ast.main_token, field_token_type);
     }
 
     if (container_field.ast.type_expr != 0) {
@@ -941,13 +944,13 @@ fn writeContainerField(builder: *Builder, node: Ast.Node.Index, field_token_type
         }
     }
 
-    if (container_field.ast.value_expr != 0) block: {
+    if (container_field.ast.value_expr != 0) {
         const eq_tok: Ast.TokenIndex = if (container_field.ast.align_expr != 0)
             ast.lastToken(tree, container_field.ast.align_expr) + 2
         else if (container_field.ast.type_expr != 0)
             ast.lastToken(tree, container_field.ast.type_expr) + 1
         else
-            break :block;
+            container_field.ast.main_token + 1;
 
         try writeToken(builder, eq_tok, .operator);
         try callWriteNodeTokens(allocator, .{ builder, container_field.ast.value_expr });
