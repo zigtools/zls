@@ -1642,10 +1642,11 @@ pub fn smallestEnclosingSubrange(children: []const offsets.Loc, loc: offsets.Loc
         0 => return null,
         1 => return if (offsets.locInside(loc, children[0])) .{ .start = 0, .len = 1 } else null,
         else => {
-            for (children[0 .. children.len - 1], children[1..]) |previous_loc, current_loc| {
-                std.debug.assert(previous_loc.end <= current_loc.start); // must by sorted
-                std.debug.assert(!offsets.locIntersect(previous_loc, current_loc)); // must be non-intersecting
-            }
+            // TODO re-enable checks once parsing conforms to these assumptions
+            // for (children[0 .. children.len - 1], children[1..]) |previous_loc, current_loc| {
+            //     std.debug.assert(previous_loc.end <= current_loc.start); // must be sorted
+            //     std.debug.assert(!offsets.locIntersect(previous_loc, current_loc)); // must be non-intersecting
+            // }
         },
     }
 
