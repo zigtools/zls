@@ -108,6 +108,12 @@
             "default": "1048576"
         },
         {
+            "name": "prefer_ast_check_as_child_process",
+            "description": "Can be used in conjuction with `enable_ast_check_diagnostics` to favor using `zig ast-check` instead of ZLS's fork",
+            "type": "bool",
+            "default": "true"
+        },
+        {
             "name": "record_session",
             "description": "When true, zls will record all request is receives and write in into `record_session_path`, so that they can replayed with `zls replay`",
             "type": "bool",

@@ -13,6 +13,8 @@ const Config = @import("Config.zig");
 const ZigVersionWrapper = @import("ZigVersionWrapper.zig");
 const translate_c = @import("translate_c.zig");
 const ComptimeInterpreter = @import("ComptimeInterpreter.zig");
+const AstGen = @import("stage2/AstGen.zig");
+const Zir = @import("stage2/Zir.zig");
 
 const DocumentStore = @This();
 
@@ -56,6 +58,13 @@ pub const Handle = struct {
     uri: Uri,
     text: [:0]const u8,
     tree: Ast,
+    /// do not access unless `zir_status != .none`
+    zir: Zir = undefined,
+    zir_status: enum {
+        none,
+        outdated,
+        done,
+    } = .none,
     /// Not null if a ComptimeInterpreter is actually used
     interpreter: ?*ComptimeInterpreter = null,
     document_scope: analysis.DocumentScope,
@@ -74,6 +83,7 @@ pub const Handle = struct {
             allocator.destroy(interpreter);
         }
         self.document_scope.deinit(allocator);
+        if (self.zir_status != .none) self.zir.deinit(allocator);
         self.tree.deinit(allocator);
         allocator.free(self.text);
         allocator.free(self.uri);
@@ -213,6 +223,15 @@ pub fn refreshDocument(self: *DocumentStore, uri: Uri, new_text: [:0]const u8) !
     var new_tree = try Ast.parse(self.allocator, handle.text, .zig);
     handle.tree.deinit(self.allocator);
     handle.tree = new_tree;
+
+    if (self.wantZir() and handle.open and new_tree.errors.len == 0) {
+        const new_zir = try AstGen.generate(self.allocator, new_tree);
+        if (handle.zir_status != .none) handle.zir.deinit(self.allocator);
+        handle.zir = new_zir;
+        handle.zir_status = .done;
+    } else if (handle.zir_status == .done) {
+        handle.zir_status = .outdated;
+    }
 
     var new_document_scope = try analysis.makeDocumentScope(self.allocator, handle.tree);
     handle.document_scope.deinit(self.allocator);
@@ -698,17 +717,31 @@ fn createDocument(self: *DocumentStore, uri: Uri, text: [:0]const u8, open: bool
         var tree = try Ast.parse(self.allocator, text, .zig);
         errdefer tree.deinit(self.allocator);
 
+        // remove unused capacity
         var nodes = tree.nodes.toMultiArrayList();
         try nodes.setCapacity(self.allocator, nodes.len);
         tree.nodes = nodes.slice();
 
+        // remove unused capacity
         var tokens = tree.tokens.toMultiArrayList();
         try tokens.setCapacity(self.allocator, tokens.len);
         tree.tokens = tokens.slice();
 
+        const generate_zir = self.wantZir() and open and tree.errors.len == 0;
+        var zir: ?Zir = if (generate_zir) try AstGen.generate(self.allocator, tree) else null;
+        errdefer if (zir) |*code| code.deinit(self.allocator);
+
+        // remove unused capacity
+        if (zir) |*code| {
+            var instructions = code.instructions.toMultiArrayList();
+            try instructions.setCapacity(self.allocator, instructions.len);
+            code.instructions = instructions.slice();
+        }
+
         var document_scope = try analysis.makeDocumentScope(self.allocator, tree);
         errdefer document_scope.deinit(self.allocator);
 
+        // remove unused capacity
         try document_scope.scopes.setCapacity(self.allocator, document_scope.scopes.len);
 
         break :blk Handle{
@@ -716,6 +749,8 @@ fn createDocument(self: *DocumentStore, uri: Uri, text: [:0]const u8, open: bool
             .uri = duped_uri,
             .text = text,
             .tree = tree,
+            .zir = if (zir) |code| code else undefined,
+            .zir_status = if (zir != null) .done else .none,
             .document_scope = document_scope,
         };
     };
@@ -1082,6 +1117,12 @@ pub fn errorCompletionItems(self: DocumentStore, arena: std.mem.Allocator, handl
 
 pub fn enumCompletionItems(self: DocumentStore, arena: std.mem.Allocator, handle: Handle) error{OutOfMemory}![]types.CompletionItem {
     return try self.tagStoreCompletionItems(arena, handle, "enum_completions");
+}
+
+pub fn wantZir(self: DocumentStore) bool {
+    if (!self.config.enable_ast_check_diagnostics) return false;
+    const can_run_ast_check = std.process.can_spawn and self.config.zig_exe_path != null and self.config.prefer_ast_check_as_child_process;
+    return !can_run_ast_check;
 }
 
 pub fn ensureInterpreterExists(self: *DocumentStore, uri: Uri) !*ComptimeInterpreter {
