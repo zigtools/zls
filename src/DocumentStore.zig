@@ -269,6 +269,8 @@ pub fn applySave(self: *DocumentStore, handle: *const Handle) !void {
 /// Invalidates all build files. Used to rerun
 /// upon changing the zig exe path via a configuration request.
 pub fn invalidateBuildFiles(self: *DocumentStore) void {
+    if (!std.process.can_spawn) return;
+
     var it = self.build_files.iterator();
 
     while (it.next()) |entry| {
