@@ -754,8 +754,7 @@ fn handleConfiguration(server: *Server, json: std.json.Value) error{OutOfMemory}
 fn openDocumentHandler(server: *Server, notification: types.DidOpenTextDocumentParams) Error!void {
     const handle = try server.document_store.openDocument(notification.textDocument.uri, try server.document_store.allocator.dupeZ(u8, notification.textDocument.text));
 
-    if (server.client_capabilities.supports_publish_diagnostics) blk: {
-        if (!std.process.can_spawn) break :blk;
+    if (server.client_capabilities.supports_publish_diagnostics) {
         const diagnostics = try diagnostics_gen.generateDiagnostics(server, handle);
         server.sendNotification("textDocument/publishDiagnostics", diagnostics);
     }
@@ -771,8 +770,7 @@ fn changeDocumentHandler(server: *Server, notification: types.DidChangeTextDocum
 
     try server.document_store.refreshDocument(handle.uri, new_text);
 
-    if (server.client_capabilities.supports_publish_diagnostics) blk: {
-        if (!std.process.can_spawn) break :blk;
+    if (server.client_capabilities.supports_publish_diagnostics) {
         const diagnostics = try diagnostics_gen.generateDiagnostics(server, handle.*);
         server.sendNotification("textDocument/publishDiagnostics", diagnostics);
     }
@@ -913,8 +911,7 @@ pub fn hoverHandler(server: *Server, request: types.HoverParams) Error!?types.Ho
     const response = hover_handler.hover(server, source_index, handle);
 
     // TODO: Figure out a better solution for comptime interpreter diags
-    if (server.client_capabilities.supports_publish_diagnostics) blk: {
-        if (!std.process.can_spawn) break :blk;
+    if (server.client_capabilities.supports_publish_diagnostics) {
         const diagnostics = try diagnostics_gen.generateDiagnostics(server, handle.*);
         server.sendNotification("textDocument/publishDiagnostics", diagnostics);
     }
