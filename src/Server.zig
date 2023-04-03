@@ -935,15 +935,6 @@ pub fn formattingHandler(server: *Server, request: types.DocumentFormattingParam
 
     if (std.mem.eql(u8, handle.text, formatted)) return null;
 
-    if (formatted.len <= 512) {
-        var text_edits = try allocator.alloc(types.TextEdit, 1);
-        text_edits[0] = .{
-            .range = offsets.locToRange(handle.text, .{ .start = 0, .end = handle.text.len }, server.offset_encoding),
-            .newText = formatted,
-        };
-        return text_edits;
-    }
-
     return if (diff.edits(allocator, handle.text, formatted, server.offset_encoding)) |text_edits| text_edits.items else |_| null;
 }
 
