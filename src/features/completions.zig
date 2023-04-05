@@ -821,7 +821,7 @@ fn completeDot(server: *Server, handle: *const DocumentStore.Handle, source_inde
         }
 
         // iterate until we find current token loc (should be a .period)
-        while (upper_index > 1) : (upper_index -= 1) {
+        while (upper_index > 0) : (upper_index -= 1) {
             if (tokens_start[upper_index] > source_index) continue;
             upper_index -= 1;
             break;
@@ -829,25 +829,37 @@ fn completeDot(server: *Server, handle: *const DocumentStore.Handle, source_inde
 
         const token_tags = tree.tokens.items(.tag);
 
-        // look for an .l_brace (but don't extend past a .semicolon or .r_brace)
-        while (upper_index != 0 and token_tags[upper_index] != .l_brace) {
-            if (token_tags[upper_index] == .semicolon or token_tags[upper_index] == .r_brace) break :struct_init;
+        if (token_tags[upper_index] == .number_literal) break :struct_init; // `var s = MyStruct{.float_field = 1.`
+
+        // look for .identifier followed by .l_brace, skipping matches at depth 0+
+        var depth: i32 = 0; // Should end up being negative, ie even the first/single .l_brace would put it at -1; 0+ => nested
+        while (upper_index > 0) {
+            if (token_tags[upper_index] != .identifier) {
+                switch (token_tags[upper_index]) {
+                    .r_brace => depth += 1,
+                    .l_brace => depth -= 1,
+                    .period => if (depth < 0 and token_tags[upper_index + 1] == .l_brace) break :struct_init, // anon struct init `.{.`
+                    .semicolon => break :struct_init, // generic exit; maybe also .keyword_(var/const)
+                    else => {},
+                }
+            } else if (token_tags[upper_index + 1] == .l_brace and depth < 0) break;
             upper_index -= 1;
         }
 
-        // the .l_brace should be preceded by an .identifier
-        if (upper_index == 0 or token_tags[upper_index - 1] != .identifier) {
-            break :struct_init;
-        }
+        if (upper_index == 0) break :struct_init;
 
-        upper_index -= 1; // identifier's index
         var identifier_loc = offsets.tokenIndexToLoc(tree.source, tokens_start[upper_index]);
 
         // if this is done as a field access collect all the identifiers, eg `path.to.MyStruct`
         var identifier_original_start = identifier_loc.start;
-        while ((token_tags[upper_index] == .period or token_tags[upper_index] == .identifier) and upper_index != 0) : (upper_index -= 1) {
+        while ((token_tags[upper_index] == .period or token_tags[upper_index] == .identifier) and upper_index > 0) : (upper_index -= 1) {
             identifier_loc.start = tokens_start[upper_index];
         }
+
+        // token_tags[upper_index + 1] should be .identifier, else => there are potentially more tokens, eg
+        // the `@import("my_file.zig")` in  `var s = @import("my_file.zig").MyStruct{.`, which getSymbolFieldAccesses can(?) handle
+        // but it could be some other combo of tokens.. potential TODO
+        if (token_tags[upper_index + 1] != .identifier) break :struct_init;
 
         var completions = std.ArrayListUnmanaged(types.CompletionItem){};
 
