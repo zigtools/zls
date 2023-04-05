@@ -872,6 +872,10 @@ fn completeDot(server: *Server, handle: *const DocumentStore.Handle, source_inde
             if (maybe_decl) |local_decl| {
                 const nodes_tags = handle.tree.nodes.items(.tag);
                 const nodes_data = handle.tree.nodes.items(.data);
+                switch (local_decl.decl.*) {
+                    .ast_node => {},
+                    else => break :struct_init,
+                }
                 const node_data = nodes_data[local_decl.decl.ast_node];
                 if (node_data.rhs != 0) {
                     switch (nodes_tags[node_data.rhs]) {
