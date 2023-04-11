@@ -7,7 +7,7 @@ const zls_version = std.builtin.Version{ .major = 0, .minor = 11, .patch = 0 };
 pub fn build(b: *std.build.Builder) !void {
     comptime {
         const current_zig = builtin.zig_version;
-        const min_zig = std.SemanticVersion.parse("0.11.0-dev.1836+28364166e") catch unreachable; // package manager stuff + --build-runner + zls as a library
+        const min_zig = std.SemanticVersion.parse("0.11.0-dev.2558+d3a237a98") catch unreachable; // zig build changes - "remove-legacy-build-api" https://github.com/ziglang/zig/pull/15234
         if (current_zig.order(min_zig) == .lt) {
             @compileError(std.fmt.comptimePrint("Your Zig version v{} does not meet the minimum build requirement of v{}", .{ current_zig, min_zig }));
         }
@@ -109,7 +109,7 @@ pub fn build(b: *std.build.Builder) !void {
     }
 
     exe.pie = pie;
-    exe.install();
+    b.installArtifact(exe);
 
     const build_options_module = exe_options.createModule();
 
@@ -129,7 +129,7 @@ pub fn build(b: *std.build.Builder) !void {
     });
     gen_exe.addModule("tres", tres_module);
 
-    const gen_cmd = gen_exe.run();
+    const gen_cmd = b.addRunArtifact(gen_exe);
     gen_cmd.addArgs(&.{
         b.pathFromRoot("src/Config.zig"),
         b.pathFromRoot("schema.json"),
@@ -148,9 +148,9 @@ pub fn build(b: *std.build.Builder) !void {
         .root_source_file = .{ .path = "tests/tests.zig" },
         .target = target,
         .optimize = .Debug,
+        .filter = test_filter,
     });
 
-    tests.setFilter(test_filter);
     tests.addModule("zls", zls_module);
     tests.addModule("tres", tres_module);
     tests.addModule("diffz", diffz_module);
@@ -160,8 +160,8 @@ pub fn build(b: *std.build.Builder) !void {
         .root_source_file = .{ .path = "src/zls.zig" },
         .target = target,
         .optimize = .Debug,
+        .filter = test_filter,
     });
-    src_tests.setFilter(test_filter);
     test_step.dependOn(&b.addRunArtifact(src_tests).step);
 
     if (coverage) {
