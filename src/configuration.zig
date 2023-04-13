@@ -80,7 +80,7 @@ pub fn configChanged(config: *Config, runtime_zig_version: *?ZigVersionWrapper, 
     }
 
     if (config.zig_exe_path) |exe_path| blk: {
-        logger.info("Using zig executable {s}", .{exe_path});
+        logger.info("Using zig executable '{s}'", .{exe_path});
 
         var env = getZigEnv(allocator, exe_path) orelse break :blk;
         defer std.json.parseFree(Env, env, .{ .allocator = allocator });
