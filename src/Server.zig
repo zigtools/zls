@@ -399,6 +399,9 @@ fn initializeHandler(server: *Server, request: types.InitializeParams) Error!typ
         if (textDocument.hover) |hover| {
             if (hover.contentFormat) |content_format| {
                 for (content_format) |format| {
+                    if (format == .plaintext) {
+                        break;
+                    }
                     if (format == .markdown) {
                         server.client_capabilities.hover_supports_md = true;
                         break;
@@ -412,6 +415,9 @@ fn initializeHandler(server: *Server, request: types.InitializeParams) Error!typ
                 server.client_capabilities.supports_snippets = completionItem.snippetSupport orelse false;
                 if (completionItem.documentationFormat) |documentation_format| {
                     for (documentation_format) |format| {
+                        if (format == .plaintext) {
+                            break;
+                        }
                         if (format == .markdown) {
                             server.client_capabilities.completion_doc_supports_md = true;
                             break;
