@@ -2079,6 +2079,7 @@ pub const Inst = struct {
         i128_type,
         usize_type,
         isize_type,
+        c_char_type,
         c_short_type,
         c_ushort_type,
         c_int_type,
