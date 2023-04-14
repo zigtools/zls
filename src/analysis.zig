@@ -653,6 +653,7 @@ pub fn isTypeIdent(text: []const u8) bool {
         .{"type"},         .{"anyerror"},
         .{"comptime_int"}, .{"comptime_float"},
         .{"anyframe"},     .{"anytype"},
+        .{"c_char"}
     });
 
     if (PrimitiveTypes.has(text)) return true;
