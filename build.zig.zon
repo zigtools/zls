@@ -15,5 +15,9 @@
             .url = "https://github.com/ziglibs/diffz/archive/b966296b4489eb082b0831ec9a37d6f5e1906040.tar.gz",
             .hash = "1220ed4aed884221108ad39f2658b69a91653e0bbc8ce429bc7f1bc4e58f6a751553",
         },
+        .binned_allocator = .{
+            .url = "https://gist.github.com/silversquirl/c1e4840048fdf48e669b6eac76d80634/archive/8bbe137e65f26854ff936046d884a45d4fa156de.tar.gz",
+            .hash = "1220044bd25cc02da476d0ddf988667a29751dae6bf988128b32ac258b21c23d0f47",
+        },
     },
 }
