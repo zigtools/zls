@@ -41,7 +41,7 @@ pub const Context = struct {
 
         config.* = default_config;
 
-        const server = try Server.create(allocator, config, null, false, false);
+        const server = try Server.create(allocator, config, null, false, false, false);
         errdefer server.destroy();
 
         var context: Context = .{

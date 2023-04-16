@@ -48,6 +48,7 @@ runtime_zig_version: ?ZigVersionWrapper,
 outgoing_messages: std.ArrayListUnmanaged([]const u8) = .{},
 recording_enabled: bool,
 replay_enabled: bool,
+message_tracing_enabled: bool = false,
 offset_encoding: offsets.Encoding = .@"utf-16",
 status: enum {
     /// the server has not received a `initialize` request
@@ -450,6 +451,13 @@ fn initializeHandler(server: *Server, request: types.InitializeParams) Error!typ
         }
     }
 
+    if (request.trace) |trace| {
+        // To support --enable-message-tracing, only allow turning this on here
+        if (trace != .off) {
+            server.message_tracing_enabled = true;
+        }
+    }
+
     log.info("zls initializing", .{});
     log.info("{}", .{server.client_capabilities});
     log.info("Using offset encoding: {s}", .{std.meta.tagName(server.offset_encoding)});
@@ -612,6 +620,10 @@ fn cancelRequestHandler(server: *Server, request: types.CancelParams) Error!void
     _ = server;
     _ = request;
     // TODO implement $/cancelRequest
+}
+
+fn setTraceHandler(server: *Server, request: types.SetTraceParams) Error!void {
+    server.message_tracing_enabled = request.value != .off;
 }
 
 fn registerCapability(server: *Server, method: []const u8) Error!void {
@@ -1449,6 +1461,7 @@ pub fn processMessage(server: *Server, message: Message) Error!void {
         .{ "shutdown", shutdownHandler },
         .{ "exit", exitHandler },
         .{ "$/cancelRequest", cancelRequestHandler },
+        .{ "$/setTrace", setTraceHandler },
         .{ "textDocument/didOpen", openDocumentHandler },
         .{ "textDocument/didChange", changeDocumentHandler },
         .{ "textDocument/didSave", saveDocumentHandler },
@@ -1533,6 +1546,7 @@ pub fn create(
     config_path: ?[]const u8,
     recording_enabled: bool,
     replay_enabled: bool,
+    message_tracing_enabled: bool,
 ) !*Server {
     const server = try allocator.create(Server);
     server.* = Server{
@@ -1549,6 +1563,7 @@ pub fn create(
         .builtin_completions = null,
         .recording_enabled = recording_enabled,
         .replay_enabled = replay_enabled,
+        .message_tracing_enabled = message_tracing_enabled,
         .status = .uninitialized,
     };
     server.analyser = Analyser.init(allocator, &server.document_store);
