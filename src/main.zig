@@ -11,6 +11,7 @@ const Header = @import("Header.zig");
 const debug = @import("debug.zig");
 
 const logger = std.log.scoped(.zls_main);
+const message_logger = std.log.scoped(.message);
 
 var actual_log_level: std.log.Level = switch (zig_builtin.mode) {
     .Debug => .debug,
@@ -60,6 +61,7 @@ fn loop(
             const header = Header{ .content_length = outgoing_message.len };
             try header.write(true, writer);
             try writer.writeAll(outgoing_message);
+            if (server.message_tracing_enabled) message_logger.info("sent: {s}\n", .{outgoing_message});
         }
         try buffered_writer.flush();
         for (server.outgoing_messages.items) |outgoing_message| {
@@ -78,6 +80,7 @@ fn loop(
             try file.writeAll(json_message);
         }
 
+        if (server.message_tracing_enabled) message_logger.info("received: {s}\n", .{json_message});
         server.processJsonRpc(json_message);
 
         if (server.status == .exiting_success or server.status == .exiting_failure) return;
@@ -195,6 +198,7 @@ const ParseArgsResult = struct {
     config_path: ?[]const u8,
     replay_enabled: bool,
     replay_session_path: ?[]const u8,
+    message_tracing_enabled: bool,
 };
 
 fn parseArgs(allocator: std.mem.Allocator) !ParseArgsResult {
@@ -203,6 +207,7 @@ fn parseArgs(allocator: std.mem.Allocator) !ParseArgsResult {
         .config_path = null,
         .replay_enabled = false,
         .replay_session_path = null,
+        .message_tracing_enabled = false,
     };
 
     const ArgId = enum {
@@ -210,6 +215,7 @@ fn parseArgs(allocator: std.mem.Allocator) !ParseArgsResult {
         version,
         replay,
         @"enable-debug-log",
+        @"enable-message-tracing",
         @"show-config-path",
         @"config-path",
     };
@@ -236,6 +242,7 @@ fn parseArgs(allocator: std.mem.Allocator) !ParseArgsResult {
             .version = "Prints the compiler version with which the server was compiled.",
             .replay = "Replay a previous recorded zls session",
             .@"enable-debug-log" = "Enables debug logs.",
+            .@"enable-message-tracing" = "Enables message tracing.",
             .@"config-path" = "Specify the path to a configuration file specifying LSP behaviour.",
             .@"show-config-path" = "Prints the path to the configuration file to stdout",
         });
@@ -281,6 +288,7 @@ fn parseArgs(allocator: std.mem.Allocator) !ParseArgsResult {
             .help,
             .version,
             .@"enable-debug-log",
+            .@"enable-message-tracing",
             .@"show-config-path",
             => {},
             .@"config-path" => {
@@ -309,6 +317,10 @@ fn parseArgs(allocator: std.mem.Allocator) !ParseArgsResult {
     if (specified.get(.@"enable-debug-log")) {
         actual_log_level = .debug;
         logger.info("Enabled debug logging.\n", .{});
+    }
+    if (specified.get(.@"enable-message-tracing")) {
+        result.message_tracing_enabled = true;
+        logger.info("Enabled message tracing.\n", .{});
     }
     if (specified.get(.@"config-path")) {
         std.debug.assert(result.config_path != null);
@@ -390,6 +402,7 @@ pub fn main() !void {
         config.config_path,
         record_file != null,
         replay_file != null,
+        result.message_tracing_enabled,
     );
     defer server.destroy();
 
