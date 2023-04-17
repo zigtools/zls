@@ -205,7 +205,7 @@ pub const builtins = [_]Builtin{
     },
     .{
         .name = "@breakpoint",
-        .signature = "@breakpoint()",
+        .signature = "@breakpoint() void",
         .snippet = "@breakpoint()",
         .documentation =
         \\This function inserts a platform-specific debug trap instruction which causes debuggers to break there. Unlike for `@trap()`, execution may continue after this point if the program is resumed.
@@ -329,7 +329,7 @@ pub const builtins = [_]Builtin{
     },
     .{
         .name = "@cDefine",
-        .signature = "@cDefine(comptime name: []u8, value)",
+        .signature = "@cDefine(comptime name: []u8, value) void",
         .snippet = "@cDefine(${1:comptime name: []u8}, ${2:value})",
         .documentation =
         \\This function can only occur inside `@cImport`.
@@ -370,7 +370,7 @@ pub const builtins = [_]Builtin{
     },
     .{
         .name = "@cInclude",
-        .signature = "@cInclude(comptime path: []u8)",
+        .signature = "@cInclude(comptime path: []u8) void",
         .snippet = "@cInclude(${1:comptime path: []u8})",
         .documentation =
         \\This function can only occur inside `@cImport`.
@@ -384,7 +384,7 @@ pub const builtins = [_]Builtin{
     },
     .{
         .name = "@clz",
-        .signature = "@clz(operand: anytype)",
+        .signature = "@clz(operand: anytype) anytype",
         .snippet = "@clz(${1:operand: anytype})",
         .documentation =
         \\`@TypeOf(operand)` must be an integer type or an integer vector type.
@@ -469,7 +469,7 @@ pub const builtins = [_]Builtin{
     },
     .{
         .name = "@compileError",
-        .signature = "@compileError(comptime msg: []u8)",
+        .signature = "@compileError(comptime msg: []u8) noreturn",
         .snippet = "@compileError(${1:comptime msg: []u8})",
         .documentation =
         \\This function, when semantically analyzed, causes a compile error with the message `msg`.
@@ -482,7 +482,7 @@ pub const builtins = [_]Builtin{
     },
     .{
         .name = "@compileLog",
-        .signature = "@compileLog(args: ...)",
+        .signature = "@compileLog(args: ...) void",
         .snippet = "@compileLog(${1:args: ...})",
         .documentation =
         \\This function prints the arguments passed to it at compile-time.
@@ -535,7 +535,7 @@ pub const builtins = [_]Builtin{
     },
     .{
         .name = "@ctz",
-        .signature = "@ctz(operand: anytype)",
+        .signature = "@ctz(operand: anytype) anytype",
         .snippet = "@ctz(${1:operand: anytype})",
         .documentation =
         \\`@TypeOf(operand)` must be an integer type or an integer vector type.
@@ -554,7 +554,7 @@ pub const builtins = [_]Builtin{
     },
     .{
         .name = "@cUndef",
-        .signature = "@cUndef(comptime name: []u8)",
+        .signature = "@cUndef(comptime name: []u8) void",
         .snippet = "@cUndef(${1:comptime name: []u8})",
         .documentation =
         \\This function can only occur inside `@cImport`.
@@ -784,7 +784,7 @@ pub const builtins = [_]Builtin{
     },
     .{
         .name = "@fence",
-        .signature = "@fence(order: AtomicOrder)",
+        .signature = "@fence(order: AtomicOrder) void",
         .snippet = "@fence(${1:order: AtomicOrder})",
         .documentation =
         \\The `fence` function is used to introduce happens-before edges between operations.
@@ -1049,7 +1049,7 @@ pub const builtins = [_]Builtin{
     },
     .{
         .name = "@memcpy",
-        .signature = "@memcpy(noalias dest: [*]u8, noalias source: [*]const u8, byte_count: usize)",
+        .signature = "@memcpy(noalias dest: [*]u8, noalias source: [*]const u8, byte_count: usize) void",
         .snippet = "@memcpy(${1:noalias dest: [*]u8}, ${2:noalias source: [*]const u8}, ${3:byte_count: usize})",
         .documentation =
         \\This function copies bytes from one region of memory to another. `dest` and `source` are both pointers and must not overlap.
@@ -1074,7 +1074,7 @@ pub const builtins = [_]Builtin{
     },
     .{
         .name = "@memset",
-        .signature = "@memset(dest: [*]u8, c: u8, byte_count: usize)",
+        .signature = "@memset(dest: [*]u8, c: u8, byte_count: usize) void",
         .snippet = "@memset(${1:dest: [*]u8}, ${2:c: u8}, ${3:byte_count: usize})",
         .documentation =
         \\This function sets a region of memory to `c`. `dest` is a pointer.
@@ -1196,7 +1196,7 @@ pub const builtins = [_]Builtin{
     },
     .{
         .name = "@popCount",
-        .signature = "@popCount(operand: anytype)",
+        .signature = "@popCount(operand: anytype) anytype",
         .snippet = "@popCount(${1:operand: anytype})",
         .documentation =
         \\`@TypeOf(operand)` must be an integer type.
@@ -1213,7 +1213,7 @@ pub const builtins = [_]Builtin{
     },
     .{
         .name = "@prefetch",
-        .signature = "@prefetch(ptr: anytype, comptime options: std.builtin.PrefetchOptions)",
+        .signature = "@prefetch(ptr: anytype, comptime options: std.builtin.PrefetchOptions) void",
         .snippet = "@prefetch(${1:ptr: anytype}, ${2:comptime options: std.builtin.PrefetchOptions})",
         .documentation =
         \\This builtin tells the compiler to emit a prefetch instruction if supported by the target CPU. If the target CPU does not support the requested prefetch instruction, this builtin is a no-op. This function has no effect on the behavior of the program, only on the performance characteristics.
@@ -1332,7 +1332,7 @@ pub const builtins = [_]Builtin{
     },
     .{
         .name = "@setAlignStack",
-        .signature = "@setAlignStack(comptime alignment: u29)",
+        .signature = "@setAlignStack(comptime alignment: u29) void",
         .snippet = "@setAlignStack(${1:comptime alignment: u29})",
         .documentation =
         \\Ensures that a function will have a stack alignment of at least `alignment` bytes.
@@ -1343,7 +1343,7 @@ pub const builtins = [_]Builtin{
     },
     .{
         .name = "@setCold",
-        .signature = "@setCold(comptime is_cold: bool)",
+        .signature = "@setCold(comptime is_cold: bool) void",
         .snippet = "@setCold(${1:comptime is_cold: bool})",
         .documentation =
         \\Tells the optimizer that a function is rarely called.
@@ -1354,7 +1354,7 @@ pub const builtins = [_]Builtin{
     },
     .{
         .name = "@setEvalBranchQuota",
-        .signature = "@setEvalBranchQuota(comptime new_quota: u32)",
+        .signature = "@setEvalBranchQuota(comptime new_quota: u32) void",
         .snippet = "@setEvalBranchQuota(${1:comptime new_quota: u32})",
         .documentation =
         \\Changes the maximum number of backwards branches that compile-time code execution can use before giving up and making a compile error.
@@ -1380,7 +1380,7 @@ pub const builtins = [_]Builtin{
     },
     .{
         .name = "@setFloatMode",
-        .signature = "@setFloatMode(comptime mode: @import(\"std\").builtin.FloatMode)",
+        .signature = "@setFloatMode(comptime mode: @import(\"std\").builtin.FloatMode) void",
         .snippet = "@setFloatMode(${1:comptime mode: @import(\"std\").builtin.FloatMode})",
         .documentation =
         \\Sets the floating point mode of the current scope. Possible values are:
@@ -2027,6 +2027,39 @@ pub const builtins = [_]Builtin{
         ,
         .arguments = &.{
             "value: anytype",
+        },
+    },
+    .{
+        .name = "@workGroupId",
+        .signature = "@workGroupId(comptime dimension: u32) u32",
+        .snippet = "@workGroupId(${1:comptime dimension: u32})",
+        .documentation =
+        \\Returns the index of the work group in the current kernel invocation in dimension `dimension`.
+        ,
+        .arguments = &.{
+            "comptime dimension: u32",
+        },
+    },
+    .{
+        .name = "@workGroupSize",
+        .signature = "@workGroupSize(comptime dimension: u32) u32",
+        .snippet = "@workGroupSize(${1:comptime dimension: u32})",
+        .documentation =
+        \\Returns the number of work items that a work group has in dimension `dimension`.
+        ,
+        .arguments = &.{
+            "comptime dimension: u32",
+        },
+    },
+    .{
+        .name = "@workItemId",
+        .signature = "@workItemId(comptime dimension: u32) u32",
+        .snippet = "@workItemId(${1:comptime dimension: u32})",
+        .documentation =
+        \\Returns the index of the work item in the work group in dimension `dimension`. This function returns values between `0` (inclusive) and `@workGroupSize(dimension)` (exclusive).
+        ,
+        .arguments = &.{
+            "comptime dimension: u32",
         },
     },
 };
