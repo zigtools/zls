@@ -305,6 +305,7 @@ pub const Key = union(enum) {
 
                 .usize,
                 .isize,
+                .c_char,
                 .c_short,
                 .c_ushort,
                 .c_int,
@@ -437,6 +438,7 @@ pub const Key = union(enum) {
                 .usize => return .{ .signedness = .signed, .bits = target.cpu.arch.ptrBitWidth() },
                 .isize => return .{ .signedness = .unsigned, .bits = target.cpu.arch.ptrBitWidth() },
 
+                .c_char => return .{ .signedness = .signed, .bits = target.c_type_bit_size(.char) },
                 .c_short => return .{ .signedness = .signed, .bits = target.c_type_bit_size(.short) },
                 .c_ushort => return .{ .signedness = .unsigned, .bits = target.c_type_bit_size(.ushort) },
                 .c_int => return .{ .signedness = .signed, .bits = target.c_type_bit_size(.int) },
@@ -595,6 +597,7 @@ pub const Key = union(enum) {
                 .f128,
                 .usize,
                 .isize,
+                .c_char,
                 .c_short,
                 .c_ushort,
                 .c_int,
@@ -769,6 +772,7 @@ pub const Key = union(enum) {
                 .f128,
                 .usize,
                 .isize,
+                .c_char,
                 .c_short,
                 .c_ushort,
                 .c_int,
@@ -1033,6 +1037,7 @@ pub const Index = enum(u32) {
     i128_type,
     usize_type,
     isize_type,
+    c_char_type,
     c_short_type,
     c_ushort_type,
     c_int_type,
@@ -1147,6 +1152,13 @@ pub const Index = enum(u32) {
         }
     }
 };
+
+comptime {
+    const Zir = @import("../stage2/Zir.zig");
+    assert(@enumToInt(Zir.Inst.Ref.generic_poison_type) == @enumToInt(Index.generic_poison_type));
+    assert(@enumToInt(Zir.Inst.Ref.undef) == @enumToInt(Index.undefined_value));
+    assert(@enumToInt(Zir.Inst.Ref.one_usize) == @enumToInt(Index.one_usize));
+}
 
 pub const NamespaceIndex = enum(u32) {
     none = std.math.maxInt(u32),
@@ -1264,6 +1276,7 @@ pub const SimpleType = enum(u32) {
     f128,
     usize,
     isize,
+    c_char,
     c_short,
     c_ushort,
     c_int,
@@ -1336,6 +1349,7 @@ pub fn init(gpa: Allocator) Allocator.Error!InternPool {
 
         .{ .index = .usize_type, .key = .{ .simple_type = .usize } },
         .{ .index = .isize_type, .key = .{ .simple_type = .isize } },
+        .{ .index = .c_char_type, .key = .{ .simple_type = .c_char } },
         .{ .index = .c_short_type, .key = .{ .simple_type = .c_short } },
         .{ .index = .c_ushort_type, .key = .{ .simple_type = .c_ushort } },
         .{ .index = .c_int_type, .key = .{ .simple_type = .c_int } },
@@ -1804,6 +1818,7 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
 
                 .usize,
                 .isize,
+                .c_char,
                 .c_short,
                 .c_ushort,
                 .c_int,
@@ -1817,6 +1832,7 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
                     .simple_type => |chosen_simple| switch (chosen_simple) {
                         .usize,
                         .isize,
+                        .c_char,
                         .c_short,
                         .c_ushort,
                         .c_int,
@@ -1865,6 +1881,7 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
                         .f128,
                         .usize,
                         .isize,
+                        .c_char,
                         .c_short,
                         .c_ushort,
                         .c_int,
@@ -1906,6 +1923,7 @@ pub fn resolvePeerTypes(ip: *InternPool, gpa: Allocator, types: []const Index, t
                 .simple_type => |chosen_simple| switch (chosen_simple) {
                     .usize,
                     .isize,
+                    .c_char,
                     .c_short,
                     .c_ushort,
                     .c_int,
