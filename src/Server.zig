@@ -1549,6 +1549,7 @@ pub fn create(
     message_tracing_enabled: bool,
 ) !*Server {
     const server = try allocator.create(Server);
+    errdefer server.destroy();
     server.* = Server{
         .config = config,
         .runtime_zig_version = null,
