@@ -164,7 +164,7 @@ fn getConfig(
 ) !ConfigWithPath {
     if (config_path) |path| {
         if (configuration.loadFromFile(allocator, path)) |config| {
-            return ConfigWithPath{ .config = config, .config_path = path };
+            return ConfigWithPath{ .config = config, .config_path = try allocator.dupe(u8, path) };
         }
         std.debug.print(
             \\Could not open configuration file '{s}'
