@@ -964,15 +964,16 @@ fn httpGET(allocator: std.mem.Allocator, uri: std.Uri) !Response {
     defer client.deinit();
     try client.ca_bundle.rescan(allocator);
 
-    var request = try client.request(uri, .{ .connection = .close }, .{});
+    var request = try client.request(.GET, uri, .{ .allocator = allocator }, .{});
     defer request.deinit();
 
-    try request.do();
+    try request.start();
     // try request.finish();
+    try request.do();
 
-    if (request.response.headers.status.class() != .success) {
+    if (request.response.status.class() != .success) {
         return .{
-            .other = request.response.headers.status,
+            .other = request.response.status,
         };
     }
 
