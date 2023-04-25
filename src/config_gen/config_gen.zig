@@ -969,7 +969,7 @@ fn httpGET(allocator: std.mem.Allocator, uri: std.Uri) !Response {
 
     try request.start();
     // try request.finish();
-    try request.do();
+    try request.wait();
 
     if (request.response.status.class() != .success) {
         return .{
@@ -984,7 +984,7 @@ fn httpGET(allocator: std.mem.Allocator, uri: std.Uri) !Response {
 
 pub fn main() !void {
     var general_purpose_allocator = std.heap.GeneralPurposeAllocator(.{}){};
-    defer std.debug.assert(!general_purpose_allocator.deinit());
+    defer std.debug.assert(general_purpose_allocator.deinit() == .ok);
     var gpa = general_purpose_allocator.allocator();
 
     var stderr = std.io.getStdErr().writer();
