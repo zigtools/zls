@@ -7,7 +7,7 @@ const zls_version = std.builtin.Version{ .major = 0, .minor = 11, .patch = 0 };
 pub fn build(b: *std.build.Builder) !void {
     comptime {
         const current_zig = builtin.zig_version;
-        const min_zig = std.SemanticVersion.parse("0.11.0-dev.2730+bd801dc48") catch unreachable; // gpa.deinit() now returns an enum
+        const min_zig = std.SemanticVersion.parse("0.11.0-dev.2835+7285eedcd") catch unreachable; // std.http: do -> wait, fix redirects
         if (current_zig.order(min_zig) == .lt) {
             @compileError(std.fmt.comptimePrint("Your Zig version v{} does not meet the minimum build requirement of v{}", .{ current_zig, min_zig }));
         }

@@ -391,7 +391,7 @@ pub const builtins = [_]Builtin{
         \\
         \\`operand` may be an [integer](https://ziglang.org/documentation/master/#Integers) or [vector](https://ziglang.org/documentation/master/#Vectors).
         \\
-        \\This function counts the number of most-significant (leading in a big-Endian sense) zeroes in an integer.
+        \\Counts the number of most-significant (leading in a big-endian sense) zeroes in an integer - "count leading zeroes".
         \\
         \\If `operand` is a [comptime](https://ziglang.org/documentation/master/#comptime)-known integer, the return type is `comptime_int`. Otherwise, the return type is an unsigned integer or vector of unsigned integers with the minimum number of bits that can represent the bit count of the integer type.
         \\
@@ -542,7 +542,7 @@ pub const builtins = [_]Builtin{
         \\
         \\`operand` may be an [integer](https://ziglang.org/documentation/master/#Integers) or [vector](https://ziglang.org/documentation/master/#Vectors).
         \\
-        \\This function counts the number of least-significant (trailing in a big-Endian sense) zeroes in an integer.
+        \\Counts the number of least-significant (trailing in a big-endian sense) zeroes in an integer - "count trailing zeroes".
         \\
         \\If `operand` is a [comptime](https://ziglang.org/documentation/master/#comptime)-known integer, the return type is `comptime_int`. Otherwise, the return type is an unsigned integer or vector of unsigned integers with the minimum number of bits that can represent the bit count of the integer type.
         \\
@@ -946,14 +946,25 @@ pub const builtins = [_]Builtin{
         \\The following packages are always available:
         \\
         \\ - `@import("std")` - Zig Standard Library
-        \\ - `@import("builtin")` - Target-specific information. The command
+        \\ - `@import("builtin")` - Target-specific information The command
         \\`zig build-exe --show-builtin`outputs the source to stdout for reference.
-        \\ - `@import("root")` - Points to the root source file. This is usually
-        \\`src/main.zig`but it depends on what file is chosen to be built.
+        \\ - `@import("root")` - Root source file This is usually
+        \\`src/main.zig`but depends on what file is built.
         ,
         .arguments = &.{
             "comptime path: []u8",
         },
+    },
+    .{
+        .name = "@inComptime",
+        .signature = "@inComptime() bool",
+        .snippet = "@inComptime()",
+        .documentation =
+        \\Returns whether the builtin was run in a `comptime` context. The result is a compile-time constant.
+        \\
+        \\This can be used to provide alternative, comptime-friendly implementations of functions. It should not be used, for instance, to exclude certain functions from being evaluated at comptime.
+        ,
+        .arguments = &.{},
     },
     .{
         .name = "@intCast",
@@ -1203,7 +1214,7 @@ pub const builtins = [_]Builtin{
         \\
         \\`operand` may be an [integer](https://ziglang.org/documentation/master/#Integers) or [vector](https://ziglang.org/documentation/master/#Vectors).
         \\
-        \\Counts the number of bits set in an integer.
+        \\Counts the number of bits set in an integer - "population count".
         \\
         \\If `operand` is a [comptime](https://ziglang.org/documentation/master/#comptime)-known integer, the return type is `comptime_int`. Otherwise, the return type is an unsigned integer or vector of unsigned integers with the minimum number of bits that can represent the bit count of the integer type.
         ,
@@ -1228,6 +1239,8 @@ pub const builtins = [_]Builtin{
         \\pub const PrefetchOptions = struct {
         \\    /// Whether the prefetch should prepare for a read or a write.
         \\    rw: Rw = .read,
+        \\    /// The data's locality in an inclusive range from 0 to 3.
+        \\    ///
         \\    /// 0 means no temporal locality. That is, the data can be immediately
         \\    /// dropped from the cache after it is accessed.
         \\    ///
@@ -1236,11 +1249,11 @@ pub const builtins = [_]Builtin{
         \\    locality: u2 = 3,
         \\    /// The cache that the prefetch should be preformed on.
         \\    cache: Cache = .data,
-        \\    pub const Rw = enum {
+        \\    pub const Rw = enum(u1) {
         \\        read,
         \\        write,
         \\    };
-        \\    pub const Cache = enum {
+        \\    pub const Cache = enum(u1) {
         \\        instruction,
         \\        data,
         \\    };
