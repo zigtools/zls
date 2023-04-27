@@ -85,8 +85,8 @@ pub fn build(b: *std.build.Builder) !void {
     const tres_module = b.dependency("tres", .{}).module("tres");
     exe.addModule("tres", tres_module);
 
-    const diffz_module = b.dependency("diffz", .{}).module("diffz");
-    exe.addModule("diffz", diffz_module);
+    const diff_module = b.dependency("diff-zimilar", .{}).module("diff-zimilar");
+    exe.addModule("diff-zimilar", diff_module);
 
     if (enable_tracy) {
         const client_cpp = "src/tracy/TracyClient.cpp";
@@ -118,7 +118,7 @@ pub fn build(b: *std.build.Builder) !void {
         .dependencies = &.{
             .{ .name = "known-folders", .module = known_folders_module },
             .{ .name = "tres", .module = tres_module },
-            .{ .name = "diffz", .module = diffz_module },
+            .{ .name = "diff-zimilar", .module = diff_module },
             .{ .name = "build_options", .module = build_options_module },
         },
     });
@@ -153,7 +153,7 @@ pub fn build(b: *std.build.Builder) !void {
 
     tests.addModule("zls", zls_module);
     tests.addModule("tres", tres_module);
-    tests.addModule("diffz", diffz_module);
+    tests.addModule("diff-zimilar", diff_module);
     test_step.dependOn(&b.addRunArtifact(tests).step);
 
     var src_tests = b.addTest(.{

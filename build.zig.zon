@@ -11,9 +11,9 @@
             .url = "https://github.com/ziglibs/tres/archive/707a09313b42e05d6ae22d1590499eece5f968ce.tar.gz",
             .hash = "1220beaae8d152baa941a10b7ef3d3a59d093b257047035e2373c3c2f876ad29ccc8",
         },
-        .diffz = .{
-            .url = "https://github.com/ziglibs/diffz/archive/b966296b4489eb082b0831ec9a37d6f5e1906040.tar.gz",
-            .hash = "1220ed4aed884221108ad39f2658b69a91653e0bbc8ce429bc7f1bc4e58f6a751553",
+        .@"diff-zimilar" = .{
+            .url = "https://github.com/travisstaloch/diff-zimilar/archive/fee47a09b939802fb5f3eaf957dc88a330ba6d32.tar.gz",
+            .hash = "1220732202a14f2de4d13944d0993665e2079f642efd2981f704171dc03ca66cf598",
         },
     },
 }

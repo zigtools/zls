@@ -2,11 +2,7 @@ const std = @import("std");
 const types = @import("lsp.zig");
 const offsets = @import("offsets.zig");
 const tracy = @import("tracy.zig");
-const DiffMatchPatch = @import("diffz");
-
-const dmp = DiffMatchPatch{
-    .diff_timeout = 250,
-};
+const diff_zimilar = @import("diff-zimilar");
 
 pub const Error = error{OutOfMemory};
 
@@ -21,14 +17,13 @@ pub fn edits(
 
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
-    var diffs = try dmp.diff(arena.allocator(), before, after, true);
+    var diffs = try diff_zimilar.diff(arena.allocator(), before, after);
 
     var edit_count: usize = 0;
     for (diffs.items) |diff| {
-        switch (diff.operation) {
-            .delete => edit_count += 1,
+        switch (diff) {
+            .delete, .insert => edit_count += 1,
             .equal => continue,
-            .insert => edit_count += 1,
         }
     }
 
@@ -42,21 +37,21 @@ pub fn edits(
     var offset: usize = 0;
     for (diffs.items) |diff| {
         var start = offset;
-        switch (diff.operation) {
+        switch (diff) {
             .delete => {
-                offset += diff.text.len;
+                offset += diff.delete.len;
                 eds.appendAssumeCapacity(.{
                     .range = offsets.locToRange(before, .{ .start = start, .end = offset }, encoding),
                     .newText = "",
                 });
             },
             .equal => {
-                offset += diff.text.len;
+                offset += diff.equal.len;
             },
             .insert => {
                 eds.appendAssumeCapacity(.{
                     .range = offsets.locToRange(before, .{ .start = start, .end = start }, encoding),
-                    .newText = try allocator.dupe(u8, diff.text),
+                    .newText = try allocator.dupe(u8, diff.insert),
                 });
             },
         }
