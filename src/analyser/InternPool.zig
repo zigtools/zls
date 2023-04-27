@@ -3333,15 +3333,15 @@ test "bytes value" {
 
     var str1: [43]u8 = "https://www.youtube.com/watch?v=dQw4w9WgXcQ".*;
     const bytes_value1 = try ip.get(gpa, .{ .bytes = &str1 });
-    @memset(&str1, 0, str1.len);
+    @memset(&str1, 0);
 
     var str2: [43]u8 = "https://www.youtube.com/watch?v=dQw4w9WgXcQ".*;
     const bytes_value2 = try ip.get(gpa, .{ .bytes = &str2 });
-    @memset(&str2, 0, str2.len);
+    @memset(&str2, 0);
 
     var str3: [26]u8 = "https://www.duckduckgo.com".*;
     const bytes_value3 = try ip.get(gpa, .{ .bytes = &str3 });
-    @memset(&str3, 0, str3.len);
+    @memset(&str3, 0);
 
     try expect(bytes_value1 == bytes_value2);
     try expect(bytes_value2 != bytes_value3);
