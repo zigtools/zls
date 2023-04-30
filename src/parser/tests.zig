@@ -1,5 +1,6 @@
 const std = @import("std");
-const tokenizer = @import("tokenizer.zig");
+const Ast = @import("Ast.zig");
+const Tokenizer = @import("Tokenizer.zig");
 const DiffMatchPatch = @import("diffz");
 
 var dmp = DiffMatchPatch{
@@ -22,20 +23,25 @@ test {
 
     std.log.err("DIFF: {any}", .{diffs.items});
 
-    const a_tokens = try tokenizer.tokenize(allocator, a, 0);
+    const a_tokens = try Tokenizer.tokenize(allocator, a, 0);
+    const b_tokens = try Tokenizer.retokenize(allocator, b, a_tokens, diffs.items, 1);
 
-    const b_tokens = try tokenizer.retokenize(allocator, b, a_tokens, diffs.items, 1);
+    var tree = try Ast.parse(allocator, b, .zig, b_tokens);
+    _ = tree;
+    // _ = tree;
 
-    std.debug.print("\n\n", .{});
+    // std.log.err("{any}", .{tree.tokens});
 
-    for (0..b_tokens.entries.len) |i| {
-        const bruh = b_tokens.entries.get(i);
+    // std.debug.print("\n\n", .{});
 
-        if (bruh.key.version == 0)
-            std.debug.print("\x1b[0;37m{s} ", .{b[bruh.value.loc.start..bruh.value.loc.end]})
-        else
-            std.debug.print("\x1b[0;31m{s} ", .{b[bruh.value.loc.start..bruh.value.loc.end]});
-    }
+    // for (0..b_tokens.entries.len) |i| {
+    //     const bruh = b_tokens.entries.get(i);
 
-    std.debug.print("\x1b[0;37m", .{});
+    //     if (bruh.key.version == 0)
+    //         std.debug.print("\x1b[0;37m{s} ", .{b[bruh.value.loc.start..bruh.value.loc.end]})
+    //     else
+    //         std.debug.print("\x1b[0;31m{s} ", .{b[bruh.value.loc.start..bruh.value.loc.end]});
+    // }
+
+    // std.debug.print("\x1b[0;37m", .{});
 }
