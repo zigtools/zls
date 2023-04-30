@@ -30,8 +30,8 @@ pub fn tokenize(allocator: std.mem.Allocator, source: [:0]const u8, version: u32
     while (true) {
         var token = tokenizer.next();
 
-        try tokens.append(allocator, .{
-            .vesrion = version,
+        try tokens.put(allocator, .{
+            .version = version,
             .loc = token.loc,
         }, token);
         if (token.tag == .eof) break;
@@ -41,18 +41,18 @@ pub fn tokenize(allocator: std.mem.Allocator, source: [:0]const u8, version: u32
 }
 
 fn isTokenOnOrInDelete(tok_start: u32, tok_end: u32, del_start: u32, del_end: u32) bool {
-    return (tok_start >= del_start and tok_end < del_end); // whole token deleted
+    return (tok_start >= del_start and tok_end <= del_end); // whole token deleted
     // (del_start > tok_start and del_end < tok_end); // deletion within a token
 }
 
 pub fn retokenize(
     allocator: std.mem.Allocator,
     source: [:0]const u8,
-    old_tokens: std.MultiArrayList(Token),
+    old_tokens: TokenMap,
     diffs: []const DiffMatchPatch.Diff,
     version: u32,
-) !std.MultiArrayList(Token) {
-    var tokens = std.MultiArrayList(Token){};
+) !TokenMap {
+    var tokens = TokenMap{};
 
     const estimated_token_count = source.len / 8;
     try tokens.ensureTotalCapacity(allocator, estimated_token_count);
@@ -61,20 +61,27 @@ pub fn retokenize(
 
     var orig_index: u32 = 0;
     var diff_index: u32 = 0;
+
+    // Offset in new string
     var diff_byteoffset: u32 = 0;
+    // Offset in old string
+    var diff_delete_offset: u32 = 0;
 
     // m y T o k e n
     // = = - - = = =
 
     while (true) {
-        // std.log.err("{d}", .{diff_index});
         var token = tokenizer.next();
 
         while (diff_index < diffs.len) {
+            // std.log.err("BBB: {d}", .{diff_index});
             switch (diffs[diff_index].operation) {
                 .insert, .equal => {
                     if (tokenizer.index > diff_byteoffset + diffs[diff_index].text.len) {
                         diff_byteoffset += @intCast(u32, diffs[diff_index].text.len);
+                        if (diffs[diff_index].operation == .equal) {
+                            diff_delete_offset += @intCast(u32, diffs[diff_index].text.len);
+                        }
                         diff_index += 1;
                         continue;
                     }
@@ -82,37 +89,54 @@ pub fn retokenize(
                     break;
                 },
                 .delete => {
+                    std.log.err("AAA: {any} | {d}..{d} vs {d}..{d}", .{
+                        old_tokens.entries.items(.value)[orig_index].tag,
+                        old_tokens.entries.items(.value)[orig_index].loc.start,
+                        old_tokens.entries.items(.value)[orig_index].loc.end,
+                        @intCast(u32, diff_delete_offset),
+                        @intCast(u32, diff_delete_offset + diffs[diff_index].text.len),
+                    });
+
                     while (isTokenOnOrInDelete(
-                        old_tokens.items(.loc)[orig_index].start,
-                        old_tokens.items(.loc)[orig_index].end,
-                        @intCast(u32, diff_byteoffset),
-                        @intCast(u32, diff_byteoffset + diffs[diff_index].text.len),
+                        old_tokens.entries.items(.value)[orig_index].loc.start,
+                        old_tokens.entries.items(.value)[orig_index].loc.end,
+                        @intCast(u32, diff_delete_offset),
+                        @intCast(u32, diff_delete_offset + diffs[diff_index].text.len),
                     )) {
+                        std.log.err("AAA: {any}", .{old_tokens.entries.items(.value)[orig_index].tag});
                         orig_index += 1;
                     }
 
+                    diff_delete_offset += @intCast(u32, diffs[diff_index].text.len);
                     diff_index += 1;
                 },
             }
         }
 
+        var origin: Token.Origin = .{
+            .version = version,
+            .loc = token.loc,
+        };
+
         switch (diffs[diff_index].operation) {
             .equal => {
-                if (old_tokens.items(.tag)[orig_index] == token.tag) {
-                    token.orig_version = old_tokens.items(.orig_version)[orig_index];
-                    token.orig_loc = old_tokens.items(.orig_loc)[orig_index];
+                if (old_tokens.entries.items(.value)[orig_index].tag == token.tag) {
+                    std.log.err("old: {any} | new: {any}", .{ old_tokens.entries.items(.value)[orig_index].tag, token.tag });
+
+                    origin.version = old_tokens.entries.items(.key)[orig_index].version;
+                    origin.loc = old_tokens.entries.items(.key)[orig_index].loc;
                 }
 
                 orig_index += 1;
             },
             .insert => {
-                token.orig_version = version;
-                token.orig_loc = token.loc;
+                origin.version = version;
+                origin.loc = token.loc;
             },
             .delete => unreachable,
         }
 
-        try tokens.append(allocator, token);
+        try tokens.put(allocator, origin, token);
         if (token.tag == .eof) break;
     }
 
