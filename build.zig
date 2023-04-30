@@ -156,6 +156,21 @@ pub fn build(b: *std.build.Builder) !void {
     tests.addModule("diffz", diffz_module);
     test_step.dependOn(&b.addRunArtifact(tests).step);
 
+    const test_step2 = b.step("test2", "Run all the tests");
+    test_step2.dependOn(b.getInstallStep());
+
+    var tests2 = b.addTest(.{
+        .root_source_file = .{ .path = "src/parser/tests.zig" },
+        .target = target,
+        .optimize = .Debug,
+        .filter = test_filter,
+    });
+
+    // tests2.addModule("zls", zls_module);
+    // tests2.addModule("tres", tres_module);
+    tests2.addModule("diffz", diffz_module);
+    test_step2.dependOn(&b.addRunArtifact(tests2).step);
+
     var src_tests = b.addTest(.{
         .root_source_file = .{ .path = "src/zls.zig" },
         .target = target,
