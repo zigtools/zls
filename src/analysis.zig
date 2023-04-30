@@ -653,7 +653,7 @@ pub fn isTypeIdent(text: []const u8) bool {
         .{"type"},         .{"anyerror"},
         .{"comptime_int"}, .{"comptime_float"},
         .{"anyframe"},     .{"anytype"},
-        .{"c_char"}
+        .{"c_char"},
     });
 
     if (PrimitiveTypes.has(text)) return true;
@@ -810,7 +810,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 const body = decl.handle.tree.nodes.items(.data)[decl_node].rhs;
                 if (try analyser.resolveReturnType(fn_decl, decl.handle, if (has_body) body else null)) |ret| {
                     return ret;
-                } else if (analyser.store.config.use_comptime_interpreter) {
+                } else if (analyser.store.config.dangerous_comptime_experiments_do_not_enable) {
                     // TODO: Better case-by-case; we just use the ComptimeInterpreter when all else fails,
                     // probably better to use it more liberally
                     // TODO: Handle non-isolate args; e.g. `const T = u8; TypeFunc(T);`
