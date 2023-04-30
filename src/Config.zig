@@ -50,7 +50,7 @@ warn_style: bool = false,
 highlight_global_var_declarations: bool = false,
 
 /// Whether to use the comptime interpreter
-use_comptime_interpreter: bool = false,
+dangerous_comptime_experiments_do_not_enable: bool = false,
 
 /// Whether the @ sign should be part of the completion of builtins
 include_at_in_builtins: bool = false,
