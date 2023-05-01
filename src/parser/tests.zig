@@ -24,11 +24,16 @@ test {
     std.log.err("DIFF: {any}", .{diffs.items});
 
     const a_tokens = try Tokenizer.tokenize(allocator, a, 0);
-    const b_tokens = try Tokenizer.retokenize(allocator, b, a_tokens, diffs.items, 1);
+    const b_tokens = try Tokenizer.retokenize(allocator, a, a_tokens, b, diffs.items, 1);
 
     var tree = try Ast.parse(allocator, b, .zig, b_tokens);
-    _ = tree;
     // _ = tree;
+    // _ = tree;
+    // _ = tree;
+    var l = std.ArrayList(u8).init(allocator);
+    try tree.renderToArrayList(&l);
+
+    std.debug.print("\n\n{s}", .{l.items});
 
     // std.log.err("{any}", .{tree.tokens});
 

@@ -117,21 +117,21 @@ pub fn parse(gpa: Allocator, source: [:0]const u8, mode: Mode, tokens: Tokenizer
     };
 }
 
-// /// `gpa` is used for allocating the resulting formatted source code, as well as
-// /// for allocating extra stack memory if needed, because this function utilizes recursion.
-// /// Note: that's not actually true yet, see https://github.com/ziglang/zig/issues/1006.
-// /// Caller owns the returned slice of bytes, allocated with `gpa`.
-// pub fn render(tree: Ast, gpa: Allocator) RenderError![]u8 {
-//     var buffer = std.ArrayList(u8).init(gpa);
-//     defer buffer.deinit();
+/// `gpa` is used for allocating the resulting formatted source code, as well as
+/// for allocating extra stack memory if needed, because this function utilizes recursion.
+/// Note: that's not actually true yet, see https://github.com/ziglang/zig/issues/1006.
+/// Caller owns the returned slice of bytes, allocated with `gpa`.
+pub fn render(tree: Ast, gpa: Allocator) RenderError![]u8 {
+    var buffer = std.ArrayList(u8).init(gpa);
+    defer buffer.deinit();
 
-//     try tree.renderToArrayList(&buffer);
-//     return buffer.toOwnedSlice();
-// }
+    try tree.renderToArrayList(&buffer);
+    return buffer.toOwnedSlice();
+}
 
-// pub fn renderToArrayList(tree: Ast, buffer: *std.ArrayList(u8)) RenderError!void {
-//     return @import("./render.zig").renderTree(buffer, tree);
-// }
+pub fn renderToArrayList(tree: Ast, buffer: *std.ArrayList(u8)) RenderError!void {
+    return @import("render.zig").renderTree(buffer, tree);
+}
 
 /// Returns an extra offset for column and byte offset of errors that
 /// should point after the token in the error message.
@@ -1445,12 +1445,12 @@ pub fn containerFieldAlign(tree: Ast, node: Node.Index) full.ContainerField {
     const data = tree.nodes.items(.data)[node];
     const main_token = tree.nodes.items(.main_token)[node];
     return tree.fullContainerFieldComponents(.{
-        .main_token = main_token,
+        .main_token = @intCast(u32, tree.tokens.getIndex(main_token).?),
         .type_expr = data.lhs,
         .value_expr = 0,
         .align_expr = data.rhs,
-        .tuple_like = tree.tokens.items(.tag)[main_token] != .identifier or
-            tree.tokens.items(.tag)[main_token + 1] != .colon,
+        .tuple_like = tree.tokens.get(main_token).tag != .identifier or
+            tree.tokens.entries.items(.value)[@intCast(u32, tree.tokens.getIndex(main_token).?) + 1].tag != .colon,
     });
 }
 
@@ -2053,16 +2053,17 @@ fn fullIfComponents(tree: Ast, info: full.If.Components) full.If {
 }
 
 fn fullContainerFieldComponents(tree: Ast, info: full.ContainerField.Components) full.ContainerField {
-    const token_tags = tree.tokens.items(.tag);
+    const tokens = tree.tokens.entries.items(.value);
+
     var result: full.ContainerField = .{
         .ast = info,
         .comptime_token = null,
     };
-    if (token_tags[info.main_token] == .keyword_comptime) {
+    if (tokens[info.main_token].tag == .keyword_comptime) {
         // comptime type = init,
         // ^
         result.comptime_token = info.main_token;
-    } else if (info.main_token > 0 and token_tags[info.main_token - 1] == .keyword_comptime) {
+    } else if (info.main_token > 0 and tokens[info.main_token - 1].tag == .keyword_comptime) {
         // comptime name: type = init,
         // ^
         result.comptime_token = info.main_token - 1;

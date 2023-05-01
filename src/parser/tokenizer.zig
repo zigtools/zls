@@ -31,11 +31,15 @@ fn isTokenOnOrInDelete(tok_start: u32, tok_end: u32, del_start: u32, del_end: u3
 
 pub fn retokenize(
     allocator: std.mem.Allocator,
-    source: [:0]const u8,
+    old_source: [:0]const u8,
     old_tokens: TokenMap,
+    source: [:0]const u8,
     diffs: []const DiffMatchPatch.Diff,
     version: u32,
 ) std.mem.Allocator.Error!TokenMap {
+    const old_keys = old_tokens.entries.items(.key);
+    const old_values = old_tokens.entries.items(.value);
+
     var tokens = TokenMap{};
 
     const estimated_token_count = source.len / 8;
@@ -50,9 +54,6 @@ pub fn retokenize(
     var diff_byteoffset: u32 = 0;
     // Offset in old string
     var diff_delete_offset: u32 = 0;
-
-    // m y T o k e n
-    // = = - - = = =
 
     var index: u32 = 0;
     while (true) : (index += 1) {
@@ -74,8 +75,8 @@ pub fn retokenize(
                 },
                 .delete => {
                     while (isTokenOnOrInDelete(
-                        old_tokens.entries.items(.value)[orig_index].loc.start,
-                        old_tokens.entries.items(.value)[orig_index].loc.end,
+                        old_values[orig_index].loc.start,
+                        old_values[orig_index].loc.end,
                         @intCast(u32, diff_delete_offset),
                         @intCast(u32, diff_delete_offset + diffs[diff_index].text.len),
                     )) {
@@ -95,9 +96,16 @@ pub fn retokenize(
 
         switch (diffs[diff_index].operation) {
             .equal => {
-                if (old_tokens.entries.items(.value)[orig_index].tag == token.tag) {
-                    origin.version = old_tokens.entries.items(.key)[orig_index].version;
-                    origin.index = old_tokens.entries.items(.key)[orig_index].index;
+                // Tokens are the same if they have the same tag and same byte value
+                // The value clause makes identifier name change detections simple in analysis
+                if (old_values[orig_index].tag == token.tag and
+                    std.mem.eql(
+                    u8,
+                    old_source[old_values[orig_index].loc.start..old_values[orig_index].loc.end],
+                    source[token.loc.start..token.loc.end],
+                )) {
+                    origin.version = old_keys[orig_index].version;
+                    origin.index = old_keys[orig_index].index;
                 }
 
                 orig_index += 1;
