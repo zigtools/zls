@@ -17,7 +17,8 @@ const Parse = @import("Parse.zig");
 /// Reference to externally-owned data.
 source: [:0]const u8,
 
-tokens: Tokenizer.TokenMap,
+token_origins: Tokenizer.TokenMap,
+tokens: Tokenizer.TokenList,
 /// The root AST node is assumed to be index 0. Since there can be no
 /// references to the root node, this means 0 is available to indicate null.
 nodes: NodeList.Slice,
@@ -79,13 +80,14 @@ pub const Mode = enum { zig, zon };
 
 /// Result should be freed with tree.deinit() when there are
 /// no more references to any of the tokens or nodes.
-pub fn parse(gpa: Allocator, source: [:0]const u8, mode: Mode, tokens: Tokenizer.TokenMap) Allocator.Error!Ast {
+pub fn parse(gpa: Allocator, tokenizer: Tokenizer, mode: Mode) Allocator.Error!Ast {
     var parser: Parse = .{
-        .source = source,
+        .source = tokenizer.buffer,
         .gpa = gpa,
-        .tokens = tokens,
-        .token_keys = tokens.entries.items(.key),
-        .token_values = tokens.entries.items(.value),
+        .token_origin_map = tokenizer.origins,
+        .token_origins = tokenizer.origins.entries.items(.key),
+        .token_tags = tokenizer.tokens.items(.tag),
+        .token_locs = tokenizer.tokens.items(.loc),
         .errors = .{},
         .nodes = .{},
         .extra_data = .{},
@@ -99,7 +101,7 @@ pub fn parse(gpa: Allocator, source: [:0]const u8, mode: Mode, tokens: Tokenizer
 
     // Empirically, Zig source code has a 2:1 ratio of tokens to AST nodes.
     // Make sure at least 1 so we can use appendAssumeCapacity on the root node below.
-    const estimated_node_count = (tokens.count() + 2) / 2;
+    const estimated_node_count = (tokenizer.tokens.len + 2) / 2;
     try parser.nodes.ensureTotalCapacity(gpa, estimated_node_count);
 
     switch (mode) {
@@ -109,8 +111,9 @@ pub fn parse(gpa: Allocator, source: [:0]const u8, mode: Mode, tokens: Tokenizer
 
     // TODO experiment with compacting the MultiArrayList slices here
     return Ast{
-        .source = source,
-        .tokens = tokens,
+        .source = tokenizer.buffer,
+        .token_origins = tokenizer.origins,
+        .tokens = tokenizer.tokens,
         .nodes = parser.nodes.toOwnedSlice(),
         .extra_data = try parser.extra_data.toOwnedSlice(gpa),
         .errors = try parser.errors.toOwnedSlice(gpa),

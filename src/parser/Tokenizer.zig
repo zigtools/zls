@@ -1,27 +1,44 @@
 const std = @import("std");
 const DiffMatchPatch = @import("diffz");
 
-pub const TokenMap = std.AutoArrayHashMapUnmanaged(Token.Origin, Token);
+const Tokenizer = @This();
 
-pub fn tokenize(allocator: std.mem.Allocator, source: [:0]const u8, version: u32) std.mem.Allocator.Error!TokenMap {
-    var tokens = TokenMap{};
+pub const TokenMap = std.AutoArrayHashMapUnmanaged(Token.Origin, void);
+pub const TokenList = std.MultiArrayList(Token);
 
-    const estimated_token_count = source.len / 8;
-    try tokens.ensureTotalCapacity(allocator, estimated_token_count);
+allocator: std.mem.Allocator,
+buffer: [:0]const u8,
+index: usize,
+pending_invalid_token: ?Token,
+
+// Incremental
+version: u32,
+origins: TokenMap,
+tokens: TokenList,
+
+pub fn tokenize(tokenizer: *Tokenizer) std.mem.Allocator.Error!void {
+    defer tokenizer.version += 1;
+
+    tokenizer.index = 0;
+    tokenizer.pending_invalid_token = null;
+
+    const estimated_token_count = tokenizer.buffer.len / 8;
+
+    try tokenizer.origins.ensureTotalCapacity(tokenizer.allocator, estimated_token_count);
+    try tokenizer.tokens.ensureTotalCapacity(tokenizer.allocator, estimated_token_count);
 
     var index: u32 = 0;
-    var tokenizer = Tokenizer.init(source);
     while (true) : (index += 1) {
         var token = tokenizer.next();
 
-        try tokens.put(allocator, .{
-            .version = version,
+        try tokenizer.origins.put(tokenizer.allocator, .{
+            .version = tokenizer.version,
             .index = index,
-        }, token);
+        }, {});
+        try tokenizer.tokens.append(tokenizer.allocator, token);
+
         if (token.tag == .eof) break;
     }
-
-    return tokens;
 }
 
 fn isTokenOnOrInDelete(tok_start: u32, tok_end: u32, del_start: u32, del_end: u32) bool {
@@ -29,23 +46,28 @@ fn isTokenOnOrInDelete(tok_start: u32, tok_end: u32, del_start: u32, del_end: u3
     // (del_start > tok_start and del_end < tok_end); // deletion within a token
 }
 
+/// Returns the old buffer for your freeing pleasure (or you can ignore it if you free it elsewhere)
 pub fn retokenize(
-    allocator: std.mem.Allocator,
-    old_source: [:0]const u8,
-    old_tokens: TokenMap,
-    source: [:0]const u8,
+    tokenizer: *Tokenizer,
+    new_source: [:0]const u8,
     diffs: []const DiffMatchPatch.Diff,
-    version: u32,
-) std.mem.Allocator.Error!TokenMap {
-    const old_keys = old_tokens.entries.items(.key);
-    const old_values = old_tokens.entries.items(.value);
+) std.mem.Allocator.Error![:0]const u8 {
+    defer tokenizer.version += 1;
 
-    var tokens = TokenMap{};
+    const old_source = tokenizer.buffer;
+    tokenizer.buffer = new_source;
+    tokenizer.index = 0;
+    tokenizer.pending_invalid_token = null;
 
-    const estimated_token_count = source.len / 8;
-    try tokens.ensureTotalCapacity(allocator, estimated_token_count);
+    const old_origins = tokenizer.origins.entries.items(.key);
+    const old_tags = tokenizer.tokens.items(.tag);
+    const old_locs = tokenizer.tokens.items(.loc);
 
-    var tokenizer = Tokenizer.init(source);
+    var new_origins = TokenMap{};
+    var new_tokens = TokenList{};
+
+    try new_origins.ensureTotalCapacity(tokenizer.allocator, tokenizer.tokens.len);
+    try new_tokens.ensureTotalCapacity(tokenizer.allocator, tokenizer.tokens.len);
 
     var orig_index: u32 = 0;
     var diff_index: u32 = 0;
@@ -75,8 +97,8 @@ pub fn retokenize(
                 },
                 .delete => {
                     while (isTokenOnOrInDelete(
-                        old_values[orig_index].loc.start,
-                        old_values[orig_index].loc.end,
+                        old_locs[orig_index].start,
+                        old_locs[orig_index].end,
                         @intCast(u32, diff_delete_offset),
                         @intCast(u32, diff_delete_offset + diffs[diff_index].text.len),
                     )) {
@@ -90,7 +112,7 @@ pub fn retokenize(
         }
 
         var origin: Token.Origin = .{
-            .version = version,
+            .version = tokenizer.version,
             .index = index,
         };
 
@@ -98,14 +120,14 @@ pub fn retokenize(
             .equal => {
                 // Tokens are the same if they have the same tag and same byte value
                 // The value clause makes identifier name change detections simple in analysis
-                if (old_values[orig_index].tag == token.tag and
+                if (old_tags[orig_index] == token.tag and
                     std.mem.eql(
                     u8,
-                    old_source[old_values[orig_index].loc.start..old_values[orig_index].loc.end],
-                    source[token.loc.start..token.loc.end],
+                    old_source[old_locs[orig_index].start..old_locs[orig_index].end],
+                    new_source[token.loc.start..token.loc.end],
                 )) {
-                    origin.version = old_keys[orig_index].version;
-                    origin.index = old_keys[orig_index].index;
+                    origin.version = old_origins[orig_index].version;
+                    origin.index = old_origins[orig_index].index;
                 }
 
                 orig_index += 1;
@@ -114,11 +136,18 @@ pub fn retokenize(
             .delete => unreachable,
         }
 
-        try tokens.put(allocator, origin, token);
+        try new_origins.put(tokenizer.allocator, origin, {});
+        try new_tokens.append(tokenizer.allocator, token);
         if (token.tag == .eof) break;
     }
 
-    return tokens;
+    tokenizer.origins.deinit(tokenizer.allocator);
+    tokenizer.tokens.deinit(tokenizer.allocator);
+
+    tokenizer.origins = new_origins;
+    tokenizer.tokens = new_tokens;
+
+    return old_source;
 }
 
 pub const Token = extern struct {
@@ -468,24 +497,23 @@ pub const Token = extern struct {
     };
 };
 
-const Tokenizer = @This();
-
-buffer: [:0]const u8,
-index: usize,
-pending_invalid_token: ?Token,
-
 /// For debugging purposes
 pub fn dump(self: *Tokenizer, token: *const Token) void {
     std.debug.print("{s} \"{s}\"\n", .{ @tagName(token.tag), self.buffer[token.loc.start..token.loc.end] });
 }
 
-pub fn init(buffer: [:0]const u8) Tokenizer {
+pub fn init(allocator: std.mem.Allocator, buffer: [:0]const u8) Tokenizer {
     // Skip the UTF-8 BOM if present
     const src_start: usize = if (std.mem.startsWith(u8, buffer, "\xEF\xBB\xBF")) 3 else 0;
     return Tokenizer{
+        .allocator = allocator,
         .buffer = buffer,
         .index = src_start,
         .pending_invalid_token = null,
+
+        .version = 0,
+        .origins = .{},
+        .tokens = .{},
     };
 }
 
@@ -2052,7 +2080,7 @@ test "null byte before eof" {
 }
 
 fn testTokenize(source: [:0]const u8, expected_token_tags: []const Token.Tag) !void {
-    var tokenizer = Tokenizer.init(source);
+    var tokenizer = Tokenizer.init(undefined, source);
     for (expected_token_tags) |expected_token_tag| {
         const token = tokenizer.next();
         try std.testing.expectEqual(expected_token_tag, token.tag);

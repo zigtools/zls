@@ -23,30 +23,31 @@ test {
 
     std.log.err("DIFF: {any}", .{diffs.items});
 
-    const a_tokens = try Tokenizer.tokenize(allocator, a, 0);
-    const b_tokens = try Tokenizer.retokenize(allocator, a, a_tokens, b, diffs.items, 1);
+    var tokenizer = Tokenizer.init(allocator, a);
 
-    var tree = try Ast.parse(allocator, b, .zig, b_tokens);
-    // _ = tree;
-    // _ = tree;
-    // _ = tree;
-    var l = std.ArrayList(u8).init(allocator);
-    try tree.renderToArrayList(&l);
+    try tokenizer.tokenize();
+    _ = try tokenizer.retokenize(b, diffs.items);
 
-    std.debug.print("\n\n{s}", .{l.items});
+    var tree = try Ast.parse(allocator, tokenizer, .zig);
+    _ = tree;
+    // _ = tree;
+    // _ = tree;
+    // _ = tree;
+    // var l = std.ArrayList(u8).init(allocator);
+    // try tree.renderToArrayList(&l);
+
+    // std.debug.print("\n\n{s}", .{l.items});
 
     // std.log.err("{any}", .{tree.tokens});
 
-    // std.debug.print("\n\n", .{});
+    std.debug.print("\n\n", .{});
 
-    // for (0..b_tokens.entries.len) |i| {
-    //     const bruh = b_tokens.entries.get(i);
+    for (tokenizer.origins.entries.items(.key), tokenizer.tokens.items(.loc)) |origin, loc| {
+        if (origin.version == 0)
+            std.debug.print("\x1b[0;37m{s} ", .{b[loc.start..loc.end]})
+        else
+            std.debug.print("\x1b[0;31m{s} ", .{b[loc.start..loc.end]});
+    }
 
-    //     if (bruh.key.version == 0)
-    //         std.debug.print("\x1b[0;37m{s} ", .{b[bruh.value.loc.start..bruh.value.loc.end]})
-    //     else
-    //         std.debug.print("\x1b[0;31m{s} ", .{b[bruh.value.loc.start..bruh.value.loc.end]});
-    // }
-
-    // std.debug.print("\x1b[0;37m", .{});
+    std.debug.print("\x1b[0;37m", .{});
 }

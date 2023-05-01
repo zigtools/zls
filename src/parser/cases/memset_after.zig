@@ -1,6 +1,6 @@
 const std = @import("std");
 
-test "bytes value" {
+test "bytes value!" {
     const gpa = std.testing.allocator;
     var ip = try InternPool.init(gpa);
     defer ip.deinit(gpa);
