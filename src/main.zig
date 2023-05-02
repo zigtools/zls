@@ -365,6 +365,8 @@ pub fn main() !void {
     var failing_allocator_state = if (build_options.enable_failing_allocator) debug.FailingAllocator.init(inner_allocator, build_options.enable_failing_allocator_likelihood) else void{};
     const allocator: std.mem.Allocator = if (build_options.enable_failing_allocator) failing_allocator_state.allocator() else inner_allocator;
 
+    logger.info("Starting ZLS {s}", .{build_options.version});
+
     const result = try parseArgs(allocator);
     defer if (result.config_path) |path| allocator.free(path);
     defer if (result.replay_session_path) |path| allocator.free(path);
