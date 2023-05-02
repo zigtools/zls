@@ -199,6 +199,8 @@ const ParseArgsResult = struct {
     replay_enabled: bool,
     replay_session_path: ?[]const u8,
     message_tracing_enabled: bool,
+
+    zls_exe_path: []const u8,
 };
 
 fn parseArgs(allocator: std.mem.Allocator) !ParseArgsResult {
@@ -208,6 +210,7 @@ fn parseArgs(allocator: std.mem.Allocator) !ParseArgsResult {
         .replay_enabled = false,
         .replay_session_path = null,
         .message_tracing_enabled = false,
+        .zls_exe_path = undefined,
     };
 
     const ArgId = enum {
@@ -256,7 +259,10 @@ fn parseArgs(allocator: std.mem.Allocator) !ParseArgsResult {
 
     var args_it = try std.process.ArgIterator.initWithAllocator(allocator);
     defer args_it.deinit();
-    if (!args_it.skip()) @panic("Could not find self argument");
+
+    if (args_it.next()) |zls_path| {
+        result.zls_exe_path = try allocator.dupe(u8, zls_path);
+    } else unreachable;
 
     // Makes behavior of enabling debug more logging consistent regardless of argument order.
     var specified = std.enums.EnumArray(ArgId, bool).initFill(false);
@@ -365,15 +371,16 @@ pub fn main() !void {
     var failing_allocator_state = if (build_options.enable_failing_allocator) debug.FailingAllocator.init(inner_allocator, build_options.enable_failing_allocator_likelihood) else void{};
     const allocator: std.mem.Allocator = if (build_options.enable_failing_allocator) failing_allocator_state.allocator() else inner_allocator;
 
-    logger.info("Starting ZLS {s}", .{build_options.version});
-
     const result = try parseArgs(allocator);
+    defer allocator.free(result.zls_exe_path);
     defer if (result.config_path) |path| allocator.free(path);
     defer if (result.replay_session_path) |path| allocator.free(path);
     switch (result.action) {
         .proceed => {},
         .exit => return,
     }
+
+    logger.info("Starting ZLS {s} @ '{s}'", .{ build_options.version, result.zls_exe_path });
 
     var config = try getConfig(allocator, result.config_path);
     defer std.json.parseFree(Config, config.config, .{ .allocator = allocator });
