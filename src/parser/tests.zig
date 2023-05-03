@@ -29,14 +29,10 @@ test {
     _ = try tokenizer.retokenize(b, diffs.items);
 
     var tree = try Ast.parse(allocator, tokenizer, .zig);
-    _ = tree;
-    // _ = tree;
-    // _ = tree;
-    // _ = tree;
-    // var l = std.ArrayList(u8).init(allocator);
-    // try tree.renderToArrayList(&l);
 
-    // std.debug.print("\n\n{s}", .{l.items});
+    var l = std.ArrayList(u8).init(allocator);
+    try tree.renderToArrayList(&l);
+    std.debug.print("\n\n{s}", .{l.items});
 
     // std.log.err("{any}", .{tree.tokens});
 

@@ -1002,7 +1002,7 @@ fn parseStatement(p: *Parse, allow_defer_var: bool) Error!Node.Index {
             .tag = .@"errdefer",
             .main_token = p.token_origins[p.nextToken()],
             .data = .{
-                .lhs = .{ .node = try p.parsePayload() },
+                .lhs = .{ .token = try p.parsePayload() },
                 .rhs = .{ .node = try p.expectBlockExprStatement() },
             },
         }),
@@ -2041,8 +2041,8 @@ fn parseBlock(p: *Parse) !Node.Index {
             .tag = .block_two,
             .main_token = p.token_origins[lbrace],
             .data = .{
-                .lhs = .{ .none = 0 },
-                .rhs = .{ .none = 0 },
+                .lhs = .{ .node = 0 },
+                .rhs = .{ .node = 0 },
             },
         }),
         1 => return p.addNode(.{
@@ -2050,7 +2050,7 @@ fn parseBlock(p: *Parse) !Node.Index {
             .main_token = p.token_origins[lbrace],
             .data = .{
                 .lhs = .{ .node = statements[0] },
-                .rhs = .{ .none = 0 },
+                .rhs = .{ .node = 0 },
             },
         }),
         2 => return p.addNode(.{
@@ -2604,7 +2604,7 @@ fn parsePrimaryTypeExpr(p: *Parse) !Node.Index {
                 .tag = .multiline_string_literal,
                 .main_token = p.token_origins[first_line],
                 .data = .{
-                    .lhs = .{ .node = first_line },
+                    .lhs = .{ .token = p.token_origins[first_line] },
                     .rhs = .{ .token = p.token_origins[p.tok_i - 1] },
                 },
             });

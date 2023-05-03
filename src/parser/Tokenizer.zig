@@ -165,6 +165,14 @@ pub const Token = extern struct {
         pub fn isNull(self: Origin) bool {
             return @bitCast(u64, self) == std.math.maxInt(u64);
         }
+
+        pub fn fromIndex(index: ?u32, origins: TokenMap) Origin {
+            return if (index) |i| origins.entries.items(.key)[i] else getNull();
+        }
+
+        pub fn toIndex(self: Origin, origins: TokenMap) ?u32 {
+            return if (self.isNull()) null else @intCast(u32, origins.getIndex(self).?);
+        }
     };
 
     pub const Loc = extern struct {
