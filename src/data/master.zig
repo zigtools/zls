@@ -1060,52 +1060,40 @@ pub const builtins = [_]Builtin{
     },
     .{
         .name = "@memcpy",
-        .signature = "@memcpy(noalias dest: [*]u8, noalias source: [*]const u8, byte_count: usize) void",
-        .snippet = "@memcpy(${1:noalias dest: [*]u8}, ${2:noalias source: [*]const u8}, ${3:byte_count: usize})",
+        .signature = "@memcpy(noalias dest, noalias source) void",
+        .snippet = "@memcpy(${1:noalias dest}, ${2:noalias source})",
         .documentation =
-        \\This function copies bytes from one region of memory to another. `dest` and `source` are both pointers and must not overlap.
+        \\This function copies bytes from one region of memory to another.
         \\
-        \\This function is a low level intrinsic with no safety mechanisms. Most code should not use this function, instead using something like this:
+        \\`dest` must be a mutable slice, a mutable pointer to an array, or a mutable many-item [pointer](https://ziglang.org/documentation/master/#Pointers). It may have any alignment, and it may have any element type.
         \\
-        \\`for (dest, source[0..byte_count]) |*d, s| d.* = s;`
-        \\The optimizer is intelligent enough to turn the above snippet into a memcpy.
+        \\Likewise, `source` must be a mutable slice, a mutable pointer to an array, or a mutable many-item [pointer](https://ziglang.org/documentation/master/#Pointers). It may have any alignment, and it may have any element type.
         \\
-        \\There is also a standard library function for this:
+        \\The `source` element type must support [Type Coercion](https://ziglang.org/documentation/master/#Type-Coercion) into the `dest` element type. The element types may have different ABI size, however, that may incur a performance penalty.
         \\
-        \\```zig
-        \\const mem = @import("std").mem;
-        \\mem.copy(u8, dest[0..byte_count], source[0..byte_count]);
-        \\```
+        \\Similar to [for](https://ziglang.org/documentation/master/#for) loops, at least one of `source` and `dest` must provide a length, and if two lengths are provided, they must be equal.
+        \\
+        \\Finally, the two memory regions must not overlap.
         ,
         .arguments = &.{
-            "noalias dest: [*]u8",
-            "noalias source: [*]const u8",
-            "byte_count: usize",
+            "noalias dest",
+            "noalias source",
         },
     },
     .{
         .name = "@memset",
-        .signature = "@memset(dest: [*]u8, c: u8, byte_count: usize) void",
-        .snippet = "@memset(${1:dest: [*]u8}, ${2:c: u8}, ${3:byte_count: usize})",
+        .signature = "@memset(dest, elem) void",
+        .snippet = "@memset(${1:dest}, ${2:elem})",
         .documentation =
-        \\This function sets a region of memory to `c`. `dest` is a pointer.
+        \\This function sets all the elements of a memory region to `elem`.
         \\
-        \\This function is a low level intrinsic with no safety mechanisms. Most code should not use this function, instead using something like this:
+        \\`dest` must be a mutable slice or a mutable pointer to an array. It may have any alignment, and it may have any element type.
         \\
-        \\`for (dest[0..byte_count]) |*b| b.* = c;`
-        \\The optimizer is intelligent enough to turn the above snippet into a memset.
-        \\
-        \\There is also a standard library function for this:
-        \\
-        \\```zig
-        \\const mem = @import("std").mem;
-        \\mem.set(u8, dest, c);
-        \\```
+        \\`elem` is coerced to the element type of `dest`.
         ,
         .arguments = &.{
-            "dest: [*]u8",
-            "c: u8",
-            "byte_count: usize",
+            "dest",
+            "elem",
         },
     },
     .{
