@@ -300,12 +300,35 @@ pub fn advancePosition(text: []const u8, position: types.Position, from_index: u
     };
 }
 
+/// a custom version of std.unicode.Utf8Iterator which prevents index out of bounds panics.
+const Utf8Iterator = struct {
+    bytes: []const u8,
+    i: usize,
+
+    pub fn nextCodepointSlice(it: *Utf8Iterator) ?[]const u8 {
+        if (it.i >= it.bytes.len) {
+            return null;
+        }
+
+        const cp_len = std.unicode.utf8ByteSequenceLength(it.bytes[it.i]) catch unreachable;
+        it.i += cp_len;
+        // this is the only difference between this custom impl and std.unicode.Utf8Iterator.
+        // ensure that we don't slice past the end of it.bytes.
+        return it.bytes[it.i - cp_len .. @min(it.bytes.len, it.i)];
+    }
+
+    pub fn nextCodepoint(it: *Utf8Iterator) ?u21 {
+        const slice = it.nextCodepointSlice() orelse return null;
+        return std.unicode.utf8Decode(slice) catch unreachable;
+    }
+};
+
 /// returns the number of code units in `text`
 pub fn countCodeUnits(text: []const u8, encoding: Encoding) usize {
     switch (encoding) {
         .@"utf-8" => return text.len,
         .@"utf-16" => {
-            var iter: std.unicode.Utf8Iterator = .{ .bytes = text, .i = 0 };
+            var iter: Utf8Iterator = .{ .bytes = text, .i = 0 };
 
             var utf16_len: usize = 0;
             while (iter.nextCodepoint()) |codepoint| {
@@ -327,7 +350,7 @@ pub fn getNCodeUnitByteCount(text: []const u8, n: usize, encoding: Encoding) usi
         .@"utf-8" => return n,
         .@"utf-16" => {
             if (n == 0) return 0;
-            var iter: std.unicode.Utf8Iterator = .{ .bytes = text, .i = 0 };
+            var iter: Utf8Iterator = .{ .bytes = text, .i = 0 };
 
             var utf16_len: usize = 0;
             while (iter.nextCodepoint()) |codepoint| {

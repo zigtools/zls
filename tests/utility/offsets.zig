@@ -124,6 +124,16 @@ test "offsets - countCodeUnits" {
     try testCountCodeUnits("a¶↉🠁", .{ 10, 5, 4 });
     try testCountCodeUnits("🠁↉¶a", .{ 10, 5, 4 });
     try testCountCodeUnits("🇺🇸 🇩🇪", .{ 17, 9, 5 });
+
+    // TODO - once utf32 also accounts for truncated input, the following block can be replaced with
+    // try testCountCodeUnits(&[_]u8{0b1111_0000}, .{ 1,1,1 });
+    {
+        const text = [_]u8{0b1111_0000}; // truncated codepoint which indicates len=4
+        try std.testing.expectEqual(@as(usize, 1), offsets.countCodeUnits(&text, .@"utf-8"));
+        try std.testing.expectEqual(@as(usize, 1), offsets.countCodeUnits(&text, .@"utf-16"));
+        // TODO - utf32: results in panic: attempt to unwrap error: TruncatedInput
+        // try std.testing.expectEqual(@as(usize, 1), offsets.countCodeUnits(&text, .@"utf-32"));
+    }
 }
 
 test "offsets - getNCodeUnitByteCount" {
