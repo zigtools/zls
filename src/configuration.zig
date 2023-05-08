@@ -130,7 +130,11 @@ pub fn configChanged(config: *Config, runtime_zig_version: *?ZigVersionWrapper, 
         defer allocator.free(result.stdout);
         defer allocator.free(result.stderr);
 
-        var d = try std.fs.cwd().openDir(builtin_creation_dir.?, .{});
+        var d = if (std.fs.path.isAbsolute(builtin_creation_dir.?))
+            try std.fs.openDirAbsolute(builtin_creation_dir.?, .{})
+         else
+            try std.fs.cwd().openDir(builtin_creation_dir.?, .{})
+        ;
         defer d.close();
 
         const f = d.createFile("builtin.zig", .{}) catch |err| switch (err) {

@@ -1569,7 +1569,12 @@ pub fn create(
     };
     server.analyser = Analyser.init(allocator, &server.document_store);
 
-    try configuration.configChanged(config, &server.runtime_zig_version, allocator, config_path);
+    var builtin_creation_dir = config_path;
+    if (config_path) |path| {
+        builtin_creation_dir = std.fs.path.dirname(path);
+    }
+
+    try configuration.configChanged(config, &server.runtime_zig_version, allocator, builtin_creation_dir);
 
     if (config.dangerous_comptime_experiments_do_not_enable) {
         server.analyser.ip = try analyser.InternPool.init(allocator);
