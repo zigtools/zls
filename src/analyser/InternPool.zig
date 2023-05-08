@@ -178,6 +178,10 @@ pub const UnionValue = packed struct {
     val: Index,
 };
 
+pub const NullValue = packed struct {
+    ty: Index,
+};
+
 pub const UndefinedValue = packed struct {
     ty: Index,
 };
@@ -240,6 +244,7 @@ pub const Key = union(enum) {
     slice: Slice,
     aggregate: Aggregate,
     union_value: UnionValue,
+    null_value: NullValue,
     undefined_value: UndefinedValue,
     unknown_value: UnknownValue,
 
@@ -293,6 +298,7 @@ pub const Key = union(enum) {
             .slice => .slice,
             .aggregate => .aggregate,
             .union_value => .union_value,
+            .null_value => .null_value,
             .undefined_value => .undefined_value,
             .unknown_value => .unknown_value,
         };
@@ -384,6 +390,7 @@ pub const Key = union(enum) {
             .slice,
             .aggregate,
             .union_value,
+            .null_value,
             .undefined_value,
             .unknown_value,
             => unreachable,
@@ -434,6 +441,7 @@ pub const Key = union(enum) {
             .slice => |slice_info| slice_info.ty,
             .aggregate => |aggregate_info| aggregate_info.ty,
             .union_value => |union_info| union_info.ty,
+            .null_value => |null_info| null_info.ty,
             .undefined_value => |undefined_info| undefined_info.ty,
             .unknown_value => |unknown_info| unknown_info.ty,
         };
@@ -720,6 +728,7 @@ pub const Key = union(enum) {
             .slice,
             .aggregate,
             .union_value,
+            .null_value,
             .undefined_value,
             .unknown_value,
             => unreachable,
@@ -739,6 +748,7 @@ pub const Key = union(enum) {
             .int_i64_value => |int_value| int_value.int == 0,
             .int_big_value => |int_value| int_value.int.orderAgainstScalar(0).compare(.eq),
 
+            .null_value => true,
             .optional_value => false,
             .unknown_value => unreachable,
 
@@ -760,6 +770,7 @@ pub const Key = union(enum) {
             .int_u64_value => |int_value| int_value.int,
             .int_i64_value => |int_value| @intCast(u64, int_value.int),
             .int_big_value => |int_value| int_value.int.to(u64) catch null,
+            .null_value => 0,
             else => null,
         };
     }
@@ -1028,6 +1039,7 @@ pub const Key = union(enum) {
                     union_value.val.fmt(ip),
                 });
             },
+            .null_value => try writer.print("null", .{}),
             .undefined_value => try writer.print("undefined", .{}),
             .unknown_value => try writer.print("(unknown value)", .{}),
         }
@@ -1295,6 +1307,9 @@ pub const Tag = enum(u8) {
     /// A union value.
     /// data is index to UnionValue.
     union_value,
+    /// A null value.
+    /// data is index to type which may be unknown.
+    null_value,
     /// A undefined value.
     /// data is index to type which may be unknown.
     undefined_value,
@@ -1552,6 +1567,7 @@ pub fn indexToKey(ip: InternPool, index: Index) Key {
         .slice => .{ .slice = ip.extraData(Slice, data) },
         .aggregate => .{ .aggregate = ip.extraData(Aggregate, data) },
         .union_value => .{ .union_value = ip.extraData(UnionValue, data) },
+        .null_value => .{ .null_value = .{ .ty = @intToEnum(Index, data) } },
         .undefined_value => .{ .undefined_value = .{ .ty = @intToEnum(Index, data) } },
         .unknown_value => .{ .unknown_value = .{ .ty = @intToEnum(Index, data) } },
     };
@@ -1583,6 +1599,7 @@ pub fn get(ip: *InternPool, gpa: Allocator, key: Key) Allocator.Error!Index {
         }),
         .float_16_value => |float_val| @bitCast(u16, float_val),
         .float_32_value => |float_val| @bitCast(u32, float_val),
+        .null_value => |null_val| @enumToInt(null_val.ty),
         .undefined_value => |undefined_val| @enumToInt(undefined_val.ty),
         .unknown_value => |unknown_val| @enumToInt(unknown_val.ty),
         inline else => |data| try ip.addExtra(gpa, data), // TODO sad stage1 noises :(
