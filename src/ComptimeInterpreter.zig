@@ -560,7 +560,7 @@ pub fn interpret(
                             .interpreter = interpreter,
                             .node_idx = data[node_idx].rhs,
                             .index = try interpreter.ip.get(interpreter.allocator, .{ .int_u64_value = .{
-                                .ty = .comptime_int_type,
+                                .ty = .usize_type,
                                 .int = array_info.len,
                             } }),
                         } };
