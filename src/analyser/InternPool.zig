@@ -735,6 +735,24 @@ pub const Key = union(enum) {
         };
     }
 
+    /// If the value fits in a u64, return it, otherwise null.
+    /// Asserts not undefined.
+    pub fn getUnsignedInt(val: Key) !?u64 {
+        return switch (val) {
+            .simple_value => |simple| switch (simple) {
+                .null_value => 0,
+                .bool_true => 1,
+                .bool_false => 0,
+                .the_only_possible_value => 0,
+                else => null,
+            },
+            .int_u64_value => |int_value| int_value.int,
+            .int_i64_value => |int_value| @intCast(u64, int_value.int),
+            .int_big_value => |int_value| int_value.int.to(u64) catch null,
+            else => null,
+        };
+    }
+
     pub const FormatContext = struct {
         key: Key,
         options: FormatOptions = .{},
