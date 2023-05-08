@@ -209,7 +209,7 @@ pub const SrcLoc = struct {
                 return nodeToSpan(tree, node_datas[asm_output].lhs);
             },
 
-            .node_offset_for_cond, .node_offset_if_cond => |node_off| {
+            .node_offset_if_cond => |node_off| {
                 const tree = src_loc.handle.tree;
                 const node = src_loc.declRelativeToNodeIndex(node_off);
                 const node_tags = tree.nodes.items(.tag);
@@ -230,6 +230,55 @@ pub const SrcLoc = struct {
                     else => unreachable,
                 };
                 return nodeToSpan(tree, src_node);
+            },
+            .for_input => |for_input| {
+                const tree = try src_loc.handle.tree;
+                const node = src_loc.declRelativeToNodeIndex(for_input.for_node_offset);
+                const for_full = tree.fullFor(node).?;
+                const src_node = for_full.ast.inputs[for_input.input_index];
+                return nodeToSpan(tree, src_node);
+            },
+            .for_capture_from_input => |node_off| {
+                const tree = try src_loc.handle.tree;
+                const token_tags = tree.tokens.items(.tag);
+                const input_node = src_loc.declRelativeToNodeIndex(node_off);
+                // We have to actually linear scan the whole AST to find the for loop
+                // that contains this input.
+                const node_tags = tree.nodes.items(.tag);
+                for (node_tags, 0..) |node_tag, node_usize| {
+                    const node = @intCast(Ast.Node.Index, node_usize);
+                    switch (node_tag) {
+                        .for_simple, .@"for" => {
+                            const for_full = tree.fullFor(node).?;
+                            for (for_full.ast.inputs, 0..) |input, input_index| {
+                                if (input_node == input) {
+                                    var count = input_index;
+                                    var tok = for_full.payload_token;
+                                    while (true) {
+                                        switch (token_tags[tok]) {
+                                            .comma => {
+                                                count -= 1;
+                                                tok += 1;
+                                            },
+                                            .identifier => {
+                                                if (count == 0)
+                                                    return tokensToSpan(tree, tok, tok + 1, tok);
+                                                tok += 1;
+                                            },
+                                            .asterisk => {
+                                                if (count == 0)
+                                                    return tokensToSpan(tree, tok, tok + 2, tok);
+                                                tok += 1;
+                                            },
+                                            else => unreachable,
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        else => continue,
+                    }
+                } else unreachable;
             },
             .node_offset_bin_lhs => |node_off| {
                 const tree = src_loc.handle.tree;
@@ -608,19 +657,19 @@ pub const LazySrcLoc = union(enum) {
     /// value is being set to this tag.
     unneeded,
     /// Means the source location points to an entire file; not any particular
-    /// location within the file. `handle` union field will be active.
+    /// location within the file. `file_scope` union field will be active.
     entire_file,
     /// The source location points to a byte offset within a source file,
     /// offset from 0. The source file is determined contextually.
-    /// Inside a `SrcLoc`, the `handle` union field will be active.
+    /// Inside a `SrcLoc`, the `file_scope` union field will be active.
     byte_abs: u32,
     /// The source location points to a token within a source file,
     /// offset from 0. The source file is determined contextually.
-    /// Inside a `SrcLoc`, the `handle` union field will be active.
+    /// Inside a `SrcLoc`, the `file_scope` union field will be active.
     token_abs: u32,
     /// The source location points to an AST node within a source file,
     /// offset from 0. The source file is determined contextually.
-    /// Inside a `SrcLoc`, the `handle` union field will be active.
+    /// Inside a `SrcLoc`, the `file_scope` union field will be active.
     node_abs: u32,
     /// The source location points to a byte offset within a source file,
     /// offset from the byte offset of the Decl within the file.
@@ -658,12 +707,6 @@ pub const LazySrcLoc = union(enum) {
     /// The source location points to the initializer of a var decl.
     /// The Decl is determined contextually.
     node_offset_var_decl_init: i32,
-    /// The source location points to a for loop condition expression,
-    /// found by taking this AST node index offset from the containing
-    /// Decl AST node, which points to a for loop AST node. Next, navigate
-    /// to the condition expression.
-    /// The Decl is determined contextually.
-    node_offset_for_cond: i32,
     /// The source location points to the first parameter of a builtin
     /// function call, found by taking this AST node index offset from the containing
     /// Decl AST node, which points to a builtin call AST node. Next, navigate
@@ -873,6 +916,20 @@ pub const LazySrcLoc = union(enum) {
     /// The source location points to the RHS of an assignment.
     /// The Decl is determined contextually.
     node_offset_store_operand: i32,
+    /// The source location points to a for loop input.
+    /// The Decl is determined contextually.
+    for_input: struct {
+        /// Points to the for loop AST node.
+        for_node_offset: i32,
+        /// Picks one of the inputs from the condition.
+        input_index: u32,
+    },
+    /// The source location points to one of the captures of a for loop, found
+    /// by taking this AST node index offset from the containing
+    /// Decl AST node, which points to one of the input nodes of a for loop.
+    /// Next, navigate to the corresponding capture.
+    /// The Decl is determined contextually.
+    for_capture_from_input: i32,
 
     pub fn nodeOffset(node_offset: i32) LazySrcLoc {
         return .{ .node_offset = node_offset };
@@ -901,7 +958,6 @@ pub const LazySrcLoc = union(enum) {
             .node_offset_var_decl_section,
             .node_offset_var_decl_addrspace,
             .node_offset_var_decl_init,
-            .node_offset_for_cond,
             .node_offset_builtin_call_arg0,
             .node_offset_builtin_call_arg1,
             .node_offset_builtin_call_arg2,
@@ -950,6 +1006,8 @@ pub const LazySrcLoc = union(enum) {
             .node_offset_init_ty,
             .node_offset_store_ptr,
             .node_offset_store_operand,
+            .for_input,
+            .for_capture_from_input,
             => .{
                 .handle = handle,
                 .parent_decl_node = src_node,

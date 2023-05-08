@@ -58,6 +58,7 @@ pub const Tag = enum {
     has_decl,
     has_field,
     import,
+    in_comptime,
     int_cast,
     int_to_enum,
     int_to_error,
@@ -561,6 +562,13 @@ pub const list = list: {
             },
         },
         .{
+            "@inComptime",
+            .{
+                .tag = .in_comptime,
+                .param_count = 0,
+            },
+        },
+        .{
             "@intCast",
             .{
                 .tag = .int_cast,
@@ -600,28 +608,28 @@ pub const list = list: {
             "@max",
             .{
                 .tag = .max,
-                .param_count = 2,
+                .param_count = null,
             },
         },
         .{
             "@memcpy",
             .{
                 .tag = .memcpy,
-                .param_count = 3,
+                .param_count = 2,
             },
         },
         .{
             "@memset",
             .{
                 .tag = .memset,
-                .param_count = 3,
+                .param_count = 2,
             },
         },
         .{
             "@min",
             .{
                 .tag = .min,
-                .param_count = 2,
+                .param_count = null,
             },
         },
         .{
