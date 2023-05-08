@@ -25,18 +25,10 @@ document_store: *DocumentStore,
 uri: DocumentStore.Uri,
 namespaces: std.MultiArrayList(Namespace) = .{},
 
-/// Interpreter diagnostic errors
-errors: std.AutoArrayHashMapUnmanaged(Ast.Node.Index, InterpreterError) = .{},
-
 pub fn getHandle(interpreter: *ComptimeInterpreter) *const DocumentStore.Handle {
     // This interpreter is loaded from a known-valid handle so a valid handle must exist
     return interpreter.document_store.getHandle(interpreter.uri).?;
 }
-
-pub const InterpreterError = struct {
-    code: []const u8,
-    message: []const u8,
-};
 
 pub fn recordError(
     interpreter: *ComptimeInterpreter,
@@ -47,24 +39,21 @@ pub fn recordError(
 ) error{OutOfMemory}!void {
     const message = try std.fmt.allocPrint(interpreter.allocator, fmt, args);
     errdefer interpreter.allocator.free(message);
-    const previous = try interpreter.errors.fetchPut(interpreter.allocator, node_idx, .{
+    const handle = interpreter.document_store.handles.get(interpreter.uri).?;
+    try handle.analysis_errors.append(interpreter.document_store.allocator, .{
+        .loc = offsets.nodeToLoc(handle.tree, node_idx),
         .code = code,
         .message = message,
     });
-    if (previous) |p| interpreter.allocator.free(p.value.message);
 }
 
 pub fn deinit(interpreter: *ComptimeInterpreter) void {
-    for (interpreter.errors.values()) |err| {
-        interpreter.allocator.free(err.message);
-    }
-
-    interpreter.errors.deinit(interpreter.allocator);
-
-    var i: usize = 0;
-    while (i < interpreter.namespaces.len) : (i += 1) {
-        interpreter.namespaces.items(.decls)[i].deinit(interpreter.allocator);
-        interpreter.namespaces.items(.usingnamespaces)[i].deinit(interpreter.allocator);
+    for (
+        interpreter.namespaces.items(.decls),
+        interpreter.namespaces.items(.usingnamespaces),
+    ) |*decls, *usingnamespaces| {
+        decls.deinit(interpreter.allocator);
+        usingnamespaces.deinit(interpreter.allocator);
     }
     interpreter.namespaces.deinit(interpreter.allocator);
 }
