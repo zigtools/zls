@@ -178,6 +178,10 @@ pub const UnionValue = packed struct {
     val: Index,
 };
 
+pub const UndefinedValue = packed struct {
+    ty: Index,
+};
+
 pub const UnknownValue = packed struct {
     ty: Index,
 };
@@ -236,6 +240,7 @@ pub const Key = union(enum) {
     slice: Slice,
     aggregate: Aggregate,
     union_value: UnionValue,
+    undefined_value: UndefinedValue,
     unknown_value: UnknownValue,
 
     // error
@@ -288,6 +293,7 @@ pub const Key = union(enum) {
             .slice => .slice,
             .aggregate => .aggregate,
             .union_value => .union_value,
+            .undefined_value => .undefined_value,
             .unknown_value => .unknown_value,
         };
     }
@@ -378,6 +384,7 @@ pub const Key = union(enum) {
             .slice,
             .aggregate,
             .union_value,
+            .undefined_value,
             .unknown_value,
             => unreachable,
         };
@@ -427,6 +434,7 @@ pub const Key = union(enum) {
             .slice => |slice_info| slice_info.ty,
             .aggregate => |aggregate_info| aggregate_info.ty,
             .union_value => |union_info| union_info.ty,
+            .undefined_value => |undefined_info| undefined_info.ty,
             .unknown_value => |unknown_info| unknown_info.ty,
         };
     }
@@ -712,6 +720,7 @@ pub const Key = union(enum) {
             .slice,
             .aggregate,
             .union_value,
+            .undefined_value,
             .unknown_value,
             => unreachable,
         };
@@ -1019,6 +1028,7 @@ pub const Key = union(enum) {
                     union_value.val.fmt(ip),
                 });
             },
+            .undefined_value => try writer.print("undefined", .{}),
             .unknown_value => try writer.print("(unknown value)", .{}),
         }
         return null;
@@ -1285,6 +1295,9 @@ pub const Tag = enum(u8) {
     /// A union value.
     /// data is index to UnionValue.
     union_value,
+    /// A undefined value.
+    /// data is index to type which may be unknown.
+    undefined_value,
     /// A unknown value.
     /// data is index to type which may also be unknown.
     unknown_value,
@@ -1539,6 +1552,7 @@ pub fn indexToKey(ip: InternPool, index: Index) Key {
         .slice => .{ .slice = ip.extraData(Slice, data) },
         .aggregate => .{ .aggregate = ip.extraData(Aggregate, data) },
         .union_value => .{ .union_value = ip.extraData(UnionValue, data) },
+        .undefined_value => .{ .undefined_value = .{ .ty = @intToEnum(Index, data) } },
         .unknown_value => .{ .unknown_value = .{ .ty = @intToEnum(Index, data) } },
     };
 }
@@ -1569,6 +1583,7 @@ pub fn get(ip: *InternPool, gpa: Allocator, key: Key) Allocator.Error!Index {
         }),
         .float_16_value => |float_val| @bitCast(u16, float_val),
         .float_32_value => |float_val| @bitCast(u32, float_val),
+        .undefined_value => |undefined_val| @enumToInt(undefined_val.ty),
         .unknown_value => |unknown_val| @enumToInt(unknown_val.ty),
         inline else => |data| try ip.addExtra(gpa, data), // TODO sad stage1 noises :(
     };
