@@ -20,7 +20,7 @@ pub const ComptimeInterpreter = @This();
 const log = std.log.scoped(.zls_comptime_interpreter);
 
 allocator: std.mem.Allocator,
-ip: InternPool,
+ip: *InternPool,
 document_store: *DocumentStore,
 uri: DocumentStore.Uri,
 namespaces: std.MultiArrayList(Namespace) = .{},
@@ -60,7 +60,6 @@ pub fn deinit(interpreter: *ComptimeInterpreter) void {
     }
 
     interpreter.errors.deinit(interpreter.allocator);
-    interpreter.ip.deinit(interpreter.allocator);
 
     var i: usize = 0;
     while (i < interpreter.namespaces.len) : (i += 1) {
@@ -240,7 +239,7 @@ pub fn interpret(
                         container_field.ast.type_expr,
                         "expected_type",
                         "expected type 'type', found '{}'",
-                        .{init_value_ty.fmt(interpreter.ip)},
+                        .{init_value_ty.fmt(interpreter.ip.*)},
                     );
                     continue;
                 }
@@ -470,7 +469,7 @@ pub fn interpret(
             const can_have_fields: bool = switch (inner_ty) {
                 .simple_type => |simple| switch (simple) {
                     .type => blk: {
-                        if (interpreter.huntItDown(val.getNamespace(interpreter.ip), field_name, options)) |decl_index| {
+                        if (interpreter.huntItDown(val.getNamespace(interpreter.ip.*), field_name, options)) |decl_index| {
                             const decl = interpreter.ip.getDecl(decl_index);
                             return InterpretResult{ .value = Value{
                                 .interpreter = interpreter,
@@ -575,7 +574,7 @@ pub fn interpret(
                             node_idx,
                             "null_unwrap",
                             "tried to unwrap optional of type `{}` which was null",
-                            .{optional_info.payload_type.fmt(interpreter.ip)},
+                            .{optional_info.payload_type.fmt(interpreter.ip.*)},
                         );
                         return error.InvalidOperation;
                     }
@@ -655,14 +654,14 @@ pub fn interpret(
                     node_idx,
                     "undeclared_identifier",
                     "`{}` has no member '{s}'",
-                    .{ accessed_ty.fmt(interpreter.ip), field_name },
+                    .{ accessed_ty.fmt(interpreter.ip.*), field_name },
                 );
             } else {
                 try interpreter.recordError(
                     node_idx,
                     "invalid_field_access",
                     "`{}` does not support field access",
-                    .{accessed_ty.fmt(interpreter.ip)},
+                    .{accessed_ty.fmt(interpreter.ip.*)},
                 );
             }
             return error.InvalidOperation;
@@ -702,7 +701,7 @@ pub fn interpret(
                         if_info.ast.cond_expr,
                         "invalid_if_condition",
                         "expected `bool` but found `{}`",
-                        .{condition_ty.fmt(interpreter.ip)},
+                        .{condition_ty.fmt(interpreter.ip.*)},
                     );
                     return error.InvalidOperation;
                 },
@@ -850,7 +849,7 @@ pub fn interpret(
                     const val = interpreter.ip.indexToKey(ir_value.index);
                     const ty = val.typeOf();
 
-                    try writer.print("@as({}, {})", .{ ty.fmt(interpreter.ip), val.fmt(interpreter.ip) });
+                    try writer.print("@as({}, {})", .{ ty.fmt(interpreter.ip.*), val.fmt(interpreter.ip.*) });
                     if (index != params.len - 1)
                         try writer.writeAll(", ");
                 }
@@ -897,7 +896,7 @@ pub fn interpret(
                 defer interpreter.allocator.free(import_uri);
 
                 var handle = interpreter.document_store.getOrLoadHandle(import_uri) orelse return error.ImportFailure;
-                _ = try interpreter.document_store.ensureInterpreterExists(handle.uri);
+                _ = try interpreter.document_store.ensureInterpreterExists(handle.uri, interpreter.ip);
 
                 return InterpretResult{
                     .value = Value{
@@ -927,7 +926,7 @@ pub fn interpret(
                     try writer.writeAll("incompatible types: ");
                     for (types, 0..) |ty, i| {
                         if (i != 0) try writer.writeAll(", ");
-                        try writer.print("`{}`", .{ty.fmt(interpreter.ip)});
+                        try writer.print("`{}`", .{ty.fmt(interpreter.ip.*)});
                     }
 
                     try interpreter.recordError(node_idx, "invalid_typeof", "{s}", .{output.items});
@@ -952,7 +951,7 @@ pub fn interpret(
 
                 if (ty != .type_type) return error.InvalidBuiltin;
 
-                const value_namespace = interpreter.ip.indexToKey(ty).getNamespace(interpreter.ip);
+                const value_namespace = interpreter.ip.indexToKey(ty).getNamespace(interpreter.ip.*);
                 if (value_namespace == .none) return error.InvalidBuiltin;
 
                 const name = interpreter.ip.indexToKey(field_name.index).bytes; // TODO add checks
@@ -1137,7 +1136,7 @@ pub fn interpret(
                     node_idx,
                     "invalid_deref",
                     "expected type `bool` but got `{}`",
-                    .{ty.fmt(interpreter.ip)},
+                    .{ty.fmt(interpreter.ip.*)},
                 );
                 return error.InvalidOperation;
             }
@@ -1259,7 +1258,7 @@ pub fn call(
                 param.type_expr,
                 "expected_type",
                 "expected type 'type', found '{}'",
-                .{tex_ty.fmt(interpreter.ip)},
+                .{tex_ty.fmt(interpreter.ip.*)},
             );
             return error.InvalidCast;
         }

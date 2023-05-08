@@ -15,6 +15,7 @@ const translate_c = @import("translate_c.zig");
 const ComptimeInterpreter = @import("ComptimeInterpreter.zig");
 const AstGen = @import("stage2/AstGen.zig");
 const Zir = @import("stage2/Zir.zig");
+const InternPool = @import("analyser/InternPool.zig");
 
 const DocumentStore = @This();
 
@@ -1125,16 +1126,13 @@ pub fn wantZir(self: DocumentStore) bool {
     return !can_run_ast_check;
 }
 
-pub fn ensureInterpreterExists(self: *DocumentStore, uri: Uri) !*ComptimeInterpreter {
+pub fn ensureInterpreterExists(self: *DocumentStore, uri: Uri, ip: *InternPool) !*ComptimeInterpreter {
     var handle = self.handles.get(uri).?;
     if (handle.interpreter != null) return handle.interpreter.?;
 
     {
         var interpreter = try self.allocator.create(ComptimeInterpreter);
         errdefer self.allocator.destroy(interpreter);
-
-        var ip = try ComptimeInterpreter.InternPool.init(self.allocator);
-        errdefer ip.deinit(self.allocator);
 
         interpreter.* = ComptimeInterpreter{
             .allocator = self.allocator,

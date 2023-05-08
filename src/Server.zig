@@ -1571,6 +1571,10 @@ pub fn create(
 
     try configuration.configChanged(config, &server.runtime_zig_version, allocator, config_path);
 
+    if (config.dangerous_comptime_experiments_do_not_enable) {
+        server.analyser.ip = try analyser.InternPool.init(allocator);
+    }
+
     return server;
 }
 

@@ -68,7 +68,7 @@ pub fn hoverSymbol(server: *Server, decl_handle: Analyser.DeclWithHandle, markup
 
     const resolved_type_str = if (resolved_type) |rt|
         if (rt.type.is_type_val) switch (rt.type.data) {
-            .@"comptime" => |co| try std.fmt.allocPrint(server.arena.allocator(), "{}", .{co.value.index.fmt(co.interpreter.ip)}),
+            .@"comptime" => |co| try std.fmt.allocPrint(server.arena.allocator(), "{}", .{co.value.index.fmt(co.interpreter.ip.*)}),
             else => "type",
         } else switch (rt.type.data) { // TODO: Investigate random weird numbers like 897 that cause index of bounds
             .pointer,
