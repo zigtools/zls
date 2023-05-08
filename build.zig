@@ -40,6 +40,10 @@ pub fn build(b: *std.build.Builder) !void {
     exe_options.addOption(bool, "enable_failing_allocator", b.option(bool, "enable_failing_allocator", "Whether to use a randomly failing allocator.") orelse false);
     exe_options.addOption(u32, "enable_failing_allocator_likelihood", b.option(u32, "enable_failing_allocator_likelihood", "The chance that an allocation will fail is `1/likelihood`") orelse 256);
 
+    exe_options.addOption([]const u8, "telemetry_address", b.option([]const u8, "telemetry_address", "Address of telemetry server.") orelse "telemetry.zigtools.org");
+    exe_options.addOption(u16, "telemetry_port", b.option(u16, "telemetry_port", "Port of telemetry server.") orelse 443);
+    exe_options.addOption(bool, "telemetry_use_http", b.option(bool, "telemetry_use_http", "Use telemetry server over HTTP and not HTTPS (not recommended).") orelse false);
+
     const version = v: {
         const version_string = b.fmt("{d}.{d}.{d}", .{ zls_version.major, zls_version.minor, zls_version.patch });
         const build_root_path = b.build_root.path orelse ".";
@@ -87,6 +91,9 @@ pub fn build(b: *std.build.Builder) !void {
 
     const diffz_module = b.dependency("diffz", .{}).module("diffz");
     exe.addModule("diffz", diffz_module);
+
+    const proto_module = b.dependency("protobuf-zig", .{}).module("protobuf-zig");
+    exe.addModule("protobuf", proto_module);
 
     if (enable_tracy) {
         const client_cpp = "src/tracy/TracyClient.cpp";

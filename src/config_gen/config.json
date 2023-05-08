@@ -166,6 +166,12 @@
             "description": "Path to a directory that will be used as the global cache path when executing a projects build.zig. null is equivalent to the path shown by `zig env`",
             "type": "?[]const u8",
             "default": "null"
+        },
+        {
+            "name": "opt_in_telemetry",
+            "description": "Opt into telemetry so that we can optimize the Zig Language Server",
+            "type": "bool",
+            "default": "false"
         }
     ]
 }

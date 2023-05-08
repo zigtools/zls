@@ -91,4 +91,7 @@ global_cache_path: ?[]const u8 = null,
 /// Path to a directory that will be used as the global cache path when executing a projects build.zig. null is equivalent to the path shown by `zig env`
 build_runner_global_cache_path: ?[]const u8 = null,
 
+/// Opt into telemetry so that we can optimize the Zig Language Server
+opt_in_telemetry: bool = false,
+
 // DO NOT EDIT
