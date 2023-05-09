@@ -10,6 +10,7 @@ const tracy = @import("tracy.zig");
 const ComptimeInterpreter = @import("ComptimeInterpreter.zig");
 const InternPool = ComptimeInterpreter.InternPool;
 const references = @import("features/references.zig");
+const Telemetry = @import("otel/Telemetry.zig");
 
 const Analyser = @This();
 
@@ -20,6 +21,7 @@ ip: ?InternPool,
 bound_type_params: std.AutoHashMapUnmanaged(Ast.full.FnProto.Param, TypeWithHandle) = .{},
 using_trail: std.AutoHashMapUnmanaged(Ast.Node.Index, void) = .{},
 resolved_nodes: std.HashMapUnmanaged(NodeWithUri, ?TypeWithHandle, NodeWithUri.Context, std.hash_map.default_max_load_percentage) = .{},
+telemetry: *Telemetry,
 
 pub fn init(gpa: std.mem.Allocator, store: *DocumentStore) Analyser {
     return .{
@@ -27,6 +29,7 @@ pub fn init(gpa: std.mem.Allocator, store: *DocumentStore) Analyser {
         .arena = std.heap.ArenaAllocator.init(gpa),
         .store = store,
         .ip = null,
+        .telemetry = store.telemetry,
     };
 }
 
@@ -669,6 +672,9 @@ pub fn isTypeIdent(text: []const u8) bool {
 
 /// Resolves the type of a node
 fn resolveTypeOfNodeInternal(analyser: *Analyser, node_handle: NodeWithHandle) error{OutOfMemory}!?TypeWithHandle {
+    var span = analyser.telemetry.span("analysis.resolveTypeOfNodeInternal");
+    defer span.finish();
+
     const node_with_uri = NodeWithUri{
         .node = node_handle.node,
         .uri = node_handle.handle.uri,
@@ -1361,6 +1367,9 @@ pub const TypeWithHandle = struct {
 };
 
 pub fn resolveTypeOfNode(analyser: *Analyser, node_handle: NodeWithHandle) error{OutOfMemory}!?TypeWithHandle {
+    var span = analyser.telemetry.span("analysis.resolveTypeOfNode");
+    defer span.finish();
+
     analyser.bound_type_params.clearRetainingCapacity();
     return analyser.resolveTypeOfNodeInternal(node_handle);
 }
@@ -2598,9 +2607,16 @@ pub const Scope = struct {
     uses: []const Ast.Node.Index = &.{},
 };
 
-pub fn makeDocumentScope(allocator: std.mem.Allocator, tree: Ast) !DocumentScope {
+pub fn makeDocumentScope(
+    allocator: std.mem.Allocator,
+    tree: Ast,
+    telemetry: *Telemetry,
+) !DocumentScope {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
+
+    var span = telemetry.span("analysis.makeDocumentScope");
+    defer span.finish();
 
     var document_scope = DocumentScope{
         .scopes = .{},

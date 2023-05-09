@@ -87,7 +87,6 @@ pub fn sendTelemetryThread(telemetry: *Telemetry) void {
 
         var http_req = http_client.request(.POST, telemetry_uri, h, .{}) catch @panic("Failed to create http request");
 
-        std.log.info("SIZE {d}", .{node.data.len});
         http_req.transfer_encoding = .chunked;
 
         http_req.start() catch @panic("OOM");
@@ -123,7 +122,6 @@ pub const Span = struct {
 
     pub fn finish(s: Span) void {
         s.data.end_time_unix_nano = @intCast(u64, std.time.nanoTimestamp());
-        std.log.info("{any} span parents len {d}", .{ s.data, s.trace.span_parents.items.len });
         s.trace.span_parents.items.len -= 1;
         s.trace.spans.append(s.trace.telemetry.allocator, s.data) catch @panic("failed to append span");
 
@@ -157,8 +155,6 @@ const Trace = struct {
             .message = protobuf.extern_types.String.init("Success."),
             .code = .STATUS_CODE_OK,
         });
-
-        std.log.info("bruh {any}", .{status});
 
         span_data.* = otel_trace.Span.initFields(.{
             .trace_id = protobuf.extern_types.String.init(allocator.dupe(u8, &t.id) catch @panic("OOM")),
@@ -299,7 +295,7 @@ const Trace = struct {
 };
 
 fn startTrace(telemetry: *Telemetry) void {
-    if (telemetry.current_trace.spans.len == 0)
+    if (telemetry.current_trace.spans.len == 0 and telemetry.current_trace.span_parents.items.len == 0)
         telemetry.current_trace = .{
             .telemetry = telemetry,
             .id = id: {

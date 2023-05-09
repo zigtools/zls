@@ -250,7 +250,7 @@ pub fn refreshDocument(self: *DocumentStore, uri: Uri, new_text: [:0]const u8) !
         handle.zir_status = .outdated;
     }
 
-    var new_document_scope = try analysis.makeDocumentScope(self.allocator, handle.tree);
+    var new_document_scope = try analysis.makeDocumentScope(self.allocator, handle.tree, self.telemetry);
     handle.document_scope.deinit(self.allocator);
     handle.document_scope = new_document_scope;
 
@@ -764,7 +764,7 @@ fn createDocument(self: *DocumentStore, uri: Uri, text: [:0]const u8, open: bool
             code.instructions = instructions.slice();
         }
 
-        var document_scope = try analysis.makeDocumentScope(self.allocator, tree);
+        var document_scope = try analysis.makeDocumentScope(self.allocator, tree, self.telemetry);
         errdefer document_scope.deinit(self.allocator);
 
         // remove unused capacity
