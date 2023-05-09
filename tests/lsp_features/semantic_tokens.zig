@@ -197,6 +197,7 @@ test "semantic tokens - operators" {
 }
 
 test "semantic tokens - field access" {
+    if (builtin.target.isWasm()) return error.SkipZigTest;
     // this will make sure that the std module can be resolved
     try testSemanticTokens(
         \\const std = @import("std");
