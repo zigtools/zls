@@ -89,7 +89,7 @@ pub fn build(b: *std.build.Builder) !void {
     exe.addModule("diffz", diffz_module);
 
     if (enable_tracy) {
-        const client_cpp = "src/tracy/TracyClient.cpp";
+        const client_cpp = "src/tracy/public/TracyClient.cpp";
 
         // On mingw, we need to opt into windows 7+ to get some features required by tracy.
         const tracy_c_flags: []const []const u8 = if (target.isWindows() and target.getAbi() == .gnu)
