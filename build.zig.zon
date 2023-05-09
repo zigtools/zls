@@ -16,8 +16,8 @@
             .hash = "1220ed4aed884221108ad39f2658b69a91653e0bbc8ce429bc7f1bc4e58f6a751553",
         },
         .@"protobuf-zig" = .{
-            .url = "https://github.com/travisstaloch/protobuf-zig/archive/58544fec90b3eb7c629ff510479af5727b3ef955.tar.gz",
-            .hash = "1220c2f8f335d084211b56b2bd0641a5c5c96c007ca611a15ac0c10d12e0ea28c692",
+            .url = "https://github.com/travisstaloch/protobuf-zig/archive/eb1b532384b38434e95d035dfb643009a6b669dc.tar.gz",
+            .hash = "1220553acea9989b9ffa94c91bfeb88030db3ff1f26f3d1d772d5c274a181fbc53fc",
         },
     },
 }

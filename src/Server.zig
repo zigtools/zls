@@ -17,6 +17,7 @@ const diff = @import("diff.zig");
 const ComptimeInterpreter = @import("ComptimeInterpreter.zig");
 const analyser = @import("analyser/analyser.zig");
 const ZigVersionWrapper = @import("ZigVersionWrapper.zig");
+const Telemetry = @import("otel/Telemetry.zig");
 
 const signature_help = @import("features/signature_help.zig");
 const references = @import("features/references.zig");
@@ -43,6 +44,8 @@ arena: std.heap.ArenaAllocator,
 analyser: Analyser,
 document_store: DocumentStore,
 builtin_completions: ?std.ArrayListUnmanaged(types.CompletionItem),
+editor: ?EditorInfo,
+telemetry: *Telemetry,
 client_capabilities: ClientCapabilities = .{},
 runtime_zig_version: ?ZigVersionWrapper,
 outgoing_messages: std.ArrayListUnmanaged([]const u8) = .{},
@@ -66,6 +69,11 @@ status: enum {
 },
 
 // Code was based off of https://github.com/andersfr/zig-lsp/blob/master/server.zig
+
+const EditorInfo = struct {
+    name: []const u8,
+    version: ?[]const u8 = null,
+};
 
 const ClientCapabilities = packed struct {
     supports_snippets: bool = false,
@@ -351,6 +359,11 @@ fn initializeHandler(server: *Server, request: types.InitializeParams) Error!typ
     var skip_set_fixall = false;
 
     if (request.clientInfo) |clientInfo| {
+        server.editor = .{
+            .name = try server.allocator.dupe(u8, clientInfo.name),
+            .version = if (clientInfo.version) |v| try server.allocator.dupe(u8, v) else null,
+        };
+
         log.info("client is '{s}-{s}'", .{ clientInfo.name, clientInfo.version orelse "<no version>" });
 
         if (std.mem.eql(u8, clientInfo.name, "Sublime Text LSP")) blk: {
@@ -1389,6 +1402,9 @@ pub fn maybeFreeArena(server: *Server) void {
 }
 
 pub fn processMessage(server: *Server, message: Message) Error!void {
+    var trace = server.telemetry.trace();
+    defer trace.send();
+
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -1421,6 +1437,9 @@ pub fn processMessage(server: *Server, message: Message) Error!void {
     }
 
     const method = message.method().?; // message cannot be a ResponseMessage
+
+    var span = trace.span(method);
+    defer span.finish();
 
     switch (server.status) {
         .uninitialized => blk: {
@@ -1516,8 +1535,8 @@ pub fn processMessage(server: *Server, message: Message) Error!void {
 
                 break :blk handler(server, params) catch |err| {
                     log.err("got {} error while handling {s}", .{ err, method });
-                    if (@errorReturnTrace()) |trace| {
-                        std.debug.dumpStackTrace(trace.*);
+                    if (@errorReturnTrace()) |ert| {
+                        std.debug.dumpStackTrace(ert.*);
                     }
                     return error.InternalError;
                 };
@@ -1561,6 +1580,8 @@ pub fn create(
             .config = config,
             .runtime_zig_version = &server.runtime_zig_version,
         },
+        .editor = null,
+        .telemetry = try Telemetry.init(allocator, server),
         .builtin_completions = null,
         .recording_enabled = recording_enabled,
         .replay_enabled = replay_enabled,
@@ -1593,7 +1614,16 @@ pub fn destroy(server: *Server) void {
         zig_version.free();
     }
 
-    server.arena.deinit();
+    if (server.editor) |editor| {
+        server.allocator.free(editor.name);
+        if (editor.version) |v|
+            server.allocator.free(v);
+    }
+    @atomicStore(bool, &server.telemetry.alive, false, .Unordered);
+    while (@atomicLoad(bool, &server.telemetry.thread_alive, .Unordered)) {}
+    server.telemetry.arena.deinit();
 
+    server.arena.deinit();
+    server.allocator.destroy(server.telemetry);
     server.allocator.destroy(server);
 }

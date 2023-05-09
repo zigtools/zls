@@ -10,14 +10,6 @@ const Server = @import("Server.zig");
 const Header = @import("Header.zig");
 const debug = @import("debug.zig");
 
-const protobuf = @import("protobuf");
-const common = @import("otel/common/v1/common.pb.zig");
-const collector = @import("otel/collector/trace/v1/trace_service.pb.zig");
-const resource = @import("otel/resource/v1/resource.pb.zig");
-const trace = @import("otel/trace/v1/trace.pb.zig");
-
-const otel_schema_url = "https://opentelemetry.io/schemas/1.19.0";
-
 const logger = std.log.scoped(.zls_main);
 const message_logger = std.log.scoped(.message);
 
@@ -369,16 +361,6 @@ const stack_frames = switch (zig_builtin.mode) {
     else => 0,
 };
 
-fn pbInit(comptime T: type, values: anytype) T {
-    var inited = T.init();
-
-    inline for (@typeInfo(@TypeOf(values)).Struct.fields) |field| {
-        inited.set(@field(protobuf.types.FieldEnum(T), field.name), @field(values, field.name));
-    }
-
-    return inited;
-}
-
 pub fn main() !void {
     var gpa_state = std.heap.GeneralPurposeAllocator(.{ .stack_trace_frames = stack_frames }){};
     defer std.debug.assert(gpa_state.deinit() == .ok);
@@ -432,119 +414,6 @@ pub fn main() !void {
         result.message_tracing_enabled,
     );
     defer server.destroy();
-
-    var pb_arena = std.heap.ArenaAllocator.init(allocator);
-    defer pb_arena.deinit();
-    var pb_allocator = pb_arena.allocator();
-
-    var req = pbInit(collector.ExportTraceServiceRequest, .{
-        .resource_spans = .{},
-    });
-
-    var ress = pbInit(resource.Resource, .{
-        .attributes = .{},
-        .dropped_attributes_count = 0,
-    });
-
-    var val = pbInit(common.AnyValue, .{
-        .value__string_value = protobuf.extern_types.String.init("VSCode"),
-    });
-
-    var val2 = pbInit(common.AnyValue, .{
-        .value__string_value = protobuf.extern_types.String.init("zls"),
-    });
-
-    var kv1 = pbInit(common.KeyValue, .{
-        .key = protobuf.extern_types.String.init("editor"),
-        .value = &val,
-    });
-    var kv2 = pbInit(common.KeyValue, .{
-        .key = protobuf.extern_types.String.init("service.name"),
-        .value = &val2,
-    });
-    try ress.attributes.appendSlice(pb_allocator, &.{ &kv1, &kv2 });
-
-    var scope = pbInit(common.InstrumentationScope, .{
-        .name = protobuf.extern_types.String.init("otel-zig"),
-        .version = protobuf.extern_types.String.init("0.0.1"),
-        .attributes = .{},
-        .dropped_attributes_count = 0,
-    });
-
-    var status = pbInit(trace.Status, .{
-        .message = protobuf.extern_types.String.init("lets' goo!!!"),
-        .code = .STATUS_CODE_OK,
-    });
-
-    var span = pbInit(trace.Span, .{
-        .trace_id = protobuf.extern_types.String.init("abcdefghabcdefgh"),
-        .span_id = protobuf.extern_types.String.init("zyxwzyxw"),
-        .trace_state = protobuf.extern_types.String.empty,
-        .parent_span_id = protobuf.extern_types.String.empty,
-        .name = protobuf.extern_types.String.init("HELLO"),
-        .kind = .SPAN_KIND_SERVER,
-        .start_time_unix_nano = @intCast(u64, std.time.nanoTimestamp()),
-        .end_time_unix_nano = @intCast(u64, std.time.nanoTimestamp()),
-        .attributes = .{},
-        .dropped_attributes_count = 0,
-        .events = .{},
-        .dropped_events_count = 0,
-        .links = .{},
-        .dropped_links_count = 0,
-        .status = &status,
-    });
-
-    var spans = protobuf.extern_types.ArrayListMut(*trace.Span){};
-    try spans.append(pb_allocator, &span);
-
-    var scope_spans = protobuf.extern_types.ArrayListMut(*trace.ScopeSpans){};
-
-    var scope_span = pbInit(trace.ScopeSpans, .{
-        .scope = &scope,
-        .spans = spans,
-        .schema_url = protobuf.extern_types.String.init(otel_schema_url),
-    });
-
-    try scope_spans.append(pb_allocator, &scope_span);
-
-    var resource_spans = pbInit(trace.ResourceSpans, .{
-        .resource = &ress,
-        .scope_spans = scope_spans,
-        .schema_url = protobuf.extern_types.String.init(otel_schema_url),
-    });
-
-    try req.resource_spans.append(pb_allocator, &resource_spans);
-
-    var http_client: std.http.Client = .{ .allocator = pb_allocator };
-    defer http_client.deinit();
-
-    var h = std.http.Headers{ .allocator = pb_allocator };
-    try h.append("Content-Type", "application/x-protobuf");
-    defer h.deinit();
-
-    try protobuf.json.serialize(&req.base, std.io.getStdOut().writer(), .{ .pretty_print = .{} });
-
-    var http_req = try http_client.request(.POST, try std.Uri.parse("https://telemetry.zigtools.org:4318/v1/traces"), h, .{});
-    // var http_req = try http_client.request(.POST, try std.Uri.parse("https://httpdump.app/dumps/29afed7c-6b9a-42ee-9950-850ee2c04d63"), h, .{});
-    defer http_req.deinit();
-
-    http_req.transfer_encoding = .chunked;
-
-    try http_req.start();
-    var bufw = std.io.bufferedWriter(http_req.writer());
-    try protobuf.protobuf.serialize(&req.base, bufw.writer());
-    try bufw.flush();
-    try http_req.finish();
-
-    try http_req.wait();
-
-    std.log.info("{any}", .{http_req.response});
-
-    var buf: [1024]u8 = undefined;
-    var len = try http_req.reader().read(&buf);
-    std.log.info("body: {s}", .{buf[0..len]});
-
-    std.log.info("DONE!", .{});
 
     try loop(server, record_file, replay_file);
 
