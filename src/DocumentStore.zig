@@ -16,6 +16,7 @@ const ComptimeInterpreter = @import("ComptimeInterpreter.zig");
 const AstGen = @import("stage2/AstGen.zig");
 const Zir = @import("stage2/Zir.zig");
 const InternPool = @import("analyser/InternPool.zig");
+const Telemetry = @import("otel/Telemetry.zig");
 
 const DocumentStore = @This();
 
@@ -121,6 +122,7 @@ runtime_zig_version: *const ?ZigVersionWrapper,
 handles: std.StringArrayHashMapUnmanaged(*Handle) = .{},
 build_files: std.StringArrayHashMapUnmanaged(BuildFile) = .{},
 cimports: std.AutoArrayHashMapUnmanaged(Hash, translate_c.Result) = .{},
+telemetry: *Telemetry,
 
 pub fn deinit(self: *DocumentStore) void {
     for (self.handles.values()) |handle| {
@@ -728,6 +730,9 @@ fn uriInImports(
 fn createDocument(self: *DocumentStore, uri: Uri, text: [:0]const u8, open: bool) error{OutOfMemory}!Handle {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
+
+    var span = self.telemetry.span("DocumentStore.createDocument");
+    defer span.finish();
 
     var handle: Handle = blk: {
         errdefer self.allocator.free(text);

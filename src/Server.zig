@@ -1402,9 +1402,6 @@ pub fn maybeFreeArena(server: *Server) void {
 }
 
 pub fn processMessage(server: *Server, message: Message) Error!void {
-    var trace = server.telemetry.trace();
-    defer trace.send();
-
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -1438,7 +1435,7 @@ pub fn processMessage(server: *Server, message: Message) Error!void {
 
     const method = message.method().?; // message cannot be a ResponseMessage
 
-    var span = trace.span(method);
+    var span = server.telemetry.span(method);
     defer span.finish();
 
     switch (server.status) {
@@ -1569,6 +1566,7 @@ pub fn create(
 ) !*Server {
     const server = try allocator.create(Server);
     errdefer server.destroy();
+    const telemetry = try Telemetry.create(allocator, server);
     server.* = Server{
         .config = config,
         .runtime_zig_version = null,
@@ -1579,9 +1577,10 @@ pub fn create(
             .allocator = allocator,
             .config = config,
             .runtime_zig_version = &server.runtime_zig_version,
+            .telemetry = telemetry,
         },
         .editor = null,
-        .telemetry = try Telemetry.init(allocator, server),
+        .telemetry = telemetry,
         .builtin_completions = null,
         .recording_enabled = recording_enabled,
         .replay_enabled = replay_enabled,
