@@ -164,22 +164,16 @@ pub fn generateDiagnostics(server: *Server, handle: DocumentStore.Handle) error{
         }
     }
 
-    if (handle.interpreter) |int| {
-        try diagnostics.ensureUnusedCapacity(allocator, int.errors.count());
-
-        var err_it = int.errors.iterator();
-
-        while (err_it.next()) |err| {
-            diagnostics.appendAssumeCapacity(.{
-                .range = offsets.nodeToRange(tree, err.key_ptr.*, server.offset_encoding),
-                .severity = .Error,
-                .code = .{ .string = err.value_ptr.code },
-                .source = "zls",
-                .message = err.value_ptr.message,
-            });
-        }
+    try diagnostics.ensureUnusedCapacity(allocator, handle.analysis_errors.items.len);
+    for (handle.analysis_errors.items) |err| {
+        diagnostics.appendAssumeCapacity(.{
+            .range = offsets.locToRange(handle.tree.source, err.loc, server.offset_encoding),
+            .severity = .Error,
+            .code = .{ .string = err.code },
+            .source = "zls",
+            .message = err.message,
+        });
     }
-    // try diagnostics.appendSlice(allocator, handle.interpreter.?.diagnostics.items);
 
     return .{
         .uri = handle.uri,

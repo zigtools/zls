@@ -15,6 +15,7 @@ const translate_c = @import("translate_c.zig");
 const ComptimeInterpreter = @import("ComptimeInterpreter.zig");
 const AstGen = @import("stage2/AstGen.zig");
 const Zir = @import("stage2/Zir.zig");
+const InternPool = @import("analyser/InternPool.zig");
 
 const DocumentStore = @This();
 
@@ -73,6 +74,9 @@ pub const Handle = struct {
     /// Contains one entry for every cimport in the document
     cimports: std.MultiArrayList(CImportHandle) = .{},
 
+    /// error messages from comptime_interpreter or astgen_analyser
+    analysis_errors: std.ArrayListUnmanaged(ErrorMessage) = .{},
+
     /// `DocumentStore.build_files` is guaranteed to contain this uri
     /// uri memory managed by its build_file
     associated_build_file: ?Uri = null,
@@ -97,7 +101,18 @@ pub const Handle = struct {
             allocator.free(source);
         }
         self.cimports.deinit(allocator);
+
+        for (self.analysis_errors.items) |err| {
+            allocator.free(err.message);
+        }
+        self.analysis_errors.deinit(allocator);
     }
+};
+
+pub const ErrorMessage = struct {
+    loc: offsets.Loc,
+    code: []const u8,
+    message: []const u8,
 };
 
 allocator: std.mem.Allocator,
@@ -209,7 +224,7 @@ pub fn refreshDocument(self: *DocumentStore, uri: Uri, new_text: [:0]const u8) !
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const handle = self.handles.get(uri) orelse unreachable;
+    const handle = self.handles.get(uri).?;
 
     // TODO: Handle interpreter cross reference
     if (handle.interpreter) |int| {
@@ -254,6 +269,12 @@ pub fn refreshDocument(self: *DocumentStore, uri: Uri, new_text: [:0]const u8) !
     }
     handle.cimports.deinit(self.allocator);
     handle.cimports = new_cimports;
+
+    for (handle.analysis_errors.items) |err| {
+        self.allocator.free(err.message);
+    }
+    handle.analysis_errors.deinit(self.allocator);
+    handle.analysis_errors = .{};
 
     if (old_import_count != new_import_count or
         old_cimport_count != new_cimport_count)
@@ -1125,16 +1146,13 @@ pub fn wantZir(self: DocumentStore) bool {
     return !can_run_ast_check;
 }
 
-pub fn ensureInterpreterExists(self: *DocumentStore, uri: Uri) !*ComptimeInterpreter {
+pub fn ensureInterpreterExists(self: *DocumentStore, uri: Uri, ip: *InternPool) !*ComptimeInterpreter {
     var handle = self.handles.get(uri).?;
     if (handle.interpreter != null) return handle.interpreter.?;
 
     {
         var interpreter = try self.allocator.create(ComptimeInterpreter);
         errdefer self.allocator.destroy(interpreter);
-
-        var ip = try ComptimeInterpreter.InternPool.init(self.allocator);
-        errdefer ip.deinit(self.allocator);
 
         interpreter.* = ComptimeInterpreter{
             .allocator = self.allocator,

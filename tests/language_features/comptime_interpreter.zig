@@ -134,7 +134,7 @@ test "ComptimeInterpreter - variable lookup" {
     defer context.deinit();
 
     const result = try context.interpret(context.findVar("bar"));
-    try expectEqualKey(context.interpreter.ip, .{ .int_u64_value = .{ .ty = .comptime_int_type, .int = 3 } }, result.val);
+    try expectEqualKey(context.interpreter.ip.*, .{ .int_u64_value = .{ .ty = .comptime_int_type, .int = 3 } }, result.val);
 }
 
 test "ComptimeInterpreter - field access" {
@@ -294,6 +294,7 @@ const KV = struct {
 const Context = struct {
     config: *zls.Config,
     document_store: *zls.DocumentStore,
+    ip: *InternPool,
     interpreter: *ComptimeInterpreter,
 
     pub fn init(source: []const u8) !Context {
@@ -305,6 +306,12 @@ const Context = struct {
 
         var interpreter = try allocator.create(ComptimeInterpreter);
         errdefer allocator.destroy(interpreter);
+
+        var ip = try allocator.create(InternPool);
+        errdefer allocator.destroy(ip);
+
+        ip.* = try InternPool.init(allocator);
+        errdefer ip.deinit(allocator);
 
         config.* = .{};
         document_store.* = .{
@@ -325,7 +332,7 @@ const Context = struct {
 
         interpreter.* = .{
             .allocator = allocator,
-            .ip = try InternPool.init(allocator),
+            .ip = ip,
             .document_store = document_store,
             .uri = handle.uri,
         };
@@ -337,6 +344,7 @@ const Context = struct {
         return .{
             .config = config,
             .document_store = document_store,
+            .ip = ip,
             .interpreter = interpreter,
         };
     }
@@ -344,10 +352,12 @@ const Context = struct {
     pub fn deinit(self: *Context) void {
         self.interpreter.deinit();
         self.document_store.deinit();
+        self.ip.deinit(allocator);
 
         allocator.destroy(self.config);
         allocator.destroy(self.document_store);
         allocator.destroy(self.interpreter);
+        allocator.destroy(self.ip);
     }
 
     pub fn call(self: *Context, func_node: Ast.Node.Index, arguments: []const KV) !KV {
@@ -428,8 +438,8 @@ fn testCall(
 
     const result = try context.call(context.findFn("Foo"), arguments);
 
-    try expectEqualKey(context.interpreter.ip, Key{ .simple_type = .type }, result.ty);
-    try expectEqualKey(context.interpreter.ip, expected_ty, result.val);
+    try expectEqualKey(context.interpreter.ip.*, Key{ .simple_type = .type }, result.ty);
+    try expectEqualKey(context.interpreter.ip.*, expected_ty, result.val);
 }
 
 fn testExpr(
@@ -446,7 +456,7 @@ fn testExpr(
 
     const result = try context.interpret(context.findVar("foobarbaz"));
 
-    try expectEqualKey(context.interpreter.ip, expected, result.val);
+    try expectEqualKey(context.interpreter.ip.*, expected, result.val);
 }
 
 fn expectEqualKey(ip: InternPool, expected: Key, actual: ?Key) !void {

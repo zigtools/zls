@@ -63,11 +63,9 @@ pub const SrcLoc = struct {
                 const end = start + @intCast(u32, tree.tokenSlice(tok_index).len);
                 return Span{ .start = start, .end = end, .main = start };
             },
-            .node_offset => |traced_off| {
-                const node_off = traced_off.x;
+            .node_offset => |node_off| {
                 const tree = src_loc.handle.tree;
                 const node = src_loc.declRelativeToNodeIndex(node_off);
-                assert(src_loc.handle.tree_loaded);
                 return nodeToSpan(tree, node);
             },
             .node_offset_main_token => |node_off| {
@@ -79,7 +77,6 @@ pub const SrcLoc = struct {
             .node_offset_bin_op => |node_off| {
                 const tree = src_loc.handle.tree;
                 const node = src_loc.declRelativeToNodeIndex(node_off);
-                assert(src_loc.handle.tree_loaded);
                 return nodeToSpan(tree, node);
             },
             .node_offset_initializer => |node_off| {
@@ -594,7 +591,7 @@ pub const SrcLoc = struct {
         src_loc: SrcLoc,
         node_off: i32,
         arg_index: u32,
-    ) !Span {
+    ) Span {
         const tree = src_loc.handle.tree;
         const node_datas = tree.nodes.items(.data);
         const node_tags = tree.nodes.items(.tag);
@@ -611,7 +608,7 @@ pub const SrcLoc = struct {
         return nodeToSpan(tree, param);
     }
 
-    pub fn nodeToSpan(tree: *const Ast, node: u32) Span {
+    pub fn nodeToSpan(tree: Ast, node: u32) Span {
         return tokensToSpan(
             tree,
             tree.firstToken(node),
@@ -620,7 +617,7 @@ pub const SrcLoc = struct {
         );
     }
 
-    fn tokensToSpan(tree: *const Ast, start: Ast.TokenIndex, end: Ast.TokenIndex, main: Ast.TokenIndex) Span {
+    fn tokensToSpan(tree: Ast, start: Ast.TokenIndex, end: Ast.TokenIndex, main: Ast.TokenIndex) Span {
         const token_starts = tree.tokens.items(.start);
         var start_tok = start;
         var end_tok = end;
