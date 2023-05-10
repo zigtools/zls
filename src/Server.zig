@@ -460,7 +460,7 @@ fn initializeHandler(server: *Server, request: types.InitializeParams) Error!typ
 
     log.info("zls initializing", .{});
     log.info("{}", .{server.client_capabilities});
-    log.info("Using offset encoding: {s}", .{std.meta.tagName(server.offset_encoding)});
+    log.info("Using offset encoding: {s}", .{@tagName(server.offset_encoding)});
 
     server.status = .initializing;
 
