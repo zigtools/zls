@@ -60,7 +60,7 @@ pub const Context = struct {
     }
 
     pub fn deinit(self: *Context) void {
-        std.json.parseFree(Config, self.config.*, .{ .allocator = allocator });
+        std.json.parseFree(Config, allocator, self.config.*);
         allocator.destroy(self.config);
 
         self.request("shutdown", "{}", null) catch {};
@@ -130,17 +130,17 @@ pub const Context = struct {
         const expected = expect orelse return;
 
         // parse the response
-        var parser = std.json.Parser.init(allocator, false);
+        var parser = std.json.Parser.init(allocator, .alloc_always);
         defer parser.deinit();
 
         var tree = try parser.parse(response_bytes);
         defer tree.deinit();
 
-        const response = tree.root.Object;
+        const response = tree.root.object;
 
         // assertions
-        try std.testing.expectEqualStrings("2.0", response.get("jsonrpc").?.String);
-        try std.testing.expectEqual(self.request_id, @intCast(u32, response.get("id").?.Integer));
+        try std.testing.expectEqualStrings("2.0", response.get("jsonrpc").?.string);
+        try std.testing.expectEqual(self.request_id, @intCast(u32, response.get("id").?.integer));
         try std.testing.expect(!response.contains("error"));
 
         const result_json = try std.json.stringifyAlloc(allocator, response.get("result").?, .{});
@@ -195,7 +195,7 @@ pub const Context = struct {
         const response_bytes = try self.requestAlloc(method, buffer.items);
         defer self.server.allocator.free(response_bytes);
 
-        var parser = std.json.Parser.init(self.arena.allocator(), false);
+        var parser = std.json.Parser.init(self.arena.allocator(), .alloc_always);
         var tree = try parser.parse(try self.arena.allocator().dupe(u8, response_bytes));
 
         // TODO validate jsonrpc and id

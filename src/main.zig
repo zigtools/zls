@@ -146,9 +146,8 @@ fn updateConfig(
         defer allocator.free(json_message);
         try file.reader().readNoEof(json_message);
 
-        var token_stream = std.json.TokenStream.init(json_message);
-        const new_config = try std.json.parse(Config, &token_stream, .{ .allocator = allocator });
-        std.json.parseFree(Config, config.*, .{ .allocator = allocator });
+        const new_config = try std.json.parseFromSlice(Config, allocator, json_message, .{});
+        std.json.parseFree(Config, allocator, config.*);
         config.* = new_config;
     }
 }
@@ -334,7 +333,7 @@ fn parseArgs(allocator: std.mem.Allocator) !ParseArgsResult {
     if (specified.get(.@"show-config-path")) {
         const new_config = try getConfig(allocator, result.config_path);
         defer if (new_config.config_path) |path| allocator.free(path);
-        defer std.json.parseFree(Config, new_config.config, .{ .allocator = allocator });
+        defer std.json.parseFree(Config, allocator, new_config.config);
 
         const full_path = if (new_config.config_path) |path| blk: {
             break :blk try std.fs.path.resolve(allocator, &.{ path, "zls.json" });
@@ -383,7 +382,7 @@ pub fn main() !void {
     logger.info("Starting ZLS {s} @ '{s}'", .{ build_options.version, result.zls_exe_path });
 
     var config = try getConfig(allocator, result.config_path);
-    defer std.json.parseFree(Config, config.config, .{ .allocator = allocator });
+    defer std.json.parseFree(Config, allocator, config.config);
     defer if (config.config_path) |path| allocator.free(path);
 
     if (result.replay_enabled and config.config.replay_session_path == null and config.config.record_session_path == null) {

@@ -686,7 +686,7 @@ fn handleConfiguration(server: *Server, json: std.json.Value) error{OutOfMemory}
     // but not sure how standard this "standard" really is
 
     var new_zig_exe = false;
-    const result = json.Array;
+    const result = json.array;
 
     inline for (std.meta.fields(Config), result.items) |field, value| {
         const ft = if (@typeInfo(field.type) == .Optional)
@@ -695,10 +695,10 @@ fn handleConfiguration(server: *Server, json: std.json.Value) error{OutOfMemory}
             field.type;
         const ti = @typeInfo(ft);
 
-        if (value != .Null) {
+        if (value != .null) {
             const new_value: field.type = switch (ft) {
                 []const u8 => switch (value) {
-                    .String => |s| blk: {
+                    .string => |s| blk: {
                         const trimmed = std.mem.trim(u8, s, " ");
                         if (trimmed.len == 0 or std.mem.eql(u8, trimmed, "nil")) {
                             log.warn("Ignoring new value for \"zls.{s}\": the given new value is invalid", .{field.name});
@@ -723,7 +723,7 @@ fn handleConfiguration(server: *Server, json: std.json.Value) error{OutOfMemory}
                 },
                 else => switch (ti) {
                     .Int => switch (value) {
-                        .Integer => |val| std.math.cast(ft, val) orelse blk: {
+                        .integer => |val| std.math.cast(ft, val) orelse blk: {
                             log.warn("Ignoring new value for \"zls.{s}\": the given new value is invalid", .{field.name});
                             break :blk @field(server.config, field.name);
                         },
@@ -733,14 +733,14 @@ fn handleConfiguration(server: *Server, json: std.json.Value) error{OutOfMemory}
                         },
                     },
                     .Bool => switch (value) {
-                        .Bool => |b| b,
+                        .bool => |b| b,
                         else => blk: {
                             log.warn("Ignoring new value for \"zls.{s}\": the given new value has an invalid type", .{field.name});
                             break :blk @field(server.config, field.name);
                         },
                     },
                     .Enum => switch (value) {
-                        .String => |s| blk: {
+                        .string => |s| blk: {
                             const trimmed = std.mem.trim(u8, s, " ");
                             break :blk std.meta.stringToEnum(field.type, trimmed) orelse inner: {
                                 log.warn("Ignoring new value for \"zls.{s}\": the given new value is invalid", .{field.name});
@@ -1298,8 +1298,8 @@ const Message = union(enum) {
         const tracy_zone = tracy.trace(@src());
         defer tracy_zone.end();
 
-        if (tree.root != .Object) return error.InvalidRequest;
-        const object = tree.root.Object;
+        if (tree.root != .object) return error.InvalidRequest;
+        const object = tree.root.object;
 
         if (object.get("id")) |id_obj| {
             comptime std.debug.assert(!tres.isAllocatorRequired(types.RequestId));
@@ -1307,11 +1307,11 @@ const Message = union(enum) {
 
             if (object.get("method")) |method_obj| {
                 const msg_method = switch (method_obj) {
-                    .String => |str| str,
+                    .string => |str| str,
                     else => return error.InvalidRequest,
                 };
 
-                const msg_params = object.get("params") orelse .Null;
+                const msg_params = object.get("params") orelse .null;
 
                 return .{ .RequestMessage = .{
                     .id = msg_id,
@@ -1319,13 +1319,13 @@ const Message = union(enum) {
                     .params = msg_params,
                 } };
             } else {
-                const result = object.get("result") orelse .Null;
-                const error_obj = object.get("error") orelse .Null;
+                const result = object.get("result") orelse .null;
+                const error_obj = object.get("error") orelse .null;
 
                 comptime std.debug.assert(!tres.isAllocatorRequired(?types.ResponseError));
                 const err = tres.parse(?types.ResponseError, error_obj, null) catch return error.InvalidRequest;
 
-                if (result != .Null and err != null) return error.InvalidRequest;
+                if (result != .null and err != null) return error.InvalidRequest;
 
                 return .{ .ResponseMessage = .{
                     .id = msg_id,
@@ -1335,11 +1335,11 @@ const Message = union(enum) {
             }
         } else {
             const msg_method = switch (object.get("method") orelse return error.InvalidRequest) {
-                .String => |str| str,
+                .string => |str| str,
                 else => return error.InvalidRequest,
             };
 
-            const msg_params = object.get("params") orelse .Null;
+            const msg_params = object.get("params") orelse .null;
 
             return .{ .NotificationMessage = .{
                 .method = msg_method,
@@ -1356,7 +1356,7 @@ pub fn processJsonRpc(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    var parser = std.json.Parser.init(server.arena.allocator(), false);
+    var parser = std.json.Parser.init(server.arena.allocator(), .alloc_always);
     defer parser.deinit();
 
     var tree = parser.parse(json) catch |err| {
