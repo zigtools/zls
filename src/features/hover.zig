@@ -70,13 +70,13 @@ pub fn hoverSymbol(server: *Server, decl_handle: Analyser.DeclWithHandle, markup
         if (rt.type.is_type_val) switch (rt.type.data) {
             .@"comptime" => |co| try std.fmt.allocPrint(server.arena.allocator(), "{}", .{co.value.index.fmt(co.interpreter.ip.*)}),
             else => "type",
-        } else switch (rt.type.data) { // TODO: Investigate random weird numbers like 897 that cause index of bounds
+        } else switch (rt.type.data) {
             .pointer,
             .slice,
             .error_union,
             .primitive,
-            => |p| if (p >= tree.nodes.len) "unknown" else offsets.nodeToSlice(tree, p),
-            .other => |p| if (p >= tree.nodes.len) "unknown" else switch (tree.nodes.items(.tag)[p]) {
+            => |p| offsets.nodeToSlice(rt.handle.tree, p),
+            .other => |p| switch (rt.handle.tree.nodes.items(.tag)[p]) {
                 .container_decl,
                 .container_decl_arg,
                 .container_decl_arg_trailing,
@@ -89,7 +89,7 @@ pub fn hoverSymbol(server: *Server, decl_handle: Analyser.DeclWithHandle, markup
                 .tagged_union_two_trailing,
                 .tagged_union_enum_tag,
                 .tagged_union_enum_tag_trailing,
-                => tree.tokenSlice(tree.nodes.items(.main_token)[p] - 2), // NOTE: This is a hacky nightmare but it works :P
+                => rt.handle.tree.tokenSlice(rt.handle.tree.nodes.items(.main_token)[p] - 2), // NOTE: This is a hacky nightmare but it works :P
                 .fn_proto,
                 .fn_proto_multi,
                 .fn_proto_one,
@@ -102,7 +102,7 @@ pub fn hoverSymbol(server: *Server, decl_handle: Analyser.DeclWithHandle, markup
                 .ptr_type_aligned,
                 .ptr_type_bit_range,
                 .ptr_type_sentinel,
-                => offsets.nodeToSlice(tree, p),
+                => offsets.nodeToSlice(rt.handle.tree, p),
                 else => "unknown", // TODO: Implement more "other" type expressions; better safe than sorry
             },
             else => "unknown",
