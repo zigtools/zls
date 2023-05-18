@@ -1002,7 +1002,7 @@ fn parseStatement(p: *Parse, allow_defer_var: bool) Error!Node.Index {
             .tag = .@"errdefer",
             .main_token = p.token_origins[p.nextToken()],
             .data = .{
-                .lhs = .{ .token = try p.parsePayload() },
+                .lhs = .{ .token = p.token_origins[try p.parsePayload()] },
                 .rhs = .{ .node = try p.expectBlockExprStatement() },
             },
         }),

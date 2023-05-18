@@ -114,7 +114,7 @@ fn renderMember(
             }
             assert(datas[decl].rhs.node != 0);
             try renderExpression(gpa, ais, tree, fn_proto, .space);
-            return renderExpression(gpa, ais, tree, datas[decl].rhs, space);
+            return renderExpression(gpa, ais, tree, datas[decl].rhs.node, space);
         },
         .fn_proto_simple,
         .fn_proto_multi,
@@ -123,7 +123,7 @@ fn renderMember(
         => {
             // Extern function prototypes are parsed as these tags.
             // Go back to the first token we should render here.
-            const fn_token = main_tokens[decl];
+            const fn_token = main_tokens[decl].toIndex(tree.token_origins).?;
             var i = fn_token;
             while (i > 0) {
                 i -= 1;
@@ -150,8 +150,8 @@ fn renderMember(
         },
 
         .@"usingnamespace" => {
-            const main_token = main_tokens[decl];
-            const expr = datas[decl].lhs;
+            const main_token = main_tokens[decl].toIndex(tree.token_origins).?;
+            const expr = datas[decl].lhs.node;
             if (main_token > 0 and token_tags[main_token - 1] == .keyword_pub) {
                 try renderToken(ais, tree, main_token - 1, .space); // pub
             }
@@ -167,7 +167,7 @@ fn renderMember(
         => return renderVarDecl(gpa, ais, tree, tree.fullVarDecl(decl).?),
 
         .test_decl => {
-            const test_token = main_tokens[decl];
+            const test_token = main_tokens[decl].toIndex(tree.token_origins).?;
             try renderToken(ais, tree, test_token, .space);
             const test_name_tag = token_tags[test_token + 1];
             switch (test_name_tag) {
@@ -175,7 +175,7 @@ fn renderMember(
                 .identifier => try renderIdentifier(ais, tree, test_token + 1, .space, .preserve_when_shadowing),
                 else => {},
             }
-            try renderExpression(gpa, ais, tree, datas[decl].rhs, space);
+            try renderExpression(gpa, ais, tree, datas[decl].rhs.node, space);
         },
 
         .container_field_init,
@@ -640,17 +640,17 @@ fn renderExpression(gpa: Allocator, ais: *Ais, tree: Ast, node: Ast.Node.Index, 
         },
 
         .builtin_call_two, .builtin_call_two_comma => {
-            if (datas[node].lhs == 0) {
-                return renderBuiltinCall(gpa, ais, tree, main_tokens[node], &.{}, space);
-            } else if (datas[node].rhs == 0) {
-                return renderBuiltinCall(gpa, ais, tree, main_tokens[node], &.{datas[node].lhs}, space);
+            if (datas[node].lhs.node == 0) {
+                return renderBuiltinCall(gpa, ais, tree, main_tokens[node].toIndex(tree.token_origins).?, &.{}, space);
+            } else if (datas[node].rhs.node == 0) {
+                return renderBuiltinCall(gpa, ais, tree, main_tokens[node].toIndex(tree.token_origins).?, &.{datas[node].lhs.node}, space);
             } else {
-                return renderBuiltinCall(gpa, ais, tree, main_tokens[node], &.{ datas[node].lhs, datas[node].rhs }, space);
+                return renderBuiltinCall(gpa, ais, tree, main_tokens[node].toIndex(tree.token_origins).?, &.{ datas[node].lhs.node, datas[node].rhs.node }, space);
             }
         },
         .builtin_call, .builtin_call_comma => {
-            const params = tree.extra_data[datas[node].lhs..datas[node].rhs];
-            return renderBuiltinCall(gpa, ais, tree, main_tokens[node], params, space);
+            const params = tree.extra_data[datas[node].lhs.extra..datas[node].rhs.extra];
+            return renderBuiltinCall(gpa, ais, tree, main_tokens[node].toIndex(tree.token_origins).?, params, space);
         },
 
         .fn_proto_simple,
@@ -676,9 +676,9 @@ fn renderExpression(gpa: Allocator, ais: *Ais, tree: Ast, node: Ast.Node.Index, 
         .@"switch",
         .switch_comma,
         => {
-            const switch_token = main_tokens[node];
-            const condition = datas[node].lhs;
-            const extra = tree.extraData(datas[node].rhs, Ast.Node.SubRange);
+            const switch_token = main_tokens[node].toIndex(tree.token_origins).?;
+            const condition = datas[node].lhs.token.toIndex(tree.token_origins).?;
+            const extra = tree.extraData(datas[node].rhs.extra, Ast.Node.SubRange);
             const cases = tree.extra_data[extra.start..extra.end];
             const rparen = tree.lastToken(condition) + 1;
 
@@ -779,7 +779,7 @@ fn renderPtrType(
             // this pointer type and rely on the child to render our asterisk
             // as well when it renders the ** token.
             if (tree.tokens.items(.tag)[ptr_type.ast.main_token] == .asterisk_asterisk and
-                ptr_type.ast.main_token == tree.nodes.items(.main_token)[ptr_type.ast.child_type])
+                ptr_type.ast.main_token == tree.nodes.items(.main_token)[ptr_type.ast.child_type].toIndex(tree.token_origins).?)
             {
                 return renderExpression(gpa, ais, tree, ptr_type.ast.child_type, space);
             }
@@ -905,7 +905,7 @@ fn renderAsmOutput(
     const main_tokens = tree.nodes.items(.main_token);
     const datas = tree.nodes.items(.data);
     assert(node_tags[asm_output] == .asm_output);
-    const symbolic_name = main_tokens[asm_output];
+    const symbolic_name = main_tokens[asm_output].toIndex(tree.token_origins).?;
 
     try renderToken(ais, tree, symbolic_name - 1, .none); // lbracket
     try renderIdentifier(ais, tree, symbolic_name, .none, .eagerly_unquote); // ident
@@ -915,8 +915,8 @@ fn renderAsmOutput(
 
     if (token_tags[symbolic_name + 4] == .arrow) {
         try renderToken(ais, tree, symbolic_name + 4, .space); // ->
-        try renderExpression(gpa, ais, tree, datas[asm_output].lhs, Space.none);
-        return renderToken(ais, tree, datas[asm_output].rhs, space); // rparen
+        try renderExpression(gpa, ais, tree, datas[asm_output].lhs.node, Space.none);
+        return renderToken(ais, tree, datas[asm_output].rhs.token.toIndex(tree.token_origins).?, space); // rparen
     } else {
         try renderIdentifier(ais, tree, symbolic_name + 4, .none, .eagerly_unquote); // ident
         return renderToken(ais, tree, symbolic_name + 5, space); // rparen
@@ -934,15 +934,15 @@ fn renderAsmInput(
     const main_tokens = tree.nodes.items(.main_token);
     const datas = tree.nodes.items(.data);
     assert(node_tags[asm_input] == .asm_input);
-    const symbolic_name = main_tokens[asm_input];
+    const symbolic_name = main_tokens[asm_input].toIndex(tree.token_origins).?;
 
     try renderToken(ais, tree, symbolic_name - 1, .none); // lbracket
     try renderIdentifier(ais, tree, symbolic_name, .none, .eagerly_unquote); // ident
     try renderToken(ais, tree, symbolic_name + 1, .space); // rbracket
     try renderToken(ais, tree, symbolic_name + 2, .space); // "constraint"
     try renderToken(ais, tree, symbolic_name + 3, .none); // lparen
-    try renderExpression(gpa, ais, tree, datas[asm_input].lhs, Space.none);
-    return renderToken(ais, tree, datas[asm_input].rhs, space); // rparen
+    try renderExpression(gpa, ais, tree, datas[asm_input].lhs.node, Space.none);
+    return renderToken(ais, tree, datas[asm_input].rhs.token.toIndex(tree.token_origins).?, space); // rparen
 }
 
 fn renderVarDecl(gpa: Allocator, ais: *Ais, tree: Ast, var_decl: Ast.full.VarDecl) Error!void {
@@ -1287,7 +1287,7 @@ fn renderContainerField(
     space: Space,
 ) Error!void {
     var field = field_param;
-    if (!is_tuple) field.convertToNonTupleLike(tree.nodes);
+    if (!is_tuple) field.convertToNonTupleLike(tree);
 
     if (field.comptime_token) |t| {
         try renderToken(ais, tree, t, .space); // comptime
@@ -1636,7 +1636,7 @@ fn renderFnProto(gpa: Allocator, ais: *Ais, tree: Ast, fn_proto: Ast.full.FnProt
         try renderToken(ais, tree, section_rparen, .space); // )
     }
 
-    const is_callconv_inline = mem.eql(u8, "Inline", tree.tokenSlice(tree.nodes.items(.main_token)[fn_proto.ast.callconv_expr]));
+    const is_callconv_inline = mem.eql(u8, "Inline", tree.tokenSlice(tree.nodes.items(.main_token)[fn_proto.ast.callconv_expr].toIndex(tree.token_origins).?));
     const is_declaration = fn_proto.name_token != null;
     if (fn_proto.ast.callconv_expr != 0 and !(is_declaration and is_callconv_inline)) {
         const callconv_lparen = tree.firstToken(fn_proto.ast.callconv_expr) - 1;
