@@ -191,8 +191,8 @@ pub fn parseRoot(p: *Parse) !void {
         try p.warnExpected(.eof);
     }
     p.nodes.items(.data)[0] = .{
-        .lhs = .{ .node = root_decls.start },
-        .rhs = .{ .node = root_decls.end },
+        .lhs = .{ .extra = root_decls.start },
+        .rhs = .{ .extra = root_decls.end },
     };
 }
 
@@ -2067,8 +2067,8 @@ fn parseBlock(p: *Parse) !Node.Index {
                 .tag = if (semicolon) .block_semicolon else .block,
                 .main_token = p.token_origins[lbrace],
                 .data = .{
-                    .lhs = .{ .node = span.start },
-                    .rhs = .{ .node = span.end },
+                    .lhs = .{ .extra = span.start },
+                    .rhs = .{ .extra = span.end },
                 },
             });
         },
@@ -2704,7 +2704,7 @@ fn parsePrimaryTypeExpr(p: *Parse) !Node.Index {
                             .main_token = p.token_origins[lbrace],
                             .data = .{
                                 .lhs = .{ .node = inits[0] },
-                                .rhs = .{ .none = 0 },
+                                .rhs = .{ .node = 0 },
                             },
                         }),
                         2 => return p.addNode(.{
@@ -2760,7 +2760,7 @@ fn parsePrimaryTypeExpr(p: *Parse) !Node.Index {
                         .main_token = p.token_origins[lbrace],
                         .data = .{
                             .lhs = .{ .node = inits[0] },
-                            .rhs = .{ .none = 0 },
+                            .rhs = .{ .node = 0 },
                         },
                     }),
                     2 => return p.addNode(.{

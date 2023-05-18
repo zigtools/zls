@@ -591,7 +591,7 @@ pub fn firstToken(tree: Ast, node: Node.Index) TokenIndex {
         .switch_range,
         .for_range,
         .error_union,
-        => n = @intCast(u32, tree.token_origins.getIndex(datas[n].lhs.token).?),
+        => n = datas[n].lhs.node,
 
         .fn_decl,
         .fn_proto_simple,
@@ -784,6 +784,12 @@ pub fn lastToken(tree: Ast, node: Node.Index) TokenIndex {
         .root => return @intCast(TokenIndex, tree.tokens.len - 1),
 
         .@"usingnamespace",
+        .optional_type,
+        .@"resume",
+        .@"nosuspend",
+        .@"comptime",
+        => n = datas[n].lhs.token.toIndex(tree.token_origins).?,
+
         .bool_not,
         .negation,
         .bit_not,
@@ -791,11 +797,7 @@ pub fn lastToken(tree: Ast, node: Node.Index) TokenIndex {
         .address_of,
         .@"try",
         .@"await",
-        .optional_type,
-        .@"resume",
-        .@"nosuspend",
-        .@"comptime",
-        => n = datas[n].lhs.token.toIndex(tree.token_origins).?,
+        => n = datas[n].lhs.node,
 
         .test_decl,
         .@"errdefer",
@@ -865,7 +867,8 @@ pub fn lastToken(tree: Ast, node: Node.Index) TokenIndex {
         .switch_case,
         .switch_case_inline,
         .switch_range,
-        => n = datas[n].rhs.token.toIndex(tree.token_origins).?,
+        => n = datas[n].rhs.node,
+        // => n = datas[n].rhs.token.toIndex(tree.token_origins).?,
 
         .for_range => if (datas[n].rhs.node != 0) {
             n = datas[n].rhs.node;
@@ -1989,7 +1992,7 @@ pub fn callOne(tree: Ast, buffer: *[1]Node.Index, node: Node.Index) full.Call {
 
 pub fn callFull(tree: Ast, node: Node.Index) full.Call {
     const data = tree.nodes.items(.data)[node];
-    const extra = tree.extraData(data.rhs.node, Node.SubRange);
+    const extra = tree.extraData(data.rhs.extra, Node.SubRange);
     return tree.fullCallComponents(.{
         .lparen = tree.nodes.items(.main_token)[node].toIndex(tree.token_origins).?,
         .fn_expr = data.lhs.node,

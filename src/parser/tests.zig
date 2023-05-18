@@ -32,11 +32,8 @@ test {
 
     var l = std.ArrayList(u8).init(allocator);
     try tree.renderToArrayList(&l);
-    std.debug.print("\n\n{s}", .{l.items});
-
-    // std.log.err("{any}", .{tree.tokens});
-
-    std.debug.print("\n\n", .{});
+    // std.debug.print("\n\n{s}", .{l.items});
+    try std.testing.expectEqualStrings(b, l.items);
 
     for (tokenizer.origins.entries.items(.key), tokenizer.tokens.items(.loc)) |origin, loc| {
         if (origin.version == 0)
