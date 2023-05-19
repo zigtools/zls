@@ -248,12 +248,12 @@ fn generateVSCodeConfigFile(allocator: std.mem.Allocator, config: Config, path: 
         .type = "string",
         .@"enum" = &.{ "off", "messages", "verbose" },
         .description = "Traces the communication between VS Code and the language server.",
-        .default = .{ .String = "off" },
+        .default = .{ .string = "off" },
     });
     configuration.putAssumeCapacityNoClobber("zig.zls.checkForUpdate", .{
         .type = "boolean",
         .description = "Whether to automatically check for new updates",
-        .default = .{ .Bool = true },
+        .default = .{ .bool = true },
     });
     configuration.putAssumeCapacityNoClobber("zig.zls.path", .{
         .type = "string",
@@ -269,15 +269,15 @@ fn generateVSCodeConfigFile(allocator: std.mem.Allocator, config: Config, path: 
         errdefer allocator.free(name);
 
         const default: ?std.json.Value = blk: {
-            if (option.@"enum" != null) break :blk .{ .String = option.default };
+            if (option.@"enum" != null) break :blk .{ .string = option.default };
 
-            var parser = std.json.Parser.init(allocator, false);
+            var parser = std.json.Parser.init(allocator, .alloc_always);
             defer parser.deinit();
 
             var value = try parser.parse(option.default);
             defer value.deinit();
 
-            break :blk if (value.root != .Null) value.root else null;
+            break :blk if (value.root != .null) value.root else null;
         };
 
         configuration.putAssumeCapacityNoClobber(name, .{
@@ -1051,7 +1051,7 @@ pub fn main() !void {
     }
 
     const config = try std.json.parseFromSlice(Config, gpa, @embedFile("config.json"), .{});
-    defer std.json.parseFree(Config, config, .{});
+    defer std.json.parseFree(Config, gpa, config);
 
     try generateConfigFile(gpa, config, config_path);
     try generateSchemaFile(gpa, config, schema_path);
