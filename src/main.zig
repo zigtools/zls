@@ -369,7 +369,7 @@ pub fn main() !void {
 
     defer {
         if (build_options.use_gpa)
-            std.debug.assert(!allocator_state.deinit())
+            std.debug.assert(allocator_state.deinit() == .ok)
         else
             allocator_state.deinit();
     }
