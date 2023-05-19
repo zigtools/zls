@@ -7,7 +7,7 @@ const zls_version = std.builtin.Version{ .major = 0, .minor = 11, .patch = 0 };
 pub fn build(b: *std.build.Builder) !void {
     comptime {
         const current_zig = builtin.zig_version;
-        const min_zig = std.SemanticVersion.parse("0.11.0-dev.1836+28364166e") catch unreachable; // package manager stuff + --build-runner + zls as a library
+        const min_zig = std.SemanticVersion.parse("0.11.0-dev.3134+018b743c7") catch unreachable; // std.http: do -> wait, fix redirects
         if (current_zig.order(min_zig) == .lt) {
             @compileError(std.fmt.comptimePrint("Your Zig version v{} does not meet the minimum build requirement of v{}", .{ current_zig, min_zig }));
         }
@@ -35,8 +35,8 @@ pub fn build(b: *std.build.Builder) !void {
     exe_options.addOption(shared.ZigVersion, "data_version", b.option(shared.ZigVersion, "data_version", "The Zig version your compiler is.") orelse .master);
     exe_options.addOption(std.log.Level, "log_level", b.option(std.log.Level, "log_level", "The Log Level to be used.") orelse .info);
     exe_options.addOption(bool, "enable_tracy", enable_tracy);
-    exe_options.addOption(bool, "enable_tracy_allocation", b.option(bool, "enable_tracy_allocation", "Enable using TracyAllocator to monitor allocations.") orelse false);
-    exe_options.addOption(bool, "enable_tracy_callstack", b.option(bool, "enable_tracy_callstack", "Enable callstack graphs.") orelse false);
+    exe_options.addOption(bool, "enable_tracy_allocation", b.option(bool, "enable_tracy_allocation", "Enable using TracyAllocator to monitor allocations.") orelse enable_tracy);
+    exe_options.addOption(bool, "enable_tracy_callstack", b.option(bool, "enable_tracy_callstack", "Enable callstack graphs.") orelse enable_tracy);
     exe_options.addOption(bool, "enable_failing_allocator", b.option(bool, "enable_failing_allocator", "Whether to use a randomly failing allocator.") orelse false);
     exe_options.addOption(u32, "enable_failing_allocator_likelihood", b.option(u32, "enable_failing_allocator_likelihood", "The chance that an allocation will fail is `1/likelihood`") orelse 256);
 
@@ -89,7 +89,7 @@ pub fn build(b: *std.build.Builder) !void {
     exe.addModule("diffz", diffz_module);
 
     if (enable_tracy) {
-        const client_cpp = "src/tracy/TracyClient.cpp";
+        const client_cpp = "src/tracy/public/TracyClient.cpp";
 
         // On mingw, we need to opt into windows 7+ to get some features required by tracy.
         const tracy_c_flags: []const []const u8 = if (target.isWindows() and target.getAbi() == .gnu)
@@ -109,7 +109,7 @@ pub fn build(b: *std.build.Builder) !void {
     }
 
     exe.pie = pie;
-    exe.install();
+    b.installArtifact(exe);
 
     const build_options_module = exe_options.createModule();
 
@@ -129,7 +129,7 @@ pub fn build(b: *std.build.Builder) !void {
     });
     gen_exe.addModule("tres", tres_module);
 
-    const gen_cmd = gen_exe.run();
+    const gen_cmd = b.addRunArtifact(gen_exe);
     gen_cmd.addArgs(&.{
         b.pathFromRoot("src/Config.zig"),
         b.pathFromRoot("schema.json"),
@@ -148,9 +148,9 @@ pub fn build(b: *std.build.Builder) !void {
         .root_source_file = .{ .path = "tests/tests.zig" },
         .target = target,
         .optimize = .Debug,
+        .filter = test_filter,
     });
 
-    tests.setFilter(test_filter);
     tests.addModule("zls", zls_module);
     tests.addModule("tres", tres_module);
     tests.addModule("diffz", diffz_module);
@@ -160,8 +160,8 @@ pub fn build(b: *std.build.Builder) !void {
         .root_source_file = .{ .path = "src/zls.zig" },
         .target = target,
         .optimize = .Debug,
+        .filter = test_filter,
     });
-    src_tests.setFilter(test_filter);
     test_step.dependOn(&b.addRunArtifact(src_tests).step);
 
     if (coverage) {

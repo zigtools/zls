@@ -82,7 +82,7 @@ fn typeToCompletion(
         .@"comptime" => |co| try analyser.completions.dotCompletions(
             allocator,
             list,
-            &co.interpreter.ip,
+            co.interpreter.ip,
             co.value.index,
             type_handle.type.is_type_val,
             co.value.node_idx,
@@ -330,7 +330,23 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: Analyser.Decl
     const tree = decl_handle.handle.tree;
     const decl = decl_handle.decl.*;
 
-    switch (decl) {
+    const is_cimport = std.mem.eql(u8, std.fs.path.basename(decl_handle.handle.uri), "cimport.zig");
+    if (is_cimport) {
+        const name = tree.tokenSlice(decl_handle.nameToken());
+        if (std.mem.startsWith(u8, name, "_")) return;
+        // TODO figuring out which declarations should be excluded could be made more complete and accurate
+        // by translating an empty file to acquire all exclusions
+        const exclusions = std.ComptimeStringMap(void, .{
+            .{ "linux", {} },
+            .{ "unix", {} },
+            .{ "WIN32", {} },
+            .{ "WINNT", {} },
+            .{ "WIN64", {} },
+        });
+        if (exclusions.has(name)) return;
+    }
+
+    switch (decl_handle.decl.*) {
         .ast_node => |node| try nodeToCompletion(
             context.server,
             context.completions,
@@ -420,14 +436,11 @@ fn populateSnippedCompletions(
     completions: *std.ArrayListUnmanaged(types.CompletionItem),
     snippets: []const snipped_data.Snipped,
     config: Config,
-    start_with: ?[]const u8,
 ) error{OutOfMemory}!void {
     try completions.ensureUnusedCapacity(allocator, snippets.len);
 
     for (snippets) |snipped| {
-        if (start_with) |needle| {
-            if (!std.mem.startsWith(u8, snipped.label, needle)) continue;
-        }
+        if (!config.enable_snippets and snipped.kind == .Snippet) continue;
 
         completions.appendAssumeCapacity(.{
             .label = snipped.label,
@@ -495,7 +508,7 @@ fn completeGlobal(server: *Server, pos_index: usize, handle: *const DocumentStor
         .orig_handle = handle,
     };
     try server.analyser.iterateSymbolsGlobal(handle, pos_index, declToCompletion, context);
-    try populateSnippedCompletions(server.arena.allocator(), &completions, &snipped_data.generic, server.config.*, null);
+    try populateSnippedCompletions(server.arena.allocator(), &completions, &snipped_data.generic, server.config.*);
 
     if (server.client_capabilities.label_details_support) {
         for (completions.items) |*item| {
@@ -808,7 +821,7 @@ fn completeDot(server: *Server, handle: *const DocumentStore.Handle, source_inde
         }
 
         // iterate until we find current token loc (should be a .period)
-        while (upper_index > 1) : (upper_index -= 1) {
+        while (upper_index > 0) : (upper_index -= 1) {
             if (tokens_start[upper_index] > source_index) continue;
             upper_index -= 1;
             break;
@@ -816,25 +829,37 @@ fn completeDot(server: *Server, handle: *const DocumentStore.Handle, source_inde
 
         const token_tags = tree.tokens.items(.tag);
 
-        // look for an .l_brace (but don't extend past a .semicolon or .r_brace)
-        while (upper_index != 0 and token_tags[upper_index] != .l_brace) {
-            if (token_tags[upper_index] == .semicolon or token_tags[upper_index] == .r_brace) break :struct_init;
+        if (token_tags[upper_index] == .number_literal) break :struct_init; // `var s = MyStruct{.float_field = 1.`
+
+        // look for .identifier followed by .l_brace, skipping matches at depth 0+
+        var depth: i32 = 0; // Should end up being negative, ie even the first/single .l_brace would put it at -1; 0+ => nested
+        while (upper_index > 0) {
+            if (token_tags[upper_index] != .identifier) {
+                switch (token_tags[upper_index]) {
+                    .r_brace => depth += 1,
+                    .l_brace => depth -= 1,
+                    .period => if (depth < 0 and token_tags[upper_index + 1] == .l_brace) break :struct_init, // anon struct init `.{.`
+                    .semicolon => break :struct_init, // generic exit; maybe also .keyword_(var/const)
+                    else => {},
+                }
+            } else if (token_tags[upper_index + 1] == .l_brace and depth < 0) break;
             upper_index -= 1;
         }
 
-        // the .l_brace should be preceded by an .identifier
-        if (upper_index == 0 or token_tags[upper_index - 1] != .identifier) {
-            break :struct_init;
-        }
+        if (upper_index == 0) break :struct_init;
 
-        upper_index -= 1; // identifier's index
         var identifier_loc = offsets.tokenIndexToLoc(tree.source, tokens_start[upper_index]);
 
         // if this is done as a field access collect all the identifiers, eg `path.to.MyStruct`
         var identifier_original_start = identifier_loc.start;
-        while ((token_tags[upper_index] == .period or token_tags[upper_index] == .identifier) and upper_index != 0) : (upper_index -= 1) {
+        while ((token_tags[upper_index] == .period or token_tags[upper_index] == .identifier) and upper_index > 0) : (upper_index -= 1) {
             identifier_loc.start = tokens_start[upper_index];
         }
+
+        // token_tags[upper_index + 1] should be .identifier, else => there are potentially more tokens, eg
+        // the `@import("my_file.zig")` in  `var s = @import("my_file.zig").MyStruct{.`, which getSymbolFieldAccesses can(?) handle
+        // but it could be some other combo of tokens.. potential TODO
+        if (token_tags[upper_index + 1] != .identifier) break :struct_init;
 
         var completions = std.ArrayListUnmanaged(types.CompletionItem){};
 
@@ -859,6 +884,10 @@ fn completeDot(server: *Server, handle: *const DocumentStore.Handle, source_inde
             if (maybe_decl) |local_decl| {
                 const nodes_tags = handle.tree.nodes.items(.tag);
                 const nodes_data = handle.tree.nodes.items(.data);
+                switch (local_decl.decl.*) {
+                    .ast_node => {},
+                    else => break :struct_init,
+                }
                 const node_data = nodes_data[local_decl.decl.ast_node];
                 if (node_data.rhs != 0) {
                     switch (nodes_tags[node_data.rhs]) {
@@ -1005,7 +1034,7 @@ pub fn completionAtIndex(server: *Server, source_index: usize, handle: *const Do
     const at_line_start = offsets.lineSliceUntilIndex(handle.tree.source, source_index).len == 0;
     if (at_line_start) {
         var completions = std.ArrayListUnmanaged(types.CompletionItem){};
-        try populateSnippedCompletions(server.arena.allocator(), &completions, &snipped_data.top_level_decl_data, server.config.*, null);
+        try populateSnippedCompletions(server.arena.allocator(), &completions, &snipped_data.top_level_decl_data, server.config.*);
 
         return .{ .isIncomplete = false, .items = completions.items };
     }

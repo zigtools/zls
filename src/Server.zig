@@ -29,6 +29,7 @@ const completions = @import("features/completions.zig");
 const goto = @import("features/goto.zig");
 const hover_handler = @import("features/hover.zig");
 const selection_range = @import("features/selection_range.zig");
+const diagnostics_gen = @import("features/diagnostics.zig");
 
 const tres = @import("tres");
 
@@ -47,6 +48,7 @@ runtime_zig_version: ?ZigVersionWrapper,
 outgoing_messages: std.ArrayListUnmanaged([]const u8) = .{},
 recording_enabled: bool,
 replay_enabled: bool,
+message_tracing_enabled: bool = false,
 offset_encoding: offsets.Encoding = .@"utf-16",
 status: enum {
     /// the server has not received a `initialize` request
@@ -209,285 +211,6 @@ fn showMessage(
     });
 }
 
-fn generateDiagnostics(server: *Server, handle: DocumentStore.Handle) error{OutOfMemory}!types.PublishDiagnosticsParams {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    std.debug.assert(server.client_capabilities.supports_publish_diagnostics);
-
-    const tree = handle.tree;
-
-    var allocator = server.arena.allocator();
-    var diagnostics = std.ArrayListUnmanaged(types.Diagnostic){};
-
-    for (tree.errors) |err| {
-        var mem_buffer: [256]u8 = undefined;
-        var fbs = std.io.fixedBufferStream(&mem_buffer);
-        tree.renderError(err, fbs.writer()) catch if (std.debug.runtime_safety) unreachable else continue; // if an error occurs here increase buffer size
-
-        try diagnostics.append(allocator, .{
-            .range = offsets.tokenToRange(tree, err.token, server.offset_encoding),
-            .severity = .Error,
-            .code = .{ .string = @tagName(err.tag) },
-            .source = "zls",
-            .message = try server.arena.allocator().dupe(u8, fbs.getWritten()),
-            // .relatedInformation = undefined
-        });
-    }
-
-    if (server.config.enable_ast_check_diagnostics and tree.errors.len == 0) {
-        getAstCheckDiagnostics(server, handle, &diagnostics) catch |err| {
-            log.err("failed to run ast-check: {}", .{err});
-        };
-    }
-
-    if (server.config.warn_style) {
-        var node: u32 = 0;
-        while (node < tree.nodes.len) : (node += 1) {
-            if (ast.isBuiltinCall(tree, node)) {
-                const builtin_token = tree.nodes.items(.main_token)[node];
-                const call_name = tree.tokenSlice(builtin_token);
-
-                if (!std.mem.eql(u8, call_name, "@import")) continue;
-
-                var buffer: [2]Ast.Node.Index = undefined;
-                const params = ast.builtinCallParams(tree, node, &buffer).?;
-
-                if (params.len != 1) continue;
-
-                const import_str_token = tree.nodes.items(.main_token)[params[0]];
-                const import_str = tree.tokenSlice(import_str_token);
-
-                if (std.mem.startsWith(u8, import_str, "\"./")) {
-                    try diagnostics.append(allocator, .{
-                        .range = offsets.tokenToRange(tree, import_str_token, server.offset_encoding),
-                        .severity = .Hint,
-                        .code = .{ .string = "dot_slash_import" },
-                        .source = "zls",
-                        .message = "A ./ is not needed in imports",
-                    });
-                }
-            }
-        }
-
-        // TODO: style warnings for types, values and declarations below root scope
-        if (tree.errors.len == 0) {
-            for (tree.rootDecls()) |decl_idx| {
-                const decl = tree.nodes.items(.tag)[decl_idx];
-                switch (decl) {
-                    .fn_proto,
-                    .fn_proto_multi,
-                    .fn_proto_one,
-                    .fn_proto_simple,
-                    .fn_decl,
-                    => blk: {
-                        var buf: [1]Ast.Node.Index = undefined;
-                        const func = tree.fullFnProto(&buf, decl_idx).?;
-                        if (func.extern_export_inline_token != null) break :blk;
-
-                        if (func.name_token) |name_token| {
-                            const is_type_function = Analyser.isTypeFunction(tree, func);
-
-                            const func_name = tree.tokenSlice(name_token);
-                            if (!is_type_function and !Analyser.isCamelCase(func_name)) {
-                                try diagnostics.append(allocator, .{
-                                    .range = offsets.tokenToRange(tree, name_token, server.offset_encoding),
-                                    .severity = .Hint,
-                                    .code = .{ .string = "bad_style" },
-                                    .source = "zls",
-                                    .message = "Functions should be camelCase",
-                                });
-                            } else if (is_type_function and !Analyser.isPascalCase(func_name)) {
-                                try diagnostics.append(allocator, .{
-                                    .range = offsets.tokenToRange(tree, name_token, server.offset_encoding),
-                                    .severity = .Hint,
-                                    .code = .{ .string = "bad_style" },
-                                    .source = "zls",
-                                    .message = "Type functions should be PascalCase",
-                                });
-                            }
-                        }
-                    },
-                    else => {},
-                }
-            }
-        }
-    }
-
-    for (handle.cimports.items(.hash), handle.cimports.items(.node)) |hash, node| {
-        const result = server.document_store.cimports.get(hash) orelse continue;
-        if (result != .failure) continue;
-        const stderr = std.mem.trim(u8, result.failure, " ");
-
-        var pos_and_diag_iterator = std.mem.split(u8, stderr, ":");
-        _ = pos_and_diag_iterator.next(); // skip file path
-        _ = pos_and_diag_iterator.next(); // skip line
-        _ = pos_and_diag_iterator.next(); // skip character
-
-        try diagnostics.append(allocator, .{
-            .range = offsets.nodeToRange(handle.tree, node, server.offset_encoding),
-            .severity = .Error,
-            .code = .{ .string = "cImport" },
-            .source = "zls",
-            .message = try allocator.dupe(u8, pos_and_diag_iterator.rest()),
-        });
-    }
-
-    if (server.config.highlight_global_var_declarations) {
-        const main_tokens = tree.nodes.items(.main_token);
-        const tags = tree.tokens.items(.tag);
-        for (tree.rootDecls()) |decl| {
-            const decl_tag = tree.nodes.items(.tag)[decl];
-            const decl_main_token = tree.nodes.items(.main_token)[decl];
-
-            switch (decl_tag) {
-                .simple_var_decl,
-                .aligned_var_decl,
-                .local_var_decl,
-                .global_var_decl,
-                => {
-                    if (tags[main_tokens[decl]] != .keyword_var) continue; // skip anything immutable
-                    // uncomment this to get a list :)
-                    //log.debug("possible global variable \"{s}\"", .{tree.tokenSlice(decl_main_token + 1)});
-                    try diagnostics.append(allocator, .{
-                        .range = offsets.tokenToRange(tree, decl_main_token, server.offset_encoding),
-                        .severity = .Hint,
-                        .code = .{ .string = "highlight_global_var_declarations" },
-                        .source = "zls",
-                        .message = "Global var declaration",
-                    });
-                },
-                else => {},
-            }
-        }
-    }
-
-    if (handle.interpreter) |int| {
-        try diagnostics.ensureUnusedCapacity(allocator, int.errors.count());
-
-        var err_it = int.errors.iterator();
-
-        while (err_it.next()) |err| {
-            diagnostics.appendAssumeCapacity(.{
-                .range = offsets.nodeToRange(tree, err.key_ptr.*, server.offset_encoding),
-                .severity = .Error,
-                .code = .{ .string = err.value_ptr.code },
-                .source = "zls",
-                .message = err.value_ptr.message,
-            });
-        }
-    }
-    // try diagnostics.appendSlice(allocator, handle.interpreter.?.diagnostics.items);
-
-    return .{
-        .uri = handle.uri,
-        .diagnostics = diagnostics.items,
-    };
-}
-
-fn getAstCheckDiagnostics(
-    server: *Server,
-    handle: DocumentStore.Handle,
-    diagnostics: *std.ArrayListUnmanaged(types.Diagnostic),
-) !void {
-    var allocator = server.arena.allocator();
-
-    const zig_exe_path = server.config.zig_exe_path orelse return;
-
-    var process = std.ChildProcess.init(&[_][]const u8{ zig_exe_path, "ast-check", "--color", "off" }, server.allocator);
-    process.stdin_behavior = .Pipe;
-    process.stderr_behavior = .Pipe;
-
-    process.spawn() catch |err| {
-        log.warn("Failed to spawn zig ast-check process, error: {}", .{err});
-        return;
-    };
-    try process.stdin.?.writeAll(handle.text);
-    process.stdin.?.close();
-
-    process.stdin = null;
-
-    const stderr_bytes = try process.stderr.?.reader().readAllAlloc(server.allocator, std.math.maxInt(usize));
-    defer server.allocator.free(stderr_bytes);
-
-    const term = process.wait() catch |err| {
-        log.warn("Failed to await zig ast-check process, error: {}", .{err});
-        return;
-    };
-
-    if (term != .Exited) return;
-
-    var last_diagnostic: ?types.Diagnostic = null;
-    // we don't store DiagnosticRelatedInformation in last_diagnostic instead
-    // its stored in last_related_diagnostics because we need an ArrayList
-    var last_related_diagnostics: std.ArrayListUnmanaged(types.DiagnosticRelatedInformation) = .{};
-
-    // NOTE: I believe that with color off it's one diag per line; is this correct?
-    var line_iterator = std.mem.split(u8, stderr_bytes, "\n");
-
-    while (line_iterator.next()) |line| lin: {
-        if (!std.mem.startsWith(u8, line, "<stdin>")) continue;
-
-        var pos_and_diag_iterator = std.mem.split(u8, line, ":");
-        const maybe_first = pos_and_diag_iterator.next();
-        if (maybe_first) |first| {
-            if (first.len <= 1) break :lin;
-        } else break;
-
-        const utf8_position = types.Position{
-            .line = (try std.fmt.parseInt(u32, pos_and_diag_iterator.next().?, 10)) - 1,
-            .character = (try std.fmt.parseInt(u32, pos_and_diag_iterator.next().?, 10)) - 1,
-        };
-
-        // zig uses utf-8 encoding for character offsets
-        const position = offsets.convertPositionEncoding(handle.text, utf8_position, .@"utf-8", server.offset_encoding);
-        const range = offsets.tokenPositionToRange(handle.text, position, server.offset_encoding);
-
-        const msg = pos_and_diag_iterator.rest()[1..];
-
-        if (std.mem.startsWith(u8, msg, "note: ")) {
-            try last_related_diagnostics.append(allocator, .{
-                .location = .{
-                    .uri = handle.uri,
-                    .range = range,
-                },
-                .message = try server.arena.allocator().dupe(u8, msg["note: ".len..]),
-            });
-            continue;
-        }
-
-        if (last_diagnostic) |*diagnostic| {
-            diagnostic.relatedInformation = try last_related_diagnostics.toOwnedSlice(allocator);
-            try diagnostics.append(allocator, diagnostic.*);
-            last_diagnostic = null;
-        }
-
-        if (std.mem.startsWith(u8, msg, "error: ")) {
-            last_diagnostic = types.Diagnostic{
-                .range = range,
-                .severity = .Error,
-                .code = .{ .string = "ast_check" },
-                .source = "zls",
-                .message = try server.arena.allocator().dupe(u8, msg["error: ".len..]),
-            };
-        } else {
-            last_diagnostic = types.Diagnostic{
-                .range = range,
-                .severity = .Error,
-                .code = .{ .string = "ast_check" },
-                .source = "zls",
-                .message = try server.arena.allocator().dupe(u8, msg),
-            };
-        }
-    }
-
-    if (last_diagnostic) |*diagnostic| {
-        diagnostic.relatedInformation = try last_related_diagnostics.toOwnedSlice(allocator);
-        try diagnostics.append(allocator, diagnostic.*);
-        last_diagnostic = null;
-    }
-}
-
 fn getAutofixMode(server: *Server) enum {
     on_save,
     will_save_wait_until,
@@ -495,7 +218,8 @@ fn getAutofixMode(server: *Server) enum {
     none,
 } {
     if (!server.config.enable_autofix) return .none;
-    if (server.client_capabilities.supports_code_action_fixall) return .fixall;
+    // TODO https://github.com/zigtools/zls/issues/1093
+    // if (server.client_capabilities.supports_code_action_fixall) return .fixall;
     if (server.client_capabilities.supports_apply_edits) {
         if (server.client_capabilities.supports_will_save_wait_until) return .will_save_wait_until;
         return .on_save;
@@ -506,12 +230,11 @@ fn getAutofixMode(server: *Server) enum {
 /// caller owns returned memory.
 pub fn autofix(server: *Server, allocator: std.mem.Allocator, handle: *const DocumentStore.Handle) error{OutOfMemory}!std.ArrayListUnmanaged(types.TextEdit) {
     if (!server.config.enable_ast_check_diagnostics) return .{};
-
     if (handle.tree.errors.len != 0) return .{};
+
     var diagnostics = std.ArrayListUnmanaged(types.Diagnostic){};
-    getAstCheckDiagnostics(server, handle.*, &diagnostics) catch |err| {
-        log.err("failed to run ast-check: {}", .{err});
-    };
+    try diagnostics_gen.getAstCheckDiagnostics(server, handle.*, &diagnostics);
+    if (diagnostics.items.len == 0) return .{};
 
     var builder = code_actions.Builder{
         .arena = server.arena.allocator(),
@@ -677,6 +400,9 @@ fn initializeHandler(server: *Server, request: types.InitializeParams) Error!typ
         if (textDocument.hover) |hover| {
             if (hover.contentFormat) |content_format| {
                 for (content_format) |format| {
+                    if (format == .plaintext) {
+                        break;
+                    }
                     if (format == .markdown) {
                         server.client_capabilities.hover_supports_md = true;
                         break;
@@ -690,6 +416,9 @@ fn initializeHandler(server: *Server, request: types.InitializeParams) Error!typ
                 server.client_capabilities.supports_snippets = completionItem.snippetSupport orelse false;
                 if (completionItem.documentationFormat) |documentation_format| {
                     for (documentation_format) |format| {
+                        if (format == .plaintext) {
+                            break;
+                        }
                         if (format == .markdown) {
                             server.client_capabilities.completion_doc_supports_md = true;
                             break;
@@ -722,9 +451,16 @@ fn initializeHandler(server: *Server, request: types.InitializeParams) Error!typ
         }
     }
 
+    if (request.trace) |trace| {
+        // To support --enable-message-tracing, only allow turning this on here
+        if (trace != .off) {
+            server.message_tracing_enabled = true;
+        }
+    }
+
     log.info("zls initializing", .{});
     log.info("{}", .{server.client_capabilities});
-    log.info("Using offset encoding: {s}", .{std.meta.tagName(server.offset_encoding)});
+    log.info("Using offset encoding: {s}", .{@tagName(server.offset_encoding)});
 
     server.status = .initializing;
 
@@ -762,6 +498,16 @@ fn initializeHandler(server: *Server, request: types.InitializeParams) Error!typ
         server.showMessage(.Info,
             \\This zls session is being recorded to {?s}.
         , .{server.config.record_session_path});
+    }
+
+    if (server.config.enable_ast_check_diagnostics and
+        server.config.prefer_ast_check_as_child_process)
+    {
+        if (!std.process.can_spawn) {
+            log.info("'prefer_ast_check_as_child_process' is ignored because your OS can't spawn a child process", .{});
+        } else if (server.config.zig_exe_path == null) {
+            log.info("'prefer_ast_check_as_child_process' is ignored because Zig could not be found", .{});
+        }
     }
 
     return .{
@@ -876,6 +622,10 @@ fn cancelRequestHandler(server: *Server, request: types.CancelParams) Error!void
     // TODO implement $/cancelRequest
 }
 
+fn setTraceHandler(server: *Server, request: types.SetTraceParams) Error!void {
+    server.message_tracing_enabled = request.value != .off;
+}
+
 fn registerCapability(server: *Server, method: []const u8) Error!void {
     const allocator = server.arena.allocator();
 
@@ -936,7 +686,7 @@ fn handleConfiguration(server: *Server, json: std.json.Value) error{OutOfMemory}
     // but not sure how standard this "standard" really is
 
     var new_zig_exe = false;
-    const result = json.Array;
+    const result = json.array;
 
     inline for (std.meta.fields(Config), result.items) |field, value| {
         const ft = if (@typeInfo(field.type) == .Optional)
@@ -945,10 +695,10 @@ fn handleConfiguration(server: *Server, json: std.json.Value) error{OutOfMemory}
             field.type;
         const ti = @typeInfo(ft);
 
-        if (value != .Null) {
+        if (value != .null) {
             const new_value: field.type = switch (ft) {
                 []const u8 => switch (value) {
-                    .String => |s| blk: {
+                    .string => |s| blk: {
                         const trimmed = std.mem.trim(u8, s, " ");
                         if (trimmed.len == 0 or std.mem.eql(u8, trimmed, "nil")) {
                             log.warn("Ignoring new value for \"zls.{s}\": the given new value is invalid", .{field.name});
@@ -973,7 +723,7 @@ fn handleConfiguration(server: *Server, json: std.json.Value) error{OutOfMemory}
                 },
                 else => switch (ti) {
                     .Int => switch (value) {
-                        .Integer => |val| std.math.cast(ft, val) orelse blk: {
+                        .integer => |val| std.math.cast(ft, val) orelse blk: {
                             log.warn("Ignoring new value for \"zls.{s}\": the given new value is invalid", .{field.name});
                             break :blk @field(server.config, field.name);
                         },
@@ -983,14 +733,14 @@ fn handleConfiguration(server: *Server, json: std.json.Value) error{OutOfMemory}
                         },
                     },
                     .Bool => switch (value) {
-                        .Bool => |b| b,
+                        .bool => |b| b,
                         else => blk: {
                             log.warn("Ignoring new value for \"zls.{s}\": the given new value has an invalid type", .{field.name});
                             break :blk @field(server.config, field.name);
                         },
                     },
                     .Enum => switch (value) {
-                        .String => |s| blk: {
+                        .string => |s| blk: {
                             const trimmed = std.mem.trim(u8, s, " ");
                             break :blk std.meta.stringToEnum(field.type, trimmed) orelse inner: {
                                 log.warn("Ignoring new value for \"zls.{s}\": the given new value is invalid", .{field.name});
@@ -1022,9 +772,8 @@ fn handleConfiguration(server: *Server, json: std.json.Value) error{OutOfMemory}
 fn openDocumentHandler(server: *Server, notification: types.DidOpenTextDocumentParams) Error!void {
     const handle = try server.document_store.openDocument(notification.textDocument.uri, try server.document_store.allocator.dupeZ(u8, notification.textDocument.text));
 
-    if (server.client_capabilities.supports_publish_diagnostics) blk: {
-        if (!std.process.can_spawn) break :blk;
-        const diagnostics = try server.generateDiagnostics(handle);
+    if (server.client_capabilities.supports_publish_diagnostics) {
+        const diagnostics = try diagnostics_gen.generateDiagnostics(server, handle);
         server.sendNotification("textDocument/publishDiagnostics", diagnostics);
     }
 }
@@ -1039,9 +788,8 @@ fn changeDocumentHandler(server: *Server, notification: types.DidChangeTextDocum
 
     try server.document_store.refreshDocument(handle.uri, new_text);
 
-    if (server.client_capabilities.supports_publish_diagnostics) blk: {
-        if (!std.process.can_spawn) break :blk;
-        const diagnostics = try server.generateDiagnostics(handle.*);
+    if (server.client_capabilities.supports_publish_diagnostics) {
+        const diagnostics = try diagnostics_gen.generateDiagnostics(server, handle.*);
         server.sendNotification("textDocument/publishDiagnostics", diagnostics);
     }
 }
@@ -1053,7 +801,7 @@ fn saveDocumentHandler(server: *Server, notification: types.DidSaveTextDocumentP
     const handle = server.document_store.getHandle(uri) orelse return;
     try server.document_store.applySave(handle);
 
-    if (std.process.can_spawn and server.getAutofixMode() == .on_save) {
+    if (server.getAutofixMode() == .on_save) {
         var text_edits = try server.autofix(allocator, handle);
 
         var workspace_edit = types.WorkspaceEdit{ .changes = .{} };
@@ -1081,7 +829,6 @@ fn willSaveWaitUntilHandler(server: *Server, request: types.WillSaveTextDocument
 
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
 
-    if (!std.process.can_spawn) return null;
     var text_edits = try server.autofix(allocator, handle);
 
     return try text_edits.toOwnedSlice(allocator);
@@ -1182,9 +929,8 @@ pub fn hoverHandler(server: *Server, request: types.HoverParams) Error!?types.Ho
     const response = hover_handler.hover(server, source_index, handle);
 
     // TODO: Figure out a better solution for comptime interpreter diags
-    if (server.client_capabilities.supports_publish_diagnostics) blk: {
-        if (!std.process.can_spawn) break :blk;
-        const diagnostics = try server.generateDiagnostics(handle.*);
+    if (server.client_capabilities.supports_publish_diagnostics) {
+        const diagnostics = try diagnostics_gen.generateDiagnostics(server, handle.*);
         server.sendNotification("textDocument/publishDiagnostics", diagnostics);
     }
 
@@ -1206,15 +952,6 @@ pub fn formattingHandler(server: *Server, request: types.DocumentFormattingParam
     const formatted = try handle.tree.render(allocator);
 
     if (std.mem.eql(u8, handle.text, formatted)) return null;
-
-    if (formatted.len <= 512) {
-        var text_edits = try allocator.alloc(types.TextEdit, 1);
-        text_edits[0] = .{
-            .range = offsets.locToRange(handle.text, .{ .start = 0, .end = handle.text.len }, server.offset_encoding),
-            .newText = formatted,
-        };
-        return text_edits;
-    }
 
     return if (diff.edits(allocator, handle.text, formatted, server.offset_encoding)) |text_edits| text_edits.items else |_| null;
 }
@@ -1458,12 +1195,8 @@ fn codeActionHandler(server: *Server, request: types.CodeActionParams) Error!?[]
 
     // as of right now, only ast-check errors may get a code action
     var diagnostics = std.ArrayListUnmanaged(types.Diagnostic){};
-    if (server.config.enable_ast_check_diagnostics and handle.tree.errors.len == 0) blk: {
-        if (!std.process.can_spawn) break :blk;
-        getAstCheckDiagnostics(server, handle.*, &diagnostics) catch |err| {
-            log.err("failed to run ast-check: {}", .{err});
-            return error.InternalError;
-        };
+    if (server.config.enable_ast_check_diagnostics and handle.tree.errors.len == 0) {
+        try diagnostics_gen.getAstCheckDiagnostics(server, handle.*, &diagnostics);
     }
 
     var actions = std.ArrayListUnmanaged(types.CodeAction){};
@@ -1565,8 +1298,8 @@ const Message = union(enum) {
         const tracy_zone = tracy.trace(@src());
         defer tracy_zone.end();
 
-        if (tree.root != .Object) return error.InvalidRequest;
-        const object = tree.root.Object;
+        if (tree.root != .object) return error.InvalidRequest;
+        const object = tree.root.object;
 
         if (object.get("id")) |id_obj| {
             comptime std.debug.assert(!tres.isAllocatorRequired(types.RequestId));
@@ -1574,11 +1307,11 @@ const Message = union(enum) {
 
             if (object.get("method")) |method_obj| {
                 const msg_method = switch (method_obj) {
-                    .String => |str| str,
+                    .string => |str| str,
                     else => return error.InvalidRequest,
                 };
 
-                const msg_params = object.get("params") orelse .Null;
+                const msg_params = object.get("params") orelse .null;
 
                 return .{ .RequestMessage = .{
                     .id = msg_id,
@@ -1586,13 +1319,13 @@ const Message = union(enum) {
                     .params = msg_params,
                 } };
             } else {
-                const result = object.get("result") orelse .Null;
-                const error_obj = object.get("error") orelse .Null;
+                const result = object.get("result") orelse .null;
+                const error_obj = object.get("error") orelse .null;
 
                 comptime std.debug.assert(!tres.isAllocatorRequired(?types.ResponseError));
                 const err = tres.parse(?types.ResponseError, error_obj, null) catch return error.InvalidRequest;
 
-                if (result != .Null and err != null) return error.InvalidRequest;
+                if (result != .null and err != null) return error.InvalidRequest;
 
                 return .{ .ResponseMessage = .{
                     .id = msg_id,
@@ -1602,11 +1335,11 @@ const Message = union(enum) {
             }
         } else {
             const msg_method = switch (object.get("method") orelse return error.InvalidRequest) {
-                .String => |str| str,
+                .string => |str| str,
                 else => return error.InvalidRequest,
             };
 
-            const msg_params = object.get("params") orelse .Null;
+            const msg_params = object.get("params") orelse .null;
 
             return .{ .NotificationMessage = .{
                 .method = msg_method,
@@ -1623,7 +1356,7 @@ pub fn processJsonRpc(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    var parser = std.json.Parser.init(server.arena.allocator(), false);
+    var parser = std.json.Parser.init(server.arena.allocator(), .alloc_always);
     defer parser.deinit();
 
     var tree = parser.parse(json) catch |err| {
@@ -1728,6 +1461,7 @@ pub fn processMessage(server: *Server, message: Message) Error!void {
         .{ "shutdown", shutdownHandler },
         .{ "exit", exitHandler },
         .{ "$/cancelRequest", cancelRequestHandler },
+        .{ "$/setTrace", setTraceHandler },
         .{ "textDocument/didOpen", openDocumentHandler },
         .{ "textDocument/didChange", changeDocumentHandler },
         .{ "textDocument/didSave", saveDocumentHandler },
@@ -1812,8 +1546,10 @@ pub fn create(
     config_path: ?[]const u8,
     recording_enabled: bool,
     replay_enabled: bool,
+    message_tracing_enabled: bool,
 ) !*Server {
     const server = try allocator.create(Server);
+    errdefer server.destroy();
     server.* = Server{
         .config = config,
         .runtime_zig_version = null,
@@ -1828,11 +1564,21 @@ pub fn create(
         .builtin_completions = null,
         .recording_enabled = recording_enabled,
         .replay_enabled = replay_enabled,
+        .message_tracing_enabled = message_tracing_enabled,
         .status = .uninitialized,
     };
-    server.analyser = Analyser.init(allocator, server.arena.allocator(), &server.document_store);
+    server.analyser = Analyser.init(allocator, &server.document_store);
 
-    try configuration.configChanged(config, &server.runtime_zig_version, allocator, config_path);
+    var builtin_creation_dir = config_path;
+    if (config_path) |path| {
+        builtin_creation_dir = std.fs.path.dirname(path);
+    }
+
+    try configuration.configChanged(config, &server.runtime_zig_version, allocator, builtin_creation_dir);
+
+    if (config.dangerous_comptime_experiments_do_not_enable) {
+        server.analyser.ip = try analyser.InternPool.init(allocator);
+    }
 
     return server;
 }

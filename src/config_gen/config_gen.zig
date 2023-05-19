@@ -848,17 +848,16 @@ fn generateVersionDataFile(allocator: std.mem.Allocator, version: []const u8, pa
     defer allocator.free(url);
 
     const response = try httpGET(allocator, try std.Uri.parse(url));
-    switch (response) {
-        .ok => {},
+    const response_bytes = switch (response) {
+        .success => |response_bytes| response_bytes,
         .other => |status| {
             const error_name = status.phrase() orelse @tagName(status.class());
             std.log.err("failed to download {s}: {s}", .{ url, error_name });
             return error.DownloadFailed;
         },
-    }
-    defer allocator.free(response.ok);
+    };
+    defer allocator.free(response_bytes);
 
-    const response_bytes = response.ok;
     // const response_bytes: []const u8 = @embedFile("langref.html.in");
 
     var builtins = try collectBuiltinData(allocator, version, response_bytes);
@@ -956,7 +955,7 @@ fn generateVersionDataFile(allocator: std.mem.Allocator, version: []const u8, pa
 }
 
 const Response = union(enum) {
-    ok: []const u8,
+    success: []const u8,
     other: std.http.Status,
 };
 
@@ -965,31 +964,27 @@ fn httpGET(allocator: std.mem.Allocator, uri: std.Uri) !Response {
     defer client.deinit();
     try client.ca_bundle.rescan(allocator);
 
-    var request = try client.request(uri, .{}, .{});
+    var request = try client.request(.GET, uri, .{ .allocator = allocator }, .{});
     defer request.deinit();
 
-    var output = std.ArrayListUnmanaged(u8){};
-    defer output.deinit(allocator);
+    try request.start();
+    // try request.finish();
+    try request.wait();
 
-    var buffer: [1024]u8 = undefined;
-    while (true) {
-        const size = try request.read(&buffer);
-        if (size == 0) break;
-        try output.appendSlice(allocator, buffer[0..size]);
-    }
-
-    if (request.response.headers.status != .ok) {
+    if (request.response.status.class() != .success) {
         return .{
-            .other = request.response.headers.status,
+            .other = request.response.status,
         };
     }
 
-    return .{ .ok = try output.toOwnedSlice(allocator) };
+    return .{
+        .success = try request.reader().readAllAlloc(allocator, std.math.maxInt(usize)),
+    };
 }
 
 pub fn main() !void {
     var general_purpose_allocator = std.heap.GeneralPurposeAllocator(.{}){};
-    defer std.debug.assert(!general_purpose_allocator.deinit());
+    defer std.debug.assert(general_purpose_allocator.deinit() == .ok);
     var gpa = general_purpose_allocator.allocator();
 
     var stderr = std.io.getStdErr().writer();
@@ -1055,12 +1050,8 @@ pub fn main() !void {
         }
     }
 
-    const parse_options = std.json.ParseOptions{
-        .allocator = gpa,
-    };
-    var token_stream = std.json.TokenStream.init(@embedFile("config.json"));
-    const config = try std.json.parse(Config, &token_stream, parse_options);
-    defer std.json.parseFree(Config, config, parse_options);
+    const config = try std.json.parseFromSlice(Config, gpa, @embedFile("config.json"), .{});
+    defer std.json.parseFree(Config, config, .{});
 
     try generateConfigFile(gpa, config, config_path);
     try generateSchemaFile(gpa, config, schema_path);

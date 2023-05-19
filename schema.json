@@ -74,7 +74,7 @@
             "type": "boolean",
             "default": "false"
         },
-        "use_comptime_interpreter": {
+        "dangerous_comptime_experiments_do_not_enable": {
             "description": "Whether to use the comptime interpreter",
             "type": "boolean",
             "default": "false"
@@ -93,6 +93,11 @@
             "description": "The detail field of completions is truncated to be no longer than this (in bytes)",
             "type": "integer",
             "default": "1048576"
+        },
+        "prefer_ast_check_as_child_process": {
+            "description": "Can be used in conjuction with `enable_ast_check_diagnostics` to favor using `zig ast-check` instead of ZLS's fork",
+            "type": "boolean",
+            "default": "true"
         },
         "record_session": {
             "description": "When true, zls will record all request is receives and write in into `record_session_path`, so that they can replayed with `zls replay`",

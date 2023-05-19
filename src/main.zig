@@ -11,6 +11,7 @@ const Header = @import("Header.zig");
 const debug = @import("debug.zig");
 
 const logger = std.log.scoped(.zls_main);
+const message_logger = std.log.scoped(.message);
 
 var actual_log_level: std.log.Level = switch (zig_builtin.mode) {
     .Debug => .debug,
@@ -60,6 +61,7 @@ fn loop(
             const header = Header{ .content_length = outgoing_message.len };
             try header.write(true, writer);
             try writer.writeAll(outgoing_message);
+            if (server.message_tracing_enabled) message_logger.info("sent: {s}\n", .{outgoing_message});
         }
         try buffered_writer.flush();
         for (server.outgoing_messages.items) |outgoing_message| {
@@ -78,6 +80,7 @@ fn loop(
             try file.writeAll(json_message);
         }
 
+        if (server.message_tracing_enabled) message_logger.info("received: {s}\n", .{json_message});
         server.processJsonRpc(json_message);
 
         if (server.status == .exiting_success or server.status == .exiting_failure) return;
@@ -143,9 +146,8 @@ fn updateConfig(
         defer allocator.free(json_message);
         try file.reader().readNoEof(json_message);
 
-        var token_stream = std.json.TokenStream.init(json_message);
-        const new_config = try std.json.parse(Config, &token_stream, .{ .allocator = allocator });
-        std.json.parseFree(Config, config.*, .{ .allocator = allocator });
+        const new_config = try std.json.parseFromSlice(Config, allocator, json_message, .{});
+        std.json.parseFree(Config, allocator, config.*);
         config.* = new_config;
     }
 }
@@ -161,7 +163,7 @@ fn getConfig(
 ) !ConfigWithPath {
     if (config_path) |path| {
         if (configuration.loadFromFile(allocator, path)) |config| {
-            return ConfigWithPath{ .config = config, .config_path = path };
+            return ConfigWithPath{ .config = config, .config_path = try allocator.dupe(u8, path) };
         }
         std.debug.print(
             \\Could not open configuration file '{s}'
@@ -195,6 +197,9 @@ const ParseArgsResult = struct {
     config_path: ?[]const u8,
     replay_enabled: bool,
     replay_session_path: ?[]const u8,
+    message_tracing_enabled: bool,
+
+    zls_exe_path: []const u8,
 };
 
 fn parseArgs(allocator: std.mem.Allocator) !ParseArgsResult {
@@ -203,6 +208,8 @@ fn parseArgs(allocator: std.mem.Allocator) !ParseArgsResult {
         .config_path = null,
         .replay_enabled = false,
         .replay_session_path = null,
+        .message_tracing_enabled = false,
+        .zls_exe_path = undefined,
     };
 
     const ArgId = enum {
@@ -210,6 +217,7 @@ fn parseArgs(allocator: std.mem.Allocator) !ParseArgsResult {
         version,
         replay,
         @"enable-debug-log",
+        @"enable-message-tracing",
         @"show-config-path",
         @"config-path",
     };
@@ -236,6 +244,7 @@ fn parseArgs(allocator: std.mem.Allocator) !ParseArgsResult {
             .version = "Prints the compiler version with which the server was compiled.",
             .replay = "Replay a previous recorded zls session",
             .@"enable-debug-log" = "Enables debug logs.",
+            .@"enable-message-tracing" = "Enables message tracing.",
             .@"config-path" = "Specify the path to a configuration file specifying LSP behaviour.",
             .@"show-config-path" = "Prints the path to the configuration file to stdout",
         });
@@ -249,7 +258,10 @@ fn parseArgs(allocator: std.mem.Allocator) !ParseArgsResult {
 
     var args_it = try std.process.ArgIterator.initWithAllocator(allocator);
     defer args_it.deinit();
-    if (!args_it.skip()) @panic("Could not find self argument");
+
+    if (args_it.next()) |zls_path| {
+        result.zls_exe_path = try allocator.dupe(u8, zls_path);
+    } else unreachable;
 
     // Makes behavior of enabling debug more logging consistent regardless of argument order.
     var specified = std.enums.EnumArray(ArgId, bool).initFill(false);
@@ -281,6 +293,7 @@ fn parseArgs(allocator: std.mem.Allocator) !ParseArgsResult {
             .help,
             .version,
             .@"enable-debug-log",
+            .@"enable-message-tracing",
             .@"show-config-path",
             => {},
             .@"config-path" => {
@@ -310,13 +323,17 @@ fn parseArgs(allocator: std.mem.Allocator) !ParseArgsResult {
         actual_log_level = .debug;
         logger.info("Enabled debug logging.\n", .{});
     }
+    if (specified.get(.@"enable-message-tracing")) {
+        result.message_tracing_enabled = true;
+        logger.info("Enabled message tracing.\n", .{});
+    }
     if (specified.get(.@"config-path")) {
         std.debug.assert(result.config_path != null);
     }
     if (specified.get(.@"show-config-path")) {
         const new_config = try getConfig(allocator, result.config_path);
         defer if (new_config.config_path) |path| allocator.free(path);
-        defer std.json.parseFree(Config, new_config.config, .{ .allocator = allocator });
+        defer std.json.parseFree(Config, allocator, new_config.config);
 
         const full_path = if (new_config.config_path) |path| blk: {
             break :blk try std.fs.path.resolve(allocator, &.{ path, "zls.json" });
@@ -345,7 +362,7 @@ const stack_frames = switch (zig_builtin.mode) {
 
 pub fn main() !void {
     var gpa_state = std.heap.GeneralPurposeAllocator(.{ .stack_trace_frames = stack_frames }){};
-    defer std.debug.assert(!gpa_state.deinit());
+    defer std.debug.assert(gpa_state.deinit() == .ok);
 
     var tracy_state = if (tracy.enable_allocation) tracy.tracyAllocator(gpa_state.allocator()) else void{};
     const inner_allocator: std.mem.Allocator = if (tracy.enable_allocation) tracy_state.allocator() else gpa_state.allocator();
@@ -354,6 +371,7 @@ pub fn main() !void {
     const allocator: std.mem.Allocator = if (build_options.enable_failing_allocator) failing_allocator_state.allocator() else inner_allocator;
 
     const result = try parseArgs(allocator);
+    defer allocator.free(result.zls_exe_path);
     defer if (result.config_path) |path| allocator.free(path);
     defer if (result.replay_session_path) |path| allocator.free(path);
     switch (result.action) {
@@ -361,8 +379,10 @@ pub fn main() !void {
         .exit => return,
     }
 
+    logger.info("Starting ZLS {s} @ '{s}'", .{ build_options.version, result.zls_exe_path });
+
     var config = try getConfig(allocator, result.config_path);
-    defer std.json.parseFree(Config, config.config, .{ .allocator = allocator });
+    defer std.json.parseFree(Config, allocator, config.config);
     defer if (config.config_path) |path| allocator.free(path);
 
     if (result.replay_enabled and config.config.replay_session_path == null and config.config.record_session_path == null) {
@@ -390,6 +410,7 @@ pub fn main() !void {
         config.config_path,
         record_file != null,
         replay_file != null,
+        result.message_tracing_enabled,
     );
     defer server.destroy();
 

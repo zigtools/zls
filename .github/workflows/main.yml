@@ -48,7 +48,7 @@ jobs:
       - name: Build artifacts
         if: ${{ matrix.os == 'ubuntu-latest' && github.event.inputs.bypass_tracy_and_artifacts != 'true' }}
         run: |
-          declare -a targets=("x86_64-windows" "x86_64-linux" "x86_64-macos" "x86-windows" "x86-linux" "aarch64-linux" "aarch64-macos")
+          declare -a targets=("x86_64-windows" "x86_64-linux" "x86_64-macos" "x86-windows" "x86-linux" "aarch64-linux" "aarch64-macos" "wasm32-wasi")
           mkdir -p "artifacts/"
 
           for target in "${targets[@]}"; do
@@ -113,6 +113,13 @@ jobs:
         with:
           name: zls-aarch64-macos
           path: artifacts/aarch64-macos/
+
+      - name: Upload wasm32-wasi artifact
+        if: ${{ matrix.os == 'ubuntu-latest' && github.event.inputs.bypass_tracy_and_artifacts != 'true' }}
+        uses: actions/upload-artifact@v3
+        with:
+          name: zls-wasm32-wasi
+          path: artifacts/wasm32-wasi/
 
       - name: Beam to Felix
         if: ${{ matrix.os == 'ubuntu-latest' && github.ref == 'refs/heads/master' && github.repository_owner == 'zigtools' }}

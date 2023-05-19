@@ -55,7 +55,7 @@ test "inlayhints - builtin call" {
         \\const _ = @intCast(<DestType>u32,<int>5);
     );
     try testInlayHints(
-        \\const _ = @memcpy(<dest>null,<source>null,<byte_count>0);
+        \\const _ = @memcpy(<dest>"",<source>"");
     );
 
     try testInlayHints(

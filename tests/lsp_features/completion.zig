@@ -358,6 +358,68 @@ test "completion - error union" {
     });
 }
 
+test "completion - struct init" {
+    try testCompletion(
+        \\const S = struct {
+        \\    alpha: u32,
+        \\    beta: []const u8,
+        \\};
+        \\const foo = S{ .<cursor> };
+    , &.{
+        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+        .{ .label = "beta", .kind = .Field, .detail = "beta: []const u8" },
+    });
+    try testCompletion(
+        \\const S = struct {
+        \\    alpha: u32,
+        \\    beta: []const u8,
+        \\    gamma: ?*S,
+        \\};
+        \\const foo = S{ .alpha = 3, .<cursor>, .gamma = null };
+    , &.{
+        // TODO `alpha` should be excluded
+        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+        .{ .label = "beta", .kind = .Field, .detail = "beta: []const u8" },
+        // TODO `gamma` should be excluded
+        .{ .label = "gamma", .kind = .Field, .detail = "gamma: ?*S" },
+    });
+    try testCompletion(
+        \\const S = struct {
+        \\    alpha: *const S,
+        \\    beta: []const u8,
+        \\};
+        \\const foo = S{ .alpha = S{ .beta = "{}" }, .<cursor> };
+    , &.{
+        // TODO `alpha` should be excluded
+        .{ .label = "alpha", .kind = .Field, .detail = "alpha: *const S" },
+        .{ .label = "beta", .kind = .Field, .detail = "beta: []const u8" },
+    });
+    try testCompletion(
+        \\const S = struct {
+        \\    alpha: *const S,
+        \\    beta: u32,
+        \\};
+        \\const foo = S{ .alpha = S{ .<cursor> } };
+    , &.{
+        .{ .label = "alpha", .kind = .Field, .detail = "alpha: *const S" },
+        .{ .label = "beta", .kind = .Field, .detail = "beta: u32" },
+    });
+    try testCompletion(
+        \\const S = struct {
+        \\    alpha: *const S,
+        \\    beta: u32,
+        \\    gamma: ?*S,
+        \\};
+        \\const foo = S{ .gamma = undefined, .<cursor> , .alpha = undefined };
+    , &.{
+        // TODO `gamma` should be excluded
+        .{ .label = "gamma", .kind = .Field, .detail = "gamma: ?*S" },
+        .{ .label = "beta", .kind = .Field, .detail = "beta: u32" },
+        // TODO `alpha` should be excluded
+        .{ .label = "alpha", .kind = .Field, .detail = "alpha: *const S" },
+    });
+}
+
 test "completion - declarations" {
     try testCompletion(
         \\const S = struct {

@@ -84,7 +84,7 @@
             "default": "false"
         },
         {
-            "name": "use_comptime_interpreter",
+            "name": "dangerous_comptime_experiments_do_not_enable",
             "description": "Whether to use the comptime interpreter",
             "type": "bool",
             "default": "false"
@@ -106,6 +106,12 @@
             "description": "The detail field of completions is truncated to be no longer than this (in bytes)",
             "type": "usize",
             "default": "1048576"
+        },
+        {
+            "name": "prefer_ast_check_as_child_process",
+            "description": "Can be used in conjuction with `enable_ast_check_diagnostics` to favor using `zig ast-check` instead of ZLS's fork",
+            "type": "bool",
+            "default": "true"
         },
         {
             "name": "record_session",

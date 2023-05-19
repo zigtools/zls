@@ -1176,6 +1176,8 @@ pub fn iterateChildren(
 ) Error!void {
     const node_tags = tree.nodes.items(.tag);
     const node_data = tree.nodes.items(.data);
+    const main_tokens = tree.nodes.items(.main_token);
+    const token_tags = tree.tokens.items(.tag);
 
     if (node > tree.nodes.len) return;
 
@@ -1494,16 +1496,25 @@ pub fn iterateChildren(
         },
 
         .@"asm" => {
-            const asm_ast = tree.asmFull(node).ast;
-            try callback(context, tree, asm_ast.template);
-            for (asm_ast.items) |child| {
-                try callback(context, tree, child);
+            const asm_node = tree.asmFull(node);
+
+            try callback(context, tree, asm_node.ast.template);
+
+            for (asm_node.outputs) |output_node| {
+                const has_arrow = token_tags[main_tokens[output_node] + 4] == .arrow;
+                if (has_arrow) {
+                    try callback(context, tree, node_data[output_node].lhs);
+                }
+            }
+
+            for (asm_node.inputs) |input_node| {
+                try callback(context, tree, node_data[input_node].lhs);
             }
         },
 
         .asm_output,
         .asm_input,
-        => {}, // TODO
+        => unreachable,
 
         .@"continue",
         .anyframe_literal,
@@ -1642,10 +1653,11 @@ pub fn smallestEnclosingSubrange(children: []const offsets.Loc, loc: offsets.Loc
         0 => return null,
         1 => return if (offsets.locInside(loc, children[0])) .{ .start = 0, .len = 1 } else null,
         else => {
-            for (children[0 .. children.len - 1], children[1..]) |previous_loc, current_loc| {
-                std.debug.assert(previous_loc.end <= current_loc.start); // must by sorted
-                std.debug.assert(!offsets.locIntersect(previous_loc, current_loc)); // must be non-intersecting
-            }
+            // TODO re-enable checks once parsing conforms to these assumptions
+            // for (children[0 .. children.len - 1], children[1..]) |previous_loc, current_loc| {
+            //     std.debug.assert(previous_loc.end <= current_loc.start); // must be sorted
+            //     std.debug.assert(!offsets.locIntersect(previous_loc, current_loc)); // must be non-intersecting
+            // }
         },
     }
 
