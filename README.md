@@ -75,7 +75,7 @@ The following options are currently available.
 | `operator_completions` | `bool` | `true` | Enables `*` and `?` operators in completion lists |
 | `warn_style` | `bool` | `false` | Enables warnings for style guideline mismatches |
 | `highlight_global_var_declarations` | `bool` | `false` | Whether to highlight global var declarations |
-| `use_comptime_interpreter` | `bool` | `false` | Whether to use the comptime interpreter |
+| `dangerous_comptime_experiments_do_not_enable` | `bool` | `false` | Whether to use the comptime interpreter |
 | `include_at_in_builtins` | `bool` | `false` | Whether the @ sign should be part of the completion of builtins |
 | `skip_std_references` | `bool` | `false` | When true, skips searching for references in std. Improves lookup speed for functions in user's code. Renaming and go-to-definition will continue to work as is |
 | `max_detail_length` | `usize` | `1048576` | The detail field of completions is truncated to be no longer than this (in bytes) |

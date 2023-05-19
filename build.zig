@@ -7,7 +7,7 @@ const zls_version = std.builtin.Version{ .major = 0, .minor = 11, .patch = 0 };
 pub fn build(b: *std.build.Builder) !void {
     comptime {
         const current_zig = builtin.zig_version;
-        const min_zig = std.SemanticVersion.parse("0.11.0-dev.2571+31738de28") catch unreachable; // add c_char - https://github.com/ziglang/zig/pull/15263
+        const min_zig = std.SemanticVersion.parse("0.11.0-dev.3134+018b743c7") catch unreachable; // std.http: do -> wait, fix redirects
         if (current_zig.order(min_zig) == .lt) {
             @compileError(std.fmt.comptimePrint("Your Zig version v{} does not meet the minimum build requirement of v{}", .{ current_zig, min_zig }));
         }
@@ -35,8 +35,8 @@ pub fn build(b: *std.build.Builder) !void {
     exe_options.addOption(shared.ZigVersion, "data_version", b.option(shared.ZigVersion, "data_version", "The Zig version your compiler is.") orelse .master);
     exe_options.addOption(std.log.Level, "log_level", b.option(std.log.Level, "log_level", "The Log Level to be used.") orelse .info);
     exe_options.addOption(bool, "enable_tracy", enable_tracy);
-    exe_options.addOption(bool, "enable_tracy_allocation", b.option(bool, "enable_tracy_allocation", "Enable using TracyAllocator to monitor allocations.") orelse false);
-    exe_options.addOption(bool, "enable_tracy_callstack", b.option(bool, "enable_tracy_callstack", "Enable callstack graphs.") orelse false);
+    exe_options.addOption(bool, "enable_tracy_allocation", b.option(bool, "enable_tracy_allocation", "Enable using TracyAllocator to monitor allocations.") orelse enable_tracy);
+    exe_options.addOption(bool, "enable_tracy_callstack", b.option(bool, "enable_tracy_callstack", "Enable callstack graphs.") orelse enable_tracy);
     exe_options.addOption(bool, "enable_failing_allocator", b.option(bool, "enable_failing_allocator", "Whether to use a randomly failing allocator.") orelse false);
     exe_options.addOption(u32, "enable_failing_allocator_likelihood", b.option(u32, "enable_failing_allocator_likelihood", "The chance that an allocation will fail is `1/likelihood`") orelse 256);
     exe_options.addOption(bool, "use_gpa", b.option(bool, "use_gpa", "Good for debugging") orelse false);
@@ -93,7 +93,7 @@ pub fn build(b: *std.build.Builder) !void {
     exe.addModule("binned_allocator", binned_allocator_module);
 
     if (enable_tracy) {
-        const client_cpp = "src/tracy/TracyClient.cpp";
+        const client_cpp = "src/tracy/public/TracyClient.cpp";
 
         // On mingw, we need to opt into windows 7+ to get some features required by tracy.
         const tracy_c_flags: []const []const u8 = if (target.isWindows() and target.getAbi() == .gnu)

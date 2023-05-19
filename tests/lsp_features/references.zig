@@ -120,6 +120,24 @@ test "references - label" {
     );
 }
 
+test "references - asm" {
+    try testReferences(
+        \\fn foo(<0>: u32) void {
+        \\    asm ("bogus"
+        \\        : [ret] "={rax}" (-> void),
+        \\        : [bar] "{rax}" (<0>),
+        \\    );
+        \\}
+    );
+    try testReferences(
+        \\fn foo(comptime <0>: type) void {
+        \\    asm ("bogus"
+        \\        : [ret] "={rax}" (-> <0>),
+        \\    );
+        \\}
+    );
+}
+
 test "references - cross-file reference" {
     if (true) return error.SkipZigTest; // TODO
     try testMFReferences(&.{

@@ -701,13 +701,16 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
         .grouped_expression => {
             try callWriteNodeTokens(allocator, .{ builder, node_data[node].lhs });
         },
-        .@"break",
-        .@"continue",
-        => {
+        .@"break" => {
             try writeToken(builder, main_token, .keyword);
             if (node_data[node].lhs != 0)
                 try writeToken(builder, node_data[node].lhs, .label);
             try callWriteNodeTokens(allocator, .{ builder, node_data[node].rhs });
+        },
+        .@"continue" => {
+            try writeToken(builder, main_token, .keyword);
+            if (node_data[node].lhs != 0)
+                try writeToken(builder, node_data[node].lhs, .label);
         },
         .@"suspend", .@"return" => {
             try writeToken(builder, main_token, .keyword);

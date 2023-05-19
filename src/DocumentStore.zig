@@ -15,6 +15,7 @@ const translate_c = @import("translate_c.zig");
 const ComptimeInterpreter = @import("ComptimeInterpreter.zig");
 const AstGen = @import("stage2/AstGen.zig");
 const Zir = @import("stage2/Zir.zig");
+const InternPool = @import("analyser/InternPool.zig");
 
 const DocumentStore = @This();
 
@@ -42,10 +43,10 @@ const BuildFile = struct {
 
     pub fn deinit(self: *BuildFile, allocator: std.mem.Allocator) void {
         allocator.free(self.uri);
-        std.json.parseFree(BuildConfig, self.config, .{ .allocator = allocator });
+        std.json.parseFree(BuildConfig, allocator, self.config);
         if (self.builtin_uri) |builtin_uri| allocator.free(builtin_uri);
         if (self.build_associated_config) |cfg| {
-            std.json.parseFree(BuildAssociatedConfig, cfg, .{ .allocator = allocator });
+            std.json.parseFree(BuildAssociatedConfig, allocator, cfg);
         }
     }
 };
@@ -73,6 +74,9 @@ pub const Handle = struct {
     /// Contains one entry for every cimport in the document
     cimports: std.MultiArrayList(CImportHandle) = .{},
 
+    /// error messages from comptime_interpreter or astgen_analyser
+    analysis_errors: std.ArrayListUnmanaged(ErrorMessage) = .{},
+
     /// `DocumentStore.build_files` is guaranteed to contain this uri
     /// uri memory managed by its build_file
     associated_build_file: ?Uri = null,
@@ -97,7 +101,18 @@ pub const Handle = struct {
             allocator.free(source);
         }
         self.cimports.deinit(allocator);
+
+        for (self.analysis_errors.items) |err| {
+            allocator.free(err.message);
+        }
+        self.analysis_errors.deinit(allocator);
     }
+};
+
+pub const ErrorMessage = struct {
+    loc: offsets.Loc,
+    code: []const u8,
+    message: []const u8,
 };
 
 allocator: std.mem.Allocator,
@@ -209,7 +224,7 @@ pub fn refreshDocument(self: *DocumentStore, uri: Uri, new_text: [:0]const u8) !
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const handle = self.handles.get(uri) orelse unreachable;
+    const handle = self.handles.get(uri).?;
 
     // TODO: Handle interpreter cross reference
     if (handle.interpreter) |int| {
@@ -255,6 +270,12 @@ pub fn refreshDocument(self: *DocumentStore, uri: Uri, new_text: [:0]const u8) !
     handle.cimports.deinit(self.allocator);
     handle.cimports = new_cimports;
 
+    for (handle.analysis_errors.items) |err| {
+        self.allocator.free(err.message);
+    }
+    handle.analysis_errors.deinit(self.allocator);
+    handle.analysis_errors = .{};
+
     if (old_import_count != new_import_count or
         old_cimport_count != new_cimport_count)
     {
@@ -280,7 +301,7 @@ pub fn applySave(self: *DocumentStore, handle: *const Handle) !void {
             return;
         };
 
-        std.json.parseFree(BuildConfig, build_file.config, .{ .allocator = self.allocator });
+        std.json.parseFree(BuildConfig, self.allocator, build_file.config);
         build_file.config = build_config;
     }
 }
@@ -305,7 +326,7 @@ pub fn invalidateBuildFiles(self: *DocumentStore) void {
             return;
         };
 
-        std.json.parseFree(BuildConfig, build_file.config, .{ .allocator = self.allocator });
+        std.json.parseFree(BuildConfig, self.allocator, build_file.config);
         build_file.config = build_config;
     }
 }
@@ -452,8 +473,7 @@ fn loadBuildAssociatedConfiguration(allocator: std.mem.Allocator, build_file: Bu
     const file_buf = try config_file.readToEndAlloc(allocator, std.math.maxInt(usize));
     defer allocator.free(file_buf);
 
-    var token_stream = std.json.TokenStream.init(file_buf);
-    return try std.json.parse(BuildAssociatedConfig, &token_stream, .{ .allocator = allocator });
+    return try std.json.parseFromSlice(BuildAssociatedConfig, allocator, file_buf, .{});
 }
 
 /// Caller owns returned memory!
@@ -537,16 +557,19 @@ pub fn loadBuildConfiguration(
     }
 
     const parse_options = std.json.ParseOptions{
-        .allocator = allocator,
         // We ignore unknown fields so people can roll
         // their own build runners in libraries with
         // the only requirement being general adherance
         // to the BuildConfig type
         .ignore_unknown_fields = true,
     };
-    var token_stream = std.json.TokenStream.init(zig_run_result.stdout);
-    var build_config = std.json.parse(BuildConfig, &token_stream, parse_options) catch return error.RunFailed;
-    errdefer std.json.parseFree(BuildConfig, build_config, parse_options);
+    const build_config = std.json.parseFromSlice(
+        BuildConfig,
+        allocator,
+        zig_run_result.stdout,
+        parse_options,
+    ) catch return error.RunFailed;
+    errdefer std.json.parseFree(BuildConfig, allocator, build_config);
 
     for (build_config.packages) |*pkg| {
         const pkg_abs_path = try std.fs.path.resolve(allocator, &[_][]const u8{ build_file_path, "..", pkg.path });
@@ -1125,16 +1148,13 @@ pub fn wantZir(self: DocumentStore) bool {
     return !can_run_ast_check;
 }
 
-pub fn ensureInterpreterExists(self: *DocumentStore, uri: Uri) !*ComptimeInterpreter {
+pub fn ensureInterpreterExists(self: *DocumentStore, uri: Uri, ip: *InternPool) !*ComptimeInterpreter {
     var handle = self.handles.get(uri).?;
     if (handle.interpreter != null) return handle.interpreter.?;
 
     {
         var interpreter = try self.allocator.create(ComptimeInterpreter);
         errdefer self.allocator.destroy(interpreter);
-
-        var ip = try ComptimeInterpreter.InternPool.init(self.allocator);
-        errdefer ip.deinit(self.allocator);
 
         interpreter.* = ComptimeInterpreter{
             .allocator = self.allocator,
