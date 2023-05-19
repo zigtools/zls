@@ -8,8 +8,8 @@
             .hash = "122028c00915d9b37296059be8a3883c718dbb5bd174350caedf152fed1f46f99607",
         },
         .tres = .{
-            .url = "https://github.com/ziglibs/tres/archive/707a09313b42e05d6ae22d1590499eece5f968ce.tar.gz",
-            .hash = "1220beaae8d152baa941a10b7ef3d3a59d093b257047035e2373c3c2f876ad29ccc8",
+            .url = "https://github.com/ziglibs/tres/archive/220d01f3931595e3a2e2a6a0693363c0bfaf47e9.tar.gz",
+            .hash = "12204d32c44b494c0cbe553811dedfb7a73da37b13b492872dd4edc0340983072697",
         },
         .diffz = .{
             .url = "https://github.com/ziglibs/diffz/archive/b966296b4489eb082b0831ec9a37d6f5e1906040.tar.gz",

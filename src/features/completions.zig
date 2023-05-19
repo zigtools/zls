@@ -82,7 +82,7 @@ fn typeToCompletion(
         .@"comptime" => |co| try analyser.completions.dotCompletions(
             allocator,
             list,
-            &co.interpreter.ip,
+            co.interpreter.ip,
             co.value.index,
             type_handle.type.is_type_val,
             co.value.node_idx,

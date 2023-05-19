@@ -16,6 +16,7 @@ const Analyser = @This();
 gpa: std.mem.Allocator,
 arena: std.heap.ArenaAllocator,
 store: *DocumentStore,
+ip: ?InternPool,
 bound_type_params: std.AutoHashMapUnmanaged(Ast.full.FnProto.Param, TypeWithHandle) = .{},
 using_trail: std.AutoHashMapUnmanaged(Ast.Node.Index, void) = .{},
 resolved_nodes: std.HashMapUnmanaged(NodeWithUri, ?TypeWithHandle, NodeWithUri.Context, std.hash_map.default_max_load_percentage) = .{},
@@ -25,6 +26,7 @@ pub fn init(gpa: std.mem.Allocator, store: *DocumentStore) Analyser {
         .gpa = gpa,
         .arena = std.heap.ArenaAllocator.init(gpa),
         .store = store,
+        .ip = null,
     };
 }
 
@@ -32,6 +34,7 @@ pub fn deinit(self: *Analyser) void {
     self.bound_type_params.deinit(self.gpa);
     self.using_trail.deinit(self.gpa);
     self.resolved_nodes.deinit(self.gpa);
+    if (self.ip) |*intern_pool| intern_pool.deinit(self.gpa);
     self.arena.deinit();
 }
 
@@ -810,7 +813,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 const body = decl.handle.tree.nodes.items(.data)[decl_node].rhs;
                 if (try analyser.resolveReturnType(fn_decl, decl.handle, if (has_body) body else null)) |ret| {
                     return ret;
-                } else if (analyser.store.config.use_comptime_interpreter) {
+                } else if (analyser.store.config.dangerous_comptime_experiments_do_not_enable) {
                     // TODO: Better case-by-case; we just use the ComptimeInterpreter when all else fails,
                     // probably better to use it more liberally
                     // TODO: Handle non-isolate args; e.g. `const T = u8; TypeFunc(T);`
@@ -823,7 +826,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
 
                     log.info("Invoking interpreter!", .{});
 
-                    const interpreter = analyser.store.ensureInterpreterExists(handle.uri) catch |err| {
+                    const interpreter = analyser.store.ensureInterpreterExists(handle.uri, &analyser.ip.?) catch |err| {
                         log.err("Failed to interpret file: {s}", .{@errorName(err)});
                         if (@errorReturnTrace()) |trace| {
                             std.debug.dumpStackTrace(trace.*);

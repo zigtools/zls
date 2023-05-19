@@ -1050,12 +1050,8 @@ pub fn main() !void {
         }
     }
 
-    const parse_options = std.json.ParseOptions{
-        .allocator = gpa,
-    };
-    var token_stream = std.json.TokenStream.init(@embedFile("config.json"));
-    const config = try std.json.parse(Config, &token_stream, parse_options);
-    defer std.json.parseFree(Config, config, parse_options);
+    const config = try std.json.parseFromSlice(Config, gpa, @embedFile("config.json"), .{});
+    defer std.json.parseFree(Config, config, .{});
 
     try generateConfigFile(gpa, config, config_path);
     try generateSchemaFile(gpa, config, schema_path);

@@ -146,9 +146,8 @@ fn updateConfig(
         defer allocator.free(json_message);
         try file.reader().readNoEof(json_message);
 
-        var token_stream = std.json.TokenStream.init(json_message);
-        const new_config = try std.json.parse(Config, &token_stream, .{ .allocator = allocator });
-        std.json.parseFree(Config, config.*, .{ .allocator = allocator });
+        const new_config = try std.json.parseFromSlice(Config, allocator, json_message, .{});
+        std.json.parseFree(Config, allocator, config.*);
         config.* = new_config;
     }
 }
@@ -199,6 +198,8 @@ const ParseArgsResult = struct {
     replay_enabled: bool,
     replay_session_path: ?[]const u8,
     message_tracing_enabled: bool,
+
+    zls_exe_path: []const u8,
 };
 
 fn parseArgs(allocator: std.mem.Allocator) !ParseArgsResult {
@@ -208,6 +209,7 @@ fn parseArgs(allocator: std.mem.Allocator) !ParseArgsResult {
         .replay_enabled = false,
         .replay_session_path = null,
         .message_tracing_enabled = false,
+        .zls_exe_path = undefined,
     };
 
     const ArgId = enum {
@@ -256,7 +258,10 @@ fn parseArgs(allocator: std.mem.Allocator) !ParseArgsResult {
 
     var args_it = try std.process.ArgIterator.initWithAllocator(allocator);
     defer args_it.deinit();
-    if (!args_it.skip()) @panic("Could not find self argument");
+
+    if (args_it.next()) |zls_path| {
+        result.zls_exe_path = try allocator.dupe(u8, zls_path);
+    } else unreachable;
 
     // Makes behavior of enabling debug more logging consistent regardless of argument order.
     var specified = std.enums.EnumArray(ArgId, bool).initFill(false);
@@ -328,7 +333,7 @@ fn parseArgs(allocator: std.mem.Allocator) !ParseArgsResult {
     if (specified.get(.@"show-config-path")) {
         const new_config = try getConfig(allocator, result.config_path);
         defer if (new_config.config_path) |path| allocator.free(path);
-        defer std.json.parseFree(Config, new_config.config, .{ .allocator = allocator });
+        defer std.json.parseFree(Config, allocator, new_config.config);
 
         const full_path = if (new_config.config_path) |path| blk: {
             break :blk try std.fs.path.resolve(allocator, &.{ path, "zls.json" });
@@ -366,6 +371,7 @@ pub fn main() !void {
     const allocator: std.mem.Allocator = if (build_options.enable_failing_allocator) failing_allocator_state.allocator() else inner_allocator;
 
     const result = try parseArgs(allocator);
+    defer allocator.free(result.zls_exe_path);
     defer if (result.config_path) |path| allocator.free(path);
     defer if (result.replay_session_path) |path| allocator.free(path);
     switch (result.action) {
@@ -373,8 +379,10 @@ pub fn main() !void {
         .exit => return,
     }
 
+    logger.info("Starting ZLS {s} @ '{s}'", .{ build_options.version, result.zls_exe_path });
+
     var config = try getConfig(allocator, result.config_path);
-    defer std.json.parseFree(Config, config.config, .{ .allocator = allocator });
+    defer std.json.parseFree(Config, allocator, config.config);
     defer if (config.config_path) |path| allocator.free(path);
 
     if (result.replay_enabled and config.config.replay_session_path == null and config.config.record_session_path == null) {

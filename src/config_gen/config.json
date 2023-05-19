@@ -84,7 +84,7 @@
             "default": "false"
         },
         {
-            "name": "use_comptime_interpreter",
+            "name": "dangerous_comptime_experiments_do_not_enable",
             "description": "Whether to use the comptime interpreter",
             "type": "bool",
             "default": "false"

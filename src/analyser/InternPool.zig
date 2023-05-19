@@ -178,6 +178,14 @@ pub const UnionValue = packed struct {
     val: Index,
 };
 
+pub const NullValue = packed struct {
+    ty: Index,
+};
+
+pub const UndefinedValue = packed struct {
+    ty: Index,
+};
+
 pub const UnknownValue = packed struct {
     ty: Index,
 };
@@ -236,6 +244,8 @@ pub const Key = union(enum) {
     slice: Slice,
     aggregate: Aggregate,
     union_value: UnionValue,
+    null_value: NullValue,
+    undefined_value: UndefinedValue,
     unknown_value: UnknownValue,
 
     // error
@@ -288,6 +298,8 @@ pub const Key = union(enum) {
             .slice => .slice,
             .aggregate => .aggregate,
             .union_value => .union_value,
+            .null_value => .null_value,
+            .undefined_value => .undefined_value,
             .unknown_value => .unknown_value,
         };
     }
@@ -326,6 +338,7 @@ pub const Key = union(enum) {
                 .anyerror => .ErrorSet,
                 .noreturn => .NoReturn,
                 .anyframe_type => .AnyFrame,
+                .empty_struct_literal => .Struct,
                 .null_type => .Null,
                 .undefined_type => .Undefined,
                 .enum_literal_type => .EnumLiteral,
@@ -377,6 +390,8 @@ pub const Key = union(enum) {
             .slice,
             .aggregate,
             .union_value,
+            .null_value,
+            .undefined_value,
             .unknown_value,
             => unreachable,
         };
@@ -426,6 +441,8 @@ pub const Key = union(enum) {
             .slice => |slice_info| slice_info.ty,
             .aggregate => |aggregate_info| aggregate_info.ty,
             .union_value => |union_info| union_info.ty,
+            .null_value => |null_info| null_info.ty,
+            .undefined_value => |undefined_info| undefined_info.ty,
             .unknown_value => |unknown_info| unknown_info.ty,
         };
     }
@@ -617,6 +634,7 @@ pub const Key = union(enum) {
                 .enum_literal_type,
                 => Index.none,
 
+                .empty_struct_literal => Index.empty_aggregate,
                 .void => Index.void_value,
                 .noreturn => Index.unreachable_value,
                 .null_type => Index.null_value,
@@ -710,6 +728,8 @@ pub const Key = union(enum) {
             .slice,
             .aggregate,
             .union_value,
+            .null_value,
+            .undefined_value,
             .unknown_value,
             => unreachable,
         };
@@ -728,10 +748,30 @@ pub const Key = union(enum) {
             .int_i64_value => |int_value| int_value.int == 0,
             .int_big_value => |int_value| int_value.int.orderAgainstScalar(0).compare(.eq),
 
+            .null_value => true,
             .optional_value => false,
             .unknown_value => unreachable,
 
             else => unreachable,
+        };
+    }
+
+    /// If the value fits in a u64, return it, otherwise null.
+    /// Asserts not undefined.
+    pub fn getUnsignedInt(val: Key) !?u64 {
+        return switch (val) {
+            .simple_value => |simple| switch (simple) {
+                .null_value => 0,
+                .bool_true => 1,
+                .bool_false => 0,
+                .the_only_possible_value => 0,
+                else => null,
+            },
+            .int_u64_value => |int_value| int_value.int,
+            .int_i64_value => |int_value| @intCast(u64, int_value.int),
+            .int_big_value => |int_value| int_value.int.to(u64) catch null,
+            .null_value => 0,
+            else => null,
         };
     }
 
@@ -795,6 +835,7 @@ pub const Key = union(enum) {
 
                 .null_type => try writer.writeAll("@TypeOf(null)"),
                 .undefined_type => try writer.writeAll("@TypeOf(undefined)"),
+                .empty_struct_literal => try writer.writeAll("@TypeOf(.{})"),
                 .enum_literal_type => try writer.writeAll("@TypeOf(.enum_literal)"),
 
                 .atomic_order => try writer.writeAll("std.builtin.AtomicOrder"),
@@ -998,6 +1039,8 @@ pub const Key = union(enum) {
                     union_value.val.fmt(ip),
                 });
             },
+            .null_value => try writer.print("null", .{}),
+            .undefined_value => try writer.print("undefined", .{}),
             .unknown_value => try writer.print("(unknown value)", .{}),
         }
         return null;
@@ -1061,6 +1104,7 @@ pub const Index = enum(u32) {
     comptime_float_type,
     noreturn_type,
     anyframe_type,
+    empty_struct_literal,
     null_type,
     undefined_type,
     enum_literal_type,
@@ -1263,6 +1307,12 @@ pub const Tag = enum(u8) {
     /// A union value.
     /// data is index to UnionValue.
     union_value,
+    /// A null value.
+    /// data is index to type which may be unknown.
+    null_value,
+    /// A undefined value.
+    /// data is index to type which may be unknown.
+    undefined_value,
     /// A unknown value.
     /// data is index to type which may also be unknown.
     unknown_value,
@@ -1295,6 +1345,7 @@ pub const SimpleType = enum(u32) {
     comptime_float,
     noreturn,
     anyframe_type,
+    empty_struct_literal,
     null_type,
     undefined_type,
     enum_literal_type,
@@ -1373,6 +1424,7 @@ pub fn init(gpa: Allocator) Allocator.Error!InternPool {
         .{ .index = .comptime_float_type, .key = .{ .simple_type = .comptime_float } },
         .{ .index = .noreturn_type, .key = .{ .simple_type = .noreturn } },
         .{ .index = .anyframe_type, .key = .{ .simple_type = .anyframe_type } },
+        .{ .index = .empty_struct_literal, .key = .{ .simple_type = .empty_struct_literal } },
         .{ .index = .null_type, .key = .{ .simple_type = .null_type } },
         .{ .index = .undefined_type, .key = .{ .simple_type = .undefined_type } },
         .{ .index = .enum_literal_type, .key = .{ .simple_type = .enum_literal_type } },
@@ -1409,7 +1461,7 @@ pub fn init(gpa: Allocator) Allocator.Error!InternPool {
         .{ .index = .bool_true, .key = .{ .simple_value = .bool_true } },
         .{ .index = .bool_false, .key = .{ .simple_value = .bool_false } },
 
-        .{ .index = .empty_aggregate, .key = .{ .aggregate = .{ .ty = .none, .values = &.{} } } },
+        .{ .index = .empty_aggregate, .key = .{ .aggregate = .{ .ty = .empty_struct_literal, .values = &.{} } } },
         .{ .index = .zero_usize, .key = .{ .int_u64_value = .{ .ty = .usize_type, .int = 0 } } },
         .{ .index = .one_usize, .key = .{ .int_u64_value = .{ .ty = .usize_type, .int = 1 } } },
         .{ .index = .the_only_possible_value, .key = .{ .simple_value = .the_only_possible_value } },
@@ -1515,6 +1567,8 @@ pub fn indexToKey(ip: InternPool, index: Index) Key {
         .slice => .{ .slice = ip.extraData(Slice, data) },
         .aggregate => .{ .aggregate = ip.extraData(Aggregate, data) },
         .union_value => .{ .union_value = ip.extraData(UnionValue, data) },
+        .null_value => .{ .null_value = .{ .ty = @intToEnum(Index, data) } },
+        .undefined_value => .{ .undefined_value = .{ .ty = @intToEnum(Index, data) } },
         .unknown_value => .{ .unknown_value = .{ .ty = @intToEnum(Index, data) } },
     };
 }
@@ -1545,6 +1599,8 @@ pub fn get(ip: *InternPool, gpa: Allocator, key: Key) Allocator.Error!Index {
         }),
         .float_16_value => |float_val| @bitCast(u16, float_val),
         .float_32_value => |float_val| @bitCast(u32, float_val),
+        .null_value => |null_val| @enumToInt(null_val.ty),
+        .undefined_value => |undefined_val| @enumToInt(undefined_val.ty),
         .unknown_value => |unknown_val| @enumToInt(unknown_val.ty),
         inline else => |data| try ip.addExtra(gpa, data), // TODO sad stage1 noises :(
     };
