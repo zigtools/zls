@@ -26,20 +26,19 @@ pub fn loadFromFile(allocator: std.mem.Allocator, file_path: []const u8) ?Config
     defer allocator.free(file_buf);
     @setEvalBranchQuota(10000);
 
-    var token_stream = std.json.TokenStream.init(file_buf);
-    const parse_options = std.json.ParseOptions{ .allocator = allocator, .ignore_unknown_fields = true };
+    const parse_options = std.json.ParseOptions{ .ignore_unknown_fields = true };
+    var parse_diagnostics: std.json.Diagnostics = undefined;
 
-    // TODO: use a better error reporting system or use ZON instead of JSON
+    var scanner = std.json.Scanner.initCompleteInput(allocator, file_buf);
+    defer scanner.deinit();
+    scanner.enableDiagnostics(&parse_diagnostics);
+
     // TODO: report errors using "textDocument/publishDiagnostics"
-    var config = std.json.parse(Config, &token_stream, parse_options) catch |err| {
-        const loc = if (token_stream.slice.len == 0)
-            std.zig.Loc{ .line = 0, .column = 0, .source_line = "" }
-        else
-            std.zig.findLineColumn(file_buf, token_stream.i);
-        logger.warn("{s}:{d}:{d}: Error while parsing configuration file {}", .{ file_path, loc.line + 1, loc.column, err });
-        if (err == error.InvalidValueBegin) {
-            logger.warn("Maybe your configuration file contains a trailing comma", .{});
-        }
+    var config = std.json.parseFromTokenSource(Config, allocator, &scanner, parse_options) catch |err| {
+        logger.warn(
+            "{s}:{d}:{d}: Error while parsing configuration file {}",
+            .{ file_path, parse_diagnostics.getLine(), parse_diagnostics.getColumn(), err },
+        );
         return null;
     };
 
@@ -83,7 +82,7 @@ pub fn configChanged(config: *Config, runtime_zig_version: *?ZigVersionWrapper, 
         logger.info("Using zig executable '{s}'", .{exe_path});
 
         var env = getZigEnv(allocator, exe_path) orelse break :blk;
-        defer std.json.parseFree(Env, env, .{ .allocator = allocator });
+        defer std.json.parseFree(Env, allocator, env);
 
         if (config.zig_lib_path) |lib_path| allocator.free(lib_path);
         // Make sure the path is absolute
@@ -203,14 +202,11 @@ pub fn getZigEnv(allocator: std.mem.Allocator, zig_exe_path: []const u8) ?Env {
         else => logger.err("zig env invocation failed", .{}),
     }
 
-    var token_stream = std.json.TokenStream.init(zig_env_result.stdout);
-    return std.json.parse(
+    return std.json.parseFromSlice(
         Env,
-        &token_stream,
-        .{
-            .allocator = allocator,
-            .ignore_unknown_fields = true,
-        },
+        allocator,
+        zig_env_result.stdout,
+        .{ .ignore_unknown_fields = true },
     ) catch {
         logger.err("Failed to parse zig env JSON result", .{});
         return null;

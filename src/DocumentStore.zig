@@ -43,10 +43,10 @@ const BuildFile = struct {
 
     pub fn deinit(self: *BuildFile, allocator: std.mem.Allocator) void {
         allocator.free(self.uri);
-        std.json.parseFree(BuildConfig, self.config, .{ .allocator = allocator });
+        std.json.parseFree(BuildConfig, allocator, self.config);
         if (self.builtin_uri) |builtin_uri| allocator.free(builtin_uri);
         if (self.build_associated_config) |cfg| {
-            std.json.parseFree(BuildAssociatedConfig, cfg, .{ .allocator = allocator });
+            std.json.parseFree(BuildAssociatedConfig, allocator, cfg);
         }
     }
 };
@@ -301,7 +301,7 @@ pub fn applySave(self: *DocumentStore, handle: *const Handle) !void {
             return;
         };
 
-        std.json.parseFree(BuildConfig, build_file.config, .{ .allocator = self.allocator });
+        std.json.parseFree(BuildConfig, self.allocator, build_file.config);
         build_file.config = build_config;
     }
 }
@@ -326,7 +326,7 @@ pub fn invalidateBuildFiles(self: *DocumentStore) void {
             return;
         };
 
-        std.json.parseFree(BuildConfig, build_file.config, .{ .allocator = self.allocator });
+        std.json.parseFree(BuildConfig, self.allocator, build_file.config);
         build_file.config = build_config;
     }
 }
@@ -473,8 +473,7 @@ fn loadBuildAssociatedConfiguration(allocator: std.mem.Allocator, build_file: Bu
     const file_buf = try config_file.readToEndAlloc(allocator, std.math.maxInt(usize));
     defer allocator.free(file_buf);
 
-    var token_stream = std.json.TokenStream.init(file_buf);
-    return try std.json.parse(BuildAssociatedConfig, &token_stream, .{ .allocator = allocator });
+    return try std.json.parseFromSlice(BuildAssociatedConfig, allocator, file_buf, .{});
 }
 
 /// Caller owns returned memory!
@@ -558,16 +557,19 @@ pub fn loadBuildConfiguration(
     }
 
     const parse_options = std.json.ParseOptions{
-        .allocator = allocator,
         // We ignore unknown fields so people can roll
         // their own build runners in libraries with
         // the only requirement being general adherance
         // to the BuildConfig type
         .ignore_unknown_fields = true,
     };
-    var token_stream = std.json.TokenStream.init(zig_run_result.stdout);
-    var build_config = std.json.parse(BuildConfig, &token_stream, parse_options) catch return error.RunFailed;
-    errdefer std.json.parseFree(BuildConfig, build_config, parse_options);
+    const build_config = std.json.parseFromSlice(
+        BuildConfig,
+        allocator,
+        zig_run_result.stdout,
+        parse_options,
+    ) catch return error.RunFailed;
+    errdefer std.json.parseFree(BuildConfig, allocator, build_config);
 
     for (build_config.packages) |*pkg| {
         const pkg_abs_path = try std.fs.path.resolve(allocator, &[_][]const u8{ build_file_path, "..", pkg.path });

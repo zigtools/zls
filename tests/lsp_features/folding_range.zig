@@ -229,7 +229,7 @@ fn testFoldingRange(source: []const u8, expect: []const types.FoldingRange) !voi
     var expected = std.ArrayListUnmanaged(u8){};
     defer expected.deinit(allocator);
 
-    const options = std.json.StringifyOptions{ .emit_null_optional_fields = false, .whitespace = .{ .indent = .None } };
+    const options = std.json.StringifyOptions{ .emit_null_optional_fields = false };
     try tres.stringify(response.result, options, actual.writer(allocator));
     try tres.stringify(expect, options, expected.writer(allocator));
 
