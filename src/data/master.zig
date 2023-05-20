@@ -1067,7 +1067,7 @@ pub const builtins = [_]Builtin{
         \\
         \\`dest` must be a mutable slice, a mutable pointer to an array, or a mutable many-item [pointer](https://ziglang.org/documentation/master/#Pointers). It may have any alignment, and it may have any element type.
         \\
-        \\Likewise, `source` must be a mutable slice, a mutable pointer to an array, or a mutable many-item [pointer](https://ziglang.org/documentation/master/#Pointers). It may have any alignment, and it may have any element type.
+        \\`source` must be a slice, a pointer to an array, or a many-item [pointer](https://ziglang.org/documentation/master/#Pointers). It may have any alignment, and it may have any element type.
         \\
         \\The `source` element type must support [Type Coercion](https://ziglang.org/documentation/master/#Type-Coercion) into the `dest` element type. The element types may have different ABI size, however, that may incur a performance penalty.
         \\
