@@ -3,3 +3,10 @@ zig-*
 debug
 release
 *.zlsreplay
+
+# Direnv
+/.direnv/
+/.envrc
+
+# Nix
+/result
