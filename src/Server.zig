@@ -805,6 +805,9 @@ fn saveDocumentHandler(server: *Server, notification: types.DidSaveTextDocumentP
 }
 
 fn closeDocumentHandler(server: *Server, notification: types.DidCloseTextDocumentParams) error{}!void {
+    // cached type info may point to a closed handle
+    server.analyser.invalidate();
+
     server.document_store.closeDocument(notification.textDocument.uri);
 }
 
