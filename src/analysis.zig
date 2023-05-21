@@ -2191,9 +2191,8 @@ fn iterateSymbolsContainerInternal(
     const scope_uses = handle.document_scope.scopes.items(.uses);
     const container_scope_index = findContainerScopeIndex(container_handle) orelse return;
 
-    var decl_it = scope_decls[container_scope_index].valueIterator();
-    while (decl_it.next()) |decl_index| {
-        const decl = &handle.document_scope.decls.items[@enumToInt(decl_index.*)];
+    for (scope_decls[container_scope_index].values()) |decl_index| {
+        const decl = &handle.document_scope.decls.items[@enumToInt(decl_index)];
         switch (decl.*) {
             .ast_node => |node| {
                 if (node_tags[node].isContainerField()) {
@@ -2291,9 +2290,8 @@ pub fn iterateLabels(handle: *const DocumentStore.Handle, source_index: usize, c
 
     var scope_iterator = iterateEnclosingScopes(handle.document_scope, source_index);
     while (scope_iterator.next()) |scope_index| {
-        var decl_it = scope_decls[@enumToInt(scope_index)].valueIterator();
-        while (decl_it.next()) |decl_index| {
-            const decl = &handle.document_scope.decls.items[@enumToInt(decl_index.*)];
+        for (scope_decls[@enumToInt(scope_index)].values()) |decl_index| {
+            const decl = &handle.document_scope.decls.items[@enumToInt(decl_index)];
             if (decl.* != .label_decl) continue;
             try callback(context, DeclWithHandle{ .decl = decl, .handle = handle });
         }
@@ -2312,9 +2310,8 @@ fn iterateSymbolsGlobalInternal(
 
     var scope_iterator = iterateEnclosingScopes(handle.document_scope, source_index);
     while (scope_iterator.next()) |scope_index| {
-        var decl_it = scope_decls[@enumToInt(scope_index)].valueIterator();
-        while (decl_it.next()) |decl_index| {
-            const decl = &handle.document_scope.decls.items[@enumToInt(decl_index.*)];
+        for (scope_decls[@enumToInt(scope_index)].values()) |decl_index| {
+            const decl = &handle.document_scope.decls.items[@enumToInt(decl_index)];
             if (decl.* == .ast_node and handle.tree.nodes.items(.tag)[decl.ast_node].isContainerField()) continue;
             if (decl.* == .label_decl) continue;
             try callback(context, DeclWithHandle{ .decl = decl, .handle = handle });
@@ -2450,15 +2447,15 @@ pub fn lookupSymbolGlobal(analyser: *Analyser, handle: *const DocumentStore.Hand
         const scope_index = @enumToInt(current_scope);
         defer current_scope = scope_parents[scope_index];
         if (scope_decls[scope_index].get(symbol)) |decl_index| {
-            const decl = &handle.document_scope.decls.items[@enumToInt(decl_index)];
-            switch (decl.*) {
+            const candidate = &handle.document_scope.decls.items[@enumToInt(decl_index)];
+            switch (candidate.*) {
                 .ast_node => |node| {
                     if (handle.tree.nodes.items(.tag)[node].isContainerField()) continue;
                 },
                 .label_decl => continue,
                 else => {},
             }
-            return DeclWithHandle{ .decl = decl, .handle = handle };
+            return DeclWithHandle{ .decl = candidate, .handle = handle };
         }
         if (try analyser.resolveUse(scope_uses[scope_index], symbol, handle)) |result| return result;
     }
@@ -2593,7 +2590,7 @@ pub const Scope = struct {
     loc: offsets.Loc,
     parent: Index,
     data: Data,
-    decls: std.StringHashMapUnmanaged(Declaration.Index) = .{},
+    decls: std.StringArrayHashMapUnmanaged(Declaration.Index) = .{},
     child_scopes: std.ArrayListUnmanaged(Scope.Index) = .{},
     tests: []const Ast.Node.Index = &.{},
     uses: []const Ast.Node.Index = &.{},
