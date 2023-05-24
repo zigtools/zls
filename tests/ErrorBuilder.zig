@@ -92,7 +92,7 @@ pub fn write(builder: *ErrorBuilder, writer: anytype, tty_config: std.debug.TTY.
     for (builder.files.keys(), builder.files.values()) |file_name, file| {
         if (file.messages.items.len == 0) continue;
 
-        std.sort.sort(MsgItem, file.messages.items, file.source, ErrorBuilder.lessThan);
+        std.mem.sort(MsgItem, file.messages.items, file.source, ErrorBuilder.lessThan);
 
         try writer.writeByte('\n');
         if (builder.files.count() > 1) {

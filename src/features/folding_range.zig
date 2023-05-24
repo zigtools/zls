@@ -93,7 +93,7 @@ const Builder = struct {
         }
 
         // sort mappings based on their source index
-        std.sort.sort(IndexToPositionEntry, mappings, {}, IndexToPositionEntry.lessThan);
+        std.mem.sort(IndexToPositionEntry, mappings, {}, IndexToPositionEntry.lessThan);
 
         var last_index: usize = 0;
         var last_position: types.Position = .{ .line = 0, .character = 0 };
