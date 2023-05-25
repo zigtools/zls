@@ -1142,7 +1142,7 @@ fn inlayHintHandler(server: *Server, request: types.InlayHintParams) Error!?[]ty
         }
     };
 
-    std.sort.sort(inlay_hints.InlayHint, hints, {}, helper.lessThan);
+    std.mem.sort(inlay_hints.InlayHint, hints, {}, helper.lessThan);
 
     var last_index: usize = 0;
     var last_position: types.Position = .{ .line = 0, .character = 0 };

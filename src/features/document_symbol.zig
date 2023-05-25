@@ -171,7 +171,7 @@ fn convertSymbols(
     const result = convertSymbolsInternal(from, &symbol_buffer, &mappings);
 
     // sort items based on their source position
-    std.sort.sort(IndexToPositionEntry, mappings.items, {}, IndexToPositionEntry.lessThan);
+    std.mem.sort(IndexToPositionEntry, mappings.items, {}, IndexToPositionEntry.lessThan);
 
     var last_index: usize = 0;
     var last_position: types.Position = .{ .line = 0, .character = 0 };

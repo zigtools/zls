@@ -37,7 +37,7 @@ pub fn generateSelectionRanges(
             }
         }
 
-        std.sort.sort(offsets.Loc, locs.items, {}, shorterLocsFirst);
+        std.mem.sort(offsets.Loc, locs.items, {}, shorterLocsFirst);
         {
             var i: usize = 0;
             while (i + 1 < locs.items.len) {

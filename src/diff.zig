@@ -125,7 +125,7 @@ pub fn applyTextEdits(
     defer allocator.free(text_edits_sortable);
 
     std.mem.copy(types.TextEdit, text_edits_sortable, text_edits);
-    std.sort.sort(types.TextEdit, text_edits_sortable, {}, textEditLessThan);
+    std.mem.sort(types.TextEdit, text_edits_sortable, {}, textEditLessThan);
 
     var final_text = std.ArrayListUnmanaged(u8){};
     errdefer final_text.deinit(allocator);
