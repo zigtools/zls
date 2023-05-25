@@ -88,7 +88,7 @@ pub fn clearMessages(builder: *ErrorBuilder) void {
     builder.message_count = 0;
 }
 
-pub fn write(builder: *ErrorBuilder, writer: anytype, tty_config: std.debug.TTY.Config) !void {
+pub fn write(builder: *ErrorBuilder, writer: anytype, tty_config: std.io.tty.Config) !void {
     for (builder.files.keys(), builder.files.values()) |file_name, file| {
         if (file.messages.items.len == 0) continue;
 
@@ -116,15 +116,15 @@ pub fn write(builder: *ErrorBuilder, writer: anytype, tty_config: std.debug.TTY.
                 .info => "info",
                 .debug => "debug",
             };
-            const color: std.debug.TTY.Color = switch (item.level) {
-                .err => .Red,
-                .warn => .Yellow,
-                .info => .White,
-                .debug => .White,
+            const color: std.io.tty.Color = switch (item.level) {
+                .err => .red,
+                .warn => .yellow,
+                .info => .white,
+                .debug => .white,
             };
             try tty_config.setColor(writer, color);
             try writer.print(" {s}: ", .{level_txt});
-            try tty_config.setColor(writer, .Reset);
+            try tty_config.setColor(writer, .reset);
             try writer.writeAll(item.message);
         }
 
@@ -137,7 +137,7 @@ pub fn writeDebug(builder: *ErrorBuilder) void {
     std.debug.getStderrMutex().lock();
     defer std.debug.getStderrMutex().unlock();
     const stderr = std.io.getStdErr();
-    const tty_config = std.debug.detectTTYConfig(stderr);
+    const tty_config = std.io.tty.detectConfig(stderr);
     // does zig trim the output or why is this needed?
     stderr.writeAll(" ") catch return;
     nosuspend builder.write(stderr.writer(), tty_config) catch return;
