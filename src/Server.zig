@@ -1560,6 +1560,7 @@ pub fn create(
             .allocator = allocator,
             .config = config,
             .runtime_zig_version = &server.runtime_zig_version,
+            .uris_that_import_this = .{},
         },
         .builtin_completions = null,
         .recording_enabled = recording_enabled,

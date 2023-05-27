@@ -158,22 +158,14 @@ fn gatherReferences(
         dependencies.deinit(allocator);
     }
 
-    for (analyser.store.handles.values()) |handle| {
-        if (skip_std_references and std.mem.indexOf(u8, handle.uri, "std") != null) {
-            if (!include_decl or !std.mem.eql(u8, handle.uri, curr_handle.uri))
-                continue;
-        }
-
-        var handle_dependencies = std.ArrayListUnmanaged([]const u8){};
-        defer handle_dependencies.deinit(allocator);
-        try analyser.store.collectDependencies(allocator, handle.*, &handle_dependencies);
-
-        try dependencies.ensureUnusedCapacity(allocator, handle_dependencies.items.len);
-        for (handle_dependencies.items) |uri| {
-            var gop = dependencies.getOrPutAssumeCapacity(uri);
-            if (gop.found_existing) {
-                allocator.free(uri);
+    if (analyser.store.uris_that_import_this.get(curr_handle.uri)) |a| {
+        var ref_it = a.iterator();
+        while (ref_it.next()) |entry| {
+            if (skip_std_references and std.mem.indexOf(u8, entry.key_ptr.*, "std") != null) {
+                if (!include_decl or !std.mem.eql(u8, entry.key_ptr.*, curr_handle.uri))
+                    continue;
             }
+            try dependencies.put(allocator, entry.key_ptr.*, {});
         }
     }
 

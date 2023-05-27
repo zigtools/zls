@@ -71,8 +71,6 @@ pub const Handle = struct {
     document_scope: analysis.DocumentScope,
     /// Contains one entry for every import in the document (this_handle -> [other_handle_0, ...])
     import_uris: std.ArrayListUnmanaged(Uri) = .{},
-    /// Contains one entry for every document that imports this document ([other_handle_0, ...] -> this_handle)
-    uris_that_import_this: std.StringArrayHashMapUnmanaged(void) = .{},
     /// Contains one entry for every cimport in the document
     cimports: std.MultiArrayList(CImportHandle) = .{},
 
@@ -98,7 +96,6 @@ pub const Handle = struct {
             allocator.free(import_uri);
         }
         self.import_uris.deinit(allocator);
-        self.uris_that_import_this.deinit(allocator); // keys held by dependents so they are not freed
 
         for (self.cimports.items(.source)) |source| {
             allocator.free(source);
@@ -125,7 +122,17 @@ handles: std.StringArrayHashMapUnmanaged(*Handle) = .{},
 build_files: std.StringArrayHashMapUnmanaged(BuildFile) = .{},
 cimports: std.AutoArrayHashMapUnmanaged(Hash, translate_c.Result) = .{},
 
+/// Contains one entry for every document that imports this document ([other_handle_0, ...] -> this_handle)
+uris_that_import_this: std.StringArrayHashMapUnmanaged(std.StringArrayHashMapUnmanaged(void)) = .{},
+
 pub fn deinit(self: *DocumentStore) void {
+    var urimaps = self.uris_that_import_this.iterator();
+    while (urimaps.next()) |entry| {
+        entry.value_ptr.deinit(self.allocator);
+    }
+
+    self.uris_that_import_this.deinit(self.allocator); // keys held by dependents so they are not freed
+
     for (self.handles.values()) |handle| {
         handle.deinit(self.allocator);
         self.allocator.destroy(handle);
@@ -257,8 +264,8 @@ pub fn refreshDocument(self: *DocumentStore, uri: Uri, new_text: [:0]const u8) !
 
     var new_import_uris = try self.collectImportUris(handle.*);
     for (handle.import_uris.items) |import_uri| {
-        if (self.handles.get(import_uri)) |other_handle|
-            _ = other_handle.uris_that_import_this.swapRemove(uri);
+        if (self.uris_that_import_this.getPtr(import_uri)) |other_handle|
+            _ = other_handle.swapRemove(uri);
         self.allocator.free(import_uri);
     }
     const old_import_count = handle.import_uris.items.len;
@@ -378,6 +385,11 @@ fn garbageCollectionImports(self: *DocumentStore) error{OutOfMemory}!void {
     while (it.next()) |handle_index| {
         const handle = self.handles.values()[handle_index];
         log.debug("Closing document {s}", .{handle.uri});
+
+        for (handle.import_uris.items) |uri| {
+            _ = (self.uris_that_import_this.getPtr(uri) orelse @panic("Literally impossible like this is illegal.")).swapRemove(handle.uri);
+        }
+
         self.handles.swapRemoveAt(handle_index);
         handle.deinit(self.allocator);
         self.allocator.destroy(handle);
@@ -887,8 +899,12 @@ fn collectImportUris(self: *DocumentStore, handle: Handle) error{OutOfMemory}!st
         if (maybe_uri) |uri| {
             // The raw import strings are owned by the document and do not need to be freed here.
             imports.items[i] = uri;
-            if (self.getOrLoadHandle(uri)) |other_handle|
-                try @constCast(other_handle).uris_that_import_this.put(self.allocator, handle.uri, {});
+
+            var map = try self.uris_that_import_this.getOrPut(self.allocator, try self.allocator.dupe(u8, uri));
+            if (!map.found_existing) map.value_ptr.* = .{};
+
+            try map.value_ptr.put(self.allocator, try self.allocator.dupe(u8, handle.uri), {});
+
             i += 1;
         } else {
             _ = imports.swapRemove(i);
