@@ -14,7 +14,12 @@ pub const Builder = struct {
     handle: *const DocumentStore.Handle,
     offset_encoding: offsets.Encoding,
 
-    pub fn generateCodeAction(builder: *Builder, diagnostic: types.Diagnostic, actions: *std.ArrayListUnmanaged(types.CodeAction)) error{OutOfMemory}!void {
+    pub fn generateCodeAction(
+        builder: *Builder,
+        diagnostic: types.Diagnostic,
+        actions: *std.ArrayListUnmanaged(types.CodeAction),
+        remove_capture_actions: *std.AutoHashMapUnmanaged(types.Range, void),
+    ) error{OutOfMemory}!void {
         const kind = DiagnosticKind.parse(diagnostic.message) orelse return;
 
         const loc = offsets.rangeToLoc(builder.handle.text, diagnostic.range, builder.offset_encoding);
@@ -24,12 +29,12 @@ pub const Builder = struct {
                 .@"function parameter" => try handleUnusedFunctionParameter(builder, actions, loc),
                 .@"local constant" => try handleUnusedVariableOrConstant(builder, actions, loc),
                 .@"local variable" => try handleUnusedVariableOrConstant(builder, actions, loc),
-                .@"switch tag capture", .capture => try handleUnusedCapture(builder, actions, loc),
+                .@"switch tag capture", .capture => try handleUnusedCapture(builder, actions, loc, remove_capture_actions),
             },
             .non_camelcase_fn => try handleNonCamelcaseFunction(builder, actions, loc),
             .pointless_discard => try handlePointlessDiscard(builder, actions, loc),
             .omit_discard => |id| switch (id) {
-                .@"error capture" => try handleUnusedCapture(builder, actions, loc),
+                .@"error capture" => try handleUnusedCapture(builder, actions, loc, remove_capture_actions),
             },
             // the undeclared identifier may be a discard
             .undeclared_identifier => try handlePointlessDiscard(builder, actions, loc),
@@ -164,7 +169,12 @@ fn handleUnusedVariableOrConstant(builder: *Builder, actions: *std.ArrayListUnma
     });
 }
 
-fn handleUnusedCapture(builder: *Builder, actions: *std.ArrayListUnmanaged(types.CodeAction), loc: offsets.Loc) !void {
+fn handleUnusedCapture(
+    builder: *Builder,
+    actions: *std.ArrayListUnmanaged(types.CodeAction),
+    loc: offsets.Loc,
+    remove_capture_actions: *std.AutoHashMapUnmanaged(types.Range, void),
+) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -199,23 +209,8 @@ fn handleUnusedCapture(builder: *Builder, actions: *std.ArrayListUnmanaged(types
     // prevent adding duplicate 'remove capture' action.
     // search for a matching action by comparing ranges.
     const remove_cap_loc = builder.createTextEditLoc(capture_loc, "");
-    const found_remove_capture_action = outer: for (actions.items) |item| {
-        const edit = item.edit orelse continue;
-        const changes = edit.changes orelse continue;
-        var iter = changes.iterator();
-        while (iter.next()) |entry| {
-            const t_edits = entry.value_ptr.*;
-            for (t_edits) |t_edit| {
-                if (remove_cap_loc.range.start.line == t_edit.range.start.line and
-                    remove_cap_loc.range.start.character == t_edit.range.start.character and
-                    remove_cap_loc.range.end.line == t_edit.range.end.line and
-                    remove_cap_loc.range.end.character == t_edit.range.end.character)
-                    break :outer true;
-            }
-        }
-    } else false;
-
-    if (found_remove_capture_action)
+    const gop = try remove_capture_actions.getOrPut(builder.arena, remove_cap_loc.range);
+    if (gop.found_existing)
         try actions.appendSlice(builder.arena, &.{ action1, action2 })
     else {
         const action0 = types.CodeAction{
