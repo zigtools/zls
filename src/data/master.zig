@@ -183,8 +183,6 @@ pub const builtins = [_]Builtin{
         .snippet = "@boolToInt(${1:value: bool})",
         .documentation =
         \\Converts `true` to `@as(u1, 1)` and `false` to `@as(u1, 0)`.
-        \\
-        \\If the value is known at compile-time, the return type is `comptime_int` instead of `u1`.
         ,
         .arguments = &.{
             "value: bool",

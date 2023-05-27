@@ -452,8 +452,8 @@ pub const Key = union(enum) {
         var key: Key = ty;
         while (true) switch (key) {
             .simple_type => |simple| switch (simple) {
-                .usize => return .{ .signedness = .signed, .bits = target.cpu.arch.ptrBitWidth() },
-                .isize => return .{ .signedness = .unsigned, .bits = target.cpu.arch.ptrBitWidth() },
+                .usize => return .{ .signedness = .signed, .bits = target.ptrBitWidth() },
+                .isize => return .{ .signedness = .unsigned, .bits = target.ptrBitWidth() },
 
                 .c_char => return .{ .signedness = .signed, .bits = target.c_type_bit_size(.char) },
                 .c_short => return .{ .signedness = .signed, .bits = target.c_type_bit_size(.short) },

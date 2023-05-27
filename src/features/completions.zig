@@ -993,22 +993,22 @@ fn completeFileSystemStringLiteral(
                 else => unreachable,
             };
             switch (entry.kind) {
-                .File => if (expected_extension) |expected| {
+                .file => if (expected_extension) |expected| {
                     const actual_extension = std.fs.path.extension(entry.name);
                     if (!std.mem.eql(u8, actual_extension, expected)) continue;
                 },
-                .Directory => {},
+                .directory => {},
                 else => continue,
             }
 
             _ = try completions.getOrPut(arena, types.CompletionItem{
                 .label = try arena.dupe(u8, entry.name),
                 .detail = if (pos_context == .cinclude_string_literal) path else null,
-                .insertText = if (entry.kind == .Directory)
+                .insertText = if (entry.kind == .directory)
                     try std.fmt.allocPrint(arena, "{s}/", .{entry.name})
                 else
                     null,
-                .kind = if (entry.kind == .File) .File else .Folder,
+                .kind = if (entry.kind == .file) .File else .Folder,
             });
         }
     }
