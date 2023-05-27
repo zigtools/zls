@@ -244,8 +244,9 @@ pub fn autofix(server: *Server, allocator: std.mem.Allocator, handle: *const Doc
     };
 
     var actions = std.ArrayListUnmanaged(types.CodeAction){};
+    var remove_capture_actions = std.AutoHashMapUnmanaged(types.Range, void){};
     for (diagnostics.items) |diagnostic| {
-        try builder.generateCodeAction(diagnostic, &actions);
+        try builder.generateCodeAction(diagnostic, &actions, &remove_capture_actions);
     }
 
     var text_edits = std.ArrayListUnmanaged(types.TextEdit){};
@@ -1189,8 +1190,9 @@ fn codeActionHandler(server: *Server, request: types.CodeActionParams) Error!?[]
     }
 
     var actions = std.ArrayListUnmanaged(types.CodeAction){};
+    var remove_capture_actions = std.AutoHashMapUnmanaged(types.Range, void){};
     for (diagnostics.items) |diagnostic| {
-        try builder.generateCodeAction(diagnostic, &actions);
+        try builder.generateCodeAction(diagnostic, &actions, &remove_capture_actions);
     }
 
     return actions.items;
