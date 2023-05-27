@@ -478,13 +478,17 @@ fn getCaptureLoc(text: []const u8, loc: offsets.Loc) ?offsets.Loc {
     const start_pipe_position = blk: {
         var i = loc.start;
         while (true) : (i -= 1) {
-            if (text[i] == '|' or i == 0) break;
+            if (text[i] == '|') break;
+            if (i == 0) return null;
         }
         break :blk i;
     };
 
     const end_pipe_position = (std.mem.indexOfScalarPos(u8, text, start_pipe_position + 1, '|') orelse
         return null) + 1;
+
+    const trimmed = std.mem.trim(u8, text[start_pipe_position + 1 .. end_pipe_position - 1], &std.ascii.whitespace);
+    if (trimmed.len == 0) return null;
 
     return .{ .start = start_pipe_position, .end = end_pipe_position };
 }
@@ -504,10 +508,13 @@ test "getCaptureLoc" {
         const captext = text[caploc.start..caploc.end];
         try std.testing.expectEqualStrings(text, captext);
     }
-    {
-        const caploc = getCaptureLoc("||", .{ .start = 1, .end = 2 });
-        try std.testing.expect(caploc == null);
-    }
+
+    try std.testing.expect(getCaptureLoc("||", .{ .start = 1, .end = 2 }) == null);
+    try std.testing.expect(getCaptureLoc(" |", .{ .start = 1, .end = 2 }) == null);
+    try std.testing.expect(getCaptureLoc("| ", .{ .start = 1, .end = 2 }) == null);
+    try std.testing.expect(getCaptureLoc("||", .{ .start = 1, .end = 1 }) == null);
+    try std.testing.expect(getCaptureLoc("| |", .{ .start = 1, .end = 3 }) == null);
+    try std.testing.expect(getCaptureLoc("|    |", .{ .start = 1, .end = 6 }) == null);
 }
 
 fn isSymbolChar(char: u8) bool {
