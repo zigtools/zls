@@ -24,13 +24,11 @@ pub const Builder = struct {
                 .@"function parameter" => try handleUnusedFunctionParameter(builder, actions, loc),
                 .@"local constant" => try handleUnusedVariableOrConstant(builder, actions, loc),
                 .@"local variable" => try handleUnusedVariableOrConstant(builder, actions, loc),
-                .@"loop index capture" => try handleUnusedIndexCapture(builder, actions, loc),
-                .capture => try handleUnusedCapture(builder, actions, loc),
+                .@"switch tag capture", .capture => try handleUnusedCapture(builder, actions, loc),
             },
             .non_camelcase_fn => try handleNonCamelcaseFunction(builder, actions, loc),
             .pointless_discard => try handlePointlessDiscard(builder, actions, loc),
             .omit_discard => |id| switch (id) {
-                .@"index capture" => try handleUnusedIndexCapture(builder, actions, loc),
                 .@"error capture" => try handleUnusedCapture(builder, actions, loc),
             },
             // the undeclared identifier may be a discard
@@ -166,64 +164,67 @@ fn handleUnusedVariableOrConstant(builder: *Builder, actions: *std.ArrayListUnma
     });
 }
 
-fn handleUnusedIndexCapture(builder: *Builder, actions: *std.ArrayListUnmanaged(types.CodeAction), loc: offsets.Loc) !void {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    const capture_locs = getCaptureLoc(builder.handle.text, loc, true) orelse return;
-
-    // TODO support discarding without modifying the capture
-    // by adding a discard in the block scope
-    const is_value_discarded = std.mem.eql(u8, offsets.locToSlice(builder.handle.text, capture_locs.value), "_");
-    if (is_value_discarded) {
-        // |_, i| ->
-        // TODO fix formatting
-        try actions.append(builder.arena, .{
-            .title = "remove capture",
-            .kind = .quickfix,
-            .isPreferred = true,
-            .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditLoc(capture_locs.loc, "")}),
-        });
-    } else {
-        // |v, i| -> |v|
-        // |v, _| -> |v|
-        try actions.append(builder.arena, .{
-            .title = "remove index capture",
-            .kind = .quickfix,
-            .isPreferred = true,
-            .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditLoc(
-                .{ .start = capture_locs.value.end, .end = capture_locs.loc.end - 1 },
-                "",
-            )}),
-        });
-    }
-}
-
 fn handleUnusedCapture(builder: *Builder, actions: *std.ArrayListUnmanaged(types.CodeAction), loc: offsets.Loc) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const capture_locs = getCaptureLoc(builder.handle.text, loc, false) orelse return;
+    const capture_loc = getCaptureLoc(builder.handle.text, loc) orelse return;
 
-    // TODO support discarding without modifying the capture
-    // by adding a discard in the block scope
-    if (capture_locs.index != null) {
-        // |v, i| -> |_, i|
-        try actions.append(builder.arena, .{
-            .title = "discard capture",
-            .kind = .quickfix,
-            .isPreferred = true,
-            .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditLoc(capture_locs.value, "_")}),
-        });
-    } else {
-        // |v|    ->
-        // TODO fix formatting
-        try actions.append(builder.arena, .{
+    // look for next non-whitespace after last '|'. if its a '{' we can insert discards.
+    // this means bare loop/switch captures (w/out curlies) aren't supported.
+    var block_start = capture_loc.end + 1;
+    while (block_start < builder.handle.text.len and
+        std.ascii.isWhitespace(builder.handle.text[block_start])) : (block_start += 1)
+    {}
+    if (builder.handle.text[block_start] != '{') {
+        return;
+    }
+
+    const block_start_loc = offsets.Loc{ .start = block_start + 1, .end = block_start + 1 };
+    const identifier_name = builder.handle.text[loc.start..loc.end];
+    const new_text = try createDiscardText(builder, identifier_name, block_start, true);
+    const action1 = .{
+        .title = "discard capture",
+        .kind = .@"source.fixAll",
+        .isPreferred = true,
+        .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditLoc(block_start_loc, new_text)}),
+    };
+    const action2 = .{
+        .title = "discard capture name",
+        .kind = .quickfix,
+        .isPreferred = false,
+        .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditLoc(loc, "_")}),
+    };
+
+    // prevent adding duplicate 'remove capture' action.
+    // search for a matching action by comparing ranges.
+    const remove_cap_loc = builder.createTextEditLoc(capture_loc, "");
+    const found_remove_capture_action = outer: for (actions.items) |item| {
+        const edit = item.edit orelse continue;
+        const changes = edit.changes orelse continue;
+        var iter = changes.iterator();
+        while (iter.next()) |entry| {
+            const t_edits = entry.value_ptr.*;
+            for (t_edits) |t_edit| {
+                if (remove_cap_loc.range.start.line == t_edit.range.start.line and
+                    remove_cap_loc.range.start.character == t_edit.range.start.character and
+                    remove_cap_loc.range.end.line == t_edit.range.end.line and
+                    remove_cap_loc.range.end.character == t_edit.range.end.character)
+                    break :outer true;
+            }
+        }
+    } else false;
+
+    if (found_remove_capture_action)
+        try actions.appendSlice(builder.arena, &.{ action1, action2 })
+    else {
+        const action0 = types.CodeAction{
             .title = "remove capture",
             .kind = .quickfix,
-            .isPreferred = true,
-            .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditLoc(capture_locs.loc, "")}),
-        });
+            .isPreferred = false,
+            .edit = try builder.createWorkspaceEdit(&.{remove_cap_loc}),
+        };
+        try actions.appendSlice(builder.arena, &.{ action0, action1, action2 });
     }
 }
 
@@ -374,13 +375,11 @@ const DiagnosticKind = union(enum) {
         @"function parameter",
         @"local constant",
         @"local variable",
-        @"loop index capture",
+        @"switch tag capture",
         capture,
     };
 
     const DiscardCat = enum {
-        // "discard of index capture; omit it instead"
-        @"index capture",
         // "discard of error capture; omit it instead"
         @"error capture",
     };
@@ -478,126 +477,42 @@ fn getDiscardLoc(text: []const u8, loc: offsets.Loc) ?offsets.Loc {
     };
 }
 
-const CaptureLocs = struct {
-    loc: offsets.Loc,
-    value: offsets.Loc,
-    index: ?offsets.Loc,
-};
-
-/// takes the location of an identifier which is part of a payload `|value, index|`
-/// and returns the location from '|' until '|' or null on failure
-/// use `is_index_payload` to indicate whether `loc` points to `value` or `index`
-fn getCaptureLoc(text: []const u8, loc: offsets.Loc, is_index_payload: bool) ?CaptureLocs {
-    const value_end = if (!is_index_payload) loc.end else found: {
-        // move back until we find a comma
-        const comma_position = found_comma: {
-            var i = loc.start - 1;
-            while (i != 0) : (i -= 1) {
-                switch (text[i]) {
-                    ' ' => continue,
-                    ',' => break :found_comma i,
-                    else => return null,
-                }
-            } else return null;
-        };
-
-        // trim space
-        var i = comma_position - 1;
-        while (i != 0) : (i -= 1) {
-            switch (text[i]) {
-                ' ' => continue,
-                else => {
-                    if (!isSymbolChar(text[i])) return null;
-                    break :found i + 1;
-                },
-            }
-        } else return null;
-    };
-
-    const value_start = if (!is_index_payload) loc.start else found: {
-        // move back until we find a non identifier character
-        var i = value_end - 1;
-        while (i != 0) : (i -= 1) {
-            if (isSymbolChar(text[i])) continue;
-            switch (text[i]) {
-                ' ', '|', '*' => break :found i + 1,
-                else => return null,
-            }
-        } else return null;
-    };
-
-    var index: ?offsets.Loc = null;
-
-    if (is_index_payload) {
-        index = loc;
-    } else blk: {
-        // move forward until we find a comma
-        const comma_position = found_comma: {
-            var i = value_end;
-            while (i < text.len) : (i += 1) {
-                switch (text[i]) {
-                    ' ' => continue,
-                    ',' => break :found_comma i,
-                    else => break :blk,
-                }
-            }
-            break :blk;
-        };
-
-        // trim space
-        const index_start = found_start: {
-            var i = comma_position + 1;
-            while (i < text.len) : (i += 1) {
-                switch (text[i]) {
-                    ' ' => continue,
-                    else => {
-                        if (!isSymbolChar(text[i])) break :blk;
-                        break :found_start i;
-                    },
-                }
-            }
-            break :blk;
-        };
-
-        // move forward until we find a non identifier character
-        var i = index_start + 1;
-        while (i < text.len) : (i += 1) {
-            if (isSymbolChar(text[i])) continue;
-            index = offsets.Loc{
-                .start = index_start,
-                .end = i,
-            };
-            break;
+/// takes the location of a capture ie `value` from `...|value...|...`.
+/// returns the location from '|' until '|'
+fn getCaptureLoc(text: []const u8, loc: offsets.Loc) ?offsets.Loc {
+    const start_pipe_position = blk: {
+        var i = loc.start;
+        while (true) : (i -= 1) {
+            if (text[i] == '|' or i == 0) break;
         }
+        break :blk i;
+    };
+
+    const end_pipe_position = (std.mem.indexOfScalarPos(u8, text, start_pipe_position + 1, '|') orelse
+        return null) + 1;
+
+    return .{ .start = start_pipe_position, .end = end_pipe_position };
+}
+
+test "getCaptureLoc" {
+    {
+        const text = "|i|";
+        const caploc = getCaptureLoc(text, .{ .start = 1, .end = 2 }) orelse
+            return std.testing.expect(false);
+        const captext = text[caploc.start..caploc.end];
+        try std.testing.expectEqualStrings(text, captext);
     }
-
-    const start_pipe_position = found: {
-        var i = value_start - 1;
-        while (i != 0) : (i -= 1) {
-            switch (text[i]) {
-                ' ' => continue,
-                '|' => break :found i,
-                else => return null,
-            }
-        } else return null;
-    };
-
-    const end_pipe_position = found: {
-        var i: usize = if (index) |index_loc| index_loc.end else value_end;
-        while (i < text.len) : (i += 1) {
-            switch (text[i]) {
-                ' ' => continue,
-                '|' => break :found i + 1,
-                else => return null,
-            }
-        } else return null;
-    };
-
-    return CaptureLocs{
-        .loc = .{ .start = start_pipe_position, .end = end_pipe_position },
-        .value = .{ .start = value_start, .end = value_end },
-        .index = index,
-    };
+    {
+        const text = "|i, jjj, foobar|";
+        const caploc = getCaptureLoc(text, .{ .start = 1, .end = 17 }) orelse
+            return std.testing.expect(false);
+        const captext = text[caploc.start..caploc.end];
+        try std.testing.expectEqualStrings(text, captext);
+    }
+    {
+        const caploc = getCaptureLoc("||", .{ .start = 1, .end = 2 });
+        try std.testing.expect(caploc == null);
+    }
 }
 
 fn isSymbolChar(char: u8) bool {
