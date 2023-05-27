@@ -261,7 +261,7 @@ pub fn findZig(allocator: std.mem.Allocator) !?[]const u8 {
         const file = std.fs.openFileAbsolute(full_path, .{}) catch continue;
         defer file.close();
         const stat = file.stat() catch continue;
-        if (stat.kind == .Directory) continue;
+        if (stat.kind == .directory) continue;
 
         return try allocator.dupe(u8, full_path);
     }

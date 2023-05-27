@@ -7,7 +7,7 @@ const zls_version = std.builtin.Version{ .major = 0, .minor = 11, .patch = 0 };
 pub fn build(b: *std.build.Builder) !void {
     comptime {
         const current_zig = builtin.zig_version;
-        const min_zig = std.SemanticVersion.parse("0.11.0-dev.3134+018b743c7") catch unreachable; // std.http: do -> wait, fix redirects
+        const min_zig = std.SemanticVersion.parse("0.11.0-dev.3312+ab37ab33c") catch unreachable; // poly1305: properly cast the mask from u1 to u64
         if (current_zig.order(min_zig) == .lt) {
             @compileError(std.fmt.comptimePrint("Your Zig version v{} does not meet the minimum build requirement of v{}", .{ current_zig, min_zig }));
         }
