@@ -120,15 +120,28 @@ const Builder = struct {
         if (loc.start < self.previous_source_index) return;
         switch (token_type) {
             .type,
-            .parameter,
-            .variable,
             .enumMember,
             .property,
             .errorTag,
             .function,
-            .label,
+            .namespace,
+            .@"struct",
+            .@"enum",
+            .@"union",
+            .@"opaque",
             => {},
-            else => if (self.limited) return,
+
+            .parameter,
+            .variable,
+            .keyword,
+            .comment,
+            .string,
+            .number,
+            .operator,
+            .builtin,
+            .label,
+            .keywordLiteral,
+            => if (self.limited) return,
         }
 
         const delta_text = self.handle.tree.source[self.previous_source_index..loc.start];
