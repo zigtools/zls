@@ -115,9 +115,10 @@ const Builder = struct {
         }
     }
 
-    fn addDirect(self: *Builder, token_type: TokenType, token_modifiers: TokenModifiers, loc: offsets.Loc) error{OutOfMemory}!void {
+    fn addDirect(self: *Builder, param_token_type: TokenType, token_modifiers: TokenModifiers, loc: offsets.Loc) error{OutOfMemory}!void {
         std.debug.assert(loc.start <= loc.end);
         if (loc.start < self.previous_source_index) return;
+        var token_type = param_token_type;
         switch (token_type) {
             .type,
             .enumMember,
@@ -127,9 +128,11 @@ const Builder = struct {
             .namespace,
             .@"struct",
             .@"enum",
+            => {},
+
             .@"union",
             .@"opaque",
-            => {},
+            => token_type = .type,
 
             .parameter,
             .variable,
