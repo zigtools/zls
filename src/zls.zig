@@ -29,6 +29,7 @@ pub const completions = @import("features/completions.zig");
 pub const goto = @import("features/goto.zig");
 pub const hover_handler = @import("features/hover.zig");
 pub const selection_range = @import("features/selection_range.zig");
+pub const diagnostics = @import("features/diagnostics.zig");
 
 comptime {
     const std = @import("std");
