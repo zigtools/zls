@@ -463,6 +463,16 @@ test "completion - usingnamespace" {
         // TODO private should not be visible
         .{ .label = "private", .kind = .Function, .detail = "fn private() !void" },
     });
+    try testCompletion(
+        \\const S1 = struct {
+        \\    usingnamespace struct {
+        \\        pub fn inner() void {}
+        \\    };
+        \\};
+        \\const foo = S1.<cursor>
+    , &.{
+        .{ .label = "inner", .kind = .Function, .detail = "fn inner() void" },
+    });
 }
 
 test "completion - block" {

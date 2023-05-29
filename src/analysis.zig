@@ -2615,10 +2615,9 @@ pub fn makeDocumentScope(allocator: std.mem.Allocator, tree: Ast) !DocumentScope
         .allocator = allocator,
         .scopes = &document_scope.scopes,
         .current_scope = &current_scope,
-        .tree = tree,
         .errors = &document_scope.error_completions,
         .enums = &document_scope.enum_completions,
-    }, 0);
+    }, tree, 0);
 
     return document_scope;
 }
@@ -2627,7 +2626,6 @@ const ScopeContext = struct {
     allocator: std.mem.Allocator,
     scopes: *std.MultiArrayList(Scope),
     current_scope: *Scope.Index,
-    tree: Ast,
     enums: *CompletionSet,
     errors: *CompletionSet,
 
@@ -2651,13 +2649,12 @@ const ScopeContext = struct {
     }
 };
 
-fn makeInnerScope(context: ScopeContext, node_idx: Ast.Node.Index) error{OutOfMemory}!void {
+fn makeInnerScope(context: ScopeContext, tree: Ast, node_idx: Ast.Node.Index) error{OutOfMemory}!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
     const allocator = context.allocator;
     const scopes = context.scopes;
-    const tree = context.tree;
     const tags = tree.nodes.items(.tag);
 
     const scope_index = try context.pushScope(
@@ -2675,18 +2672,22 @@ fn makeInnerScope(context: ScopeContext, node_idx: Ast.Node.Index) error{OutOfMe
     errdefer uses.deinit(allocator);
 
     for (container_decl.ast.members) |decl| {
-        if (tags[decl] == .@"usingnamespace") {
-            try uses.append(allocator, decl);
-            continue;
+        try makeScopeInternal(context, tree, decl);
+
+        switch (tags[decl]) {
+            .@"usingnamespace" => {
+                try uses.append(allocator, decl);
+                continue;
+            },
+            .test_decl => {
+                try tests.append(allocator, decl);
+                continue;
+            },
+            else => {},
         }
 
-        try makeScopeInternal(context, decl);
         const name = getDeclName(tree, decl) orelse continue;
 
-        if (tags[decl] == .test_decl) {
-            try tests.append(allocator, decl);
-            continue;
-        }
         try scopes.items(.decls)[scope_index].put(allocator, name, .{ .ast_node = decl });
 
         if (container_decl.ast.enum_token != null) {
@@ -2713,13 +2714,13 @@ fn makeInnerScope(context: ScopeContext, node_idx: Ast.Node.Index) error{OutOfMe
 
 /// If `node_idx` is a block it's scope index will be returned
 /// Otherwise, a new scope will be created that will enclose `node_idx`
-fn makeBlockScopeInternal(context: ScopeContext, node_idx: Ast.Node.Index) error{OutOfMemory}!?usize {
+fn makeBlockScopeInternal(context: ScopeContext, tree: Ast, node_idx: Ast.Node.Index) error{OutOfMemory}!?usize {
     if (node_idx == 0) return null;
-    const tags = context.tree.nodes.items(.tag);
+    const tags = tree.nodes.items(.tag);
 
     // if node_idx is a block, the next scope will be a block so we store its index here
     const block_scope_index = context.scopes.len;
-    try makeScopeInternal(context, node_idx);
+    try makeScopeInternal(context, tree, node_idx);
 
     switch (tags[node_idx]) {
         .block,
@@ -2732,7 +2733,7 @@ fn makeBlockScopeInternal(context: ScopeContext, node_idx: Ast.Node.Index) error
         },
         else => {
             const new_scope = try context.pushScope(
-                offsets.nodeToLoc(context.tree, node_idx),
+                offsets.nodeToLoc(tree, node_idx),
                 .other,
             );
             context.popScope();
@@ -2741,16 +2742,17 @@ fn makeBlockScopeInternal(context: ScopeContext, node_idx: Ast.Node.Index) error
     }
 }
 
-fn makeScopeInternal(context: ScopeContext, node_idx: Ast.Node.Index) error{OutOfMemory}!void {
+fn makeScopeInternal(context: ScopeContext, tree: Ast, node_idx: Ast.Node.Index) error{OutOfMemory}!void {
     if (node_idx == 0) return;
 
     const allocator = context.allocator;
     const scopes = context.scopes;
-    const tree = context.tree;
+
     const tags = tree.nodes.items(.tag);
     const token_tags = tree.tokens.items(.tag);
     const data = tree.nodes.items(.data);
     const main_tokens = tree.nodes.items(.main_token);
+
     const node_tag = tags[node_idx];
 
     switch (node_tag) {
@@ -2767,9 +2769,7 @@ fn makeScopeInternal(context: ScopeContext, node_idx: Ast.Node.Index) error{OutO
         .tagged_union_two_trailing,
         .tagged_union_enum_tag,
         .tagged_union_enum_tag_trailing,
-        => {
-            try makeInnerScope(context, node_idx);
-        },
+        => try makeInnerScope(context, tree, node_idx),
         .error_set_decl => {
             const scope_index = try context.pushScope(
                 offsets.nodeToLoc(tree, node_idx),
@@ -2832,7 +2832,7 @@ fn makeScopeInternal(context: ScopeContext, node_idx: Ast.Node.Index) error{OutO
                 }
                 // Visit parameter types to pick up any error sets and enum
                 //   completions
-                try makeScopeInternal(context, param.type_expr);
+                try makeScopeInternal(context, tree, param.type_expr);
                 param_index += 1;
             }
 
@@ -2841,11 +2841,11 @@ fn makeScopeInternal(context: ScopeContext, node_idx: Ast.Node.Index) error{OutO
                 const return_type_node = data[data[node_idx].lhs].rhs;
 
                 // Visit the return type
-                try makeScopeInternal(context, return_type_node);
+                try makeScopeInternal(context, tree, return_type_node);
             }
 
             // Visit the function body
-            try makeScopeInternal(context, data[node_idx].rhs);
+            try makeScopeInternal(context, tree, data[node_idx].rhs);
         },
         .block,
         .block_semicolon,
@@ -2884,7 +2884,7 @@ fn makeScopeInternal(context: ScopeContext, node_idx: Ast.Node.Index) error{OutO
             const statements = ast.blockStatements(tree, node_idx, &buffer).?;
 
             for (statements) |idx| {
-                try makeScopeInternal(context, idx);
+                try makeScopeInternal(context, tree, idx);
                 if (tree.fullVarDecl(idx)) |var_decl| {
                     const name = tree.tokenSlice(var_decl.ast.mut_token + 1);
                     try scopes.items(.decls)[scope_index].put(allocator, name, .{ .ast_node = idx });
@@ -2896,7 +2896,7 @@ fn makeScopeInternal(context: ScopeContext, node_idx: Ast.Node.Index) error{OutO
         => {
             const if_node = ast.fullIf(tree, node_idx).?;
 
-            const then_scope = (try makeBlockScopeInternal(context, if_node.ast.then_expr)).?;
+            const then_scope = (try makeBlockScopeInternal(context, tree, if_node.ast.then_expr)).?;
 
             if (if_node.payload_token) |payload| {
                 const name_token = payload + @boolToInt(token_tags[payload] == .asterisk);
@@ -2911,7 +2911,7 @@ fn makeScopeInternal(context: ScopeContext, node_idx: Ast.Node.Index) error{OutO
             }
 
             if (if_node.ast.else_expr != 0) {
-                const else_scope = (try makeBlockScopeInternal(context, if_node.ast.else_expr)).?;
+                const else_scope = (try makeBlockScopeInternal(context, tree, if_node.ast.else_expr)).?;
                 if (if_node.error_token) |err_token| {
                     const name = tree.tokenSlice(err_token);
                     try scopes.items(.decls)[else_scope].put(allocator, name, .{ .ast_node = if_node.ast.else_expr });
@@ -2919,9 +2919,9 @@ fn makeScopeInternal(context: ScopeContext, node_idx: Ast.Node.Index) error{OutO
             }
         },
         .@"catch" => {
-            try makeScopeInternal(context, data[node_idx].lhs);
+            try makeScopeInternal(context, tree, data[node_idx].lhs);
 
-            const expr_scope = (try makeBlockScopeInternal(context, data[node_idx].rhs)).?;
+            const expr_scope = (try makeBlockScopeInternal(context, tree, data[node_idx].rhs)).?;
 
             const catch_token = main_tokens[node_idx] + 2;
             if (token_tags.len > catch_token and
@@ -2939,11 +2939,11 @@ fn makeScopeInternal(context: ScopeContext, node_idx: Ast.Node.Index) error{OutO
             // label_token: inline_token while (cond_expr) |payload_token| : (cont_expr) then_expr else else_expr
             const while_node = ast.fullWhile(tree, node_idx).?;
 
-            try makeScopeInternal(context, while_node.ast.cond_expr);
+            try makeScopeInternal(context, tree, while_node.ast.cond_expr);
 
-            const cont_scope = try makeBlockScopeInternal(context, while_node.ast.cont_expr);
-            const then_scope = (try makeBlockScopeInternal(context, while_node.ast.then_expr)).?;
-            const else_scope = try makeBlockScopeInternal(context, while_node.ast.else_expr);
+            const cont_scope = try makeBlockScopeInternal(context, tree, while_node.ast.cont_expr);
+            const then_scope = (try makeBlockScopeInternal(context, tree, while_node.ast.then_expr)).?;
+            const else_scope = try makeBlockScopeInternal(context, tree, while_node.ast.else_expr);
 
             if (while_node.label_token) |label| {
                 std.debug.assert(token_tags[label] == .identifier);
@@ -2993,11 +2993,11 @@ fn makeScopeInternal(context: ScopeContext, node_idx: Ast.Node.Index) error{OutO
             const for_node = ast.fullFor(tree, node_idx).?;
 
             for (for_node.ast.inputs) |input_node| {
-                try makeScopeInternal(context, input_node);
+                try makeScopeInternal(context, tree, input_node);
             }
 
-            const then_scope = (try makeBlockScopeInternal(context, for_node.ast.then_expr)).?;
-            const else_scope = try makeBlockScopeInternal(context, for_node.ast.else_expr);
+            const then_scope = (try makeBlockScopeInternal(context, tree, for_node.ast.then_expr)).?;
+            const else_scope = try makeBlockScopeInternal(context, tree, for_node.ast.else_expr);
 
             var capture_token = for_node.payload_token;
             for (for_node.ast.inputs) |input| {
@@ -3042,7 +3042,7 @@ fn makeScopeInternal(context: ScopeContext, node_idx: Ast.Node.Index) error{OutO
                 const switch_case: Ast.full.SwitchCase = tree.fullSwitchCase(case).?;
 
                 if (switch_case.payload_token) |payload| {
-                    const expr_index = (try makeBlockScopeInternal(context, switch_case.ast.target_expr)).?;
+                    const expr_index = (try makeBlockScopeInternal(context, tree, switch_case.ast.target_expr)).?;
                     // if payload is *name than get next token
                     const name_token = payload + @boolToInt(token_tags[payload] == .asterisk);
                     const name = tree.tokenSlice(name_token);
@@ -3055,132 +3055,14 @@ fn makeScopeInternal(context: ScopeContext, node_idx: Ast.Node.Index) error{OutO
                         },
                     });
 
-                    try makeScopeInternal(context, switch_case.ast.target_expr);
+                    try makeScopeInternal(context, tree, switch_case.ast.target_expr);
                 } else {
-                    try makeScopeInternal(context, switch_case.ast.target_expr);
+                    try makeScopeInternal(context, tree, switch_case.ast.target_expr);
                 }
             }
         },
-        .global_var_decl,
-        .local_var_decl,
-        .aligned_var_decl,
-        .simple_var_decl,
-        => {
-            const var_decl = tree.fullVarDecl(node_idx).?;
-            if (var_decl.ast.type_node != 0) {
-                try makeScopeInternal(context, var_decl.ast.type_node);
-            }
-
-            if (var_decl.ast.init_node != 0) {
-                try makeScopeInternal(context, var_decl.ast.init_node);
-            }
-        },
-        .call,
-        .call_comma,
-        .call_one,
-        .call_one_comma,
-        .async_call,
-        .async_call_comma,
-        .async_call_one,
-        .async_call_one_comma,
-        => {
-            var buf: [1]Ast.Node.Index = undefined;
-            const call = tree.fullCall(&buf, node_idx).?;
-
-            try makeScopeInternal(context, call.ast.fn_expr);
-            for (call.ast.params) |param|
-                try makeScopeInternal(context, param);
-        },
-        .struct_init,
-        .struct_init_comma,
-        .struct_init_dot,
-        .struct_init_dot_comma,
-        .struct_init_dot_two,
-        .struct_init_dot_two_comma,
-        .struct_init_one,
-        .struct_init_one_comma,
-        => {
-            var buf: [2]Ast.Node.Index = undefined;
-            const struct_init: Ast.full.StructInit = tree.fullStructInit(&buf, node_idx).?;
-
-            if (struct_init.ast.type_expr != 0)
-                try makeScopeInternal(context, struct_init.ast.type_expr);
-
-            for (struct_init.ast.fields) |field| {
-                try makeScopeInternal(context, field);
-            }
-        },
-        .array_init,
-        .array_init_comma,
-        .array_init_dot,
-        .array_init_dot_comma,
-        .array_init_dot_two,
-        .array_init_dot_two_comma,
-        .array_init_one,
-        .array_init_one_comma,
-        => {
-            var buf: [2]Ast.Node.Index = undefined;
-            const array_init: Ast.full.ArrayInit = tree.fullArrayInit(&buf, node_idx).?;
-
-            if (array_init.ast.type_expr != 0)
-                try makeScopeInternal(context, array_init.ast.type_expr);
-            for (array_init.ast.elements) |elem| {
-                try makeScopeInternal(context, elem);
-            }
-        },
-        .container_field,
-        .container_field_align,
-        .container_field_init,
-        => {
-            const field = tree.fullContainerField(node_idx).?;
-
-            try makeScopeInternal(context, field.ast.type_expr);
-            try makeScopeInternal(context, field.ast.align_expr);
-            try makeScopeInternal(context, field.ast.value_expr);
-        },
-        .builtin_call,
-        .builtin_call_comma,
-        .builtin_call_two,
-        .builtin_call_two_comma,
-        => {
-            var buffer: [2]Ast.Node.Index = undefined;
-            const params = ast.builtinCallParams(tree, node_idx, &buffer).?;
-
-            for (params) |param| {
-                try makeScopeInternal(context, param);
-            }
-        },
-        .ptr_type,
-        .ptr_type_aligned,
-        .ptr_type_bit_range,
-        .ptr_type_sentinel,
-        => {
-            const ptr_type: Ast.full.PtrType = ast.fullPtrType(tree, node_idx).?;
-
-            try makeScopeInternal(context, ptr_type.ast.sentinel);
-            try makeScopeInternal(context, ptr_type.ast.align_node);
-            try makeScopeInternal(context, ptr_type.ast.child_type);
-        },
-        .array_type_sentinel => {
-            const array_type: Ast.full.ArrayType = tree.fullArrayType(node_idx).?;
-
-            try makeScopeInternal(context, array_type.ast.elem_count);
-            try makeScopeInternal(context, array_type.ast.elem_type);
-            try makeScopeInternal(context, array_type.ast.sentinel);
-        },
-        .slice,
-        .slice_open,
-        .slice_sentinel,
-        => {
-            const slice: Ast.full.Slice = tree.fullSlice(node_idx).?;
-
-            try makeScopeInternal(context, slice.ast.sliced);
-            try makeScopeInternal(context, slice.ast.start);
-            try makeScopeInternal(context, slice.ast.end);
-            try makeScopeInternal(context, slice.ast.sentinel);
-        },
         .@"errdefer" => {
-            const expr_scope = (try makeBlockScopeInternal(context, data[node_idx].rhs)).?;
+            const expr_scope = (try makeBlockScopeInternal(context, tree, data[node_idx].rhs)).?;
 
             const payload_token = data[node_idx].lhs;
             if (payload_token != 0) {
@@ -3188,112 +3070,8 @@ fn makeScopeInternal(context: ScopeContext, node_idx: Ast.Node.Index) error{OutO
                 try scopes.items(.decls)[expr_scope].putNoClobber(allocator, name, .{ .ast_node = data[node_idx].rhs });
             }
         },
-
-        .switch_case,
-        .switch_case_inline,
-        .switch_case_one,
-        .switch_case_inline_one,
-        .@"asm",
-        .asm_simple,
-        .asm_output,
-        .asm_input,
-        .error_value,
-        .multiline_string_literal,
-        .string_literal,
-        .enum_literal,
-        .identifier,
-        .anyframe_literal,
-        .char_literal,
-        .number_literal,
-        .unreachable_literal,
-        .@"continue",
-        => {},
-
-        .test_decl,
-        .@"break",
-        .@"defer",
-        .anyframe_type,
-        => {
-            try makeScopeInternal(context, data[node_idx].rhs);
-        },
-
-        .@"return",
-        .@"resume",
-        .field_access,
-        .@"suspend",
-        .deref,
-        .@"try",
-        .@"await",
-        .optional_type,
-        .@"comptime",
-        .@"nosuspend",
-        .bool_not,
-        .negation,
-        .bit_not,
-        .negation_wrap,
-        .address_of,
-        .grouped_expression,
-        .unwrap_optional,
-        .@"usingnamespace",
-        => {
-            try makeScopeInternal(context, data[node_idx].lhs);
-        },
-
-        .equal_equal,
-        .bang_equal,
-        .less_than,
-        .greater_than,
-        .less_or_equal,
-        .greater_or_equal,
-        .assign_mul,
-        .assign_div,
-        .assign_mod,
-        .assign_add,
-        .assign_sub,
-        .assign_shl,
-        .assign_shr,
-        .assign_bit_and,
-        .assign_bit_xor,
-        .assign_bit_or,
-        .assign_mul_wrap,
-        .assign_add_wrap,
-        .assign_sub_wrap,
-        .assign_mul_sat,
-        .assign_add_sat,
-        .assign_sub_sat,
-        .assign_shl_sat,
-        .assign,
-        .merge_error_sets,
-        .mul,
-        .div,
-        .mod,
-        .array_mult,
-        .mul_wrap,
-        .mul_sat,
-        .add,
-        .sub,
-        .array_cat,
-        .add_wrap,
-        .sub_wrap,
-        .add_sat,
-        .sub_sat,
-        .shl,
-        .shl_sat,
-        .shr,
-        .bit_and,
-        .bit_xor,
-        .bit_or,
-        .@"orelse",
-        .bool_and,
-        .bool_or,
-        .array_type,
-        .array_access,
-        .error_union,
-        .for_range,
-        .switch_range,
-        => {
-            try makeScopeInternal(context, data[node_idx].lhs);
-            try makeScopeInternal(context, data[node_idx].rhs);
+        else => {
+            try ast.iterateChildren(tree, node_idx, context, error{OutOfMemory}, makeScopeInternal);
         },
     }
 }
