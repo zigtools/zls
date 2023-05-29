@@ -2693,18 +2693,18 @@ fn makeInnerScope(context: ScopeContext, tree: Ast, node_idx: Ast.Node.Index) er
 
         if (container_decl.ast.enum_token != null) {
             if (std.mem.eql(u8, name, "_")) return;
-            const Documentation = @TypeOf(@as(types.CompletionItem, undefined).documentation);
 
-            var doc: Documentation = if (try getDocComments(allocator, tree, decl, .markdown)) |docs| .{ .MarkupContent = types.MarkupContent{ .kind = .markdown, .value = docs } } else null;
+            const doc = try getDocComments(allocator, tree, decl, .markdown);
+            errdefer if (doc) |d| allocator.free(d);
             var gop_res = try context.doc_scope.enum_completions.getOrPut(allocator, .{
                 .label = name,
                 .kind = .Constant,
                 .insertText = name,
                 .insertTextFormat = .PlainText,
-                .documentation = doc,
+                .documentation = if (doc) |d| .{ .MarkupContent = types.MarkupContent{ .kind = .markdown, .value = d } } else null,
             });
             if (gop_res.found_existing) {
-                if (doc) |d| allocator.free(d.MarkupContent.value);
+                if (doc) |d| allocator.free(d);
             }
         }
     }
