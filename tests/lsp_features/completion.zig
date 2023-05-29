@@ -300,6 +300,16 @@ test "completion - enum" {
         .{ .label = "alpha", .kind = .Enum },
         .{ .label = "beta", .kind = .Enum },
     });
+    try testCompletion(
+        \\const E = enum {
+        \\    alpha,
+        \\    beta,
+        \\};
+        \\const foo: E = .<cursor>
+    , &.{
+        .{ .label = "alpha", .kind = .Enum },
+        .{ .label = "beta", .kind = .Enum },
+    });
 }
 
 test "completion - error union" {

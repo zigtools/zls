@@ -2657,6 +2657,7 @@ fn makeInnerScope(context: ScopeContext, tree: Ast, node_idx: Ast.Node.Index) er
     const allocator = context.allocator;
     const scopes = &context.doc_scope.scopes;
     const tags = tree.nodes.items(.tag);
+    const token_tags = tree.tokens.items(.tag);
 
     const scope_index = try context.pushScope(
         offsets.nodeToLoc(tree, node_idx),
@@ -2691,14 +2692,16 @@ fn makeInnerScope(context: ScopeContext, tree: Ast, node_idx: Ast.Node.Index) er
 
         try context.putDecl(scope_index, name, .{ .ast_node = decl });
 
-        if (container_decl.ast.enum_token != null) {
+        if ((node_idx != 0 and token_tags[container_decl.ast.main_token] == .keyword_enum) or
+            container_decl.ast.enum_token != null)
+        {
             if (std.mem.eql(u8, name, "_")) return;
 
             const doc = try getDocComments(allocator, tree, decl, .markdown);
             errdefer if (doc) |d| allocator.free(d);
             var gop_res = try context.doc_scope.enum_completions.getOrPut(allocator, .{
                 .label = name,
-                .kind = .Constant,
+                .kind = .Enum,
                 .insertText = name,
                 .insertTextFormat = .PlainText,
                 .documentation = if (doc) |d| .{ .MarkupContent = types.MarkupContent{ .kind = .markdown, .value = d } } else null,
