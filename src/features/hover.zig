@@ -48,12 +48,7 @@ pub fn hoverSymbol(server: *Server, decl_handle: Analyser.DeclWithHandle, markup
                 doc_str = try Analyser.collectDocComments(server.arena.allocator(), handle.tree, doc_comments, markup_kind, false);
             }
 
-            const first_token = ast.paramFirstToken(tree, param);
-            const last_token = ast.paramLastToken(tree, param);
-
-            const start = offsets.tokenToIndex(tree, first_token);
-            const end = offsets.tokenToLoc(tree, last_token).end;
-            break :def tree.source[start..end];
+            break :def ast.paramSlice(tree, param);
         },
         .pointer_payload,
         .array_payload,

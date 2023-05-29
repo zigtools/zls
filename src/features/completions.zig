@@ -370,14 +370,11 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: Analyser.Decl
                     try Analyser.collectDocComments(allocator, tree, doc_comments, doc_kind, false),
             } } else null;
 
-            const first_token = ast.paramFirstToken(tree, param);
-            const last_token = ast.paramLastToken(tree, param);
-
             try context.completions.append(allocator, .{
                 .label = tree.tokenSlice(param.name_token.?),
                 .kind = .Constant,
                 .documentation = doc,
-                .detail = tree.source[offsets.tokenToIndex(tree, first_token)..offsets.tokenToLoc(tree, last_token).end],
+                .detail = ast.paramSlice(tree, param),
                 .insertText = tree.tokenSlice(param.name_token.?),
                 .insertTextFormat = .PlainText,
             });

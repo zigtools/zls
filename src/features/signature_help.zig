@@ -7,12 +7,12 @@ const DocumentStore = @import("../DocumentStore.zig");
 const types = @import("../lsp.zig");
 const Server = @import("../Server.zig");
 const ast = @import("../ast.zig");
+const offsets = @import("../offsets.zig");
 
 const data = @import("../data/data.zig");
 
 fn fnProtoToSignatureInfo(analyser: *Analyser, alloc: std.mem.Allocator, commas: u32, skip_self_param: bool, handle: *const DocumentStore.Handle, fn_node: Ast.Node.Index, proto: Ast.full.FnProto) !types.SignatureInformation {
     const tree = handle.tree;
-    const token_starts = tree.tokens.items(.start);
     const label = Analyser.getFunctionSignature(tree, proto);
     const proto_comments = (try Analyser.getDocComments(alloc, tree, fn_node, .markdown)) orelse "";
 
@@ -29,32 +29,8 @@ fn fnProtoToSignatureInfo(analyser: *Analyser, alloc: std.mem.Allocator, commas:
         else
             "";
 
-        var param_label_start: usize = 0;
-        var param_label_end: usize = 0;
-        if (param.comptime_noalias) |cn| {
-            param_label_start = token_starts[cn];
-            param_label_end = param_label_start + tree.tokenSlice(cn).len;
-        }
-        if (param.name_token) |nt| {
-            if (param_label_start == 0)
-                param_label_start = token_starts[nt];
-            param_label_end = token_starts[nt] + tree.tokenSlice(nt).len;
-        }
-        if (param.anytype_ellipsis3) |ae| {
-            if (param_label_start == 0)
-                param_label_start = token_starts[ae];
-            param_label_end = token_starts[ae] + tree.tokenSlice(ae).len;
-        }
-        if (param.type_expr != 0) {
-            if (param_label_start == 0)
-                param_label_start = token_starts[tree.firstToken(param.type_expr)];
-
-            const last_param_tok = ast.lastToken(tree, param.type_expr);
-            param_label_end = token_starts[last_param_tok] + tree.tokenSlice(last_param_tok).len;
-        }
-        const param_label = tree.source[param_label_start..param_label_end];
         try params.append(alloc, .{
-            .label = .{ .string = param_label },
+            .label = .{ .string = ast.paramSlice(tree, param) },
             .documentation = .{ .MarkupContent = .{
                 .kind = .markdown,
                 .value = param_comments,

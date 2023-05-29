@@ -991,6 +991,15 @@ pub fn paramLastToken(tree: Ast, param: Ast.full.FnProto.Param) Ast.TokenIndex {
     return param.anytype_ellipsis3 orelse tree.lastToken(param.type_expr);
 }
 
+pub fn paramSlice(tree: Ast, param: Ast.full.FnProto.Param) []const u8 {
+    const first_token = paramFirstToken(tree, param);
+    const last_token = paramLastToken(tree, param);
+
+    const start = offsets.tokenToIndex(tree, first_token);
+    const end = offsets.tokenToLoc(tree, last_token).end;
+    return tree.source[start..end];
+}
+
 pub fn isContainer(tree: Ast, node: Ast.Node.Index) bool {
     return switch (tree.nodes.items(.tag)[node]) {
         .container_decl,
