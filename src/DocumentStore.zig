@@ -988,7 +988,10 @@ pub fn collectIncludeDirs(
 
     const native_include_dirs = try native_paths.include_dirs.toOwnedSlice();
     defer allocator.free(native_include_dirs);
-    include_dirs.appendSliceAssumeCapacity(native_include_dirs);
+    for (native_include_dirs) |native_include_dir| {
+        var array = std.ArrayListUnmanaged(u8).fromOwnedSliceSentinel(0, native_include_dir);
+        include_dirs.appendAssumeCapacity(try array.toOwnedSlice(allocator));
+    }
 
     for (build_file_includes_paths) |include_path| {
         const absolute_path = if (std.fs.path.isAbsolute(include_path))
@@ -1015,10 +1018,6 @@ pub fn resolveCImport(self: *DocumentStore, handle: Handle, node: Ast.Node.Index
 
     if (!std.process.can_spawn) return null;
 
-    // FIXME: Re-enable cimport resolution once https://github.com/ziglang/zig/issues/15025 is resolved
-    // Tracking issue: https://github.com/zigtools/zls/issues/1080
-    if (true) return null;
-
     const index = std.mem.indexOfScalar(Ast.Node.Index, handle.cimports.items(.node), node) orelse return null;
 
     const hash: Hash = handle.cimports.items(.hash)[index];
@@ -1039,12 +1038,19 @@ pub fn resolveCImport(self: *DocumentStore, handle: Handle, node: Ast.Node.Index
             return null;
         };
 
-        var result = (try translate_c.translate(
+        const maybe_result = translate_c.translate(
             self.allocator,
             self.config.*,
             include_dirs.items,
             source,
-        )) orelse return null;
+        ) catch |err| switch (err) {
+            error.OutOfMemory => |e| return e,
+            else => |e| {
+                log.err("failed to translate cimport: {}", .{e});
+                return null;
+            },
+        };
+        var result = maybe_result orelse return null;
 
         self.cimports.putNoClobber(self.allocator, hash, result) catch result.deinit(self.allocator);
 
