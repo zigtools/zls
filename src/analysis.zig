@@ -2548,7 +2548,7 @@ pub const DocumentScope = struct {
         self.scopes.deinit(allocator);
         self.decls.deinit(allocator);
 
-        for (self.error_completions.entries.items(.key)) |item| {
+        for (self.error_completions.keys()) |item| {
             if (item.detail) |detail| allocator.free(detail);
             switch (item.documentation orelse continue) {
                 .string => |str| allocator.free(str),
@@ -2556,7 +2556,7 @@ pub const DocumentScope = struct {
             }
         }
         self.error_completions.deinit(allocator);
-        for (self.enum_completions.entries.items(.key)) |item| {
+        for (self.enum_completions.keys()) |item| {
             if (item.detail) |detail| allocator.free(detail);
             switch (item.documentation orelse continue) {
                 .string => |str| allocator.free(str),
@@ -2607,11 +2607,8 @@ pub fn makeDocumentScope(allocator: std.mem.Allocator, tree: Ast) !DocumentScope
 
     try makeInnerScope(.{
         .allocator = allocator,
-        .scopes = &document_scope.scopes,
-        .decls = &document_scope.decls,
+        .doc_scope = &document_scope,
         .current_scope = &current_scope,
-        .errors = &document_scope.error_completions,
-        .enums = &document_scope.enum_completions,
     }, tree, 0);
 
     return document_scope;
@@ -2619,40 +2616,37 @@ pub fn makeDocumentScope(allocator: std.mem.Allocator, tree: Ast) !DocumentScope
 
 const ScopeContext = struct {
     allocator: std.mem.Allocator,
-    scopes: *std.MultiArrayList(Scope),
-    decls: *std.ArrayListUnmanaged(Declaration),
+    doc_scope: *DocumentScope,
     current_scope: *Scope.Index,
-    enums: *CompletionSet,
-    errors: *CompletionSet,
 
     fn pushScope(context: ScopeContext, loc: offsets.Loc, data: Scope.Data) error{OutOfMemory}!Scope.Index {
-        try context.scopes.append(context.allocator, .{
+        try context.doc_scope.scopes.append(context.allocator, .{
             .parent = context.current_scope.*,
             .loc = loc,
             .data = data,
         });
-        const new_scope = @intToEnum(Scope.Index, context.scopes.len - 1);
+        const new_scope = @intToEnum(Scope.Index, context.doc_scope.scopes.len - 1);
         if (context.current_scope.* != .none) {
-            try context.scopes.items(.child_scopes)[@enumToInt(context.current_scope.*)].append(context.allocator, new_scope);
+            try context.doc_scope.scopes.items(.child_scopes)[@enumToInt(context.current_scope.*)].append(context.allocator, new_scope);
         }
         context.current_scope.* = new_scope;
         return new_scope;
     }
 
     fn popScope(context: ScopeContext) void {
-        const parent_scope = context.scopes.items(.parent)[@enumToInt(context.current_scope.*)];
+        const parent_scope = context.doc_scope.scopes.items(.parent)[@enumToInt(context.current_scope.*)];
         context.current_scope.* = parent_scope;
     }
 
     fn putDecl(context: ScopeContext, scope: Scope.Index, name: []const u8, decl: Declaration) error{OutOfMemory}!void {
         std.debug.assert(scope != .none);
 
-        try context.decls.append(context.allocator, decl);
-        errdefer _ = context.decls.pop();
+        try context.doc_scope.decls.append(context.allocator, decl);
+        errdefer _ = context.doc_scope.decls.pop();
 
-        const decl_index = @intToEnum(Declaration.Index, context.decls.items.len - 1);
+        const decl_index = @intToEnum(Declaration.Index, context.doc_scope.decls.items.len - 1);
 
-        try context.scopes.items(.decls)[@enumToInt(scope)].put(context.allocator, name, decl_index);
+        try context.doc_scope.scopes.items(.decls)[@enumToInt(scope)].put(context.allocator, name, decl_index);
     }
 };
 
@@ -2661,7 +2655,7 @@ fn makeInnerScope(context: ScopeContext, tree: Ast, node_idx: Ast.Node.Index) er
     defer tracy_zone.end();
 
     const allocator = context.allocator;
-    const scopes = context.scopes;
+    const scopes = &context.doc_scope.scopes;
     const tags = tree.nodes.items(.tag);
 
     const scope_index = try context.pushScope(
@@ -2702,7 +2696,7 @@ fn makeInnerScope(context: ScopeContext, tree: Ast, node_idx: Ast.Node.Index) er
             const Documentation = @TypeOf(@as(types.CompletionItem, undefined).documentation);
 
             var doc: Documentation = if (try getDocComments(allocator, tree, decl, .markdown)) |docs| .{ .MarkupContent = types.MarkupContent{ .kind = .markdown, .value = docs } } else null;
-            var gop_res = try context.enums.getOrPut(allocator, .{
+            var gop_res = try context.doc_scope.enum_completions.getOrPut(allocator, .{
                 .label = name,
                 .kind = .Constant,
                 .insertText = name,
@@ -2726,7 +2720,7 @@ fn makeBlockScopeInternal(context: ScopeContext, tree: Ast, node_idx: Ast.Node.I
     const tags = tree.nodes.items(.tag);
 
     // if node_idx is a block, the next scope will be a block so we store its index here
-    const block_scope_index = context.scopes.len;
+    const block_scope_index = context.doc_scope.scopes.len;
     try makeScopeInternal(context, tree, node_idx);
 
     switch (tags[node_idx]) {
@@ -2735,7 +2729,7 @@ fn makeBlockScopeInternal(context: ScopeContext, tree: Ast, node_idx: Ast.Node.I
         .block_two,
         .block_two_semicolon,
         => {
-            std.debug.assert(context.scopes.items(.data)[block_scope_index] == .block);
+            std.debug.assert(context.doc_scope.scopes.items(.data)[block_scope_index] == .block);
             return @intToEnum(Scope.Index, block_scope_index);
         },
         else => {
@@ -2791,7 +2785,7 @@ fn makeScopeInternal(context: ScopeContext, tree: Ast, node_idx: Ast.Node.Index)
                     .identifier => {
                         const name = offsets.tokenToSlice(tree, tok_i);
                         try context.putDecl(scope_index, name, .{ .error_token = tok_i });
-                        const gop = try context.errors.getOrPut(allocator, .{
+                        const gop = try context.doc_scope.error_completions.getOrPut(allocator, .{
                             .label = name,
                             .kind = .Constant,
                             //.detail =
