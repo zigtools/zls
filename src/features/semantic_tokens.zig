@@ -115,20 +115,36 @@ const Builder = struct {
         }
     }
 
-    fn addDirect(self: *Builder, token_type: TokenType, token_modifiers: TokenModifiers, loc: offsets.Loc) error{OutOfMemory}!void {
+    fn addDirect(self: *Builder, param_token_type: TokenType, token_modifiers: TokenModifiers, loc: offsets.Loc) error{OutOfMemory}!void {
         std.debug.assert(loc.start <= loc.end);
         if (loc.start < self.previous_source_index) return;
+        var token_type = param_token_type;
         switch (token_type) {
             .type,
-            .parameter,
-            .variable,
             .enumMember,
             .property,
             .errorTag,
             .function,
-            .label,
+            .namespace,
+            .@"struct",
+            .@"enum",
             => {},
-            else => if (self.limited) return,
+
+            .@"union",
+            .@"opaque",
+            => token_type = .type,
+
+            .parameter,
+            .variable,
+            .keyword,
+            .comment,
+            .string,
+            .number,
+            .operator,
+            .builtin,
+            .label,
+            .keywordLiteral,
+            => if (self.limited) return,
         }
 
         const delta_text = self.handle.tree.source[self.previous_source_index..loc.start];

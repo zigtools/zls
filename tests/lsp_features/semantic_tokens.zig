@@ -568,7 +568,7 @@ test "semantic tokens - union" {
         \\const Foo = union {};
     , &.{
         .{ "const", .keyword, .{} },
-        .{ "Foo", .@"union", .{ .declaration = true } },
+        .{ "Foo", .type, .{ .declaration = true } },
         .{ "=", .operator, .{} },
         .{ "union", .keyword, .{} },
     });
@@ -576,7 +576,7 @@ test "semantic tokens - union" {
         \\const Foo = packed union(enum) {};
     , &.{
         .{ "const", .keyword, .{} },
-        .{ "Foo", .@"union", .{ .declaration = true } },
+        .{ "Foo", .type, .{ .declaration = true } },
         .{ "=", .operator, .{} },
         .{ "packed", .keyword, .{} },
         .{ "union", .keyword, .{} },
@@ -588,7 +588,7 @@ test "semantic tokens - union" {
         \\};
     , &.{
         .{ "const", .keyword, .{} },
-        .{ "Foo", .@"union", .{ .declaration = true } },
+        .{ "Foo", .type, .{ .declaration = true } },
         .{ "=", .operator, .{} },
         .{ "union", .keyword, .{} },
         .{ "E", .variable, .{} },
@@ -601,7 +601,7 @@ test "semantic tokens - union" {
         \\};
     , &.{
         .{ "const", .keyword, .{} },
-        .{ "Foo", .@"union", .{ .declaration = true } },
+        .{ "Foo", .type, .{ .declaration = true } },
         .{ "=", .operator, .{} },
         .{ "union", .keyword, .{} },
         .{ "E", .variable, .{} },
@@ -615,7 +615,7 @@ test "semantic tokens - union" {
         \\};
     , &.{
         .{ "const", .keyword, .{} },
-        .{ "Foo", .@"union", .{ .declaration = true } },
+        .{ "Foo", .type, .{ .declaration = true } },
         .{ "=", .operator, .{} },
         .{ "union", .keyword, .{} },
         .{ "E", .variable, .{} },
@@ -688,7 +688,7 @@ test "semantic tokens - opaque" {
         \\const Foo = opaque {};
     , &.{
         .{ "const", .keyword, .{} },
-        .{ "Foo", .@"opaque", .{ .declaration = true } },
+        .{ "Foo", .type, .{ .declaration = true } },
         .{ "=", .operator, .{} },
         .{ "opaque", .keyword, .{} },
     });
