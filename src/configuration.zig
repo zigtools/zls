@@ -214,9 +214,6 @@ pub fn getZigEnv(allocator: std.mem.Allocator, zig_exe_path: []const u8) ?Env {
 }
 
 pub const Configuration = getConfigurationType();
-pub const DidChangeConfigurationParams = struct {
-    settings: ?Configuration,
-};
 
 // returns a Struct which is the same as `Config` except that every field is optional.
 fn getConfigurationType() type {
