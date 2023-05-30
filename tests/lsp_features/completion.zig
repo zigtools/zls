@@ -300,6 +300,16 @@ test "completion - enum" {
         .{ .label = "alpha", .kind = .Enum },
         .{ .label = "beta", .kind = .Enum },
     });
+    try testCompletion(
+        \\const E = enum {
+        \\    alpha,
+        \\    beta,
+        \\};
+        \\const foo: E = .<cursor>
+    , &.{
+        .{ .label = "alpha", .kind = .Enum },
+        .{ .label = "beta", .kind = .Enum },
+    });
 }
 
 test "completion - error union" {
@@ -462,6 +472,16 @@ test "completion - usingnamespace" {
         .{ .label = "public", .kind = .Function, .detail = "fn public() S1" },
         // TODO private should not be visible
         .{ .label = "private", .kind = .Function, .detail = "fn private() !void" },
+    });
+    try testCompletion(
+        \\const S1 = struct {
+        \\    usingnamespace struct {
+        \\        pub fn inner() void {}
+        \\    };
+        \\};
+        \\const foo = S1.<cursor>
+    , &.{
+        .{ .label = "inner", .kind = .Function, .detail = "fn inner() void" },
     });
 }
 
