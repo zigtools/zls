@@ -946,11 +946,12 @@ pub fn formattingHandler(server: *Server, request: types.DocumentFormattingParam
     return if (diff.edits(allocator, handle.text, formatted, server.offset_encoding)) |text_edits| text_edits.items else |_| null;
 }
 
-fn didChangeConfigurationHandler(server: *Server, request: configuration.DidChangeConfigurationParams) Error!void {
+fn didChangeConfigurationHandler(server: *Server, request: types.DidChangeConfigurationParams) Error!void {
     var new_zig_exe = false;
 
     // NOTE: VS Code seems to always respond with null
-    if (request.settings) |cfg| {
+    if (request.settings != .null) {
+        const cfg = tres.parse(configuration.Configuration, request.settings.object.get("zls") orelse request.settings, null) catch return;
         inline for (std.meta.fields(configuration.Configuration)) |field| {
             if (@field(cfg, field.name)) |value| {
                 blk: {
@@ -1474,7 +1475,7 @@ pub fn processMessage(server: *Server, message: Message) Error!void {
         .{ "textDocument/references", referencesHandler },
         .{ "textDocument/documentHighlight", documentHighlightHandler },
         .{ "textDocument/codeAction", codeActionHandler },
-        .{ "workspace/didChangeConfiguration", didChangeConfigurationHandler }, // types.DidChangeConfigurationParams
+        .{ "workspace/didChangeConfiguration", didChangeConfigurationHandler },
         .{ "textDocument/foldingRange", foldingRangeHandler },
         .{ "textDocument/selectionRange", selectionRangeHandler },
     };
