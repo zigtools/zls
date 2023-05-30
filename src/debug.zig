@@ -12,16 +12,16 @@ pub fn printTree(tree: std.zig.Ast) void {
         \\-----------------------------------------------
         \\
     , .{});
-    var i: usize = 0;
-    while (i < tree.nodes.len) : (i += 1) {
-        std.debug.print("    {d:<3} {s:<20} {d:<3} {d:<3} {d:<3} {s}\n", .{
-            i,
-            @tagName(tree.nodes.items(.tag)[i]),
-            tree.nodes.items(.data)[i].lhs,
-            tree.nodes.items(.data)[i].rhs,
-            tree.nodes.items(.main_token)[i],
-            offsets.tokenToSlice(tree, tree.nodes.items(.main_token)[i]),
-        });
+    for (
+        tree.nodes.items(.tag),
+        tree.nodes.items(.data),
+        tree.nodes.items(.main_token),
+        0..,
+    ) |tag, data, main_token, i| {
+        std.debug.print(
+            "    {d:<3} {s:<20} {d:<3} {d:<3} {d:<3} {s}\n",
+            .{ i, @tagName(tag), data.lhs, data.rhs, main_token, offsets.tokenToSlice(tree, main_token) },
+        );
     }
 
     std.debug.print(
@@ -30,39 +30,42 @@ pub fn printTree(tree: std.zig.Ast) void {
         \\----------------------------------
         \\
     , .{});
-    i = 0;
-    while (i < tree.tokens.len) : (i += 1) {
-        std.debug.print("    {d:<3} {s:<20} {d:<}\n", .{
-            i,
-            @tagName(tree.tokens.items(.tag)[i]),
-            tree.tokens.items(.start)[i],
-        });
+    for (tree.tokens.items(.tag), tree.tokens.items(.start), 0..) |tag, start, i| {
+        std.debug.print(
+            "    {d:<3} {s:<20} {d:<}\n",
+            .{ i, @tagName(tag), start },
+        );
     }
 }
 
 pub fn printDocumentScope(doc_scope: analysis.DocumentScope) void {
     if (!std.debug.runtime_safety) @compileError("this function should only be used in debug mode!");
 
-    var index: usize = 0;
-    while (index < doc_scope.scopes.len) : (index += 1) {
+    for (0..doc_scope.scopes.len) |index| {
         const scope = doc_scope.scopes.get(index);
         if (index != 0) std.debug.print("\n\n", .{});
         std.debug.print(
-            \\[{d}, {d}] {}
-            \\usingnamespaces: {d}
-            \\Decls:
+            \\[{d}, {d}]
+            \\  data: {}
+            \\  parent: {}
+            \\  child scopes: {any}
+            \\  usingnamespaces: {any}
+            \\  tests: {any}
+            \\  decls:
             \\
         , .{
             scope.loc.start,
             scope.loc.end,
             scope.data,
-            scope.uses.len,
+            scope.parent,
+            scope.child_scopes.items,
+            scope.uses,
+            scope.tests,
         });
 
         var decl_it = scope.decls.iterator();
-        var idx: usize = 0;
-        while (decl_it.next()) |entry| : (idx += 1) {
-            std.debug.print("    {s:<8} {}\n", .{ entry.key_ptr.*, entry.value_ptr.* });
+        while (decl_it.next()) |entry| {
+            std.debug.print("    - {s:<8} {}\n", .{ entry.key_ptr.*, entry.value_ptr.* });
         }
     }
 }
@@ -136,3 +139,9 @@ pub const FailingAllocator = struct {
         return 0 == self.random.random().intRangeAtMostBiased(u32, 0, self.likelihood);
     }
 };
+
+comptime {
+    if (std.debug.runtime_safety) {
+        std.testing.refAllDeclsRecursive(@This());
+    }
+}
