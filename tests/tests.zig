@@ -12,6 +12,7 @@ comptime {
     // TODO Document Synchronization
 
     // LSP features
+    _ = @import("lsp_features/code_actions.zig");
     _ = @import("lsp_features/completion.zig");
     _ = @import("lsp_features/definition.zig");
     _ = @import("lsp_features/document_symbol.zig");
