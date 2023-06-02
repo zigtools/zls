@@ -226,6 +226,7 @@ fn getConfigurationType() type {
                 .Optional = .{ .child = field.type },
             });
         }
+        new_field.default_value = &@as(new_field.type, null);
     }
     config_info.Struct.fields = fields[0..];
     config_info.Struct.decls = &.{};
