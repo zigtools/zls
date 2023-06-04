@@ -9,6 +9,7 @@ const configuration = @import("configuration.zig");
 const Server = @import("Server.zig");
 const Header = @import("Header.zig");
 const debug = @import("debug.zig");
+const binned_allocator = @import("binned_allocator");
 
 const logger = std.log.scoped(.zls_main);
 const message_logger = std.log.scoped(.message);
@@ -361,11 +362,20 @@ const stack_frames = switch (zig_builtin.mode) {
 };
 
 pub fn main() !void {
-    var gpa_state = std.heap.GeneralPurposeAllocator(.{ .stack_trace_frames = stack_frames }){};
-    defer std.debug.assert(gpa_state.deinit() == .ok);
+    var allocator_state = if (build_options.use_gpa)
+        std.heap.GeneralPurposeAllocator(.{ .stack_trace_frames = stack_frames }){}
+    else
+        binned_allocator.BinnedAllocator(.{ .thread_safe = false }){};
 
-    var tracy_state = if (tracy.enable_allocation) tracy.tracyAllocator(gpa_state.allocator()) else void{};
-    const inner_allocator: std.mem.Allocator = if (tracy.enable_allocation) tracy_state.allocator() else gpa_state.allocator();
+    defer {
+        if (build_options.use_gpa)
+            std.debug.assert(allocator_state.deinit() == .ok)
+        else
+            allocator_state.deinit();
+    }
+
+    var tracy_state = if (tracy.enable_allocation) tracy.tracyAllocator(allocator_state.allocator()) else void{};
+    const inner_allocator: std.mem.Allocator = if (tracy.enable_allocation) tracy_state.allocator() else allocator_state.allocator();
 
     var failing_allocator_state = if (build_options.enable_failing_allocator) debug.FailingAllocator.init(inner_allocator, build_options.enable_failing_allocator_likelihood) else void{};
     const allocator: std.mem.Allocator = if (build_options.enable_failing_allocator) failing_allocator_state.allocator() else inner_allocator;
