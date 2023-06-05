@@ -119,8 +119,8 @@ pub fn main() !void {
     builder.resolveInstallPrefix(null, Build.DirList{});
     try runBuild(builder);
 
-    var packages = std.ArrayListUnmanaged(BuildConfig.Pkg){};
-    defer packages.deinit(allocator);
+    var packages = Packages{ .allocator = allocator };
+    defer packages.deinit();
 
     var include_dirs: std.StringArrayHashMapUnmanaged(void) = .{};
     defer include_dirs.deinit(allocator);
@@ -142,9 +142,12 @@ pub fn main() !void {
         }
     }
 
+    const package_list = try packages.toPackageList();
+    defer allocator.free(package_list);
+
     try std.json.stringify(
         BuildConfig{
-            .packages = packages.items,
+            .packages = package_list,
             .include_dirs = include_dirs.keys(),
         },
         .{ .whitespace = .{} },
@@ -169,9 +172,50 @@ fn reifyOptions(step: *Build.Step) anyerror!void {
     }
 }
 
+const Packages = struct {
+    allocator: std.mem.Allocator,
+
+    /// Outer key is the package name, inner key is the file path.
+    packages: std.StringArrayHashMapUnmanaged(std.StringArrayHashMapUnmanaged(void)) = .{},
+
+    /// Returns true if the package was already present.
+    pub fn addPackage(self: *Packages, name: []const u8, path: []const u8) !bool {
+        const name_gop_result = try self.packages.getOrPut(self.allocator, name);
+        if (!name_gop_result.found_existing) {
+            name_gop_result.value_ptr.* = .{};
+        }
+
+        const path_gop_result = try name_gop_result.value_ptr.getOrPut(self.allocator, path);
+        return path_gop_result.found_existing;
+    }
+
+    pub fn toPackageList(self: *Packages) ![]BuildConfig.Pkg {
+        var result: std.ArrayListUnmanaged(BuildConfig.Pkg) = .{};
+        errdefer result.deinit(self.allocator);
+
+        var name_iter = self.packages.iterator();
+        while (name_iter.next()) |path_hashmap| {
+            var path_iter = path_hashmap.value_ptr.iterator();
+            while (path_iter.next()) |path| {
+                try result.append(self.allocator, .{ .name = path_hashmap.key_ptr.*, .path = path.key_ptr.* });
+            }
+        }
+
+        return try result.toOwnedSlice(self.allocator);
+    }
+
+    pub fn deinit(self: *Packages) void {
+        var outer_iter = self.packages.iterator();
+        while (outer_iter.next()) |inner| {
+            inner.value_ptr.deinit(self.allocator);
+        }
+        self.packages.deinit(self.allocator);
+    }
+};
+
 fn processStep(
     allocator: std.mem.Allocator,
-    packages: *std.ArrayListUnmanaged(BuildConfig.Pkg),
+    packages: *Packages,
     include_dirs: *std.StringArrayHashMapUnmanaged(void),
     step: *Build.Step,
 ) anyerror!void {
@@ -181,7 +225,7 @@ fn processStep(
                 .path => |path| path,
                 .generated => |generated| generated.path,
             };
-            if (maybe_path) |path| try packages.append(allocator, .{ .name = "root", .path = path });
+            if (maybe_path) |path| _ = try packages.addPackage("root", path);
         }
 
         try processIncludeDirs(allocator, include_dirs, install_exe.artifact.include_dirs.items);
@@ -197,7 +241,7 @@ fn processStep(
                 .path => |path| path,
                 .generated => |generated| generated.path,
             };
-            if (maybe_path) |path| try packages.append(allocator, .{ .name = "root", .path = path });
+            if (maybe_path) |path| _ = try packages.addPackage("root", path);
         }
         try processIncludeDirs(allocator, include_dirs, exe.include_dirs.items);
         try processPkgConfig(allocator, include_dirs, exe);
@@ -215,13 +259,9 @@ fn processStep(
 
 fn processModule(
     allocator: std.mem.Allocator,
-    packages: *std.ArrayListUnmanaged(BuildConfig.Pkg),
+    packages: *Packages,
     module: std.StringArrayHashMap(*Build.Module).Entry,
 ) !void {
-    for (packages.items) |package| {
-        if (std.mem.eql(u8, package.name, module.key_ptr.*)) return;
-    }
-
     const builder = module.value_ptr.*.builder;
 
     const maybe_path = switch (module.value_ptr.*.source_file) {
@@ -230,7 +270,9 @@ fn processModule(
     };
 
     if (maybe_path) |path| {
-        try packages.append(allocator, .{ .name = module.key_ptr.*, .path = builder.pathFromRoot(path) });
+        const already_added = try packages.addPackage(module.key_ptr.*, builder.pathFromRoot(path));
+        // if the package has already been added short circuit here or recursive modules will ruin us
+        if (already_added) return;
     }
 
     var deps_it = module.value_ptr.*.dependencies.iterator();
