@@ -505,6 +505,7 @@ pub fn executeBuildRunner(
         .allocator = allocator,
         .argv = args,
         .cwd = build_file_directory_path,
+        .max_output_bytes = 1024 * 100,
     });
 }
 
