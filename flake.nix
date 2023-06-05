@@ -11,14 +11,17 @@
 
       flake-utils.url = "github:numtide/flake-utils";
 
+      binned_allocator.url = "https://gist.github.com/silversquirl/c1e4840048fdf48e669b6eac76d80634/archive/8bbe137e65f26854ff936046d884a45d4fa156de.tar.gz";
+      binned_allocator.flake = false;
+
+      diffz.url = "https://github.com/ziglibs/diffz/archive/b966296b4489eb082b0831ec9a37d6f5e1906040.tar.gz";
+      diffz.flake = false;
+
       known_folders.url = "https://github.com/ziglibs/known-folders/archive/d13ba6137084e55f873f6afb67447fe8906cc951.tar.gz";
       known_folders.flake = false;
 
       tres.url = "https://github.com/ziglibs/tres/archive/220d01f3931595e3a2e2a6a0693363c0bfaf47e9.tar.gz";
       tres.flake = false;
-
-      diffz.url = "https://github.com/ziglibs/diffz/archive/b966296b4489eb082b0831ec9a37d6f5e1906040.tar.gz";
-      diffz.flake = false;
     };
 
   outputs = inputs:
