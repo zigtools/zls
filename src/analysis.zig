@@ -2390,6 +2390,7 @@ pub fn innermostContainer(handle: *const DocumentStore.Handle, source_index: usi
 }
 
 fn resolveUse(analyser: *Analyser, uses: []const Ast.Node.Index, symbol: []const u8, handle: *const DocumentStore.Handle) error{OutOfMemory}!?DeclWithHandle {
+    analyser.using_trail.clearRetainingCapacity();
     for (uses) |index| {
         const gop = try analyser.using_trail.getOrPut(analyser.gpa, index);
         if (gop.found_existing) continue;

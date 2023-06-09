@@ -483,6 +483,22 @@ test "completion - usingnamespace" {
     , &.{
         .{ .label = "inner", .kind = .Function, .detail = "fn inner() void" },
     });
+    try testCompletion(
+        \\fn Bar(comptime Self: type) type {
+        \\    return struct {
+        \\        fn inner(self: Self) void { _ = self; }
+        \\    };
+        \\}
+        \\const Foo = struct {
+        \\    pub usingnamespace Bar(Foo);
+        \\    fn deinit(self: Foo) void { _ = self; }
+        \\};
+        \\const foo: Foo = undefined;
+        \\const bar = foo.<cursor>
+    , &.{
+        .{ .label = "inner", .kind = .Function, .detail = "fn inner(self: Self) void" },
+        .{ .label = "deinit", .kind = .Function, .detail = "fn deinit(self: Foo) void" },
+    });
 }
 
 test "completion - block" {
