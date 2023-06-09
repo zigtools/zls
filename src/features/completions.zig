@@ -223,7 +223,7 @@ fn nodeToCompletion(
             const field = tree.fullContainerField(node).?;
             try list.append(allocator, .{
                 .label = handle.tree.tokenSlice(field.ast.main_token),
-                .kind = if (field.ast.tuple_like) .Enum else .Field,
+                .kind = if (field.ast.tuple_like) .EnumMember else .Field,
                 .documentation = doc,
                 .detail = Analyser.getContainerFieldSignature(handle.tree, field),
                 .insertText = tree.tokenSlice(field.ast.main_token),
@@ -729,6 +729,7 @@ fn kindToSortScore(kind: types.CompletionItemKind) ?[]const u8 {
         .Class,
         .Interface,
         .Struct,
+        .Enum,
         // Union?
         .TypeParameter,
         => "6_",
@@ -757,7 +758,7 @@ pub fn addStructInitNodeFields(server: *Server, decl: Analyser.DeclWithHandle, c
                     const field = decl.handle.tree.fullContainerField(member) orelse continue;
                     try completions.append(server.arena.allocator(), .{
                         .label = decl.handle.tree.tokenSlice(field.ast.main_token),
-                        .kind = if (field.ast.tuple_like) .Enum else .Field,
+                        .kind = if (field.ast.tuple_like) .EnumMember else .Field,
                         .detail = Analyser.getContainerFieldSignature(decl.handle.tree, field),
                         .insertText = decl.handle.tree.tokenSlice(field.ast.main_token),
                         .insertTextFormat = .PlainText,
@@ -770,7 +771,7 @@ pub fn addStructInitNodeFields(server: *Server, decl: Analyser.DeclWithHandle, c
                 const field = decl.handle.tree.fullContainerField(@intCast(u32, root_node)) orelse continue;
                 try completions.append(server.arena.allocator(), .{
                     .label = decl.handle.tree.tokenSlice(field.ast.main_token),
-                    .kind = if (field.ast.tuple_like) .Enum else .Field,
+                    .kind = if (field.ast.tuple_like) .EnumMember else .Field,
                     .detail = Analyser.getContainerFieldSignature(decl.handle.tree, field),
                     .insertText = decl.handle.tree.tokenSlice(field.ast.main_token),
                     .insertTextFormat = .PlainText,

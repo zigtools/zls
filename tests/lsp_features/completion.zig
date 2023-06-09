@@ -297,8 +297,8 @@ test "completion - enum" {
         \\};
         \\const foo = E.<cursor>
     , &.{
-        .{ .label = "alpha", .kind = .Enum },
-        .{ .label = "beta", .kind = .Enum },
+        .{ .label = "alpha", .kind = .EnumMember },
+        .{ .label = "beta", .kind = .EnumMember },
     });
     try testCompletion(
         \\const E = enum {
@@ -307,8 +307,8 @@ test "completion - enum" {
         \\};
         \\const foo: E = .<cursor>
     , &.{
-        .{ .label = "alpha", .kind = .Enum },
-        .{ .label = "beta", .kind = .Enum },
+        .{ .label = "alpha", .kind = .EnumMember },
+        .{ .label = "beta", .kind = .EnumMember },
     });
 }
 
