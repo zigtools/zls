@@ -51,7 +51,7 @@ pub fn dotCompletions(
                         while (field_it.next()) |entry| {
                             try completions.append(arena, .{
                                 .label = entry.key_ptr.*,
-                                .kind = .Constant,
+                                .kind = .EnumMember,
                                 // include field.val?
                             });
                         }

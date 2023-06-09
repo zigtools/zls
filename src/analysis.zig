@@ -2702,7 +2702,7 @@ fn makeInnerScope(context: ScopeContext, tree: Ast, node_idx: Ast.Node.Index) er
             errdefer if (doc) |d| allocator.free(d);
             var gop_res = try context.doc_scope.enum_completions.getOrPut(allocator, .{
                 .label = name,
-                .kind = .Enum,
+                .kind = .EnumMember,
                 .insertText = name,
                 .insertTextFormat = .PlainText,
                 .documentation = if (doc) |d| .{ .MarkupContent = types.MarkupContent{ .kind = .markdown, .value = d } } else null,
