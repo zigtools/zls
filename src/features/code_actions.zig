@@ -183,9 +183,16 @@ fn handleUnusedCapture(
     // look for next non-whitespace after last '|'. if its a '{' we can insert discards.
     // this means bare loop/switch captures (w/out curlies) aren't supported.
     var block_start = capture_loc.end + 1;
-    while (block_start < builder.handle.text.len and
-        std.ascii.isWhitespace(builder.handle.text[block_start])) : (block_start += 1)
-    {}
+    var is_comment = false;
+    while (block_start < builder.handle.text.len) : (block_start += 1)
+    {
+        //If the next two characters are // then its a comment
+        if(builder.handle.text[block_start] == '/' and builder.handle.text[block_start + 1] == '/') is_comment = true;
+        // if we go to a new line, drop the is_comment boolean
+        if(builder.handle.text[block_start] == '\n' and is_comment) is_comment = false;
+        //If the character is not a whitespace, and we're not in a comment then break out of the loop
+        if(!std.ascii.isWhitespace(builder.handle.text[block_start]) and !is_comment) break;
+    }
     if (builder.handle.text[block_start] != '{') {
         return;
     }
