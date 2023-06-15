@@ -189,6 +189,8 @@ fn handleUnusedCapture(
         //If the next two characters are // then its a comment - check for OOB as well
         if(builder.handle.text[block_start] == '/' and block_start + 1 < builder.handle.text.len and builder.handle.text[block_start + 1] == '/') {
             is_comment = true;
+            // we already know the next character is a `/` so lets skip that iteration
+            block_start += 1;
             continue;
         }
         // if we go to a new line, drop the is_comment boolean
