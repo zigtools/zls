@@ -186,8 +186,8 @@ fn handleUnusedCapture(
     var is_comment = false;
     while (block_start < builder.handle.text.len) : (block_start += 1)
     {
-        //If the next two characters are // then its a comment
-        if(builder.handle.text[block_start] == '/' and builder.handle.text[block_start + 1] == '/') is_comment = true;
+        //If the next two characters are // then its a comment - check for OOB as well
+        if(builder.handle.text[block_start] == '/' and block_start + 1 < builder.handle.text.len and builder.handle.text[block_start + 1] == '/') is_comment = true;
         // if we go to a new line, drop the is_comment boolean
         if(builder.handle.text[block_start] == '\n' and is_comment) is_comment = false;
         //If the character is not a whitespace, and we're not in a comment then break out of the loop
