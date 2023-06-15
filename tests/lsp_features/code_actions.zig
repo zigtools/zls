@@ -81,6 +81,25 @@ test "code actions - discard captures" {
     );
 }
 
+test "code actions - discard capture with comment" {
+    try testAutofix(
+        \\test {
+        \\  if (1 == 1) |a|
+        \\      //a
+        \\      {}
+        \\}
+    ,
+        \\test {
+        \\    if (1 == 1) |a|
+        \\    //a
+        \\    {
+        \\        _ = a;
+        \\    }
+        \\}
+        \\
+    );
+}
+
 test "code actions - remove pointless discard" {
     try testAutofix(
         \\fn foo(a: u32) u32 {
