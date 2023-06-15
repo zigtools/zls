@@ -186,20 +186,19 @@ fn handleUnusedCapture(
     var is_comment = false;
     while (block_start < builder.handle.text.len) : (block_start += 1)
     {
-        //If the next two characters are // then its a comment - check for OOB as well
-        if(builder.handle.text[block_start] == '/' and block_start + 1 < builder.handle.text.len and builder.handle.text[block_start + 1] == '/') {
-            is_comment = true;
-            // we already know the next character is a `/` so lets skip that iteration
-            block_start += 1;
-            continue;
+        switch (builder.handle.text[block_start]) {
+            '/' => if (block_start + 1 < builder.handle.text.len and builder.handle.text[block_start + 1] == '/') {
+                is_comment = true;
+                // we already know the next character is a `/` so lets skip that iteration
+                block_start += 1;
+            },
+            // if we go to a new line, drop the is_comment boolean
+            '\n' => if (is_comment) {
+                is_comment = false;
+            },
+            //If the character is not a whitespace, and we're not in a comment then break out of the loop
+            else => |c| if(!std.ascii.isWhitespace(c) and !is_comment) break,
         }
-        // if we go to a new line, drop the is_comment boolean
-        if(builder.handle.text[block_start] == '\n' and is_comment) {
-            is_comment = false;
-            continue;
-        }
-        //If the character is not a whitespace, and we're not in a comment then break out of the loop
-        if(!std.ascii.isWhitespace(builder.handle.text[block_start]) and !is_comment) break;
     }
     if (builder.handle.text[block_start] != '{') {
         return;
