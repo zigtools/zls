@@ -15,13 +15,13 @@
     "diffz": {
       "flake": false,
       "locked": {
-        "narHash": "sha256-9bdX4R/VDdjAn8TDH4T3a783mvbpjdWq2KSNtM9RcnY=",
+        "narHash": "sha256-CHRuEEeYGEpotuPo4vRe1qKz0EmkZwVvNjZagFj07ok=",
         "type": "tarball",
-        "url": "https://github.com/ziglibs/diffz/archive/b966296b4489eb082b0831ec9a37d6f5e1906040.tar.gz"
+        "url": "https://github.com/ziglibs/diffz/archive/2fd03fc72760a700e41f30f2b180f26e11c3365b.tar.gz"
       },
       "original": {
         "type": "tarball",
-        "url": "https://github.com/ziglibs/diffz/archive/b966296b4489eb082b0831ec9a37d6f5e1906040.tar.gz"
+        "url": "https://github.com/ziglibs/diffz/archive/2fd03fc72760a700e41f30f2b180f26e11c3365b.tar.gz"
       }
     },
     "flake-compat": {
@@ -107,11 +107,11 @@
     },
     "nixpkgs": {
       "locked": {
-        "lastModified": 1685894048,
-        "narHash": "sha256-QKqv1QS+22k9oxncj1AnAxeqS5jGnQiUW3Jq3B+dI1w=",
+        "lastModified": 1686979235,
+        "narHash": "sha256-gBlBtk+KrezFkfMrZw6uwTuA7YWtbFciiS14mEoTCo0=",
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "2e56a850786211972d99d2bb39665a9b5a1801d6",
+        "rev": "7cc30fd5372ddafb3373c318507d9932bd74aafe",
         "type": "github"
       },
       "original": {
@@ -169,11 +169,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1685924773,
-        "narHash": "sha256-aVHvs+cHYYnPvdWaZGJIcoX4rAjEk9eZlI1pVuoBDk4=",
+        "lastModified": 1687003639,
+        "narHash": "sha256-cE9UfUDRadtNkQ1QlAgsyLlqPRPuy12PxWUcGmsV0JE=",
         "owner": "mitchellh",
         "repo": "zig-overlay",
-        "rev": "e48b53e13bdbc58b141d329086736d7b5d1909ef",
+        "rev": "8aba0488ca0e24b68fa163cbbb71a3532af3d519",
         "type": "github"
       },
       "original": {
