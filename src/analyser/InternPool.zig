@@ -3023,8 +3023,8 @@ test "float value" {
     const f32_nan_value = try ip.get(gpa, .{ .float_32_value = std.math.nan_f32 });
     const f32_qnan_value = try ip.get(gpa, .{ .float_32_value = std.math.qnan_f32 });
 
-    const f32_inf_value = try ip.get(gpa, .{ .float_32_value = std.math.inf_f32 });
-    const f32_ninf_value = try ip.get(gpa, .{ .float_32_value = -std.math.inf_f32 });
+    const f32_inf_value = try ip.get(gpa, .{ .float_32_value = std.math.inf(f32) });
+    const f32_ninf_value = try ip.get(gpa, .{ .float_32_value = -std.math.inf(f32) });
 
     const f32_zero_value = try ip.get(gpa, .{ .float_32_value = 0.0 });
     const f32_nzero_value = try ip.get(gpa, .{ .float_32_value = -0.0 });
