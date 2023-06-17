@@ -792,7 +792,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 }
 
                 // Bind type params to the arguments passed in the call.
-                const param_len = std.math.min(call.ast.params.len, expected_params);
+                const param_len = @min(call.ast.params.len, expected_params);
                 var i: usize = 0;
                 while (ast.nextFnParam(&it)) |decl_param| : (i += 1) {
                     if (i >= param_len) break;
