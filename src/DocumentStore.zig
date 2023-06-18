@@ -470,16 +470,6 @@ fn loadBuildAssociatedConfiguration(allocator: std.mem.Allocator, build_file: Bu
     return try legacy_json.parseFromSlice(BuildAssociatedConfig, allocator, file_buf, .{});
 }
 
-/// Caller owns returned memory!
-pub fn populateBuildConfigurationArgs(
-    allocator: std.mem.Allocator,
-    args: *std.ArrayListUnmanaged([]const u8),
-    zig_exe_path: []const u8,
-    build_runner_path: []const u8,
-) error{OutOfMemory}!void {
-    try args.appendSlice(allocator, &.{ zig_exe_path, "build", "--build-runner", build_runner_path });
-}
-
 /// Runs the build.zig and returns the run result
 /// Args should be the output of `createBuildConfigurationArgs`
 /// plus any additional custom arguments
@@ -492,13 +482,10 @@ pub fn executeBuildRunner(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const build_file_directory_path = try std.fs.path.resolve(allocator, &.{ build_file_path, "../" });
-    defer allocator.free(build_file_directory_path);
-
     return try std.ChildProcess.exec(.{
         .allocator = allocator,
         .argv = args,
-        .cwd = build_file_directory_path,
+        .cwd = std.fs.path.dirname(build_file_path).?,
         .max_output_bytes = 1024 * 100,
     });
 }
@@ -513,31 +500,39 @@ pub fn loadBuildConfiguration(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    var arena = std.heap.ArenaAllocator.init(allocator);
-    defer arena.deinit();
-    const arena_allocator = arena.allocator();
+    std.debug.assert(config.zig_exe_path != null);
+    std.debug.assert(config.build_runner_path != null);
+    std.debug.assert(config.global_cache_path != null);
 
-    const build_file_path = try URI.parse(arena_allocator, build_file.uri);
+    const build_file_path = try URI.parse(allocator, build_file.uri);
+    defer allocator.free(build_file_path);
 
     // NOTE: This used to be backwards compatible
     // but then I came in like a wrecking ball
 
     const arg_length = 4 + if (build_file.build_associated_config) |cfg| if (cfg.build_options) |options| options.len else 0 else 0;
-    var args = try std.ArrayListUnmanaged([]const u8).initCapacity(arena_allocator, arg_length);
-    try populateBuildConfigurationArgs(arena_allocator, &args, config.zig_exe_path.?, config.build_runner_path.?);
+    var args = try std.ArrayListUnmanaged([]const u8).initCapacity(allocator, arg_length);
+    defer {
+        for (args.items) |arg| allocator.free(arg);
+        args.deinit(allocator);
+    }
+    try args.appendSlice(allocator, &.{ config.zig_exe_path.?, "build", "--build-runner", config.build_runner_path.? });
 
     if (build_file.build_associated_config) |cfg| {
         if (cfg.build_options) |options| {
             for (options) |opt| {
-                args.appendAssumeCapacity(try opt.formatParam(arena_allocator));
+                args.appendAssumeCapacity(try opt.formatParam(allocator));
             }
         }
     }
 
-    var zig_run_result = try executeBuildRunner(arena_allocator, build_file_path, args.items);
+    var zig_run_result = try executeBuildRunner(allocator, build_file_path, args.items);
+    defer allocator.free(zig_run_result.stdout);
+    defer allocator.free(zig_run_result.stderr);
 
     errdefer blk: {
-        const joined = std.mem.join(arena_allocator, " ", args.items) catch break :blk;
+        const joined = std.mem.join(allocator, " ", args.items) catch break :blk;
+        defer allocator.free(joined);
 
         log.err(
             "Failed to execute build runner to collect build configuration, command:\n{s}\nError: {s}",
