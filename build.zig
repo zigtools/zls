@@ -2,12 +2,12 @@ const std = @import("std");
 const builtin = @import("builtin");
 const shared = @import("src/shared.zig");
 
-const zls_version = std.builtin.Version{ .major = 0, .minor = 11, .patch = 0 };
+const zls_version = std.SemanticVersion{ .major = 0, .minor = 11, .patch = 0 };
 
 pub fn build(b: *std.build.Builder) !void {
     comptime {
         const current_zig = builtin.zig_version;
-        const min_zig = std.SemanticVersion.parse("0.11.0-dev.3312+ab37ab33c") catch unreachable; // poly1305: properly cast the mask from u1 to u64
+        const min_zig = std.SemanticVersion.parse("0.11.0-dev.3696+8d0a8c285") catch unreachable; // std.builtin.Version -> std.SemanticVersion
         if (current_zig.order(min_zig) == .lt) {
             @compileError(std.fmt.comptimePrint("Your Zig version v{} does not meet the minimum build requirement of v{}", .{ current_zig, min_zig }));
         }
@@ -65,7 +65,7 @@ pub fn build(b: *std.build.Builder) !void {
                 const commit_height = it.next().?;
                 const commit_id = it.next().?;
 
-                const ancestor_ver = try std.builtin.Version.parse(tagged_ancestor);
+                const ancestor_ver = try std.SemanticVersion.parse(tagged_ancestor);
                 std.debug.assert(zls_version.order(ancestor_ver) == .gt); // zls version must be greater than its previous version
                 std.debug.assert(std.mem.startsWith(u8, commit_id, "g")); // commit hash is prefixed with a 'g'
 

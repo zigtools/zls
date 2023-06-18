@@ -193,7 +193,7 @@ pub fn canEncodeAsBytes(comptime T: type) bool {
 /// forward aligns `extra` until it has the given alignment
 pub fn alignForward(extra: []const u8, alignment: usize) []const u8 {
     const unaligned = @ptrToInt(extra.ptr);
-    const offset = std.mem.alignForward(unaligned, alignment) - unaligned;
+    const offset = std.mem.alignForward(usize, unaligned, alignment) - unaligned;
     const result = extra[offset..];
     std.debug.assert(std.mem.isAligned(@ptrToInt(result.ptr), alignment));
     return result;
