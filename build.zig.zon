@@ -8,16 +8,16 @@
             .hash = "122028c00915d9b37296059be8a3883c718dbb5bd174350caedf152fed1f46f99607",
         },
         .tres = .{
-            .url = "https://github.com/ziglibs/tres/archive/220d01f3931595e3a2e2a6a0693363c0bfaf47e9.tar.gz",
-            .hash = "12204d32c44b494c0cbe553811dedfb7a73da37b13b492872dd4edc0340983072697",
+            .url = "https://github.com/ziglibs/tres/archive/57335cdbf0cbd870e7dead15a9bfb41dcbefb47b.tar.gz",
+            .hash = "1220b23398142f65003da68986b8e7b015720d4b62f7bcb5f73a111c9220422658f6",
         },
         .diffz = .{
-            .url = "https://github.com/ziglibs/diffz/archive/2fd03fc72760a700e41f30f2b180f26e11c3365b.tar.gz",
-            .hash = "1220de3226674f638ef4afcc919d121e06207a868cd163b24426b55d77c1048fc608",
+            .url = "https://github.com/ziglibs/diffz/archive/393be9b92121bc064460b2e2feef9d51b949756d.tar.gz",
+            .hash = "122041f6531ee2cd10e7d5f81817c50b45037affc95d748cbcd71a766866fb6030d4",
         },
         .binned_allocator = .{
-            .url = "https://gist.github.com/silversquirl/c1e4840048fdf48e669b6eac76d80634/archive/8bbe137e65f26854ff936046d884a45d4fa156de.tar.gz",
-            .hash = "1220044bd25cc02da476d0ddf988667a29751dae6bf988128b32ac258b21c23d0f47",
+            .url = "https://gist.github.com/FalsePattern/48fded613c115e16e91c46db8642c7e4/archive/75e3d5e6a0e0cf23dbf7abfe16831e23c38721bc.tar.gz",
+            .hash = "1220ba896ddd4258eed9274b36284d4cc4600ee69c4c0978cbe237ec09a524a2e252",
         },
     },
 }
