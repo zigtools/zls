@@ -16,7 +16,7 @@ const message_logger = std.log.scoped(.message);
 
 var actual_log_level: std.log.Level = switch (zig_builtin.mode) {
     .Debug => .debug,
-    else => @intToEnum(std.log.Level, @enumToInt(build_options.log_level)), // temporary fix to build failing on release-safe due to a Zig bug
+    else => @enumFromInt(std.log.Level, @intFromEnum(build_options.log_level)), // temporary fix to build failing on release-safe due to a Zig bug
 };
 
 pub const std_options = struct {
@@ -30,7 +30,7 @@ pub const std_options = struct {
         comptime format: []const u8,
         args: anytype,
     ) void {
-        if (@enumToInt(level) > @enumToInt(actual_log_level)) return;
+        if (@intFromEnum(level) > @intFromEnum(actual_log_level)) return;
 
         const level_txt = comptime level.asText();
         const scope_txt = comptime @tagName(scope);
@@ -227,7 +227,7 @@ fn parseArgs(allocator: std.mem.Allocator) !ParseArgsResult {
         const KV = struct { []const u8, ArgId };
         var pairs: [fields.len]KV = undefined;
         for (&pairs, fields) |*pair, field| {
-            pair.* = .{ field.name, @intToEnum(ArgId, field.value) };
+            pair.* = .{ field.name, @enumFromInt(ArgId, field.value) };
         }
         break :blk pairs[0..];
     });

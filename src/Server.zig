@@ -1364,7 +1364,7 @@ pub fn processJsonRpc(
 
     server.processMessage(message) catch |err| switch (message) {
         .RequestMessage => |request| server.sendResponseError(request.id, .{
-            .code = @errorToInt(err),
+            .code = @intFromError(err),
             .message = @errorName(err),
         }),
         else => {},

@@ -137,8 +137,8 @@ pub fn huntItDown(
 
     var current_namespace = namespace;
     while (current_namespace != .none) {
-        const decls = interpreter.namespaces.items(.decls)[@enumToInt(current_namespace)];
-        defer current_namespace = interpreter.namespaces.items(.parent)[@enumToInt(current_namespace)];
+        const decls = interpreter.namespaces.items(.decls)[@intFromEnum(current_namespace)];
+        defer current_namespace = interpreter.namespaces.items(.parent)[@intFromEnum(current_namespace)];
 
         if (decls.get(decl_name)) |decl| {
             return decl;
@@ -195,7 +195,7 @@ pub fn interpret(
                 .node_idx = node_idx,
                 .ty = .none,
             });
-            const container_namespace = @intToEnum(Namespace.Index, interpreter.namespaces.len - 1);
+            const container_namespace = @enumFromInt(Namespace.Index, interpreter.namespaces.len - 1);
 
             const struct_index = try interpreter.ip.createStruct(interpreter.allocator, .{
                 .fields = .{},
@@ -244,7 +244,7 @@ pub fn interpret(
             }
 
             const struct_type = try interpreter.ip.get(interpreter.allocator, Key{ .struct_type = struct_index });
-            interpreter.namespaces.items(.ty)[@enumToInt(container_namespace)] = struct_type;
+            interpreter.namespaces.items(.ty)[@intFromEnum(container_namespace)] = struct_type;
 
             return InterpretResult{ .value = Value{
                 .interpreter = interpreter,
@@ -261,7 +261,7 @@ pub fn interpret(
         .aligned_var_decl,
         .simple_var_decl,
         => {
-            var decls: *std.StringArrayHashMapUnmanaged(InternPool.DeclIndex) = &interpreter.namespaces.items(.decls)[@enumToInt(namespace)];
+            var decls: *std.StringArrayHashMapUnmanaged(InternPool.DeclIndex) = &interpreter.namespaces.items(.decls)[@intFromEnum(namespace)];
 
             const name = analysis.getDeclName(tree, node_idx).?;
             const decl_index = try interpreter.ip.createDecl(interpreter.allocator, .{
@@ -324,7 +324,7 @@ pub fn interpret(
                 .node_idx = node_idx,
                 .ty = .none,
             });
-            const block_namespace = @intToEnum(Namespace.Index, interpreter.namespaces.len - 1);
+            const block_namespace = @enumFromInt(Namespace.Index, interpreter.namespaces.len - 1);
 
             var buffer: [2]Ast.Node.Index = undefined;
             const statements = ast.blockStatements(tree, node_idx, &buffer).?;
@@ -333,7 +333,7 @@ pub fn interpret(
                 const ret = try interpreter.interpret(idx, block_namespace, options);
                 switch (ret) {
                     .@"break" => |lllll| {
-                        const maybe_block_label_string = if (interpreter.namespaces.get(@enumToInt(namespace)).getLabel(tree)) |i| tree.tokenSlice(i) else null;
+                        const maybe_block_label_string = if (interpreter.namespaces.get(@intFromEnum(namespace)).getLabel(tree)) |i| tree.tokenSlice(i) else null;
                         if (lllll) |l| {
                             if (maybe_block_label_string) |ls| {
                                 if (std.mem.eql(u8, l, ls)) {
@@ -345,7 +345,7 @@ pub fn interpret(
                         }
                     },
                     .break_with_value => |bwv| {
-                        const maybe_block_label_string = if (interpreter.namespaces.get(@enumToInt(namespace)).getLabel(tree)) |i| tree.tokenSlice(i) else null;
+                        const maybe_block_label_string = if (interpreter.namespaces.get(@intFromEnum(namespace)).getLabel(tree)) |i| tree.tokenSlice(i) else null;
 
                         if (bwv.label) |l| {
                             if (maybe_block_label_string) |ls| {
@@ -753,7 +753,7 @@ pub fn interpret(
                         var big_int = try std.math.big.int.Managed.init(interpreter.allocator);
                         defer big_int.deinit();
                         const prefix_length: usize = if (base != .decimal) 2 else 0;
-                        try big_int.setString(@enumToInt(base), s[prefix_length..]);
+                        try big_int.setString(@intFromEnum(base), s[prefix_length..]);
                         std.debug.assert(number_type == .comptime_int_type);
                         break :blk Key{ .int_big_value = .{ .ty = number_type, .int = big_int.toConst() } };
                     },
@@ -947,7 +947,7 @@ pub fn interpret(
 
                 const name = interpreter.ip.indexToKey(field_name.index).bytes; // TODO add checks
 
-                const decls = interpreter.namespaces.items(.decls)[@enumToInt(value_namespace)];
+                const decls = interpreter.namespaces.items(.decls)[@intFromEnum(value_namespace)];
                 const has_decl = decls.contains(name);
 
                 return InterpretResult{ .value = Value{
@@ -1058,7 +1058,7 @@ pub fn interpret(
             //     fnd.return_type = value.value_data.@"type";
 
             if (namespace != .none) {
-                const decls = &interpreter.namespaces.items(.decls)[@enumToInt(namespace)];
+                const decls = &interpreter.namespaces.items(.decls)[@intFromEnum(namespace)];
 
                 const decl_index = try interpreter.ip.createDecl(interpreter.allocator, .{
                     .name = name,
@@ -1236,7 +1236,7 @@ pub fn call(
         .node_idx = func_node_idx,
         .ty = .none,
     });
-    const fn_namespace = @intToEnum(Namespace.Index, interpreter.namespaces.len - 1);
+    const fn_namespace = @enumFromInt(Namespace.Index, interpreter.namespaces.len - 1);
 
     var arg_it = proto.iterate(&tree);
     var arg_index: usize = 0;
@@ -1257,7 +1257,7 @@ pub fn call(
         if (param.name_token) |name_token| {
             const name = offsets.tokenToSlice(tree, name_token);
 
-            const decls = &interpreter.namespaces.items(.decls)[@enumToInt(fn_namespace)];
+            const decls = &interpreter.namespaces.items(.decls)[@intFromEnum(fn_namespace)];
             const decl_index = try interpreter.ip.createDecl(interpreter.allocator, .{
                 .name = name,
                 .node_idx = name_token,

@@ -155,7 +155,7 @@ const Builder = struct {
             @truncate(u32, delta.line),
             @truncate(u32, delta.character),
             @truncate(u32, length),
-            @enumToInt(token_type),
+            @intFromEnum(token_type),
             @bitCast(u16, token_modifiers),
         });
         self.previous_source_index = loc.start;
@@ -472,7 +472,7 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
             // check it it's 'else'
             if (switch_case.ast.values.len == 0) try writeToken(builder, switch_case.ast.arrow_token - 1, .keyword);
             if (switch_case.payload_token) |payload_token| {
-                const actual_payload = payload_token + @boolToInt(token_tags[payload_token] == .asterisk);
+                const actual_payload = payload_token + @intFromBool(token_tags[payload_token] == .asterisk);
                 try writeTokenMod(builder, actual_payload, .variable, .{ .declaration = true });
             }
             try callWriteNodeTokens(allocator, .{ builder, switch_case.ast.target_expr });
@@ -488,7 +488,7 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
             try callWriteNodeTokens(allocator, .{ builder, while_node.ast.cond_expr });
             if (while_node.payload_token) |payload| {
                 const capture_is_ref = token_tags[payload] == .asterisk;
-                const name_token = payload + @boolToInt(capture_is_ref);
+                const name_token = payload + @intFromBool(capture_is_ref);
                 try writeTokenMod(builder, name_token, .variable, .{ .declaration = true });
             }
             try callWriteNodeTokens(allocator, .{ builder, while_node.ast.cont_expr });
@@ -519,7 +519,7 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
             var capture_token = for_node.payload_token;
             for (for_node.ast.inputs) |_| {
                 const capture_is_ref = token_tags[capture_token] == .asterisk;
-                const name_token = capture_token + @boolToInt(capture_is_ref);
+                const name_token = capture_token + @intFromBool(capture_is_ref);
                 capture_token = name_token + 2;
 
                 try writeTokenMod(builder, name_token, .variable, .{ .declaration = true });
@@ -541,7 +541,7 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
 
             if (if_node.payload_token) |payload_token| {
                 const capture_is_ref = token_tags[payload_token] == .asterisk;
-                const actual_payload = payload_token + @boolToInt(capture_is_ref);
+                const actual_payload = payload_token + @intFromBool(capture_is_ref);
                 try writeTokenMod(builder, actual_payload, .variable, .{ .declaration = true });
             }
             try callWriteNodeTokens(allocator, .{ builder, if_node.ast.then_expr });

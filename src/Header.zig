@@ -31,7 +31,7 @@ pub fn parse(allocator: std.mem.Allocator, include_carriage_return: bool, reader
         }
 
         const header_name = header[0 .. std.mem.indexOf(u8, header, ": ") orelse return error.MissingColon];
-        const header_value = header[header_name.len + 2 .. header.len - @boolToInt(include_carriage_return)];
+        const header_value = header[header_name.len + 2 .. header.len - @intFromBool(include_carriage_return)];
         if (std.mem.eql(u8, header_name, "Content-Length")) {
             if (header_value.len == 0) return error.MissingHeaderValue;
             r.content_length = std.fmt.parseInt(usize, header_value, 10) catch return error.InvalidContentLength;

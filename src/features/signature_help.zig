@@ -18,7 +18,7 @@ fn fnProtoToSignatureInfo(analyser: *Analyser, alloc: std.mem.Allocator, commas:
 
     const arg_idx = if (skip_self_param) blk: {
         const has_self_param = try analyser.hasSelfParam(handle, proto);
-        break :blk commas + @boolToInt(has_self_param);
+        break :blk commas + @intFromBool(has_self_param);
     } else commas;
 
     var params = std.ArrayListUnmanaged(types.ParameterInformation){};
