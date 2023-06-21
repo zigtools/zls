@@ -60,7 +60,7 @@ pub const Context = struct {
     }
 
     pub fn deinit(self: *Context) void {
-        @import("../src/legacy_json.zig").parseFree(Config, allocator, self.config.*);
+        zls.legacy_json.parseFree(Config, allocator, self.config.*);
         allocator.destroy(self.config);
 
         self.request("shutdown", "{}", null) catch {};
