@@ -10,6 +10,7 @@ const Server = @import("Server.zig");
 const Header = @import("Header.zig");
 const debug = @import("debug.zig");
 const binned_allocator = @import("binned_allocator");
+const legacy_json = @import("legacy_json.zig");
 
 const logger = std.log.scoped(.zls_main);
 const message_logger = std.log.scoped(.message);
@@ -147,8 +148,8 @@ fn updateConfig(
         defer allocator.free(json_message);
         try file.reader().readNoEof(json_message);
 
-        const new_config = try std.json.parseFromSlice(Config, allocator, json_message, .{});
-        std.json.parseFree(Config, allocator, config.*);
+        const new_config = try legacy_json.parseFromSlice(Config, allocator, json_message, .{});
+        legacy_json.parseFree(Config, allocator, config.*);
         config.* = new_config;
     }
 }
@@ -334,7 +335,7 @@ fn parseArgs(allocator: std.mem.Allocator) !ParseArgsResult {
     if (specified.get(.@"show-config-path")) {
         const new_config = try getConfig(allocator, result.config_path);
         defer if (new_config.config_path) |path| allocator.free(path);
-        defer std.json.parseFree(Config, allocator, new_config.config);
+        defer legacy_json.parseFree(Config, allocator, new_config.config);
 
         const full_path = if (new_config.config_path) |path| blk: {
             break :blk try std.fs.path.resolve(allocator, &.{ path, "zls.json" });
@@ -392,7 +393,7 @@ pub fn main() !void {
     logger.info("Starting ZLS {s} @ '{s}'", .{ build_options.version, result.zls_exe_path });
 
     var config = try getConfig(allocator, result.config_path);
-    defer std.json.parseFree(Config, allocator, config.config);
+    defer legacy_json.parseFree(Config, allocator, config.config);
     defer if (config.config_path) |path| allocator.free(path);
 
     if (result.replay_enabled and config.config.replay_session_path == null and config.config.record_session_path == null) {

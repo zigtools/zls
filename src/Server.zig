@@ -1286,12 +1286,12 @@ const Message = union(enum) {
         };
     }
 
-    pub fn fromJsonValueTree(tree: std.json.ValueTree) error{InvalidRequest}!Message {
+    pub fn fromJsonValueTree(root: std.json.Value) error{InvalidRequest}!Message {
         const tracy_zone = tracy.trace(@src());
         defer tracy_zone.end();
 
-        if (tree.root != .object) return error.InvalidRequest;
-        const object = tree.root.object;
+        if (root != .object) return error.InvalidRequest;
+        const object = root.object;
 
         if (object.get("id")) |id_obj| {
             comptime std.debug.assert(!tres.isAllocatorRequired(types.RequestId));
@@ -1348,16 +1348,13 @@ pub fn processJsonRpc(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    var parser = std.json.Parser.init(server.arena.allocator(), .alloc_always);
-    defer parser.deinit();
-
-    var tree = parser.parse(json) catch |err| {
+    var tree = std.json.parseFromSlice(std.json.Value, server.arena.allocator(), json, .{}) catch |err| {
         log.err("failed to parse message: {}", .{err});
         return; // maybe panic?
     };
     defer tree.deinit();
 
-    const message = Message.fromJsonValueTree(tree) catch |err| {
+    const message = Message.fromJsonValueTree(tree.value) catch |err| {
         log.err("failed to parse message: {}", .{err});
         return; // maybe panic?
     };

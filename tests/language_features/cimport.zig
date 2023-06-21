@@ -108,7 +108,7 @@ fn testTranslate(c_source: []const u8) !translate_c.Result {
     if (!std.process.can_spawn) return error.SkipZigTest;
 
     var config: zls.Config = .{};
-    defer std.json.parseFree(zls.Config, allocator, config);
+    defer @import("../../src/legacy_json.zig").parseFree(zls.Config, allocator, config);
 
     var runtime_zig_version: ?zls.ZigVersionWrapper = null;
     defer if (runtime_zig_version) |*v| v.free();

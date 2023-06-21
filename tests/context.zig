@@ -60,7 +60,7 @@ pub const Context = struct {
     }
 
     pub fn deinit(self: *Context) void {
-        std.json.parseFree(Config, allocator, self.config.*);
+        @import("../src/legacy_json.zig").parseFree(Config, allocator, self.config.*);
         allocator.destroy(self.config);
 
         self.request("shutdown", "{}", null) catch {};
@@ -129,14 +129,10 @@ pub const Context = struct {
 
         const expected = expect orelse return;
 
-        // parse the response
-        var parser = std.json.Parser.init(allocator, .alloc_always);
-        defer parser.deinit();
-
-        var tree = try parser.parse(response_bytes);
+        var tree = try std.json.parseFromSlice(std.json.Value, allocator, response_bytes, .{});
         defer tree.deinit();
 
-        const response = tree.root.object;
+        const response = tree.value.object;
 
         // assertions
         try std.testing.expectEqualStrings("2.0", response.get("jsonrpc").?.string);
@@ -195,11 +191,10 @@ pub const Context = struct {
         const response_bytes = try self.requestAlloc(method, buffer.items);
         defer self.server.allocator.free(response_bytes);
 
-        var parser = std.json.Parser.init(self.arena.allocator(), .alloc_always);
-        var tree = try parser.parse(try self.arena.allocator().dupe(u8, response_bytes));
+        var tree = try std.json.parseFromSlice(std.json.Value, self.arena.allocator(), try self.arena.allocator().dupe(u8, response_bytes), .{});
 
         // TODO validate jsonrpc and id
 
-        return tres.parse(Response(Result), tree.root, self.arena.allocator());
+        return tres.parse(Response(Result), tree.value, self.arena.allocator());
     }
 };
