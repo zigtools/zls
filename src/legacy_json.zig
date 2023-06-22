@@ -1,3 +1,7 @@
+// TODO This is a *very* temporary fix until a proper rewrite is made.
+// See discussions in https://github.com/zigtools/zls/pull/1249
+//                and https://github.com/zigtools/zls/issues/1248
+
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const ParseError = std.json.ParseError;
