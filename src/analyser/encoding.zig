@@ -23,7 +23,7 @@ pub fn encode(extra: *std.ArrayList(u8), comptime T: type, data: anytype) Alloca
         => @compileError("Unable to encode type " ++ @typeName(T)),
 
         .Void => {},
-        .Bool => try encode(extra, u1, @boolToInt(data)),
+        .Bool => try encode(extra, u1, @intFromBool(data)),
         .Int => try extra.appendSlice(std.mem.asBytes(&data)),
         .Float => |info| switch (info.bits) {
             16 => try encode(extra, u16, @bitCast(u16, data)),
@@ -81,7 +81,7 @@ pub fn encode(extra: *std.ArrayList(u8), comptime T: type, data: anytype) Alloca
                 try encode(extra, item);
             }
         },
-        .Enum => |info| try encode(extra, info.tag_type, @enumToInt(data)),
+        .Enum => |info| try encode(extra, info.tag_type, @intFromEnum(data)),
         .Union => @compileError("TODO"),
         .Vector => |info| {
             const array: [info.len]info.child = data;
@@ -174,7 +174,7 @@ pub fn decode(extra: *[]const u8, comptime T: type) T {
                 break :blk decode(extra, info.child);
             }
         },
-        .Enum => |info| @intToEnum(T, decode(extra, info.tag_type)),
+        .Enum => |info| @enumFromInt(T, decode(extra, info.tag_type)),
         .Union => @compileError("TODO"),
         .Vector => |info| decode(extra, [info.len]info.child),
     };
@@ -192,10 +192,10 @@ pub fn canEncodeAsBytes(comptime T: type) bool {
 
 /// forward aligns `extra` until it has the given alignment
 pub fn alignForward(extra: []const u8, alignment: usize) []const u8 {
-    const unaligned = @ptrToInt(extra.ptr);
+    const unaligned = @intFromPtr(extra.ptr);
     const offset = std.mem.alignForward(usize, unaligned, alignment) - unaligned;
     const result = extra[offset..];
-    std.debug.assert(std.mem.isAligned(@ptrToInt(result.ptr), alignment));
+    std.debug.assert(std.mem.isAligned(@intFromPtr(result.ptr), alignment));
     return result;
 }
 

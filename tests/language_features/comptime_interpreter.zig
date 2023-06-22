@@ -377,7 +377,7 @@ const Context = struct {
             };
         }
 
-        const namespace = @intToEnum(ComptimeInterpreter.Namespace.Index, 0); // root namespace
+        const namespace = @enumFromInt(ComptimeInterpreter.Namespace.Index, 0); // root namespace
         const result = (try self.interpreter.call(namespace, func_node, args, .{})).result;
 
         const val = self.interpreter.ip.indexToKey(result.value.index);
@@ -390,7 +390,7 @@ const Context = struct {
     }
 
     pub fn interpret(self: *Context, node: Ast.Node.Index) !KV {
-        const namespace = @intToEnum(ComptimeInterpreter.Namespace.Index, 0); // root namespace
+        const namespace = @enumFromInt(ComptimeInterpreter.Namespace.Index, 0); // root namespace
         const result = try (try self.interpreter.interpret(node, namespace, .{})).getValue();
 
         const val = self.interpreter.ip.indexToKey(result.index);

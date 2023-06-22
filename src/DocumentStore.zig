@@ -17,6 +17,8 @@ const AstGen = @import("stage2/AstGen.zig");
 const Zir = @import("stage2/Zir.zig");
 const InternPool = @import("analyser/InternPool.zig");
 
+const legacy_json = @import("legacy_json.zig");
+
 const DocumentStore = @This();
 
 pub const Uri = []const u8;
@@ -43,10 +45,10 @@ const BuildFile = struct {
 
     pub fn deinit(self: *BuildFile, allocator: std.mem.Allocator) void {
         allocator.free(self.uri);
-        std.json.parseFree(BuildConfig, allocator, self.config);
+        legacy_json.parseFree(BuildConfig, allocator, self.config);
         if (self.builtin_uri) |builtin_uri| allocator.free(builtin_uri);
         if (self.build_associated_config) |cfg| {
-            std.json.parseFree(BuildAssociatedConfig, allocator, cfg);
+            legacy_json.parseFree(BuildAssociatedConfig, allocator, cfg);
         }
     }
 };
@@ -301,7 +303,7 @@ pub fn applySave(self: *DocumentStore, handle: *const Handle) !void {
             return;
         };
 
-        std.json.parseFree(BuildConfig, self.allocator, build_file.config);
+        legacy_json.parseFree(BuildConfig, self.allocator, build_file.config);
         build_file.config = build_config;
     }
 }
@@ -326,7 +328,7 @@ pub fn invalidateBuildFiles(self: *DocumentStore) void {
             return;
         };
 
-        std.json.parseFree(BuildConfig, self.allocator, build_file.config);
+        legacy_json.parseFree(BuildConfig, self.allocator, build_file.config);
         build_file.config = build_config;
     }
 }
@@ -457,7 +459,7 @@ pub fn isInStd(uri: Uri) bool {
 }
 
 /// looks for a `zls.build.json` file in the build file directory
-/// has to be freed with `std.json.parseFree`
+/// has to be freed with `json_compat.parseFree`
 fn loadBuildAssociatedConfiguration(allocator: std.mem.Allocator, build_file: BuildFile) !BuildAssociatedConfig {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
@@ -473,7 +475,7 @@ fn loadBuildAssociatedConfiguration(allocator: std.mem.Allocator, build_file: Bu
     const file_buf = try config_file.readToEndAlloc(allocator, std.math.maxInt(usize));
     defer allocator.free(file_buf);
 
-    return try std.json.parseFromSlice(BuildAssociatedConfig, allocator, file_buf, .{});
+    return try legacy_json.parseFromSlice(BuildAssociatedConfig, allocator, file_buf, .{});
 }
 
 /// Caller owns returned memory!
@@ -510,7 +512,7 @@ pub fn executeBuildRunner(
 }
 
 /// Runs the build.zig and extracts include directories and packages
-/// Has to be freed with `std.json.parseFree`
+/// Has to be freed with `json_compat.parseFree`
 pub fn loadBuildConfiguration(
     allocator: std.mem.Allocator,
     build_file: BuildFile,
@@ -564,13 +566,13 @@ pub fn loadBuildConfiguration(
         // to the BuildConfig type
         .ignore_unknown_fields = true,
     };
-    const build_config = std.json.parseFromSlice(
+    const build_config = legacy_json.parseFromSlice(
         BuildConfig,
         allocator,
         zig_run_result.stdout,
         parse_options,
     ) catch return error.RunFailed;
-    errdefer std.json.parseFree(BuildConfig, allocator, build_config);
+    errdefer legacy_json.parseFree(BuildConfig, allocator, build_config);
 
     for (build_config.packages) |*pkg| {
         const pkg_abs_path = try std.fs.path.resolve(allocator, &[_][]const u8{ build_file_path, "..", pkg.path });

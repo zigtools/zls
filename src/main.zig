@@ -10,13 +10,14 @@ const Server = @import("Server.zig");
 const Header = @import("Header.zig");
 const debug = @import("debug.zig");
 const binned_allocator = @import("binned_allocator");
+const legacy_json = @import("legacy_json.zig");
 
 const logger = std.log.scoped(.zls_main);
 const message_logger = std.log.scoped(.message);
 
 var actual_log_level: std.log.Level = switch (zig_builtin.mode) {
     .Debug => .debug,
-    else => @intToEnum(std.log.Level, @enumToInt(build_options.log_level)), // temporary fix to build failing on release-safe due to a Zig bug
+    else => @enumFromInt(std.log.Level, @intFromEnum(build_options.log_level)), // temporary fix to build failing on release-safe due to a Zig bug
 };
 
 pub const std_options = struct {
@@ -30,7 +31,7 @@ pub const std_options = struct {
         comptime format: []const u8,
         args: anytype,
     ) void {
-        if (@enumToInt(level) > @enumToInt(actual_log_level)) return;
+        if (@intFromEnum(level) > @intFromEnum(actual_log_level)) return;
 
         const level_txt = comptime level.asText();
         const scope_txt = comptime @tagName(scope);
@@ -147,8 +148,8 @@ fn updateConfig(
         defer allocator.free(json_message);
         try file.reader().readNoEof(json_message);
 
-        const new_config = try std.json.parseFromSlice(Config, allocator, json_message, .{});
-        std.json.parseFree(Config, allocator, config.*);
+        const new_config = try legacy_json.parseFromSlice(Config, allocator, json_message, .{});
+        legacy_json.parseFree(Config, allocator, config.*);
         config.* = new_config;
     }
 }
@@ -227,7 +228,7 @@ fn parseArgs(allocator: std.mem.Allocator) !ParseArgsResult {
         const KV = struct { []const u8, ArgId };
         var pairs: [fields.len]KV = undefined;
         for (&pairs, fields) |*pair, field| {
-            pair.* = .{ field.name, @intToEnum(ArgId, field.value) };
+            pair.* = .{ field.name, @enumFromInt(ArgId, field.value) };
         }
         break :blk pairs[0..];
     });
@@ -334,7 +335,7 @@ fn parseArgs(allocator: std.mem.Allocator) !ParseArgsResult {
     if (specified.get(.@"show-config-path")) {
         const new_config = try getConfig(allocator, result.config_path);
         defer if (new_config.config_path) |path| allocator.free(path);
-        defer std.json.parseFree(Config, allocator, new_config.config);
+        defer legacy_json.parseFree(Config, allocator, new_config.config);
 
         const full_path = if (new_config.config_path) |path| blk: {
             break :blk try std.fs.path.resolve(allocator, &.{ path, "zls.json" });
@@ -392,7 +393,7 @@ pub fn main() !void {
     logger.info("Starting ZLS {s} @ '{s}'", .{ build_options.version, result.zls_exe_path });
 
     var config = try getConfig(allocator, result.config_path);
-    defer std.json.parseFree(Config, allocator, config.config);
+    defer legacy_json.parseFree(Config, allocator, config.config);
     defer if (config.config_path) |path| allocator.free(path);
 
     if (result.replay_enabled and config.config.replay_session_path == null and config.config.record_session_path == null) {

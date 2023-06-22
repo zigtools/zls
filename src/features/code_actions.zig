@@ -184,8 +184,7 @@ fn handleUnusedCapture(
     // this means bare loop/switch captures (w/out curlies) aren't supported.
     var block_start = capture_loc.end + 1;
     var is_comment = false;
-    while (block_start < builder.handle.text.len) : (block_start += 1)
-    {
+    while (block_start < builder.handle.text.len) : (block_start += 1) {
         switch (builder.handle.text[block_start]) {
             '/' => if (block_start + 1 < builder.handle.text.len and builder.handle.text[block_start + 1] == '/') {
                 is_comment = true;
@@ -197,7 +196,7 @@ fn handleUnusedCapture(
                 is_comment = false;
             },
             //If the character is not a whitespace, and we're not in a comment then break out of the loop
-            else => |c| if(!std.ascii.isWhitespace(c) and !is_comment) break,
+            else => |c| if (!std.ascii.isWhitespace(c) and !is_comment) break,
         }
     }
     if (builder.handle.text[block_start] != '{') {
@@ -420,7 +419,7 @@ const DiagnosticKind = union(enum) {
         inline for (std.meta.fields(T)) |field| {
             if (std.mem.startsWith(u8, message, field.name)) {
                 // is there a better way to achieve this?
-                return @intToEnum(T, field.value);
+                return @enumFromInt(T, field.value);
             }
         }
 

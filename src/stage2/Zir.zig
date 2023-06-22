@@ -70,7 +70,7 @@ pub fn extraData(code: Zir, comptime T: type, index: usize) struct { data: T, en
     inline for (fields) |field| {
         @field(result, field.name) = switch (field.type) {
             u32 => code.extra[i],
-            Inst.Ref => @intToEnum(Inst.Ref, code.extra[i]),
+            Inst.Ref => @enumFromInt(Inst.Ref, code.extra[i]),
             i32 => @bitCast(i32, code.extra[i]),
             Inst.Call.Flags => @bitCast(Inst.Call.Flags, code.extra[i]),
             Inst.BuiltinCall.Flags => @bitCast(Inst.BuiltinCall.Flags, code.extra[i]),
@@ -101,7 +101,7 @@ pub fn refSlice(code: Zir, start: usize, len: usize) []Inst.Ref {
 }
 
 pub fn hasCompileErrors(code: Zir) bool {
-    return code.extra[@enumToInt(ExtraIndex.compile_errors)] != 0;
+    return code.extra[@intFromEnum(ExtraIndex.compile_errors)] != 0;
 }
 
 pub fn deinit(code: *Zir, gpa: Allocator) void {
@@ -2724,8 +2724,8 @@ pub const Inst = struct {
             pub const ScalarCasesLen = u29;
 
             pub fn specialProng(bits: Bits) SpecialProng {
-                const has_else: u2 = @boolToInt(bits.has_else);
-                const has_under: u2 = @boolToInt(bits.has_under);
+                const has_else: u2 = @intFromBool(bits.has_else);
+                const has_under: u2 = @intFromBool(bits.has_under);
                 return switch ((has_else << 1) | has_under) {
                     0b00 => .none,
                     0b01 => .under,
@@ -2765,7 +2765,7 @@ pub const Inst = struct {
 
             var scalar_i: usize = 0;
             while (true) : (scalar_i += 1) {
-                const item = @intToEnum(Ref, zir.extra[extra_index]);
+                const item = @enumFromInt(Ref, zir.extra[extra_index]);
                 extra_index += 1;
                 const body_len = @truncate(u31, zir.extra[extra_index]);
                 extra_index += 1;
@@ -3373,8 +3373,8 @@ pub fn declIterator(zir: Zir, decl_inst: u32) DeclIterator {
                 .struct_decl => {
                     const small = @bitCast(Inst.StructDecl.Small, extended.small);
                     var extra_index: usize = extended.operand;
-                    extra_index += @boolToInt(small.has_src_node);
-                    extra_index += @boolToInt(small.has_fields_len);
+                    extra_index += @intFromBool(small.has_src_node);
+                    extra_index += @intFromBool(small.has_fields_len);
                     const decls_len = if (small.has_decls_len) decls_len: {
                         const decls_len = zir.extra[extra_index];
                         extra_index += 1;
@@ -3396,10 +3396,10 @@ pub fn declIterator(zir: Zir, decl_inst: u32) DeclIterator {
                 .enum_decl => {
                     const small = @bitCast(Inst.EnumDecl.Small, extended.small);
                     var extra_index: usize = extended.operand;
-                    extra_index += @boolToInt(small.has_src_node);
-                    extra_index += @boolToInt(small.has_tag_type);
-                    extra_index += @boolToInt(small.has_body_len);
-                    extra_index += @boolToInt(small.has_fields_len);
+                    extra_index += @intFromBool(small.has_src_node);
+                    extra_index += @intFromBool(small.has_tag_type);
+                    extra_index += @intFromBool(small.has_body_len);
+                    extra_index += @intFromBool(small.has_fields_len);
                     const decls_len = if (small.has_decls_len) decls_len: {
                         const decls_len = zir.extra[extra_index];
                         extra_index += 1;
@@ -3411,10 +3411,10 @@ pub fn declIterator(zir: Zir, decl_inst: u32) DeclIterator {
                 .union_decl => {
                     const small = @bitCast(Inst.UnionDecl.Small, extended.small);
                     var extra_index: usize = extended.operand;
-                    extra_index += @boolToInt(small.has_src_node);
-                    extra_index += @boolToInt(small.has_tag_type);
-                    extra_index += @boolToInt(small.has_body_len);
-                    extra_index += @boolToInt(small.has_fields_len);
+                    extra_index += @intFromBool(small.has_src_node);
+                    extra_index += @intFromBool(small.has_tag_type);
+                    extra_index += @intFromBool(small.has_body_len);
+                    extra_index += @intFromBool(small.has_fields_len);
                     const decls_len = if (small.has_decls_len) decls_len: {
                         const decls_len = zir.extra[extra_index];
                         extra_index += 1;
@@ -3426,7 +3426,7 @@ pub fn declIterator(zir: Zir, decl_inst: u32) DeclIterator {
                 .opaque_decl => {
                     const small = @bitCast(Inst.OpaqueDecl.Small, extended.small);
                     var extra_index: usize = extended.operand;
-                    extra_index += @boolToInt(small.has_src_node);
+                    extra_index += @intFromBool(small.has_src_node);
                     const decls_len = if (small.has_decls_len) decls_len: {
                         const decls_len = zir.extra[extra_index];
                         extra_index += 1;
@@ -3499,7 +3499,7 @@ fn findDeclsInner(
             const inst_data = datas[inst].pl_node;
             const extra = zir.extraData(Inst.FuncFancy, inst_data.payload_index);
             var extra_index: usize = extra.end;
-            extra_index += @boolToInt(extra.data.bits.has_lib_name);
+            extra_index += @intFromBool(extra.data.bits.has_lib_name);
 
             if (extra.data.bits.has_align_body) {
                 const body_len = zir.extra[extra_index];
@@ -3551,7 +3551,7 @@ fn findDeclsInner(
                 extra_index += 1;
             }
 
-            extra_index += @boolToInt(extra.data.bits.has_any_noalias);
+            extra_index += @intFromBool(extra.data.bits.has_any_noalias);
 
             const body = zir.extra[extra_index..][0..extra.data.body_len];
             return zir.findDeclsBody(list, body);
@@ -3730,7 +3730,7 @@ pub fn getFnInfo(zir: Zir, fn_inst: Inst.Index) FnInfo {
                     ret_ty_ref = .void_type;
                 },
                 1 => {
-                    ret_ty_ref = @intToEnum(Inst.Ref, zir.extra[extra_index]);
+                    ret_ty_ref = @enumFromInt(Inst.Ref, zir.extra[extra_index]);
                     extra_index += 1;
                 },
                 else => {
@@ -3757,7 +3757,7 @@ pub fn getFnInfo(zir: Zir, fn_inst: Inst.Index) FnInfo {
             var ret_ty_ref: Inst.Ref = .void_type;
             var ret_ty_body: []const Inst.Index = &.{};
 
-            extra_index += @boolToInt(extra.data.bits.has_lib_name);
+            extra_index += @intFromBool(extra.data.bits.has_lib_name);
             if (extra.data.bits.has_align_body) {
                 extra_index += zir.extra[extra_index] + 1;
             } else if (extra.data.bits.has_align_ref) {
@@ -3784,11 +3784,11 @@ pub fn getFnInfo(zir: Zir, fn_inst: Inst.Index) FnInfo {
                 ret_ty_body = zir.extra[extra_index..][0..body_len];
                 extra_index += ret_ty_body.len;
             } else if (extra.data.bits.has_ret_ty_ref) {
-                ret_ty_ref = @intToEnum(Inst.Ref, zir.extra[extra_index]);
+                ret_ty_ref = @enumFromInt(Inst.Ref, zir.extra[extra_index]);
                 extra_index += 1;
             }
 
-            extra_index += @boolToInt(extra.data.bits.has_any_noalias);
+            extra_index += @intFromBool(extra.data.bits.has_any_noalias);
 
             const body = zir.extra[extra_index..][0..extra.data.body_len];
             extra_index += body.len;
@@ -3825,14 +3825,14 @@ pub fn getFnInfo(zir: Zir, fn_inst: Inst.Index) FnInfo {
     };
 }
 
-pub const ref_start_index: u32 = @enumToInt(Inst.Ref.ref_start_index);
+pub const ref_start_index: u32 = @intFromEnum(Inst.Ref.ref_start_index);
 
 pub fn indexToRef(inst: Inst.Index) Inst.Ref {
-    return @intToEnum(Inst.Ref, ref_start_index + inst);
+    return @enumFromInt(Inst.Ref, ref_start_index + inst);
 }
 
 pub fn refToIndex(inst: Inst.Ref) ?Inst.Index {
-    const ref_int = @enumToInt(inst);
+    const ref_int = @intFromEnum(inst);
     if (ref_int >= ref_start_index) {
         return ref_int - ref_start_index;
     } else {

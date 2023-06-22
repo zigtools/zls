@@ -319,7 +319,7 @@ fn getDiagnosticsFromZir(
 
     const allocator = server.arena.allocator();
 
-    const payload_index = handle.zir.extra[@enumToInt(Zir.ExtraIndex.compile_errors)];
+    const payload_index = handle.zir.extra[@intFromEnum(Zir.ExtraIndex.compile_errors)];
     if (payload_index == 0) return;
 
     const header = handle.zir.extraData(Zir.Inst.CompileErrors, payload_index);

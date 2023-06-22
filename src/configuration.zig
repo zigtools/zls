@@ -10,6 +10,8 @@ const offsets = @import("offsets.zig");
 
 const logger = std.log.scoped(.zls_config);
 
+const legacy_json = @import("legacy_json.zig");
+
 pub fn loadFromFile(allocator: std.mem.Allocator, file_path: []const u8) ?Config {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
@@ -34,7 +36,7 @@ pub fn loadFromFile(allocator: std.mem.Allocator, file_path: []const u8) ?Config
     scanner.enableDiagnostics(&parse_diagnostics);
 
     // TODO: report errors using "textDocument/publishDiagnostics"
-    var config = std.json.parseFromTokenSource(Config, allocator, &scanner, parse_options) catch |err| {
+    var config = legacy_json.parseFromTokenSource(Config, allocator, &scanner, parse_options) catch |err| {
         logger.warn(
             "{s}:{d}:{d}: Error while parsing configuration file {}",
             .{ file_path, parse_diagnostics.getLine(), parse_diagnostics.getColumn(), err },
@@ -82,7 +84,7 @@ pub fn configChanged(config: *Config, runtime_zig_version: *?ZigVersionWrapper, 
         logger.info("Using zig executable '{s}'", .{exe_path});
 
         var env = getZigEnv(allocator, exe_path) orelse break :blk;
-        defer std.json.parseFree(Env, allocator, env);
+        defer legacy_json.parseFree(Env, allocator, env);
 
         if (config.zig_lib_path) |lib_path| allocator.free(lib_path);
         // Make sure the path is absolute
@@ -177,7 +179,7 @@ pub const Env = struct {
     target: ?[]const u8 = null,
 };
 
-/// result has to be freed with `std.json.parseFree`
+/// result has to be freed with `json_compat.parseFree`
 pub fn getZigEnv(allocator: std.mem.Allocator, zig_exe_path: []const u8) ?Env {
     const zig_env_result = std.ChildProcess.exec(.{
         .allocator = allocator,
@@ -202,7 +204,7 @@ pub fn getZigEnv(allocator: std.mem.Allocator, zig_exe_path: []const u8) ?Env {
         else => logger.err("zig env invocation failed", .{}),
     }
 
-    return std.json.parseFromSlice(
+    return legacy_json.parseFromSlice(
         Env,
         allocator,
         zig_env_result.stdout,

@@ -167,7 +167,7 @@ pub fn getFunctionSnippet(allocator: std.mem.Allocator, tree: Ast, func: Ast.ful
     var i: usize = 0;
     while (ast.nextFnParam(&it)) |param| : (i += 1) {
         if (skip_self_param and i == 0) continue;
-        if (i != @boolToInt(skip_self_param))
+        if (i != @intFromBool(skip_self_param))
             try buf_stream.writeAll(", ${")
         else
             try buf_stream.writeAll("${");
@@ -834,7 +834,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                         return null;
                     };
 
-                    const root_namespace = @intToEnum(ComptimeInterpreter.Namespace.Index, 0);
+                    const root_namespace = @enumFromInt(ComptimeInterpreter.Namespace.Index, 0);
 
                     // TODO: Start from current/nearest-current scope
                     const result = interpreter.interpret(node, root_namespace, .{}) catch |err| {
@@ -1033,7 +1033,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 const new_handle = analyser.store.getOrLoadHandle(builtin_uri) orelse return null;
                 const root_scope_decls = new_handle.document_scope.scopes.items(.decls)[0];
                 const decl_index = root_scope_decls.get("Type") orelse return null;
-                const decl = new_handle.document_scope.decls.items[@enumToInt(decl_index)];
+                const decl = new_handle.document_scope.decls.items[@intFromEnum(decl_index)];
                 if (decl != .ast_node) return null;
 
                 const var_decl = new_handle.tree.fullVarDecl(decl.ast_node) orelse return null;
@@ -1173,7 +1173,7 @@ pub const TypeWithHandle = struct {
         // duplicates
 
         fn hashType(hasher: *std.hash.Wyhash, ty: Type) void {
-            hasher.update(&.{ @boolToInt(ty.is_type_val), @enumToInt(ty.data) });
+            hasher.update(&.{ @intFromBool(ty.is_type_val), @intFromEnum(ty.data) });
 
             switch (ty.data) {
                 .pointer,
@@ -1209,7 +1209,7 @@ pub const TypeWithHandle = struct {
 
             if (!std.mem.eql(u8, a.handle.uri, b.handle.uri)) return false;
             if (a.type.is_type_val != b.type.is_type_val) return false;
-            if (@enumToInt(a.type.data) != @enumToInt(b.type.data)) return false;
+            if (@intFromEnum(a.type.data) != @intFromEnum(b.type.data)) return false;
 
             switch (a.type.data) {
                 inline .pointer,
@@ -2132,7 +2132,7 @@ pub const DeclWithHandle = struct {
 
                 const name = tree.tokenSlice(main_tokens[pay.items[0]]);
                 const decl_index = scope_decls[scope_index].get(name) orelse return null;
-                const decl = switch_expr_type.handle.document_scope.decls.items[@enumToInt(decl_index)];
+                const decl = switch_expr_type.handle.document_scope.decls.items[@intFromEnum(decl_index)];
 
                 switch (decl) {
                     .ast_node => |node| {
@@ -2192,7 +2192,7 @@ fn iterateSymbolsContainerInternal(
     const container_scope_index = findContainerScopeIndex(container_handle) orelse return;
 
     for (scope_decls[container_scope_index].values()) |decl_index| {
-        const decl = &handle.document_scope.decls.items[@enumToInt(decl_index)];
+        const decl = &handle.document_scope.decls.items[@intFromEnum(decl_index)];
         switch (decl.*) {
             .ast_node => |node| {
                 if (node_tags[node].isContainerField()) {
@@ -2252,9 +2252,9 @@ pub const EnclosingScopeIterator = struct {
     pub fn next(self: *EnclosingScopeIterator) ?Scope.Index {
         if (self.current_scope == .none) return null;
 
-        const child_scopes = self.scope_children[@enumToInt(self.current_scope)];
+        const child_scopes = self.scope_children[@intFromEnum(self.current_scope)];
         defer self.current_scope = for (child_scopes.items) |child_scope| {
-            const child_loc = self.scope_locs[@enumToInt(child_scope)];
+            const child_loc = self.scope_locs[@intFromEnum(child_scope)];
             if (child_loc.start <= self.source_index and self.source_index <= child_loc.end) {
                 break child_scope;
             }
@@ -2268,7 +2268,7 @@ fn iterateEnclosingScopes(document_scope: DocumentScope, source_index: usize) En
     return .{
         .scope_locs = document_scope.scopes.items(.loc),
         .scope_children = document_scope.scopes.items(.child_scopes),
-        .current_scope = @intToEnum(Scope.Index, 0),
+        .current_scope = @enumFromInt(Scope.Index, 0),
         .source_index = source_index,
     };
 }
@@ -2290,8 +2290,8 @@ pub fn iterateLabels(handle: *const DocumentStore.Handle, source_index: usize, c
 
     var scope_iterator = iterateEnclosingScopes(handle.document_scope, source_index);
     while (scope_iterator.next()) |scope_index| {
-        for (scope_decls[@enumToInt(scope_index)].values()) |decl_index| {
-            const decl = &handle.document_scope.decls.items[@enumToInt(decl_index)];
+        for (scope_decls[@intFromEnum(scope_index)].values()) |decl_index| {
+            const decl = &handle.document_scope.decls.items[@intFromEnum(decl_index)];
             if (decl.* != .label_decl) continue;
             try callback(context, DeclWithHandle{ .decl = decl, .handle = handle });
         }
@@ -2310,14 +2310,14 @@ fn iterateSymbolsGlobalInternal(
 
     var scope_iterator = iterateEnclosingScopes(handle.document_scope, source_index);
     while (scope_iterator.next()) |scope_index| {
-        for (scope_decls[@enumToInt(scope_index)].values()) |decl_index| {
-            const decl = &handle.document_scope.decls.items[@enumToInt(decl_index)];
+        for (scope_decls[@intFromEnum(scope_index)].values()) |decl_index| {
+            const decl = &handle.document_scope.decls.items[@intFromEnum(decl_index)];
             if (decl.* == .ast_node and handle.tree.nodes.items(.tag)[decl.ast_node].isContainerField()) continue;
             if (decl.* == .label_decl) continue;
             try callback(context, DeclWithHandle{ .decl = decl, .handle = handle });
         }
 
-        for (scope_uses[@enumToInt(scope_index)]) |use| {
+        for (scope_uses[@intFromEnum(scope_index)]) |use| {
             const gop = try analyser.using_trail.getOrPut(analyser.gpa, use);
             if (gop.found_existing) continue;
 
@@ -2365,9 +2365,9 @@ pub fn innermostBlockScope(handle: DocumentStore.Handle, source_index: usize) As
 
     var scope_index = innermostBlockScopeIndex(handle, source_index);
     while (true) {
-        defer scope_index = scope_parents[@enumToInt(scope_index)];
-        switch (scope_datas[@enumToInt(scope_index)]) {
-            .container, .function, .block => return scope_datas[@enumToInt(scope_index)].toNodeIndex().?,
+        defer scope_index = scope_parents[@intFromEnum(scope_index)];
+        switch (scope_datas[@intFromEnum(scope_index)]) {
+            .container, .function, .block => return scope_datas[@intFromEnum(scope_index)].toNodeIndex().?,
             else => {},
         }
     }
@@ -2381,7 +2381,7 @@ pub fn innermostContainer(handle: *const DocumentStore.Handle, source_index: usi
 
     var scope_iterator = iterateEnclosingScopes(handle.document_scope, source_index);
     while (scope_iterator.next()) |scope_index| {
-        switch (scope_datas[@enumToInt(scope_index)]) {
+        switch (scope_datas[@intFromEnum(scope_index)]) {
             .container => |node| current = node,
             else => {},
         }
@@ -2427,8 +2427,8 @@ pub fn lookupLabel(
 
     var scope_iterator = iterateEnclosingScopes(handle.document_scope, source_index);
     while (scope_iterator.next()) |scope_index| {
-        const decl_index = scope_decls[@enumToInt(scope_index)].get(symbol) orelse continue;
-        const decl = &handle.document_scope.decls.items[@enumToInt(decl_index)];
+        const decl_index = scope_decls[@intFromEnum(scope_index)].get(symbol) orelse continue;
+        const decl = &handle.document_scope.decls.items[@intFromEnum(decl_index)];
 
         if (decl.* != .label_decl) continue;
 
@@ -2445,10 +2445,10 @@ pub fn lookupSymbolGlobal(analyser: *Analyser, handle: *const DocumentStore.Hand
     var current_scope = innermostBlockScopeIndex(handle.*, source_index);
 
     while (current_scope != .none) {
-        const scope_index = @enumToInt(current_scope);
+        const scope_index = @intFromEnum(current_scope);
         defer current_scope = scope_parents[scope_index];
         if (scope_decls[scope_index].get(symbol)) |decl_index| {
-            const candidate = &handle.document_scope.decls.items[@enumToInt(decl_index)];
+            const candidate = &handle.document_scope.decls.items[@intFromEnum(decl_index)];
             switch (candidate.*) {
                 .ast_node => |node| {
                     if (handle.tree.nodes.items(.tag)[node].isContainerField()) continue;
@@ -2485,7 +2485,7 @@ pub fn lookupSymbolContainer(
 
     if (findContainerScopeIndex(container_handle)) |container_scope_index| {
         if (scope_decls[container_scope_index].get(symbol)) |decl_index| {
-            const decl = &handle.document_scope.decls.items[@enumToInt(decl_index)];
+            const decl = &handle.document_scope.decls.items[@intFromEnum(decl_index)];
             switch (decl.*) {
                 .ast_node => |node| {
                     if (node_tags[node].isContainerField()) {
@@ -2626,16 +2626,16 @@ const ScopeContext = struct {
             .loc = loc,
             .data = data,
         });
-        const new_scope = @intToEnum(Scope.Index, context.doc_scope.scopes.len - 1);
+        const new_scope = @enumFromInt(Scope.Index, context.doc_scope.scopes.len - 1);
         if (context.current_scope.* != .none) {
-            try context.doc_scope.scopes.items(.child_scopes)[@enumToInt(context.current_scope.*)].append(context.allocator, new_scope);
+            try context.doc_scope.scopes.items(.child_scopes)[@intFromEnum(context.current_scope.*)].append(context.allocator, new_scope);
         }
         context.current_scope.* = new_scope;
         return new_scope;
     }
 
     fn popScope(context: ScopeContext) void {
-        const parent_scope = context.doc_scope.scopes.items(.parent)[@enumToInt(context.current_scope.*)];
+        const parent_scope = context.doc_scope.scopes.items(.parent)[@intFromEnum(context.current_scope.*)];
         context.current_scope.* = parent_scope;
     }
 
@@ -2645,9 +2645,9 @@ const ScopeContext = struct {
         try context.doc_scope.decls.append(context.allocator, decl);
         errdefer _ = context.doc_scope.decls.pop();
 
-        const decl_index = @intToEnum(Declaration.Index, context.doc_scope.decls.items.len - 1);
+        const decl_index = @enumFromInt(Declaration.Index, context.doc_scope.decls.items.len - 1);
 
-        try context.doc_scope.scopes.items(.decls)[@enumToInt(scope)].put(context.allocator, name, decl_index);
+        try context.doc_scope.scopes.items(.decls)[@intFromEnum(scope)].put(context.allocator, name, decl_index);
     }
 };
 
@@ -2713,8 +2713,8 @@ fn makeInnerScope(context: ScopeContext, tree: Ast, node_idx: Ast.Node.Index) er
         }
     }
 
-    scopes.items(.tests)[@enumToInt(scope_index)] = try tests.toOwnedSlice(allocator);
-    scopes.items(.uses)[@enumToInt(scope_index)] = try uses.toOwnedSlice(allocator);
+    scopes.items(.tests)[@intFromEnum(scope_index)] = try tests.toOwnedSlice(allocator);
+    scopes.items(.uses)[@intFromEnum(scope_index)] = try uses.toOwnedSlice(allocator);
 }
 
 /// If `node_idx` is a block it's scope index will be returned
@@ -2734,7 +2734,7 @@ fn makeBlockScopeInternal(context: ScopeContext, tree: Ast, node_idx: Ast.Node.I
         .block_two_semicolon,
         => {
             std.debug.assert(context.doc_scope.scopes.items(.data)[block_scope_index] == .block);
-            return @intToEnum(Scope.Index, block_scope_index);
+            return @enumFromInt(Scope.Index, block_scope_index);
         },
         else => {
             const new_scope = try context.pushScope(
@@ -2903,7 +2903,7 @@ fn makeScopeInternal(context: ScopeContext, tree: Ast, node_idx: Ast.Node.Index)
             const then_scope = (try makeBlockScopeInternal(context, tree, if_node.ast.then_expr)).?;
 
             if (if_node.payload_token) |payload| {
-                const name_token = payload + @boolToInt(token_tags[payload] == .asterisk);
+                const name_token = payload + @intFromBool(token_tags[payload] == .asterisk);
                 std.debug.assert(token_tags[name_token] == .identifier);
 
                 const name = tree.tokenSlice(name_token);
@@ -2960,7 +2960,7 @@ fn makeScopeInternal(context: ScopeContext, tree: Ast, node_idx: Ast.Node.Index)
             }
 
             if (while_node.payload_token) |payload| {
-                const name_token = payload + @boolToInt(token_tags[payload] == .asterisk);
+                const name_token = payload + @intFromBool(token_tags[payload] == .asterisk);
                 std.debug.assert(token_tags[name_token] == .identifier);
 
                 const name = tree.tokenSlice(name_token);
@@ -2999,7 +2999,7 @@ fn makeScopeInternal(context: ScopeContext, tree: Ast, node_idx: Ast.Node.Index)
             for (for_node.ast.inputs) |input| {
                 if (capture_token + 1 >= tree.tokens.len) break;
                 const capture_is_ref = token_tags[capture_token] == .asterisk;
-                const name_token = capture_token + @boolToInt(capture_is_ref);
+                const name_token = capture_token + @intFromBool(capture_is_ref);
                 capture_token = name_token + 2;
 
                 try context.putDecl(
@@ -3040,7 +3040,7 @@ fn makeScopeInternal(context: ScopeContext, tree: Ast, node_idx: Ast.Node.Index)
                 if (switch_case.payload_token) |payload| {
                     const expr_index = (try makeBlockScopeInternal(context, tree, switch_case.ast.target_expr)).?;
                     // if payload is *name than get next token
-                    const name_token = payload + @boolToInt(token_tags[payload] == .asterisk);
+                    const name_token = payload + @intFromBool(token_tags[payload] == .asterisk);
                     const name = tree.tokenSlice(name_token);
 
                     try context.putDecl(expr_index, name, .{
