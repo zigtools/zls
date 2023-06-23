@@ -9,6 +9,9 @@ const translate_c = zls.translate_c;
 const allocator: std.mem.Allocator = std.testing.allocator;
 
 test "zig compile server - translate c" {
+    // FIXME: Disabled due to https://github.com/zigtools/zls/issues/1252
+    if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
+
     var result1 = try testTranslate(
         \\void foo(int);
         \\void bar(float*);
