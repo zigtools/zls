@@ -989,16 +989,22 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
 
             const cast_map = std.ComptimeStringMap(void, .{
                 .{"@as"},
+                .{"@atomicLoad"},
+                .{"@atomicRmw"},
+                .{"@atomicStore"},
                 .{"@bitCast"},
-                .{"@fieldParentPtr"},
+                .{"@mulAdd"},
+                .{"@errSetCast"},
+                .{"@fieldParentPtr"}, // the return type is actually a pointer
                 .{"@floatCast"},
-                .{"@floatToInt"},
+                .{"@intFromFloat"},
                 .{"@intCast"},
-                .{"@intToEnum"},
-                .{"@intToFloat"},
-                .{"@intToPtr"},
-                .{"@truncate"},
+                .{"@enumFromInt"},
+                .{"@floatFromInt"},
+                .{"@ptrFromInt"},
                 .{"@ptrCast"},
+                .{"@truncate"},
+                .{"@unionInit"},
             });
             if (cast_map.has(call_name)) {
                 if (params.len < 1) return null;
