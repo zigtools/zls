@@ -338,7 +338,7 @@ pub const Key = union(enum) {
                 .anyerror => .ErrorSet,
                 .noreturn => .NoReturn,
                 .anyframe_type => .AnyFrame,
-                .empty_struct_literal => .Struct,
+                .empty_struct_type => .Struct,
                 .null_type => .Null,
                 .undefined_type => .Undefined,
                 .enum_literal_type => .EnumLiteral,
@@ -634,7 +634,7 @@ pub const Key = union(enum) {
                 .enum_literal_type,
                 => Index.none,
 
-                .empty_struct_literal => Index.empty_aggregate,
+                .empty_struct_type => Index.empty_aggregate,
                 .void => Index.void_value,
                 .noreturn => Index.unreachable_value,
                 .null_type => Index.null_value,
@@ -659,8 +659,8 @@ pub const Key = union(enum) {
             .int_type => |int_info| {
                 if (int_info.bits == 0) {
                     switch (int_info.signedness) {
-                        .unsigned => return Index.zero,
-                        .signed => return Index.zero, // do we need a signed zero?
+                        .unsigned => return Index.zero_comptime_int,
+                        .signed => return Index.zero_comptime_int, // do we need a signed zero?
                     }
                 }
                 return Index.none;
@@ -835,7 +835,7 @@ pub const Key = union(enum) {
 
                 .null_type => try writer.writeAll("@TypeOf(null)"),
                 .undefined_type => try writer.writeAll("@TypeOf(undefined)"),
-                .empty_struct_literal => try writer.writeAll("@TypeOf(.{})"),
+                .empty_struct_type => try writer.writeAll("@TypeOf(.{})"),
                 .enum_literal_type => try writer.writeAll("@TypeOf(.enum_literal)"),
 
                 .atomic_order => try writer.writeAll("std.builtin.AtomicOrder"),
@@ -1104,7 +1104,7 @@ pub const Index = enum(u32) {
     comptime_float_type,
     noreturn_type,
     anyframe_type,
-    empty_struct_literal,
+    empty_struct_type,
     null_type,
     undefined_type,
     enum_literal_type,
@@ -1114,19 +1114,22 @@ pub const Index = enum(u32) {
     address_space_type,
     float_mode_type,
     reduce_op_type,
-    modifier_type,
+    call_modifier_type,
     prefetch_options_type,
     export_options_type,
     extern_options_type,
     type_info_type,
     manyptr_u8_type,
     manyptr_const_u8_type,
+    manyptr_const_u8_sentinel_0_type,
     fn_noreturn_no_args_type,
     fn_void_no_args_type,
     fn_naked_noreturn_no_args_type,
     fn_ccc_void_no_args_type,
     single_const_pointer_to_comptime_int_type,
-    const_slice_u8_type,
+    slice_const_u8_type,
+    slice_const_u8_sentinel_0_type,
+    optional_noreturn_type,
     anyerror_void_error_union_type,
     generic_poison_type,
     unknown_type,
@@ -1134,9 +1137,17 @@ pub const Index = enum(u32) {
     /// `undefined` (untyped)
     undefined_value,
     /// `0` (comptime_int)
-    zero,
+    zero_comptime_int,
+    /// `0` (u8)
+    zero_u8,
+    /// `0` (usize)
+    zero_usize,
     /// `1` (comptime_int)
-    one,
+    one_comptime_int,
+    /// `1` (u8)
+    one_u8,
+    /// `1` (usize)
+    one_usize,
     /// `{}`
     void_value,
     /// `unreachable` (noreturn type)
@@ -1149,10 +1160,6 @@ pub const Index = enum(u32) {
     bool_false,
     /// `.{}` (untyped)
     empty_aggregate,
-    /// `0` (usize)
-    zero_usize,
-    /// `1` (usize)
-    one_usize,
     the_only_possible_value,
     generic_poison,
     // unknown value of unknown type
@@ -1345,7 +1352,7 @@ pub const SimpleType = enum(u32) {
     comptime_float,
     noreturn,
     anyframe_type,
-    empty_struct_literal,
+    empty_struct_type,
     null_type,
     undefined_type,
     enum_literal_type,
@@ -1424,7 +1431,7 @@ pub fn init(gpa: Allocator) Allocator.Error!InternPool {
         .{ .index = .comptime_float_type, .key = .{ .simple_type = .comptime_float } },
         .{ .index = .noreturn_type, .key = .{ .simple_type = .noreturn } },
         .{ .index = .anyframe_type, .key = .{ .simple_type = .anyframe_type } },
-        .{ .index = .empty_struct_literal, .key = .{ .simple_type = .empty_struct_literal } },
+        .{ .index = .empty_struct_type, .key = .{ .simple_type = .empty_struct_type } },
         .{ .index = .null_type, .key = .{ .simple_type = .null_type } },
         .{ .index = .undefined_type, .key = .{ .simple_type = .undefined_type } },
         .{ .index = .enum_literal_type, .key = .{ .simple_type = .enum_literal_type } },
@@ -1435,41 +1442,45 @@ pub fn init(gpa: Allocator) Allocator.Error!InternPool {
         .{ .index = .address_space_type, .key = .{ .simple_type = .address_space } },
         .{ .index = .float_mode_type, .key = .{ .simple_type = .float_mode } },
         .{ .index = .reduce_op_type, .key = .{ .simple_type = .reduce_op } },
-        .{ .index = .modifier_type, .key = .{ .simple_type = .modifier } },
+        .{ .index = .call_modifier_type, .key = .{ .simple_type = .modifier } },
         .{ .index = .prefetch_options_type, .key = .{ .simple_type = .prefetch_options } },
         .{ .index = .export_options_type, .key = .{ .simple_type = .export_options } },
         .{ .index = .extern_options_type, .key = .{ .simple_type = .extern_options } },
         .{ .index = .type_info_type, .key = .{ .simple_type = .type_info } },
         .{ .index = .manyptr_u8_type, .key = .{ .pointer_type = .{ .elem_type = .u8_type, .size = .Many } } },
         .{ .index = .manyptr_const_u8_type, .key = .{ .pointer_type = .{ .elem_type = .u8_type, .size = .Many, .is_const = true } } },
+        .{ .index = .manyptr_const_u8_sentinel_0_type, .key = .{ .pointer_type = .{ .elem_type = .u8_type, .sentinel = .zero_u8, .size = .Many, .is_const = true } } },
         .{ .index = .fn_noreturn_no_args_type, .key = .{ .function_type = .{ .args = &.{}, .return_type = .noreturn_type } } },
         .{ .index = .fn_void_no_args_type, .key = .{ .function_type = .{ .args = &.{}, .return_type = .void_type } } },
         .{ .index = .fn_naked_noreturn_no_args_type, .key = .{ .function_type = .{ .args = &.{}, .return_type = .void_type, .calling_convention = .Naked } } },
         .{ .index = .fn_ccc_void_no_args_type, .key = .{ .function_type = .{ .args = &.{}, .return_type = .void_type, .calling_convention = .C } } },
         .{ .index = .single_const_pointer_to_comptime_int_type, .key = .{ .pointer_type = .{ .elem_type = .comptime_int_type, .size = .One, .is_const = true } } },
-        .{ .index = .const_slice_u8_type, .key = .{ .pointer_type = .{ .elem_type = .u8_type, .size = .Slice, .is_const = true } } },
+        .{ .index = .slice_const_u8_type, .key = .{ .pointer_type = .{ .elem_type = .u8_type, .size = .Slice, .is_const = true } } },
+        .{ .index = .slice_const_u8_sentinel_0_type, .key = .{ .pointer_type = .{ .elem_type = .u8_type, .sentinel = .zero_u8, .size = .Slice, .is_const = true } } },
+        .{ .index = .optional_noreturn_type, .key = .{ .optional_type = .{ .payload_type = .noreturn_type } } },
         .{ .index = .anyerror_void_error_union_type, .key = .{ .error_union_type = .{ .error_set_type = .anyerror_type, .payload_type = .void_type } } },
         .{ .index = .generic_poison_type, .key = .{ .simple_type = .generic_poison } },
         .{ .index = .unknown_type, .key = .{ .simple_type = .unknown } },
 
         .{ .index = .undefined_value, .key = .{ .simple_value = .undefined_value } },
-        .{ .index = .zero, .key = .{ .int_u64_value = .{ .ty = .comptime_int_type, .int = 0 } } },
-        .{ .index = .one, .key = .{ .int_u64_value = .{ .ty = .comptime_int_type, .int = 1 } } },
+        .{ .index = .zero_comptime_int, .key = .{ .int_u64_value = .{ .ty = .comptime_int_type, .int = 0 } } },
+        .{ .index = .zero_u8, .key = .{ .int_u64_value = .{ .ty = .u8_type, .int = 0 } } },
+        .{ .index = .zero_usize, .key = .{ .int_u64_value = .{ .ty = .usize_type, .int = 0 } } },
+        .{ .index = .one_comptime_int, .key = .{ .int_u64_value = .{ .ty = .comptime_int_type, .int = 1 } } },
+        .{ .index = .one_u8, .key = .{ .int_u64_value = .{ .ty = .u8_type, .int = 1 } } },
+        .{ .index = .one_usize, .key = .{ .int_u64_value = .{ .ty = .usize_type, .int = 1 } } },
         .{ .index = .void_value, .key = .{ .simple_value = .void_value } },
         .{ .index = .unreachable_value, .key = .{ .simple_value = .unreachable_value } },
         .{ .index = .null_value, .key = .{ .simple_value = .null_value } },
         .{ .index = .bool_true, .key = .{ .simple_value = .bool_true } },
         .{ .index = .bool_false, .key = .{ .simple_value = .bool_false } },
-
-        .{ .index = .empty_aggregate, .key = .{ .aggregate = .{ .ty = .empty_struct_literal, .values = &.{} } } },
-        .{ .index = .zero_usize, .key = .{ .int_u64_value = .{ .ty = .usize_type, .int = 0 } } },
-        .{ .index = .one_usize, .key = .{ .int_u64_value = .{ .ty = .usize_type, .int = 1 } } },
+        .{ .index = .empty_aggregate, .key = .{ .aggregate = .{ .ty = .empty_struct_type, .values = &.{} } } },
         .{ .index = .the_only_possible_value, .key = .{ .simple_value = .the_only_possible_value } },
         .{ .index = .generic_poison, .key = .{ .simple_value = .generic_poison } },
         .{ .index = .unknown_unknown, .key = .{ .unknown_value = .{ .ty = .unknown_type } } },
     };
 
-    const extra_count = 4 * @sizeOf(Pointer) + @sizeOf(ErrorUnion) + 4 * @sizeOf(Function) + 4 * @sizeOf(InternPool.U64Value);
+    const extra_count = 6 * @sizeOf(Pointer) + @sizeOf(ErrorUnion) + 4 * @sizeOf(Function) + 6 * @sizeOf(InternPool.U64Value);
 
     try ip.map.ensureTotalCapacity(gpa, items.len);
     try ip.items.ensureTotalCapacity(gpa, items.len);
@@ -3107,7 +3118,7 @@ test "pointer type" {
     const @"[*:0]u32" = try ip.get(gpa, .{ .pointer_type = .{
         .elem_type = .u32_type,
         .size = .Many,
-        .sentinel = .zero,
+        .sentinel = .zero_comptime_int,
     } });
     const @"[]u32" = try ip.get(gpa, .{ .pointer_type = .{
         .elem_type = .u32_type,
@@ -3116,7 +3127,7 @@ test "pointer type" {
     const @"[:0]u32" = try ip.get(gpa, .{ .pointer_type = .{
         .elem_type = .u32_type,
         .size = .Slice,
-        .sentinel = .zero,
+        .sentinel = .zero_comptime_int,
     } });
     const @"[*c]u32" = try ip.get(gpa, .{ .pointer_type = .{
         .elem_type = .u32_type,
@@ -3233,7 +3244,7 @@ test "array type" {
     const u32_0_0_array_type = try ip.get(gpa, .{ .array_type = .{
         .len = 3,
         .child = .u32_type,
-        .sentinel = .zero,
+        .sentinel = .zero_comptime_int,
     } });
 
     try expect(i32_3_array_type != u32_0_0_array_type);
