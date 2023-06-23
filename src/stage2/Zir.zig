@@ -19,6 +19,7 @@ const BigIntConst = std.math.big.int.Const;
 const BigIntMutable = std.math.big.int.Mutable;
 const Ast = std.zig.Ast;
 
+const InternPool = @import("../analyser/InternPool.zig");
 const Zir = @This();
 const Module = @import("Module.zig");
 const LazySrcLoc = Module.LazySrcLoc;
@@ -294,6 +295,14 @@ pub const Inst = struct {
         /// Uses the `pl_node` union field with payload `Call`.
         /// AST node is the function call.
         call,
+        /// Function call using `a.b()` syntax.
+        /// Uses the named field as the callee. If there is no such field, searches in the type for
+        /// a decl matching the field name. The decl is resolved and we ensure that it's a function
+        /// which can accept the object as the first parameter, with one pointer fixup. This
+        /// function is then used as the callee, with the object as an implicit first parameter.
+        /// Uses the `pl_node` union field with payload `FieldCall`.
+        /// AST node is the function call.
+        field_call,
         /// Implements the `@call` builtin.
         /// Uses the `pl_node` union field with payload `BuiltinCall`.
         /// AST node is the builtin call.
@@ -429,15 +438,6 @@ pub const Inst = struct {
         /// This instruction also accepts a pointer.
         /// Uses `pl_node` field. The AST node is the a.b syntax. Payload is Field.
         field_val,
-        /// Given a pointer to a struct or object that contains virtual fields, returns the
-        /// named field.  If there is no named field, searches in the type for a decl that
-        /// matches the field name.  The decl is resolved and we ensure that it's a function
-        /// which can accept the object as the first parameter, with one pointer fixup.  If
-        /// all of that works, this instruction produces a special "bound function" value
-        /// which contains both the function and the saved first parameter value.
-        /// Bound functions may only be used as the function parameter to a `call` or
-        /// `builtin_call` instruction.  Any other use is invalid zir and may crash the compiler.
-        field_call_bind,
         /// Given a pointer to a struct or object that contains virtual fields, returns a pointer
         /// to the named field. The field name is a comptime instruction. Used by @field.
         /// Uses `pl_node` field. The AST node is the builtin call. Payload is FieldNamed.
@@ -567,6 +567,10 @@ pub const Inst = struct {
         /// Returns a pointer to the subslice.
         /// Uses the `pl_node` field. AST node is the slice syntax. Payload is `SliceSentinel`.
         slice_sentinel,
+        /// Slice operation `array_ptr[start..][0..len]`. Optional sentinel.
+        /// Returns a pointer to the subslice.
+        /// Uses the `pl_node` field. AST node is the slice syntax. Payload is `SliceLength`.
+        slice_length,
         /// Write a value to a pointer. For loading, see `load`.
         /// Source location is assumed to be same as previous instruction.
         /// Uses the `bin` union field.
@@ -660,38 +664,9 @@ pub const Inst = struct {
         /// A switch expression. Uses the `pl_node` union field.
         /// AST node is the switch, payload is `SwitchBlock`.
         switch_block,
-        /// Produces the value that will be switched on. For example, for
-        /// integers, it returns the integer with no modifications. For tagged unions, it
-        /// returns the active enum tag.
-        /// Uses the `un_node` union field.
-        switch_cond,
-        /// Same as `switch_cond`, except the input operand is a pointer to
-        /// what will be switched on.
-        /// Uses the `un_node` union field.
-        switch_cond_ref,
-        /// Produces the capture value for a switch prong.
-        /// Uses the `switch_capture` field.
-        /// If the `prong_index` field is max int, it means this is the capture
-        /// for the else/`_` prong.
-        switch_capture,
-        /// Produces the capture value for a switch prong.
-        /// Result is a pointer to the value.
-        /// Uses the `switch_capture` field.
-        /// If the `prong_index` field is max int, it means this is the capture
-        /// for the else/`_` prong.
-        switch_capture_ref,
-        /// Produces the capture value for a switch prong.
-        /// The prong is one of the multi cases.
-        /// Uses the `switch_capture` field.
-        switch_capture_multi,
-        /// Produces the capture value for a switch prong.
-        /// The prong is one of the multi cases.
-        /// Result is a pointer to the value.
-        /// Uses the `switch_capture` field.
-        switch_capture_multi_ref,
-        /// Produces the capture value for an inline switch prong tag capture.
-        /// Uses the `un_tok` field.
-        switch_capture_tag,
+        /// A switch expression. Uses the `pl_node` union field.
+        /// AST node is the switch, payload is `SwitchBlock`. Operand is a pointer.
+        switch_block_ref,
         /// Given a
         ///   *A returns *A
         ///   *E!A returns *A
@@ -771,9 +746,9 @@ pub const Inst = struct {
         /// Implements the `@bitSizeOf` builtin. Uses `un_node`.
         bit_size_of,
 
-        /// Implement builtin `@ptrToInt`. Uses `un_node`.
+        /// Implement builtin `@intFromPtr`. Uses `un_node`.
         /// Convert a pointer to a `usize` integer.
-        ptr_to_int,
+        int_from_ptr,
         /// Emit an error message and fail compilation.
         /// Uses the `un_node` field.
         compile_error,
@@ -783,11 +758,11 @@ pub const Inst = struct {
         set_eval_branch_quota,
         /// Converts an enum value into an integer. Resulting type will be the tag type
         /// of the enum. Uses `un_node`.
-        enum_to_int,
+        int_from_enum,
         /// Implement builtin `@alignOf`. Uses `un_node`.
         align_of,
-        /// Implement builtin `@boolToInt`. Uses `un_node`.
-        bool_to_int,
+        /// Implement builtin `@intFromBool`. Uses `un_node`.
+        int_from_bool,
         /// Implement builtin `@embedFile`. Uses `un_node`.
         embed_file,
         /// Implement builtin `@errorName`. Uses `un_node`.
@@ -836,18 +811,18 @@ pub const Inst = struct {
         /// Implement builtin `@frameSize`. Uses `un_node`.
         frame_size,
 
-        /// Implements the `@floatToInt` builtin.
+        /// Implements the `@intFromFloat` builtin.
         /// Uses `pl_node` with payload `Bin`. `lhs` is dest type, `rhs` is operand.
-        float_to_int,
-        /// Implements the `@intToFloat` builtin.
+        int_from_float,
+        /// Implements the `@floatFromInt` builtin.
         /// Uses `pl_node` with payload `Bin`. `lhs` is dest type, `rhs` is operand.
-        int_to_float,
-        /// Implements the `@intToPtr` builtin.
+        float_from_int,
+        /// Implements the `@ptrFromInt` builtin.
         /// Uses `pl_node` with payload `Bin`. `lhs` is dest type, `rhs` is operand.
-        int_to_ptr,
+        ptr_from_int,
         /// Converts an integer into an enum value.
         /// Uses `pl_node` with payload `Bin`. `lhs` is dest type, `rhs` is operand.
-        int_to_enum,
+        enum_from_int,
         /// Convert a larger float type to any other float type, possibly causing
         /// a loss of precision.
         /// Uses the `pl_node` field. AST is the `@floatCast` syntax.
@@ -1044,6 +1019,7 @@ pub const Inst = struct {
                 .bool_br_or,
                 .bool_not,
                 .call,
+                .field_call,
                 .cmp_lt,
                 .cmp_lte,
                 .cmp_eq,
@@ -1076,7 +1052,6 @@ pub const Inst = struct {
                 .field_ptr,
                 .field_ptr_init,
                 .field_val,
-                .field_call_bind,
                 .field_ptr_named,
                 .field_val_named,
                 .func,
@@ -1132,18 +1107,13 @@ pub const Inst = struct {
                 .slice_start,
                 .slice_end,
                 .slice_sentinel,
+                .slice_length,
                 .import,
                 .typeof_log2_int_type,
                 .resolve_inferred_alloc,
                 .set_eval_branch_quota,
-                .switch_capture,
-                .switch_capture_ref,
-                .switch_capture_multi,
-                .switch_capture_multi_ref,
-                .switch_capture_tag,
                 .switch_block,
-                .switch_cond,
-                .switch_cond_ref,
+                .switch_block_ref,
                 .array_base_ptr,
                 .field_base_ptr,
                 .validate_array_init_ty,
@@ -1163,14 +1133,14 @@ pub const Inst = struct {
                 .union_init,
                 .field_type,
                 .field_type_ref,
-                .int_to_enum,
-                .enum_to_int,
+                .enum_from_int,
+                .int_from_enum,
                 .type_info,
                 .size_of,
                 .bit_size_of,
-                .ptr_to_int,
+                .int_from_ptr,
                 .align_of,
-                .bool_to_int,
+                .int_from_bool,
                 .embed_file,
                 .error_name,
                 .set_runtime_safety,
@@ -1192,9 +1162,9 @@ pub const Inst = struct {
                 .type_name,
                 .frame_type,
                 .frame_size,
-                .float_to_int,
-                .int_to_float,
-                .int_to_ptr,
+                .int_from_float,
+                .float_from_int,
+                .ptr_from_int,
                 .float_cast,
                 .int_cast,
                 .ptr_cast,
@@ -1353,6 +1323,7 @@ pub const Inst = struct {
                 .bool_br_or,
                 .bool_not,
                 .call,
+                .field_call,
                 .cmp_lt,
                 .cmp_lte,
                 .cmp_eq,
@@ -1375,7 +1346,6 @@ pub const Inst = struct {
                 .field_ptr,
                 .field_ptr_init,
                 .field_val,
-                .field_call_bind,
                 .field_ptr_named,
                 .field_val_named,
                 .func,
@@ -1427,16 +1397,11 @@ pub const Inst = struct {
                 .slice_start,
                 .slice_end,
                 .slice_sentinel,
+                .slice_length,
                 .import,
                 .typeof_log2_int_type,
-                .switch_capture,
-                .switch_capture_ref,
-                .switch_capture_multi,
-                .switch_capture_multi_ref,
-                .switch_capture_tag,
                 .switch_block,
-                .switch_cond,
-                .switch_cond_ref,
+                .switch_block_ref,
                 .array_base_ptr,
                 .field_base_ptr,
                 .struct_init_empty,
@@ -1451,14 +1416,14 @@ pub const Inst = struct {
                 .union_init,
                 .field_type,
                 .field_type_ref,
-                .int_to_enum,
-                .enum_to_int,
+                .enum_from_int,
+                .int_from_enum,
                 .type_info,
                 .size_of,
                 .bit_size_of,
-                .ptr_to_int,
+                .int_from_ptr,
                 .align_of,
-                .bool_to_int,
+                .int_from_bool,
                 .embed_file,
                 .error_name,
                 .sqrt,
@@ -1479,9 +1444,9 @@ pub const Inst = struct {
                 .type_name,
                 .frame_type,
                 .frame_size,
-                .float_to_int,
-                .int_to_float,
-                .int_to_ptr,
+                .int_from_float,
+                .float_from_int,
+                .ptr_from_int,
                 .float_cast,
                 .int_cast,
                 .ptr_cast,
@@ -1592,6 +1557,7 @@ pub const Inst = struct {
                 .check_comptime_control_flow = .un_node,
                 .for_len = .pl_node,
                 .call = .pl_node,
+                .field_call = .pl_node,
                 .cmp_lt = .pl_node,
                 .cmp_lte = .pl_node,
                 .cmp_eq = .pl_node,
@@ -1632,7 +1598,6 @@ pub const Inst = struct {
                 .field_val = .pl_node,
                 .field_ptr_named = .pl_node,
                 .field_val_named = .pl_node,
-                .field_call_bind = .pl_node,
                 .func = .pl_node,
                 .func_inferred = .pl_node,
                 .func_fancy = .pl_node,
@@ -1664,6 +1629,7 @@ pub const Inst = struct {
                 .slice_start = .pl_node,
                 .slice_end = .pl_node,
                 .slice_sentinel = .pl_node,
+                .slice_length = .pl_node,
                 .store = .bin,
                 .store_node = .pl_node,
                 .store_to_block_ptr = .bin,
@@ -1686,13 +1652,7 @@ pub const Inst = struct {
                 .err_union_code_ptr = .un_node,
                 .enum_literal = .str_tok,
                 .switch_block = .pl_node,
-                .switch_cond = .un_node,
-                .switch_cond_ref = .un_node,
-                .switch_capture = .switch_capture,
-                .switch_capture_ref = .switch_capture,
-                .switch_capture_multi = .switch_capture,
-                .switch_capture_multi_ref = .switch_capture,
-                .switch_capture_tag = .un_tok,
+                .switch_block_ref = .pl_node,
                 .array_base_ptr = .un_node,
                 .field_base_ptr = .un_node,
                 .validate_array_init_ty = .pl_node,
@@ -1716,12 +1676,12 @@ pub const Inst = struct {
                 .size_of = .un_node,
                 .bit_size_of = .un_node,
 
-                .ptr_to_int = .un_node,
+                .int_from_ptr = .un_node,
                 .compile_error = .un_node,
                 .set_eval_branch_quota = .un_node,
-                .enum_to_int = .un_node,
+                .int_from_enum = .un_node,
                 .align_of = .un_node,
-                .bool_to_int = .un_node,
+                .int_from_bool = .un_node,
                 .embed_file = .un_node,
                 .error_name = .un_node,
                 .panic = .un_node,
@@ -1746,10 +1706,10 @@ pub const Inst = struct {
                 .frame_type = .un_node,
                 .frame_size = .un_node,
 
-                .float_to_int = .pl_node,
-                .int_to_float = .pl_node,
-                .int_to_ptr = .pl_node,
-                .int_to_enum = .pl_node,
+                .int_from_float = .pl_node,
+                .float_from_int = .pl_node,
+                .ptr_from_int = .pl_node,
+                .enum_from_int = .pl_node,
                 .float_cast = .pl_node,
                 .int_cast = .pl_node,
                 .ptr_cast = .pl_node,
@@ -1945,16 +1905,6 @@ pub const Inst = struct {
         /// The `@prefetch` builtin.
         /// `operand` is payload index to `BinNode`.
         prefetch,
-        /// Given a pointer to a struct or object that contains virtual fields, returns the
-        /// named field.  If there is no named field, searches in the type for a decl that
-        /// matches the field name.  The decl is resolved and we ensure that it's a function
-        /// which can accept the object as the first parameter, with one pointer fixup.  If
-        /// all of that works, this instruction produces a special "bound function" value
-        /// which contains both the function and the saved first parameter value.
-        /// Bound functions may only be used as the function parameter to a `call` or
-        /// `builtin_call` instruction.  Any other use is invalid zir and may crash the compiler.
-        /// Uses `pl_node` field. The AST node is the `@field` builtin. Payload is FieldNamedNode.
-        field_call_bind_named,
         /// Implements the `@fence` builtin.
         /// `operand` is payload index to `UnNode`.
         fence,
@@ -1980,10 +1930,10 @@ pub const Inst = struct {
         select,
         /// Implement builtin `@errToInt`.
         /// `operand` is payload index to `UnNode`.
-        error_to_int,
-        /// Implement builtin `@intToError`.
+        int_from_error,
+        /// Implement builtin `@errorFromInt`.
         /// `operand` is payload index to `UnNode`.
-        int_to_error,
+        error_from_int,
         /// Implement builtin `@Type`.
         /// `operand` is payload index to `UnNode`.
         /// `small` contains `NameStrategy`.
@@ -2028,9 +1978,10 @@ pub const Inst = struct {
         /// Implements the `@inComptime` builtin.
         /// `operand` is `src_node: i32`.
         in_comptime,
-        /// Used as a placeholder for the capture of an `errdefer`.
-        /// This is replaced by Sema with the captured value.
-        errdefer_err_code,
+        /// Used as a placeholder instruction which is just a dummy index for Sema to replace
+        /// with a specific value. For instance, this is used for the capture of an `errdefer`.
+        /// This should never appear in a body.
+        value_placeholder,
 
         pub const InstData = struct {
             opcode: Extended,
@@ -2058,107 +2009,89 @@ pub const Inst = struct {
     /// The tag type is specified so that it is safe to bitcast between `[]u32`
     /// and `[]Ref`.
     pub const Ref = enum(u32) {
-        u1_type,
-        u8_type,
-        i8_type,
-        u16_type,
-        i16_type,
-        u29_type,
-        u32_type,
-        i32_type,
-        u64_type,
-        i64_type,
-        u128_type,
-        i128_type,
-        usize_type,
-        isize_type,
-        c_char_type,
-        c_short_type,
-        c_ushort_type,
-        c_int_type,
-        c_uint_type,
-        c_long_type,
-        c_ulong_type,
-        c_longlong_type,
-        c_ulonglong_type,
-        c_longdouble_type,
-        f16_type,
-        f32_type,
-        f64_type,
-        f80_type,
-        f128_type,
-        anyopaque_type,
-        bool_type,
-        void_type,
-        type_type,
-        anyerror_type,
-        comptime_int_type,
-        comptime_float_type,
-        noreturn_type,
-        anyframe_type,
-        empty_struct_literal,
-        null_type,
-        undefined_type,
-        enum_literal_type,
-        atomic_order_type,
-        atomic_rmw_op_type,
-        calling_convention_type,
-        address_space_type,
-        float_mode_type,
-        reduce_op_type,
-        modifier_type,
-        prefetch_options_type,
-        export_options_type,
-        extern_options_type,
-        type_info_type,
-        manyptr_u8_type,
-        manyptr_const_u8_type,
-        fn_noreturn_no_args_type,
-        fn_void_no_args_type,
-        fn_naked_noreturn_no_args_type,
-        fn_ccc_void_no_args_type,
-        single_const_pointer_to_comptime_int_type,
-        const_slice_u8_type,
-        anyerror_void_error_union_type,
-        generic_poison_type,
-        unknown_type,
+        u1_type = @intFromEnum(InternPool.Index.u1_type),
+        u8_type = @intFromEnum(InternPool.Index.u8_type),
+        i8_type = @intFromEnum(InternPool.Index.i8_type),
+        u16_type = @intFromEnum(InternPool.Index.u16_type),
+        i16_type = @intFromEnum(InternPool.Index.i16_type),
+        u29_type = @intFromEnum(InternPool.Index.u29_type),
+        u32_type = @intFromEnum(InternPool.Index.u32_type),
+        i32_type = @intFromEnum(InternPool.Index.i32_type),
+        u64_type = @intFromEnum(InternPool.Index.u64_type),
+        i64_type = @intFromEnum(InternPool.Index.i64_type),
+        u128_type = @intFromEnum(InternPool.Index.u128_type),
+        i128_type = @intFromEnum(InternPool.Index.i128_type),
+        usize_type = @intFromEnum(InternPool.Index.usize_type),
+        isize_type = @intFromEnum(InternPool.Index.isize_type),
+        c_char_type = @intFromEnum(InternPool.Index.c_char_type),
+        c_short_type = @intFromEnum(InternPool.Index.c_short_type),
+        c_ushort_type = @intFromEnum(InternPool.Index.c_ushort_type),
+        c_int_type = @intFromEnum(InternPool.Index.c_int_type),
+        c_uint_type = @intFromEnum(InternPool.Index.c_uint_type),
+        c_long_type = @intFromEnum(InternPool.Index.c_long_type),
+        c_ulong_type = @intFromEnum(InternPool.Index.c_ulong_type),
+        c_longlong_type = @intFromEnum(InternPool.Index.c_longlong_type),
+        c_ulonglong_type = @intFromEnum(InternPool.Index.c_ulonglong_type),
+        c_longdouble_type = @intFromEnum(InternPool.Index.c_longdouble_type),
+        f16_type = @intFromEnum(InternPool.Index.f16_type),
+        f32_type = @intFromEnum(InternPool.Index.f32_type),
+        f64_type = @intFromEnum(InternPool.Index.f64_type),
+        f80_type = @intFromEnum(InternPool.Index.f80_type),
+        f128_type = @intFromEnum(InternPool.Index.f128_type),
+        anyopaque_type = @intFromEnum(InternPool.Index.anyopaque_type),
+        bool_type = @intFromEnum(InternPool.Index.bool_type),
+        void_type = @intFromEnum(InternPool.Index.void_type),
+        type_type = @intFromEnum(InternPool.Index.type_type),
+        anyerror_type = @intFromEnum(InternPool.Index.anyerror_type),
+        comptime_int_type = @intFromEnum(InternPool.Index.comptime_int_type),
+        comptime_float_type = @intFromEnum(InternPool.Index.comptime_float_type),
+        noreturn_type = @intFromEnum(InternPool.Index.noreturn_type),
+        anyframe_type = @intFromEnum(InternPool.Index.anyframe_type),
+        empty_struct_type = @intFromEnum(InternPool.Index.empty_struct_type),
+        null_type = @intFromEnum(InternPool.Index.null_type),
+        undefined_type = @intFromEnum(InternPool.Index.undefined_type),
+        enum_literal_type = @intFromEnum(InternPool.Index.enum_literal_type),
+        atomic_order_type = @intFromEnum(InternPool.Index.atomic_order_type),
+        atomic_rmw_op_type = @intFromEnum(InternPool.Index.atomic_rmw_op_type),
+        calling_convention_type = @intFromEnum(InternPool.Index.calling_convention_type),
+        address_space_type = @intFromEnum(InternPool.Index.address_space_type),
+        float_mode_type = @intFromEnum(InternPool.Index.float_mode_type),
+        reduce_op_type = @intFromEnum(InternPool.Index.reduce_op_type),
+        call_modifier_type = @intFromEnum(InternPool.Index.call_modifier_type),
+        prefetch_options_type = @intFromEnum(InternPool.Index.prefetch_options_type),
+        export_options_type = @intFromEnum(InternPool.Index.export_options_type),
+        extern_options_type = @intFromEnum(InternPool.Index.extern_options_type),
+        type_info_type = @intFromEnum(InternPool.Index.type_info_type),
+        manyptr_u8_type = @intFromEnum(InternPool.Index.manyptr_u8_type),
+        manyptr_const_u8_type = @intFromEnum(InternPool.Index.manyptr_const_u8_type),
+        manyptr_const_u8_sentinel_0_type = @intFromEnum(InternPool.Index.manyptr_const_u8_sentinel_0_type),
+        single_const_pointer_to_comptime_int_type = @intFromEnum(InternPool.Index.single_const_pointer_to_comptime_int_type),
+        slice_const_u8_type = @intFromEnum(InternPool.Index.slice_const_u8_type),
+        slice_const_u8_sentinel_0_type = @intFromEnum(InternPool.Index.slice_const_u8_sentinel_0_type),
+        optional_noreturn_type = @intFromEnum(InternPool.Index.optional_noreturn_type),
+        anyerror_void_error_union_type = @intFromEnum(InternPool.Index.anyerror_void_error_union_type),
+        generic_poison_type = @intFromEnum(InternPool.Index.generic_poison_type),
+        unknown_type = @intFromEnum(InternPool.Index.unknown_type),
 
-        /// `undefined` (untyped)
-        undef,
-        /// `0` (comptime_int)
-        zero,
-        /// `1` (comptime_int)
-        one,
-        /// `{}`
-        void_value,
-        /// `unreachable` (noreturn type)
-        unreachable_value,
-        /// `null` (untyped)
-        null_value,
-        /// `true`
-        bool_true,
-        /// `false`
-        bool_false,
-        /// `.{}` (untyped)
-        empty_struct,
-        /// `0` (usize)
-        zero_usize,
-        /// `1` (usize)
-        one_usize,
-        /// `std.builtin.CallingConvention.C`
-        calling_convention_c,
-        /// `std.builtin.CallingConvention.Inline`
-        calling_convention_inline,
-        /// Used for generic parameters where the type and value
-        /// is not known until generic function instantiation.
-        generic_poison,
-        unknown,
+        undef = @intFromEnum(InternPool.Index.undefined_value),
+        zero = @intFromEnum(InternPool.Index.zero_comptime_int),
+        zero_u8 = @intFromEnum(InternPool.Index.zero_u8),
+        one = @intFromEnum(InternPool.Index.one_comptime_int),
+        one_u8 = @intFromEnum(InternPool.Index.one_u8),
+        void_value = @intFromEnum(InternPool.Index.void_value),
+        unreachable_value = @intFromEnum(InternPool.Index.unreachable_value),
+        null_value = @intFromEnum(InternPool.Index.null_value),
+        bool_true = @intFromEnum(InternPool.Index.bool_true),
+        bool_false = @intFromEnum(InternPool.Index.bool_false),
+        empty_aggregate = @intFromEnum(InternPool.Index.empty_aggregate),
+        zero_usize = @intFromEnum(InternPool.Index.zero_usize),
+        one_usize = @intFromEnum(InternPool.Index.one_usize),
+        the_only_possible_value = @intFromEnum(InternPool.Index.the_only_possible_value),
+        generic_poison = @intFromEnum(InternPool.Index.generic_poison),
+        unknown_unknown = @intFromEnum(InternPool.Index.unknown_unknown),
 
         ref_start_index,
-
-        /// This Ref does not correspond to any ZIR instruction or constant
-        /// value and may instead be used as a sentinel to indicate null.
-        none = std.math.maxInt(u32),
+        none = @intFromEnum(InternPool.Index.none),
         _,
     };
 
@@ -2290,10 +2223,6 @@ pub const Inst = struct {
             operand: Ref,
             payload_index: u32,
         },
-        switch_capture: struct {
-            switch_inst: Index,
-            prong_index: u32,
-        },
         dbg_stmt: LineColumn,
         /// Used for unary operators which reference an inst,
         /// with an AST node source location.
@@ -2363,7 +2292,6 @@ pub const Inst = struct {
             bool_br,
             @"unreachable",
             @"break",
-            switch_capture,
             dbg_stmt,
             inst_node,
             str_op,
@@ -2579,6 +2507,19 @@ pub const Inst = struct {
         };
     };
 
+    /// Stored inside extra, with trailing arguments according to `args_len`.
+    /// Implicit 0. arg_0_start: u32, // always same as `args_len`
+    /// 1. arg_end: u32, // for each `args_len`
+    /// arg_N_start is the same as arg_N-1_end
+    pub const FieldCall = struct {
+        // Note: Flags *must* come first so that unusedResultExpr
+        // can find it when it goes to modify them.
+        flags: Call.Flags,
+        obj_ptr: Ref,
+        /// Offset into `string_bytes`.
+        field_name_start: u32,
+    };
+
     pub const TypeOfPeer = struct {
         src_node: i32,
         body_len: u32,
@@ -2658,6 +2599,14 @@ pub const Inst = struct {
         sentinel: Ref,
     };
 
+    pub const SliceLength = struct {
+        lhs: Ref,
+        start: Ref,
+        len: Ref,
+        sentinel: Ref,
+        start_src_node_offset: i32,
+    };
+
     /// The meaning of these operands depends on the corresponding `Tag`.
     pub const Bin = struct {
         lhs: Ref,
@@ -2681,36 +2630,52 @@ pub const Inst = struct {
     };
 
     /// 0. multi_cases_len: u32 // If has_multi_cases is set.
-    /// 1. else_body { // If has_else or has_under is set.
-    ///        body_len: u32,
-    ///        body member Index for every body_len
+    /// 1. tag_capture_inst: u32 // If any_has_tag_capture is set. Index of instruction prongs use to refer to the inline tag capture.
+    /// 2. else_body { // If has_else or has_under is set.
+    ///        info: ProngInfo,
+    ///        body member Index for every info.body_len
     ///     }
-    /// 2. scalar_cases: { // for every scalar_cases_len
+    /// 3. scalar_cases: { // for every scalar_cases_len
     ///        item: Ref,
-    ///        body_len: u32,
-    ///        body member Index for every body_len
+    ///        info: ProngInfo,
+    ///        body member Index for every info.body_len
     ///     }
-    /// 3. multi_cases: { // for every multi_cases_len
+    /// 4. multi_cases: { // for every multi_cases_len
     ///        items_len: u32,
     ///        ranges_len: u32,
-    ///        body_len: u32,
+    ///        info: ProngInfo,
     ///        item: Ref // for every items_len
     ///        ranges: { // for every ranges_len
     ///            item_first: Ref,
     ///            item_last: Ref,
     ///        }
-    ///        body member Index for every body_len
+    ///        body member Index for every info.body_len
     ///    }
+    ///
+    /// When analyzing a case body, the switch instruction itself refers to the
+    /// captured payload. Whether this is captured by reference or by value
+    /// depends on whether the `byref` bit is set for the corresponding body.
     pub const SwitchBlock = struct {
-        /// This is always a `switch_cond` or `switch_cond_ref` instruction.
-        /// If it is a `switch_cond_ref` instruction, bits.is_ref is always true.
-        /// If it is a `switch_cond` instruction, bits.is_ref is always false.
-        /// Both `switch_cond` and `switch_cond_ref` return a value, not a pointer,
-        /// that is useful for the case items, but cannot be used for capture values.
-        /// For the capture values, Sema is expected to find the operand of this operand
-        /// and use that.
+        /// The operand passed to the `switch` expression. If this is a
+        /// `switch_block`, this is the operand value; if `switch_block_ref` it
+        /// is a pointer to the operand. `switch_block_ref` is always used if
+        /// any prong has a byref capture.
         operand: Ref,
         bits: Bits,
+
+        /// These are stored in trailing data in `extra` for each prong.
+        pub const ProngInfo = packed struct(u32) {
+            body_len: u28,
+            capture: Capture,
+            is_inline: bool,
+            has_tag_capture: bool,
+
+            pub const Capture = enum(u2) {
+                none,
+                by_val,
+                by_ref,
+            };
+        };
 
         pub const Bits = packed struct {
             /// If true, one or more prongs have multiple items.
@@ -2719,9 +2684,11 @@ pub const Inst = struct {
             has_else: bool,
             /// If true, there is an underscore prong. This is mutually exclusive with `has_else`.
             has_under: bool,
+            /// If true, at least one prong has an inline tag capture.
+            any_has_tag_capture: bool,
             scalar_cases_len: ScalarCasesLen,
 
-            pub const ScalarCasesLen = u29;
+            pub const ScalarCasesLen = u28;
 
             pub fn specialProng(bits: Bits) SpecialProng {
                 const has_else: u2 = @intFromBool(bits.has_else);
@@ -2735,103 +2702,10 @@ pub const Inst = struct {
             }
         };
 
-        pub const ScalarProng = struct {
-            item: Ref,
-            body: []const Index,
-        };
-
-        /// TODO performance optimization: instead of having this helper method
-        /// change the definition of switch_capture instruction to store extra_index
-        /// instead of prong_index. This way, Sema won't be doing O(N^2) iterations
-        /// over the switch prongs.
-        pub fn getScalarProng(
-            self: SwitchBlock,
-            zir: Zir,
-            extra_end: usize,
-            prong_index: usize,
-        ) ScalarProng {
-            var extra_index: usize = extra_end;
-
-            if (self.bits.has_multi_cases) {
-                extra_index += 1;
-            }
-
-            if (self.bits.specialProng() != .none) {
-                const body_len = @truncate(u31, zir.extra[extra_index]);
-                extra_index += 1;
-                const body = zir.extra[extra_index..][0..body_len];
-                extra_index += body.len;
-            }
-
-            var scalar_i: usize = 0;
-            while (true) : (scalar_i += 1) {
-                const item = @enumFromInt(Ref, zir.extra[extra_index]);
-                extra_index += 1;
-                const body_len = @truncate(u31, zir.extra[extra_index]);
-                extra_index += 1;
-                const body = zir.extra[extra_index..][0..body_len];
-                extra_index += body.len;
-
-                if (scalar_i < prong_index) continue;
-
-                return .{
-                    .item = item,
-                    .body = body,
-                };
-            }
-        }
-
         pub const MultiProng = struct {
             items: []const Ref,
             body: []const Index,
         };
-
-        pub fn getMultiProng(
-            self: SwitchBlock,
-            zir: Zir,
-            extra_end: usize,
-            prong_index: usize,
-        ) MultiProng {
-            // +1 for self.bits.has_multi_cases == true
-            var extra_index: usize = extra_end + 1;
-
-            if (self.bits.specialProng() != .none) {
-                const body_len = @truncate(u31, zir.extra[extra_index]);
-                extra_index += 1;
-                const body = zir.extra[extra_index..][0..body_len];
-                extra_index += body.len;
-            }
-
-            var scalar_i: usize = 0;
-            while (scalar_i < self.bits.scalar_cases_len) : (scalar_i += 1) {
-                extra_index += 1;
-                const body_len = @truncate(u31, zir.extra[extra_index]);
-                extra_index += 1;
-                extra_index += body_len;
-            }
-            var multi_i: u32 = 0;
-            while (true) : (multi_i += 1) {
-                const items_len = zir.extra[extra_index];
-                extra_index += 1;
-                const ranges_len = zir.extra[extra_index];
-                extra_index += 1;
-                const body_len = @truncate(u31, zir.extra[extra_index]);
-                extra_index += 1;
-                const items = zir.refSlice(extra_index, items_len);
-                extra_index += items_len;
-                // Each range has a start and an end.
-                extra_index += 2 * ranges_len;
-
-                const body = zir.extra[extra_index..][0..body_len];
-                extra_index += body_len;
-
-                if (multi_i < prong_index) continue;
-                return .{
-                    .items = items,
-                    .body = body,
-                };
-            }
-        }
     };
 
     pub const Field = struct {
@@ -2841,12 +2715,6 @@ pub const Inst = struct {
     };
 
     pub const FieldNamed = struct {
-        lhs: Ref,
-        field_name: Ref,
-    };
-
-    pub const FieldNamedNode = struct {
-        node: i32,
         lhs: Ref,
         field_name: Ref,
     };
@@ -3832,10 +3700,16 @@ pub fn indexToRef(inst: Inst.Index) Inst.Ref {
 }
 
 pub fn refToIndex(inst: Inst.Ref) ?Inst.Index {
+    assert(inst != .none);
     const ref_int = @intFromEnum(inst);
     if (ref_int >= ref_start_index) {
         return ref_int - ref_start_index;
     } else {
         return null;
     }
+}
+
+pub fn refToIndexAllowNone(inst: Inst.Ref) ?Inst.Index {
+    if (inst == .none) return null;
+    return refToIndex(inst);
 }
