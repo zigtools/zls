@@ -49,6 +49,11 @@ test "inlayhints - function self parameter" {
         \\const _ = foo.bar(<alpha>5,<beta>"");
     );
     try testInlayHints(
+        \\const Foo = struct { pub fn bar(self: Foo, alpha: u32, beta: anytype) void {} };
+        \\const foo: Foo = .{};
+        \\const _ = foo.bar(<alpha>5,<beta>4);
+    );
+    try testInlayHints(
         \\const Foo = struct { pub fn bar(self: Foo, alpha: u32, beta: []const u8) void {} };
         \\const _ = Foo.bar(<self>undefined,<alpha>5,<beta>"");
     );

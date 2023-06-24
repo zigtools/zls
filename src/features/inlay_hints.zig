@@ -84,27 +84,31 @@ fn writeCallHint(builder: *Builder, call: Ast.full.Call, decl_handle: Analyser.D
     var buffer: [1]Ast.Node.Index = undefined;
     const fn_proto = decl_tree.fullFnProto(&buffer, fn_node) orelse return;
 
-    var i: usize = 0;
-    var it = fn_proto.iterate(&decl_tree);
+    var params = try std.ArrayListUnmanaged(Ast.full.FnProto.Param).initCapacity(builder.arena, fn_proto.ast.params.len);
+    defer params.deinit(builder.arena);
 
-    if (tree.tokens.items(.tag)[call.ast.lparen - 2] == .period and
-        call.ast.params.len + 1 == fn_proto.ast.params.len and
-        try builder.analyser.hasSelfParam(decl_handle.handle, fn_proto))
-    {
-        _ = ast.nextFnParam(&it);
+    var it = fn_proto.iterate(&decl_tree);
+    while (ast.nextFnParam(&it)) |param| {
+        try params.append(builder.arena, param);
     }
 
-    while (ast.nextFnParam(&it)) |param| : (i += 1) {
-        if (i >= call.ast.params.len) break;
+    const has_self_param = tree.tokens.items(.tag)[call.ast.lparen - 2] == .period and
+        call.ast.params.len + 1 == params.items.len and
+        try builder.analyser.hasSelfParam(decl_handle.handle, fn_proto);
+
+    const parameters = params.items[@intFromBool(has_self_param)..];
+    const arguments = call.ast.params;
+    const min_len = @min(parameters.len, arguments.len);
+    for (parameters[0..min_len], call.ast.params[0..min_len]) |param, arg| {
         const name_token = param.name_token orelse continue;
         const name = decl_tree.tokenSlice(name_token);
 
         if (builder.config.inlay_hints_hide_redundant_param_names or builder.config.inlay_hints_hide_redundant_param_names_last_token) {
-            const last_param_token = tree.lastToken(call.ast.params[i]);
-            const param_name = tree.tokenSlice(last_param_token);
+            const last_arg_token = tree.lastToken(arg);
+            const arg_name = tree.tokenSlice(last_arg_token);
 
-            if (std.mem.eql(u8, param_name, name)) {
-                if (tree.firstToken(call.ast.params[i]) == last_param_token) {
+            if (std.mem.eql(u8, arg_name, name)) {
+                if (tree.firstToken(arg) == last_arg_token) {
                     if (builder.config.inlay_hints_hide_redundant_param_names)
                         continue;
                 } else {
@@ -125,7 +129,7 @@ fn writeCallHint(builder: *Builder, call: Ast.full.Call, decl_handle: Analyser.D
             offsets.nodeToSlice(decl_tree, param.type_expr);
 
         try builder.appendParameterHint(
-            tree.firstToken(call.ast.params[i]),
+            tree.firstToken(arg),
             name,
             tooltip,
             no_alias,
