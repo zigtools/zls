@@ -236,12 +236,10 @@ pub fn translate(
                 const body_size = @sizeOf(std.zig.Server.Message.EmitBinPath);
                 if (header.bytes_len <= body_size) return error.InvalidResponse;
 
-                const trailing_size = header.bytes_len - body_size;
-
                 _ = try zcs.receiveEmitBinPath();
 
-                const result_path = try zcs.receiveBytes(allocator, trailing_size);
-                defer allocator.free(result_path);
+                const trailing_size = header.bytes_len - body_size;
+                const result_path = zcs.pooler.fifo(.in).readableSliceOfLen(trailing_size);
 
                 return Result{ .success = try URI.fromPath(allocator, std.mem.sliceTo(result_path, '\n')) };
             },
