@@ -1140,6 +1140,33 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 .handle = handle,
             };
         },
+        .block,
+        .block_semicolon,
+        .block_two,
+        .block_two_semicolon,
+        => {
+            const first_token = tree.firstToken(node);
+            if (token_tags[first_token] != .identifier) return null;
+
+            const block_label = tree.tokenSlice(first_token);
+
+            var buffer: [2]Ast.Node.Index = undefined;
+            const statements = ast.blockStatements(tree, node, &buffer).?;
+
+            for (statements) |child_idx| {
+                // TODO: Recursively find matching `break :label` (e.g. inside `if`)
+                if (node_tags[child_idx] == .@"break") {
+                    if (datas[child_idx].lhs == 0) continue;
+                    if (datas[child_idx].rhs == 0) continue;
+
+                    const break_label = tree.tokenSlice(datas[child_idx].lhs);
+                    if (!std.mem.eql(u8, block_label, break_label)) continue;
+
+                    const operand = .{ .node = datas[child_idx].rhs, .handle = handle };
+                    return try analyser.resolveTypeOfNodeInternal(operand);
+                }
+            }
+        },
         else => {},
     }
     return null;

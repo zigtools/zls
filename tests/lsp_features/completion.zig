@@ -509,6 +509,17 @@ test "completion - block" {
     , &.{
         .{ .label = "blk", .kind = .Text }, // idk what kind this should be
     });
+
+    try testCompletion(
+        \\const S = struct { alpha: u32 };
+        \\const foo: S = undefined;
+        \\const bar = blk: {
+        \\    break :blk foo;
+        \\};
+        \\const baz = bar.<cursor>
+    , &.{
+        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+    });
 }
 
 fn testCompletion(source: []const u8, expected_completions: []const Completion) !void {
