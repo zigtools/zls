@@ -87,7 +87,10 @@ fn writeCallHint(builder: *Builder, call: Ast.full.Call, decl_handle: Analyser.D
     var i: usize = 0;
     var it = fn_proto.iterate(&decl_tree);
 
-    if (try builder.analyser.hasSelfParam(decl_handle.handle, fn_proto)) {
+    if (tree.tokens.items(.tag)[call.ast.lparen - 2] == .period and
+        call.ast.params.len + 1 == fn_proto.ast.params.len and
+        try builder.analyser.hasSelfParam(decl_handle.handle, fn_proto))
+    {
         _ = ast.nextFnParam(&it);
     }
 
