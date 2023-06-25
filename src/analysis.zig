@@ -331,12 +331,8 @@ pub fn getDeclNameToken(tree: Ast, node: Ast.Node.Index) ?Ast.TokenIndex {
         .container_field,
         .container_field_init,
         .container_field_align,
-        => {
-            const field = tree.fullContainerField(node).?.ast;
-            return field.main_token;
-        },
-
-        .identifier => main_token,
+        .identifier,
+        => main_token,
         .error_value => {
             const tok = main_token + 2;
             return if (tok >= tree.tokens.len)
@@ -2227,17 +2223,27 @@ fn iterateSymbolsContainerInternal(
     for (scope_decls[container_scope_index].values()) |decl_index| {
         const decl = &handle.document_scope.decls.items[@intFromEnum(decl_index)];
         switch (decl.*) {
-            .ast_node => |node| {
-                if (node_tags[node].isContainerField()) {
-                    if (!instance_access and !is_enum) continue;
-                    if (instance_access and is_enum) continue;
-                } else if (node_tags[node] == .global_var_decl or
-                    node_tags[node] == .local_var_decl or
-                    node_tags[node] == .simple_var_decl or
-                    node_tags[node] == .aligned_var_decl)
-                {
+            .ast_node => |node| switch (node_tags[node]) {
+                .container_field_init,
+                .container_field_align,
+                .container_field,
+                => {
+                    if (is_enum) {
+                        if (instance_access) continue;
+                        const field_name = offsets.tokenToSlice(tree, tree.nodes.items(.main_token)[node]);
+                        if (std.mem.eql(u8, field_name, "_")) continue;
+                    } else {
+                        if (!instance_access) continue;
+                    }
+                },
+                .global_var_decl,
+                .local_var_decl,
+                .simple_var_decl,
+                .aligned_var_decl,
+                => {
                     if (instance_access) continue;
-                }
+                },
+                else => {},
             },
             .label_decl => continue,
             else => {},
