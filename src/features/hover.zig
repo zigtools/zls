@@ -72,6 +72,7 @@ pub fn hoverSymbol(server: *Server, decl_handle: Analyser.DeclWithHandle, markup
             .primitive,
             => |p| offsets.nodeToSlice(rt.handle.tree, p),
             .other => |p| switch (rt.handle.tree.nodes.items(.tag)[p]) {
+                .root => if (URI.parse(server.arena.allocator(), rt.handle.uri)) |path| std.fs.path.stem(path) else |_| "unknown",
                 .container_decl,
                 .container_decl_arg,
                 .container_decl_arg_trailing,
