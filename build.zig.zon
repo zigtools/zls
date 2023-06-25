@@ -16,7 +16,6 @@
             .hash = "122041f6531ee2cd10e7d5f81817c50b45037affc95d748cbcd71a766866fb6030d4",
         },
         .binned_allocator = .{
-            // upstream: https://gist.github.com/silversquirl/c1e4840048fdf48e669b6eac76d80634
             .url = "https://gist.github.com/FalsePattern/48fded613c115e16e91c46db8642c7e4/archive/75e3d5e6a0e0cf23dbf7abfe16831e23c38721bc.tar.gz",
             .hash = "1220ba896ddd4258eed9274b36284d4cc4600ee69c4c0978cbe237ec09a524a2e252",
         },
