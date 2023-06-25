@@ -310,6 +310,25 @@ test "completion - enum" {
         .{ .label = "alpha", .kind = .EnumMember },
         .{ .label = "beta", .kind = .EnumMember },
     });
+    try testCompletion(
+        \\const E = enum {
+        \\    _,
+        \\    fn inner(_: E) void {} 
+        \\};
+        \\const foo = E.<cursor>
+    , &.{
+        .{ .label = "inner", .kind = .Function, .detail = "fn inner(_: E) void" },
+    });
+    try testCompletion(
+        \\const E = enum {
+        \\    _,
+        \\    fn inner(_: E) void {} 
+        \\};
+        \\const e: E = undefined;
+        \\const foo = e.<cursor>
+    , &.{
+        .{ .label = "inner", .kind = .Function, .detail = "fn inner(_: E) void" },
+    });
 }
 
 test "completion - error union" {

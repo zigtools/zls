@@ -2735,7 +2735,7 @@ fn makeInnerScope(context: ScopeContext, tree: Ast, node_idx: Ast.Node.Index) er
         if ((node_idx != 0 and token_tags[container_decl.ast.main_token] == .keyword_enum) or
             container_decl.ast.enum_token != null)
         {
-            if (std.mem.eql(u8, name, "_")) return;
+            if (std.mem.eql(u8, name, "_")) continue;
 
             const doc = try getDocComments(allocator, tree, decl, .markdown);
             errdefer if (doc) |d| allocator.free(d);
