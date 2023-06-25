@@ -330,9 +330,11 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: Analyser.Decl
     const tree = decl_handle.handle.tree;
     const decl = decl_handle.decl.*;
 
+    const name = tree.tokenSlice(decl_handle.nameToken());
+    if (std.mem.eql(u8, name, "_")) return;
+
     const is_cimport = std.mem.eql(u8, std.fs.path.basename(decl_handle.handle.uri), "cimport.zig");
     if (is_cimport) {
-        const name = tree.tokenSlice(decl_handle.nameToken());
         if (std.mem.startsWith(u8, name, "_")) return;
         // TODO figuring out which declarations should be excluded could be made more complete and accurate
         // by translating an empty file to acquire all exclusions
@@ -371,11 +373,11 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: Analyser.Decl
             } } else null;
 
             try context.completions.append(allocator, .{
-                .label = tree.tokenSlice(param.name_token.?),
+                .label = name,
                 .kind = .Constant,
                 .documentation = doc,
                 .detail = ast.paramSlice(tree, param),
-                .insertText = tree.tokenSlice(param.name_token.?),
+                .insertText = name,
                 .insertTextFormat = .PlainText,
             });
         },
@@ -385,8 +387,6 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: Analyser.Decl
         .switch_payload,
         .label_decl,
         => {
-            const name = tree.tokenSlice(decl_handle.nameToken());
-
             try context.completions.append(allocator, .{
                 .label = name,
                 .kind = if (decl == .label_decl) .Text else .Variable,
@@ -395,8 +395,6 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: Analyser.Decl
             });
         },
         .error_token => {
-            const name = tree.tokenSlice(decl_handle.decl.error_token);
-
             try context.completions.append(allocator, .{
                 .label = name,
                 .kind = .Constant,
