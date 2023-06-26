@@ -135,7 +135,7 @@ pub fn generateFoldingRanges(allocator: std.mem.Allocator, tree: Ast, encoding: 
     var start_doc_comment: ?Ast.TokenIndex = null;
     var end_doc_comment: ?Ast.TokenIndex = null;
     for (token_tags, 0..) |tag, i| {
-        const token = @intCast(Ast.TokenIndex, i);
+        const token: Ast.TokenIndex = @intCast(i);
         switch (tag) {
             .doc_comment,
             .container_doc_comment,
@@ -162,7 +162,7 @@ pub fn generateFoldingRanges(allocator: std.mem.Allocator, tree: Ast, encoding: 
     // TODO add folding range for top level `@Import()`
 
     for (node_tags, 0..) |node_tag, i| {
-        const node = @intCast(Ast.Node.Index, i);
+        const node: Ast.Node.Index = @intCast(i);
 
         switch (node_tag) {
             .root => continue,

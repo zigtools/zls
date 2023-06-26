@@ -830,7 +830,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                         return null;
                     };
 
-                    const root_namespace = @enumFromInt(ComptimeInterpreter.Namespace.Index, 0);
+                    const root_namespace: ComptimeInterpreter.Namespace.Index = @enumFromInt(0);
 
                     // TODO: Start from current/nearest-current scope
                     const result = interpreter.interpret(node, root_namespace, .{}) catch |err| {
@@ -988,18 +988,8 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 .{"@atomicLoad"},
                 .{"@atomicRmw"},
                 .{"@atomicStore"},
-                .{"@bitCast"},
                 .{"@mulAdd"},
-                .{"@errSetCast"},
                 .{"@fieldParentPtr"}, // the return type is actually a pointer
-                .{"@floatCast"},
-                .{"@intFromFloat"},
-                .{"@intCast"},
-                .{"@enumFromInt"},
-                .{"@floatFromInt"},
-                .{"@ptrFromInt"},
-                .{"@ptrCast"},
-                .{"@truncate"},
                 .{"@unionInit"},
             });
             if (cast_map.has(call_name)) {
@@ -1406,7 +1396,7 @@ pub fn collectImports(allocator: std.mem.Allocator, tree: Ast) error{OutOfMemory
     while (i < tags.len) : (i += 1) {
         if (tags[i] != .builtin)
             continue;
-        const text = tree.tokenSlice(@intCast(u32, i));
+        const text = tree.tokenSlice(@intCast(i));
 
         if (std.mem.eql(u8, text, "@import")) {
             if (i + 3 >= tags.len)
@@ -1418,7 +1408,7 @@ pub fn collectImports(allocator: std.mem.Allocator, tree: Ast) error{OutOfMemory
             if (tags[i + 3] != .r_paren)
                 continue;
 
-            const str = tree.tokenSlice(@intCast(u32, i + 2));
+            const str = tree.tokenSlice(@as(u32, @intCast(i + 2)));
             try imports.append(allocator, str[1 .. str.len - 1]);
         }
     }
@@ -1440,7 +1430,7 @@ pub fn collectCImportNodes(allocator: std.mem.Allocator, tree: Ast) error{OutOfM
 
     var i: usize = 0;
     while (i < node_tags.len) : (i += 1) {
-        const node = @intCast(Ast.Node.Index, i);
+        const node: Ast.Node.Index = @intCast(i);
         if (!ast.isBuiltinCall(tree, node)) continue;
 
         if (!std.mem.eql(u8, Ast.tokenSlice(tree, main_tokens[node]), "@cImport")) continue;
@@ -2307,7 +2297,7 @@ fn iterateEnclosingScopes(document_scope: DocumentScope, source_index: usize) En
     return .{
         .scope_locs = document_scope.scopes.items(.loc),
         .scope_children = document_scope.scopes.items(.child_scopes),
-        .current_scope = @enumFromInt(Scope.Index, 0),
+        .current_scope = @enumFromInt(0),
         .source_index = source_index,
     };
 }
@@ -2547,7 +2537,7 @@ pub fn lookupSymbolContainer(
 const CompletionContext = struct {
     pub fn hash(self: @This(), item: types.CompletionItem) u32 {
         _ = self;
-        return @truncate(u32, std.hash.Wyhash.hash(0, item.label));
+        return @truncate(std.hash.Wyhash.hash(0, item.label));
     }
 
     pub fn eql(self: @This(), a: types.CompletionItem, b: types.CompletionItem, b_index: usize) bool {
@@ -2665,7 +2655,7 @@ const ScopeContext = struct {
             .loc = loc,
             .data = data,
         });
-        const new_scope = @enumFromInt(Scope.Index, context.doc_scope.scopes.len - 1);
+        const new_scope: Scope.Index = @enumFromInt(context.doc_scope.scopes.len - 1);
         if (context.current_scope.* != .none) {
             try context.doc_scope.scopes.items(.child_scopes)[@intFromEnum(context.current_scope.*)].append(context.allocator, new_scope);
         }
@@ -2684,7 +2674,7 @@ const ScopeContext = struct {
         try context.doc_scope.decls.append(context.allocator, decl);
         errdefer _ = context.doc_scope.decls.pop();
 
-        const decl_index = @enumFromInt(Declaration.Index, context.doc_scope.decls.items.len - 1);
+        const decl_index: Declaration.Index = @enumFromInt(context.doc_scope.decls.items.len - 1);
 
         try context.doc_scope.scopes.items(.decls)[@intFromEnum(scope)].put(context.allocator, name, decl_index);
     }
@@ -2773,7 +2763,7 @@ fn makeBlockScopeInternal(context: ScopeContext, tree: Ast, node_idx: Ast.Node.I
         .block_two_semicolon,
         => {
             std.debug.assert(context.doc_scope.scopes.items(.data)[block_scope_index] == .block);
-            return @enumFromInt(Scope.Index, block_scope_index);
+            return @enumFromInt(block_scope_index);
         },
         else => {
             const new_scope = try context.pushScope(
@@ -2870,7 +2860,11 @@ fn makeScopeInternal(context: ScopeContext, tree: Ast, node_idx: Ast.Node.Index)
                     try context.putDecl(
                         scope_index,
                         tree.tokenSlice(name_token),
-                        .{ .param_payload = .{ .param = param, .param_idx = @intCast(u16, param_index), .func = node_idx } },
+                        .{ .param_payload = .{
+                            .param = param,
+                            .param_idx = @intCast(param_index),
+                            .func = node_idx,
+                        } },
                     );
                 }
                 // Visit parameter types to pick up any error sets and enum

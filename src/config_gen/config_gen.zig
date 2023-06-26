@@ -237,7 +237,7 @@ fn generateVSCodeConfigFile(allocator: std.mem.Allocator, config: Config, path: 
 
     const predefined_configurations: usize = 3;
     var configuration: std.StringArrayHashMapUnmanaged(ConfigurationProperty) = .{};
-    try configuration.ensureTotalCapacity(allocator, predefined_configurations + @intCast(u32, config.options.len));
+    try configuration.ensureTotalCapacity(allocator, predefined_configurations + @as(u32, @intCast(config.options.len)));
     defer {
         for (configuration.keys()[predefined_configurations..]) |name| allocator.free(name);
         configuration.deinit(allocator);

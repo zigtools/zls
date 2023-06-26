@@ -152,11 +152,11 @@ const Builder = struct {
         const length = offsets.locLength(self.handle.tree.source, loc, self.encoding);
 
         try self.token_buffer.appendSlice(self.arena, &.{
-            @truncate(u32, delta.line),
-            @truncate(u32, delta.character),
-            @truncate(u32, length),
+            @as(u32, @truncate(delta.line)),
+            @as(u32, @truncate(delta.character)),
+            @as(u32, @truncate(length)),
             @intFromEnum(token_type),
-            @bitCast(u16, token_modifiers),
+            @as(u16, @bitCast(token_modifiers)),
         });
         self.previous_source_index = loc.start;
     }

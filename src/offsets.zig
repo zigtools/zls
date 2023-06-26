@@ -12,8 +12,8 @@ pub fn indexToPosition(text: []const u8, index: usize, encoding: Encoding) types
     const line_count = std.mem.count(u8, text[0..last_line_start], "\n");
 
     return .{
-        .line = @intCast(u32, line_count),
-        .character = @intCast(u32, countCodeUnits(text[last_line_start..index], encoding)),
+        .line = @intCast(line_count),
+        .character = @intCast(countCodeUnits(text[last_line_start..index], encoding)),
     };
 }
 
@@ -247,7 +247,7 @@ pub fn convertPositionEncoding(text: []const u8, position: types.Position, from_
 
     return .{
         .line = position.line,
-        .character = @intCast(u32, locLength(text, line_loc, to_encoding)),
+        .character = @intCast(locLength(text, line_loc, to_encoding)),
     };
 }
 
@@ -296,7 +296,7 @@ pub fn advancePosition(text: []const u8, position: types.Position, from_index: u
 
     return .{
         .line = line,
-        .character = @intCast(u32, locLength(text, line_loc, encoding)),
+        .character = @intCast(locLength(text, line_loc, encoding)),
     };
 }
 
