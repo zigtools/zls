@@ -91,7 +91,7 @@ fn testConvertCInclude(cimport_source: []const u8, expected: []const u8) !void {
 
             if (!std.mem.eql(u8, offsets.tokenToSlice(tree, token), "@cImport")) continue;
 
-            break :blk @intCast(Ast.Node.Index, i);
+            break :blk @intCast(i);
         }
         return error.TestUnexpectedResult; // source doesn't contain a cImport
     };

@@ -195,7 +195,7 @@ pub fn interpret(
                 .node_idx = node_idx,
                 .ty = .none,
             });
-            const container_namespace = @enumFromInt(Namespace.Index, interpreter.namespaces.len - 1);
+            const container_namespace = @as(Namespace.Index, @enumFromInt(interpreter.namespaces.len - 1));
 
             const struct_index = try interpreter.ip.createStruct(interpreter.allocator, .{
                 .fields = .{},
@@ -324,7 +324,7 @@ pub fn interpret(
                 .node_idx = node_idx,
                 .ty = .none,
             });
-            const block_namespace = @enumFromInt(Namespace.Index, interpreter.namespaces.len - 1);
+            const block_namespace = @as(Namespace.Index, @enumFromInt(interpreter.namespaces.len - 1));
 
             var buffer: [2]Ast.Node.Index = undefined;
             const statements = ast.blockStatements(tree, node_idx, &buffer).?;
@@ -1236,7 +1236,7 @@ pub fn call(
         .node_idx = func_node_idx,
         .ty = .none,
     });
-    const fn_namespace = @enumFromInt(Namespace.Index, interpreter.namespaces.len - 1);
+    const fn_namespace = @as(Namespace.Index, @enumFromInt(interpreter.namespaces.len - 1));
 
     var arg_it = proto.iterate(&tree);
     var arg_index: usize = 0;

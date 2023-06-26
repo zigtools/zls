@@ -419,7 +419,7 @@ const DiagnosticKind = union(enum) {
         inline for (std.meta.fields(T)) |field| {
             if (std.mem.startsWith(u8, message, field.name)) {
                 // is there a better way to achieve this?
-                return @enumFromInt(T, field.value);
+                return @as(T, @enumFromInt(field.value));
             }
         }
 

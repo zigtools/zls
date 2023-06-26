@@ -377,7 +377,7 @@ const Context = struct {
             };
         }
 
-        const namespace = @enumFromInt(ComptimeInterpreter.Namespace.Index, 0); // root namespace
+        const namespace: ComptimeInterpreter.Namespace.Index = @enumFromInt(0); // root namespace
         const result = (try self.interpreter.call(namespace, func_node, args, .{})).result;
 
         const val = self.interpreter.ip.indexToKey(result.value.index);
@@ -390,7 +390,7 @@ const Context = struct {
     }
 
     pub fn interpret(self: *Context, node: Ast.Node.Index) !KV {
-        const namespace = @enumFromInt(ComptimeInterpreter.Namespace.Index, 0); // root namespace
+        const namespace: ComptimeInterpreter.Namespace.Index = @enumFromInt(0); // root namespace
         const result = try (try self.interpreter.interpret(node, namespace, .{})).getValue();
 
         const val = self.interpreter.ip.indexToKey(result.index);
@@ -406,7 +406,7 @@ const Context = struct {
         const handle = self.interpreter.getHandle();
         for (handle.tree.nodes.items(.tag), 0..) |tag, i| {
             if (tag != .fn_decl) continue;
-            const node = @intCast(Ast.Node.Index, i);
+            const node: Ast.Node.Index = @intCast(i);
             var buffer: [1]Ast.Node.Index = undefined;
             const fn_decl = handle.tree.fullFnProto(&buffer, node).?;
             const fn_name = offsets.tokenToSlice(handle.tree, fn_decl.name_token.?);

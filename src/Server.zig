@@ -1092,7 +1092,7 @@ pub fn generalReferencesHandler(server: *Server, request: GeneralReferencesReque
 
             // TODO can we avoid having to move map from `changes` to `new_changes`?
             var new_changes: types.Map(types.DocumentUri, []const types.TextEdit) = .{};
-            try new_changes.ensureTotalCapacity(allocator, @intCast(u32, changes.count()));
+            try new_changes.ensureTotalCapacity(allocator, @intCast(changes.count()));
 
             var changes_it = changes.iterator();
             while (changes_it.next()) |entry| {
