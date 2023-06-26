@@ -360,26 +360,62 @@ pub fn getDeclName(tree: Ast, node: Ast.Node.Index) ?[]const u8 {
     return name;
 }
 
-fn resolveVarDeclAliasInternal(analyser: *Analyser, node_handle: NodeWithHandle) error{OutOfMemory}!?DeclWithHandle {
+/// Resolves variable declarations consisting of chains of imports and field accesses of containers
+/// Examples:
+///```zig
+/// const decl = @import("decl-file.zig").decl;
+/// const other = decl.middle.other;
+///```
+pub fn resolveVarDeclAlias(analyser: *Analyser, node_handle: NodeWithHandle) error{OutOfMemory}!?DeclWithHandle {
     const handle = node_handle.handle;
     const tree = handle.tree;
     const node_tags = tree.nodes.items(.tag);
     const main_tokens = tree.nodes.items(.main_token);
     const datas = tree.nodes.items(.data);
+    const token_tags = tree.tokens.items(.tag);
 
-    if (node_tags[node_handle.node] == .identifier) {
-        const token = main_tokens[node_handle.node];
-        return try analyser.lookupSymbolGlobal(
-            handle,
-            tree.tokenSlice(token),
-            tree.tokens.items(.start)[token],
-        );
-    }
+    const resolved = switch (node_tags[node_handle.node]) {
+        .identifier => blk: {
+            const token = main_tokens[node_handle.node];
+            break :blk try analyser.lookupSymbolGlobal(
+                handle,
+                tree.tokenSlice(token),
+                tree.tokens.items(.start)[token],
+            );
+        },
+        .field_access => blk: {
+            const lhs = datas[node_handle.node].lhs;
+            const resolved = (try analyser.resolveTypeOfNode(.{ .node = lhs, .handle = handle })) orelse return null;
+            const resolved_node = switch (resolved.type.data) {
+                .other => |n| n,
+                else => return null,
+            };
 
-    if (node_tags[node_handle.node] == .field_access) {
-        const lhs = datas[node_handle.node].lhs;
+            break :blk try analyser.lookupSymbolContainer(
+                .{ .node = resolved_node, .handle = resolved.handle },
+                tree.tokenSlice(datas[node_handle.node].rhs),
+                false,
+            );
+        },
+        .global_var_decl,
+        .local_var_decl,
+        .aligned_var_decl,
+        .simple_var_decl,
+        => {
+            const var_decl = handle.tree.fullVarDecl(node_handle.node).?;
 
-        const container_node = if (ast.isBuiltinCall(tree, lhs)) block: {
+            if (var_decl.ast.init_node == 0) return null;
+            const base_exp = var_decl.ast.init_node;
+            if (token_tags[var_decl.ast.mut_token] != .keyword_const) return null;
+
+            return try analyser.resolveVarDeclAlias(.{ .node = base_exp, .handle = handle });
+        },
+        .builtin_call,
+        .builtin_call_comma,
+        .builtin_call_two,
+        .builtin_call_two_comma,
+        => blk: {
+            const lhs = datas[node_handle.node].lhs;
             const name = tree.tokenSlice(main_tokens[lhs]);
             if (!std.mem.eql(u8, name, "@import") and !std.mem.eql(u8, name, "@cImport"))
                 return null;
@@ -387,51 +423,22 @@ fn resolveVarDeclAliasInternal(analyser: *Analyser, node_handle: NodeWithHandle)
             const inner_node = (try analyser.resolveTypeOfNode(.{ .node = lhs, .handle = handle })) orelse return null;
             // assert root node
             std.debug.assert(inner_node.type.data.other == 0);
-            break :block NodeWithHandle{ .node = inner_node.type.data.other, .handle = inner_node.handle };
-        } else if (try analyser.resolveVarDeclAliasInternal(.{ .node = lhs, .handle = handle })) |decl_handle| block: {
-            if (decl_handle.decl.* != .ast_node) return null;
-            const resolved = (try analyser.resolveTypeOfNode(.{ .node = decl_handle.decl.ast_node, .handle = decl_handle.handle })) orelse return null;
-            const resolved_node = switch (resolved.type.data) {
-                .other => |n| n,
-                else => return null,
-            };
-            if (!ast.isContainer(resolved.handle.tree, resolved_node)) return null;
-            break :block NodeWithHandle{ .node = resolved_node, .handle = resolved.handle };
-        } else return null;
+            const root_decl = &inner_node.handle.document_scope.decls.items[0];
+            break :blk DeclWithHandle{ .decl = root_decl, .handle = inner_node.handle };
+        },
+        else => return null,
+    } orelse return null;
 
-        return try analyser.lookupSymbolContainer(container_node, tree.tokenSlice(datas[node_handle.node].rhs), false);
+    const resolved_node = switch (resolved.decl.*) {
+        .ast_node => |node| node,
+        else => return resolved,
+    };
+
+    if (try analyser.resolveVarDeclAlias(.{ .node = resolved_node, .handle = resolved.handle })) |result| {
+        return result;
+    } else {
+        return resolved;
     }
-    return null;
-}
-
-/// Resolves variable declarations consisting of chains of imports and field accesses of containers, ending with the same name as the variable decl's name
-/// Examples:
-///```zig
-/// const decl = @import("decl-file.zig").decl;
-/// const other = decl.middle.other;
-///```
-pub fn resolveVarDeclAlias(analyser: *Analyser, decl_handle: NodeWithHandle) !?DeclWithHandle {
-    const decl = decl_handle.node;
-    const handle = decl_handle.handle;
-    const tree = handle.tree;
-    const token_tags = tree.tokens.items(.tag);
-    const node_tags = tree.nodes.items(.tag);
-
-    if (handle.tree.fullVarDecl(decl)) |var_decl| {
-        if (var_decl.ast.init_node == 0) return null;
-        const base_exp = var_decl.ast.init_node;
-        if (token_tags[var_decl.ast.mut_token] != .keyword_const) return null;
-
-        if (node_tags[base_exp] == .field_access) {
-            const name = tree.tokenSlice(tree.nodes.items(.data)[base_exp].rhs);
-            if (!std.mem.eql(u8, tree.tokenSlice(var_decl.ast.mut_token + 1), name))
-                return null;
-
-            return try analyser.resolveVarDeclAliasInternal(.{ .node = base_exp, .handle = handle });
-        }
-    }
-
-    return null;
 }
 
 fn findReturnStatementInternal(tree: Ast, fn_decl: Ast.full.FnProto, body: Ast.Node.Index, already_found: *bool) ?Ast.Node.Index {
