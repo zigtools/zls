@@ -67,6 +67,14 @@ test "inlayhints - function self parameter" {
     );
 }
 
+test "inlayhints - resolve alias" {
+    try testInlayHints(
+        \\fn foo(alpha: u32) void {}
+        \\const bar = foo;
+        \\const _ = bar(<alpha>5);
+    );
+}
+
 test "inlayhints - builtin call" {
     try testInlayHints(
         \\const _ = @memcpy(<dest>"",<source>"");
