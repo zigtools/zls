@@ -73,13 +73,20 @@ fn writeCallHint(builder: *Builder, call: Ast.full.Call, decl_handle: Analyser.D
     const handle = builder.handle;
     const tree = handle.tree;
 
-    const decl = decl_handle.decl;
-    const decl_tree = decl_handle.handle.tree;
+    const node = switch (decl_handle.decl.*) {
+        .ast_node => |node| node,
+        else => return,
+    };
 
-    const fn_node = switch (decl.*) {
+    const maybe_resolved_alias = try builder.analyser.resolveVarDeclAlias(.{ .node = node, .handle = decl_handle.handle });
+    const resolved_decl_handle = if (maybe_resolved_alias) |resolved_decl| resolved_decl else decl_handle;
+
+    const fn_node = switch (resolved_decl_handle.decl.*) {
         .ast_node => |fn_node| fn_node,
         else => return,
     };
+
+    const decl_tree = resolved_decl_handle.handle.tree;
 
     var buffer: [1]Ast.Node.Index = undefined;
     const fn_proto = decl_tree.fullFnProto(&buffer, fn_node) orelse return;
@@ -99,7 +106,7 @@ fn writeCallHint(builder: *Builder, call: Ast.full.Call, decl_handle: Analyser.D
     const parameters = params.items[@intFromBool(has_self_param)..];
     const arguments = call.ast.params;
     const min_len = @min(parameters.len, arguments.len);
-    for (parameters[0..min_len], call.ast.params[0..min_len]) |param, arg| {
+    for (parameters[0..min_len], arguments[0..min_len]) |param, arg| {
         const name_token = param.name_token orelse continue;
         const name = decl_tree.tokenSlice(name_token);
 
