@@ -4,20 +4,20 @@
 
     .dependencies = .{
         .known_folders = .{
-            .url = "https://github.com/ziglibs/known-folders/archive/d13ba6137084e55f873f6afb67447fe8906cc951.tar.gz",
-            .hash = "122028c00915d9b37296059be8a3883c718dbb5bd174350caedf152fed1f46f99607",
+            .url = "https://github.com/ziglibs/known-folders/archive/d070896807cbbd2847d24d561438994504b929dd.tar.gz",
+            .hash = "122001a81a0ba2faca0271d53c50e8069721fe66a19d71dd8498e61fa26d7ca6f558",
         },
         .tres = .{
-            .url = "https://github.com/ziglibs/tres/archive/67d5b6305135d15ea84024e447c9070ce14fa5d0.tar.gz",
-            .hash = "1220b23398142f65003da68986b8e7b015720d4b62f7bcb5f73a111c9220422658f6",
+            .url = "https://github.com/ziglibs/tres/archive/9ca9cd547d10d30984565399dec92068fefd7ad2.tar.gz",
+            .hash = "122026823fb890736435cb5ddbfdf5691d4b9d4759ab1147f245beced0abec17c483",
         },
         .diffz = .{
-            .url = "https://github.com/ziglibs/diffz/archive/df02d432be9b40d55b5d7de5c1c53ec80aad6d5d.tar.gz",
-            .hash = "122041f6531ee2cd10e7d5f81817c50b45037affc95d748cbcd71a766866fb6030d4",
+            .url = "https://github.com/ziglibs/diffz/archive/90353d401c59e2ca5ed0abe5444c29ad3d7489aa.tar.gz",
+            .hash = "122089a8247a693cad53beb161bde6c30f71376cd4298798d45b32740c3581405864",
         },
         .binned_allocator = .{
-            .url = "https://gist.github.com/FalsePattern/48fded613c115e16e91c46db8642c7e4/archive/75e3d5e6a0e0cf23dbf7abfe16831e23c38721bc.tar.gz",
-            .hash = "1220ba896ddd4258eed9274b36284d4cc4600ee69c4c0978cbe237ec09a524a2e252",
+            .url = "https://gist.github.com/antlilja/8372900fcc09e38d7b0b6bbaddad3904/archive/6c3321e0969ff2463f8335da5601986cf2108690.tar.gz",
+            .hash = "1220363c7e27b2d3f39de6ff6e90f9537a0634199860fea237a55ddb1e1717f5d6a5",
         },
     },
 }
