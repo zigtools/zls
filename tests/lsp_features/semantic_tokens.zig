@@ -1048,8 +1048,8 @@ fn testSemanticTokens(source: [:0]const u8, expected_tokens: []const TokenData) 
         const delta_line = token_data[0];
         const delta_start = token_data[1];
         const length = token_data[2];
-        const token_type = @enumFromInt(zls.semantic_tokens.TokenType, token_data[3]);
-        const token_modifiers = @bitCast(zls.semantic_tokens.TokenModifiers, @intCast(u16, token_data[4]));
+        const token_type: zls.semantic_tokens.TokenType = @enumFromInt(token_data[3]);
+        const token_modifiers: zls.semantic_tokens.TokenModifiers = @bitCast(@as(u16, @intCast(token_data[4])));
 
         position.line += delta_line;
         position.character = delta_start + if (delta_line == 0) position.character else 0;

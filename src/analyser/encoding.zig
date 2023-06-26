@@ -26,11 +26,11 @@ pub fn encode(extra: *std.ArrayList(u8), comptime T: type, data: anytype) Alloca
         .Bool => try encode(extra, u1, @intFromBool(data)),
         .Int => try extra.appendSlice(std.mem.asBytes(&data)),
         .Float => |info| switch (info.bits) {
-            16 => try encode(extra, u16, @bitCast(u16, data)),
-            32 => try encode(extra, u32, @bitCast(u32, data)),
-            64 => try encode(extra, u64, @bitCast(u64, data)),
-            80 => try encode(extra, u80, @bitCast(u80, data)),
-            128 => try encode(extra, u128, @bitCast(u128, data)),
+            16 => try encode(extra, u16, @as(u16, @bitCast(data))),
+            32 => try encode(extra, u32, @as(u32, @bitCast(data))),
+            64 => try encode(extra, u64, @as(u64, @bitCast(data))),
+            80 => try encode(extra, u80, @as(u80, @bitCast(data))),
+            128 => try encode(extra, u128, @as(u128, @bitCast(data))),
             else => @compileError("Unable to encode type " ++ @typeName(T)),
         },
         .Pointer => |info| {
@@ -45,7 +45,7 @@ pub fn encode(extra: *std.ArrayList(u8), comptime T: type, data: anytype) Alloca
                 },
                 .Slice => {
                     if (comptime canEncodeAsBytes(info.child)) {
-                        try encode(extra, u32, @intCast(u32, data.len));
+                        try encode(extra, u32, @as(u32, @intCast(data.len)));
                         try extra.appendNTimes(undefined, std.mem.alignPointerOffset(extra.items.ptr + extra.items.len, info.alignment).?);
                         try extra.appendSlice(std.mem.sliceAsBytes(data));
                     } else {
@@ -111,11 +111,11 @@ pub fn decode(extra: *[]const u8, comptime T: type) T {
         .Bool => decode(extra, u1) == 1,
         .Int => std.mem.bytesToValue(T, readArray(extra, @sizeOf(T))),
         .Float => |info| switch (info.bits) {
-            16 => @bitCast(T, decode(extra, u16)),
-            32 => @bitCast(T, decode(extra, u32)),
-            64 => @bitCast(T, decode(extra, u64)),
-            80 => @bitCast(T, decode(extra, u80)),
-            128 => @bitCast(T, decode(extra, u128)),
+            16 => @as(T, @bitCast(decode(extra, u16))),
+            32 => @as(T, @bitCast(decode(extra, u32))),
+            64 => @as(T, @bitCast(decode(extra, u64))),
+            80 => @as(T, @bitCast(decode(extra, u80))),
+            128 => @as(T, @bitCast(decode(extra, u128))),
             else => @compileError("Unable to decode type " ++ @typeName(T)),
         },
         .Pointer => |info| {
@@ -133,7 +133,7 @@ pub fn decode(extra: *[]const u8, comptime T: type) T {
                         const len = decode(extra, u32);
                         extra.* = alignForward(extra.*, info.alignment);
                         const bytes = readBytes(extra, len * @sizeOf(info.child));
-                        return std.mem.bytesAsSlice(info.child, @alignCast(info.alignment, bytes));
+                        return std.mem.bytesAsSlice(info.child, @as([]align(info.alignment) const u8, @alignCast(bytes)));
                     } else {
                         @compileError("Decoding " ++ @typeName(T) ++ " would require allocation");
                     }
@@ -174,7 +174,7 @@ pub fn decode(extra: *[]const u8, comptime T: type) T {
                 break :blk decode(extra, info.child);
             }
         },
-        .Enum => |info| @enumFromInt(T, decode(extra, info.tag_type)),
+        .Enum => |info| @as(T, @enumFromInt(decode(extra, info.tag_type))),
         .Union => @compileError("TODO"),
         .Vector => |info| decode(extra, [info.len]info.child),
     };

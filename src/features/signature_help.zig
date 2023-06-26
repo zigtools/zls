@@ -68,7 +68,7 @@ pub fn getSignatureInfo(analyser: *Analyser, alloc: std.mem.Allocator, handle: *
                 break :blk i - 1;
             }
         }
-        break :blk @truncate(u32, token_tags.len - 1);
+        break :blk @as(u32, @truncate(token_tags.len - 1));
     };
 
     // We scan the tokens from last to first, adding and removing open and close

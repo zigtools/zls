@@ -80,8 +80,8 @@ fn deepCopy(comptime T: type, allocator: Allocator, value: T) !T {
                         try result.append(try deepCopy(ptrInfo.child, allocator, v));
                     }
                     if (ptrInfo.sentinel) |some| {
-                        const sentinel_value = @ptrCast(*align(1) const ptrInfo.child, some).*;
-                        return try result.toOwnedSliceSentinel(sentinel_value);
+                        const sentinel_value: *align(1) const ptrInfo.child = @ptrCast(some);
+                        return try result.toOwnedSliceSentinel(sentinel_value.*);
                     }
                     return try result.toOwnedSlice();
                 },
@@ -129,7 +129,7 @@ pub fn parseFree(comptime T: type, allocator: Allocator, value: T) void {
                             };
                             const field_addr = @intFromPtr(field_ptr);
 
-                            const casted_default = @ptrCast(*const field.type, @alignCast(@alignOf(field.type), default)).*;
+                            const casted_default: *const field.type = @ptrCast(@alignCast(default));
                             const default_ptr = switch (fieldPtrInfo.size) {
                                 .One => casted_default,
                                 .Slice => casted_default.ptr,

@@ -270,7 +270,7 @@ pub fn forSimple(tree: Ast, node: Node.Index) full.For {
 
 pub fn forFull(tree: Ast, node: Node.Index) full.For {
     const data = tree.nodes.items(.data)[node];
-    const extra = @bitCast(Node.For, data.rhs);
+    const extra = @as(Node.For, @bitCast(data.rhs));
     const inputs = tree.extra_data[data.lhs..][0..extra.inputs];
     const then_expr = tree.extra_data[data.lhs + extra.inputs];
     const else_expr = if (extra.has_else) tree.extra_data[data.lhs + extra.inputs + 1] else 0;
@@ -327,7 +327,7 @@ pub fn lastToken(tree: Ast, node: Ast.Node.Index) Ast.TokenIndex {
     var n = node;
     var end_offset: TokenIndex = 0;
     while (true) switch (tags[n]) {
-        .root => return @intCast(TokenIndex, tree.tokens.len - 1),
+        .root => return @as(TokenIndex, @intCast(tree.tokens.len - 1)),
         .@"usingnamespace" => {
             // lhs is the expression
             if (datas[n].lhs == 0) {
@@ -963,7 +963,7 @@ pub fn lastToken(tree: Ast, node: Ast.Node.Index) Ast.TokenIndex {
             n = extra.else_expr;
         },
         .@"for" => {
-            const extra = @bitCast(Node.For, datas[n].rhs);
+            const extra = @as(Node.For, @bitCast(datas[n].rhs));
             n = tree.extra_data[datas[n].lhs + extra.inputs + @intFromBool(extra.has_else)];
         },
         .@"suspend" => {

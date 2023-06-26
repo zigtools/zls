@@ -30,7 +30,7 @@ pub fn generateSelectionRanges(
 
         locs.clearRetainingCapacity();
         for (0..handle.tree.nodes.len) |i| {
-            const node = @intCast(Ast.Node.Index, i);
+            const node = @as(Ast.Node.Index, @intCast(i));
             const loc = offsets.nodeToLoc(handle.tree, node);
             if (loc.start <= index and index <= loc.end) {
                 try locs.append(arena, loc);

@@ -136,7 +136,7 @@ pub const Context = struct {
 
         // assertions
         try std.testing.expectEqualStrings("2.0", response.get("jsonrpc").?.string);
-        try std.testing.expectEqual(self.request_id, @intCast(u32, response.get("id").?.integer));
+        try std.testing.expectEqual(self.request_id, @as(u32, @intCast(response.get("id").?.integer)));
         try std.testing.expect(!response.contains("error"));
 
         const result_json = try std.json.stringifyAlloc(allocator, response.get("result").?, .{});

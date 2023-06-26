@@ -258,7 +258,7 @@ pub const Key = union(enum) {
     pub fn hash(a: Key) u32 {
         var hasher = std.hash.Wyhash.init(0);
         deepHash(&hasher, a);
-        return @truncate(u32, hasher.final());
+        return @truncate(hasher.final());
     }
 
     pub fn tag(key: Key) Tag {
@@ -768,7 +768,7 @@ pub const Key = union(enum) {
                 else => null,
             },
             .int_u64_value => |int_value| int_value.int,
-            .int_i64_value => |int_value| @intCast(u64, int_value.int),
+            .int_i64_value => |int_value| @intCast(int_value.int),
             .int_big_value => |int_value| int_value.int.to(u64) catch null,
             .null_value => 0,
             else => null,
@@ -997,10 +997,10 @@ pub const Key = union(enum) {
             .float_16_value => |float| try writer.print("{d}", .{float}),
             .float_32_value => |float| try writer.print("{d}", .{float}),
             .float_64_value => |float| try writer.print("{d}", .{float}),
-            .float_80_value => |float| try writer.print("{d}", .{@floatCast(f64, float)}),
+            .float_80_value => |float| try writer.print("{d}", .{@as(f64, @floatCast(float))}),
             .float_128_value,
             .float_comptime_value,
-            => |float| try writer.print("{d}", .{@floatCast(f64, float)}),
+            => |float| try writer.print("{d}", .{@as(f64, @floatCast(float))}),
 
             .bytes => |bytes| try writer.print("\"{}\"", .{std.zig.fmtEscapes(bytes)}),
             .optional_value => |optional| {
@@ -1527,30 +1527,30 @@ pub fn indexToKey(ip: InternPool, index: Index) Key {
     const item = ip.items.get(@intFromEnum(index));
     const data = item.data;
     return switch (item.tag) {
-        .simple_type => .{ .simple_type = @enumFromInt(SimpleType, data) },
-        .simple_value => .{ .simple_value = @enumFromInt(SimpleValue, data) },
+        .simple_type => .{ .simple_type = @enumFromInt(data) },
+        .simple_value => .{ .simple_value = @enumFromInt(data) },
 
         .type_int_signed => .{ .int_type = .{
             .signedness = .signed,
-            .bits = @intCast(u16, data),
+            .bits = @as(u16, @intCast(data)),
         } },
         .type_int_unsigned => .{ .int_type = .{
             .signedness = .unsigned,
-            .bits = @intCast(u16, data),
+            .bits = @as(u16, @intCast(data)),
         } },
         .type_pointer => .{ .pointer_type = ip.extraData(Pointer, data) },
         .type_array => .{ .array_type = ip.extraData(Array, data) },
-        .type_optional => .{ .optional_type = .{ .payload_type = @enumFromInt(Index, data) } },
-        .type_anyframe => .{ .anyframe_type = .{ .child = @enumFromInt(Index, data) } },
+        .type_optional => .{ .optional_type = .{ .payload_type = @enumFromInt(data) } },
+        .type_anyframe => .{ .anyframe_type = .{ .child = @enumFromInt(data) } },
         .type_error_union => .{ .error_union_type = ip.extraData(ErrorUnion, data) },
         .type_error_set => .{ .error_set_type = ip.extraData(ErrorSet, data) },
         .type_function => .{ .function_type = ip.extraData(Function, data) },
         .type_tuple => .{ .tuple_type = ip.extraData(Tuple, data) },
         .type_vector => .{ .vector_type = ip.extraData(Vector, data) },
 
-        .type_struct => .{ .struct_type = @enumFromInt(StructIndex, data) },
-        .type_enum => .{ .enum_type = @enumFromInt(EnumIndex, data) },
-        .type_union => .{ .union_type = @enumFromInt(UnionIndex, data) },
+        .type_struct => .{ .struct_type = @enumFromInt(data) },
+        .type_enum => .{ .enum_type = @enumFromInt(data) },
+        .type_union => .{ .union_type = @enumFromInt(data) },
 
         .int_u64 => .{ .int_u64_value = ip.extraData(U64Value, data) },
         .int_i64 => .{ .int_i64_value = ip.extraData(I64Value, data) },
@@ -1566,8 +1566,8 @@ pub fn indexToKey(ip: InternPool, index: Index) Key {
                 },
             };
         } },
-        .float_f16 => .{ .float_16_value = @bitCast(f16, @intCast(u16, data)) },
-        .float_f32 => .{ .float_32_value = @bitCast(f32, data) },
+        .float_f16 => .{ .float_16_value = @bitCast(@as(u16, @intCast(data))) },
+        .float_f32 => .{ .float_32_value = @bitCast(data) },
         .float_f64 => .{ .float_64_value = ip.extraData(f64, data) },
         .float_f80 => .{ .float_80_value = ip.extraData(f80, data) },
         .float_f128 => .{ .float_128_value = ip.extraData(f128, data) },
@@ -1578,16 +1578,16 @@ pub fn indexToKey(ip: InternPool, index: Index) Key {
         .slice => .{ .slice = ip.extraData(Slice, data) },
         .aggregate => .{ .aggregate = ip.extraData(Aggregate, data) },
         .union_value => .{ .union_value = ip.extraData(UnionValue, data) },
-        .null_value => .{ .null_value = .{ .ty = @enumFromInt(Index, data) } },
-        .undefined_value => .{ .undefined_value = .{ .ty = @enumFromInt(Index, data) } },
-        .unknown_value => .{ .unknown_value = .{ .ty = @enumFromInt(Index, data) } },
+        .null_value => .{ .null_value = .{ .ty = @as(Index, @enumFromInt(data)) } },
+        .undefined_value => .{ .undefined_value = .{ .ty = @as(Index, @enumFromInt(data)) } },
+        .unknown_value => .{ .unknown_value = .{ .ty = @as(Index, @enumFromInt(data)) } },
     };
 }
 
 pub fn get(ip: *InternPool, gpa: Allocator, key: Key) Allocator.Error!Index {
     const adapter: KeyAdapter = .{ .ip = ip };
     const gop = try ip.map.getOrPutAdapted(gpa, key, adapter);
-    if (gop.found_existing) return @enumFromInt(Index, gop.index);
+    if (gop.found_existing) return @as(Index, @enumFromInt(gop.index));
 
     const tag: Tag = key.tag();
     const data: u32 = switch (key) {
@@ -1608,8 +1608,8 @@ pub fn get(ip: *InternPool, gpa: Allocator, key: Key) Allocator.Error!Index {
             .ty = big_int_val.ty,
             .limbs = big_int_val.int.limbs,
         }),
-        .float_16_value => |float_val| @bitCast(u16, float_val),
-        .float_32_value => |float_val| @bitCast(u32, float_val),
+        .float_16_value => |float_val| @as(u16, @bitCast(float_val)),
+        .float_32_value => |float_val| @as(u32, @bitCast(float_val)),
         .null_value => |null_val| @intFromEnum(null_val.ty),
         .undefined_value => |undefined_val| @intFromEnum(undefined_val.ty),
         .unknown_value => |unknown_val| @intFromEnum(unknown_val.ty),
@@ -1620,13 +1620,13 @@ pub fn get(ip: *InternPool, gpa: Allocator, key: Key) Allocator.Error!Index {
         .tag = tag,
         .data = data,
     });
-    return @enumFromInt(Index, ip.items.len - 1);
+    return @as(Index, @enumFromInt(ip.items.len - 1));
 }
 
 pub fn contains(ip: InternPool, key: Key) ?Index {
     const adapter: KeyAdapter = .{ .ip = &ip };
     const index = ip.map.getIndexAdapted(key, adapter) orelse return null;
-    return @enumFromInt(Index, index);
+    return @as(Index, @enumFromInt(index));
 }
 
 pub fn getDecl(ip: InternPool, index: InternPool.DeclIndex) *InternPool.Decl {
@@ -1648,19 +1648,19 @@ pub fn getUnion(ip: InternPool, index: InternPool.UnionIndex) *InternPool.Union 
 
 pub fn createDecl(ip: *InternPool, gpa: Allocator, decl: InternPool.Decl) Allocator.Error!InternPool.DeclIndex {
     try ip.decls.append(gpa, decl);
-    return @enumFromInt(InternPool.DeclIndex, ip.decls.count() - 1);
+    return @as(InternPool.DeclIndex, @enumFromInt(ip.decls.count() - 1));
 }
 pub fn createStruct(ip: *InternPool, gpa: Allocator, struct_info: InternPool.Struct) Allocator.Error!InternPool.StructIndex {
     try ip.structs.append(gpa, struct_info);
-    return @enumFromInt(InternPool.StructIndex, ip.structs.count() - 1);
+    return @as(InternPool.StructIndex, @enumFromInt(ip.structs.count() - 1));
 }
 pub fn createEnum(ip: *InternPool, gpa: Allocator, enum_info: InternPool.Enum) Allocator.Error!InternPool.EnumIndex {
     try ip.enums.append(gpa, enum_info);
-    return @enumFromInt(InternPool.EnumIndex, ip.enums.count() - 1);
+    return @as(InternPool.EnumIndex, @enumFromInt(ip.enums.count() - 1));
 }
 pub fn createUnion(ip: *InternPool, gpa: Allocator, union_info: InternPool.Union) Allocator.Error!InternPool.UnionIndex {
     try ip.unions.append(gpa, union_info);
-    return @enumFromInt(InternPool.UnionIndex, ip.unions.count() - 1);
+    return @as(InternPool.UnionIndex, @enumFromInt(ip.unions.count() - 1));
 }
 
 fn addExtra(ip: *InternPool, gpa: Allocator, extra: anytype) Allocator.Error!u32 {
@@ -1669,7 +1669,7 @@ fn addExtra(ip: *InternPool, gpa: Allocator, extra: anytype) Allocator.Error!u32
         @compileError(@typeName(T) ++ " fits into a u32! Consider directly storing this extra in Item's data field");
     };
 
-    const result = @intCast(u32, ip.extra.items.len);
+    const result = @as(u32, @intCast(ip.extra.items.len));
     var managed = ip.extra.toManaged(gpa);
     defer ip.extra = managed.moveToUnmanaged();
     try encoding.encode(&managed, T, extra);
@@ -1686,7 +1686,7 @@ const KeyAdapter = struct {
 
     pub fn eql(ctx: @This(), a: Key, b_void: void, b_map_index: usize) bool {
         _ = b_void;
-        return a.eql(ctx.ip.indexToKey(@enumFromInt(Index, b_map_index)));
+        return a.eql(ctx.ip.indexToKey(@as(Index, @enumFromInt(b_map_index))));
     }
 
     pub fn hash(ctx: @This(), a: Key) u32 {
@@ -1739,7 +1739,7 @@ fn deepEql(a: anytype, b: @TypeOf(a)) bool {
         },
         .Float => {
             const I = std.meta.Int(.unsigned, @bitSizeOf(T));
-            return @bitCast(I, a) == @bitCast(I, b);
+            return @as(I, @bitCast(a)) == @as(I, @bitCast(b));
         },
         .Bool,
         .Int,
@@ -1765,11 +1765,11 @@ fn deepHash(hasher: anytype, key: anytype) void {
         .Bool => deepHash(hasher, @intFromBool(key)),
         .Enum => deepHash(hasher, @intFromEnum(key)),
         .Float => |info| deepHash(hasher, switch (info.bits) {
-            16 => @bitCast(u16, key),
-            32 => @bitCast(u32, key),
-            64 => @bitCast(u64, key),
-            80 => @bitCast(u80, key),
-            128 => @bitCast(u128, key),
+            16 => @as(u16, @bitCast(key)),
+            32 => @as(u32, @bitCast(key)),
+            64 => @as(u64, @bitCast(key)),
+            80 => @as(u80, @bitCast(key)),
+            128 => @as(u128, @bitCast(key)),
             else => unreachable,
         }),
 

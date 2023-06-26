@@ -768,7 +768,7 @@ pub fn addStructInitNodeFields(server: *Server, decl: Analyser.DeclWithHandle, c
         },
         .root => {
             for (decl.handle.tree.rootDecls()) |root_node| {
-                const field = decl.handle.tree.fullContainerField(@intCast(u32, root_node)) orelse continue;
+                const field = decl.handle.tree.fullContainerField(@as(u32, @intCast(root_node))) orelse continue;
                 try completions.append(server.arena.allocator(), .{
                     .label = decl.handle.tree.tokenSlice(field.ast.main_token),
                     .kind = if (field.ast.tuple_like) .EnumMember else .Field,

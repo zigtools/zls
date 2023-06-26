@@ -98,7 +98,7 @@ pub fn serveMessage(
     var iovecs: [10]std.os.iovec_const = undefined;
     const header_le = bswap(header);
     iovecs[0] = .{
-        .iov_base = @ptrCast([*]const u8, &header_le),
+        .iov_base = @as([*]const u8, @ptrCast(&header_le)),
         .iov_len = @sizeOf(OutMessage.Header),
     };
     for (bufs, iovecs[1 .. bufs.len + 1]) |buf, *iovec| {
@@ -115,7 +115,7 @@ fn bswap(x: anytype) @TypeOf(x) {
 
     const T = @TypeOf(x);
     switch (@typeInfo(T)) {
-        .Enum => return @enumFromInt(T, @byteSwap(@intFromEnum(x))),
+        .Enum => return @as(T, @enumFromInt(@byteSwap(@intFromEnum(x)))),
         .Int => return @byteSwap(x),
         .Struct => |info| switch (info.layout) {
             .Extern => {
@@ -127,7 +127,7 @@ fn bswap(x: anytype) @TypeOf(x) {
             },
             .Packed => {
                 const I = info.backing_integer.?;
-                return @bitCast(T, @byteSwap(@bitCast(I, x)));
+                return @as(T, @bitCast(@byteSwap(@as(I, @bitCast(x)))));
             },
             .Auto => @compileError("auto layout struct"),
         },
@@ -148,7 +148,7 @@ fn bswap_and_workaround_u32(bytes_ptr: *const [4]u8) u32 {
 /// workaround for https://github.com/ziglang/zig/issues/14904
 fn bswap_and_workaround_tag(bytes_ptr: *const [4]u8) InMessage.Tag {
     const int = std.mem.readIntLittle(u32, bytes_ptr);
-    return @enumFromInt(InMessage.Tag, int);
+    return @as(InMessage.Tag, @enumFromInt(int));
 }
 
 const OutMessage = std.zig.Client.Message;
