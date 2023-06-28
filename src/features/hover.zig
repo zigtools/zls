@@ -18,6 +18,9 @@ pub fn hoverSymbol(server: *Server, decl_handle: Analyser.DeclWithHandle, markup
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
+    var temp_arena = std.heap.ArenaAllocator.init(server.allocator);
+    defer temp_arena.deinit();
+
     const handle = decl_handle.handle;
     const tree = handle.tree;
 
@@ -28,7 +31,7 @@ pub fn hoverSymbol(server: *Server, decl_handle: Analyser.DeclWithHandle, markup
             if (try server.analyser.resolveVarDeclAlias(.{ .node = node, .handle = handle })) |result| {
                 return try hoverSymbol(server, result, markup_kind);
             }
-            doc_str = try Analyser.getDocComments(server.arena.allocator(), tree, node, markup_kind);
+            doc_str = try Analyser.getDocComments(temp_arena.allocator(), tree, node, markup_kind);
 
             var buf: [1]Ast.Node.Index = undefined;
 
@@ -45,7 +48,7 @@ pub fn hoverSymbol(server: *Server, decl_handle: Analyser.DeclWithHandle, markup
         .param_payload => |pay| def: {
             const param = pay.param;
             if (param.first_doc_comment) |doc_comments| {
-                doc_str = try Analyser.collectDocComments(server.arena.allocator(), handle.tree, doc_comments, markup_kind, false);
+                doc_str = try Analyser.collectDocComments(temp_arena.allocator(), handle.tree, doc_comments, markup_kind, false);
             }
 
             break :def ast.paramSlice(tree, param);
@@ -59,69 +62,31 @@ pub fn hoverSymbol(server: *Server, decl_handle: Analyser.DeclWithHandle, markup
         => tree.tokenSlice(decl_handle.nameToken()),
     };
 
-    const resolved_type = try decl_handle.resolveType(&server.analyser);
+    var resolved_type_str: []const u8 = "unknown";
+    var referenced_types: []const Analyser.ReferencedType = &.{};
+    if (try decl_handle.resolveType(&server.analyser)) |resolved_type|
+        try server.analyser.referencedTypes(temp_arena.allocator(), resolved_type, &resolved_type_str, &referenced_types);
 
-    const resolved_type_str = if (resolved_type) |rt|
-        if (rt.type.is_type_val) switch (rt.type.data) {
-            .@"comptime" => |co| try std.fmt.allocPrint(server.arena.allocator(), "{}", .{co.value.index.fmt(co.interpreter.ip.*)}),
-            else => "type",
-        } else switch (rt.type.data) {
-            .pointer,
-            .slice,
-            .error_union,
-            .primitive,
-            => |p| offsets.nodeToSlice(rt.handle.tree, p),
-            .other => |p| switch (rt.handle.tree.nodes.items(.tag)[p]) {
-                .root => if (URI.parse(server.arena.allocator(), rt.handle.uri)) |path| std.fs.path.stem(path) else |_| "unknown",
-                .container_decl,
-                .container_decl_arg,
-                .container_decl_arg_trailing,
-                .container_decl_trailing,
-                .container_decl_two,
-                .container_decl_two_trailing,
-                .tagged_union,
-                .tagged_union_trailing,
-                .tagged_union_two,
-                .tagged_union_two_trailing,
-                .tagged_union_enum_tag,
-                .tagged_union_enum_tag_trailing,
-                => rt.handle.tree.tokenSlice(rt.handle.tree.nodes.items(.main_token)[p] - 2), // NOTE: This is a hacky nightmare but it works :P
-                .fn_proto,
-                .fn_proto_multi,
-                .fn_proto_one,
-                .fn_proto_simple,
-                .fn_decl,
-                => "fn", // TODO:(?) Add more info?
-                .array_type,
-                .array_type_sentinel,
-                .ptr_type,
-                .ptr_type_aligned,
-                .ptr_type_bit_range,
-                .ptr_type_sentinel,
-                => offsets.nodeToSlice(rt.handle.tree, p),
-                else => "unknown", // TODO: Implement more "other" type expressions; better safe than sorry
-            },
-            else => "unknown",
-        }
-    else
-        "unknown";
-
-    var hover_text: []const u8 = undefined;
+    var hover_text = std.ArrayList(u8).init(server.arena.allocator());
+    const writer = hover_text.writer();
     if (markup_kind == .markdown) {
-        hover_text =
-            if (doc_str) |doc|
-            try std.fmt.allocPrint(server.arena.allocator(), "```zig\n{s}\n```\n```zig\n({s})\n```\n{s}", .{ def_str, resolved_type_str, doc })
-        else
-            try std.fmt.allocPrint(server.arena.allocator(), "```zig\n{s}\n```\n```zig\n({s})\n```", .{ def_str, resolved_type_str });
+        try writer.print("```zig\n{s}\n```\n```zig\n({s})\n```", .{ def_str, resolved_type_str });
+        if (doc_str) |doc|
+            try writer.print("\n{s}", .{doc});
+        if (referenced_types.len > 0)
+            try writer.print("\n\n", .{});
+        for (referenced_types, 0..) |ref, index| {
+            if (index > 0)
+                try writer.print(" | ", .{});
+            try writer.print("Go to [{s}]({s}#L{d})", .{ ref.str, ref.uri, ref.loc.line + 1 });
+        }
     } else {
-        hover_text =
-            if (doc_str) |doc|
-            try std.fmt.allocPrint(server.arena.allocator(), "{s} ({s})\n{s}", .{ def_str, resolved_type_str, doc })
-        else
-            try std.fmt.allocPrint(server.arena.allocator(), "{s} ({s})", .{ def_str, resolved_type_str });
+        try writer.print("{s} ({s})", .{ def_str, resolved_type_str });
+        if (doc_str) |doc|
+            try writer.print("\n{s}", .{doc});
     }
 
-    return hover_text;
+    return hover_text.items;
 }
 
 pub fn hoverDefinitionLabel(server: *Server, pos_index: usize, handle: *const DocumentStore.Handle) error{OutOfMemory}!?types.Hover {
