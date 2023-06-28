@@ -58,6 +58,10 @@ pub fn tokenToIndex(tree: Ast, token_index: Ast.TokenIndex) usize {
     return tree.tokens.items(.start)[token_index];
 }
 
+pub fn tokensToLoc(tree: Ast, first_token: Ast.TokenIndex, last_token: Ast.TokenIndex) Loc {
+    return .{ .start = tokenToIndex(tree, first_token), .end = tokenToLoc(tree, last_token).end };
+}
+
 pub fn tokenToLoc(tree: Ast, token_index: Ast.TokenIndex) Loc {
     const start = tree.tokens.items(.start)[token_index];
     const tag = tree.tokens.items(.tag)[token_index];
@@ -191,7 +195,7 @@ pub fn rangeToLoc(text: []const u8, range: types.Range, encoding: Encoding) Loc 
 }
 
 pub fn nodeToLoc(tree: Ast, node: Ast.Node.Index) Loc {
-    return .{ .start = tokenToIndex(tree, tree.firstToken(node)), .end = tokenToLoc(tree, ast.lastToken(tree, node)).end };
+    return tokensToLoc(tree, tree.firstToken(node), ast.lastToken(tree, node));
 }
 
 pub fn nodeToSlice(tree: Ast, node: Ast.Node.Index) []const u8 {
