@@ -75,7 +75,8 @@ pub fn hoverSymbol(server: *Server, decl_handle: Analyser.DeclWithHandle, markup
         for (referenced_types, 0..) |ref, index| {
             if (index > 0)
                 try writer.print(" | ", .{});
-            try writer.print("Go to [{s}]({s}#L{d})", .{ ref.str, ref.uri, ref.loc.line + 1 });
+            const loc = offsets.tokenToPosition(ref.handle.tree, ref.token, server.offset_encoding);
+            try writer.print("Go to [{s}]({s}#L{d})", .{ ref.str, ref.handle.uri, loc.line + 1 });
         }
     } else {
         try writer.print("{s} ({s})", .{ def_str, resolved_type_str });

@@ -3110,16 +3110,11 @@ fn makeScopeInternal(context: ScopeContext, tree: Ast, node_idx: Ast.Node.Index)
 
 pub const ReferencedType = struct {
     str: []const u8,
-    uri: []const u8,
-    loc: types.Position,
+    handle: *const DocumentStore.Handle,
+    token: Ast.TokenIndex,
 
     fn init(str: []const u8, handle: *const DocumentStore.Handle, token: Ast.TokenIndex) ReferencedType {
-        const loc = offsets.tokenToPosition(handle.tree, token, .@"utf-8");
-        return .{
-            .str = str,
-            .uri = handle.uri,
-            .loc = loc,
-        };
+        return .{ .str = str, .handle = handle, .token = token };
     }
 };
 
