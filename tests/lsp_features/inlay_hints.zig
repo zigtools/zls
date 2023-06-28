@@ -69,9 +69,6 @@ test "inlayhints - function self parameter" {
 
 test "inlayhints - builtin call" {
     try testInlayHints(
-        \\const _ = @intCast(<DestType>u32,<int>5);
-    );
-    try testInlayHints(
         \\const _ = @memcpy(<dest>"",<source>"");
     );
 
