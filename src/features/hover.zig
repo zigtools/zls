@@ -18,9 +18,6 @@ pub fn hoverSymbol(server: *Server, decl_handle: Analyser.DeclWithHandle, markup
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    var temp_arena = std.heap.ArenaAllocator.init(server.allocator);
-    defer temp_arena.deinit();
-
     const handle = decl_handle.handle;
     const tree = handle.tree;
 
@@ -31,7 +28,7 @@ pub fn hoverSymbol(server: *Server, decl_handle: Analyser.DeclWithHandle, markup
             if (try server.analyser.resolveVarDeclAlias(.{ .node = node, .handle = handle })) |result| {
                 return try hoverSymbol(server, result, markup_kind);
             }
-            doc_str = try Analyser.getDocComments(temp_arena.allocator(), tree, node, markup_kind);
+            doc_str = try Analyser.getDocComments(server.arena.allocator(), tree, node, markup_kind);
 
             var buf: [1]Ast.Node.Index = undefined;
 
@@ -48,7 +45,7 @@ pub fn hoverSymbol(server: *Server, decl_handle: Analyser.DeclWithHandle, markup
         .param_payload => |pay| def: {
             const param = pay.param;
             if (param.first_doc_comment) |doc_comments| {
-                doc_str = try Analyser.collectDocComments(temp_arena.allocator(), handle.tree, doc_comments, markup_kind, false);
+                doc_str = try Analyser.collectDocComments(server.arena.allocator(), handle.tree, doc_comments, markup_kind, false);
             }
 
             break :def ast.paramSlice(tree, param);
@@ -65,7 +62,7 @@ pub fn hoverSymbol(server: *Server, decl_handle: Analyser.DeclWithHandle, markup
     var resolved_type_str: []const u8 = "unknown";
     var referenced_types: []const Analyser.ReferencedType = &.{};
     if (try decl_handle.resolveType(&server.analyser)) |resolved_type|
-        try server.analyser.referencedTypes(temp_arena.allocator(), resolved_type, &resolved_type_str, &referenced_types);
+        try server.analyser.referencedTypes(server.arena.allocator(), resolved_type, &resolved_type_str, &referenced_types);
 
     var hover_text = std.ArrayList(u8).init(server.arena.allocator());
     const writer = hover_text.writer();
