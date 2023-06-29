@@ -35,14 +35,14 @@ pub fn hoverSymbol(server: *Server, decl_handle: Analyser.DeclWithHandle, markup
 
             if (tree.fullVarDecl(node)) |var_decl| {
                 if (var_decl.ast.type_node != 0)
-                    type_str = tree.getNodeSource(var_decl.ast.type_node);
+                    type_str = offsets.nodeToSlice(tree, var_decl.ast.type_node);
 
                 break :def Analyser.getVariableSignature(tree, var_decl);
             } else if (tree.fullFnProto(&buf, node)) |fn_proto| {
                 break :def Analyser.getFunctionSignature(tree, fn_proto);
             } else if (tree.fullContainerField(node)) |field| {
                 std.debug.assert(field.ast.type_expr != 0);
-                type_str = tree.getNodeSource(field.ast.type_expr);
+                type_str = offsets.nodeToSlice(tree, field.ast.type_expr);
 
                 break :def Analyser.getContainerFieldSignature(tree, field);
             } else {
@@ -53,7 +53,7 @@ pub fn hoverSymbol(server: *Server, decl_handle: Analyser.DeclWithHandle, markup
             const param = pay.param;
 
             std.debug.assert(param.type_expr != 0);
-            type_str = tree.getNodeSource(param.type_expr);
+            type_str = offsets.nodeToSlice(tree, param.type_expr);
 
             if (param.first_doc_comment) |doc_comments| {
                 doc_str = try Analyser.collectDocComments(server.arena.allocator(), handle.tree, doc_comments, markup_kind, false);
