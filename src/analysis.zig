@@ -3121,18 +3121,19 @@ pub const ReferencedType = struct {
 pub fn referencedTypes(
     analyser: *Analyser,
     allocator: std.mem.Allocator,
+    type_str: ?[]const u8,
     resolved_type: TypeWithHandle,
     resolved_type_str: *[]const u8,
     referenced_types: *[]const ReferencedType,
 ) error{OutOfMemory}!void {
     var list = std.ArrayList(ReferencedType).init(allocator);
     if (resolved_type.type.is_type_val) {
-        _ = try analyser.addReferencedTypes(resolved_type, false, &list);
+        _ = try analyser.addReferencedTypes(type_str, resolved_type, false, &list);
         resolved_type_str.* = switch (resolved_type.type.data) {
             .@"comptime" => |co| try std.fmt.allocPrint(allocator, "{}", .{co.value.index.fmt(co.interpreter.ip.*)}),
             else => "type",
         };
-    } else if (try analyser.addReferencedTypes(resolved_type, true, &list)) |str| {
+    } else if (try analyser.addReferencedTypes(type_str, resolved_type, true, &list)) |str| {
         resolved_type_str.* = str;
     }
     referenced_types.* = list.items;
@@ -3144,11 +3145,13 @@ fn addReferencedTypesFromNode(
     referenced_types: *std.ArrayList(ReferencedType),
 ) error{OutOfMemory}!void {
     const type_handle = try analyser.resolveTypeOfNode(node_handle) orelse return;
-    _ = try analyser.addReferencedTypes(type_handle, true, referenced_types);
+    const type_str = node_handle.handle.tree.getNodeSource(node_handle.node);
+    _ = try analyser.addReferencedTypes(type_str, type_handle, true, referenced_types);
 }
 
 fn addReferencedTypes(
     analyser: *Analyser,
+    type_str: ?[]const u8,
     type_handle: TypeWithHandle,
     is_referenced_type: bool,
     referenced_types: *std.ArrayList(ReferencedType),
@@ -3174,7 +3177,7 @@ fn addReferencedTypes(
                 const path = URI.parse(allocator, handle.uri) catch return null;
                 const str = std.fs.path.stem(path);
                 if (is_referenced_type)
-                    try referenced_types.append(ReferencedType.init(str, handle, tree.firstToken(p)));
+                    try referenced_types.append(ReferencedType.init(type_str orelse str, handle, tree.firstToken(p)));
                 return str;
             },
 
@@ -3196,7 +3199,7 @@ fn addReferencedTypes(
                 if (token_tags[token] != .identifier) return null;
                 const str = tree.tokenSlice(token);
                 if (is_referenced_type)
-                    try referenced_types.append(ReferencedType.init(str, handle, token));
+                    try referenced_types.append(ReferencedType.init(type_str orelse str, handle, token));
                 return str;
             },
 

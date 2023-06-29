@@ -21,6 +21,7 @@ pub fn hoverSymbol(server: *Server, decl_handle: Analyser.DeclWithHandle, markup
     const handle = decl_handle.handle;
     const tree = handle.tree;
 
+    var type_str: ?[]const u8 = null;
     var doc_str: ?[]const u8 = null;
 
     const def_str = switch (decl_handle.decl.*) {
@@ -33,10 +34,16 @@ pub fn hoverSymbol(server: *Server, decl_handle: Analyser.DeclWithHandle, markup
             var buf: [1]Ast.Node.Index = undefined;
 
             if (tree.fullVarDecl(node)) |var_decl| {
+                if (var_decl.ast.type_node != 0)
+                    type_str = tree.getNodeSource(var_decl.ast.type_node);
+
                 break :def Analyser.getVariableSignature(tree, var_decl);
             } else if (tree.fullFnProto(&buf, node)) |fn_proto| {
                 break :def Analyser.getFunctionSignature(tree, fn_proto);
             } else if (tree.fullContainerField(node)) |field| {
+                std.debug.assert(field.ast.type_expr != 0);
+                type_str = tree.getNodeSource(field.ast.type_expr);
+
                 break :def Analyser.getContainerFieldSignature(tree, field);
             } else {
                 break :def Analyser.nodeToString(tree, node) orelse return null;
@@ -44,6 +51,10 @@ pub fn hoverSymbol(server: *Server, decl_handle: Analyser.DeclWithHandle, markup
         },
         .param_payload => |pay| def: {
             const param = pay.param;
+
+            std.debug.assert(param.type_expr != 0);
+            type_str = tree.getNodeSource(param.type_expr);
+
             if (param.first_doc_comment) |doc_comments| {
                 doc_str = try Analyser.collectDocComments(server.arena.allocator(), handle.tree, doc_comments, markup_kind, false);
             }
@@ -62,7 +73,7 @@ pub fn hoverSymbol(server: *Server, decl_handle: Analyser.DeclWithHandle, markup
     var resolved_type_str: []const u8 = "unknown";
     var referenced_types: []const Analyser.ReferencedType = &.{};
     if (try decl_handle.resolveType(&server.analyser)) |resolved_type|
-        try server.analyser.referencedTypes(server.arena.allocator(), resolved_type, &resolved_type_str, &referenced_types);
+        try server.analyser.referencedTypes(server.arena.allocator(), type_str, resolved_type, &resolved_type_str, &referenced_types);
 
     var hover_text = std.ArrayList(u8).init(server.arena.allocator());
     const writer = hover_text.writer();
