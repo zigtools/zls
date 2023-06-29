@@ -3164,6 +3164,7 @@ fn addReferencedTypes(
     const node_tags = tree.nodes.items(.tag);
     const token_tags = tree.tokens.items(.tag);
     const main_tokens = tree.nodes.items(.main_token);
+    const datas = tree.nodes.items(.data);
 
     switch (type_handle.type.data) {
         .pointer,
@@ -3250,6 +3251,29 @@ fn addReferencedTypes(
 
                 try analyser.addReferencedTypesFromNode(
                     .{ .node = ptr_type.ast.child_type, .handle = handle },
+                    referenced_types,
+                );
+
+                return offsets.nodeToSlice(tree, p);
+            },
+
+            .optional_type => {
+                try analyser.addReferencedTypesFromNode(
+                    .{ .node = datas[p].lhs, .handle = handle },
+                    referenced_types,
+                );
+
+                return offsets.nodeToSlice(tree, p);
+            },
+
+            .error_union => {
+                try analyser.addReferencedTypesFromNode(
+                    .{ .node = datas[p].lhs, .handle = handle },
+                    referenced_types,
+                );
+
+                try analyser.addReferencedTypesFromNode(
+                    .{ .node = datas[p].rhs, .handle = handle },
                     referenced_types,
                 );
 
