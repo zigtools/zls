@@ -1099,10 +1099,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
             if (try analyser.resolveTypeOfNodeInternal(.{ .handle = handle, .node = if_node.ast.else_expr })) |t|
                 try either.append(analyser.arena.allocator(), .{ .type_with_handle = t, .descriptor = try std.fmt.allocPrint(analyser.arena.allocator(), "!({s})", .{offsets.nodeToSlice(tree, if_node.ast.cond_expr)}) });
 
-            return TypeWithHandle{
-                .type = .{ .data = .{ .either = try either.toOwnedSlice(analyser.arena.allocator()) }, .is_type_val = false },
-                .handle = handle,
-            };
+            return TypeWithHandle.fromEither(analyser.gpa, try either.toOwnedSlice(analyser.arena.allocator()), handle);
         },
         .@"switch",
         .switch_comma,
@@ -1128,10 +1125,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                     });
             }
 
-            return TypeWithHandle{
-                .type = .{ .data = .{ .either = try either.toOwnedSlice(analyser.arena.allocator()) }, .is_type_val = false },
-                .handle = handle,
-            };
+            return TypeWithHandle.fromEither(analyser.gpa, try either.toOwnedSlice(analyser.arena.allocator()), handle);
         },
         .block,
         .block_semicolon,
@@ -1276,6 +1270,31 @@ pub const TypeWithHandle = struct {
     }
 
     pub const Deduplicator = std.HashMapUnmanaged(TypeWithHandle, void, TypeWithHandle.Context, std.hash_map.default_max_load_percentage);
+
+    pub fn fromEither(allocator: std.mem.Allocator, entries: []const Type.EitherEntry, handle: *const DocumentStore.Handle) error{OutOfMemory}!?TypeWithHandle {
+        if (entries.len == 0)
+            return null;
+
+        if (entries.len == 1)
+            return entries[0].type_with_handle;
+
+        var deduplicator = Deduplicator{};
+        defer deduplicator.deinit(allocator);
+
+        for (entries) |e|
+            _ = try deduplicator.getOrPut(allocator, e.type_with_handle);
+
+        if (deduplicator.size == 1)
+            return entries[0].type_with_handle;
+
+        return .{
+            .type = .{
+                .data = .{ .either = entries },
+                .is_type_val = false,
+            },
+            .handle = handle,
+        };
+    }
 
     /// Resolves possible types of a type (single for all except array_index and either)
     /// Drops duplicates
@@ -2100,10 +2119,7 @@ pub const DeclWithHandle = struct {
                         }
                     }
 
-                    return TypeWithHandle{
-                        .type = .{ .data = .{ .either = try possible.toOwnedSlice(analyser.arena.allocator()) }, .is_type_val = false },
-                        .handle = self.handle,
-                    };
+                    return TypeWithHandle.fromEither(analyser.gpa, try possible.toOwnedSlice(analyser.arena.allocator()), self.handle);
                 }
 
                 const param_decl = pay.param;
