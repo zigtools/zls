@@ -3134,10 +3134,23 @@ pub const ReferencedType = struct {
     }
 };
 
+pub fn referencedVarDeclAlias(
+    analyser: *Analyser,
+    node_handle: NodeWithHandle,
+    type_str: *?[]const u8,
+    referenced_type: *?ReferencedType,
+) error{OutOfMemory}!void {
+    const str = offsets.nodeToSlice(node_handle.handle.tree, node_handle.node);
+    type_str.* = str;
+    const decl_handle = try analyser.resolveVarDeclAlias(node_handle) orelse return;
+    referenced_type.* = .{ .str = str, .handle = decl_handle.handle, .token = decl_handle.nameToken() };
+}
+
 pub fn referencedTypes(
     analyser: *Analyser,
     allocator: std.mem.Allocator,
     type_str: ?[]const u8,
+    type_reference: ?ReferencedType,
     resolved_type: TypeWithHandle,
     resolved_type_str: *[]const u8,
     referenced_types: *[]const ReferencedType,
@@ -3149,8 +3162,12 @@ pub fn referencedTypes(
             .@"comptime" => |co| try std.fmt.allocPrint(allocator, "{}", .{co.value.index.fmt(co.interpreter.ip.*)}),
             else => "type",
         };
-    } else if (try analyser.addReferencedTypes(type_str, resolved_type, true, &list)) |str| {
-        resolved_type_str.* = str;
+    } else {
+        if (type_reference) |ref|
+            try list.append(ref);
+
+        if (try analyser.addReferencedTypes(type_str, resolved_type, type_reference == null, &list)) |str|
+            resolved_type_str.* = str;
     }
     referenced_types.* = list.items;
 }
@@ -3160,9 +3177,13 @@ fn addReferencedTypesFromNode(
     node_handle: NodeWithHandle,
     referenced_types: *std.ArrayList(ReferencedType),
 ) error{OutOfMemory}!void {
+    var type_str: ?[]const u8 = null;
+    var type_reference: ?ReferencedType = null;
+    try analyser.referencedVarDeclAlias(node_handle, &type_str, &type_reference);
+    if (type_reference) |ref|
+        try referenced_types.append(ref);
     const type_handle = try analyser.resolveTypeOfNode(node_handle) orelse return;
-    const type_str = offsets.nodeToSlice(node_handle.handle.tree, node_handle.node);
-    _ = try analyser.addReferencedTypes(type_str, type_handle, true, referenced_types);
+    _ = try analyser.addReferencedTypes(type_str, type_handle, type_reference == null, referenced_types);
 }
 
 fn addReferencedTypes(
