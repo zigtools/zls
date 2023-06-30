@@ -3132,6 +3132,27 @@ pub const ReferencedType = struct {
     fn init(str: []const u8, handle: *const DocumentStore.Handle, token: Ast.TokenIndex) ReferencedType {
         return .{ .str = str, .handle = handle, .token = token };
     }
+
+    const Set = std.ArrayHashMap(ReferencedType, void, SetContext, true);
+
+    const SetContext = struct {
+        pub fn hash(self: @This(), item: ReferencedType) u32 {
+            _ = self;
+            var hasher = std.hash.Wyhash.init(0);
+            hasher.update(item.str);
+            hasher.update(item.handle.uri);
+            hasher.update(&std.mem.toBytes(item.token));
+            return @truncate(hasher.final());
+        }
+
+        pub fn eql(self: @This(), a: ReferencedType, b: ReferencedType, b_index: usize) bool {
+            _ = self;
+            _ = b_index;
+            return std.mem.eql(u8, a.str, b.str) and
+                std.mem.eql(u8, a.handle.uri, b.handle.uri) and
+                a.token == b.token;
+        }
+    };
 };
 
 pub fn referencedVarDeclAlias(
@@ -3155,33 +3176,33 @@ pub fn referencedTypes(
     resolved_type_str: *[]const u8,
     referenced_types: *[]const ReferencedType,
 ) error{OutOfMemory}!void {
-    var list = std.ArrayList(ReferencedType).init(allocator);
+    var set = ReferencedType.Set.init(allocator);
     if (resolved_type.type.is_type_val) {
-        _ = try analyser.addReferencedTypes(type_str, resolved_type, false, &list);
+        _ = try analyser.addReferencedTypes(type_str, resolved_type, false, &set);
         resolved_type_str.* = switch (resolved_type.type.data) {
             .@"comptime" => |co| try std.fmt.allocPrint(allocator, "{}", .{co.value.index.fmt(co.interpreter.ip.*)}),
             else => "type",
         };
     } else {
         if (type_reference) |ref|
-            try list.append(ref);
+            try set.put(ref, {});
 
-        if (try analyser.addReferencedTypes(type_str, resolved_type, type_reference == null, &list)) |str|
+        if (try analyser.addReferencedTypes(type_str, resolved_type, type_reference == null, &set)) |str|
             resolved_type_str.* = str;
     }
-    referenced_types.* = list.items;
+    referenced_types.* = set.keys();
 }
 
 fn addReferencedTypesFromNode(
     analyser: *Analyser,
     node_handle: NodeWithHandle,
-    referenced_types: *std.ArrayList(ReferencedType),
+    referenced_types: *ReferencedType.Set,
 ) error{OutOfMemory}!void {
     var type_str: ?[]const u8 = null;
     var type_reference: ?ReferencedType = null;
     try analyser.referencedVarDeclAlias(node_handle, &type_str, &type_reference);
     if (type_reference) |ref|
-        try referenced_types.append(ref);
+        try referenced_types.put(ref, {});
     const type_handle = try analyser.resolveTypeOfNode(node_handle) orelse return;
     _ = try analyser.addReferencedTypes(type_str, type_handle, type_reference == null, referenced_types);
 }
@@ -3191,7 +3212,7 @@ fn addReferencedTypes(
     type_str: ?[]const u8,
     type_handle: TypeWithHandle,
     is_referenced_type: bool,
-    referenced_types: *std.ArrayList(ReferencedType),
+    referenced_types: *ReferencedType.Set,
 ) error{OutOfMemory}!?[]const u8 {
     const allocator = referenced_types.allocator;
 
@@ -3215,7 +3236,7 @@ fn addReferencedTypes(
                 const path = URI.parse(allocator, handle.uri) catch return null;
                 const str = std.fs.path.stem(path);
                 if (is_referenced_type)
-                    try referenced_types.append(ReferencedType.init(type_str orelse str, handle, tree.firstToken(p)));
+                    try referenced_types.put(ReferencedType.init(type_str orelse str, handle, tree.firstToken(p)), {});
                 return str;
             },
 
@@ -3237,7 +3258,7 @@ fn addReferencedTypes(
                 if (token_tags[token] != .identifier) return null;
                 const str = tree.tokenSlice(token);
                 if (is_referenced_type)
-                    try referenced_types.append(ReferencedType.init(type_str orelse str, handle, token));
+                    try referenced_types.put(ReferencedType.init(type_str orelse str, handle, token), {});
                 return str;
             },
 
