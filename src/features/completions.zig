@@ -48,7 +48,7 @@ fn typeToCompletion(
             }
         },
         .error_union => {},
-        .pointer => |n| {
+        .pointer => |t| {
             if (server.config.operator_completions) {
                 try list.append(allocator, .{
                     .label = "*",
@@ -57,16 +57,7 @@ fn typeToCompletion(
                     .insertTextFormat = .PlainText,
                 });
             }
-            try nodeToCompletion(
-                server,
-                list,
-                .{ .node = n, .handle = type_handle.handle },
-                null,
-                orig_handle,
-                type_handle.type.is_type_val,
-                null,
-                either_descriptor,
-            );
+            try typeToCompletion(server, list, .{ .original = t.* }, orig_handle, null);
         },
         .other => |n| try nodeToCompletion(
             server,
