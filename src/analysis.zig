@@ -2662,7 +2662,7 @@ pub fn makeDocumentScope(allocator: std.mem.Allocator, tree: Ast) !DocumentScope
         .allocator = allocator,
         .doc_scope = &document_scope,
         .current_scope = &current_scope,
-    }, tree, 0);
+    }, tree, 0, 0);
 
     return document_scope;
 }
@@ -2703,7 +2703,12 @@ const ScopeContext = struct {
     }
 };
 
-fn makeInnerScope(context: ScopeContext, tree: Ast, node_idx: Ast.Node.Index) error{OutOfMemory}!void {
+fn makeInnerScope(
+    context: ScopeContext,
+    tree: Ast,
+    node_idx: Ast.Node.Index,
+    start_token: Ast.TokenIndex,
+) error{OutOfMemory}!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -2713,7 +2718,7 @@ fn makeInnerScope(context: ScopeContext, tree: Ast, node_idx: Ast.Node.Index) er
     const token_tags = tree.tokens.items(.tag);
 
     const scope_index = try context.pushScope(
-        offsets.nodeToLoc(tree, node_idx),
+        offsets.tokensToLoc(tree, start_token, ast.lastToken(tree, node_idx)),
         .{ .container = node_idx },
     );
     defer context.popScope();
@@ -2772,12 +2777,21 @@ fn makeInnerScope(context: ScopeContext, tree: Ast, node_idx: Ast.Node.Index) er
 /// If `node_idx` is a block it's scope index will be returned
 /// Otherwise, a new scope will be created that will enclose `node_idx`
 fn makeBlockScopeInternal(context: ScopeContext, tree: Ast, node_idx: Ast.Node.Index) error{OutOfMemory}!?Scope.Index {
+    return makeBlockScopeAt(context, tree, node_idx, tree.firstToken(node_idx));
+}
+
+fn makeBlockScopeAt(
+    context: ScopeContext,
+    tree: Ast,
+    node_idx: Ast.Node.Index,
+    start_token: Ast.TokenIndex,
+) error{OutOfMemory}!?Scope.Index {
     if (node_idx == 0) return null;
     const tags = tree.nodes.items(.tag);
 
     // if node_idx is a block, the next scope will be a block so we store its index here
     const block_scope_index = context.doc_scope.scopes.len;
-    try makeScopeInternal(context, tree, node_idx);
+    try makeScopeAt(context, tree, node_idx, start_token);
 
     switch (tags[node_idx]) {
         .block,
@@ -2790,7 +2804,7 @@ fn makeBlockScopeInternal(context: ScopeContext, tree: Ast, node_idx: Ast.Node.I
         },
         else => {
             const new_scope = try context.pushScope(
-                offsets.nodeToLoc(tree, node_idx),
+                offsets.tokensToLoc(tree, start_token, ast.lastToken(tree, node_idx)),
                 .other,
             );
             context.popScope();
@@ -2800,6 +2814,15 @@ fn makeBlockScopeInternal(context: ScopeContext, tree: Ast, node_idx: Ast.Node.I
 }
 
 fn makeScopeInternal(context: ScopeContext, tree: Ast, node_idx: Ast.Node.Index) error{OutOfMemory}!void {
+    return makeScopeAt(context, tree, node_idx, tree.firstToken(node_idx));
+}
+
+fn makeScopeAt(
+    context: ScopeContext,
+    tree: Ast,
+    node_idx: Ast.Node.Index,
+    start_token: Ast.TokenIndex,
+) error{OutOfMemory}!void {
     if (node_idx == 0) return;
 
     const allocator = context.allocator;
@@ -2825,10 +2848,10 @@ fn makeScopeInternal(context: ScopeContext, tree: Ast, node_idx: Ast.Node.Index)
         .tagged_union_two_trailing,
         .tagged_union_enum_tag,
         .tagged_union_enum_tag_trailing,
-        => try makeInnerScope(context, tree, node_idx),
+        => try makeInnerScope(context, tree, node_idx, start_token),
         .error_set_decl => {
             const scope_index = try context.pushScope(
-                offsets.nodeToLoc(tree, node_idx),
+                offsets.tokensToLoc(tree, start_token, ast.lastToken(tree, node_idx)),
                 .{ .container = node_idx },
             );
             defer context.popScope();
@@ -2866,7 +2889,7 @@ fn makeScopeInternal(context: ScopeContext, tree: Ast, node_idx: Ast.Node.Index)
             const func = tree.fullFnProto(&buf, node_idx).?;
 
             const scope_index = try context.pushScope(
-                offsets.nodeToLoc(tree, node_idx),
+                offsets.tokensToLoc(tree, start_token, ast.lastToken(tree, node_idx)),
                 .{ .function = node_idx },
             );
             defer context.popScope();
@@ -2924,7 +2947,7 @@ fn makeScopeInternal(context: ScopeContext, tree: Ast, node_idx: Ast.Node.Index)
 
             const scope_index = try context.pushScope(
                 .{
-                    .start = offsets.tokenToIndex(tree, main_tokens[node_idx]),
+                    .start = offsets.tokenToIndex(tree, start_token),
                     .end = end_index,
                 },
                 .{ .block = node_idx },
@@ -2956,7 +2979,8 @@ fn makeScopeInternal(context: ScopeContext, tree: Ast, node_idx: Ast.Node.Index)
         => {
             const if_node = ast.fullIf(tree, node_idx).?;
 
-            const then_scope = (try makeBlockScopeInternal(context, tree, if_node.ast.then_expr)).?;
+            const then_start = if_node.payload_token orelse tree.firstToken(if_node.ast.then_expr);
+            const then_scope = (try makeBlockScopeAt(context, tree, if_node.ast.then_expr, then_start)).?;
 
             if (if_node.payload_token) |payload| {
                 const name_token = payload + @intFromBool(token_tags[payload] == .asterisk);
@@ -2971,7 +2995,8 @@ fn makeScopeInternal(context: ScopeContext, tree: Ast, node_idx: Ast.Node.Index)
             }
 
             if (if_node.ast.else_expr != 0) {
-                const else_scope = (try makeBlockScopeInternal(context, tree, if_node.ast.else_expr)).?;
+                const else_start = if_node.error_token orelse tree.firstToken(if_node.ast.else_expr);
+                const else_scope = (try makeBlockScopeAt(context, tree, if_node.ast.else_expr, else_start)).?;
                 if (if_node.error_token) |err_token| {
                     const name = tree.tokenSlice(err_token);
                     try context.putDecl(else_scope, name, .{ .ast_node = if_node.ast.else_expr });
@@ -2981,15 +3006,16 @@ fn makeScopeInternal(context: ScopeContext, tree: Ast, node_idx: Ast.Node.Index)
         .@"catch" => {
             try makeScopeInternal(context, tree, data[node_idx].lhs);
 
-            const expr_scope = (try makeBlockScopeInternal(context, tree, data[node_idx].rhs)).?;
-
             const catch_token = main_tokens[node_idx] + 2;
             if (token_tags.len > catch_token and
                 token_tags[catch_token - 1] == .pipe and
                 token_tags[catch_token] == .identifier)
             {
+                const expr_scope = (try makeBlockScopeAt(context, tree, data[node_idx].rhs, catch_token)).?;
                 const name = tree.tokenSlice(catch_token);
                 try context.putDecl(expr_scope, name, .{ .ast_node = data[node_idx].rhs });
+            } else {
+                try makeScopeInternal(context, tree, data[node_idx].rhs);
             }
         },
         .@"while",
@@ -3002,8 +3028,12 @@ fn makeScopeInternal(context: ScopeContext, tree: Ast, node_idx: Ast.Node.Index)
             try makeScopeInternal(context, tree, while_node.ast.cond_expr);
 
             const cont_scope = try makeBlockScopeInternal(context, tree, while_node.ast.cont_expr);
-            const then_scope = (try makeBlockScopeInternal(context, tree, while_node.ast.then_expr)).?;
-            const else_scope = try makeBlockScopeInternal(context, tree, while_node.ast.else_expr);
+
+            const then_start = while_node.payload_token orelse tree.firstToken(while_node.ast.then_expr);
+            const then_scope = (try makeBlockScopeAt(context, tree, while_node.ast.then_expr, then_start)).?;
+
+            const else_start = while_node.error_token orelse tree.firstToken(while_node.ast.else_expr);
+            const else_scope = try makeBlockScopeAt(context, tree, while_node.ast.else_expr, else_start);
 
             if (while_node.label_token) |label| {
                 std.debug.assert(token_tags[label] == .identifier);
@@ -3048,10 +3078,10 @@ fn makeScopeInternal(context: ScopeContext, tree: Ast, node_idx: Ast.Node.Index)
                 try makeScopeInternal(context, tree, input_node);
             }
 
-            const then_scope = (try makeBlockScopeInternal(context, tree, for_node.ast.then_expr)).?;
+            var capture_token = for_node.payload_token;
+            const then_scope = (try makeBlockScopeAt(context, tree, for_node.ast.then_expr, capture_token)).?;
             const else_scope = try makeBlockScopeInternal(context, tree, for_node.ast.else_expr);
 
-            var capture_token = for_node.payload_token;
             for (for_node.ast.inputs) |input| {
                 if (capture_token + 1 >= tree.tokens.len) break;
                 const capture_is_ref = token_tags[capture_token] == .asterisk;
@@ -3094,7 +3124,7 @@ fn makeScopeInternal(context: ScopeContext, tree: Ast, node_idx: Ast.Node.Index)
                 const switch_case: Ast.full.SwitchCase = tree.fullSwitchCase(case).?;
 
                 if (switch_case.payload_token) |payload| {
-                    const expr_index = (try makeBlockScopeInternal(context, tree, switch_case.ast.target_expr)).?;
+                    const expr_index = (try makeBlockScopeAt(context, tree, switch_case.ast.target_expr, payload)).?;
                     // if payload is *name than get next token
                     const name_token = payload + @intFromBool(token_tags[payload] == .asterisk);
                     const name = tree.tokenSlice(name_token);
@@ -3102,17 +3132,16 @@ fn makeScopeInternal(context: ScopeContext, tree: Ast, node_idx: Ast.Node.Index)
                     try context.putDecl(expr_index, name, .{
                         .switch_payload = .{ .node = name_token, .switch_expr = cond, .items = switch_case.ast.values },
                     });
-
-                    try makeScopeInternal(context, tree, switch_case.ast.target_expr);
                 } else {
                     try makeScopeInternal(context, tree, switch_case.ast.target_expr);
                 }
             }
         },
         .@"errdefer" => {
-            const expr_scope = (try makeBlockScopeInternal(context, tree, data[node_idx].rhs)).?;
-
             const payload_token = data[node_idx].lhs;
+            const expr_start = if (payload_token != 0) payload_token else tree.firstToken(data[node_idx].rhs);
+            const expr_scope = (try makeBlockScopeAt(context, tree, data[node_idx].rhs, expr_start)).?;
+
             if (payload_token != 0) {
                 const name = tree.tokenSlice(payload_token);
                 try context.putDecl(expr_scope, name, .{ .ast_node = data[node_idx].rhs });
