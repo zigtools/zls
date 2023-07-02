@@ -502,8 +502,7 @@ fn resolveReturnType(analyser: *Analyser, fn_decl: Ast.full.FnProto, handle: *co
     const child_type = (try analyser.resolveTypeOfNodeInternal(ret)) orelse
         return null;
 
-    const is_inferred_error = tree.tokens.items(.tag)[tree.firstToken(return_type) - 1] == .bang;
-    if (is_inferred_error) {
+    if (ast.hasInferredError(tree, fn_decl)) {
         const child_type_node = switch (child_type.type.data) {
             .other => |n| n,
             else => return null,
@@ -3328,7 +3327,10 @@ fn addReferencedTypes(
                         try writer.print(", ", .{});
                     try writer.print("{s}", .{param_type_str orelse return null});
                 }
-                try writer.print(") {s}", .{return_type_str orelse return null});
+                try writer.print(") ", .{});
+                if (ast.hasInferredError(tree, fn_proto))
+                    try writer.print("!", .{});
+                try writer.print("{s}", .{return_type_str orelse return null});
                 return str.items;
             },
 
