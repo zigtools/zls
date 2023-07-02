@@ -3275,6 +3275,7 @@ fn addReferencedTypes(
             .container_decl_trailing,
             .container_decl_two,
             .container_decl_two_trailing,
+            .error_set_decl,
             .tagged_union,
             .tagged_union_trailing,
             .tagged_union_two,
@@ -3283,12 +3284,17 @@ fn addReferencedTypes(
             .tagged_union_enum_tag_trailing,
             => {
                 // NOTE: This is a hacky nightmare but it works :P
-                const token = main_tokens[p] - 2;
-                if (token_tags[token] != .identifier) return null;
-                const str = tree.tokenSlice(token);
-                if (is_referenced_type)
-                    try referenced_types.put(ReferencedType.init(type_str orelse str, handle, token), {});
-                return str;
+                const token = main_tokens[p];
+                if (token_tags[token - 2] == .identifier and token_tags[token - 1] == .equal) {
+                    const str = tree.tokenSlice(token - 2);
+                    if (is_referenced_type)
+                        try referenced_types.put(ReferencedType.init(type_str orelse str, handle, token - 2), {});
+                    return str;
+                }
+                if (token_tags[token - 1] == .keyword_return) {
+                    return null;
+                }
+                return offsets.nodeToSlice(tree, p);
             },
 
             .fn_proto,
