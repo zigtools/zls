@@ -2491,9 +2491,20 @@ pub fn lookupLabel(
 }
 
 pub fn lookupSymbolGlobal(analyser: *Analyser, handle: *const DocumentStore.Handle, symbol: []const u8, source_index: usize) error{OutOfMemory}!?DeclWithHandle {
+    return analyser.lookupSymbolGlobalAdvanced(handle, symbol, source_index, .{});
+}
+
+pub fn lookupSymbolGlobalAdvanced(
+    analyser: *Analyser,
+    handle: *const DocumentStore.Handle,
+    symbol: []const u8,
+    source_index: usize,
+    comptime options: struct { skip_container_fields: bool = true },
+) error{OutOfMemory}!?DeclWithHandle {
     const scope_parents = handle.document_scope.scopes.items(.parent);
     const scope_decls = handle.document_scope.scopes.items(.decls);
     const scope_uses = handle.document_scope.scopes.items(.uses);
+    const node_tags = handle.tree.nodes.items(.tag);
 
     var current_scope = innermostBlockScopeIndex(handle.*, source_index);
 
@@ -2504,7 +2515,7 @@ pub fn lookupSymbolGlobal(analyser: *Analyser, handle: *const DocumentStore.Hand
             const candidate = &handle.document_scope.decls.items[@intFromEnum(decl_index)];
             switch (candidate.*) {
                 .ast_node => |node| {
-                    if (handle.tree.nodes.items(.tag)[node].isContainerField()) continue;
+                    if (options.skip_container_fields and node_tags[node].isContainerField()) continue;
                 },
                 .label_decl => continue,
                 else => {},

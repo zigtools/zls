@@ -306,7 +306,9 @@ pub fn getSymbolGlobal(
     const name = Server.identifierFromPosition(pos_index, handle.*);
     if (name.len == 0) return null;
 
-    return try server.analyser.lookupSymbolGlobal(handle, name, pos_index);
+    return try server.analyser.lookupSymbolGlobalAdvanced(handle, name, pos_index, .{
+        .skip_container_fields = false,
+    });
 }
 
 /// Multiple when using branched types
