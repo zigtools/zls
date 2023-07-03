@@ -33,6 +33,7 @@ pub const Builder = struct {
             },
             .non_camelcase_fn => try handleNonCamelcaseFunction(builder, actions, loc),
             .pointless_discard => try handlePointlessDiscard(builder, actions, loc),
+            .dot_slash_import => try handleDotSlashImport(builder, actions, loc),
             .omit_discard => |id| switch (id) {
                 .@"error capture" => try handleUnusedCapture(builder, actions, loc, remove_capture_actions),
             },
@@ -252,6 +253,32 @@ fn handlePointlessDiscard(builder: *Builder, actions: *std.ArrayListUnmanaged(ty
     });
 }
 
+fn handleDotSlashImport(builder: *Builder, actions: *std.ArrayListUnmanaged(types.CodeAction), loc: offsets.Loc) !void {
+    const import_path = offsets.locToSlice(builder.handle.text, loc);
+
+    var new_path = try discardDotSlash(builder.arena, import_path);
+
+    try actions.append(builder.arena, .{ 
+        .title = "remove unnecessary ./ in import", 
+        .kind = .quickfix, 
+        .isPreferred = true, 
+        .edit = try builder.createWorkspaceEdit(&.{
+            builder.createTextEditLoc(loc, new_path),
+        })
+    });
+}
+
+// "\"./foo/bar\"" -> "\"foo/bar\""
+fn discardDotSlash(allocator: std.mem.Allocator, path: []const u8) ![]const u8 {
+    var new_path = try std.ArrayListUnmanaged(u8).initCapacity(allocator, path.len - 2);
+    errdefer new_path.deinit(allocator);
+
+    new_path.appendAssumeCapacity('"');
+    new_path.appendSliceAssumeCapacity(path[3..]);
+
+    return new_path.toOwnedSlice(allocator);
+}
+
 fn detectIndentation(source: []const u8) []const u8 {
     // Essentially I'm looking for the first indentation in the file.
     var i: usize = 0;
@@ -378,6 +405,7 @@ const DiagnosticKind = union(enum) {
     non_camelcase_fn,
     undeclared_identifier,
     unreachable_code,
+    dot_slash_import,
 
     const IdCat = enum {
         @"function parameter",
@@ -411,6 +439,8 @@ const DiagnosticKind = union(enum) {
             return .non_camelcase_fn;
         } else if (std.mem.startsWith(u8, msg, "use of undeclared identifier")) {
             return .undeclared_identifier;
+        } else if (std.mem.startsWith(u8, msg, "A ./ is not needed in imports")) {
+            return .dot_slash_import;
         }
         return null;
     }
