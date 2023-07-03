@@ -1079,6 +1079,8 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
         },
         .multiline_string_literal,
         .string_literal,
+        .char_literal,
+        .number_literal,
         => return TypeWithHandle{
             .type = .{ .data = .{ .other = node }, .is_type_val = false },
             .handle = handle,
@@ -3272,7 +3274,10 @@ fn addReferencedTypes(
 
         .other => |p| switch (node_tags[p]) {
             .root => {
-                const path = URI.parse(allocator, handle.uri) catch return null;
+                const path = URI.parse(allocator, handle.uri) catch |err| switch (err) {
+                    error.OutOfMemory => |e| return e,
+                    else => return null,
+                };
                 const str = std.fs.path.stem(path);
                 if (is_referenced_type)
                     try referenced_types.put(ReferencedType.init(type_str orelse str, handle, tree.firstToken(p)), {});
@@ -3410,6 +3415,30 @@ fn addReferencedTypes(
                     rhs_str orelse return null,
                 });
             },
+
+            .multiline_string_literal => {
+                const start = datas[p].lhs;
+                const end = datas[p].rhs;
+                var len: usize = end - start;
+                var tok_i = start;
+                while (tok_i <= end) : (tok_i += 1) {
+                    const slice = tree.tokenSlice(tok_i);
+                    len += slice.len - 3;
+                    if (slice[slice.len - 2] == '\r') len -= 1;
+                }
+                return try std.fmt.allocPrint(allocator, "*const [{d}:0]u8", .{len});
+            },
+
+            .string_literal => {
+                const token = tree.tokenSlice(main_tokens[p]);
+                var counter = std.io.countingWriter(std.io.null_writer);
+                return switch (try std.zig.string_literal.parseWrite(counter.writer(), token)) {
+                    .success => try std.fmt.allocPrint(allocator, "*const [{d}:0]u8", .{counter.bytes_written}),
+                    .failure => null,
+                };
+            },
+
+            .number_literal, .char_literal => return "comptime_int",
 
             else => {}, // TODO: Implement more "other" type expressions; better safe than sorry
         },
