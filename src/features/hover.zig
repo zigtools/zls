@@ -30,7 +30,7 @@ pub fn hoverSymbol(server: *Server, decl_handle: Analyser.DeclWithHandle, markup
             if (try server.analyser.resolveVarDeclAlias(.{ .node = node, .handle = handle })) |result| {
                 return try hoverSymbol(server, result, markup_kind);
             }
-            doc_str = try Analyser.getDocComments(server.arena.allocator(), tree, node, markup_kind);
+            doc_str = try Analyser.getDocComments(server.arena.allocator(), tree, node);
 
             var buf: [1]Ast.Node.Index = undefined;
 
@@ -69,7 +69,7 @@ pub fn hoverSymbol(server: *Server, decl_handle: Analyser.DeclWithHandle, markup
                 );
 
             if (param.first_doc_comment) |doc_comments| {
-                doc_str = try Analyser.collectDocComments(server.arena.allocator(), handle.tree, doc_comments, markup_kind, false);
+                doc_str = try Analyser.collectDocComments(server.arena.allocator(), handle.tree, doc_comments, false);
             }
 
             break :def ast.paramSlice(tree, param);
