@@ -110,7 +110,7 @@ pub fn collectDocComments(allocator: std.mem.Allocator, tree: Ast, doc_comments:
         } else break;
     }
 
-    return try std.mem.join(allocator, if (format == .markdown) "  \n" else "\n", lines.items);
+    return try std.mem.join(allocator, "\n", lines.items);
 }
 
 /// Gets a function's keyword, name, arguments and return value.
