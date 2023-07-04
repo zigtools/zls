@@ -35,9 +35,19 @@ pub fn hoverSymbol(server: *Server, decl_handle: Analyser.DeclWithHandle, markup
             var buf: [1]Ast.Node.Index = undefined;
 
             if (tree.fullVarDecl(node)) |var_decl| {
-                if (var_decl.ast.type_node != 0)
+                var struct_init_buf: [2]Ast.Node.Index = undefined;
+                var type_node: Ast.Node.Index = 0;
+
+                if (var_decl.ast.type_node != 0) {
+                    type_node = var_decl.ast.type_node;
+                } else if (tree.fullStructInit(&struct_init_buf, var_decl.ast.init_node)) |struct_init| {
+                    if (struct_init.ast.type_expr != 0)
+                        type_node = struct_init.ast.type_expr;
+                }
+
+                if (type_node != 0)
                     try server.analyser.referencedTypesFromNode(
-                        .{ .node = var_decl.ast.type_node, .handle = handle },
+                        .{ .node = type_node, .handle = handle },
                         &reference_collector,
                     );
 
