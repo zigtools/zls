@@ -156,6 +156,7 @@ fn updateConfig(
 
 const ConfigWithPath = struct {
     config: Config,
+    /// The path to the file from which the config was read.
     config_path: ?[]const u8,
 };
 
@@ -174,18 +175,22 @@ fn getConfig(
         , .{path});
     }
 
-    if (try known_folders.getPath(allocator, .local_configuration)) |path| {
-        if (configuration.loadFromFolder(allocator, path)) |config| {
-            return ConfigWithPath{ .config = config, .config_path = path };
+    if (try known_folders.getPath(allocator, .local_configuration)) |folder_path| {
+        defer allocator.free(folder_path);
+        const file_path = try std.fs.path.resolve(allocator, &.{ folder_path, "zls.json" });
+        if (configuration.loadFromFile(allocator, file_path)) |config| {
+            return ConfigWithPath{ .config = config, .config_path = file_path };
         }
-        allocator.free(path);
+        allocator.free(file_path);
     }
 
-    if (try known_folders.getPath(allocator, .global_configuration)) |path| {
-        if (configuration.loadFromFolder(allocator, path)) |config| {
-            return ConfigWithPath{ .config = config, .config_path = path };
+    if (try known_folders.getPath(allocator, .global_configuration)) |folder_path| {
+        defer allocator.free(folder_path);
+        const file_path = try std.fs.path.resolve(allocator, &.{ folder_path, "zls.json" });
+        if (configuration.loadFromFile(allocator, file_path)) |config| {
+            return ConfigWithPath{ .config = config, .config_path = file_path };
         }
-        allocator.free(path);
+        allocator.free(file_path);
     }
 
     return ConfigWithPath{
@@ -337,9 +342,8 @@ fn parseArgs(allocator: std.mem.Allocator) !ParseArgsResult {
         defer if (new_config.config_path) |path| allocator.free(path);
         defer legacy_json.parseFree(Config, allocator, new_config.config);
 
-        const full_path = if (new_config.config_path) |path| blk: {
-            break :blk try std.fs.path.resolve(allocator, &.{ path, "zls.json" });
-        } else blk: {
+        const full_path = if (new_config.config_path) |path| try allocator.dupe(u8, path)
+        else blk: {
             const local_config_path = try known_folders.getPath(allocator, .local_configuration) orelse {
                 logger.err("failed to find local configuration folder", .{});
                 return result;

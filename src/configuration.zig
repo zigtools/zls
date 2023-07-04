@@ -55,15 +55,6 @@ pub fn loadFromFile(allocator: std.mem.Allocator, file_path: []const u8) ?Config
     return config;
 }
 
-pub fn loadFromFolder(allocator: std.mem.Allocator, folder_path: []const u8) ?Config {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    const full_path = std.fs.path.resolve(allocator, &.{ folder_path, "zls.json" }) catch return null;
-    defer allocator.free(full_path);
-    return loadFromFile(allocator, full_path);
-}
-
 /// Invoke this once all config values have been changed.
 pub fn configChanged(config: *Config, runtime_zig_version: *?ZigVersionWrapper, allocator: std.mem.Allocator, builtin_creation_dir: ?[]const u8) !void {
     if (!std.process.can_spawn) return;
