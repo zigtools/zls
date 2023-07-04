@@ -21,8 +21,8 @@ pub fn hoverSymbol(server: *Server, decl_handle: Analyser.DeclWithHandle, markup
     const handle = decl_handle.handle;
     const tree = handle.tree;
 
-    var type_str: ?[]const u8 = null;
-    var type_reference: ?Analyser.ReferencedType = null;
+    var type_references = Analyser.ReferencedType.Set.init(server.arena.allocator());
+    var reference_collector = Analyser.ReferencedType.Collector.init(&type_references);
     var doc_str: ?[]const u8 = null;
 
     const def_str = switch (decl_handle.decl.*) {
@@ -36,10 +36,9 @@ pub fn hoverSymbol(server: *Server, decl_handle: Analyser.DeclWithHandle, markup
 
             if (tree.fullVarDecl(node)) |var_decl| {
                 if (var_decl.ast.type_node != 0)
-                    try server.analyser.referencedVarDeclAlias(
+                    try server.analyser.referencedTypesFromNode(
                         .{ .node = var_decl.ast.type_node, .handle = handle },
-                        &type_str,
-                        &type_reference,
+                        &reference_collector,
                     );
 
                 break :def Analyser.getVariableSignature(tree, var_decl);
@@ -47,10 +46,9 @@ pub fn hoverSymbol(server: *Server, decl_handle: Analyser.DeclWithHandle, markup
                 break :def Analyser.getFunctionSignature(tree, fn_proto);
             } else if (tree.fullContainerField(node)) |field| {
                 std.debug.assert(field.ast.type_expr != 0);
-                try server.analyser.referencedVarDeclAlias(
+                try server.analyser.referencedTypesFromNode(
                     .{ .node = field.ast.type_expr, .handle = handle },
-                    &type_str,
-                    &type_reference,
+                    &reference_collector,
                 );
 
                 break :def Analyser.getContainerFieldSignature(tree, field);
@@ -62,10 +60,9 @@ pub fn hoverSymbol(server: *Server, decl_handle: Analyser.DeclWithHandle, markup
             const param = pay.param;
 
             if (param.type_expr != 0) // zero for `anytype` and extern C varargs `...`
-                try server.analyser.referencedVarDeclAlias(
+                try server.analyser.referencedTypesFromNode(
                     .{ .node = param.type_expr, .handle = handle },
-                    &type_str,
-                    &type_reference,
+                    &reference_collector,
                 );
 
             if (param.first_doc_comment) |doc_comments| {
@@ -84,20 +81,14 @@ pub fn hoverSymbol(server: *Server, decl_handle: Analyser.DeclWithHandle, markup
     };
 
     var resolved_type_str: []const u8 = "unknown";
-    var referenced_types: []const Analyser.ReferencedType = &.{};
     if (try decl_handle.resolveType(&server.analyser)) |resolved_type| {
         try server.analyser.referencedTypes(
-            server.arena.allocator(),
-            type_str,
-            type_reference,
             resolved_type,
             &resolved_type_str,
-            &referenced_types,
+            &reference_collector,
         );
-    } else if (type_reference) |ref| {
-        resolved_type_str = ref.str;
-        referenced_types = &.{ref};
     }
+    const referenced_types: []const Analyser.ReferencedType = type_references.keys();
 
     var hover_text = std.ArrayList(u8).init(server.arena.allocator());
     const writer = hover_text.writer();
