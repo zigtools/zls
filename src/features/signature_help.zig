@@ -14,7 +14,7 @@ const data = @import("../data/data.zig");
 fn fnProtoToSignatureInfo(analyser: *Analyser, alloc: std.mem.Allocator, commas: u32, skip_self_param: bool, handle: *const DocumentStore.Handle, fn_node: Ast.Node.Index, proto: Ast.full.FnProto) !types.SignatureInformation {
     const tree = handle.tree;
     const label = Analyser.getFunctionSignature(tree, proto);
-    const proto_comments = (try Analyser.getDocComments(alloc, tree, fn_node, .markdown)) orelse "";
+    const proto_comments = (try Analyser.getDocComments(alloc, tree, fn_node)) orelse "";
 
     const arg_idx = if (skip_self_param) blk: {
         const has_self_param = try analyser.hasSelfParam(handle, proto);
@@ -25,7 +25,7 @@ fn fnProtoToSignatureInfo(analyser: *Analyser, alloc: std.mem.Allocator, commas:
     var param_it = proto.iterate(&tree);
     while (ast.nextFnParam(&param_it)) |param| {
         const param_comments = if (param.first_doc_comment) |dc|
-            try Analyser.collectDocComments(alloc, tree, dc, .markdown, false)
+            try Analyser.collectDocComments(alloc, tree, dc, false)
         else
             "";
 

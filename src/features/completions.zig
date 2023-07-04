@@ -117,20 +117,16 @@ fn nodeToCompletion(
         allocator,
         handle.tree,
         node,
-        doc_kind,
     )) |doc_comments| .{ .MarkupContent = types.MarkupContent{
         .kind = doc_kind,
         .value = if (either_descriptor) |ed|
             try std.fmt.allocPrint(allocator, "`Conditionally available: {s}`\n\n{s}", .{ ed, doc_comments })
         else
             doc_comments,
-    } } else (if (either_descriptor) |ed|
-        .{ .MarkupContent = types.MarkupContent{
-            .kind = doc_kind,
-            .value = try std.fmt.allocPrint(allocator, "`Conditionally available: {s}`", .{ed}),
-        } }
-    else
-        null);
+    } } else (if (either_descriptor) |ed| .{ .MarkupContent = types.MarkupContent{
+        .kind = doc_kind,
+        .value = try std.fmt.allocPrint(allocator, "`Conditionally available: {s}`", .{ed}),
+    } } else null);
 
     if (ast.isContainer(handle.tree, node)) {
         const context = DeclToCompletionContext{
@@ -356,9 +352,9 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: Analyser.Decl
             const doc: Documentation = if (param.first_doc_comment) |doc_comments| .{ .MarkupContent = types.MarkupContent{
                 .kind = doc_kind,
                 .value = if (context.either_descriptor) |ed|
-                    try std.fmt.allocPrint(allocator, "`Conditionally available: {s}`\n\n{s}", .{ ed, try Analyser.collectDocComments(allocator, tree, doc_comments, doc_kind, false) })
+                    try std.fmt.allocPrint(allocator, "`Conditionally available: {s}`\n\n{s}", .{ ed, try Analyser.collectDocComments(allocator, tree, doc_comments, false) })
                 else
-                    try Analyser.collectDocComments(allocator, tree, doc_comments, doc_kind, false),
+                    try Analyser.collectDocComments(allocator, tree, doc_comments, false),
             } } else null;
 
             try context.completions.append(allocator, .{
