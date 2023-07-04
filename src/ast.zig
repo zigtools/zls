@@ -215,7 +215,7 @@ fn fullForComponents(tree: Ast, info: full.For.Components) full.For {
         result.label_token = tok_i -| 1;
     }
     const last_cond_token = lastToken(tree, info.inputs[info.inputs.len - 1]);
-    result.payload_token = last_cond_token + 3 + @boolToInt(token_tags[last_cond_token + 1] == .comma);
+    result.payload_token = last_cond_token + 3 + @intFromBool(token_tags[last_cond_token + 1] == .comma);
     if (info.else_expr != 0) {
         result.else_token = lastToken(tree, info.then_expr) + 1;
     }
@@ -270,7 +270,7 @@ pub fn forSimple(tree: Ast, node: Node.Index) full.For {
 
 pub fn forFull(tree: Ast, node: Node.Index) full.For {
     const data = tree.nodes.items(.data)[node];
-    const extra = @bitCast(Node.For, data.rhs);
+    const extra = @as(Node.For, @bitCast(data.rhs));
     const inputs = tree.extra_data[data.lhs..][0..extra.inputs];
     const then_expr = tree.extra_data[data.lhs + extra.inputs];
     const else_expr = if (extra.has_else) tree.extra_data[data.lhs + extra.inputs + 1] else 0;
@@ -327,7 +327,7 @@ pub fn lastToken(tree: Ast, node: Ast.Node.Index) Ast.TokenIndex {
     var n = node;
     var end_offset: TokenIndex = 0;
     while (true) switch (tags[n]) {
-        .root => return @intCast(TokenIndex, tree.tokens.len - 1),
+        .root => return @as(TokenIndex, @intCast(tree.tokens.len - 1)),
         .@"usingnamespace" => {
             // lhs is the expression
             if (datas[n].lhs == 0) {
@@ -963,8 +963,8 @@ pub fn lastToken(tree: Ast, node: Ast.Node.Index) Ast.TokenIndex {
             n = extra.else_expr;
         },
         .@"for" => {
-            const extra = @bitCast(Node.For, datas[n].rhs);
-            n = tree.extra_data[datas[n].lhs + extra.inputs + @boolToInt(extra.has_else)];
+            const extra = @as(Node.For, @bitCast(datas[n].rhs));
+            n = tree.extra_data[datas[n].lhs + extra.inputs + @intFromBool(extra.has_else)];
         },
         .@"suspend" => {
             if (datas[n].lhs != 0) {
@@ -978,6 +978,11 @@ pub fn lastToken(tree: Ast, node: Ast.Node.Index) Ast.TokenIndex {
             n = extra.elem_type;
         },
     };
+}
+
+pub fn hasInferredError(tree: Ast, fn_proto: Ast.full.FnProto) bool {
+    const token_tags = tree.tokens.items(.tag);
+    return token_tags[tree.firstToken(fn_proto.ast.return_type) - 1] == .bang;
 }
 
 pub fn paramFirstToken(tree: Ast, param: Ast.full.FnProto.Param) Ast.TokenIndex {

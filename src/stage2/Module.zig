@@ -23,7 +23,7 @@ pub const SrcLoc = struct {
     }
 
     pub fn declRelativeToNodeIndex(src_loc: SrcLoc, offset: i32) Ast.TokenIndex {
-        return @bitCast(Ast.Node.Index, offset + @bitCast(i32, src_loc.parent_decl_node));
+        return @as(Ast.Node.Index, @bitCast(offset + @as(i32, @bitCast(src_loc.parent_decl_node))));
     }
 
     pub const Span = struct {
@@ -42,7 +42,7 @@ pub const SrcLoc = struct {
             .token_abs => |tok_index| {
                 const tree = src_loc.handle.tree;
                 const start = tree.tokens.items(.start)[tok_index];
-                const end = start + @intCast(u32, tree.tokenSlice(tok_index).len);
+                const end = start + @as(u32, @intCast(tree.tokenSlice(tok_index).len));
                 return Span{ .start = start, .end = end, .main = start };
             },
             .node_abs => |node| {
@@ -53,14 +53,14 @@ pub const SrcLoc = struct {
                 const tree = src_loc.handle.tree;
                 const tok_index = src_loc.declSrcToken();
                 const start = tree.tokens.items(.start)[tok_index] + byte_off;
-                const end = start + @intCast(u32, tree.tokenSlice(tok_index).len);
+                const end = start + @as(u32, @intCast(tree.tokenSlice(tok_index).len));
                 return Span{ .start = start, .end = end, .main = start };
             },
             .token_offset => |tok_off| {
                 const tree = src_loc.handle.tree;
                 const tok_index = src_loc.declSrcToken() + tok_off;
                 const start = tree.tokens.items(.start)[tok_index];
-                const end = start + @intCast(u32, tree.tokenSlice(tok_index).len);
+                const end = start + @as(u32, @intCast(tree.tokenSlice(tok_index).len));
                 return Span{ .start = start, .end = end, .main = start };
             },
             .node_offset => |node_off| {
@@ -110,7 +110,7 @@ pub const SrcLoc = struct {
                 }
                 const tok_index = full.ast.mut_token + 1; // the name token
                 const start = tree.tokens.items(.start)[tok_index];
-                const end = start + @intCast(u32, tree.tokenSlice(tok_index).len);
+                const end = start + @as(u32, @intCast(tree.tokenSlice(tok_index).len));
                 return Span{ .start = start, .end = end, .main = start };
             },
             .node_offset_var_decl_align => |node_off| {
@@ -183,7 +183,7 @@ pub const SrcLoc = struct {
                     else => tree.firstToken(node) - 2,
                 };
                 const start = tree.tokens.items(.start)[tok_index];
-                const end = start + @intCast(u32, tree.tokenSlice(tok_index).len);
+                const end = start + @as(u32, @intCast(tree.tokenSlice(tok_index).len));
                 return Span{ .start = start, .end = end, .main = start };
             },
             .node_offset_deref_ptr => |node_off| {
@@ -243,7 +243,7 @@ pub const SrcLoc = struct {
                 // that contains this input.
                 const node_tags = tree.nodes.items(.tag);
                 for (node_tags, 0..) |node_tag, node_usize| {
-                    const node = @intCast(Ast.Node.Index, node_usize);
+                    const node = @as(Ast.Node.Index, @intCast(node_usize));
                     switch (node_tag) {
                         .for_simple, .@"for" => {
                             const for_full = tree.fullFor(node).?;
@@ -352,7 +352,7 @@ pub const SrcLoc = struct {
                 };
                 const start = tree.tokens.items(.start)[start_tok];
                 const end_start = tree.tokens.items(.start)[end_tok];
-                const end = end_start + @intCast(u32, tree.tokenSlice(end_tok).len);
+                const end = end_start + @as(u32, @intCast(tree.tokenSlice(end_tok).len));
                 return Span{ .start = start, .end = end, .main = start };
             },
             .node_offset_fn_type_align => |node_off| {
@@ -412,7 +412,7 @@ pub const SrcLoc = struct {
                 const tree = src_loc.handle.tree;
                 const token_tags = tree.tokens.items(.tag);
                 const main_token = tree.nodes.items(.main_token)[src_loc.parent_decl_node];
-                const tok_index = @bitCast(Ast.TokenIndex, token_off + @bitCast(i32, main_token));
+                const tok_index = @as(Ast.TokenIndex, @bitCast(token_off + @as(i32, @bitCast(main_token))));
 
                 var first_tok = tok_index;
                 while (true) switch (token_tags[first_tok - 1]) {
@@ -441,7 +441,7 @@ pub const SrcLoc = struct {
                 const full = tree.fullFnProto(&buf, parent_node).?;
                 const tok_index = full.lib_name.?;
                 const start = tree.tokens.items(.start)[tok_index];
-                const end = start + @intCast(u32, tree.tokenSlice(tok_index).len);
+                const end = start + @as(u32, @intCast(tree.tokenSlice(tok_index).len));
                 return Span{ .start = start, .end = end, .main = start };
             },
 
@@ -633,7 +633,7 @@ pub const SrcLoc = struct {
             end_tok = main;
         }
         const start_off = token_starts[start_tok];
-        const end_off = token_starts[end_tok] + @intCast(u32, tree.tokenSlice(end_tok).len);
+        const end_off = token_starts[end_tok] + @as(u32, @intCast(tree.tokenSlice(end_tok).len));
         return Span{ .start = start_off, .end = end_off, .main = token_starts[main] };
     }
 };

@@ -18,7 +18,7 @@ fn fnProtoToSignatureInfo(analyser: *Analyser, alloc: std.mem.Allocator, commas:
 
     const arg_idx = if (skip_self_param) blk: {
         const has_self_param = try analyser.hasSelfParam(handle, proto);
-        break :blk commas + @boolToInt(has_self_param);
+        break :blk commas + @intFromBool(has_self_param);
     } else commas;
 
     var params = std.ArrayListUnmanaged(types.ParameterInformation){};
@@ -68,7 +68,7 @@ pub fn getSignatureInfo(analyser: *Analyser, alloc: std.mem.Allocator, handle: *
                 break :blk i - 1;
             }
         }
-        break :blk @truncate(u32, token_tags.len - 1);
+        break :blk @as(u32, @truncate(token_tags.len - 1));
     };
 
     // We scan the tokens from last to first, adding and removing open and close

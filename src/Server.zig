@@ -306,7 +306,9 @@ pub fn getSymbolGlobal(
     const name = Server.identifierFromPosition(pos_index, handle.*);
     if (name.len == 0) return null;
 
-    return try server.analyser.lookupSymbolGlobal(handle, name, pos_index);
+    return try server.analyser.lookupSymbolGlobalAdvanced(handle, name, pos_index, .{
+        .skip_container_fields = false,
+    });
 }
 
 /// Multiple when using branched types
@@ -1092,7 +1094,7 @@ pub fn generalReferencesHandler(server: *Server, request: GeneralReferencesReque
 
             // TODO can we avoid having to move map from `changes` to `new_changes`?
             var new_changes: types.Map(types.DocumentUri, []const types.TextEdit) = .{};
-            try new_changes.ensureTotalCapacity(allocator, @intCast(u32, changes.count()));
+            try new_changes.ensureTotalCapacity(allocator, @intCast(changes.count()));
 
             var changes_it = changes.iterator();
             while (changes_it.next()) |entry| {
@@ -1286,12 +1288,12 @@ const Message = union(enum) {
         };
     }
 
-    pub fn fromJsonValueTree(tree: std.json.ValueTree) error{InvalidRequest}!Message {
+    pub fn fromJsonValueTree(root: std.json.Value) error{InvalidRequest}!Message {
         const tracy_zone = tracy.trace(@src());
         defer tracy_zone.end();
 
-        if (tree.root != .object) return error.InvalidRequest;
-        const object = tree.root.object;
+        if (root != .object) return error.InvalidRequest;
+        const object = root.object;
 
         if (object.get("id")) |id_obj| {
             comptime std.debug.assert(!tres.isAllocatorRequired(types.RequestId));
@@ -1348,23 +1350,20 @@ pub fn processJsonRpc(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    var parser = std.json.Parser.init(server.arena.allocator(), .alloc_always);
-    defer parser.deinit();
-
-    var tree = parser.parse(json) catch |err| {
+    var tree = std.json.parseFromSlice(std.json.Value, server.arena.allocator(), json, .{}) catch |err| {
         log.err("failed to parse message: {}", .{err});
         return; // maybe panic?
     };
     defer tree.deinit();
 
-    const message = Message.fromJsonValueTree(tree) catch |err| {
+    const message = Message.fromJsonValueTree(tree.value) catch |err| {
         log.err("failed to parse message: {}", .{err});
         return; // maybe panic?
     };
 
     server.processMessage(message) catch |err| switch (message) {
         .RequestMessage => |request| server.sendResponseError(request.id, .{
-            .code = @errorToInt(err),
+            .code = @intFromError(err),
             .message = @errorName(err),
         }),
         else => {},

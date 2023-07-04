@@ -32,32 +32,27 @@ pub fn receiveMessage(client: *Client) !InMessage.Header {
     const Header = InMessage.Header;
     const fifo = client.pooler.fifo(.in);
 
-    while (try client.pooler.poll()) {
-        const buf = fifo.readableSlice(0);
-        assert(fifo.readableLength() == buf.len);
-        if (buf.len >= @sizeOf(Header)) {
-            // workaround for https://github.com/ziglang/zig/issues/14904
+    var first_run = true;
+    var header: ?Header = null;
+    while (first_run or try client.pooler.poll()) {
+        first_run = false;
+
+        if (header == null) {
+            if (fifo.readableLength() < @sizeOf(Header)) continue;
+            const buf = fifo.readableSlice(0);
             const bytes_len = bswap_and_workaround_u32(buf[4..][0..4]);
             const tag = bswap_and_workaround_tag(buf[0..][0..4]);
-
-            if (buf.len - @sizeOf(Header) >= bytes_len) {
-                fifo.discard(@sizeOf(Header));
-                return .{
-                    .tag = tag,
-                    .bytes_len = bytes_len,
-                };
-            } else {
-                const needed = bytes_len - (buf.len - @sizeOf(Header));
-                const write_buffer = try fifo.writableWithSize(needed);
-                const amt = try client.in.readAll(write_buffer);
-                fifo.update(amt);
-                continue;
-            }
+            header = Header{
+                .tag = tag,
+                .bytes_len = bytes_len,
+            };
+            fifo.discard(@sizeOf(Header));
         }
 
-        const write_buffer = try fifo.writableWithSize(256);
-        const amt = try client.in.read(write_buffer);
-        fifo.update(amt);
+        if (header) |h| {
+            if (fifo.readableLength() < h.bytes_len) continue;
+            return h;
+        }
     }
     return error.Timeout;
 }
@@ -103,7 +98,7 @@ pub fn serveMessage(
     var iovecs: [10]std.os.iovec_const = undefined;
     const header_le = bswap(header);
     iovecs[0] = .{
-        .iov_base = @ptrCast([*]const u8, &header_le),
+        .iov_base = @as([*]const u8, @ptrCast(&header_le)),
         .iov_len = @sizeOf(OutMessage.Header),
     };
     for (bufs, iovecs[1 .. bufs.len + 1]) |buf, *iovec| {
@@ -120,7 +115,7 @@ fn bswap(x: anytype) @TypeOf(x) {
 
     const T = @TypeOf(x);
     switch (@typeInfo(T)) {
-        .Enum => return @intToEnum(T, @byteSwap(@enumToInt(x))),
+        .Enum => return @as(T, @enumFromInt(@byteSwap(@intFromEnum(x)))),
         .Int => return @byteSwap(x),
         .Struct => |info| switch (info.layout) {
             .Extern => {
@@ -132,7 +127,7 @@ fn bswap(x: anytype) @TypeOf(x) {
             },
             .Packed => {
                 const I = info.backing_integer.?;
-                return @bitCast(T, @byteSwap(@bitCast(I, x)));
+                return @as(T, @bitCast(@byteSwap(@as(I, @bitCast(x)))));
             },
             .Auto => @compileError("auto layout struct"),
         },
@@ -153,7 +148,7 @@ fn bswap_and_workaround_u32(bytes_ptr: *const [4]u8) u32 {
 /// workaround for https://github.com/ziglang/zig/issues/14904
 fn bswap_and_workaround_tag(bytes_ptr: *const [4]u8) InMessage.Tag {
     const int = std.mem.readIntLittle(u32, bytes_ptr);
-    return @intToEnum(InMessage.Tag, int);
+    return @as(InMessage.Tag, @enumFromInt(int));
 }
 
 const OutMessage = std.zig.Client.Message;

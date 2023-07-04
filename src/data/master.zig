@@ -14,13 +14,12 @@ const Builtin = struct {
 pub const builtins = [_]Builtin{
     .{
         .name = "@addrSpaceCast",
-        .signature = "@addrSpaceCast(comptime addrspace: std.builtin.AddressSpace, ptr: anytype) anytype",
-        .snippet = "@addrSpaceCast(${1:comptime addrspace: std.builtin.AddressSpace}, ${2:ptr: anytype})",
+        .signature = "@addrSpaceCast(ptr: anytype) anytype",
+        .snippet = "@addrSpaceCast(${1:ptr: anytype})",
         .documentation =
-        \\Converts a pointer from one address space to another. Depending on the current target and address spaces, this cast may be a no-op, a complex operation, or illegal. If the cast is legal, then the resulting pointer points to the same memory location as the pointer operand. It is always valid to cast a pointer between the same address spaces.
+        \\Converts a pointer from one address space to another. The new address space is inferred based on the result type. Depending on the current target and address spaces, this cast may be a no-op, a complex operation, or illegal. If the cast is legal, then the resulting pointer points to the same memory location as the pointer operand. It is always valid to cast a pointer between the same address spaces.
         ,
         .arguments = &.{
-            "comptime addrspace: std.builtin.AddressSpace",
             "ptr: anytype",
         },
     },
@@ -38,15 +37,14 @@ pub const builtins = [_]Builtin{
     },
     .{
         .name = "@alignCast",
-        .signature = "@alignCast(comptime alignment: u29, ptr: anytype) anytype",
-        .snippet = "@alignCast(${1:comptime alignment: u29}, ${2:ptr: anytype})",
+        .signature = "@alignCast(ptr: anytype) anytype",
+        .snippet = "@alignCast(${1:ptr: anytype})",
         .documentation =
-        \\`ptr` can be `*T`, `?*T`, or `[]T`. It returns the same type as `ptr` except with the alignment adjusted to the new value.
+        \\`ptr` can be `*T`, `?*T`, or `[]T`. Changes the alignment of a pointer. The alignment to use is inferred based on the result type.
         \\
         \\A [pointer alignment safety check](https://ziglang.org/documentation/master/#Incorrect-Pointer-Alignment) is added to the generated code to make sure the pointer is aligned as promised.
         ,
         .arguments = &.{
-            "comptime alignment: u29",
             "ptr: anytype",
         },
     },
@@ -143,14 +141,14 @@ pub const builtins = [_]Builtin{
     },
     .{
         .name = "@bitCast",
-        .signature = "@bitCast(comptime DestType: type, value: anytype) DestType",
-        .snippet = "@bitCast(${1:comptime DestType: type}, ${2:value: anytype})",
+        .signature = "@bitCast(value: anytype) anytype",
+        .snippet = "@bitCast(${1:value: anytype})",
         .documentation =
-        \\Converts a value of one type to another type.
+        \\Converts a value of one type to another type. The return type is the inferred result type.
         \\
         \\Asserts that `@sizeOf(@TypeOf(value)) == @sizeOf(DestType)`.
         \\
-        \\Asserts that `@typeInfo(DestType) != .Pointer`. Use `@ptrCast` or `@intToPtr` if you need this.
+        \\Asserts that `@typeInfo(DestType) != .Pointer`. Use `@ptrCast` or `@ptrFromInt` if you need this.
         \\
         \\Can be used for these things for example:
         \\
@@ -159,7 +157,6 @@ pub const builtins = [_]Builtin{
         \\Works at compile-time if `value` is known at compile time. It's a compile error to bitcast a value of undefined layout; this means that, besides the restriction from types which possess dedicated casting builtins (enums, pointers, error sets), bare structs, error unions, slices, optionals, and any other type without a well-defined memory layout, also cannot be used in this operation.
         ,
         .arguments = &.{
-            "comptime DestType: type",
             "value: anytype",
         },
     },
@@ -178,9 +175,9 @@ pub const builtins = [_]Builtin{
         },
     },
     .{
-        .name = "@boolToInt",
-        .signature = "@boolToInt(value: bool) u1",
-        .snippet = "@boolToInt(${1:value: bool})",
+        .name = "@intFromBool",
+        .signature = "@intFromBool(value: bool) u1",
+        .snippet = "@intFromBool(${1:value: bool})",
         .documentation =
         \\Converts `true` to `@as(u1, 1)` and `false` to `@as(u1, 0)`.
         ,
@@ -669,9 +666,9 @@ pub const builtins = [_]Builtin{
         },
     },
     .{
-        .name = "@enumToInt",
-        .signature = "@enumToInt(enum_or_tagged_union: anytype) anytype",
-        .snippet = "@enumToInt(${1:enum_or_tagged_union: anytype})",
+        .name = "@intFromEnum",
+        .signature = "@intFromEnum(enum_or_tagged_union: anytype) anytype",
+        .snippet = "@intFromEnum(${1:enum_or_tagged_union: anytype})",
         .documentation =
         \\Converts an enumeration value into its integer tag type. When a tagged union is passed, the tag value is used as the enumeration value.
         \\
@@ -704,9 +701,9 @@ pub const builtins = [_]Builtin{
         .arguments = &.{},
     },
     .{
-        .name = "@errorToInt",
-        .signature = "@errorToInt(err: anytype) std.meta.Int(.unsigned, @sizeOf(anyerror) * 8)",
-        .snippet = "@errorToInt(${1:err: anytype})",
+        .name = "@intFromError",
+        .signature = "@intFromError(err: anytype) std.meta.Int(.unsigned, @sizeOf(anyerror) * 8)",
+        .snippet = "@intFromError(${1:err: anytype})",
         .documentation =
         \\Supports the following types:
         \\
@@ -723,13 +720,12 @@ pub const builtins = [_]Builtin{
     },
     .{
         .name = "@errSetCast",
-        .signature = "@errSetCast(comptime T: DestType, value: anytype) DestType",
-        .snippet = "@errSetCast(${1:comptime T: DestType}, ${2:value: anytype})",
+        .signature = "@errSetCast(value: anytype) anytype",
+        .snippet = "@errSetCast(${1:value: anytype})",
         .documentation =
-        \\Converts an error value from one error set to another error set. Attempting to convert an error which is not in the destination error set results in safety-protected [Undefined Behavior](https://ziglang.org/documentation/master/#Undefined-Behavior).
+        \\Converts an error value from one error set to another error set. The return type is the inferred result type. Attempting to convert an error which is not in the destination error set results in safety-protected [Undefined Behavior](https://ziglang.org/documentation/master/#Undefined-Behavior).
         ,
         .arguments = &.{
-            "comptime T: DestType",
             "value: anytype",
         },
     },
@@ -843,27 +839,25 @@ pub const builtins = [_]Builtin{
     },
     .{
         .name = "@floatCast",
-        .signature = "@floatCast(comptime DestType: type, value: anytype) DestType",
-        .snippet = "@floatCast(${1:comptime DestType: type}, ${2:value: anytype})",
+        .signature = "@floatCast(value: anytype) anytype",
+        .snippet = "@floatCast(${1:value: anytype})",
         .documentation =
-        \\Convert from one float type to another. This cast is safe, but may cause the numeric value to lose precision.
+        \\Convert from one float type to another. This cast is safe, but may cause the numeric value to lose precision. The return type is the inferred result type.
         ,
         .arguments = &.{
-            "comptime DestType: type",
             "value: anytype",
         },
     },
     .{
-        .name = "@floatToInt",
-        .signature = "@floatToInt(comptime DestType: type, float: anytype) DestType",
-        .snippet = "@floatToInt(${1:comptime DestType: type}, ${2:float: anytype})",
+        .name = "@intFromFloat",
+        .signature = "@intFromFloat(float: anytype) anytype",
+        .snippet = "@intFromFloat(${1:float: anytype})",
         .documentation =
-        \\Converts the integer part of a floating point number to the destination type.
+        \\Converts the integer part of a floating point number to the inferred result type.
         \\
         \\If the integer part of the floating point number cannot fit in the destination type, it invokes safety-checked [Undefined Behavior](https://ziglang.org/documentation/master/#Undefined-Behavior).
         ,
         .arguments = &.{
-            "comptime DestType: type",
             "float: anytype",
         },
     },
@@ -966,15 +960,15 @@ pub const builtins = [_]Builtin{
     },
     .{
         .name = "@intCast",
-        .signature = "@intCast(comptime DestType: type, int: anytype) DestType",
-        .snippet = "@intCast(${1:comptime DestType: type}, ${2:int: anytype})",
+        .signature = "@intCast(int: anytype) anytype",
+        .snippet = "@intCast(${1:int: anytype})",
         .documentation =
-        \\Converts an integer to another integer while keeping the same numerical value. Attempting to convert a number which is out of range of the destination type results in safety-protected [Undefined Behavior](https://ziglang.org/documentation/master/#Undefined-Behavior).
+        \\Converts an integer to another integer while keeping the same numerical value. The return type is the inferred result type. Attempting to convert a number which is out of range of the destination type results in safety-protected [Undefined Behavior](https://ziglang.org/documentation/master/#Undefined-Behavior).
         \\
         \\```zig
         \\test "integer cast panic" {
         \\    var a: u16 = 0xabcd;
-        \\    var b: u8 = @intCast(u8, a);
+        \\    var b: u8 = @intCast(a);
         \\    _ = b;
         \\}
         \\```
@@ -983,28 +977,26 @@ pub const builtins = [_]Builtin{
         \\If `T` is `comptime_int`, then this is semantically equivalent to [Type Coercion](https://ziglang.org/documentation/master/#Type-Coercion).
         ,
         .arguments = &.{
-            "comptime DestType: type",
             "int: anytype",
         },
     },
     .{
-        .name = "@intToEnum",
-        .signature = "@intToEnum(comptime DestType: type, integer: anytype) DestType",
-        .snippet = "@intToEnum(${1:comptime DestType: type}, ${2:integer: anytype})",
+        .name = "@enumFromInt",
+        .signature = "@enumFromInt(integer: anytype) anytype",
+        .snippet = "@enumFromInt(${1:integer: anytype})",
         .documentation =
-        \\Converts an integer into an [enum](https://ziglang.org/documentation/master/#enum) value.
+        \\Converts an integer into an [enum](https://ziglang.org/documentation/master/#enum) value. The return type is the inferred result type.
         \\
         \\Attempting to convert an integer which represents no value in the chosen enum type invokes safety-checked [Undefined Behavior](https://ziglang.org/documentation/master/#Undefined-Behavior).
         ,
         .arguments = &.{
-            "comptime DestType: type",
             "integer: anytype",
         },
     },
     .{
-        .name = "@intToError",
-        .signature = "@intToError(value: std.meta.Int(.unsigned, @sizeOf(anyerror) * 8)) anyerror",
-        .snippet = "@intToError(${1:value: std.meta.Int(.unsigned, @sizeOf(anyerror) * 8})",
+        .name = "@errorFromInt",
+        .signature = "@errorFromInt(value: std.meta.Int(.unsigned, @sizeOf(anyerror) * 8)) anyerror",
+        .snippet = "@errorFromInt(${1:value: std.meta.Int(.unsigned, @sizeOf(anyerror) * 8})",
         .documentation =
         \\Converts from the integer representation of an error into [The Global Error Set](https://ziglang.org/documentation/master/#The-Global-Error-Set) type.
         \\
@@ -1017,28 +1009,26 @@ pub const builtins = [_]Builtin{
         },
     },
     .{
-        .name = "@intToFloat",
-        .signature = "@intToFloat(comptime DestType: type, int: anytype) DestType",
-        .snippet = "@intToFloat(${1:comptime DestType: type}, ${2:int: anytype})",
+        .name = "@floatFromInt",
+        .signature = "@floatFromInt(int: anytype) anytype",
+        .snippet = "@floatFromInt(${1:int: anytype})",
         .documentation =
-        \\Converts an integer to the closest floating point representation. To convert the other way, use [@floatToInt](https://ziglang.org/documentation/master/#floatToInt). This cast is always safe.
+        \\Converts an integer to the closest floating point representation. The return type is the inferred result type. To convert the other way, use [@intFromFloat](https://ziglang.org/documentation/master/#intFromFloat). This cast is always safe.
         ,
         .arguments = &.{
-            "comptime DestType: type",
             "int: anytype",
         },
     },
     .{
-        .name = "@intToPtr",
-        .signature = "@intToPtr(comptime DestType: type, address: usize) DestType",
-        .snippet = "@intToPtr(${1:comptime DestType: type}, ${2:address: usize})",
+        .name = "@ptrFromInt",
+        .signature = "@ptrFromInt(address: usize) anytype",
+        .snippet = "@ptrFromInt(${1:address: usize})",
         .documentation =
-        \\Converts an integer to a [pointer](https://ziglang.org/documentation/master/#Pointers). To convert the other way, use [@ptrToInt](https://ziglang.org/documentation/master/#ptrToInt). Casting an address of 0 to a destination type which in not [optional](https://ziglang.org/documentation/master/#Optional-Pointers) and does not have the `allowzero` attribute will result in a [Pointer Cast Invalid Null](https://ziglang.org/documentation/master/#Pointer-Cast-Invalid-Null) panic when runtime safety checks are enabled.
+        \\Converts an integer to a [pointer](https://ziglang.org/documentation/master/#Pointers). The return type is the inferred result type. To convert the other way, use [@intFromPtr](https://ziglang.org/documentation/master/#intFromPtr). Casting an address of 0 to a destination type which in not [optional](https://ziglang.org/documentation/master/#Optional-Pointers) and does not have the `allowzero` attribute will result in a [Pointer Cast Invalid Null](https://ziglang.org/documentation/master/#Pointer-Cast-Invalid-Null) panic when runtime safety checks are enabled.
         \\
         \\If the destination pointer type does not allow address zero and `address` is zero, this invokes safety-checked [Undefined Behavior](https://ziglang.org/documentation/master/#Undefined-Behavior).
         ,
         .arguments = &.{
-            "comptime DestType: type",
             "address: usize",
         },
     },
@@ -1253,10 +1243,10 @@ pub const builtins = [_]Builtin{
     },
     .{
         .name = "@ptrCast",
-        .signature = "@ptrCast(comptime DestType: type, value: anytype) DestType",
-        .snippet = "@ptrCast(${1:comptime DestType: type}, ${2:value: anytype})",
+        .signature = "@ptrCast(value: anytype) anytype",
+        .snippet = "@ptrCast(${1:value: anytype})",
         .documentation =
-        \\Converts a pointer of one type to a pointer of another type.
+        \\Converts a pointer of one type to a pointer of another type. The return type is the inferred result type.
         \\
         \\[Optional Pointers](https://ziglang.org/documentation/master/#Optional-Pointers) are allowed. Casting an optional pointer which is [null](https://ziglang.org/documentation/master/#null) to a non-optional pointer invokes safety-checked [Undefined Behavior](https://ziglang.org/documentation/master/#Undefined-Behavior).
         \\
@@ -1269,18 +1259,17 @@ pub const builtins = [_]Builtin{
         \\ - Casting a non-slice pointer to a slice, use slicing syntax `ptr[start..end]`.
         ,
         .arguments = &.{
-            "comptime DestType: type",
             "value: anytype",
         },
     },
     .{
-        .name = "@ptrToInt",
-        .signature = "@ptrToInt(value: anytype) usize",
-        .snippet = "@ptrToInt(${1:value: anytype})",
+        .name = "@intFromPtr",
+        .signature = "@intFromPtr(value: anytype) usize",
+        .snippet = "@intFromPtr(${1:value: anytype})",
         .documentation =
         \\Converts `value` to a `usize` which is the address of the pointer. `value` can be `*T` or `?*T`.
         \\
-        \\To convert the other way, use [@intToPtr](https://ziglang.org/documentation/master/#intToPtr)
+        \\To convert the other way, use [@ptrFromInt](https://ziglang.org/documentation/master/#ptrFromInt)
         ,
         .arguments = &.{
             "value: anytype",
@@ -1555,7 +1544,7 @@ pub const builtins = [_]Builtin{
         \\test "vector @splat" {
         \\    const scalar: u32 = 5;
         \\    const result = @splat(4, scalar);
-        \\    comptime try expect(@TypeOf(result) == @Vector(4, u32));
+        \\    try comptime expect(@TypeOf(result) == @Vector(4, u32));
         \\    try expect(std.mem.eql(u32, &@as([4]u32, result), &[_]u32{ 5, 5, 5, 5 }));
         \\}
         \\```
@@ -1588,9 +1577,9 @@ pub const builtins = [_]Builtin{
         \\    const value = @Vector(4, i32){ 1, -1, 1, -1 };
         \\    const result = value > @splat(4, @as(i32, 0));
         \\    // result is { true, false, true, false };
-        \\    comptime try expect(@TypeOf(result) == @Vector(4, bool));
+        \\    try comptime expect(@TypeOf(result) == @Vector(4, bool));
         \\    const is_all_true = @reduce(.And, result);
-        \\    comptime try expect(@TypeOf(is_all_true) == bool);
+        \\    try comptime expect(@TypeOf(is_all_true) == bool);
         \\    try expect(is_all_true == false);
         \\}
         \\```
@@ -1642,7 +1631,7 @@ pub const builtins = [_]Builtin{
         .signature = "@sin(value: anytype) @TypeOf(value)",
         .snippet = "@sin(${1:value: anytype})",
         .documentation =
-        \\Sine trigonometric function on a floating point number. Uses a dedicated hardware instruction when available.
+        \\Sine trigonometric function on a floating point number in radians. Uses a dedicated hardware instruction when available.
         \\
         \\Supports [Floats](https://ziglang.org/documentation/master/#Floats) and [Vectors](https://ziglang.org/documentation/master/#Vectors) of floats.
         ,
@@ -1655,7 +1644,7 @@ pub const builtins = [_]Builtin{
         .signature = "@cos(value: anytype) @TypeOf(value)",
         .snippet = "@cos(${1:value: anytype})",
         .documentation =
-        \\Cosine trigonometric function on a floating point number. Uses a dedicated hardware instruction when available.
+        \\Cosine trigonometric function on a floating point number in radians. Uses a dedicated hardware instruction when available.
         \\
         \\Supports [Floats](https://ziglang.org/documentation/master/#Floats) and [Vectors](https://ziglang.org/documentation/master/#Vectors) of floats.
         ,
@@ -1668,7 +1657,7 @@ pub const builtins = [_]Builtin{
         .signature = "@tan(value: anytype) @TypeOf(value)",
         .snippet = "@tan(${1:value: anytype})",
         .documentation =
-        \\Tangent trigonometric function on a floating point number. Uses a dedicated hardware instruction when available.
+        \\Tangent trigonometric function on a floating point number in radians. Uses a dedicated hardware instruction when available.
         \\
         \\Supports [Floats](https://ziglang.org/documentation/master/#Floats) and [Vectors](https://ziglang.org/documentation/master/#Vectors) of floats.
         ,
@@ -1873,10 +1862,10 @@ pub const builtins = [_]Builtin{
     },
     .{
         .name = "@truncate",
-        .signature = "@truncate(comptime T: type, integer: anytype) T",
-        .snippet = "@truncate(${1:comptime T: type}, ${2:integer: anytype})",
+        .signature = "@truncate(integer: anytype) anytype",
+        .snippet = "@truncate(${1:integer: anytype})",
         .documentation =
-        \\This function truncates bits from an integer type, resulting in a smaller or same-sized integer type.
+        \\This function truncates bits from an integer type, resulting in a smaller or same-sized integer type. The return type is the inferred result type.
         \\
         \\This function always truncates the significant bits of the integer, regardless of endianness on the target platform.
         \\
@@ -1887,14 +1876,13 @@ pub const builtins = [_]Builtin{
         \\const expect = std.testing.expect;
         \\test "integer truncation" {
         \\    var a: u16 = 0xabcd;
-        \\    var b: u8 = @truncate(u8, a);
+        \\    var b: u8 = @truncate(a);
         \\    try expect(b == 0xcd);
         \\}
         \\```
         \\Use [@intCast](https://ziglang.org/documentation/master/#intCast) to convert numbers guaranteed to fit the destination type.
         ,
         .arguments = &.{
-            "comptime T: type",
             "integer: anytype",
         },
     },
@@ -1977,7 +1965,7 @@ pub const builtins = [_]Builtin{
         \\test "no runtime side effects" {
         \\    var data: i32 = 0;
         \\    const T = @TypeOf(foo(i32, &data));
-        \\    comptime try expect(T == i32);
+        \\    try comptime expect(T == i32);
         \\    try expect(data == 0);
         \\}
         \\fn foo(comptime T: type, ptr: *T) T {

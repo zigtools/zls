@@ -12,8 +12,8 @@ pub fn indexToPosition(text: []const u8, index: usize, encoding: Encoding) types
     const line_count = std.mem.count(u8, text[0..last_line_start], "\n");
 
     return .{
-        .line = @intCast(u32, line_count),
-        .character = @intCast(u32, countCodeUnits(text[last_line_start..index], encoding)),
+        .line = @intCast(line_count),
+        .character = @intCast(countCodeUnits(text[last_line_start..index], encoding)),
     };
 }
 
@@ -56,6 +56,10 @@ pub fn positionToIndex(text: []const u8, position: types.Position, encoding: Enc
 
 pub fn tokenToIndex(tree: Ast, token_index: Ast.TokenIndex) usize {
     return tree.tokens.items(.start)[token_index];
+}
+
+pub fn tokensToLoc(tree: Ast, first_token: Ast.TokenIndex, last_token: Ast.TokenIndex) Loc {
+    return .{ .start = tokenToIndex(tree, first_token), .end = tokenToLoc(tree, last_token).end };
 }
 
 pub fn tokenToLoc(tree: Ast, token_index: Ast.TokenIndex) Loc {
@@ -191,7 +195,7 @@ pub fn rangeToLoc(text: []const u8, range: types.Range, encoding: Encoding) Loc 
 }
 
 pub fn nodeToLoc(tree: Ast, node: Ast.Node.Index) Loc {
-    return .{ .start = tokenToIndex(tree, tree.firstToken(node)), .end = tokenToLoc(tree, ast.lastToken(tree, node)).end };
+    return tokensToLoc(tree, tree.firstToken(node), ast.lastToken(tree, node));
 }
 
 pub fn nodeToSlice(tree: Ast, node: Ast.Node.Index) []const u8 {
@@ -247,7 +251,7 @@ pub fn convertPositionEncoding(text: []const u8, position: types.Position, from_
 
     return .{
         .line = position.line,
-        .character = @intCast(u32, locLength(text, line_loc, to_encoding)),
+        .character = @intCast(locLength(text, line_loc, to_encoding)),
     };
 }
 
@@ -296,7 +300,7 @@ pub fn advancePosition(text: []const u8, position: types.Position, from_index: u
 
     return .{
         .line = line,
-        .character = @intCast(u32, locLength(text, line_loc, encoding)),
+        .character = @intCast(locLength(text, line_loc, encoding)),
     };
 }
 

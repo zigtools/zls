@@ -310,6 +310,25 @@ test "completion - enum" {
         .{ .label = "alpha", .kind = .EnumMember },
         .{ .label = "beta", .kind = .EnumMember },
     });
+    try testCompletion(
+        \\const E = enum {
+        \\    _,
+        \\    fn inner(_: E) void {} 
+        \\};
+        \\const foo = E.<cursor>
+    , &.{
+        .{ .label = "inner", .kind = .Function, .detail = "fn inner(_: E) void" },
+    });
+    try testCompletion(
+        \\const E = enum {
+        \\    _,
+        \\    fn inner(_: E) void {} 
+        \\};
+        \\const e: E = undefined;
+        \\const foo = e.<cursor>
+    , &.{
+        .{ .label = "inner", .kind = .Function, .detail = "fn inner(_: E) void" },
+    });
 }
 
 test "completion - error union" {
@@ -508,6 +527,17 @@ test "completion - block" {
         \\};
     , &.{
         .{ .label = "blk", .kind = .Text }, // idk what kind this should be
+    });
+
+    try testCompletion(
+        \\const S = struct { alpha: u32 };
+        \\const foo: S = undefined;
+        \\const bar = blk: {
+        \\    break :blk foo;
+        \\};
+        \\const baz = bar.<cursor>
+    , &.{
+        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
     });
 }
 

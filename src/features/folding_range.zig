@@ -135,7 +135,7 @@ pub fn generateFoldingRanges(allocator: std.mem.Allocator, tree: Ast, encoding: 
     var start_doc_comment: ?Ast.TokenIndex = null;
     var end_doc_comment: ?Ast.TokenIndex = null;
     for (token_tags, 0..) |tag, i| {
-        const token = @intCast(Ast.TokenIndex, i);
+        const token: Ast.TokenIndex = @intCast(i);
         switch (tag) {
             .doc_comment,
             .container_doc_comment,
@@ -162,7 +162,7 @@ pub fn generateFoldingRanges(allocator: std.mem.Allocator, tree: Ast, encoding: 
     // TODO add folding range for top level `@Import()`
 
     for (node_tags, 0..) |node_tag, i| {
-        const node = @intCast(Ast.Node.Index, i);
+        const node: Ast.Node.Index = @intCast(i);
 
         switch (node_tag) {
             .root => continue,
@@ -182,7 +182,7 @@ pub fn generateFoldingRanges(allocator: std.mem.Allocator, tree: Ast, encoding: 
                     const last_param = fn_proto.ast.params[fn_proto.ast.params.len - 1];
                     const last_param_tok = ast.lastToken(tree, last_param);
                     const param_has_comma = last_param_tok + 1 < tree.tokens.len and token_tags[last_param_tok + 1] == .comma;
-                    const list_end_tok = last_param_tok + @boolToInt(param_has_comma);
+                    const list_end_tok = last_param_tok + @intFromBool(param_has_comma);
 
                     if (list_start_tok > list_end_tok) continue; // Incomplete, ie `fn a()`
                     try builder.add(null, list_start_tok, list_end_tok, .exclusive, .inclusive);

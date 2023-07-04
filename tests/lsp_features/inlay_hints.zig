@@ -48,12 +48,34 @@ test "inlayhints - function self parameter" {
         \\const foo: Foo = .{};
         \\const _ = foo.bar(<alpha>5,<beta>"");
     );
+    try testInlayHints(
+        \\const Foo = struct { pub fn bar(self: Foo, alpha: u32, beta: anytype) void {} };
+        \\const foo: Foo = .{};
+        \\const _ = foo.bar(<alpha>5,<beta>4);
+    );
+    try testInlayHints(
+        \\const Foo = struct { pub fn bar(self: Foo, alpha: u32, beta: []const u8) void {} };
+        \\const _ = Foo.bar(<self>undefined,<alpha>5,<beta>"");
+    );
+    try testInlayHints(
+        \\const Foo = struct {
+        \\  pub fn bar(self: Foo, alpha: u32, beta: []const u8) void {}
+        \\  pub fn foo() void {
+        \\      bar(<self>undefined,<alpha>5,<beta>"");
+        \\  }
+        \\};
+    );
+}
+
+test "inlayhints - resolve alias" {
+    try testInlayHints(
+        \\fn foo(alpha: u32) void {}
+        \\const bar = foo;
+        \\const _ = bar(<alpha>5);
+    );
 }
 
 test "inlayhints - builtin call" {
-    try testInlayHints(
-        \\const _ = @intCast(<DestType>u32,<int>5);
-    );
     try testInlayHints(
         \\const _ = @memcpy(<dest>"",<source>"");
     );

@@ -84,7 +84,7 @@ pub const FailingAllocator = struct {
 
         return FailingAllocator{
             .internal_allocator = internal_allocator,
-            .random = std.rand.DefaultPrng.init(@bitCast(u64, seed)),
+            .random = std.rand.DefaultPrng.init(@bitCast(seed)),
             .likelihood = likelihood,
         };
     }
@@ -106,7 +106,7 @@ pub const FailingAllocator = struct {
         log2_ptr_align: u8,
         return_address: usize,
     ) ?[*]u8 {
-        const self = @ptrCast(*FailingAllocator, @alignCast(@alignOf(FailingAllocator), ctx));
+        const self: *FailingAllocator = @ptrCast(@alignCast(ctx));
         if (shouldFail(self)) return null;
         return self.internal_allocator.rawAlloc(len, log2_ptr_align, return_address);
     }
@@ -118,7 +118,7 @@ pub const FailingAllocator = struct {
         new_len: usize,
         ra: usize,
     ) bool {
-        const self = @ptrCast(*FailingAllocator, @alignCast(@alignOf(FailingAllocator), ctx));
+        const self: *FailingAllocator = @ptrCast(@alignCast(ctx));
         if (!self.internal_allocator.rawResize(old_mem, log2_old_align, new_len, ra))
             return false;
         return true;
@@ -130,7 +130,7 @@ pub const FailingAllocator = struct {
         log2_old_align: u8,
         ra: usize,
     ) void {
-        const self = @ptrCast(*FailingAllocator, @alignCast(@alignOf(FailingAllocator), ctx));
+        const self: *FailingAllocator = @ptrCast(@alignCast(ctx));
         self.internal_allocator.rawFree(old_mem, log2_old_align, ra);
     }
 

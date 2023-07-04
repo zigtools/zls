@@ -91,7 +91,7 @@ fn testConvertCInclude(cimport_source: []const u8, expected: []const u8) !void {
 
             if (!std.mem.eql(u8, offsets.tokenToSlice(tree, token), "@cImport")) continue;
 
-            break :blk @intCast(Ast.Node.Index, i);
+            break :blk @intCast(i);
         }
         return error.TestUnexpectedResult; // source doesn't contain a cImport
     };
@@ -108,7 +108,7 @@ fn testTranslate(c_source: []const u8) !translate_c.Result {
     if (!std.process.can_spawn) return error.SkipZigTest;
 
     var config: zls.Config = .{};
-    defer std.json.parseFree(zls.Config, allocator, config);
+    defer zls.legacy_json.parseFree(zls.Config, allocator, config);
 
     var runtime_zig_version: ?zls.ZigVersionWrapper = null;
     defer if (runtime_zig_version) |*v| v.free();

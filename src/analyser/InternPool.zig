@@ -258,7 +258,7 @@ pub const Key = union(enum) {
     pub fn hash(a: Key) u32 {
         var hasher = std.hash.Wyhash.init(0);
         deepHash(&hasher, a);
-        return @truncate(u32, hasher.final());
+        return @truncate(hasher.final());
     }
 
     pub fn tag(key: Key) Tag {
@@ -338,7 +338,7 @@ pub const Key = union(enum) {
                 .anyerror => .ErrorSet,
                 .noreturn => .NoReturn,
                 .anyframe_type => .AnyFrame,
-                .empty_struct_literal => .Struct,
+                .empty_struct_type => .Struct,
                 .null_type => .Null,
                 .undefined_type => .Undefined,
                 .enum_literal_type => .EnumLiteral,
@@ -634,7 +634,7 @@ pub const Key = union(enum) {
                 .enum_literal_type,
                 => Index.none,
 
-                .empty_struct_literal => Index.empty_aggregate,
+                .empty_struct_type => Index.empty_aggregate,
                 .void => Index.void_value,
                 .noreturn => Index.unreachable_value,
                 .null_type => Index.null_value,
@@ -659,8 +659,8 @@ pub const Key = union(enum) {
             .int_type => |int_info| {
                 if (int_info.bits == 0) {
                     switch (int_info.signedness) {
-                        .unsigned => return Index.zero,
-                        .signed => return Index.zero, // do we need a signed zero?
+                        .unsigned => return Index.zero_comptime_int,
+                        .signed => return Index.zero_comptime_int, // do we need a signed zero?
                     }
                 }
                 return Index.none;
@@ -768,7 +768,7 @@ pub const Key = union(enum) {
                 else => null,
             },
             .int_u64_value => |int_value| int_value.int,
-            .int_i64_value => |int_value| @intCast(u64, int_value.int),
+            .int_i64_value => |int_value| @intCast(int_value.int),
             .int_big_value => |int_value| int_value.int.to(u64) catch null,
             .null_value => 0,
             else => null,
@@ -835,7 +835,7 @@ pub const Key = union(enum) {
 
                 .null_type => try writer.writeAll("@TypeOf(null)"),
                 .undefined_type => try writer.writeAll("@TypeOf(undefined)"),
-                .empty_struct_literal => try writer.writeAll("@TypeOf(.{})"),
+                .empty_struct_type => try writer.writeAll("@TypeOf(.{})"),
                 .enum_literal_type => try writer.writeAll("@TypeOf(.enum_literal)"),
 
                 .atomic_order => try writer.writeAll("std.builtin.AtomicOrder"),
@@ -997,10 +997,10 @@ pub const Key = union(enum) {
             .float_16_value => |float| try writer.print("{d}", .{float}),
             .float_32_value => |float| try writer.print("{d}", .{float}),
             .float_64_value => |float| try writer.print("{d}", .{float}),
-            .float_80_value => |float| try writer.print("{d}", .{@floatCast(f64, float)}),
+            .float_80_value => |float| try writer.print("{d}", .{@as(f64, @floatCast(float))}),
             .float_128_value,
             .float_comptime_value,
-            => |float| try writer.print("{d}", .{@floatCast(f64, float)}),
+            => |float| try writer.print("{d}", .{@as(f64, @floatCast(float))}),
 
             .bytes => |bytes| try writer.print("\"{}\"", .{std.zig.fmtEscapes(bytes)}),
             .optional_value => |optional| {
@@ -1104,7 +1104,7 @@ pub const Index = enum(u32) {
     comptime_float_type,
     noreturn_type,
     anyframe_type,
-    empty_struct_literal,
+    empty_struct_type,
     null_type,
     undefined_type,
     enum_literal_type,
@@ -1114,19 +1114,22 @@ pub const Index = enum(u32) {
     address_space_type,
     float_mode_type,
     reduce_op_type,
-    modifier_type,
+    call_modifier_type,
     prefetch_options_type,
     export_options_type,
     extern_options_type,
     type_info_type,
     manyptr_u8_type,
     manyptr_const_u8_type,
+    manyptr_const_u8_sentinel_0_type,
     fn_noreturn_no_args_type,
     fn_void_no_args_type,
     fn_naked_noreturn_no_args_type,
     fn_ccc_void_no_args_type,
     single_const_pointer_to_comptime_int_type,
-    const_slice_u8_type,
+    slice_const_u8_type,
+    slice_const_u8_sentinel_0_type,
+    optional_noreturn_type,
     anyerror_void_error_union_type,
     generic_poison_type,
     unknown_type,
@@ -1134,9 +1137,17 @@ pub const Index = enum(u32) {
     /// `undefined` (untyped)
     undefined_value,
     /// `0` (comptime_int)
-    zero,
+    zero_comptime_int,
+    /// `0` (u8)
+    zero_u8,
+    /// `0` (usize)
+    zero_usize,
     /// `1` (comptime_int)
-    one,
+    one_comptime_int,
+    /// `1` (u8)
+    one_u8,
+    /// `1` (usize)
+    one_usize,
     /// `{}`
     void_value,
     /// `unreachable` (noreturn type)
@@ -1149,10 +1160,6 @@ pub const Index = enum(u32) {
     bool_false,
     /// `.{}` (untyped)
     empty_aggregate,
-    /// `0` (usize)
-    zero_usize,
-    /// `1` (usize)
-    one_usize,
     the_only_possible_value,
     generic_poison,
     // unknown value of unknown type
@@ -1199,9 +1206,9 @@ pub const Index = enum(u32) {
 
 comptime {
     const Zir = @import("../stage2/Zir.zig");
-    assert(@enumToInt(Zir.Inst.Ref.generic_poison_type) == @enumToInt(Index.generic_poison_type));
-    assert(@enumToInt(Zir.Inst.Ref.undef) == @enumToInt(Index.undefined_value));
-    assert(@enumToInt(Zir.Inst.Ref.one_usize) == @enumToInt(Index.one_usize));
+    assert(@intFromEnum(Zir.Inst.Ref.generic_poison_type) == @intFromEnum(Index.generic_poison_type));
+    assert(@intFromEnum(Zir.Inst.Ref.undef) == @intFromEnum(Index.undefined_value));
+    assert(@intFromEnum(Zir.Inst.Ref.one_usize) == @intFromEnum(Index.one_usize));
 }
 
 pub const NamespaceIndex = enum(u32) {
@@ -1345,7 +1352,7 @@ pub const SimpleType = enum(u32) {
     comptime_float,
     noreturn,
     anyframe_type,
-    empty_struct_literal,
+    empty_struct_type,
     null_type,
     undefined_type,
     enum_literal_type,
@@ -1424,7 +1431,7 @@ pub fn init(gpa: Allocator) Allocator.Error!InternPool {
         .{ .index = .comptime_float_type, .key = .{ .simple_type = .comptime_float } },
         .{ .index = .noreturn_type, .key = .{ .simple_type = .noreturn } },
         .{ .index = .anyframe_type, .key = .{ .simple_type = .anyframe_type } },
-        .{ .index = .empty_struct_literal, .key = .{ .simple_type = .empty_struct_literal } },
+        .{ .index = .empty_struct_type, .key = .{ .simple_type = .empty_struct_type } },
         .{ .index = .null_type, .key = .{ .simple_type = .null_type } },
         .{ .index = .undefined_type, .key = .{ .simple_type = .undefined_type } },
         .{ .index = .enum_literal_type, .key = .{ .simple_type = .enum_literal_type } },
@@ -1435,41 +1442,45 @@ pub fn init(gpa: Allocator) Allocator.Error!InternPool {
         .{ .index = .address_space_type, .key = .{ .simple_type = .address_space } },
         .{ .index = .float_mode_type, .key = .{ .simple_type = .float_mode } },
         .{ .index = .reduce_op_type, .key = .{ .simple_type = .reduce_op } },
-        .{ .index = .modifier_type, .key = .{ .simple_type = .modifier } },
+        .{ .index = .call_modifier_type, .key = .{ .simple_type = .modifier } },
         .{ .index = .prefetch_options_type, .key = .{ .simple_type = .prefetch_options } },
         .{ .index = .export_options_type, .key = .{ .simple_type = .export_options } },
         .{ .index = .extern_options_type, .key = .{ .simple_type = .extern_options } },
         .{ .index = .type_info_type, .key = .{ .simple_type = .type_info } },
         .{ .index = .manyptr_u8_type, .key = .{ .pointer_type = .{ .elem_type = .u8_type, .size = .Many } } },
         .{ .index = .manyptr_const_u8_type, .key = .{ .pointer_type = .{ .elem_type = .u8_type, .size = .Many, .is_const = true } } },
+        .{ .index = .manyptr_const_u8_sentinel_0_type, .key = .{ .pointer_type = .{ .elem_type = .u8_type, .sentinel = .zero_u8, .size = .Many, .is_const = true } } },
         .{ .index = .fn_noreturn_no_args_type, .key = .{ .function_type = .{ .args = &.{}, .return_type = .noreturn_type } } },
         .{ .index = .fn_void_no_args_type, .key = .{ .function_type = .{ .args = &.{}, .return_type = .void_type } } },
         .{ .index = .fn_naked_noreturn_no_args_type, .key = .{ .function_type = .{ .args = &.{}, .return_type = .void_type, .calling_convention = .Naked } } },
         .{ .index = .fn_ccc_void_no_args_type, .key = .{ .function_type = .{ .args = &.{}, .return_type = .void_type, .calling_convention = .C } } },
         .{ .index = .single_const_pointer_to_comptime_int_type, .key = .{ .pointer_type = .{ .elem_type = .comptime_int_type, .size = .One, .is_const = true } } },
-        .{ .index = .const_slice_u8_type, .key = .{ .pointer_type = .{ .elem_type = .u8_type, .size = .Slice, .is_const = true } } },
+        .{ .index = .slice_const_u8_type, .key = .{ .pointer_type = .{ .elem_type = .u8_type, .size = .Slice, .is_const = true } } },
+        .{ .index = .slice_const_u8_sentinel_0_type, .key = .{ .pointer_type = .{ .elem_type = .u8_type, .sentinel = .zero_u8, .size = .Slice, .is_const = true } } },
+        .{ .index = .optional_noreturn_type, .key = .{ .optional_type = .{ .payload_type = .noreturn_type } } },
         .{ .index = .anyerror_void_error_union_type, .key = .{ .error_union_type = .{ .error_set_type = .anyerror_type, .payload_type = .void_type } } },
         .{ .index = .generic_poison_type, .key = .{ .simple_type = .generic_poison } },
         .{ .index = .unknown_type, .key = .{ .simple_type = .unknown } },
 
         .{ .index = .undefined_value, .key = .{ .simple_value = .undefined_value } },
-        .{ .index = .zero, .key = .{ .int_u64_value = .{ .ty = .comptime_int_type, .int = 0 } } },
-        .{ .index = .one, .key = .{ .int_u64_value = .{ .ty = .comptime_int_type, .int = 1 } } },
+        .{ .index = .zero_comptime_int, .key = .{ .int_u64_value = .{ .ty = .comptime_int_type, .int = 0 } } },
+        .{ .index = .zero_u8, .key = .{ .int_u64_value = .{ .ty = .u8_type, .int = 0 } } },
+        .{ .index = .zero_usize, .key = .{ .int_u64_value = .{ .ty = .usize_type, .int = 0 } } },
+        .{ .index = .one_comptime_int, .key = .{ .int_u64_value = .{ .ty = .comptime_int_type, .int = 1 } } },
+        .{ .index = .one_u8, .key = .{ .int_u64_value = .{ .ty = .u8_type, .int = 1 } } },
+        .{ .index = .one_usize, .key = .{ .int_u64_value = .{ .ty = .usize_type, .int = 1 } } },
         .{ .index = .void_value, .key = .{ .simple_value = .void_value } },
         .{ .index = .unreachable_value, .key = .{ .simple_value = .unreachable_value } },
         .{ .index = .null_value, .key = .{ .simple_value = .null_value } },
         .{ .index = .bool_true, .key = .{ .simple_value = .bool_true } },
         .{ .index = .bool_false, .key = .{ .simple_value = .bool_false } },
-
-        .{ .index = .empty_aggregate, .key = .{ .aggregate = .{ .ty = .empty_struct_literal, .values = &.{} } } },
-        .{ .index = .zero_usize, .key = .{ .int_u64_value = .{ .ty = .usize_type, .int = 0 } } },
-        .{ .index = .one_usize, .key = .{ .int_u64_value = .{ .ty = .usize_type, .int = 1 } } },
+        .{ .index = .empty_aggregate, .key = .{ .aggregate = .{ .ty = .empty_struct_type, .values = &.{} } } },
         .{ .index = .the_only_possible_value, .key = .{ .simple_value = .the_only_possible_value } },
         .{ .index = .generic_poison, .key = .{ .simple_value = .generic_poison } },
         .{ .index = .unknown_unknown, .key = .{ .unknown_value = .{ .ty = .unknown_type } } },
     };
 
-    const extra_count = 4 * @sizeOf(Pointer) + @sizeOf(ErrorUnion) + 4 * @sizeOf(Function) + 4 * @sizeOf(InternPool.U64Value);
+    const extra_count = 6 * @sizeOf(Pointer) + @sizeOf(ErrorUnion) + 4 * @sizeOf(Function) + 6 * @sizeOf(InternPool.U64Value);
 
     try ip.map.ensureTotalCapacity(gpa, items.len);
     try ip.items.ensureTotalCapacity(gpa, items.len);
@@ -1513,33 +1524,33 @@ pub fn deinit(ip: *InternPool, gpa: Allocator) void {
 
 pub fn indexToKey(ip: InternPool, index: Index) Key {
     assert(index != .none);
-    const item = ip.items.get(@enumToInt(index));
+    const item = ip.items.get(@intFromEnum(index));
     const data = item.data;
     return switch (item.tag) {
-        .simple_type => .{ .simple_type = @intToEnum(SimpleType, data) },
-        .simple_value => .{ .simple_value = @intToEnum(SimpleValue, data) },
+        .simple_type => .{ .simple_type = @enumFromInt(data) },
+        .simple_value => .{ .simple_value = @enumFromInt(data) },
 
         .type_int_signed => .{ .int_type = .{
             .signedness = .signed,
-            .bits = @intCast(u16, data),
+            .bits = @as(u16, @intCast(data)),
         } },
         .type_int_unsigned => .{ .int_type = .{
             .signedness = .unsigned,
-            .bits = @intCast(u16, data),
+            .bits = @as(u16, @intCast(data)),
         } },
         .type_pointer => .{ .pointer_type = ip.extraData(Pointer, data) },
         .type_array => .{ .array_type = ip.extraData(Array, data) },
-        .type_optional => .{ .optional_type = .{ .payload_type = @intToEnum(Index, data) } },
-        .type_anyframe => .{ .anyframe_type = .{ .child = @intToEnum(Index, data) } },
+        .type_optional => .{ .optional_type = .{ .payload_type = @enumFromInt(data) } },
+        .type_anyframe => .{ .anyframe_type = .{ .child = @enumFromInt(data) } },
         .type_error_union => .{ .error_union_type = ip.extraData(ErrorUnion, data) },
         .type_error_set => .{ .error_set_type = ip.extraData(ErrorSet, data) },
         .type_function => .{ .function_type = ip.extraData(Function, data) },
         .type_tuple => .{ .tuple_type = ip.extraData(Tuple, data) },
         .type_vector => .{ .vector_type = ip.extraData(Vector, data) },
 
-        .type_struct => .{ .struct_type = @intToEnum(StructIndex, data) },
-        .type_enum => .{ .enum_type = @intToEnum(EnumIndex, data) },
-        .type_union => .{ .union_type = @intToEnum(UnionIndex, data) },
+        .type_struct => .{ .struct_type = @enumFromInt(data) },
+        .type_enum => .{ .enum_type = @enumFromInt(data) },
+        .type_union => .{ .union_type = @enumFromInt(data) },
 
         .int_u64 => .{ .int_u64_value = ip.extraData(U64Value, data) },
         .int_i64 => .{ .int_i64_value = ip.extraData(I64Value, data) },
@@ -1555,8 +1566,8 @@ pub fn indexToKey(ip: InternPool, index: Index) Key {
                 },
             };
         } },
-        .float_f16 => .{ .float_16_value = @bitCast(f16, @intCast(u16, data)) },
-        .float_f32 => .{ .float_32_value = @bitCast(f32, data) },
+        .float_f16 => .{ .float_16_value = @bitCast(@as(u16, @intCast(data))) },
+        .float_f32 => .{ .float_32_value = @bitCast(data) },
         .float_f64 => .{ .float_64_value = ip.extraData(f64, data) },
         .float_f80 => .{ .float_80_value = ip.extraData(f80, data) },
         .float_f128 => .{ .float_128_value = ip.extraData(f128, data) },
@@ -1567,29 +1578,29 @@ pub fn indexToKey(ip: InternPool, index: Index) Key {
         .slice => .{ .slice = ip.extraData(Slice, data) },
         .aggregate => .{ .aggregate = ip.extraData(Aggregate, data) },
         .union_value => .{ .union_value = ip.extraData(UnionValue, data) },
-        .null_value => .{ .null_value = .{ .ty = @intToEnum(Index, data) } },
-        .undefined_value => .{ .undefined_value = .{ .ty = @intToEnum(Index, data) } },
-        .unknown_value => .{ .unknown_value = .{ .ty = @intToEnum(Index, data) } },
+        .null_value => .{ .null_value = .{ .ty = @as(Index, @enumFromInt(data)) } },
+        .undefined_value => .{ .undefined_value = .{ .ty = @as(Index, @enumFromInt(data)) } },
+        .unknown_value => .{ .unknown_value = .{ .ty = @as(Index, @enumFromInt(data)) } },
     };
 }
 
 pub fn get(ip: *InternPool, gpa: Allocator, key: Key) Allocator.Error!Index {
     const adapter: KeyAdapter = .{ .ip = ip };
     const gop = try ip.map.getOrPutAdapted(gpa, key, adapter);
-    if (gop.found_existing) return @intToEnum(Index, gop.index);
+    if (gop.found_existing) return @as(Index, @enumFromInt(gop.index));
 
     const tag: Tag = key.tag();
     const data: u32 = switch (key) {
-        .simple_type => |simple| @enumToInt(simple),
-        .simple_value => |simple| @enumToInt(simple),
+        .simple_type => |simple| @intFromEnum(simple),
+        .simple_value => |simple| @intFromEnum(simple),
 
         .int_type => |int_ty| int_ty.bits,
-        .optional_type => |optional_ty| @enumToInt(optional_ty.payload_type),
-        .anyframe_type => |anyframe_ty| @enumToInt(anyframe_ty.child),
+        .optional_type => |optional_ty| @intFromEnum(optional_ty.payload_type),
+        .anyframe_type => |anyframe_ty| @intFromEnum(anyframe_ty.child),
 
-        .struct_type => |struct_index| @enumToInt(struct_index),
-        .enum_type => |enum_index| @enumToInt(enum_index),
-        .union_type => |union_index| @enumToInt(union_index),
+        .struct_type => |struct_index| @intFromEnum(struct_index),
+        .enum_type => |enum_index| @intFromEnum(enum_index),
+        .union_type => |union_index| @intFromEnum(union_index),
 
         .int_u64_value => |int_val| try ip.addExtra(gpa, int_val),
         .int_i64_value => |int_val| try ip.addExtra(gpa, int_val),
@@ -1597,11 +1608,11 @@ pub fn get(ip: *InternPool, gpa: Allocator, key: Key) Allocator.Error!Index {
             .ty = big_int_val.ty,
             .limbs = big_int_val.int.limbs,
         }),
-        .float_16_value => |float_val| @bitCast(u16, float_val),
-        .float_32_value => |float_val| @bitCast(u32, float_val),
-        .null_value => |null_val| @enumToInt(null_val.ty),
-        .undefined_value => |undefined_val| @enumToInt(undefined_val.ty),
-        .unknown_value => |unknown_val| @enumToInt(unknown_val.ty),
+        .float_16_value => |float_val| @as(u16, @bitCast(float_val)),
+        .float_32_value => |float_val| @as(u32, @bitCast(float_val)),
+        .null_value => |null_val| @intFromEnum(null_val.ty),
+        .undefined_value => |undefined_val| @intFromEnum(undefined_val.ty),
+        .unknown_value => |unknown_val| @intFromEnum(unknown_val.ty),
         inline else => |data| try ip.addExtra(gpa, data), // TODO sad stage1 noises :(
     };
 
@@ -1609,47 +1620,47 @@ pub fn get(ip: *InternPool, gpa: Allocator, key: Key) Allocator.Error!Index {
         .tag = tag,
         .data = data,
     });
-    return @intToEnum(Index, ip.items.len - 1);
+    return @as(Index, @enumFromInt(ip.items.len - 1));
 }
 
 pub fn contains(ip: InternPool, key: Key) ?Index {
     const adapter: KeyAdapter = .{ .ip = &ip };
     const index = ip.map.getIndexAdapted(key, adapter) orelse return null;
-    return @intToEnum(Index, index);
+    return @as(Index, @enumFromInt(index));
 }
 
 pub fn getDecl(ip: InternPool, index: InternPool.DeclIndex) *InternPool.Decl {
     var decls = ip.decls;
-    return decls.at(@enumToInt(index));
+    return decls.at(@intFromEnum(index));
 }
 pub fn getStruct(ip: InternPool, index: InternPool.StructIndex) *InternPool.Struct {
     var structs = ip.structs;
-    return structs.at(@enumToInt(index));
+    return structs.at(@intFromEnum(index));
 }
 pub fn getEnum(ip: InternPool, index: InternPool.EnumIndex) *InternPool.Enum {
     var enums = ip.enums;
-    return enums.at(@enumToInt(index));
+    return enums.at(@intFromEnum(index));
 }
 pub fn getUnion(ip: InternPool, index: InternPool.UnionIndex) *InternPool.Union {
     var unions = ip.unions;
-    return unions.at(@enumToInt(index));
+    return unions.at(@intFromEnum(index));
 }
 
 pub fn createDecl(ip: *InternPool, gpa: Allocator, decl: InternPool.Decl) Allocator.Error!InternPool.DeclIndex {
     try ip.decls.append(gpa, decl);
-    return @intToEnum(InternPool.DeclIndex, ip.decls.count() - 1);
+    return @as(InternPool.DeclIndex, @enumFromInt(ip.decls.count() - 1));
 }
 pub fn createStruct(ip: *InternPool, gpa: Allocator, struct_info: InternPool.Struct) Allocator.Error!InternPool.StructIndex {
     try ip.structs.append(gpa, struct_info);
-    return @intToEnum(InternPool.StructIndex, ip.structs.count() - 1);
+    return @as(InternPool.StructIndex, @enumFromInt(ip.structs.count() - 1));
 }
 pub fn createEnum(ip: *InternPool, gpa: Allocator, enum_info: InternPool.Enum) Allocator.Error!InternPool.EnumIndex {
     try ip.enums.append(gpa, enum_info);
-    return @intToEnum(InternPool.EnumIndex, ip.enums.count() - 1);
+    return @as(InternPool.EnumIndex, @enumFromInt(ip.enums.count() - 1));
 }
 pub fn createUnion(ip: *InternPool, gpa: Allocator, union_info: InternPool.Union) Allocator.Error!InternPool.UnionIndex {
     try ip.unions.append(gpa, union_info);
-    return @intToEnum(InternPool.UnionIndex, ip.unions.count() - 1);
+    return @as(InternPool.UnionIndex, @enumFromInt(ip.unions.count() - 1));
 }
 
 fn addExtra(ip: *InternPool, gpa: Allocator, extra: anytype) Allocator.Error!u32 {
@@ -1658,7 +1669,7 @@ fn addExtra(ip: *InternPool, gpa: Allocator, extra: anytype) Allocator.Error!u32
         @compileError(@typeName(T) ++ " fits into a u32! Consider directly storing this extra in Item's data field");
     };
 
-    const result = @intCast(u32, ip.extra.items.len);
+    const result = @as(u32, @intCast(ip.extra.items.len));
     var managed = ip.extra.toManaged(gpa);
     defer ip.extra = managed.moveToUnmanaged();
     try encoding.encode(&managed, T, extra);
@@ -1675,7 +1686,7 @@ const KeyAdapter = struct {
 
     pub fn eql(ctx: @This(), a: Key, b_void: void, b_map_index: usize) bool {
         _ = b_void;
-        return a.eql(ctx.ip.indexToKey(@intToEnum(Index, b_map_index)));
+        return a.eql(ctx.ip.indexToKey(@as(Index, @enumFromInt(b_map_index))));
     }
 
     pub fn hash(ctx: @This(), a: Key) u32 {
@@ -1728,7 +1739,7 @@ fn deepEql(a: anytype, b: @TypeOf(a)) bool {
         },
         .Float => {
             const I = std.meta.Int(.unsigned, @bitSizeOf(T));
-            return @bitCast(I, a) == @bitCast(I, b);
+            return @as(I, @bitCast(a)) == @as(I, @bitCast(b));
         },
         .Bool,
         .Int,
@@ -1751,14 +1762,14 @@ fn deepHash(hasher: anytype, key: anytype) void {
             }
         },
 
-        .Bool => deepHash(hasher, @boolToInt(key)),
-        .Enum => deepHash(hasher, @enumToInt(key)),
+        .Bool => deepHash(hasher, @intFromBool(key)),
+        .Enum => deepHash(hasher, @intFromEnum(key)),
         .Float => |info| deepHash(hasher, switch (info.bits) {
-            16 => @bitCast(u16, key),
-            32 => @bitCast(u32, key),
-            64 => @bitCast(u64, key),
-            80 => @bitCast(u80, key),
-            128 => @bitCast(u128, key),
+            16 => @as(u16, @bitCast(key)),
+            32 => @as(u32, @bitCast(key)),
+            64 => @as(u64, @bitCast(key)),
+            80 => @as(u80, @bitCast(key)),
+            128 => @as(u128, @bitCast(key)),
             else => unreachable,
         }),
 
@@ -3107,7 +3118,7 @@ test "pointer type" {
     const @"[*:0]u32" = try ip.get(gpa, .{ .pointer_type = .{
         .elem_type = .u32_type,
         .size = .Many,
-        .sentinel = .zero,
+        .sentinel = .zero_comptime_int,
     } });
     const @"[]u32" = try ip.get(gpa, .{ .pointer_type = .{
         .elem_type = .u32_type,
@@ -3116,7 +3127,7 @@ test "pointer type" {
     const @"[:0]u32" = try ip.get(gpa, .{ .pointer_type = .{
         .elem_type = .u32_type,
         .size = .Slice,
-        .sentinel = .zero,
+        .sentinel = .zero_comptime_int,
     } });
     const @"[*c]u32" = try ip.get(gpa, .{ .pointer_type = .{
         .elem_type = .u32_type,
@@ -3233,7 +3244,7 @@ test "array type" {
     const u32_0_0_array_type = try ip.get(gpa, .{ .array_type = .{
         .len = 3,
         .child = .u32_type,
-        .sentinel = .zero,
+        .sentinel = .zero_comptime_int,
     } });
 
     try expect(i32_3_array_type != u32_0_0_array_type);
@@ -3402,9 +3413,9 @@ test "bytes value" {
     try expect(bytes_value1 == bytes_value2);
     try expect(bytes_value2 != bytes_value3);
 
-    try expect(@ptrToInt(&str1) != @ptrToInt(ip.indexToKey(bytes_value1).bytes.ptr));
-    try expect(@ptrToInt(&str2) != @ptrToInt(ip.indexToKey(bytes_value2).bytes.ptr));
-    try expect(@ptrToInt(&str3) != @ptrToInt(ip.indexToKey(bytes_value3).bytes.ptr));
+    try expect(@intFromPtr(&str1) != @intFromPtr(ip.indexToKey(bytes_value1).bytes.ptr));
+    try expect(@intFromPtr(&str2) != @intFromPtr(ip.indexToKey(bytes_value2).bytes.ptr));
+    try expect(@intFromPtr(&str3) != @intFromPtr(ip.indexToKey(bytes_value3).bytes.ptr));
 
     try std.testing.expectEqual(ip.indexToKey(bytes_value1).bytes.ptr, ip.indexToKey(bytes_value2).bytes.ptr);
 

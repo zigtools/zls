@@ -237,7 +237,7 @@ fn generateVSCodeConfigFile(allocator: std.mem.Allocator, config: Config, path: 
 
     const predefined_configurations: usize = 3;
     var configuration: std.StringArrayHashMapUnmanaged(ConfigurationProperty) = .{};
-    try configuration.ensureTotalCapacity(allocator, predefined_configurations + @intCast(u32, config.options.len));
+    try configuration.ensureTotalCapacity(allocator, predefined_configurations + @as(u32, @intCast(config.options.len)));
     defer {
         for (configuration.keys()[predefined_configurations..]) |name| allocator.free(name);
         configuration.deinit(allocator);
@@ -271,13 +271,10 @@ fn generateVSCodeConfigFile(allocator: std.mem.Allocator, config: Config, path: 
         const default: ?std.json.Value = blk: {
             if (option.@"enum" != null) break :blk .{ .string = option.default };
 
-            var parser = std.json.Parser.init(allocator, .alloc_always);
-            defer parser.deinit();
-
-            var value = try parser.parse(option.default);
+            var value = try std.json.parseFromSlice(std.json.Value, allocator, option.default, .{});
             defer value.deinit();
 
-            break :blk if (value.root != .null) value.root else null;
+            break :blk if (value.value != .null) value.value else null;
         };
 
         configuration.putAssumeCapacityNoClobber(name, .{
@@ -1050,8 +1047,9 @@ pub fn main() !void {
         }
     }
 
-    const config = try std.json.parseFromSlice(Config, gpa, @embedFile("config.json"), .{});
-    defer std.json.parseFree(Config, gpa, config);
+    const config_json = try std.json.parseFromSlice(Config, gpa, @embedFile("config.json"), .{});
+    defer config_json.deinit();
+    const config = config_json.value;
 
     try generateConfigFile(gpa, config, config_path);
     try generateSchemaFile(gpa, config, schema_path);
