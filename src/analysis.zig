@@ -3346,7 +3346,7 @@ fn addReferencedTypes(
             .tagged_union_enum_tag_trailing,
             => {
                 // NOTE: This is a hacky nightmare but it works :P
-                const token = main_tokens[p];
+                const token = tree.firstToken(p);
                 if (token_tags[token - 2] == .identifier and token_tags[token - 1] == .equal) {
                     const str = tree.tokenSlice(token - 2);
                     if (needs_type_reference) {
