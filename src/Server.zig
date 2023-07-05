@@ -311,6 +311,18 @@ pub fn getSymbolGlobal(
     });
 }
 
+pub fn getSymbolEnumLiteral(
+    server: *Server,
+    source_index: usize,
+    handle: *const DocumentStore.Handle,
+) error{OutOfMemory}!?Analyser.DeclWithHandle {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    const nodes = try ast.nodesOverlappingIndex(server.arena.allocator(), handle.tree, source_index);
+    return try server.analyser.lookupSymbolEnumLiteral(handle, nodes);
+}
+
 /// Multiple when using branched types
 pub fn getSymbolFieldAccesses(
     server: *Server,

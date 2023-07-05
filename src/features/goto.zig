@@ -2,6 +2,7 @@ const std = @import("std");
 const Ast = std.zig.Ast;
 const log = std.log.scoped(.zls_goto);
 
+const ast = @import("../ast.zig");
 const types = @import("../lsp.zig");
 const offsets = @import("../offsets.zig");
 const URI = @import("../uri.zig");
@@ -65,6 +66,18 @@ pub fn gotoDefinitionGlobal(
 
     const decl = (try server.getSymbolGlobal(pos_index, handle)) orelse return null;
     return try gotoDefinitionSymbol(server, decl, resolve_alias);
+}
+
+pub fn gotoDefinitionEnumLiteral(
+    server: *Server,
+    source_index: usize,
+    handle: *const DocumentStore.Handle,
+) error{OutOfMemory}!?types.Location {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    const decl = (try server.getSymbolEnumLiteral(source_index, handle)) orelse return null;
+    return try gotoDefinitionSymbol(server, decl, false);
 }
 
 pub fn gotoDefinitionBuiltin(
@@ -191,6 +204,7 @@ pub fn goto(
         .embedfile_string_literal,
         => .{ .Location = (try gotoDefinitionString(server, pos_context, handle)) orelse return null },
         .label => .{ .Location = (try gotoDefinitionLabel(server, source_index, handle)) orelse return null },
+        .enum_literal => .{ .Location = (try gotoDefinitionEnumLiteral(server, source_index, handle)) orelse return null },
         else => null,
     };
 }
