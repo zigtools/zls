@@ -776,7 +776,7 @@ fn handleConfiguration(server: *Server, json: std.json.Value) error{OutOfMemory}
 }
 
 fn openDocumentHandler(server: *Server, notification: types.DidOpenTextDocumentParams) Error!void {
-    const handle = try server.document_store.openDocument(notification.textDocument.uri, try server.document_store.allocator.dupeZ(u8, notification.textDocument.text));
+    const handle = try server.document_store.openDocument(notification.textDocument.uri, notification.textDocument.text);
 
     if (server.client_capabilities.supports_publish_diagnostics) {
         const diagnostics = try diagnostics_gen.generateDiagnostics(server, handle);

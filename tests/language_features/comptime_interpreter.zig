@@ -326,7 +326,7 @@ const Context = struct {
             else => "file:///test.zig",
         };
 
-        const handle = try document_store.openDocument(test_uri, try document_store.allocator.dupeZ(u8, source));
+        const handle = try document_store.openDocument(test_uri, source);
 
         // TODO handle handle.tree.errors
 
