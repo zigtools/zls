@@ -1604,6 +1604,33 @@ pub fn nodeChildrenRecursiveAlloc(allocator: std.mem.Allocator, tree: Ast, node:
     return children.toOwnedSlice(allocator);
 }
 
+/// returns a list of nodes that overlap with the given source code index.
+/// sorted from smallest to largest.
+/// caller owns the returned memory.
+pub fn nodesOverlappingIndex(allocator: std.mem.Allocator, tree: Ast, index: usize) error{OutOfMemory}![]Ast.Node.Index {
+    std.debug.assert(index <= tree.source.len);
+
+    const Context = struct {
+        index: usize,
+        allocator: std.mem.Allocator,
+        nodes: std.ArrayListUnmanaged(Ast.Node.Index) = .{},
+
+        pub fn append(self: *@This(), ast: Ast, node: Ast.Node.Index) error{OutOfMemory}!void {
+            if (node == 0) return;
+            const loc = offsets.nodeToLoc(ast, node);
+            if (loc.start <= self.index and self.index <= loc.end) {
+                try iterateChildren(ast, node, self, error{OutOfMemory}, append);
+                try self.nodes.append(self.allocator, node);
+            }
+        }
+    };
+
+    var context: Context = .{ .index = index, .allocator = allocator };
+    try iterateChildren(tree, 0, &context, error{OutOfMemory}, Context.append);
+    try context.nodes.append(allocator, 0);
+    return try context.nodes.toOwnedSlice(allocator);
+}
+
 /// returns a list of nodes that together encloses the given source code range
 /// caller owns the returned memory
 pub fn nodesAtLoc(allocator: std.mem.Allocator, tree: Ast, loc: offsets.Loc) error{OutOfMemory}![]Ast.Node.Index {

@@ -207,6 +207,27 @@ pub fn hoverDefinitionGlobal(server: *Server, pos_index: usize, handle: *const D
     };
 }
 
+pub fn hoverDefinitionEnumLiteral(
+    server: *Server,
+    source_index: usize,
+    handle: *const DocumentStore.Handle,
+) error{OutOfMemory}!?types.Hover {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    const markup_kind: types.MarkupKind = if (server.client_capabilities.hover_supports_md) .markdown else .plaintext;
+    const decl = (try server.getSymbolEnumLiteral(source_index, handle)) orelse return null;
+
+    return .{
+        .contents = .{
+            .MarkupContent = .{
+                .kind = markup_kind,
+                .value = (try hoverSymbol(server, decl, markup_kind)) orelse return null,
+            },
+        },
+    };
+}
+
 pub fn hoverDefinitionFieldAccess(
     server: *Server,
     handle: *const DocumentStore.Handle,
@@ -244,6 +265,7 @@ pub fn hover(server: *Server, source_index: usize, handle: *const DocumentStore.
         .var_access => try hoverDefinitionGlobal(server, source_index, handle),
         .field_access => |loc| try hoverDefinitionFieldAccess(server, handle, source_index, loc),
         .label => try hoverDefinitionLabel(server, source_index, handle),
+        .enum_literal => try hoverDefinitionEnumLiteral(server, source_index, handle),
         else => null,
     };
 

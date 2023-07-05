@@ -211,6 +211,18 @@ pub fn getFunctionSnippet(allocator: std.mem.Allocator, tree: Ast, func: Ast.ful
     return buffer.toOwnedSlice(allocator);
 }
 
+pub fn isInstanceCall(
+    analyser: *Analyser,
+    call_handle: *const DocumentStore.Handle,
+    call: Ast.full.Call,
+    func_handle: *const DocumentStore.Handle,
+    func: Ast.full.FnProto,
+) !bool {
+    return call_handle.tree.tokens.items(.tag)[call.ast.lparen - 2] == .period and
+        call.ast.params.len + 1 == func.ast.params.len and
+        try analyser.hasSelfParam(func_handle, func);
+}
+
 pub fn hasSelfParam(analyser: *Analyser, handle: *const DocumentStore.Handle, func: Ast.full.FnProto) !bool {
     // Non-decl prototypes cannot have a self parameter.
     if (func.name_token == null) return false;
@@ -782,11 +794,9 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 // If we call as method, the first parameter should be skipped
                 // TODO: Back-parse to extract the self argument?
                 var it = fn_decl.iterate(&decl.handle.tree);
-                if (token_tags[call.ast.lparen - 2] == .period) {
-                    if (try analyser.hasSelfParam(decl.handle, fn_decl)) {
-                        _ = ast.nextFnParam(&it);
-                        expected_params -= 1;
-                    }
+                if (try analyser.isInstanceCall(handle, call, decl.handle, fn_decl)) {
+                    _ = ast.nextFnParam(&it);
+                    expected_params -= 1;
                 }
 
                 // Bind type params to the arguments passed in the call.
@@ -1915,7 +1925,9 @@ pub fn getPositionContext(
                     .field_access => {},
                     .other => {},
                     .global_error_set => {},
-                    .label => {},
+                    .label => |filled| if (filled) {
+                        curr_ctx.ctx = .enum_literal;
+                    },
                     else => curr_ctx.ctx = .{
                         .field_access = tokenLocAppend(curr_ctx.ctx.loc().?, tok),
                     },
@@ -2573,6 +2585,223 @@ pub fn lookupSymbolContainer(
         }
 
         if (try analyser.resolveUse(scope_uses[container_scope_index], symbol, handle)) |result| return result;
+    }
+
+    return null;
+}
+
+pub fn lookupSymbolEnumLiteral(
+    analyser: *Analyser,
+    handle: *const DocumentStore.Handle,
+    nodes: []Ast.Node.Index,
+) error{OutOfMemory}!?DeclWithHandle {
+    if (nodes.len == 0) return null;
+
+    const tree = handle.tree;
+    const node_tags = tree.nodes.items(.tag);
+    if (node_tags[nodes[0]] != .enum_literal) return null;
+
+    const container_type = (try analyser.resolveEnumLiteralType(
+        handle,
+        nodes[0],
+        nodes[1..],
+    )) orelse return null;
+
+    const container_node = switch (container_type.type.data) {
+        .other => |n| n,
+        else => return null,
+    };
+
+    return analyser.lookupSymbolContainer(
+        .{ .node = container_node, .handle = container_type.handle },
+        tree.tokenSlice(tree.nodes.items(.main_token)[nodes[0]]),
+        !container_type.isEnumType(),
+    );
+}
+
+pub fn resolveEnumLiteralType(
+    analyser: *Analyser,
+    handle: *const DocumentStore.Handle,
+    node: Ast.Node.Index,
+    ancestors: []Ast.Node.Index,
+) error{OutOfMemory}!?TypeWithHandle {
+    if (ancestors.len == 0) return null;
+
+    const tree = handle.tree;
+    const node_tags: []Ast.Node.Tag = tree.nodes.items(.tag);
+    const datas: []Ast.Node.Data = tree.nodes.items(.data);
+    const token_tags: []std.zig.Token.Tag = tree.tokens.items(.tag);
+
+    var call_buf: [1]Ast.Node.Index = undefined;
+
+    if (tree.fullVarDecl(ancestors[0])) |var_decl| {
+        if (node == var_decl.ast.init_node) {
+            return try analyser.resolveTypeOfNode(.{
+                .node = ancestors[0],
+                .handle = handle,
+            });
+        }
+    } else if (tree.fullIf(ancestors[0])) |if_node| {
+        if (node == if_node.ast.then_expr or node == if_node.ast.else_expr) {
+            return (try analyser.resolveTypeOfNode(.{
+                .node = ancestors[0],
+                .handle = handle,
+            })) orelse (try analyser.resolveEnumLiteralType(
+                handle,
+                ancestors[0],
+                ancestors[1..],
+            ));
+        }
+    } else if (tree.fullFor(ancestors[0])) |for_node| {
+        if (node == for_node.ast.else_expr) {
+            return (try analyser.resolveTypeOfNode(.{
+                .node = ancestors[0],
+                .handle = handle,
+            })) orelse (try analyser.resolveEnumLiteralType(
+                handle,
+                ancestors[0],
+                ancestors[1..],
+            ));
+        }
+    } else if (tree.fullWhile(ancestors[0])) |while_node| {
+        if (node == while_node.ast.else_expr) {
+            return (try analyser.resolveTypeOfNode(.{
+                .node = ancestors[0],
+                .handle = handle,
+            })) orelse (try analyser.resolveEnumLiteralType(
+                handle,
+                ancestors[0],
+                ancestors[1..],
+            ));
+        }
+    } else if (tree.fullSwitchCase(ancestors[0])) |switch_case| {
+        if (ancestors.len == 1) return null;
+
+        switch (node_tags[ancestors[1]]) {
+            .@"switch", .switch_comma => {},
+            else => return null,
+        }
+
+        if (node == switch_case.ast.target_expr) {
+            return (try analyser.resolveTypeOfNode(.{
+                .node = ancestors[1],
+                .handle = handle,
+            })) orelse (try analyser.resolveEnumLiteralType(
+                handle,
+                ancestors[1],
+                ancestors[2..],
+            ));
+        }
+
+        for (switch_case.ast.values) |value| {
+            if (node == value) {
+                return try analyser.resolveTypeOfNode(.{
+                    .node = datas[ancestors[1]].lhs,
+                    .handle = handle,
+                });
+            }
+        }
+    } else if (tree.fullCall(&call_buf, ancestors[0])) |call| {
+        const arg_index = std.mem.indexOfScalar(Ast.Node.Index, call.ast.params, node) orelse return null;
+
+        const fn_type = (try analyser.resolveTypeOfNode(.{
+            .node = call.ast.fn_expr,
+            .handle = handle,
+        })) orelse return null;
+
+        if (fn_type.type.is_type_val) return null;
+
+        const fn_handle = fn_type.handle;
+        const fn_tree = fn_handle.tree;
+        const fn_node = switch (fn_type.type.data) {
+            .other => |n| n,
+            else => return null,
+        };
+
+        var fn_buf: [1]Ast.Node.Index = undefined;
+        const fn_proto = fn_tree.fullFnProto(&fn_buf, fn_node) orelse return null;
+
+        var param_iter = fn_proto.iterate(&fn_tree);
+        if (try analyser.isInstanceCall(handle, call, fn_handle, fn_proto)) {
+            _ = ast.nextFnParam(&param_iter);
+        }
+
+        var param_index: usize = 0;
+        while (ast.nextFnParam(&param_iter)) |param| : (param_index += 1) {
+            if (param_index == arg_index) {
+                return try analyser.resolveTypeOfNode(.{
+                    .node = param.type_expr,
+                    .handle = fn_handle,
+                });
+            }
+        }
+    } else switch (node_tags[ancestors[0]]) {
+        .assign => {
+            if (node == datas[ancestors[0]].rhs) {
+                return try analyser.resolveTypeOfNode(.{
+                    .node = datas[ancestors[0]].lhs,
+                    .handle = handle,
+                });
+            }
+        },
+
+        .equal_equal, .bang_equal => {
+            return (try analyser.resolveTypeOfNode(.{
+                .node = datas[ancestors[0]].lhs,
+                .handle = handle,
+            })) orelse (try analyser.resolveTypeOfNode(.{
+                .node = datas[ancestors[0]].rhs,
+                .handle = handle,
+            }));
+        },
+
+        .@"break" => {
+            if (node != datas[ancestors[0]].rhs) return null;
+
+            const break_label_maybe: ?[]const u8 = if (datas[ancestors[0]].lhs != 0)
+                tree.tokenSlice(datas[ancestors[0]].lhs)
+            else
+                null;
+
+            const index = blk: for (1..ancestors.len) |index| {
+                if (tree.fullFor(ancestors[index])) |for_node| {
+                    const break_label = break_label_maybe orelse break :blk index;
+                    const for_label = tree.tokenSlice(for_node.label_token orelse continue);
+                    if (std.mem.eql(u8, break_label, for_label)) break :blk index;
+                } else if (tree.fullWhile(ancestors[index])) |while_node| {
+                    const break_label = break_label_maybe orelse break :blk index;
+                    const while_label = tree.tokenSlice(while_node.label_token orelse continue);
+                    if (std.mem.eql(u8, break_label, while_label)) break :blk index;
+                } else switch (node_tags[ancestors[index]]) {
+                    .block,
+                    .block_semicolon,
+                    .block_two,
+                    .block_two_semicolon,
+                    => {
+                        const break_label = break_label_maybe orelse continue;
+
+                        const first_token = tree.firstToken(ancestors[index]);
+                        if (token_tags[first_token] != .identifier) continue;
+                        const block_label = tree.tokenSlice(first_token);
+
+                        if (std.mem.eql(u8, break_label, block_label)) break :blk index;
+                    },
+
+                    else => {},
+                }
+            } else return null;
+
+            return (try analyser.resolveTypeOfNode(.{
+                .node = ancestors[index],
+                .handle = handle,
+            })) orelse (try analyser.resolveEnumLiteralType(
+                handle,
+                ancestors[index],
+                ancestors[index + 1 ..],
+            ));
+        },
+
+        else => {}, // TODO: Implement more expressions that may contain enum literals; better safe than sorry
     }
 
     return null;
