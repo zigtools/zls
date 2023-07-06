@@ -99,7 +99,8 @@ fn writeCallHint(builder: *Builder, call: Ast.full.Call, decl_handle: Analyser.D
         try params.append(builder.arena, param);
     }
 
-    const has_self_param = try builder.analyser.isInstanceCall(handle, call, decl_handle.handle, fn_proto);
+    const has_self_param = call.ast.params.len + 1 == params.items.len and
+        try builder.analyser.isInstanceCall(handle, call, decl_handle.handle, fn_proto);
 
     const parameters = params.items[@intFromBool(has_self_param)..];
     const arguments = call.ast.params;

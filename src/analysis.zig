@@ -219,7 +219,6 @@ pub fn isInstanceCall(
     func: Ast.full.FnProto,
 ) !bool {
     return call_handle.tree.tokens.items(.tag)[call.ast.lparen - 2] == .period and
-        call.ast.params.len + 1 == func.ast.params.len and
         try analyser.hasSelfParam(func_handle, func);
 }
 
