@@ -81,13 +81,16 @@ pub fn hoverSymbol(server: *Server, decl_handle: Analyser.DeclWithHandle, markup
 
             break :def ast.paramSlice(tree, param);
         },
+        .error_token => |token| def: {
+            doc_str = try Analyser.getDocCommentsBeforeToken(server.arena.allocator(), tree, token);
+            break :def tree.tokenSlice(decl_handle.nameToken());
+        },
         .pointer_payload,
         .error_union_payload,
         .array_payload,
         .array_index,
         .switch_payload,
         .label_decl,
-        .error_token,
         => tree.tokenSlice(decl_handle.nameToken()),
     };
 

@@ -45,11 +45,16 @@ pub fn invalidate(self: *Analyser) void {
     _ = self.arena.reset(.free_all);
 }
 
+pub fn getDocCommentsBeforeToken(allocator: std.mem.Allocator, tree: Ast, base: Ast.TokenIndex) !?[]const u8 {
+    const tokens = tree.tokens.items(.tag);
+    const doc_comment_index = getDocCommentTokenIndex(tokens, base) orelse return null;
+    return try collectDocComments(allocator, tree, doc_comment_index, false);
+}
+
 /// Gets a declaration's doc comments. Caller owns returned memory.
 pub fn getDocComments(allocator: std.mem.Allocator, tree: Ast, node: Ast.Node.Index) !?[]const u8 {
     const base = tree.nodes.items(.main_token)[node];
     const base_kind = tree.nodes.items(.tag)[node];
-    const tokens = tree.tokens.items(.tag);
 
     switch (base_kind) {
         // As far as I know, this does not actually happen yet, but it
@@ -67,10 +72,7 @@ pub fn getDocComments(allocator: std.mem.Allocator, tree: Ast, node: Ast.Node.In
         .container_field_init,
         .container_field_align,
         .container_field,
-        => {
-            if (getDocCommentTokenIndex(tokens, base)) |doc_comment_index|
-                return try collectDocComments(allocator, tree, doc_comment_index, false);
-        },
+        => return try getDocCommentsBeforeToken(allocator, tree, base),
         else => {},
     }
     return null;
@@ -2044,7 +2046,7 @@ pub const Declaration = union(enum) {
         block: Ast.Node.Index,
     },
     /// always an identifier
-    error_token: Ast.Node.Index,
+    error_token: Ast.TokenIndex,
 
     pub const Index = enum(u32) { _ };
 
