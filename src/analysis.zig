@@ -1937,7 +1937,7 @@ pub fn getPositionContext(
                     .other => {},
                     .global_error_set => {},
                     .label => |filled| if (filled) {
-                        curr_ctx.ctx = .enum_literal;
+                        curr_ctx.ctx = .{ .enum_literal = tok.loc };
                     },
                     else => curr_ctx.ctx = .{
                         .field_access = tokenLocAppend(curr_ctx.ctx.loc().?, tok),
