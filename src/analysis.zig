@@ -965,6 +965,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
         .ptr_type_bit_range,
         .error_union,
         .error_set_decl,
+        .merge_error_sets,
         .container_decl,
         .container_decl_arg,
         .container_decl_arg_trailing,
