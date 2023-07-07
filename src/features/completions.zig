@@ -742,97 +742,74 @@ fn kindToSortScore(kind: types.CompletionItemKind) ?[]const u8 {
     };
 }
 
-/// Given a container node decl,
-/// `root` or a .simple_var_decl (const MyStruct = struct {..}),
-/// adds it's `.container_field*`s to completions
-pub fn collectContainerNodeFields(
+/// Given a TypeWithHandle that is a container, adds it's `.container_field*`s to completions
+pub fn collectContainerFields(
     server: *Server,
-    decl: Analyser.DeclWithHandle,
+    container: Analyser.TypeWithHandle,
     completions: *std.ArrayListUnmanaged(types.CompletionItem),
 ) error{OutOfMemory}!void {
-    const node = switch (decl.decl.*) {
-        .ast_node => |ast_node| ast_node,
+    const node = switch (container.type.data) {
+        .other => |n| n,
         else => return,
     };
-    const node_tags = decl.handle.tree.nodes.items(.tag);
-    switch (node_tags[node]) {
-        .simple_var_decl => {
-            const node_data = decl.handle.tree.nodes.items(.data)[node];
-            if (node_data.rhs != 0) {
-                var buffer: [2]Ast.Node.Index = undefined;
-                const container_decl = Ast.fullContainerDecl(decl.handle.tree, &buffer, node_data.rhs) orelse return;
-                for (container_decl.ast.members) |member| {
-                    const field = decl.handle.tree.fullContainerField(member) orelse continue;
-                    try completions.append(server.arena.allocator(), .{
-                        .label = decl.handle.tree.tokenSlice(field.ast.main_token),
-                        .kind = if (field.ast.tuple_like) .EnumMember else .Field,
-                        .detail = Analyser.getContainerFieldSignature(decl.handle.tree, field),
-                        .insertText = decl.handle.tree.tokenSlice(field.ast.main_token),
-                        .insertTextFormat = .PlainText,
-                    });
-                }
-            }
-        },
-        .root => {
-            for (decl.handle.tree.rootDecls()) |root_node| {
-                const field = decl.handle.tree.fullContainerField(@as(u32, @intCast(root_node))) orelse continue;
-                try completions.append(server.arena.allocator(), .{
-                    .label = decl.handle.tree.tokenSlice(field.ast.main_token),
-                    .kind = if (field.ast.tuple_like) .EnumMember else .Field,
-                    .detail = Analyser.getContainerFieldSignature(decl.handle.tree, field),
-                    .insertText = decl.handle.tree.tokenSlice(field.ast.main_token),
-                    .insertTextFormat = .PlainText,
-                });
-            }
-        },
-        else => {},
+    var buffer: [2]Ast.Node.Index = undefined;
+    const container_decl = Ast.fullContainerDecl(container.handle.tree, &buffer, node) orelse return;
+    for (container_decl.ast.members) |member| {
+        const field = container.handle.tree.fullContainerField(member) orelse continue;
+        try completions.append(server.arena.allocator(), .{
+            .label = container.handle.tree.tokenSlice(field.ast.main_token),
+            .kind = if (field.ast.tuple_like) .EnumMember else .Field,
+            .detail = Analyser.getContainerFieldSignature(container.handle.tree, field),
+            .insertText = container.handle.tree.tokenSlice(field.ast.main_token),
+            .insertTextFormat = .PlainText,
+        });
     }
 }
 
-/// Collects the fields of `T` or `fn_name`'s `fn_arg_index` param's T(if it can be resolved/looked up).
-/// `fn completeDot` helper
-/// `doc_index`: index into `text` of a `T` / `path.to.T` or `fn_name` / `path.to.fn_name`
-/// If `T`, `fn_arg_index` is unused, otherwise used as index into `fn_name` params to lookup the param's type.
-fn completeStructFields(
+/// Resolves `identifier`/`path.to.identifier` at `text_index`
+/// If the `identifier` is a container `fn_arg_index` is unused
+/// If the `identifier` is a `fn_name`/`identifier.fn_name`, tries to resolve
+///         `fn_name`'s `fn_arg_index`'s param type
+fn resolveContainer(
     server: *Server,
     handle: *const DocumentStore.Handle,
     allocator: std.mem.Allocator,
-    text: []const u8,
-    doc_index: usize,
+    text_index: usize,
     fn_arg_index: usize,
-    completions: *std.ArrayListUnmanaged(types.CompletionItem),
-) error{OutOfMemory}!void {
+) error{OutOfMemory}![]Analyser.TypeWithHandle {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const pos_context = try Analyser.getPositionContext(allocator, text, doc_index, false);
+    var types_with_handles = std.ArrayListUnmanaged(Analyser.TypeWithHandle){};
+
+    const pos_context = try Analyser.getPositionContext(allocator, handle.text, text_index, false);
 
     switch (pos_context) {
-        .var_access => |loc| {
-            const symbol_decl = try server.analyser.lookupSymbolGlobal(handle, text[loc.start..loc.end], loc.end) orelse return;
-            if (symbol_decl.decl.* != .ast_node) return;
+        .var_access => |loc| va: {
+            const symbol_decl = try server.analyser.lookupSymbolGlobal(handle, handle.text[loc.start..loc.end], loc.end) orelse break :va;
+            if (symbol_decl.decl.* != .ast_node) break :va;
             const nodes_tags = symbol_decl.handle.tree.nodes.items(.tag);
             if (nodes_tags[symbol_decl.decl.ast_node] == .fn_decl) {
                 var buf: [1]Ast.Node.Index = undefined;
-                const full_fn_proto = symbol_decl.handle.tree.fullFnProto(&buf, symbol_decl.decl.ast_node) orelse return;
+                const full_fn_proto = symbol_decl.handle.tree.fullFnProto(&buf, symbol_decl.decl.ast_node) orelse break :va;
                 var maybe_fn_param: ?Ast.full.FnProto.Param = undefined;
                 var fn_param_iter = full_fn_proto.iterate(&symbol_decl.handle.tree);
                 for (fn_arg_index + 1) |_| maybe_fn_param = ast.nextFnParam(&fn_param_iter);
-                const param = maybe_fn_param orelse return;
-                if (param.type_expr == 0) return;
-                try completeStructFields(
+                const param = maybe_fn_param orelse break :va;
+                if (param.type_expr == 0) break :va;
+                const param_rcts = try resolveContainer(
                     server,
                     symbol_decl.handle,
                     allocator,
-                    symbol_decl.handle.text,
                     offsets.nodeToLoc(symbol_decl.handle.tree, param.type_expr).end,
                     fn_arg_index,
-                    completions,
                 );
-                return;
+                for (param_rcts) |prct| try types_with_handles.append(allocator, prct);
+                allocator.free(param_rcts);
+                break :va;
             }
             const node_data = symbol_decl.handle.tree.nodes.items(.data)[symbol_decl.decl.ast_node];
-            if (node_data.rhs == 0) return;
+            if (node_data.rhs == 0) break :va;
             switch (nodes_tags[node_data.rhs]) {
                 // decl is `const Alias = @import("MyStruct.zig");`
                 .builtin_call_two => {
@@ -841,143 +818,287 @@ fn completeStructFields(
                         symbol_decl.handle.tree,
                         node_data.rhs,
                         &buffer,
-                    ) orelse return;
+                    ) orelse break :va;
 
                     const main_tokens = symbol_decl.handle.tree.nodes.items(.main_token);
                     const call_name = symbol_decl.handle.tree.tokenSlice(main_tokens[node_data.rhs]);
 
                     if (std.mem.eql(u8, call_name, "@import")) {
-                        if (params.len == 0) return;
+                        if (params.len == 0) break :va;
                         const import_param = params[0];
-                        if (nodes_tags[import_param] != .string_literal) return;
+                        if (nodes_tags[import_param] != .string_literal) break :va;
 
                         const import_str = symbol_decl.handle.tree.tokenSlice(main_tokens[import_param]);
                         const import_uri = try server.document_store.uriFromImportStr(
                             allocator,
                             symbol_decl.handle.*,
                             import_str[1 .. import_str.len - 1],
-                        ) orelse return;
+                        ) orelse break :va;
 
-                        const node_handle = server.document_store.getOrLoadHandle(import_uri) orelse return;
-                        var decl = Analyser.Declaration{ .ast_node = 0 };
-                        try collectContainerNodeFields(
-                            server,
-                            Analyser.DeclWithHandle{ .handle = node_handle, .decl = &decl },
-                            completions,
+                        const node_handle = server.document_store.getOrLoadHandle(import_uri) orelse break :va;
+                        try types_with_handles.append(
+                            allocator,
+                            Analyser.TypeWithHandle{
+                                .handle = node_handle,
+                                .type = .{
+                                    .data = .{ .other = 0 },
+                                    .is_type_val = true,
+                                },
+                            },
                         );
                     }
                 },
                 // decl is `const Alias = path.to.MyStruct` or `const Alias = @import("file.zig").MyStruct;`
                 .field_access => {
                     const node_loc = offsets.nodeToLoc(symbol_decl.handle.tree, node_data.rhs);
-                    try completeStructFields(
+                    const rcts = try resolveContainer(
                         server,
                         handle,
                         allocator,
-                        symbol_decl.handle.text,
                         node_loc.end,
                         fn_arg_index,
-                        completions,
                     );
+                    for (rcts) |rct| try types_with_handles.append(allocator, rct);
+                    allocator.free(rcts);
                 },
                 // decl is `const AliasB = AliasA;` (alias of an alias)
                 .identifier => {
                     const node_loc = offsets.nodeToLoc(symbol_decl.handle.tree, node_data.rhs);
-                    try completeStructFields(
+                    const rcts = try resolveContainer(
                         server,
                         handle,
                         allocator,
-                        symbol_decl.handle.text,
                         node_loc.end,
                         fn_arg_index,
-                        completions,
                     );
+                    for (rcts) |rct| try types_with_handles.append(allocator, rct);
+                    allocator.free(rcts);
                 },
-                // decl is `const MyStruct = struct {..}` which is a .simple_var_decl (check is in collectContainerNodeFields)
-                else => try collectContainerNodeFields(server, symbol_decl, completions),
+                // decl is `const MyStruct = struct {..};
+                else => {
+                    if (ast.isContainer(symbol_decl.handle.tree, node_data.rhs))
+                        try types_with_handles.append(
+                            allocator,
+                            Analyser.TypeWithHandle{
+                                .handle = symbol_decl.handle,
+                                .type = .{
+                                    .data = .{ .other = node_data.rhs },
+                                    .is_type_val = true,
+                                },
+                            },
+                        )
+                    else {
+                        const node_type = try server.analyser.resolveTypeOfNode(.{ .node = symbol_decl.decl.ast_node, .handle = symbol_decl.handle }) orelse break :va;
+                        for (try node_type.getAllTypesWithHandles(allocator)) |either| {
+                            const node = switch (either.type.data) {
+                                .other => |n| n,
+                                else => continue,
+                            };
+                            if (ast.isContainer(symbol_decl.handle.tree, node))
+                                try types_with_handles.append(
+                                    allocator,
+                                    Analyser.TypeWithHandle{
+                                        .handle = symbol_decl.handle,
+                                        .type = .{
+                                            .data = .{ .other = node },
+                                            .is_type_val = true,
+                                        },
+                                    },
+                                );
+                        }
+                    }
+                    //Analyser.DeclWithHandle{ .handle = symbol_decl.handle, .decl = .{.array_payload = .{}} };
+                },
             }
         },
-        .field_access => |loc| {
-            const decls = try server.getSymbolFieldAccesses(handle, loc.end, loc) orelse return;
+        .field_access => |loc| fa: {
+            const decls = try server.getSymbolFieldAccesses(handle, loc.end, loc) orelse break :fa;
             for (decls) |decl| {
-                switch (decl.decl.*) {
-                    .ast_node => |node| {
-                        const nodes_tags = decl.handle.tree.nodes.items(.tag);
-                        if (nodes_tags[node] == .fn_decl) {
-                            var buf: [1]Ast.Node.Index = undefined;
-                            const full_fn_proto = decl.handle.tree.fullFnProto(&buf, node) orelse continue;
-                            var maybe_fn_param: ?Ast.full.FnProto.Param = undefined;
-                            var fn_param_iter = full_fn_proto.iterate(&decl.handle.tree);
-                            // don't have the luxury of referencing an `Ast.full.Call`
-                            // check if the first symbol is a `T` or an instance_of_T
-                            const additional_index: usize = blk: {
-                                // NOTE: `loc` points to offsets within `handle`, not `decl.handle`
-                                const field_access_slice = handle.text[loc.start..loc.end];
-                                var symbol_iter = std.mem.tokenizeScalar(u8, field_access_slice, '.');
-                                const first_symbol = symbol_iter.next() orelse continue;
-                                const symbol_decl = try server.analyser.lookupSymbolGlobal(handle, first_symbol, loc.start) orelse continue;
-                                const symbol_type = try symbol_decl.resolveType(&server.analyser) orelse continue;
-                                if (!symbol_type.type.is_type_val) { // then => instance_of_T
-                                    if (try server.analyser.hasSelfParam(decl.handle, full_fn_proto)) break :blk 2;
-                                }
-                                break :blk 1; // is `T`, no SelfParam
-                            };
-                            for (fn_arg_index + additional_index) |_| maybe_fn_param = ast.nextFnParam(&fn_param_iter);
-                            const param = maybe_fn_param orelse continue;
-                            if (param.type_expr == 0) continue;
-                            try completeStructFields(
-                                server,
-                                decl.handle,
-                                allocator,
-                                decl.handle.text,
-                                offsets.nodeToLoc(decl.handle.tree, param.type_expr).end,
-                                fn_arg_index,
-                                completions,
-                            );
-                            continue;
-                        }
-                        const node_type = try server.analyser.resolveTypeOfNode(.{ .node = node, .handle = decl.handle }) orelse continue;
-                        if (node_type.isFunc()) {
-                            var buf: [1]Ast.Node.Index = undefined;
-                            const full_fn_proto = node_type.handle.tree.fullFnProto(&buf, node_type.type.data.other) orelse continue;
-                            var maybe_fn_param: ?Ast.full.FnProto.Param = undefined;
-                            var fn_param_iter = full_fn_proto.iterate(&node_type.handle.tree);
-                            // don't have the luxury of referencing an `Ast.full.Call`
-                            // check if the first symbol is a `T` or an instance_of_T
-                            const additional_index: usize = blk: {
-                                // NOTE: `loc` points to offsets within `handle`, not `node_type.decl.handle`
-                                const field_access_slice = handle.text[loc.start..loc.end];
-                                var symbol_iter = std.mem.tokenizeScalar(u8, field_access_slice, '.');
-                                const first_symbol = symbol_iter.next() orelse continue;
-                                const symbol_decl = try server.analyser.lookupSymbolGlobal(handle, first_symbol, loc.start) orelse continue;
-                                const symbol_type = try symbol_decl.resolveType(&server.analyser) orelse continue;
-                                if (!symbol_type.type.is_type_val) { // then => instance_of_T
-                                    if (try server.analyser.hasSelfParam(node_type.handle, full_fn_proto)) break :blk 2;
-                                }
-                                break :blk 1; // is `T`, no SelfParam
-                            };
-                            for (fn_arg_index + additional_index) |_| maybe_fn_param = ast.nextFnParam(&fn_param_iter);
-                            const param = maybe_fn_param orelse continue;
-                            if (param.type_expr == 0) continue;
-                            try completeStructFields(
-                                server,
-                                node_type.handle,
-                                allocator,
-                                node_type.handle.text,
-                                offsets.nodeToLoc(node_type.handle.tree, param.type_expr).end,
-                                fn_arg_index,
-                                completions,
-                            );
-                            continue;
-                        }
-                        try collectContainerNodeFields(server, decl, completions);
-                    },
+                const decl_node = switch (decl.decl.*) {
+                    .ast_node => |ast_node| ast_node,
                     else => continue,
+                };
+                const node_type = try server.analyser.resolveTypeOfNode(.{ .node = decl_node, .handle = decl.handle }) orelse continue;
+                if (node_type.isFunc()) {
+                    var buf: [1]Ast.Node.Index = undefined;
+                    const full_fn_proto = node_type.handle.tree.fullFnProto(&buf, node_type.type.data.other) orelse continue;
+                    var maybe_fn_param: ?Ast.full.FnProto.Param = undefined;
+                    var fn_param_iter = full_fn_proto.iterate(&node_type.handle.tree);
+                    // don't have the luxury of referencing an `Ast.full.Call`
+                    // check if the first symbol is a `T` or an instance_of_T
+                    const additional_index: usize = blk: {
+                        // NOTE: `loc` points to offsets within `handle`, not `node_type.decl.handle`
+                        const field_access_slice = handle.text[loc.start..loc.end];
+                        var symbol_iter = std.mem.tokenizeScalar(u8, field_access_slice, '.');
+                        const first_symbol = symbol_iter.next() orelse continue;
+                        const symbol_decl = try server.analyser.lookupSymbolGlobal(handle, first_symbol, loc.start) orelse continue;
+                        const symbol_type = try symbol_decl.resolveType(&server.analyser) orelse continue;
+                        if (!symbol_type.type.is_type_val) { // then => instance_of_T
+                            if (try server.analyser.hasSelfParam(node_type.handle, full_fn_proto)) break :blk 2;
+                        }
+                        break :blk 1; // is `T`, no SelfParam
+                    };
+                    for (fn_arg_index + additional_index) |_| maybe_fn_param = ast.nextFnParam(&fn_param_iter);
+                    const param = maybe_fn_param orelse continue;
+                    if (param.type_expr == 0) continue;
+                    const param_rcts = try resolveContainer(
+                        server,
+                        node_type.handle,
+                        allocator,
+                        offsets.nodeToLoc(node_type.handle.tree, param.type_expr).end,
+                        fn_arg_index,
+                    );
+                    for (param_rcts) |prct| try types_with_handles.append(allocator, prct);
+                    allocator.free(param_rcts);
+                    continue;
+                }
+                switch (node_type.type.data) {
+                    .other => |n| if (ast.isContainer(node_type.handle.tree, n)) {
+                        try types_with_handles.append(allocator, node_type);
+                        continue;
+                    },
+                    else => {},
+                }
+                for (try node_type.getAllTypesWithHandles(allocator)) |either| {
+                    const enode = switch (either.type.data) {
+                        .other => |n| n,
+                        else => continue,
+                    };
+                    if (ast.isContainer(node_type.handle.tree, enode))
+                        try types_with_handles.append(
+                            allocator,
+                            Analyser.TypeWithHandle{
+                                .handle = node_type.handle,
+                                .type = .{
+                                    .data = .{ .other = enode },
+                                    .is_type_val = true,
+                                },
+                            },
+                        );
                 }
             }
         },
-        else => return, // <- `else =>` of `switch (pos_context)`
+        .enum_literal => |loc| el: {
+            const alleged_field_name = handle.text[loc.start + 1 .. loc.end];
+            const dot_index = offsets.sourceIndexToTokenIndex(handle.tree, loc.start);
+            var field_fn_arg_index: usize = 0;
+            const id_token_index = getIdentifierTokenIndexAndFnArgIndex(handle.tree, dot_index, &field_fn_arg_index) orelse break :el;
+            const containers = try resolveContainer(
+                server,
+                handle,
+                allocator,
+                handle.tree.tokens.items(.start)[id_token_index],
+                field_fn_arg_index,
+            );
+            for (containers) |container| {
+                const node = switch (container.type.data) {
+                    .other => |n| n,
+                    else => continue,
+                };
+                var buffer: [2]Ast.Node.Index = undefined;
+                const container_decl = Ast.fullContainerDecl(container.handle.tree, &buffer, node) orelse continue;
+                for (container_decl.ast.members) |member| {
+                    const field = container.handle.tree.fullContainerField(member) orelse continue;
+                    if (std.mem.eql(u8, container.handle.tree.tokenSlice(field.ast.main_token), alleged_field_name)) {
+                        if (ast.isContainer(container.handle.tree, field.ast.type_expr)) {
+                            try types_with_handles.append(
+                                allocator,
+                                Analyser.TypeWithHandle{
+                                    .handle = container.handle,
+                                    .type = .{
+                                        .data = .{ .other = field.ast.type_expr },
+                                        .is_type_val = true,
+                                    },
+                                },
+                            );
+                            continue;
+                        }
+                        const end = offsets.tokenToLoc(container.handle.tree, ast.lastToken(container.handle.tree, field.ast.type_expr)).end;
+                        const param_rcts = try resolveContainer(
+                            server,
+                            container.handle,
+                            allocator,
+                            end,
+                            fn_arg_index,
+                        );
+                        for (param_rcts) |prct| try types_with_handles.append(allocator, prct);
+                        allocator.free(param_rcts);
+                    }
+                }
+            }
+        },
+        else => {}, // <- `else =>` of `switch (pos_context)`
     }
+    return types_with_handles.toOwnedSlice(allocator);
+}
+
+/// Looks for an identifier that can be passed to `resolveContainer()`
+/// Returns the token index of the identifer
+/// If the identifier is a `fn_name`, `fn_arg_index` is the index of the fn's param
+fn getIdentifierTokenIndexAndFnArgIndex(
+    tree: Ast,
+    dot_index: usize,
+    fn_arg_index_out: *usize,
+) ?usize {
+    // at least 3 tokens should be present, `x{.`
+    if (dot_index < 2) return null;
+    const token_tags = tree.tokens.items(.tag);
+    // pedantic check (can be removed if the "generic exit" conditions below are made to cover more/all cases)
+    if (token_tags[dot_index] != .period) return null;
+    var upper_index = dot_index - 1;
+    // This prevents completions popping up for `x{.field.`
+    if (token_tags[upper_index] == .identifier) return null;
+    // This prevents completions popping up for `x{.field = .`, ie it would suggest `field` again
+    // in this case `fn completeDot` would still provide enum completions
+    if (token_tags[upper_index] == .equal) return null;
+
+    var fn_arg_index: usize = 0;
+
+    // look for .identifier followed by .l_brace, skipping matches at depth 0+
+    var depth: i32 = 0; // Should end up being negative, ie even the first/single .l_brace would put it at -1; 0+ => nested
+    find_identifier: while (upper_index > 0) {
+        if (token_tags[upper_index] != .identifier) {
+            switch (token_tags[upper_index]) {
+                .r_brace => depth += 1,
+                .l_brace => depth -= 1,
+                .period => if (depth < 0 and token_tags[upper_index + 1] == .l_brace) { // anon struct init `.{.`
+                    // if the preceding token is `=`, then this might be a `var foo: Foo = .{.`
+                    if (token_tags[upper_index - 1] == .equal) {
+                        upper_index -= 2; // eat `= .`
+                        break :find_identifier;
+                    }
+                    var num_braces: i32 = 0;
+                    var num_parens: i32 = 0;
+                    while (upper_index > 0) : (upper_index -= 1) {
+                        switch (token_tags[upper_index]) {
+                            .r_brace => num_braces += 1,
+                            .l_brace => num_braces -= 1,
+                            .r_paren => num_parens += 1,
+                            .l_paren => {
+                                num_parens -= 1;
+                                if (num_parens < 0) {
+                                    upper_index -= 1;
+                                    break :find_identifier;
+                                }
+                            },
+                            .semicolon => return null, // generic exit; maybe also .keyword_(var/const)
+                            .comma => if (num_braces == 0 and num_parens == 0) { // those only matter when outside of braces or parens
+                                fn_arg_index += 1;
+                            },
+                            else => {},
+                        }
+                    }
+                    break :find_identifier;
+                },
+                .semicolon => return null, // generic exit; maybe also .keyword_(var/const)
+                else => {},
+            }
+        } else if (token_tags[upper_index + 1] == .l_brace and depth < 0) break :find_identifier;
+        upper_index -= 1;
+    }
+
+    fn_arg_index_out.* = fn_arg_index;
+    return upper_index;
 }
 
 fn completeDot(server: *Server, handle: *const DocumentStore.Handle, source_index: usize) error{OutOfMemory}![]types.CompletionItem {
@@ -986,103 +1107,45 @@ fn completeDot(server: *Server, handle: *const DocumentStore.Handle, source_inde
 
     const allocator = server.arena.allocator();
 
+    const tree = handle.tree;
+    const token_tags = tree.tokens.items(.tag);
+
+    // as invoked source_index points to the char/token after the `.`, do `- 1`
+    var token_index = offsets.sourceIndexToTokenIndex(tree, source_index - 1);
+
+    var completions = std.ArrayListUnmanaged(types.CompletionItem){};
+
     struct_init: {
-        const tree = handle.tree;
-        const tokens_start = tree.tokens.items(.start);
-
-        var upper_index = tokens_start.len - 1;
-        const mid = upper_index / 2;
-        const mid_tok_start = tokens_start[mid];
-        if (mid_tok_start < source_index) {
-            // std.log.debug("source_index is in upper half", .{});
-            const quart_index = mid + (mid / 2);
-            const quart_tok_start = tokens_start[quart_index];
-            if (quart_tok_start < source_index) {
-                // std.log.debug("source_index is in upper fourth", .{});
-            } else {
-                upper_index = quart_index;
-                // std.log.debug("source_index is in upper third", .{});
-            }
-        } else {
-            // std.log.debug("source_index is in lower half", .{});
-            const quart_index = mid / 2;
-            const quart_tok_start = tokens_start[quart_index];
-            if (quart_tok_start < source_index) {
-                // std.log.debug("source_index is in second quarth", .{});
-                upper_index = mid;
-            } else {
-                // std.log.debug("source_index is in first quarth", .{});
-                upper_index = quart_index;
-            }
-        }
-
-        // iterate until we find current token loc (should be a .period)
-        while (upper_index > 0) : (upper_index -= 1) {
-            if (tokens_start[upper_index] > source_index) continue;
-            upper_index -= 1;
-            break;
-        }
-
-        const token_tags = tree.tokens.items(.tag);
-
-        if (token_tags[upper_index] == .number_literal) break :struct_init; // `var s = MyStruct{.float_field = 1.`
+        // This prevents completions popping up for floating point numbers
+        // but I discovered it is a very helpful parser workaround to enable providing completions
+        // for struct that are declared after the current block !
+        // The fact that the logic outside this block (struct_init) already pops up completions for
+        // floating point numbers, ie `var a = `1.m` will pop up completions for `m*`, makes me think
+        // this hasn't been an issue for many ..
+        // if (token_tags[token_index - 1] == .number_literal) break :struct_init; // `var s = MyStruct{.float_field = 1.`
 
         var fn_arg_index: usize = 0;
+        token_index = getIdentifierTokenIndexAndFnArgIndex(tree, token_index, &fn_arg_index) orelse break :struct_init;
+        if (token_index == 0) break :struct_init;
 
-        // look for .identifier followed by .l_brace, skipping matches at depth 0+
-        var depth: i32 = 0; // Should end up being negative, ie even the first/single .l_brace would put it at -1; 0+ => nested
-        find_identifier: while (upper_index > 0) {
-            if (token_tags[upper_index] != .identifier) {
-                switch (token_tags[upper_index]) {
-                    .r_brace => depth += 1,
-                    .l_brace => depth -= 1,
-                    .period => if (depth < 0 and token_tags[upper_index + 1] == .l_brace) { // anon struct init `.{.`
-                        // if the preceding token is `=`, then this might be a `var foo: Foo = .{.`
-                        if (token_tags[upper_index - 1] == .equal) {
-                            upper_index -= 2; // eat `= .`
-                            break :find_identifier;
-                        }
-                        var num_braces: i32 = 0;
-                        var num_parens: i32 = 0;
-                        while (upper_index > 0) : (upper_index -= 1) {
-                            switch (token_tags[upper_index]) {
-                                .r_brace => num_braces += 1,
-                                .l_brace => num_braces -= 1,
-                                .r_paren => num_parens += 1,
-                                .l_paren => {
-                                    num_parens -= 1;
-                                    if (num_parens < 0) {
-                                        upper_index -= 1;
-                                        break :find_identifier;
-                                    }
-                                },
-                                .semicolon => break :struct_init, // generic exit; maybe also .keyword_(var/const)
-                                .comma => if (num_braces == 0 and num_parens == 0) { // those only matter when outside of braces or parens
-                                    fn_arg_index += 1;
-                                },
-                                else => {},
-                            }
-                        }
-                        break :find_identifier;
-                    },
-                    .semicolon => break :struct_init, // generic exit; maybe also .keyword_(var/const)
-                    else => {},
-                }
-            } else if (token_tags[upper_index + 1] == .l_brace and depth < 0) break :find_identifier;
-            upper_index -= 1;
-        }
+        const containers = try resolveContainer(
+            server,
+            handle,
+            allocator,
+            tree.tokens.items(.start)[token_index],
+            fn_arg_index,
+        );
 
-        if (upper_index == 0) break :struct_init;
-
-        var completions = std.ArrayListUnmanaged(types.CompletionItem){};
-
-        try completeStructFields(server, handle, allocator, handle.text, tokens_start[upper_index], fn_arg_index, &completions);
+        for (containers) |container| try collectContainerFields(server, container, &completions);
 
         if (completions.items.len != 0) return completions.toOwnedSlice(allocator);
     }
 
-    var completions = try server.document_store.enumCompletionItems(allocator, handle.*);
-    return completions;
+    // This prevents completions popping up for floats; token/source_index points to the token/char after the `.`, => `- 2`
+    if ((token_index > 1) and (token_tags[token_index - 2] == .number_literal)) return completions.toOwnedSlice(allocator);
+
+    var enum_completions = try server.document_store.enumCompletionItems(allocator, handle.*);
+    return enum_completions;
 }
 
 fn completeFileSystemStringLiteral(

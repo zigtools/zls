@@ -54,6 +54,66 @@ pub fn positionToIndex(text: []const u8, position: types.Position, encoding: Enc
     return line_start_index + line_byte_length;
 }
 
+pub fn sourceIndexToTokenIndex(tree: Ast, source_index: usize) usize {
+    std.debug.assert(source_index < tree.source.len);
+
+    const tokens_start = tree.tokens.items(.start);
+    var upper_index = tokens_start.len - 1;
+    var mid: usize = upper_index / 2;
+
+    if (tokens_start.len < 600) {
+        const mid_tok_start = tokens_start[mid];
+        if (mid_tok_start < source_index) { // source_index is in upper half
+            const quart_index = mid + (mid / 2);
+            const quart_tok_start = tokens_start[quart_index];
+            if (quart_tok_start < source_index) { // source_index is in upper fourth
+            } else { // source_index is in upper third
+                upper_index = quart_index;
+            }
+        } else { // source_index is in lower half
+            const quart_index = mid / 2;
+            const quart_tok_start = tokens_start[quart_index];
+            if (quart_tok_start < source_index) { // source_index is in second/4
+                upper_index = mid;
+            } else { // source_index is in first/4
+                upper_index = quart_index;
+            }
+        }
+    } else {
+        // at which point to stop dividing and just iterate
+        // good results w/ 128 as well, anything lower/higher and the cost of
+        // dividing overruns the cost of iterating and vice versa
+        const threshold = 168;
+
+        var lower_index: usize = 0;
+        while (true) {
+            const mid_tok_start = tokens_start[mid];
+            if (mid_tok_start < source_index) { // source_index is in upper half
+                if ((upper_index - mid) < threshold) break;
+                lower_index = mid; // raise the lower_index to mid
+            } else { // source_index is in lower half
+                upper_index = mid; // lower the upper_index to mid
+                if ((mid - lower_index) < threshold) break;
+            }
+            mid = lower_index + (upper_index - lower_index) / 2;
+        }
+    }
+    while (upper_index > 0) : (upper_index -= 1) {
+        var token_start = tokens_start[upper_index];
+        if (token_start > source_index) continue; // checking for equality here is suboptimal
+        // check if source_index is within current token
+        //  `token_start - 1` to include it's loc.start source_index and avoid the equality part of the check
+        //  because the above `if` doesn't check for equality upper_index ends up always `< last/max index`,
+        //  and the check below doesn't overflow => ie if upper_index is the last index and even if
+        //  token_start == source_index => another iteration, `(upper_index -= 1)`
+        const is_within_current_token = (source_index > (token_start - 1)) and (source_index < tokens_start[upper_index + 1]);
+        if (!is_within_current_token) upper_index += 1; // gone 1 past
+        break;
+    }
+
+    return upper_index;
+}
+
 pub fn tokenToIndex(tree: Ast, token_index: Ast.TokenIndex) usize {
     return tree.tokens.items(.start)[token_index];
 }

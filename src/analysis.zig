@@ -1764,7 +1764,7 @@ pub const PositionContext = union(enum) {
     field_access: offsets.Loc,
     var_access: offsets.Loc,
     global_error_set,
-    enum_literal,
+    enum_literal: offsets.Loc,
     pre_label,
     label: bool,
     other,
@@ -1780,7 +1780,7 @@ pub const PositionContext = union(enum) {
             .string_literal => |r| r,
             .field_access => |r| r,
             .var_access => |r| r,
-            .enum_literal => null,
+            .enum_literal => |r| r,
             .pre_label => null,
             .label => null,
             .other => null,
@@ -1921,6 +1921,9 @@ pub fn getPositionContext(
                     } else {
                         curr_ctx.ctx = .{ .var_access = tok.loc };
                     },
+                    .enum_literal => curr_ctx.ctx = .{
+                        .enum_literal = tokenLocAppend(curr_ctx.ctx.loc().?, tok),
+                    },
                     else => {},
                 },
                 .builtin => switch (curr_ctx.ctx) {
@@ -1928,7 +1931,7 @@ pub fn getPositionContext(
                     else => {},
                 },
                 .period, .period_asterisk => switch (curr_ctx.ctx) {
-                    .empty, .pre_label => curr_ctx.ctx = .enum_literal,
+                    .empty, .pre_label => curr_ctx.ctx = .{ .enum_literal = tok.loc },
                     .enum_literal => curr_ctx.ctx = .empty,
                     .field_access => {},
                     .other => {},
