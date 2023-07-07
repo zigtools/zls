@@ -104,6 +104,7 @@ fn nodeToCompletion(
     const handle = node_handle.handle;
     const tree = handle.tree;
     const node_tags = tree.nodes.items(.tag);
+    const datas = tree.nodes.items(.data);
     const token_tags = tree.tokens.items(.tag);
 
     const doc_kind: types.MarkupKind = if (server.client_capabilities.completion_doc_supports_md)
@@ -143,6 +144,18 @@ fn nodeToCompletion(
             context,
             !is_type_val,
         );
+    }
+
+    switch (node_tags[node]) {
+        .merge_error_sets => {
+            if (try server.analyser.resolveTypeOfNode(.{ .node = datas[node].lhs, .handle = handle })) |ty| {
+                try typeToCompletion(server, list, .{ .original = ty }, orig_handle, either_descriptor);
+            }
+            if (try server.analyser.resolveTypeOfNode(.{ .node = datas[node].rhs, .handle = handle })) |ty| {
+                try typeToCompletion(server, list, .{ .original = ty }, orig_handle, either_descriptor);
+            }
+        },
+        else => {},
     }
 
     if (is_type_val) return;

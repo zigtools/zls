@@ -331,7 +331,7 @@ test "completion - enum" {
     });
 }
 
-test "completion - error union" {
+test "completion - error set" {
     try testCompletion(
         \\const E = error {
         \\    Foo,
@@ -353,7 +353,45 @@ test "completion - error union" {
         .{ .label = "foo", .kind = .Constant, .detail = "error.foo" },
         .{ .label = "bar", .kind = .Constant, .detail = "error.bar" },
     });
+}
 
+test "completion - merged error sets" {
+    try testCompletion(
+        \\const FirstSet = error{
+        \\    X,
+        \\    Y,
+        \\};
+        \\const SecondSet = error{
+        \\    Foo,
+        \\    Bar,
+        \\} || FirstSet;
+        \\const e = error.<cursor>
+    , &.{
+        .{ .label = "X", .kind = .Constant, .detail = "error.X" },
+        .{ .label = "Y", .kind = .Constant, .detail = "error.Y" },
+        .{ .label = "Foo", .kind = .Constant, .detail = "error.Foo" },
+        .{ .label = "Bar", .kind = .Constant, .detail = "error.Bar" },
+    });
+
+    try testCompletion(
+        \\const FirstSet = error{
+        \\    x,
+        \\    y,
+        \\};
+        \\const SecondSet = error{
+        \\    foo,
+        \\    bar,
+        \\} || FirstSet;
+        \\const e = SecondSet.<cursor>
+    , &.{
+        .{ .label = "x", .kind = .Constant, .detail = "error.x" },
+        .{ .label = "y", .kind = .Constant, .detail = "error.y" },
+        .{ .label = "foo", .kind = .Constant, .detail = "error.foo" },
+        .{ .label = "bar", .kind = .Constant, .detail = "error.bar" },
+    });
+}
+
+test "completion - error union" {
     try testCompletion(
         \\const S = struct { alpha: u32 };
         \\fn foo() error{Foo}!S {}
