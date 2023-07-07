@@ -428,19 +428,19 @@ test "position context - enum literal" {
         \\var foo = .<cursor>tag;
     ,
         .enum_literal,
-        null,
+        ".t",
     );
     try testContext(
         \\var foo = .ta<cursor>g;
     ,
         .enum_literal,
-        null,
+        ".tag",
     );
     try testContext(
         \\var foo = .tag<cursor>;
     ,
         .enum_literal,
-        null,
+        ".tag",
     );
     try testContext(
         \\var foo = <cursor>.;
@@ -452,7 +452,7 @@ test "position context - enum literal" {
         \\var foo = .<cursor>;
     ,
         .enum_literal,
-        null,
+        ".",
     );
 }
 
