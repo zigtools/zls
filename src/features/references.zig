@@ -87,6 +87,7 @@ const Builder = struct {
             .builder = self,
             .handle = handle,
         };
+        try referenceNode(&context, handle.tree, node);
         try ast.iterateChildrenRecursive(handle.tree, node, &context, error{OutOfMemory}, referenceNode);
     }
 
@@ -244,6 +245,9 @@ pub fn symbolReferences(
                 while (ast.nextFnParam(&it)) |candidate| {
                     if (!std.meta.eql(candidate, payload.param)) continue;
 
+                    while (ast.nextFnParam(&it)) |param|
+                        try builder.collectReferences(curr_handle, param.type_expr);
+                    try builder.collectReferences(curr_handle, fn_proto.ast.return_type);
                     if (curr_handle.tree.nodes.items(.tag)[proto] != .fn_decl) break :blk;
                     try builder.collectReferences(curr_handle, curr_handle.tree.nodes.items(.data)[proto].rhs);
                     break :blk;

@@ -138,6 +138,15 @@ test "references - asm" {
     );
 }
 
+test "references - function header" {
+    try testReferences(
+        \\fn foo(<0>: anytype) @TypeOf(<0>) {}
+    );
+    try testReferences(
+        \\fn foo(<0>: type, bar: <0>) <0> {}
+    );
+}
+
 test "references - cross-file reference" {
     if (true) return error.SkipZigTest; // TODO
     try testMFReferences(&.{
