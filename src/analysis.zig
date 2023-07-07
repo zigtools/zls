@@ -540,16 +540,23 @@ fn resolveUnwrapOptionalType(analyser: *Analyser, opt: TypeWithHandle) !?TypeWit
     return null;
 }
 
-fn resolveUnwrapErrorType(analyser: *Analyser, rhs: TypeWithHandle) !?TypeWithHandle {
+fn resolveUnwrapErrorUnionType(analyser: *Analyser, rhs: TypeWithHandle, side: ErrorUnionSide) !?TypeWithHandle {
     const rhs_node = switch (rhs.type.data) {
         .other => |n| n,
-        .error_union => |t| return t.*,
+        .error_union => |t| return switch (side) {
+            .left => null,
+            .right => t.*,
+        },
         .primitive, .slice, .pointer, .array_index, .@"comptime", .either => return null,
     };
 
     if (rhs.handle.tree.nodes.items(.tag)[rhs_node] == .error_union) {
+        const data = rhs.handle.tree.nodes.items(.data)[rhs_node];
         return ((try analyser.resolveTypeOfNodeInternal(.{
-            .node = rhs.handle.tree.nodes.items(.data)[rhs_node].rhs,
+            .node = switch (side) {
+                .left => data.lhs,
+                .right => data.rhs,
+            },
             .handle = rhs.handle,
         })) orelse return null).instanceTypeVal();
     }
@@ -919,8 +926,8 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 .unwrap_optional => try analyser.resolveUnwrapOptionalType(base_type),
                 .array_access => try analyser.resolveBracketAccessType(base_type, .Single),
                 .@"orelse" => try analyser.resolveUnwrapOptionalType(base_type),
-                .@"catch" => try analyser.resolveUnwrapErrorType(base_type),
-                .@"try" => try analyser.resolveUnwrapErrorType(base_type),
+                .@"catch" => try analyser.resolveUnwrapErrorUnionType(base_type, .right),
+                .@"try" => try analyser.resolveUnwrapErrorUnionType(base_type, .right),
                 .address_of => {
                     const base_type_ptr = try analyser.arena.allocator().create(TypeWithHandle);
                     base_type_ptr.* = base_type;
@@ -1998,6 +2005,8 @@ pub fn getPositionContext(
     return if (tok.tag == .identifier) PositionContext{ .var_access = tok.loc } else .empty;
 }
 
+pub const ErrorUnionSide = enum { left, right };
+
 pub const Declaration = union(enum) {
     /// Index of the ast node
     ast_node: Ast.Node.Index,
@@ -2010,6 +2019,11 @@ pub const Declaration = union(enum) {
     pointer_payload: struct {
         name: Ast.TokenIndex,
         condition: Ast.Node.Index,
+    },
+    error_union_payload: struct {
+        name: Ast.TokenIndex,
+        condition: ?Ast.Node.Index,
+        side: ErrorUnionSide,
     },
     array_payload: struct {
         identifier: Ast.TokenIndex,
@@ -2049,6 +2063,7 @@ pub const DeclWithHandle = struct {
             .ast_node => |n| getDeclNameToken(tree, n).?,
             .param_payload => |pp| pp.param.name_token.?,
             .pointer_payload => |pp| pp.name,
+            .error_union_payload => |ep| ep.name,
             .array_payload => |ap| ap.identifier,
             .array_index => |ai| ai,
             .switch_payload => |sp| sp.node,
@@ -2157,6 +2172,13 @@ pub const DeclWithHandle = struct {
                     .node = pay.condition,
                     .handle = self.handle,
                 })) orelse return null,
+            ),
+            .error_union_payload => |pay| try analyser.resolveUnwrapErrorUnionType(
+                (try analyser.resolveTypeOfNodeInternal(.{
+                    .node = pay.condition orelse return null,
+                    .handle = self.handle,
+                })) orelse return null,
+                pay.side,
             ),
             .array_payload => |pay| try analyser.resolveBracketAccessType(
                 (try analyser.resolveTypeOfNodeInternal(.{
@@ -3237,11 +3259,11 @@ fn makeScopeAt(
                 std.debug.assert(token_tags[name_token] == .identifier);
 
                 const name = tree.tokenSlice(name_token);
-                try context.putDecl(
-                    then_scope,
-                    name,
-                    .{ .pointer_payload = .{ .name = name_token, .condition = if_node.ast.cond_expr } },
-                );
+                const decl: Declaration = if (if_node.ast.else_expr != 0)
+                    .{ .error_union_payload = .{ .name = name_token, .condition = if_node.ast.cond_expr, .side = .right } }
+                else
+                    .{ .pointer_payload = .{ .name = name_token, .condition = if_node.ast.cond_expr } };
+                try context.putDecl(then_scope, name, decl);
             }
 
             if (if_node.ast.else_expr != 0) {
@@ -3249,7 +3271,9 @@ fn makeScopeAt(
                 const else_scope = (try makeBlockScopeAt(context, tree, if_node.ast.else_expr, else_start)).?;
                 if (if_node.error_token) |err_token| {
                     const name = tree.tokenSlice(err_token);
-                    try context.putDecl(else_scope, name, .{ .ast_node = if_node.ast.else_expr });
+                    try context.putDecl(else_scope, name, .{
+                        .error_union_payload = .{ .name = err_token, .condition = if_node.ast.cond_expr, .side = .left },
+                    });
                 }
             }
         },
@@ -3263,7 +3287,9 @@ fn makeScopeAt(
             {
                 const expr_scope = (try makeBlockScopeAt(context, tree, data[node_idx].rhs, catch_token)).?;
                 const name = tree.tokenSlice(catch_token);
-                try context.putDecl(expr_scope, name, .{ .ast_node = data[node_idx].rhs });
+                try context.putDecl(expr_scope, name, .{
+                    .error_union_payload = .{ .name = catch_token, .condition = data[node_idx].lhs, .side = .left },
+                });
             } else {
                 try makeScopeInternal(context, tree, data[node_idx].rhs);
             }
@@ -3300,12 +3326,10 @@ fn makeScopeAt(
                 std.debug.assert(token_tags[name_token] == .identifier);
 
                 const name = tree.tokenSlice(name_token);
-                const decl: Declaration = .{
-                    .pointer_payload = .{
-                        .name = name_token,
-                        .condition = while_node.ast.cond_expr,
-                    },
-                };
+                const decl: Declaration = if (while_node.error_token != null)
+                    .{ .error_union_payload = .{ .name = name_token, .condition = while_node.ast.cond_expr, .side = .right } }
+                else
+                    .{ .pointer_payload = .{ .name = name_token, .condition = while_node.ast.cond_expr } };
                 if (cont_scope) |index| {
                     try context.putDecl(index, name, decl);
                 }
@@ -3315,7 +3339,9 @@ fn makeScopeAt(
             if (while_node.error_token) |err_token| {
                 std.debug.assert(token_tags[err_token] == .identifier);
                 const name = tree.tokenSlice(err_token);
-                try context.putDecl(else_scope.?, name, .{ .ast_node = while_node.ast.else_expr });
+                try context.putDecl(else_scope.?, name, .{
+                    .error_union_payload = .{ .name = err_token, .condition = while_node.ast.cond_expr, .side = .left },
+                });
             }
         },
         .@"for",
@@ -3394,7 +3420,9 @@ fn makeScopeAt(
 
             if (payload_token != 0) {
                 const name = tree.tokenSlice(payload_token);
-                try context.putDecl(expr_scope, name, .{ .ast_node = data[node_idx].rhs });
+                try context.putDecl(expr_scope, name, .{
+                    .error_union_payload = .{ .name = payload_token, .condition = null, .side = .left },
+                });
             }
         },
         else => {
