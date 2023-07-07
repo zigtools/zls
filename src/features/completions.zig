@@ -85,6 +85,32 @@ fn typeToCompletion(
     }
 }
 
+fn completionDoc(
+    server: *Server,
+    either_descriptor: ?[]const u8,
+    doc_comments: ?[]const u8,
+) error{OutOfMemory}!@TypeOf(@as(types.CompletionItem, undefined).documentation) {
+    var list = std.ArrayList(u8).init(server.arena.allocator());
+    const writer = list.writer();
+
+    if (either_descriptor) |ed|
+        try writer.print("`Conditionally available: {s}`", .{ed});
+
+    if (doc_comments) |dc| {
+        if (either_descriptor != null)
+            try writer.writeAll("\n\n");
+        try writer.writeAll(dc);
+    }
+
+    if (list.items.len == 0)
+        return null;
+
+    return .{ .MarkupContent = types.MarkupContent{
+        .kind = if (server.client_capabilities.completion_doc_supports_md) .markdown else .plaintext,
+        .value = list.items,
+    } };
+}
+
 fn nodeToCompletion(
     server: *Server,
     list: *std.ArrayListUnmanaged(types.CompletionItem),
@@ -107,27 +133,11 @@ fn nodeToCompletion(
     const datas = tree.nodes.items(.data);
     const token_tags = tree.tokens.items(.tag);
 
-    const doc_kind: types.MarkupKind = if (server.client_capabilities.completion_doc_supports_md)
-        .markdown
-    else
-        .plaintext;
-
-    const Documentation = @TypeOf(@as(types.CompletionItem, undefined).documentation);
-
-    const doc: Documentation = if (try Analyser.getDocComments(
-        allocator,
-        handle.tree,
-        node,
-    )) |doc_comments| .{ .MarkupContent = types.MarkupContent{
-        .kind = doc_kind,
-        .value = if (either_descriptor) |ed|
-            try std.fmt.allocPrint(allocator, "`Conditionally available: {s}`\n\n{s}", .{ ed, doc_comments })
-        else
-            doc_comments,
-    } } else (if (either_descriptor) |ed| .{ .MarkupContent = types.MarkupContent{
-        .kind = doc_kind,
-        .value = try std.fmt.allocPrint(allocator, "`Conditionally available: {s}`", .{ed}),
-    } } else null);
+    const doc = try completionDoc(
+        server,
+        either_descriptor,
+        try Analyser.getDocComments(allocator, handle.tree, node),
+    );
 
     if (ast.isContainer(handle.tree, node)) {
         const context = DeclToCompletionContext{
@@ -358,17 +368,15 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: Analyser.Decl
             context.either_descriptor,
         ),
         .param_payload => |pay| {
-            const Documentation = @TypeOf(@as(types.CompletionItem, undefined).documentation);
-
             const param = pay.param;
-            const doc_kind: types.MarkupKind = if (context.server.client_capabilities.completion_doc_supports_md) .markdown else .plaintext;
-            const doc: Documentation = if (param.first_doc_comment) |doc_comments| .{ .MarkupContent = types.MarkupContent{
-                .kind = doc_kind,
-                .value = if (context.either_descriptor) |ed|
-                    try std.fmt.allocPrint(allocator, "`Conditionally available: {s}`\n\n{s}", .{ ed, try Analyser.collectDocComments(allocator, tree, doc_comments, false) })
+            const doc = try completionDoc(
+                context.server,
+                context.either_descriptor,
+                if (param.first_doc_comment) |doc_comments|
+                    try Analyser.collectDocComments(allocator, tree, doc_comments, false)
                 else
-                    try Analyser.collectDocComments(allocator, tree, doc_comments, false),
-            } } else null;
+                    null,
+            );
 
             try context.completions.append(allocator, .{
                 .label = tree.tokenSlice(param.name_token.?),
@@ -395,12 +403,18 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: Analyser.Decl
                 .insertTextFormat = .PlainText,
             });
         },
-        .error_token => {
-            const name = tree.tokenSlice(decl_handle.decl.error_token);
+        .error_token => |token| {
+            const name = tree.tokenSlice(token);
+            const doc = try completionDoc(
+                context.server,
+                context.either_descriptor,
+                try Analyser.getDocCommentsBeforeToken(allocator, tree, token),
+            );
 
             try context.completions.append(allocator, .{
                 .label = name,
                 .kind = .Constant,
+                .documentation = doc,
                 .detail = try std.fmt.allocPrint(allocator, "error.{s}", .{name}),
                 .insertText = name,
                 .insertTextFormat = .PlainText,
