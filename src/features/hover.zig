@@ -82,6 +82,7 @@ pub fn hoverSymbol(server: *Server, decl_handle: Analyser.DeclWithHandle, markup
             break :def ast.paramSlice(tree, param);
         },
         .pointer_payload,
+        .error_union_payload,
         .array_payload,
         .array_index,
         .switch_payload,

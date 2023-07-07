@@ -219,6 +219,7 @@ pub fn symbolReferences(
     switch (decl_handle.decl.*) {
         .ast_node,
         .pointer_payload,
+        .error_union_payload,
         .switch_payload,
         .array_payload,
         .array_index,
