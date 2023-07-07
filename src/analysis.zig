@@ -65,6 +65,7 @@ pub fn getDocComments(allocator: std.mem.Allocator, tree: Ast, node: Ast.Node.In
         .aligned_var_decl,
         .simple_var_decl,
         .container_field_init,
+        .container_field_align,
         .container_field,
         => {
             if (getDocCommentTokenIndex(tokens, base)) |doc_comment_index|
