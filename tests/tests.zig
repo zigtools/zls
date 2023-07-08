@@ -7,7 +7,7 @@ comptime {
     _ = @import("utility/uri.zig");
     _ = @import("utility/diff.zig");
 
-    // TODO Lifecycle Messages
+    _ = @import("lifecycle.zig");
 
     // TODO Document Synchronization
 
