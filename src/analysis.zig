@@ -259,13 +259,18 @@ pub fn hasSelfParam(analyser: *Analyser, handle: *const DocumentStore.Handle, fu
 }
 
 pub fn getVariableSignature(tree: Ast, var_decl: Ast.full.VarDecl) []const u8 {
+    const start_token = var_decl.ast.mut_token;
     const end_token = blk: {
-        if (var_decl.ast.init_node == 0)
-            break :blk var_decl.ast.mut_token + 1;
+        const init_node = var_decl.ast.init_node;
+        if (init_node == 0)
+            break :blk start_token + 1;
+
+        if (tree.nodes.items(.tag)[init_node] == .error_set_decl)
+            break :blk tree.nodes.items(.main_token)[init_node];
 
         var buf: [2]Ast.Node.Index = undefined;
-        const container_decl = tree.fullContainerDecl(&buf, var_decl.ast.init_node) orelse
-            break :blk ast.lastToken(tree, var_decl.ast.init_node);
+        const container_decl = tree.fullContainerDecl(&buf, init_node) orelse
+            break :blk ast.lastToken(tree, init_node);
 
         var token = container_decl.ast.main_token;
         var offset: Ast.TokenIndex = 0;
@@ -284,7 +289,7 @@ pub fn getVariableSignature(tree: Ast, var_decl: Ast.full.VarDecl) []const u8 {
 
         break :blk token + offset;
     };
-    const start = offsets.tokenToIndex(tree, var_decl.ast.mut_token);
+    const start = offsets.tokenToIndex(tree, start_token);
     const end = offsets.tokenToLoc(tree, end_token).end;
     return tree.source[start..end];
 }
