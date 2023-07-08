@@ -3641,6 +3641,7 @@ fn addReferencedTypes(
             .container_decl_two,
             .container_decl_two_trailing,
             .error_set_decl,
+            .merge_error_sets,
             .tagged_union,
             .tagged_union_trailing,
             .tagged_union_two,
