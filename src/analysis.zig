@@ -2554,12 +2554,17 @@ pub fn lookupSymbolGlobal(analyser: *Analyser, handle: *const DocumentStore.Hand
     return analyser.lookupSymbolGlobalAdvanced(handle, symbol, source_index, .{});
 }
 
+pub const LookupSymbolGlobalOptions = struct {
+    skip_container_fields: bool = true,
+    skip_labels: bool = true,
+};
+
 pub fn lookupSymbolGlobalAdvanced(
     analyser: *Analyser,
     handle: *const DocumentStore.Handle,
     symbol: []const u8,
     source_index: usize,
-    comptime options: struct { skip_container_fields: bool = true },
+    comptime options: LookupSymbolGlobalOptions,
 ) error{OutOfMemory}!?DeclWithHandle {
     const scope_parents = handle.document_scope.scopes.items(.parent);
     const scope_decls = handle.document_scope.scopes.items(.decls);
@@ -2577,7 +2582,7 @@ pub fn lookupSymbolGlobalAdvanced(
                 .ast_node => |node| {
                     if (options.skip_container_fields and node_tags[node].isContainerField()) continue;
                 },
-                .label_decl => continue,
+                .label_decl => if (options.skip_labels) continue,
                 else => {},
             }
             return DeclWithHandle{ .decl = candidate, .handle = handle };
@@ -2990,6 +2995,20 @@ const ScopeContext = struct {
 
         try context.doc_scope.scopes.items(.decls)[@intFromEnum(scope)].put(context.allocator, name, decl_index);
     }
+
+    fn putDeclLoopLabel(
+        context: ScopeContext,
+        tree: Ast,
+        label: Ast.TokenIndex,
+        node_idx: Ast.Node.Index,
+    ) error{OutOfMemory}![]const u8 {
+        const label_scope = try context.pushScope(offsets.tokenToLoc(tree, label), .other);
+        context.popScope();
+
+        const name = tree.tokenSlice(label);
+        try context.putDecl(label_scope, name, .{ .label_decl = .{ .label = label, .block = node_idx } });
+        return name;
+    }
 };
 
 fn makeInnerScope(
@@ -3331,7 +3350,7 @@ fn makeScopeAt(
             if (while_node.label_token) |label| {
                 std.debug.assert(token_tags[label] == .identifier);
 
-                const name = tree.tokenSlice(label);
+                const name = try context.putDeclLoopLabel(tree, label, node_idx);
                 try context.putDecl(then_scope, name, .{ .label_decl = .{ .label = label, .block = while_node.ast.then_expr } });
                 if (else_scope) |index| {
                     try context.putDecl(index, name, .{ .label_decl = .{ .label = label, .block = while_node.ast.else_expr } });
@@ -3391,7 +3410,7 @@ fn makeScopeAt(
             if (for_node.label_token) |label| {
                 std.debug.assert(token_tags[label] == .identifier);
 
-                const name = tree.tokenSlice(label);
+                const name = try context.putDeclLoopLabel(tree, label, node_idx);
                 try context.putDecl(
                     then_scope,
                     name,

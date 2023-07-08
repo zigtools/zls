@@ -308,6 +308,7 @@ pub fn getSymbolGlobal(
 
     return try server.analyser.lookupSymbolGlobalAdvanced(handle, name, pos_index, .{
         .skip_container_fields = false,
+        .skip_labels = false,
     });
 }
 
@@ -1079,7 +1080,7 @@ pub fn generalReferencesHandler(server: *Server, request: GeneralReferencesReque
         else => true,
     };
 
-    const locations = if (pos_context == .label)
+    const locations = if (decl.decl.* == .label_decl)
         try references.labelReferences(allocator, decl, server.offset_encoding, include_decl)
     else
         try references.symbolReferences(
