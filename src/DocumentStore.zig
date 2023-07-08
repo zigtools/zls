@@ -108,6 +108,7 @@ pub const Handle = struct {
             allocator.free(err.message);
         }
         self.analysis_errors.deinit(allocator);
+        self.* = undefined;
     }
 };
 
@@ -140,6 +141,7 @@ pub fn deinit(self: *DocumentStore) void {
         result.deinit(self.allocator);
     }
     self.cimports.deinit(self.allocator);
+    self.* = undefined;
 }
 
 /// Returns a handle to the given document
@@ -263,7 +265,7 @@ pub fn refreshDocument(self: *DocumentStore, uri: Uri, new_text: [:0]const u8) !
     handle.import_uris.deinit(self.allocator);
     handle.import_uris = new_import_uris;
 
-    var new_cimports = try self.collectCIncludes(handle.*);
+    var new_cimports = try collectCIncludes(self.allocator, handle.tree);
     const old_cimport_count = handle.cimports.len;
     const new_cimport_count = new_cimports.len;
     for (handle.cimports.items(.source)) |source| {
@@ -286,19 +288,14 @@ pub fn refreshDocument(self: *DocumentStore, uri: Uri, new_text: [:0]const u8) !
     }
 }
 
-pub fn applySave(self: *DocumentStore, handle: *const Handle) !void {
+pub fn applySave(self: *DocumentStore, uri: Uri) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    if (std.process.can_spawn and isBuildFile(handle.uri)) {
-        const build_file = self.build_files.getPtr(handle.uri).?;
+    if (std.process.can_spawn and isBuildFile(uri)) {
+        const build_file = self.build_files.getPtr(uri).?;
 
-        const build_config = loadBuildConfiguration(
-            self.allocator,
-            build_file.*,
-            self.config.*,
-            self.runtime_zig_version.*.?, // if we have the path to zig we should have the zig version
-        ) catch |err| {
+        const build_config = loadBuildConfiguration(self.allocator, build_file.*, self.config.*) catch |err| {
             log.err("Failed to load build configuration for {s} (error: {})", .{ build_file.uri, err });
             return;
         };
@@ -318,12 +315,7 @@ pub fn invalidateBuildFiles(self: *DocumentStore) void {
     while (it.next()) |entry| {
         const build_file = entry.value_ptr;
 
-        const build_config = loadBuildConfiguration(
-            self.allocator,
-            build_file.*,
-            self.config.*,
-            self.runtime_zig_version.*.?, // if we have the path to zig we should have the zig version
-        ) catch |err| {
+        const build_config = loadBuildConfiguration(self.allocator, build_file.*, self.config.*) catch |err| {
             log.err("Failed to load build configuration for {s} (error: {})", .{ build_file.uri, err });
             return;
         };
@@ -517,7 +509,6 @@ pub fn loadBuildConfiguration(
     allocator: std.mem.Allocator,
     build_file: BuildFile,
     config: Config,
-    _: ZigVersionWrapper,
 ) !BuildConfig {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
@@ -627,7 +618,7 @@ const BuildDotZigIterator = struct {
 };
 
 /// takes ownership of `uri`
-fn createBuildFile(self: *const DocumentStore, uri: Uri) error{OutOfMemory}!BuildFile {
+fn createBuildFile(allocator: std.mem.Allocator, config: Config, uri: Uri) error{OutOfMemory}!BuildFile {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -638,16 +629,16 @@ fn createBuildFile(self: *const DocumentStore, uri: Uri) error{OutOfMemory}!Buil
             .include_dirs = &.{},
         },
     };
-    errdefer build_file.deinit(self.allocator);
+    errdefer build_file.deinit(allocator);
 
-    if (loadBuildAssociatedConfiguration(self.allocator, build_file)) |config| {
-        build_file.build_associated_config = config;
+    if (loadBuildAssociatedConfiguration(allocator, build_file)) |cfg| {
+        build_file.build_associated_config = cfg;
 
-        if (config.relative_builtin_path) |relative_builtin_path| blk: {
-            const build_file_path = URI.parse(self.allocator, build_file.uri) catch break :blk;
-            const absolute_builtin_path = std.fs.path.resolve(self.allocator, &.{ build_file_path, "../", relative_builtin_path }) catch break :blk;
-            defer self.allocator.free(absolute_builtin_path);
-            build_file.builtin_uri = try URI.fromPath(self.allocator, absolute_builtin_path);
+        if (build_file.build_associated_config.?.relative_builtin_path) |relative_builtin_path| blk: {
+            const build_file_path = URI.parse(allocator, build_file.uri) catch break :blk;
+            const absolute_builtin_path = std.fs.path.resolve(allocator, &.{ build_file_path, "../", relative_builtin_path }) catch break :blk;
+            defer allocator.free(absolute_builtin_path);
+            build_file.builtin_uri = try URI.fromPath(allocator, absolute_builtin_path);
         }
     } else |err| {
         if (err != error.FileNotFound) {
@@ -657,12 +648,7 @@ fn createBuildFile(self: *const DocumentStore, uri: Uri) error{OutOfMemory}!Buil
 
     // TODO: Do this in a separate thread?
     // It can take quite long.
-    if (loadBuildConfiguration(
-        self.allocator,
-        build_file,
-        self.config.*,
-        self.runtime_zig_version.*.?, // if we have the path to zig we should have the zig version
-    )) |build_config| {
+    if (loadBuildConfiguration(allocator, build_file, config)) |build_config| {
         build_file.config = build_config;
     } else |err| {
         log.err("Failed to load build configuration for {s} (error: {})", .{ build_file.uri, err });
@@ -793,7 +779,7 @@ fn createDocument(self: *DocumentStore, uri: Uri, text: [:0]const u8, open: bool
     }
 
     handle.import_uris = try self.collectImportUris(handle);
-    handle.cimports = try self.collectCIncludes(handle);
+    handle.cimports = try collectCIncludes(self.allocator, handle.tree);
 
     if (!std.process.can_spawn or self.config.zig_exe_path == null) return handle;
 
@@ -805,7 +791,7 @@ fn createDocument(self: *DocumentStore, uri: Uri, text: [:0]const u8, open: bool
         }
         if (!gop.found_existing) {
             const duped_uri = try self.allocator.dupe(u8, uri);
-            gop.value_ptr.* = try self.createBuildFile(duped_uri);
+            gop.value_ptr.* = try createBuildFile(self.allocator, self.config.*, duped_uri);
             gop.key_ptr.* = gop.value_ptr.uri;
         }
     } else if (!isBuiltinFile(handle.uri) and !isInStd(handle.uri)) blk: {
@@ -832,7 +818,7 @@ fn createDocument(self: *DocumentStore, uri: Uri, text: [:0]const u8, open: bool
 
             if (!gop.found_existing) {
                 errdefer self.build_files.swapRemoveAt(gop.index);
-                gop.value_ptr.* = try self.createBuildFile(build_file_uri);
+                gop.value_ptr.* = try createBuildFile(self.allocator, self.config.*, build_file_uri);
             } else {
                 self.allocator.free(build_file_uri);
             }
@@ -905,24 +891,24 @@ pub const CImportHandle = struct {
 
 /// Collects all `@cImport` nodes and converts them into c source code
 /// Caller owns returned memory.
-fn collectCIncludes(self: *const DocumentStore, handle: Handle) error{OutOfMemory}!std.MultiArrayList(CImportHandle) {
+fn collectCIncludes(allocator: std.mem.Allocator, tree: Ast) error{OutOfMemory}!std.MultiArrayList(CImportHandle) {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    var cimport_nodes = try analysis.collectCImportNodes(self.allocator, handle.tree);
-    defer self.allocator.free(cimport_nodes);
+    var cimport_nodes = try analysis.collectCImportNodes(allocator, tree);
+    defer allocator.free(cimport_nodes);
 
     var sources = std.MultiArrayList(CImportHandle){};
-    try sources.ensureTotalCapacity(self.allocator, cimport_nodes.len);
+    try sources.ensureTotalCapacity(allocator, cimport_nodes.len);
     errdefer {
         for (sources.items(.source)) |source| {
-            self.allocator.free(source);
+            allocator.free(source);
         }
-        sources.deinit(self.allocator);
+        sources.deinit(allocator);
     }
 
     for (cimport_nodes) |node| {
-        const c_source = translate_c.convertCInclude(self.allocator, handle.tree, node) catch |err| switch (err) {
+        const c_source = translate_c.convertCInclude(allocator, tree, node) catch |err| switch (err) {
             error.Unsupported => continue,
             error.OutOfMemory => return error.OutOfMemory,
         };

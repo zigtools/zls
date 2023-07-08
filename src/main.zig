@@ -341,8 +341,7 @@ fn parseArgs(allocator: std.mem.Allocator) !ParseArgsResult {
         defer if (new_config.config_path) |path| allocator.free(path);
         defer legacy_json.parseFree(Config, allocator, new_config.config);
 
-        const full_path = if (new_config.config_path) |path| try allocator.dupe(u8, path)
-        else blk: {
+        const full_path = if (new_config.config_path) |path| try allocator.dupe(u8, path) else blk: {
             const local_config_path = try known_folders.getPath(allocator, .local_configuration) orelse {
                 logger.err("failed to find local configuration folder", .{});
                 return result;
