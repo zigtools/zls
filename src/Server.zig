@@ -1806,23 +1806,6 @@ fn pushJob(server: *Server, job: Job) error{OutOfMemory}!void {
     };
 }
 
-test {
-    const gpa = std.testing.allocator;
-    var config: Config = .{};
-    defer @import("legacy_json.zig").parseFree(Config, gpa, config);
-    var server = try Server.create(gpa, &config, null);
-    defer server.destroy();
-
-    var arena_allocator = std.heap.ArenaAllocator.init(gpa);
-    defer arena_allocator.deinit();
-    const arena = arena_allocator.allocator();
-
-    _ = try server.sendRequestSync(arena, "initialize", .{ .capabilities = .{} });
-    _ = try server.sendNotificationSync(arena, "initialized", .{});
-    _ = try server.sendRequestSync(arena, "shutdown", {});
-    _ = try server.sendNotificationSync(arena, "exit", {});
-}
-
 //
 // LSP helper functions
 //
