@@ -40,7 +40,6 @@ allocator: std.mem.Allocator,
 arena: std.heap.ArenaAllocator,
 analyser: Analyser,
 document_store: DocumentStore,
-builtin_completions: ?std.ArrayListUnmanaged(types.CompletionItem),
 client_capabilities: ClientCapabilities = .{},
 runtime_zig_version: ?ZigVersionWrapper,
 outgoing_messages: std.ArrayListUnmanaged([]const u8) = .{},
@@ -1523,7 +1522,6 @@ pub fn create(
             .config = config,
             .runtime_zig_version = &server.runtime_zig_version,
         },
-        .builtin_completions = null,
         .recording_enabled = recording_enabled,
         .replay_enabled = replay_enabled,
         .message_tracing_enabled = message_tracing_enabled,
@@ -1548,8 +1546,6 @@ pub fn create(
 pub fn destroy(server: *Server) void {
     server.document_store.deinit();
     server.analyser.deinit();
-
-    if (server.builtin_completions) |*items| items.deinit(server.allocator);
 
     for (server.outgoing_messages.items) |message| {
         server.allocator.free(message);
