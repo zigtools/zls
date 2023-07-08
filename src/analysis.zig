@@ -262,13 +262,27 @@ pub fn getVariableSignature(tree: Ast, var_decl: Ast.full.VarDecl) []const u8 {
     const end_token = blk: {
         if (var_decl.ast.init_node == 0)
             break :blk var_decl.ast.mut_token + 1;
+
         var buf: [2]Ast.Node.Index = undefined;
-        if (tree.fullContainerDecl(&buf, var_decl.ast.init_node)) |container_decl| {
-            if (container_decl.ast.enum_token) |enum_token|
-                break :blk enum_token + 1;
-            break :blk container_decl.ast.main_token;
+        const container_decl = tree.fullContainerDecl(&buf, var_decl.ast.init_node) orelse
+            break :blk ast.lastToken(tree, var_decl.ast.init_node);
+
+        var token = container_decl.ast.main_token;
+        var offset: Ast.TokenIndex = 0;
+
+        // Tagged union: union(enum)
+        if (container_decl.ast.enum_token) |enum_token| {
+            token = enum_token;
+            offset += 1;
         }
-        break :blk ast.lastToken(tree, var_decl.ast.init_node);
+
+        // Backing integer: struct(u32), union(enum(u32))
+        if (container_decl.ast.arg != 0) {
+            token = ast.lastToken(tree, container_decl.ast.arg);
+            offset += 1;
+        }
+
+        break :blk token + offset;
     };
     const start = offsets.tokenToIndex(tree, var_decl.ast.mut_token);
     const end = offsets.tokenToLoc(tree, end_token).end;
