@@ -661,14 +661,15 @@ fn allDigits(str: []const u8) bool {
     return true;
 }
 
+const primitive_types = std.ComptimeStringMap([]const u8, .{
+    .{ "true", "bool" },
+    .{ "false", "bool" },
+    .{ "null", "@TypeOf(null)" },
+    .{ "undefined", "@TypeOf(undefined)" },
+});
+
 pub fn isValueIdent(text: []const u8) bool {
-    const PrimitiveTypes = std.ComptimeStringMap(void, .{
-        .{"true"},
-        .{"false"},
-        .{"null"},
-        .{"undefined"},
-    });
-    return PrimitiveTypes.has(text);
+    return primitive_types.has(text);
 }
 
 pub fn isTypeIdent(text: []const u8) bool {
@@ -762,6 +763,13 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
             if (isTypeIdent(name)) {
                 return TypeWithHandle{
                     .type = .{ .data = .{ .primitive = node }, .is_type_val = true },
+                    .handle = handle,
+                };
+            }
+
+            if (isValueIdent(name)) {
+                return TypeWithHandle{
+                    .type = .{ .data = .{ .other = node }, .is_type_val = false },
                     .handle = handle,
                 };
             }
@@ -1112,6 +1120,8 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
         .string_literal,
         .char_literal,
         .number_literal,
+        .enum_literal,
+        .error_value,
         => return TypeWithHandle{
             .type = .{ .data = .{ .other = node }, .is_type_val = false },
             .handle = handle,
@@ -3797,6 +3807,18 @@ fn addReferencedTypes(
             },
 
             .number_literal, .char_literal => return "comptime_int",
+
+            .enum_literal => return "@TypeOf(.enum_literal)",
+
+            .error_value => {
+                const identifier = tree.tokenSlice(datas[p].rhs);
+                return try std.fmt.allocPrint(allocator, "error{{{s}}}", .{identifier});
+            },
+
+            .identifier => {
+                const name = offsets.nodeToSlice(tree, p);
+                return primitive_types.get(name);
+            },
 
             else => {}, // TODO: Implement more "other" type expressions; better safe than sorry
         },
