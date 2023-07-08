@@ -111,12 +111,12 @@ pub fn hoverSymbol(server: *Server, decl_handle: Analyser.DeclWithHandle, markup
         if (doc_str) |doc|
             try writer.print("\n{s}", .{doc});
         if (referenced_types.len > 0)
-            try writer.print("\n\n", .{});
+            try writer.print("\n\n" ++ "Go to ", .{});
         for (referenced_types, 0..) |ref, index| {
             if (index > 0)
                 try writer.print(" | ", .{});
             const loc = offsets.tokenToPosition(ref.handle.tree, ref.token, server.offset_encoding);
-            try writer.print("Go to [{s}]({s}#L{d})", .{ ref.str, ref.handle.uri, loc.line + 1 });
+            try writer.print("[{s}]({s}#L{d})", .{ ref.str, ref.handle.uri, loc.line + 1 });
         }
     } else {
         try writer.print("{s} ({s})", .{ def_str, resolved_type_str });
