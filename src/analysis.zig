@@ -259,8 +259,19 @@ pub fn hasSelfParam(analyser: *Analyser, handle: *const DocumentStore.Handle, fu
 }
 
 pub fn getVariableSignature(tree: Ast, var_decl: Ast.full.VarDecl) []const u8 {
+    const end_token = blk: {
+        if (var_decl.ast.init_node == 0)
+            break :blk var_decl.ast.mut_token + 1;
+        var buf: [2]Ast.Node.Index = undefined;
+        if (tree.fullContainerDecl(&buf, var_decl.ast.init_node)) |container_decl| {
+            if (container_decl.ast.enum_token) |enum_token|
+                break :blk enum_token + 1;
+            break :blk container_decl.ast.main_token;
+        }
+        break :blk ast.lastToken(tree, var_decl.ast.init_node);
+    };
     const start = offsets.tokenToIndex(tree, var_decl.ast.mut_token);
-    const end = offsets.tokenToLoc(tree, ast.lastToken(tree, var_decl.ast.init_node)).end;
+    const end = offsets.tokenToLoc(tree, end_token).end;
     return tree.source[start..end];
 }
 
