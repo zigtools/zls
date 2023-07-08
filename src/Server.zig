@@ -804,10 +804,10 @@ fn saveDocumentHandler(server: *Server, notification: types.DidSaveTextDocumentP
     const allocator = server.arena.allocator();
     const uri = notification.textDocument.uri;
 
-    const handle = server.document_store.getHandle(uri) orelse return;
-    try server.document_store.applySave(handle);
+    try server.document_store.applySave(uri);
 
     if (server.getAutofixMode() == .on_save) {
+        const handle = server.document_store.getHandle(uri) orelse return;
         var text_edits = try server.autofix(allocator, handle);
 
         var workspace_edit = types.WorkspaceEdit{ .changes = .{} };
