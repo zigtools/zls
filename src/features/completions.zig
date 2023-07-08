@@ -467,42 +467,33 @@ fn completeBuiltin(server: *Server) error{OutOfMemory}!?[]types.CompletionItem {
 
     const allocator = server.arena.allocator();
 
-    const builtin_completions = blk: {
-        if (server.builtin_completions) |completions| {
-            break :blk completions;
-        } else {
-            server.builtin_completions = try std.ArrayListUnmanaged(types.CompletionItem).initCapacity(server.allocator, data.builtins.len);
-            for (data.builtins) |builtin| {
-                const use_snippets = server.config.enable_snippets and server.client_capabilities.supports_snippets;
-                const insert_text = if (use_snippets) builtin.snippet else builtin.name;
-                server.builtin_completions.?.appendAssumeCapacity(.{
-                    .label = builtin.name,
-                    .kind = .Function,
-                    .filterText = builtin.name[1..],
-                    .detail = builtin.signature,
-                    .insertText = if (server.config.include_at_in_builtins) insert_text else insert_text[1..],
-                    .insertTextFormat = if (use_snippets) .Snippet else .PlainText,
-                    .documentation = .{
-                        .MarkupContent = .{
-                            .kind = .markdown,
-                            .value = builtin.documentation,
-                        },
-                    },
-                });
-            }
-            break :blk server.builtin_completions.?;
-        }
-    };
-
-    var completions = try builtin_completions.clone(allocator);
+    const completions = try allocator.alloc(types.CompletionItem, data.builtins.len);
+    for (completions, data.builtins) |*out, builtin| {
+        const use_snippets = server.config.enable_snippets and server.client_capabilities.supports_snippets;
+        const insert_text = if (use_snippets) builtin.snippet else builtin.name;
+        out.* = types.CompletionItem{
+            .label = builtin.name,
+            .kind = .Function,
+            .filterText = builtin.name[1..],
+            .detail = builtin.signature,
+            .insertText = if (server.config.include_at_in_builtins) insert_text else insert_text[1..],
+            .insertTextFormat = if (use_snippets) .Snippet else .PlainText,
+            .documentation = .{
+                .MarkupContent = .{
+                    .kind = .markdown,
+                    .value = builtin.documentation,
+                },
+            },
+        };
+    }
 
     if (server.client_capabilities.label_details_support) {
-        for (completions.items) |*item| {
+        for (completions) |*item| {
             try formatDetailedLabel(item, allocator);
         }
     }
 
-    return completions.items;
+    return completions;
 }
 
 fn completeGlobal(server: *Server, pos_index: usize, handle: *const DocumentStore.Handle) error{OutOfMemory}![]types.CompletionItem {
