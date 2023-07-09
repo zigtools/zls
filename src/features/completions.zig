@@ -221,7 +221,7 @@ fn nodeToCompletion(
                 .label = handle.tree.tokenSlice(var_decl.ast.mut_token + 1),
                 .kind = if (is_const) .Constant else .Variable,
                 .documentation = doc,
-                .detail = Analyser.getVariableSignature(tree, var_decl),
+                .detail = try Analyser.getVariableSignature(allocator, tree, var_decl),
                 .insertText = tree.tokenSlice(var_decl.ast.mut_token + 1),
                 .insertTextFormat = .PlainText,
             });

@@ -51,7 +51,7 @@ pub fn hoverSymbol(server: *Server, decl_handle: Analyser.DeclWithHandle, markup
                         &reference_collector,
                     );
 
-                break :def Analyser.getVariableSignature(tree, var_decl);
+                break :def try Analyser.getVariableSignature(server.arena.allocator(), tree, var_decl);
             } else if (tree.fullFnProto(&buf, node)) |fn_proto| {
                 break :def Analyser.getFunctionSignature(tree, fn_proto);
             } else if (tree.fullContainerField(node)) |field| {
