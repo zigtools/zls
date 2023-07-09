@@ -321,7 +321,7 @@ pub fn getSymbolEnumLiteral(
     defer tracy_zone.end();
 
     const nodes = try ast.nodesOverlappingIndex(server.arena.allocator(), handle.tree, source_index);
-    return try server.analyser.lookupSymbolEnumLiteral(handle, nodes);
+    return try server.analyser.lookupSymbolEnumLiteral(handle, source_index, nodes);
 }
 
 /// Multiple when using branched types
