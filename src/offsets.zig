@@ -152,6 +152,10 @@ pub fn tokenToSlice(tree: Ast, token_index: Ast.TokenIndex) []const u8 {
     return locToSlice(tree.source, tokenToLoc(tree, token_index));
 }
 
+pub fn tokensToSlice(tree: Ast, first_token: Ast.TokenIndex, last_token: Ast.TokenIndex) []const u8 {
+    return locToSlice(tree.source, tokensToLoc(tree, first_token, last_token));
+}
+
 pub fn tokenToPosition(tree: Ast, token_index: Ast.TokenIndex, encoding: Encoding) types.Position {
     const start = tokenToIndex(tree, token_index);
     return indexToPosition(tree.source, start, encoding);

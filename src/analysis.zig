@@ -258,15 +258,22 @@ pub fn hasSelfParam(analyser: *Analyser, handle: *const DocumentStore.Handle, fu
     return false;
 }
 
-pub fn getVariableSignature(tree: Ast, var_decl: Ast.full.VarDecl) []const u8 {
+pub fn getVariableSignature(allocator: std.mem.Allocator, tree: Ast, var_decl: Ast.full.VarDecl) error{OutOfMemory}![]const u8 {
+    const node_tags = tree.nodes.items(.tag);
+
     const start_token = var_decl.ast.mut_token;
     const end_token = blk: {
         const init_node = var_decl.ast.init_node;
         if (init_node == 0)
             break :blk start_token + 1;
 
-        if (tree.nodes.items(.tag)[init_node] == .error_set_decl)
-            break :blk tree.nodes.items(.main_token)[init_node];
+        if (node_tags[init_node] == .merge_error_sets)
+            return try std.fmt.allocPrint(allocator, "{s} error", .{
+                offsets.tokensToSlice(tree, start_token, tree.firstToken(init_node) - 1),
+            });
+
+        if (node_tags[init_node] == .error_set_decl)
+            break :blk tree.firstToken(init_node);
 
         var buf: [2]Ast.Node.Index = undefined;
         const container_decl = tree.fullContainerDecl(&buf, init_node) orelse
@@ -289,9 +296,7 @@ pub fn getVariableSignature(tree: Ast, var_decl: Ast.full.VarDecl) []const u8 {
 
         break :blk token + offset;
     };
-    const start = offsets.tokenToIndex(tree, start_token);
-    const end = offsets.tokenToLoc(tree, end_token).end;
-    return tree.source[start..end];
+    return offsets.tokensToSlice(tree, start_token, end_token);
 }
 
 pub fn getContainerFieldSignature(tree: Ast, field: Ast.full.ContainerField) []const u8 {
