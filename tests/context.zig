@@ -2,8 +2,6 @@ const std = @import("std");
 const zls = @import("zls");
 const builtin = @import("builtin");
 
-const tres = @import("tres");
-
 const Header = zls.Header;
 const Config = zls.Config;
 const Server = zls.Server;
@@ -38,6 +36,7 @@ pub const Context = struct {
     pub fn init() !Context {
         var config = try allocator.create(Config);
         errdefer allocator.destroy(config);
+        errdefer zls.legacy_json.parseFree(Config, allocator, config.*);
 
         config.* = default_config;
 
@@ -176,9 +175,9 @@ pub const Context = struct {
 
     pub fn Response(comptime Result: type) type {
         return struct {
-            jsonrpc: []const u8,
+            jsonrpc: []const u8 = "2.0",
             id: types.RequestId,
-            result: Result,
+            result: Result = null,
         };
     }
 
@@ -186,15 +185,15 @@ pub const Context = struct {
         var buffer = std.ArrayListUnmanaged(u8){};
         defer buffer.deinit(allocator);
 
-        try tres.stringify(params, .{}, buffer.writer(allocator));
+        try std.json.stringify(params, .{ .emit_null_optional_fields = false }, buffer.writer(allocator));
 
         const response_bytes = try self.requestAlloc(method, buffer.items);
         defer self.server.allocator.free(response_bytes);
 
-        var tree = try std.json.parseFromSlice(std.json.Value, self.arena.allocator(), try self.arena.allocator().dupe(u8, response_bytes), .{});
+        const tree = try std.json.parseFromSliceLeaky(std.json.Value, self.arena.allocator(), try self.arena.allocator().dupe(u8, response_bytes), .{});
 
         // TODO validate jsonrpc and id
 
-        return tres.parse(Response(Result), tree.value, self.arena.allocator());
+        return try std.json.parseFromValueLeaky(Response(Result), self.arena.allocator(), tree, .{});
     }
 };

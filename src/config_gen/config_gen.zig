@@ -1,8 +1,6 @@
 const std = @import("std");
 const zig_builtin = @import("builtin");
 
-const tres = @import("tres");
-
 const ConfigOption = struct {
     /// Name of config option
     name: []const u8,
@@ -39,17 +37,12 @@ const ConfigOption = struct {
         _ = options;
         if (fmt.len != 0) return std.fmt.invalidFmtError(fmt, ConfigOption);
         if (config.@"enum") |enum_members| {
-            try writer.writeAll("enum {\n    ");
+            try writer.writeAll("enum {\n");
             for (enum_members) |member_name| {
-                try writer.writeAll(member_name);
-                try writer.writeAll(",\n    ");
+                try writer.print("    {s},\n", .{member_name});
             }
             std.debug.assert(enum_members.len > 1);
-            try writer.writeAll(
-                \\
-                \\    pub const tres_string_enum = true;
-                \\}
-            );
+            try writer.writeByte('}');
             return;
         }
         try writer.writeAll(config.type);
@@ -88,7 +81,7 @@ const Schema = struct {
     title: []const u8 = "ZLS Config",
     description: []const u8 = "Configuration file for the zig language server (ZLS)",
     type: []const u8 = "object",
-    properties: std.StringArrayHashMap(SchemaEntry),
+    properties: std.json.ArrayHashMap(SchemaEntry),
 };
 
 const SchemaEntry = struct {
@@ -146,12 +139,13 @@ fn generateSchemaFile(allocator: std.mem.Allocator, config: Config, path: []cons
 
     var buff_out = std.io.bufferedWriter(schema_file.writer());
 
-    var properties = std.StringArrayHashMapUnmanaged(SchemaEntry){};
-    defer properties.deinit(allocator);
-    try properties.ensureTotalCapacity(allocator, config.options.len);
+    var schema = Schema{ .properties = .{} };
+    defer schema.properties.map.deinit(allocator);
+
+    try schema.properties.map.ensureTotalCapacity(allocator, @intCast(config.options.len));
 
     for (config.options) |option| {
-        properties.putAssumeCapacityNoClobber(option.name, .{
+        schema.properties.map.putAssumeCapacityNoClobber(option.name, .{
             .description = option.description,
             .type = try option.getTypescriptType(),
             .@"enum" = option.@"enum",
@@ -159,23 +153,12 @@ fn generateSchemaFile(allocator: std.mem.Allocator, config: Config, path: []cons
         });
     }
 
-    _ = try buff_out.write(
-        \\{
-        \\    "$schema": "http://json-schema.org/schema",
-        \\    "title": "ZLS Config",
-        \\    "description": "Configuration file for the zig language server (ZLS)",
-        \\    "type": "object",
-        \\    "properties": 
-    );
-
-    try tres.stringify(properties, .{
-        .whitespace = .{
-            .indent_level = 1,
-        },
+    try std.json.stringify(schema, .{
+        .whitespace = .{},
         .emit_null_optional_fields = false,
     }, buff_out.writer());
+    try buff_out.writer().writeByte('\n');
 
-    _ = try buff_out.write("\n}\n");
     try buff_out.flush();
     try schema_file.setEndPos(try schema_file.getPos());
 }
@@ -236,26 +219,26 @@ fn generateVSCodeConfigFile(allocator: std.mem.Allocator, config: Config, path: 
     defer config_file.close();
 
     const predefined_configurations: usize = 3;
-    var configuration: std.StringArrayHashMapUnmanaged(ConfigurationProperty) = .{};
-    try configuration.ensureTotalCapacity(allocator, predefined_configurations + @as(u32, @intCast(config.options.len)));
+    var configuration: std.json.ArrayHashMap(ConfigurationProperty) = .{};
+    try configuration.map.ensureTotalCapacity(allocator, @intCast(predefined_configurations + config.options.len));
     defer {
-        for (configuration.keys()[predefined_configurations..]) |name| allocator.free(name);
-        configuration.deinit(allocator);
+        for (configuration.map.keys()[predefined_configurations..]) |name| allocator.free(name);
+        configuration.map.deinit(allocator);
     }
 
-    configuration.putAssumeCapacityNoClobber("zig.trace.server", .{
+    configuration.map.putAssumeCapacityNoClobber("zig.trace.server", .{
         .scope = "window",
         .type = "string",
         .@"enum" = &.{ "off", "messages", "verbose" },
         .description = "Traces the communication between VS Code and the language server.",
         .default = .{ .string = "off" },
     });
-    configuration.putAssumeCapacityNoClobber("zig.zls.checkForUpdate", .{
+    configuration.map.putAssumeCapacityNoClobber("zig.zls.checkForUpdate", .{
         .type = "boolean",
         .description = "Whether to automatically check for new updates",
         .default = .{ .bool = true },
     });
-    configuration.putAssumeCapacityNoClobber("zig.zls.path", .{
+    configuration.map.putAssumeCapacityNoClobber("zig.zls.path", .{
         .type = "string",
         .description = "Path to `zls` executable. Example: `C:/zls/zig-cache/bin/zls.exe`.",
         .format = "path",
@@ -277,7 +260,7 @@ fn generateVSCodeConfigFile(allocator: std.mem.Allocator, config: Config, path: 
             break :blk if (value.value != .null) value.value else null;
         };
 
-        configuration.putAssumeCapacityNoClobber(name, .{
+        configuration.map.putAssumeCapacityNoClobber(name, .{
             .type = try option.getTypescriptType(),
             .description = option.description,
             .@"enum" = option.@"enum",
@@ -289,7 +272,7 @@ fn generateVSCodeConfigFile(allocator: std.mem.Allocator, config: Config, path: 
     var buffered_writer = std.io.bufferedWriter(config_file.writer());
     var writer = buffered_writer.writer();
 
-    try tres.stringify(configuration, .{
+    try std.json.stringify(configuration, .{
         .whitespace = .{},
         .emit_null_optional_fields = false,
     }, writer);
