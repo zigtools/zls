@@ -704,6 +704,38 @@ pub fn resolveFieldAccessLhsType(analyser: *Analyser, lhs: TypeWithHandle) !Type
     return (try analyser.resolveDerefType(lhs)) orelse lhs;
 }
 
+fn resolveTupleFieldType(analyser: *Analyser, type_handle: TypeWithHandle, index: usize) !?TypeWithHandle {
+    const node = switch (type_handle.type.data) {
+        .other => |n| n,
+        else => return null,
+    };
+    const handle = type_handle.handle;
+    const tree = handle.tree;
+    const main_tokens = tree.nodes.items(.main_token);
+    const token_tags = tree.tokens.items(.tag);
+
+    if (token_tags[main_tokens[node]] != .keyword_struct)
+        return null;
+
+    var buf: [2]Ast.Node.Index = undefined;
+    const container_decl = tree.fullContainerDecl(&buf, node) orelse
+        return null;
+
+    if (index >= container_decl.ast.members.len)
+        return null;
+
+    const field = tree.fullContainerField(container_decl.ast.members[index]) orelse
+        return null;
+
+    if (!field.ast.tuple_like)
+        return null;
+
+    if (try analyser.resolveTypeOfNode(.{ .node = field.ast.type_expr, .handle = handle })) |t|
+        return t.instanceTypeVal();
+
+    return null;
+}
+
 fn resolvePropertyType(analyser: *Analyser, type_handle: TypeWithHandle, name: []const u8) !?TypeWithHandle {
     if (type_handle.type.is_type_val)
         return null;
@@ -711,8 +743,6 @@ fn resolvePropertyType(analyser: *Analyser, type_handle: TypeWithHandle, name: [
     const handle = type_handle.handle;
     const tree = handle.tree;
     const node_tags = tree.nodes.items(.tag);
-    const main_tokens = tree.nodes.items(.main_token);
-    const token_tags = tree.tokens.items(.tag);
 
     switch (type_handle.type.data) {
         .slice => |t| {
@@ -781,7 +811,6 @@ fn resolvePropertyType(analyser: *Analyser, type_handle: TypeWithHandle, name: [
             .container_decl_two,
             .container_decl_two_trailing,
             => {
-                if (token_tags[main_tokens[n]] != .keyword_struct) return null;
                 if (!std.mem.startsWith(u8, name, "@\"")) return null;
                 if (!std.mem.endsWith(u8, name, "\"")) return null;
 
@@ -789,17 +818,7 @@ fn resolvePropertyType(analyser: *Analyser, type_handle: TypeWithHandle, name: [
                 if (!allDigits(text)) return null;
                 const index = std.fmt.parseUnsigned(u16, text, 10) catch return null;
 
-                var buf: [2]Ast.Node.Index = undefined;
-                const container_decl = tree.fullContainerDecl(&buf, n).?;
-                if (index >= container_decl.ast.members.len) return null;
-
-                const field = tree.fullContainerField(container_decl.ast.members[index]) orelse return null;
-                if (!field.ast.tuple_like) return null;
-
-                return ((try analyser.resolveTypeOfNode(.{
-                    .node = field.ast.type_expr,
-                    .handle = handle,
-                })) orelse return null).instanceTypeVal();
+                return analyser.resolveTupleFieldType(type_handle, index);
             },
 
             else => {},
@@ -1116,6 +1135,10 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
         .container_field,
         .container_field_init,
         .container_field_align,
+        .array_init,
+        .array_init_comma,
+        .array_init_one,
+        .array_init_one_comma,
         .struct_init,
         .struct_init_comma,
         .struct_init_one,
@@ -1142,6 +1165,10 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 .container_field,
                 .container_field_init,
                 .container_field_align,
+                .array_init,
+                .array_init_comma,
+                .array_init_one,
+                .array_init_one_comma,
                 .struct_init,
                 .struct_init_comma,
                 .struct_init_one,
@@ -3002,6 +3029,30 @@ pub fn resolveExpressionTypeFromAncestors(
                 return try field_decl.resolveType(analyser);
             }
         }
+    } else if (tree.fullArrayInit(&struct_init_buf, ancestors[0])) |array_init| {
+        const element_index = std.mem.indexOfScalar(Ast.Node.Index, array_init.ast.elements, node) orelse
+            return null;
+
+        if (try analyser.resolveExpressionType(
+            handle,
+            ancestors[0],
+            ancestors[1..],
+        )) |array_type| {
+            return (try analyser.resolveBracketAccessType(array_type, .Single)) orelse
+                (try analyser.resolveTupleFieldType(array_type, element_index));
+        }
+
+        if (ancestors.len != 1 and node_tags[ancestors[1]] == .address_of) {
+            if (try analyser.resolveExpressionType(
+                handle,
+                ancestors[1],
+                ancestors[2..],
+            )) |slice_type| {
+                return try analyser.resolveBracketAccessType(slice_type, .Single);
+            }
+        }
+
+        return null;
     } else if (tree.fullVarDecl(ancestors[0])) |var_decl| {
         if (node == var_decl.ast.init_node) {
             return try analyser.resolveTypeOfNode(.{
