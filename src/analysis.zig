@@ -1154,6 +1154,11 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
         .@"try",
         .address_of,
         => {
+            if (node_tags[node].isContainerField()) {
+                const container_type = innermostContainer(handle, offsets.tokenToIndex(tree, tree.firstToken(node)));
+                if (container_type.isEnumType())
+                    return container_type.instanceTypeVal();
+            }
             const base = .{ .node = datas[node].lhs, .handle = handle };
             const base_type = (try analyser.resolveTypeOfNodeInternal(base)) orelse
                 return null;

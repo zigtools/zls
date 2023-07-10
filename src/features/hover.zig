@@ -55,11 +55,13 @@ pub fn hoverSymbol(server: *Server, decl_handle: Analyser.DeclWithHandle, markup
             } else if (tree.fullFnProto(&buf, node)) |fn_proto| {
                 break :def Analyser.getFunctionSignature(tree, fn_proto);
             } else if (tree.fullContainerField(node)) |field| {
-                std.debug.assert(field.ast.type_expr != 0);
-                try server.analyser.referencedTypesFromNode(
-                    .{ .node = field.ast.type_expr, .handle = handle },
-                    &reference_collector,
-                );
+                var converted = field;
+                converted.convertToNonTupleLike(tree.nodes);
+                if (converted.ast.type_expr != 0)
+                    try server.analyser.referencedTypesFromNode(
+                        .{ .node = converted.ast.type_expr, .handle = handle },
+                        &reference_collector,
+                    );
 
                 break :def Analyser.getContainerFieldSignature(tree, field);
             } else {
