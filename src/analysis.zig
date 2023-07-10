@@ -3384,7 +3384,7 @@ fn makeScopeAt(
                 std.debug.assert(token_tags[name_token] == .identifier);
 
                 const name = tree.tokenSlice(name_token);
-                const decl: Declaration = if (if_node.ast.else_expr != 0)
+                const decl: Declaration = if (if_node.error_token != null)
                     .{ .error_union_payload = .{ .name = name_token, .condition = if_node.ast.cond_expr, .side = .right } }
                 else
                     .{ .pointer_payload = .{ .name = name_token, .condition = if_node.ast.cond_expr } };
