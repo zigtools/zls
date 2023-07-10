@@ -3,7 +3,6 @@ const zig_builtin = @import("builtin");
 const build_options = @import("build_options");
 const tracy = @import("tracy.zig");
 const known_folders = @import("known-folders");
-const tres = @import("tres");
 const Config = @import("Config.zig");
 const configuration = @import("configuration.zig");
 const Server = @import("Server.zig");
@@ -135,7 +134,7 @@ fn updateConfig(
         var buffer = std.ArrayListUnmanaged(u8){};
         defer buffer.deinit(allocator);
 
-        try tres.stringify(cfg, .{}, buffer.writer(allocator));
+        try std.json.stringify(cfg, .{}, buffer.writer(allocator));
         const header = Header{ .content_length = buffer.items.len };
         try header.write(false, file.writer());
         try file.writeAll(buffer.items);

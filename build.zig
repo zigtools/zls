@@ -83,9 +83,6 @@ pub fn build(b: *std.build.Builder) !void {
     const known_folders_module = b.dependency("known_folders", .{}).module("known-folders");
     exe.addModule("known-folders", known_folders_module);
 
-    const tres_module = b.dependency("tres", .{}).module("tres");
-    exe.addModule("tres", tres_module);
-
     const diffz_module = b.dependency("diffz", .{}).module("diffz");
     exe.addModule("diffz", diffz_module);
 
@@ -121,7 +118,6 @@ pub fn build(b: *std.build.Builder) !void {
         .source_file = .{ .path = "src/zls.zig" },
         .dependencies = &.{
             .{ .name = "known-folders", .module = known_folders_module },
-            .{ .name = "tres", .module = tres_module },
             .{ .name = "diffz", .module = diffz_module },
             .{ .name = "binned_allocator", .module = binned_allocator_module },
             .{ .name = "build_options", .module = build_options_module },
@@ -132,7 +128,6 @@ pub fn build(b: *std.build.Builder) !void {
         .name = "zls_gen",
         .root_source_file = .{ .path = "src/config_gen/config_gen.zig" },
     });
-    gen_exe.addModule("tres", tres_module);
 
     const gen_cmd = b.addRunArtifact(gen_exe);
     gen_cmd.addArgs(&.{
@@ -157,7 +152,6 @@ pub fn build(b: *std.build.Builder) !void {
     });
 
     tests.addModule("zls", zls_module);
-    tests.addModule("tres", tres_module);
     tests.addModule("diffz", diffz_module);
     tests.addModule("binned_allocator", binned_allocator_module);
     test_step.dependOn(&b.addRunArtifact(tests).step);
