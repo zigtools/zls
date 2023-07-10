@@ -2671,19 +2671,52 @@ pub fn lookupSymbolContainer(
 pub fn lookupSymbolEnumLiteral(
     analyser: *Analyser,
     handle: *const DocumentStore.Handle,
+    source_index: usize,
     nodes: []Ast.Node.Index,
 ) error{OutOfMemory}!?DeclWithHandle {
     if (nodes.len == 0) return null;
 
     const tree = handle.tree;
     const node_tags = tree.nodes.items(.tag);
-    if (node_tags[nodes[0]] != .enum_literal) return null;
+    const main_tokens = tree.nodes.items(.main_token);
 
-    const container_type = (try analyser.resolveEnumLiteralType(
+    var struct_init_buf: [2]Ast.Node.Index = undefined;
+    if (tree.fullStructInit(&struct_init_buf, nodes[0])) |struct_init| {
+        for (struct_init.ast.fields) |field_init| {
+            const field_token = handle.tree.firstToken(field_init) - 2;
+            const field_loc = offsets.tokenToLoc(handle.tree, field_token);
+            if (field_loc.start <= source_index and source_index <= field_loc.end) {
+                const field_name = tree.tokenSlice(field_token);
+                return analyser.lookupSymbolFieldInit(handle, field_name, nodes);
+            }
+        }
+    } else if (node_tags[nodes[0]] == .enum_literal) {
+        const field_name = tree.tokenSlice(main_tokens[nodes[0]]);
+        return analyser.lookupSymbolFieldInit(handle, field_name, nodes);
+    }
+
+    return null;
+}
+
+pub fn lookupSymbolFieldInit(
+    analyser: *Analyser,
+    handle: *const DocumentStore.Handle,
+    field_name: []const u8,
+    nodes: []Ast.Node.Index,
+) error{OutOfMemory}!?DeclWithHandle {
+    if (nodes.len == 0) return null;
+
+    var container_type = (try analyser.resolveExpressionType(
         handle,
         nodes[0],
         nodes[1..],
     )) orelse return null;
+
+    if (try analyser.resolveUnwrapErrorUnionType(container_type, .right)) |unwrapped|
+        container_type = unwrapped;
+
+    if (try analyser.resolveUnwrapOptionalType(container_type)) |unwrapped|
+        container_type = unwrapped;
 
     const container_node = switch (container_type.type.data) {
         .other => |n| n,
@@ -2692,12 +2725,28 @@ pub fn lookupSymbolEnumLiteral(
 
     return analyser.lookupSymbolContainer(
         .{ .node = container_node, .handle = container_type.handle },
-        tree.tokenSlice(tree.nodes.items(.main_token)[nodes[0]]),
+        field_name,
         !container_type.isEnumType(),
     );
 }
 
-pub fn resolveEnumLiteralType(
+pub fn resolveExpressionType(
+    analyser: *Analyser,
+    handle: *const DocumentStore.Handle,
+    node: Ast.Node.Index,
+    ancestors: []Ast.Node.Index,
+) error{OutOfMemory}!?TypeWithHandle {
+    return (try analyser.resolveExpressionTypeFromAncestors(
+        handle,
+        node,
+        ancestors,
+    )) orelse (try analyser.resolveTypeOfNode(.{
+        .node = node,
+        .handle = handle,
+    }));
+}
+
+pub fn resolveExpressionTypeFromAncestors(
     analyser: *Analyser,
     handle: *const DocumentStore.Handle,
     node: Ast.Node.Index,
@@ -2711,8 +2760,16 @@ pub fn resolveEnumLiteralType(
     const token_tags: []std.zig.Token.Tag = tree.tokens.items(.tag);
 
     var call_buf: [1]Ast.Node.Index = undefined;
+    var struct_init_buf: [2]Ast.Node.Index = undefined;
 
-    if (tree.fullVarDecl(ancestors[0])) |var_decl| {
+    if (tree.fullStructInit(&struct_init_buf, ancestors[0])) |struct_init| {
+        if (std.mem.indexOfScalar(Ast.Node.Index, struct_init.ast.fields, node) != null) {
+            const field_name = tree.tokenSlice(tree.firstToken(node) - 2);
+            if (try analyser.lookupSymbolFieldInit(handle, field_name, ancestors)) |field_decl| {
+                return try field_decl.resolveType(analyser);
+            }
+        }
+    } else if (tree.fullVarDecl(ancestors[0])) |var_decl| {
         if (node == var_decl.ast.init_node) {
             return try analyser.resolveTypeOfNode(.{
                 .node = ancestors[0],
@@ -2721,36 +2778,27 @@ pub fn resolveEnumLiteralType(
         }
     } else if (tree.fullIf(ancestors[0])) |if_node| {
         if (node == if_node.ast.then_expr or node == if_node.ast.else_expr) {
-            return (try analyser.resolveTypeOfNode(.{
-                .node = ancestors[0],
-                .handle = handle,
-            })) orelse (try analyser.resolveEnumLiteralType(
+            return try analyser.resolveExpressionType(
                 handle,
                 ancestors[0],
                 ancestors[1..],
-            ));
+            );
         }
     } else if (tree.fullFor(ancestors[0])) |for_node| {
         if (node == for_node.ast.else_expr) {
-            return (try analyser.resolveTypeOfNode(.{
-                .node = ancestors[0],
-                .handle = handle,
-            })) orelse (try analyser.resolveEnumLiteralType(
+            return try analyser.resolveExpressionType(
                 handle,
                 ancestors[0],
                 ancestors[1..],
-            ));
+            );
         }
     } else if (tree.fullWhile(ancestors[0])) |while_node| {
         if (node == while_node.ast.else_expr) {
-            return (try analyser.resolveTypeOfNode(.{
-                .node = ancestors[0],
-                .handle = handle,
-            })) orelse (try analyser.resolveEnumLiteralType(
+            return try analyser.resolveExpressionType(
                 handle,
                 ancestors[0],
                 ancestors[1..],
-            ));
+            );
         }
     } else if (tree.fullSwitchCase(ancestors[0])) |switch_case| {
         if (ancestors.len == 1) return null;
@@ -2761,14 +2809,11 @@ pub fn resolveEnumLiteralType(
         }
 
         if (node == switch_case.ast.target_expr) {
-            return (try analyser.resolveTypeOfNode(.{
-                .node = ancestors[1],
-                .handle = handle,
-            })) orelse (try analyser.resolveEnumLiteralType(
+            return try analyser.resolveExpressionType(
                 handle,
                 ancestors[1],
                 ancestors[2..],
-            ));
+            );
         }
 
         for (switch_case.ast.values) |value| {
@@ -2833,6 +2878,19 @@ pub fn resolveEnumLiteralType(
             }));
         },
 
+        .@"return" => {
+            if (node != datas[ancestors[0]].lhs) return null;
+
+            var func_buf: [1]Ast.Node.Index = undefined;
+            for (1..ancestors.len) |index| {
+                const func = tree.fullFnProto(&func_buf, ancestors[index]) orelse continue;
+                return try analyser.resolveTypeOfNode(.{
+                    .node = func.ast.return_type,
+                    .handle = handle,
+                });
+            }
+        },
+
         .@"break" => {
             if (node != datas[ancestors[0]].rhs) return null;
 
@@ -2869,17 +2927,14 @@ pub fn resolveEnumLiteralType(
                 }
             } else return null;
 
-            return (try analyser.resolveTypeOfNode(.{
-                .node = ancestors[index],
-                .handle = handle,
-            })) orelse (try analyser.resolveEnumLiteralType(
+            return try analyser.resolveExpressionType(
                 handle,
                 ancestors[index],
                 ancestors[index + 1 ..],
-            ));
+            );
         },
 
-        else => {}, // TODO: Implement more expressions that may contain enum literals; better safe than sorry
+        else => {}, // TODO: Implement more expressions; better safe than sorry
     }
 
     return null;
