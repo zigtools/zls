@@ -133,10 +133,15 @@ fn nodeToCompletion(
     const datas = tree.nodes.items(.data);
     const token_tags = tree.tokens.items(.tag);
 
+    const doc_kind: types.MarkupKind = if (server.client_capabilities.completion_doc_supports_md)
+        .markdown
+    else
+        .plaintext;
+
     const doc = try completionDoc(
         server,
         either_descriptor,
-        try Analyser.getDocComments(allocator, handle.tree, node),
+        try Analyser.getDocComments(allocator, handle.tree, node, doc_kind),
     );
 
     if (ast.isContainer(handle.tree, node)) {
@@ -356,6 +361,8 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: Analyser.Decl
         if (exclusions.has(name)) return;
     }
 
+    const doc_kind: types.MarkupKind = if (context.server.client_capabilities.completion_doc_supports_md) .markdown else .plaintext;
+
     switch (decl_handle.decl.*) {
         .ast_node => |node| try nodeToCompletion(
             context.server,
@@ -373,7 +380,7 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: Analyser.Decl
                 context.server,
                 context.either_descriptor,
                 if (param.first_doc_comment) |doc_comments|
-                    try Analyser.collectDocComments(allocator, tree, doc_comments, false)
+                    try Analyser.collectDocComments(allocator, tree, doc_comments, doc_kind, false)
                 else
                     null,
             );
@@ -408,7 +415,7 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: Analyser.Decl
             const doc = try completionDoc(
                 context.server,
                 context.either_descriptor,
-                try Analyser.getDocCommentsBeforeToken(allocator, tree, token),
+                try Analyser.getDocCommentsBeforeToken(allocator, tree, token, doc_kind),
             );
 
             try context.completions.append(allocator, .{

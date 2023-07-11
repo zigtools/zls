@@ -45,21 +45,21 @@ pub fn invalidate(self: *Analyser) void {
     _ = self.arena.reset(.free_all);
 }
 
-pub fn getDocCommentsBeforeToken(allocator: std.mem.Allocator, tree: Ast, base: Ast.TokenIndex) !?[]const u8 {
+pub fn getDocCommentsBeforeToken(allocator: std.mem.Allocator, tree: Ast, base: Ast.TokenIndex, format: types.MarkupKind) !?[]const u8 {
     const tokens = tree.tokens.items(.tag);
     const doc_comment_index = getDocCommentTokenIndex(tokens, base) orelse return null;
-    return try collectDocComments(allocator, tree, doc_comment_index, false);
+    return try collectDocComments(allocator, tree, doc_comment_index, format, false);
 }
 
 /// Gets a declaration's doc comments. Caller owns returned memory.
-pub fn getDocComments(allocator: std.mem.Allocator, tree: Ast, node: Ast.Node.Index) !?[]const u8 {
+pub fn getDocComments(allocator: std.mem.Allocator, tree: Ast, node: Ast.Node.Index, format: types.MarkupKind) !?[]const u8 {
     const base = tree.nodes.items(.main_token)[node];
     const base_kind = tree.nodes.items(.tag)[node];
 
     switch (base_kind) {
         // As far as I know, this does not actually happen yet, but it
         // may come in useful.
-        .root => return try collectDocComments(allocator, tree, 0, true),
+        .root => return try collectDocComments(allocator, tree, 0, format, true),
         .fn_proto,
         .fn_proto_one,
         .fn_proto_simple,
@@ -72,7 +72,7 @@ pub fn getDocComments(allocator: std.mem.Allocator, tree: Ast, node: Ast.Node.In
         .container_field_init,
         .container_field_align,
         .container_field,
-        => return try getDocCommentsBeforeToken(allocator, tree, base),
+        => return try getDocCommentsBeforeToken(allocator, tree, base, format),
         else => {},
     }
     return null;
@@ -100,7 +100,7 @@ pub fn getDocCommentTokenIndex(tokens: []const std.zig.Token.Tag, base_token: As
     } else idx + 1;
 }
 
-pub fn collectDocComments(allocator: std.mem.Allocator, tree: Ast, doc_comments: Ast.TokenIndex, container_doc: bool) ![]const u8 {
+pub fn collectDocComments(allocator: std.mem.Allocator, tree: Ast, doc_comments: Ast.TokenIndex, format: types.MarkupKind, container_doc: bool) ![]const u8 {
     var lines = std.ArrayList([]const u8).init(allocator);
     defer lines.deinit();
     const tokens = tree.tokens.items(.tag);
@@ -113,7 +113,7 @@ pub fn collectDocComments(allocator: std.mem.Allocator, tree: Ast, doc_comments:
         } else break;
     }
 
-    return try std.mem.join(allocator, "\n", lines.items);
+    return try std.mem.join(allocator, if (format == .markdown) "  \n" else "\n", lines.items);
 }
 
 /// Gets a function's keyword, name, arguments and return value.
@@ -3152,7 +3152,7 @@ fn makeInnerScope(
         {
             if (std.mem.eql(u8, name, "_")) continue;
 
-            const doc = try getDocComments(allocator, tree, decl);
+            const doc = try getDocComments(allocator, tree, decl, .markdown);
             errdefer if (doc) |d| allocator.free(d);
             var gop_res = try context.doc_scope.enum_completions.getOrPut(allocator, .{
                 .label = name,
