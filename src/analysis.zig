@@ -722,6 +722,56 @@ pub fn isTypeIdent(text: []const u8) bool {
     return true;
 }
 
+const FindBreaks = struct {
+    const Error = error{OutOfMemory};
+
+    label: ?[]const u8,
+    allow_unlabeled: bool,
+    allocator: std.mem.Allocator,
+    break_operands: std.ArrayListUnmanaged(Ast.Node.Index) = .{},
+
+    fn deinit(context: *FindBreaks) void {
+        context.break_operands.deinit(context.allocator);
+    }
+
+    fn findBreakOperands(context: *FindBreaks, tree: Ast, node: Ast.Node.Index) Error!void {
+        if (node == 0)
+            return;
+
+        const allow_unlabeled = context.allow_unlabeled;
+        const node_tags = tree.nodes.items(.tag);
+        const datas = tree.nodes.items(.data);
+
+        switch (node_tags[node]) {
+            .@"break" => {
+                const label_token = datas[node].lhs;
+                const operand = datas[node].rhs;
+                if (allow_unlabeled and label_token == 0) {
+                    try context.break_operands.append(context.allocator, operand);
+                } else if (context.label) |label| {
+                    if (label_token != 0 and std.mem.eql(u8, label, tree.tokenSlice(label_token)))
+                        try context.break_operands.append(context.allocator, operand);
+                }
+            },
+
+            .@"while",
+            .while_simple,
+            .while_cont,
+            .@"for",
+            .for_simple,
+            => {
+                context.allow_unlabeled = false;
+                try ast.iterateChildren(tree, node, context, Error, findBreakOperands);
+                context.allow_unlabeled = allow_unlabeled;
+            },
+
+            else => {
+                try ast.iterateChildren(tree, node, context, Error, findBreakOperands);
+            },
+        }
+    }
+};
+
 /// Resolves the type of a node
 fn resolveTypeOfNodeInternal(analyser: *Analyser, node_handle: NodeWithHandle) error{OutOfMemory}!?TypeWithHandle {
     const node_with_uri = NodeWithUri{
@@ -1187,6 +1237,50 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
 
             return TypeWithHandle.fromEither(analyser.gpa, try either.toOwnedSlice(analyser.arena.allocator()), handle);
         },
+        .@"while",
+        .while_simple,
+        .while_cont,
+        .@"for",
+        .for_simple,
+        => {
+            const loop: struct {
+                label_token: ?Ast.TokenIndex,
+                then_expr: Ast.Node.Index,
+                else_expr: Ast.Node.Index,
+            } = if (tree.fullWhile(node)) |while_node|
+                .{
+                    .label_token = while_node.label_token,
+                    .then_expr = while_node.ast.then_expr,
+                    .else_expr = while_node.ast.else_expr,
+                }
+            else if (tree.fullFor(node)) |for_node|
+                .{
+                    .label_token = for_node.label_token,
+                    .then_expr = for_node.ast.then_expr,
+                    .else_expr = for_node.ast.else_expr,
+                }
+            else
+                unreachable;
+
+            if (loop.else_expr == 0)
+                return null;
+
+            // TODO: peer type resolution based on `else` and all `break` statements
+            if (try analyser.resolveTypeOfNodeInternal(.{ .node = loop.else_expr, .handle = handle })) |else_type|
+                return else_type;
+
+            var context = FindBreaks{
+                .label = if (loop.label_token) |token| tree.tokenSlice(token) else null,
+                .allow_unlabeled = true,
+                .allocator = analyser.gpa,
+            };
+            defer context.deinit();
+            try context.findBreakOperands(tree, loop.then_expr);
+            for (context.break_operands.items) |operand| {
+                if (try analyser.resolveTypeOfNodeInternal(.{ .node = operand, .handle = handle })) |operand_type|
+                    return operand_type;
+            }
+        },
         .block,
         .block_semicolon,
         .block_two,
@@ -1197,21 +1291,17 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
 
             const block_label = tree.tokenSlice(first_token);
 
-            var buffer: [2]Ast.Node.Index = undefined;
-            const statements = ast.blockStatements(tree, node, &buffer).?;
-
-            for (statements) |child_idx| {
-                // TODO: Recursively find matching `break :label` (e.g. inside `if`)
-                if (node_tags[child_idx] == .@"break") {
-                    if (datas[child_idx].lhs == 0) continue;
-                    if (datas[child_idx].rhs == 0) continue;
-
-                    const break_label = tree.tokenSlice(datas[child_idx].lhs);
-                    if (!std.mem.eql(u8, block_label, break_label)) continue;
-
-                    const operand = .{ .node = datas[child_idx].rhs, .handle = handle };
-                    return try analyser.resolveTypeOfNodeInternal(operand);
-                }
+            // TODO: peer type resolution based on all `break` statements
+            var context = FindBreaks{
+                .label = block_label,
+                .allow_unlabeled = false,
+                .allocator = analyser.gpa,
+            };
+            defer context.deinit();
+            try context.findBreakOperands(tree, node);
+            for (context.break_operands.items) |operand| {
+                if (try analyser.resolveTypeOfNodeInternal(.{ .node = operand, .handle = handle })) |operand_type|
+                    return operand_type;
             }
         },
         else => {},
