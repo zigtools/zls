@@ -171,7 +171,19 @@ pub fn getOrLoadHandle(self: *DocumentStore, uri: Uri) ?*const Handle {
 
     const file_contents = file.readToEndAllocOptions(self.allocator, std.math.maxInt(usize), null, @alignOf(u8), 0) catch return null;
 
-    return self.createAndStoreDocument(uri, file_contents, false) catch null;
+    const handle = self.createAndStoreDocument(uri, file_contents, false) catch return null;
+
+    defer {
+        if (handle.associated_build_file) |build_file_uri| {
+            log.debug("Opened document `{s}` with build file `{s}`", .{ handle.uri, build_file_uri });
+        } else if (isBuildFile(handle.uri)) {
+            log.debug("Opened document `{s}` (build file)", .{handle.uri});
+        } else {
+            log.debug("Opened document `{s}`", .{handle.uri});
+        }
+    }
+
+    return handle;
 }
 
 /// **Thread safe** takes a shared lock
@@ -790,16 +802,6 @@ fn createDocument(self: *DocumentStore, uri: Uri, text: [:0]const u8, open: bool
         };
     };
     errdefer handle.deinit(self.allocator);
-
-    defer {
-        if (handle.associated_build_file) |build_file_uri| {
-            log.debug("Opened document `{s}` with build file `{s}`", .{ handle.uri, build_file_uri });
-        } else if (isBuildFile(handle.uri)) {
-            log.debug("Opened document `{s}` (build file)", .{handle.uri});
-        } else {
-            log.debug("Opened document `{s}`", .{handle.uri});
-        }
-    }
 
     handle.import_uris = try self.collectImportUris(handle);
     handle.cimports = try collectCIncludes(self.allocator, handle.tree);

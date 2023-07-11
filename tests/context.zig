@@ -30,7 +30,6 @@ pub const Context = struct {
     server: *Server,
     arena: std.heap.ArenaAllocator,
     config: *Config,
-    request_id: u32 = 1,
     file_id: u32 = 0,
 
     pub fn init() !Context {
@@ -40,7 +39,7 @@ pub const Context = struct {
 
         config.* = default_config;
 
-        const server = try Server.create(allocator, config, null, false, false, false);
+        const server = try Server.create(allocator, config, null);
         errdefer server.destroy();
 
         var context: Context = .{
@@ -49,8 +48,8 @@ pub const Context = struct {
             .config = config,
         };
 
-        try context.request("initialize", initialize_msg, null);
-        try context.notification("initialized", "{}");
+        _ = try context.server.sendRequestSync(context.arena.allocator(), "initialize", .{ .capabilities = .{} });
+        _ = try context.server.sendNotificationSync(context.arena.allocator(), "initialized", .{});
 
         // TODO this line shouldn't be needed
         context.server.client_capabilities.label_details_support = false;
@@ -62,86 +61,9 @@ pub const Context = struct {
         zls.legacy_json.parseFree(Config, allocator, self.config.*);
         allocator.destroy(self.config);
 
-        self.request("shutdown", "{}", null) catch {};
+        _ = self.server.sendRequestSync(self.arena.allocator(), "shutdown", {}) catch {};
         self.server.destroy();
         self.arena.deinit();
-    }
-
-    pub fn notification(
-        self: *Context,
-        method: []const u8,
-        params: []const u8,
-    ) !void {
-        var output = std.ArrayListUnmanaged(u8){};
-        defer output.deinit(allocator);
-
-        // create the request
-        const req = try std.fmt.allocPrint(allocator,
-            \\{{"jsonrpc":"2.0","method":"{s}","params":{s}}}
-        , .{ method, params });
-        defer allocator.free(req);
-
-        //  send the request to the server
-        self.server.processJsonRpc(req);
-
-        for (self.server.outgoing_messages.items) |outgoing_message| {
-            self.server.allocator.free(outgoing_message);
-        }
-        self.server.outgoing_messages.clearRetainingCapacity();
-    }
-
-    pub fn requestAlloc(
-        self: *Context,
-        method: []const u8,
-        params: []const u8,
-    ) ![]const u8 {
-        // create the request
-        self.request_id += 1;
-        const req = try std.fmt.allocPrint(allocator,
-            \\{{"jsonrpc":"2.0","id":{},"method":"{s}","params":{s}}}
-        , .{ self.request_id, method, params });
-        defer allocator.free(req);
-
-        //  send the request to the server
-        self.server.processJsonRpc(req);
-
-        const messages = self.server.outgoing_messages.items;
-
-        try std.testing.expect(messages.len != 0);
-
-        for (messages[0..(messages.len - 1)]) |message| {
-            self.server.allocator.free(message);
-        }
-        defer self.server.outgoing_messages.clearRetainingCapacity();
-
-        return messages[messages.len - 1];
-    }
-
-    pub fn request(
-        self: *Context,
-        method: []const u8,
-        params: []const u8,
-        expect: ?[]const u8,
-    ) !void {
-        const response_bytes = try self.requestAlloc(method, params);
-        defer self.server.allocator.free(response_bytes);
-
-        const expected = expect orelse return;
-
-        var tree = try std.json.parseFromSlice(std.json.Value, allocator, response_bytes, .{});
-        defer tree.deinit();
-
-        const response = tree.value.object;
-
-        // assertions
-        try std.testing.expectEqualStrings("2.0", response.get("jsonrpc").?.string);
-        try std.testing.expectEqual(self.request_id, @as(u32, @intCast(response.get("id").?.integer)));
-        try std.testing.expect(!response.contains("error"));
-
-        const result_json = try std.json.stringifyAlloc(allocator, response.get("result").?, .{});
-        defer allocator.free(result_json);
-
-        try std.testing.expectEqualStrings(expected, result_json);
     }
 
     // helper
@@ -156,7 +78,7 @@ pub const Context = struct {
             .{self.file_id},
         );
 
-        const open_document = types.DidOpenTextDocumentParams{
+        const params = types.DidOpenTextDocumentParams{
             .textDocument = .{
                 .uri = uri,
                 .languageId = "zig",
@@ -164,36 +86,10 @@ pub const Context = struct {
                 .text = source,
             },
         };
-        const params = try std.json.stringifyAlloc(allocator, open_document, .{});
-        defer allocator.free(params);
 
-        try self.notification("textDocument/didOpen", params);
+        _ = try self.server.sendNotificationSync(self.arena.allocator(), "textDocument/didOpen", params);
 
         self.file_id += 1;
         return uri;
-    }
-
-    pub fn Response(comptime Result: type) type {
-        return struct {
-            jsonrpc: []const u8 = "2.0",
-            id: types.RequestId,
-            result: Result = null,
-        };
-    }
-
-    pub fn requestGetResponse(self: *Context, comptime Result: type, method: []const u8, params: anytype) !Response(Result) {
-        var buffer = std.ArrayListUnmanaged(u8){};
-        defer buffer.deinit(allocator);
-
-        try std.json.stringify(params, .{ .emit_null_optional_fields = false }, buffer.writer(allocator));
-
-        const response_bytes = try self.requestAlloc(method, buffer.items);
-        defer self.server.allocator.free(response_bytes);
-
-        const tree = try std.json.parseFromSliceLeaky(std.json.Value, self.arena.allocator(), try self.arena.allocator().dupe(u8, response_bytes), .{});
-
-        // TODO validate jsonrpc and id
-
-        return try std.json.parseFromValueLeaky(Response(Result), self.arena.allocator(), tree, .{});
     }
 };

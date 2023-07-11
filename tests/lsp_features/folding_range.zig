@@ -219,7 +219,7 @@ fn testFoldingRange(source: []const u8, expect: []const types.FoldingRange) !voi
 
     const params = types.FoldingRangeParams{ .textDocument = .{ .uri = test_uri } };
 
-    const response = try ctx.requestGetResponse(?[]types.FoldingRange, "textDocument/foldingRange", params);
+    const response = try ctx.server.sendRequestSync(ctx.arena.allocator(), "textDocument/foldingRange", params) orelse return error.InvalidResponse;
 
     var actual = std.ArrayListUnmanaged(u8){};
     defer actual.deinit(allocator);
@@ -228,7 +228,7 @@ fn testFoldingRange(source: []const u8, expect: []const types.FoldingRange) !voi
     defer expected.deinit(allocator);
 
     const options = std.json.StringifyOptions{ .emit_null_optional_fields = false };
-    try std.json.stringify(response.result, options, actual.writer(allocator));
+    try std.json.stringify(response, options, actual.writer(allocator));
     try std.json.stringify(expect, options, expected.writer(allocator));
 
     // TODO: Actually compare strings as JSON values.

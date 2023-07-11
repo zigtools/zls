@@ -7,12 +7,12 @@ const Config = @import("Config.zig");
 const configuration = @import("configuration.zig");
 const Server = @import("Server.zig");
 const Header = @import("Header.zig");
+const Transport = @import("Transport.zig");
 const debug = @import("debug.zig");
 const binned_allocator = @import("binned_allocator");
 const legacy_json = @import("legacy_json.zig");
 
 const logger = std.log.scoped(.zls_main);
-const message_logger = std.log.scoped(.message);
 
 var actual_log_level: std.log.Level = switch (zig_builtin.mode) {
     .Debug => .debug,
@@ -39,54 +39,6 @@ pub const std_options = struct {
         std.debug.print(format ++ "\n", args);
     }
 };
-
-fn loop(
-    server: *Server,
-    record_file: ?std.fs.File,
-    replay_file: ?std.fs.File,
-) !void {
-    const std_in = std.io.getStdIn().reader();
-    const std_out = std.io.getStdOut().writer();
-
-    var buffered_reader = std.io.bufferedReader(if (replay_file) |file| file.reader() else std_in);
-    const reader = buffered_reader.reader();
-
-    var buffered_writer = std.io.bufferedWriter(std_out);
-    const writer = buffered_writer.writer();
-
-    while (true) {
-        // write server -> client messages
-        for (server.outgoing_messages.items) |outgoing_message| {
-            const header = Header{ .content_length = outgoing_message.len };
-            try header.write(true, writer);
-            try writer.writeAll(outgoing_message);
-            if (server.message_tracing_enabled) message_logger.info("sent: {s}\n", .{outgoing_message});
-        }
-        try buffered_writer.flush();
-        for (server.outgoing_messages.items) |outgoing_message| {
-            server.allocator.free(outgoing_message);
-        }
-        server.outgoing_messages.clearRetainingCapacity();
-
-        // read and handle client -> server message
-        const header = try Header.parse(server.allocator, replay_file == null, reader);
-        defer header.deinit(server.allocator);
-
-        const json_message = try server.allocator.alloc(u8, header.content_length);
-        defer server.allocator.free(json_message);
-        try reader.readNoEof(json_message);
-
-        if (record_file) |file| {
-            try header.write(false, file.writer());
-            try file.writeAll(json_message);
-        }
-
-        if (server.message_tracing_enabled) message_logger.info("received: {s}\n", .{json_message});
-        server.processJsonRpc(json_message);
-
-        if (server.status == .exiting_success or server.status == .exiting_failure) return;
-    }
-}
 
 fn getRecordFile(config: Config) ?std.fs.File {
     if (!config.record_session) return null;
@@ -136,12 +88,12 @@ fn updateConfig(
 
         try std.json.stringify(cfg, .{}, buffer.writer(allocator));
         const header = Header{ .content_length = buffer.items.len };
-        try header.write(false, file.writer());
+        try header.write(true, file.writer());
         try file.writeAll(buffer.items);
     }
 
     if (replay_file) |file| {
-        const header = try Header.parse(allocator, false, file.reader());
+        const header = try Header.parse(allocator, true, file.reader());
         defer header.deinit(allocator);
         const json_message = try allocator.alloc(u8, header.content_length);
         defer allocator.free(json_message);
@@ -368,7 +320,7 @@ pub fn main() !void {
     var allocator_state = if (build_options.use_gpa)
         std.heap.GeneralPurposeAllocator(.{ .stack_trace_frames = stack_frames }){}
     else
-        binned_allocator.BinnedAllocator(.{ .thread_safe = false }){};
+        binned_allocator.BinnedAllocator(.{}){};
 
     defer {
         if (build_options.use_gpa)
@@ -413,6 +365,13 @@ pub fn main() !void {
     const replay_file = if (result.replay_enabled) getReplayFile(config.config) else null;
     defer if (replay_file) |file| file.close();
 
+    var transport = Transport.init(
+        if (replay_file) |file| file.reader() else std.io.getStdIn().reader(),
+        std.io.getStdOut().writer(),
+    );
+    transport.message_tracing = result.message_tracing_enabled;
+    if (record_file) |file| transport.replay_file = file.writer();
+
     std.debug.assert(record_file == null or replay_file == null);
 
     try updateConfig(allocator, &config.config, record_file, replay_file);
@@ -421,13 +380,13 @@ pub fn main() !void {
         allocator,
         &config.config,
         config.config_path,
-        record_file != null,
-        replay_file != null,
-        result.message_tracing_enabled,
     );
     defer server.destroy();
+    server.recording_enabled = record_file != null;
+    server.recording_enabled = replay_file != null;
+    server.transport = &transport;
 
-    try loop(server, record_file, replay_file);
+    try server.loop();
 
     if (server.status == .exiting_failure) {
         std.process.exit(1);

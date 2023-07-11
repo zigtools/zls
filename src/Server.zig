@@ -10,13 +10,13 @@ const types = @import("lsp.zig");
 const Analyser = @import("analysis.zig");
 const ast = @import("ast.zig");
 const offsets = @import("offsets.zig");
-const shared = @import("shared.zig");
 const Ast = std.zig.Ast;
 const tracy = @import("tracy.zig");
 const diff = @import("diff.zig");
 const ComptimeInterpreter = @import("ComptimeInterpreter.zig");
 const InternPool = @import("analyser/analyser.zig").InternPool;
 const ZigVersionWrapper = @import("ZigVersionWrapper.zig");
+const Transport = @import("Transport.zig");
 
 const signature_help = @import("features/signature_help.zig");
 const references = @import("features/references.zig");
@@ -33,33 +33,22 @@ const diagnostics_gen = @import("features/diagnostics.zig");
 
 const log = std.log.scoped(.zls_server);
 
-// Server fields
-
-config: *Config,
+// public fields
 allocator: std.mem.Allocator,
+config: *Config,
 document_store: DocumentStore,
+transport: ?*Transport = null,
+offset_encoding: offsets.Encoding = .@"utf-16",
+status: Status = .uninitialized,
+
+// private fields
+thread_pool: if (zig_builtin.single_threaded) void else std.Thread.Pool,
+wait_group: if (zig_builtin.single_threaded) void else std.Thread.WaitGroup,
 ip: InternPool = .{},
 client_capabilities: ClientCapabilities = .{},
-runtime_zig_version: ?ZigVersionWrapper,
-outgoing_messages: std.ArrayListUnmanaged([]const u8) = .{},
-recording_enabled: bool,
-replay_enabled: bool,
-message_tracing_enabled: bool = false,
-offset_encoding: offsets.Encoding = .@"utf-16",
-status: enum {
-    /// the server has not received a `initialize` request
-    uninitialized,
-    /// the server has received a `initialize` request and is awaiting the `initialized` notification
-    initializing,
-    /// the server has been initialized and is ready to received requests
-    initialized,
-    /// the server has been shutdown and can't handle any more requests
-    shutdown,
-    /// the server is received a `exit` notification and has been shutdown
-    exiting_success,
-    /// the server is received a `exit` notification but has not been shutdown
-    exiting_failure,
-},
+runtime_zig_version: ?ZigVersionWrapper = null,
+recording_enabled: bool = false,
+replay_enabled: bool = false,
 
 // Code was based off of https://github.com/andersfr/zig-lsp/blob/master/server.zig
 
@@ -77,7 +66,8 @@ const ClientCapabilities = packed struct {
     supports_workspace_did_change_configuration_dynamic_registration: bool = false,
 };
 
-pub const Error = std.mem.Allocator.Error || error{
+pub const Error = error{
+    OutOfMemory,
     ParseError,
     InvalidRequest,
     MethodNotFound,
@@ -113,43 +103,59 @@ pub const Error = std.mem.Allocator.Error || error{
     RequestCancelled,
 };
 
-fn sendResponse(server: *Server, id: types.RequestId, result: anytype) void {
+pub const Status = enum {
+    /// the server has not received a `initialize` request
+    uninitialized,
+    /// the server has received a `initialize` request and is awaiting the `initialized` notification
+    initializing,
+    /// the server has been initialized and is ready to received requests
+    initialized,
+    /// the server has been shutdown and can't handle any more requests
+    shutdown,
+    /// the server is received a `exit` notification and has been shutdown
+    exiting_success,
+    /// the server is received a `exit` notification but has not been shutdown
+    exiting_failure,
+};
+
+fn sendToClientResponse(server: *Server, id: types.RequestId, result: anytype) error{OutOfMemory}![]u8 {
     // TODO validate result type is a possible response
     // TODO validate response is from a client to server request
     // TODO validate result type
 
-    server.sendInternal(id, null, null, "result", result) catch {};
+    return try server.sendToClientInternal(id, null, null, "result", result);
 }
 
-fn sendRequest(server: *Server, id: types.RequestId, method: []const u8, params: anytype) void {
+fn sendToClientRequest(server: *Server, id: types.RequestId, method: []const u8, params: anytype) error{OutOfMemory}![]u8 {
     // TODO validate method is a request
     // TODO validate method is server to client
     // TODO validate params type
 
-    server.sendInternal(id, method, null, "params", params) catch {};
+    return try server.sendToClientInternal(id, method, null, "params", params);
 }
 
-fn sendNotification(server: *Server, method: []const u8, params: anytype) void {
+fn sendToClientNotification(server: *Server, method: []const u8, params: anytype) error{OutOfMemory}![]u8 {
     // TODO validate method is a notification
     // TODO validate method is server to client
     // TODO validate params type
 
-    server.sendInternal(null, method, null, "params", params) catch {};
+    return try server.sendToClientInternal(null, method, null, "params", params);
 }
 
-fn sendResponseError(server: *Server, id: types.RequestId, err: ?types.ResponseError) void {
-    server.sendInternal(id, null, err, "", {}) catch {};
+fn sendToClientResponseError(server: *Server, id: types.RequestId, err: ?types.ResponseError) error{OutOfMemory}![]u8 {
+    return try server.sendToClientInternal(id, null, err, "", null);
 }
 
-fn sendInternal(
+fn sendToClientInternal(
     server: *Server,
     maybe_id: ?types.RequestId,
     maybe_method: ?[]const u8,
     maybe_err: ?types.ResponseError,
     extra_name: []const u8,
     extra: anytype,
-) error{OutOfMemory}!void {
+) error{OutOfMemory}![]u8 {
     var buffer = std.ArrayListUnmanaged(u8){};
+    errdefer buffer.deinit(server.allocator);
     var writer = buffer.writer(server.allocator);
     try writer.writeAll(
         \\{"jsonrpc":"2.0"
@@ -188,10 +194,12 @@ fn sendInternal(
     }
     try writer.writeByte('}');
 
-    const message = try buffer.toOwnedSlice(server.allocator);
-    errdefer server.allocator.free(message);
-
-    try server.outgoing_messages.append(server.allocator, message);
+    if (server.transport) |transport| {
+        transport.writeJsonMessage(buffer.items) catch |err| {
+            log.err("failed to write response: {}", .{err});
+        };
+    }
+    return buffer.toOwnedSlice(server.allocator);
 }
 
 fn showMessage(
@@ -208,10 +216,14 @@ fn showMessage(
         .Info => log.info("{s}", .{message}),
         .Log => log.debug("{s}", .{message}),
     }
-    server.sendNotification("window/showMessage", types.ShowMessageParams{
+    if (server.sendToClientNotification("window/showMessage", types.ShowMessageParams{
         .type = message_type,
         .message = message,
-    });
+    })) |json_message| {
+        server.allocator.free(json_message);
+    } else |err| {
+        log.warn("failed to show message: {}", .{err});
+    }
 }
 
 fn getAutofixMode(server: *Server) enum {
@@ -381,7 +393,9 @@ fn initializeHandler(server: *Server, _: std.mem.Allocator, request: types.Initi
     if (request.trace) |trace| {
         // To support --enable-message-tracing, only allow turning this on here
         if (trace != .off) {
-            server.message_tracing_enabled = true;
+            if (server.transport) |transport| {
+                transport.message_tracing = true;
+            }
         }
     }
 
@@ -536,7 +550,9 @@ fn cancelRequestHandler(server: *Server, _: std.mem.Allocator, request: types.Ca
 }
 
 fn setTraceHandler(server: *Server, _: std.mem.Allocator, request: types.SetTraceParams) Error!void {
-    server.message_tracing_enabled = request.value != .off;
+    if (server.transport) |transport| {
+        transport.message_tracing = request.value != .off;
+    }
 }
 
 fn registerCapability(server: *Server, method: []const u8) Error!void {
@@ -545,7 +561,7 @@ fn registerCapability(server: *Server, method: []const u8) Error!void {
 
     log.debug("Dynamically registering method '{s}'", .{method});
 
-    server.sendRequest(
+    const json_message = try server.sendToClientRequest(
         .{ .string = id },
         "client/registerCapability",
         types.RegistrationParams{ .registrations = &.{
@@ -555,6 +571,7 @@ fn registerCapability(server: *Server, method: []const u8) Error!void {
             },
         } },
     );
+    server.allocator.free(json_message);
 }
 
 fn requestConfiguration(server: *Server) Error!void {
@@ -574,13 +591,14 @@ fn requestConfiguration(server: *Server) Error!void {
         break :config comp_config;
     };
 
-    server.sendRequest(
+    const json_message = try server.sendToClientRequest(
         .{ .string = "i_haz_configuration" },
         "workspace/configuration",
         types.ConfigurationParams{
             .items = &configuration_items,
         },
     );
+    server.allocator.free(json_message);
 }
 
 fn handleConfiguration(server: *Server, json: std.json.Value) error{OutOfMemory}!void {
@@ -686,7 +704,8 @@ fn openDocumentHandler(server: *Server, arena: std.mem.Allocator, notification: 
 
     if (server.client_capabilities.supports_publish_diagnostics) {
         const diagnostics = try diagnostics_gen.generateDiagnostics(server, arena, handle);
-        server.sendNotification("textDocument/publishDiagnostics", diagnostics);
+        const json_message = try server.sendToClientNotification("textDocument/publishDiagnostics", diagnostics);
+        server.allocator.free(json_message);
     }
 }
 
@@ -699,7 +718,8 @@ fn changeDocumentHandler(server: *Server, arena: std.mem.Allocator, notification
 
     if (server.client_capabilities.supports_publish_diagnostics) {
         const diagnostics = try diagnostics_gen.generateDiagnostics(server, arena, handle.*);
-        server.sendNotification("textDocument/publishDiagnostics", diagnostics);
+        const json_message = try server.sendToClientNotification("textDocument/publishDiagnostics", diagnostics);
+        server.allocator.free(json_message);
     }
 }
 
@@ -715,7 +735,7 @@ fn saveDocumentHandler(server: *Server, arena: std.mem.Allocator, notification: 
         var workspace_edit = types.WorkspaceEdit{ .changes = .{} };
         try workspace_edit.changes.?.map.putNoClobber(arena, uri, try text_edits.toOwnedSlice(arena));
 
-        server.sendRequest(
+        const json_message = try server.sendToClientRequest(
             .{ .string = "apply_edit" },
             "workspace/applyEdit",
             types.ApplyWorkspaceEditParams{
@@ -723,6 +743,7 @@ fn saveDocumentHandler(server: *Server, arena: std.mem.Allocator, notification: 
                 .edit = workspace_edit,
             },
         );
+        server.allocator.free(json_message);
     }
 }
 
@@ -777,7 +798,7 @@ fn semanticTokensRangeHandler(server: *Server, arena: std.mem.Allocator, request
     );
 }
 
-pub fn completionHandler(server: *Server, arena: std.mem.Allocator, request: types.CompletionParams) Error!?types.CompletionList {
+pub fn completionHandler(server: *Server, arena: std.mem.Allocator, request: types.CompletionParams) Error!ResultType("textDocument/completion") {
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
 
     const source_index = offsets.positionToIndex(handle.text, request.position, server.offset_encoding);
@@ -785,7 +806,9 @@ pub fn completionHandler(server: *Server, arena: std.mem.Allocator, request: typ
     var analyser = Analyser.init(server.allocator, &server.document_store, &server.ip);
     defer analyser.deinit();
 
-    return try completions.completionAtIndex(server, &analyser, arena, handle, source_index);
+    return .{
+        .CompletionList = try completions.completionAtIndex(server, &analyser, arena, handle, source_index) orelse return null,
+    };
 }
 
 pub fn signatureHelpHandler(server: *Server, arena: std.mem.Allocator, request: types.SignatureHelpParams) Error!?types.SignatureHelp {
@@ -818,8 +841,8 @@ pub fn signatureHelpHandler(server: *Server, arena: std.mem.Allocator, request: 
 fn gotoDefinitionHandler(
     server: *Server,
     arena: std.mem.Allocator,
-    request: types.TextDocumentPositionParams,
-) Error!?types.Definition {
+    request: types.DefinitionParams,
+) Error!ResultType("textDocument/definition") {
     if (request.position.character == 0) return null;
 
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
@@ -828,15 +851,42 @@ fn gotoDefinitionHandler(
     var analyser = Analyser.init(server.allocator, &server.document_store, &server.ip);
     defer analyser.deinit();
 
-    return try goto.goto(&analyser, &server.document_store, arena, handle, source_index, true, server.offset_encoding);
+    return .{
+        .Definition = try goto.goto(&analyser, &server.document_store, arena, handle, source_index, true, server.offset_encoding) orelse return null,
+    };
 }
 
-fn gotoDeclarationHandler(
-    server: *Server,
-    arena: std.mem.Allocator,
-    request: types.TextDocumentPositionParams,
-) Error!?types.Definition {
-    return try server.gotoDefinitionHandler(arena, request);
+fn gotoTypeDeclarationHandler(server: *Server, arena: std.mem.Allocator, request: types.TypeDefinitionParams) Error!ResultType("textDocument/typeDefinition") {
+    const response = (try server.gotoDefinitionHandler(arena, .{
+        .textDocument = request.textDocument,
+        .position = request.position,
+        .workDoneToken = request.workDoneToken,
+        .partialResultToken = request.partialResultToken,
+    })) orelse return null;
+    return .{ .Definition = response.Definition };
+}
+
+fn gotoImplementationHandler(server: *Server, arena: std.mem.Allocator, request: types.ImplementationParams) Error!ResultType("textDocument/implementation") {
+    const response = (try server.gotoDefinitionHandler(arena, .{
+        .textDocument = request.textDocument,
+        .position = request.position,
+        .workDoneToken = request.workDoneToken,
+        .partialResultToken = request.partialResultToken,
+    })) orelse return null;
+    return .{ .Definition = response.Definition };
+}
+
+fn gotoDeclarationHandler(server: *Server, arena: std.mem.Allocator, request: types.DeclarationParams) Error!ResultType("textDocument/declaration") {
+    const response = (try server.gotoDefinitionHandler(arena, .{
+        .textDocument = request.textDocument,
+        .position = request.position,
+        .workDoneToken = request.workDoneToken,
+        .partialResultToken = request.partialResultToken,
+    })) orelse return null;
+    return .{ .Declaration = switch (response.Definition) {
+        .Location => |loc| .{ .Location = loc },
+        .array_of_Location => |locs| .{ .array_of_Location = locs },
+    } };
 }
 
 pub fn hoverHandler(server: *Server, arena: std.mem.Allocator, request: types.HoverParams) Error!?types.Hover {
@@ -855,15 +905,18 @@ pub fn hoverHandler(server: *Server, arena: std.mem.Allocator, request: types.Ho
     // TODO: Figure out a better solution for comptime interpreter diags
     if (server.client_capabilities.supports_publish_diagnostics) {
         const diagnostics = try diagnostics_gen.generateDiagnostics(server, arena, handle.*);
-        server.sendNotification("textDocument/publishDiagnostics", diagnostics);
+        const json_message = try server.sendToClientNotification("textDocument/publishDiagnostics", diagnostics);
+        server.allocator.free(json_message);
     }
 
     return response;
 }
 
-pub fn documentSymbolsHandler(server: *Server, arena: std.mem.Allocator, request: types.DocumentSymbolParams) Error!?[]types.DocumentSymbol {
+pub fn documentSymbolsHandler(server: *Server, arena: std.mem.Allocator, request: types.DocumentSymbolParams) Error!ResultType("textDocument/documentSymbol") {
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
-    return try document_symbol.getDocumentSymbols(arena, handle.tree, server.offset_encoding);
+    return .{
+        .array_of_DocumentSymbol = try document_symbol.getDocumentSymbols(arena, handle.tree, server.offset_encoding),
+    };
 }
 
 pub fn formattingHandler(server: *Server, arena: std.mem.Allocator, request: types.DocumentFormattingParams) Error!?[]types.TextEdit {
@@ -878,12 +931,12 @@ pub fn formattingHandler(server: *Server, arena: std.mem.Allocator, request: typ
     return if (diff.edits(arena, handle.text, formatted, server.offset_encoding)) |text_edits| text_edits.items else |_| null;
 }
 
-fn didChangeConfigurationHandler(server: *Server, arena: std.mem.Allocator, request: types.DidChangeConfigurationParams) Error!void {
+fn didChangeConfigurationHandler(server: *Server, arena: std.mem.Allocator, notification: types.DidChangeConfigurationParams) Error!void {
     var new_zig_exe = false;
 
     // NOTE: VS Code seems to always respond with null
-    if (request.settings != .null) {
-        const cfg = std.json.parseFromValueLeaky(configuration.Configuration, arena, request.settings.object.get("zls") orelse request.settings, .{}) catch return;
+    if (notification.settings != .null) {
+        const cfg = std.json.parseFromValueLeaky(configuration.Configuration, arena, notification.settings.object.get("zls") orelse notification.settings, .{}) catch return;
         inline for (std.meta.fields(configuration.Configuration)) |field| {
             if (@field(cfg, field.name)) |value| {
                 blk: {
@@ -1072,7 +1125,7 @@ fn inlayHintHandler(server: *Server, arena: std.mem.Allocator, request: types.In
     );
 }
 
-fn codeActionHandler(server: *Server, arena: std.mem.Allocator, request: types.CodeActionParams) Error!?[]types.CodeAction {
+fn codeActionHandler(server: *Server, arena: std.mem.Allocator, request: types.CodeActionParams) Error!ResultType("textDocument/codeAction") {
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
 
     var analyser = Analyser.init(server.allocator, &server.document_store, &server.ip);
@@ -1097,7 +1150,13 @@ fn codeActionHandler(server: *Server, arena: std.mem.Allocator, request: types.C
         try builder.generateCodeAction(diagnostic, &actions, &remove_capture_actions);
     }
 
-    return actions.items;
+    const Result = getRequestMetadata("textDocument/codeAction").?.Result;
+    var result = try arena.alloc(std.meta.Child(std.meta.Child(Result)), actions.items.len);
+    for (actions.items, result) |action, *out| {
+        out.* = .{ .CodeAction = action };
+    }
+
+    return result;
 }
 
 fn foldingRangeHandler(server: *Server, arena: std.mem.Allocator, request: types.FoldingRangeParams) Error!?[]types.FoldingRange {
@@ -1106,55 +1165,76 @@ fn foldingRangeHandler(server: *Server, arena: std.mem.Allocator, request: types
     return try folding_range.generateFoldingRanges(arena, handle.tree, server.offset_encoding);
 }
 
-fn selectionRangeHandler(server: *Server, arena: std.mem.Allocator, request: types.SelectionRangeParams) Error!?[]*types.SelectionRange {
+fn selectionRangeHandler(server: *Server, arena: std.mem.Allocator, request: types.SelectionRangeParams) Error!?[]types.SelectionRange {
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
 
     return try selection_range.generateSelectionRanges(arena, handle, request.positions, server.offset_encoding);
 }
 
-/// return true if there is a request with the given method name
-fn requestMethodExists(method: []const u8) bool {
-    const methods = comptime blk: {
-        var methods: [types.request_metadata.len][]const u8 = undefined;
-        for (types.request_metadata, &methods) |meta, *out| {
-            out.* = meta.method;
-        }
-        break :blk methods;
+pub const Message = union(enum) {
+    request: Request,
+    notification: Notification,
+    response: Response,
+
+    pub const Request = struct {
+        id: types.RequestId,
+        params: Params,
+
+        pub const Params = union(enum) {
+            initialize: types.InitializeParams,
+            shutdown: void,
+            @"textDocument/willSaveWaitUntil": types.WillSaveTextDocumentParams,
+            @"textDocument/semanticTokens/full": types.SemanticTokensParams,
+            @"textDocument/semanticTokens/range": types.SemanticTokensRangeParams,
+            @"textDocument/inlayHint": types.InlayHintParams,
+            @"textDocument/completion": types.CompletionParams,
+            @"textDocument/signatureHelp": types.SignatureHelpParams,
+            @"textDocument/definition": types.DefinitionParams,
+            @"textDocument/typeDefinition": types.TypeDefinitionParams,
+            @"textDocument/implementation": types.ImplementationParams,
+            @"textDocument/declaration": types.DeclarationParams,
+            @"textDocument/hover": types.HoverParams,
+            @"textDocument/documentSymbol": types.DocumentSymbolParams,
+            @"textDocument/formatting": types.DocumentFormattingParams,
+            @"textDocument/rename": types.RenameParams,
+            @"textDocument/references": types.ReferenceParams,
+            @"textDocument/documentHighlight": types.DocumentHighlightParams,
+            @"textDocument/codeAction": types.CodeActionParams,
+            @"textDocument/foldingRange": types.FoldingRangeParams,
+            @"textDocument/selectionRange": types.SelectionRangeParams,
+            unknown: []const u8,
+        };
     };
 
-    return for (methods) |name| {
-        if (std.mem.eql(u8, method, name)) break true;
-    } else false;
-}
-
-/// return true if there is a notification with the given method name
-fn notificationMethodExists(method: []const u8) bool {
-    const methods = comptime blk: {
-        var methods: [types.notification_metadata.len][]const u8 = undefined;
-        for (types.notification_metadata, 0..) |meta, i| {
-            methods[i] = meta.method;
-        }
-        break :blk methods;
+    pub const Notification = union(enum) {
+        initialized: types.InitializedParams,
+        exit: void,
+        @"$/cancelRequest": types.CancelParams,
+        @"$/setTrace": types.SetTraceParams,
+        @"textDocument/didOpen": types.DidOpenTextDocumentParams,
+        @"textDocument/didChange": types.DidChangeTextDocumentParams,
+        @"textDocument/didSave": types.DidSaveTextDocumentParams,
+        @"textDocument/didClose": types.DidCloseTextDocumentParams,
+        @"workspace/didChangeConfiguration": types.DidChangeConfigurationParams,
+        unknown: []const u8,
     };
 
-    return for (methods) |name| {
-        if (std.mem.eql(u8, method, name)) break true;
-    } else false;
-}
+    pub const Response = struct {
+        id: types.RequestId,
+        data: Data,
 
-const Message = struct {
-    kind: enum {
-        RequestMessage,
-        NotificationMessage,
-        ResponseMessage,
-    },
+        pub const Data = union(enum) {
+            result: types.LSPAny,
+            @"error": types.ResponseError,
+        };
+    };
 
-    id: ?types.RequestId = null,
-    method: ?[]const u8 = null,
-    params: ?types.LSPAny = null,
-    /// non null on success
-    result: ?types.LSPAny = null,
-    @"error": ?types.ResponseError = null,
+    pub fn jsonParse(allocator: std.mem.Allocator, source: anytype, options: std.json.ParseOptions) std.json.ParseError(@TypeOf(source.*))!Message {
+        const tracy_zone = tracy.trace(@src());
+        defer tracy_zone.end();
+        const json_value = try std.json.parseFromTokenSourceLeaky(std.json.Value, allocator, source, options);
+        return try jsonParseFromValue(allocator, json_value, options);
+    }
 
     pub fn jsonParseFromValue(
         allocator: std.mem.Allocator,
@@ -1167,23 +1247,34 @@ const Message = struct {
         if (source != .object) return error.UnexpectedToken;
         const object = source.object;
 
+        @setEvalBranchQuota(10_000);
         if (object.get("id")) |id_obj| {
             const msg_id = try std.json.parseFromValueLeaky(types.RequestId, allocator, id_obj, options);
 
             if (object.get("method")) |method_obj| {
-                const msg_method = switch (method_obj) {
-                    .string => |str| str,
-                    else => return error.UnexpectedToken,
-                };
+                const msg_method = try std.json.parseFromValueLeaky([]const u8, allocator, method_obj, options);
 
                 const msg_params = object.get("params") orelse .null;
 
-                return .{
-                    .kind = .RequestMessage,
+                const fields = @typeInfo(Request.Params).Union.fields;
+
+                inline for (fields) |field| {
+                    if (std.mem.eql(u8, msg_method, field.name)) {
+                        const params = if (field.type == void)
+                            void{}
+                        else
+                            try std.json.parseFromValueLeaky(field.type, allocator, msg_params, options);
+
+                        return .{ .request = .{
+                            .id = msg_id,
+                            .params = @unionInit(Request.Params, field.name, params),
+                        } };
+                    }
+                }
+                return .{ .request = .{
                     .id = msg_id,
-                    .method = msg_method,
-                    .params = msg_params,
-                };
+                    .params = .{ .unknown = msg_method },
+                } };
             } else {
                 const result = object.get("result") orelse .null;
                 const error_obj = object.get("error") orelse .null;
@@ -1192,93 +1283,365 @@ const Message = struct {
 
                 if (result != .null and err != null) return error.UnexpectedToken;
 
-                return .{
-                    .kind = .ResponseMessage,
-                    .id = msg_id,
-                    .result = result,
-                    .@"error" = err,
-                };
+                if (err) |e| {
+                    return .{ .response = .{
+                        .id = msg_id,
+                        .data = .{ .@"error" = e },
+                    } };
+                } else {
+                    return .{ .response = .{
+                        .id = msg_id,
+                        .data = .{ .result = result },
+                    } };
+                }
             }
         } else {
-            const msg_method = switch (object.get("method") orelse return error.UnexpectedToken) {
-                .string => |str| str,
-                else => return error.UnexpectedToken,
-            };
+            const method_obj = object.get("method") orelse return error.UnexpectedToken;
+            const msg_method = try std.json.parseFromValueLeaky([]const u8, allocator, method_obj, options);
 
             const msg_params = object.get("params") orelse .null;
 
-            return .{
-                .kind = .NotificationMessage,
-                .method = msg_method,
-                .params = msg_params,
-            };
+            const fields = @typeInfo(Notification).Union.fields;
+
+            inline for (fields) |field| {
+                if (std.mem.eql(u8, msg_method, field.name)) {
+                    const params = if (field.type == void)
+                        void{}
+                    else
+                        try std.json.parseFromValueLeaky(field.type, allocator, msg_params, options);
+
+                    return .{
+                        .notification = @unionInit(Notification, field.name, params),
+                    };
+                }
+            }
+            return .{ .notification = .{ .unknown = msg_method } };
+        }
+    }
+
+    pub fn isBlocking(self: Message) bool {
+        switch (self) {
+            .request => |request| switch (request.params) {
+                .initialize,
+                .shutdown,
+                => return true,
+                .@"textDocument/willSaveWaitUntil",
+                .@"textDocument/semanticTokens/full",
+                .@"textDocument/semanticTokens/range",
+                .@"textDocument/inlayHint",
+                .@"textDocument/completion",
+                .@"textDocument/signatureHelp",
+                .@"textDocument/definition",
+                .@"textDocument/typeDefinition",
+                .@"textDocument/implementation",
+                .@"textDocument/declaration",
+                .@"textDocument/hover",
+                .@"textDocument/documentSymbol",
+                .@"textDocument/formatting",
+                .@"textDocument/rename",
+                .@"textDocument/references",
+                .@"textDocument/documentHighlight",
+                .@"textDocument/codeAction",
+                .@"textDocument/foldingRange",
+                .@"textDocument/selectionRange",
+                => return false,
+                .unknown => return false,
+            },
+            .notification => |notification| switch (notification) {
+                .@"$/cancelRequest" => return false,
+                .initialized,
+                .exit,
+                .@"$/setTrace",
+                .@"textDocument/didOpen",
+                .@"textDocument/didChange",
+                .@"textDocument/didSave",
+                .@"textDocument/didClose",
+                .@"workspace/didChangeConfiguration",
+                => return true,
+                .unknown => return false,
+            },
+            .response => return true,
+        }
+    }
+
+    pub fn format(message: Message, comptime fmt_str: []const u8, options: std.fmt.FormatOptions, writer: anytype) @TypeOf(writer).Error!void {
+        _ = options;
+        if (fmt_str.len != 0) std.fmt.invalidFmtError(fmt_str, message);
+        switch (message) {
+            .request => |request| try writer.print("request-{}-{s}", .{ request.id, switch (request.params) {
+                .unknown => |method| method,
+                else => @tagName(request.params),
+            } }),
+            .notification => |notification| try writer.print("notification-{s}", .{switch (notification) {
+                .unknown => |method| method,
+                else => @tagName(notification),
+            }}),
+            .response => |response| try writer.print("response-{}", .{response.id}),
         }
     }
 };
 
-pub fn processJsonRpc(
-    server: *Server,
-    json: []const u8,
-) void {
+/// make sure to also set the `transport` field
+pub fn create(
+    allocator: std.mem.Allocator,
+    config: *Config,
+    config_path: ?[]const u8,
+) !*Server {
+    const server = try allocator.create(Server);
+    errdefer server.destroy();
+    server.* = Server{
+        .allocator = allocator,
+        .config = config,
+        .document_store = .{
+            .allocator = allocator,
+            .config = config,
+            .runtime_zig_version = &server.runtime_zig_version,
+        },
+        .thread_pool = undefined, // set below
+        .wait_group = if (zig_builtin.single_threaded) {} else .{},
+    };
+    if (zig_builtin.single_threaded) {
+        server.thread_pool = {};
+    } else {
+        try server.thread_pool.init(.{
+            .allocator = allocator,
+            .n_jobs = 4, // what is a good value here?
+        });
+    }
+
+    var builtin_creation_dir = config_path;
+    if (config_path) |path| {
+        builtin_creation_dir = std.fs.path.dirname(path);
+    }
+
+    try configuration.configChanged(config, &server.runtime_zig_version, allocator, builtin_creation_dir);
+
+    if (config.dangerous_comptime_experiments_do_not_enable) {
+        server.ip = try InternPool.init(allocator);
+    }
+
+    return server;
+}
+
+pub fn destroy(server: *Server) void {
+    if (!zig_builtin.single_threaded) {
+        server.wait_group.wait();
+        server.thread_pool.deinit();
+    }
+
+    server.document_store.deinit();
+    server.ip.deinit(server.allocator);
+    if (server.runtime_zig_version) |zig_version| zig_version.free();
+    server.allocator.destroy(server);
+}
+
+pub fn keepRunning(server: Server) bool {
+    switch (server.status) {
+        .exiting_success, .exiting_failure => return false,
+        else => return true,
+    }
+}
+
+pub fn waitAndWork(server: *Server) void {
+    if (zig_builtin.single_threaded) return;
+    server.thread_pool.waitAndWork(&server.wait_group);
+    server.wait_group.reset();
+}
+
+pub fn loop(server: *Server) !void {
+    std.debug.assert(server.transport != null);
+    while (server.keepRunning()) {
+        const in_json = try server.transport.?.readJsonMessage(server.allocator);
+        defer server.allocator.free(in_json);
+        try server.sendJsonMessage(in_json);
+    }
+}
+
+pub fn sendJsonMessage(server: *Server, json_message: []const u8) Error!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const tree = std.json.parseFromSlice(std.json.Value, server.allocator, json, .{}) catch |err| {
-        log.err("failed to parse message: {}", .{err});
-        return; // maybe panic?
-    };
-    defer tree.deinit();
+    const parsed_message = std.json.parseFromSlice(Message, server.allocator, json_message, .{}) catch return error.ParseError;
 
-    const message = std.json.parseFromValueLeaky(Message, tree.arena.allocator(), tree.value, .{}) catch |err| {
-        log.err("failed to parse message: {}", .{err});
-        return; // maybe panic?
-    };
+    if (zig_builtin.single_threaded or parsed_message.value.isBlocking()) {
+        defer parsed_message.deinit();
+        server.waitAndWork();
+        const response = server.processMessageReportError(parsed_message.value) orelse return;
+        defer server.allocator.free(response);
+    } else {
+        errdefer parsed_message.deinit();
+        server.wait_group.start();
+        try server.thread_pool.spawn(processAndRespondMessage, .{ server, parsed_message });
+    }
+}
 
-    server.processMessage(message) catch |err| switch (message.kind) {
-        .RequestMessage => server.sendResponseError(message.id.?, .{
-            .code = @intFromError(err),
-            .message = @errorName(err),
-        }),
-        else => {},
+pub fn sendJsonMessageSync(server: *Server, json_message: []const u8) Error!?[]u8 {
+    const parsed_message = std.json.parseFromSlice(Message, server.allocator, json_message, .{}) catch return error.ParseError;
+    defer parsed_message.deinit();
+    return try server.processMessage(parsed_message.value);
+}
+
+pub fn sendRequestSync(server: *Server, arena: std.mem.Allocator, comptime method: []const u8, params: ParamsType(method)) Error!ResultType(method) {
+    comptime std.debug.assert(isRequestMethod(method));
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+    tracy_zone.setName(method);
+
+    const RequestMethods = std.meta.Tag(Message.Request.Params);
+
+    return switch (comptime std.meta.stringToEnum(RequestMethods, method).?) {
+        .initialize => try server.initializeHandler(arena, params),
+        .shutdown => try server.shutdownHandler(arena, params),
+        .@"textDocument/willSaveWaitUntil" => try server.willSaveWaitUntilHandler(arena, params),
+        .@"textDocument/semanticTokens/full" => try server.semanticTokensFullHandler(arena, params),
+        .@"textDocument/semanticTokens/range" => try server.semanticTokensRangeHandler(arena, params),
+        .@"textDocument/inlayHint" => try server.inlayHintHandler(arena, params),
+        .@"textDocument/completion" => try server.completionHandler(arena, params),
+        .@"textDocument/signatureHelp" => try server.signatureHelpHandler(arena, params),
+        .@"textDocument/definition" => try server.gotoDefinitionHandler(arena, params),
+        .@"textDocument/typeDefinition" => try server.gotoTypeDeclarationHandler(arena, params),
+        .@"textDocument/implementation" => try server.gotoImplementationHandler(arena, params),
+        .@"textDocument/declaration" => try server.gotoDeclarationHandler(arena, params),
+        .@"textDocument/hover" => try server.hoverHandler(arena, params),
+        .@"textDocument/documentSymbol" => try server.documentSymbolsHandler(arena, params),
+        .@"textDocument/formatting" => try server.formattingHandler(arena, params),
+        .@"textDocument/rename" => try server.renameHandler(arena, params),
+        .@"textDocument/references" => try server.referencesHandler(arena, params),
+        .@"textDocument/documentHighlight" => try server.documentHighlightHandler(arena, params),
+        .@"textDocument/codeAction" => try server.codeActionHandler(arena, params),
+        .@"textDocument/foldingRange" => try server.foldingRangeHandler(arena, params),
+        .@"textDocument/selectionRange" => try server.selectionRangeHandler(arena, params),
+        .unknown => return null,
     };
 }
 
-pub fn processMessage(server: *Server, message: Message) Error!void {
+pub fn sendNotificationSync(server: *Server, arena: std.mem.Allocator, comptime method: []const u8, params: ParamsType(method)) Error!void {
+    comptime std.debug.assert(isNotificationMethod(method));
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+    tracy_zone.setName(method);
+
+    const NotificationMethods = std.meta.Tag(Message.Notification);
+
+    return switch (comptime std.meta.stringToEnum(NotificationMethods, method).?) {
+        .initialized => try server.initializedHandler(arena, params),
+        .exit => try server.exitHandler(arena, params),
+        .@"$/cancelRequest" => try server.cancelRequestHandler(arena, params),
+        .@"$/setTrace" => try server.setTraceHandler(arena, params),
+        .@"textDocument/didOpen" => try server.openDocumentHandler(arena, params),
+        .@"textDocument/didChange" => try server.changeDocumentHandler(arena, params),
+        .@"textDocument/didSave" => try server.saveDocumentHandler(arena, params),
+        .@"textDocument/didClose" => try server.closeDocumentHandler(arena, params),
+        .@"workspace/didChangeConfiguration" => try server.didChangeConfigurationHandler(arena, params),
+        .unknown => return,
+    };
+}
+
+pub fn sendMessageSync(server: *Server, arena: std.mem.Allocator, comptime method: []const u8, params: ParamsType(method)) Error!ResultType(method) {
+    comptime std.debug.assert(isRequestMethod(method) or isNotificationMethod(method));
+
+    if (comptime isRequestMethod(method)) {
+        return try server.sendRequestSync(arena, method, params);
+    } else if (comptime isNotificationMethod(method)) {
+        return try server.sendNotificationSync(arena, method, params);
+    } else unreachable;
+}
+
+fn processMessage(server: *Server, message: Message) Error!?[]const u8 {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    switch (message.kind) {
-        .RequestMessage => {
-            if (!requestMethodExists(message.method.?)) return error.MethodNotFound;
-        },
-        .NotificationMessage => {
-            if (!notificationMethodExists(message.method.?)) return error.MethodNotFound;
-        },
-        .ResponseMessage => {
-            const id = switch (message.id.?) {
-                .string => |str| str,
-                .integer => return,
-            };
-            if (std.mem.startsWith(u8, id, "register")) {
-                if (message.@"error") |err| {
-                    log.err("Error response for '{s}': {}, {s}", .{ id, err.code, err.message });
-                }
-                return;
-            }
-            if (std.mem.eql(u8, id, "apply_edit")) return;
-
-            if (std.mem.eql(u8, id, "i_haz_configuration")) {
-                if (message.@"error" != null) return;
-                try server.handleConfiguration(message.result.?);
-                return;
-            }
-
-            log.warn("received response from client with id '{s}' that has no handler!", .{id});
-            return;
-        },
+    const start_time = std.time.milliTimestamp();
+    defer {
+        const end_time = std.time.milliTimestamp();
+        const total_time = end_time - start_time;
+        if (zig_builtin.single_threaded) {
+            log.debug("Took {d}ms to process {}", .{ total_time, message });
+        } else {
+            const thread_id = std.Thread.getCurrentId();
+            log.debug("Took {d}ms to process {} on Thread {d}", .{ total_time, message, thread_id });
+        }
     }
 
-    const method = message.method.?; // message cannot be a ResponseMessage
+    try server.validateMessage(message);
+
+    var arena_allocator = std.heap.ArenaAllocator.init(server.allocator);
+    defer arena_allocator.deinit();
+
+    @setEvalBranchQuota(5_000);
+    switch (message) {
+        .request => |request| switch (std.meta.activeTag(request.params)) {
+            inline else => |method_name| {
+                const method = @tagName(method_name);
+                const params = @field(request.params, method);
+                const result = try server.sendRequestSync(arena_allocator.allocator(), method, params);
+                return try server.sendToClientResponse(request.id, result);
+            },
+            .unknown => return try server.sendToClientResponse(request.id, null),
+        },
+        .notification => |notification| switch (std.meta.activeTag(notification)) {
+            inline else => |method_name| {
+                const method = @tagName(method_name);
+                const params = @field(notification, method);
+                try server.sendNotificationSync(arena_allocator.allocator(), method, params);
+            },
+            .unknown => {},
+        },
+        .response => |response| try server.handleResponse(response),
+    }
+    return null;
+}
+
+fn processMessageReportError(server: *Server, message: Message) ?[]const u8 {
+    return server.processMessage(message) catch |err| switch (message) {
+        .request => |request| server.sendToClientResponseError(request.id, types.ResponseError{
+            .code = @intFromError(err),
+            .message = @errorName(err),
+        }) catch |e| {
+            log.err("failed to process {}: {}", .{ message, e });
+            return null;
+        },
+        .notification, .response => {
+            log.err("failed to process {}: {}", .{ message, err });
+            return null;
+        },
+    };
+}
+
+fn processAndRespondMessage(
+    server: *Server,
+    message: std.json.Parsed(Message),
+) void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+    defer server.wait_group.finish();
+    defer message.deinit();
+
+    const response = server.processMessageReportError(message.value) orelse return;
+    server.allocator.free(response);
+}
+
+fn validateMessage(server: *const Server, message: Message) Error!void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    const method = switch (message) {
+        .request => |request| switch (request.params) {
+            .unknown => |method| blk: {
+                if (!isRequestMethod(method)) return error.MethodNotFound;
+                break :blk method;
+            },
+            else => @tagName(request.params),
+        },
+        .notification => |notification| switch (notification) {
+            .unknown => |method| blk: {
+                if (!isNotificationMethod(method)) return error.MethodNotFound;
+                break :blk method;
+            },
+            else => @tagName(notification),
+        },
+        .response => return, // validation happens in `handleResponse`
+    };
 
     switch (server.status) {
         .uninitialized => blk: {
@@ -1303,168 +1666,104 @@ pub fn processMessage(server: *Server, message: Message) Error!void {
         .exiting_failure,
         => unreachable,
     }
+}
 
-    const start_time = std.time.milliTimestamp();
-    defer {
-        // makes `zig build test` look nice
-        if (!zig_builtin.is_test) {
-            const end_time = std.time.milliTimestamp();
-            log.debug("Took {}ms to process method {s}", .{ end_time - start_time, method });
-        }
-    }
+fn handleResponse(server: *Server, response: Message.Response) Error!void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
 
-    const method_map = .{
-        .{ "initialized", initializedHandler },
-        .{ "initialize", initializeHandler },
-        .{ "shutdown", shutdownHandler },
-        .{ "exit", exitHandler },
-        .{ "$/cancelRequest", cancelRequestHandler },
-        .{ "$/setTrace", setTraceHandler },
-        .{ "textDocument/didOpen", openDocumentHandler },
-        .{ "textDocument/didChange", changeDocumentHandler },
-        .{ "textDocument/didSave", saveDocumentHandler },
-        .{ "textDocument/didClose", closeDocumentHandler },
-        .{ "textDocument/willSaveWaitUntil", willSaveWaitUntilHandler },
-        .{ "textDocument/semanticTokens/full", semanticTokensFullHandler },
-        .{ "textDocument/semanticTokens/range", semanticTokensRangeHandler },
-        .{ "textDocument/inlayHint", inlayHintHandler },
-        .{ "textDocument/completion", completionHandler },
-        .{ "textDocument/signatureHelp", signatureHelpHandler },
-        .{ "textDocument/definition", gotoDefinitionHandler },
-        .{ "textDocument/typeDefinition", gotoDefinitionHandler },
-        .{ "textDocument/implementation", gotoDefinitionHandler },
-        .{ "textDocument/declaration", gotoDeclarationHandler },
-        .{ "textDocument/hover", hoverHandler },
-        .{ "textDocument/documentSymbol", documentSymbolsHandler },
-        .{ "textDocument/formatting", formattingHandler },
-        .{ "textDocument/rename", renameHandler },
-        .{ "textDocument/references", referencesHandler },
-        .{ "textDocument/documentHighlight", documentHighlightHandler },
-        .{ "textDocument/codeAction", codeActionHandler },
-        .{ "workspace/didChangeConfiguration", didChangeConfigurationHandler },
-        .{ "textDocument/foldingRange", foldingRangeHandler },
-        .{ "textDocument/selectionRange", selectionRangeHandler },
-    };
-
-    comptime {
-        inline for (method_map) |method_info| {
-            _ = method_info;
-            // TODO validate that the method actually exists
-            // TODO validate that direction is client_to_server
-            // TODO validate that the handler accepts and returns the correct types
-            // TODO validate that notification handler return Error!void
-            // TODO validate handler parameter names
-        }
-    }
-
-    @setEvalBranchQuota(10000);
-    inline for (method_map) |method_info| {
-        if (std.mem.eql(u8, method, method_info[0])) {
-            const handler = method_info[1];
-
-            const handler_info: std.builtin.Type.Fn = @typeInfo(@TypeOf(handler)).Fn;
-            const ParamsType = handler_info.params[2].type.?; // TODO add error message on null
-            var arena_allocator = std.heap.ArenaAllocator.init(server.allocator);
-            defer arena_allocator.deinit();
-
-            const params: ParamsType = if (ParamsType == void)
-                void{}
-            else
-                std.json.parseFromValueLeaky(
-                    ParamsType,
-                    arena_allocator.allocator(),
-                    message.params.?,
-                    .{ .ignore_unknown_fields = true },
-                ) catch |err| {
-                    log.err("failed to parse params from {s}: {}", .{ method, err });
-                    if (@errorReturnTrace()) |trace| {
-                        std.debug.dumpStackTrace(trace.*);
-                    }
-                    return error.ParseError;
-                };
-
-            const response = blk: {
-                const tracy_zone2 = tracy.trace(@src());
-                defer tracy_zone2.end();
-                tracy_zone2.setName(method);
-
-                break :blk handler(server, arena_allocator.allocator(), params) catch |err| {
-                    log.err("got {} error while handling {s}", .{ err, method });
-                    if (@errorReturnTrace()) |trace| {
-                        std.debug.dumpStackTrace(trace.*);
-                    }
-                    return error.InternalError;
-                };
-            };
-
-            if (@TypeOf(response) == void) return;
-
-            if (message.kind == .RequestMessage) {
-                server.sendResponse(message.id.?, response);
-            }
-
+    const id: []const u8 = switch (response.id) {
+        .string => |id| id,
+        .integer => |id| {
+            log.warn("received response from client with id '{d}' that has no handler!", .{id});
             return;
-        }
-    }
-
-    switch (message.kind) {
-        .RequestMessage => server.sendResponse(message.id.?, null),
-        .NotificationMessage => return,
-        .ResponseMessage => unreachable,
-    }
-}
-
-pub fn create(
-    allocator: std.mem.Allocator,
-    config: *Config,
-    config_path: ?[]const u8,
-    recording_enabled: bool,
-    replay_enabled: bool,
-    message_tracing_enabled: bool,
-) !*Server {
-    const server = try allocator.create(Server);
-    errdefer server.destroy();
-    server.* = Server{
-        .config = config,
-        .runtime_zig_version = null,
-        .allocator = allocator,
-        .document_store = .{
-            .allocator = allocator,
-            .config = config,
-            .runtime_zig_version = &server.runtime_zig_version,
         },
-        .recording_enabled = recording_enabled,
-        .replay_enabled = replay_enabled,
-        .message_tracing_enabled = message_tracing_enabled,
-        .status = .uninitialized,
     };
 
-    var builtin_creation_dir = config_path;
-    if (config_path) |path| {
-        builtin_creation_dir = std.fs.path.dirname(path);
+    if (response.data == .@"error") {
+        const err = response.data.@"error";
+        log.err("Error response for '{s}': {}, {s}", .{ id, err.code, err.message });
+        return;
     }
 
-    try configuration.configChanged(config, &server.runtime_zig_version, allocator, builtin_creation_dir);
-
-    if (config.dangerous_comptime_experiments_do_not_enable) {
-        server.ip = try InternPool.init(allocator);
+    if (std.mem.startsWith(u8, id, "register")) {
+        //
+    } else if (std.mem.eql(u8, id, "apply_edit")) {
+        //
+    } else if (std.mem.eql(u8, id, "i_haz_configuration")) {
+        try server.handleConfiguration(response.data.result);
+    } else {
+        log.warn("received response from client with id '{s}' that has no handler!", .{id});
     }
-
-    return server;
 }
 
-pub fn destroy(server: *Server) void {
-    server.document_store.deinit();
-    server.ip.deinit(server.allocator);
+test {
+    const gpa = std.testing.allocator;
+    var config: Config = .{};
+    defer @import("legacy_json.zig").parseFree(Config, gpa, config);
+    var server = try Server.create(gpa, &config, null);
+    defer server.destroy();
 
-    for (server.outgoing_messages.items) |message| {
-        server.allocator.free(message);
+    var arena_allocator = std.heap.ArenaAllocator.init(gpa);
+    defer arena_allocator.deinit();
+    const arena = arena_allocator.allocator();
+
+    _ = try server.sendRequestSync(arena, "initialize", .{ .capabilities = .{} });
+    _ = try server.sendNotificationSync(arena, "initialized", .{});
+    _ = try server.sendRequestSync(arena, "shutdown", {});
+    _ = try server.sendNotificationSync(arena, "exit", {});
+}
+
+//
+// LSP helper functions
+//
+
+pub fn ResultType(comptime method: []const u8) type {
+    if (getRequestMetadata(method)) |meta| return meta.Result;
+    if (isNotificationMethod(method)) return void;
+    @compileError("unknown method '" ++ method ++ "'");
+}
+
+pub fn ParamsType(comptime method: []const u8) type {
+    if (getRequestMetadata(method)) |meta| return meta.Params orelse void;
+    if (getNotificationMetadata(method)) |meta| return meta.Params orelse void;
+    @compileError("unknown method '" ++ method ++ "'");
+}
+
+fn getRequestMetadata(comptime method: []const u8) ?types.RequestMetadata {
+    for (types.request_metadata) |meta| {
+        if (std.mem.eql(u8, method, meta.method)) {
+            return meta;
+        }
     }
-    server.outgoing_messages.deinit(server.allocator);
+    return null;
+}
 
-    if (server.runtime_zig_version) |zig_version| {
-        zig_version.free();
+fn getNotificationMetadata(comptime method: []const u8) ?types.NotificationMetadata {
+    for (types.notification_metadata) |meta| {
+        if (std.mem.eql(u8, method, meta.method)) {
+            return meta;
+        }
     }
+    return null;
+}
 
-    server.allocator.destroy(server);
+/// return true if there is a request with the given method name
+fn isRequestMethod(method: []const u8) bool {
+    @setEvalBranchQuota(5000);
+    comptime var kvs_list: [types.request_metadata.len]struct { []const u8 } = undefined;
+    inline for (types.request_metadata, &kvs_list) |meta, *kv| {
+        kv.* = .{meta.method};
+    }
+    return std.ComptimeStringMap(void, &kvs_list).has(method);
+}
+
+/// return true if there is a notification with the given method name
+fn isNotificationMethod(method: []const u8) bool {
+    @setEvalBranchQuota(5000);
+    comptime var kvs_list: [types.notification_metadata.len]struct { []const u8 } = undefined;
+    inline for (types.notification_metadata, &kvs_list) |meta, *kv| {
+        kv.* = .{meta.method};
+    }
+    return std.ComptimeStringMap(void, &kvs_list).has(method);
 }

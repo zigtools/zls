@@ -35,19 +35,13 @@ fn testSelectionRange(source: []const u8, want: []const []const u8) !void {
 
     const position = offsets.locToRange(phr.new_source, phr.locations.items(.new)[0], .@"utf-16").start;
 
-    const SelectionRange = struct {
-        range: types.Range,
-        parent: ?*@This() = null,
-    };
-
     const params = types.SelectionRangeParams{
         .textDocument = .{ .uri = test_uri },
         .positions = &[_]types.Position{position},
     };
+    const response = try ctx.server.sendRequestSync(ctx.arena.allocator(), "textDocument/selectionRange", params);
 
-    const response = try ctx.requestGetResponse(?[]SelectionRange, "textDocument/selectionRange", params);
-
-    const selectionRanges: []SelectionRange = response.result orelse {
+    const selectionRanges: []const types.SelectionRange = response orelse {
         std.debug.print("Server returned `null` as the result\n", .{});
         return error.InvalidResponse;
     };
@@ -55,7 +49,7 @@ fn testSelectionRange(source: []const u8, want: []const []const u8) !void {
     var got = std.ArrayList([]const u8).init(allocator);
     defer got.deinit();
 
-    var it: ?*SelectionRange = &selectionRanges[0];
+    var it: ?*const types.SelectionRange = &selectionRanges[0];
     while (it) |r| {
         const slice = offsets.rangeToSlice(phr.new_source, r.range, .@"utf-16");
         (try got.addOne()).* = slice;

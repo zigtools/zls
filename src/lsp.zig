@@ -16,6 +16,15 @@ pub const RequestId = union(enum) {
     integer: i64,
     string: []const u8,
     pub usingnamespace UnionParser(@This());
+
+    pub fn format(id: RequestId, comptime fmt_str: []const u8, options: std.fmt.FormatOptions, writer: anytype) @TypeOf(writer).Error!void {
+        _ = options;
+        if (fmt_str.len != 0) std.fmt.invalidFmtError(fmt_str, id);
+        switch (id) {
+            .integer => |number| try writer.print("{d}", .{number}),
+            .string => |str| try writer.writeAll(str),
+        }
+    }
 };
 
 pub const ResponseError = struct {

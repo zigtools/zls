@@ -106,10 +106,9 @@ fn testInlayHints(source: []const u8) !void {
         .textDocument = .{ .uri = test_uri },
         .range = range,
     };
+    const response = try ctx.server.sendRequestSync(ctx.arena.allocator(), "textDocument/inlayHint", params);
 
-    const response = try ctx.requestGetResponse(?[]types.InlayHint, "textDocument/inlayHint", params);
-
-    const hints: []types.InlayHint = response.result orelse {
+    const hints: []const types.InlayHint = response orelse {
         std.debug.print("Server returned `null` as the result\n", .{});
         return error.InvalidResponse;
     };
@@ -141,7 +140,7 @@ fn testInlayHints(source: []const u8) !void {
             if (!std.mem.eql(u8, expected_label, actual_label)) {
                 try error_builder.msgAtLoc("expected label `{s}` here but got `{s}`!", test_uri, new_loc, .err, .{ expected_label, actual_label });
             }
-            if (hint.kind != types.InlayHintKind.Parameter) {
+            if (hint.kind.? != types.InlayHintKind.Parameter) {
                 try error_builder.msgAtLoc("hint kind should be `{s}` but got `{s}`!", test_uri, new_loc, .err, .{ @tagName(types.InlayHintKind.Parameter), @tagName(hint.kind.?) });
             }
 
