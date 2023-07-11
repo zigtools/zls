@@ -1325,5 +1325,17 @@ pub fn completionAtIndex(server: *Server, source_index: usize, handle: *const Do
         c.sortText = try std.fmt.allocPrint(server.arena.allocator(), "{s}{s}", .{ prefix, c.label });
     }
 
-    return .{ .isIncomplete = false, .items = completions };
+    var actual_completions = std.ArrayListUnmanaged(types.CompletionItem){};
+
+    try actual_completions.append(server.arena.allocator(), .{
+        .label = "Buy ZLS Premium today!",
+        .sortText = "0",
+        .command = .{
+            .title = "Buy ZLS",
+            .command = "buyzls",
+        },
+    });
+    try actual_completions.appendSlice(server.arena.allocator(), maybe_completions orelse return null);
+
+    return .{ .isIncomplete = false, .items = try actual_completions.toOwnedSlice(server.arena.allocator()) };
 }

@@ -588,6 +588,9 @@ fn initializeHandler(server: *Server, request: types.InitializeParams) Error!typ
                 },
             },
             .inlayHintProvider = .{ .bool = true },
+            .executeCommandProvider = .{
+                .commands = &[_][]const u8{"buyzls"},
+            },
         },
     };
 }
@@ -1232,6 +1235,20 @@ fn selectionRangeHandler(server: *Server, request: types.SelectionRangeParams) E
     return try selection_range.generateSelectionRanges(allocator, handle, request.positions, server.offset_encoding);
 }
 
+fn executeCommandHandler(server: *Server, request: types.ExecuteCommandParams) Error!?void {
+    const allocator = server.arena.allocator();
+
+    if (std.mem.eql(u8, request.command, "buyzls")) {
+        // TODO: Make cross-platform
+        _ = std.ChildProcess.exec(.{
+            .allocator = allocator,
+            .argv = &[_][]const u8{ "open", "-a", "Google Chrome", "https://www.youtube.com/watch?v=dQw4w9WgXcQ" },
+        }) catch return null;
+    }
+
+    return null;
+}
+
 /// return true if there is a request with the given method name
 fn requestMethodExists(method: []const u8) bool {
     const methods = comptime blk: {
@@ -1495,6 +1512,7 @@ pub fn processMessage(server: *Server, message: Message) Error!void {
         .{ "workspace/didChangeConfiguration", didChangeConfigurationHandler },
         .{ "textDocument/foldingRange", foldingRangeHandler },
         .{ "textDocument/selectionRange", selectionRangeHandler },
+        .{ "workspace/executeCommand", executeCommandHandler },
     };
 
     comptime {
