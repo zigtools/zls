@@ -14,7 +14,6 @@ const Config = @import("../Config.zig");
 const data = @import("../data/data.zig");
 
 /// don't show inlay hints for the given builtin functions
-/// builtins with one parameter are skipped automatically
 /// this option is rare and is therefore build-only and
 /// non-configurable at runtime
 pub const inlay_hints_exclude_builtins: []const u8 = &.{};
@@ -274,7 +273,7 @@ fn writeNodeInlayHint(
             var buffer: [2]Ast.Node.Index = undefined;
             const params = ast.builtinCallParams(tree, node, &buffer).?;
 
-            if (!builder.config.inlay_hints_show_builtin or params.len <= 1) break :blk;
+            if (!builder.config.inlay_hints_show_builtin or params.len == 0) break :blk;
 
             const name = tree.tokenSlice(main_tokens[node]);
 
