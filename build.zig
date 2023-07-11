@@ -26,6 +26,7 @@ pub fn build(b: *std.build.Builder) !void {
     const exe_options = b.addOptions();
     exe.addOptions("build_options", exe_options);
 
+    const single_threaded = b.option(bool, "single-threaded", "Build a single threaded Executable");
     const pie = b.option(bool, "pie", "Build a Position Independent Executable");
     const enable_tracy = b.option(bool, "enable_tracy", "Whether tracy should be enabled.") orelse false;
     const coverage = b.option(bool, "generate_coverage", "Generate coverage data with kcov") orelse false;
@@ -109,6 +110,7 @@ pub fn build(b: *std.build.Builder) !void {
         }
     }
 
+    exe.single_threaded = single_threaded;
     exe.pie = pie;
     b.installArtifact(exe);
 
@@ -152,8 +154,10 @@ pub fn build(b: *std.build.Builder) !void {
     });
 
     tests.addModule("zls", zls_module);
+    tests.addModule("known-folders", known_folders_module);
     tests.addModule("diffz", diffz_module);
     tests.addModule("binned_allocator", binned_allocator_module);
+    tests.addModule("build_options", build_options_module);
     test_step.dependOn(&b.addRunArtifact(tests).step);
 
     var src_tests = b.addTest(.{
@@ -162,6 +166,10 @@ pub fn build(b: *std.build.Builder) !void {
         .optimize = .Debug,
         .filter = test_filter,
     });
+    src_tests.addModule("known-folders", known_folders_module);
+    src_tests.addModule("diffz", diffz_module);
+    src_tests.addModule("binned_allocator", binned_allocator_module);
+    src_tests.addModule("build_options", build_options_module);
     test_step.dependOn(&b.addRunArtifact(src_tests).step);
 
     if (coverage) {

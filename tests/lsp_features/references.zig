@@ -215,18 +215,16 @@ fn testMFReferences(sources: []const []const u8) !void {
             const file_uri = files.keys()[file_index];
 
             const middle = new_loc.start + (new_loc.end - new_loc.start) / 2;
-            const response = try ctx.requestGetResponse(
-                ?[]types.Location,
-                "textDocument/references",
-                types.ReferenceParams{
-                    .textDocument = .{ .uri = file_uri },
-                    .position = offsets.indexToPosition(file.new_source, middle, ctx.server.offset_encoding),
-                    .context = .{ .includeDeclaration = true },
-                },
-            );
+            const params = types.ReferenceParams{
+                .textDocument = .{ .uri = file_uri },
+                .position = offsets.indexToPosition(file.new_source, middle, ctx.server.offset_encoding),
+                .context = .{ .includeDeclaration = true },
+            };
+            const response = try ctx.server.sendRequestSync(ctx.arena.allocator(), "textDocument/references", params);
+
             try error_builder.msgAtLoc("asked for references here", file_uri, new_loc, .info, .{});
 
-            const actual_locations: []const types.Location = response.result orelse {
+            const actual_locations: []const types.Location = response orelse {
                 std.debug.print("Server returned `null` as the result\n", .{});
                 return error.InvalidResponse;
             };

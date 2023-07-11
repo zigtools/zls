@@ -137,11 +137,8 @@ fn testAutofix(before: []const u8, after: []const u8) !void {
     const uri = try ctx.addDocument(before);
     const handle = ctx.server.document_store.getHandle(uri).?;
 
-    var arena_allocator = std.heap.ArenaAllocator.init(allocator);
-    defer arena_allocator.deinit();
-
     var diagnostics: std.ArrayListUnmanaged(types.Diagnostic) = .{};
-    try zls.diagnostics.getAstCheckDiagnostics(ctx.server, arena_allocator.allocator(), handle.*, &diagnostics);
+    try zls.diagnostics.getAstCheckDiagnostics(ctx.server, ctx.arena.allocator(), handle.*, &diagnostics);
 
     const params = types.CodeActionParams{
         .textDocument = .{ .uri = uri },
@@ -153,17 +150,13 @@ fn testAutofix(before: []const u8, after: []const u8) !void {
     };
 
     @setEvalBranchQuota(5000);
-    const response = try ctx.requestGetResponse(?[]types.CodeAction, "textDocument/codeAction", params);
-
-    const code_action_list: []types.CodeAction = response.result orelse {
-        std.debug.print("Server returned `null` as the result\n", .{});
-        return error.InvalidResponse;
-    };
+    const response = try ctx.server.sendRequestSync(ctx.arena.allocator(), "textDocument/codeAction", params) orelse return error.InvalidResponse;
 
     var text_edits: std.ArrayListUnmanaged(types.TextEdit) = .{};
     defer text_edits.deinit(allocator);
 
-    for (code_action_list) |code_action| {
+    for (response) |action| {
+        const code_action = action.CodeAction;
         if (code_action.kind.? != .@"source.fixAll") continue;
         const workspace_edit = code_action.edit.?;
         const changes = workspace_edit.changes.?.map;

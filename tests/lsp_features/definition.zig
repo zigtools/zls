@@ -55,12 +55,11 @@ fn testDefinition(source: []const u8) !void {
 
     const test_uri = try ctx.addDocument(phr.new_source);
 
-    const params = types.TextDocumentPositionParams{
+    const params = types.DefinitionParams{
         .textDocument = .{ .uri = test_uri },
         .position = cursor_lsp,
     };
 
-    const response = try ctx.requestGetResponse(?types.Location, "textDocument/definition", params);
-    const result = response.result orelse return error.UnresolvedDefinition;
-    try std.testing.expectEqual(def_range_lsp, result.range);
+    const response = try ctx.server.sendRequestSync(ctx.arena.allocator(), "textDocument/definition", params) orelse return error.UnresolvedDefinition;
+    try std.testing.expectEqual(def_range_lsp, response.Definition.Location.range);
 }

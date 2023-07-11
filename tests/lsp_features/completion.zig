@@ -655,12 +655,12 @@ fn testCompletion(source: []const u8, expected_completions: []const Completion) 
     };
 
     @setEvalBranchQuota(5000);
-    const response = try ctx.requestGetResponse(?types.CompletionList, "textDocument/completion", params);
+    const response = try ctx.server.sendRequestSync(ctx.arena.allocator(), "textDocument/completion", params);
 
-    const completion_list: types.CompletionList = response.result orelse {
+    const completion_list: types.CompletionList = (response orelse {
         std.debug.print("Server returned `null` as the result\n", .{});
         return error.InvalidResponse;
-    };
+    }).CompletionList;
 
     var actual = try extractCompletionLabels(completion_list.items);
     defer actual.deinit(allocator);
