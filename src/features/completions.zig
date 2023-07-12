@@ -48,6 +48,7 @@ fn typeToCompletion(
             }
         },
         .error_union => {},
+        .multi_pointer => {},
         .pointer => |t| {
             if (server.config.operator_completions) {
                 try list.append(allocator, .{
@@ -301,7 +302,9 @@ fn nodeToCompletion(
             }
             return;
         },
-        .string_literal => {
+        .multiline_string_literal,
+        .string_literal,
+        => {
             try list.append(allocator, .{
                 .label = "len",
                 .detail = "const len: usize",
