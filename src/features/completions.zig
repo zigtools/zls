@@ -134,10 +134,17 @@ fn nodeToCompletion(
     const datas = tree.nodes.items(.data);
     const token_tags = tree.tokens.items(.tag);
 
+    var doc_comments = try Analyser.getDocComments(allocator, handle.tree, node);
+    if (doc_comments == null) {
+        if (try server.analyser.resolveVarDeclAlias(node_handle)) |result| {
+            doc_comments = try result.docComments(allocator);
+        }
+    }
+
     const doc = try completionDoc(
         server,
         either_descriptor,
-        try Analyser.getDocComments(allocator, handle.tree, node),
+        doc_comments,
     );
 
     if (ast.isContainer(handle.tree, node)) {
@@ -207,16 +214,6 @@ fn nodeToCompletion(
         => {
             const var_decl = tree.fullVarDecl(node).?;
             const is_const = token_tags[var_decl.ast.mut_token] == .keyword_const;
-
-            if (try server.analyser.resolveVarDeclAlias(node_handle)) |result| {
-                const context = DeclToCompletionContext{
-                    .server = server,
-                    .completions = list,
-                    .orig_handle = orig_handle,
-                    .either_descriptor = either_descriptor,
-                };
-                return try declToCompletion(context, result);
-            }
 
             try list.append(allocator, .{
                 .label = handle.tree.tokenSlice(var_decl.ast.mut_token + 1),
@@ -375,10 +372,7 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: Analyser.Decl
             const doc = try completionDoc(
                 context.server,
                 context.either_descriptor,
-                if (param.first_doc_comment) |doc_comments|
-                    try Analyser.collectDocComments(allocator, tree, doc_comments, false)
-                else
-                    null,
+                try decl_handle.docComments(allocator),
             );
 
             try context.completions.append(allocator, .{
@@ -411,7 +405,7 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: Analyser.Decl
             const doc = try completionDoc(
                 context.server,
                 context.either_descriptor,
-                try Analyser.getDocCommentsBeforeToken(allocator, tree, token),
+                try decl_handle.docComments(allocator),
             );
 
             try context.completions.append(allocator, .{

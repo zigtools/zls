@@ -14,7 +14,12 @@ const DocumentStore = @import("../DocumentStore.zig");
 
 const data = @import("../data/data.zig");
 
-pub fn hoverSymbol(server: *Server, decl_handle: Analyser.DeclWithHandle, markup_kind: types.MarkupKind) error{OutOfMemory}!?[]const u8 {
+pub fn hoverSymbol(
+    server: *Server,
+    decl_handle: Analyser.DeclWithHandle,
+    markup_kind: types.MarkupKind,
+    original_doc_str: ?[]const u8,
+) error{OutOfMemory}!?[]const u8 {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -23,14 +28,13 @@ pub fn hoverSymbol(server: *Server, decl_handle: Analyser.DeclWithHandle, markup
 
     var type_references = Analyser.ReferencedType.Set.init(server.arena.allocator());
     var reference_collector = Analyser.ReferencedType.Collector.init(&type_references);
-    var doc_str: ?[]const u8 = null;
+    var doc_str = original_doc_str orelse try decl_handle.docComments(server.arena.allocator());
 
     const def_str = switch (decl_handle.decl.*) {
         .ast_node => |node| def: {
             if (try server.analyser.resolveVarDeclAlias(.{ .node = node, .handle = handle })) |result| {
-                return try hoverSymbol(server, result, markup_kind);
+                return try hoverSymbol(server, result, markup_kind, doc_str);
             }
-            doc_str = try Analyser.getDocComments(server.arena.allocator(), tree, node);
 
             var buf: [1]Ast.Node.Index = undefined;
 
@@ -77,15 +81,7 @@ pub fn hoverSymbol(server: *Server, decl_handle: Analyser.DeclWithHandle, markup
                     &reference_collector,
                 );
 
-            if (param.first_doc_comment) |doc_comments| {
-                doc_str = try Analyser.collectDocComments(server.arena.allocator(), handle.tree, doc_comments, false);
-            }
-
             break :def ast.paramSlice(tree, param);
-        },
-        .error_token => |token| def: {
-            doc_str = try Analyser.getDocCommentsBeforeToken(server.arena.allocator(), tree, token);
-            break :def tree.tokenSlice(decl_handle.nameToken());
         },
         .pointer_payload,
         .error_union_payload,
@@ -93,6 +89,7 @@ pub fn hoverSymbol(server: *Server, decl_handle: Analyser.DeclWithHandle, markup
         .array_index,
         .switch_payload,
         .label_decl,
+        .error_token,
         => tree.tokenSlice(decl_handle.nameToken()),
     };
 
@@ -140,7 +137,7 @@ pub fn hoverDefinitionLabel(server: *Server, pos_index: usize, handle: *const Do
         .contents = .{
             .MarkupContent = .{
                 .kind = markup_kind,
-                .value = (try hoverSymbol(server, decl, markup_kind)) orelse return null,
+                .value = (try hoverSymbol(server, decl, markup_kind, null)) orelse return null,
             },
         },
     };
@@ -207,7 +204,7 @@ pub fn hoverDefinitionGlobal(server: *Server, pos_index: usize, handle: *const D
         .contents = .{
             .MarkupContent = .{
                 .kind = markup_kind,
-                .value = (try hoverSymbol(server, decl, markup_kind)) orelse return null,
+                .value = (try hoverSymbol(server, decl, markup_kind, null)) orelse return null,
             },
         },
     };
@@ -228,7 +225,7 @@ pub fn hoverDefinitionEnumLiteral(
         .contents = .{
             .MarkupContent = .{
                 .kind = markup_kind,
-                .value = (try hoverSymbol(server, decl, markup_kind)) orelse return null,
+                .value = (try hoverSymbol(server, decl, markup_kind, null)) orelse return null,
             },
         },
     };
@@ -250,7 +247,7 @@ pub fn hoverDefinitionFieldAccess(
 
     for (decls) |decl| {
         try content.append(server.arena.allocator(), .{
-            .string = (try hoverSymbol(server, decl, markup_kind)) orelse continue,
+            .string = (try hoverSymbol(server, decl, markup_kind, null)) orelse continue,
         });
     }
 

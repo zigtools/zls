@@ -2388,6 +2388,19 @@ pub const DeclWithHandle = struct {
         };
     }
 
+    pub fn docComments(self: DeclWithHandle, allocator: std.mem.Allocator) !?[]const u8 {
+        const tree = self.handle.tree;
+        return switch (self.decl.*) {
+            .ast_node => |node| try Analyser.getDocComments(allocator, tree, node),
+            .param_payload => |pay| {
+                const doc_comments = pay.param.first_doc_comment orelse return null;
+                return try Analyser.collectDocComments(allocator, tree, doc_comments, false);
+            },
+            .error_token => |token| try Analyser.getDocCommentsBeforeToken(allocator, tree, token),
+            else => null,
+        };
+    }
+
     fn isPublic(self: DeclWithHandle) bool {
         return switch (self.decl.*) {
             .ast_node => |node| isNodePublic(self.handle.tree, node),
