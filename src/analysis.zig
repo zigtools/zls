@@ -348,9 +348,15 @@ pub fn isSnakeCase(name: []const u8) bool {
 // ANALYSIS ENGINE
 
 pub fn getDeclNameToken(tree: Ast, node: Ast.Node.Index) ?Ast.TokenIndex {
+    return getContainerDeclNameToken(tree, null, node);
+}
+
+pub fn getContainerDeclNameToken(tree: Ast, container: ?Ast.Node.Index, node: Ast.Node.Index) ?Ast.TokenIndex {
     const tags = tree.nodes.items(.tag);
     const datas = tree.nodes.items(.data);
-    const main_token = tree.nodes.items(.main_token)[node];
+    const main_tokens = tree.nodes.items(.main_token);
+    const main_token = main_tokens[node];
+    const token_tags = tree.tokens.items(.tag);
 
     return switch (tags[node]) {
         // regular declaration names. + 1 to mut token because name comes after 'const'/'var'
@@ -380,8 +386,17 @@ pub fn getDeclNameToken(tree: Ast, node: Ast.Node.Index) ?Ast.TokenIndex {
         .container_field,
         .container_field_init,
         .container_field_align,
-        .identifier,
-        => main_token,
+        => {
+            if (container) |container_node| {
+                if (token_tags[main_tokens[container_node]] == .keyword_struct and
+                    tree.fullContainerField(node).?.ast.tuple_like)
+                {
+                    return null;
+                }
+            }
+            return main_token;
+        },
+        .identifier => main_token,
         .error_value => {
             const tok = main_token + 2;
             return if (tok >= tree.tokens.len)
@@ -397,7 +412,11 @@ pub fn getDeclNameToken(tree: Ast, node: Ast.Node.Index) ?Ast.TokenIndex {
 }
 
 pub fn getDeclName(tree: Ast, node: Ast.Node.Index) ?[]const u8 {
-    const name_token = getDeclNameToken(tree, node) orelse return null;
+    return getContainerDeclName(tree, null, node);
+}
+
+pub fn getContainerDeclName(tree: Ast, container: ?Ast.Node.Index, node: Ast.Node.Index) ?[]const u8 {
+    const name_token = getContainerDeclNameToken(tree, container, node) orelse return null;
     const name = offsets.tokenToSlice(tree, name_token);
 
     if (tree.nodes.items(.tag)[node] == .test_decl and
@@ -692,6 +711,8 @@ fn resolvePropertyType(analyser: *Analyser, type_handle: TypeWithHandle, name: [
     const handle = type_handle.handle;
     const tree = handle.tree;
     const node_tags = tree.nodes.items(.tag);
+    const main_tokens = tree.nodes.items(.main_token);
+    const token_tags = tree.tokens.items(.tag);
 
     switch (type_handle.type.data) {
         .slice => |t| {
@@ -751,6 +772,34 @@ fn resolvePropertyType(analyser: *Analyser, type_handle: TypeWithHandle, name: [
                         };
                     }
                 }
+            },
+
+            .container_decl,
+            .container_decl_trailing,
+            .container_decl_arg,
+            .container_decl_arg_trailing,
+            .container_decl_two,
+            .container_decl_two_trailing,
+            => {
+                if (token_tags[main_tokens[n]] != .keyword_struct) return null;
+                if (!std.mem.startsWith(u8, name, "@\"")) return null;
+                if (!std.mem.endsWith(u8, name, "\"")) return null;
+
+                const text = name[2 .. name.len - 1];
+                if (!allDigits(text)) return null;
+                const index = std.fmt.parseUnsigned(u16, text, 10) catch return null;
+
+                var buf: [2]Ast.Node.Index = undefined;
+                const container_decl = tree.fullContainerDecl(&buf, n).?;
+                if (index >= container_decl.ast.members.len) return null;
+
+                const field = tree.fullContainerField(container_decl.ast.members[index]) orelse return null;
+                if (!field.ast.tuple_like) return null;
+
+                return ((try analyser.resolveTypeOfNode(.{
+                    .node = field.ast.type_expr,
+                    .handle = handle,
+                })) orelse return null).instanceTypeVal();
             },
 
             else => {},
@@ -3327,7 +3376,7 @@ fn makeInnerScope(
             else => {},
         }
 
-        const name = getDeclName(tree, decl) orelse continue;
+        const name = getContainerDeclName(tree, node_idx, decl) orelse continue;
 
         try context.putDecl(scope_index, name, .{ .ast_node = decl });
 
