@@ -54,7 +54,7 @@ pub fn positionToIndex(text: []const u8, position: types.Position, encoding: Enc
     return line_start_index + line_byte_length;
 }
 
-pub fn sourceIndexToTokenIndex(tree: Ast, source_index: usize) usize {
+pub fn sourceIndexToTokenIndex(tree: Ast, source_index: usize) Ast.TokenIndex {
     std.debug.assert(source_index < tree.source.len);
 
     const tokens_start = tree.tokens.items(.start);
@@ -111,7 +111,7 @@ pub fn sourceIndexToTokenIndex(tree: Ast, source_index: usize) usize {
         break;
     }
 
-    return upper_index;
+    return @intCast(upper_index);
 }
 
 pub fn tokenToIndex(tree: Ast, token_index: Ast.TokenIndex) usize {
