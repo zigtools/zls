@@ -21,6 +21,8 @@ semantic_tokens: enum {
     none,
     partial,
     full,
+    
+    pub const tres_string_enum = true;
 } = .full,
 
 /// Enables inlay hint support when the client also supports it

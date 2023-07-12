@@ -5,12 +5,17 @@ const DocumentStore = @import("../DocumentStore.zig");
 const types = @import("../lsp.zig");
 const offsets = @import("../offsets.zig");
 
+pub const SelectionRange = struct {
+    range: types.Range,
+    parent: ?*SelectionRange,
+};
+
 pub fn generateSelectionRanges(
     arena: std.mem.Allocator,
     handle: *const DocumentStore.Handle,
     positions: []const types.Position,
     offset_encoding: offsets.Encoding,
-) error{OutOfMemory}!?[]*types.SelectionRange {
+) error{OutOfMemory}!?[]*SelectionRange {
     // For each of the input positions, we need to compute the stack of AST
     // nodes/ranges which contain the position. At the moment, we do this in a
     // super inefficient way, by iterating _all_ nodes, selecting the ones that
@@ -18,7 +23,7 @@ pub fn generateSelectionRanges(
     //
     // A faster algorithm would be to walk the tree starting from the root,
     // descending into the child containing the position at every step.
-    var result = try arena.alloc(*types.SelectionRange, positions.len);
+    var result = try arena.alloc(*SelectionRange, positions.len);
     var locs = try std.ArrayListUnmanaged(offsets.Loc).initCapacity(arena, 32);
     for (positions, result) |position, *out| {
         const index = offsets.positionToIndex(handle.text, position, offset_encoding);
@@ -44,7 +49,7 @@ pub fn generateSelectionRanges(
             }
         }
 
-        var selection_ranges = try arena.alloc(types.SelectionRange, locs.items.len);
+        var selection_ranges = try arena.alloc(SelectionRange, locs.items.len);
         for (selection_ranges, 0..) |*range, i| {
             range.range = offsets.locToRange(handle.text, locs.items[i], offset_encoding);
             range.parent = if (i + 1 < selection_ranges.len) &selection_ranges[i + 1] else null;
