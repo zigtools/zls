@@ -195,11 +195,12 @@ fn nodeToCompletion(
             const func = tree.fullFnProto(&buf, node).?;
             if (func.name_token) |name_token| {
                 const use_snippets = server.config.enable_snippets and server.client_capabilities.supports_snippets;
-                const insert_text = if (use_snippets) blk: {
+                const use_placeholders = server.config.enable_argument_placeholders and server.client_capabilities.supports_snippets;
+                const insert_text = if (use_placeholders) blk: {
                     const skip_self_param = !(parent_is_type_val orelse true) and
                         try analyser.hasSelfParam(handle, func);
                     break :blk try Analyser.getFunctionSnippet(arena, tree, func, skip_self_param);
-                } else tree.tokenSlice(func.name_token.?);
+                } else try std.fmt.allocPrint(arena, "{s}({s})", .{ tree.tokenSlice(func.name_token.?), "${}" });
 
                 const is_type_function = Analyser.isTypeFunction(handle.tree, func);
 
