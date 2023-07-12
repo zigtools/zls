@@ -2564,7 +2564,10 @@ pub const DeclWithHandle = struct {
                 .type = .{ .data = .array_index, .is_type_val = false },
                 .handle = self.handle,
             },
-            .label_decl => return null,
+            .label_decl => |decl| try analyser.resolveTypeOfNodeInternal(.{
+                .node = decl.block,
+                .handle = self.handle,
+            }),
             .switch_payload => |pay| {
                 if (pay.items.len == 0) return null;
                 // TODO Peer type resolution, we just use the first item for now.
