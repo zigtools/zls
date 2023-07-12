@@ -2,6 +2,8 @@ const std = @import("std");
 const zls = @import("zls");
 const builtin = @import("builtin");
 
+const tres = @import("tres");
+
 const Context = @import("../context.zig").Context;
 
 const types = zls.types;
@@ -68,12 +70,7 @@ fn testDocumentSymbol(source: []const u8, want: []const u8) !void {
         .textDocument = .{ .uri = test_uri },
     };
 
-    const response = try ctx.requestGetResponse(?[]types.DocumentSymbol, "textDocument/documentSymbol", params);
-
-    const document_symbol_list: []types.DocumentSymbol = response.result orelse {
-        std.debug.print("Server returned `null` as the result\n", .{});
-        return error.InvalidResponse;
-    };
+    const response = try ctx.requestGetResponse([]types.DocumentSymbol, "textDocument/documentSymbol", params);
 
     var got = std.ArrayListUnmanaged(u8){};
     defer got.deinit(allocator);
@@ -81,7 +78,7 @@ fn testDocumentSymbol(source: []const u8, want: []const u8) !void {
     var stack: [16][]const types.DocumentSymbol = undefined;
     var stack_len: usize = 0;
 
-    stack[stack_len] = document_symbol_list;
+    stack[stack_len] = response.result;
     stack_len += 1;
 
     var writer = got.writer(allocator);

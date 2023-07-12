@@ -7,7 +7,7 @@ const zls_version = std.SemanticVersion{ .major = 0, .minor = 11, .patch = 0 };
 pub fn build(b: *std.build.Builder) !void {
     comptime {
         const current_zig = builtin.zig_version;
-        const min_zig = std.SemanticVersion.parse("0.11.0-dev.3957+3bf0b8ead") catch unreachable; // explicitly specify error set of `std.json.stringify`
+        const min_zig = std.SemanticVersion.parse("0.11.0-dev.3834+d98147414") catch unreachable; // std.builtin.Version -> std.SemanticVersion
         if (current_zig.order(min_zig) == .lt) {
             @compileError(std.fmt.comptimePrint("Your Zig version v{} does not meet the minimum build requirement of v{}", .{ current_zig, min_zig }));
         }
@@ -83,6 +83,9 @@ pub fn build(b: *std.build.Builder) !void {
     const known_folders_module = b.dependency("known_folders", .{}).module("known-folders");
     exe.addModule("known-folders", known_folders_module);
 
+    const tres_module = b.dependency("tres", .{}).module("tres");
+    exe.addModule("tres", tres_module);
+
     const diffz_module = b.dependency("diffz", .{}).module("diffz");
     exe.addModule("diffz", diffz_module);
 
@@ -118,6 +121,7 @@ pub fn build(b: *std.build.Builder) !void {
         .source_file = .{ .path = "src/zls.zig" },
         .dependencies = &.{
             .{ .name = "known-folders", .module = known_folders_module },
+            .{ .name = "tres", .module = tres_module },
             .{ .name = "diffz", .module = diffz_module },
             .{ .name = "binned_allocator", .module = binned_allocator_module },
             .{ .name = "build_options", .module = build_options_module },
@@ -128,6 +132,7 @@ pub fn build(b: *std.build.Builder) !void {
         .name = "zls_gen",
         .root_source_file = .{ .path = "src/config_gen/config_gen.zig" },
     });
+    gen_exe.addModule("tres", tres_module);
 
     const gen_cmd = b.addRunArtifact(gen_exe);
     gen_cmd.addArgs(&.{
@@ -152,6 +157,7 @@ pub fn build(b: *std.build.Builder) !void {
     });
 
     tests.addModule("zls", zls_module);
+    tests.addModule("tres", tres_module);
     tests.addModule("diffz", diffz_module);
     tests.addModule("binned_allocator", binned_allocator_module);
     test_step.dependOn(&b.addRunArtifact(tests).step);

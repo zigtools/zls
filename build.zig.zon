@@ -7,6 +7,10 @@
             .url = "https://github.com/ziglibs/known-folders/archive/d070896807cbbd2847d24d561438994504b929dd.tar.gz",
             .hash = "122001a81a0ba2faca0271d53c50e8069721fe66a19d71dd8498e61fa26d7ca6f558",
         },
+        .tres = .{
+            .url = "https://github.com/ziglibs/tres/archive/9ca9cd547d10d30984565399dec92068fefd7ad2.tar.gz",
+            .hash = "122026823fb890736435cb5ddbfdf5691d4b9d4759ab1147f245beced0abec17c483",
+        },
         .diffz = .{
             .url = "https://github.com/ziglibs/diffz/archive/90353d401c59e2ca5ed0abe5444c29ad3d7489aa.tar.gz",
             .hash = "122089a8247a693cad53beb161bde6c30f71376cd4298798d45b32740c3581405864",
