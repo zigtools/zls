@@ -1021,17 +1021,12 @@ fn testSemanticTokens(source: [:0]const u8, expected_tokens: []const TokenData) 
     const uri = try ctx.addDocument(source);
 
     const response = try ctx.requestGetResponse(
-        ?types.SemanticTokens,
+        types.SemanticTokens,
         "textDocument/semanticTokens/full",
         types.SemanticTokensParams{ .textDocument = .{ .uri = uri } },
     );
 
-    const semantic_tokens: types.SemanticTokens = response.result orelse {
-        std.debug.print("Server returned `null` as the result\n", .{});
-        return error.InvalidResponse;
-    };
-
-    const actual = semantic_tokens.data;
+    const actual = response.result.data;
     try std.testing.expect(actual.len % 5 == 0); // every token is represented by 5 integers
 
     var error_builder = ErrorBuilder.init(allocator);

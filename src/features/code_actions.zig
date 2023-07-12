@@ -58,7 +58,7 @@ pub const Builder = struct {
 
     pub fn createWorkspaceEdit(self: *Builder, edits: []const types.TextEdit) error{OutOfMemory}!types.WorkspaceEdit {
         var workspace_edit = types.WorkspaceEdit{ .changes = .{} };
-        try workspace_edit.changes.?.map.putNoClobber(self.arena, self.handle.uri, try self.arena.dupe(types.TextEdit, edits));
+        try workspace_edit.changes.?.putNoClobber(self.arena, self.handle.uri, try self.arena.dupe(types.TextEdit, edits));
 
         return workspace_edit;
     }
