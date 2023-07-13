@@ -150,15 +150,20 @@ fn testAutofix(before: []const u8, after: []const u8) !void {
     };
 
     @setEvalBranchQuota(5000);
-    const response = try ctx.requestGetResponse([]types.CodeAction, "textDocument/codeAction", params);
+    const response = try ctx.requestGetResponse(?[]types.CodeAction, "textDocument/codeAction", params);
+
+    const code_action_list: []types.CodeAction = response.result orelse {
+        std.debug.print("Server returned `null` as the result\n", .{});
+        return error.InvalidResponse;
+    };
 
     var text_edits: std.ArrayListUnmanaged(types.TextEdit) = .{};
     defer text_edits.deinit(allocator);
 
-    for (response.result) |code_action| {
+    for (code_action_list) |code_action| {
         if (code_action.kind.? != .@"source.fixAll") continue;
         const workspace_edit = code_action.edit.?;
-        const changes = workspace_edit.changes.?;
+        const changes = workspace_edit.changes.?.map;
         try std.testing.expectEqual(@as(usize, 1), changes.count());
         try std.testing.expect(changes.contains(uri));
 

@@ -102,20 +102,14 @@ fn testInlayHints(source: []const u8) !void {
         .end = offsets.indexToPosition(phr.new_source, phr.new_source.len, .@"utf-16"),
     };
 
-    const InlayHint = struct {
-        position: types.Position,
-        label: []const u8,
-        kind: types.InlayHintKind,
-    };
-
     const params = types.InlayHintParams{
         .textDocument = .{ .uri = test_uri },
         .range = range,
     };
 
-    const response = try ctx.requestGetResponse(?[]InlayHint, "textDocument/inlayHint", params);
+    const response = try ctx.requestGetResponse(?[]types.InlayHint, "textDocument/inlayHint", params);
 
-    const hints: []InlayHint = response.result orelse {
+    const hints: []types.InlayHint = response.result orelse {
         std.debug.print("Server returned `null` as the result\n", .{});
         return error.InvalidResponse;
     };
@@ -139,16 +133,16 @@ fn testInlayHints(source: []const u8) !void {
         for (hints) |hint| {
             if (position.line != hint.position.line or position.character != hint.position.character) continue;
 
-            if (!std.mem.endsWith(u8, hint.label, ":")) {
-                try error_builder.msgAtLoc("label `{s}` must end with a colon!", test_uri, new_loc, .err, .{hint.label});
+            if (!std.mem.endsWith(u8, hint.label.string, ":")) {
+                try error_builder.msgAtLoc("label `{s}` must end with a colon!", test_uri, new_loc, .err, .{hint.label.string});
             }
-            const actual_label = hint.label[0 .. hint.label.len - 1];
+            const actual_label = hint.label.string[0 .. hint.label.string.len - 1];
 
             if (!std.mem.eql(u8, expected_label, actual_label)) {
                 try error_builder.msgAtLoc("expected label `{s}` here but got `{s}`!", test_uri, new_loc, .err, .{ expected_label, actual_label });
             }
             if (hint.kind != types.InlayHintKind.Parameter) {
-                try error_builder.msgAtLoc("hint kind should be `{s}` but got `{s}`!", test_uri, new_loc, .err, .{ @tagName(types.InlayHintKind.Parameter), @tagName(hint.kind) });
+                try error_builder.msgAtLoc("hint kind should be `{s}` but got `{s}`!", test_uri, new_loc, .err, .{ @tagName(types.InlayHintKind.Parameter), @tagName(hint.kind.?) });
             }
 
             continue :outer;
