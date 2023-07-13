@@ -56,8 +56,6 @@ pub fn getDocComments(allocator: std.mem.Allocator, tree: Ast, node: Ast.Node.In
     const base_kind = tree.nodes.items(.tag)[node];
 
     switch (base_kind) {
-        // As far as I know, this does not actually happen yet, but it
-        // may come in useful.
         .root => return try collectDocComments(allocator, tree, 0, true),
         .fn_proto,
         .fn_proto_one,
@@ -1736,6 +1734,16 @@ pub const TypeWithHandle = struct {
             else => false,
         };
     }
+
+    pub fn docComments(self: TypeWithHandle, allocator: std.mem.Allocator) !?[]const u8 {
+        if (self.type.is_type_val) {
+            switch (self.type.data) {
+                .other => |n| return getDocComments(allocator, self.handle.tree, n),
+                else => {},
+            }
+        }
+        return null;
+    }
 };
 
 pub fn resolveTypeOfNode(analyser: *Analyser, node_handle: NodeWithHandle) error{OutOfMemory}!?TypeWithHandle {
@@ -2392,6 +2400,7 @@ pub const DeclWithHandle = struct {
     pub fn docComments(self: DeclWithHandle, allocator: std.mem.Allocator) !?[]const u8 {
         const tree = self.handle.tree;
         return switch (self.decl.*) {
+            // TODO: delete redundant `Analyser.`
             .ast_node => |node| try Analyser.getDocComments(allocator, tree, node),
             .param_payload => |pay| {
                 const doc_comments = pay.param.first_doc_comment orelse return null;

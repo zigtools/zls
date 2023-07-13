@@ -95,6 +95,9 @@ pub fn hoverSymbol(
 
     var resolved_type_str: []const u8 = "unknown";
     if (try decl_handle.resolveType(analyser)) |resolved_type| {
+        if (doc_str == null) {
+            doc_str = try resolved_type.docComments(arena);
+        }
         try analyser.referencedTypes(
             resolved_type,
             &resolved_type_str,
