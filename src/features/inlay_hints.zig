@@ -23,6 +23,10 @@ pub const InlayHint = struct {
     label: []const u8,
     kind: types.InlayHintKind,
     tooltip: types.MarkupContent,
+
+    fn lessThan(_: void, lhs: InlayHint, rhs: InlayHint) bool {
+        return lhs.token_index < rhs.token_index;
+    }
 };
 
 const Builder = struct {
@@ -30,7 +34,7 @@ const Builder = struct {
     analyser: *Analyser,
     config: *const Config,
     handle: *const DocumentStore.Handle,
-    hints: std.ArrayListUnmanaged(InlayHint),
+    hints: std.ArrayListUnmanaged(InlayHint) = .{},
     hover_kind: types.MarkupKind,
 
     fn appendParameterHint(self: *Builder, token_index: Ast.TokenIndex, label: []const u8, tooltip: []const u8, tooltip_noalias: bool, tooltip_comptime: bool) !void {
@@ -57,8 +61,34 @@ const Builder = struct {
         });
     }
 
-    fn toOwnedSlice(self: *Builder) error{OutOfMemory}![]InlayHint {
-        return self.hints.toOwnedSlice(self.arena);
+    fn getInlayHints(self: *Builder, offset_encoding: offsets.Encoding) error{OutOfMemory}![]types.InlayHint {
+        std.mem.sort(InlayHint, self.hints.items, {}, InlayHint.lessThan);
+
+        var last_index: usize = 0;
+        var last_position: types.Position = .{ .line = 0, .character = 0 };
+
+        var converted_hints = try self.arena.alloc(types.InlayHint, self.hints.items.len);
+        for (converted_hints, self.hints.items) |*converted_hint, hint| {
+            const index = offsets.tokenToIndex(self.handle.tree, hint.token_index);
+            const position = offsets.advancePosition(
+                self.handle.tree.source,
+                last_position,
+                last_index,
+                index,
+                offset_encoding,
+            );
+            defer last_index = index;
+            defer last_position = position;
+            converted_hint.* = types.InlayHint{
+                .position = position,
+                .label = .{ .string = hint.label },
+                .kind = hint.kind,
+                .tooltip = .{ .MarkupContent = hint.tooltip },
+                .paddingLeft = false,
+                .paddingRight = true,
+            };
+        }
+        return converted_hints;
     }
 };
 
@@ -301,13 +331,13 @@ pub fn writeRangeInlayHint(
     handle: *const DocumentStore.Handle,
     loc: offsets.Loc,
     hover_kind: types.MarkupKind,
-) error{OutOfMemory}![]InlayHint {
+    offset_encoding: offsets.Encoding,
+) error{OutOfMemory}![]types.InlayHint {
     var builder: Builder = .{
         .arena = arena,
         .analyser = analyser,
         .config = &config,
         .handle = handle,
-        .hints = .{},
         .hover_kind = hover_kind,
     };
 
@@ -318,5 +348,5 @@ pub fn writeRangeInlayHint(
         try ast.iterateChildrenRecursive(handle.tree, child, &builder, error{OutOfMemory}, writeNodeInlayHint);
     }
 
-    return try builder.toOwnedSlice();
+    return try builder.getInlayHints(offset_encoding);
 }
