@@ -11,10 +11,10 @@ const offsets = @import("../offsets.zig");
 
 const data = @import("../data/data.zig");
 
-fn fnProtoToSignatureInfo(analyser: *Analyser, alloc: std.mem.Allocator, commas: u32, skip_self_param: bool, handle: *const DocumentStore.Handle, fn_node: Ast.Node.Index, proto: Ast.full.FnProto) !types.SignatureInformation {
+fn fnProtoToSignatureInfo(analyser: *Analyser, arena: std.mem.Allocator, commas: u32, skip_self_param: bool, handle: *const DocumentStore.Handle, fn_node: Ast.Node.Index, proto: Ast.full.FnProto) !types.SignatureInformation {
     const tree = handle.tree;
     const label = Analyser.getFunctionSignature(tree, proto);
-    const proto_comments = (try Analyser.getDocComments(alloc, tree, fn_node)) orelse "";
+    const proto_comments = (try Analyser.getDocComments(arena, tree, fn_node)) orelse "";
 
     const arg_idx = if (skip_self_param) blk: {
         const has_self_param = try analyser.hasSelfParam(handle, proto);
@@ -25,11 +25,11 @@ fn fnProtoToSignatureInfo(analyser: *Analyser, alloc: std.mem.Allocator, commas:
     var param_it = proto.iterate(&tree);
     while (ast.nextFnParam(&param_it)) |param| {
         const param_comments = if (param.first_doc_comment) |dc|
-            try Analyser.collectDocComments(alloc, tree, dc, false)
+            try Analyser.collectDocComments(arena, tree, dc, false)
         else
             "";
 
-        try params.append(alloc, .{
+        try params.append(arena, .{
             .label = .{ .string = ast.paramSlice(tree, param) },
             .documentation = .{ .MarkupContent = .{
                 .kind = .markdown,
@@ -48,7 +48,7 @@ fn fnProtoToSignatureInfo(analyser: *Analyser, alloc: std.mem.Allocator, commas:
     };
 }
 
-pub fn getSignatureInfo(analyser: *Analyser, alloc: std.mem.Allocator, handle: *const DocumentStore.Handle, absolute_index: usize) !?types.SignatureInformation {
+pub fn getSignatureInfo(analyser: *Analyser, arena: std.mem.Allocator, handle: *const DocumentStore.Handle, absolute_index: usize) !?types.SignatureInformation {
     const innermost_block = Analyser.innermostBlockScope(handle.*, absolute_index);
     const tree = handle.tree;
     const token_tags = tree.tokens.items(.tag);
@@ -100,9 +100,9 @@ pub fn getSignatureInfo(analyser: *Analyser, alloc: std.mem.Allocator, handle: *
             };
         }
     };
-    var symbol_stack = try std.ArrayListUnmanaged(StackSymbol).initCapacity(alloc, 8);
+    var symbol_stack = try std.ArrayListUnmanaged(StackSymbol).initCapacity(arena, 8);
     var curr_commas: u32 = 0;
-    var comma_stack = try std.ArrayListUnmanaged(u32).initCapacity(alloc, 4);
+    var comma_stack = try std.ArrayListUnmanaged(u32).initCapacity(arena, 4);
     var curr_token = last_token;
     while (curr_token >= first_token and curr_token != 0) : (curr_token -= 1) {
         switch (token_tags[curr_token]) {
@@ -122,7 +122,7 @@ pub fn getSignatureInfo(analyser: *Analyser, alloc: std.mem.Allocator, handle: *
                         else => {},
                     }
                 }
-                try symbol_stack.append(alloc, .l_brace);
+                try symbol_stack.append(arena, .l_brace);
             },
             .l_bracket => {
                 curr_commas = comma_stack.popOrNull() orelse 0;
@@ -139,7 +139,7 @@ pub fn getSignatureInfo(analyser: *Analyser, alloc: std.mem.Allocator, handle: *
                         else => {},
                     }
                 }
-                try symbol_stack.append(alloc, .l_bracket);
+                try symbol_stack.append(arena, .l_bracket);
             },
             .l_paren => {
                 const paren_commas = curr_commas;
@@ -167,7 +167,7 @@ pub fn getSignatureInfo(analyser: *Analyser, alloc: std.mem.Allocator, handle: *
                     // Builtin token, find the builtin and construct signature information.
                     for (data.builtins) |builtin| {
                         if (std.mem.eql(u8, builtin.name, tree.tokenSlice(expr_last_token))) {
-                            const param_infos = try alloc.alloc(
+                            const param_infos = try arena.alloc(
                                 types.ParameterInformation,
                                 builtin.arguments.len,
                             );
@@ -223,14 +223,14 @@ pub fn getSignatureInfo(analyser: *Analyser, alloc: std.mem.Allocator, handle: *
                     }
                 } else first_token + 1;
                 if (state != .any or expr_first_token > expr_last_token) {
-                    try symbol_stack.append(alloc, .l_paren);
+                    try symbol_stack.append(arena, .l_paren);
                     continue;
                 }
                 const expr_start = token_starts[expr_first_token];
                 const last_token_slice = tree.tokenSlice(expr_last_token);
                 const expr_end = token_starts[expr_last_token] + last_token_slice.len;
 
-                var held_expr = try alloc.dupeZ(u8, handle.text[expr_start..expr_end]);
+                var held_expr = try arena.dupeZ(u8, handle.text[expr_start..expr_end]);
 
                 // Resolve the expression.
                 var tokenizer = std.zig.Tokenizer.init(held_expr);
@@ -243,7 +243,7 @@ pub fn getSignatureInfo(analyser: *Analyser, alloc: std.mem.Allocator, handle: *
                     var node = switch (type_handle.type.data) {
                         .other => |n| n,
                         else => {
-                            try symbol_stack.append(alloc, .l_paren);
+                            try symbol_stack.append(arena, .l_paren);
                             continue;
                         },
                     };
@@ -252,7 +252,7 @@ pub fn getSignatureInfo(analyser: *Analyser, alloc: std.mem.Allocator, handle: *
                     if (type_handle.handle.tree.fullFnProto(&buf, node)) |proto| {
                         return try fnProtoToSignatureInfo(
                             analyser,
-                            alloc,
+                            arena,
                             paren_commas,
                             false,
                             type_handle.handle,
@@ -263,7 +263,7 @@ pub fn getSignatureInfo(analyser: *Analyser, alloc: std.mem.Allocator, handle: *
 
                     const name = Server.identifierFromPosition(expr_end - 1, handle.*);
                     if (name.len == 0) {
-                        try symbol_stack.append(alloc, .l_paren);
+                        try symbol_stack.append(arena, .l_paren);
                         continue;
                     }
 
@@ -273,14 +273,14 @@ pub fn getSignatureInfo(analyser: *Analyser, alloc: std.mem.Allocator, handle: *
                         name,
                         true,
                     )) orelse {
-                        try symbol_stack.append(alloc, .l_paren);
+                        try symbol_stack.append(arena, .l_paren);
                         continue;
                     };
                     var res_handle = decl_handle.handle;
                     node = switch (decl_handle.decl.*) {
                         .ast_node => |n| n,
                         else => {
-                            try symbol_stack.append(alloc, .l_paren);
+                            try symbol_stack.append(arena, .l_paren);
                             continue;
                         },
                     };
@@ -300,7 +300,7 @@ pub fn getSignatureInfo(analyser: *Analyser, alloc: std.mem.Allocator, handle: *
                     if (res_handle.tree.fullFnProto(&buf, node)) |proto| {
                         return try fnProtoToSignatureInfo(
                             analyser,
-                            alloc,
+                            arena,
                             paren_commas,
                             skip_self_param,
                             res_handle,
@@ -311,9 +311,9 @@ pub fn getSignatureInfo(analyser: *Analyser, alloc: std.mem.Allocator, handle: *
                 }
             },
             .r_brace, .r_paren, .r_bracket => |tag| {
-                try comma_stack.append(alloc, curr_commas);
+                try comma_stack.append(arena, curr_commas);
                 curr_commas = 0;
-                try symbol_stack.append(alloc, StackSymbol.from(tag));
+                try symbol_stack.append(arena, StackSymbol.from(tag));
             },
             else => {},
         }

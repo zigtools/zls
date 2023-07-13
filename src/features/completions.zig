@@ -18,13 +18,12 @@ const snipped_data = @import("../data/snippets.zig");
 
 fn typeToCompletion(
     server: *Server,
+    arena: std.mem.Allocator,
     list: *std.ArrayListUnmanaged(types.CompletionItem),
     field_access: Analyser.FieldAccessReturn,
     orig_handle: *const DocumentStore.Handle,
     either_descriptor: ?[]const u8,
 ) error{OutOfMemory}!void {
-    var allocator = server.arena.allocator();
-
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -32,14 +31,14 @@ fn typeToCompletion(
     switch (type_handle.type.data) {
         .slice => {
             if (!type_handle.type.is_type_val) {
-                try list.append(allocator, .{
+                try list.append(arena, .{
                     .label = "len",
                     .detail = "const len: usize",
                     .kind = .Field,
                     .insertText = "len",
                     .insertTextFormat = .PlainText,
                 });
-                try list.append(allocator, .{
+                try list.append(arena, .{
                     .label = "ptr",
                     .kind = .Field,
                     .insertText = "ptr",
@@ -51,17 +50,18 @@ fn typeToCompletion(
         .multi_pointer => {},
         .pointer => |t| {
             if (server.config.operator_completions) {
-                try list.append(allocator, .{
+                try list.append(arena, .{
                     .label = "*",
                     .kind = .Operator,
                     .insertText = "*",
                     .insertTextFormat = .PlainText,
                 });
             }
-            try typeToCompletion(server, list, .{ .original = t.* }, orig_handle, null);
+            try typeToCompletion(server, arena, list, .{ .original = t.* }, orig_handle, null);
         },
         .other => |n| try nodeToCompletion(
             server,
+            arena,
             list,
             .{ .node = n, .handle = type_handle.handle },
             field_access.unwrapped,
@@ -72,7 +72,7 @@ fn typeToCompletion(
         ),
         .primitive, .array_index => {},
         .@"comptime" => |co| try analyser.completions.dotCompletions(
-            allocator,
+            arena,
             list,
             co.interpreter.ip,
             co.value.index,
@@ -81,17 +81,18 @@ fn typeToCompletion(
         ),
         .either => |bruh| {
             for (bruh) |a|
-                try typeToCompletion(server, list, .{ .original = a.type_with_handle }, orig_handle, a.descriptor);
+                try typeToCompletion(server, arena, list, .{ .original = a.type_with_handle }, orig_handle, a.descriptor);
         },
     }
 }
 
 fn completionDoc(
     server: *Server,
+    arena: std.mem.Allocator,
     either_descriptor: ?[]const u8,
     doc_comments: ?[]const u8,
 ) error{OutOfMemory}!@TypeOf(@as(types.CompletionItem, undefined).documentation) {
-    var list = std.ArrayList(u8).init(server.arena.allocator());
+    var list = std.ArrayList(u8).init(arena);
     const writer = list.writer();
 
     if (either_descriptor) |ed|
@@ -114,6 +115,7 @@ fn completionDoc(
 
 fn nodeToCompletion(
     server: *Server,
+    arena: std.mem.Allocator,
     list: *std.ArrayListUnmanaged(types.CompletionItem),
     node_handle: Analyser.NodeWithHandle,
     unwrapped: ?Analyser.TypeWithHandle,
@@ -125,8 +127,6 @@ fn nodeToCompletion(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    var allocator = server.arena.allocator();
-
     const node = node_handle.node;
     const handle = node_handle.handle;
     const tree = handle.tree;
@@ -134,15 +134,16 @@ fn nodeToCompletion(
     const datas = tree.nodes.items(.data);
     const token_tags = tree.tokens.items(.tag);
 
-    var doc_comments = try Analyser.getDocComments(allocator, handle.tree, node);
+    var doc_comments = try Analyser.getDocComments(arena, handle.tree, node);
     if (doc_comments == null) {
         if (try server.analyser.resolveVarDeclAlias(node_handle)) |result| {
-            doc_comments = try result.docComments(allocator);
+            doc_comments = try result.docComments(arena);
         }
     }
 
     const doc = try completionDoc(
         server,
+        arena,
         either_descriptor,
         doc_comments,
     );
@@ -150,6 +151,7 @@ fn nodeToCompletion(
     if (ast.isContainer(handle.tree, node)) {
         const context = DeclToCompletionContext{
             .server = server,
+            .arena = arena,
             .completions = list,
             .orig_handle = orig_handle,
             .parent_is_type_val = is_type_val,
@@ -167,10 +169,10 @@ fn nodeToCompletion(
     switch (node_tags[node]) {
         .merge_error_sets => {
             if (try server.analyser.resolveTypeOfNode(.{ .node = datas[node].lhs, .handle = handle })) |ty| {
-                try typeToCompletion(server, list, .{ .original = ty }, orig_handle, either_descriptor);
+                try typeToCompletion(server, arena, list, .{ .original = ty }, orig_handle, either_descriptor);
             }
             if (try server.analyser.resolveTypeOfNode(.{ .node = datas[node].rhs, .handle = handle })) |ty| {
-                try typeToCompletion(server, list, .{ .original = ty }, orig_handle, either_descriptor);
+                try typeToCompletion(server, arena, list, .{ .original = ty }, orig_handle, either_descriptor);
             }
         },
         else => {},
@@ -192,12 +194,12 @@ fn nodeToCompletion(
                 const insert_text = if (use_snippets) blk: {
                     const skip_self_param = !(parent_is_type_val orelse true) and
                         try server.analyser.hasSelfParam(handle, func);
-                    break :blk try Analyser.getFunctionSnippet(server.arena.allocator(), tree, func, skip_self_param);
+                    break :blk try Analyser.getFunctionSnippet(arena, tree, func, skip_self_param);
                 } else tree.tokenSlice(func.name_token.?);
 
                 const is_type_function = Analyser.isTypeFunction(handle.tree, func);
 
-                try list.append(allocator, .{
+                try list.append(arena, .{
                     .label = handle.tree.tokenSlice(name_token),
                     .kind = if (is_type_function) .Struct else .Function,
                     .documentation = doc,
@@ -215,11 +217,11 @@ fn nodeToCompletion(
             const var_decl = tree.fullVarDecl(node).?;
             const is_const = token_tags[var_decl.ast.mut_token] == .keyword_const;
 
-            try list.append(allocator, .{
+            try list.append(arena, .{
                 .label = handle.tree.tokenSlice(var_decl.ast.mut_token + 1),
                 .kind = if (is_const) .Constant else .Variable,
                 .documentation = doc,
-                .detail = try Analyser.getVariableSignature(allocator, tree, var_decl),
+                .detail = try Analyser.getVariableSignature(arena, tree, var_decl),
                 .insertText = tree.tokenSlice(var_decl.ast.mut_token + 1),
                 .insertTextFormat = .PlainText,
             });
@@ -229,7 +231,7 @@ fn nodeToCompletion(
         .container_field_init,
         => {
             const field = tree.fullContainerField(node).?;
-            try list.append(allocator, .{
+            try list.append(arena, .{
                 .label = handle.tree.tokenSlice(field.ast.main_token),
                 .kind = if (field.ast.tuple_like) .EnumMember else .Field,
                 .documentation = doc,
@@ -241,7 +243,7 @@ fn nodeToCompletion(
         .array_type,
         .array_type_sentinel,
         => {
-            try list.append(allocator, .{
+            try list.append(arena, .{
                 .label = "len",
                 .detail = "const len: usize",
                 .kind = .Field,
@@ -258,7 +260,7 @@ fn nodeToCompletion(
 
             switch (ptr_type.size) {
                 .One, .C, .Many => if (server.config.operator_completions) {
-                    try list.append(allocator, .{
+                    try list.append(arena, .{
                         .label = "*",
                         .kind = .Operator,
                         .insertText = "*",
@@ -266,13 +268,13 @@ fn nodeToCompletion(
                     });
                 },
                 .Slice => {
-                    try list.append(allocator, .{
+                    try list.append(arena, .{
                         .label = "ptr",
                         .kind = .Field,
                         .insertText = "ptr",
                         .insertTextFormat = .PlainText,
                     });
-                    try list.append(allocator, .{
+                    try list.append(arena, .{
                         .label = "len",
                         .detail = "const len: usize",
                         .kind = .Field,
@@ -284,13 +286,13 @@ fn nodeToCompletion(
             }
 
             if (unwrapped) |actual_type| {
-                try typeToCompletion(server, list, .{ .original = actual_type }, orig_handle, either_descriptor);
+                try typeToCompletion(server, arena, list, .{ .original = actual_type }, orig_handle, either_descriptor);
             }
             return;
         },
         .optional_type => {
             if (server.config.operator_completions) {
-                try list.append(allocator, .{
+                try list.append(arena, .{
                     .label = "?",
                     .kind = .Operator,
                     .insertText = "?",
@@ -302,7 +304,7 @@ fn nodeToCompletion(
         .multiline_string_literal,
         .string_literal,
         => {
-            try list.append(allocator, .{
+            try list.append(arena, .{
                 .label = "len",
                 .detail = "const len: usize",
                 .kind = .Field,
@@ -311,7 +313,7 @@ fn nodeToCompletion(
             });
         },
         else => if (Analyser.nodeToString(tree, node)) |string| {
-            try list.append(allocator, .{
+            try list.append(arena, .{
                 .label = string,
                 .kind = .Field,
                 .documentation = doc,
@@ -325,6 +327,7 @@ fn nodeToCompletion(
 
 const DeclToCompletionContext = struct {
     server: *Server,
+    arena: std.mem.Allocator,
     completions: *std.ArrayListUnmanaged(types.CompletionItem),
     orig_handle: *const DocumentStore.Handle,
     parent_is_type_val: ?bool = null,
@@ -334,8 +337,6 @@ const DeclToCompletionContext = struct {
 fn declToCompletion(context: DeclToCompletionContext, decl_handle: Analyser.DeclWithHandle) error{OutOfMemory}!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
-
-    var allocator = context.server.arena.allocator();
 
     const tree = decl_handle.handle.tree;
     const decl = decl_handle.decl.*;
@@ -359,6 +360,7 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: Analyser.Decl
     switch (decl_handle.decl.*) {
         .ast_node => |node| try nodeToCompletion(
             context.server,
+            context.arena,
             context.completions,
             .{ .node = node, .handle = decl_handle.handle },
             null,
@@ -371,11 +373,12 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: Analyser.Decl
             const param = pay.param;
             const doc = try completionDoc(
                 context.server,
+                context.arena,
                 context.either_descriptor,
-                try decl_handle.docComments(allocator),
+                try decl_handle.docComments(context.arena),
             );
 
-            try context.completions.append(allocator, .{
+            try context.completions.append(context.arena, .{
                 .label = tree.tokenSlice(param.name_token.?),
                 .kind = .Constant,
                 .documentation = doc,
@@ -393,7 +396,7 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: Analyser.Decl
         => {
             const name = tree.tokenSlice(decl_handle.nameToken());
 
-            try context.completions.append(allocator, .{
+            try context.completions.append(context.arena, .{
                 .label = name,
                 .kind = if (decl == .label_decl) .Text else .Variable,
                 .insertText = name,
@@ -404,15 +407,16 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: Analyser.Decl
             const name = tree.tokenSlice(token);
             const doc = try completionDoc(
                 context.server,
+                context.arena,
                 context.either_descriptor,
-                try decl_handle.docComments(allocator),
+                try decl_handle.docComments(context.arena),
             );
 
-            try context.completions.append(allocator, .{
+            try context.completions.append(context.arena, .{
                 .label = name,
                 .kind = .Constant,
                 .documentation = doc,
-                .detail = try std.fmt.allocPrint(allocator, "error.{s}", .{name}),
+                .detail = try std.fmt.allocPrint(context.arena, "error.{s}", .{name}),
                 .insertText = name,
                 .insertTextFormat = .PlainText,
             });
@@ -422,8 +426,9 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: Analyser.Decl
 
 fn completeLabel(
     server: *Server,
-    pos_index: usize,
+    arena: std.mem.Allocator,
     handle: *const DocumentStore.Handle,
+    pos_index: usize,
 ) error{OutOfMemory}![]types.CompletionItem {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
@@ -432,12 +437,13 @@ fn completeLabel(
 
     const context = DeclToCompletionContext{
         .server = server,
+        .arena = arena,
         .completions = &completions,
         .orig_handle = handle,
     };
     try Analyser.iterateLabels(handle, pos_index, declToCompletion, context);
 
-    return completions.toOwnedSlice(server.arena.allocator());
+    return completions.toOwnedSlice(arena);
 }
 
 fn populateSnippedCompletions(
@@ -461,13 +467,11 @@ fn populateSnippedCompletions(
     }
 }
 
-fn completeBuiltin(server: *Server) error{OutOfMemory}!?[]types.CompletionItem {
+fn completeBuiltin(server: *Server, arena: std.mem.Allocator) error{OutOfMemory}!?[]types.CompletionItem {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const allocator = server.arena.allocator();
-
-    const completions = try allocator.alloc(types.CompletionItem, data.builtins.len);
+    const completions = try arena.alloc(types.CompletionItem, data.builtins.len);
     for (completions, data.builtins) |*out, builtin| {
         const use_snippets = server.config.enable_snippets and server.client_capabilities.supports_snippets;
         const insert_text = if (use_snippets) builtin.snippet else builtin.name;
@@ -489,14 +493,14 @@ fn completeBuiltin(server: *Server) error{OutOfMemory}!?[]types.CompletionItem {
 
     if (server.client_capabilities.label_details_support) {
         for (completions) |*item| {
-            try formatDetailedLabel(item, allocator);
+            try formatDetailedLabel(item, arena);
         }
     }
 
     return completions;
 }
 
-fn completeGlobal(server: *Server, pos_index: usize, handle: *const DocumentStore.Handle) error{OutOfMemory}![]types.CompletionItem {
+fn completeGlobal(server: *Server, arena: std.mem.Allocator, handle: *const DocumentStore.Handle, pos_index: usize) error{OutOfMemory}![]types.CompletionItem {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -504,41 +508,40 @@ fn completeGlobal(server: *Server, pos_index: usize, handle: *const DocumentStor
 
     const context = DeclToCompletionContext{
         .server = server,
+        .arena = arena,
         .completions = &completions,
         .orig_handle = handle,
     };
     try server.analyser.iterateSymbolsGlobal(handle, pos_index, declToCompletion, context);
-    try populateSnippedCompletions(server.arena.allocator(), &completions, &snipped_data.generic, server.config.*);
+    try populateSnippedCompletions(arena, &completions, &snipped_data.generic, server.config.*);
 
     if (server.client_capabilities.label_details_support) {
         for (completions.items) |*item| {
-            try formatDetailedLabel(item, server.arena.allocator());
+            try formatDetailedLabel(item, arena);
         }
     }
 
-    return completions.toOwnedSlice(server.arena.allocator());
+    return completions.toOwnedSlice(arena);
 }
 
-fn completeFieldAccess(server: *Server, handle: *const DocumentStore.Handle, source_index: usize, loc: offsets.Loc) error{OutOfMemory}!?[]types.CompletionItem {
+fn completeFieldAccess(server: *Server, arena: std.mem.Allocator, handle: *const DocumentStore.Handle, source_index: usize, loc: offsets.Loc) error{OutOfMemory}!?[]types.CompletionItem {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const allocator = server.arena.allocator();
-
     var completions = std.ArrayListUnmanaged(types.CompletionItem){};
 
-    var held_loc = try allocator.dupeZ(u8, offsets.locToSlice(handle.text, loc));
+    var held_loc = try arena.dupeZ(u8, offsets.locToSlice(handle.text, loc));
     var tokenizer = std.zig.Tokenizer.init(held_loc);
 
     const result = (try server.analyser.getFieldAccessType(handle, source_index, &tokenizer)) orelse return null;
-    try typeToCompletion(server, &completions, result, handle, null);
+    try typeToCompletion(server, arena, &completions, result, handle, null);
     if (server.client_capabilities.label_details_support) {
         for (completions.items) |*item| {
-            try formatDetailedLabel(item, allocator);
+            try formatDetailedLabel(item, arena);
         }
     }
 
-    return try completions.toOwnedSlice(allocator);
+    return try completions.toOwnedSlice(arena);
 }
 
 fn formatDetailedLabel(item: *types.CompletionItem, arena: std.mem.Allocator) error{OutOfMemory}!void {
@@ -708,11 +711,11 @@ fn formatDetailedLabel(item: *types.CompletionItem, arena: std.mem.Allocator) er
     //     logger.info("labelDetails: {s}  ::  {s}", .{item.labelDetails.?.detail, item.labelDetails.?.description});
 }
 
-fn completeError(server: *Server, handle: *const DocumentStore.Handle) error{OutOfMemory}![]types.CompletionItem {
+fn completeError(server: *Server, arena: std.mem.Allocator, handle: *const DocumentStore.Handle) error{OutOfMemory}![]types.CompletionItem {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    return try server.document_store.errorCompletionItems(server.arena.allocator(), handle.*);
+    return try server.document_store.errorCompletionItems(arena, handle.*);
 }
 
 fn kindToSortScore(kind: types.CompletionItemKind) ?[]const u8 {
@@ -746,7 +749,7 @@ fn kindToSortScore(kind: types.CompletionItemKind) ?[]const u8 {
 
 /// Given a TypeWithHandle that is a container, adds it's `.container_field*`s to completions
 pub fn collectContainerFields(
-    server: *Server,
+    arena: std.mem.Allocator,
     container: Analyser.TypeWithHandle,
     completions: *std.ArrayListUnmanaged(types.CompletionItem),
 ) error{OutOfMemory}!void {
@@ -758,7 +761,7 @@ pub fn collectContainerFields(
     const container_decl = Ast.fullContainerDecl(container.handle.tree, &buffer, node) orelse return;
     for (container_decl.ast.members) |member| {
         const field = container.handle.tree.fullContainerField(member) orelse continue;
-        try completions.append(server.arena.allocator(), .{
+        try completions.append(arena, .{
             .label = container.handle.tree.tokenSlice(field.ast.main_token),
             .kind = if (field.ast.tuple_like) .EnumMember else .Field,
             .detail = Analyser.getContainerFieldSignature(container.handle.tree, field),
@@ -774,8 +777,8 @@ pub fn collectContainerFields(
 ///         `fn_name`'s `fn_arg_index`'s param type
 fn resolveContainer(
     server: *Server,
+    arena: std.mem.Allocator,
     handle: *const DocumentStore.Handle,
-    allocator: std.mem.Allocator,
     text_index: usize,
     fn_arg_index: usize,
 ) error{OutOfMemory}![]Analyser.TypeWithHandle {
@@ -784,7 +787,7 @@ fn resolveContainer(
 
     var types_with_handles = std.ArrayListUnmanaged(Analyser.TypeWithHandle){};
 
-    const pos_context = try Analyser.getPositionContext(allocator, handle.text, text_index, false);
+    const pos_context = try Analyser.getPositionContext(arena, handle.text, text_index, false);
 
     switch (pos_context) {
         .var_access => |loc| va: {
@@ -801,13 +804,12 @@ fn resolveContainer(
                 if (param.type_expr == 0) break :va;
                 const param_rcts = try resolveContainer(
                     server,
+                    arena,
                     symbol_decl.handle,
-                    allocator,
                     offsets.nodeToLoc(symbol_decl.handle.tree, param.type_expr).end,
                     fn_arg_index,
                 );
-                for (param_rcts) |prct| try types_with_handles.append(allocator, prct);
-                allocator.free(param_rcts);
+                for (param_rcts) |prct| try types_with_handles.append(arena, prct);
                 break :va;
             }
             const node_data = symbol_decl.handle.tree.nodes.items(.data)[symbol_decl.decl.ast_node];
@@ -832,14 +834,14 @@ fn resolveContainer(
 
                         const import_str = symbol_decl.handle.tree.tokenSlice(main_tokens[import_param]);
                         const import_uri = try server.document_store.uriFromImportStr(
-                            allocator,
+                            arena,
                             symbol_decl.handle.*,
                             import_str[1 .. import_str.len - 1],
                         ) orelse break :va;
 
                         const node_handle = server.document_store.getOrLoadHandle(import_uri) orelse break :va;
                         try types_with_handles.append(
-                            allocator,
+                            arena,
                             Analyser.TypeWithHandle{
                                 .handle = node_handle,
                                 .type = .{
@@ -855,32 +857,30 @@ fn resolveContainer(
                     const node_loc = offsets.nodeToLoc(symbol_decl.handle.tree, node_data.rhs);
                     const rcts = try resolveContainer(
                         server,
+                        arena,
                         handle,
-                        allocator,
                         node_loc.end,
                         fn_arg_index,
                     );
-                    for (rcts) |rct| try types_with_handles.append(allocator, rct);
-                    allocator.free(rcts);
+                    for (rcts) |rct| try types_with_handles.append(arena, rct);
                 },
                 // decl is `const AliasB = AliasA;` (alias of an alias)
                 .identifier => {
                     const node_loc = offsets.nodeToLoc(symbol_decl.handle.tree, node_data.rhs);
                     const rcts = try resolveContainer(
                         server,
+                        arena,
                         handle,
-                        allocator,
                         node_loc.end,
                         fn_arg_index,
                     );
-                    for (rcts) |rct| try types_with_handles.append(allocator, rct);
-                    allocator.free(rcts);
+                    for (rcts) |rct| try types_with_handles.append(arena, rct);
                 },
                 // decl is `const MyStruct = struct {..};
                 else => {
                     if (ast.isContainer(symbol_decl.handle.tree, node_data.rhs))
                         try types_with_handles.append(
-                            allocator,
+                            arena,
                             Analyser.TypeWithHandle{
                                 .handle = symbol_decl.handle,
                                 .type = .{
@@ -891,14 +891,14 @@ fn resolveContainer(
                         )
                     else {
                         const node_type = try server.analyser.resolveTypeOfNode(.{ .node = symbol_decl.decl.ast_node, .handle = symbol_decl.handle }) orelse break :va;
-                        for (try node_type.getAllTypesWithHandles(allocator)) |either| {
+                        for (try node_type.getAllTypesWithHandles(arena)) |either| {
                             const node = switch (either.type.data) {
                                 .other => |n| n,
                                 else => continue,
                             };
                             if (ast.isContainer(symbol_decl.handle.tree, node))
                                 try types_with_handles.append(
-                                    allocator,
+                                    arena,
                                     Analyser.TypeWithHandle{
                                         .handle = symbol_decl.handle,
                                         .type = .{
@@ -914,7 +914,7 @@ fn resolveContainer(
             }
         },
         .field_access => |loc| fa: {
-            const decls = try server.getSymbolFieldAccesses(handle, loc.end, loc) orelse break :fa;
+            const decls = try server.getSymbolFieldAccesses(arena, handle, loc.end, loc) orelse break :fa;
             for (decls) |decl| {
                 const decl_node = switch (decl.decl.*) {
                     .ast_node => |ast_node| ast_node,
@@ -945,30 +945,29 @@ fn resolveContainer(
                     if (param.type_expr == 0) continue;
                     const param_rcts = try resolveContainer(
                         server,
+                        arena,
                         node_type.handle,
-                        allocator,
                         offsets.nodeToLoc(node_type.handle.tree, param.type_expr).end,
                         fn_arg_index,
                     );
-                    for (param_rcts) |prct| try types_with_handles.append(allocator, prct);
-                    allocator.free(param_rcts);
+                    for (param_rcts) |prct| try types_with_handles.append(arena, prct);
                     continue;
                 }
                 switch (node_type.type.data) {
                     .other => |n| if (ast.isContainer(node_type.handle.tree, n)) {
-                        try types_with_handles.append(allocator, node_type);
+                        try types_with_handles.append(arena, node_type);
                         continue;
                     },
                     else => {},
                 }
-                for (try node_type.getAllTypesWithHandles(allocator)) |either| {
+                for (try node_type.getAllTypesWithHandles(arena)) |either| {
                     const enode = switch (either.type.data) {
                         .other => |n| n,
                         else => continue,
                     };
                     if (ast.isContainer(node_type.handle.tree, enode))
                         try types_with_handles.append(
-                            allocator,
+                            arena,
                             Analyser.TypeWithHandle{
                                 .handle = node_type.handle,
                                 .type = .{
@@ -987,8 +986,8 @@ fn resolveContainer(
             const id_token_index = getIdentifierTokenIndexAndFnArgIndex(handle.tree, dot_index, &field_fn_arg_index) orelse break :el;
             const containers = try resolveContainer(
                 server,
+                arena,
                 handle,
-                allocator,
                 handle.tree.tokens.items(.start)[id_token_index],
                 field_fn_arg_index,
             );
@@ -1004,7 +1003,7 @@ fn resolveContainer(
                     if (std.mem.eql(u8, container.handle.tree.tokenSlice(field.ast.main_token), alleged_field_name)) {
                         if (ast.isContainer(container.handle.tree, field.ast.type_expr)) {
                             try types_with_handles.append(
-                                allocator,
+                                arena,
                                 Analyser.TypeWithHandle{
                                     .handle = container.handle,
                                     .type = .{
@@ -1018,20 +1017,19 @@ fn resolveContainer(
                         const end = offsets.tokenToLoc(container.handle.tree, ast.lastToken(container.handle.tree, field.ast.type_expr)).end;
                         const param_rcts = try resolveContainer(
                             server,
+                            arena,
                             container.handle,
-                            allocator,
                             end,
                             fn_arg_index,
                         );
-                        for (param_rcts) |prct| try types_with_handles.append(allocator, prct);
-                        allocator.free(param_rcts);
+                        for (param_rcts) |prct| try types_with_handles.append(arena, prct);
                     }
                 }
             }
         },
         else => {}, // <- `else =>` of `switch (pos_context)`
     }
-    return types_with_handles.toOwnedSlice(allocator);
+    return types_with_handles.toOwnedSlice(arena);
 }
 
 /// Looks for an identifier that can be passed to `resolveContainer()`
@@ -1103,11 +1101,9 @@ fn getIdentifierTokenIndexAndFnArgIndex(
     return upper_index;
 }
 
-fn completeDot(server: *Server, handle: *const DocumentStore.Handle, source_index: usize) error{OutOfMemory}![]types.CompletionItem {
+fn completeDot(server: *Server, arena: std.mem.Allocator, handle: *const DocumentStore.Handle, source_index: usize) error{OutOfMemory}![]types.CompletionItem {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
-
-    const allocator = server.arena.allocator();
 
     const tree = handle.tree;
     const token_tags = tree.tokens.items(.tag);
@@ -1132,21 +1128,21 @@ fn completeDot(server: *Server, handle: *const DocumentStore.Handle, source_inde
 
         const containers = try resolveContainer(
             server,
+            arena,
             handle,
-            allocator,
             tree.tokens.items(.start)[token_index],
             fn_arg_index,
         );
 
-        for (containers) |container| try collectContainerFields(server, container, &completions);
+        for (containers) |container| try collectContainerFields(arena, container, &completions);
 
-        if (completions.items.len != 0) return completions.toOwnedSlice(allocator);
+        if (completions.items.len != 0) return completions.toOwnedSlice(arena);
     }
 
     // This prevents completions popping up for floats; token/source_index points to the token/char after the `.`, => `- 2`
-    if ((token_index > 1) and (token_tags[token_index - 2] == .number_literal)) return completions.toOwnedSlice(allocator);
+    if ((token_index > 1) and (token_tags[token_index - 2] == .number_literal)) return completions.toOwnedSlice(arena);
 
-    var enum_completions = try server.document_store.enumCompletionItems(allocator, handle.*);
+    var enum_completions = try server.document_store.enumCompletionItems(arena, handle.*);
     return enum_completions;
 }
 
@@ -1233,31 +1229,31 @@ fn completeFileSystemStringLiteral(
     return completions.keys();
 }
 
-pub fn completionAtIndex(server: *Server, source_index: usize, handle: *const DocumentStore.Handle) error{OutOfMemory}!?types.CompletionList {
+pub fn completionAtIndex(server: *Server, arena: std.mem.Allocator, handle: *const DocumentStore.Handle, source_index: usize) error{OutOfMemory}!?types.CompletionList {
     const at_line_start = offsets.lineSliceUntilIndex(handle.tree.source, source_index).len == 0;
     if (at_line_start) {
         var completions = std.ArrayListUnmanaged(types.CompletionItem){};
-        try populateSnippedCompletions(server.arena.allocator(), &completions, &snipped_data.top_level_decl_data, server.config.*);
+        try populateSnippedCompletions(arena, &completions, &snipped_data.top_level_decl_data, server.config.*);
 
         return .{ .isIncomplete = false, .items = completions.items };
     }
 
-    const pos_context = try Analyser.getPositionContext(server.arena.allocator(), handle.text, source_index, false);
+    const pos_context = try Analyser.getPositionContext(arena, handle.text, source_index, false);
 
     const maybe_completions = switch (pos_context) {
-        .builtin => try completeBuiltin(server),
-        .var_access, .empty => try completeGlobal(server, source_index, handle),
-        .field_access => |loc| try completeFieldAccess(server, handle, source_index, loc),
-        .global_error_set => try completeError(server, handle),
-        .enum_literal => try completeDot(server, handle, source_index),
-        .label => try completeLabel(server, source_index, handle),
+        .builtin => try completeBuiltin(server, arena),
+        .var_access, .empty => try completeGlobal(server, arena, handle, source_index),
+        .field_access => |loc| try completeFieldAccess(server, arena, handle, source_index, loc),
+        .global_error_set => try completeError(server, arena, handle),
+        .enum_literal => try completeDot(server, arena, handle, source_index),
+        .label => try completeLabel(server, arena, handle, source_index),
         .import_string_literal,
         .cinclude_string_literal,
         .embedfile_string_literal,
         => blk: {
             if (!server.config.enable_import_embedfile_argument_completions) break :blk null;
 
-            break :blk completeFileSystemStringLiteral(server.arena.allocator(), server.document_store, handle.*, pos_context) catch |err| {
+            break :blk completeFileSystemStringLiteral(arena, server.document_store, handle.*, pos_context) catch |err| {
                 log.err("failed to get file system completions: {}", .{err});
                 return null;
             };
@@ -1270,7 +1266,7 @@ pub fn completionAtIndex(server: *Server, source_index: usize, handle: *const Do
     // The cursor is in the middle of a word or before a @, so we can replace
     // the remaining identifier with the completion instead of just inserting.
     // TODO Identify function call/struct init and replace the whole thing.
-    const lookahead_context = try Analyser.getPositionContext(server.arena.allocator(), handle.text, source_index, true);
+    const lookahead_context = try Analyser.getPositionContext(arena, handle.text, source_index, true);
     if (server.client_capabilities.supports_apply_edits and
         pos_context != .import_string_literal and
         pos_context != .cinclude_string_literal and
@@ -1310,7 +1306,7 @@ pub fn completionAtIndex(server: *Server, source_index: usize, handle: *const Do
     for (completions) |*c| {
         const prefix = kindToSortScore(c.kind.?) orelse continue;
 
-        c.sortText = try std.fmt.allocPrint(server.arena.allocator(), "{s}{s}", .{ prefix, c.label });
+        c.sortText = try std.fmt.allocPrint(arena, "{s}{s}", .{ prefix, c.label });
     }
 
     return .{ .isIncomplete = false, .items = completions };

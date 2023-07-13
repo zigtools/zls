@@ -45,11 +45,13 @@ pub fn gotoDefinitionSymbol(
 
 pub fn gotoDefinitionLabel(
     server: *Server,
-    pos_index: usize,
+    arena: std.mem.Allocator,
     handle: *const DocumentStore.Handle,
+    pos_index: usize,
 ) error{OutOfMemory}!?types.Location {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
+    _ = arena;
 
     const decl = (try Server.getLabelGlobal(pos_index, handle)) orelse return null;
     return try gotoDefinitionSymbol(server, decl, false);
@@ -57,12 +59,14 @@ pub fn gotoDefinitionLabel(
 
 pub fn gotoDefinitionGlobal(
     server: *Server,
-    pos_index: usize,
+    arena: std.mem.Allocator,
     handle: *const DocumentStore.Handle,
+    pos_index: usize,
     resolve_alias: bool,
 ) error{OutOfMemory}!?types.Location {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
+    _ = arena;
 
     const decl = (try server.getSymbolGlobal(pos_index, handle)) orelse return null;
     return try gotoDefinitionSymbol(server, decl, resolve_alias);
@@ -70,23 +74,26 @@ pub fn gotoDefinitionGlobal(
 
 pub fn gotoDefinitionEnumLiteral(
     server: *Server,
-    source_index: usize,
+    arena: std.mem.Allocator,
     handle: *const DocumentStore.Handle,
+    source_index: usize,
 ) error{OutOfMemory}!?types.Location {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const decl = (try server.getSymbolEnumLiteral(source_index, handle)) orelse return null;
+    const decl = (try server.getSymbolEnumLiteral(arena, handle, source_index)) orelse return null;
     return try gotoDefinitionSymbol(server, decl, false);
 }
 
 pub fn gotoDefinitionBuiltin(
     server: *Server,
+    arena: std.mem.Allocator,
     handle: *const DocumentStore.Handle,
     loc: offsets.Loc,
 ) error{OutOfMemory}!?types.Location {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
+    _ = arena;
 
     const name = offsets.tokenIndexToSlice(handle.tree.source, loc.start);
     if (std.mem.eql(u8, name, "@cImport")) {
@@ -114,6 +121,7 @@ pub fn gotoDefinitionBuiltin(
 
 pub fn gotoDefinitionFieldAccess(
     server: *Server,
+    arena: std.mem.Allocator,
     handle: *const DocumentStore.Handle,
     source_index: usize,
     loc: offsets.Loc,
@@ -122,29 +130,28 @@ pub fn gotoDefinitionFieldAccess(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const accesses = (try server.getSymbolFieldAccesses(handle, source_index, loc)) orelse return null;
+    const accesses = (try server.getSymbolFieldAccesses(arena, handle, source_index, loc)) orelse return null;
     var locs = std.ArrayListUnmanaged(types.Location){};
 
     for (accesses) |access| {
         if (try gotoDefinitionSymbol(server, access, resolve_alias)) |l|
-            try locs.append(server.arena.allocator(), l);
+            try locs.append(arena, l);
     }
 
     if (locs.items.len == 0)
         return null;
 
-    return try locs.toOwnedSlice(server.arena.allocator());
+    return try locs.toOwnedSlice(arena);
 }
 
 pub fn gotoDefinitionString(
     server: *Server,
+    arena: std.mem.Allocator,
     pos_context: Analyser.PositionContext,
     handle: *const DocumentStore.Handle,
 ) error{OutOfMemory}!?types.Location {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
-
-    const allocator = server.arena.allocator();
 
     const loc = pos_context.loc().?;
     const import_str_loc = offsets.tokenIndexToLoc(handle.tree.source, loc.start);
@@ -157,18 +164,18 @@ pub fn gotoDefinitionString(
     const uri = switch (pos_context) {
         .import_string_literal,
         .embedfile_string_literal,
-        => try server.document_store.uriFromImportStr(allocator, handle.*, import_str),
+        => try server.document_store.uriFromImportStr(arena, handle.*, import_str),
         .cinclude_string_literal => try URI.fromPath(
-            allocator,
+            arena,
             blk: {
                 if (std.fs.path.isAbsolute(import_str)) break :blk import_str;
                 var include_dirs: std.ArrayListUnmanaged([]const u8) = .{};
-                server.document_store.collectIncludeDirs(allocator, handle.*, &include_dirs) catch |err| {
+                server.document_store.collectIncludeDirs(arena, handle.*, &include_dirs) catch |err| {
                     log.err("failed to resolve include paths: {}", .{err});
                     return null;
                 };
                 for (include_dirs.items) |dir| {
-                    const path = try std.fs.path.join(allocator, &.{ dir, import_str });
+                    const path = try std.fs.path.join(arena, &.{ dir, import_str });
                     std.fs.accessAbsolute(path, .{}) catch continue;
                     break :blk path;
                 }
@@ -189,22 +196,23 @@ pub fn gotoDefinitionString(
 
 pub fn goto(
     server: *Server,
-    source_index: usize,
+    arena: std.mem.Allocator,
     handle: *const DocumentStore.Handle,
+    source_index: usize,
     resolve_alias: bool,
 ) !?types.Definition {
-    const pos_context = try Analyser.getPositionContext(server.arena.allocator(), handle.text, source_index, true);
+    const pos_context = try Analyser.getPositionContext(arena, handle.text, source_index, true);
 
     return switch (pos_context) {
-        .builtin => |loc| .{ .Location = (try gotoDefinitionBuiltin(server, handle, loc)) orelse return null },
-        .var_access => .{ .Location = (try gotoDefinitionGlobal(server, source_index, handle, resolve_alias)) orelse return null },
-        .field_access => |loc| .{ .array_of_Location = (try gotoDefinitionFieldAccess(server, handle, source_index, loc, resolve_alias)) orelse return null },
+        .builtin => |loc| .{ .Location = (try gotoDefinitionBuiltin(server, arena, handle, loc)) orelse return null },
+        .var_access => .{ .Location = (try gotoDefinitionGlobal(server, arena, handle, source_index, resolve_alias)) orelse return null },
+        .field_access => |loc| .{ .array_of_Location = (try gotoDefinitionFieldAccess(server, arena, handle, source_index, loc, resolve_alias)) orelse return null },
         .import_string_literal,
         .cinclude_string_literal,
         .embedfile_string_literal,
-        => .{ .Location = (try gotoDefinitionString(server, pos_context, handle)) orelse return null },
-        .label => .{ .Location = (try gotoDefinitionLabel(server, source_index, handle)) orelse return null },
-        .enum_literal => .{ .Location = (try gotoDefinitionEnumLiteral(server, source_index, handle)) orelse return null },
+        => .{ .Location = (try gotoDefinitionString(server, arena, pos_context, handle)) orelse return null },
+        .label => .{ .Location = (try gotoDefinitionLabel(server, arena, handle, source_index)) orelse return null },
+        .enum_literal => .{ .Location = (try gotoDefinitionEnumLiteral(server, arena, handle, source_index)) orelse return null },
         else => null,
     };
 }
