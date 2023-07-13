@@ -8,14 +8,13 @@ const offsets = @import("../offsets.zig");
 const URI = @import("../uri.zig");
 const tracy = @import("../tracy.zig");
 
-const Server = @import("../Server.zig");
 const Analyser = @import("../analysis.zig");
 const DocumentStore = @import("../DocumentStore.zig");
 
 const data = @import("../data/data.zig");
 
 pub fn hoverSymbol(
-    server: *Server,
+    analyser: *Analyser,
     arena: std.mem.Allocator,
     decl_handle: Analyser.DeclWithHandle,
     markup_kind: types.MarkupKind,
@@ -33,8 +32,8 @@ pub fn hoverSymbol(
 
     const def_str = switch (decl_handle.decl.*) {
         .ast_node => |node| def: {
-            if (try server.analyser.resolveVarDeclAlias(.{ .node = node, .handle = handle })) |result| {
-                return try hoverSymbol(server, arena, result, markup_kind, doc_str);
+            if (try analyser.resolveVarDeclAlias(.{ .node = node, .handle = handle })) |result| {
+                return try hoverSymbol(analyser, arena, result, markup_kind, doc_str);
             }
 
             var buf: [1]Ast.Node.Index = undefined;
@@ -51,7 +50,7 @@ pub fn hoverSymbol(
                 }
 
                 if (type_node != 0)
-                    try server.analyser.referencedTypesFromNode(
+                    try analyser.referencedTypesFromNode(
                         .{ .node = type_node, .handle = handle },
                         &reference_collector,
                     );
@@ -63,7 +62,7 @@ pub fn hoverSymbol(
                 var converted = field;
                 converted.convertToNonTupleLike(tree.nodes);
                 if (converted.ast.type_expr != 0)
-                    try server.analyser.referencedTypesFromNode(
+                    try analyser.referencedTypesFromNode(
                         .{ .node = converted.ast.type_expr, .handle = handle },
                         &reference_collector,
                     );
@@ -77,7 +76,7 @@ pub fn hoverSymbol(
             const param = pay.param;
 
             if (param.type_expr != 0) // zero for `anytype` and extern C varargs `...`
-                try server.analyser.referencedTypesFromNode(
+                try analyser.referencedTypesFromNode(
                     .{ .node = param.type_expr, .handle = handle },
                     &reference_collector,
                 );
@@ -95,8 +94,8 @@ pub fn hoverSymbol(
     };
 
     var resolved_type_str: []const u8 = "unknown";
-    if (try decl_handle.resolveType(&server.analyser)) |resolved_type| {
-        try server.analyser.referencedTypes(
+    if (try decl_handle.resolveType(analyser)) |resolved_type| {
+        try analyser.referencedTypes(
             resolved_type,
             &resolved_type_str,
             &reference_collector,
@@ -115,8 +114,9 @@ pub fn hoverSymbol(
         for (referenced_types, 0..) |ref, index| {
             if (index > 0)
                 try writer.print(" | ", .{});
-            const loc = offsets.tokenToPosition(ref.handle.tree, ref.token, server.offset_encoding);
-            try writer.print("[{s}]({s}#L{d})", .{ ref.str, ref.handle.uri, loc.line + 1 });
+            const source_index = offsets.tokenToIndex(ref.handle.tree, ref.token);
+            const line = 1 + std.mem.count(u8, ref.handle.tree.source[0..source_index], "\n");
+            try writer.print("[{s}]({s}#L{d})", .{ ref.str, ref.handle.uri, line });
         }
     } else {
         try writer.print("{s} ({s})", .{ def_str, resolved_type_str });
@@ -127,29 +127,41 @@ pub fn hoverSymbol(
     return hover_text.items;
 }
 
-pub fn hoverDefinitionLabel(server: *Server, arena: std.mem.Allocator, handle: *const DocumentStore.Handle, pos_index: usize) error{OutOfMemory}!?types.Hover {
+pub fn hoverDefinitionLabel(
+    analyser: *Analyser,
+    arena: std.mem.Allocator,
+    handle: *const DocumentStore.Handle,
+    pos_index: usize,
+    markup_kind: types.MarkupKind,
+) error{OutOfMemory}!?types.Hover {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const markup_kind: types.MarkupKind = if (server.client_capabilities.hover_supports_md) .markdown else .plaintext;
-    const decl = (try Server.getLabelGlobal(pos_index, handle)) orelse return null;
+    const decl = (try Analyser.getLabelGlobal(pos_index, handle)) orelse return null;
 
     return .{
         .contents = .{
             .MarkupContent = .{
                 .kind = markup_kind,
-                .value = (try hoverSymbol(server, arena, decl, markup_kind, null)) orelse return null,
+                .value = (try hoverSymbol(analyser, arena, decl, markup_kind, null)) orelse return null,
             },
         },
     };
 }
 
-pub fn hoverDefinitionBuiltin(server: *Server, arena: std.mem.Allocator, handle: *const DocumentStore.Handle, pos_index: usize) error{OutOfMemory}!?types.Hover {
+pub fn hoverDefinitionBuiltin(
+    analyser: *Analyser,
+    arena: std.mem.Allocator,
+    handle: *const DocumentStore.Handle,
+    pos_index: usize,
+    markup_kind: types.MarkupKind,
+) error{OutOfMemory}!?types.Hover {
+    _ = analyser;
+    _ = markup_kind;
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
-    _ = server;
 
-    const name = Server.identifierFromPosition(pos_index, handle.*);
+    const name = Analyser.identifierFromPosition(pos_index, handle.*);
     if (name.len == 0) return null;
 
     const builtin = for (data.builtins) |builtin| {
@@ -195,63 +207,68 @@ pub fn hoverDefinitionBuiltin(server: *Server, arena: std.mem.Allocator, handle:
     };
 }
 
-pub fn hoverDefinitionGlobal(server: *Server, arena: std.mem.Allocator, handle: *const DocumentStore.Handle, pos_index: usize) error{OutOfMemory}!?types.Hover {
+pub fn hoverDefinitionGlobal(
+    analyser: *Analyser,
+    arena: std.mem.Allocator,
+    handle: *const DocumentStore.Handle,
+    pos_index: usize,
+    markup_kind: types.MarkupKind,
+) error{OutOfMemory}!?types.Hover {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const markup_kind: types.MarkupKind = if (server.client_capabilities.hover_supports_md) .markdown else .plaintext;
-    const decl = (try server.getSymbolGlobal(pos_index, handle)) orelse return null;
+    const decl = (try analyser.getSymbolGlobal(pos_index, handle)) orelse return null;
 
     return .{
         .contents = .{
             .MarkupContent = .{
                 .kind = markup_kind,
-                .value = (try hoverSymbol(server, arena, decl, markup_kind, null)) orelse return null,
+                .value = (try hoverSymbol(analyser, arena, decl, markup_kind, null)) orelse return null,
             },
         },
     };
 }
 
 pub fn hoverDefinitionEnumLiteral(
-    server: *Server,
+    analyser: *Analyser,
     arena: std.mem.Allocator,
     handle: *const DocumentStore.Handle,
     source_index: usize,
+    markup_kind: types.MarkupKind,
 ) error{OutOfMemory}!?types.Hover {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const markup_kind: types.MarkupKind = if (server.client_capabilities.hover_supports_md) .markdown else .plaintext;
-    const decl = (try server.getSymbolEnumLiteral(arena, handle, source_index)) orelse return null;
+    const decl = (try analyser.getSymbolEnumLiteral(arena, handle, source_index)) orelse return null;
 
     return .{
         .contents = .{
             .MarkupContent = .{
                 .kind = markup_kind,
-                .value = (try hoverSymbol(server, arena, decl, markup_kind, null)) orelse return null,
+                .value = (try hoverSymbol(analyser, arena, decl, markup_kind, null)) orelse return null,
             },
         },
     };
 }
 
 pub fn hoverDefinitionFieldAccess(
-    server: *Server,
+    analyser: *Analyser,
     arena: std.mem.Allocator,
     handle: *const DocumentStore.Handle,
     source_index: usize,
     loc: offsets.Loc,
+    markup_kind: types.MarkupKind,
 ) error{OutOfMemory}!?types.Hover {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const markup_kind: types.MarkupKind = if (server.client_capabilities.hover_supports_md) .markdown else .plaintext;
-    const decls = (try server.getSymbolFieldAccesses(arena, handle, source_index, loc)) orelse return null;
+    const decls = (try analyser.getSymbolFieldAccesses(arena, handle, source_index, loc)) orelse return null;
 
     var content = std.ArrayListUnmanaged(types.MarkedString){};
 
     for (decls) |decl| {
         try content.append(arena, .{
-            .string = (try hoverSymbol(server, arena, decl, markup_kind, null)) orelse continue,
+            .string = (try hoverSymbol(analyser, arena, decl, markup_kind, null)) orelse continue,
         });
     }
 
@@ -264,15 +281,15 @@ pub fn hoverDefinitionFieldAccess(
     };
 }
 
-pub fn hover(server: *Server, arena: std.mem.Allocator, handle: *const DocumentStore.Handle, source_index: usize) !?types.Hover {
+pub fn hover(analyser: *Analyser, arena: std.mem.Allocator, handle: *const DocumentStore.Handle, source_index: usize, markup_kind: types.MarkupKind) !?types.Hover {
     const pos_context = try Analyser.getPositionContext(arena, handle.text, source_index, true);
 
     const response = switch (pos_context) {
-        .builtin => try hoverDefinitionBuiltin(server, arena, handle, source_index),
-        .var_access => try hoverDefinitionGlobal(server, arena, handle, source_index),
-        .field_access => |loc| try hoverDefinitionFieldAccess(server, arena, handle, source_index, loc),
-        .label => try hoverDefinitionLabel(server, arena, handle, source_index),
-        .enum_literal => try hoverDefinitionEnumLiteral(server, arena, handle, source_index),
+        .builtin => try hoverDefinitionBuiltin(analyser, arena, handle, source_index, markup_kind),
+        .var_access => try hoverDefinitionGlobal(analyser, arena, handle, source_index, markup_kind),
+        .field_access => |loc| try hoverDefinitionFieldAccess(analyser, arena, handle, source_index, loc, markup_kind),
+        .label => try hoverDefinitionLabel(analyser, arena, handle, source_index, markup_kind),
+        .enum_literal => try hoverDefinitionEnumLiteral(analyser, arena, handle, source_index, markup_kind),
         else => null,
     };
 

@@ -11,13 +11,14 @@ const ast = @import("../ast.zig");
 const offsets = @import("../offsets.zig");
 const tracy = @import("../tracy.zig");
 const URI = @import("../uri.zig");
-const analyser = @import("../analyser/analyser.zig");
+const analyser_completions = @import("../analyser/completions.zig");
 
 const data = @import("../data/data.zig");
 const snipped_data = @import("../data/snippets.zig");
 
 fn typeToCompletion(
     server: *Server,
+    analyser: *Analyser,
     arena: std.mem.Allocator,
     list: *std.ArrayListUnmanaged(types.CompletionItem),
     field_access: Analyser.FieldAccessReturn,
@@ -57,10 +58,11 @@ fn typeToCompletion(
                     .insertTextFormat = .PlainText,
                 });
             }
-            try typeToCompletion(server, arena, list, .{ .original = t.* }, orig_handle, null);
+            try typeToCompletion(server, analyser, arena, list, .{ .original = t.* }, orig_handle, null);
         },
         .other => |n| try nodeToCompletion(
             server,
+            analyser,
             arena,
             list,
             .{ .node = n, .handle = type_handle.handle },
@@ -71,7 +73,7 @@ fn typeToCompletion(
             either_descriptor,
         ),
         .primitive, .array_index => {},
-        .@"comptime" => |co| try analyser.completions.dotCompletions(
+        .@"comptime" => |co| try analyser_completions.dotCompletions(
             arena,
             list,
             co.interpreter.ip,
@@ -81,7 +83,7 @@ fn typeToCompletion(
         ),
         .either => |bruh| {
             for (bruh) |a|
-                try typeToCompletion(server, arena, list, .{ .original = a.type_with_handle }, orig_handle, a.descriptor);
+                try typeToCompletion(server, analyser, arena, list, .{ .original = a.type_with_handle }, orig_handle, a.descriptor);
         },
     }
 }
@@ -115,6 +117,7 @@ fn completionDoc(
 
 fn nodeToCompletion(
     server: *Server,
+    analyser: *Analyser,
     arena: std.mem.Allocator,
     list: *std.ArrayListUnmanaged(types.CompletionItem),
     node_handle: Analyser.NodeWithHandle,
@@ -136,7 +139,7 @@ fn nodeToCompletion(
 
     var doc_comments = try Analyser.getDocComments(arena, handle.tree, node);
     if (doc_comments == null) {
-        if (try server.analyser.resolveVarDeclAlias(node_handle)) |result| {
+        if (try analyser.resolveVarDeclAlias(node_handle)) |result| {
             doc_comments = try result.docComments(arena);
         }
     }
@@ -151,13 +154,14 @@ fn nodeToCompletion(
     if (ast.isContainer(handle.tree, node)) {
         const context = DeclToCompletionContext{
             .server = server,
+            .analyser = analyser,
             .arena = arena,
             .completions = list,
             .orig_handle = orig_handle,
             .parent_is_type_val = is_type_val,
             .either_descriptor = either_descriptor,
         };
-        try server.analyser.iterateSymbolsContainer(
+        try analyser.iterateSymbolsContainer(
             node_handle,
             orig_handle,
             declToCompletion,
@@ -168,11 +172,11 @@ fn nodeToCompletion(
 
     switch (node_tags[node]) {
         .merge_error_sets => {
-            if (try server.analyser.resolveTypeOfNode(.{ .node = datas[node].lhs, .handle = handle })) |ty| {
-                try typeToCompletion(server, arena, list, .{ .original = ty }, orig_handle, either_descriptor);
+            if (try analyser.resolveTypeOfNode(.{ .node = datas[node].lhs, .handle = handle })) |ty| {
+                try typeToCompletion(server, analyser, arena, list, .{ .original = ty }, orig_handle, either_descriptor);
             }
-            if (try server.analyser.resolveTypeOfNode(.{ .node = datas[node].rhs, .handle = handle })) |ty| {
-                try typeToCompletion(server, arena, list, .{ .original = ty }, orig_handle, either_descriptor);
+            if (try analyser.resolveTypeOfNode(.{ .node = datas[node].rhs, .handle = handle })) |ty| {
+                try typeToCompletion(server, analyser, arena, list, .{ .original = ty }, orig_handle, either_descriptor);
             }
         },
         else => {},
@@ -193,7 +197,7 @@ fn nodeToCompletion(
                 const use_snippets = server.config.enable_snippets and server.client_capabilities.supports_snippets;
                 const insert_text = if (use_snippets) blk: {
                     const skip_self_param = !(parent_is_type_val orelse true) and
-                        try server.analyser.hasSelfParam(handle, func);
+                        try analyser.hasSelfParam(handle, func);
                     break :blk try Analyser.getFunctionSnippet(arena, tree, func, skip_self_param);
                 } else tree.tokenSlice(func.name_token.?);
 
@@ -286,7 +290,7 @@ fn nodeToCompletion(
             }
 
             if (unwrapped) |actual_type| {
-                try typeToCompletion(server, arena, list, .{ .original = actual_type }, orig_handle, either_descriptor);
+                try typeToCompletion(server, analyser, arena, list, .{ .original = actual_type }, orig_handle, either_descriptor);
             }
             return;
         },
@@ -327,6 +331,7 @@ fn nodeToCompletion(
 
 const DeclToCompletionContext = struct {
     server: *Server,
+    analyser: *Analyser,
     arena: std.mem.Allocator,
     completions: *std.ArrayListUnmanaged(types.CompletionItem),
     orig_handle: *const DocumentStore.Handle,
@@ -360,6 +365,7 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: Analyser.Decl
     switch (decl_handle.decl.*) {
         .ast_node => |node| try nodeToCompletion(
             context.server,
+            context.analyser,
             context.arena,
             context.completions,
             .{ .node = node, .handle = decl_handle.handle },
@@ -426,6 +432,7 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: Analyser.Decl
 
 fn completeLabel(
     server: *Server,
+    analyser: *Analyser,
     arena: std.mem.Allocator,
     handle: *const DocumentStore.Handle,
     pos_index: usize,
@@ -437,6 +444,7 @@ fn completeLabel(
 
     const context = DeclToCompletionContext{
         .server = server,
+        .analyser = analyser,
         .arena = arena,
         .completions = &completions,
         .orig_handle = handle,
@@ -500,7 +508,7 @@ fn completeBuiltin(server: *Server, arena: std.mem.Allocator) error{OutOfMemory}
     return completions;
 }
 
-fn completeGlobal(server: *Server, arena: std.mem.Allocator, handle: *const DocumentStore.Handle, pos_index: usize) error{OutOfMemory}![]types.CompletionItem {
+fn completeGlobal(server: *Server, analyser: *Analyser, arena: std.mem.Allocator, handle: *const DocumentStore.Handle, pos_index: usize) error{OutOfMemory}![]types.CompletionItem {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -508,11 +516,12 @@ fn completeGlobal(server: *Server, arena: std.mem.Allocator, handle: *const Docu
 
     const context = DeclToCompletionContext{
         .server = server,
+        .analyser = analyser,
         .arena = arena,
         .completions = &completions,
         .orig_handle = handle,
     };
-    try server.analyser.iterateSymbolsGlobal(handle, pos_index, declToCompletion, context);
+    try analyser.iterateSymbolsGlobal(handle, pos_index, declToCompletion, context);
     try populateSnippedCompletions(arena, &completions, &snipped_data.generic, server.config.*);
 
     if (server.client_capabilities.label_details_support) {
@@ -524,7 +533,7 @@ fn completeGlobal(server: *Server, arena: std.mem.Allocator, handle: *const Docu
     return completions.toOwnedSlice(arena);
 }
 
-fn completeFieldAccess(server: *Server, arena: std.mem.Allocator, handle: *const DocumentStore.Handle, source_index: usize, loc: offsets.Loc) error{OutOfMemory}!?[]types.CompletionItem {
+fn completeFieldAccess(server: *Server, analyser: *Analyser, arena: std.mem.Allocator, handle: *const DocumentStore.Handle, source_index: usize, loc: offsets.Loc) error{OutOfMemory}!?[]types.CompletionItem {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -533,8 +542,8 @@ fn completeFieldAccess(server: *Server, arena: std.mem.Allocator, handle: *const
     var held_loc = try arena.dupeZ(u8, offsets.locToSlice(handle.text, loc));
     var tokenizer = std.zig.Tokenizer.init(held_loc);
 
-    const result = (try server.analyser.getFieldAccessType(handle, source_index, &tokenizer)) orelse return null;
-    try typeToCompletion(server, arena, &completions, result, handle, null);
+    const result = (try analyser.getFieldAccessType(handle, source_index, &tokenizer)) orelse return null;
+    try typeToCompletion(server, analyser, arena, &completions, result, handle, null);
     if (server.client_capabilities.label_details_support) {
         for (completions.items) |*item| {
             try formatDetailedLabel(item, arena);
@@ -776,7 +785,8 @@ pub fn collectContainerFields(
 /// If the `identifier` is a `fn_name`/`identifier.fn_name`, tries to resolve
 ///         `fn_name`'s `fn_arg_index`'s param type
 fn resolveContainer(
-    server: *Server,
+    document_store: *DocumentStore,
+    analyser: *Analyser,
     arena: std.mem.Allocator,
     handle: *const DocumentStore.Handle,
     text_index: usize,
@@ -791,7 +801,7 @@ fn resolveContainer(
 
     switch (pos_context) {
         .var_access => |loc| va: {
-            const symbol_decl = try server.analyser.lookupSymbolGlobal(handle, handle.text[loc.start..loc.end], loc.end) orelse break :va;
+            const symbol_decl = try analyser.lookupSymbolGlobal(handle, handle.text[loc.start..loc.end], loc.end) orelse break :va;
             if (symbol_decl.decl.* != .ast_node) break :va;
             const nodes_tags = symbol_decl.handle.tree.nodes.items(.tag);
             if (nodes_tags[symbol_decl.decl.ast_node] == .fn_decl) {
@@ -803,7 +813,8 @@ fn resolveContainer(
                 const param = maybe_fn_param orelse break :va;
                 if (param.type_expr == 0) break :va;
                 const param_rcts = try resolveContainer(
-                    server,
+                    document_store,
+                    analyser,
                     arena,
                     symbol_decl.handle,
                     offsets.nodeToLoc(symbol_decl.handle.tree, param.type_expr).end,
@@ -833,13 +844,13 @@ fn resolveContainer(
                         if (nodes_tags[import_param] != .string_literal) break :va;
 
                         const import_str = symbol_decl.handle.tree.tokenSlice(main_tokens[import_param]);
-                        const import_uri = try server.document_store.uriFromImportStr(
+                        const import_uri = try document_store.uriFromImportStr(
                             arena,
                             symbol_decl.handle.*,
                             import_str[1 .. import_str.len - 1],
                         ) orelse break :va;
 
-                        const node_handle = server.document_store.getOrLoadHandle(import_uri) orelse break :va;
+                        const node_handle = document_store.getOrLoadHandle(import_uri) orelse break :va;
                         try types_with_handles.append(
                             arena,
                             Analyser.TypeWithHandle{
@@ -856,7 +867,8 @@ fn resolveContainer(
                 .field_access => {
                     const node_loc = offsets.nodeToLoc(symbol_decl.handle.tree, node_data.rhs);
                     const rcts = try resolveContainer(
-                        server,
+                        document_store,
+                        analyser,
                         arena,
                         handle,
                         node_loc.end,
@@ -868,7 +880,8 @@ fn resolveContainer(
                 .identifier => {
                     const node_loc = offsets.nodeToLoc(symbol_decl.handle.tree, node_data.rhs);
                     const rcts = try resolveContainer(
-                        server,
+                        document_store,
+                        analyser,
                         arena,
                         handle,
                         node_loc.end,
@@ -890,7 +903,7 @@ fn resolveContainer(
                             },
                         )
                     else {
-                        const node_type = try server.analyser.resolveTypeOfNode(.{ .node = symbol_decl.decl.ast_node, .handle = symbol_decl.handle }) orelse break :va;
+                        const node_type = try analyser.resolveTypeOfNode(.{ .node = symbol_decl.decl.ast_node, .handle = symbol_decl.handle }) orelse break :va;
                         for (try node_type.getAllTypesWithHandles(arena)) |either| {
                             const node = switch (either.type.data) {
                                 .other => |n| n,
@@ -914,13 +927,13 @@ fn resolveContainer(
             }
         },
         .field_access => |loc| fa: {
-            const decls = try server.getSymbolFieldAccesses(arena, handle, loc.end, loc) orelse break :fa;
+            const decls = try analyser.getSymbolFieldAccesses(arena, handle, loc.end, loc) orelse break :fa;
             for (decls) |decl| {
                 const decl_node = switch (decl.decl.*) {
                     .ast_node => |ast_node| ast_node,
                     else => continue,
                 };
-                const node_type = try server.analyser.resolveTypeOfNode(.{ .node = decl_node, .handle = decl.handle }) orelse continue;
+                const node_type = try analyser.resolveTypeOfNode(.{ .node = decl_node, .handle = decl.handle }) orelse continue;
                 if (node_type.isFunc()) {
                     var buf: [1]Ast.Node.Index = undefined;
                     const full_fn_proto = node_type.handle.tree.fullFnProto(&buf, node_type.type.data.other) orelse continue;
@@ -933,10 +946,10 @@ fn resolveContainer(
                         const field_access_slice = handle.text[loc.start..loc.end];
                         var symbol_iter = std.mem.tokenizeScalar(u8, field_access_slice, '.');
                         const first_symbol = symbol_iter.next() orelse continue;
-                        const symbol_decl = try server.analyser.lookupSymbolGlobal(handle, first_symbol, loc.start) orelse continue;
-                        const symbol_type = try symbol_decl.resolveType(&server.analyser) orelse continue;
+                        const symbol_decl = try analyser.lookupSymbolGlobal(handle, first_symbol, loc.start) orelse continue;
+                        const symbol_type = try symbol_decl.resolveType(analyser) orelse continue;
                         if (!symbol_type.type.is_type_val) { // then => instance_of_T
-                            if (try server.analyser.hasSelfParam(node_type.handle, full_fn_proto)) break :blk 2;
+                            if (try analyser.hasSelfParam(node_type.handle, full_fn_proto)) break :blk 2;
                         }
                         break :blk 1; // is `T`, no SelfParam
                     };
@@ -944,7 +957,8 @@ fn resolveContainer(
                     const param = maybe_fn_param orelse continue;
                     if (param.type_expr == 0) continue;
                     const param_rcts = try resolveContainer(
-                        server,
+                        document_store,
+                        analyser,
                         arena,
                         node_type.handle,
                         offsets.nodeToLoc(node_type.handle.tree, param.type_expr).end,
@@ -985,7 +999,8 @@ fn resolveContainer(
             var field_fn_arg_index: usize = 0;
             const id_token_index = getIdentifierTokenIndexAndFnArgIndex(handle.tree, dot_index, &field_fn_arg_index) orelse break :el;
             const containers = try resolveContainer(
-                server,
+                document_store,
+                analyser,
                 arena,
                 handle,
                 handle.tree.tokens.items(.start)[id_token_index],
@@ -1016,7 +1031,8 @@ fn resolveContainer(
                         }
                         const end = offsets.tokenToLoc(container.handle.tree, ast.lastToken(container.handle.tree, field.ast.type_expr)).end;
                         const param_rcts = try resolveContainer(
-                            server,
+                            document_store,
+                            analyser,
                             arena,
                             container.handle,
                             end,
@@ -1101,7 +1117,7 @@ fn getIdentifierTokenIndexAndFnArgIndex(
     return upper_index;
 }
 
-fn completeDot(server: *Server, arena: std.mem.Allocator, handle: *const DocumentStore.Handle, source_index: usize) error{OutOfMemory}![]types.CompletionItem {
+fn completeDot(document_store: *DocumentStore, analyser: *Analyser, arena: std.mem.Allocator, handle: *const DocumentStore.Handle, source_index: usize) error{OutOfMemory}![]types.CompletionItem {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -1127,7 +1143,8 @@ fn completeDot(server: *Server, arena: std.mem.Allocator, handle: *const Documen
         if (token_index == 0) break :struct_init;
 
         const containers = try resolveContainer(
-            server,
+            document_store,
+            analyser,
             arena,
             handle,
             tree.tokens.items(.start)[token_index],
@@ -1142,7 +1159,7 @@ fn completeDot(server: *Server, arena: std.mem.Allocator, handle: *const Documen
     // This prevents completions popping up for floats; token/source_index points to the token/char after the `.`, => `- 2`
     if ((token_index > 1) and (token_tags[token_index - 2] == .number_literal)) return completions.toOwnedSlice(arena);
 
-    var enum_completions = try server.document_store.enumCompletionItems(arena, handle.*);
+    var enum_completions = try document_store.enumCompletionItems(arena, handle.*);
     return enum_completions;
 }
 
@@ -1229,7 +1246,7 @@ fn completeFileSystemStringLiteral(
     return completions.keys();
 }
 
-pub fn completionAtIndex(server: *Server, arena: std.mem.Allocator, handle: *const DocumentStore.Handle, source_index: usize) error{OutOfMemory}!?types.CompletionList {
+pub fn completionAtIndex(server: *Server, analyser: *Analyser, arena: std.mem.Allocator, handle: *const DocumentStore.Handle, source_index: usize) error{OutOfMemory}!?types.CompletionList {
     const at_line_start = offsets.lineSliceUntilIndex(handle.tree.source, source_index).len == 0;
     if (at_line_start) {
         var completions = std.ArrayListUnmanaged(types.CompletionItem){};
@@ -1242,11 +1259,11 @@ pub fn completionAtIndex(server: *Server, arena: std.mem.Allocator, handle: *con
 
     const maybe_completions = switch (pos_context) {
         .builtin => try completeBuiltin(server, arena),
-        .var_access, .empty => try completeGlobal(server, arena, handle, source_index),
-        .field_access => |loc| try completeFieldAccess(server, arena, handle, source_index, loc),
+        .var_access, .empty => try completeGlobal(server, analyser, arena, handle, source_index),
+        .field_access => |loc| try completeFieldAccess(server, analyser, arena, handle, source_index, loc),
         .global_error_set => try completeError(server, arena, handle),
-        .enum_literal => try completeDot(server, arena, handle, source_index),
-        .label => try completeLabel(server, arena, handle, source_index),
+        .enum_literal => try completeDot(&server.document_store, analyser, arena, handle, source_index),
+        .label => try completeLabel(server, analyser, arena, handle, source_index),
         .import_string_literal,
         .cinclude_string_literal,
         .embedfile_string_literal,
