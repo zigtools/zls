@@ -1735,6 +1735,16 @@ pub const TypeWithHandle = struct {
         };
     }
 
+    pub fn definitionToken(self: TypeWithHandle) ?Ast.TokenIndex {
+        if (self.type.is_type_val) {
+            switch (self.type.data) {
+                .other => |n| return self.handle.tree.firstToken(n),
+                else => {},
+            }
+        }
+        return null;
+    }
+
     pub fn docComments(self: TypeWithHandle, allocator: std.mem.Allocator) !?[]const u8 {
         if (self.type.is_type_val) {
             switch (self.type.data) {
@@ -2330,6 +2340,11 @@ pub fn getPositionContext(
     return if (tok.tag == .identifier) PositionContext{ .var_access = tok.loc } else .empty;
 }
 
+pub const TokenWithHandle = struct {
+    token: Ast.TokenIndex,
+    handle: *const DocumentStore.Handle,
+};
+
 pub const ErrorUnionSide = enum { left, right };
 
 pub const Declaration = union(enum) {
@@ -2395,6 +2410,25 @@ pub const DeclWithHandle = struct {
             .label_decl => |ld| ld.label,
             .error_token => |et| et,
         };
+    }
+
+    pub fn definitionToken(self: DeclWithHandle, analyser: *Analyser, resolve_alias: bool) !TokenWithHandle {
+        if (resolve_alias) {
+            switch (self.decl.*) {
+                .ast_node => |node| {
+                    if (try analyser.resolveVarDeclAlias(.{ .node = node, .handle = self.handle })) |result| {
+                        return result.definitionToken(analyser, resolve_alias);
+                    }
+                },
+                else => {},
+            }
+            if (try self.resolveType(analyser)) |resolved_type| {
+                if (resolved_type.definitionToken()) |token| {
+                    return .{ .token = token, .handle = resolved_type.handle };
+                }
+            }
+        }
+        return .{ .token = self.nameToken(), .handle = self.handle };
     }
 
     pub fn docComments(self: DeclWithHandle, allocator: std.mem.Allocator) !?[]const u8 {

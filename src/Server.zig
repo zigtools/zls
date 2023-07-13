@@ -883,6 +883,15 @@ fn gotoDefinitionHandler(
     arena: std.mem.Allocator,
     request: types.DefinitionParams,
 ) Error!ResultType("textDocument/definition") {
+    return server.gotoHandler(arena, true, request);
+}
+
+fn gotoHandler(
+    server: *Server,
+    arena: std.mem.Allocator,
+    comptime resolve_alias: bool,
+    request: types.DefinitionParams,
+) Error!ResultType("textDocument/definition") {
     if (request.position.character == 0) return null;
 
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
@@ -892,12 +901,12 @@ fn gotoDefinitionHandler(
     defer analyser.deinit();
 
     return .{
-        .Definition = try goto.goto(&analyser, &server.document_store, arena, handle, source_index, true, server.offset_encoding) orelse return null,
+        .Definition = try goto.goto(&analyser, &server.document_store, arena, handle, source_index, resolve_alias, server.offset_encoding) orelse return null,
     };
 }
 
 fn gotoTypeDeclarationHandler(server: *Server, arena: std.mem.Allocator, request: types.TypeDefinitionParams) Error!ResultType("textDocument/typeDefinition") {
-    const response = (try server.gotoDefinitionHandler(arena, .{
+    const response = (try server.gotoHandler(arena, false, .{
         .textDocument = request.textDocument,
         .position = request.position,
         .workDoneToken = request.workDoneToken,
@@ -907,7 +916,7 @@ fn gotoTypeDeclarationHandler(server: *Server, arena: std.mem.Allocator, request
 }
 
 fn gotoImplementationHandler(server: *Server, arena: std.mem.Allocator, request: types.ImplementationParams) Error!ResultType("textDocument/implementation") {
-    const response = (try server.gotoDefinitionHandler(arena, .{
+    const response = (try server.gotoHandler(arena, true, .{
         .textDocument = request.textDocument,
         .position = request.position,
         .workDoneToken = request.workDoneToken,
@@ -917,7 +926,7 @@ fn gotoImplementationHandler(server: *Server, arena: std.mem.Allocator, request:
 }
 
 fn gotoDeclarationHandler(server: *Server, arena: std.mem.Allocator, request: types.DeclarationParams) Error!ResultType("textDocument/declaration") {
-    const response = (try server.gotoDefinitionHandler(arena, .{
+    const response = (try server.gotoHandler(arena, false, .{
         .textDocument = request.textDocument,
         .position = request.position,
         .workDoneToken = request.workDoneToken,

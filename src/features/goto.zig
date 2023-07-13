@@ -20,26 +20,13 @@ pub fn gotoDefinitionSymbol(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    var handle = decl_handle.handle;
-
-    const name_token = switch (decl_handle.decl.*) {
-        .ast_node => |node| block: {
-            if (resolve_alias) {
-                if (try analyser.resolveVarDeclAlias(.{ .node = node, .handle = handle })) |result| {
-                    handle = result.handle;
-
-                    break :block result.nameToken();
-                }
-            }
-
-            break :block Analyser.getDeclNameToken(handle.tree, node) orelse return null;
-        },
-        else => decl_handle.nameToken(),
-    };
+    const token_handle = try decl_handle.definitionToken(analyser, resolve_alias);
+    const token = token_handle.token;
+    const handle = token_handle.handle;
 
     return types.Location{
         .uri = handle.uri,
-        .range = offsets.tokenToRange(handle.tree, name_token, offset_encoding),
+        .range = offsets.tokenToRange(handle.tree, token, offset_encoding),
     };
 }
 
