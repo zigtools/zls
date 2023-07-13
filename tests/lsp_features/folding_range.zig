@@ -2,8 +2,6 @@ const std = @import("std");
 const zls = @import("zls");
 const builtin = @import("builtin");
 
-const tres = @import("tres");
-
 const Context = @import("../context.zig").Context;
 
 const types = zls.types;
@@ -230,8 +228,8 @@ fn testFoldingRange(source: []const u8, expect: []const types.FoldingRange) !voi
     defer expected.deinit(allocator);
 
     const options = std.json.StringifyOptions{ .emit_null_optional_fields = false };
-    try tres.stringify(response.result, options, actual.writer(allocator));
-    try tres.stringify(expect, options, expected.writer(allocator));
+    try std.json.stringify(response.result, options, actual.writer(allocator));
+    try std.json.stringify(expect, options, expected.writer(allocator));
 
     // TODO: Actually compare strings as JSON values.
     try std.testing.expectEqualStrings(expected.items, actual.items);

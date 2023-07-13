@@ -31,8 +31,6 @@ const hover_handler = @import("features/hover.zig");
 const selection_range = @import("features/selection_range.zig");
 const diagnostics_gen = @import("features/diagnostics.zig");
 
-const tres = @import("tres");
-
 const log = std.log.scoped(.zls_server);
 
 // Server fields
@@ -142,7 +140,7 @@ fn sendNotification(server: *Server, method: []const u8, params: anytype) void {
 }
 
 fn sendResponseError(server: *Server, id: types.RequestId, err: ?types.ResponseError) void {
-    server.sendInternal(id, null, err, "", void) catch {};
+    server.sendInternal(id, null, err, "", {}) catch {};
 }
 
 fn sendInternal(
@@ -162,27 +160,33 @@ fn sendInternal(
         try writer.writeAll(
             \\,"id":
         );
-        try tres.stringify(id, .{}, writer);
+        try std.json.stringify(id, .{}, writer);
     }
     if (maybe_method) |method| {
         try writer.writeAll(
             \\,"method":
         );
-        try tres.stringify(method, .{}, writer);
+        try std.json.stringify(method, .{}, writer);
     }
-    if (@TypeOf(extra) != @TypeOf(void)) {
-        try writer.print(
-            \\,"{s}":
-        , .{extra_name});
-        try tres.stringify(extra, .{
-            .emit_null_optional_fields = false,
-        }, writer);
+    switch (@TypeOf(extra)) {
+        void => {},
+        ?void => {
+            try writer.print(
+                \\,"{s}":null
+            , .{extra_name});
+        },
+        else => {
+            try writer.print(
+                \\,"{s}":
+            , .{extra_name});
+            try std.json.stringify(extra, .{ .emit_null_optional_fields = false }, writer);
+        },
     }
     if (maybe_err) |err| {
         try writer.writeAll(
             \\,"error":
         );
-        try tres.stringify(err, .{}, writer);
+        try std.json.stringify(err, .{}, writer);
     }
     try writer.writeByte('}');
 
@@ -257,7 +261,7 @@ pub fn autofix(server: *Server, allocator: std.mem.Allocator, handle: *const Doc
 
         if (action.kind.? != .@"source.fixAll") continue;
 
-        const changes = action.edit.?.changes.?;
+        const changes = action.edit.?.changes.?.map;
         if (changes.count() != 1) continue;
 
         const edits: []const types.TextEdit = changes.get(handle.uri) orelse continue;
@@ -807,7 +811,7 @@ fn saveDocumentHandler(server: *Server, notification: types.DidSaveTextDocumentP
         var text_edits = try server.autofix(allocator, handle);
 
         var workspace_edit = types.WorkspaceEdit{ .changes = .{} };
-        try workspace_edit.changes.?.putNoClobber(allocator, uri, try text_edits.toOwnedSlice(allocator));
+        try workspace_edit.changes.?.map.putNoClobber(allocator, uri, try text_edits.toOwnedSlice(allocator));
 
         server.sendRequest(
             .{ .string = "apply_edit" },
@@ -966,7 +970,7 @@ fn didChangeConfigurationHandler(server: *Server, request: types.DidChangeConfig
 
     // NOTE: VS Code seems to always respond with null
     if (request.settings != .null) {
-        const cfg = tres.parse(configuration.Configuration, request.settings.object.get("zls") orelse request.settings, null) catch return;
+        const cfg = std.json.parseFromValueLeaky(configuration.Configuration, server.arena.allocator(), request.settings.object.get("zls") orelse request.settings, .{}) catch return;
         inline for (std.meta.fields(configuration.Configuration)) |field| {
             if (@field(cfg, field.name)) |value| {
                 blk: {
@@ -1107,11 +1111,11 @@ pub fn generalReferencesHandler(server: *Server, request: GeneralReferencesReque
 
             // TODO can we avoid having to move map from `changes` to `new_changes`?
             var new_changes: types.Map(types.DocumentUri, []const types.TextEdit) = .{};
-            try new_changes.ensureTotalCapacity(allocator, @intCast(changes.count()));
+            try new_changes.map.ensureTotalCapacity(allocator, @intCast(changes.count()));
 
             var changes_it = changes.iterator();
             while (changes_it.next()) |entry| {
-                new_changes.putAssumeCapacityNoClobber(entry.key_ptr.*, try entry.value_ptr.toOwnedSlice(allocator));
+                new_changes.map.putAssumeCapacityNoClobber(entry.key_ptr.*, try entry.value_ptr.toOwnedSlice(allocator));
             }
 
             return .{ .rename = .{ .changes = new_changes } };
@@ -1221,7 +1225,7 @@ fn foldingRangeHandler(server: *Server, request: types.FoldingRangeParams) Error
     return try folding_range.generateFoldingRanges(allocator, handle.tree, server.offset_encoding);
 }
 
-fn selectionRangeHandler(server: *Server, request: types.SelectionRangeParams) Error!?[]*selection_range.SelectionRange {
+fn selectionRangeHandler(server: *Server, request: types.SelectionRangeParams) Error!?[]*types.SelectionRange {
     const allocator = server.arena.allocator();
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
 
@@ -1301,21 +1305,24 @@ const Message = union(enum) {
         };
     }
 
-    pub fn fromJsonValueTree(root: std.json.Value) error{InvalidRequest}!Message {
+    pub fn jsonParseFromValue(
+        allocator: std.mem.Allocator,
+        source: std.json.Value,
+        options: std.json.ParseOptions,
+    ) !Message {
         const tracy_zone = tracy.trace(@src());
         defer tracy_zone.end();
 
-        if (root != .object) return error.InvalidRequest;
-        const object = root.object;
+        if (source != .object) return error.UnexpectedToken;
+        const object = source.object;
 
         if (object.get("id")) |id_obj| {
-            comptime std.debug.assert(!tres.isAllocatorRequired(types.RequestId));
-            const msg_id = tres.parse(types.RequestId, id_obj, null) catch return error.InvalidRequest;
+            const msg_id = try std.json.parseFromValueLeaky(types.RequestId, allocator, id_obj, options);
 
             if (object.get("method")) |method_obj| {
                 const msg_method = switch (method_obj) {
                     .string => |str| str,
-                    else => return error.InvalidRequest,
+                    else => return error.UnexpectedToken,
                 };
 
                 const msg_params = object.get("params") orelse .null;
@@ -1329,10 +1336,9 @@ const Message = union(enum) {
                 const result = object.get("result") orelse .null;
                 const error_obj = object.get("error") orelse .null;
 
-                comptime std.debug.assert(!tres.isAllocatorRequired(?types.ResponseError));
-                const err = tres.parse(?types.ResponseError, error_obj, null) catch return error.InvalidRequest;
+                const err = try std.json.parseFromValueLeaky(?types.ResponseError, allocator, error_obj, options);
 
-                if (result != .null and err != null) return error.InvalidRequest;
+                if (result != .null and err != null) return error.UnexpectedToken;
 
                 return .{ .ResponseMessage = .{
                     .id = msg_id,
@@ -1341,9 +1347,9 @@ const Message = union(enum) {
                 } };
             }
         } else {
-            const msg_method = switch (object.get("method") orelse return error.InvalidRequest) {
+            const msg_method = switch (object.get("method") orelse return error.UnexpectedToken) {
                 .string => |str| str,
-                else => return error.InvalidRequest,
+                else => return error.UnexpectedToken,
             };
 
             const msg_params = object.get("params") orelse .null;
@@ -1363,13 +1369,12 @@ pub fn processJsonRpc(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    var tree = std.json.parseFromSlice(std.json.Value, server.arena.allocator(), json, .{}) catch |err| {
+    const tree = std.json.parseFromSliceLeaky(std.json.Value, server.arena.allocator(), json, .{}) catch |err| {
         log.err("failed to parse message: {}", .{err});
         return; // maybe panic?
     };
-    defer tree.deinit();
 
-    const message = Message.fromJsonValueTree(tree.value) catch |err| {
+    const message = std.json.parseFromValueLeaky(Message, server.arena.allocator(), tree, .{}) catch |err| {
         log.err("failed to parse message: {}", .{err});
         return; // maybe panic?
     };
@@ -1511,7 +1516,16 @@ pub fn processMessage(server: *Server, message: Message) Error!void {
             const handler_info: std.builtin.Type.Fn = @typeInfo(@TypeOf(handler)).Fn;
             const ParamsType = handler_info.params[1].type.?; // TODO add error message on null
 
-            const params: ParamsType = tres.parse(ParamsType, message.params().?, server.arena.allocator()) catch return error.InternalError;
+            const params: ParamsType = if (ParamsType == void)
+                void{}
+            else
+                std.json.parseFromValueLeaky(ParamsType, server.arena.allocator(), message.params().?, .{}) catch |err| {
+                    log.err("failed to parse params from {s}: {}", .{ method, err });
+                    if (@errorReturnTrace()) |trace| {
+                        std.debug.dumpStackTrace(trace.*);
+                    }
+                    return error.ParseError;
+                };
 
             const response = blk: {
                 const tracy_zone2 = tracy.trace(@src());
