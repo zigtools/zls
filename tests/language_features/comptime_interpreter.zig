@@ -326,7 +326,7 @@ const Context = struct {
             else => "file:///test.zig",
         };
 
-        const handle = try document_store.openDocument(test_uri, source);
+        _ = try document_store.openDocument(test_uri, source);
 
         // TODO handle handle.tree.errors
 
@@ -334,7 +334,7 @@ const Context = struct {
             .allocator = allocator,
             .ip = ip,
             .document_store = document_store,
-            .uri = handle.uri,
+            .uri = test_uri,
         };
         errdefer interpreter.deinit();
 

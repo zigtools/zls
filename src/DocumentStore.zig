@@ -206,7 +206,7 @@ fn getOrLoadBuildFile(self: *DocumentStore, uri: Uri) ?std.StringArrayHashMapUnm
 
     const gop = self.build_files.getOrPut(self.allocator, uri) catch return null;
     if (!gop.found_existing) {
-        gop.value_ptr.* = createBuildFile(self.allocator, self.config.*, uri) catch |err| {
+        gop.value_ptr.* = self.createBuildFile(uri) catch |err| {
             self.build_files.swapRemoveAt(gop.index);
             log.debug("Failed to load build file {s}: {}", .{ uri, err });
             return null;
@@ -220,7 +220,7 @@ fn getOrLoadBuildFile(self: *DocumentStore, uri: Uri) ?std.StringArrayHashMapUnm
 }
 
 /// **Thread safe** takes an exclusive lock
-pub fn openDocument(self: *DocumentStore, uri: Uri, text: []const u8) error{OutOfMemory}!Handle {
+pub fn openDocument(self: *DocumentStore, uri: Uri, text: []const u8) error{OutOfMemory}!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -232,13 +232,12 @@ pub fn openDocument(self: *DocumentStore, uri: Uri, text: []const u8) error{OutO
             if (!handle.open.swap(true, .Acquire)) {
                 log.warn("Document already open: {s}", .{uri});
             }
-            return handle.*;
+            return;
         }
     }
 
     const duped_text = try self.allocator.dupeZ(u8, text);
-
-    return (try self.createAndStoreDocument(uri, duped_text, true)).*;
+    _ = try self.createAndStoreDocument(uri, duped_text, true);
 }
 
 /// **Thread safe** takes an exclusive lock
@@ -315,45 +314,30 @@ pub fn refreshDocument(self: *DocumentStore, uri: Uri, new_text: [:0]const u8) !
     }
 }
 
+/// Invalidates a build files.
 /// **Thread safe** takes an exclusive lock
-pub fn applySave(self: *DocumentStore, uri: Uri) !void {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    if (std.process.can_spawn and isBuildFile(uri)) {
-        self.lock.lock();
-        defer self.lock.unlock();
-
-        const build_file = self.build_files.getPtr(uri) orelse return;
-
-        const build_config = loadBuildConfiguration(self.allocator, build_file.*, self.config.*) catch |err| {
-            log.err("Failed to load build configuration for {s} (error: {})", .{ build_file.uri, err });
-            return;
-        };
-
-        legacy_json.parseFree(BuildConfig, self.allocator, build_file.config);
-        build_file.config = build_config;
-    }
-}
-
-/// Invalidates all build files. Used to rerun
-/// upon changing the zig exe path via a configuration request.
-/// **Thread safe** takes an exclusive lock
-pub fn invalidateBuildFiles(self: *DocumentStore) void {
+pub fn invalidateBuildFile(self: *DocumentStore, build_file_uri: Uri) error{OutOfMemory}!void {
     if (!std.process.can_spawn) return;
+
+    const build_associated_config = blk: {
+        self.lock.lockShared();
+        defer self.lock.unlockShared();
+        const build_file: *BuildFile = self.build_files.getPtr(build_file_uri) orelse return;
+        break :blk if (build_file.build_associated_config) |build_config| try build_config.dupe(self.allocator) else null;
+    };
+    defer if (build_associated_config) |build_config| legacy_json.parseFree(BuildAssociatedConfig, self.allocator, build_config);
+
+    const build_config = loadBuildConfiguration(self.allocator, build_file_uri, build_associated_config, self.config.*) catch |err| {
+        log.err("Failed to load build configuration for {s} (error: {})", .{ build_file_uri, err });
+        return;
+    };
 
     self.lock.lock();
     defer self.lock.unlock();
 
-    for (self.build_files.values()) |*build_file| {
-        const build_config = loadBuildConfiguration(self.allocator, build_file.*, self.config.*) catch |err| {
-            log.err("Failed to load build configuration for {s} (error: {})", .{ build_file.uri, err });
-            return;
-        };
-
-        legacy_json.parseFree(BuildConfig, self.allocator, build_file.config);
-        build_file.config = build_config;
-    }
+    const build_file: *BuildFile = self.build_files.getPtr(build_file_uri) orelse return;
+    legacy_json.parseFree(BuildConfig, self.allocator, build_file.config);
+    build_file.config = build_config;
 }
 
 /// The `DocumentStore` represents a graph structure where every
@@ -528,7 +512,8 @@ pub fn executeBuildRunner(
 /// Has to be freed with `json_compat.parseFree`
 pub fn loadBuildConfiguration(
     allocator: std.mem.Allocator,
-    build_file: BuildFile,
+    build_file_uri: Uri,
+    build_associated_config: ?BuildAssociatedConfig,
     config: Config,
 ) !BuildConfig {
     const tracy_zone = tracy.trace(@src());
@@ -538,7 +523,7 @@ pub fn loadBuildConfiguration(
     std.debug.assert(config.build_runner_path != null);
     std.debug.assert(config.global_cache_path != null);
 
-    const build_file_path = try URI.parse(allocator, build_file.uri);
+    const build_file_path = try URI.parse(allocator, build_file_uri);
     defer allocator.free(build_file_path);
 
     // NOTE: This used to be backwards compatible
@@ -548,7 +533,7 @@ pub fn loadBuildConfiguration(
         config.zig_exe_path.?, "build", "--build-runner", config.build_runner_path.?,
     };
 
-    const arg_length = base_args.len + if (build_file.build_associated_config) |cfg| if (cfg.build_options) |options| options.len else 0 else 0;
+    const arg_length = base_args.len + if (build_associated_config) |cfg| if (cfg.build_options) |options| options.len else 0 else 0;
     var args = try std.ArrayListUnmanaged([]const u8).initCapacity(allocator, arg_length);
     defer {
         for (args.items[base_args.len..]) |arg| allocator.free(arg);
@@ -556,7 +541,7 @@ pub fn loadBuildConfiguration(
     }
     args.appendSliceAssumeCapacity(base_args);
 
-    if (build_file.build_associated_config) |cfg| {
+    if (build_associated_config) |cfg| {
         if (cfg.build_options) |options| {
             for (options) |opt| {
                 args.appendAssumeCapacity(try opt.formatParam(allocator));
@@ -650,27 +635,27 @@ const BuildDotZigIterator = struct {
     }
 };
 
-fn createBuildFile(allocator: std.mem.Allocator, config: Config, uri: Uri) error{OutOfMemory}!BuildFile {
+fn createBuildFile(self: *DocumentStore, uri: Uri) error{OutOfMemory}!BuildFile {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
     var build_file = BuildFile{
-        .uri = try allocator.dupe(u8, uri),
+        .uri = try self.allocator.dupe(u8, uri),
         .config = .{
             .packages = &.{},
             .include_dirs = &.{},
         },
     };
-    errdefer build_file.deinit(allocator);
+    errdefer build_file.deinit(self.allocator);
 
-    if (loadBuildAssociatedConfiguration(allocator, build_file)) |cfg| {
+    if (loadBuildAssociatedConfiguration(self.allocator, build_file)) |cfg| {
         build_file.build_associated_config = cfg;
 
         if (build_file.build_associated_config.?.relative_builtin_path) |relative_builtin_path| blk: {
-            const build_file_path = URI.parse(allocator, build_file.uri) catch break :blk;
-            const absolute_builtin_path = std.fs.path.resolve(allocator, &.{ build_file_path, "../", relative_builtin_path }) catch break :blk;
-            defer allocator.free(absolute_builtin_path);
-            build_file.builtin_uri = try URI.fromPath(allocator, absolute_builtin_path);
+            const build_file_path = URI.parse(self.allocator, build_file.uri) catch break :blk;
+            const absolute_builtin_path = std.fs.path.resolve(self.allocator, &.{ build_file_path, "../", relative_builtin_path }) catch break :blk;
+            defer self.allocator.free(absolute_builtin_path);
+            build_file.builtin_uri = try URI.fromPath(self.allocator, absolute_builtin_path);
         }
     } else |err| {
         if (err != error.FileNotFound) {
@@ -678,12 +663,17 @@ fn createBuildFile(allocator: std.mem.Allocator, config: Config, uri: Uri) error
         }
     }
 
-    // TODO: Do this in a separate thread?
-    // It can take quite long.
-    if (loadBuildConfiguration(allocator, build_file, config)) |build_config| {
-        build_file.config = build_config;
-    } else |err| {
-        log.err("Failed to load build configuration for {s} (error: {})", .{ build_file.uri, err });
+    {
+        const Server = @import("Server.zig");
+        const server = @fieldParentPtr(Server, "document_store", self);
+
+        server.job_queue_lock.lock();
+        defer server.job_queue_lock.unlock();
+
+        try server.job_queue.ensureUnusedCapacity(1);
+        server.job_queue.writeItemAssumeCapacity(.{
+            .load_build_configuration = try server.allocator.dupe(u8, build_file.uri),
+        });
     }
 
     return build_file;
