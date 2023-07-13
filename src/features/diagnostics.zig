@@ -216,28 +216,35 @@ fn getDiagnosticsFromAstCheck(
 
     const zig_exe_path = server.config.zig_exe_path.?;
 
-    var process = std.ChildProcess.init(&[_][]const u8{ zig_exe_path, "ast-check", "--color", "off" }, server.allocator);
-    process.stdin_behavior = .Pipe;
-    process.stderr_behavior = .Pipe;
+    const stderr_bytes = blk: {
+        server.zig_exe_lock.lock();
+        defer server.zig_exe_lock.unlock();
 
-    process.spawn() catch |err| {
-        log.warn("Failed to spawn zig ast-check process, error: {}", .{err});
-        return;
+        var process = std.ChildProcess.init(&[_][]const u8{ zig_exe_path, "ast-check", "--color", "off" }, server.allocator);
+        process.stdin_behavior = .Pipe;
+        process.stderr_behavior = .Pipe;
+
+        process.spawn() catch |err| {
+            log.warn("Failed to spawn zig ast-check process, error: {}", .{err});
+            return;
+        };
+        try process.stdin.?.writeAll(handle.text);
+        process.stdin.?.close();
+
+        process.stdin = null;
+
+        const stderr_bytes = try process.stderr.?.reader().readAllAlloc(server.allocator, std.math.maxInt(usize));
+        errdefer server.allocator.free(stderr_bytes);
+
+        const term = process.wait() catch |err| {
+            log.warn("Failed to await zig ast-check process, error: {}", .{err});
+            return;
+        };
+
+        if (term != .Exited) return;
+        break :blk stderr_bytes;
     };
-    try process.stdin.?.writeAll(handle.text);
-    process.stdin.?.close();
-
-    process.stdin = null;
-
-    const stderr_bytes = try process.stderr.?.reader().readAllAlloc(server.allocator, std.math.maxInt(usize));
     defer server.allocator.free(stderr_bytes);
-
-    const term = process.wait() catch |err| {
-        log.warn("Failed to await zig ast-check process, error: {}", .{err});
-        return;
-    };
-
-    if (term != .Exited) return;
 
     var last_diagnostic: ?types.Diagnostic = null;
     // we don't store DiagnosticRelatedInformation in last_diagnostic instead
@@ -311,7 +318,7 @@ fn getDiagnosticsFromAstCheck(
 }
 
 fn getDiagnosticsFromZir(
-    server: *Server,
+    server: *const Server,
     arena: std.mem.Allocator,
     handle: DocumentStore.Handle,
     diagnostics: *std.ArrayListUnmanaged(types.Diagnostic),

@@ -44,7 +44,10 @@ status: Status = .uninitialized,
 // private fields
 thread_pool: if (zig_builtin.single_threaded) void else std.Thread.Pool,
 wait_group: if (zig_builtin.single_threaded) void else std.Thread.WaitGroup,
+job_queue: std.fifo.LinearFifo(Job, .Dynamic),
+job_queue_lock: std.Thread.Mutex = .{},
 ip: InternPool = .{},
+zig_exe_lock: std.Thread.Mutex = .{},
 client_capabilities: ClientCapabilities = .{},
 runtime_zig_version: ?ZigVersionWrapper = null,
 recording_enabled: bool = false,
@@ -116,6 +119,39 @@ pub const Status = enum {
     exiting_success,
     /// the server is received a `exit` notification but has not been shutdown
     exiting_failure,
+};
+
+const Job = union(enum) {
+    incoming_message: std.json.Parsed(Message),
+    generate_diagnostics: DocumentStore.Uri,
+    load_build_configuration: DocumentStore.Uri,
+
+    fn deinit(self: Job, allocator: std.mem.Allocator) void {
+        switch (self) {
+            .incoming_message => |parsed_message| parsed_message.deinit(),
+            .generate_diagnostics => |uri| allocator.free(uri),
+            .load_build_configuration => |uri| allocator.free(uri),
+        }
+    }
+
+    const SynchronizationMode = enum {
+        /// this `Job` requires exclusive access to `Server` and `DocumentStore`
+        /// all previous jobs will be awaited
+        exclusive,
+        /// this `Job` requires shared access to `Server` and `DocumentStore`
+        /// other non exclusive jobs can be processed in parallel
+        shared,
+        /// this `Job` operates atomically and does not require any synchronisation
+        atomic,
+    };
+
+    fn syncMode(self: Job) SynchronizationMode {
+        return switch (self) {
+            .incoming_message => |parsed_message| if (parsed_message.value.isBlocking()) .exclusive else .shared,
+            .generate_diagnostics => .shared,
+            .load_build_configuration => .atomic,
+        };
+    }
 };
 
 fn sendToClientResponse(server: *Server, id: types.RequestId, result: anytype) error{OutOfMemory}![]u8 {
@@ -696,20 +732,20 @@ fn handleConfiguration(server: *Server, json: std.json.Value) error{OutOfMemory}
     };
 
     if (new_zig_exe)
-        server.document_store.invalidateBuildFiles();
+        try server.invalidateAllBuildFiles();
 }
 
-fn openDocumentHandler(server: *Server, arena: std.mem.Allocator, notification: types.DidOpenTextDocumentParams) Error!void {
-    const handle = try server.document_store.openDocument(notification.textDocument.uri, notification.textDocument.text);
+fn openDocumentHandler(server: *Server, _: std.mem.Allocator, notification: types.DidOpenTextDocumentParams) Error!void {
+    try server.document_store.openDocument(notification.textDocument.uri, notification.textDocument.text);
 
     if (server.client_capabilities.supports_publish_diagnostics) {
-        const diagnostics = try diagnostics_gen.generateDiagnostics(server, arena, handle);
-        const json_message = try server.sendToClientNotification("textDocument/publishDiagnostics", diagnostics);
-        server.allocator.free(json_message);
+        try server.pushJob(.{
+            .generate_diagnostics = try server.allocator.dupe(u8, notification.textDocument.uri),
+        });
     }
 }
 
-fn changeDocumentHandler(server: *Server, arena: std.mem.Allocator, notification: types.DidChangeTextDocumentParams) Error!void {
+fn changeDocumentHandler(server: *Server, _: std.mem.Allocator, notification: types.DidChangeTextDocumentParams) Error!void {
     const handle = server.document_store.getHandle(notification.textDocument.uri) orelse return;
 
     const new_text = try diff.applyContentChanges(server.allocator, handle.text, notification.contentChanges, server.offset_encoding);
@@ -717,16 +753,20 @@ fn changeDocumentHandler(server: *Server, arena: std.mem.Allocator, notification
     try server.document_store.refreshDocument(handle.uri, new_text);
 
     if (server.client_capabilities.supports_publish_diagnostics) {
-        const diagnostics = try diagnostics_gen.generateDiagnostics(server, arena, handle.*);
-        const json_message = try server.sendToClientNotification("textDocument/publishDiagnostics", diagnostics);
-        server.allocator.free(json_message);
+        try server.pushJob(.{
+            .generate_diagnostics = try server.allocator.dupe(u8, handle.uri),
+        });
     }
 }
 
 fn saveDocumentHandler(server: *Server, arena: std.mem.Allocator, notification: types.DidSaveTextDocumentParams) Error!void {
     const uri = notification.textDocument.uri;
 
-    try server.document_store.applySave(uri);
+    if (std.process.can_spawn and DocumentStore.isBuildFile(uri)) {
+        try server.pushJob(.{
+            .load_build_configuration = try server.allocator.dupe(u8, uri),
+        });
+    }
 
     if (server.getAutofixMode() == .on_save) {
         const handle = server.document_store.getHandle(uri) orelse return;
@@ -904,9 +944,9 @@ pub fn hoverHandler(server: *Server, arena: std.mem.Allocator, request: types.Ho
 
     // TODO: Figure out a better solution for comptime interpreter diags
     if (server.client_capabilities.supports_publish_diagnostics) {
-        const diagnostics = try diagnostics_gen.generateDiagnostics(server, arena, handle.*);
-        const json_message = try server.sendToClientNotification("textDocument/publishDiagnostics", diagnostics);
-        server.allocator.free(json_message);
+        try server.pushJob(.{
+            .generate_diagnostics = try server.allocator.dupe(u8, handle.uri),
+        });
     }
 
     return response;
@@ -968,10 +1008,36 @@ fn didChangeConfigurationHandler(server: *Server, arena: std.mem.Allocator, noti
         };
 
         if (new_zig_exe)
-            server.document_store.invalidateBuildFiles();
+            try server.invalidateAllBuildFiles();
     } else if (server.client_capabilities.supports_configuration) {
         try server.requestConfiguration();
     }
+}
+
+fn invalidateAllBuildFiles(server: *Server) error{OutOfMemory}!void {
+    if (!std.process.can_spawn) return;
+
+    {
+        server.document_store.lock.lockShared();
+        defer server.document_store.lock.unlockShared();
+
+        server.job_queue_lock.lock();
+        defer server.job_queue_lock.unlock();
+
+        try server.job_queue.ensureUnusedCapacity(server.document_store.build_files.count());
+        for (server.document_store.build_files.keys()) |build_file_uri| {
+            server.job_queue.writeItemAssumeCapacity(.{
+                .load_build_configuration = try server.allocator.dupe(u8, build_file_uri),
+            });
+        }
+    }
+
+    const json_message = try server.sendToClientRequest(
+        .{ .string = "semantic_tokens_refresh" },
+        "workspace/semanticTokens/refresh",
+        {},
+    );
+    server.allocator.free(json_message);
 }
 
 pub fn renameHandler(server: *Server, arena: std.mem.Allocator, request: types.RenameParams) Error!?types.WorkspaceEdit {
@@ -1397,9 +1463,11 @@ pub fn create(
             .config = config,
             .runtime_zig_version = &server.runtime_zig_version,
         },
+        .job_queue = std.fifo.LinearFifo(Job, .Dynamic).init(allocator),
         .thread_pool = undefined, // set below
         .wait_group = if (zig_builtin.single_threaded) {} else .{},
     };
+
     if (zig_builtin.single_threaded) {
         server.thread_pool = {};
     } else {
@@ -1429,6 +1497,8 @@ pub fn destroy(server: *Server) void {
         server.thread_pool.deinit();
     }
 
+    while (server.job_queue.readItem()) |job| job.deinit(server.allocator);
+    server.job_queue.deinit();
     server.document_store.deinit();
     server.ip.deinit(server.allocator);
     if (server.runtime_zig_version) |zig_version| zig_version.free();
@@ -1451,9 +1521,32 @@ pub fn waitAndWork(server: *Server) void {
 pub fn loop(server: *Server) !void {
     std.debug.assert(server.transport != null);
     while (server.keepRunning()) {
-        const in_json = try server.transport.?.readJsonMessage(server.allocator);
-        defer server.allocator.free(in_json);
-        try server.sendJsonMessage(in_json);
+        const json_message = try server.transport.?.readJsonMessage(server.allocator);
+        defer server.allocator.free(json_message);
+        try server.sendJsonMessage(json_message);
+
+        while (server.job_queue.readItem()) |job| {
+            if (zig_builtin.single_threaded) {
+                server.processJob(job, null);
+                return;
+            }
+
+            switch (job.syncMode()) {
+                .exclusive => {
+                    server.waitAndWork();
+                    server.processJob(job, null);
+                },
+                .shared => {
+                    server.wait_group.start();
+                    errdefer job.deinit(server.allocator);
+                    try server.thread_pool.spawn(processJob, .{ server, job, &server.wait_group });
+                },
+                .atomic => {
+                    errdefer job.deinit(server.allocator);
+                    try server.thread_pool.spawn(processJob, .{ server, job, null });
+                },
+            }
+        }
     }
 }
 
@@ -1461,18 +1554,9 @@ pub fn sendJsonMessage(server: *Server, json_message: []const u8) Error!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
+    try server.job_queue.ensureUnusedCapacity(1);
     const parsed_message = std.json.parseFromSlice(Message, server.allocator, json_message, .{}) catch return error.ParseError;
-
-    if (zig_builtin.single_threaded or parsed_message.value.isBlocking()) {
-        defer parsed_message.deinit();
-        server.waitAndWork();
-        const response = server.processMessageReportError(parsed_message.value) orelse return;
-        defer server.allocator.free(response);
-    } else {
-        errdefer parsed_message.deinit();
-        server.wait_group.start();
-        try server.thread_pool.spawn(processAndRespondMessage, .{ server, parsed_message });
-    }
+    server.job_queue.writeItemAssumeCapacity(.{ .incoming_message = parsed_message });
 }
 
 pub fn sendJsonMessageSync(server: *Server, json_message: []const u8) Error!?[]u8 {
@@ -1608,17 +1692,30 @@ fn processMessageReportError(server: *Server, message: Message) ?[]const u8 {
     };
 }
 
-fn processAndRespondMessage(
-    server: *Server,
-    message: std.json.Parsed(Message),
-) void {
+fn processJob(server: *Server, job: Job, wait_group: ?*std.Thread.WaitGroup) void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
-    defer server.wait_group.finish();
-    defer message.deinit();
+    defer if (!zig_builtin.single_threaded and wait_group != null) wait_group.?.finish();
 
-    const response = server.processMessageReportError(message.value) orelse return;
-    server.allocator.free(response);
+    defer job.deinit(server.allocator);
+
+    switch (job) {
+        .incoming_message => |parsed_message| {
+            const response = server.processMessageReportError(parsed_message.value) orelse return;
+            server.allocator.free(response);
+        },
+        .generate_diagnostics => |uri| {
+            const handle = server.document_store.getHandle(uri) orelse return;
+            var arena_allocator = std.heap.ArenaAllocator.init(server.allocator);
+            defer arena_allocator.deinit();
+            const diagnostics = diagnostics_gen.generateDiagnostics(server, arena_allocator.allocator(), handle.*) catch return;
+            const json_message = server.sendToClientNotification("textDocument/publishDiagnostics", diagnostics) catch return;
+            server.allocator.free(json_message);
+        },
+        .load_build_configuration => |build_file_uri| {
+            server.document_store.invalidateBuildFile(build_file_uri) catch return;
+        },
+    }
 }
 
 fn validateMessage(server: *const Server, message: Message) Error!void {
@@ -1686,7 +1783,9 @@ fn handleResponse(server: *Server, response: Message.Response) Error!void {
         return;
     }
 
-    if (std.mem.startsWith(u8, id, "register")) {
+    if (std.mem.eql(u8, id, "semantic_tokens_refresh")) {
+        //
+    } else if (std.mem.startsWith(u8, id, "register")) {
         //
     } else if (std.mem.eql(u8, id, "apply_edit")) {
         //
@@ -1695,6 +1794,16 @@ fn handleResponse(server: *Server, response: Message.Response) Error!void {
     } else {
         log.warn("received response from client with id '{s}' that has no handler!", .{id});
     }
+}
+
+/// takes ownership of `job`
+fn pushJob(server: *Server, job: Job) error{OutOfMemory}!void {
+    server.job_queue_lock.lock();
+    defer server.job_queue_lock.unlock();
+    server.job_queue.writeItem(job) catch |err| {
+        job.deinit(server.allocator);
+        return err;
+    };
 }
 
 test {
