@@ -7,6 +7,12 @@
             "default": "true"
         },
         {
+            "name": "enable_argument_placeholders",
+            "description": "Whether to enable function argument placeholder completions",
+            "type": "bool",
+            "default": "true"
+        },
+        {
             "name": "enable_ast_check_diagnostics",
             "description": "Whether to enable ast-check diagnostics",
             "type": "bool",

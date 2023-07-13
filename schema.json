@@ -9,6 +9,11 @@
             "type": "boolean",
             "default": "true"
         },
+        "enable_argument_placeholders": {
+            "description": "Whether to enable function argument placeholder completions",
+            "type": "boolean",
+            "default": "true"
+        },
         "enable_ast_check_diagnostics": {
             "description": "Whether to enable ast-check diagnostics",
             "type": "boolean",
