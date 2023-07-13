@@ -297,6 +297,7 @@ pub fn generateFoldingRanges(allocator: std.mem.Allocator, tree: Ast, encoding: 
 
     // We add opened folding regions to a stack as we go and pop one off when we find a closing brace.
     var stack = std.ArrayListUnmanaged(usize){};
+    defer stack.deinit(allocator);
 
     var i: usize = 0;
     while (std.mem.indexOfPos(u8, tree.source, i, "//#")) |possible_region| {

@@ -137,8 +137,11 @@ fn testAutofix(before: []const u8, after: []const u8) !void {
     const uri = try ctx.addDocument(before);
     const handle = ctx.server.document_store.getHandle(uri).?;
 
+    var arena_allocator = std.heap.ArenaAllocator.init(allocator);
+    defer arena_allocator.deinit();
+
     var diagnostics: std.ArrayListUnmanaged(types.Diagnostic) = .{};
-    try zls.diagnostics.getAstCheckDiagnostics(ctx.server, handle.*, &diagnostics);
+    try zls.diagnostics.getAstCheckDiagnostics(ctx.server, arena_allocator.allocator(), handle.*, &diagnostics);
 
     const params = types.CodeActionParams{
         .textDocument = .{ .uri = uri },

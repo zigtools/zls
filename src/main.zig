@@ -55,8 +55,6 @@ fn loop(
     const writer = buffered_writer.writer();
 
     while (true) {
-        defer server.maybeFreeArena();
-
         // write server -> client messages
         for (server.outgoing_messages.items) |outgoing_message| {
             const header = Header{ .content_length = outgoing_message.len };
@@ -71,9 +69,11 @@ fn loop(
         server.outgoing_messages.clearRetainingCapacity();
 
         // read and handle client -> server message
-        const header = try Header.parse(server.arena.allocator(), replay_file == null, reader);
+        const header = try Header.parse(server.allocator, replay_file == null, reader);
+        defer header.deinit(server.allocator);
 
-        const json_message = try server.arena.allocator().alloc(u8, header.content_length);
+        const json_message = try server.allocator.alloc(u8, header.content_length);
+        defer server.allocator.free(json_message);
         try reader.readNoEof(json_message);
 
         if (record_file) |file| {
