@@ -1144,53 +1144,15 @@ fn inlayHintHandler(server: *Server, request: types.InlayHintParams) Error!?[]ty
     const hover_kind: types.MarkupKind = if (server.client_capabilities.hover_supports_md) .markdown else .plaintext;
     const loc = offsets.rangeToLoc(handle.text, request.range, server.offset_encoding);
 
-    // TODO cache hints per document
-    // because the function could be stored in a different document
-    // we need the regenerate hints when the document itself or its imported documents change
-    // with caching it would also make sense to generate all hints instead of only the visible ones
-    const hints = try inlay_hints.writeRangeInlayHint(
+    return try inlay_hints.writeRangeInlayHint(
         server.arena.allocator(),
         server.config.*,
         &server.analyser,
         handle,
         loc,
         hover_kind,
+        server.offset_encoding,
     );
-
-    const helper = struct {
-        fn lessThan(_: void, lhs: inlay_hints.InlayHint, rhs: inlay_hints.InlayHint) bool {
-            return lhs.token_index < rhs.token_index;
-        }
-    };
-
-    std.mem.sort(inlay_hints.InlayHint, hints, {}, helper.lessThan);
-
-    var last_index: usize = 0;
-    var last_position: types.Position = .{ .line = 0, .character = 0 };
-
-    var converted_hints = try server.arena.allocator().alloc(types.InlayHint, hints.len);
-    for (hints, 0..) |hint, i| {
-        const index = offsets.tokenToIndex(handle.tree, hint.token_index);
-        const position = offsets.advancePosition(
-            handle.tree.source,
-            last_position,
-            last_index,
-            index,
-            server.offset_encoding,
-        );
-        defer last_index = index;
-        defer last_position = position;
-        converted_hints[i] = types.InlayHint{
-            .position = position,
-            .label = .{ .string = hint.label },
-            .kind = hint.kind,
-            .tooltip = .{ .MarkupContent = hint.tooltip },
-            .paddingLeft = false,
-            .paddingRight = true,
-        };
-    }
-
-    return converted_hints;
 }
 
 fn codeActionHandler(server: *Server, request: types.CodeActionParams) Error!?[]types.CodeAction {
