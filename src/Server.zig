@@ -1262,48 +1262,19 @@ fn notificationMethodExists(method: []const u8) bool {
     } else false;
 }
 
-const Message = union(enum) {
-    RequestMessage: struct {
-        id: types.RequestId,
-        method: []const u8,
-        /// may be null
-        params: types.LSPAny,
-    },
-    NotificationMessage: struct {
-        method: []const u8,
-        /// may be null
-        params: types.LSPAny,
-    },
-    ResponseMessage: struct {
-        id: types.RequestId,
-        /// non null on success
-        result: types.LSPAny,
-        @"error": ?types.ResponseError,
+const Message = struct {
+    kind: enum {
+        RequestMessage,
+        NotificationMessage,
+        ResponseMessage,
     },
 
-    pub fn id(self: Message) ?types.RequestId {
-        return switch (self) {
-            .RequestMessage => |request| request.id,
-            .NotificationMessage => null,
-            .ResponseMessage => |response| response.id,
-        };
-    }
-
-    pub fn method(self: Message) ?[]const u8 {
-        return switch (self) {
-            .RequestMessage => |request| request.method,
-            .NotificationMessage => |notification| notification.method,
-            .ResponseMessage => null,
-        };
-    }
-
-    pub fn params(self: Message) ?types.LSPAny {
-        return switch (self) {
-            .RequestMessage => |request| request.params,
-            .NotificationMessage => |notification| notification.params,
-            .ResponseMessage => null,
-        };
-    }
+    id: ?types.RequestId = null,
+    method: ?[]const u8 = null,
+    params: ?types.LSPAny = null,
+    /// non null on success
+    result: ?types.LSPAny = null,
+    @"error": ?types.ResponseError = null,
 
     pub fn jsonParseFromValue(
         allocator: std.mem.Allocator,
@@ -1327,11 +1298,12 @@ const Message = union(enum) {
 
                 const msg_params = object.get("params") orelse .null;
 
-                return .{ .RequestMessage = .{
+                return .{
+                    .kind = .RequestMessage,
                     .id = msg_id,
                     .method = msg_method,
                     .params = msg_params,
-                } };
+                };
             } else {
                 const result = object.get("result") orelse .null;
                 const error_obj = object.get("error") orelse .null;
@@ -1340,11 +1312,12 @@ const Message = union(enum) {
 
                 if (result != .null and err != null) return error.UnexpectedToken;
 
-                return .{ .ResponseMessage = .{
+                return .{
+                    .kind = .ResponseMessage,
                     .id = msg_id,
                     .result = result,
                     .@"error" = err,
-                } };
+                };
             }
         } else {
             const msg_method = switch (object.get("method") orelse return error.UnexpectedToken) {
@@ -1354,10 +1327,11 @@ const Message = union(enum) {
 
             const msg_params = object.get("params") orelse .null;
 
-            return .{ .NotificationMessage = .{
+            return .{
+                .kind = .NotificationMessage,
                 .method = msg_method,
                 .params = msg_params,
-            } };
+            };
         }
     }
 };
@@ -1379,8 +1353,8 @@ pub fn processJsonRpc(
         return; // maybe panic?
     };
 
-    server.processMessage(message) catch |err| switch (message) {
-        .RequestMessage => |request| server.sendResponseError(request.id, .{
+    server.processMessage(message) catch |err| switch (message.kind) {
+        .RequestMessage => server.sendResponseError(message.id.?, .{
             .code = @intFromError(err),
             .message = @errorName(err),
         }),
@@ -1401,35 +1375,38 @@ pub fn processMessage(server: *Server, message: Message) Error!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    switch (message) {
-        .RequestMessage => |request| {
-            if (!requestMethodExists(request.method)) return error.MethodNotFound;
+    switch (message.kind) {
+        .RequestMessage => {
+            if (!requestMethodExists(message.method.?)) return error.MethodNotFound;
         },
-        .NotificationMessage => |notification| {
-            if (!notificationMethodExists(notification.method)) return error.MethodNotFound;
+        .NotificationMessage => {
+            if (!notificationMethodExists(message.method.?)) return error.MethodNotFound;
         },
-        .ResponseMessage => |response| {
-            if (response.id != .string) return;
-            if (std.mem.startsWith(u8, response.id.string, "register")) {
-                if (response.@"error") |err| {
-                    log.err("Error response for '{s}': {}, {s}", .{ response.id.string, err.code, err.message });
+        .ResponseMessage => {
+            const id = switch (message.id.?) {
+                .string => |str| str,
+                .integer => return,
+            };
+            if (std.mem.startsWith(u8, id, "register")) {
+                if (message.@"error") |err| {
+                    log.err("Error response for '{s}': {}, {s}", .{ id, err.code, err.message });
                 }
                 return;
             }
-            if (std.mem.eql(u8, response.id.string, "apply_edit")) return;
+            if (std.mem.eql(u8, id, "apply_edit")) return;
 
-            if (std.mem.eql(u8, response.id.string, "i_haz_configuration")) {
-                if (response.@"error" != null) return;
-                try server.handleConfiguration(response.result);
+            if (std.mem.eql(u8, id, "i_haz_configuration")) {
+                if (message.@"error" != null) return;
+                try server.handleConfiguration(message.result.?);
                 return;
             }
 
-            log.warn("received response from client with id '{s}' that has no handler!", .{response.id.string});
+            log.warn("received response from client with id '{s}' that has no handler!", .{id});
             return;
         },
     }
 
-    const method = message.method().?; // message cannot be a ResponseMessage
+    const method = message.method.?; // message cannot be a ResponseMessage
 
     switch (server.status) {
         .uninitialized => blk: {
@@ -1519,7 +1496,7 @@ pub fn processMessage(server: *Server, message: Message) Error!void {
             const params: ParamsType = if (ParamsType == void)
                 void{}
             else
-                std.json.parseFromValueLeaky(ParamsType, server.arena.allocator(), message.params().?, .{}) catch |err| {
+                std.json.parseFromValueLeaky(ParamsType, server.arena.allocator(), message.params.?, .{}) catch |err| {
                     log.err("failed to parse params from {s}: {}", .{ method, err });
                     if (@errorReturnTrace()) |trace| {
                         std.debug.dumpStackTrace(trace.*);
@@ -1543,16 +1520,16 @@ pub fn processMessage(server: *Server, message: Message) Error!void {
 
             if (@TypeOf(response) == void) return;
 
-            if (message == .RequestMessage) {
-                server.sendResponse(message.RequestMessage.id, response);
+            if (message.kind == .RequestMessage) {
+                server.sendResponse(message.id.?, response);
             }
 
             return;
         }
     }
 
-    switch (message) {
-        .RequestMessage => |request| server.sendResponse(request.id, null),
+    switch (message.kind) {
+        .RequestMessage => server.sendResponse(message.id.?, null),
         .NotificationMessage => return,
         .ResponseMessage => unreachable,
     }
