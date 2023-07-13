@@ -5,7 +5,6 @@ const Token = std.zig.Token;
 const Analyser = @import("../analysis.zig");
 const DocumentStore = @import("../DocumentStore.zig");
 const types = @import("../lsp.zig");
-const Server = @import("../Server.zig");
 const ast = @import("../ast.zig");
 const offsets = @import("../offsets.zig");
 
@@ -261,7 +260,7 @@ pub fn getSignatureInfo(analyser: *Analyser, arena: std.mem.Allocator, handle: *
                         );
                     }
 
-                    const name = Server.identifierFromPosition(expr_end - 1, handle.*);
+                    const name = Analyser.identifierFromPosition(expr_end - 1, handle.*);
                     if (name.len == 0) {
                         try symbol_stack.append(arena, .l_paren);
                         continue;

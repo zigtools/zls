@@ -15,7 +15,7 @@ const Ast = std.zig.Ast;
 const tracy = @import("tracy.zig");
 const diff = @import("diff.zig");
 const ComptimeInterpreter = @import("ComptimeInterpreter.zig");
-const analyser = @import("analyser/analyser.zig");
+const InternPool = @import("analyser/analyser.zig").InternPool;
 const ZigVersionWrapper = @import("ZigVersionWrapper.zig");
 
 const signature_help = @import("features/signature_help.zig");
@@ -37,8 +37,8 @@ const log = std.log.scoped(.zls_server);
 
 config: *Config,
 allocator: std.mem.Allocator,
-analyser: Analyser,
 document_store: DocumentStore,
+ip: InternPool = .{},
 client_capabilities: ClientCapabilities = .{},
 runtime_zig_version: ?ZigVersionWrapper,
 outgoing_messages: std.ArrayListUnmanaged([]const u8) = .{},
@@ -239,9 +239,12 @@ pub fn autofix(server: *Server, arena: std.mem.Allocator, handle: *const Documen
     try diagnostics_gen.getAstCheckDiagnostics(server, arena, handle.*, &diagnostics);
     if (diagnostics.items.len == 0) return .{};
 
+    var analyser = Analyser.init(server.allocator, &server.document_store, &server.ip);
+    defer analyser.deinit();
+
     var builder = code_actions.Builder{
         .arena = arena,
-        .analyser = &server.analyser,
+        .analyser = &analyser,
         .handle = handle,
         .offset_encoding = server.offset_encoding,
     };
@@ -269,103 +272,6 @@ pub fn autofix(server: *Server, arena: std.mem.Allocator, handle: *const Documen
     }
 
     return text_edits;
-}
-
-pub fn identifierFromPosition(pos_index: usize, handle: DocumentStore.Handle) []const u8 {
-    if (pos_index + 1 >= handle.text.len) return "";
-    var start_idx = pos_index;
-
-    while (start_idx > 0 and Analyser.isSymbolChar(handle.text[start_idx - 1])) {
-        start_idx -= 1;
-    }
-
-    var end_idx = pos_index;
-    while (end_idx < handle.text.len and Analyser.isSymbolChar(handle.text[end_idx])) {
-        end_idx += 1;
-    }
-
-    if (end_idx <= start_idx) return "";
-    return handle.text[start_idx..end_idx];
-}
-
-pub fn getLabelGlobal(pos_index: usize, handle: *const DocumentStore.Handle) error{OutOfMemory}!?Analyser.DeclWithHandle {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    const name = identifierFromPosition(pos_index, handle.*);
-    if (name.len == 0) return null;
-
-    return try Analyser.lookupLabel(handle, name, pos_index);
-}
-
-pub fn getSymbolGlobal(
-    server: *Server,
-    pos_index: usize,
-    handle: *const DocumentStore.Handle,
-) error{OutOfMemory}!?Analyser.DeclWithHandle {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    const name = Server.identifierFromPosition(pos_index, handle.*);
-    if (name.len == 0) return null;
-
-    return try server.analyser.lookupSymbolGlobalAdvanced(handle, name, pos_index, .{
-        .skip_container_fields = false,
-        .skip_labels = false,
-    });
-}
-
-pub fn getSymbolEnumLiteral(
-    server: *Server,
-    arena: std.mem.Allocator,
-    handle: *const DocumentStore.Handle,
-    source_index: usize,
-) error{OutOfMemory}!?Analyser.DeclWithHandle {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    const nodes = try ast.nodesOverlappingIndex(arena, handle.tree, source_index);
-    return try server.analyser.lookupSymbolEnumLiteral(handle, source_index, nodes);
-}
-
-/// Multiple when using branched types
-pub fn getSymbolFieldAccesses(
-    server: *Server,
-    arena: std.mem.Allocator,
-    handle: *const DocumentStore.Handle,
-    source_index: usize,
-    loc: offsets.Loc,
-) error{OutOfMemory}!?[]const Analyser.DeclWithHandle {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    const name = Server.identifierFromPosition(source_index, handle.*);
-    if (name.len == 0) return null;
-
-    const held_range = try arena.dupeZ(u8, offsets.locToSlice(handle.text, loc));
-    var tokenizer = std.zig.Tokenizer.init(held_range);
-
-    var decls_with_handles = std.ArrayListUnmanaged(Analyser.DeclWithHandle){};
-
-    if (try server.analyser.getFieldAccessType(handle, source_index, &tokenizer)) |result| {
-        const container_handle = result.unwrapped orelse result.original;
-
-        const container_handle_nodes = try container_handle.getAllTypesWithHandles(arena);
-
-        for (container_handle_nodes) |ty| {
-            const container_handle_node = switch (ty.type.data) {
-                .other => |n| n,
-                else => continue,
-            };
-            try decls_with_handles.append(arena, (try server.analyser.lookupSymbolContainer(
-                .{ .node = container_handle_node, .handle = ty.handle },
-                name,
-                true,
-            )) orelse continue);
-        }
-    }
-
-    return try decls_with_handles.toOwnedSlice(arena);
 }
 
 fn initializeHandler(server: *Server, _: std.mem.Allocator, request: types.InitializeParams) Error!types.InitializeResult {
@@ -785,9 +691,6 @@ fn openDocumentHandler(server: *Server, arena: std.mem.Allocator, notification: 
 }
 
 fn changeDocumentHandler(server: *Server, arena: std.mem.Allocator, notification: types.DidChangeTextDocumentParams) Error!void {
-    // whenever a document changes, any cached info is invalidated
-    server.analyser.invalidate();
-
     const handle = server.document_store.getHandle(notification.textDocument.uri) orelse return;
 
     const new_text = try diff.applyContentChanges(server.allocator, handle.text, notification.contentChanges, server.offset_encoding);
@@ -824,9 +727,6 @@ fn saveDocumentHandler(server: *Server, arena: std.mem.Allocator, notification: 
 }
 
 fn closeDocumentHandler(server: *Server, _: std.mem.Allocator, notification: types.DidCloseTextDocumentParams) error{}!void {
-    // cached type info may point to a closed handle
-    server.analyser.invalidate();
-
     server.document_store.closeDocument(notification.textDocument.uri);
 }
 
@@ -845,9 +745,12 @@ fn semanticTokensFullHandler(server: *Server, arena: std.mem.Allocator, request:
 
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
 
+    var analyser = Analyser.init(server.allocator, &server.document_store, &server.ip);
+    defer analyser.deinit();
+
     return try semantic_tokens.writeSemanticTokens(
         arena,
-        &server.analyser,
+        &analyser,
         handle,
         null,
         server.offset_encoding,
@@ -861,9 +764,12 @@ fn semanticTokensRangeHandler(server: *Server, arena: std.mem.Allocator, request
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
     const loc = offsets.rangeToLoc(handle.tree.source, request.range, server.offset_encoding);
 
+    var analyser = Analyser.init(server.allocator, &server.document_store, &server.ip);
+    defer analyser.deinit();
+
     return try semantic_tokens.writeSemanticTokens(
         arena,
-        &server.analyser,
+        &analyser,
         handle,
         loc,
         server.offset_encoding,
@@ -875,7 +781,11 @@ pub fn completionHandler(server: *Server, arena: std.mem.Allocator, request: typ
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
 
     const source_index = offsets.positionToIndex(handle.text, request.position, server.offset_encoding);
-    return try completions.completionAtIndex(server, arena, handle, source_index);
+
+    var analyser = Analyser.init(server.allocator, &server.document_store, &server.ip);
+    defer analyser.deinit();
+
+    return try completions.completionAtIndex(server, &analyser, arena, handle, source_index);
 }
 
 pub fn signatureHelpHandler(server: *Server, arena: std.mem.Allocator, request: types.SignatureHelpParams) Error!?types.SignatureHelp {
@@ -885,8 +795,11 @@ pub fn signatureHelpHandler(server: *Server, arena: std.mem.Allocator, request: 
 
     const source_index = offsets.positionToIndex(handle.text, request.position, server.offset_encoding);
 
+    var analyser = Analyser.init(server.allocator, &server.document_store, &server.ip);
+    defer analyser.deinit();
+
     const signature_info = (try signature_help.getSignatureInfo(
-        &server.analyser,
+        &analyser,
         arena,
         handle,
         source_index,
@@ -912,7 +825,10 @@ fn gotoDefinitionHandler(
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
     const source_index = offsets.positionToIndex(handle.text, request.position, server.offset_encoding);
 
-    return try goto.goto(server, arena, handle, source_index, true);
+    var analyser = Analyser.init(server.allocator, &server.document_store, &server.ip);
+    defer analyser.deinit();
+
+    return try goto.goto(&analyser, &server.document_store, arena, handle, source_index, true, server.offset_encoding);
 }
 
 fn gotoDeclarationHandler(
@@ -920,12 +836,7 @@ fn gotoDeclarationHandler(
     arena: std.mem.Allocator,
     request: types.TextDocumentPositionParams,
 ) Error!?types.Definition {
-    if (request.position.character == 0) return null;
-
-    const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
-    const source_index = offsets.positionToIndex(handle.text, request.position, server.offset_encoding);
-
-    return try goto.goto(server, arena, handle, source_index, false);
+    return try server.gotoDefinitionHandler(arena, request);
 }
 
 pub fn hoverHandler(server: *Server, arena: std.mem.Allocator, request: types.HoverParams) Error!?types.Hover {
@@ -934,7 +845,12 @@ pub fn hoverHandler(server: *Server, arena: std.mem.Allocator, request: types.Ho
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
     const source_index = offsets.positionToIndex(handle.text, request.position, server.offset_encoding);
 
-    const response = hover_handler.hover(server, arena, handle, source_index);
+    const markup_kind: types.MarkupKind = if (server.client_capabilities.hover_supports_md) .markdown else .plaintext;
+
+    var analyser = Analyser.init(server.allocator, &server.document_store, &server.ip);
+    defer analyser.deinit();
+
+    const response = hover_handler.hover(&analyser, arena, handle, source_index, markup_kind);
 
     // TODO: Figure out a better solution for comptime interpreter diags
     if (server.client_capabilities.supports_publish_diagnostics) {
@@ -1059,18 +975,21 @@ pub fn generalReferencesHandler(server: *Server, arena: std.mem.Allocator, reque
     const source_index = offsets.positionToIndex(handle.text, request.position(), server.offset_encoding);
     const pos_context = try Analyser.getPositionContext(server.allocator, handle.text, source_index, true);
 
+    var analyser = Analyser.init(server.allocator, &server.document_store, &server.ip);
+    defer analyser.deinit();
+
     // TODO: Make this work with branching types
     const decl = switch (pos_context) {
-        .var_access => try server.getSymbolGlobal(source_index, handle),
+        .var_access => try analyser.getSymbolGlobal(source_index, handle),
         .field_access => |range| z: {
-            const a = try server.getSymbolFieldAccesses(arena, handle, source_index, range);
+            const a = try analyser.getSymbolFieldAccesses(arena, handle, source_index, range);
             if (a) |b| {
                 if (b.len != 0) break :z b[0];
             }
 
             break :z null;
         },
-        .label => try getLabelGlobal(source_index, handle),
+        .label => try Analyser.getLabelGlobal(source_index, handle),
         else => null,
     } orelse return null;
 
@@ -1084,7 +1003,7 @@ pub fn generalReferencesHandler(server: *Server, arena: std.mem.Allocator, reque
     else
         try references.symbolReferences(
             arena,
-            &server.analyser,
+            &analyser,
             decl,
             server.offset_encoding,
             include_decl,
@@ -1139,10 +1058,13 @@ fn inlayHintHandler(server: *Server, arena: std.mem.Allocator, request: types.In
     const hover_kind: types.MarkupKind = if (server.client_capabilities.hover_supports_md) .markdown else .plaintext;
     const loc = offsets.rangeToLoc(handle.text, request.range, server.offset_encoding);
 
+    var analyser = Analyser.init(server.allocator, &server.document_store, &server.ip);
+    defer analyser.deinit();
+
     return try inlay_hints.writeRangeInlayHint(
         arena,
         server.config.*,
-        &server.analyser,
+        &analyser,
         handle,
         loc,
         hover_kind,
@@ -1153,9 +1075,12 @@ fn inlayHintHandler(server: *Server, arena: std.mem.Allocator, request: types.In
 fn codeActionHandler(server: *Server, arena: std.mem.Allocator, request: types.CodeActionParams) Error!?[]types.CodeAction {
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
 
+    var analyser = Analyser.init(server.allocator, &server.document_store, &server.ip);
+    defer analyser.deinit();
+
     var builder = code_actions.Builder{
         .arena = arena,
-        .analyser = &server.analyser,
+        .analyser = &analyser,
         .handle = handle,
         .offset_encoding = server.offset_encoding,
     };
@@ -1503,7 +1428,6 @@ pub fn create(
         .config = config,
         .runtime_zig_version = null,
         .allocator = allocator,
-        .analyser = undefined,
         .document_store = .{
             .allocator = allocator,
             .config = config,
@@ -1514,7 +1438,6 @@ pub fn create(
         .message_tracing_enabled = message_tracing_enabled,
         .status = .uninitialized,
     };
-    server.analyser = Analyser.init(allocator, &server.document_store);
 
     var builtin_creation_dir = config_path;
     if (config_path) |path| {
@@ -1524,7 +1447,7 @@ pub fn create(
     try configuration.configChanged(config, &server.runtime_zig_version, allocator, builtin_creation_dir);
 
     if (config.dangerous_comptime_experiments_do_not_enable) {
-        server.analyser.ip = try analyser.InternPool.init(allocator);
+        server.ip = try InternPool.init(allocator);
     }
 
     return server;
@@ -1532,7 +1455,7 @@ pub fn create(
 
 pub fn destroy(server: *Server) void {
     server.document_store.deinit();
-    server.analyser.deinit();
+    server.ip.deinit(server.allocator);
 
     for (server.outgoing_messages.items) |message| {
         server.allocator.free(message);

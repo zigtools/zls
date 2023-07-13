@@ -16,17 +16,17 @@ const Analyser = @This();
 gpa: std.mem.Allocator,
 arena: std.heap.ArenaAllocator,
 store: *DocumentStore,
-ip: ?InternPool,
+ip: ?*InternPool,
 bound_type_params: std.AutoHashMapUnmanaged(Ast.full.FnProto.Param, TypeWithHandle) = .{},
 using_trail: std.AutoHashMapUnmanaged(Ast.Node.Index, void) = .{},
 resolved_nodes: std.HashMapUnmanaged(NodeWithUri, ?TypeWithHandle, NodeWithUri.Context, std.hash_map.default_max_load_percentage) = .{},
 
-pub fn init(gpa: std.mem.Allocator, store: *DocumentStore) Analyser {
+pub fn init(gpa: std.mem.Allocator, store: *DocumentStore, ip: ?*InternPool) Analyser {
     return .{
         .gpa = gpa,
         .arena = std.heap.ArenaAllocator.init(gpa),
         .store = store,
-        .ip = null,
+        .ip = ip,
     };
 }
 
@@ -34,7 +34,6 @@ pub fn deinit(self: *Analyser) void {
     self.bound_type_params.deinit(self.gpa);
     self.using_trail.deinit(self.gpa);
     self.resolved_nodes.deinit(self.gpa);
-    if (self.ip) |*intern_pool| intern_pool.deinit(self.gpa);
     self.arena.deinit();
 }
 
@@ -1088,7 +1087,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
 
                     log.info("Invoking interpreter!", .{});
 
-                    const interpreter = analyser.store.ensureInterpreterExists(handle.uri, &analyser.ip.?) catch |err| {
+                    const interpreter = analyser.store.ensureInterpreterExists(handle.uri, analyser.ip.?) catch |err| {
                         log.err("Failed to interpret file: {s}", .{@errorName(err)});
                         if (@errorReturnTrace()) |trace| {
                             std.debug.dumpStackTrace(trace.*);
@@ -3240,6 +3239,103 @@ pub fn resolveExpressionTypeFromAncestors(
     }
 
     return null;
+}
+
+pub fn identifierFromPosition(pos_index: usize, handle: DocumentStore.Handle) []const u8 {
+    if (pos_index + 1 >= handle.text.len) return "";
+    var start_idx = pos_index;
+
+    while (start_idx > 0 and Analyser.isSymbolChar(handle.text[start_idx - 1])) {
+        start_idx -= 1;
+    }
+
+    var end_idx = pos_index;
+    while (end_idx < handle.text.len and Analyser.isSymbolChar(handle.text[end_idx])) {
+        end_idx += 1;
+    }
+
+    if (end_idx <= start_idx) return "";
+    return handle.text[start_idx..end_idx];
+}
+
+pub fn getLabelGlobal(pos_index: usize, handle: *const DocumentStore.Handle) error{OutOfMemory}!?DeclWithHandle {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    const name = identifierFromPosition(pos_index, handle.*);
+    if (name.len == 0) return null;
+
+    return try lookupLabel(handle, name, pos_index);
+}
+
+pub fn getSymbolGlobal(
+    analyser: *Analyser,
+    pos_index: usize,
+    handle: *const DocumentStore.Handle,
+) error{OutOfMemory}!?DeclWithHandle {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    const name = identifierFromPosition(pos_index, handle.*);
+    if (name.len == 0) return null;
+
+    return try analyser.lookupSymbolGlobalAdvanced(handle, name, pos_index, .{
+        .skip_container_fields = false,
+        .skip_labels = false,
+    });
+}
+
+pub fn getSymbolEnumLiteral(
+    analyser: *Analyser,
+    arena: std.mem.Allocator,
+    handle: *const DocumentStore.Handle,
+    source_index: usize,
+) error{OutOfMemory}!?DeclWithHandle {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    const nodes = try ast.nodesOverlappingIndex(arena, handle.tree, source_index);
+    return try analyser.lookupSymbolEnumLiteral(handle, source_index, nodes);
+}
+
+/// Multiple when using branched types
+pub fn getSymbolFieldAccesses(
+    analyser: *Analyser,
+    arena: std.mem.Allocator,
+    handle: *const DocumentStore.Handle,
+    source_index: usize,
+    loc: offsets.Loc,
+) error{OutOfMemory}!?[]const DeclWithHandle {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    const name = identifierFromPosition(source_index, handle.*);
+    if (name.len == 0) return null;
+
+    const held_range = try arena.dupeZ(u8, offsets.locToSlice(handle.text, loc));
+    var tokenizer = std.zig.Tokenizer.init(held_range);
+
+    var decls_with_handles = std.ArrayListUnmanaged(DeclWithHandle){};
+
+    if (try analyser.getFieldAccessType(handle, source_index, &tokenizer)) |result| {
+        const container_handle = result.unwrapped orelse result.original;
+
+        const container_handle_nodes = try container_handle.getAllTypesWithHandles(arena);
+
+        for (container_handle_nodes) |ty| {
+            const container_handle_node = switch (ty.type.data) {
+                .other => |n| n,
+                else => continue,
+            };
+            try decls_with_handles.append(arena, (try analyser.lookupSymbolContainer(
+                .{ .node = container_handle_node, .handle = ty.handle },
+                name,
+                true,
+            )) orelse continue);
+        }
+    }
+
+    return try decls_with_handles.toOwnedSlice(arena);
 }
 
 const CompletionContext = struct {
