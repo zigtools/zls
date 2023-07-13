@@ -4055,9 +4055,8 @@ fn addReferencedTypes(
                     const func_name_token = func.name_token orelse return null;
                     const func_name = offsets.tokenToSlice(tree, func_name_token);
                     if (needs_type_reference) {
-                        std.debug.assert(type_str == null);
                         try referenced_types.put(.{
-                            .str = func_name,
+                            .str = type_str orelse func_name,
                             .handle = handle,
                             .token = func_name_token,
                         }, {});
