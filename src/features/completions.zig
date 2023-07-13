@@ -155,6 +155,11 @@ fn nodeToCompletion(
         };
         return try declToCompletion(context, result);
     }
+    if (doc_comments == null) {
+        if (try analyser.resolveTypeOfNode(node_handle)) |resolved_type| {
+            doc_comments = try resolved_type.docComments(arena);
+        }
+    }
 
     const doc = try completionDoc(
         server,
