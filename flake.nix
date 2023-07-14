@@ -19,9 +19,6 @@
 
       known_folders.url = "https://github.com/ziglibs/known-folders/archive/d070896807cbbd2847d24d561438994504b929dd.tar.gz";
       known_folders.flake = false;
-
-      tres.url = "https://github.com/ziglibs/tres/archive/9ca9cd547d10d30984565399dec92068fefd7ad2.tar.gz";
-      tres.flake = false;
     };
 
   outputs = inputs:
