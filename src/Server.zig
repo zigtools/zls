@@ -1496,7 +1496,12 @@ pub fn processMessage(server: *Server, message: Message) Error!void {
             const params: ParamsType = if (ParamsType == void)
                 void{}
             else
-                std.json.parseFromValueLeaky(ParamsType, server.arena.allocator(), message.params.?, .{}) catch |err| {
+                std.json.parseFromValueLeaky(
+                    ParamsType,
+                    server.arena.allocator(),
+                    message.params.?,
+                    .{ .ignore_unknown_fields = true },
+                ) catch |err| {
                     log.err("failed to parse params from {s}: {}", .{ method, err });
                     if (@errorReturnTrace()) |trace| {
                         std.debug.dumpStackTrace(trace.*);
