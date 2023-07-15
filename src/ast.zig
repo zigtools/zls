@@ -1005,6 +1005,19 @@ pub fn paramSlice(tree: Ast, param: Ast.full.FnProto.Param) []const u8 {
     return tree.source[start..end];
 }
 
+pub fn isTaggedUnion(tree: Ast, node: Ast.Node.Index) bool {
+    const main_tokens = tree.nodes.items(.main_token);
+    const tags = tree.tokens.items(.tag);
+    if (tags[main_tokens[node]] != .keyword_union)
+        return false;
+
+    var buf: [2]Ast.Node.Index = undefined;
+    const decl = tree.fullContainerDecl(&buf, node) orelse
+        return false;
+
+    return decl.ast.enum_token != null or decl.ast.arg != 0;
+}
+
 pub fn isContainer(tree: Ast, node: Ast.Node.Index) bool {
     return switch (tree.nodes.items(.tag)[node]) {
         .container_decl,

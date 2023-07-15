@@ -288,6 +288,7 @@ pub fn getVariableSignature(allocator: std.mem.Allocator, tree: Ast, var_decl: A
         }
 
         // Backing integer: struct(u32), union(enum(u32))
+        // Tagged union: union(ComplexTypeTag)
         if (container_decl.ast.arg != 0) {
             token = ast.lastToken(tree, container_decl.ast.arg);
             offset += 1;
@@ -1157,6 +1158,16 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 const container_type = innermostContainer(handle, offsets.tokenToIndex(tree, tree.firstToken(node)));
                 if (container_type.isEnumType())
                     return container_type.instanceTypeVal();
+
+                if (container_type.isTaggedUnion()) {
+                    var field = tree.fullContainerField(node).?;
+                    field.convertToNonTupleLike(tree.nodes);
+                    if (field.ast.type_expr == 0)
+                        return TypeWithHandle{
+                            .type = .{ .data = .{ .primitive = "void" }, .is_type_val = false },
+                            .handle = handle,
+                        };
+                }
             }
             const base = .{ .node = datas[node].lhs, .handle = handle };
             const base_type = (try analyser.resolveTypeOfNodeInternal(base)) orelse
@@ -1694,6 +1705,14 @@ pub const TypeWithHandle = struct {
 
     pub fn isOpaqueType(self: TypeWithHandle) bool {
         return self.isContainerKind(.keyword_opaque);
+    }
+
+    pub fn isTaggedUnion(self: TypeWithHandle) bool {
+        const tree = self.handle.tree;
+        return switch (self.type.data) {
+            .other => |n| ast.isTaggedUnion(tree, n),
+            else => false,
+        };
     }
 
     pub fn isTypeFunc(self: TypeWithHandle) bool {
@@ -3604,7 +3623,7 @@ fn makeInnerScope(
         try context.putDecl(scope_index, name, .{ .ast_node = decl });
 
         if ((node_idx != 0 and token_tags[container_decl.ast.main_token] == .keyword_enum) or
-            container_decl.ast.enum_token != null)
+            ast.isTaggedUnion(tree, node_idx))
         {
             if (std.mem.eql(u8, name, "_")) continue;
 
