@@ -1103,9 +1103,9 @@ fn resolveContainer(
 /// If the identifier is a `fn_name`, `fn_arg_index` is the index of the fn's param
 fn getIdentifierTokenIndexAndFnArgIndex(
     tree: Ast,
-    dot_index: usize,
+    dot_index: Ast.TokenIndex,
     fn_arg_index_out: *usize,
-) ?usize {
+) ?Ast.TokenIndex {
     // at least 3 tokens should be present, `x{.`
     if (dot_index < 2) return null;
     const token_tags = tree.tokens.items(.tag);

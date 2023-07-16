@@ -3287,20 +3287,29 @@ pub fn resolveExpressionTypeFromAncestors(
 }
 
 pub fn identifierFromPosition(pos_index: usize, handle: DocumentStore.Handle) []const u8 {
-    if (pos_index + 1 >= handle.text.len) return "";
+    const loc = identifierLocFromPosition(pos_index, &handle) orelse return "";
+    return offsets.locToSlice(handle.text, loc);
+}
+
+pub fn identifierLocFromPosition(pos_index: usize, handle: *const DocumentStore.Handle) ?std.zig.Token.Loc {
+    if (pos_index + 1 >= handle.text.len) return null;
     var start_idx = pos_index;
 
     while (start_idx > 0 and Analyser.isSymbolChar(handle.text[start_idx - 1])) {
         start_idx -= 1;
     }
 
+    const token_index = offsets.sourceIndexToTokenIndex(handle.tree, start_idx);
+    if (handle.tree.tokens.items(.tag)[token_index] == .identifier)
+        return offsets.tokenToLoc(handle.tree, token_index);
+
     var end_idx = pos_index;
     while (end_idx < handle.text.len and Analyser.isSymbolChar(handle.text[end_idx])) {
         end_idx += 1;
     }
 
-    if (end_idx <= start_idx) return "";
-    return handle.text[start_idx..end_idx];
+    if (end_idx <= start_idx) return null;
+    return .{ .start = start_idx, .end = end_idx };
 }
 
 pub fn getLabelGlobal(pos_index: usize, handle: *const DocumentStore.Handle) error{OutOfMemory}!?DeclWithHandle {
@@ -3354,10 +3363,11 @@ pub fn getSymbolFieldAccesses(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const name = identifierFromPosition(source_index, handle.*);
+    const name_loc = identifierLocFromPosition(source_index, handle) orelse return null;
+    const name = offsets.locToSlice(handle.text, name_loc);
     if (name.len == 0) return null;
 
-    const held_range = try arena.dupeZ(u8, offsets.locToSlice(handle.text, loc));
+    const held_range = try arena.dupeZ(u8, offsets.locToSlice(handle.text, offsets.locMerge(loc, name_loc)));
     var tokenizer = std.zig.Tokenizer.init(held_range);
 
     var decls_with_handles = std.ArrayListUnmanaged(DeclWithHandle){};
