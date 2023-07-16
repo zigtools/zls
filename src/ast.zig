@@ -604,15 +604,11 @@ pub fn lastToken(tree: Ast, node: Ast.Node.Index) Ast.TokenIndex {
             }
             n = tree.extra_data[params.end - 1]; // last parameter
         },
+        .switch_comma,
         .@"switch" => {
-            const cases = tree.extraData(datas[n].rhs, Node.SubRange);
-            if (cases.end - cases.start == 0) {
-                end_offset += 3; // rparen, lbrace, rbrace
-                n = datas[n].lhs; // condition expression
-            } else {
-                end_offset += 1; // for the rbrace
-                n = tree.extra_data[cases.end - 1]; // last case
-            }
+            const lhs = datas[n].lhs;
+            const l_brace = tree.lastToken(lhs) + 2; //lparen + rbrace
+            return findMatchingRBrace(token_tags, l_brace);
         },
         .container_decl_arg,
         .container_decl_arg_trailing,
@@ -640,7 +636,6 @@ pub fn lastToken(tree: Ast, node: Ast.Node.Index) Ast.TokenIndex {
         },
         .array_init_comma,
         .struct_init_comma,
-        .switch_comma,
         => {
             if (datas[n].rhs != 0) {
                 const members = tree.extraData(datas[n].rhs, Node.SubRange);
