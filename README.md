@@ -63,6 +63,7 @@ The following options are currently available.
 | Option | Type | Default value | What it Does |
 | --- | --- | --- | --- |
 | `enable_snippets` | `bool` | `true` | Enables snippet completions when the client also supports them |
+| `enable_argument_placeholders` | `bool` | `true` | Whether to enable function argument placeholder completions |
 | `enable_ast_check_diagnostics` | `bool` | `true` | Whether to enable ast-check diagnostics |
 | `enable_autofix` | `bool` | `true` | Whether to automatically fix errors on save. Currently supports adding and removing discards. |
 | `enable_import_embedfile_argument_completions` | `bool` | `true` | Whether to enable import/embedFile argument completions |
@@ -149,7 +150,7 @@ You can use zls as a library! [Check out this demo repo](https://github.com/zigt
 
 ## Quick Thanks :)
 
-We'd like to take a second to thank all our awesome [contributors](https://github.com/zigtools/zls/graphs/contributors) and donators/backers/sponsors; if you have time or money to spare, consider partaking in either of these options - they help keep zls awesome for everyone! 
+We'd like to take a second to thank all our awesome [contributors](https://github.com/zigtools/zls/graphs/contributors) and donators/backers/sponsors; if you have time or money to spare, consider partaking in either of these options - they help keep zls awesome for everyone!
 
 [![OpenCollective Backers](https://opencollective.com/zigtools/backers.svg?width=890&limit=1000)](https://opencollective.com/zigtools#category-CONTRIBUTE)
 

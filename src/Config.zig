@@ -7,6 +7,9 @@
 /// Enables snippet completions when the client also supports them
 enable_snippets: bool = true,
 
+/// Whether to enable function argument placeholder completions
+enable_argument_placeholders: bool = true,
+
 /// Whether to enable ast-check diagnostics
 enable_ast_check_diagnostics: bool = true,
 

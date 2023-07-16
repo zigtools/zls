@@ -195,11 +195,33 @@ fn nodeToCompletion(
             const func = tree.fullFnProto(&buf, node).?;
             if (func.name_token) |name_token| {
                 const use_snippets = server.config.enable_snippets and server.client_capabilities.supports_snippets;
-                const insert_text = if (use_snippets) blk: {
-                    const skip_self_param = !(parent_is_type_val orelse true) and
-                        try analyser.hasSelfParam(handle, func);
-                    break :blk try Analyser.getFunctionSnippet(arena, tree, func, skip_self_param);
-                } else tree.tokenSlice(func.name_token.?);
+
+                const insert_text = blk: {
+                    const func_name = tree.tokenSlice(func.name_token.?);
+
+                    if (!use_snippets) break :blk func_name;
+
+                    const skip_self_param = !(parent_is_type_val orelse true) and try analyser.hasSelfParam(handle, func);
+
+                    const use_placeholders = server.config.enable_argument_placeholders;
+                    if (use_placeholders) break :blk try Analyser.getFunctionSnippet(arena, tree, func, skip_self_param);
+
+                    switch (func.ast.params.len) {
+                        // No arguments, leave cursor at the end
+                        0 => break :blk try std.fmt.allocPrint(arena, "{s}()", .{func_name}),
+                        1 => {
+                            if (skip_self_param) {
+                                // The one argument is a self parameter, leave cursor at the end
+                                break :blk try std.fmt.allocPrint(arena, "{s}()", .{func_name});
+                            }
+
+                            // Non-self parameter, leave the cursor in the parentheses
+                            break :blk try std.fmt.allocPrint(arena, "{s}(${{1:}})", .{func_name});
+                        },
+                        // Atleast one non-self parameter, leave the cursor in the parentheses
+                        else => break :blk try std.fmt.allocPrint(arena, "{s}(${{1:}})", .{func_name}),
+                    }
+                };
 
                 const is_type_function = Analyser.isTypeFunction(handle.tree, func);
 
