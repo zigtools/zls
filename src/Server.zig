@@ -976,7 +976,12 @@ fn didChangeConfigurationHandler(server: *Server, arena: std.mem.Allocator, noti
 
     // NOTE: VS Code seems to always respond with null
     if (notification.settings != .null) {
-        const cfg = std.json.parseFromValueLeaky(configuration.Configuration, arena, notification.settings.object.get("zls") orelse notification.settings, .{}) catch return;
+        const cfg = std.json.parseFromValueLeaky(
+            configuration.Configuration,
+            arena,
+            notification.settings.object.get("zls") orelse notification.settings,
+            .{ .ignore_unknown_fields = true },
+        ) catch return;
         inline for (std.meta.fields(configuration.Configuration)) |field| {
             if (@field(cfg, field.name)) |value| {
                 blk: {
@@ -1555,12 +1560,22 @@ pub fn sendJsonMessage(server: *Server, json_message: []const u8) Error!void {
     defer tracy_zone.end();
 
     try server.job_queue.ensureUnusedCapacity(1);
-    const parsed_message = std.json.parseFromSlice(Message, server.allocator, json_message, .{}) catch return error.ParseError;
+    const parsed_message = std.json.parseFromSlice(
+        Message,
+        server.allocator,
+        json_message,
+        .{ .ignore_unknown_fields = true },
+    ) catch return error.ParseError;
     server.job_queue.writeItemAssumeCapacity(.{ .incoming_message = parsed_message });
 }
 
 pub fn sendJsonMessageSync(server: *Server, json_message: []const u8) Error!?[]u8 {
-    const parsed_message = std.json.parseFromSlice(Message, server.allocator, json_message, .{}) catch return error.ParseError;
+    const parsed_message = std.json.parseFromSlice(
+        Message,
+        server.allocator,
+        json_message,
+        .{ .ignore_unknown_fields = true },
+    ) catch return error.ParseError;
     defer parsed_message.deinit();
     return try server.processMessage(parsed_message.value);
 }
