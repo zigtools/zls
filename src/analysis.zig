@@ -152,24 +152,26 @@ fn fmtSnippetPlaceholder(bytes: []const u8) SnippetPlaceholderFormatter {
 }
 
 /// Creates snippet insert text for a function. Caller owns returned memory.
-pub fn getFunctionSnippet(allocator: std.mem.Allocator, tree: Ast, func: Ast.full.FnProto, skip_self_param: bool) ![]const u8 {
-    const name_index = func.name_token.?;
+pub fn getFunctionSnippet(
+    allocator: std.mem.Allocator,
+    name: []const u8,
+    iterator: *Ast.full.FnProto.Iterator,
+) ![]const u8 {
+    const tree = iterator.tree.*;
 
     var buffer = std.ArrayListUnmanaged(u8){};
     try buffer.ensureTotalCapacity(allocator, 128);
 
     var buf_stream = buffer.writer(allocator);
 
-    try buf_stream.writeAll(tree.tokenSlice(name_index));
+    try buf_stream.writeAll(name);
     try buf_stream.writeByte('(');
 
     const token_tags = tree.tokens.items(.tag);
 
-    var it = func.iterate(&tree);
     var i: usize = 0;
-    while (ast.nextFnParam(&it)) |param| : (i += 1) {
-        if (skip_self_param and i == 0) continue;
-        if (i != @intFromBool(skip_self_param))
+    while (ast.nextFnParam(iterator)) |param| : (i += 1) {
+        if (i != 0)
             try buf_stream.writeAll(", ${")
         else
             try buf_stream.writeAll("${");

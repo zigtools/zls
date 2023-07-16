@@ -68,6 +68,8 @@ fn typeToCompletion(
             .{ .node = n, .handle = type_handle.handle },
             field_access.unwrapped,
             orig_handle,
+            null,
+            null,
             type_handle.type.is_type_val,
             null,
             either_descriptor,
@@ -123,6 +125,8 @@ fn nodeToCompletion(
     node_handle: Analyser.NodeWithHandle,
     unwrapped: ?Analyser.TypeWithHandle,
     orig_handle: *const DocumentStore.Handle,
+    orig_name: ?[]const u8,
+    orig_doc: ?[]const u8,
     is_type_val: bool,
     parent_is_type_val: ?bool,
     either_descriptor: ?[]const u8,
@@ -137,11 +141,19 @@ fn nodeToCompletion(
     const datas = tree.nodes.items(.data);
     const token_tags = tree.tokens.items(.tag);
 
-    var doc_comments = try Analyser.getDocComments(arena, handle.tree, node);
-    if (doc_comments == null) {
-        if (try analyser.resolveVarDeclAlias(node_handle)) |result| {
-            doc_comments = try result.docComments(arena);
-        }
+    var doc_comments = orig_doc orelse (try Analyser.getDocComments(arena, handle.tree, node));
+    if (try analyser.resolveVarDeclAlias(node_handle)) |result| {
+        const context = DeclToCompletionContext{
+            .server = server,
+            .analyser = analyser,
+            .arena = arena,
+            .completions = list,
+            .orig_handle = orig_handle,
+            .orig_name = Analyser.getDeclName(tree, node),
+            .orig_doc = doc_comments,
+            .either_descriptor = either_descriptor,
+        };
+        return try declToCompletion(context, result);
     }
 
     const doc = try completionDoc(
@@ -194,17 +206,20 @@ fn nodeToCompletion(
             var buf: [1]Ast.Node.Index = undefined;
             const func = tree.fullFnProto(&buf, node).?;
             if (func.name_token) |name_token| {
+                const func_name = orig_name orelse tree.tokenSlice(name_token);
                 const use_snippets = server.config.enable_snippets and server.client_capabilities.supports_snippets;
 
                 const insert_text = blk: {
-                    const func_name = tree.tokenSlice(func.name_token.?);
-
                     if (!use_snippets) break :blk func_name;
 
                     const skip_self_param = !(parent_is_type_val orelse true) and try analyser.hasSelfParam(handle, func);
 
                     const use_placeholders = server.config.enable_argument_placeholders;
-                    if (use_placeholders) break :blk try Analyser.getFunctionSnippet(arena, tree, func, skip_self_param);
+                    if (use_placeholders) {
+                        var it = func.iterate(&tree);
+                        if (skip_self_param) _ = ast.nextFnParam(&it);
+                        break :blk try Analyser.getFunctionSnippet(arena, func_name, &it);
+                    }
 
                     switch (func.ast.params.len) {
                         // No arguments, leave cursor at the end
@@ -226,7 +241,7 @@ fn nodeToCompletion(
                 const is_type_function = Analyser.isTypeFunction(handle.tree, func);
 
                 try list.append(arena, .{
-                    .label = handle.tree.tokenSlice(name_token),
+                    .label = func_name,
                     .kind = if (is_type_function) .Struct else .Function,
                     .documentation = doc,
                     .detail = Analyser.getFunctionSignature(handle.tree, func),
@@ -241,14 +256,15 @@ fn nodeToCompletion(
         .simple_var_decl,
         => {
             const var_decl = tree.fullVarDecl(node).?;
+            const name = orig_name orelse tree.tokenSlice(var_decl.ast.mut_token + 1);
             const is_const = token_tags[var_decl.ast.mut_token] == .keyword_const;
 
             try list.append(arena, .{
-                .label = handle.tree.tokenSlice(var_decl.ast.mut_token + 1),
+                .label = name,
                 .kind = if (is_const) .Constant else .Variable,
                 .documentation = doc,
                 .detail = try Analyser.getVariableSignature(arena, tree, var_decl),
-                .insertText = tree.tokenSlice(var_decl.ast.mut_token + 1),
+                .insertText = name,
                 .insertTextFormat = .PlainText,
             });
         },
@@ -257,12 +273,13 @@ fn nodeToCompletion(
         .container_field_init,
         => {
             const field = tree.fullContainerField(node).?;
+            const name = tree.tokenSlice(field.ast.main_token);
             try list.append(arena, .{
-                .label = handle.tree.tokenSlice(field.ast.main_token),
+                .label = name,
                 .kind = if (field.ast.tuple_like) .EnumMember else .Field,
                 .documentation = doc,
                 .detail = Analyser.getContainerFieldSignature(handle.tree, field),
-                .insertText = tree.tokenSlice(field.ast.main_token),
+                .insertText = name,
                 .insertTextFormat = .PlainText,
             });
         },
@@ -357,6 +374,8 @@ const DeclToCompletionContext = struct {
     arena: std.mem.Allocator,
     completions: *std.ArrayListUnmanaged(types.CompletionItem),
     orig_handle: *const DocumentStore.Handle,
+    orig_name: ?[]const u8 = null,
+    orig_doc: ?[]const u8 = null,
     parent_is_type_val: ?bool = null,
     either_descriptor: ?[]const u8 = null,
 };
@@ -393,12 +412,15 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: Analyser.Decl
             .{ .node = node, .handle = decl_handle.handle },
             null,
             context.orig_handle,
+            context.orig_name,
+            context.orig_doc,
             false,
             context.parent_is_type_val,
             context.either_descriptor,
         ),
         .param_payload => |pay| {
             const param = pay.param;
+            const name = tree.tokenSlice(param.name_token.?);
             const doc = try completionDoc(
                 context.server,
                 context.arena,
@@ -407,11 +429,11 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: Analyser.Decl
             );
 
             try context.completions.append(context.arena, .{
-                .label = tree.tokenSlice(param.name_token.?),
+                .label = name,
                 .kind = .Constant,
                 .documentation = doc,
                 .detail = ast.paramSlice(tree, param),
-                .insertText = tree.tokenSlice(param.name_token.?),
+                .insertText = name,
                 .insertTextFormat = .PlainText,
             });
         },
@@ -792,11 +814,12 @@ pub fn collectContainerFields(
     const container_decl = Ast.fullContainerDecl(container.handle.tree, &buffer, node) orelse return;
     for (container_decl.ast.members) |member| {
         const field = container.handle.tree.fullContainerField(member) orelse continue;
+        const name = container.handle.tree.tokenSlice(field.ast.main_token);
         try completions.append(arena, .{
-            .label = container.handle.tree.tokenSlice(field.ast.main_token),
+            .label = name,
             .kind = if (field.ast.tuple_like) .EnumMember else .Field,
             .detail = Analyser.getContainerFieldSignature(container.handle.tree, field),
-            .insertText = container.handle.tree.tokenSlice(field.ast.main_token),
+            .insertText = name,
             .insertTextFormat = .PlainText,
         });
     }
