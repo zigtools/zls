@@ -3144,6 +3144,13 @@ pub fn resolveExpressionTypeFromAncestors(
                 .handle = handle,
             });
         }
+    } else if (tree.fullContainerField(ancestors[0])) |container_field| {
+        if (node == container_field.ast.value_expr) {
+            return try analyser.resolveTypeOfNode(.{
+                .node = ancestors[0],
+                .handle = handle,
+            });
+        }
     } else if (tree.fullIf(ancestors[0])) |if_node| {
         if (node == if_node.ast.then_expr or node == if_node.ast.else_expr) {
             return try analyser.resolveExpressionType(
