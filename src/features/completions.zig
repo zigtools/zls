@@ -977,7 +977,10 @@ fn resolveContainer(
             }
         },
         .field_access => |loc| fa: {
-            const decls = try analyser.getSymbolFieldAccesses(arena, handle, loc.end, loc) orelse break :fa;
+            const name_loc = Analyser.identifierLocFromPosition(loc.end, handle) orelse break :fa;
+            const name = offsets.locToSlice(handle.text, name_loc);
+            const held_loc = offsets.locMerge(loc, name_loc);
+            const decls = try analyser.getSymbolFieldAccesses(arena, handle, loc.end, held_loc, name) orelse break :fa;
             for (decls) |decl| {
                 const decl_node = switch (decl.decl.*) {
                     .ast_node => |ast_node| ast_node,

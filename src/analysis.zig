@@ -3012,36 +3012,6 @@ pub fn lookupSymbolContainer(
     return null;
 }
 
-pub fn lookupSymbolEnumLiteral(
-    analyser: *Analyser,
-    handle: *const DocumentStore.Handle,
-    source_index: usize,
-    nodes: []Ast.Node.Index,
-) error{OutOfMemory}!?DeclWithHandle {
-    if (nodes.len == 0) return null;
-
-    const tree = handle.tree;
-    const node_tags = tree.nodes.items(.tag);
-    const main_tokens = tree.nodes.items(.main_token);
-
-    var struct_init_buf: [2]Ast.Node.Index = undefined;
-    if (tree.fullStructInit(&struct_init_buf, nodes[0])) |struct_init| {
-        for (struct_init.ast.fields) |field_init| {
-            const field_token = handle.tree.firstToken(field_init) - 2;
-            const field_loc = offsets.tokenToLoc(handle.tree, field_token);
-            if (field_loc.start <= source_index and source_index <= field_loc.end) {
-                const field_name = tree.tokenSlice(field_token);
-                return analyser.lookupSymbolFieldInit(handle, field_name, nodes);
-            }
-        }
-    } else if (node_tags[nodes[0]] == .enum_literal) {
-        const field_name = tree.tokenSlice(main_tokens[nodes[0]]);
-        return analyser.lookupSymbolFieldInit(handle, field_name, nodes);
-    }
-
-    return null;
-}
-
 pub fn lookupSymbolFieldInit(
     analyser: *Analyser,
     handle: *const DocumentStore.Handle,
@@ -3315,11 +3285,6 @@ pub fn resolveExpressionTypeFromAncestors(
     return null;
 }
 
-pub fn identifierFromPosition(pos_index: usize, handle: DocumentStore.Handle) []const u8 {
-    const loc = identifierLocFromPosition(pos_index, &handle) orelse return "";
-    return offsets.locToSlice(handle.text, loc);
-}
-
 pub fn identifierLocFromPosition(pos_index: usize, handle: *const DocumentStore.Handle) ?std.zig.Token.Loc {
     if (pos_index + 1 >= handle.text.len) return null;
     var start_idx = pos_index;
@@ -3341,12 +3306,13 @@ pub fn identifierLocFromPosition(pos_index: usize, handle: *const DocumentStore.
     return .{ .start = start_idx, .end = end_idx };
 }
 
-pub fn getLabelGlobal(pos_index: usize, handle: *const DocumentStore.Handle) error{OutOfMemory}!?DeclWithHandle {
+pub fn getLabelGlobal(
+    pos_index: usize,
+    handle: *const DocumentStore.Handle,
+    name: []const u8,
+) error{OutOfMemory}!?DeclWithHandle {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
-
-    const name = identifierFromPosition(pos_index, handle.*);
-    if (name.len == 0) return null;
 
     return try lookupLabel(handle, name, pos_index);
 }
@@ -3355,12 +3321,10 @@ pub fn getSymbolGlobal(
     analyser: *Analyser,
     pos_index: usize,
     handle: *const DocumentStore.Handle,
+    name: []const u8,
 ) error{OutOfMemory}!?DeclWithHandle {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
-
-    const name = identifierFromPosition(pos_index, handle.*);
-    if (name.len == 0) return null;
 
     return try analyser.lookupSymbolGlobalAdvanced(handle, name, pos_index, .{
         .skip_container_fields = false,
@@ -3373,12 +3337,14 @@ pub fn getSymbolEnumLiteral(
     arena: std.mem.Allocator,
     handle: *const DocumentStore.Handle,
     source_index: usize,
+    name: []const u8,
 ) error{OutOfMemory}!?DeclWithHandle {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
     const nodes = try ast.nodesOverlappingIndex(arena, handle.tree, source_index);
-    return try analyser.lookupSymbolEnumLiteral(handle, source_index, nodes);
+    if (nodes.len == 0) return null;
+    return analyser.lookupSymbolFieldInit(handle, name, nodes);
 }
 
 /// Multiple when using branched types
@@ -3387,16 +3353,13 @@ pub fn getSymbolFieldAccesses(
     arena: std.mem.Allocator,
     handle: *const DocumentStore.Handle,
     source_index: usize,
-    loc: offsets.Loc,
+    held_loc: offsets.Loc,
+    name: []const u8,
 ) error{OutOfMemory}!?[]const DeclWithHandle {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const name_loc = identifierLocFromPosition(source_index, handle) orelse return null;
-    const name = offsets.locToSlice(handle.text, name_loc);
-    if (name.len == 0) return null;
-
-    const held_range = try arena.dupeZ(u8, offsets.locToSlice(handle.text, offsets.locMerge(loc, name_loc)));
+    const held_range = try arena.dupeZ(u8, offsets.locToSlice(handle.text, held_loc));
     var tokenizer = std.zig.Tokenizer.init(held_range);
 
     var decls_with_handles = std.ArrayListUnmanaged(DeclWithHandle){};

@@ -61,5 +61,6 @@ fn testDefinition(source: []const u8) !void {
     };
 
     const response = try ctx.server.sendRequestSync(ctx.arena.allocator(), "textDocument/definition", params) orelse return error.UnresolvedDefinition;
-    try std.testing.expectEqual(def_range_lsp, response.Definition.Location.range);
+    try std.testing.expectEqual(@as(usize, 1), response.array_of_DefinitionLink.len);
+    try std.testing.expectEqual(def_range_lsp, response.array_of_DefinitionLink[0].targetSelectionRange);
 }

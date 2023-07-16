@@ -260,11 +260,11 @@ pub fn getSignatureInfo(analyser: *Analyser, arena: std.mem.Allocator, handle: *
                         );
                     }
 
-                    const name = Analyser.identifierFromPosition(expr_end - 1, handle.*);
-                    if (name.len == 0) {
+                    const name_loc = Analyser.identifierLocFromPosition(expr_end - 1, handle) orelse {
                         try symbol_stack.append(arena, .l_paren);
                         continue;
-                    }
+                    };
+                    const name = offsets.locToSlice(handle.text, name_loc);
 
                     const skip_self_param = !type_handle.type.is_type_val;
                     const decl_handle = (try analyser.lookupSymbolContainer(
