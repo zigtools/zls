@@ -182,7 +182,17 @@ fn writeDocComments(builder: *Builder, tree: Ast, doc: Ast.TokenIndex) !void {
     }
 }
 
-fn fieldTokenType(container_decl: Ast.Node.Index, handle: *const DocumentStore.Handle) ?TokenType {
+fn fieldTokenType(
+    container_decl: Ast.Node.Index,
+    handle: *const DocumentStore.Handle,
+    is_static_access: bool,
+) ?TokenType {
+    if (!ast.isContainer(handle.tree, container_decl))
+        return null;
+    if (container_decl == 0)
+        return .property;
+    if (is_static_access and ast.isTaggedUnion(handle.tree, container_decl))
+        return .enumMember;
     const main_token = handle.tree.nodes.items(.main_token)[container_decl];
     if (main_token > handle.tree.tokens.len) return null;
     return @as(?TokenType, switch (handle.tree.tokens.items(.tag)[main_token]) {
@@ -589,10 +599,7 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
                 field_token_type = if (try builder.analyser.resolveTypeOfNode(
                     .{ .node = struct_init.ast.type_expr, .handle = handle },
                 )) |struct_type| switch (struct_type.type.data) {
-                    .other => |type_node| if (ast.isContainer(struct_type.handle.tree, type_node))
-                        fieldTokenType(type_node, struct_type.handle)
-                    else
-                        null,
+                    .other => |n| fieldTokenType(n, struct_type.handle, false),
                     else => null,
                 } else null;
             }
@@ -846,12 +853,10 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
                 switch (decl_type.decl.*) {
                     .ast_node => |decl_node| {
                         if (decl_type.handle.tree.nodes.items(.tag)[decl_node].isContainerField()) {
-                            const tok_type: ?TokenType = if (ast.isContainer(lhs_type.handle.tree, left_type_node))
-                                fieldTokenType(decl_node, lhs_type.handle)
-                            else if (left_type_node == 0)
-                                .property
-                            else
-                                null;
+                            const tok_type = switch (lhs_type.type.data) {
+                                .other => |n| fieldTokenType(n, lhs_type.handle, lhs_type.type.is_type_val),
+                                else => null,
+                            };
 
                             if (tok_type) |tt| try writeToken(builder, data.rhs, tt);
                             return;
@@ -938,7 +943,7 @@ fn writeContainerField(builder: *Builder, node: Ast.Node.Index, container_decl: 
     var allocator = builder.arena;
 
     var container_field = tree.fullContainerField(node).?;
-    const field_token_type = fieldTokenType(container_decl, builder.handle) orelse .property;
+    const field_token_type = fieldTokenType(container_decl, builder.handle, false) orelse .property;
 
     const token_tags = tree.tokens.items(.tag);
     const main_tokens = tree.nodes.items(.main_token);
