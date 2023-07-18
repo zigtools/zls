@@ -47,8 +47,6 @@ fn typeToCompletion(
                 });
             }
         },
-        .error_union => {},
-        .multi_pointer => {},
         .pointer => |t| {
             if (server.config.operator_completions) {
                 try list.append(arena, .{
@@ -74,7 +72,6 @@ fn typeToCompletion(
             null,
             either_descriptor,
         ),
-        .primitive, .array_index => {},
         .@"comptime" => |co| try analyser_completions.dotCompletions(
             arena,
             list,
@@ -87,6 +84,7 @@ fn typeToCompletion(
             for (bruh) |a|
                 try typeToCompletion(server, analyser, arena, list, .{ .original = a.type_with_handle }, orig_handle, a.descriptor);
         },
+        else => {},
     }
 }
 
