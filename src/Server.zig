@@ -951,6 +951,8 @@ pub fn hoverHandler(server: *Server, arena: std.mem.Allocator, request: types.Ho
 
     const response = hover_handler.hover(&analyser, arena, handle, source_index, markup_kind);
 
+    if (1 == 1) @panic("expected crash");
+
     // TODO: Figure out a better solution for comptime interpreter diags
     if (server.client_capabilities.supports_publish_diagnostics) {
         try server.pushJob(.{

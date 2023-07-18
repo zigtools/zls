@@ -8,7 +8,7 @@ on:
   # - We don't expose secrets in environment variables which makes exploitation much more difficult
   # - The secrets that we reference aren't all that important anyways (they can only access our DigitalOcean Space)
   pull_request_target:
-    types: [labeled, synchronize]
+    types: [synchronize]
   push:
     paths:
       - "**.zig"
@@ -27,7 +27,7 @@ permissions: read-all
 
 jobs:
   fuzz:
-    if: github.repository_owner == 'zigtools' && (github.event_name != 'pull_request_target' || contains(github.event.pull_request.labels.*.name, 'pr:fuzz'))
+    if: github.repository_owner == 'zigtools'
     runs-on: ubuntu-latest
 
     steps:
@@ -105,6 +105,14 @@ jobs:
           FUZZING_DURATION=${{ env.FUZZING_DURATION }}
           { sleep ${FUZZING_DURATION:-1h}; pkill -9 sus; } &
           ./zig-out/bin/sus $GITHUB_WORKSPACE/zls/zig-out/bin/zls markov $GITHUB_WORKSPACE/zig/lib/std
+
+      - name: Publish status
+        run: |
+          ERRORCOUNT=$(ls sus/saved_logs/ | wc -l)
+          echo "$ERRORCOUNT failures found" >> $GITHUB_STEP_SUMMARY
+          if [ $ERRORCOUNT -gt 0 ]; then
+            exit 1
+          fi
 
       - name: Upload saved logs
         uses: actions/upload-artifact@v3
