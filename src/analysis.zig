@@ -1779,8 +1779,12 @@ pub const TypeWithHandle = struct {
         if (self.type.is_type_val) {
             if (try analyser.lookupSymbolContainer(node_handle, symbol, .variable)) |decl|
                 return decl;
+            if (self.isEnumType() or self.isTaggedUnion())
+                return analyser.lookupSymbolContainer(node_handle, symbol, .field);
             return null;
         }
+        if (self.isEnumType())
+            return analyser.lookupSymbolContainer(node_handle, symbol, .variable);
         if (try analyser.lookupSymbolContainer(node_handle, symbol, .field)) |decl|
             return decl;
         return analyser.lookupSymbolContainer(node_handle, symbol, .variable);
