@@ -106,7 +106,7 @@ pub fn collectDocComments(allocator: std.mem.Allocator, tree: Ast, doc_comments:
     while (true) : (curr_line_tok += 1) {
         const comm = tokens[curr_line_tok];
         if ((container_doc and comm == .container_doc_comment) or (!container_doc and comm == .doc_comment)) {
-            try lines.append(std.mem.trim(u8, tree.tokenSlice(curr_line_tok)[3..], &std.ascii.whitespace));
+            try lines.append(tree.tokenSlice(curr_line_tok)[3..]);
         } else break;
     }
 
