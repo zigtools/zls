@@ -454,6 +454,9 @@ pub fn resolveVarDeclAlias(analyser: *Analyser, node_handle: NodeWithHandle) err
         .field_access => blk: {
             const lhs = datas[node_handle.node].lhs;
             const resolved = (try analyser.resolveTypeOfNode(.{ .node = lhs, .handle = handle })) orelse return null;
+            if (!resolved.type.is_type_val)
+                return null;
+
             const resolved_node = switch (resolved.type.data) {
                 .other => |n| n,
                 else => return null,
@@ -604,7 +607,7 @@ fn resolveUnwrapErrorUnionType(analyser: *Analyser, rhs: TypeWithHandle, side: E
             .left => null,
             .right => t.*,
         },
-        .primitive, .slice, .pointer, .multi_pointer, .array_index, .@"comptime", .either => return null,
+        else => return null,
     };
 
     if (rhs.handle.tree.nodes.items(.tag)[rhs_node] == .error_union) {
@@ -616,6 +619,56 @@ fn resolveUnwrapErrorUnionType(analyser: *Analyser, rhs: TypeWithHandle, side: E
             },
             .handle = rhs.handle,
         })) orelse return null).instanceTypeVal();
+    }
+
+    return null;
+}
+
+fn resolveTaggedUnionFieldType(analyser: *Analyser, type_handle: TypeWithHandle, symbol: []const u8) !?TypeWithHandle {
+    if (!type_handle.type.is_type_val)
+        return null;
+
+    const node = switch (type_handle.type.data) {
+        .other => |n| n,
+        else => return null,
+    };
+
+    if (node == 0)
+        return null;
+
+    const handle = type_handle.handle;
+    const tree = handle.tree;
+    const node_tags = tree.nodes.items(.tag);
+    const token_tags = tree.tokens.items(.tag);
+
+    var buf: [2]Ast.Node.Index = undefined;
+    const container_decl = tree.fullContainerDecl(&buf, node) orelse
+        return null;
+
+    if (token_tags[container_decl.ast.main_token] != .keyword_union)
+        return null;
+
+    const child = try type_handle.lookupSymbol(analyser, symbol) orelse
+        return null;
+
+    if (child.decl.* != .ast_node or !node_tags[child.decl.ast_node].isContainerField())
+        return try child.resolveType(analyser);
+
+    if (container_decl.ast.enum_token != null) {
+        const union_type_ptr = try analyser.arena.allocator().create(TypeWithHandle);
+        union_type_ptr.* = type_handle;
+        return TypeWithHandle{
+            .type = .{ .data = .{ .union_tag = union_type_ptr }, .is_type_val = false },
+            .handle = handle,
+        };
+    }
+
+    if (container_decl.ast.arg != 0) {
+        const tag_type = (try analyser.resolveTypeOfNode(.{
+            .node = container_decl.ast.arg,
+            .handle = handle,
+        })) orelse return null;
+        return tag_type.instanceTypeVal();
     }
 
     return null;
@@ -1218,10 +1271,13 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 .handle = handle,
             })) orelse return null;
 
+            const symbol = tree.tokenSlice(datas[node].rhs);
+
+            if (try analyser.resolveTaggedUnionFieldType(lhs, symbol)) |tag_type|
+                return tag_type;
+
             // If we are accessing a pointer type, remove one pointerness level :)
             const left_type = (try analyser.resolveDerefType(lhs)) orelse lhs;
-
-            const symbol = tree.tokenSlice(datas[node].rhs);
 
             if (try analyser.resolvePropertyType(left_type, symbol)) |t|
                 return t;
@@ -1490,14 +1546,38 @@ pub const Type = struct {
     };
 
     data: union(enum) {
+        /// Type of `foo` in `&foo`
         pointer: *TypeWithHandle,
+
+        /// Element type of `slice` in `slice.ptr`
         multi_pointer: *TypeWithHandle,
+
+        /// Element type of `array` in `array[x..y]`
         slice: *TypeWithHandle,
+
+        /// Return type of `fn foo() !Foo`
         error_union: *TypeWithHandle,
+
+        /// `Foo` in `Foo.bar` where `Foo = union(enum) { bar }`
+        union_tag: *TypeWithHandle,
+
+        /// - Container type: `struct {}`, `enum {}`, `union {}`, `opaque {}`, `error {}`
+        /// - Pointer type: `*Foo`, `[]Foo`, `?Foo`
+        /// - Error type: `Foo || Bar`, `Foo!Bar`
+        /// - Function: `fn () Foo`, `fn foo() Foo`
+        /// - Literal: `"foo"`, `'x'`, `42`, `.foo`, `error.Foo`
+        /// - Primitive value: `true`, `false`, `null`, `undefined`
         other: Ast.Node.Index,
+
+        /// Primitive type: `u8`, `bool`, `type`, etc.
         primitive: []const u8,
+
+        /// Branching types
         either: []const EitherEntry,
+
+        // TODO: Unused?
         array_index,
+
         @"comptime": struct {
             interpreter: *ComptimeInterpreter,
             value: ComptimeInterpreter.Value,
@@ -1523,6 +1603,7 @@ pub const TypeWithHandle = struct {
                 .multi_pointer,
                 .slice,
                 .error_union,
+                .union_tag,
                 => |t| hashTypeWithHandle(hasher, t.*),
                 .other => |idx| hasher.update(&std.mem.toBytes(idx)),
                 .primitive => |name| hasher.update(name),
@@ -1561,6 +1642,7 @@ pub const TypeWithHandle = struct {
                 .multi_pointer,
                 .slice,
                 .error_union,
+                .union_tag,
                 => |a_type, name| {
                     const b_type = @field(b.type.data, @tagName(name));
                     if (!self.eql(a_type.*, b_type.*)) return false;
@@ -4161,6 +4243,11 @@ fn addReferencedTypes(
         .error_union => |t| {
             const rhs_str = try analyser.addReferencedTypes(t.*, ReferencedType.Collector.init(referenced_types));
             return try std.fmt.allocPrint(allocator, "!{s}", .{rhs_str orelse return null});
+        },
+
+        .union_tag => |t| {
+            const union_type_str = try analyser.addReferencedTypes(t.*, ReferencedType.Collector.init(referenced_types));
+            return try std.fmt.allocPrint(allocator, "@typeInfo({s}).Union.tag_type.?", .{union_type_str orelse return null});
         },
 
         .other => |p| switch (node_tags[p]) {
