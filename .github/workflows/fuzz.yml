@@ -27,7 +27,7 @@ permissions: read-all
 
 jobs:
   fuzz:
-    if: github.repository_owner == 'zigtools' && (github.event_name != 'pull_request_target' || contains(github.event.pull_request.labels.*.name, 'pr:fuzz'))
+    if: github.repository_owner == 'zigtools'
     runs-on: ubuntu-latest
 
     steps:
