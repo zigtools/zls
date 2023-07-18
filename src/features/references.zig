@@ -122,16 +122,8 @@ const Builder = struct {
                     (try builder.analyser.resolveTypeOfNode(.{ .node = datas[node].lhs, .handle = handle })) orelse return,
                 );
 
-                const left_type_node = switch (left_type.type.data) {
-                    .other => |n| n,
-                    else => return,
-                };
-
-                const child = (try builder.analyser.lookupSymbolContainer(
-                    .{ .node = left_type_node, .handle = left_type.handle },
-                    offsets.tokenToSlice(tree, datas[node].rhs),
-                    !left_type.type.is_type_val,
-                )) orelse return;
+                const symbol = offsets.tokenToSlice(tree, datas[node].rhs);
+                const child = (try left_type.lookupSymbol(builder.analyser, symbol)) orelse return;
 
                 if (builder.decl_handle.eql(child)) {
                     try builder.add(handle, datas[node].rhs);
@@ -341,16 +333,8 @@ const CallBuilder = struct {
                             (try builder.analyser.resolveTypeOfNode(.{ .node = datas[called_node].lhs, .handle = handle })) orelse return,
                         );
 
-                        const left_type_node = switch (left_type.type.data) {
-                            .other => |n| n,
-                            else => return,
-                        };
-
-                        const child = (try builder.analyser.lookupSymbolContainer(
-                            .{ .node = left_type_node, .handle = left_type.handle },
-                            offsets.tokenToSlice(tree, datas[called_node].rhs),
-                            !left_type.type.is_type_val,
-                        )) orelse return;
+                        const symbol = offsets.tokenToSlice(tree, datas[called_node].rhs);
+                        const child = (try left_type.lookupSymbol(builder.analyser, symbol)) orelse return;
 
                         if (builder.decl_handle.eql(child)) {
                             try builder.add(handle, node);

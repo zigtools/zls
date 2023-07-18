@@ -250,17 +250,9 @@ fn writeCallNodeHint(builder: *Builder, call: Ast.full.Call) !void {
             // than trying to re-tokenize and re-parse it
             if (try builder.analyser.getFieldAccessType(handle, rhs_loc.end, &tokenizer)) |result| {
                 const container_handle = result.unwrapped orelse result.original;
-                switch (container_handle.type.data) {
-                    .other => |container_handle_node| {
-                        if (try builder.analyser.lookupSymbolContainer(
-                            .{ .node = container_handle_node, .handle = container_handle.handle },
-                            tree.tokenSlice(rhsToken),
-                            true,
-                        )) |decl_handle| {
-                            try writeCallHint(builder, call, decl_handle);
-                        }
-                    },
-                    else => {},
+                const symbol = tree.tokenSlice(rhsToken);
+                if (try container_handle.lookupSymbol(builder.analyser, symbol)) |decl_handle| {
+                    try writeCallHint(builder, call, decl_handle);
                 }
             }
         },
