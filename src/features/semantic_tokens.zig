@@ -841,15 +841,7 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
             const lhs_type = try builder.analyser.resolveFieldAccessLhsType(
                 (try builder.analyser.resolveTypeOfNode(.{ .node = data.lhs, .handle = handle })) orelse return,
             );
-            const left_type_node = switch (lhs_type.type.data) {
-                .other => |n| n,
-                else => return,
-            };
-            if (try builder.analyser.lookupSymbolContainer(
-                .{ .node = left_type_node, .handle = lhs_type.handle },
-                tree.tokenSlice(data.rhs),
-                !lhs_type.type.is_type_val,
-            )) |decl_type| {
+            if (try lhs_type.lookupSymbol(builder.analyser, tree.tokenSlice(data.rhs))) |decl_type| {
                 switch (decl_type.decl.*) {
                     .ast_node => |decl_node| {
                         if (decl_type.handle.tree.nodes.items(.tag)[decl_node].isContainerField()) {

@@ -65,7 +65,7 @@ pub fn printDocumentScope(doc_scope: analysis.DocumentScope) void {
 
         var decl_it = scope.decls.iterator();
         while (decl_it.next()) |entry| {
-            std.debug.print("    - {s:<8} {}\n", .{ entry.key_ptr.*, entry.value_ptr.* });
+            std.debug.print("    - {s:<8} {}\n", .{ entry.key_ptr.name, entry.value_ptr.* });
         }
     }
 }
