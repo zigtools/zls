@@ -5,10 +5,12 @@ on:
     paths:
       - ".github/workflows/main.yml"
       - "**.zig"
+      - "build.zig.zon"
   pull_request:
     paths:
       - ".github/workflows/main.yml"
       - "**.zig"
+      - "build.zig.zon"
   schedule:
     - cron: "0 0 * * *"
   workflow_dispatch:
