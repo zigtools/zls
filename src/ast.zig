@@ -604,23 +604,11 @@ pub fn lastToken(tree: Ast, node: Ast.Node.Index) Ast.TokenIndex {
             }
             n = tree.extra_data[params.end - 1]; // last parameter
         },
-        .switch_comma,
-        .@"switch" => {
+        .switch_comma, .@"switch" => {
             const lhs = datas[n].lhs;
             const l_brace = tree.lastToken(lhs) + 2; //lparen + rbrace
-            return findMatchingRBrace(token_tags, l_brace);
-        },
-        .container_decl_arg,
-        .container_decl_arg_trailing,
-        => {
-            const members = tree.extraData(datas[n].rhs, Node.SubRange);
-            if (members.end - members.start == 0) {
-                end_offset += 3; // for the rparen + lbrace + rbrace
-                n = datas[n].lhs;
-            } else {
-                end_offset += 1; // for the rbrace
-                n = tree.extra_data[members.end - 1]; // last parameter
-            }
+            return findMatchingRBrace(token_tags, l_brace)
+                orelse @intCast(tree.tokens.len - 1);
         },
         .@"asm" => {
             const extra = tree.extraData(datas[n].rhs, Node.Asm);
@@ -649,7 +637,6 @@ pub fn lastToken(tree: Ast, node: Ast.Node.Index) Ast.TokenIndex {
         },
         .array_init_dot,
         .struct_init_dot,
-        .block,
         .container_decl,
         .tagged_union,
         .builtin_call,
@@ -660,8 +647,6 @@ pub fn lastToken(tree: Ast, node: Ast.Node.Index) Ast.TokenIndex {
         },
         .array_init_dot_comma,
         .struct_init_dot_comma,
-        .block_semicolon,
-        .container_decl_trailing,
         .tagged_union_trailing,
         .builtin_call_comma,
         => {
@@ -679,11 +664,28 @@ pub fn lastToken(tree: Ast, node: Ast.Node.Index) Ast.TokenIndex {
             }
             n = datas[n].rhs;
         },
-        .block_two => {
-            return findMatchingRBrace(token_tags, main_tokens[n]);
+        .block,
+        .block_semicolon,
+        .block_two_semicolon,
+        .block_two,
+        => {
+            return findMatchingRBrace(token_tags, main_tokens[n])
+                orelse @intCast(tree.tokens.len - 1);
         },
-        .container_decl_two => {
-            return findMatchingRBrace(token_tags, main_tokens[n] + 1);
+        .container_decl_trailing,
+        .container_decl_two_trailing,
+        .container_decl_two,
+        => {
+            // + 1 for the lbrace
+            return findMatchingRBrace(token_tags, main_tokens[n] + 1)
+                orelse @intCast(tree.tokens.len - 1);
+        },
+        .container_decl_arg,
+        .container_decl_arg_trailing,
+        => {
+            // + 4 for the lparen, identifier, rparen, lbrace
+            return findMatchingRBrace(token_tags, main_tokens[n] + 4)
+                orelse @intCast(tree.tokens.len - 1);
         },
         .array_init_dot_two,
         .builtin_call_two,
@@ -714,9 +716,7 @@ pub fn lastToken(tree: Ast, node: Ast.Node.Index) Ast.TokenIndex {
         },
         .array_init_dot_two_comma,
         .builtin_call_two_comma,
-        .block_two_semicolon,
         .struct_init_dot_two_comma,
-        .container_decl_two_trailing,
         .tagged_union_two_trailing,
         => {
             end_offset += 2; // for the comma/semicolon + rbrace/rparen
