@@ -167,8 +167,7 @@ test "foldingRange - container decl" {
         \\  beta: u16,
         \\};
     , &.{
-        // .{ .startLine = 0, .startCharacter = 32, .endLine = 3, .endCharacter = 0 }, // TODO
-        .{ .startLine = 0, .startCharacter = 32, .endLine = 2, .endCharacter = 11 },
+        .{ .startLine = 0, .startCharacter = 32, .endLine = 3, .endCharacter = 0 },
     });
     try testFoldingRange(
         \\const Foo = union {
