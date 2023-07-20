@@ -55,7 +55,10 @@ fn fullPtrTypeComponents(tree: Ast, info: full.PtrType.Components) full.PtrType 
     return result;
 }
 
-fn findMatchingRBrace(token_tags: []const TokenTag, l_brace: Ast.TokenIndex) Ast.TokenIndex {
+/// Given an l_brace, find the corresponding r_brace.
+/// If no corresponding r_brace is found, return null.
+/// Useful for finding the extent of a block/scope if the syntax is valid.
+fn findMatchingRBrace(token_tags: []const TokenTag, l_brace: Ast.TokenIndex) ?Ast.TokenIndex {
     std.debug.assert(token_tags[l_brace] == TokenTag.l_brace);
 
     const start = l_brace + 1;
@@ -75,10 +78,7 @@ fn findMatchingRBrace(token_tags: []const TokenTag, l_brace: Ast.TokenIndex) Ast
         }
     }
 
-    std.debug.assert(depth == 0);
-    std.debug.assert(token_tags[start + offset] == std.zig.Token.Tag.r_brace);
-
-    return start + offset;
+    return if (depth == 0) start + offset else null;
 }
 
 pub fn ptrTypeSimple(tree: Ast, node: Node.Index) full.PtrType {
