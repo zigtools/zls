@@ -1040,9 +1040,9 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 };
             }
 
-            if (isValueIdent(name)) {
+            if (primitive_types.get(name)) |type_name| {
                 return TypeWithHandle{
-                    .type = .{ .data = .{ .other = node_handle }, .is_type_val = false },
+                    .type = .{ .data = .{ .primitive = type_name }, .is_type_val = false },
                 };
             }
 
@@ -4420,11 +4420,6 @@ fn addReferencedTypes(
                 .error_value => {
                     const identifier = tree.tokenSlice(datas[node].rhs);
                     return try std.fmt.allocPrint(allocator, "error{{{s}}}", .{identifier});
-                },
-
-                .identifier => {
-                    const name = offsets.nodeToSlice(tree, node);
-                    return primitive_types.get(name);
                 },
 
                 else => {}, // TODO: Implement more "other" type expressions; better safe than sorry
