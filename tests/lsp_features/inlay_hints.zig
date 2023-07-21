@@ -119,11 +119,7 @@ fn testInlayHints(source: []const u8) !void {
 
     try error_builder.addFile(test_uri, phr.new_source);
 
-    var i: usize = 0;
-    outer: while (i < phr.locations.len) : (i += 1) {
-        const old_loc = phr.locations.items(.old)[i];
-        const new_loc = phr.locations.items(.new)[i];
-
+    outer: for (phr.locations.items(.old), phr.locations.items(.new)) |old_loc, new_loc| {
         const expected_name = offsets.locToSlice(source, old_loc);
         const expected_label = expected_name[1 .. expected_name.len - 1]; // convert <name> to name
 

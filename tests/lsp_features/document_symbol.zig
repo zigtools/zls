@@ -73,26 +73,22 @@ fn testDocumentSymbol(source: []const u8, want: []const u8) !void {
     var got = std.ArrayListUnmanaged(u8){};
     defer got.deinit(allocator);
 
-    var stack: [16][]const types.DocumentSymbol = undefined;
-    var stack_len: usize = 0;
-
-    stack[stack_len] = response.array_of_DocumentSymbol;
-    stack_len += 1;
+    var stack = std.BoundedArray([]const types.DocumentSymbol, 16){};
+    stack.appendAssumeCapacity(response.array_of_DocumentSymbol);
 
     var writer = got.writer(allocator);
-    while (stack_len > 0) {
-        const top = &stack[stack_len - 1];
+    while (stack.len > 0) {
+        const depth = stack.len - 1;
+        const top = stack.get(depth);
         if (top.len > 0) {
-            try std.fmt.format(writer, "{[space]s:[width]}", .{ .space = "", .width = (stack_len - 1) * 2 });
-            try std.fmt.format(writer, "{s} {s}\n", .{ @tagName(top.*[0].kind), top.*[0].name });
-            if (top.*[0].children) |children| {
-                std.debug.assert(stack_len < stack.len);
-                stack[stack_len] = children;
-                stack_len += 1;
+            try writer.writeByteNTimes(' ', (depth) * 2);
+            try writer.print("{s} {s}\n", .{ @tagName(top[0].kind), top[0].name });
+            if (top[0].children) |children| {
+                try stack.append(children);
             }
-            top.* = top.*[1..];
+            stack.set(depth, top[1..]);
         } else {
-            stack_len -= 1;
+            _ = stack.pop();
         }
     }
     _ = got.pop(); // Final \n

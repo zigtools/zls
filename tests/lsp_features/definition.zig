@@ -37,20 +37,24 @@ fn testDefinition(source: []const u8) !void {
     var phr = try helper.collectClearPlaceholders(allocator, source);
     defer phr.deinit(allocator);
 
-    var cursor: offsets.Loc = .{ .start = 0, .end = 0 };
-    var def_start: offsets.Loc = .{ .start = 0, .end = 0 };
-    var def_end: offsets.Loc = .{ .start = 0, .end = 0 };
-    for (phr.locations.items(.old), phr.locations.items(.new)) |old, new| {
-        if (mem.eql(u8, source[old.start..old.end], "<>")) cursor = new;
-        if (mem.eql(u8, source[old.start..old.end], "<def>")) def_start = new;
-        if (mem.eql(u8, source[old.start..old.end], "</def>")) def_end = new;
+    var cursor: ?offsets.Loc = null;
+    var def_start: ?offsets.Loc = null;
+    var def_end: ?offsets.Loc = null;
+    for (phr.locations.items(.old), phr.locations.items(.new)) |old_loc, new_loc| {
+        const str = offsets.locToSlice(source, old_loc);
+        if (mem.eql(u8, str, "<>")) cursor = new_loc;
+        if (mem.eql(u8, str, "<def>")) def_start = new_loc;
+        if (mem.eql(u8, str, "</def>")) def_end = new_loc;
     }
-
-    const cursor_lsp = offsets.locToRange(phr.new_source, cursor, .@"utf-16").start;
-    const def_range_lsp = offsets.locToRange(phr.new_source, .{ .start = def_start.end, .end = def_end.start }, .@"utf-16");
+    try std.testing.expect(cursor != null);
+    try std.testing.expect(def_start != null);
+    try std.testing.expect(def_end != null);
 
     var ctx = try Context.init();
     defer ctx.deinit();
+
+    const cursor_lsp = offsets.locToRange(phr.new_source, cursor.?, ctx.server.offset_encoding).start;
+    const def_range_lsp = offsets.locToRange(phr.new_source, .{ .start = def_start.?.end, .end = def_end.?.start }, ctx.server.offset_encoding);
 
     const test_uri = try ctx.addDocument(phr.new_source);
 
