@@ -8,7 +8,6 @@ const ErrorBuilder = @import("../ErrorBuilder.zig");
 
 const types = zls.types;
 const offsets = zls.offsets;
-const requests = zls.requests;
 
 const allocator: std.mem.Allocator = std.testing.allocator;
 
