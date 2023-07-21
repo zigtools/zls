@@ -86,7 +86,6 @@ pub fn hoverSymbol(
         .pointer_payload,
         .error_union_payload,
         .array_payload,
-        .array_index,
         .switch_payload,
         .label_decl,
         .error_token,

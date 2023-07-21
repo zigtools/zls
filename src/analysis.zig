@@ -1575,9 +1575,6 @@ pub const Type = struct {
         /// Branching types
         either: []const EitherEntry,
 
-        // TODO: Unused?
-        array_index,
-
         @"comptime": struct {
             interpreter: *ComptimeInterpreter,
             value: ComptimeInterpreter.Value,
@@ -1613,7 +1610,6 @@ pub const TypeWithHandle = struct {
                         hashTypeWithHandle(hasher, e.type_with_handle);
                     }
                 },
-                .array_index => {},
                 .@"comptime" => {
                     // TODO
                 },
@@ -1664,7 +1660,6 @@ pub const TypeWithHandle = struct {
                         if (!self.eql(ae.type_with_handle, be.type_with_handle)) return false;
                     }
                 },
-                .array_index => {},
                 .@"comptime" => {
                     // TODO
                 },
@@ -1711,7 +1706,7 @@ pub const TypeWithHandle = struct {
         };
     }
 
-    /// Resolves possible types of a type (single for all except array_index and either)
+    /// Resolves possible types of a type (single for all except either)
     /// Drops duplicates
     pub fn getAllTypesWithHandles(ty: TypeWithHandle, arena: std.mem.Allocator) ![]const TypeWithHandle {
         var all_types = std.ArrayListUnmanaged(TypeWithHandle){};
@@ -2478,7 +2473,6 @@ pub const Declaration = union(enum) {
         identifier: Ast.TokenIndex,
         array_expr: Ast.Node.Index,
     },
-    array_index: Ast.TokenIndex,
     switch_payload: struct {
         node: Ast.TokenIndex,
         switch_expr: Ast.Node.Index,
@@ -2537,7 +2531,6 @@ pub const DeclWithHandle = struct {
             .pointer_payload => |pp| pp.name,
             .error_union_payload => |ep| ep.name,
             .array_payload => |ap| ap.identifier,
-            .array_index => |ai| ai,
             .switch_payload => |sp| sp.node,
             .label_decl => |ld| ld.label,
             .error_token => |et| et,
@@ -2692,10 +2685,6 @@ pub const DeclWithHandle = struct {
                 })) orelse return null,
                 .Single,
             ),
-            .array_index => TypeWithHandle{
-                .type = .{ .data = .array_index, .is_type_val = false },
-                .handle = self.handle,
-            },
             .label_decl => |decl| try analyser.resolveTypeOfNodeInternal(.{
                 .node = decl.block,
                 .handle = self.handle,
