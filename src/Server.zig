@@ -1533,6 +1533,12 @@ pub fn waitAndWork(server: *Server) void {
     server.wait_group.reset();
 }
 
+comptime {
+    if (build_options.coverage) {
+        std.testing.refAllDecls(@This());
+    }
+}
+
 pub fn loop(server: *Server) !void {
     std.debug.assert(server.transport != null);
     while (server.keepRunning()) {
@@ -1656,7 +1662,7 @@ pub fn sendMessageSync(server: *Server, arena: std.mem.Allocator, comptime metho
     } else unreachable;
 }
 
-fn processMessage(server: *Server, message: Message) Error!?[]const u8 {
+fn processMessage(server: *Server, message: Message) Error!?[]u8 {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
