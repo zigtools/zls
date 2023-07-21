@@ -248,14 +248,14 @@ pub fn getSignatureInfo(analyser: *Analyser, arena: std.mem.Allocator, handle: *
                     };
 
                     var buf: [1]Ast.Node.Index = undefined;
-                    if (type_handle.handle.tree.fullFnProto(&buf, node)) |proto| {
+                    if (node.handle.tree.fullFnProto(&buf, node.node)) |proto| {
                         return try fnProtoToSignatureInfo(
                             analyser,
                             arena,
                             paren_commas,
                             false,
-                            type_handle.handle,
-                            node,
+                            node.handle,
+                            node.node,
                             proto,
                         );
                     }
@@ -271,35 +271,31 @@ pub fn getSignatureInfo(analyser: *Analyser, arena: std.mem.Allocator, handle: *
                         try symbol_stack.append(arena, .l_paren);
                         continue;
                     };
-                    var res_handle = decl_handle.handle;
                     node = switch (decl_handle.decl.*) {
-                        .ast_node => |n| n,
+                        .ast_node => |n| .{ .node = n, .handle = decl_handle.handle },
                         else => {
                             try symbol_stack.append(arena, .l_paren);
                             continue;
                         },
                     };
 
-                    if (try analyser.resolveVarDeclAlias(
-                        .{ .node = node, .handle = decl_handle.handle },
-                    )) |resolved| {
+                    if (try analyser.resolveVarDeclAlias(node)) |resolved| {
                         switch (resolved.decl.*) {
                             .ast_node => |n| {
-                                res_handle = resolved.handle;
-                                node = n;
+                                node = .{ .node = n, .handle = resolved.handle };
                             },
                             else => {},
                         }
                     }
 
-                    if (res_handle.tree.fullFnProto(&buf, node)) |proto| {
+                    if (node.handle.tree.fullFnProto(&buf, node.node)) |proto| {
                         return try fnProtoToSignatureInfo(
                             analyser,
                             arena,
                             paren_commas,
                             skip_self_param,
-                            res_handle,
-                            node,
+                            node.handle,
+                            node.node,
                             proto,
                         );
                     }

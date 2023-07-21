@@ -599,7 +599,7 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
                 field_token_type = if (try builder.analyser.resolveTypeOfNode(
                     .{ .node = struct_init.ast.type_expr, .handle = handle },
                 )) |struct_type| switch (struct_type.type.data) {
-                    .other => |n| fieldTokenType(n, struct_type.handle, false),
+                    .other => |n| fieldTokenType(n.node, n.handle, false),
                     else => null,
                 } else null;
             }
@@ -846,7 +846,7 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
                     .ast_node => |decl_node| {
                         if (decl_type.handle.tree.nodes.items(.tag)[decl_node].isContainerField()) {
                             const tok_type = switch (lhs_type.type.data) {
-                                .other => |n| fieldTokenType(n, lhs_type.handle, lhs_type.type.is_type_val),
+                                .other => |n| fieldTokenType(n.node, n.handle, lhs_type.type.is_type_val),
                                 else => null,
                             };
 

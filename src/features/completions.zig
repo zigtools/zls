@@ -63,7 +63,7 @@ fn typeToCompletion(
             analyser,
             arena,
             list,
-            .{ .node = n, .handle = type_handle.handle },
+            n,
             field_access.unwrapped,
             orig_handle,
             null,
@@ -805,15 +805,15 @@ fn kindToSortScore(kind: types.CompletionItemKind) ?[]const u8 {
 /// Given a TypeWithHandle that is a container, adds it's `.container_field*`s to completions
 pub fn collectContainerFields(
     arena: std.mem.Allocator,
-    container: Analyser.TypeWithHandle,
+    container_type: Analyser.TypeWithHandle,
     completions: *std.ArrayListUnmanaged(types.CompletionItem),
 ) error{OutOfMemory}!void {
-    const node = switch (container.type.data) {
+    const container = switch (container_type.type.data) {
         .other => |n| n,
         else => return,
     };
     var buffer: [2]Ast.Node.Index = undefined;
-    const container_decl = Ast.fullContainerDecl(container.handle.tree, &buffer, node) orelse return;
+    const container_decl = Ast.fullContainerDecl(container.handle.tree, &buffer, container.node) orelse return;
     for (container_decl.ast.members) |member| {
         const field = container.handle.tree.fullContainerField(member) orelse continue;
         const name = container.handle.tree.tokenSlice(field.ast.main_token);
@@ -901,9 +901,8 @@ fn resolveContainer(
                         try types_with_handles.append(
                             arena,
                             Analyser.TypeWithHandle{
-                                .handle = node_handle,
                                 .type = .{
-                                    .data = .{ .other = 0 },
+                                    .data = .{ .other = .{ .node = 0, .handle = node_handle } },
                                     .is_type_val = true,
                                 },
                             },
@@ -942,9 +941,8 @@ fn resolveContainer(
                         try types_with_handles.append(
                             arena,
                             Analyser.TypeWithHandle{
-                                .handle = symbol_decl.handle,
                                 .type = .{
-                                    .data = .{ .other = node_data.rhs },
+                                    .data = .{ .other = .{ .node = node_data.rhs, .handle = symbol_decl.handle } },
                                     .is_type_val = true,
                                 },
                             },
@@ -956,11 +954,10 @@ fn resolveContainer(
                                 .other => |n| n,
                                 else => continue,
                             };
-                            if (ast.isContainer(symbol_decl.handle.tree, node))
+                            if (ast.isContainer(node.handle.tree, node.node))
                                 try types_with_handles.append(
                                     arena,
                                     Analyser.TypeWithHandle{
-                                        .handle = symbol_decl.handle,
                                         .type = .{
                                             .data = .{ .other = node },
                                             .is_type_val = true,
@@ -985,21 +982,22 @@ fn resolveContainer(
                 };
                 const node_type = try analyser.resolveTypeOfNode(.{ .node = decl_node, .handle = decl.handle }) orelse continue;
                 if (node_type.isFunc()) {
+                    const node = node_type.type.data.other;
                     var buf: [1]Ast.Node.Index = undefined;
-                    const full_fn_proto = node_type.handle.tree.fullFnProto(&buf, node_type.type.data.other) orelse continue;
+                    const full_fn_proto = node.handle.tree.fullFnProto(&buf, node.node) orelse continue;
                     var maybe_fn_param: ?Ast.full.FnProto.Param = undefined;
-                    var fn_param_iter = full_fn_proto.iterate(&node_type.handle.tree);
+                    var fn_param_iter = full_fn_proto.iterate(&node.handle.tree);
                     // don't have the luxury of referencing an `Ast.full.Call`
                     // check if the first symbol is a `T` or an instance_of_T
                     const additional_index: usize = blk: {
-                        // NOTE: `loc` points to offsets within `handle`, not `node_type.decl.handle`
+                        // NOTE: `loc` points to offsets within `handle`, not `node.handle`
                         const field_access_slice = handle.text[loc.start..loc.end];
                         var symbol_iter = std.mem.tokenizeScalar(u8, field_access_slice, '.');
                         const first_symbol = symbol_iter.next() orelse continue;
                         const symbol_decl = try analyser.lookupSymbolGlobal(handle, first_symbol, loc.start) orelse continue;
                         const symbol_type = try symbol_decl.resolveType(analyser) orelse continue;
                         if (!symbol_type.type.is_type_val) { // then => instance_of_T
-                            if (try analyser.hasSelfParam(node_type.handle, full_fn_proto)) break :blk 2;
+                            if (try analyser.hasSelfParam(node.handle, full_fn_proto)) break :blk 2;
                         }
                         break :blk 1; // is `T`, no SelfParam
                     };
@@ -1010,15 +1008,15 @@ fn resolveContainer(
                         document_store,
                         analyser,
                         arena,
-                        node_type.handle,
-                        offsets.nodeToLoc(node_type.handle.tree, param.type_expr).end,
+                        node.handle,
+                        offsets.nodeToLoc(node.handle.tree, param.type_expr).end,
                         fn_arg_index,
                     );
                     for (param_rcts) |prct| try types_with_handles.append(arena, prct);
                     continue;
                 }
                 switch (node_type.type.data) {
-                    .other => |n| if (ast.isContainer(node_type.handle.tree, n)) {
+                    .other => |n| if (ast.isContainer(n.handle.tree, n.node)) {
                         try types_with_handles.append(arena, node_type);
                         continue;
                     },
@@ -1029,11 +1027,10 @@ fn resolveContainer(
                         .other => |n| n,
                         else => continue,
                     };
-                    if (ast.isContainer(node_type.handle.tree, enode))
+                    if (ast.isContainer(enode.handle.tree, enode.node))
                         try types_with_handles.append(
                             arena,
                             Analyser.TypeWithHandle{
-                                .handle = node_type.handle,
                                 .type = .{
                                     .data = .{ .other = enode },
                                     .is_type_val = true,
@@ -1062,29 +1059,28 @@ fn resolveContainer(
                     else => continue,
                 };
                 var buffer: [2]Ast.Node.Index = undefined;
-                const container_decl = Ast.fullContainerDecl(container.handle.tree, &buffer, node) orelse continue;
+                const container_decl = Ast.fullContainerDecl(node.handle.tree, &buffer, node.node) orelse continue;
                 for (container_decl.ast.members) |member| {
-                    const field = container.handle.tree.fullContainerField(member) orelse continue;
-                    if (std.mem.eql(u8, container.handle.tree.tokenSlice(field.ast.main_token), alleged_field_name)) {
-                        if (ast.isContainer(container.handle.tree, field.ast.type_expr)) {
+                    const field = node.handle.tree.fullContainerField(member) orelse continue;
+                    if (std.mem.eql(u8, node.handle.tree.tokenSlice(field.ast.main_token), alleged_field_name)) {
+                        if (ast.isContainer(node.handle.tree, field.ast.type_expr)) {
                             try types_with_handles.append(
                                 arena,
                                 Analyser.TypeWithHandle{
-                                    .handle = container.handle,
                                     .type = .{
-                                        .data = .{ .other = field.ast.type_expr },
+                                        .data = .{ .other = .{ .node = field.ast.type_expr, .handle = node.handle } },
                                         .is_type_val = true,
                                     },
                                 },
                             );
                             continue;
                         }
-                        const end = offsets.tokenToLoc(container.handle.tree, ast.lastToken(container.handle.tree, field.ast.type_expr)).end;
+                        const end = offsets.tokenToLoc(node.handle.tree, ast.lastToken(node.handle.tree, field.ast.type_expr)).end;
                         const param_rcts = try resolveContainer(
                             document_store,
                             analyser,
                             arena,
-                            container.handle,
+                            node.handle,
                             end,
                             fn_arg_index,
                         );

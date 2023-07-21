@@ -462,11 +462,8 @@ pub fn resolveVarDeclAlias(analyser: *Analyser, node_handle: NodeWithHandle) err
                 else => return null,
             };
 
-            break :blk try analyser.lookupSymbolContainer(
-                .{ .node = resolved_node, .handle = resolved.handle },
-                tree.tokenSlice(datas[node_handle.node].rhs),
-                .variable,
-            );
+            const symbol = tree.tokenSlice(datas[node_handle.node].rhs);
+            break :blk try analyser.lookupSymbolContainer(resolved_node, symbol, .variable);
         },
         .global_var_decl,
         .local_var_decl,
@@ -491,9 +488,11 @@ pub fn resolveVarDeclAlias(analyser: *Analyser, node_handle: NodeWithHandle) err
             if (!std.mem.eql(u8, name, "@import") and !std.mem.eql(u8, name, "@cImport"))
                 return null;
 
-            const inner_node = (try analyser.resolveTypeOfNode(.{ .node = lhs, .handle = handle })) orelse return null;
+            const inner_type = (try analyser.resolveTypeOfNode(.{ .node = lhs, .handle = handle })) orelse return null;
+            std.debug.assert(inner_type.type.data == .other);
+            const inner_node = inner_type.type.data.other;
             // assert root node
-            std.debug.assert(inner_node.type.data.other == 0);
+            std.debug.assert(inner_node.node == 0);
             const root_decl = &inner_node.handle.document_scope.decls.items[0];
             break :blk DeclWithHandle{ .decl = root_decl, .handle = inner_node.handle };
         },
@@ -578,21 +577,20 @@ fn resolveReturnType(analyser: *Analyser, fn_decl: Ast.full.FnProto, handle: *co
         child_type_ptr.* = child_type.instanceTypeVal() orelse return null;
         return TypeWithHandle{
             .type = .{ .data = .{ .error_union = child_type_ptr }, .is_type_val = false },
-            .handle = handle,
         };
     } else return child_type.instanceTypeVal();
 }
 
 /// Resolves the child type of an optional type
-fn resolveUnwrapOptionalType(analyser: *Analyser, opt: TypeWithHandle) !?TypeWithHandle {
-    const opt_node = switch (opt.type.data) {
+fn resolveUnwrapOptionalType(analyser: *Analyser, opt_type: TypeWithHandle) !?TypeWithHandle {
+    const opt = switch (opt_type.type.data) {
         .other => |n| n,
         else => return null,
     };
 
-    if (opt.handle.tree.nodes.items(.tag)[opt_node] == .optional_type) {
+    if (opt.handle.tree.nodes.items(.tag)[opt.node] == .optional_type) {
         return ((try analyser.resolveTypeOfNodeInternal(.{
-            .node = opt.handle.tree.nodes.items(.data)[opt_node].lhs,
+            .node = opt.handle.tree.nodes.items(.data)[opt.node].lhs,
             .handle = opt.handle,
         })) orelse return null).instanceTypeVal();
     }
@@ -600,8 +598,8 @@ fn resolveUnwrapOptionalType(analyser: *Analyser, opt: TypeWithHandle) !?TypeWit
     return null;
 }
 
-fn resolveUnwrapErrorUnionType(analyser: *Analyser, rhs: TypeWithHandle, side: ErrorUnionSide) !?TypeWithHandle {
-    const rhs_node = switch (rhs.type.data) {
+fn resolveUnwrapErrorUnionType(analyser: *Analyser, rhs_type: TypeWithHandle, side: ErrorUnionSide) !?TypeWithHandle {
+    const rhs = switch (rhs_type.type.data) {
         .other => |n| n,
         .error_union => |t| return switch (side) {
             .left => null,
@@ -610,8 +608,8 @@ fn resolveUnwrapErrorUnionType(analyser: *Analyser, rhs: TypeWithHandle, side: E
         else => return null,
     };
 
-    if (rhs.handle.tree.nodes.items(.tag)[rhs_node] == .error_union) {
-        const data = rhs.handle.tree.nodes.items(.data)[rhs_node];
+    if (rhs.handle.tree.nodes.items(.tag)[rhs.node] == .error_union) {
+        const data = rhs.handle.tree.nodes.items(.data)[rhs.node];
         return ((try analyser.resolveTypeOfNodeInternal(.{
             .node = switch (side) {
                 .left => data.lhs,
@@ -628,15 +626,16 @@ fn resolveTaggedUnionFieldType(analyser: *Analyser, type_handle: TypeWithHandle,
     if (!type_handle.type.is_type_val)
         return null;
 
-    const node = switch (type_handle.type.data) {
+    const node_handle = switch (type_handle.type.data) {
         .other => |n| n,
         else => return null,
     };
 
+    const node = node_handle.node;
     if (node == 0)
         return null;
 
-    const handle = type_handle.handle;
+    const handle = node_handle.handle;
     const tree = handle.tree;
     const node_tags = tree.nodes.items(.tag);
     const token_tags = tree.tokens.items(.tag);
@@ -659,7 +658,6 @@ fn resolveTaggedUnionFieldType(analyser: *Analyser, type_handle: TypeWithHandle,
         union_type_ptr.* = type_handle;
         return TypeWithHandle{
             .type = .{ .data = .{ .union_tag = union_type_ptr }, .is_type_val = false },
-            .handle = handle,
         };
     }
 
@@ -675,17 +673,17 @@ fn resolveTaggedUnionFieldType(analyser: *Analyser, type_handle: TypeWithHandle,
 }
 
 /// Resolves the child type of a deref type
-fn resolveDerefType(analyser: *Analyser, deref: TypeWithHandle) !?TypeWithHandle {
-    const deref_node = switch (deref.type.data) {
+fn resolveDerefType(analyser: *Analyser, deref_type: TypeWithHandle) !?TypeWithHandle {
+    const deref = switch (deref_type.type.data) {
         .other => |n| n,
         .pointer => |t| return t.*,
         else => return null,
     };
     const tree = deref.handle.tree;
-    const main_token = tree.nodes.items(.main_token)[deref_node];
+    const main_token = tree.nodes.items(.main_token)[deref.node];
     const token_tag = tree.tokens.items(.tag)[main_token];
 
-    if (ast.fullPtrType(tree, deref_node)) |ptr_type| {
+    if (ast.fullPtrType(tree, deref.node)) |ptr_type| {
         switch (token_tag) {
             .asterisk => {
                 return ((try analyser.resolveTypeOfNodeInternal(.{
@@ -701,27 +699,26 @@ fn resolveDerefType(analyser: *Analyser, deref: TypeWithHandle) !?TypeWithHandle
 }
 
 /// Resolves slicing and array access
-fn resolveBracketAccessType(analyser: *Analyser, lhs: TypeWithHandle, rhs: enum { Single, Range }) !?TypeWithHandle {
-    const lhs_node = switch (lhs.type.data) {
+fn resolveBracketAccessType(analyser: *Analyser, lhs_type: TypeWithHandle, rhs: enum { Single, Range }) !?TypeWithHandle {
+    const lhs = switch (lhs_type.type.data) {
         .other => |n| n,
         .multi_pointer => |t| return switch (rhs) {
             .Single => t.*,
             .Range => TypeWithHandle{
-                .type = .{ .data = .{ .slice = t }, .is_type_val = lhs.type.is_type_val },
-                .handle = lhs.handle,
+                .type = .{ .data = .{ .slice = t }, .is_type_val = lhs_type.type.is_type_val },
             },
         },
         .slice => |t| return switch (rhs) {
             .Single => t.*,
-            .Range => lhs,
+            .Range => lhs_type,
         },
         else => return null,
     };
 
     const tree = lhs.handle.tree;
     const tags = tree.nodes.items(.tag);
-    const tag = tags[lhs_node];
-    const data = tree.nodes.items(.data)[lhs_node];
+    const tag = tags[lhs.node];
+    const data = tree.nodes.items(.data)[lhs.node];
 
     if (tag == .array_type or tag == .array_type_sentinel) {
         const child_type = (try analyser.resolveTypeOfNodeInternal(.{
@@ -734,9 +731,8 @@ fn resolveBracketAccessType(analyser: *Analyser, lhs: TypeWithHandle, rhs: enum 
         child_type_ptr.* = child_type.instanceTypeVal() orelse return null;
         return TypeWithHandle{
             .type = .{ .data = .{ .slice = child_type_ptr }, .is_type_val = false },
-            .handle = lhs.handle,
         };
-    } else if (ast.fullPtrType(tree, lhs_node)) |ptr_type| {
+    } else if (ast.fullPtrType(tree, lhs.node)) |ptr_type| {
         if (ptr_type.size == .Slice) {
             if (rhs == .Single) {
                 return ((try analyser.resolveTypeOfNodeInternal(.{
@@ -744,7 +740,7 @@ fn resolveBracketAccessType(analyser: *Analyser, lhs: TypeWithHandle, rhs: enum 
                     .handle = lhs.handle,
                 })) orelse return null).instanceTypeVal();
             }
-            return lhs;
+            return lhs_type;
         }
     }
 
@@ -758,11 +754,12 @@ pub fn resolveFieldAccessLhsType(analyser: *Analyser, lhs: TypeWithHandle) !Type
 }
 
 fn resolveTupleFieldType(analyser: *Analyser, type_handle: TypeWithHandle, index: usize) !?TypeWithHandle {
-    const node = switch (type_handle.type.data) {
+    const node_handle = switch (type_handle.type.data) {
         .other => |n| n,
         else => return null,
     };
-    const handle = type_handle.handle;
+    const node = node_handle.node;
+    const handle = node_handle.handle;
     const tree = handle.tree;
     const main_tokens = tree.nodes.items(.main_token);
     const token_tags = tree.tokens.items(.tag);
@@ -793,88 +790,86 @@ fn resolvePropertyType(analyser: *Analyser, type_handle: TypeWithHandle, name: [
     if (type_handle.type.is_type_val)
         return null;
 
-    const handle = type_handle.handle;
-    const tree = handle.tree;
-    const node_tags = tree.nodes.items(.tag);
-
     switch (type_handle.type.data) {
         .slice => |t| {
             if (std.mem.eql(u8, "len", name)) {
                 return TypeWithHandle{
                     .type = .{ .data = .{ .primitive = "usize" }, .is_type_val = false },
-                    .handle = handle,
                 };
             }
 
             if (std.mem.eql(u8, "ptr", name)) {
                 return TypeWithHandle{
                     .type = .{ .data = .{ .multi_pointer = t }, .is_type_val = false },
-                    .handle = handle,
                 };
             }
         },
 
-        .other => |n| switch (node_tags[n]) {
-            .array_type,
-            .array_type_sentinel,
-            .multiline_string_literal,
-            .string_literal,
-            => if (std.mem.eql(u8, "len", name)) {
-                return TypeWithHandle{
-                    .type = .{ .data = .{ .primitive = "usize" }, .is_type_val = false },
-                    .handle = handle,
-                };
-            },
+        .other => |n| {
+            const node = n.node;
+            const handle = n.handle;
+            const tree = handle.tree;
+            const node_tags = tree.nodes.items(.tag);
 
-            .ptr_type,
-            .ptr_type_aligned,
-            .ptr_type_bit_range,
-            .ptr_type_sentinel,
-            => {
-                const ptr_type = tree.fullPtrType(n).?;
+            switch (node_tags[node]) {
+                .array_type,
+                .array_type_sentinel,
+                .multiline_string_literal,
+                .string_literal,
+                => if (std.mem.eql(u8, "len", name)) {
+                    return TypeWithHandle{
+                        .type = .{ .data = .{ .primitive = "usize" }, .is_type_val = false },
+                    };
+                },
 
-                if (ptr_type.size == .Slice) {
-                    if (std.mem.eql(u8, "len", name)) {
-                        return TypeWithHandle{
-                            .type = .{ .data = .{ .primitive = "usize" }, .is_type_val = false },
-                            .handle = handle,
-                        };
+                .ptr_type,
+                .ptr_type_aligned,
+                .ptr_type_bit_range,
+                .ptr_type_sentinel,
+                => {
+                    const ptr_type = tree.fullPtrType(node).?;
+
+                    if (ptr_type.size == .Slice) {
+                        if (std.mem.eql(u8, "len", name)) {
+                            return TypeWithHandle{
+                                .type = .{ .data = .{ .primitive = "usize" }, .is_type_val = false },
+                            };
+                        }
+
+                        if (std.mem.eql(u8, "ptr", name)) {
+                            const child_type = (try analyser.resolveTypeOfNodeInternal(.{
+                                .node = ptr_type.ast.child_type,
+                                .handle = handle,
+                            })) orelse return null;
+
+                            const child_type_ptr = try analyser.arena.allocator().create(TypeWithHandle);
+                            child_type_ptr.* = child_type.instanceTypeVal() orelse return null;
+                            return TypeWithHandle{
+                                .type = .{ .data = .{ .multi_pointer = child_type_ptr }, .is_type_val = false },
+                            };
+                        }
                     }
+                },
 
-                    if (std.mem.eql(u8, "ptr", name)) {
-                        const child_type = (try analyser.resolveTypeOfNodeInternal(.{
-                            .node = ptr_type.ast.child_type,
-                            .handle = handle,
-                        })) orelse return null;
+                .container_decl,
+                .container_decl_trailing,
+                .container_decl_arg,
+                .container_decl_arg_trailing,
+                .container_decl_two,
+                .container_decl_two_trailing,
+                => {
+                    if (!std.mem.startsWith(u8, name, "@\"")) return null;
+                    if (!std.mem.endsWith(u8, name, "\"")) return null;
 
-                        const child_type_ptr = try analyser.arena.allocator().create(TypeWithHandle);
-                        child_type_ptr.* = child_type.instanceTypeVal() orelse return null;
-                        return TypeWithHandle{
-                            .type = .{ .data = .{ .multi_pointer = child_type_ptr }, .is_type_val = false },
-                            .handle = handle,
-                        };
-                    }
-                }
-            },
+                    const text = name[2 .. name.len - 1];
+                    if (!allDigits(text)) return null;
+                    const index = std.fmt.parseUnsigned(u16, text, 10) catch return null;
 
-            .container_decl,
-            .container_decl_trailing,
-            .container_decl_arg,
-            .container_decl_arg_trailing,
-            .container_decl_two,
-            .container_decl_two_trailing,
-            => {
-                if (!std.mem.startsWith(u8, name, "@\"")) return null;
-                if (!std.mem.endsWith(u8, name, "\"")) return null;
+                    return analyser.resolveTupleFieldType(type_handle, index);
+                },
 
-                const text = name[2 .. name.len - 1];
-                if (!allDigits(text)) return null;
-                const index = std.fmt.parseUnsigned(u16, text, 10) catch return null;
-
-                return analyser.resolveTupleFieldType(type_handle, index);
-            },
-
-            else => {},
+                else => {},
+            }
         },
 
         else => {},
@@ -1042,14 +1037,12 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
             if (isTypeIdent(name)) {
                 return TypeWithHandle{
                     .type = .{ .data = .{ .primitive = name }, .is_type_val = true },
-                    .handle = handle,
                 };
             }
 
             if (isValueIdent(name)) {
                 return TypeWithHandle{
-                    .type = .{ .data = .{ .other = node }, .is_type_val = false },
-                    .handle = handle,
+                    .type = .{ .data = .{ .other = node_handle }, .is_type_val = false },
                 };
             }
 
@@ -1089,19 +1082,21 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 return null;
 
             if (decl.type.is_type_val) return null;
-            const decl_node = switch (decl.type.data) {
+            const decl_node_handle = switch (decl.type.data) {
                 .other => |n| n,
                 else => return null,
             };
+            const decl_node = decl_node_handle.node;
+            const decl_handle = decl_node_handle.handle;
             var buf: [1]Ast.Node.Index = undefined;
-            const func_maybe = decl.handle.tree.fullFnProto(&buf, decl_node);
+            const func_maybe = decl_handle.tree.fullFnProto(&buf, decl_node);
 
             if (func_maybe) |fn_decl| {
                 var expected_params = fn_decl.ast.params.len;
                 // If we call as method, the first parameter should be skipped
                 // TODO: Back-parse to extract the self argument?
-                var it = fn_decl.iterate(&decl.handle.tree);
-                if (try analyser.isInstanceCall(handle, call, decl.handle, fn_decl)) {
+                var it = fn_decl.iterate(&decl_handle.tree);
+                if (try analyser.isInstanceCall(handle, call, decl_handle, fn_decl)) {
                     _ = ast.nextFnParam(&it);
                     expected_params -= 1;
                 }
@@ -1111,7 +1106,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 var i: usize = 0;
                 while (ast.nextFnParam(&it)) |decl_param| : (i += 1) {
                     if (i >= param_len) break;
-                    if (!isMetaType(decl.handle.tree, decl_param.type_expr))
+                    if (!isMetaType(decl_handle.tree, decl_param.type_expr))
                         continue;
 
                     const argument = .{ .node = call.ast.params[i], .handle = handle };
@@ -1124,9 +1119,9 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                     try analyser.bound_type_params.put(analyser.gpa, decl_param, argument_type);
                 }
 
-                const has_body = decl.handle.tree.nodes.items(.tag)[decl_node] == .fn_decl;
-                const body = decl.handle.tree.nodes.items(.data)[decl_node].rhs;
-                if (try analyser.resolveReturnType(fn_decl, decl.handle, if (has_body) body else null)) |ret| {
+                const has_body = decl_handle.tree.nodes.items(.tag)[decl_node] == .fn_decl;
+                const body = decl_handle.tree.nodes.items(.data)[decl_node].rhs;
+                if (try analyser.resolveReturnType(fn_decl, decl_handle, if (has_body) body else null)) |ret| {
                     return ret;
                 } else if (analyser.store.config.dangerous_comptime_experiments_do_not_enable) {
                     // TODO: Better case-by-case; we just use the ComptimeInterpreter when all else fails,
@@ -1176,7 +1171,6 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                             } },
                             .is_type_val = is_type_val,
                         },
-                        .handle = node_handle.handle,
                     };
                 }
             }
@@ -1218,7 +1212,6 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                     if (field.ast.type_expr == 0)
                         return TypeWithHandle{
                             .type = .{ .data = .{ .primitive = "void" }, .is_type_val = false },
-                            .handle = handle,
                         };
                 }
             }
@@ -1257,7 +1250,6 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                     base_type_ptr.* = base_type;
                     return TypeWithHandle{
                         .type = .{ .data = .{ .pointer = base_type_ptr }, .is_type_val = base_type.type.is_type_val },
-                        .handle = base.handle,
                     };
                 },
                 else => unreachable,
@@ -1373,10 +1365,9 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
 
                 return TypeWithHandle{
                     .type = .{
-                        .data = .{ .other = var_decl.ast.init_node },
+                        .data = .{ .other = .{ .node = var_decl.ast.init_node, .handle = new_handle } },
                         .is_type_val = false,
                     },
-                    .handle = new_handle,
                 };
             }
 
@@ -1414,8 +1405,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
             }
 
             return TypeWithHandle{
-                .type = .{ .data = .{ .other = node }, .is_type_val = false },
-                .handle = handle,
+                .type = .{ .data = .{ .other = node_handle }, .is_type_val = false },
             };
         },
         .multiline_string_literal,
@@ -1425,8 +1415,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
         .enum_literal,
         .error_value,
         => return TypeWithHandle{
-            .type = .{ .data = .{ .other = node }, .is_type_val = false },
-            .handle = handle,
+            .type = .{ .data = .{ .other = node_handle }, .is_type_val = false },
         },
         .@"if", .if_simple => {
             const if_node = ast.fullIf(tree, node).?;
@@ -1437,7 +1426,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
             if (try analyser.resolveTypeOfNodeInternal(.{ .handle = handle, .node = if_node.ast.else_expr })) |t|
                 try either.append(analyser.arena.allocator(), .{ .type_with_handle = t, .descriptor = try std.fmt.allocPrint(analyser.arena.allocator(), "!({s})", .{offsets.nodeToSlice(tree, if_node.ast.cond_expr)}) });
 
-            return TypeWithHandle.fromEither(analyser.gpa, try either.toOwnedSlice(analyser.arena.allocator()), handle);
+            return TypeWithHandle.fromEither(analyser.gpa, try either.toOwnedSlice(analyser.arena.allocator()));
         },
         .@"switch",
         .switch_comma,
@@ -1463,7 +1452,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                     });
             }
 
-            return TypeWithHandle.fromEither(analyser.gpa, try either.toOwnedSlice(analyser.arena.allocator()), handle);
+            return TypeWithHandle.fromEither(analyser.gpa, try either.toOwnedSlice(analyser.arena.allocator()));
         },
         .@"while",
         .while_simple,
@@ -1567,7 +1556,7 @@ pub const Type = struct {
         /// - Function: `fn () Foo`, `fn foo() Foo`
         /// - Literal: `"foo"`, `'x'`, `42`, `.foo`, `error.Foo`
         /// - Primitive value: `true`, `false`, `null`, `undefined`
-        other: Ast.Node.Index,
+        other: NodeWithHandle,
 
         /// Primitive type: `u8`, `bool`, `type`, etc.
         primitive: []const u8,
@@ -1584,9 +1573,9 @@ pub const Type = struct {
     is_type_val: bool,
 };
 
+// TODO: flatten this into Type
 pub const TypeWithHandle = struct {
     type: Type,
-    handle: *const DocumentStore.Handle,
 
     const Context = struct {
         // Note that we don't hash/equate descriptors to remove
@@ -1618,7 +1607,6 @@ pub const TypeWithHandle = struct {
 
         fn hashTypeWithHandle(hasher: *std.hash.Wyhash, item: TypeWithHandle) void {
             hashType(hasher, item.type);
-            hasher.update(item.handle.uri);
         }
 
         pub fn hash(self: @This(), item: TypeWithHandle) u64 {
@@ -1629,7 +1617,6 @@ pub const TypeWithHandle = struct {
         }
 
         pub fn eql(self: @This(), a: TypeWithHandle, b: TypeWithHandle) bool {
-            if (!std.mem.eql(u8, a.handle.uri, b.handle.uri)) return false;
             if (a.type.is_type_val != b.type.is_type_val) return false;
             if (@intFromEnum(a.type.data) != @intFromEnum(b.type.data)) return false;
 
@@ -1643,9 +1630,10 @@ pub const TypeWithHandle = struct {
                     const b_type = @field(b.type.data, @tagName(name));
                     if (!self.eql(a_type.*, b_type.*)) return false;
                 },
-                .other => |a_idx| {
-                    const b_idx = b.type.data.other;
-                    if (a_idx != b_idx) return false;
+                .other => |a_node| {
+                    const b_node = b.type.data.other;
+                    if (a_node.node != b_node.node) return false;
+                    if (!std.mem.eql(u8, a_node.handle.uri, b_node.handle.uri)) return false;
                 },
                 .primitive => |a_name| {
                     const b_name = b.type.data.primitive;
@@ -1672,16 +1660,15 @@ pub const TypeWithHandle = struct {
     pub fn typeVal(node_handle: NodeWithHandle) TypeWithHandle {
         return .{
             .type = .{
-                .data = .{ .other = node_handle.node },
+                .data = .{ .other = node_handle },
                 .is_type_val = true,
             },
-            .handle = node_handle.handle,
         };
     }
 
     pub const Deduplicator = std.HashMapUnmanaged(TypeWithHandle, void, TypeWithHandle.Context, std.hash_map.default_max_load_percentage);
 
-    pub fn fromEither(allocator: std.mem.Allocator, entries: []const Type.EitherEntry, handle: *const DocumentStore.Handle) error{OutOfMemory}!?TypeWithHandle {
+    pub fn fromEither(allocator: std.mem.Allocator, entries: []const Type.EitherEntry) error{OutOfMemory}!?TypeWithHandle {
         if (entries.len == 0)
             return null;
 
@@ -1702,7 +1689,6 @@ pub const TypeWithHandle = struct {
                 .data = .{ .either = entries },
                 .is_type_val = false,
             },
-            .handle = handle,
         };
     }
 
@@ -1725,24 +1711,25 @@ pub const TypeWithHandle = struct {
         if (!self.type.is_type_val) return null;
         return TypeWithHandle{
             .type = .{ .data = self.type.data, .is_type_val = false },
-            .handle = self.handle,
         };
     }
 
     fn isRoot(self: TypeWithHandle) bool {
         switch (self.type.data) {
             // root is always index 0
-            .other => |n| return n == 0,
+            .other => |n| return n.node == 0,
             else => return false,
         }
     }
 
     fn isContainerKind(self: TypeWithHandle, container_kind_tok: std.zig.Token.Tag) bool {
-        const tree = self.handle.tree;
-        const main_tokens = tree.nodes.items(.main_token);
-        const tags = tree.tokens.items(.tag);
         switch (self.type.data) {
-            .other => |n| return tags[main_tokens[n]] == container_kind_tok,
+            .other => |n| {
+                const tree = n.handle.tree;
+                const main_tokens = tree.nodes.items(.main_token);
+                const tags = tree.tokens.items(.tag);
+                return tags[main_tokens[n.node]] == container_kind_tok;
+            },
             else => return false,
         }
     }
@@ -1753,8 +1740,9 @@ pub const TypeWithHandle = struct {
 
     pub fn isNamespace(self: TypeWithHandle) bool {
         if (!self.isStructType()) return false;
-        const tree = self.handle.tree;
-        const node = self.type.data.other;
+        const node_handle = self.type.data.other;
+        const node = node_handle.node;
+        const tree = node_handle.handle.tree;
         const tags = tree.nodes.items(.tag);
         var buf: [2]Ast.Node.Index = undefined;
         const full = tree.fullContainerDecl(&buf, node) orelse return true;
@@ -1777,19 +1765,17 @@ pub const TypeWithHandle = struct {
     }
 
     pub fn isTaggedUnion(self: TypeWithHandle) bool {
-        const tree = self.handle.tree;
         return switch (self.type.data) {
-            .other => |n| ast.isTaggedUnion(tree, n),
+            .other => |n| ast.isTaggedUnion(n.handle.tree, n.node),
             else => false,
         };
     }
 
     pub fn isTypeFunc(self: TypeWithHandle) bool {
         var buf: [1]Ast.Node.Index = undefined;
-        const tree = self.handle.tree;
         return switch (self.type.data) {
-            .other => |n| if (tree.fullFnProto(&buf, n)) |fn_proto| blk: {
-                break :blk isTypeFunction(tree, fn_proto);
+            .other => |n| if (n.handle.tree.fullFnProto(&buf, n.node)) |fn_proto| blk: {
+                break :blk isTypeFunction(n.handle.tree, fn_proto);
             } else false,
             else => false,
         };
@@ -1797,20 +1783,17 @@ pub const TypeWithHandle = struct {
 
     pub fn isGenericFunc(self: TypeWithHandle) bool {
         var buf: [1]Ast.Node.Index = undefined;
-        const tree = self.handle.tree;
         return switch (self.type.data) {
-            .other => |n| if (tree.fullFnProto(&buf, n)) |fn_proto| blk: {
-                break :blk isGenericFunction(tree, fn_proto);
+            .other => |n| if (n.handle.tree.fullFnProto(&buf, n.node)) |fn_proto| blk: {
+                break :blk isGenericFunction(n.handle.tree, fn_proto);
             } else false,
             else => false,
         };
     }
 
     pub fn isFunc(self: TypeWithHandle) bool {
-        const tree = self.handle.tree;
-        const tags = tree.nodes.items(.tag);
         return switch (self.type.data) {
-            .other => |n| switch (tags[n]) {
+            .other => |n| switch (n.handle.tree.nodes.items(.tag)[n.node]) {
                 .fn_proto,
                 .fn_proto_multi,
                 .fn_proto_one,
@@ -1823,10 +1806,13 @@ pub const TypeWithHandle = struct {
         };
     }
 
-    pub fn definitionToken(self: TypeWithHandle) ?Ast.TokenIndex {
+    pub fn definitionToken(self: TypeWithHandle) ?TokenWithHandle {
         if (self.type.is_type_val) {
             switch (self.type.data) {
-                .other => |n| return self.handle.tree.firstToken(n),
+                .other => |n| return .{
+                    .token = n.handle.tree.firstToken(n.node),
+                    .handle = n.handle,
+                },
                 else => {},
             }
         }
@@ -1836,7 +1822,7 @@ pub const TypeWithHandle = struct {
     pub fn docComments(self: TypeWithHandle, allocator: std.mem.Allocator) !?[]const u8 {
         if (self.type.is_type_val) {
             switch (self.type.data) {
-                .other => |n| return getDocComments(allocator, self.handle.tree, n),
+                .other => |n| return getDocComments(allocator, n.handle.tree, n.node),
                 else => {},
             }
         }
@@ -1848,11 +1834,10 @@ pub const TypeWithHandle = struct {
         analyser: *Analyser,
         symbol: []const u8,
     ) error{OutOfMemory}!?DeclWithHandle {
-        const node = switch (self.type.data) {
+        const node_handle = switch (self.type.data) {
             .other => |n| n,
             else => return null,
         };
-        const node_handle = NodeWithHandle{ .node = node, .handle = self.handle };
         if (self.type.is_type_val) {
             if (try analyser.lookupSymbolContainer(node_handle, symbol, .variable)) |decl|
                 return decl;
@@ -1973,12 +1958,12 @@ pub fn getFieldAccessType(analyser: *Analyser, handle: *const DocumentStore.Hand
                 .unwrapped = try analyser.resolveDerefType(current_type orelse return null),
             },
             .identifier => {
-                const ct_handle = if (current_type) |c| c.handle else handle;
-                if (try analyser.lookupSymbolGlobal(
-                    ct_handle,
-                    tokenizer.buffer[tok.loc.start..tok.loc.end],
-                    source_index,
-                )) |child| {
+                const symbol = tokenizer.buffer[tok.loc.start..tok.loc.end];
+                const child_maybe = if (current_type) |c|
+                    try c.lookupSymbol(analyser, symbol)
+                else
+                    try analyser.lookupSymbolGlobal(handle, symbol, source_index);
+                if (child_maybe) |child| {
                     current_type = (try child.resolveType(analyser)) orelse return null;
                 } else return null;
             },
@@ -2051,17 +2036,17 @@ pub fn getFieldAccessType(analyser: *Analyser, handle: *const DocumentStore.Hand
 
                 // Can't call a function type, we need a function type instance.
                 if (current_type.?.type.is_type_val) return null;
-                const cur_tree = current_type.?.handle.tree;
+                const cur_tree = current_type_node.handle.tree;
                 var buf: [1]Ast.Node.Index = undefined;
-                if (cur_tree.fullFnProto(&buf, current_type_node)) |func| {
+                if (cur_tree.fullFnProto(&buf, current_type_node.node)) |func| {
                     // Check if the function has a body and if so, pass it
                     // so the type can be resolved if it's a generic function returning
                     // an anonymous struct
-                    const has_body = cur_tree.nodes.items(.tag)[current_type_node] == .fn_decl;
-                    const body = cur_tree.nodes.items(.data)[current_type_node].rhs;
+                    const has_body = cur_tree.nodes.items(.tag)[current_type_node.node] == .fn_decl;
+                    const body = cur_tree.nodes.items(.data)[current_type_node.node].rhs;
 
                     // TODO Actually bind params here when calling functions instead of just skipping args.
-                    if (try analyser.resolveReturnType(func, current_type.?.handle, if (has_body) body else null)) |ret| {
+                    if (try analyser.resolveReturnType(func, current_type_node.handle, if (has_body) body else null)) |ret| {
                         current_type = ret;
                         // Skip to the right paren
                         var paren_count: usize = 1;
@@ -2095,7 +2080,7 @@ pub fn getFieldAccessType(analyser: *Analyser, handle: *const DocumentStore.Hand
                 current_type = (try analyser.resolveBracketAccessType(current_type orelse return null, if (is_range) .Range else .Single)) orelse return null;
             },
             .builtin => {
-                const curr_handle = if (current_type == null) handle else current_type.?.handle;
+                if (current_type != null) return null;
                 if (std.mem.eql(u8, tokenizer.buffer[tok.loc.start..tok.loc.end], "@import")) {
                     if (tokenizer.next().tag != .l_paren) return null;
                     var import_str_tok = tokenizer.next(); // should be the .string_literal
@@ -2105,7 +2090,7 @@ pub fn getFieldAccessType(analyser: *Analyser, handle: *const DocumentStore.Hand
                         .start = import_str_tok.loc.start + 1,
                         .end = import_str_tok.loc.end - 1,
                     });
-                    const uri = try analyser.store.uriFromImportStr(analyser.arena.allocator(), curr_handle.*, import_str) orelse return null;
+                    const uri = try analyser.store.uriFromImportStr(analyser.arena.allocator(), handle.*, import_str) orelse return null;
                     const node_handle = analyser.store.getOrLoadHandle(uri) orelse return null;
                     current_type = TypeWithHandle.typeVal(NodeWithHandle{ .handle = node_handle, .node = 0 });
                     _ = tokenizer.next(); // eat the .r_paren
@@ -2549,7 +2534,7 @@ pub const DeclWithHandle = struct {
             }
             if (try self.resolveType(analyser)) |resolved_type| {
                 if (resolved_type.definitionToken()) |token| {
-                    return .{ .token = token, .handle = resolved_type.handle };
+                    return token;
                 }
             }
         }
@@ -2645,7 +2630,7 @@ pub const DeclWithHandle = struct {
                         }
                     }
 
-                    return TypeWithHandle.fromEither(analyser.gpa, try possible.toOwnedSlice(analyser.arena.allocator()), self.handle);
+                    return TypeWithHandle.fromEither(analyser.gpa, try possible.toOwnedSlice(analyser.arena.allocator()));
                 }
 
                 const param_decl = pay.param;
@@ -2701,20 +2686,21 @@ pub const DeclWithHandle = struct {
 
                 if (node_tags[pay.items[0]] != .enum_literal) return null;
 
-                const scope_index = findContainerScopeIndex(.{ .node = switch_expr_type.type.data.other, .handle = switch_expr_type.handle }) orelse return null;
-                const scope_decls = switch_expr_type.handle.document_scope.scopes.items(.decls);
+                const scope_index = findContainerScopeIndex(switch_expr_type.type.data.other) orelse return null;
+                const switch_handle = switch_expr_type.type.data.other.handle;
+                const scope_decls = switch_handle.document_scope.scopes.items(.decls);
 
                 const name = tree.tokenSlice(main_tokens[pay.items[0]]);
                 const decl_key = Declaration.Key{ .kind = .field, .name = name };
                 const decl_index = scope_decls[scope_index].get(decl_key) orelse return null;
-                const decl = switch_expr_type.handle.document_scope.decls.items[@intFromEnum(decl_index)];
+                const decl = switch_handle.document_scope.decls.items[@intFromEnum(decl_index)];
 
                 switch (decl) {
                     .ast_node => |node| {
-                        if (switch_expr_type.handle.tree.fullContainerField(node)) |container_field| {
+                        if (switch_handle.tree.fullContainerField(node)) |container_field| {
                             if (container_field.ast.type_expr != 0) {
                                 return ((try analyser.resolveTypeOfNodeInternal(
-                                    .{ .node = container_field.ast.type_expr, .handle = switch_expr_type.handle },
+                                    .{ .node = container_field.ast.type_expr, .handle = switch_handle },
                                 )) orelse return null).instanceTypeVal();
                             }
                         }
@@ -2819,7 +2805,7 @@ fn iterateSymbolsContainerInternal(
             else => continue,
         };
         try analyser.iterateSymbolsContainerInternal(
-            .{ .node = use_expr_node, .handle = use_expr.handle },
+            use_expr_node,
             orig_handle,
             callback,
             context,
@@ -2914,7 +2900,7 @@ fn iterateSymbolsGlobalInternal(
                 else => continue,
             };
             try analyser.iterateSymbolsContainerInternal(
-                .{ .node = use_expr_node, .handle = use_expr.handle },
+                use_expr_node,
                 handle,
                 callback,
                 context,
@@ -3117,11 +3103,7 @@ pub fn lookupSymbolFieldInit(
         else => return null,
     };
 
-    return analyser.lookupSymbolContainer(
-        .{ .node = container_node, .handle = container_type.handle },
-        field_name,
-        .field,
-    );
+    return analyser.lookupSymbolContainer(container_node, field_name, .field);
 }
 
 pub fn resolveExpressionType(
@@ -3259,12 +3241,13 @@ pub fn resolveExpressionTypeFromAncestors(
 
         if (fn_type.type.is_type_val) return null;
 
-        const fn_handle = fn_type.handle;
-        const fn_tree = fn_handle.tree;
-        const fn_node = switch (fn_type.type.data) {
+        const fn_node_handle = switch (fn_type.type.data) {
             .other => |n| n,
             else => return null,
         };
+        const fn_node = fn_node_handle.node;
+        const fn_handle = fn_node_handle.handle;
+        const fn_tree = fn_handle.tree;
 
         var fn_buf: [1]Ast.Node.Index = undefined;
         const fn_proto = fn_tree.fullFnProto(&fn_buf, fn_node) orelse return null;
@@ -4202,15 +4185,6 @@ fn addReferencedTypes(
     const referenced_types = collector.referenced_types;
     const allocator = referenced_types.allocator;
 
-    const handle = type_handle.handle;
-    const tree = handle.tree;
-
-    const node_tags = tree.nodes.items(.tag);
-    const token_tags = tree.tokens.items(.tag);
-    const main_tokens = tree.nodes.items(.main_token);
-    const datas = tree.nodes.items(.data);
-    const token_starts = tree.tokens.items(.start);
-
     switch (type_handle.type.data) {
         .primitive => |name| return name,
 
@@ -4239,210 +4213,222 @@ fn addReferencedTypes(
             return try std.fmt.allocPrint(allocator, "@typeInfo({s}).Union.tag_type.?", .{union_type_str orelse return null});
         },
 
-        .other => |p| switch (node_tags[p]) {
-            .root => {
-                const path = URI.parse(allocator, handle.uri) catch |err| switch (err) {
-                    error.OutOfMemory => |e| return e,
-                    else => return null,
-                };
-                const str = std.fs.path.stem(path);
-                if (needs_type_reference) {
-                    try referenced_types.put(.{
-                        .str = type_str orelse str,
-                        .handle = handle,
-                        .token = tree.firstToken(p),
-                    }, {});
-                }
-                return str;
-            },
+        .other => |n| {
+            const node = n.node;
+            const handle = n.handle;
+            const tree = handle.tree;
 
-            .container_decl,
-            .container_decl_arg,
-            .container_decl_arg_trailing,
-            .container_decl_trailing,
-            .container_decl_two,
-            .container_decl_two_trailing,
-            .error_set_decl,
-            .merge_error_sets,
-            .tagged_union,
-            .tagged_union_trailing,
-            .tagged_union_two,
-            .tagged_union_two_trailing,
-            .tagged_union_enum_tag,
-            .tagged_union_enum_tag_trailing,
-            => {
-                // NOTE: This is a hacky nightmare but it works :P
-                const token = tree.firstToken(p);
-                if (token_tags[token - 2] == .identifier and token_tags[token - 1] == .equal) {
-                    const str = tree.tokenSlice(token - 2);
+            const node_tags = tree.nodes.items(.tag);
+            const token_tags = tree.tokens.items(.tag);
+            const main_tokens = tree.nodes.items(.main_token);
+            const datas = tree.nodes.items(.data);
+            const token_starts = tree.tokens.items(.start);
+
+            switch (node_tags[node]) {
+                .root => {
+                    const path = URI.parse(allocator, handle.uri) catch |err| switch (err) {
+                        error.OutOfMemory => |e| return e,
+                        else => return null,
+                    };
+                    const str = std.fs.path.stem(path);
                     if (needs_type_reference) {
                         try referenced_types.put(.{
                             .str = type_str orelse str,
                             .handle = handle,
-                            .token = token - 2,
+                            .token = tree.firstToken(node),
                         }, {});
                     }
                     return str;
-                }
-                if (token_tags[token - 1] == .keyword_return) {
-                    const func_node = innermostBlockScopeInternal(handle.*, token_starts[token - 1], true);
-                    var buf: [1]Ast.Node.Index = undefined;
-                    const func = tree.fullFnProto(&buf, func_node) orelse return null;
-                    const func_name_token = func.name_token orelse return null;
-                    const func_name = offsets.tokenToSlice(tree, func_name_token);
-                    if (needs_type_reference) {
-                        try referenced_types.put(.{
-                            .str = type_str orelse func_name,
-                            .handle = handle,
-                            .token = func_name_token,
-                        }, {});
+                },
+
+                .container_decl,
+                .container_decl_arg,
+                .container_decl_arg_trailing,
+                .container_decl_trailing,
+                .container_decl_two,
+                .container_decl_two_trailing,
+                .error_set_decl,
+                .merge_error_sets,
+                .tagged_union,
+                .tagged_union_trailing,
+                .tagged_union_two,
+                .tagged_union_two_trailing,
+                .tagged_union_enum_tag,
+                .tagged_union_enum_tag_trailing,
+                => {
+                    // NOTE: This is a hacky nightmare but it works :P
+                    const token = tree.firstToken(node);
+                    if (token_tags[token - 2] == .identifier and token_tags[token - 1] == .equal) {
+                        const str = tree.tokenSlice(token - 2);
+                        if (needs_type_reference) {
+                            try referenced_types.put(.{
+                                .str = type_str orelse str,
+                                .handle = handle,
+                                .token = token - 2,
+                            }, {});
+                        }
+                        return str;
                     }
-                    return try std.fmt.allocPrint(allocator, "{s}(...)", .{func_name});
-                }
-                return offsets.nodeToSlice(tree, p);
-            },
+                    if (token_tags[token - 1] == .keyword_return) {
+                        const func_node = innermostBlockScopeInternal(handle.*, token_starts[token - 1], true);
+                        var buf: [1]Ast.Node.Index = undefined;
+                        const func = tree.fullFnProto(&buf, func_node) orelse return null;
+                        const func_name_token = func.name_token orelse return null;
+                        const func_name = offsets.tokenToSlice(tree, func_name_token);
+                        if (needs_type_reference) {
+                            try referenced_types.put(.{
+                                .str = type_str orelse func_name,
+                                .handle = handle,
+                                .token = func_name_token,
+                            }, {});
+                        }
+                        return try std.fmt.allocPrint(allocator, "{s}(...)", .{func_name});
+                    }
+                    return offsets.nodeToSlice(tree, node);
+                },
 
-            .fn_proto,
-            .fn_proto_multi,
-            .fn_proto_one,
-            .fn_proto_simple,
-            .fn_decl,
-            => {
-                var buffer: [1]Ast.Node.Index = undefined;
-                const fn_proto = tree.fullFnProto(&buffer, p).?;
+                .fn_proto,
+                .fn_proto_multi,
+                .fn_proto_one,
+                .fn_proto_simple,
+                .fn_decl,
+                => {
+                    var buffer: [1]Ast.Node.Index = undefined;
+                    const fn_proto = tree.fullFnProto(&buffer, node).?;
 
-                var param_type_strings = std.ArrayList(?[]const u8).init(allocator);
-                var it = fn_proto.iterate(&tree);
-                while (ast.nextFnParam(&it)) |param| {
-                    try param_type_strings.append(try analyser.addReferencedTypesFromNode(
-                        .{ .node = param.type_expr, .handle = handle },
+                    var param_type_strings = std.ArrayList(?[]const u8).init(allocator);
+                    var it = fn_proto.iterate(&tree);
+                    while (ast.nextFnParam(&it)) |param| {
+                        try param_type_strings.append(try analyser.addReferencedTypesFromNode(
+                            .{ .node = param.type_expr, .handle = handle },
+                            referenced_types,
+                        ));
+                    }
+
+                    const return_type_str = try analyser.addReferencedTypesFromNode(
+                        .{ .node = fn_proto.ast.return_type, .handle = handle },
                         referenced_types,
-                    ));
-                }
+                    );
 
-                const return_type_str = try analyser.addReferencedTypesFromNode(
-                    .{ .node = fn_proto.ast.return_type, .handle = handle },
-                    referenced_types,
-                );
+                    var str = std.ArrayList(u8).init(allocator);
+                    const writer = str.writer();
+                    try writer.print("fn (", .{});
+                    for (param_type_strings.items, 0..) |param_type_str, param_index| {
+                        if (param_index > 0)
+                            try writer.print(", ", .{});
+                        try writer.print("{s}", .{param_type_str orelse return null});
+                    }
+                    try writer.print(") ", .{});
+                    if (ast.hasInferredError(tree, fn_proto))
+                        try writer.print("!", .{});
+                    try writer.print("{s}", .{return_type_str orelse return null});
+                    return str.items;
+                },
 
-                var str = std.ArrayList(u8).init(allocator);
-                const writer = str.writer();
-                try writer.print("fn (", .{});
-                for (param_type_strings.items, 0..) |param_type_str, param_index| {
-                    if (param_index > 0)
-                        try writer.print(", ", .{});
-                    try writer.print("{s}", .{param_type_str orelse return null});
-                }
-                try writer.print(") ", .{});
-                if (ast.hasInferredError(tree, fn_proto))
-                    try writer.print("!", .{});
-                try writer.print("{s}", .{return_type_str orelse return null});
-                return str.items;
-            },
+                .array_type,
+                .array_type_sentinel,
+                => {
+                    const array_type = tree.fullArrayType(node).?;
 
-            .array_type,
-            .array_type_sentinel,
-            => {
-                const array_type = tree.fullArrayType(p).?;
+                    const elem_type_str = try analyser.addReferencedTypesFromNode(
+                        .{ .node = array_type.ast.elem_type, .handle = handle },
+                        referenced_types,
+                    );
 
-                const elem_type_str = try analyser.addReferencedTypesFromNode(
-                    .{ .node = array_type.ast.elem_type, .handle = handle },
-                    referenced_types,
-                );
+                    const prefix_start = offsets.tokenToIndex(tree, tree.firstToken(node));
+                    const prefix_end = offsets.tokenToIndex(tree, tree.firstToken(array_type.ast.elem_type));
+                    return try std.fmt.allocPrint(allocator, "{s}{s}", .{
+                        tree.source[prefix_start..prefix_end],
+                        elem_type_str orelse return null,
+                    });
+                },
 
-                const prefix_start = offsets.tokenToIndex(tree, tree.firstToken(p));
-                const prefix_end = offsets.tokenToIndex(tree, tree.firstToken(array_type.ast.elem_type));
-                return try std.fmt.allocPrint(allocator, "{s}{s}", .{
-                    tree.source[prefix_start..prefix_end],
-                    elem_type_str orelse return null,
-                });
-            },
+                .ptr_type,
+                .ptr_type_aligned,
+                .ptr_type_bit_range,
+                .ptr_type_sentinel,
+                => {
+                    const ptr_type = tree.fullPtrType(node).?;
 
-            .ptr_type,
-            .ptr_type_aligned,
-            .ptr_type_bit_range,
-            .ptr_type_sentinel,
-            => {
-                const ptr_type = tree.fullPtrType(p).?;
+                    const child_type_str = try analyser.addReferencedTypesFromNode(
+                        .{ .node = ptr_type.ast.child_type, .handle = handle },
+                        referenced_types,
+                    );
 
-                const child_type_str = try analyser.addReferencedTypesFromNode(
-                    .{ .node = ptr_type.ast.child_type, .handle = handle },
-                    referenced_types,
-                );
+                    const prefix_start = offsets.tokenToIndex(tree, tree.firstToken(node));
+                    const prefix_end = offsets.tokenToIndex(tree, tree.firstToken(ptr_type.ast.child_type));
+                    return try std.fmt.allocPrint(allocator, "{s}{s}", .{
+                        tree.source[prefix_start..prefix_end],
+                        child_type_str orelse return null,
+                    });
+                },
 
-                const prefix_start = offsets.tokenToIndex(tree, tree.firstToken(p));
-                const prefix_end = offsets.tokenToIndex(tree, tree.firstToken(ptr_type.ast.child_type));
-                return try std.fmt.allocPrint(allocator, "{s}{s}", .{
-                    tree.source[prefix_start..prefix_end],
-                    child_type_str orelse return null,
-                });
-            },
+                .optional_type => {
+                    const child_type_str = try analyser.addReferencedTypesFromNode(
+                        .{ .node = datas[node].lhs, .handle = handle },
+                        referenced_types,
+                    );
 
-            .optional_type => {
-                const child_type_str = try analyser.addReferencedTypesFromNode(
-                    .{ .node = datas[p].lhs, .handle = handle },
-                    referenced_types,
-                );
+                    return try std.fmt.allocPrint(allocator, "?{s}", .{
+                        child_type_str orelse return null,
+                    });
+                },
 
-                return try std.fmt.allocPrint(allocator, "?{s}", .{
-                    child_type_str orelse return null,
-                });
-            },
+                .error_union => {
+                    const lhs_str = try analyser.addReferencedTypesFromNode(
+                        .{ .node = datas[node].lhs, .handle = handle },
+                        referenced_types,
+                    );
 
-            .error_union => {
-                const lhs_str = try analyser.addReferencedTypesFromNode(
-                    .{ .node = datas[p].lhs, .handle = handle },
-                    referenced_types,
-                );
+                    const rhs_str = try analyser.addReferencedTypesFromNode(
+                        .{ .node = datas[node].rhs, .handle = handle },
+                        referenced_types,
+                    );
 
-                const rhs_str = try analyser.addReferencedTypesFromNode(
-                    .{ .node = datas[p].rhs, .handle = handle },
-                    referenced_types,
-                );
+                    return try std.fmt.allocPrint(allocator, "{s}!{s}", .{
+                        lhs_str orelse return null,
+                        rhs_str orelse return null,
+                    });
+                },
 
-                return try std.fmt.allocPrint(allocator, "{s}!{s}", .{
-                    lhs_str orelse return null,
-                    rhs_str orelse return null,
-                });
-            },
+                .multiline_string_literal => {
+                    const start = datas[node].lhs;
+                    const end = datas[node].rhs;
+                    var len: usize = end - start;
+                    var tok_i = start;
+                    while (tok_i <= end) : (tok_i += 1) {
+                        const slice = tree.tokenSlice(tok_i);
+                        len += slice.len - 3;
+                        if (slice[slice.len - 2] == '\r') len -= 1;
+                    }
+                    return try std.fmt.allocPrint(allocator, "*const [{d}:0]u8", .{len});
+                },
 
-            .multiline_string_literal => {
-                const start = datas[p].lhs;
-                const end = datas[p].rhs;
-                var len: usize = end - start;
-                var tok_i = start;
-                while (tok_i <= end) : (tok_i += 1) {
-                    const slice = tree.tokenSlice(tok_i);
-                    len += slice.len - 3;
-                    if (slice[slice.len - 2] == '\r') len -= 1;
-                }
-                return try std.fmt.allocPrint(allocator, "*const [{d}:0]u8", .{len});
-            },
+                .string_literal => {
+                    const token = tree.tokenSlice(main_tokens[node]);
+                    var counter = std.io.countingWriter(std.io.null_writer);
+                    return switch (try std.zig.string_literal.parseWrite(counter.writer(), token)) {
+                        .success => try std.fmt.allocPrint(allocator, "*const [{d}:0]u8", .{counter.bytes_written}),
+                        .failure => null,
+                    };
+                },
 
-            .string_literal => {
-                const token = tree.tokenSlice(main_tokens[p]);
-                var counter = std.io.countingWriter(std.io.null_writer);
-                return switch (try std.zig.string_literal.parseWrite(counter.writer(), token)) {
-                    .success => try std.fmt.allocPrint(allocator, "*const [{d}:0]u8", .{counter.bytes_written}),
-                    .failure => null,
-                };
-            },
+                .number_literal, .char_literal => return "comptime_int",
 
-            .number_literal, .char_literal => return "comptime_int",
+                .enum_literal => return "@TypeOf(.enum_literal)",
 
-            .enum_literal => return "@TypeOf(.enum_literal)",
+                .error_value => {
+                    const identifier = tree.tokenSlice(datas[node].rhs);
+                    return try std.fmt.allocPrint(allocator, "error{{{s}}}", .{identifier});
+                },
 
-            .error_value => {
-                const identifier = tree.tokenSlice(datas[p].rhs);
-                return try std.fmt.allocPrint(allocator, "error{{{s}}}", .{identifier});
-            },
+                .identifier => {
+                    const name = offsets.nodeToSlice(tree, node);
+                    return primitive_types.get(name);
+                },
 
-            .identifier => {
-                const name = offsets.nodeToSlice(tree, p);
-                return primitive_types.get(name);
-            },
-
-            else => {}, // TODO: Implement more "other" type expressions; better safe than sorry
+                else => {}, // TODO: Implement more "other" type expressions; better safe than sorry
+            }
         },
 
         else => {},
