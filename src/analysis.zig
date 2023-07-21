@@ -10,6 +10,7 @@ const tracy = @import("tracy.zig");
 const ComptimeInterpreter = @import("ComptimeInterpreter.zig");
 const InternPool = ComptimeInterpreter.InternPool;
 const references = @import("features/references.zig");
+const PrimitiveType = @import("analyser/primitive.zig").PrimitiveType;
 
 const Analyser = @This();
 
@@ -794,7 +795,7 @@ fn resolvePropertyType(analyser: *Analyser, type_handle: TypeWithHandle, name: [
         .slice => |t| {
             if (std.mem.eql(u8, "len", name)) {
                 return TypeWithHandle{
-                    .type = .{ .data = .{ .primitive = "usize" }, .is_type_val = false },
+                    .type = .{ .data = .{ .primitive = .usize }, .is_type_val = false },
                 };
             }
 
@@ -818,7 +819,7 @@ fn resolvePropertyType(analyser: *Analyser, type_handle: TypeWithHandle, name: [
                 .string_literal,
                 => if (std.mem.eql(u8, "len", name)) {
                     return TypeWithHandle{
-                        .type = .{ .data = .{ .primitive = "usize" }, .is_type_val = false },
+                        .type = .{ .data = .{ .primitive = .usize }, .is_type_val = false },
                     };
                 },
 
@@ -832,7 +833,7 @@ fn resolvePropertyType(analyser: *Analyser, type_handle: TypeWithHandle, name: [
                     if (ptr_type.size == .Slice) {
                         if (std.mem.eql(u8, "len", name)) {
                             return TypeWithHandle{
-                                .type = .{ .data = .{ .primitive = "usize" }, .is_type_val = false },
+                                .type = .{ .data = .{ .primitive = .usize }, .is_type_val = false },
                             };
                         }
 
@@ -862,7 +863,8 @@ fn resolvePropertyType(analyser: *Analyser, type_handle: TypeWithHandle, name: [
                     if (!std.mem.endsWith(u8, name, "\"")) return null;
 
                     const text = name[2 .. name.len - 1];
-                    if (!allDigits(text)) return null;
+                    for (text) |c|
+                        if (!std.ascii.isDigit(c)) return null;
                     const index = std.fmt.parseUnsigned(u16, text, 10) catch return null;
 
                     return analyser.resolveTupleFieldType(type_handle, index);
@@ -876,50 +878,6 @@ fn resolvePropertyType(analyser: *Analyser, type_handle: TypeWithHandle, name: [
     }
 
     return null;
-}
-
-fn allDigits(str: []const u8) bool {
-    for (str) |c| {
-        if (!std.ascii.isDigit(c)) return false;
-    }
-    return true;
-}
-
-const primitive_types = std.ComptimeStringMap([]const u8, .{
-    .{ "true", "bool" },
-    .{ "false", "bool" },
-    .{ "null", "@TypeOf(null)" },
-    .{ "undefined", "@TypeOf(undefined)" },
-});
-
-pub fn isValueIdent(text: []const u8) bool {
-    return primitive_types.has(text);
-}
-
-pub fn isTypeIdent(text: []const u8) bool {
-    const PrimitiveTypes = std.ComptimeStringMap(void, .{
-        .{"isize"},        .{"usize"},
-        .{"c_short"},      .{"c_ushort"},
-        .{"c_int"},        .{"c_uint"},
-        .{"c_long"},       .{"c_ulong"},
-        .{"c_longlong"},   .{"c_ulonglong"},
-        .{"c_longdouble"}, .{"anyopaque"},
-        .{"f16"},          .{"f32"},
-        .{"f64"},          .{"f80"},
-        .{"f128"},         .{"bool"},
-        .{"void"},         .{"noreturn"},
-        .{"type"},         .{"anyerror"},
-        .{"comptime_int"}, .{"comptime_float"},
-        .{"anyframe"},     .{"anytype"},
-        .{"c_char"},
-    });
-
-    if (PrimitiveTypes.has(text)) return true;
-    if (text.len == 1) return false;
-    if (!(text[0] == 'u' or text[0] == 'i')) return false;
-    if (!allDigits(text[1..])) return false;
-    _ = std.fmt.parseUnsigned(u16, text[1..], 10) catch return false;
-    return true;
 }
 
 const FindBreaks = struct {
@@ -1034,15 +992,15 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
         .identifier => {
             const name = offsets.nodeToSlice(tree, node);
 
-            if (isTypeIdent(name)) {
+            if (PrimitiveType.fromTypeIdent(name)) |p| {
                 return TypeWithHandle{
-                    .type = .{ .data = .{ .primitive = name }, .is_type_val = true },
+                    .type = .{ .data = .{ .primitive = p }, .is_type_val = true },
                 };
             }
 
-            if (primitive_types.get(name)) |type_name| {
+            if (PrimitiveType.fromValueIdent(name)) |p| {
                 return TypeWithHandle{
-                    .type = .{ .data = .{ .primitive = type_name }, .is_type_val = false },
+                    .type = .{ .data = .{ .primitive = p }, .is_type_val = false },
                 };
             }
 
@@ -1211,7 +1169,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                     field.convertToNonTupleLike(tree.nodes);
                     if (field.ast.type_expr == 0)
                         return TypeWithHandle{
-                            .type = .{ .data = .{ .primitive = "void" }, .is_type_val = false },
+                            .type = .{ .data = .{ .primitive = .void }, .is_type_val = false },
                         };
                 }
             }
@@ -1559,7 +1517,7 @@ pub const Type = struct {
         other: NodeWithHandle,
 
         /// Primitive type: `u8`, `bool`, `type`, etc.
-        primitive: []const u8,
+        primitive: PrimitiveType,
 
         /// Branching types
         either: []const EitherEntry,
@@ -1592,7 +1550,7 @@ pub const TypeWithHandle = struct {
                 .union_tag,
                 => |t| hashTypeWithHandle(hasher, t.*),
                 .other => |idx| hasher.update(&std.mem.toBytes(idx)),
-                .primitive => |name| hasher.update(name),
+                .primitive => |p| p.hash(hasher),
                 .either => |entries| {
                     for (entries) |e| {
                         hasher.update(e.descriptor);
@@ -1635,9 +1593,9 @@ pub const TypeWithHandle = struct {
                     if (a_node.node != b_node.node) return false;
                     if (!std.mem.eql(u8, a_node.handle.uri, b_node.handle.uri)) return false;
                 },
-                .primitive => |a_name| {
-                    const b_name = b.type.data.primitive;
-                    if (!std.mem.eql(u8, a_name, b_name)) return false;
+                .primitive => |a_type| {
+                    const b_type = b.type.data.primitive;
+                    if (!a_type.eql(b_type)) return false;
                 },
                 .either => |a_entries| {
                     const b_entries = b.type.data.either;
@@ -4186,7 +4144,7 @@ fn addReferencedTypes(
     const allocator = referenced_types.allocator;
 
     switch (type_handle.type.data) {
-        .primitive => |name| return name,
+        .primitive => |p| return try p.toString(allocator),
 
         .pointer => |t| {
             const child_type_str = try analyser.addReferencedTypes(t.*, ReferencedType.Collector.init(referenced_types));

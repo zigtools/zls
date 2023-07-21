@@ -7,6 +7,7 @@ const DocumentStore = @import("../DocumentStore.zig");
 const Analyser = @import("../analysis.zig");
 const ast = @import("../ast.zig");
 const types = @import("../lsp.zig");
+const PrimitiveType = @import("../analyser/primitive.zig").PrimitiveType;
 
 pub const TokenType = enum(u32) {
     type,
@@ -389,9 +390,9 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
 
             if (std.mem.eql(u8, name, "_")) {
                 return;
-            } else if (Analyser.isValueIdent(name)) {
+            } else if (PrimitiveType.fromValueIdent(name) != null) {
                 return try writeToken(builder, main_token, .keywordLiteral);
-            } else if (Analyser.isTypeIdent(name)) {
+            } else if (PrimitiveType.fromTypeIdent(name) != null) {
                 return try writeToken(builder, main_token, .type);
             }
 
