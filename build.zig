@@ -41,6 +41,7 @@ pub fn build(b: *std.build.Builder) !void {
     exe_options.addOption(bool, "enable_failing_allocator", b.option(bool, "enable_failing_allocator", "Whether to use a randomly failing allocator.") orelse false);
     exe_options.addOption(u32, "enable_failing_allocator_likelihood", b.option(u32, "enable_failing_allocator_likelihood", "The chance that an allocation will fail is `1/likelihood`") orelse 256);
     exe_options.addOption(bool, "use_gpa", b.option(bool, "use_gpa", "Good for debugging") orelse (optimize == .Debug));
+    exe_options.addOption(bool, "coverage", coverage);
 
     const version = v: {
         const version_string = b.fmt("{d}.{d}.{d}", .{ zls_version.major, zls_version.minor, zls_version.patch });
@@ -173,12 +174,35 @@ pub fn build(b: *std.build.Builder) !void {
     test_step.dependOn(&b.addRunArtifact(src_tests).step);
 
     if (coverage) {
-        const src_dir = b.pathFromRoot("src");
-        const include_pattern = b.fmt("--include-pattern={s}", .{src_dir});
-        const args = &[_]?[]const u8{ "kcov", include_pattern, coverage_output_dir, null };
+        const include_pattern = b.fmt("--include-pattern=/src", .{});
+        const exclude_pattern = b.fmt("--exclude-pattern=/src/stage2", .{});
+        const args = &[_]std.build.RunStep.Arg{
+            .{ .bytes = b.dupe("kcov") },
+            .{ .bytes = b.dupe("--collect-only") },
+            .{ .bytes = b.dupe(include_pattern) },
+            .{ .bytes = b.dupe(exclude_pattern) },
+            .{ .bytes = b.dupe(coverage_output_dir) },
+        };
 
-        tests.setExecCmd(args);
-        src_tests.setExecCmd(args);
-        // TODO merge coverage reports
+        var tests_run = b.addRunArtifact(tests);
+        var src_tests_run = b.addRunArtifact(src_tests);
+        tests_run.has_side_effects = true;
+        src_tests_run.has_side_effects = true;
+
+        tests_run.argv.insertSlice(0, args) catch @panic("OOM");
+        src_tests_run.argv.insertSlice(0, args) catch @panic("OOM");
+
+        var merge_step = std.build.RunStep.create(b, "merge kcov");
+        merge_step.has_side_effects = true;
+        merge_step.addArgs(&.{
+            "kcov",
+            "--merge",
+            coverage_output_dir,
+            b.pathJoin(&.{ coverage_output_dir, "test" }),
+        });
+        merge_step.step.dependOn(&b.addRemoveDirTree(coverage_output_dir).step);
+        merge_step.step.dependOn(&tests_run.step);
+        merge_step.step.dependOn(&src_tests_run.step);
+        test_step.dependOn(&merge_step.step);
     }
 }
