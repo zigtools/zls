@@ -2654,6 +2654,8 @@ pub const DeclWithHandle = struct {
                     .node = pay.switch_expr,
                     .handle = self.handle,
                 })) orelse return null;
+                if (switch_expr_type.isEnumType())
+                    return switch_expr_type;
                 if (!switch_expr_type.isUnionType())
                     return null;
 
