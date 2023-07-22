@@ -318,6 +318,31 @@ test "completion - struct" {
         .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
         .{ .label = "beta", .kind = .Field, .detail = "beta: []const u8" },
     });
+
+    try testCompletion(
+        \\fn doNothingWithInteger(a: u32) void { _ = a; }
+        \\const S = struct {
+        \\    alpha: u32,
+        \\    beta: []const u8,
+        \\    fn foo(self: S) void {
+        \\        doNothingWithInteger(self.<cursor>
+        \\    }
+        \\};
+    , &.{
+        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+        .{ .label = "beta", .kind = .Field, .detail = "beta: []const u8" },
+        .{ .label = "foo", .kind = .Function, .detail = "fn foo(self: S) void" },
+    });
+
+    try testCompletion(
+        \\const S = struct {
+        \\    const Mode = enum { alpha, beta, };
+        \\    fn foo(mode: <cursor>
+        \\};
+    , &.{
+        .{ .label = "S", .kind = .Constant, .detail = "const S = struct" },
+        .{ .label = "Mode", .kind = .Constant, .detail = "const Mode = enum" },
+    });
 }
 
 test "completion - union" {
