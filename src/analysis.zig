@@ -989,6 +989,13 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
             const value = .{ .node = var_decl.ast.init_node, .handle = handle };
             return try analyser.resolveTypeOfNodeInternal(value);
         },
+        .@"continue",
+        .@"break",
+        .@"return",
+        .unreachable_literal,
+        => return TypeWithHandle{
+            .type = .{ .data = .{ .primitive = .noreturn }, .is_type_val = false },
+        },
         .identifier => {
             const name = offsets.nodeToSlice(tree, node);
 
