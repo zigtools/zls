@@ -1366,10 +1366,25 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 .type = .{ .data = .{ .other = node_handle }, .is_type_val = false },
             };
         },
+        .char_literal => return TypeWithHandle{
+            .type = .{ .data = .{ .primitive = .comptime_int }, .is_type_val = false },
+        },
+        .number_literal => {
+            const number_str = tree.tokenSlice(main_tokens[node]);
+            const parsed_number = std.zig.number_literal.parseNumberLiteral(number_str);
+            return TypeWithHandle{
+                .type = .{
+                    .data = .{ .primitive = switch (parsed_number) {
+                        .int, .big_int => .comptime_int,
+                        .float => .comptime_float,
+                        .failure => return null,
+                    } },
+                    .is_type_val = false,
+                },
+            };
+        },
         .multiline_string_literal,
         .string_literal,
-        .char_literal,
-        .number_literal,
         .enum_literal,
         .error_value,
         => return TypeWithHandle{
@@ -4370,8 +4385,6 @@ fn addReferencedTypes(
                         .failure => null,
                     };
                 },
-
-                .number_literal, .char_literal => return "comptime_int",
 
                 .enum_literal => return "@TypeOf(.enum_literal)",
 
