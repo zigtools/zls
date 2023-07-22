@@ -261,37 +261,35 @@ test "completion - captures" {
         .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
     });
 
-    // TODO fix error union capture with if-else
-    // try testCompletion(
-    //     \\const E = error{ X, Y };
-    //     \\const S = struct { alpha: u32 };
-    //     \\fn foo() E!S { return undefined; }
-    //     \\fn bar() void {
-    //     \\    if (foo()) |baz| {
-    //     \\        baz.<cursor>
-    //     \\    } else |err| {
-    //     \\        _ = err;
-    //     \\    }
-    //     \\}
-    // , &.{
-    //     .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
-    // });
+    try testCompletion(
+        \\const E = error{ X, Y };
+        \\const S = struct { alpha: u32 };
+        \\fn foo() E!S { return undefined; }
+        \\fn bar() void {
+        \\    if (foo()) |baz| {
+        \\        baz.<cursor>
+        \\    } else |err| {
+        \\        _ = err;
+        \\    }
+        \\}
+    , &.{
+        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+    });
 
-    // TODO fix error union capture with while loop
-    // try testCompletion(
-    //     \\const E = error{ X, Y };
-    //     \\const S = struct { alpha: u32 };
-    //     \\fn foo() E!S { return undefined; }
-    //     \\fn bar() void {
-    //     \\    while (foo()) |baz| {
-    //     \\        baz.<cursor>
-    //     \\    } else |err| {
-    //     \\        _ = err;
-    //     \\    }
-    //     \\}
-    // , &.{
-    //     .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
-    // });
+    try testCompletion(
+        \\const E = error{ X, Y };
+        \\const S = struct { alpha: u32 };
+        \\fn foo() E!S { return undefined; }
+        \\fn bar() void {
+        \\    while (foo()) |baz| {
+        \\        baz.<cursor>
+        \\    } else |err| {
+        \\        _ = err;
+        \\    }
+        \\}
+    , &.{
+        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+    });
 }
 
 test "completion - struct" {
