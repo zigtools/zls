@@ -2643,13 +2643,20 @@ pub const DeclWithHandle = struct {
                 })) orelse return null,
                 pay.side,
             ),
-            .array_payload => |pay| try analyser.resolveBracketAccessType(
-                (try analyser.resolveTypeOfNodeInternal(.{
-                    .node = pay.array_expr,
-                    .handle = self.handle,
-                })) orelse return null,
-                .Single,
-            ),
+            .array_payload => |pay| {
+                if (node_tags[pay.array_expr] == .for_range) {
+                    return TypeWithHandle{
+                        .type = .{ .data = .{ .primitive = .usize }, .is_type_val = false },
+                    };
+                }
+                return try analyser.resolveBracketAccessType(
+                    (try analyser.resolveTypeOfNodeInternal(.{
+                        .node = pay.array_expr,
+                        .handle = self.handle,
+                    })) orelse return null,
+                    .Single,
+                );
+            },
             .label_decl => |decl| try analyser.resolveTypeOfNodeInternal(.{
                 .node = decl.block,
                 .handle = self.handle,
