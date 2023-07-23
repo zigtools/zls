@@ -1535,9 +1535,9 @@ pub const Type = struct {
         /// - Container type: `struct {}`, `enum {}`, `union {}`, `opaque {}`, `error {}`
         /// - Pointer type: `*Foo`, `[]Foo`, `?Foo`
         /// - Error type: `Foo || Bar`, `Foo!Bar`
-        /// - Function: `fn () Foo`, `fn foo() Foo`
-        /// - Literal: `"foo"`, `'x'`, `42`, `.foo`, `error.Foo`
-        /// - Primitive value: `true`, `false`, `null`, `undefined`
+        /// - Function type: `fn () Foo`
+        /// - Function: `fn foo() Foo`
+        /// - Literal: `"foo"`, `.foo`, `error.Foo`
         other: NodeWithHandle,
 
         /// Primitive type: `u8`, `bool`, `type`, etc.
