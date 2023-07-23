@@ -1375,6 +1375,11 @@ pub fn completionAtIndex(server: *Server, analyser: *Analyser, arena: std.mem.Al
         const prefix = kindToSortScore(c.kind.?) orelse continue;
 
         c.sortText = try std.fmt.allocPrint(arena, "{s}{s}", .{ prefix, c.label });
+
+        if (source_index < handle.text.len and handle.text[source_index] == '(') {
+            c.insertText = c.label;
+            c.insertTextFormat = .PlainText;
+        }
     }
 
     return .{ .isIncomplete = false, .items = completions };
