@@ -150,7 +150,7 @@ pub fn main() !void {
             .packages = package_list,
             .include_dirs = include_dirs.keys(),
         },
-        .{ .whitespace = .{} },
+        .{},
         std.io.getStdOut().writer(),
     );
 }
