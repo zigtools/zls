@@ -1117,9 +1117,7 @@ pub fn generalReferencesHandler(server: *Server, arena: std.mem.Allocator, reque
         .field_access => |loc| z: {
             const held_loc = offsets.locMerge(loc, name_loc);
             const a = try analyser.getSymbolFieldAccesses(arena, handle, source_index, held_loc, name);
-            if (a) |b| {
-                if (b.len != 0) break :z b[0];
-            }
+            if (a.declarations.len != 0) break :z a.declarations[0];
 
             break :z null;
         },

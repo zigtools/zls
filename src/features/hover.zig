@@ -13,6 +13,25 @@ const DocumentStore = @import("../DocumentStore.zig");
 
 const data = @import("../data/data.zig");
 
+pub fn hoverProperty(
+    analyser: *Analyser,
+    arena: std.mem.Allocator,
+    name: []const u8,
+    resolved_type: Analyser.TypeWithHandle,
+    markup_kind: types.MarkupKind,
+) error{OutOfMemory}!?[]const u8 {
+    var type_references = Analyser.ReferencedType.Set.init(arena);
+    var reference_collector = Analyser.ReferencedType.Collector.init(&type_references);
+    var resolved_type_str: []const u8 = "unknown";
+    try analyser.referencedTypes(
+        resolved_type,
+        &resolved_type_str,
+        &reference_collector,
+    );
+    const def_str = try std.fmt.allocPrint(arena, "{s}: {s}", .{ name, resolved_type_str });
+    return createHoverString(arena, markup_kind, null, def_str, resolved_type_str, type_references.keys());
+}
+
 pub fn hoverSymbol(
     analyser: *Analyser,
     arena: std.mem.Allocator,
@@ -103,8 +122,17 @@ pub fn hoverSymbol(
             &reference_collector,
         );
     }
-    const referenced_types: []const Analyser.ReferencedType = type_references.keys();
+    return createHoverString(arena, markup_kind, doc_str, def_str, resolved_type_str, type_references.keys());
+}
 
+pub fn createHoverString(
+    arena: std.mem.Allocator,
+    markup_kind: types.MarkupKind,
+    doc_str: ?[]const u8,
+    def_str: []const u8,
+    resolved_type_str: []const u8,
+    referenced_types: []const Analyser.ReferencedType,
+) error{OutOfMemory}!?[]const u8 {
     var hover_text = std.ArrayList(u8).init(arena);
     const writer = hover_text.writer();
     if (markup_kind == .markdown) {
@@ -282,13 +310,18 @@ pub fn hoverDefinitionFieldAccess(
     const name_loc = Analyser.identifierLocFromPosition(source_index, handle) orelse return null;
     const name = offsets.locToSlice(handle.text, name_loc);
     const held_loc = offsets.locMerge(loc, name_loc);
-    const decls = (try analyser.getSymbolFieldAccesses(arena, handle, source_index, held_loc, name)) orelse return null;
+    const accesses = try analyser.getSymbolFieldAccesses(arena, handle, source_index, held_loc, name);
 
     var content = std.ArrayListUnmanaged(types.MarkedString){};
 
-    for (decls) |decl| {
+    for (accesses.declarations) |decl| {
         try content.append(arena, .{
             .string = (try hoverSymbol(analyser, arena, decl, markup_kind, null)) orelse continue,
+        });
+    }
+    for (accesses.properties) |ty| {
+        try content.append(arena, .{
+            .string = (try hoverProperty(analyser, arena, name, ty, markup_kind)) orelse continue,
         });
     }
 

@@ -3389,6 +3389,11 @@ pub fn getSymbolEnumLiteral(
     return analyser.lookupSymbolFieldInit(handle, name, nodes);
 }
 
+pub const FieldAccesses = struct {
+    declarations: []const DeclWithHandle,
+    properties: []const TypeWithHandle,
+};
+
 /// Multiple when using branched types
 pub fn getSymbolFieldAccesses(
     analyser: *Analyser,
@@ -3397,7 +3402,7 @@ pub fn getSymbolFieldAccesses(
     source_index: usize,
     held_loc: offsets.Loc,
     name: []const u8,
-) error{OutOfMemory}!?[]const DeclWithHandle {
+) error{OutOfMemory}!FieldAccesses {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -3405,6 +3410,7 @@ pub fn getSymbolFieldAccesses(
     var tokenizer = std.zig.Tokenizer.init(held_range);
 
     var decls_with_handles = std.ArrayListUnmanaged(DeclWithHandle){};
+    var properties = std.ArrayListUnmanaged(TypeWithHandle){};
 
     if (try analyser.getFieldAccessType(handle, source_index, &tokenizer)) |result| {
         const container_handle = result.unwrapped orelse result.original;
@@ -3412,11 +3418,17 @@ pub fn getSymbolFieldAccesses(
         const container_handle_nodes = try container_handle.getAllTypesWithHandles(arena);
 
         for (container_handle_nodes) |ty| {
-            try decls_with_handles.append(arena, (try ty.lookupSymbol(analyser, name)) orelse continue);
+            if (try ty.lookupSymbol(analyser, name)) |decl|
+                try decls_with_handles.append(arena, decl);
+            if (try analyser.resolvePropertyType(ty, name)) |t|
+                try properties.append(arena, t);
         }
     }
 
-    return try decls_with_handles.toOwnedSlice(arena);
+    return .{
+        .declarations = try decls_with_handles.toOwnedSlice(arena),
+        .properties = try properties.toOwnedSlice(arena),
+    };
 }
 
 const CompletionContext = struct {

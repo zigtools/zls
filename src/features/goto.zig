@@ -135,10 +135,10 @@ pub fn gotoDefinitionFieldAccess(
     const name_loc = Analyser.identifierLocFromPosition(source_index, handle) orelse return null;
     const name = offsets.locToSlice(handle.text, name_loc);
     const held_loc = offsets.locMerge(loc, name_loc);
-    const accesses = (try analyser.getSymbolFieldAccesses(arena, handle, source_index, held_loc, name)) orelse return null;
+    const accesses = (try analyser.getSymbolFieldAccesses(arena, handle, source_index, held_loc, name));
     var locs = std.ArrayListUnmanaged(types.DefinitionLink){};
 
-    for (accesses) |access| {
+    for (accesses.declarations) |access| {
         if (try gotoDefinitionSymbol(analyser, offsets.locToRange(handle.text, name_loc, offset_encoding), access, resolve_alias, offset_encoding)) |l|
             try locs.append(arena, l);
     }
