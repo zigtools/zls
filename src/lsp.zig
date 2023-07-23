@@ -90,9 +90,9 @@ pub fn UnionParser(comptime T: type) type {
             return error.UnexpectedToken;
         }
 
-        pub fn jsonStringify(self: T, options: std.json.StringifyOptions, out_stream: anytype) @TypeOf(out_stream).Error!void {
+        pub fn jsonStringify(self: T, stream: anytype) @TypeOf(stream.*).Error!void {
             switch (self) {
-                inline else => |value| try std.json.stringify(value, options, out_stream),
+                inline else => |value| try stream.write(value),
             }
         }
     };
@@ -122,16 +122,16 @@ pub fn EnumWithEmptyParser(comptime T: type) type {
             return std.meta.stringToEnum(T, source.string) orelse return error.InvalidEnumTag;
         }
 
-        pub fn jsonStringify(self: T, options: std.json.StringifyOptions, out_stream: anytype) @TypeOf(out_stream).Error!void {
-            try std.json.encodeJsonString(if (self == .empty) "" else @tagName(self), options, out_stream);
+        pub fn jsonStringify(self: T, stream: anytype) @TypeOf(stream.*).Error!void {
+            try stream.write(if (self == .empty) "" else @tagName(self));
         }
     };
 }
 
 pub fn EnumStringifyAsInt(comptime T: type) type {
     return struct {
-        pub fn jsonStringify(self: T, options: std.json.StringifyOptions, out_stream: anytype) @TypeOf(out_stream).Error!void {
-            try std.json.stringify(@intFromEnum(self), options, out_stream);
+        pub fn jsonStringify(self: T, stream: anytype) @TypeOf(stream.*).Error!void {
+            try stream.write(@intFromEnum(self));
         }
     };
 }
