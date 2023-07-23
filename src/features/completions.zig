@@ -444,6 +444,7 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: Analyser.Decl
         .error_union_payload,
         .array_payload,
         .switch_payload,
+        .switch_tag_payload,
         .label_decl,
         => {
             const name = tree.tokenSlice(decl_handle.nameToken());

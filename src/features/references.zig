@@ -214,6 +214,7 @@ pub fn symbolReferences(
         .pointer_payload,
         .error_union_payload,
         .switch_payload,
+        .switch_tag_payload,
         .array_payload,
         => {
             try builder.collectReferences(curr_handle, 0);

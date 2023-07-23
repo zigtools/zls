@@ -624,9 +624,22 @@ fn resolveUnwrapErrorUnionType(analyser: *Analyser, rhs_type: TypeWithHandle, si
 }
 
 fn resolveTaggedUnionFieldType(analyser: *Analyser, type_handle: TypeWithHandle, symbol: []const u8) !?TypeWithHandle {
-    if (!type_handle.type.is_type_val)
+    const instance_type_handle = type_handle.instanceTypeVal() orelse
         return null;
 
+    const tag_type = try analyser.resolveUnionTagType(instance_type_handle) orelse
+        return null;
+
+    const child = try type_handle.lookupSymbol(analyser, symbol) orelse
+        return null;
+
+    if (child.decl.* == .ast_node and child.handle.tree.nodes.items(.tag)[child.decl.ast_node].isContainerField())
+        return tag_type;
+
+    return null;
+}
+
+fn resolveUnionTagType(analyser: *Analyser, type_handle: TypeWithHandle) !?TypeWithHandle {
     const node_handle = switch (type_handle.type.data) {
         .other => |n| n,
         else => return null,
@@ -638,21 +651,10 @@ fn resolveTaggedUnionFieldType(analyser: *Analyser, type_handle: TypeWithHandle,
 
     const handle = node_handle.handle;
     const tree = handle.tree;
-    const node_tags = tree.nodes.items(.tag);
-    const token_tags = tree.tokens.items(.tag);
 
     var buf: [2]Ast.Node.Index = undefined;
     const container_decl = tree.fullContainerDecl(&buf, node) orelse
         return null;
-
-    if (token_tags[container_decl.ast.main_token] != .keyword_union)
-        return null;
-
-    const child = try type_handle.lookupSymbol(analyser, symbol) orelse
-        return null;
-
-    if (child.decl.* != .ast_node or !node_tags[child.decl.ast_node].isContainerField())
-        return try child.resolveType(analyser);
 
     if (container_decl.ast.enum_token != null) {
         const union_type_ptr = try analyser.arena.allocator().create(TypeWithHandle);
@@ -1527,7 +1529,7 @@ pub const Type = struct {
         /// Return type of `fn foo() !Foo`
         error_union: *TypeWithHandle,
 
-        /// `Foo` in `Foo.bar` where `Foo = union(enum) { bar }`
+        /// Type of `Foo.bar` where `Foo = union(enum) { bar }`
         union_tag: *TypeWithHandle,
 
         /// - Container type: `struct {}`, `enum {}`, `union {}`, `opaque {}`, `error {}`
@@ -2417,36 +2419,66 @@ pub const TokenWithHandle = struct {
 pub const ErrorUnionSide = enum { left, right };
 
 pub const Declaration = union(enum) {
+    /// - `var foo`
+    /// - `const foo`
+    /// - `fn foo() Foo`
+    /// - `foo: Foo` in `struct { foo: Foo }`
+    /// - `foo` in `enum { foo }`
+    ///
     /// Index of the ast node
     ast_node: Ast.Node.Index,
+
+    /// `b: B` or `c: C` in `fn a(b: B, c: C)`
+    ///
     /// Function parameter
     param_payload: struct {
         param: Ast.full.FnProto.Param,
         param_idx: u16,
         func: Ast.Node.Index,
     },
+
+    /// `bar` in `if (foo) |bar| { ... } else { ... }`
     pointer_payload: struct {
         name: Ast.TokenIndex,
         condition: Ast.Node.Index,
     },
+
+    /// `b` or `c` in `if (a) |b| { ... } else |c| { ... }`
     error_union_payload: struct {
         name: Ast.TokenIndex,
         condition: ?Ast.Node.Index,
         side: ErrorUnionSide,
     },
+
+    /// `c` or `d` in `for (a, b) |c, d|`
     array_payload: struct {
         identifier: Ast.TokenIndex,
         array_expr: Ast.Node.Index,
     },
+
+    /// `c` in `.a, .b => |c|`
     switch_payload: struct {
-        node: Ast.TokenIndex,
+        name: Ast.TokenIndex,
         switch_expr: Ast.Node.Index,
         items: []const Ast.Node.Index,
     },
+
+    /// `d` in `inline .a, .b => |c, d|`
+    switch_tag_payload: struct {
+        name: Ast.TokenIndex,
+        switch_expr: Ast.Node.Index,
+    },
+
+    /// - `blk: { ... }`
+    /// - `blk: while (foo) { ... }`
+    /// - `blk: for (foo) |bar| { ... }`
     label_decl: struct {
         label: Ast.TokenIndex,
         block: Ast.Node.Index,
     },
+
+    /// `Foo` or `Bar` in `error{ Foo, Bar }`
+    ///
     /// always an identifier
     error_token: Ast.TokenIndex,
 
@@ -2496,7 +2528,8 @@ pub const DeclWithHandle = struct {
             .pointer_payload => |pp| pp.name,
             .error_union_payload => |ep| ep.name,
             .array_payload => |ap| ap.identifier,
-            .switch_payload => |sp| sp.node,
+            .switch_payload => |sp| sp.name,
+            .switch_tag_payload => |sp| sp.name,
             .label_decl => |ld| ld.label,
             .error_token => |et| et,
         };
@@ -2661,6 +2694,12 @@ pub const DeclWithHandle = struct {
                 .node = decl.block,
                 .handle = self.handle,
             }),
+            .switch_tag_payload => |pay| try analyser.resolveUnionTagType(
+                (try analyser.resolveTypeOfNodeInternal(.{
+                    .node = pay.switch_expr,
+                    .handle = self.handle,
+                })) orelse return null,
+            ),
             .switch_payload => |pay| {
                 if (pay.items.len == 0) return null;
                 // TODO Peer type resolution, we just use the first item for now.
@@ -4048,8 +4087,16 @@ fn makeScopeAt(
                     const name = tree.tokenSlice(name_token);
 
                     try context.putVarDecl(expr_index, name, .{
-                        .switch_payload = .{ .node = name_token, .switch_expr = cond, .items = switch_case.ast.values },
+                        .switch_payload = .{ .name = name_token, .switch_expr = cond, .items = switch_case.ast.values },
                     });
+
+                    if (switch_case.inline_token != null and token_tags[name_token + 1] == .comma) {
+                        const tag_capture_token = name_token + 2;
+                        const tag_capture_name = tree.tokenSlice(tag_capture_token);
+                        try context.putVarDecl(expr_index, tag_capture_name, .{
+                            .switch_tag_payload = .{ .name = tag_capture_token, .switch_expr = cond },
+                        });
+                    }
                 } else {
                     try makeScopeInternal(context, tree, switch_case.ast.target_expr);
                 }

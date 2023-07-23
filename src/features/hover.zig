@@ -106,6 +106,7 @@ pub fn hoverSymbol(
         .error_union_payload,
         .array_payload,
         .switch_payload,
+        .switch_tag_payload,
         .label_decl,
         .error_token,
         => tree.tokenSlice(decl_handle.nameToken()),
