@@ -21,6 +21,7 @@ on:
 
 jobs:
   build:
+    if: github.repository_owner == 'zigtools'
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
@@ -55,7 +56,7 @@ jobs:
 
           for target in "${targets[@]}"; do
             mkdir -p artifacts/$target
-            echo "Building target ${target}..."   
+            echo "Building target ${target}..."
             if [ "${GITHUB_REF##*/}" == "master" ]; then
               echo "Building safe"
               zig build -Dtarget=${target} -Doptimize=ReleaseSafe --prefix artifacts/${target}/
