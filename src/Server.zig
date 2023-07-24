@@ -1549,7 +1549,7 @@ pub fn loop(server: *Server) !void {
         while (server.job_queue.readItem()) |job| {
             if (zig_builtin.single_threaded) {
                 server.processJob(job, null);
-                return;
+                continue;
             }
 
             switch (job.syncMode()) {
