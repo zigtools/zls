@@ -1573,7 +1573,10 @@ pub const TypeWithHandle = struct {
                 .error_union,
                 .union_tag,
                 => |t| hashTypeWithHandle(hasher, t.*),
-                .other => |idx| hasher.update(&std.mem.toBytes(idx)),
+                .other => |n| {
+                    hasher.update(n.handle.uri);
+                    hasher.update(&std.mem.toBytes(n.node));
+                },
                 .primitive => |p| p.hash(hasher),
                 .either => |entries| {
                     for (entries) |e| {
