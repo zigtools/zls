@@ -15,6 +15,7 @@ on:
 
 jobs:
   check_build_runner:
+    if: github.repository_owner == 'zigtools'
     strategy:
       matrix:
         zig_version: [master]
