@@ -1013,7 +1013,7 @@ pub fn paramFirstToken(tree: Ast, param: Ast.full.FnProto.Param) Ast.TokenIndex 
 }
 
 pub fn paramLastToken(tree: Ast, param: Ast.full.FnProto.Param) Ast.TokenIndex {
-    return param.anytype_ellipsis3 orelse tree.lastToken(param.type_expr);
+    return param.anytype_ellipsis3 orelse lastToken(tree, param.type_expr);
 }
 
 pub fn paramSlice(tree: Ast, param: Ast.full.FnProto.Param) []const u8 {
@@ -1126,6 +1126,7 @@ pub fn nextFnParam(it: *Ast.full.FnProto.Iterator) ?Ast.full.FnProto.Param {
                 return null;
             }
             const param_type = it.fn_proto.ast.params[it.param_i];
+            const last_param_type_token = lastToken(it.tree.*, param_type);
             var tok_i = it.tree.firstToken(param_type) - 1;
             while (true) : (tok_i -= 1) switch (token_tags[tok_i]) {
                 .colon => continue,
@@ -1135,11 +1136,11 @@ pub fn nextFnParam(it: *Ast.full.FnProto.Iterator) ?Ast.full.FnProto.Param {
                 else => break,
             };
             it.param_i += 1;
-            it.tok_i = it.tree.lastToken(param_type) + 1;
+            it.tok_i = last_param_type_token + 1;
 
             // #boundsCheck
             // https://github.com/zigtools/zls/issues/567
-            if (it.tree.lastToken(param_type) >= it.tree.tokens.len - 1)
+            if (last_param_type_token >= it.tree.tokens.len - 1)
                 return Ast.full.FnProto.Param{
                     .first_doc_comment = first_doc_comment,
                     .comptime_noalias = comptime_noalias,

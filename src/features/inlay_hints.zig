@@ -139,7 +139,7 @@ fn writeCallHint(builder: *Builder, call: Ast.full.Call, decl_handle: Analyser.D
         const name = decl_tree.tokenSlice(name_token);
 
         if (builder.config.inlay_hints_hide_redundant_param_names or builder.config.inlay_hints_hide_redundant_param_names_last_token) {
-            const last_arg_token = tree.lastToken(arg);
+            const last_arg_token = ast.lastToken(tree, arg);
             const arg_name = tree.tokenSlice(last_arg_token);
 
             if (std.mem.eql(u8, arg_name, name)) {

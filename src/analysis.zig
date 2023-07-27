@@ -1475,13 +1475,13 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 label_token: ?Ast.TokenIndex,
                 then_expr: Ast.Node.Index,
                 else_expr: Ast.Node.Index,
-            } = if (tree.fullWhile(node)) |while_node|
+            } = if (ast.fullWhile(tree, node)) |while_node|
                 .{
                     .label_token = while_node.label_token,
                     .then_expr = while_node.ast.then_expr,
                     .else_expr = while_node.ast.else_expr,
                 }
-            else if (tree.fullFor(node)) |for_node|
+            else if (ast.fullFor(tree, node)) |for_node|
                 .{
                     .label_token = for_node.label_token,
                     .then_expr = for_node.ast.then_expr,
@@ -3212,7 +3212,7 @@ pub fn resolveExpressionTypeFromAncestors(
                 .handle = handle,
             });
         }
-    } else if (tree.fullIf(ancestors[0])) |if_node| {
+    } else if (ast.fullIf(tree, ancestors[0])) |if_node| {
         if (node == if_node.ast.then_expr or node == if_node.ast.else_expr) {
             return try analyser.resolveExpressionType(
                 handle,
@@ -3220,7 +3220,7 @@ pub fn resolveExpressionTypeFromAncestors(
                 ancestors[1..],
             );
         }
-    } else if (tree.fullFor(ancestors[0])) |for_node| {
+    } else if (ast.fullFor(tree, ancestors[0])) |for_node| {
         if (node == for_node.ast.else_expr) {
             return try analyser.resolveExpressionType(
                 handle,
@@ -3228,7 +3228,7 @@ pub fn resolveExpressionTypeFromAncestors(
                 ancestors[1..],
             );
         }
-    } else if (tree.fullWhile(ancestors[0])) |while_node| {
+    } else if (ast.fullWhile(tree, ancestors[0])) |while_node| {
         if (node == while_node.ast.else_expr) {
             return try analyser.resolveExpressionType(
                 handle,
@@ -3336,11 +3336,11 @@ pub fn resolveExpressionTypeFromAncestors(
                 null;
 
             const index = blk: for (1..ancestors.len) |index| {
-                if (tree.fullFor(ancestors[index])) |for_node| {
+                if (ast.fullFor(tree, ancestors[index])) |for_node| {
                     const break_label = break_label_maybe orelse break :blk index;
                     const for_label = tree.tokenSlice(for_node.label_token orelse continue);
                     if (std.mem.eql(u8, break_label, for_label)) break :blk index;
-                } else if (tree.fullWhile(ancestors[index])) |while_node| {
+                } else if (ast.fullWhile(tree, ancestors[index])) |while_node| {
                     const break_label = break_label_maybe orelse break :blk index;
                     const while_label = tree.tokenSlice(while_node.label_token orelse continue);
                     if (std.mem.eql(u8, break_label, while_label)) break :blk index;
@@ -4368,7 +4368,7 @@ fn addReferencedTypes(
             .ptr_type_bit_range,
             .ptr_type_sentinel,
             => {
-                const ptr_type = tree.fullPtrType(p).?;
+                const ptr_type = ast.fullPtrType(tree, p).?;
 
                 const child_type_str = try analyser.addReferencedTypesFromNode(
                     .{ .node = ptr_type.ast.child_type, .handle = handle },
