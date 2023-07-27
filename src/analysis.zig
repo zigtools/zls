@@ -20,6 +20,7 @@ ip: ?*InternPool,
 bound_type_params: std.AutoHashMapUnmanaged(Ast.full.FnProto.Param, TypeWithHandle) = .{},
 using_trail: std.AutoHashMapUnmanaged(Ast.Node.Index, void) = .{},
 resolved_nodes: std.HashMapUnmanaged(NodeWithUri, ?TypeWithHandle, NodeWithUri.Context, std.hash_map.default_max_load_percentage) = .{},
+resolved_aliases: std.HashMapUnmanaged(NodeWithUri, void, NodeWithUri.Context, std.hash_map.default_max_load_percentage) = .{},
 
 pub fn init(gpa: std.mem.Allocator, store: *DocumentStore, ip: ?*InternPool) Analyser {
     return .{
@@ -34,6 +35,7 @@ pub fn deinit(self: *Analyser) void {
     self.bound_type_params.deinit(self.gpa);
     self.using_trail.deinit(self.gpa);
     self.resolved_nodes.deinit(self.gpa);
+    self.resolved_aliases.deinit(self.gpa);
     self.arena.deinit();
 }
 
@@ -41,6 +43,7 @@ pub fn invalidate(self: *Analyser) void {
     self.bound_type_params.clearRetainingCapacity();
     self.using_trail.clearRetainingCapacity();
     self.resolved_nodes.clearRetainingCapacity();
+    self.resolved_aliases.clearRetainingCapacity();
     _ = self.arena.reset(.free_all);
 }
 
@@ -435,6 +438,20 @@ pub fn getContainerDeclName(tree: Ast, container: ?Ast.Node.Index, node: Ast.Nod
 /// const other = decl.middle.other;
 ///```
 pub fn resolveVarDeclAlias(analyser: *Analyser, node_handle: NodeWithHandle) error{OutOfMemory}!?DeclWithHandle {
+    analyser.resolved_aliases.clearRetainingCapacity();
+    return try analyser.resolveVarDeclAliasInternal(node_handle);
+}
+
+fn resolveVarDeclAliasInternal(analyser: *Analyser, node_handle: NodeWithHandle) error{OutOfMemory}!?DeclWithHandle {
+    const node_with_uri = NodeWithUri{ .node = node_handle.node, .uri = node_handle.handle.uri };
+
+    const gop = try analyser.resolved_aliases.getOrPut(analyser.gpa, node_with_uri);
+    if (gop.found_existing) return null;
+
+    return try analyser.resolveVarDeclAliasUncached(node_handle);
+}
+
+fn resolveVarDeclAliasUncached(analyser: *Analyser, node_handle: NodeWithHandle) error{OutOfMemory}!?DeclWithHandle {
     const handle = node_handle.handle;
     const tree = handle.tree;
     const node_tags = tree.nodes.items(.tag);
@@ -479,7 +496,7 @@ pub fn resolveVarDeclAlias(analyser: *Analyser, node_handle: NodeWithHandle) err
             const base_exp = var_decl.ast.init_node;
             if (token_tags[var_decl.ast.mut_token] != .keyword_const) return null;
 
-            return try analyser.resolveVarDeclAlias(.{ .node = base_exp, .handle = handle });
+            return try analyser.resolveVarDeclAliasInternal(.{ .node = base_exp, .handle = handle });
         },
         .builtin_call,
         .builtin_call_comma,
@@ -505,7 +522,11 @@ pub fn resolveVarDeclAlias(analyser: *Analyser, node_handle: NodeWithHandle) err
         else => return resolved,
     };
 
-    if (try analyser.resolveVarDeclAlias(.{ .node = resolved_node, .handle = resolved.handle })) |result| {
+    if (analyser.resolved_aliases.contains(.{ .node = resolved_node, .uri = resolved.handle.uri })) {
+        return null;
+    }
+
+    if (try analyser.resolveVarDeclAliasUncached(.{ .node = resolved_node, .handle = resolved.handle })) |result| {
         return result;
     } else {
         return resolved;
@@ -831,7 +852,7 @@ fn resolvePropertyType(analyser: *Analyser, type_handle: TypeWithHandle, name: [
             .ptr_type_bit_range,
             .ptr_type_sentinel,
             => {
-                const ptr_type = tree.fullPtrType(n).?;
+                const ptr_type = ast.fullPtrType(tree, n).?;
 
                 if (ptr_type.size == .Slice) {
                     if (std.mem.eql(u8, "len", name)) {
@@ -990,21 +1011,11 @@ fn resolveTypeOfNodeInternal(analyser: *Analyser, node_handle: NodeWithHandle) e
     gop.value_ptr.* = null;
 
     const type_handle = try analyser.resolveTypeOfNodeUncached(node_handle);
-    analyser.resolved_nodes.getPtr(node_with_uri).?.* = type_handle;
+    if (type_handle != null) {
+        analyser.resolved_nodes.getPtr(node_with_uri).?.* = type_handle;
+    }
 
     return type_handle;
-
-    // if (analyser.resolved_nodes.get(node_handle)) |type_handle| return type_handle;
-
-    //// If we were asked to resolve this node before,
-    //// it is self-referential and we cannot resolve it.
-    //for (analyser.resolve_trail.items) |i| {
-    //    if (std.meta.eql(i, node_handle))
-    //        return null;
-    //}
-    //try analyser.resolve_trail.append(analyser.gpa, node_handle);
-    //defer _ = analyser.resolve_trail.pop();
-
 }
 
 fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) error{OutOfMemory}!?TypeWithHandle {
@@ -1958,6 +1969,11 @@ pub const NodeWithUri = struct {
 pub const NodeWithHandle = struct {
     node: Ast.Node.Index,
     handle: *const DocumentStore.Handle,
+
+    pub fn eql(a: NodeWithHandle, b: NodeWithHandle) bool {
+        if (a.node != b.node) return false;
+        return std.mem.eql(u8, a.handle.uri, b.handle.uri);
+    }
 };
 
 pub const FieldAccessReturn = struct {
