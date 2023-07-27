@@ -1002,6 +1002,7 @@ pub fn lastToken(tree: Ast, node: Ast.Node.Index) Ast.TokenIndex {
 
 pub fn hasInferredError(tree: Ast, fn_proto: Ast.full.FnProto) bool {
     const token_tags = tree.tokens.items(.tag);
+    if (fn_proto.ast.return_type == 0) return false;
     return token_tags[tree.firstToken(fn_proto.ast.return_type) - 1] == .bang;
 }
 
