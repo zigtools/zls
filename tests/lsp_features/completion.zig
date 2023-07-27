@@ -44,6 +44,15 @@ test "completion - root scope" {
     });
 }
 
+test "completion - root scope with self referential decl" {
+    try testCompletion(
+        \\const foo = foo;
+        \\const bar = <cursor>
+    , &.{
+        .{ .label = "foo", .kind = .Constant },
+    });
+}
+
 test "completion - local scope" {
     if (true) return error.SkipZigTest;
     try testCompletion(
