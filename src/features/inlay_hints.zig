@@ -192,7 +192,7 @@ fn writeBuiltinHint(builder: *Builder, parameters: []const Ast.Node.Index, argum
         var no_alias = false;
         var comp_time = false;
 
-        var it = std.mem.split(u8, arg[0 .. colonIndex orelse arg.len], " ");
+        var it = std.mem.splitScalar(u8, arg[0 .. colonIndex orelse arg.len], ' ');
         while (it.next()) |item| {
             if (item.len == 0) continue;
             label = item;

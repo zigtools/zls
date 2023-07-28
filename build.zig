@@ -62,7 +62,7 @@ pub fn build(b: *std.build.Builder) !void {
             },
             2 => {
                 // Untagged development build (e.g. 0.10.0-dev.216+34ce200).
-                var it = std.mem.split(u8, git_describe, "-");
+                var it = std.mem.splitScalar(u8, git_describe, '-');
                 const tagged_ancestor = it.first();
                 const commit_height = it.next().?;
                 const commit_id = it.next().?;

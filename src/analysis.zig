@@ -127,7 +127,7 @@ fn formatSnippetPlaceholder(
     _ = fmt;
     _ = options;
 
-    var split_it = std.mem.split(u8, data, "}");
+    var split_it = std.mem.splitScalar(u8, data, '}');
     while (split_it.next()) |segment| {
         try writer.writeAll(segment);
         if (split_it.index) |index|
