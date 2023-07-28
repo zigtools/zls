@@ -476,8 +476,16 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
                 } else try callWriteNodeTokens(allocator, .{ builder, param_decl.type_expr });
             }
 
+            if (fn_proto.ast.align_expr != 0) {
+                try writeToken(builder, tree.firstToken(fn_proto.ast.align_expr) - 2, .keyword);
+            }
             try callWriteNodeTokens(allocator, .{ builder, fn_proto.ast.align_expr });
+
             try callWriteNodeTokens(allocator, .{ builder, fn_proto.ast.section_expr });
+
+            if (fn_proto.ast.callconv_expr != 0) {
+                try writeToken(builder, tree.firstToken(fn_proto.ast.callconv_expr) - 2, .keyword);
+            }
             try callWriteNodeTokens(allocator, .{ builder, fn_proto.ast.callconv_expr });
 
             try callWriteNodeTokens(allocator, .{ builder, fn_proto.ast.return_type });

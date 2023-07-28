@@ -718,9 +718,9 @@ test "semantic tokens - function" {
         .{ "extern", .keyword, .{} },
         .{ "fn", .keyword, .{} },
         .{ "foo", .function, .{ .declaration = true } },
-        // TODO .{ "align", .keyword, .{} },
+        .{ "align", .keyword, .{} },
         .{ "4", .number, .{} },
-        // TODO .{ "callconv", .keyword, .{} },
+        .{ "callconv", .keyword, .{} },
         .{ "C", .enumMember, .{} },
         .{ "void", .type, .{} },
     });
