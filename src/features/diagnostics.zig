@@ -119,7 +119,7 @@ pub fn generateDiagnostics(server: *Server, arena: std.mem.Allocator, handle: Do
         if (result != .failure) continue;
         const stderr = std.mem.trim(u8, result.failure, " ");
 
-        var pos_and_diag_iterator = std.mem.split(u8, stderr, ":");
+        var pos_and_diag_iterator = std.mem.splitScalar(u8, stderr, ':');
         _ = pos_and_diag_iterator.next(); // skip file path
         _ = pos_and_diag_iterator.next(); // skip line
         _ = pos_and_diag_iterator.next(); // skip character
@@ -251,12 +251,12 @@ fn getDiagnosticsFromAstCheck(
     var last_related_diagnostics: std.ArrayListUnmanaged(types.DiagnosticRelatedInformation) = .{};
 
     // NOTE: I believe that with color off it's one diag per line; is this correct?
-    var line_iterator = std.mem.split(u8, stderr_bytes, "\n");
+    var line_iterator = std.mem.splitScalar(u8, stderr_bytes, '\n');
 
     while (line_iterator.next()) |line| lin: {
         if (!std.mem.startsWith(u8, line, "<stdin>")) continue;
 
-        var pos_and_diag_iterator = std.mem.split(u8, line, ":");
+        var pos_and_diag_iterator = std.mem.splitScalar(u8, line, ':');
         const maybe_first = pos_and_diag_iterator.next();
         if (maybe_first) |first| {
             if (first.len <= 1) break :lin;

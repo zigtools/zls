@@ -674,7 +674,7 @@ fn writeLine(str: []const u8, single_line: bool, writer: anytype) @TypeOf(writer
     if (trimmed_content.len == 0) return;
 
     if (single_line) {
-        var line_it = std.mem.split(u8, trimmed_content, "\n");
+        var line_it = std.mem.splitScalar(u8, trimmed_content, '\n');
         while (line_it.next()) |line| {
             try writer.print("{s} ", .{std.mem.trim(u8, line, &std.ascii.whitespace)});
         }
@@ -900,7 +900,7 @@ fn generateVersionDataFile(allocator: std.mem.Allocator, version: []const u8, pa
         try writeMarkdownFromHtml(html, markdown.writer(allocator));
 
         try writer.writeAll("        .documentation =\n");
-        var line_it = std.mem.split(u8, std.mem.trim(u8, markdown.items, "\n"), "\n");
+        var line_it = std.mem.splitScalar(u8, std.mem.trim(u8, markdown.items, "\n"), '\n');
         while (line_it.next()) |line| {
             try writer.print("        \\\\{s}\n", .{std.mem.trimRight(u8, line, " ")});
         }
