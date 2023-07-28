@@ -3878,13 +3878,7 @@ fn makeScopeAt(
         => {
             const first_token = tree.firstToken(node_idx);
             const last_token = ast.lastToken(tree, node_idx);
-
-            // the last token may not always be the closing brace because of broken ast
-            // so we look at most 16 characters ahead to find the closing brace
-            // TODO this should automatically be done by `ast.lastToken`
-            var end_index = offsets.tokenToLoc(tree, last_token).start;
-            const lookahead_buffer = tree.source[end_index..@min(tree.source.len, end_index + 16)];
-            end_index += std.mem.indexOfScalar(u8, lookahead_buffer, '}') orelse 0;
+            const end_index = offsets.tokenToLoc(tree, last_token).end;
 
             const scope_index = try context.pushScope(
                 .{
