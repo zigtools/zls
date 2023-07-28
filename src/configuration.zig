@@ -145,10 +145,7 @@ pub fn configChanged(config: *Config, runtime_zig_version: *?ZigVersionWrapper, 
 
         config.global_cache_path = try std.fs.path.resolve(allocator, &[_][]const u8{ cache_dir_path, "zls" });
 
-        std.fs.cwd().makePath(config.global_cache_path.?) catch |err| switch (err) {
-            error.PathAlreadyExists => {},
-            else => return err,
-        };
+        try std.fs.cwd().makePath(config.global_cache_path.?);
     }
 
     if (null == config.build_runner_path) {
