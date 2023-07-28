@@ -19,6 +19,12 @@
             "default": "true"
         },
         {
+            "name": "enable_build_on_save",
+            "description": "Whether to enable build-on-save diagnostics",
+            "type": "bool",
+            "default": "false"
+        },
+        {
             "name": "enable_autofix",
             "description": "Whether to automatically fix errors on save. Currently supports adding and removing discards.",
             "type": "bool",

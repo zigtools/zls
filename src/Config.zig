@@ -13,6 +13,9 @@ enable_argument_placeholders: bool = true,
 /// Whether to enable ast-check diagnostics
 enable_ast_check_diagnostics: bool = true,
 
+/// Whether to enable build-on-save diagnostics
+enable_build_on_save: bool = false,
+
 /// Whether to automatically fix errors on save. Currently supports adding and removing discards.
 enable_autofix: bool = true,
 
