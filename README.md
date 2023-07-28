@@ -65,6 +65,7 @@ The following options are currently available.
 | `enable_snippets` | `bool` | `true` | Enables snippet completions when the client also supports them |
 | `enable_argument_placeholders` | `bool` | `true` | Whether to enable function argument placeholder completions |
 | `enable_ast_check_diagnostics` | `bool` | `true` | Whether to enable ast-check diagnostics |
+| `enable_build_on_save` | `bool` | `false` | Whether to enable build-on-save diagnostics |
 | `enable_autofix` | `bool` | `true` | Whether to automatically fix errors on save. Currently supports adding and removing discards. |
 | `enable_import_embedfile_argument_completions` | `bool` | `true` | Whether to enable import/embedFile argument completions |
 | `semantic_tokens` | `enum` | `.full` | Set level of semantic tokens. Partial only includes information that requires semantic analysis. |
