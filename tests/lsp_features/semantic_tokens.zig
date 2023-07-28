@@ -469,7 +469,7 @@ test "semantic tokens - anyframe type" {
         \\const alpha = anyframe->u32;
     , &.{
         .{ "const", .keyword, .{} },
-        .{ "alpha", .variable, .{ .declaration = true } }, // TODO this should be .type
+        .{ "alpha", .type, .{ .declaration = true } },
         .{ "=", .operator, .{} },
         .{ "anyframe", .keyword, .{} },
         .{ "u32", .type, .{} },
