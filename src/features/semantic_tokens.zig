@@ -9,24 +9,34 @@ const ast = @import("../ast.zig");
 const types = @import("../lsp.zig");
 
 pub const TokenType = enum(u32) {
+    namespace,
     type,
+    class,
+    @"enum",
+    interface,
+    @"struct",
+    typeParameter,
     parameter,
     variable,
-    enumMember,
     property,
-    errorTag,
+    enumMember,
+    event,
     function,
+    method,
+    macro,
     keyword,
+    modifier,
     comment,
     string,
     number,
+    regexp,
     operator,
+    decorator,
+    // non standard token types
+    errorTag,
     builtin,
     label,
     keywordLiteral,
-    namespace,
-    @"struct",
-    @"enum",
     @"union",
     @"opaque",
 };
@@ -42,7 +52,7 @@ pub const TokenModifiers = packed struct(u16) {
     modification: bool = false,
     documentation: bool = false,
     defaultLibrary: bool = false,
-
+    // non standard token modifiers
     generic: bool = false,
     _: u5 = 0,
 };
@@ -120,14 +130,23 @@ const Builder = struct {
         if (loc.start < self.previous_source_index) return;
         var token_type = param_token_type;
         switch (token_type) {
-            .type,
-            .enumMember,
-            .property,
-            .errorTag,
-            .function,
             .namespace,
-            .@"struct",
+            .type,
+            .class,
             .@"enum",
+            .interface,
+            .@"struct",
+            .typeParameter,
+            .property,
+            .enumMember,
+            .event,
+            .function,
+            .method,
+            .macro,
+            .modifier,
+            .regexp,
+            .decorator,
+            .errorTag,
             => {},
 
             .@"union",
