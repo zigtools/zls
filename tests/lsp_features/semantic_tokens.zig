@@ -725,14 +725,18 @@ test "semantic tokens - function" {
         .{ "void", .type, .{} },
     });
     try testSemanticTokens(
-        \\fn foo(comptime T: type) void {}
+        \\fn foo(comptime T: type) void {
+        \\    _ = T;
+        \\}
     , &.{
         .{ "fn", .keyword, .{} },
         .{ "foo", .function, .{ .declaration = true, .generic = true } },
         .{ "comptime", .keyword, .{} },
-        .{ "T", .parameter, .{ .declaration = true } },
+        .{ "T", .typeParameter, .{ .declaration = true } },
         .{ "type", .type, .{} },
         .{ "void", .type, .{} },
+        .{ "=", .operator, .{} },
+        .{ "T", .typeParameter, .{} },
     });
 }
 

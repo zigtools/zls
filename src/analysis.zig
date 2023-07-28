@@ -310,7 +310,7 @@ pub fn getContainerFieldSignature(tree: Ast, field: Ast.full.ContainerField) []c
 }
 
 /// The node is the meta-type `type`
-fn isMetaType(tree: Ast, node: Ast.Node.Index) bool {
+pub fn isMetaType(tree: Ast, node: Ast.Node.Index) bool {
     if (tree.nodes.items(.tag)[node] == .identifier) {
         return std.mem.eql(u8, tree.tokenSlice(tree.nodes.items(.main_token)[node]), "type");
     }
@@ -2661,7 +2661,7 @@ pub const DeclWithHandle = struct {
                     while (bound_param_it.next()) |entry| {
                         if (std.meta.eql(entry.key_ptr.*, param_decl)) return entry.value_ptr.*;
                     }
-                    return null;
+                    return try analyser.resolveTypeOfNodeInternal(.{ .node = param_decl.type_expr, .handle = self.handle });
                 } else if (node_tags[param_decl.type_expr] == .identifier) {
                     if (param_decl.name_token) |name_tok| {
                         if (std.mem.eql(u8, tree.tokenSlice(main_tokens[param_decl.type_expr]), tree.tokenSlice(name_tok)))

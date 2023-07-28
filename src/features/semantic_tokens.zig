@@ -222,10 +222,14 @@ fn fieldTokenType(
     });
 }
 
-fn colorIdentifierBasedOnType(builder: *Builder, type_node: Analyser.TypeWithHandle, target_tok: Ast.TokenIndex, tok_mod: TokenModifiers) !void {
+fn colorIdentifierBasedOnType(
+    builder: *Builder,
+    type_node: Analyser.TypeWithHandle,
+    target_tok: Ast.TokenIndex,
+    is_parameter: bool,
+    tok_mod: TokenModifiers,
+) !void {
     if (type_node.type.is_type_val) {
-        var new_tok_mod = tok_mod;
-
         const token_type: TokenType =
             if (type_node.isNamespace())
             .namespace
@@ -237,10 +241,12 @@ fn colorIdentifierBasedOnType(builder: *Builder, type_node: Analyser.TypeWithHan
             .@"union"
         else if (type_node.isOpaqueType())
             .@"opaque"
+        else if (is_parameter)
+            .typeParameter
         else
             .type;
 
-        try writeTokenMod(builder, target_tok, token_type, new_tok_mod);
+        try writeTokenMod(builder, target_tok, token_type, tok_mod);
     } else if (type_node.isTypeFunc()) {
         try writeTokenMod(builder, target_tok, .type, tok_mod);
     } else if (type_node.isFunc()) {
@@ -250,7 +256,7 @@ fn colorIdentifierBasedOnType(builder: *Builder, type_node: Analyser.TypeWithHan
         }
         try writeTokenMod(builder, target_tok, .function, new_tok_mod);
     } else {
-        try writeTokenMod(builder, target_tok, .variable, tok_mod);
+        try writeTokenMod(builder, target_tok, if (is_parameter) .parameter else .variable, tok_mod);
     }
 }
 
@@ -326,7 +332,7 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
             try writeToken(builder, var_decl.ast.mut_token, .keyword);
 
             if (try builder.analyser.resolveTypeOfNode(.{ .node = node, .handle = handle })) |decl_type| {
-                try colorIdentifierBasedOnType(builder, decl_type, var_decl.ast.mut_token + 1, .{ .declaration = true });
+                try colorIdentifierBasedOnType(builder, decl_type, var_decl.ast.mut_token + 1, false, .{ .declaration = true });
             } else {
                 try writeTokenMod(builder, var_decl.ast.mut_token + 1, .variable, .{ .declaration = true });
             }
@@ -419,14 +425,16 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
                 name,
                 tree.tokens.items(.start)[main_token],
             )) |child| {
-                if (child.decl.* == .param_payload) {
-                    return try writeToken(builder, main_token, .parameter);
-                }
+                const is_param = child.decl.* == .param_payload;
+
                 if (try child.resolveType(builder.analyser)) |decl_type| {
-                    return try colorIdentifierBasedOnType(builder, decl_type, main_token, .{});
+                    return try colorIdentifierBasedOnType(builder, decl_type, main_token, is_param, .{});
+                } else {
+                    try writeTokenMod(builder, main_token, if (is_param) .parameter else .variable, .{});
                 }
+            } else {
+                try writeTokenMod(builder, main_token, .variable, .{});
             }
-            try writeTokenMod(builder, main_token, .variable, .{});
         },
         .fn_proto,
         .fn_proto_one,
@@ -459,7 +467,10 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
                 if (param_decl.first_doc_comment) |docs| try writeDocComments(builder, tree, docs);
 
                 try writeToken(builder, param_decl.comptime_noalias, .keyword);
-                try writeTokenMod(builder, param_decl.name_token, .parameter, .{ .declaration = true });
+
+                const token_type: TokenType = if (Analyser.isMetaType(tree, param_decl.type_expr)) .typeParameter else .parameter;
+                try writeTokenMod(builder, param_decl.name_token, token_type, .{ .declaration = true });
+
                 if (param_decl.anytype_ellipsis3) |any_token| {
                     try writeToken(builder, any_token, .type);
                 } else try callWriteNodeTokens(allocator, .{ builder, param_decl.type_expr });
