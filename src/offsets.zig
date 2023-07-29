@@ -123,8 +123,25 @@ pub fn tokensToLoc(tree: Ast, first_token: Ast.TokenIndex, last_token: Ast.Token
 }
 
 pub fn tokenToLoc(tree: Ast, token_index: Ast.TokenIndex) Loc {
-    const start = tree.tokens.items(.start)[token_index];
-    const tag = tree.tokens.items(.tag)[token_index];
+    const token_starts = tree.tokens.items(.start);
+    const token_tags = tree.tokens.items(.tag);
+    const start = token_starts[token_index];
+    const tag = token_tags[token_index];
+
+    // invalid tokens are one byte sized so we scan left and right to find the
+    // source location that contains complete code units
+    // this assumes that `tree.source` is valid utf8
+    if (tag == .invalid) {
+        var begin = token_index;
+        while (begin > 0 and token_tags[begin - 1] == .invalid) : (begin -= 1) {}
+
+        var end = token_index;
+        while (end < tree.tokens.len and token_tags[end] == .invalid) : (end += 1) {}
+        return .{
+            .start = token_starts[begin],
+            .end = token_starts[end],
+        };
+    }
 
     // Many tokens can be determined entirely by their tag.
     if (tag.lexeme()) |lexeme| {
