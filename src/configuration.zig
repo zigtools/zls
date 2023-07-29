@@ -29,7 +29,7 @@ pub fn loadFromFile(allocator: std.mem.Allocator, file_path: []const u8) ?Config
     @setEvalBranchQuota(10000);
 
     const parse_options = std.json.ParseOptions{ .ignore_unknown_fields = true };
-    var parse_diagnostics: std.json.Diagnostics = undefined;
+    var parse_diagnostics: std.json.Diagnostics = .{};
 
     var scanner = std.json.Scanner.initCompleteInput(allocator, file_buf);
     defer scanner.deinit();
