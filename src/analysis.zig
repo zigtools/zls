@@ -2611,6 +2611,12 @@ pub const DeclWithHandle = struct {
             .param_payload => |pay| {
                 // handle anytype
                 if (pay.param.type_expr == 0) {
+                    // protection against recursive callsite resolution
+                    const node_with_uri = NodeWithUri{ .node = pay.func, .uri = self.handle.uri };
+                    const gop_resolved = try analyser.resolved_nodes.getOrPut(analyser.gpa, node_with_uri);
+                    if (gop_resolved.found_existing) return gop_resolved.value_ptr.*;
+                    gop_resolved.value_ptr.* = null;
+
                     var func_decl = Declaration{ .ast_node = pay.func };
 
                     var func_buf: [1]Ast.Node.Index = undefined;
@@ -2630,7 +2636,6 @@ pub const DeclWithHandle = struct {
 
                     // TODO: Set `workspace` to true; current problems
                     // - we gather dependencies, not dependents
-                    // - stack overflow due to cyclically anytype resolution(?)
 
                     var possible = std.ArrayListUnmanaged(Type.EitherEntry){};
                     var deduplicator = TypeWithHandle.Deduplicator{};
@@ -2668,7 +2673,9 @@ pub const DeclWithHandle = struct {
                         }
                     }
 
-                    return TypeWithHandle.fromEither(analyser.gpa, try possible.toOwnedSlice(analyser.arena.allocator()), self.handle);
+                    const maybe_type_handle = try TypeWithHandle.fromEither(analyser.gpa, try possible.toOwnedSlice(analyser.arena.allocator()), self.handle);
+                    if (maybe_type_handle) |type_handle| analyser.resolved_nodes.getPtr(node_with_uri).?.* = type_handle;
+                    return maybe_type_handle;
                 }
 
                 const param_decl = pay.param;
