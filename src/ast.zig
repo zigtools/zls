@@ -55,6 +55,15 @@ fn fullPtrTypeComponents(tree: Ast, info: full.PtrType.Components) full.PtrType 
     return result;
 }
 
+fn findNextLBrace(token_tags: []const TokenTag, start: Ast.TokenIndex) ?Ast.TokenIndex {
+    for (token_tags[start..], 0..) |tag, i| {
+        if (tag == TokenTag.l_brace) {
+            return start + @as(Ast.TokenIndex, @intCast(i));
+        }
+    }
+    return null;
+}
+
 /// Given an l_brace, find the corresponding r_brace.
 /// If no corresponding r_brace is found, return null.
 /// Useful for finding the extent of a block/scope if the syntax is valid.
@@ -684,7 +693,9 @@ pub fn lastToken(tree: Ast, node: Ast.Node.Index) Ast.TokenIndex {
         .container_decl_arg_trailing,
         => {
             // + 4 for the lparen, identifier, rparen, lbrace
-            return findMatchingRBrace(token_tags, main_tokens[n] + 4)
+            const l_brace = findNextLBrace(token_tags, main_tokens[n])
+                orelse return @intCast(tree.tokens.len - 1);
+            return findMatchingRBrace(token_tags, l_brace)
                 orelse @intCast(tree.tokens.len - 1);
         },
         .array_init_dot_two,
