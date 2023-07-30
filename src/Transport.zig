@@ -26,7 +26,7 @@ pub fn readJsonMessage(self: *Transport, allocator: std.mem.Allocator) ![]u8 {
         defer self.in_lock.unlock();
 
         const reader = self.in.reader();
-        const header = try Header.parse(allocator, true, reader);
+        const header = try Header.parse(allocator, reader);
         defer header.deinit(allocator);
 
         const json_message = try allocator.alloc(u8, header.content_length);

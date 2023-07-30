@@ -88,12 +88,12 @@ fn updateConfig(
 
         try std.json.stringify(cfg, .{}, buffer.writer(allocator));
         const header = Header{ .content_length = buffer.items.len };
-        try header.write(true, file.writer());
+        try header.write(file.writer());
         try file.writeAll(buffer.items);
     }
 
     if (replay_file) |file| {
-        const header = try Header.parse(allocator, true, file.reader());
+        const header = try Header.parse(allocator, file.reader());
         defer header.deinit(allocator);
         const json_message = try allocator.alloc(u8, header.content_length);
         defer allocator.free(json_message);
