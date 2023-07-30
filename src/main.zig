@@ -179,15 +179,6 @@ fn parseArgs(allocator: std.mem.Allocator) !ParseArgsResult {
         @"show-config-path",
         @"config-path",
     };
-    const arg_id_map = std.ComptimeStringMap(ArgId, comptime blk: {
-        const fields = @typeInfo(ArgId).Enum.fields;
-        const KV = struct { []const u8, ArgId };
-        var pairs: [fields.len]KV = undefined;
-        for (&pairs, fields) |*pair, field| {
-            pair.* = .{ field.name, @as(ArgId, @enumFromInt(field.value)) };
-        }
-        break :blk pairs[0..];
-    });
     const help_message: []const u8 = comptime help_message: {
         var help_message: []const u8 =
             \\Usage: zls [command]
@@ -234,7 +225,7 @@ fn parseArgs(allocator: std.mem.Allocator) !ParseArgsResult {
         }
 
         const argname = tok["--".len..];
-        const id = arg_id_map.get(argname) orelse {
+        const id = std.meta.stringToEnum(ArgId, argname) orelse {
             try stderr.print("{s}\n", .{help_message});
             try stderr.print("Unrecognized argument '{s}'.\n", .{argname});
             return result;
