@@ -74,22 +74,22 @@ pub fn configChanged(config: *Config, runtime_zig_version: *?ZigVersionWrapper, 
     if (config.zig_exe_path) |exe_path| blk: {
         logger.info("Using zig executable '{s}'", .{exe_path});
 
-        var env = getZigEnv(allocator, exe_path) orelse break :blk;
-        defer legacy_json.parseFree(Env, allocator, env);
+        const env = getZigEnv(allocator, exe_path) orelse break :blk;
+        defer env.deinit();
 
+        const duped_zig_lib_path = try allocator.dupe(u8, env.value.lib_dir.?);
         if (config.zig_lib_path) |lib_path| allocator.free(lib_path);
-        // Make sure the path is absolute
-        config.zig_lib_path = try std.fs.realpathAlloc(allocator, env.lib_dir.?);
+        config.zig_lib_path = duped_zig_lib_path;
         logger.info("Using zig lib path '{s}'", .{config.zig_lib_path.?});
 
         if (config.build_runner_global_cache_path) |global_cache_path| allocator.free(global_cache_path);
-        config.build_runner_global_cache_path = try allocator.dupe(u8, env.global_cache_dir);
+        config.build_runner_global_cache_path = try allocator.dupe(u8, env.value.global_cache_dir);
         logger.info("Using build runner global cache path '{s}'", .{config.build_runner_global_cache_path.?});
 
         if (runtime_zig_version.*) |current_version| current_version.free();
         errdefer runtime_zig_version.* = null;
 
-        const duped_zig_version_string = try allocator.dupe(u8, env.version);
+        const duped_zig_version_string = try allocator.dupe(u8, env.value.version);
         errdefer allocator.free(duped_zig_version_string);
 
         logger.info("Detected runtime zig version: '{s}'", .{duped_zig_version_string});
@@ -168,7 +168,7 @@ pub const Env = struct {
 };
 
 /// result has to be freed with `json_compat.parseFree`
-pub fn getZigEnv(allocator: std.mem.Allocator, zig_exe_path: []const u8) ?Env {
+pub fn getZigEnv(allocator: std.mem.Allocator, zig_exe_path: []const u8) ?std.json.Parsed(Env) {
     const zig_env_result = std.ChildProcess.exec(.{
         .allocator = allocator,
         .argv = &[_][]const u8{ zig_exe_path, "env" },
@@ -192,11 +192,11 @@ pub fn getZigEnv(allocator: std.mem.Allocator, zig_exe_path: []const u8) ?Env {
         else => logger.err("zig env invocation failed", .{}),
     }
 
-    return legacy_json.parseFromSlice(
+    return std.json.parseFromSlice(
         Env,
         allocator,
         zig_env_result.stdout,
-        .{ .ignore_unknown_fields = true },
+        .{ .ignore_unknown_fields = true, .allocate = .alloc_always },
     ) catch {
         logger.err("Failed to parse zig env JSON result", .{});
         return null;
