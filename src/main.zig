@@ -208,9 +208,8 @@ fn parseArgs(allocator: std.mem.Allocator) !ParseArgsResult {
     var args_it = try std.process.ArgIterator.initWithAllocator(allocator);
     defer args_it.deinit();
 
-    if (args_it.next()) |zls_path| {
-        result.zls_exe_path = try allocator.dupe(u8, zls_path);
-    } else unreachable;
+    const zls_exe_path = args_it.next() orelse @panic("");
+    result.zls_exe_path = try allocator.dupe(u8, zls_exe_path);
 
     // Makes behavior of enabling debug more logging consistent regardless of argument order.
     var specified = std.enums.EnumArray(ArgId, bool).initFill(false);
