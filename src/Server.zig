@@ -1744,6 +1744,8 @@ fn processJob(server: *Server, job: Job, wait_group: ?*std.Thread.WaitGroup) voi
             server.allocator.free(json_message);
         },
         .load_build_configuration => |build_file_uri| {
+            std.debug.assert(std.process.can_spawn);
+            if (!std.process.can_spawn) return;
             server.document_store.invalidateBuildFile(build_file_uri) catch return;
         },
     }
