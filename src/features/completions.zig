@@ -1283,9 +1283,9 @@ fn completeFileSystemStringLiteral(
     if (completing.len == 0 and pos_context == .import_string_literal) {
         if (handle.associated_build_file) |uri| {
             const build_file = store.build_files.get(uri).?;
-            try completions.ensureUnusedCapacity(arena, build_file.config.packages.len);
+            try completions.ensureUnusedCapacity(arena, build_file.config.value.packages.len);
 
-            for (build_file.config.packages) |pkg| {
+            for (build_file.config.value.packages) |pkg| {
                 completions.putAssumeCapacity(.{
                     .label = pkg.name,
                     .kind = .Module,
