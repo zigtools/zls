@@ -901,7 +901,7 @@ fn gotoHandler(
     defer analyser.deinit();
 
     return .{
-        .array_of_DefinitionLink = try goto.goto(&analyser, &server.document_store, arena, handle, source_index, resolve_alias, server.offset_encoding) orelse return null,
+        .Definition = try goto.goto(&analyser, &server.document_store, arena, handle, source_index, resolve_alias, server.offset_encoding) orelse return null,
     };
 }
 
@@ -912,7 +912,7 @@ fn gotoTypeDeclarationHandler(server: *Server, arena: std.mem.Allocator, request
         .workDoneToken = request.workDoneToken,
         .partialResultToken = request.partialResultToken,
     })) orelse return null;
-    return .{ .array_of_DefinitionLink = response.array_of_DefinitionLink };
+    return .{ .Definition = response.Definition };
 }
 
 fn gotoImplementationHandler(server: *Server, arena: std.mem.Allocator, request: types.ImplementationParams) Error!ResultType("textDocument/implementation") {
@@ -922,7 +922,7 @@ fn gotoImplementationHandler(server: *Server, arena: std.mem.Allocator, request:
         .workDoneToken = request.workDoneToken,
         .partialResultToken = request.partialResultToken,
     })) orelse return null;
-    return .{ .array_of_DefinitionLink = response.array_of_DefinitionLink };
+    return .{ .Definition = response.Definition };
 }
 
 fn gotoDeclarationHandler(server: *Server, arena: std.mem.Allocator, request: types.DeclarationParams) Error!ResultType("textDocument/declaration") {
@@ -932,7 +932,10 @@ fn gotoDeclarationHandler(server: *Server, arena: std.mem.Allocator, request: ty
         .workDoneToken = request.workDoneToken,
         .partialResultToken = request.partialResultToken,
     })) orelse return null;
-    return .{ .array_of_DeclarationLink = response.array_of_DefinitionLink };
+    return .{ .Declaration = switch (response.Definition) {
+        .Location => |loc| .{ .Location = loc },
+        .array_of_Location => |locs| .{ .array_of_Location = locs },
+    } };
 }
 
 pub fn hoverHandler(server: *Server, arena: std.mem.Allocator, request: types.HoverParams) Error!?types.Hover {
@@ -946,7 +949,7 @@ pub fn hoverHandler(server: *Server, arena: std.mem.Allocator, request: types.Ho
     var analyser = Analyser.init(server.allocator, &server.document_store, &server.ip);
     defer analyser.deinit();
 
-    const response = hover_handler.hover(&analyser, arena, handle, source_index, markup_kind, server.offset_encoding);
+    const response = hover_handler.hover(&analyser, arena, handle, source_index, markup_kind);
 
     // TODO: Figure out a better solution for comptime interpreter diags
     if (server.client_capabilities.supports_publish_diagnostics) {
@@ -1094,7 +1097,6 @@ const GeneralReferencesResponse = union {
     highlight: []types.DocumentHighlight,
 };
 
-// TODO: Move to src/features/references.zig?
 pub fn generalReferencesHandler(server: *Server, arena: std.mem.Allocator, request: GeneralReferencesRequest) Error!?GeneralReferencesResponse {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
@@ -1104,8 +1106,6 @@ pub fn generalReferencesHandler(server: *Server, arena: std.mem.Allocator, reque
     if (request.position().character <= 0) return null;
 
     const source_index = offsets.positionToIndex(handle.text, request.position(), server.offset_encoding);
-    const name_loc = Analyser.identifierLocFromPosition(source_index, handle) orelse return null;
-    const name = offsets.locToSlice(handle.text, name_loc);
     const pos_context = try Analyser.getPositionContext(server.allocator, handle.text, source_index, true);
 
     var analyser = Analyser.init(server.allocator, &server.document_store, &server.ip);
@@ -1113,17 +1113,16 @@ pub fn generalReferencesHandler(server: *Server, arena: std.mem.Allocator, reque
 
     // TODO: Make this work with branching types
     const decl = switch (pos_context) {
-        .var_access => try analyser.getSymbolGlobal(source_index, handle, name),
-        .field_access => |loc| z: {
-            const held_loc = offsets.locMerge(loc, name_loc);
-            const a = try analyser.getSymbolFieldAccesses(arena, handle, source_index, held_loc, name);
+        .var_access => try analyser.getSymbolGlobal(source_index, handle),
+        .field_access => |range| z: {
+            const a = try analyser.getSymbolFieldAccesses(arena, handle, source_index, range);
             if (a) |b| {
                 if (b.len != 0) break :z b[0];
             }
 
             break :z null;
         },
-        .label => try Analyser.getLabelGlobal(source_index, handle, name),
+        .label => try Analyser.getLabelGlobal(source_index, handle),
         else => null,
     } orelse return null;
 

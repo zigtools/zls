@@ -147,14 +147,11 @@ pub fn hoverDefinitionLabel(
     handle: *const DocumentStore.Handle,
     pos_index: usize,
     markup_kind: types.MarkupKind,
-    offset_encoding: offsets.Encoding,
 ) error{OutOfMemory}!?types.Hover {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const name_loc = Analyser.identifierLocFromPosition(pos_index, handle) orelse return null;
-    const name = offsets.locToSlice(handle.text, name_loc);
-    const decl = (try Analyser.getLabelGlobal(pos_index, handle, name)) orelse return null;
+    const decl = (try Analyser.getLabelGlobal(pos_index, handle)) orelse return null;
 
     return .{
         .contents = .{
@@ -163,7 +160,6 @@ pub fn hoverDefinitionLabel(
                 .value = (try hoverSymbol(analyser, arena, decl, markup_kind, null)) orelse return null,
             },
         },
-        .range = offsets.locToRange(handle.text, name_loc, offset_encoding),
     };
 }
 
@@ -173,15 +169,14 @@ pub fn hoverDefinitionBuiltin(
     handle: *const DocumentStore.Handle,
     pos_index: usize,
     markup_kind: types.MarkupKind,
-    offset_encoding: offsets.Encoding,
 ) error{OutOfMemory}!?types.Hover {
     _ = analyser;
     _ = markup_kind;
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const name_loc = Analyser.identifierLocFromPosition(pos_index, handle) orelse return null;
-    const name = offsets.locToSlice(handle.text, name_loc);
+    const name = Analyser.identifierFromPosition(pos_index, handle.*);
+    if (name.len == 0) return null;
 
     const builtin = for (data.builtins) |builtin| {
         if (std.mem.eql(u8, builtin.name[1..], name)) {
@@ -223,7 +218,6 @@ pub fn hoverDefinitionBuiltin(
                 .value = contents.items,
             },
         },
-        .range = offsets.locToRange(handle.text, name_loc, offset_encoding),
     };
 }
 
@@ -233,14 +227,11 @@ pub fn hoverDefinitionGlobal(
     handle: *const DocumentStore.Handle,
     pos_index: usize,
     markup_kind: types.MarkupKind,
-    offset_encoding: offsets.Encoding,
 ) error{OutOfMemory}!?types.Hover {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const name_loc = Analyser.identifierLocFromPosition(pos_index, handle) orelse return null;
-    const name = offsets.locToSlice(handle.text, name_loc);
-    const decl = (try analyser.getSymbolGlobal(pos_index, handle, name)) orelse return null;
+    const decl = (try analyser.getSymbolGlobal(pos_index, handle)) orelse return null;
 
     return .{
         .contents = .{
@@ -249,7 +240,6 @@ pub fn hoverDefinitionGlobal(
                 .value = (try hoverSymbol(analyser, arena, decl, markup_kind, null)) orelse return null,
             },
         },
-        .range = offsets.locToRange(handle.text, name_loc, offset_encoding),
     };
 }
 
@@ -259,14 +249,11 @@ pub fn hoverDefinitionEnumLiteral(
     handle: *const DocumentStore.Handle,
     source_index: usize,
     markup_kind: types.MarkupKind,
-    offset_encoding: offsets.Encoding,
 ) error{OutOfMemory}!?types.Hover {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const name_loc = Analyser.identifierLocFromPosition(source_index, handle) orelse return null;
-    const name = offsets.locToSlice(handle.text, name_loc);
-    const decl = (try analyser.getSymbolEnumLiteral(arena, handle, source_index, name)) orelse return null;
+    const decl = (try analyser.getSymbolEnumLiteral(arena, handle, source_index)) orelse return null;
 
     return .{
         .contents = .{
@@ -275,7 +262,6 @@ pub fn hoverDefinitionEnumLiteral(
                 .value = (try hoverSymbol(analyser, arena, decl, markup_kind, null)) orelse return null,
             },
         },
-        .range = offsets.locToRange(handle.text, name_loc, offset_encoding),
     };
 }
 
@@ -286,15 +272,11 @@ pub fn hoverDefinitionFieldAccess(
     source_index: usize,
     loc: offsets.Loc,
     markup_kind: types.MarkupKind,
-    offset_encoding: offsets.Encoding,
 ) error{OutOfMemory}!?types.Hover {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const name_loc = Analyser.identifierLocFromPosition(source_index, handle) orelse return null;
-    const name = offsets.locToSlice(handle.text, name_loc);
-    const held_loc = offsets.locMerge(loc, name_loc);
-    const decls = (try analyser.getSymbolFieldAccesses(arena, handle, source_index, held_loc, name)) orelse return null;
+    const decls = (try analyser.getSymbolFieldAccesses(arena, handle, source_index, loc)) orelse return null;
 
     var content = std.ArrayListUnmanaged(types.MarkedString){};
 
@@ -315,26 +297,18 @@ pub fn hoverDefinitionFieldAccess(
             } },
             else => .{ .array_of_MarkedString = try content.toOwnedSlice(arena) },
         },
-        .range = offsets.locToRange(handle.text, name_loc, offset_encoding),
     };
 }
 
-pub fn hover(
-    analyser: *Analyser,
-    arena: std.mem.Allocator,
-    handle: *const DocumentStore.Handle,
-    source_index: usize,
-    markup_kind: types.MarkupKind,
-    offset_encoding: offsets.Encoding,
-) !?types.Hover {
+pub fn hover(analyser: *Analyser, arena: std.mem.Allocator, handle: *const DocumentStore.Handle, source_index: usize, markup_kind: types.MarkupKind) !?types.Hover {
     const pos_context = try Analyser.getPositionContext(arena, handle.text, source_index, true);
 
     const response = switch (pos_context) {
-        .builtin => try hoverDefinitionBuiltin(analyser, arena, handle, source_index, markup_kind, offset_encoding),
-        .var_access => try hoverDefinitionGlobal(analyser, arena, handle, source_index, markup_kind, offset_encoding),
-        .field_access => |loc| try hoverDefinitionFieldAccess(analyser, arena, handle, source_index, loc, markup_kind, offset_encoding),
-        .label => try hoverDefinitionLabel(analyser, arena, handle, source_index, markup_kind, offset_encoding),
-        .enum_literal => try hoverDefinitionEnumLiteral(analyser, arena, handle, source_index, markup_kind, offset_encoding),
+        .builtin => try hoverDefinitionBuiltin(analyser, arena, handle, source_index, markup_kind),
+        .var_access => try hoverDefinitionGlobal(analyser, arena, handle, source_index, markup_kind),
+        .field_access => |loc| try hoverDefinitionFieldAccess(analyser, arena, handle, source_index, loc, markup_kind),
+        .label => try hoverDefinitionLabel(analyser, arena, handle, source_index, markup_kind),
+        .enum_literal => try hoverDefinitionEnumLiteral(analyser, arena, handle, source_index, markup_kind),
         else => null,
     };
 
