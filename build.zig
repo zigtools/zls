@@ -7,7 +7,7 @@ const zls_version = std.SemanticVersion{ .major = 0, .minor = 11, .patch = 0 };
 pub fn build(b: *std.build.Builder) !void {
     comptime {
         const current_zig = builtin.zig_version;
-        const min_zig = std.SemanticVersion.parse("0.11.0-dev.3957+3bf0b8ead") catch unreachable; // explicitly specify error set of `std.json.stringify`
+        const min_zig = std.SemanticVersion.parse("0.11.0-dev.4332+43b830415") catch unreachable; // Merge pull request #16446 from MasterQ32/buildsystem_rename_orgy
         if (current_zig.order(min_zig) == .lt) {
             @compileError(std.fmt.comptimePrint("Your Zig version v{} does not meet the minimum build requirement of v{}", .{ current_zig, min_zig }));
         }
@@ -100,8 +100,11 @@ pub fn build(b: *std.build.Builder) !void {
         else
             &[_][]const u8{ "-DTRACY_ENABLE=1", "-fno-sanitize=undefined" };
 
-        exe.addIncludePath("src/tracy");
-        exe.addCSourceFile(client_cpp, tracy_c_flags);
+        exe.addIncludePath(.{ .path = "src/tracy" });
+        exe.addCSourceFile(.{
+            .file = .{ .path = client_cpp },
+            .flags = tracy_c_flags,
+        });
         exe.linkLibCpp();
         exe.linkLibC();
 
