@@ -100,8 +100,8 @@ pub fn build(b: *std.build.Builder) !void {
         else
             &[_][]const u8{ "-DTRACY_ENABLE=1", "-fno-sanitize=undefined" };
 
-        exe.addIncludePath("src/tracy");
-        exe.addCSourceFile(client_cpp, tracy_c_flags);
+        exe.addIncludePath(.{ .path = "src/tracy" });
+        exe.addCSourceFile(.{ .file = .{ .path = client_cpp }, .flags = tracy_c_flags });
         exe.linkLibCpp();
         exe.linkLibC();
 
