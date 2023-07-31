@@ -3477,12 +3477,7 @@ pub fn getSymbolGlobal(
     defer tracy_zone.end();
 
     const name = identifierFromPosition(pos_index, handle.*);
-    if (name.len == 0) return null;
-
-    return try analyser.lookupSymbolGlobalAdvanced(handle, name, pos_index, .{
-        .skip_container_fields = false,
-        .skip_labels = false,
-    });
+    return try analyser.lookupSymbolGlobal(handle, name, pos_index);
 }
 
 pub fn getSymbolEnumLiteral(
