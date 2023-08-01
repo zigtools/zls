@@ -96,7 +96,19 @@ test "completion - generic function" {
         \\fn ArrayList(comptime T: type) type {
         \\    return struct { items: []const T };
         \\}
-        \\const array_list: ArrayList(S);
+        \\const array_list: ArrayList(S) = undefined;
+        \\const foo = array_list.items[0].<cursor>
+    , &.{
+        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+    });
+}
+
+test "completion - std.ArrayList" {
+    if (!std.process.can_spawn) return error.SkipZigTest;
+    try testCompletion(
+        \\const std = @import("std");
+        \\const S = struct { alpha: u32 };
+        \\const array_list: std.ArrayList(S) = undefined;
         \\const foo = array_list.items[0].<cursor>
     , &.{
         .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
