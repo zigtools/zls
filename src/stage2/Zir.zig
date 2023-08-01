@@ -62,9 +62,13 @@ pub const ExtraIndex = enum(u32) {
     _,
 };
 
+fn ExtraData(comptime T: type) type {
+    return struct { data: T, end: usize };
+}
+
 /// Returns the requested data, as well as the new index which is at the start of the
 /// trailers for the object.
-pub fn extraData(code: Zir, comptime T: type, index: usize) struct { data: T, end: usize } {
+pub fn extraData(code: Zir, comptime T: type, index: usize) ExtraData(T) {
     const fields = @typeInfo(T).Struct.fields;
     var i: usize = index;
     var result: T = undefined;
@@ -87,13 +91,24 @@ pub fn extraData(code: Zir, comptime T: type, index: usize) struct { data: T, en
     };
 }
 
-/// Given an index into `string_bytes` returns the null-terminated string found there.
+/// TODO migrate to use this for type safety
+pub const NullTerminatedString = enum(u32) {
+    _,
+};
+
+/// TODO: migrate to nullTerminatedString2 for type safety
 pub fn nullTerminatedString(code: Zir, index: usize) [:0]const u8 {
-    var end: usize = index;
+    return nullTerminatedString2(code, @enumFromInt(index));
+}
+
+/// Given an index into `string_bytes` returns the null-terminated string found there.
+pub fn nullTerminatedString2(code: Zir, index: NullTerminatedString) [:0]const u8 {
+    const start = @intFromEnum(index);
+    var end: u32 = start;
     while (code.string_bytes[end] != 0) {
         end += 1;
     }
-    return code.string_bytes[index..end :0];
+    return code.string_bytes[start..end :0];
 }
 
 pub fn refSlice(code: Zir, start: usize, len: usize) []Inst.Ref {
@@ -227,6 +242,9 @@ pub const Inst = struct {
         /// Given an indexable type, returns the type of the element at given index.
         /// Uses the `bin` union field. lhs is the indexable type, rhs is the index.
         elem_type_index,
+        /// Given a pointer type, returns its element type.
+        /// Uses the `un_node` field.
+        elem_type,
         /// Given a pointer to an indexable object, returns the len property. This is
         /// used by for loops. This instruction also emits a for-loop specific compile
         /// error if the indexable object is not indexable.
@@ -249,7 +267,7 @@ pub const Inst = struct {
         /// Uses the pl_node field with payload `Bin`.
         bitcast,
         /// Bitwise NOT. `~`
-        /// Uses `un_tok`.
+        /// Uses `un_node`.
         bit_not,
         /// Bitwise OR. `|`
         bit_or,
@@ -268,7 +286,7 @@ pub const Inst = struct {
         /// Uses the `pl_node` union field. Payload is `Block`.
         suspend_block,
         /// Boolean NOT. See also `bit_not`.
-        /// Uses the `un_tok` field.
+        /// Uses the `un_node` field.
         bool_not,
         /// Short-circuiting boolean `and`. `lhs` is a boolean `Ref` and the other operand
         /// is a block, which is evaluated if `lhs` is `true`.
@@ -835,13 +853,12 @@ pub const Inst = struct {
         int_cast,
         /// Implements the `@ptrCast` builtin.
         /// Uses `pl_node` with payload `Bin`. `lhs` is dest type, `rhs` is operand.
+        /// Not every `@ptrCast` will correspond to this instruction - see also
+        /// `ptr_cast_full` in `Extended`.
         ptr_cast,
         /// Implements the `@truncate` builtin.
         /// Uses `pl_node` with payload `Bin`. `lhs` is dest type, `rhs` is operand.
         truncate,
-        /// Implements the `@alignCast` builtin.
-        /// Uses `pl_node` with payload `Bin`. `lhs` is dest alignment, `rhs` is operand.
-        align_cast,
 
         /// Implements the `@hasDecl` builtin.
         /// Uses the `pl_node` union field. Payload is `Bin`.
@@ -1002,6 +1019,7 @@ pub const Inst = struct {
                 .array_type_sentinel,
                 .vector_type,
                 .elem_type_index,
+                .elem_type,
                 .indexable_ptr_len,
                 .anyframe_type,
                 .as,
@@ -1169,7 +1187,6 @@ pub const Inst = struct {
                 .int_cast,
                 .ptr_cast,
                 .truncate,
-                .align_cast,
                 .has_field,
                 .clz,
                 .ctz,
@@ -1306,6 +1323,7 @@ pub const Inst = struct {
                 .array_type_sentinel,
                 .vector_type,
                 .elem_type_index,
+                .elem_type,
                 .indexable_ptr_len,
                 .anyframe_type,
                 .as,
@@ -1451,7 +1469,6 @@ pub const Inst = struct {
                 .int_cast,
                 .ptr_cast,
                 .truncate,
-                .align_cast,
                 .has_field,
                 .clz,
                 .ctz,
@@ -1536,6 +1553,7 @@ pub const Inst = struct {
                 .array_type_sentinel = .pl_node,
                 .vector_type = .pl_node,
                 .elem_type_index = .bin,
+                .elem_type = .un_node,
                 .indexable_ptr_len = .un_node,
                 .anyframe_type = .un_node,
                 .as = .bin,
@@ -1714,7 +1732,6 @@ pub const Inst = struct {
                 .int_cast = .pl_node,
                 .ptr_cast = .pl_node,
                 .truncate = .pl_node,
-                .align_cast = .pl_node,
                 .typeof_builtin = .pl_node,
 
                 .has_decl = .pl_node,
@@ -1945,9 +1962,6 @@ pub const Inst = struct {
         /// `small` 0=>weak 1=>strong
         /// `operand` is payload index to `Cmpxchg`.
         cmpxchg,
-        /// Implement the builtin `@addrSpaceCast`
-        /// `operand` is payload index to `BinNode`. `lhs` is dest type, `rhs` is operand.
-        addrspace_cast,
         /// Implement builtin `@cVaArg`.
         /// `operand` is payload index to `BinNode`.
         c_va_arg,
@@ -1960,12 +1974,21 @@ pub const Inst = struct {
         /// Implement builtin `@cVaStart`.
         /// `operand` is `src_node: i32`.
         c_va_start,
-        /// Implements the `@constCast` builtin.
+        /// Implements the following builtins:
+        /// `@ptrCast`, `@alignCast`, `@addrSpaceCast`, `@constCast`, `@volatileCast`.
+        /// Represents an arbitrary nesting of the above builtins. Such a nesting is treated as a
+        /// single operation which can modify multiple components of a pointer type.
+        /// `operand` is payload index to `BinNode`.
+        /// `small` contains `FullPtrCastFlags`.
+        /// AST node is the root of the nested casts.
+        /// `lhs` is dest type, `rhs` is operand.
+        ptr_cast_full,
         /// `operand` is payload index to `UnNode`.
-        const_cast,
-        /// Implements the `@volatileCast` builtin.
-        /// `operand` is payload index to `UnNode`.
-        volatile_cast,
+        /// `small` contains `FullPtrCastFlags`.
+        /// Guaranteed to only have flags where no explicit destination type is
+        /// required (const_cast and volatile_cast).
+        /// AST node is the root of the nested casts.
+        ptr_cast_no_dest,
         /// Implements the `@workItemId` builtin.
         /// `operand` is payload index to `UnNode`.
         work_item_id,
@@ -2801,6 +2824,21 @@ pub const Inst = struct {
         anon,
         /// Use the name specified in the next `dbg_var_{val,ptr}` instruction.
         dbg_var,
+    };
+
+    pub const FullPtrCastFlags = packed struct(u5) {
+        ptr_cast: bool = false,
+        align_cast: bool = false,
+        addrspace_cast: bool = false,
+        const_cast: bool = false,
+        volatile_cast: bool = false,
+
+        pub inline fn needResultTypeBuiltinName(flags: FullPtrCastFlags) []const u8 {
+            if (flags.ptr_cast) return "@ptrCast";
+            if (flags.align_cast) return "@alignCast";
+            if (flags.addrspace_cast) return "@addrSpaceCast";
+            unreachable;
+        }
     };
 
     /// Trailing:
