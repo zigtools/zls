@@ -17,6 +17,7 @@ const ComptimeInterpreter = @import("ComptimeInterpreter.zig");
 const InternPool = @import("analyser/analyser.zig").InternPool;
 const ZigVersionWrapper = @import("ZigVersionWrapper.zig");
 const Transport = @import("Transport.zig");
+const known_folders = @import("known-folders");
 
 const signature_help = @import("features/signature_help.zig");
 const references = @import("features/references.zig");
@@ -35,7 +36,8 @@ const log = std.log.scoped(.zls_server);
 
 // public fields
 allocator: std.mem.Allocator,
-config: *Config,
+// use updateConfiguration or updateConfiguration2 for setting config options
+config: Config = .{},
 document_store: DocumentStore,
 transport: ?*Transport = null,
 offset_encoding: offsets.Encoding = .@"utf-16",
@@ -46,8 +48,9 @@ thread_pool: if (zig_builtin.single_threaded) void else std.Thread.Pool,
 wait_group: if (zig_builtin.single_threaded) void else std.Thread.WaitGroup,
 job_queue: std.fifo.LinearFifo(Job, .Dynamic),
 job_queue_lock: std.Thread.Mutex = .{},
-ip: InternPool = .{},
+ip: InternPool,
 zig_exe_lock: std.Thread.Mutex = .{},
+config_arena: std.heap.ArenaAllocator.State = .{},
 client_capabilities: ClientCapabilities = .{},
 runtime_zig_version: ?ZigVersionWrapper = null,
 recording_enabled: bool = false,
@@ -244,6 +247,16 @@ fn showMessage(
     comptime fmt: []const u8,
     args: anytype,
 ) void {
+    switch (server.status) {
+        .initializing,
+        .initialized,
+        => {},
+        .uninitialized,
+        .shutdown,
+        .exiting_success,
+        .exiting_failure,
+        => return,
+    }
     const message = std.fmt.allocPrint(server.allocator, fmt, args) catch return;
     defer server.allocator.free(message);
     switch (message_type) {
@@ -435,11 +448,20 @@ fn initializeHandler(server: *Server, _: std.mem.Allocator, request: types.Initi
         }
     }
 
-    log.info("zls initializing", .{});
     log.info("{}", .{server.client_capabilities});
-    log.info("Using offset encoding: {s}", .{@tagName(server.offset_encoding)});
+    log.info("offset encoding: {s}", .{@tagName(server.offset_encoding)});
+
+    server.updateConfiguration(.{}) catch |err| {
+        log.err("failed to load configuration: {}", .{err});
+    };
 
     server.status = .initializing;
+
+    if (server.recording_enabled) {
+        server.showMessage(.Info,
+            \\This zls session is being recorded to {s}.
+        , .{server.config.record_session_path.?});
+    }
 
     if (server.runtime_zig_version) |zig_version_wrapper| {
         const zig_version = zig_version_wrapper.version;
@@ -468,22 +490,6 @@ fn initializeHandler(server: *Server, _: std.mem.Allocator, request: types.Initi
                     \\Zig `{}` is newer than ZLS `{}`. Update ZLS to avoid unexpected behavior.
                 , .{ zig_version, zls_version });
             },
-        }
-    }
-
-    if (server.recording_enabled) {
-        server.showMessage(.Info,
-            \\This zls session is being recorded to {?s}.
-        , .{server.config.record_session_path});
-    }
-
-    if (server.config.enable_ast_check_diagnostics and
-        server.config.prefer_ast_check_as_child_process)
-    {
-        if (!std.process.can_spawn) {
-            log.info("'prefer_ast_check_as_child_process' is ignored because your OS can't spawn a child process", .{});
-        } else if (server.config.zig_exe_path == null) {
-            log.info("'prefer_ast_check_as_child_process' is ignored because Zig could not be found", .{});
         }
     }
 
@@ -558,7 +564,7 @@ fn initializedHandler(server: *Server, _: std.mem.Allocator, notification: types
 
     server.status = .initialized;
 
-    if (server.client_capabilities.supports_workspace_did_change_configuration_dynamic_registration) {
+    if (!server.recording_enabled and server.client_capabilities.supports_workspace_did_change_configuration_dynamic_registration) {
         try server.registerCapability("workspace/didChangeConfiguration");
     }
 
@@ -610,6 +616,23 @@ fn registerCapability(server: *Server, method: []const u8) Error!void {
     server.allocator.free(json_message);
 }
 
+fn invalidateAllBuildFiles(server: *Server) error{OutOfMemory}!void {
+    if (!std.process.can_spawn) return;
+
+    server.document_store.lock.lockShared();
+    defer server.document_store.lock.unlockShared();
+
+    server.job_queue_lock.lock();
+    defer server.job_queue_lock.unlock();
+
+    try server.job_queue.ensureUnusedCapacity(server.document_store.build_files.count());
+    for (server.document_store.build_files.keys()) |build_file_uri| {
+        server.job_queue.writeItemAssumeCapacity(.{
+            .load_build_configuration = try server.allocator.dupe(u8, build_file_uri),
+        });
+    }
+}
+
 fn requestConfiguration(server: *Server) Error!void {
     if (server.recording_enabled) {
         log.info("workspace/configuration are disabled during a recording session!", .{});
@@ -645,94 +668,359 @@ fn handleConfiguration(server: *Server, json: std.json.Value) error{OutOfMemory}
         log.info("workspace/configuration are disabled during a replay!", .{});
         return;
     }
-    log.info("Setting configuration...", .{});
 
-    // NOTE: Does this work with other editors?
-    // Yes, String ids are officially supported by LSP
-    // but not sure how standard this "standard" really is
-
-    var new_zig_exe = false;
-    const result = json.array;
-
-    inline for (std.meta.fields(Config), result.items) |field, value| {
-        const ft = if (@typeInfo(field.type) == .Optional)
-            @typeInfo(field.type).Optional.child
-        else
-            field.type;
-        const ti = @typeInfo(ft);
-
-        if (value != .null) {
-            const new_value: field.type = switch (ft) {
-                []const u8 => switch (value) {
-                    .string => |s| blk: {
-                        const trimmed = std.mem.trim(u8, s, " ");
-                        if (trimmed.len == 0 or std.mem.eql(u8, trimmed, "nil")) {
-                            log.warn("Ignoring new value for \"zls.{s}\": the given new value is invalid", .{field.name});
-                            break :blk @field(server.config, field.name);
-                        }
-                        var nv = try server.allocator.dupe(u8, trimmed);
-
-                        if (comptime std.mem.eql(u8, field.name, "zig_exe_path")) {
-                            if (server.config.zig_exe_path == null or !std.mem.eql(u8, nv, server.config.zig_exe_path.?)) {
-                                new_zig_exe = true;
-                            }
-                        }
-
-                        if (@field(server.config, field.name)) |prev_val| server.allocator.free(prev_val);
-
-                        break :blk nv;
-                    },
-                    else => blk: {
-                        log.warn("Ignoring new value for \"zls.{s}\": the given new value has an invalid type", .{field.name});
-                        break :blk @field(server.config, field.name);
-                    },
-                },
-                else => switch (ti) {
-                    .Int => switch (value) {
-                        .integer => |val| std.math.cast(ft, val) orelse blk: {
-                            log.warn("Ignoring new value for \"zls.{s}\": the given new value is invalid", .{field.name});
-                            break :blk @field(server.config, field.name);
-                        },
-                        else => blk: {
-                            log.warn("Ignoring new value for \"zls.{s}\": the given new value has an invalid type", .{field.name});
-                            break :blk @field(server.config, field.name);
-                        },
-                    },
-                    .Bool => switch (value) {
-                        .bool => |b| b,
-                        else => blk: {
-                            log.warn("Ignoring new value for \"zls.{s}\": the given new value has an invalid type", .{field.name});
-                            break :blk @field(server.config, field.name);
-                        },
-                    },
-                    .Enum => switch (value) {
-                        .string => |s| blk: {
-                            const trimmed = std.mem.trim(u8, s, " ");
-                            break :blk std.meta.stringToEnum(field.type, trimmed) orelse inner: {
-                                log.warn("Ignoring new value for \"zls.{s}\": the given new value is invalid", .{field.name});
-                                break :inner @field(server.config, field.name);
-                            };
-                        },
-                        else => blk: {
-                            log.warn("Ignoring new value for \"zls.{s}\": the given new value has an invalid type", .{field.name});
-                            break :blk @field(server.config, field.name);
-                        },
-                    },
-                    else => @compileError("Not implemented for " ++ @typeName(ft)),
-                },
-            };
-            // log.debug("setting configuration option '{s}' to '{any}'", .{ field.name, new_value });
-            @field(server.config, field.name) = new_value;
-        }
-    }
-    log.debug("{}", .{server.client_capabilities});
-
-    configuration.configChanged(server.config, &server.runtime_zig_version, server.allocator, null) catch |err| {
-        log.err("failed to update configuration: {}", .{err});
+    const fields = std.meta.fields(configuration.Configuration);
+    const result = switch (json) {
+        .array => |arr| if (arr.items.len == fields.len) arr.items else {
+            log.err("workspace/configuration expectes an array of size {d} but received {d}", .{ fields.len, arr.items.len });
+            return;
+        },
+        else => {
+            log.err("workspace/configuration expectes an array but received {s}", .{@tagName(json)});
+            return;
+        },
     };
 
-    if (new_zig_exe)
+    var arena_allocator = std.heap.ArenaAllocator.init(server.allocator);
+    defer arena_allocator.deinit();
+    const arena = arena_allocator.allocator();
+
+    var new_config: configuration.Configuration = .{};
+
+    inline for (fields, result) |field, json_value| {
+        const maybe_new_value = std.json.parseFromValueLeaky(field.type, arena, json_value, .{}) catch |err| blk: {
+            log.err("failed to parse configuration option '{s}': {}", .{ field.name, err });
+            break :blk null;
+        };
+        if (maybe_new_value) |new_value| {
+            @field(new_config, field.name) = new_value;
+        }
+    }
+
+    server.updateConfiguration(new_config) catch |err| {
+        log.err("failed to update configuration: {}", .{err});
+    };
+}
+
+fn didChangeConfigurationHandler(server: *Server, arena: std.mem.Allocator, notification: types.DidChangeConfigurationParams) Error!void {
+    const settings = switch (notification.settings) {
+        .null => {
+            if (server.client_capabilities.supports_configuration) {
+                try server.requestConfiguration();
+            }
+            return;
+        },
+        .object => |object| object.get("zls") orelse notification.settings,
+        else => notification.settings,
+    };
+
+    const new_config = std.json.parseFromValueLeaky(
+        configuration.Configuration,
+        arena,
+        settings,
+        .{ .ignore_unknown_fields = true },
+    ) catch |err| {
+        log.err("failed to parse 'workspace/didChangeConfiguration' response: {}", .{err});
+        return error.ParseError;
+    };
+
+    server.updateConfiguration(new_config) catch |err| {
+        log.err("failed to update configuration: {}", .{err});
+    };
+}
+
+pub fn updateConfiguration2(server: *Server, new_config: Config) !void {
+    var cfg: configuration.Configuration = .{};
+    inline for (std.meta.fields(Config)) |field| {
+        @field(cfg, field.name) = @field(new_config, field.name);
+    }
+    try server.updateConfiguration(cfg);
+}
+
+pub fn updateConfiguration(server: *Server, new_config: configuration.Configuration) !void {
+    // NOTE every changed configuration will increase the amount of memory allocated by the arena
+    // This is unlikely to cause any big issues since the user is probably not going set settings
+    // often in one session
+    var config_arena_allocator = server.config_arena.promote(server.allocator);
+    defer server.config_arena = config_arena_allocator.state;
+    const config_arena = config_arena_allocator.allocator();
+
+    var new_cfg = new_config;
+
+    try server.validateConfiguration(&new_cfg);
+    try server.resolveConfiguration(config_arena, &new_cfg);
+    try server.validateConfiguration(&new_cfg);
+
+    // <---------------------------------------------------------->
+    //                        apply changes
+    // <---------------------------------------------------------->
+
+    const new_zig_exe_path =
+        new_config.zig_exe_path != null and
+        (server.config.zig_exe_path == null or !std.mem.eql(u8, server.config.zig_exe_path.?, new_config.zig_exe_path.?));
+    const new_zig_lib_path =
+        new_config.zig_lib_path != null and
+        (server.config.zig_lib_path == null or !std.mem.eql(u8, server.config.zig_lib_path.?, new_config.zig_lib_path.?));
+    const new_build_runner_path =
+        new_config.build_runner_path != null and
+        (server.config.build_runner_path == null or !std.mem.eql(u8, server.config.build_runner_path.?, new_config.build_runner_path.?));
+
+    inline for (std.meta.fields(Config)) |field| {
+        if (@field(new_cfg, field.name)) |new_config_value| {
+            if (@TypeOf(new_config_value) == []const u8) {
+                if (@field(server.config, field.name) == null or
+                    !std.mem.eql(u8, @field(server.config, field.name).?, new_config_value))
+                {
+                    log.info("set config option '{s}' to '{s}'", .{ field.name, new_config_value });
+                    @field(server.config, field.name) = try config_arena.dupe(u8, new_config_value);
+                }
+            } else {
+                if (@field(server.config, field.name) != new_config_value) {
+                    log.info("set config option '{s}' to '{any}'", .{ field.name, new_config_value });
+                    @field(server.config, field.name) = new_config_value;
+                }
+            }
+        }
+    }
+
+    if (server.config.zig_exe_path == null and
+        server.runtime_zig_version != null)
+    {
+        server.runtime_zig_version.?.free();
+        server.runtime_zig_version = null;
+    }
+
+    if (new_zig_exe_path or new_build_runner_path) {
         try server.invalidateAllBuildFiles();
+    }
+
+    if (new_zig_exe_path or new_zig_lib_path) {
+        server.document_store.cimports.clearAndFree(server.document_store.allocator);
+    }
+
+    // <---------------------------------------------------------->
+    //  don't modify config options after here, only show messages
+    // <---------------------------------------------------------->
+
+    if (std.process.can_spawn and server.config.zig_exe_path == null) {
+        // TODO there should a way to supress this message
+        server.showMessage(.Warning, "zig executable could not be found", .{});
+    }
+
+    if (server.config.enable_ast_check_diagnostics and
+        server.config.prefer_ast_check_as_child_process)
+    {
+        if (!std.process.can_spawn) {
+            log.info("'prefer_ast_check_as_child_process' is ignored because your OS can't spawn a child process", .{});
+        } else if (server.config.zig_exe_path == null) {
+            log.info("'prefer_ast_check_as_child_process' is ignored because Zig could not be found", .{});
+        }
+    }
+
+    if (server.status == .initialized) {
+        const json_message = try server.sendToClientRequest(
+            .{ .string = "semantic_tokens_refresh" },
+            "workspace/semanticTokens/refresh",
+            {},
+        );
+        server.allocator.free(json_message);
+    }
+}
+
+fn validateConfiguration(server: *Server, config: *configuration.Configuration) !void {
+    inline for (comptime std.meta.fieldNames(Config)) |field_name| {
+        const FileCheckInfo = struct {
+            kind: enum { file, directory },
+            is_accessible: bool,
+        };
+
+        @setEvalBranchQuota(2_000);
+        const file_info: FileCheckInfo = comptime if (std.mem.indexOf(u8, field_name, "path") != null) blk: {
+            if (std.mem.eql(u8, field_name, "zig_exe_path") or
+                std.mem.eql(u8, field_name, "replay_session_path") or
+                std.mem.eql(u8, field_name, "builtin_path") or
+                std.mem.eql(u8, field_name, "build_runner_path"))
+            {
+                break :blk .{ .kind = .file, .is_accessible = true };
+            } else if (std.mem.eql(u8, field_name, "record_session_path")) {
+                break :blk .{ .kind = .file, .is_accessible = false };
+            } else if (std.mem.eql(u8, field_name, "zig_lib_path")) {
+                break :blk .{ .kind = .directory, .is_accessible = true };
+            } else if (std.mem.eql(u8, field_name, "global_cache_path") or
+                std.mem.eql(u8, field_name, "build_runner_global_cache_path"))
+            {
+                break :blk .{ .kind = .directory, .is_accessible = false };
+            } else {
+                @compileError(std.fmt.comptimePrint(
+                    \\config option '{s}' contains the word 'path'.
+                    \\Please add config option validation checks above if necessary.
+                    \\If not necessary, just add a continue switch-case to ignore this error.
+                    \\
+                , .{field_name}));
+            }
+        } else continue;
+
+        const is_ok = if (@field(config, field_name)) |path| ok: {
+            if (path.len == 0) break :ok false;
+
+            if (!std.fs.path.isAbsolute(path)) {
+                server.showMessage(.Warning, "config option '{s}': expected absolute path but got '{s}'", .{ field_name, path });
+                break :ok false;
+            }
+
+            switch (file_info.kind) {
+                .file => {
+                    const file = std.fs.openFileAbsolute(path, .{}) catch |err| {
+                        if (file_info.is_accessible) {
+                            server.showMessage(.Warning, "config option '{s}': invalid file path '{s}': {}", .{ field_name, path, err });
+                            break :ok false;
+                        }
+                        break :ok true;
+                    };
+                    defer file.close();
+
+                    const stat = file.stat() catch |err| {
+                        log.err("failed to get stat of '{s}': {}", .{ path, err });
+                        break :ok true;
+                    };
+                    switch (stat.kind) {
+                        .directory => {
+                            server.showMessage(.Warning, "config option '{s}': expected file path but '{s}' is a directory", .{ field_name, path });
+                            break :ok false;
+                        },
+                        .file => {},
+                        // are there file kinds that should warn?
+                        // what about symlinks?
+                        else => {},
+                    }
+                    break :ok true;
+                },
+                .directory => {
+                    var dir = std.fs.openDirAbsolute(path, .{}) catch |err| {
+                        if (file_info.is_accessible) {
+                            server.showMessage(.Warning, "config option '{s}': invalid directory path '{s}': {}", .{ field_name, path, err });
+                            break :ok false;
+                        }
+                        break :ok true;
+                    };
+                    defer dir.close();
+                    const stat = dir.stat() catch |err| {
+                        log.err("failed to get stat of '{s}': {}", .{ path, err });
+                        break :ok true;
+                    };
+                    switch (stat.kind) {
+                        .file => {
+                            server.showMessage(.Warning, "config option '{s}': expected directory path but '{s}' is a file", .{ field_name, path });
+                            break :ok false;
+                        },
+                        .directory => {},
+                        // are there file kinds that should warn?
+                        // what about symlinks?
+                        else => {},
+                    }
+                    break :ok true;
+                },
+            }
+        } else true;
+
+        if (!is_ok) {
+            @field(config, field_name) = null;
+        }
+    }
+
+    // some config options can't be changed after initialization
+    if (server.status != .uninitialized) {
+        config.record_session = null;
+        config.record_session_path = null;
+        config.replay_session_path = null;
+    }
+}
+
+fn resolveConfiguration(server: *Server, config_arena: std.mem.Allocator, config: *configuration.Configuration) !void {
+    if (config.zig_exe_path == null) blk: {
+        comptime if (!std.process.can_spawn) break :blk;
+        config.zig_exe_path = try configuration.findZig(config_arena);
+    }
+
+    if (config.zig_exe_path) |exe_path| blk: {
+        comptime if (!std.process.can_spawn) break :blk;
+        const env = configuration.getZigEnv(server.allocator, exe_path) orelse break :blk;
+        defer env.deinit();
+
+        if (config.zig_lib_path == null) {
+            config.zig_lib_path = try config_arena.dupe(u8, env.value.lib_dir.?);
+        }
+
+        if (config.build_runner_global_cache_path == null) {
+            config.build_runner_global_cache_path = try config_arena.dupe(u8, env.value.global_cache_dir);
+        }
+
+        if (server.runtime_zig_version) |current_version| current_version.free();
+        server.runtime_zig_version = null;
+
+        const duped_zig_version_string = try server.allocator.dupe(u8, env.value.version);
+        errdefer server.allocator.free(duped_zig_version_string);
+
+        server.runtime_zig_version = .{
+            .version = try std.SemanticVersion.parse(duped_zig_version_string),
+            .allocator = server.allocator,
+            .raw_string = duped_zig_version_string,
+        };
+    }
+
+    if (config.global_cache_path == null) {
+        const cache_dir_path = (try known_folders.getPath(server.allocator, .cache)) orelse {
+            log.warn("Known-folders could not fetch the cache path", .{});
+            return;
+        };
+        defer server.allocator.free(cache_dir_path);
+
+        config.global_cache_path = try std.fs.path.resolve(config_arena, &[_][]const u8{ cache_dir_path, "zls" });
+
+        try std.fs.cwd().makePath(config.global_cache_path.?);
+    }
+
+    if (config.build_runner_path == null) blk: {
+        if (config.global_cache_path == null) break :blk;
+
+        config.build_runner_path = try std.fs.path.resolve(config_arena, &[_][]const u8{ config.global_cache_path.?, "build_runner.zig" });
+
+        const file = try std.fs.createFileAbsolute(config.build_runner_path.?, .{});
+        defer file.close();
+
+        try file.writeAll(@embedFile("special/build_runner.zig"));
+    }
+
+    if (config.builtin_path == null) blk: {
+        comptime if (!std.process.can_spawn) break :blk;
+        if (config.zig_exe_path == null) break :blk;
+        if (config.global_cache_path == null) break :blk;
+
+        const result = try std.ChildProcess.exec(.{
+            .allocator = server.allocator,
+            .argv = &.{
+                config.zig_exe_path.?,
+                "build-exe",
+                "--show-builtin",
+            },
+            .max_output_bytes = 1024 * 1024 * 50,
+        });
+        defer server.allocator.free(result.stdout);
+        defer server.allocator.free(result.stderr);
+
+        var d = try std.fs.cwd().openDir(config.global_cache_path.?, .{});
+        defer d.close();
+
+        const f = d.createFile("builtin.zig", .{}) catch |err| switch (err) {
+            error.AccessDenied => break :blk,
+            else => |e| return e,
+        };
+        defer f.close();
+
+        try f.writeAll(result.stdout);
+
+        config.builtin_path = try std.fs.path.join(config_arena, &.{ config.global_cache_path.?, "builtin.zig" });
+    }
 }
 
 fn openDocumentHandler(server: *Server, _: std.mem.Allocator, notification: types.DidOpenTextDocumentParams) Error!void {
@@ -977,80 +1265,6 @@ pub fn formattingHandler(server: *Server, arena: std.mem.Allocator, request: typ
     return if (diff.edits(arena, handle.text, formatted, server.offset_encoding)) |text_edits| text_edits.items else |_| null;
 }
 
-fn didChangeConfigurationHandler(server: *Server, arena: std.mem.Allocator, notification: types.DidChangeConfigurationParams) Error!void {
-    var new_zig_exe = false;
-
-    // NOTE: VS Code seems to always respond with null
-    if (notification.settings != .null) {
-        const cfg = std.json.parseFromValueLeaky(
-            configuration.Configuration,
-            arena,
-            notification.settings.object.get("zls") orelse notification.settings,
-            .{ .ignore_unknown_fields = true },
-        ) catch return;
-        inline for (std.meta.fields(configuration.Configuration)) |field| {
-            if (@field(cfg, field.name)) |value| {
-                blk: {
-                    if (@TypeOf(value) == []const u8) {
-                        if (value.len == 0) {
-                            break :blk;
-                        }
-                    }
-
-                    if (comptime std.mem.eql(u8, field.name, "zig_exe_path")) {
-                        if (cfg.zig_exe_path == null or !std.mem.eql(u8, value, cfg.zig_exe_path.?)) {
-                            new_zig_exe = true;
-                        }
-                    }
-
-                    if (@TypeOf(value) == []const u8) {
-                        if (@field(server.config, field.name)) |existing| server.allocator.free(existing);
-                        @field(server.config, field.name) = try server.allocator.dupe(u8, value);
-                    } else {
-                        @field(server.config, field.name) = value;
-                    }
-                    log.debug("setting configuration option '{s}' to '{any}'", .{ field.name, value });
-                }
-            }
-        }
-
-        configuration.configChanged(server.config, &server.runtime_zig_version, server.allocator, null) catch |err| {
-            log.err("failed to update config: {}", .{err});
-        };
-
-        if (new_zig_exe)
-            try server.invalidateAllBuildFiles();
-    } else if (server.client_capabilities.supports_configuration) {
-        try server.requestConfiguration();
-    }
-}
-
-fn invalidateAllBuildFiles(server: *Server) error{OutOfMemory}!void {
-    if (!std.process.can_spawn) return;
-
-    {
-        server.document_store.lock.lockShared();
-        defer server.document_store.lock.unlockShared();
-
-        server.job_queue_lock.lock();
-        defer server.job_queue_lock.unlock();
-
-        try server.job_queue.ensureUnusedCapacity(server.document_store.build_files.count());
-        for (server.document_store.build_files.keys()) |build_file_uri| {
-            server.job_queue.writeItemAssumeCapacity(.{
-                .load_build_configuration = try server.allocator.dupe(u8, build_file_uri),
-            });
-        }
-    }
-
-    const json_message = try server.sendToClientRequest(
-        .{ .string = "semantic_tokens_refresh" },
-        "workspace/semanticTokens/refresh",
-        {},
-    );
-    server.allocator.free(json_message);
-}
-
 pub fn renameHandler(server: *Server, arena: std.mem.Allocator, request: types.RenameParams) Error!?types.WorkspaceEdit {
     const response = try generalReferencesHandler(server, arena, .{ .rename = request });
     return if (response) |rep| rep.rename else null;
@@ -1197,7 +1411,7 @@ fn inlayHintHandler(server: *Server, arena: std.mem.Allocator, request: types.In
 
     return try inlay_hints.writeRangeInlayHint(
         arena,
-        server.config.*,
+        server.config,
         &analyser,
         handle,
         loc,
@@ -1463,21 +1677,17 @@ pub const Message = union(enum) {
 };
 
 /// make sure to also set the `transport` field
-pub fn create(
-    allocator: std.mem.Allocator,
-    config: *Config,
-    config_path: ?[]const u8,
-) !*Server {
+pub fn create(allocator: std.mem.Allocator) !*Server {
     const server = try allocator.create(Server);
     errdefer server.destroy();
     server.* = Server{
         .allocator = allocator,
-        .config = config,
         .document_store = .{
             .allocator = allocator,
-            .config = config,
+            .config = &server.config,
             .runtime_zig_version = &server.runtime_zig_version,
         },
+        .ip = undefined, // set below
         .job_queue = std.fifo.LinearFifo(Job, .Dynamic).init(allocator),
         .thread_pool = undefined, // set below
         .wait_group = if (zig_builtin.single_threaded) {} else .{},
@@ -1492,16 +1702,7 @@ pub fn create(
         });
     }
 
-    var builtin_creation_dir = config_path;
-    if (config_path) |path| {
-        builtin_creation_dir = std.fs.path.dirname(path);
-    }
-
-    try configuration.configChanged(config, &server.runtime_zig_version, allocator, builtin_creation_dir);
-
-    if (config.dangerous_comptime_experiments_do_not_enable) {
-        server.ip = try InternPool.init(allocator);
-    }
+    server.ip = try InternPool.init(allocator);
 
     return server;
 }
@@ -1517,6 +1718,7 @@ pub fn destroy(server: *Server) void {
     server.document_store.deinit();
     server.ip.deinit(server.allocator);
     if (server.runtime_zig_version) |zig_version| zig_version.free();
+    server.config_arena.promote(server.allocator).deinit();
     server.allocator.destroy(server);
 }
 

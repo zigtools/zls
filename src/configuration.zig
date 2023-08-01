@@ -10,33 +10,53 @@ const offsets = @import("offsets.zig");
 
 const logger = std.log.scoped(.zls_config);
 
-const legacy_json = @import("legacy_json.zig");
+pub const ConfigWithPath = struct {
+    config: Config,
+    arena: std.heap.ArenaAllocator.State,
+    /// The path to the file from which the config was read.
+    config_path: ?[]const u8,
 
-pub fn loadFromFile(allocator: std.mem.Allocator, file_path: []const u8) ?Config {
+    pub fn deinit(self: *ConfigWithPath, allocator: std.mem.Allocator) void {
+        self.arena.promote(allocator).deinit();
+        if (self.config_path) |path| allocator.free(path);
+        self.* = undefined;
+    }
+};
+
+pub fn loadFromFile(allocator: std.mem.Allocator, file_path: []const u8) ?ConfigWithPath {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    var file = std.fs.cwd().openFile(file_path, .{}) catch |err| {
-        if (err != error.FileNotFound)
+    const file_buf = std.fs.cwd().readFileAlloc(allocator, file_path, std.math.maxInt(usize)) catch |err| switch (err) {
+        error.FileNotFound => return null,
+        else => {
             logger.warn("Error while reading configuration file: {}", .{err});
-        return null;
+            return null;
+        },
     };
-
-    defer file.close();
-
-    const file_buf = file.readToEndAlloc(allocator, 0x1000000) catch return null;
     defer allocator.free(file_buf);
-    @setEvalBranchQuota(10000);
 
-    const parse_options = std.json.ParseOptions{ .ignore_unknown_fields = true };
+    const parse_options = std.json.ParseOptions{
+        .ignore_unknown_fields = true,
+        .allocate = .alloc_always,
+    };
     var parse_diagnostics: std.json.Diagnostics = .{};
 
     var scanner = std.json.Scanner.initCompleteInput(allocator, file_buf);
     defer scanner.deinit();
     scanner.enableDiagnostics(&parse_diagnostics);
 
+    var arena_allocator = std.heap.ArenaAllocator.init(allocator);
+    errdefer arena_allocator.deinit();
+
+    @setEvalBranchQuota(10000);
     // TODO: report errors using "textDocument/publishDiagnostics"
-    var config = legacy_json.parseFromTokenSource(Config, allocator, &scanner, parse_options) catch |err| {
+    const config = std.json.parseFromTokenSourceLeaky(
+        Config,
+        arena_allocator.allocator(),
+        &scanner,
+        parse_options,
+    ) catch |err| {
         logger.warn(
             "{s}:{d}:{d}: Error while parsing configuration file {}",
             .{ file_path, parse_diagnostics.getLine(), parse_diagnostics.getColumn(), err },
@@ -44,118 +64,47 @@ pub fn loadFromFile(allocator: std.mem.Allocator, file_path: []const u8) ?Config
         return null;
     };
 
-    if (config.zig_lib_path) |zig_lib_path| {
-        if (!std.fs.path.isAbsolute(zig_lib_path)) {
-            logger.warn("zig library path is not absolute, defaulting to null.", .{});
-            allocator.free(zig_lib_path);
-            config.zig_lib_path = null;
-        }
-    }
-
-    return config;
+    return .{
+        .config = config,
+        .arena = arena_allocator.state,
+        .config_path = file_path,
+    };
 }
 
-/// Invoke this once all config values have been changed.
-pub fn configChanged(config: *Config, runtime_zig_version: *?ZigVersionWrapper, allocator: std.mem.Allocator, builtin_creation_dir: ?[]const u8) !void {
-    if (!std.process.can_spawn) return;
-    // Find the zig executable in PATH
-    find_zig: {
-        if (config.zig_exe_path) |exe_path| {
-            if (std.fs.path.isAbsolute(exe_path)) not_valid: {
-                std.fs.cwd().access(exe_path, .{}) catch break :not_valid;
-                break :find_zig;
-            }
-            logger.debug("zig path `{s}` is not absolute, will look in path", .{exe_path});
-            allocator.free(exe_path);
+pub fn getConfig(allocator: std.mem.Allocator, config_path: ?[]const u8) !ConfigWithPath {
+    if (config_path) |path| {
+        if (loadFromFile(allocator, path)) |config| {
+            var cfg = config;
+            errdefer cfg.deinit(allocator);
+            cfg.config_path = try allocator.dupe(u8, path);
+            return cfg;
         }
-        config.zig_exe_path = try findZig(allocator);
+        logger.info(
+            \\Could not open configuration file '{s}'
+            \\Falling back to a lookup in the local and global configuration folders
+            \\
+        , .{path});
     }
 
-    if (config.zig_exe_path) |exe_path| blk: {
-        logger.info("Using zig executable '{s}'", .{exe_path});
-
-        const env = getZigEnv(allocator, exe_path) orelse break :blk;
-        defer env.deinit();
-
-        const duped_zig_lib_path = try allocator.dupe(u8, env.value.lib_dir.?);
-        if (config.zig_lib_path) |lib_path| allocator.free(lib_path);
-        config.zig_lib_path = duped_zig_lib_path;
-        logger.info("Using zig lib path '{s}'", .{config.zig_lib_path.?});
-
-        if (config.build_runner_global_cache_path) |global_cache_path| allocator.free(global_cache_path);
-        config.build_runner_global_cache_path = try allocator.dupe(u8, env.value.global_cache_dir);
-        logger.info("Using build runner global cache path '{s}'", .{config.build_runner_global_cache_path.?});
-
-        if (runtime_zig_version.*) |current_version| current_version.free();
-        errdefer runtime_zig_version.* = null;
-
-        const duped_zig_version_string = try allocator.dupe(u8, env.value.version);
-        errdefer allocator.free(duped_zig_version_string);
-
-        logger.info("Detected runtime zig version: '{s}'", .{duped_zig_version_string});
-
-        runtime_zig_version.* = .{
-            .version = try std.SemanticVersion.parse(duped_zig_version_string),
-            .allocator = allocator,
-            .raw_string = duped_zig_version_string,
-        };
-    } else {
-        if (runtime_zig_version.*) |version| version.free();
-        runtime_zig_version.* = null;
-        logger.warn("Zig executable path not specified in zls.json and could not be found in PATH", .{});
+    if (try known_folders.getPath(allocator, .local_configuration)) |folder_path| {
+        defer allocator.free(folder_path);
+        const file_path = try std.fs.path.resolve(allocator, &.{ folder_path, "zls.json" });
+        if (loadFromFile(allocator, file_path)) |config| return config;
+        allocator.free(file_path);
     }
 
-    if (config.zig_lib_path == null) {
-        logger.warn("Zig standard library path not specified in zls.json and could not be resolved from the zig executable", .{});
+    if (try known_folders.getPath(allocator, .global_configuration)) |folder_path| {
+        defer allocator.free(folder_path);
+        const file_path = try std.fs.path.resolve(allocator, &.{ folder_path, "zls.json" });
+        if (loadFromFile(allocator, file_path)) |config| return config;
+        allocator.free(file_path);
     }
 
-    if (config.builtin_path == null and config.zig_exe_path != null and builtin_creation_dir != null) blk: {
-        const result = try std.ChildProcess.exec(.{
-            .allocator = allocator,
-            .argv = &.{
-                config.zig_exe_path.?,
-                "build-exe",
-                "--show-builtin",
-            },
-            .max_output_bytes = 1024 * 1024 * 50,
-        });
-        defer allocator.free(result.stdout);
-        defer allocator.free(result.stderr);
-
-        var d = try std.fs.cwd().openDir(builtin_creation_dir.?, .{});
-        defer d.close();
-
-        const f = d.createFile("builtin.zig", .{}) catch |err| switch (err) {
-            error.AccessDenied => break :blk,
-            else => |e| return e,
-        };
-        defer f.close();
-
-        try f.writer().writeAll(result.stdout);
-
-        config.builtin_path = try std.fs.path.join(allocator, &.{ builtin_creation_dir.?, "builtin.zig" });
-    }
-
-    if (null == config.global_cache_path) {
-        const cache_dir_path = (try known_folders.getPath(allocator, .cache)) orelse {
-            logger.warn("Known-folders could not fetch the cache path", .{});
-            return;
-        };
-        defer allocator.free(cache_dir_path);
-
-        config.global_cache_path = try std.fs.path.resolve(allocator, &[_][]const u8{ cache_dir_path, "zls" });
-
-        try std.fs.cwd().makePath(config.global_cache_path.?);
-    }
-
-    if (null == config.build_runner_path) {
-        config.build_runner_path = try std.fs.path.resolve(allocator, &[_][]const u8{ config.global_cache_path.?, "build_runner.zig" });
-
-        const file = try std.fs.createFileAbsolute(config.build_runner_path.?, .{});
-        defer file.close();
-
-        try file.writeAll(@embedFile("special/build_runner.zig"));
-    }
+    return ConfigWithPath{
+        .config = .{},
+        .arena = .{},
+        .config_path = null,
+    };
 }
 
 pub const Env = struct {
@@ -203,6 +152,7 @@ pub fn getZigEnv(allocator: std.mem.Allocator, zig_exe_path: []const u8) ?std.js
     };
 }
 
+/// the same struct as Config but every field is optional
 pub const Configuration = getConfigurationType();
 
 // returns a Struct which is the same as `Config` except that every field is optional.

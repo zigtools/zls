@@ -4,7 +4,7 @@ const Header = @import("Header.zig");
 in: std.io.BufferedReader(4096, std.fs.File.Reader),
 out: std.fs.File.Writer,
 // TODO can we move this out of Transport?
-replay_file: ?std.fs.File.Writer = null,
+record_file: ?std.fs.File.Writer = null,
 in_lock: std.Thread.Mutex = .{},
 out_lock: std.Thread.Mutex = .{},
 message_tracing: bool = false,
@@ -33,7 +33,7 @@ pub fn readJsonMessage(self: *Transport, allocator: std.mem.Allocator) ![]u8 {
         errdefer allocator.free(json_message);
         try reader.readNoEof(json_message);
 
-        if (self.replay_file) |file| {
+        if (self.record_file) |file| {
             var buffer: [64]u8 = undefined;
             const prefix = std.fmt.bufPrint(&buffer, "Content-Length: {d}\r\n\r\n", .{json_message.len}) catch unreachable;
             try file.writeAll(prefix);

@@ -1039,16 +1039,16 @@ pub fn resolveCImport(self: *DocumentStore, handle: Handle, node: Ast.Node.Index
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
+    if (!std.process.can_spawn) return null;
+
     self.lock.lock();
     defer self.lock.unlock();
-
-    if (!std.process.can_spawn) return null;
 
     const index = std.mem.indexOfScalar(Ast.Node.Index, handle.cimports.items(.node), node) orelse return null;
 
     const hash: Hash = handle.cimports.items(.hash)[index];
 
-    // TODO regenerate cimports if config changes or the header files gets modified
+    // TODO regenerate cimports if the header files gets modified
     const result = self.cimports.get(hash) orelse blk: {
         const source: []const u8 = handle.cimports.items(.source)[index];
 

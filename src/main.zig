@@ -10,7 +10,6 @@ const Header = @import("Header.zig");
 const Transport = @import("Transport.zig");
 const debug = @import("debug.zig");
 const binned_allocator = @import("binned_allocator");
-const legacy_json = @import("legacy_json.zig");
 
 const logger = std.log.scoped(.zls_main);
 
@@ -45,14 +44,14 @@ fn getRecordFile(config: Config) ?std.fs.File {
 
     if (config.record_session_path) |record_path| {
         if (std.fs.createFileAbsolute(record_path, .{})) |file| {
-            std.debug.print("recording to {s}\n", .{record_path});
+            logger.info("recording to {s}\n", .{record_path});
             return file;
         } else |err| {
-            std.log.err("failed to create record file at {s}: {}", .{ record_path, err });
+            logger.err("failed to create record file at {s}: {}", .{ record_path, err });
             return null;
         }
     } else {
-        std.log.err("`record_session` is set but `record_session_path` is unspecified", .{});
+        logger.err("`record_session` is set but `record_session_path` is unspecified", .{});
         return null;
     }
 }
@@ -61,10 +60,10 @@ fn getReplayFile(config: Config) ?std.fs.File {
     const replay_path = config.replay_session_path orelse config.record_session_path orelse return null;
 
     if (std.fs.openFileAbsolute(replay_path, .{})) |file| {
-        std.debug.print("replaying from {s}\n", .{replay_path});
+        logger.info("replaying from {s}\n", .{replay_path});
         return file;
     } else |err| {
-        std.log.err("failed to open replay file at {s}: {}", .{ replay_path, err });
+        logger.err("failed to open replay file at {s}: {}", .{ replay_path, err });
         return null;
     }
 }
@@ -73,88 +72,42 @@ fn getReplayFile(config: Config) ?std.fs.File {
 /// when replaying we read this message and replace the current config
 fn updateConfig(
     allocator: std.mem.Allocator,
-    config: *Config,
+    transport: *Transport,
+    config: *configuration.ConfigWithPath,
     record_file: ?std.fs.File,
     replay_file: ?std.fs.File,
 ) !void {
+    std.debug.assert(record_file == null or replay_file == null);
     if (record_file) |file| {
-        var cfg = config.*;
+        var cfg = config.config;
         cfg.record_session = false;
         cfg.record_session_path = null;
         cfg.replay_session_path = null;
 
         var buffer = std.ArrayListUnmanaged(u8){};
         defer buffer.deinit(allocator);
-
         try std.json.stringify(cfg, .{}, buffer.writer(allocator));
-        const header = Header{ .content_length = buffer.items.len };
+
+        var header = Header{ .content_length = buffer.items.len };
         try header.write(file.writer());
         try file.writeAll(buffer.items);
     }
 
-    if (replay_file) |file| {
-        const header = try Header.parse(allocator, file.reader());
-        defer header.deinit(allocator);
-        const json_message = try allocator.alloc(u8, header.content_length);
+    if (replay_file != null) {
+        const json_message = try transport.readJsonMessage(allocator);
         defer allocator.free(json_message);
-        try file.reader().readNoEof(json_message);
 
-        const new_config = try legacy_json.parseFromSlice(Config, allocator, json_message, .{});
-        legacy_json.parseFree(Config, allocator, config.*);
-        config.* = new_config;
+        const new_config = try std.json.parseFromSlice(Config, allocator, json_message, .{});
+        config.arena.promote(allocator).deinit();
+        config.arena = new_config.arena.state;
+        config.config = new_config.value;
     }
-}
-
-const ConfigWithPath = struct {
-    config: Config,
-    /// The path to the file from which the config was read.
-    config_path: ?[]const u8,
-};
-
-fn getConfig(
-    allocator: std.mem.Allocator,
-    config_path: ?[]const u8,
-) !ConfigWithPath {
-    if (config_path) |path| {
-        if (configuration.loadFromFile(allocator, path)) |config| {
-            return ConfigWithPath{ .config = config, .config_path = try allocator.dupe(u8, path) };
-        }
-        std.debug.print(
-            \\Could not open configuration file '{s}'
-            \\Falling back to a lookup in the local and global configuration folders
-            \\
-        , .{path});
-    }
-
-    if (try known_folders.getPath(allocator, .local_configuration)) |folder_path| {
-        defer allocator.free(folder_path);
-        const file_path = try std.fs.path.resolve(allocator, &.{ folder_path, "zls.json" });
-        if (configuration.loadFromFile(allocator, file_path)) |config| {
-            return ConfigWithPath{ .config = config, .config_path = file_path };
-        }
-        allocator.free(file_path);
-    }
-
-    if (try known_folders.getPath(allocator, .global_configuration)) |folder_path| {
-        defer allocator.free(folder_path);
-        const file_path = try std.fs.path.resolve(allocator, &.{ folder_path, "zls.json" });
-        if (configuration.loadFromFile(allocator, file_path)) |config| {
-            return ConfigWithPath{ .config = config, .config_path = file_path };
-        }
-        allocator.free(file_path);
-    }
-
-    return ConfigWithPath{
-        .config = Config{},
-        .config_path = null,
-    };
 }
 
 const ParseArgsResult = struct {
     action: enum { proceed, exit },
     config_path: ?[]const u8,
     replay_enabled: bool,
-    replay_session_path: ?[]const u8,
     message_tracing_enabled: bool,
 
     zls_exe_path: []const u8,
@@ -165,7 +118,6 @@ fn parseArgs(allocator: std.mem.Allocator) !ParseArgsResult {
         .action = .exit,
         .config_path = null,
         .replay_enabled = false,
-        .replay_session_path = null,
         .message_tracing_enabled = false,
         .zls_exe_path = undefined,
     };
@@ -253,8 +205,6 @@ fn parseArgs(allocator: std.mem.Allocator) !ParseArgsResult {
             },
             .replay => {
                 result.replay_enabled = true;
-                const path = args_it.next() orelse break;
-                result.replay_session_path = try allocator.dupe(u8, path);
             },
         }
     }
@@ -269,7 +219,7 @@ fn parseArgs(allocator: std.mem.Allocator) !ParseArgsResult {
     }
     if (specified.get(.@"enable-debug-log")) {
         actual_log_level = .debug;
-        logger.info("Enabled debug logging.\n", .{});
+        logger.info("Enabled debug logging.", .{});
     }
     if (specified.get(.@"enable-message-tracing")) {
         result.message_tracing_enabled = true;
@@ -279,22 +229,25 @@ fn parseArgs(allocator: std.mem.Allocator) !ParseArgsResult {
         std.debug.assert(result.config_path != null);
     }
     if (specified.get(.@"show-config-path")) {
-        const new_config = try getConfig(allocator, result.config_path);
-        defer if (new_config.config_path) |path| allocator.free(path);
-        defer legacy_json.parseFree(Config, allocator, new_config.config);
+        var new_config = try configuration.getConfig(allocator, result.config_path);
+        defer new_config.deinit(allocator);
 
-        const full_path = if (new_config.config_path) |path| try allocator.dupe(u8, path) else blk: {
+        if (new_config.config_path) |path| {
+            try stdout.writeAll(path);
+            try stdout.writeByte('\n');
+            return result;
+        } else {
             const local_config_path = try known_folders.getPath(allocator, .local_configuration) orelse {
                 logger.err("failed to find local configuration folder", .{});
                 return result;
             };
             defer allocator.free(local_config_path);
-            break :blk try std.fs.path.resolve(allocator, &.{ local_config_path, "zls.json" });
-        };
-        defer allocator.free(full_path);
-        try stdout.writeAll(full_path);
-        try stdout.writeByte('\n');
-        return result;
+            const full_path = try std.fs.path.join(allocator, &.{ local_config_path, "zls.json" });
+            defer allocator.free(full_path);
+            try stdout.writeAll(full_path);
+            try stdout.writeByte('\n');
+            return result;
+        }
     }
 
     result.action = .proceed;
@@ -328,7 +281,6 @@ pub fn main() !void {
     const result = try parseArgs(allocator);
     defer allocator.free(result.zls_exe_path);
     defer if (result.config_path) |path| allocator.free(path);
-    defer if (result.replay_session_path) |path| allocator.free(path);
     switch (result.action) {
         .proceed => {},
         .exit => return,
@@ -336,11 +288,10 @@ pub fn main() !void {
 
     logger.info("Starting ZLS {s} @ '{s}'", .{ build_options.version, result.zls_exe_path });
 
-    var config = try getConfig(allocator, result.config_path);
-    defer legacy_json.parseFree(Config, allocator, config.config);
-    defer if (config.config_path) |path| allocator.free(path);
+    var config = try configuration.getConfig(allocator, result.config_path);
+    defer config.deinit(allocator);
 
-    if (result.replay_enabled and config.config.replay_session_path == null and config.config.record_session_path == null) {
+    if (result.replay_enabled and config.config.record_session_path == null) {
         logger.err("No replay file specified", .{});
         return;
     }
@@ -360,25 +311,25 @@ pub fn main() !void {
         std.io.getStdOut().writer(),
     );
     transport.message_tracing = result.message_tracing_enabled;
-    if (record_file) |file| transport.replay_file = file.writer();
+    if (record_file) |file| transport.record_file = file.writer();
 
-    std.debug.assert(record_file == null or replay_file == null);
+    try updateConfig(allocator, &transport, &config, record_file, replay_file);
 
-    try updateConfig(allocator, &config.config, record_file, replay_file);
-
-    const server = try Server.create(
-        allocator,
-        &config.config,
-        config.config_path,
-    );
+    const server = try Server.create(allocator);
     defer server.destroy();
+    try server.updateConfiguration2(config.config);
     server.recording_enabled = record_file != null;
-    server.recording_enabled = replay_file != null;
+    server.replay_enabled = replay_file != null;
     server.transport = &transport;
 
     try server.loop();
 
     if (server.status == .exiting_failure) {
-        std.process.exit(1);
+        if (zig_builtin.mode == .Debug) {
+            // make sure that GeneralPurposeAllocator.deinit gets run to detect leaks
+            return;
+        } else {
+            std.process.exit(1);
+        }
     }
 }
