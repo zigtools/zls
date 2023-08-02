@@ -30,6 +30,8 @@ pub fn hoverSymbol(
     var reference_collector = Analyser.ReferencedType.Collector.init(&type_references);
     var doc_str = original_doc_str orelse try decl_handle.docComments(arena);
 
+    var is_fn = false;
+
     const def_str = switch (decl_handle.decl.*) {
         .ast_node => |node| def: {
             if (try analyser.resolveVarDeclAlias(.{ .node = node, .handle = handle })) |result| {
@@ -57,6 +59,7 @@ pub fn hoverSymbol(
 
                 break :def try Analyser.getVariableSignature(arena, tree, var_decl);
             } else if (tree.fullFnProto(&buf, node)) |fn_proto| {
+                is_fn = true;
                 break :def Analyser.getFunctionSignature(tree, fn_proto);
             } else if (tree.fullContainerField(node)) |field| {
                 var converted = field;
@@ -109,7 +112,11 @@ pub fn hoverSymbol(
     var hover_text = std.ArrayList(u8).init(arena);
     const writer = hover_text.writer();
     if (markup_kind == .markdown) {
-        try writer.print("```zig\n{s}\n```\n```zig\n({s})\n```", .{ def_str, resolved_type_str });
+        if (is_fn) {
+            try writer.print("```zig\n{s}\n```", .{def_str});
+        } else {
+            try writer.print("```zig\n{s}\n```\n```zig\n({s})\n```", .{ def_str, resolved_type_str });
+        }
         if (doc_str) |doc|
             try writer.print("\n{s}", .{doc});
         if (referenced_types.len > 0)
@@ -122,7 +129,11 @@ pub fn hoverSymbol(
             try writer.print("[{s}]({s}#L{d})", .{ ref.str, ref.handle.uri, line });
         }
     } else {
-        try writer.print("{s} ({s})", .{ def_str, resolved_type_str });
+        if (is_fn) {
+            try writer.print("{s}", .{def_str});
+        } else {
+            try writer.print("{s}\n({s})", .{ def_str, resolved_type_str });
+        }
         if (doc_str) |doc|
             try writer.print("\n{s}", .{doc});
     }
