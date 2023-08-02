@@ -6,11 +6,6 @@ const process = std.process;
 pub const dependencies = @import("@dependencies");
 
 const Build = std.Build;
-const Cache = std.Build.Cache;
-const CompileStep = Build.CompileStep;
-
-const InstallArtifactStep = Build.InstallArtifactStep;
-const OptionsStep = Build.OptionsStep;
 
 pub const BuildConfig = struct {
     packages: []Pkg,
@@ -53,22 +48,22 @@ pub fn main() !void {
         return error.InvalidArgs;
     };
 
-    const build_root_directory = Cache.Directory{
+    const build_root_directory = Build.Cache.Directory{
         .path = build_root,
         .handle = try std.fs.cwd().openDir(build_root, .{}),
     };
 
-    const local_cache_directory = Cache.Directory{
+    const local_cache_directory = Build.Cache.Directory{
         .path = cache_root,
         .handle = try std.fs.cwd().makeOpenPath(cache_root, .{}),
     };
 
-    const global_cache_directory = Cache.Directory{
+    const global_cache_directory = Build.Cache.Directory{
         .path = global_cache_root,
         .handle = try std.fs.cwd().makeOpenPath(global_cache_root, .{}),
     };
 
-    var cache = Cache{
+    var cache = Build.Cache{
         .gpa = allocator,
         .manifest_dir = try local_cache_directory.handle.makeOpenPath("h", .{}),
     };
@@ -138,7 +133,7 @@ pub fn main() !void {
     // We also flatten them, we should probably keep the nested structure.
     for (builder.top_level_steps.values()) |tls| {
         for (tls.step.dependencies.items) |step| {
-            try processStep(allocator, &packages, &include_dirs, step);
+            try processStep(builder, &packages, &include_dirs, step);
         }
     }
 
@@ -156,7 +151,7 @@ pub fn main() !void {
 }
 
 fn reifyOptions(step: *Build.Step) anyerror!void {
-    if (step.cast(OptionsStep)) |option| {
+    if (step.cast(Build.Step.Options)) |option| {
         // We don't know how costly the dependency tree might be, so err on the side of caution
         if (step.dependencies.items.len == 0) {
             var progress: std.Progress = .{};
@@ -214,84 +209,59 @@ const Packages = struct {
 };
 
 fn processStep(
-    allocator: std.mem.Allocator,
+    builder: *std.Build,
     packages: *Packages,
     include_dirs: *std.StringArrayHashMapUnmanaged(void),
     step: *Build.Step,
 ) anyerror!void {
-    if (step.cast(InstallArtifactStep)) |install_exe| {
+    if (step.cast(Build.Step.InstallArtifact)) |install_exe| {
         if (install_exe.artifact.root_src) |src| {
-            const maybe_path = switch (src) {
-                .path => |path| path,
-                .generated => |generated| generated.path,
-            };
-            if (maybe_path) |path| _ = try packages.addPackage("root", path);
+            _ = try packages.addPackage("root", src.getPath(builder));
         }
-
-        try processIncludeDirs(allocator, include_dirs, install_exe.artifact.include_dirs.items);
-        try processPkgConfig(allocator, include_dirs, install_exe.artifact);
-
-        var modules_it = install_exe.artifact.modules.iterator();
-        while (modules_it.next()) |module_entry| {
-            try processModule(allocator, packages, module_entry);
-        }
-    } else if (step.cast(CompileStep)) |exe| {
+        try processIncludeDirs(builder, include_dirs, install_exe.artifact.include_dirs.items);
+        try processPkgConfig(builder.allocator, include_dirs, install_exe.artifact);
+        try processModules(builder, packages, install_exe.artifact.modules);
+    } else if (step.cast(Build.Step.Compile)) |exe| {
         if (exe.root_src) |src| {
-            const maybe_path = switch (src) {
-                .path => |path| path,
-                .generated => |generated| generated.path,
-            };
-            if (maybe_path) |path| _ = try packages.addPackage("root", path);
+            _ = try packages.addPackage("root", src.getPath(builder));
         }
-        try processIncludeDirs(allocator, include_dirs, exe.include_dirs.items);
-        try processPkgConfig(allocator, include_dirs, exe);
-
-        var modules_it = exe.modules.iterator();
-        while (modules_it.next()) |module_entry| {
-            try processModule(allocator, packages, module_entry);
-        }
+        try processIncludeDirs(builder, include_dirs, exe.include_dirs.items);
+        try processPkgConfig(builder.allocator, include_dirs, exe);
+        try processModules(builder, packages, exe.modules);
     } else {
         for (step.dependencies.items) |unknown_step| {
-            try processStep(allocator, packages, include_dirs, unknown_step);
+            try processStep(builder, packages, include_dirs, unknown_step);
         }
     }
 }
 
-fn processModule(
-    allocator: std.mem.Allocator,
+fn processModules(
+    builder: *Build,
     packages: *Packages,
-    module: std.StringArrayHashMap(*Build.Module).Entry,
+    modules: std.StringArrayHashMap(*Build.Module),
 ) !void {
-    const builder = module.value_ptr.*.builder;
+    for (modules.keys(), modules.values()) |name, mod| {
+        const path = mod.builder.pathFromRoot(mod.source_file.getPath(mod.builder));
 
-    const maybe_path = switch (module.value_ptr.*.source_file) {
-        .path => |path| path,
-        .generated => |generated| generated.path,
-    };
-
-    if (maybe_path) |path| {
-        const already_added = try packages.addPackage(module.key_ptr.*, builder.pathFromRoot(path));
+        const already_added = try packages.addPackage(name, path);
         // if the package has already been added short circuit here or recursive modules will ruin us
         if (already_added) return;
-    }
 
-    var deps_it = module.value_ptr.*.dependencies.iterator();
-    while (deps_it.next()) |module_dep| {
-        try processModule(allocator, packages, module_dep);
+        try processModules(builder, packages, mod.dependencies);
     }
 }
 
 fn processIncludeDirs(
-    allocator: std.mem.Allocator,
+    builder: *Build,
     include_dirs: *std.StringArrayHashMapUnmanaged(void),
-    dirs: []CompileStep.IncludeDir,
+    dirs: []Build.Step.Compile.IncludeDir,
 ) !void {
-    try include_dirs.ensureUnusedCapacity(allocator, dirs.len);
+    try include_dirs.ensureUnusedCapacity(builder.allocator, dirs.len);
 
     for (dirs) |dir| {
         const candidate: []const u8 = switch (dir) {
-            .raw_path => |path| path,
-            .raw_path_system => |path| path,
+            .path => |path| path.getPath(builder),
+            .path_system => |path| path.getPath(builder),
             else => continue,
         };
 
@@ -302,7 +272,7 @@ fn processIncludeDirs(
 fn processPkgConfig(
     allocator: std.mem.Allocator,
     include_dirs: *std.StringArrayHashMapUnmanaged(void),
-    exe: *CompileStep,
+    exe: *Build.Step.Compile,
 ) !void {
     for (exe.link_objects.items) |link_object| {
         if (link_object != .system_lib) continue;
@@ -333,7 +303,7 @@ fn processPkgConfig(
 fn getPkgConfigIncludes(
     allocator: std.mem.Allocator,
     include_dirs: *std.StringArrayHashMapUnmanaged(void),
-    exe: *CompileStep,
+    exe: *Build.Step.Compile,
     name: []const u8,
 ) !void {
     if (copied_from_zig.runPkgConfig(exe, name)) |args| {
@@ -348,7 +318,7 @@ fn getPkgConfigIncludes(
 
 // TODO: Having a copy of this is not very nice
 const copied_from_zig = struct {
-    fn runPkgConfig(self: *CompileStep, lib_name: []const u8) ![]const []const u8 {
+    fn runPkgConfig(self: *Build.Step.Compile, lib_name: []const u8) ![]const []const u8 {
         const b = self.step.owner;
         const pkg_name = match: {
             // First we have to map the library name to pkg config name. Unfortunately,
