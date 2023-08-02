@@ -1871,22 +1871,30 @@ fn getNotificationMetadata(comptime method: []const u8) ?types.NotificationMetad
     return null;
 }
 
-/// return true if there is a request with the given method name
-fn isRequestMethod(method: []const u8) bool {
+const RequestMethodSet = blk: {
     @setEvalBranchQuota(5000);
-    comptime var kvs_list: [types.request_metadata.len]struct { []const u8 } = undefined;
+    var kvs_list: [types.request_metadata.len]struct { []const u8 } = undefined;
     inline for (types.request_metadata, &kvs_list) |meta, *kv| {
         kv.* = .{meta.method};
     }
-    return std.ComptimeStringMap(void, &kvs_list).has(method);
+    break :blk std.ComptimeStringMap(void, &kvs_list);
+};
+
+const NotificationMethodSet = blk: {
+    @setEvalBranchQuota(5000);
+    var kvs_list: [types.notification_metadata.len]struct { []const u8 } = undefined;
+    inline for (types.notification_metadata, &kvs_list) |meta, *kv| {
+        kv.* = .{meta.method};
+    }
+    break :blk std.ComptimeStringMap(void, &kvs_list);
+};
+
+/// return true if there is a request with the given method name
+fn isRequestMethod(method: []const u8) bool {
+    return RequestMethodSet.has(method);
 }
 
 /// return true if there is a notification with the given method name
 fn isNotificationMethod(method: []const u8) bool {
-    @setEvalBranchQuota(5000);
-    comptime var kvs_list: [types.notification_metadata.len]struct { []const u8 } = undefined;
-    inline for (types.notification_metadata, &kvs_list) |meta, *kv| {
-        kv.* = .{meta.method};
-    }
-    return std.ComptimeStringMap(void, &kvs_list).has(method);
+    return NotificationMethodSet.has(method);
 }
