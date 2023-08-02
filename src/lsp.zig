@@ -771,7 +771,52 @@ pub const CodeActionKind = enum {
     ///
     /// @since 3.15.0
     @"source.fixAll",
-    pub usingnamespace EnumWithEmptyParser(@This());
+
+    pub fn jsonParse(allocator: std.mem.Allocator, source: anytype, options: std.json.ParseOptions) std.json.ParseError(@TypeOf(source.*))!@This() {
+        const token = try source.nextAllocMax(allocator, .alloc_if_needed, options.max_value_len.?);
+        defer switch (token) {
+            .allocated_number, .allocated_string => |slice| allocator.free(slice),
+            else => {},
+        };
+        const slice = switch (token) {
+            inline .number, .allocated_number, .string, .allocated_string => |slice| slice,
+            else => return error.UnexpectedToken,
+        };
+        return parseFromString(slice);
+    }
+
+    pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) std.json.ParseFromValueError!@This() {
+        _ = allocator;
+        _ = options;
+        if (source != .string) return error.UnexpectedToken;
+        return parseFromString(source.string);
+    }
+
+    fn parseFromString(str: []const u8) @This() {
+        if (str.len == 0) return .empty;
+        if (std.meta.stringToEnum(@This(), str)) |val| return val;
+        // Some clients (nvim) may report these by the enumeration names rather than the
+        // actual strings, so let's check those names here
+        const aliases = std.ComptimeStringMap(CodeActionKind, .{
+            .{ "Empty", .empty },
+            .{ "QuickFix", .quickfix },
+            .{ "Refactor", .refactor },
+            .{ "RefactorExtract", .@"refactor.extract" },
+            .{ "RefactorInline", .@"refactor.inline" },
+            .{ "RefactorRewrite", .@"refactor.rewrite" },
+            .{ "Source", .source },
+            .{ "SourceOrganizeImports", .@"source.organizeImports" },
+            .{ "SourceFixAll", .@"source.fixAll" },
+        });
+
+        if (aliases.get(str)) |alias| {
+            return alias;
+        }
+
+        // Strictly speaking, CodeActionKind is a string an not a enum which means that
+        // a client may report a unknown kind which can safely be ignored
+        return .empty;
+    }
 };
 
 pub const TraceValues = enum {
