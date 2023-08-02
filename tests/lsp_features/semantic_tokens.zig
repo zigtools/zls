@@ -469,7 +469,7 @@ test "semantic tokens - anyframe type" {
         \\const alpha = anyframe->u32;
     , &.{
         .{ "const", .keyword, .{} },
-        .{ "alpha", .variable, .{ .declaration = true } }, // TODO this should be .type
+        .{ "alpha", .type, .{ .declaration = true } },
         .{ "=", .operator, .{} },
         .{ "anyframe", .keyword, .{} },
         .{ "u32", .type, .{} },
@@ -718,21 +718,25 @@ test "semantic tokens - function" {
         .{ "extern", .keyword, .{} },
         .{ "fn", .keyword, .{} },
         .{ "foo", .function, .{ .declaration = true } },
-        // TODO .{ "align", .keyword, .{} },
+        .{ "align", .keyword, .{} },
         .{ "4", .number, .{} },
-        // TODO .{ "callconv", .keyword, .{} },
+        .{ "callconv", .keyword, .{} },
         .{ "C", .enumMember, .{} },
         .{ "void", .type, .{} },
     });
     try testSemanticTokens(
-        \\fn foo(comptime T: type) void {}
+        \\fn foo(comptime T: type) void {
+        \\    _ = T;
+        \\}
     , &.{
         .{ "fn", .keyword, .{} },
         .{ "foo", .function, .{ .declaration = true, .generic = true } },
         .{ "comptime", .keyword, .{} },
-        .{ "T", .parameter, .{ .declaration = true } },
+        .{ "T", .typeParameter, .{ .declaration = true } },
         .{ "type", .type, .{} },
         .{ "void", .type, .{} },
+        .{ "=", .operator, .{} },
+        .{ "T", .typeParameter, .{} },
     });
 }
 
