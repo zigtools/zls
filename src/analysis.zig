@@ -1444,6 +1444,16 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
         .@"if", .if_simple => {
             const if_node = ast.fullIf(tree, node).?;
 
+            // HACK: resolve std.ArrayList(T).Slice
+            if (std.mem.endsWith(u8, node_handle.handle.uri, "array_list.zig") and
+                if_node.payload_token != null and
+                std.mem.eql(u8, offsets.tokenToSlice(node_handle.handle.tree, if_node.payload_token.?), "a") and
+                node_tags[if_node.ast.cond_expr] == .identifier and
+                std.mem.eql(u8, offsets.tokenToSlice(node_handle.handle.tree, main_tokens[if_node.ast.cond_expr]), "alignment"))
+            blk: {
+                return (try analyser.resolveTypeOfNodeInternal(.{ .handle = handle, .node = if_node.ast.then_expr })) orelse break :blk;
+            }
+
             var either = std.ArrayListUnmanaged(Type.EitherEntry){};
             if (try analyser.resolveTypeOfNodeInternal(.{ .handle = handle, .node = if_node.ast.then_expr })) |t|
                 try either.append(analyser.arena.allocator(), .{ .type_with_handle = t, .descriptor = offsets.nodeToSlice(tree, if_node.ast.cond_expr) });
