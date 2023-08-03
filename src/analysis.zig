@@ -4222,7 +4222,8 @@ fn addReferencedTypesFromNode(
     node_handle: NodeWithHandle,
     referenced_types: *ReferencedType.Set,
 ) error{OutOfMemory}!?[]const u8 {
-    const type_handle = try analyser.resolveTypeOfNode(node_handle) orelse return null;
+    if (analyser.resolved_nodes.contains(.{ .node = node_handle.node, .uri = node_handle.handle.uri })) return null;
+    const type_handle = try analyser.resolveTypeOfNodeInternal(node_handle) orelse return null;
     if (!type_handle.type.is_type_val) return null;
     var collector = ReferencedType.Collector.init(referenced_types);
     try analyser.referencedTypesFromNode(node_handle, &collector);
