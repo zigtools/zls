@@ -857,8 +857,34 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
 
             try writeNodeTokens(builder, data.lhs);
 
-            const resolved_type = (try builder.analyser.resolveTypeOfNode(.{ .node = node, .handle = handle })) orelse return;
-            try colorIdentifierBasedOnType(builder, resolved_type, data.rhs, false, .{});
+            // TODO This is basically exactly the same as what is done in analysis.resolveTypeOfNode, with the added
+            //      writeToken code.
+            // Maybe we can hook into it instead? Also applies to Identifier and VarDecl
+            const lhs_type = try builder.analyser.resolveFieldAccessLhsType(
+                (try builder.analyser.resolveTypeOfNode(.{ .node = data.lhs, .handle = handle })) orelse return,
+            );
+            if (try lhs_type.lookupSymbol(builder.analyser, tree.tokenSlice(data.rhs))) |decl_type| {
+                switch (decl_type.decl.*) {
+                    .ast_node => |decl_node| {
+                        if (decl_type.handle.tree.nodes.items(.tag)[decl_node].isContainerField()) {
+                            const tok_type = switch (lhs_type.type.data) {
+                                .other => |n| fieldTokenType(n, lhs_type.handle, lhs_type.type.is_type_val),
+                                else => null,
+                            };
+
+                            if (tok_type) |tt| try writeToken(builder, data.rhs, tt);
+                            return;
+                        } else if (decl_type.handle.tree.nodes.items(.tag)[decl_node] == .error_value) {
+                            try writeToken(builder, data.rhs, .errorTag);
+                        }
+                    },
+                    else => {},
+                }
+
+                if (try decl_type.resolveType(builder.analyser)) |resolved_type| {
+                    try colorIdentifierBasedOnType(builder, resolved_type, data.rhs, false, .{});
+                }
+            }
         },
         .ptr_type,
         .ptr_type_aligned,
