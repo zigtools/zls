@@ -623,14 +623,15 @@ const BuildDotZigIterator = struct {
             self.i += 1;
             while (self.i < self.dir_path.len and self.dir_path[self.i] != std.fs.path.sep) : (self.i += 1) {}
 
-            if (std.fs.accessAbsolute(potential_build_path, .{})) {
-                // found a build.zig file
-                return potential_build_path;
-            } else |_| {
-                // nope it failed for whatever reason, free it and move the
-                // machinery forward
-                self.allocator.free(potential_build_path);
+            if (std.fs.path.isAbsolute(potential_build_path)) {
+                if (std.fs.accessAbsolute(potential_build_path, .{})) {
+                    // found a build.zig file
+                    return potential_build_path;
+                } else |_| {}
             }
+            // nope it failed for whatever reason, free it and move the
+            // machinery forward
+            self.allocator.free(potential_build_path);
         }
     }
 };

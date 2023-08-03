@@ -112,7 +112,6 @@ test "references - test with identifier" {
 }
 
 test "references - label" {
-    if (true) return error.SkipZigTest; // TODO
     try testReferences(
         \\const foo = <0>: {
         \\    break :<0> 0;

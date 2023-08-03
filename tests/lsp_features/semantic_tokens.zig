@@ -197,7 +197,7 @@ test "semantic tokens - operators" {
 }
 
 test "semantic tokens - field access" {
-    if (builtin.target.isWasm()) return error.SkipZigTest;
+    if (!std.process.can_spawn) return error.SkipZigTest;
     // this will make sure that the std module can be resolved
     try testSemanticTokens(
         \\const std = @import("std");
@@ -224,6 +224,23 @@ test "semantic tokens - field access" {
         .{ "std", .namespace, .{} },
         .{ "zig", .namespace, .{} },
         .{ "Ast", .@"struct", .{} },
+    });
+}
+
+test "semantic tokens - alias" {
+    try testSemanticTokens(
+        \\extern fn foo() u32;
+        \\const bar = foo;
+    , &.{
+        .{ "extern", .keyword, .{} },
+        .{ "fn", .keyword, .{} },
+        .{ "foo", .function, .{ .declaration = true } },
+        .{ "u32", .type, .{} },
+
+        .{ "const", .keyword, .{} },
+        .{ "bar", .function, .{ .declaration = true } },
+        .{ "=", .operator, .{} },
+        .{ "foo", .function, .{} },
     });
 }
 
@@ -661,6 +678,32 @@ test "semantic tokens - enum" {
     });
 }
 
+test "semantic tokens - enum member" {
+    try testSemanticTokens(
+        \\const Foo = enum { bar, baz };
+        \\const alpha = Foo.bar;
+        \\const beta = .baz;
+    , &.{
+        .{ "const", .keyword, .{} },
+        .{ "Foo", .@"enum", .{ .declaration = true } },
+        .{ "=", .operator, .{} },
+        .{ "enum", .keyword, .{} },
+        .{ "bar", .enumMember, .{} },
+        .{ "baz", .enumMember, .{} },
+
+        .{ "const", .keyword, .{} },
+        .{ "alpha", .variable, .{ .declaration = true } },
+        .{ "=", .operator, .{} },
+        .{ "Foo", .@"enum", .{} },
+        .{ "bar", .enumMember, .{} },
+
+        .{ "const", .keyword, .{} },
+        .{ "beta", .variable, .{ .declaration = true } },
+        .{ "=", .operator, .{} },
+        .{ "baz", .enumMember, .{} },
+    });
+}
+
 test "semantic tokens - error set" {
     try testSemanticTokens(
         \\const Foo = error {};
@@ -674,6 +717,21 @@ test "semantic tokens - error set" {
         \\const Foo = error {
         \\    OutOfMemory,
         \\};
+    , &.{
+        .{ "const", .keyword, .{} },
+        .{ "Foo", .type, .{ .declaration = true } },
+        .{ "=", .operator, .{} },
+        .{ "error", .keyword, .{} },
+        .{ "OutOfMemory", .errorTag, .{} },
+    });
+}
+
+test "semantic tokens - error set member" {
+    try testSemanticTokens(
+        \\const Foo = error {
+        \\    OutOfMemory,
+        \\};
+        \\const bar = Foo.OutOfMemory;
     , &.{
         .{ "const", .keyword, .{} },
         .{ "Foo", .type, .{ .declaration = true } },

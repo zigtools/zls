@@ -2,7 +2,6 @@ const std = @import("std");
 const zls = @import("zls");
 const builtin = @import("builtin");
 
-const Header = zls.Header;
 const Config = zls.Config;
 const Server = zls.Server;
 const types = zls.types;

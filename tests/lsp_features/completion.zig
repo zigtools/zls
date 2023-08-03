@@ -154,7 +154,6 @@ test "completion - pointer" {
         \\const foo: []const u8 = undefined;
         \\const bar = foo.<cursor>
     , &.{
-        // TODO detail should be 'u32'
         .{ .label = "len", .kind = .Field, .detail = "const len: usize" },
         // TODO detail should be 'const ptr: [*]const u8'
         .{ .label = "ptr", .kind = .Field },
@@ -578,7 +577,6 @@ test "completion - declarations" {
         \\const bar = foo.<cursor>
     , &.{
         .{ .label = "public", .kind = .Function, .detail = "fn public() S" },
-        // TODO private should not be visible
         .{ .label = "private", .kind = .Function, .detail = "fn private() !void" },
     });
 
@@ -590,7 +588,6 @@ test "completion - declarations" {
         \\const foo = S.<cursor>
     , &.{
         .{ .label = "public", .kind = .Function, .detail = "fn public() S" },
-        // TODO private should not be visible
         .{ .label = "private", .kind = .Function, .detail = "fn private() !void" },
     });
 }
@@ -608,7 +605,6 @@ test "completion - usingnamespace" {
         \\const foo = S2.<cursor>
     , &.{
         .{ .label = "public", .kind = .Function, .detail = "fn public() S1" },
-        // TODO private should not be visible
         .{ .label = "private", .kind = .Function, .detail = "fn private() !void" },
     });
     try testCompletion(
