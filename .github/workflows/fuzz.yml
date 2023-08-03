@@ -7,15 +7,15 @@ on:
   # - We limit runs to labelled PRs only which prevents random exploitation
   # - We don't expose secrets in environment variables which makes exploitation much more difficult
   # - The secrets that we reference aren't all that important anyways (they can only access our DigitalOcean Space)
-  pull_request_target:
-    types: [labeled, synchronize]
-  push:
-    paths:
-      - "**.zig"
-    branches:
-      - master
-  schedule:
-    - cron: "0 0 * * *"
+  # pull_request_target:
+  #   types: [labeled, synchronize]
+  # push:
+  #   paths:
+  #     - "**.zig"
+  #   branches:
+  #     - master
+  # schedule:
+  #   - cron: "0 0 * * *"
   workflow_dispatch:
     inputs:
       fuzzing_duration:
