@@ -307,8 +307,13 @@ pub fn hoverDefinitionFieldAccess(
     // Yes, this is deprecated; the issue is that there's no better
     // solution for multiple hover entries :(
     return .{
-        .contents = .{
-            .array_of_MarkedString = try content.toOwnedSlice(arena),
+        .contents = switch (content.items.len) {
+            0 => return null,
+            1 => .{ .MarkupContent = .{
+                .kind = .markdown,
+                .value = content.items[0].string,
+            } },
+            else => .{ .array_of_MarkedString = try content.toOwnedSlice(arena) },
         },
         .range = offsets.locToRange(handle.text, name_loc, offset_encoding),
     };
