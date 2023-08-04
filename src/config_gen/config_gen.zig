@@ -154,7 +154,7 @@ fn generateSchemaFile(allocator: std.mem.Allocator, config: Config, path: []cons
     }
 
     try std.json.stringify(schema, .{
-        .whitespace = .{},
+        .whitespace = .indent_4,
         .emit_null_optional_fields = false,
     }, buff_out.writer());
     try buff_out.writer().writeByte('\n');
@@ -273,7 +273,7 @@ fn generateVSCodeConfigFile(allocator: std.mem.Allocator, config: Config, path: 
     var writer = buffered_writer.writer();
 
     try std.json.stringify(configuration, .{
-        .whitespace = .{},
+        .whitespace = .indent_4,
         .emit_null_optional_fields = false,
     }, writer);
 
