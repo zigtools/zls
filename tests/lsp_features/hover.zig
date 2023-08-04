@@ -402,6 +402,25 @@ test "hover - var decl alias" {
     );
 }
 
+// https://github.com/zigtools/zls/issues/1378
+test "hover - type reference cycle" {
+    try testHover(
+        \\fn fo<cursor>o(
+        \\    alpha: anytype,
+        \\    beta: @TypeOf(alpha),
+        \\) void {
+        \\    _ = beta;
+        \\}
+    ,
+        \\```zig
+        \\fn foo(
+        \\    alpha: anytype,
+        \\    beta: @TypeOf(alpha),
+        \\) void
+        \\```
+    );
+}
+
 fn testHover(source: []const u8, expected: []const u8) !void {
     const cursor_idx = std.mem.indexOf(u8, source, "<cursor>").?;
     const text = try std.mem.concat(allocator, u8, &.{ source[0..cursor_idx], source[cursor_idx + "<cursor>".len ..] });
