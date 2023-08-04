@@ -1163,6 +1163,7 @@ fn getIdentifierTokenIndexAndFnArgIndex(
         } else if (token_tags[upper_index + 1] == .l_brace and depth < 0) break :find_identifier;
         upper_index -= 1;
     }
+    if (depth > -1) return null;
 
     fn_arg_index_out.* = fn_arg_index;
     return upper_index;

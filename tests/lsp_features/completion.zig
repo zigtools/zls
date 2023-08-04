@@ -656,6 +656,13 @@ test "completion - block" {
     });
 }
 
+// https://github.com/zigtools/zls/issues/1370
+test "completion - cyclic struct init field" {
+    try testCompletion(
+        \\_ = .{} .foo = .{ .<cursor>foo
+    , &.{});
+}
+
 fn testCompletion(source: []const u8, expected_completions: []const Completion) !void {
     const cursor_idx = std.mem.indexOf(u8, source, "<cursor>").?;
     const text = try std.mem.concat(allocator, u8, &.{ source[0..cursor_idx], source[cursor_idx + "<cursor>".len ..] });
