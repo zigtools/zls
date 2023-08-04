@@ -986,8 +986,11 @@ pub fn collectIncludeDirs(
     include_dirs: *std.ArrayListUnmanaged([]const u8),
 ) !void {
     const target_info = try std.zig.system.NativeTargetInfo.detect(.{});
-    var native_paths = try std.zig.system.NativePaths.detect(allocator, target_info);
-    defer native_paths.deinit();
+
+    var arena_allocator = std.heap.ArenaAllocator.init(allocator);
+    defer arena_allocator.deinit();
+
+    var native_paths = try std.zig.system.NativePaths.detect(arena_allocator.allocator(), target_info);
 
     const build_file_includes_paths: []const []const u8 = if (handle.associated_build_file) |build_file_uri|
         store.build_files.get(build_file_uri).?.config.include_dirs
@@ -996,11 +999,8 @@ pub fn collectIncludeDirs(
 
     try include_dirs.ensureTotalCapacity(allocator, native_paths.include_dirs.items.len + build_file_includes_paths.len);
 
-    const native_include_dirs = try native_paths.include_dirs.toOwnedSlice();
-    defer allocator.free(native_include_dirs);
-    for (native_include_dirs) |native_include_dir| {
-        var array = std.ArrayListUnmanaged(u8).fromOwnedSliceSentinel(0, native_include_dir);
-        include_dirs.appendAssumeCapacity(try array.toOwnedSlice(allocator));
+    for (native_paths.include_dirs.items) |native_include_dir| {
+        include_dirs.appendAssumeCapacity(try allocator.dupeZ(u8, native_include_dir));
     }
 
     for (build_file_includes_paths) |include_path| {
