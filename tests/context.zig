@@ -52,6 +52,7 @@ pub const Context = struct {
 
         // TODO this line shouldn't be needed
         context.server.client_capabilities.label_details_support = false;
+        context.server.client_capabilities.supports_textDocument_definition_linkSupport = true;
 
         return context;
     }
