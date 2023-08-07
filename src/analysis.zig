@@ -2293,13 +2293,29 @@ pub fn getPositionContext(
     } else if (lookahead and new_index + 1 < text.len and text[new_index] == '@') {
         new_index += 2;
     }
-
-    const line_loc = if (!lookahead) offsets.lineLocAtIndex(text, new_index) else offsets.lineLocUntilIndex(text, new_index);
-    const line = offsets.locToSlice(text, line_loc);
     const prev_char = if (new_index > 0) text[new_index - 1] else 0;
 
-    const is_comment = std.mem.startsWith(u8, std.mem.trimLeft(u8, line, " \t"), "//");
-    if (is_comment) return .comment;
+    var line_loc = if (!lookahead) offsets.lineLocAtIndex(text, new_index) else offsets.lineLocUntilIndex(text, new_index);
+
+    var line = offsets.locToSlice(text, line_loc);
+    if (std.mem.startsWith(u8, std.mem.trimLeft(u8, line, " \t"), "//")) return .comment;
+
+    // Check if the (trimmed) line starts with a '.', ie a continuation
+    while (std.mem.startsWith(u8, std.mem.trimLeft(u8, text[line_loc.start..line_loc.end], " \t\r"), ".")) {
+        if (line_loc.start > 1) {
+            line_loc.start -= 2; // jump over a (potential) preceding '\n'
+        } else break;
+        while (line_loc.start > 0) : (line_loc.start -= 1) {
+            if (text[line_loc.start] == '\n') {
+                line_loc.start += 1; // eat the `\n`
+                break;
+            }
+        } else break;
+    }
+
+    // Did we end up at a comment?
+    line = offsets.locToSlice(text, line_loc);
+    if (std.mem.startsWith(u8, std.mem.trimLeft(u8, line, " \t"), "//")) return .other;
 
     var stack = try std.ArrayListUnmanaged(StackState).initCapacity(allocator, 8);
     defer stack.deinit(allocator);
