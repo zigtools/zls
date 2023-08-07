@@ -883,13 +883,13 @@ fn gotoDefinitionHandler(
     arena: std.mem.Allocator,
     request: types.DefinitionParams,
 ) Error!ResultType("textDocument/definition") {
-    return server.gotoHandler(arena, true, request);
+    return server.gotoHandler(arena, .definition, request);
 }
 
 fn gotoHandler(
     server: *Server,
     arena: std.mem.Allocator,
-    comptime resolve_alias: bool,
+    comptime kind: goto.GotoKind,
     request: types.DefinitionParams,
 ) Error!ResultType("textDocument/definition") {
     if (request.position.character == 0) return null;
@@ -901,12 +901,12 @@ fn gotoHandler(
     defer analyser.deinit();
 
     return .{
-        .array_of_DefinitionLink = try goto.goto(&analyser, &server.document_store, arena, handle, source_index, resolve_alias, server.offset_encoding) orelse return null,
+        .array_of_DefinitionLink = try goto.goto(&analyser, &server.document_store, arena, handle, source_index, kind, server.offset_encoding) orelse return null,
     };
 }
 
-fn gotoTypeDeclarationHandler(server: *Server, arena: std.mem.Allocator, request: types.TypeDefinitionParams) Error!ResultType("textDocument/typeDefinition") {
-    const response = (try server.gotoHandler(arena, false, .{
+fn gotoTypeDefinitionHandler(server: *Server, arena: std.mem.Allocator, request: types.TypeDefinitionParams) Error!ResultType("textDocument/typeDefinition") {
+    const response = (try server.gotoHandler(arena, .type_definition, .{
         .textDocument = request.textDocument,
         .position = request.position,
         .workDoneToken = request.workDoneToken,
@@ -916,7 +916,7 @@ fn gotoTypeDeclarationHandler(server: *Server, arena: std.mem.Allocator, request
 }
 
 fn gotoImplementationHandler(server: *Server, arena: std.mem.Allocator, request: types.ImplementationParams) Error!ResultType("textDocument/implementation") {
-    const response = (try server.gotoHandler(arena, true, .{
+    const response = (try server.gotoHandler(arena, .definition, .{
         .textDocument = request.textDocument,
         .position = request.position,
         .workDoneToken = request.workDoneToken,
@@ -926,7 +926,7 @@ fn gotoImplementationHandler(server: *Server, arena: std.mem.Allocator, request:
 }
 
 fn gotoDeclarationHandler(server: *Server, arena: std.mem.Allocator, request: types.DeclarationParams) Error!ResultType("textDocument/declaration") {
-    const response = (try server.gotoHandler(arena, false, .{
+    const response = (try server.gotoHandler(arena, .declaration, .{
         .textDocument = request.textDocument,
         .position = request.position,
         .workDoneToken = request.workDoneToken,
@@ -1614,7 +1614,7 @@ pub fn sendRequestSync(server: *Server, arena: std.mem.Allocator, comptime metho
         .@"textDocument/completion" => try server.completionHandler(arena, params),
         .@"textDocument/signatureHelp" => try server.signatureHelpHandler(arena, params),
         .@"textDocument/definition" => try server.gotoDefinitionHandler(arena, params),
-        .@"textDocument/typeDefinition" => try server.gotoTypeDeclarationHandler(arena, params),
+        .@"textDocument/typeDefinition" => try server.gotoTypeDefinitionHandler(arena, params),
         .@"textDocument/implementation" => try server.gotoImplementationHandler(arena, params),
         .@"textDocument/declaration" => try server.gotoDeclarationHandler(arena, params),
         .@"textDocument/hover" => try server.hoverHandler(arena, params),

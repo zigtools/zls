@@ -1842,14 +1842,14 @@ pub const TypeWithHandle = struct {
         };
     }
 
-    pub fn definitionToken(self: TypeWithHandle) ?Ast.TokenIndex {
-        if (self.type.is_type_val) {
-            switch (self.type.data) {
-                .other => |n| return self.handle.tree.firstToken(n),
-                else => {},
-            }
-        }
-        return null;
+    pub fn typeDefinitionToken(self: TypeWithHandle) ?TokenWithHandle {
+        return switch (self.type.data) {
+            .other => |n| .{
+                .token = self.handle.tree.firstToken(n),
+                .handle = self.handle,
+            },
+            else => null,
+        };
     }
 
     pub fn docComments(self: TypeWithHandle, allocator: std.mem.Allocator) !?[]const u8 {
@@ -2574,8 +2574,10 @@ pub const DeclWithHandle = struct {
                 else => {},
             }
             if (try self.resolveType(analyser)) |resolved_type| {
-                if (resolved_type.definitionToken()) |token| {
-                    return .{ .token = token, .handle = resolved_type.handle };
+                if (resolved_type.type.is_type_val) {
+                    if (resolved_type.typeDefinitionToken()) |token| {
+                        return token;
+                    }
                 }
             }
         }
