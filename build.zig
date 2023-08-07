@@ -2,7 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const shared = @import("src/shared.zig");
 
-const zls_version = std.SemanticVersion{ .major = 0, .minor = 11, .patch = 0 };
+const zls_version = std.SemanticVersion{ .major = 0, .minor = 12, .patch = 0 };
 
 pub fn build(b: *std.build.Builder) !void {
     comptime {
