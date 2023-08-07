@@ -86,6 +86,7 @@ pub const generic = [_]Snipped{
     .{ .label = "anyframe", .kind = .Keyword },
     .{ .label = "anyopaque", .kind = .Keyword },
     .{ .label = "bool", .kind = .Keyword },
+    .{ .label = "c_char", .kind = .Keyword },
     .{ .label = "c_int", .kind = .Keyword },
     .{ .label = "c_long", .kind = .Keyword },
     .{ .label = "c_longdouble", .kind = .Keyword },
