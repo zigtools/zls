@@ -67,6 +67,7 @@ const ClientCapabilities = packed struct {
     label_details_support: bool = false,
     supports_configuration: bool = false,
     supports_workspace_did_change_configuration_dynamic_registration: bool = false,
+    supports_textDocument_definition_linkSupport: bool = false,
 };
 
 pub const Error = error{
@@ -413,6 +414,9 @@ fn initializeHandler(server: *Server, _: std.mem.Allocator, request: types.Initi
                     server.client_capabilities.supports_code_action_fixall = fixall;
                 }
             }
+        }
+        if (textDocument.definition) |definition| {
+            server.client_capabilities.supports_textDocument_definition_linkSupport = definition.linkSupport orelse false;
         }
     }
 
@@ -900,8 +904,20 @@ fn gotoHandler(
     var analyser = Analyser.init(server.allocator, &server.document_store, &server.ip);
     defer analyser.deinit();
 
+    const response = try goto.goto(&analyser, &server.document_store, arena, handle, source_index, kind, server.offset_encoding) orelse return null;
+    if (server.client_capabilities.supports_textDocument_definition_linkSupport) {
+        return .{
+            .array_of_DefinitionLink = response,
+        };
+    }
+
+    var aol = try arena.alloc(types.Location, response.len);
+    for (0..response.len) |index| {
+        aol[index].uri = response[index].targetUri;
+        aol[index].range = response[index].targetSelectionRange;
+    }
     return .{
-        .array_of_DefinitionLink = try goto.goto(&analyser, &server.document_store, arena, handle, source_index, kind, server.offset_encoding) orelse return null,
+        .Definition = .{ .array_of_Location = aol },
     };
 }
 
@@ -912,7 +928,10 @@ fn gotoTypeDefinitionHandler(server: *Server, arena: std.mem.Allocator, request:
         .workDoneToken = request.workDoneToken,
         .partialResultToken = request.partialResultToken,
     })) orelse return null;
-    return .{ .array_of_DefinitionLink = response.array_of_DefinitionLink };
+    return switch (response) {
+        .array_of_DefinitionLink => |adl| .{ .array_of_DefinitionLink = adl },
+        .Definition => |def| .{ .Definition = def },
+    };
 }
 
 fn gotoImplementationHandler(server: *Server, arena: std.mem.Allocator, request: types.ImplementationParams) Error!ResultType("textDocument/implementation") {
@@ -922,7 +941,10 @@ fn gotoImplementationHandler(server: *Server, arena: std.mem.Allocator, request:
         .workDoneToken = request.workDoneToken,
         .partialResultToken = request.partialResultToken,
     })) orelse return null;
-    return .{ .array_of_DefinitionLink = response.array_of_DefinitionLink };
+    return switch (response) {
+        .array_of_DefinitionLink => |adl| .{ .array_of_DefinitionLink = adl },
+        .Definition => |def| .{ .Definition = def },
+    };
 }
 
 fn gotoDeclarationHandler(server: *Server, arena: std.mem.Allocator, request: types.DeclarationParams) Error!ResultType("textDocument/declaration") {
@@ -932,7 +954,10 @@ fn gotoDeclarationHandler(server: *Server, arena: std.mem.Allocator, request: ty
         .workDoneToken = request.workDoneToken,
         .partialResultToken = request.partialResultToken,
     })) orelse return null;
-    return .{ .array_of_DeclarationLink = response.array_of_DefinitionLink };
+    return switch (response) {
+        .array_of_DefinitionLink => |adl| .{ .array_of_DeclarationLink = adl },
+        .Definition => |def| .{ .Declaration = .{ .array_of_Location = def.array_of_Location } },
+    };
 }
 
 pub fn hoverHandler(server: *Server, arena: std.mem.Allocator, request: types.HoverParams) Error!?types.Hover {
