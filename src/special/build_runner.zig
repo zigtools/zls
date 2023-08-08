@@ -216,14 +216,18 @@ fn processStep(
 ) anyerror!void {
     if (step.cast(Build.Step.InstallArtifact)) |install_exe| {
         if (install_exe.artifact.root_src) |src| {
-            _ = try packages.addPackage("root", src.getPath(builder));
+            if (copied_from_zig.getPath(src, builder)) |path| {
+                _ = try packages.addPackage("root", path);
+            }
         }
         try processIncludeDirs(builder, include_dirs, install_exe.artifact.include_dirs.items);
         try processPkgConfig(builder.allocator, include_dirs, install_exe.artifact);
         try processModules(builder, packages, install_exe.artifact.modules);
     } else if (step.cast(Build.Step.Compile)) |exe| {
         if (exe.root_src) |src| {
-            _ = try packages.addPackage("root", src.getPath(builder));
+            if (copied_from_zig.getPath(src, builder)) |path| {
+                _ = try packages.addPackage("root", path);
+            }
         }
         try processIncludeDirs(builder, include_dirs, exe.include_dirs.items);
         try processPkgConfig(builder.allocator, include_dirs, exe);
@@ -241,7 +245,7 @@ fn processModules(
     modules: std.StringArrayHashMap(*Build.Module),
 ) !void {
     for (modules.keys(), modules.values()) |name, mod| {
-        const path = mod.builder.pathFromRoot(mod.source_file.getPath(mod.builder));
+        const path = copied_from_zig.getPath(mod.source_file, mod.builder) orelse continue;
 
         const already_added = try packages.addPackage(name, path);
         // if the package has already been added short circuit here or recursive modules will ruin us
@@ -260,8 +264,8 @@ fn processIncludeDirs(
 
     for (dirs) |dir| {
         const candidate: []const u8 = switch (dir) {
-            .path => |path| path.getPath(builder),
-            .path_system => |path| path.getPath(builder),
+            .path => |path| copied_from_zig.getPath(path, builder) orelse continue,
+            .path_system => |path| copied_from_zig.getPath(path, builder) orelse continue,
             else => continue,
         };
 
@@ -318,6 +322,21 @@ fn getPkgConfigIncludes(
 
 // TODO: Having a copy of this is not very nice
 const copied_from_zig = struct {
+    /// Copied from `std.Build.LazyPath.getPath2` and massaged a bit.
+    fn getPath(path: std.Build.LazyPath, builder: *Build) ?[]const u8 {
+        switch (path) {
+            .path => |p| return builder.pathFromRoot(p),
+            .cwd_relative => |p| return pathFromCwd(builder, p),
+            .generated => |gen| return builder.pathFromRoot(gen.path orelse return null),
+        }
+    }
+
+    /// Copied from `std.Build.pathFromCwd` as it is non-pub.
+    fn pathFromCwd(b: *Build, p: []const u8) []u8 {
+        const cwd = process.getCwdAlloc(b.allocator) catch @panic("OOM");
+        return std.fs.path.resolve(b.allocator, &.{ cwd, p }) catch @panic("OOM");
+    }
+
     fn runPkgConfig(self: *Build.Step.Compile, lib_name: []const u8) ![]const []const u8 {
         const b = self.step.owner;
         const pkg_name = match: {
