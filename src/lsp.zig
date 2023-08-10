@@ -3658,7 +3658,7 @@ pub const LocationLink = struct {
 /// ```ts
 /// {
 ///     start: { line: 5, character: 23 }
-///     end : { line 6, character : 0 }
+///     end: { line: 6, character: 0 }
 /// }
 /// ```
 pub const Range = struct {
