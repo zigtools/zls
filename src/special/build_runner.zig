@@ -2,6 +2,7 @@ const root = @import("@build");
 const std = @import("std");
 const log = std.log;
 const process = std.process;
+const builtin = @import("builtin");
 
 pub const dependencies = @import("@dependencies");
 
@@ -72,6 +73,7 @@ pub fn main() !void {
     cache.addPrefix(build_root_directory);
     cache.addPrefix(local_cache_directory);
     cache.addPrefix(global_cache_directory);
+    cache.hash.addBytes(builtin.zig_version_string);
 
     const host = try std.zig.system.NativeTargetInfo.detect(.{});
 
