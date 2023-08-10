@@ -214,29 +214,24 @@ fn processStep(
     include_dirs: *std.StringArrayHashMapUnmanaged(void),
     step: *Build.Step,
 ) anyerror!void {
-    if (step.cast(Build.Step.InstallArtifact)) |install_exe| {
-        if (install_exe.artifact.root_src) |src| {
-            if (copied_from_zig.getPath(src, builder)) |path| {
-                _ = try packages.addPackage("root", path);
-            }
-        }
-        try processIncludeDirs(builder, include_dirs, install_exe.artifact.include_dirs.items);
-        try processPkgConfig(builder.allocator, include_dirs, install_exe.artifact);
-        try processModules(builder, packages, install_exe.artifact.modules);
-    } else if (step.cast(Build.Step.Compile)) |exe| {
-        if (exe.root_src) |src| {
-            if (copied_from_zig.getPath(src, builder)) |path| {
-                _ = try packages.addPackage("root", path);
-            }
-        }
-        try processIncludeDirs(builder, include_dirs, exe.include_dirs.items);
-        try processPkgConfig(builder.allocator, include_dirs, exe);
-        try processModules(builder, packages, exe.modules);
-    } else {
-        for (step.dependencies.items) |unknown_step| {
-            try processStep(builder, packages, include_dirs, unknown_step);
+    for (step.dependencies.items) |dependant_step| {
+        try processStep(builder, packages, include_dirs, dependant_step);
+    }
+
+    const exe = blk: {
+        if (step.cast(Build.Step.InstallArtifact)) |install_exe| break :blk install_exe.artifact;
+        if (step.cast(Build.Step.Compile)) |exe| break :blk exe;
+        return;
+    };
+
+    if (exe.root_src) |src| {
+        if (copied_from_zig.getPath(src, builder)) |path| {
+            _ = try packages.addPackage("root", path);
         }
     }
+    try processIncludeDirs(builder, include_dirs, exe.include_dirs.items);
+    try processPkgConfig(builder.allocator, include_dirs, exe);
+    try processModules(builder, packages, exe.modules);
 }
 
 fn processModules(
