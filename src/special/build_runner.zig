@@ -145,7 +145,9 @@ pub fn main() !void {
             .packages = package_list,
             .include_dirs = include_dirs.keys(),
         },
-        .{},
+        .{
+            .whitespace = .indent_1,
+        },
         std.io.getStdOut().writer(),
     );
 }
@@ -255,16 +257,31 @@ fn processIncludeDirs(
     include_dirs: *std.StringArrayHashMapUnmanaged(void),
     dirs: []Build.Step.Compile.IncludeDir,
 ) !void {
-    try include_dirs.ensureUnusedCapacity(builder.allocator, dirs.len);
-
     for (dirs) |dir| {
-        const candidate: []const u8 = switch (dir) {
-            .path => |path| copied_from_zig.getPath(path, builder) orelse continue,
-            .path_system => |path| copied_from_zig.getPath(path, builder) orelse continue,
-            else => continue,
-        };
-
-        include_dirs.putAssumeCapacity(candidate, {});
+        switch (dir) {
+            .path, .path_system => |path| {
+                const resolved_path = copied_from_zig.getPath(path, builder) orelse continue;
+                try include_dirs.put(builder.allocator, resolved_path, {});
+            },
+            .other_step => |other_step| {
+                if (other_step.generated_h) |header| {
+                    if (header.path) |path| {
+                        try include_dirs.put(builder.allocator, std.fs.path.dirname(path).?, {});
+                    }
+                }
+                if (other_step.installed_headers.items.len > 0) {
+                    const path = builder.pathJoin(&.{
+                        other_step.step.owner.install_prefix, "include",
+                    });
+                    try include_dirs.put(builder.allocator, path, {});
+                }
+            },
+            .config_header_step => |config_header| {
+                const full_file_path = config_header.output_file.path orelse continue;
+                const header_dir_path = full_file_path[0 .. full_file_path.len - config_header.include_path.len];
+                try include_dirs.put(builder.allocator, header_dir_path, {});
+            },
+        }
     }
 }
 
