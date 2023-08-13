@@ -58,7 +58,7 @@ replay_enabled: bool = false,
 
 // Code was based off of https://github.com/andersfr/zig-lsp/blob/master/server.zig
 
-const ClientCapabilities = packed struct {
+const ClientCapabilities = struct {
     supports_snippets: bool = false,
     supports_apply_edits: bool = false,
     supports_will_save: bool = false,
@@ -71,6 +71,13 @@ const ClientCapabilities = packed struct {
     supports_configuration: bool = false,
     supports_workspace_did_change_configuration_dynamic_registration: bool = false,
     supports_textDocument_definition_linkSupport: bool = false,
+    workspace_folders: []types.URI = &.{},
+
+    fn deinit(self: *ClientCapabilities, allocator: std.mem.Allocator) void {
+        for (self.workspace_folders) |uri| allocator.free(uri);
+        allocator.free(self.workspace_folders);
+        self.* = undefined;
+    }
 };
 
 pub const Error = error{
@@ -129,12 +136,14 @@ const Job = union(enum) {
     incoming_message: std.json.Parsed(Message),
     generate_diagnostics: DocumentStore.Uri,
     load_build_configuration: DocumentStore.Uri,
+    run_build_on_save,
 
     fn deinit(self: Job, allocator: std.mem.Allocator) void {
         switch (self) {
             .incoming_message => |parsed_message| parsed_message.deinit(),
             .generate_diagnostics => |uri| allocator.free(uri),
             .load_build_configuration => |uri| allocator.free(uri),
+            .run_build_on_save => {},
         }
     }
 
@@ -153,7 +162,9 @@ const Job = union(enum) {
         return switch (self) {
             .incoming_message => |parsed_message| if (parsed_message.value.isBlocking()) .exclusive else .shared,
             .generate_diagnostics => .shared,
-            .load_build_configuration => .atomic,
+            .load_build_configuration,
+            .run_build_on_save,
+            => .atomic,
         };
     }
 };
@@ -448,6 +459,14 @@ fn initializeHandler(server: *Server, _: std.mem.Allocator, request: types.Initi
         }
     }
 
+    if (request.workspaceFolders) |workspace_folders| {
+        server.client_capabilities.workspace_folders = try server.allocator.alloc(types.URI, workspace_folders.len);
+        @memset(server.client_capabilities.workspace_folders, "");
+        for (server.client_capabilities.workspace_folders, workspace_folders) |*dest, src| {
+            dest.* = try server.allocator.dupe(u8, src.uri);
+        }
+    }
+
     if (request.trace) |trace| {
         // To support --enable-message-tracing, only allow turning this on here
         if (trace != .off) {
@@ -549,8 +568,8 @@ fn initializeHandler(server: *Server, _: std.mem.Allocator, request: types.Initi
             .workspaceSymbolProvider = .{ .bool = false },
             .workspace = .{
                 .workspaceFolders = .{
-                    .supported = false,
-                    .changeNotifications = .{ .bool = false },
+                    .supported = true,
+                    .changeNotifications = .{ .bool = true },
                 },
             },
             .semanticTokensProvider = .{
@@ -713,6 +732,33 @@ fn handleConfiguration(server: *Server, json: std.json.Value) error{OutOfMemory}
     server.updateConfiguration(new_config) catch |err| {
         log.err("failed to update configuration: {}", .{err});
     };
+}
+
+fn didChangeWorkspaceFoldersHandler(server: *Server, arena: std.mem.Allocator, notification: types.DidChangeWorkspaceFoldersParams) Error!void {
+    _ = arena;
+
+    var folders = std.ArrayListUnmanaged(types.URI).fromOwnedSlice(server.client_capabilities.workspace_folders);
+    errdefer folders.deinit(server.allocator);
+
+    var i: usize = 0;
+    while (i < folders.items.len) {
+        const uri = folders.items[i];
+        for (notification.event.removed) |removed| {
+            if (std.mem.eql(u8, removed.uri, uri)) {
+                server.allocator.free(folders.swapRemove(i));
+                break;
+            }
+        } else {
+            i += 1;
+        }
+    }
+
+    try folders.ensureUnusedCapacity(server.allocator, notification.event.added.len);
+    for (notification.event.added) |added| {
+        folders.appendAssumeCapacity(try server.allocator.dupe(u8, added.uri));
+    }
+
+    server.client_capabilities.workspace_folders = try folders.toOwnedSlice(server.allocator);
 }
 
 fn didChangeConfigurationHandler(server: *Server, arena: std.mem.Allocator, notification: types.DidChangeConfigurationParams) Error!void {
@@ -1080,6 +1126,10 @@ fn saveDocumentHandler(server: *Server, arena: std.mem.Allocator, notification: 
         });
     }
 
+    if (std.process.can_spawn and server.config.enable_build_on_save) {
+        try server.pushJob(.run_build_on_save);
+    }
+
     if (server.getAutofixMode() == .on_save) {
         const handle = server.document_store.getHandle(uri) orelse return;
         var text_edits = try server.autofix(arena, handle);
@@ -1282,7 +1332,9 @@ pub fn hoverHandler(server: *Server, arena: std.mem.Allocator, request: types.Ho
     const response = hover_handler.hover(&analyser, arena, handle, source_index, markup_kind, server.offset_encoding);
 
     // TODO: Figure out a better solution for comptime interpreter diags
-    if (server.client_capabilities.supports_publish_diagnostics) {
+    if (server.config.dangerous_comptime_experiments_do_not_enable and
+        server.client_capabilities.supports_publish_diagnostics)
+    {
         try server.pushJob(.{
             .generate_diagnostics = try server.allocator.dupe(u8, handle.uri),
         });
@@ -1555,6 +1607,7 @@ pub const Message = union(enum) {
         @"textDocument/didChange": types.DidChangeTextDocumentParams,
         @"textDocument/didSave": types.DidSaveTextDocumentParams,
         @"textDocument/didClose": types.DidCloseTextDocumentParams,
+        @"workspace/didChangeWorkspaceFolders": types.DidChangeWorkspaceFoldersParams,
         @"workspace/didChangeConfiguration": types.DidChangeConfigurationParams,
         unknown: []const u8,
     };
@@ -1696,6 +1749,7 @@ pub const Message = union(enum) {
                 .@"textDocument/didChange",
                 .@"textDocument/didSave",
                 .@"textDocument/didClose",
+                .@"workspace/didChangeWorkspaceFolders",
                 .@"workspace/didChangeConfiguration",
                 => return true,
                 .unknown => return false,
@@ -1761,6 +1815,7 @@ pub fn destroy(server: *Server) void {
     server.job_queue.deinit();
     server.document_store.deinit();
     server.ip.deinit(server.allocator);
+    server.client_capabilities.deinit(server.allocator);
     if (server.runtime_zig_version) |zig_version| zig_version.free();
     server.config_arena.promote(server.allocator).deinit();
     server.allocator.destroy(server);
@@ -1893,6 +1948,7 @@ pub fn sendNotificationSync(server: *Server, arena: std.mem.Allocator, comptime 
         .@"textDocument/didChange" => try server.changeDocumentHandler(arena, params),
         .@"textDocument/didSave" => try server.saveDocumentHandler(arena, params),
         .@"textDocument/didClose" => try server.closeDocumentHandler(arena, params),
+        .@"workspace/didChangeWorkspaceFolders" => try server.didChangeWorkspaceFoldersHandler(arena, params),
         .@"workspace/didChangeConfiguration" => try server.didChangeConfigurationHandler(arena, params),
         .unknown => return,
     };
@@ -1985,6 +2041,7 @@ fn processMessageReportError(server: *Server, message: Message) ?[]const u8 {
 fn processJob(server: *Server, job: Job, wait_group: ?*std.Thread.WaitGroup) void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
+    tracy_zone.setName(@tagName(job));
     defer if (!zig_builtin.single_threaded and wait_group != null) wait_group.?.finish();
 
     defer job.deinit(server.allocator);
@@ -2006,6 +2063,28 @@ fn processJob(server: *Server, job: Job, wait_group: ?*std.Thread.WaitGroup) voi
             std.debug.assert(std.process.can_spawn);
             if (!std.process.can_spawn) return;
             server.document_store.invalidateBuildFile(build_file_uri) catch return;
+        },
+        .run_build_on_save => {
+            std.debug.assert(std.process.can_spawn);
+            if (!std.process.can_spawn) return;
+
+            for (server.client_capabilities.workspace_folders) |workspace_folder_uri| {
+                var arena_allocator = std.heap.ArenaAllocator.init(server.allocator);
+                defer arena_allocator.deinit();
+                var diagnostic_set = std.StringArrayHashMapUnmanaged(std.ArrayListUnmanaged(types.Diagnostic)){};
+                diagnostics_gen.generateBuildOnSaveDiagnostics(server, workspace_folder_uri, arena_allocator.allocator(), &diagnostic_set) catch |err| {
+                    log.err("failed to run build on save on {s}: {}", .{ workspace_folder_uri, err });
+                };
+
+                for (diagnostic_set.keys(), diagnostic_set.values()) |document_uri, diagnostics| {
+                    if (diagnostics.items.len == 0) continue;
+                    const json_message = server.sendToClientNotification("textDocument/publishDiagnostics", .{
+                        .uri = document_uri,
+                        .diagnostics = diagnostics.items,
+                    }) catch return;
+                    server.allocator.free(json_message);
+                }
+            }
         },
     }
 }

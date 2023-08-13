@@ -1,13 +1,16 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const Ast = std.zig.Ast;
 const log = std.log.scoped(.zls_diagnostics);
 
 const Server = @import("../Server.zig");
 const DocumentStore = @import("../DocumentStore.zig");
+const BuildAssociatedConfig = @import("../BuildAssociatedConfig.zig");
 const types = @import("../lsp.zig");
 const Analyser = @import("../analysis.zig");
 const ast = @import("../ast.zig");
 const offsets = @import("../offsets.zig");
+const URI = @import("../uri.zig");
 const tracy = @import("../tracy.zig");
 
 const Module = @import("../stage2/Module.zig");
@@ -177,6 +180,174 @@ pub fn generateDiagnostics(server: *Server, arena: std.mem.Allocator, handle: Do
         .uri = handle.uri,
         .diagnostics = diagnostics.items,
     };
+}
+
+pub fn generateBuildOnSaveDiagnostics(
+    server: *Server,
+    workspace_uri: types.URI,
+    arena: std.mem.Allocator,
+    diagnostics: *std.StringArrayHashMapUnmanaged(std.ArrayListUnmanaged(types.Diagnostic)),
+) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+    comptime std.debug.assert(std.process.can_spawn);
+
+    const workspace_path = URI.parse(server.allocator, workspace_uri) catch |err| {
+        log.err("failed to parse invalid uri `{s}`: {}", .{ workspace_uri, err });
+        return;
+    };
+    defer server.allocator.free(workspace_path);
+
+    std.debug.assert(std.fs.path.isAbsolute(workspace_path));
+
+    const build_zig_path = try std.fs.path.join(server.allocator, &.{ workspace_path, "build.zig" });
+    defer server.allocator.free(build_zig_path);
+
+    std.fs.accessAbsolute(build_zig_path, .{}) catch |err| switch (err) {
+        error.FileNotFound => return,
+        else => |e| {
+            log.err("failed to load build.zig at `{s}`: {}", .{ build_zig_path, e });
+            return e;
+        },
+    };
+
+    const base_args = &[_][]const u8{
+        server.config.zig_exe_path orelse return,
+        "build",
+        "--zig-lib-dir",
+        server.config.zig_lib_path orelse return,
+        "--cache-dir",
+        server.config.global_cache_path.?,
+        "-fno-reference-trace",
+        "--summary",
+        "none",
+    };
+
+    var argv = try std.ArrayListUnmanaged([]const u8).initCapacity(arena, base_args.len);
+    defer argv.deinit(arena);
+    argv.appendSliceAssumeCapacity(base_args);
+
+    blk: {
+        server.document_store.lock.lockShared();
+        defer server.document_store.lock.unlockShared();
+        const build_file = server.document_store.build_files.get(build_zig_path) orelse break :blk;
+        const build_associated_config = build_file.build_associated_config orelse break :blk;
+        const build_options = build_associated_config.value.build_options orelse break :blk;
+
+        try argv.ensureUnusedCapacity(arena, build_options.len);
+        for (build_options) |build_option| {
+            argv.appendAssumeCapacity(try build_option.formatParam(arena));
+        }
+    }
+
+    const result = blk: {
+        server.zig_exe_lock.lock();
+        defer server.zig_exe_lock.unlock();
+
+        break :blk std.ChildProcess.exec(.{
+            .allocator = server.allocator,
+            .argv = argv.items,
+            .cwd = workspace_path,
+            .max_output_bytes = 1024 * 1024,
+        }) catch |err| {
+            const joined = std.mem.join(server.allocator, " ", argv.items) catch return;
+            defer server.allocator.free(joined);
+            log.err("failed zig build command:\n{s}\nerror:{}\n", .{ joined, err });
+            return err;
+        };
+    };
+    defer server.allocator.free(result.stdout);
+    defer server.allocator.free(result.stderr);
+
+    switch (result.term) {
+        .Exited => |code| if (code == 0) return else {},
+        else => {
+            const joined = std.mem.join(server.allocator, " ", argv.items) catch return;
+            defer server.allocator.free(joined);
+            log.err("failed zig build command:\n{s}\nstderr:{s}\n\n", .{ joined, result.stderr });
+        },
+    }
+
+    var last_diagnostic_uri: ?types.URI = null;
+    var last_diagnostic: ?types.Diagnostic = null;
+    // we don't store DiagnosticRelatedInformation in last_diagnostic instead
+    // its stored in last_related_diagnostics because we need an ArrayList
+    var last_related_diagnostics: std.ArrayListUnmanaged(types.DiagnosticRelatedInformation) = .{};
+
+    // NOTE: I believe that with color off it's one diag per line; is this correct?
+    var line_iterator = std.mem.splitScalar(u8, result.stderr, '\n');
+
+    while (line_iterator.next()) |line| {
+        var pos_and_diag_iterator = std.mem.splitScalar(u8, line, ':');
+
+        const src_path = pos_and_diag_iterator.next() orelse continue;
+        const absolute_src_path = if (std.fs.path.isAbsolute(src_path)) src_path else blk: {
+            const absolute_src_path = std.fs.path.join(arena, &.{ workspace_path, src_path }) catch continue;
+            if (!std.fs.path.isAbsolute(absolute_src_path)) continue;
+            break :blk absolute_src_path;
+        };
+
+        const src_line = pos_and_diag_iterator.next() orelse continue;
+        const src_character = pos_and_diag_iterator.next() orelse continue;
+
+        // TODO zig uses utf-8 encoding for character offsets
+        // convert them to the desired offset encoding would require loading every file that contains errors
+        // is there some efficient way to do this?
+        const utf8_position = types.Position{
+            .line = (std.fmt.parseInt(u32, src_line, 10) catch continue) - 1,
+            .character = (std.fmt.parseInt(u32, src_character, 10) catch continue) - 1,
+        };
+        const range = types.Range{ .start = utf8_position, .end = utf8_position };
+
+        const msg = pos_and_diag_iterator.rest()[1..];
+
+        if (std.mem.startsWith(u8, msg, "note: ")) {
+            try last_related_diagnostics.append(arena, .{
+                .location = .{
+                    .uri = try URI.fromPath(arena, absolute_src_path),
+                    .range = range,
+                },
+                .message = try arena.dupe(u8, msg["note: ".len..]),
+            });
+            continue;
+        }
+
+        if (last_diagnostic) |*diagnostic| {
+            diagnostic.relatedInformation = try last_related_diagnostics.toOwnedSlice(arena);
+            const entry = try diagnostics.getOrPutValue(arena, last_diagnostic_uri.?, .{});
+            try entry.value_ptr.append(arena, diagnostic.*);
+            last_diagnostic_uri = null;
+            last_diagnostic = null;
+        }
+
+        if (std.mem.startsWith(u8, msg, "error: ")) {
+            last_diagnostic_uri = try URI.fromPath(arena, absolute_src_path);
+            last_diagnostic = types.Diagnostic{
+                .range = range,
+                .severity = .Error,
+                .code = .{ .string = "zig_build" },
+                .source = "zls",
+                .message = try arena.dupe(u8, msg["error: ".len..]),
+            };
+        } else {
+            last_diagnostic_uri = try URI.fromPath(arena, absolute_src_path);
+            last_diagnostic = types.Diagnostic{
+                .range = range,
+                .severity = .Error,
+                .code = .{ .string = "zig_build" },
+                .source = "zls",
+                .message = try arena.dupe(u8, msg),
+            };
+        }
+    }
+
+    if (last_diagnostic) |*diagnostic| {
+        diagnostic.relatedInformation = try last_related_diagnostics.toOwnedSlice(arena);
+        const entry = try diagnostics.getOrPutValue(arena, last_diagnostic_uri.?, .{});
+        try entry.value_ptr.append(arena, diagnostic.*);
+        last_diagnostic_uri = null;
+        last_diagnostic = null;
+    }
 }
 
 pub fn getAstCheckDiagnostics(

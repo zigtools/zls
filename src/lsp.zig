@@ -2,7 +2,7 @@
 
 const std = @import("std");
 
-const URI = []const u8;
+pub const URI = []const u8;
 /// The URI of a document
 pub const DocumentUri = []const u8;
 /// A JavaScript regular expression; never used
