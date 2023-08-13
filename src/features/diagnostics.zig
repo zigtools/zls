@@ -23,18 +23,17 @@ pub fn generateDiagnostics(server: *Server, arena: std.mem.Allocator, handle: Do
 
     var diagnostics = std.ArrayListUnmanaged(types.Diagnostic){};
 
+    try diagnostics.ensureUnusedCapacity(arena, tree.errors.len);
     for (tree.errors) |err| {
-        var mem_buffer: [256]u8 = undefined;
-        var fbs = std.io.fixedBufferStream(&mem_buffer);
-        tree.renderError(err, fbs.writer()) catch if (std.debug.runtime_safety) unreachable else continue; // if an error occurs here increase buffer size
+        var buffer = std.ArrayListUnmanaged(u8){};
+        try tree.renderError(err, buffer.writer(arena));
 
-        try diagnostics.append(arena, .{
+        diagnostics.appendAssumeCapacity(.{
             .range = offsets.tokenToRange(tree, err.token, server.offset_encoding),
             .severity = .Error,
             .code = .{ .string = @tagName(err.tag) },
             .source = "zls",
-            .message = try arena.dupe(u8, fbs.getWritten()),
-            // .relatedInformation = undefined
+            .message = try buffer.toOwnedSlice(arena),
         });
     }
 
