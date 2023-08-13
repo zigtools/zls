@@ -2,7 +2,7 @@
 
 const std = @import("std");
 
-const URI = []const u8;
+pub const URI = []const u8;
 /// The URI of a document
 pub const DocumentUri = []const u8;
 /// A JavaScript regular expression; never used
@@ -2296,7 +2296,7 @@ pub const InitializeParams = struct {
     /// configured.
     ///
     /// @since 3.6.0
-    workspaceFolders: ??[]const WorkspaceFolder = null,
+    workspaceFolders: ?[]const WorkspaceFolder = null,
 };
 
 /// The result returned from an initialize request.
