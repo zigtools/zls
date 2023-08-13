@@ -371,6 +371,7 @@ fn initializeHandler(server: *Server, _: std.mem.Allocator, request: types.Initi
                     .@"utf-8" => supports_utf8 = true,
                     .@"utf-16" => supports_utf16 = true,
                     .@"utf-32" => supports_utf32 = true,
+                    .custom_value => {},
                 }
             }
         }
@@ -423,8 +424,12 @@ fn initializeHandler(server: *Server, _: std.mem.Allocator, request: types.Initi
         if (textDocument.codeAction) |codeaction| {
             if (codeaction.codeActionLiteralSupport) |literalSupport| {
                 if (!skip_set_fixall) {
-                    const fixall = std.mem.indexOfScalar(types.CodeActionKind, literalSupport.codeActionKind.valueSet, .@"source.fixAll") != null;
-                    server.client_capabilities.supports_code_action_fixall = fixall;
+                    for (literalSupport.codeActionKind.valueSet) |code_action_kind| {
+                        if (code_action_kind.eql(.@"source.fixAll")) {
+                            server.client_capabilities.supports_code_action_fixall = true;
+                            break;
+                        }
+                    }
                 }
             }
         }
@@ -503,7 +508,11 @@ fn initializeHandler(server: *Server, _: std.mem.Allocator, request: types.Initi
             .version = build_options.version,
         },
         .capabilities = .{
-            .positionEncoding = server.offset_encoding,
+            .positionEncoding = switch (server.offset_encoding) {
+                .@"utf-8" => .@"utf-8",
+                .@"utf-16" => .@"utf-16",
+                .@"utf-32" => .@"utf-32",
+            },
             .signatureHelpProvider = .{
                 .triggerCharacters = &.{"("},
                 .retriggerCharacters = &.{","},
