@@ -3,7 +3,21 @@ const types = @import("lsp.zig");
 const ast = @import("ast.zig");
 const Ast = std.zig.Ast;
 
-pub const Encoding = types.PositionEncodingKind;
+pub const Encoding = enum {
+    /// Character offsets count UTF-8 code units (e.g. bytes).
+    @"utf-8",
+    /// Character offsets count UTF-16 code units.
+    ///
+    /// This is the default and must always be supported
+    /// by servers
+    @"utf-16",
+    /// Character offsets count UTF-32 code units.
+    ///
+    /// Implementation note: these are the same as Unicode codepoints,
+    /// so this `PositionEncodingKind` may also be used for an
+    /// encoding-agnostic representation of character offsets.
+    @"utf-32",
+};
 
 pub const Loc = std.zig.Token.Loc;
 

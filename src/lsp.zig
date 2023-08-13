@@ -98,32 +98,52 @@ pub fn UnionParser(comptime T: type) type {
     };
 }
 
-pub fn EnumWithEmptyParser(comptime T: type) type {
+pub fn EnumCustomStringValues(comptime T: type, comptime contains_empty_enum: bool) type {
     return struct {
+        const kvs = build_kvs: {
+            const KV = struct { []const u8, T };
+            const fields = @typeInfo(T).Union.fields;
+            var kvs_array: [fields.len - 1]KV = undefined;
+            inline for (fields[0 .. fields.len - 1], 0..) |field, i| {
+                kvs_array[i] = .{ field.name, @field(T, field.name) };
+            }
+            break :build_kvs kvs_array[0..];
+        };
+        const map = std.ComptimeStringMap(T, kvs);
+
+        pub fn eql(a: T, b: T) bool {
+            const tag_a = std.meta.activeTag(a);
+            const tag_b = std.meta.activeTag(b);
+            if (tag_a != tag_b) return false;
+
+            if (tag_a == .custom_value) {
+                return std.mem.eql(u8, a.custom_value, b.custom_value);
+            } else {
+                return true;
+            }
+        }
+
         pub fn jsonParse(allocator: std.mem.Allocator, source: anytype, options: std.json.ParseOptions) std.json.ParseError(@TypeOf(source.*))!T {
-            const token = try source.nextAllocMax(allocator, .alloc_if_needed, options.max_value_len.?);
-            defer switch (token) {
-                .allocated_number, .allocated_string => |slice| allocator.free(slice),
-                else => {},
-            };
-            const slice = switch (token) {
-                inline .number, .allocated_number, .string, .allocated_string => |slice| slice,
-                else => return error.UnexpectedToken,
-            };
-            if (slice.len == 0) return .empty;
-            return std.meta.stringToEnum(T, slice) orelse return error.InvalidEnumTag;
+            const slice = try std.json.parseFromTokenSourceLeaky([]const u8, allocator, source, options);
+            if (contains_empty_enum and slice.len == 0) return .empty;
+            return map.get(slice) orelse return .{ .custom_value = slice };
         }
 
         pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) std.json.ParseFromValueError!T {
-            _ = allocator;
-            _ = options;
-            if (source != .string) return error.InvalidEnumTag;
-            if (source.string.len == 0) return .empty;
-            return std.meta.stringToEnum(T, source.string) orelse return error.InvalidEnumTag;
+            const slice = try std.json.parseFromValueLeaky([]const u8, allocator, source, options);
+            if (contains_empty_enum and slice.len == 0) return .empty;
+            return map.get(slice) orelse return .{ .custom_value = slice };
         }
 
         pub fn jsonStringify(self: T, stream: anytype) @TypeOf(stream.*).Error!void {
-            try stream.write(if (self == .empty) "" else @tagName(self));
+            if (contains_empty_enum and self == .empty) {
+                try stream.write("");
+                return;
+            }
+            switch (self) {
+                .custom_value => |str| try stream.write(str),
+                else => |val| try stream.write(@tagName(val)),
+            }
         }
     };
 }
@@ -396,7 +416,7 @@ pub const Pattern = []const u8;
 /// corresponding client capabilities.
 ///
 /// @since 3.16.0
-pub const SemanticTokenTypes = enum {
+pub const SemanticTokenTypes = union(enum) {
     namespace,
     /// Represents a generic type. Acts as a fallback for types which can't be mapped to
     /// a specific type like class or enum.
@@ -423,6 +443,8 @@ pub const SemanticTokenTypes = enum {
     operator,
     /// @since 3.17.0
     decorator,
+    custom_value: []const u8,
+    pub usingnamespace EnumCustomStringValues(@This(), false);
 };
 
 /// A set of predefined token modifiers. This set is not fixed
@@ -430,7 +452,7 @@ pub const SemanticTokenTypes = enum {
 /// corresponding client capabilities.
 ///
 /// @since 3.16.0
-pub const SemanticTokenModifiers = enum {
+pub const SemanticTokenModifiers = union(enum) {
     declaration,
     definition,
     readonly,
@@ -441,6 +463,8 @@ pub const SemanticTokenModifiers = enum {
     modification,
     documentation,
     defaultLibrary,
+    custom_value: []const u8,
+    pub usingnamespace EnumCustomStringValues(@This(), false);
 };
 
 /// The document diagnostic report kinds.
@@ -466,6 +490,7 @@ pub const ErrorCodes = enum(i32) {
     /// request before the server has received the `initialize` request.
     ServerNotInitialized = -32002,
     UnknownErrorCode = -32001,
+    _,
     pub usingnamespace EnumStringifyAsInt(@This());
 };
 
@@ -495,17 +520,20 @@ pub const LSPErrorCodes = enum(i32) {
     /// The client has canceled a request and a server as detected
     /// the cancel.
     RequestCancelled = -32800,
+    _,
     pub usingnamespace EnumStringifyAsInt(@This());
 };
 
 /// A set of predefined range kinds.
-pub const FoldingRangeKind = enum {
+pub const FoldingRangeKind = union(enum) {
     /// Folding range for a comment
     comment,
     /// Folding range for an import or include
     imports,
     /// Folding range for a region (e.g. `#region`)
     region,
+    custom_value: []const u8,
+    pub usingnamespace EnumCustomStringValues(@This(), false);
 };
 
 /// A symbol kind.
@@ -721,7 +749,7 @@ pub const DocumentHighlightKind = enum(u32) {
 };
 
 /// A set of predefined code action kinds
-pub const CodeActionKind = enum {
+pub const CodeActionKind = union(enum) {
     /// Empty kind.
     empty,
     /// Base kind for quickfix actions: 'quickfix'
@@ -771,30 +799,25 @@ pub const CodeActionKind = enum {
     ///
     /// @since 3.15.0
     @"source.fixAll",
+    custom_value: []const u8,
+
+    const helpers = EnumCustomStringValues(@This(), true);
+
+    pub const eql = helpers.eql;
 
     pub fn jsonParse(allocator: std.mem.Allocator, source: anytype, options: std.json.ParseOptions) std.json.ParseError(@TypeOf(source.*))!@This() {
-        const token = try source.nextAllocMax(allocator, .alloc_if_needed, options.max_value_len.?);
-        defer switch (token) {
-            .allocated_number, .allocated_string => |slice| allocator.free(slice),
-            else => {},
-        };
-        const slice = switch (token) {
-            inline .number, .allocated_number, .string, .allocated_string => |slice| slice,
-            else => return error.UnexpectedToken,
-        };
+        const slice = try std.json.parseFromTokenSourceLeaky([]const u8, allocator, source, options);
         return parseFromString(slice);
     }
 
     pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) std.json.ParseFromValueError!@This() {
-        _ = allocator;
-        _ = options;
-        if (source != .string) return error.UnexpectedToken;
-        return parseFromString(source.string);
+        const slice = try std.json.parseFromValueLeaky([]const u8, allocator, source, options);
+        return parseFromString(slice);
     }
 
     fn parseFromString(str: []const u8) @This() {
         if (str.len == 0) return .empty;
-        if (std.meta.stringToEnum(@This(), str)) |val| return val;
+        if (helpers.map.get(str)) |val| return val;
         // Some clients (nvim) may report these by the enumeration names rather than the
         // actual strings, so let's check those names here
         const aliases = std.ComptimeStringMap(CodeActionKind, .{
@@ -809,14 +832,10 @@ pub const CodeActionKind = enum {
             .{ "SourceFixAll", .@"source.fixAll" },
         });
 
-        if (aliases.get(str)) |alias| {
-            return alias;
-        }
-
-        // Strictly speaking, CodeActionKind is a string an not a enum which means that
-        // a client may report a unknown kind which can safely be ignored
-        return .empty;
+        return aliases.get(str) orelse .{ .custom_value = str };
     }
+
+    pub const jsonStringify = helpers.jsonStringify;
 };
 
 pub const TraceValues = enum {
@@ -855,7 +874,7 @@ pub const InlineCompletionTriggerKind = enum(u32) {
 /// A set of predefined position encoding kinds.
 ///
 /// @since 3.17.0
-pub const PositionEncodingKind = enum {
+pub const PositionEncodingKind = union(enum) {
     /// Character offsets count UTF-8 code units (e.g. bytes).
     @"utf-8",
     /// Character offsets count UTF-16 code units.
@@ -869,6 +888,8 @@ pub const PositionEncodingKind = enum {
     /// so this `PositionEncodingKind` may also be used for an
     /// encoding-agnostic representation of character offsets.
     @"utf-32",
+    custom_value: []const u8,
+    pub usingnamespace EnumCustomStringValues(@This(), false);
 };
 
 /// The file event type
@@ -889,6 +910,7 @@ pub const WatchKind = enum(u32) {
     Change = 2,
     /// Interested in delete events
     Delete = 4,
+    _,
     pub usingnamespace EnumStringifyAsInt(@This());
 };
 
@@ -2270,7 +2292,7 @@ pub const InitializeParams = struct {
     /// if no folder is open.
     ///
     /// @deprecated in favour of rootUri.
-    rootPath: ??[]const u8 = null,
+    rootPath: ?[]const u8 = null,
     /// The rootUri of the workspace. Is null if no
     /// folder is open. If both `rootPath` and `rootUri` are set
     /// `rootUri` wins.
@@ -2296,7 +2318,7 @@ pub const InitializeParams = struct {
     /// configured.
     ///
     /// @since 3.6.0
-    workspaceFolders: ??[]const WorkspaceFolder = null,
+    workspaceFolders: ?[]const WorkspaceFolder = null,
 };
 
 /// The result returned from an initialize request.
@@ -4390,7 +4412,7 @@ pub const _InitializeParams = struct {
     /// if no folder is open.
     ///
     /// @deprecated in favour of rootUri.
-    rootPath: ??[]const u8 = null,
+    rootPath: ?[]const u8 = null,
     /// The rootUri of the workspace. Is null if no
     /// folder is open. If both `rootPath` and `rootUri` are set
     /// `rootUri` wins.
@@ -4417,7 +4439,7 @@ pub const WorkspaceFoldersInitializeParams = struct {
     /// configured.
     ///
     /// @since 3.6.0
-    workspaceFolders: ??[]const WorkspaceFolder = null,
+    workspaceFolders: ?[]const WorkspaceFolder = null,
 };
 
 /// Defines the capabilities provided by a language
