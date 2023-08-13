@@ -569,7 +569,7 @@ fn completeGlobal(server: *Server, analyser: *Analyser, arena: std.mem.Allocator
         .orig_handle = handle,
     };
     try analyser.iterateSymbolsGlobal(handle, pos_index, declToCompletion, context);
-    try populateSnippedCompletions(arena, &completions, &snipped_data.generic, server.config.*);
+    try populateSnippedCompletions(arena, &completions, &snipped_data.generic, server.config);
 
     if (server.client_capabilities.label_details_support) {
         for (completions.items) |*item| {
@@ -1284,9 +1284,9 @@ fn completeFileSystemStringLiteral(
     if (completing.len == 0 and pos_context == .import_string_literal) {
         if (handle.associated_build_file) |uri| {
             const build_file = store.build_files.get(uri).?;
-            try completions.ensureUnusedCapacity(arena, build_file.config.packages.len);
+            try completions.ensureUnusedCapacity(arena, build_file.config.value.packages.len);
 
-            for (build_file.config.packages) |pkg| {
+            for (build_file.config.value.packages) |pkg| {
                 completions.putAssumeCapacity(.{
                     .label = pkg.name,
                     .kind = .Module,
@@ -1302,7 +1302,7 @@ pub fn completionAtIndex(server: *Server, analyser: *Analyser, arena: std.mem.Al
     const at_line_start = offsets.lineSliceUntilIndex(handle.tree.source, source_index).len == 0;
     if (at_line_start) {
         var completions = std.ArrayListUnmanaged(types.CompletionItem){};
-        try populateSnippedCompletions(arena, &completions, &snipped_data.top_level_decl_data, server.config.*);
+        try populateSnippedCompletions(arena, &completions, &snipped_data.top_level_decl_data, server.config);
 
         return .{ .isIncomplete = false, .items = completions.items };
     }

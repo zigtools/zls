@@ -4,10 +4,7 @@ const zls = @import("zls");
 const allocator = std.testing.allocator;
 
 test "LSP lifecycle" {
-    var config: zls.Config = .{};
-    defer zls.legacy_json.parseFree(zls.Config, allocator, config);
-
-    var server = try zls.Server.create(allocator, &config, null);
+    var server = try zls.Server.create(allocator);
     defer server.destroy();
 
     var arena_allocator = std.heap.ArenaAllocator.init(allocator);

@@ -28,23 +28,17 @@ const allocator = std.testing.allocator;
 pub const Context = struct {
     server: *Server,
     arena: std.heap.ArenaAllocator,
-    config: *Config,
     file_id: u32 = 0,
 
     pub fn init() !Context {
-        var config = try allocator.create(Config);
-        errdefer allocator.destroy(config);
-        errdefer zls.legacy_json.parseFree(Config, allocator, config.*);
-
-        config.* = default_config;
-
-        const server = try Server.create(allocator, config, null);
+        const server = try Server.create(allocator);
         errdefer server.destroy();
+
+        try server.updateConfiguration2(default_config);
 
         var context: Context = .{
             .server = server,
             .arena = std.heap.ArenaAllocator.init(allocator),
-            .config = config,
         };
 
         _ = try context.server.sendRequestSync(context.arena.allocator(), "initialize", .{ .capabilities = .{} });
@@ -58,9 +52,6 @@ pub const Context = struct {
     }
 
     pub fn deinit(self: *Context) void {
-        zls.legacy_json.parseFree(Config, allocator, self.config.*);
-        allocator.destroy(self.config);
-
         _ = self.server.sendRequestSync(self.arena.allocator(), "shutdown", {}) catch {};
         self.server.destroy();
         self.arena.deinit();

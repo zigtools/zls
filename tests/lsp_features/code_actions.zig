@@ -132,7 +132,7 @@ test "code actions - remove pointless discard" {
 fn testAutofix(before: []const u8, after: []const u8) !void {
     var ctx = try Context.init();
     defer ctx.deinit();
-    ctx.config.enable_ast_check_diagnostics = true;
+    ctx.server.config.enable_ast_check_diagnostics = true;
 
     const uri = try ctx.addDocument(before);
     const handle = ctx.server.document_store.getHandle(uri).?;

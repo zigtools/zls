@@ -3,6 +3,8 @@ const zls = @import("zls");
 
 const Ast = std.zig.Ast;
 
+const Context = @import("../context.zig").Context;
+
 const offsets = zls.offsets;
 const translate_c = zls.translate_c;
 
@@ -107,19 +109,14 @@ fn testConvertCInclude(cimport_source: []const u8, expected: []const u8) !void {
 fn testTranslate(c_source: []const u8) !translate_c.Result {
     if (!std.process.can_spawn) return error.SkipZigTest;
 
-    var config: zls.Config = .{};
-    defer zls.legacy_json.parseFree(zls.Config, allocator, config);
+    var ctx = try Context.init();
+    defer ctx.deinit();
 
-    var runtime_zig_version: ?zls.ZigVersionWrapper = null;
-    defer if (runtime_zig_version) |*v| v.free();
+    if (ctx.server.config.global_cache_path == null or
+        ctx.server.config.zig_exe_path == null or
+        ctx.server.config.zig_lib_path == null) return error.SkipZigTest;
 
-    try zls.configuration.configChanged(&config, &runtime_zig_version, allocator, null);
-
-    if (config.global_cache_path == null or
-        config.zig_exe_path == null or
-        config.zig_lib_path == null) return error.SkipZigTest;
-
-    const result = (try translate_c.translate(allocator, config, &.{}, c_source)).?;
+    const result = (try translate_c.translate(allocator, ctx.server.config, &.{}, c_source)).?;
 
     switch (result) {
         .success => |uri| {
