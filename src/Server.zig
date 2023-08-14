@@ -455,7 +455,7 @@ fn initializeHandler(server: *Server, _: std.mem.Allocator, request: types.Initi
     log.info("{}", .{server.client_capabilities});
     log.info("offset encoding: {s}", .{@tagName(server.offset_encoding)});
 
-    server.updateConfiguration(.{}) catch |err| {
+    server.updateConfiguration(.{}, false) catch |err| {
         log.err("failed to load configuration: {}", .{err});
     };
 
@@ -701,7 +701,7 @@ fn handleConfiguration(server: *Server, json: std.json.Value) error{OutOfMemory}
         }
     }
 
-    server.updateConfiguration(new_config) catch |err| {
+    server.updateConfiguration(new_config, false) catch |err| {
         log.err("failed to update configuration: {}", .{err});
     };
 }
@@ -728,20 +728,20 @@ fn didChangeConfigurationHandler(server: *Server, arena: std.mem.Allocator, noti
         return error.ParseError;
     };
 
-    server.updateConfiguration(new_config) catch |err| {
+    server.updateConfiguration(new_config, false) catch |err| {
         log.err("failed to update configuration: {}", .{err});
     };
 }
 
-pub fn updateConfiguration2(server: *Server, new_config: Config) !void {
+pub fn updateConfiguration2(server: *Server, new_config: Config, resolve: bool) !void {
     var cfg: configuration.Configuration = .{};
     inline for (std.meta.fields(Config)) |field| {
         @field(cfg, field.name) = @field(new_config, field.name);
     }
-    try server.updateConfiguration(cfg);
+    try server.updateConfiguration(cfg, resolve);
 }
 
-pub fn updateConfiguration(server: *Server, new_config: configuration.Configuration) !void {
+pub fn updateConfiguration(server: *Server, new_config: configuration.Configuration, resolve: bool) !void {
     // NOTE every changed configuration will increase the amount of memory allocated by the arena
     // This is unlikely to cause any big issues since the user is probably not going set settings
     // often in one session
@@ -752,9 +752,10 @@ pub fn updateConfiguration(server: *Server, new_config: configuration.Configurat
     var new_cfg = new_config;
 
     try server.validateConfiguration(&new_cfg);
-    try server.resolveConfiguration(config_arena, &new_cfg);
-    try server.validateConfiguration(&new_cfg);
-
+    if (resolve) {
+        try server.resolveConfiguration(config_arena, &new_cfg);
+        try server.validateConfiguration(&new_cfg);
+    }
     // <---------------------------------------------------------->
     //                        apply changes
     // <---------------------------------------------------------->
