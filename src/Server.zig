@@ -248,6 +248,14 @@ fn showMessage(
     comptime fmt: []const u8,
     args: anytype,
 ) void {
+    const message = std.fmt.allocPrint(server.allocator, fmt, args) catch return;
+    defer server.allocator.free(message);
+    switch (message_type) {
+        .Error => log.err("{s}", .{message}),
+        .Warning => log.warn("{s}", .{message}),
+        .Info => log.info("{s}", .{message}),
+        .Log => log.debug("{s}", .{message}),
+    }
     switch (server.status) {
         .initializing,
         .initialized,
@@ -257,14 +265,6 @@ fn showMessage(
         .exiting_success,
         .exiting_failure,
         => return,
-    }
-    const message = std.fmt.allocPrint(server.allocator, fmt, args) catch return;
-    defer server.allocator.free(message);
-    switch (message_type) {
-        .Error => log.err("{s}", .{message}),
-        .Warning => log.warn("{s}", .{message}),
-        .Info => log.info("{s}", .{message}),
-        .Log => log.debug("{s}", .{message}),
     }
     if (server.sendToClientNotification("window/showMessage", types.ShowMessageParams{
         .type = message_type,
