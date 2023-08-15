@@ -677,7 +677,7 @@ fn createBuildFile(self: *DocumentStore, uri: Uri) error{OutOfMemory}!BuildFile 
         }
     }
 
-    {
+    if (std.process.can_spawn) {
         const Server = @import("Server.zig");
         const server = @fieldParentPtr(Server, "document_store", self);
 
@@ -810,9 +810,7 @@ fn createDocument(self: *DocumentStore, uri: Uri, text: [:0]const u8, open: bool
     handle.import_uris = try self.collectImportUris(handle);
     handle.cimports = try collectCIncludes(self.allocator, handle.tree);
 
-    if (!std.process.can_spawn or self.config.zig_exe_path == null) {
-        //
-    } else if (isBuildFile(handle.uri) and !isInStd(handle.uri)) {
+    if (isBuildFile(handle.uri) and !isInStd(handle.uri)) {
         _ = self.getOrLoadBuildFile(handle.uri);
     } else if (!isBuiltinFile(handle.uri) and !isInStd(handle.uri)) blk: {
         // log.debug("Going to walk down the tree towards: {s}", .{uri});
