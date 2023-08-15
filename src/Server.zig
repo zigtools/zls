@@ -758,7 +758,10 @@ pub fn updateConfiguration(server: *Server, new_config: configuration.Configurat
     defer server.config_arena = config_arena_allocator.state;
     const config_arena = config_arena_allocator.allocator();
 
-    var new_cfg = new_config;
+    var new_cfg: configuration.Configuration = .{};
+    inline for (std.meta.fields(Config)) |field| {
+        @field(new_cfg, field.name) = if (@field(new_config, field.name)) |new_value| new_value else @field(server.config, field.name);
+    }
 
     try server.validateConfiguration(&new_cfg);
     try server.resolveConfiguration(config_arena, &new_cfg);
