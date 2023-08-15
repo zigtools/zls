@@ -48,7 +48,7 @@ thread_pool: if (zig_builtin.single_threaded) void else std.Thread.Pool,
 wait_group: if (zig_builtin.single_threaded) void else std.Thread.WaitGroup,
 job_queue: std.fifo.LinearFifo(Job, .Dynamic),
 job_queue_lock: std.Thread.Mutex = .{},
-ip: InternPool,
+ip: InternPool = .{},
 zig_exe_lock: std.Thread.Mutex = .{},
 config_arena: std.heap.ArenaAllocator.State = .{},
 client_capabilities: ClientCapabilities = .{},
@@ -1722,7 +1722,6 @@ pub fn create(allocator: std.mem.Allocator) !*Server {
             .config = &server.config,
             .runtime_zig_version = &server.runtime_zig_version,
         },
-        .ip = undefined, // set below
         .job_queue = std.fifo.LinearFifo(Job, .Dynamic).init(allocator),
         .thread_pool = undefined, // set below
         .wait_group = if (zig_builtin.single_threaded) {} else .{},
@@ -1945,18 +1944,31 @@ fn processMessage(server: *Server, message: Message) Error!?[]u8 {
 }
 
 fn processMessageReportError(server: *Server, message: Message) ?[]const u8 {
-    return server.processMessage(message) catch |err| switch (message) {
-        .request => |request| server.sendToClientResponseError(request.id, types.ResponseError{
-            .code = @intFromError(err),
-            .message = @errorName(err),
-        }) catch |e| {
-            log.err("failed to process {}: {}", .{ message, e });
-            return null;
-        },
-        .notification, .response => {
-            log.err("failed to process {}: {}", .{ message, err });
-            return null;
-        },
+    return server.processMessage(message) catch |err| {
+        log.err("failed to process {}: {}", .{ message, err });
+        if (@errorReturnTrace()) |trace| {
+            std.debug.dumpStackTrace(trace.*);
+        }
+
+        switch (message) {
+            .request => |request| return server.sendToClientResponseError(request.id, types.ResponseError{
+                .code = switch (err) {
+                    error.OutOfMemory => @intFromEnum(types.ErrorCodes.InternalError),
+                    error.ParseError => @intFromEnum(types.ErrorCodes.ParseError),
+                    error.InvalidRequest => @intFromEnum(types.ErrorCodes.InvalidRequest),
+                    error.MethodNotFound => @intFromEnum(types.ErrorCodes.MethodNotFound),
+                    error.InvalidParams => @intFromEnum(types.ErrorCodes.InvalidParams),
+                    error.InternalError => @intFromEnum(types.ErrorCodes.InternalError),
+                    error.ServerNotInitialized => @intFromEnum(types.ErrorCodes.ServerNotInitialized),
+                    error.RequestFailed => @intFromEnum(types.LSPErrorCodes.RequestFailed),
+                    error.ServerCancelled => @intFromEnum(types.LSPErrorCodes.ServerCancelled),
+                    error.ContentModified => @intFromEnum(types.LSPErrorCodes.ContentModified),
+                    error.RequestCancelled => @intFromEnum(types.LSPErrorCodes.RequestCancelled),
+                },
+                .message = @errorName(err),
+            }) catch null,
+            .notification, .response => return null,
+        }
     };
 }
 
