@@ -964,7 +964,15 @@ fn resolveConfiguration(server: *Server, config_arena: std.mem.Allocator, config
         defer env.deinit();
 
         if (config.zig_lib_path == null) {
-            config.zig_lib_path = try config_arena.dupe(u8, env.value.lib_dir.?);
+            if (env.value.lib_dir) |lib_dir| {
+                const cwd = try std.process.getCwdAlloc(server.allocator);
+                defer server.allocator.free(cwd);
+                if (std.fs.path.isAbsolute(lib_dir)) {
+                    config.zig_lib_path = try config_arena.dupe(u8, lib_dir);
+                } else {
+                    config.zig_lib_path = try std.fs.path.resolve(config_arena, &.{ cwd, lib_dir });
+                }
+            }
         }
 
         if (config.build_runner_global_cache_path == null) {
