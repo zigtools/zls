@@ -141,7 +141,7 @@ pub fn getZigEnv(allocator: std.mem.Allocator, zig_exe_path: []const u8) ?std.js
         else => logger.err("zig env invocation failed", .{}),
     }
 
-    return std.json.parseFromSlice(
+    var parsed = std.json.parseFromSlice(
         Env,
         allocator,
         zig_env_result.stdout,
@@ -150,6 +150,12 @@ pub fn getZigEnv(allocator: std.mem.Allocator, zig_exe_path: []const u8) ?std.js
         logger.err("Failed to parse zig env JSON result", .{});
         return null;
     };
+    if (parsed.value.lib_dir) |d| {
+        parsed.value.lib_dir = std.fs.realpathAlloc(parsed.arena.allocator(), d) catch d;
+    }
+    parsed.value.std_dir = std.fs.realpathAlloc(parsed.arena.allocator(), parsed.value.std_dir) catch parsed.value.std_dir;
+
+    return parsed;
 }
 
 /// the same struct as Config but every field is optional
