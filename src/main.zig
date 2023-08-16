@@ -317,7 +317,7 @@ pub fn main() !void {
 
     const server = try Server.create(allocator);
     defer server.destroy();
-    try server.updateConfiguration2(config.config, true);
+    try server.updateConfiguration2(config.config);
     server.recording_enabled = record_file != null;
     server.replay_enabled = replay_file != null;
     server.transport = &transport;
