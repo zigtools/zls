@@ -8,7 +8,7 @@ const types = @import("../lsp.zig");
 const ast = @import("../ast.zig");
 const offsets = @import("../offsets.zig");
 
-const data = @import("../data/data.zig");
+const data = @import("version_data");
 
 fn fnProtoToSignatureInfo(analyser: *Analyser, arena: std.mem.Allocator, commas: u32, skip_self_param: bool, handle: *const DocumentStore.Handle, fn_node: Ast.Node.Index, proto: Ast.full.FnProto) !types.SignatureInformation {
     const tree = handle.tree;

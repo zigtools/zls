@@ -43,11 +43,6 @@ zig build -Doptimize=ReleaseSafe
 | --- | --- | --- | --- |
 | `-Ddata_version` | `string` (like 0.7.1 or 0.9.0) | master | The data file version. This selects the files in the `src/data` folder that correspond to the Zig version being served.|
 
-#### Updating Data Files
-
-Run `zig build gen -- --generate-version-data master` to update data files. This command will require an internet connection.
-You can replace `master` with a specific zig version like `0.10.0`. Which version ZLS uses can be configured by passing the `-Ddata_version` parameter when building ZLS.
-
 ### Configuration Options
 
 You can configure zls by editing your `zls.json` configuration file.
