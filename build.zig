@@ -1,6 +1,5 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const shared = @import("src/shared.zig");
 
 const zls_version = std.SemanticVersion{ .major = 0, .minor = 12, .patch = 0 };
 
@@ -32,8 +31,8 @@ pub fn build(b: *std.build.Builder) !void {
     const coverage = b.option(bool, "generate_coverage", "Generate coverage data with kcov") orelse false;
     const coverage_output_dir = b.option([]const u8, "coverage_output_dir", "Output directory for coverage data") orelse b.pathJoin(&.{ b.install_prefix, "kcov" });
     const test_filter = b.option([]const u8, "test-filter", "Skip tests that do not match filter");
+    const data_version = b.option([]const u8, "data_version", "The Zig version your compiler is.") orelse "master";
 
-    exe_options.addOption(shared.ZigVersion, "data_version", b.option(shared.ZigVersion, "data_version", "The Zig version your compiler is.") orelse .master);
     exe_options.addOption(std.log.Level, "log_level", b.option(std.log.Level, "log_level", "The Log Level to be used.") orelse .info);
     exe_options.addOption(bool, "enable_tracy", enable_tracy);
     exe_options.addOption(bool, "enable_tracy_allocation", b.option(bool, "enable_tracy_allocation", "Enable using TracyAllocator to monitor allocations.") orelse enable_tracy);
@@ -120,16 +119,6 @@ pub fn build(b: *std.build.Builder) !void {
 
     const build_options_module = exe_options.createModule();
 
-    const zls_module = b.addModule("zls", .{
-        .source_file = .{ .path = "src/zls.zig" },
-        .dependencies = &.{
-            .{ .name = "known-folders", .module = known_folders_module },
-            .{ .name = "diffz", .module = diffz_module },
-            .{ .name = "binned_allocator", .module = binned_allocator_module },
-            .{ .name = "build_options", .module = build_options_module },
-        },
-    });
-
     const gen_exe = b.addExecutable(.{
         .name = "zls_gen",
         .root_source_file = .{ .path = "src/config_gen/config_gen.zig" },
@@ -137,15 +126,33 @@ pub fn build(b: *std.build.Builder) !void {
 
     const gen_cmd = b.addRunArtifact(gen_exe);
     gen_cmd.addArgs(&.{
-        b.pathFromRoot("src/Config.zig"),
-        b.pathFromRoot("schema.json"),
+        "--readme-path",
         b.pathFromRoot("README.md"),
-        b.pathFromRoot("src/data"),
+        "--generate-config-path",
+        b.pathFromRoot("src/Config.zig"),
+        "--generate-schema-path",
+        b.pathFromRoot("schema.json"),
     });
     if (b.args) |args| gen_cmd.addArgs(args);
 
     const gen_step = b.step("gen", "Regenerate config files");
     gen_step.dependOn(&gen_cmd.step);
+
+    const gen_version_data_cmd = b.addRunArtifact(gen_exe);
+    gen_version_data_cmd.addArgs(&.{
+        "--generate-version-data",
+        data_version,
+        "--generate-version-data-path",
+    });
+    const version_data_file_name = blk: {
+        // invalidate version data periodically from cache because the website content may change
+        // setting `has_side_effects` would also be possible but that would always force a re-run
+        const timestamp = @divFloor(std.time.timestamp(), std.time.s_per_day);
+        break :blk b.fmt("version_data_{s}_{d}.zig", .{ data_version, timestamp });
+    };
+    const version_data_path = gen_version_data_cmd.addOutputFileArg(version_data_file_name);
+    const version_data_module = b.addModule("version_data", .{ .source_file = version_data_path });
+    exe.addModule("version_data", version_data_module);
 
     const test_step = b.step("test", "Run all the tests");
     test_step.dependOn(b.getInstallStep());
@@ -155,6 +162,17 @@ pub fn build(b: *std.build.Builder) !void {
         .target = target,
         .optimize = .Debug,
         .filter = test_filter,
+    });
+
+    const zls_module = b.addModule("zls", .{
+        .source_file = .{ .path = "src/zls.zig" },
+        .dependencies = &.{
+            .{ .name = "known-folders", .module = known_folders_module },
+            .{ .name = "diffz", .module = diffz_module },
+            .{ .name = "binned_allocator", .module = binned_allocator_module },
+            .{ .name = "build_options", .module = build_options_module },
+            .{ .name = "version_data", .module = version_data_module },
+        },
     });
 
     tests.addModule("zls", zls_module);

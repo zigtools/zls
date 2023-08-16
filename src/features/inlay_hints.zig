@@ -11,7 +11,7 @@ const tracy = @import("../tracy.zig");
 const ast = @import("../ast.zig");
 const Config = @import("../Config.zig");
 
-const data = @import("../data/data.zig");
+const data = @import("version_data");
 
 /// don't show inlay hints for the given builtin functions
 /// this option is rare and is therefore build-only and

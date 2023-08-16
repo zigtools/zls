@@ -13,8 +13,8 @@ const tracy = @import("../tracy.zig");
 const URI = @import("../uri.zig");
 const analyser_completions = @import("../analyser/completions.zig");
 
-const data = @import("../data/data.zig");
-const snipped_data = @import("../data/snippets.zig");
+const data = @import("version_data");
+const snipped_data = @import("../snippets.zig");
 
 fn typeToCompletion(
     server: *Server,

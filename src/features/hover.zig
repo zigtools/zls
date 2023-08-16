@@ -11,7 +11,7 @@ const tracy = @import("../tracy.zig");
 const Analyser = @import("../analysis.zig");
 const DocumentStore = @import("../DocumentStore.zig");
 
-const data = @import("../data/data.zig");
+const data = @import("version_data");
 
 pub fn hoverSymbol(
     analyser: *Analyser,
