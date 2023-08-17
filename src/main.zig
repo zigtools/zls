@@ -217,7 +217,7 @@ fn parseArgs(allocator: std.mem.Allocator) !ParseArgsResult {
         return result;
     }
     if (specified.get(.version)) {
-        try stdout.writeAll(build_options.version ++ "\n");
+        try stdout.writeAll(build_options.version_string ++ "\n");
         return result;
     }
     if (specified.get(.@"compiler-version")) {
@@ -293,7 +293,7 @@ pub fn main() !void {
         .exit => return,
     }
 
-    logger.info("Starting ZLS {s} @ '{s}'", .{ build_options.version, result.zls_exe_path });
+    logger.info("Starting ZLS {s} @ '{s}'", .{ build_options.version_string, result.zls_exe_path });
 
     var config = try configuration.getConfig(allocator, result.config_path);
     defer config.deinit(allocator);
