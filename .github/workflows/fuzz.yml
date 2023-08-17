@@ -47,7 +47,7 @@ jobs:
           echo "FUZZING_DURATION=15m" >> $GITHUB_ENV
 
       - name: Grab zig
-        uses: goto-bus-stop/setup-zig@v1
+        uses: goto-bus-stop/setup-zig@v2
         with:
           version: master
 

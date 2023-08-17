@@ -18,6 +18,7 @@ const InternPool = @import("analyser/analyser.zig").InternPool;
 const ZigVersionWrapper = @import("ZigVersionWrapper.zig");
 const Transport = @import("Transport.zig");
 const known_folders = @import("known-folders");
+const BuildRunnerVersion = @import("build_runner/BuildRunnerVersion.zig").BuildRunnerVersion;
 
 const signature_help = @import("features/signature_help.zig");
 const references = @import("features/references.zig");
@@ -1049,15 +1050,33 @@ fn resolveConfiguration(server: *Server, config_arena: std.mem.Allocator, config
         try std.fs.cwd().makePath(config.global_cache_path.?);
     }
 
-    if (config.build_runner_path == null) blk: {
-        if (config.global_cache_path == null) break :blk;
+    if (config.build_runner_path == null and
+        config.global_cache_path != null and
+        config.zig_exe_path != null and
+        server.runtime_zig_version != null)
+    {
+        const build_runner_version = BuildRunnerVersion.selectBuildRunnerVersion(server.runtime_zig_version.?.version);
 
-        config.build_runner_path = try std.fs.path.resolve(config_arena, &[_][]const u8{ config.global_cache_path.?, "build_runner.zig" });
+        const build_runner_file_name = try std.fmt.allocPrint(config_arena, "build_runner_{s}.zig", .{@tagName(build_runner_version)});
+        const build_runner_path = try std.fs.path.resolve(config_arena, &[_][]const u8{ config.global_cache_path.?, build_runner_file_name });
 
-        const file = try std.fs.createFileAbsolute(config.build_runner_path.?, .{});
-        defer file.close();
+        const build_runner_file = try std.fs.createFileAbsolute(build_runner_path, .{});
+        defer build_runner_file.close();
 
-        try file.writeAll(@embedFile("special/build_runner.zig"));
+        const build_config_path = try std.fs.path.resolve(config_arena, &[_][]const u8{ config.global_cache_path.?, "BuildConfig.zig" });
+
+        const build_config_file = try std.fs.createFileAbsolute(build_config_path, .{});
+        defer build_config_file.close();
+
+        try build_config_file.writeAll(@embedFile("build_runner/BuildConfig.zig"));
+
+        try build_runner_file.writeAll(
+            switch (build_runner_version) {
+                inline else => |tag| @embedFile("build_runner/" ++ @tagName(tag) ++ ".zig"),
+            },
+        );
+
+        config.build_runner_path = build_runner_path;
     }
 
     if (config.builtin_path == null) blk: {
