@@ -493,7 +493,6 @@ fn initializeHandler(server: *Server, _: std.mem.Allocator, request: types.Initi
 
     if (server.runtime_zig_version) |zig_version_wrapper| {
         const zig_version = zig_version_wrapper.version;
-        const zls_version = comptime std.SemanticVersion.parse(build_options.version) catch unreachable;
 
         const zig_version_simple = std.SemanticVersion{
             .major = zig_version.major,
@@ -501,22 +500,22 @@ fn initializeHandler(server: *Server, _: std.mem.Allocator, request: types.Initi
             .patch = 0,
         };
         const zls_version_simple = std.SemanticVersion{
-            .major = zls_version.major,
-            .minor = zls_version.minor,
+            .major = build_options.version.major,
+            .minor = build_options.version.minor,
             .patch = 0,
         };
 
         switch (zig_version_simple.order(zls_version_simple)) {
             .lt => {
                 server.showMessage(.Warning,
-                    \\Zig `{}` is older than ZLS `{}`. Update Zig to avoid unexpected behavior.
-                , .{ zig_version, zls_version });
+                    \\Zig `{s}` is older than ZLS `{s}`. Update Zig to avoid unexpected behavior.
+                , .{ zig_version_wrapper.raw_string, build_options.version_string });
             },
             .eq => {},
             .gt => {
                 server.showMessage(.Warning,
-                    \\Zig `{}` is newer than ZLS `{}`. Update ZLS to avoid unexpected behavior.
-                , .{ zig_version, zls_version });
+                    \\Zig `{s}` is newer than ZLS `{s}`. Update ZLS to avoid unexpected behavior.
+                , .{ zig_version_wrapper.raw_string, build_options.version_string });
             },
         }
     }
@@ -524,7 +523,7 @@ fn initializeHandler(server: *Server, _: std.mem.Allocator, request: types.Initi
     return .{
         .serverInfo = .{
             .name = "zls",
-            .version = build_options.version,
+            .version = build_options.version_string,
         },
         .capabilities = .{
             .positionEncoding = switch (server.offset_encoding) {

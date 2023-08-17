@@ -43,7 +43,7 @@ pub fn build(b: *std.build.Builder) !void {
     exe_options.addOption(bool, "use_gpa", b.option(bool, "use_gpa", "Good for debugging") orelse (optimize == .Debug));
     exe_options.addOption(bool, "coverage", coverage);
 
-    const version = v: {
+    const version_string = v: {
         const version_string = b.fmt("{d}.{d}.{d}", .{ zls_version.major, zls_version.minor, zls_version.patch });
         const build_root_path = b.build_root.path orelse ".";
 
@@ -79,8 +79,10 @@ pub fn build(b: *std.build.Builder) !void {
             },
         }
     };
+    exe_options.addOption([]const u8, "version_string", version_string);
 
-    exe_options.addOption([]const u8, "version", version);
+    const version = try std.SemanticVersion.parse(version_string);
+    exe_options.addOption(std.SemanticVersion, "version", version);
 
     const known_folders_module = b.dependency("known_folders", .{}).module("known-folders");
     exe.addModule("known-folders", known_folders_module);
