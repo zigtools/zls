@@ -822,28 +822,34 @@ fn extractSnippetFromSignature(allocator: std.mem.Allocator, signature: []const 
 }
 
 /// Generates data files from the Zig language Reference (https://ziglang.org/documentation/master/)
-/// An output example would `zls/src/master.zig`
-fn generateVersionDataFile(allocator: std.mem.Allocator, version: []const u8, path: []const u8) !void {
-    const url = try std.fmt.allocPrint(allocator, "https://raw.githubusercontent.com/ziglang/zig/{s}/doc/langref.html.in", .{version});
-    defer allocator.free(url);
-
-    const response = httpGET(allocator, try std.Uri.parse(url)) catch |err| {
-        std.log.err("failed to download {s}: {}", .{ url, err });
-        return error.DownloadFailed;
+/// Output example: https://github.com/zigtools/zls/blob/0.11.0/src/data/master.zig
+fn generateVersionDataFile(allocator: std.mem.Allocator, version: []const u8, output_path: []const u8, langref_path: ?[]const u8) !void {
+    // const langref_source: []const u8 = @embedFile("langref.html.in");
+    const langref_source = blk: {
+        if (langref_path) |path| {
+            const file = try std.fs.openFileAbsolute(path, .{});
+            defer file.close();
+            break :blk try file.readToEndAlloc(allocator, std.math.maxInt(usize));
+        } else {
+            const url = try std.fmt.allocPrint(allocator, "https://raw.githubusercontent.com/ziglang/zig/{s}/doc/langref.html.in", .{version});
+            defer allocator.free(url);
+            const response = httpGET(allocator, try std.Uri.parse(url)) catch |err| {
+                std.log.err("failed to download {s}: {}", .{ url, err });
+                return error.DownloadFailed;
+            };
+            break :blk switch (response) {
+                .success => |response_bytes| response_bytes,
+                .other => |status| {
+                    const error_name = status.phrase() orelse @tagName(status.class());
+                    std.log.err("failed to download {s}: {s}", .{ url, error_name });
+                    return error.DownloadFailed;
+                },
+            };
+        }
     };
-    const response_bytes = switch (response) {
-        .success => |response_bytes| response_bytes,
-        .other => |status| {
-            const error_name = status.phrase() orelse @tagName(status.class());
-            std.log.err("failed to download {s}: {s}", .{ url, error_name });
-            return error.DownloadFailed;
-        },
-    };
-    defer allocator.free(response_bytes);
+    defer allocator.free(langref_source);
 
-    // const response_bytes: []const u8 = @embedFile("langref.html.in");
-
-    var builtins = try collectBuiltinData(allocator, version, response_bytes);
+    var builtins = try collectBuiltinData(allocator, version, langref_source);
     defer {
         for (builtins) |*builtin| {
             builtin.documentation.deinit(allocator);
@@ -851,7 +857,7 @@ fn generateVersionDataFile(allocator: std.mem.Allocator, version: []const u8, pa
         allocator.free(builtins);
     }
 
-    var builtin_file = try std.fs.createFileAbsolute(path, .{});
+    var builtin_file = try std.fs.createFileAbsolute(output_path, .{});
     defer builtin_file.close();
 
     var buffered_writer = std.io.bufferedWriter(builtin_file.writer());
@@ -982,6 +988,7 @@ pub fn main() !void {
     var vscode_config_path: ?[]const u8 = null;
     var data_version: []const u8 = "master";
     var data_path: ?[]const u8 = null;
+    var langref_path: ?[]const u8 = null;
 
     while (args_it.next()) |argname| {
         if (std.mem.eql(u8, argname, "--help")) {
@@ -997,6 +1004,7 @@ pub fn main() !void {
                 \\    --generate-schema-path [path]        Output json schema file (see schema.json)
                 \\    --generate-version-data [version]    Output version data file (default: master)
                 \\    --generate-version-data-path [path]  Output data file
+                \\    --langref_path [path]                Input langref file (default: fetch from https://raw.githubusercontent.com/ziglang/zig/master/doc/langref.html.in)
                 \\
             );
         } else if (std.mem.eql(u8, argname, "--readme-path")) {
@@ -1054,6 +1062,11 @@ pub fn main() !void {
                 try stderr.print("Expected output path after --generate-version-data-path argument.\n", .{});
                 return;
             };
+        } else if (std.mem.eql(u8, argname, "--langref_path")) {
+            langref_path = args_it.next() orelse {
+                try stderr.print("Expected output path after --langref_path argument.\n", .{});
+                return;
+            };
         } else {
             try stderr.print("Unrecognized argument '{s}'.\n", .{argname});
             return;
@@ -1082,6 +1095,6 @@ pub fn main() !void {
         );
     }
     if (data_path) |output_path| {
-        try generateVersionDataFile(gpa, data_version, output_path);
+        try generateVersionDataFile(gpa, data_version, output_path, langref_path);
     }
 }
