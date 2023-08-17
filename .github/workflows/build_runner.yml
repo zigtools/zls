@@ -4,11 +4,11 @@ on:
   push:
     paths:
       - ".github/workflows/build_runner.yml"
-      - "src/special/build_runner.zig"
+      - "src/build_runner/**"
   pull_request:
     paths:
       - ".github/workflows/build_runner.yml"
-      - "src/special/build_runner.zig"
+      - "src/build_runner/**"
   schedule:
     - cron: '0 0 * * *'
   workflow_dispatch:
@@ -30,11 +30,11 @@ jobs:
           submodules: true
 
       - name: Grab zig
-        uses: goto-bus-stop/setup-zig@v1
+        uses: goto-bus-stop/setup-zig@v2
         with:
           version: ${{ matrix.zig_version }}
 
       - name: Check build_runner builds on master
         run: |
           pwd
-          zig build --build-runner src/special/build_runner.zig
+          zig build --build-runner src/build_runner/master.zig
