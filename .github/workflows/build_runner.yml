@@ -18,7 +18,7 @@ jobs:
     if: github.repository_owner == 'zigtools'
     strategy:
       matrix:
-        zig_version: [master]
+        zig_version: [master, 0.11.0]
 
     runs-on: ubuntu-latest
 
@@ -34,7 +34,13 @@ jobs:
         with:
           version: ${{ matrix.zig_version }}
 
-      - name: Check build_runner builds on master
+      - name: Create temp zig project
         run: |
-          pwd
-          zig build --build-runner src/build_runner/master.zig
+          mkdir $RUNNER_TEMP/TEMP_ZIG_PROJECT
+          cd $RUNNER_TEMP/TEMP_ZIG_PROJECT
+          zig init-exe
+
+      - name: Check build_runner builds
+        run: |
+          cd $RUNNER_TEMP/TEMP_ZIG_PROJECT
+          zig build --build-runner $GITHUB_WORKSPACE/src/build_runner/${{ matrix.zig_version }}*.zig
