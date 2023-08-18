@@ -125,6 +125,7 @@ fn parseArgs(allocator: std.mem.Allocator) !ParseArgsResult {
     const ArgId = enum {
         help,
         version,
+        @"compiler-version",
         replay,
         @"enable-debug-log",
         @"enable-message-tracing",
@@ -142,7 +143,8 @@ fn parseArgs(allocator: std.mem.Allocator) !ParseArgsResult {
         const InfoMap = std.enums.EnumArray(ArgId, []const u8);
         var cmd_infos: InfoMap = InfoMap.init(.{
             .help = "Prints this message.",
-            .version = "Prints the compiler version with which the server was compiled.",
+            .version = "Prints the version.",
+            .@"compiler-version" = "Prints the compiler version with which the server was compiled.",
             .replay = "Replay a previous recorded zls session",
             .@"enable-debug-log" = "Enables debug logs.",
             .@"enable-message-tracing" = "Enables message tracing.",
@@ -192,6 +194,7 @@ fn parseArgs(allocator: std.mem.Allocator) !ParseArgsResult {
         switch (id) {
             .help,
             .version,
+            .@"compiler-version",
             .@"enable-debug-log",
             .@"enable-message-tracing",
             .@"show-config-path",
@@ -215,6 +218,10 @@ fn parseArgs(allocator: std.mem.Allocator) !ParseArgsResult {
     }
     if (specified.get(.version)) {
         try stdout.writeAll(build_options.version ++ "\n");
+        return result;
+    }
+    if (specified.get(.@"compiler-version")) {
+        try stdout.writeAll(zig_builtin.zig_version_string ++ "\n");
         return result;
     }
     if (specified.get(.@"enable-debug-log")) {
