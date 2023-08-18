@@ -6,7 +6,7 @@ const zls_version = std.SemanticVersion{ .major = 0, .minor = 12, .patch = 0 };
 pub fn build(b: *std.build.Builder) !void {
     comptime {
         const current_zig = builtin.zig_version;
-        const min_zig = std.SemanticVersion.parse("0.11.0") catch unreachable;
+        const min_zig = std.SemanticVersion.parse("0.12.0-dev.109+f3f554b9b") catch unreachable; // deprecated float NaN constants
         if (current_zig.order(min_zig) == .lt) {
             @compileError(std.fmt.comptimePrint("Your Zig version v{} does not meet the minimum build requirement of v{}", .{ current_zig, min_zig }));
         }
