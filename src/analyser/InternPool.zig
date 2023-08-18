@@ -3031,8 +3031,8 @@ test "float value" {
     const f80_value = try ip.get(gpa, .{ .float_80_value = 2.0 });
     const f128_value = try ip.get(gpa, .{ .float_128_value = 2.75 });
 
-    const f32_nan_value = try ip.get(gpa, .{ .float_32_value = std.math.nan_f32 });
-    const f32_qnan_value = try ip.get(gpa, .{ .float_32_value = std.math.qnan_f32 });
+    const f32_snan_value = try ip.get(gpa, .{ .float_32_value = std.math.snan(f32) });
+    const f32_qnan_value = try ip.get(gpa, .{ .float_32_value = std.math.nan(f32) });
 
     const f32_inf_value = try ip.get(gpa, .{ .float_32_value = std.math.inf(f32) });
     const f32_ninf_value = try ip.get(gpa, .{ .float_32_value = -std.math.inf(f32) });
@@ -3045,15 +3045,15 @@ test "float value" {
     try expect(f64_value != f80_value);
     try expect(f80_value != f128_value);
 
-    try expect(f32_nan_value != f32_qnan_value);
+    try expect(f32_snan_value != f32_qnan_value);
     try expect(f32_inf_value != f32_ninf_value);
     try expect(f32_zero_value != f32_nzero_value);
 
     try expect(!ip.indexToKey(f16_value).eql(ip.indexToKey(f32_value)));
     try expect(ip.indexToKey(f32_value).eql(ip.indexToKey(f32_value)));
 
-    try expect(ip.indexToKey(f32_nan_value).eql(ip.indexToKey(f32_nan_value)));
-    try expect(!ip.indexToKey(f32_nan_value).eql(ip.indexToKey(f32_qnan_value)));
+    try expect(ip.indexToKey(f32_snan_value).eql(ip.indexToKey(f32_snan_value)));
+    try expect(!ip.indexToKey(f32_snan_value).eql(ip.indexToKey(f32_qnan_value)));
 
     try expect(ip.indexToKey(f32_inf_value).eql(ip.indexToKey(f32_inf_value)));
     try expect(!ip.indexToKey(f32_inf_value).eql(ip.indexToKey(f32_ninf_value)));
@@ -3067,7 +3067,7 @@ test "float value" {
     try expectFmt("2", "{}", .{f80_value.fmt(ip)});
     try expectFmt("2.75", "{}", .{f128_value.fmt(ip)});
 
-    try expectFmt("nan", "{}", .{f32_nan_value.fmt(ip)});
+    try expectFmt("nan", "{}", .{f32_snan_value.fmt(ip)});
     try expectFmt("nan", "{}", .{f32_qnan_value.fmt(ip)});
 
     try expectFmt("inf", "{}", .{f32_inf_value.fmt(ip)});
