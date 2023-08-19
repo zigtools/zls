@@ -1130,7 +1130,7 @@ fn getIdentifierTokenIndexAndFnArgIndex(
                 .l_brace => depth -= 1,
                 .period => if (depth < 0 and token_tags[upper_index + 1] == .l_brace) { // anon struct init `.{.`
                     // if the preceding token is `=`, then this might be a `var foo: Foo = .{.`
-                    if (token_tags[upper_index - 1] == .equal) {
+                    if (upper_index >= 2 and token_tags[upper_index - 1] == .equal) {
                         upper_index -= 2; // eat `= .`
                         break :find_identifier;
                     }
