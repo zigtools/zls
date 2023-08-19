@@ -2446,6 +2446,7 @@ pub fn getPositionContext(
                 else => curr_ctx.ctx = .empty,
             }
 
+            curr_ctx = try peek(allocator, &stack);
             switch (curr_ctx.ctx) {
                 .field_access => |r| curr_ctx.ctx = .{
                     .field_access = tokenLocAppend(r, tok),
