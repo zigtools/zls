@@ -663,6 +663,12 @@ test "completion - cyclic struct init field" {
     , &.{});
 }
 
+test "completion - integer overflow in struct init field without lhs" {
+    try testCompletion(
+        \\= .{ .<cursor>foo
+    , &.{});
+}
+
 fn testCompletion(source: []const u8, expected_completions: []const Completion) !void {
     const cursor_idx = std.mem.indexOf(u8, source, "<cursor>").?;
     const text = try std.mem.concat(allocator, u8, &.{ source[0..cursor_idx], source[cursor_idx + "<cursor>".len ..] });
