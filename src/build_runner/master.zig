@@ -275,6 +275,7 @@ fn processIncludeDirs(
                 const header_dir_path = full_file_path[0 .. full_file_path.len - config_header.include_path.len];
                 try include_dirs.put(builder.allocator, header_dir_path, {});
             },
+            .framework_path, .framework_path_system => {},
         }
     }
 }
