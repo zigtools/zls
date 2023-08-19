@@ -181,8 +181,10 @@ pub fn gotoDefinitionString(
     var import_str_loc = offsets.tokenIndexToLoc(handle.tree.source, loc.start);
     if (import_str_loc.end - import_str_loc.start < 2) return null;
     import_str_loc.start += 1;
-    import_str_loc.end -= 1;
-    var import_str = offsets.locToSlice(handle.tree.source, import_str_loc);
+    if (std.mem.endsWith(u8, offsets.locToSlice(handle.tree.source, import_str_loc), "\"")) {
+        import_str_loc.end -= 1;
+    }
+    const import_str = offsets.locToSlice(handle.tree.source, import_str_loc);
 
     const uri = switch (pos_context) {
         .import_string_literal,
