@@ -4329,7 +4329,7 @@ fn addReferencedTypes(
             => {
                 // NOTE: This is a hacky nightmare but it works :P
                 const token = tree.firstToken(p);
-                if (token_tags[token - 2] == .identifier and token_tags[token - 1] == .equal) {
+                if (token >= 2 and token_tags[token - 2] == .identifier and token_tags[token - 1] == .equal) {
                     const str = tree.tokenSlice(token - 2);
                     if (needs_type_reference) {
                         try referenced_types.put(.{
@@ -4340,7 +4340,7 @@ fn addReferencedTypes(
                     }
                     return str;
                 }
-                if (token_tags[token - 1] == .keyword_return) {
+                if (token >= 1 and token_tags[token - 1] == .keyword_return) {
                     const func_node = innermostBlockScopeInternal(handle.*, token_starts[token - 1], true);
                     var buf: [1]Ast.Node.Index = undefined;
                     const func = tree.fullFnProto(&buf, func_node) orelse return null;

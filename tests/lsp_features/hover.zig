@@ -421,6 +421,19 @@ test "hover - type reference cycle" {
     );
 }
 
+test "hover - integer overflow on top level container" {
+    try testHover(
+        \\enum {  foo.bar: b<cursor>az,}
+    ,
+        \\```zig
+        \\baz
+        \\```
+        \\```zig
+        \\(enum {  foo.bar: baz,})
+        \\```
+    );
+}
+
 fn testHover(source: []const u8, expected: []const u8) !void {
     const cursor_idx = std.mem.indexOf(u8, source, "<cursor>").?;
     const text = try std.mem.concat(allocator, u8, &.{ source[0..cursor_idx], source[cursor_idx + "<cursor>".len ..] });
