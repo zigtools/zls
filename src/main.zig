@@ -98,6 +98,7 @@ fn updateConfig(
         defer allocator.free(json_message);
 
         const new_config = try std.json.parseFromSlice(Config, allocator, json_message, .{});
+        defer allocator.destroy(new_config.arena);
         config.arena.promote(allocator).deinit();
         config.arena = new_config.arena.state;
         config.config = new_config.value;
