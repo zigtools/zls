@@ -554,6 +554,7 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
                 const name_token = capture_token + @intFromBool(capture_is_ref);
                 capture_token = name_token + 2;
 
+                if (token_tags[name_token] != .identifier) continue;
                 try writeTokenMod(builder, name_token, .variable, .{ .declaration = true });
             }
             try writeNodeTokens(builder, for_node.ast.then_expr);

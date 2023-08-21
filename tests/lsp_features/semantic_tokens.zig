@@ -738,6 +738,12 @@ test "semantic tokens - error set member" {
         .{ "=", .operator, .{} },
         .{ "error", .keyword, .{} },
         .{ "OutOfMemory", .errorTag, .{} },
+
+        .{ "const", .keyword, .{} },
+        .{ "bar", .variable, .{ .declaration = true } },
+        .{ "=", .operator, .{} },
+        .{ "Foo", .type, .{} },
+        .{ "OutOfMemory", .variable, .{} }, // TODO .errorTag
     });
 }
 
@@ -1076,6 +1082,49 @@ const TokenData = struct {
     zls.semantic_tokens.TokenModifiers,
 };
 
+const TokenIterator = struct {
+    it: std.mem.WindowIterator(u32),
+    source: []const u8,
+    position: types.Position,
+
+    pub const Token = struct {
+        loc: offsets.Loc,
+        type: zls.semantic_tokens.TokenType,
+        modifiers: zls.semantic_tokens.TokenModifiers,
+    };
+
+    pub fn init(source: []const u8, data: []const u32) TokenIterator {
+        std.debug.assert(data.len % 5 == 0);
+        return .{
+            .it = std.mem.window(u32, data, 5, 5),
+            .source = source,
+            .position = .{ .line = 0, .character = 0 },
+        };
+    }
+
+    pub fn next(self: *TokenIterator) ?Token {
+        const token_data = self.it.next() orelse return null;
+        if (token_data.len != 5) return null;
+        const delta_line = token_data[0];
+        const delta_start = token_data[1];
+        const length = token_data[2];
+        const token_type: zls.semantic_tokens.TokenType = @enumFromInt(token_data[3]);
+        const token_modifiers: zls.semantic_tokens.TokenModifiers = @bitCast(@as(u16, @intCast(token_data[4])));
+
+        self.position.line += delta_line;
+        self.position.character = delta_start + if (delta_line == 0) self.position.character else 0;
+
+        const source_index = offsets.positionToIndex(self.source, self.position, .@"utf-8");
+        const loc: offsets.Loc = .{ .start = source_index, .end = source_index + length };
+
+        return .{
+            .loc = loc,
+            .type = token_type,
+            .modifiers = token_modifiers,
+        };
+    }
+};
+
 fn testSemanticTokens(source: [:0]const u8, expected_tokens: []const TokenData) !void {
     var ctx = try Context.init();
     defer ctx.deinit();
@@ -1096,47 +1145,36 @@ fn testSemanticTokens(source: [:0]const u8, expected_tokens: []const TokenData) 
 
     try error_builder.addFile(uri, source);
 
-    var token_it = std.mem.window(u32, actual, 5, 5);
-    var position: types.Position = .{ .line = 0, .character = 0 };
+    var token_it = TokenIterator.init(source, actual);
     var last_token_end: usize = 0;
 
     for (expected_tokens) |expected_token| {
-        const token_data = token_it.next() orelse {
+        const token = token_it.next() orelse {
             try error_builder.msgAtIndex("expected a `{s}` token here", uri, last_token_end, .err, .{expected_token.@"0"});
             return error.ExpectedToken;
         };
+        last_token_end = token.loc.end;
 
-        const delta_line = token_data[0];
-        const delta_start = token_data[1];
-        const length = token_data[2];
-        const token_type: zls.semantic_tokens.TokenType = @enumFromInt(token_data[3]);
-        const token_modifiers: zls.semantic_tokens.TokenModifiers = @bitCast(@as(u16, @intCast(token_data[4])));
-
-        position.line += delta_line;
-        position.character = delta_start + if (delta_line == 0) position.character else 0;
-
-        const source_index = offsets.positionToIndex(source, position, .@"utf-8");
-        const token_loc: offsets.Loc = .{
-            .start = source_index,
-            .end = source_index + length,
-        };
-        last_token_end = token_loc.end;
-
-        const token_source = offsets.locToSlice(source, token_loc);
+        const token_source = offsets.locToSlice(source, token.loc);
 
         const expected_token_source = expected_token.@"0";
         const expected_token_type = expected_token.@"1";
         const expected_token_modifiers = expected_token.@"2";
 
         if (!std.mem.eql(u8, expected_token_source, token_source)) {
-            try error_builder.msgAtLoc("expected `{s}` as the next token but got `{s}` here", uri, token_loc, .err, .{ expected_token_source, token_source });
+            try error_builder.msgAtLoc("expected `{s}` as the next token but got `{s}` here", uri, token.loc, .err, .{ expected_token_source, token_source });
             return error.UnexpectedTokenContent;
-        } else if (expected_token_type != token_type) {
-            try error_builder.msgAtLoc("expected token type `{s}` but got `{s}`", uri, token_loc, .err, .{ @tagName(expected_token_type), @tagName(token_type) });
+        } else if (expected_token_type != token.type) {
+            try error_builder.msgAtLoc("expected token type `{s}` but got `{s}`", uri, token.loc, .err, .{ @tagName(expected_token_type), @tagName(token.type) });
             return error.UnexpectedTokenType;
-        } else if (!std.meta.eql(expected_token_modifiers, token_modifiers)) {
-            try error_builder.msgAtLoc("expected token modifiers `{}` but got `{}`", uri, token_loc, .err, .{ expected_token_modifiers, token_modifiers });
+        } else if (!std.meta.eql(expected_token_modifiers, token.modifiers)) {
+            try error_builder.msgAtLoc("expected token modifiers `{}` but got `{}`", uri, token.loc, .err, .{ expected_token_modifiers, token.modifiers });
             return error.UnexpectedTokenModifiers;
         }
+    }
+
+    if (token_it.next()) |unexpected_token| {
+        try error_builder.msgAtLoc("unexpected `{}` token here", uri, unexpected_token.loc, .err, .{unexpected_token.type});
+        return error.UnexpectedToken;
     }
 }
