@@ -743,7 +743,7 @@ test "semantic tokens - error set member" {
         .{ "bar", .variable, .{ .declaration = true } },
         .{ "=", .operator, .{} },
         .{ "Foo", .type, .{} },
-        .{ "OutOfMemory", .variable, .{} }, // TODO .errorTag
+        .{ "OutOfMemory", .errorTag, .{} },
     });
 }
 
