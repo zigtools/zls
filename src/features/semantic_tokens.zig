@@ -872,10 +872,13 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
                                 else => null,
                             };
 
-                            if (tok_type) |tt| try writeToken(builder, data.rhs, tt);
-                            return;
+                            if (tok_type) |tt| {
+                                try writeToken(builder, data.rhs, tt);
+                                return;
+                            }
                         } else if (decl_type.handle.tree.nodes.items(.tag)[decl_node] == .error_value) {
                             try writeToken(builder, data.rhs, .errorTag);
+                            return;
                         }
                     },
                     else => {},
@@ -883,8 +886,11 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
 
                 if (try decl_type.resolveType(builder.analyser)) |resolved_type| {
                     try colorIdentifierBasedOnType(builder, resolved_type, data.rhs, false, .{});
+                    return;
                 }
             }
+
+            try writeTokenMod(builder, data.rhs, .variable, .{});
         },
         .ptr_type,
         .ptr_type_aligned,
