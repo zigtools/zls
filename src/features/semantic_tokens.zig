@@ -878,10 +878,11 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
                                 try writeToken(builder, data.rhs, tt);
                                 return;
                             }
-                        } else if (decl_type.handle.tree.nodes.items(.tag)[decl_node] == .error_value) {
-                            try writeToken(builder, data.rhs, .errorTag);
-                            return;
                         }
+                    },
+                    .error_token => {
+                        try writeToken(builder, data.rhs, .errorTag);
+                        return;
                     },
                     else => {},
                 }
