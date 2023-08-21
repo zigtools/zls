@@ -550,6 +550,7 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
 
             var capture_token = for_node.payload_token;
             for (for_node.ast.inputs) |_| {
+                if (capture_token >= tree.tokens.len - 1) break;
                 const capture_is_ref = token_tags[capture_token] == .asterisk;
                 const name_token = capture_token + @intFromBool(capture_is_ref);
                 capture_token = name_token + 2;
