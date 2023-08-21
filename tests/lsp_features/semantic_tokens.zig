@@ -945,6 +945,17 @@ test "semantic tokens - for" {
     });
 }
 
+test "semantic tokens - for with invalid capture" {
+    try testSemanticTokens(
+        \\for (foo bar) baz
+    , &.{
+        .{ "for", .keyword, .{} },
+        .{ "foo", .variable, .{} },
+        .{ "bar", .variable, .{} },
+        .{ "baz", .variable, .{} },
+    });
+}
+
 test "semantic tokens - switch" {
     try testSemanticTokens(
         \\const foo = switch (3) {};
