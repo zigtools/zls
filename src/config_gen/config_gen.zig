@@ -857,7 +857,7 @@ fn generateVersionDataFile(allocator: std.mem.Allocator, version: []const u8, ou
         allocator.free(builtins);
     }
 
-    var builtin_file = try std.fs.createFileAbsolute(output_path, .{});
+    var builtin_file = try std.fs.cwd().createFile(output_path, .{});
     defer builtin_file.close();
 
     var buffered_writer = std.io.bufferedWriter(builtin_file.writer());

@@ -33,6 +33,7 @@ pub fn build(b: *std.build.Builder) !void {
     const test_filter = b.option([]const u8, "test-filter", "Skip tests that do not match filter");
     const data_version = b.option([]const u8, "data_version", "The Zig version your compiler is.") orelse "master";
     const data_version_path = b.option([]const u8, "version_data_path", "Manually specify zig language reference file");
+    const override_version_data_file_path = b.option([]const u8, "version_data_file_path", "Relative path to version data file (if none, will be named with timestamp)");
 
     exe_options.addOption(std.log.Level, "log_level", b.option(std.log.Level, "log_level", "The Log Level to be used.") orelse .info);
     exe_options.addOption(bool, "enable_tracy", enable_tracy);
@@ -145,7 +146,7 @@ pub fn build(b: *std.build.Builder) !void {
     gen_version_data_cmd.addArgs(&.{ "--generate-version-data", data_version });
     if (data_version_path) |path| {
         gen_version_data_cmd.addArg("--langref_path");
-        gen_version_data_cmd.addFileArg(.{ .path = path });
+        gen_version_data_cmd.addFileArg(.{ .cwd_relative = path });
     }
     const version_data_file_name = if (data_version_path != null)
         b.fmt("version_data_{s}.zig", .{data_version})
@@ -156,7 +157,10 @@ pub fn build(b: *std.build.Builder) !void {
         break :blk b.fmt("version_data_{s}_{d}.zig", .{ data_version, timestamp });
     };
     gen_version_data_cmd.addArg("--generate-version-data-path");
-    const version_data_path = gen_version_data_cmd.addOutputFileArg(version_data_file_name);
+    const version_data_path: std.build.LazyPath = if (override_version_data_file_path) |path|
+        .{ .cwd_relative = path }
+    else
+        gen_version_data_cmd.addOutputFileArg(version_data_file_name);
     const version_data_module = b.addModule("version_data", .{ .source_file = version_data_path });
     exe.addModule("version_data", version_data_module);
 
