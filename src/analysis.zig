@@ -17,7 +17,7 @@ gpa: std.mem.Allocator,
 arena: std.heap.ArenaAllocator,
 store: *DocumentStore,
 ip: ?*InternPool,
-bound_type_params: std.AutoHashMapUnmanaged(Ast.full.FnProto.Param, TypeWithHandle) = .{},
+bound_type_params: std.AutoHashMapUnmanaged(Declaration.Param, TypeWithHandle) = .{},
 resolved_nodes: std.HashMapUnmanaged(NodeWithUri, ?TypeWithHandle, NodeWithUri.Context, std.hash_map.default_max_load_percentage) = .{},
 /// used to detect recursion
 node_trail: std.HashMapUnmanaged(NodeWithUri, void, NodeWithUri.Context, std.hash_map.default_max_load_percentage) = .{},
@@ -1091,98 +1091,98 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 return null;
 
             if (decl.type.is_type_val) return null;
-            const decl_node = switch (decl.type.data) {
+            const func_node = switch (decl.type.data) {
                 .other => |n| n,
                 else => return null,
             };
             var buf: [1]Ast.Node.Index = undefined;
-            const func_maybe = decl.handle.tree.fullFnProto(&buf, decl_node);
+            const fn_decl = decl.handle.tree.fullFnProto(&buf, func_node) orelse return null;
 
-            if (func_maybe) |fn_decl| {
-                var expected_params = fn_decl.ast.params.len;
-                // If we call as method, the first parameter should be skipped
-                // TODO: Back-parse to extract the self argument?
-                var it = fn_decl.iterate(&decl.handle.tree);
-                if (try analyser.isInstanceCall(handle, call, decl.handle, fn_decl)) {
-                    _ = ast.nextFnParam(&it);
-                    expected_params -= 1;
-                }
-
-                // Bind type params to the arguments passed in the call.
-                const param_len = @min(call.ast.params.len, expected_params);
-                var i: usize = 0;
-                while (ast.nextFnParam(&it)) |decl_param| : (i += 1) {
-                    if (i >= param_len) break;
-                    if (!isMetaType(decl.handle.tree, decl_param.type_expr))
-                        continue;
-
-                    const argument = .{ .node = call.ast.params[i], .handle = handle };
-                    const argument_type = (try analyser.resolveTypeOfNodeInternal(
-                        argument,
-                    )) orelse
-                        continue;
-                    if (!argument_type.type.is_type_val) continue;
-
-                    try analyser.bound_type_params.put(analyser.gpa, decl_param, argument_type);
-                }
-
-                const has_body = decl.handle.tree.nodes.items(.tag)[decl_node] == .fn_decl;
-                const body = decl.handle.tree.nodes.items(.data)[decl_node].rhs;
-                if (try analyser.resolveReturnType(fn_decl, decl.handle, if (has_body) body else null)) |ret| {
-                    return ret;
-                } else if (analyser.store.config.dangerous_comptime_experiments_do_not_enable) {
-                    // TODO: Better case-by-case; we just use the ComptimeInterpreter when all else fails,
-                    // probably better to use it more liberally
-                    // TODO: Handle non-isolate args; e.g. `const T = u8; TypeFunc(T);`
-                    // var interpreter = ComptimeInterpreter{ .tree = tree, .allocator = arena.allocator() };
-
-                    // var top_decl = try (try interpreter.interpret(0, null, .{})).getValue();
-                    // var top_scope = interpreter.typeToTypeInfo(top_decl.@"type".info_idx).@"struct".scope;
-
-                    // var fn_decl_scope = top_scope.getParentScopeFromNode(node);
-
-                    log.info("Invoking interpreter!", .{});
-
-                    const interpreter = analyser.store.ensureInterpreterExists(handle.uri, analyser.ip.?) catch |err| {
-                        log.err("Failed to interpret file: {s}", .{@errorName(err)});
-                        if (@errorReturnTrace()) |trace| {
-                            std.debug.dumpStackTrace(trace.*);
-                        }
-                        return null;
-                    };
-
-                    const root_namespace: ComptimeInterpreter.Namespace.Index = @enumFromInt(0);
-
-                    // TODO: Start from current/nearest-current scope
-                    const result = interpreter.interpret(node, root_namespace, .{}) catch |err| {
-                        log.err("Failed to interpret node: {s}", .{@errorName(err)});
-                        if (@errorReturnTrace()) |trace| {
-                            std.debug.dumpStackTrace(trace.*);
-                        }
-                        return null;
-                    };
-                    const value = result.getValue() catch |err| {
-                        log.err("interpreter return no result: {s}", .{@errorName(err)});
-                        if (@errorReturnTrace()) |trace| {
-                            std.debug.dumpStackTrace(trace.*);
-                        }
-                        return null;
-                    };
-                    const is_type_val = interpreter.ip.indexToKey(value.index).typeOf() == .type_type;
-
-                    return TypeWithHandle{
-                        .type = .{
-                            .data = .{ .@"comptime" = .{
-                                .interpreter = interpreter,
-                                .value = value,
-                            } },
-                            .is_type_val = is_type_val,
-                        },
-                        .handle = node_handle.handle,
-                    };
-                }
+            var expected_params = fn_decl.ast.params.len;
+            // If we call as method, the first parameter should be skipped
+            // TODO: Back-parse to extract the self argument?
+            var it = fn_decl.iterate(&decl.handle.tree);
+            if (try analyser.isInstanceCall(handle, call, decl.handle, fn_decl)) {
+                _ = ast.nextFnParam(&it);
+                expected_params -= 1;
             }
-            return null;
+
+            // Bind type params to the arguments passed in the call.
+            const param_len = @min(call.ast.params.len, expected_params);
+            var i: usize = 0;
+            while (ast.nextFnParam(&it)) |decl_param| : (i += 1) {
+                if (i >= param_len) break;
+                if (!isMetaType(decl.handle.tree, decl_param.type_expr))
+                    continue;
+
+                const argument = .{ .node = call.ast.params[i], .handle = handle };
+                const argument_type = (try analyser.resolveTypeOfNodeInternal(
+                    argument,
+                )) orelse
+                    continue;
+                if (!argument_type.type.is_type_val) continue;
+
+                try analyser.bound_type_params.put(analyser.gpa, .{
+                    .func = func_node,
+                    .param_index = @intCast(i),
+                }, argument_type);
+            }
+
+            const has_body = decl.handle.tree.nodes.items(.tag)[func_node] == .fn_decl;
+            const body = decl.handle.tree.nodes.items(.data)[func_node].rhs;
+            if (try analyser.resolveReturnType(fn_decl, decl.handle, if (has_body) body else null)) |ret| {
+                return ret;
+            } else if (analyser.store.config.dangerous_comptime_experiments_do_not_enable) {
+                // TODO: Better case-by-case; we just use the ComptimeInterpreter when all else fails,
+                // probably better to use it more liberally
+                // TODO: Handle non-isolate args; e.g. `const T = u8; TypeFunc(T);`
+                // var interpreter = ComptimeInterpreter{ .tree = tree, .allocator = arena.allocator() };
+
+                // var top_decl = try (try interpreter.interpret(0, null, .{})).getValue();
+                // var top_scope = interpreter.typeToTypeInfo(top_decl.@"type".info_idx).@"struct".scope;
+
+                // var fn_decl_scope = top_scope.getParentScopeFromNode(node);
+
+                log.info("Invoking interpreter!", .{});
+
+                const interpreter = analyser.store.ensureInterpreterExists(handle.uri, analyser.ip.?) catch |err| {
+                    log.err("Failed to interpret file: {s}", .{@errorName(err)});
+                    if (@errorReturnTrace()) |trace| {
+                        std.debug.dumpStackTrace(trace.*);
+                    }
+                    return null;
+                };
+
+                const root_namespace: ComptimeInterpreter.Namespace.Index = @enumFromInt(0);
+
+                // TODO: Start from current/nearest-current scope
+                const result = interpreter.interpret(node, root_namespace, .{}) catch |err| {
+                    log.err("Failed to interpret node: {s}", .{@errorName(err)});
+                    if (@errorReturnTrace()) |trace| {
+                        std.debug.dumpStackTrace(trace.*);
+                    }
+                    return null;
+                };
+                const value = result.getValue() catch |err| {
+                    log.err("interpreter return no result: {s}", .{@errorName(err)});
+                    if (@errorReturnTrace()) |trace| {
+                        std.debug.dumpStackTrace(trace.*);
+                    }
+                    return null;
+                };
+                const is_type_val = interpreter.ip.indexToKey(value.index).typeOf() == .type_type;
+
+                return TypeWithHandle{
+                    .type = .{
+                        .data = .{ .@"comptime" = .{
+                            .interpreter = interpreter,
+                            .value = value,
+                        } },
+                        .is_type_val = is_type_val,
+                    },
+                    .handle = node_handle.handle,
+                };
+            }
         },
         .@"comptime",
         .@"nosuspend",
@@ -2496,11 +2496,7 @@ pub const Declaration = union(enum) {
     /// Index of the ast node
     ast_node: Ast.Node.Index,
     /// Function parameter
-    param_payload: struct {
-        param: Ast.full.FnProto.Param,
-        param_idx: u16,
-        func: Ast.Node.Index,
-    },
+    param_payload: Param,
     pointer_payload: struct {
         name: Ast.TokenIndex,
         condition: Ast.Node.Index,
@@ -2526,6 +2522,22 @@ pub const Declaration = union(enum) {
     },
     /// always an identifier
     error_token: Ast.TokenIndex,
+
+    pub const Param = struct {
+        param_index: u16,
+        func: Ast.Node.Index,
+
+        pub fn get(self: Param, tree: Ast) Ast.full.FnProto.Param {
+            var buffer: [1]Ast.Node.Index = undefined;
+            const func = tree.fullFnProto(&buffer, self.func).?;
+            var param_index: usize = 0;
+            var it = func.iterate(&tree);
+            while (ast.nextFnParam(&it)) |param| : (param_index += 1) {
+                if (self.param_index == param_index) return param;
+            }
+            unreachable;
+        }
+    };
 
     pub const Index = enum(u32) { _ };
 
@@ -2569,7 +2581,7 @@ pub const DeclWithHandle = struct {
         const tree = self.handle.tree;
         return switch (self.decl.*) {
             .ast_node => |n| getDeclNameToken(tree, n).?,
-            .param_payload => |pp| pp.param.name_token.?,
+            .param_payload => |pp| pp.get(tree).name_token.?,
             .pointer_payload => |pp| pp.name,
             .error_union_payload => |ep| ep.name,
             .array_payload => |ap| ap.identifier,
@@ -2607,7 +2619,8 @@ pub const DeclWithHandle = struct {
             // TODO: delete redundant `Analyser.`
             .ast_node => |node| try Analyser.getDocComments(allocator, tree, node),
             .param_payload => |pay| {
-                const doc_comments = pay.param.first_doc_comment orelse return null;
+                const param = pay.get(tree);
+                const doc_comments = param.first_doc_comment orelse return null;
                 return try Analyser.collectDocComments(allocator, tree, doc_comments, false);
             },
             .error_token => |token| try Analyser.getDocCommentsBeforeToken(allocator, tree, token),
@@ -2631,8 +2644,10 @@ pub const DeclWithHandle = struct {
                 .{ .node = node, .handle = self.handle },
             ),
             .param_payload => |pay| {
+                const param = pay.get(tree);
+
                 // handle anytype
-                if (pay.param.type_expr == 0) {
+                if (param.type_expr == 0) {
                     // protection against recursive callsite resolution
                     const node_with_uri = NodeWithUri{ .node = pay.func, .uri = self.handle.uri };
                     const gop_resolved = try analyser.resolved_nodes.getOrPut(analyser.gpa, node_with_uri);
@@ -2669,10 +2684,10 @@ pub const DeclWithHandle = struct {
                         var call_buf: [1]Ast.Node.Index = undefined;
                         var call = handle.tree.fullCall(&call_buf, ref.call_node).?;
 
-                        const real_param_idx = if (func_params_len != 0 and pay.param_idx != 0 and call.ast.params.len == func_params_len - 1)
-                            pay.param_idx - 1
+                        const real_param_idx = if (func_params_len != 0 and pay.param_index != 0 and call.ast.params.len == func_params_len - 1)
+                            pay.param_index - 1
                         else
-                            pay.param_idx;
+                            pay.param_index;
 
                         if (real_param_idx >= call.ast.params.len) continue;
 
@@ -2700,21 +2715,19 @@ pub const DeclWithHandle = struct {
                     return maybe_type_handle;
                 }
 
-                const param_decl = pay.param;
-                if (isMetaType(self.handle.tree, param_decl.type_expr)) {
-                    var bound_param_it = analyser.bound_type_params.iterator();
-                    while (bound_param_it.next()) |entry| {
-                        if (std.meta.eql(entry.key_ptr.*, param_decl)) return entry.value_ptr.*;
+                if (isMetaType(self.handle.tree, param.type_expr)) {
+                    if (analyser.bound_type_params.get(.{ .func = pay.func, .param_index = pay.param_index })) |resolved_type| {
+                        return resolved_type;
                     }
-                    return try analyser.resolveTypeOfNodeInternal(.{ .node = param_decl.type_expr, .handle = self.handle });
-                } else if (node_tags[param_decl.type_expr] == .identifier) {
-                    if (param_decl.name_token) |name_tok| {
-                        if (std.mem.eql(u8, tree.tokenSlice(main_tokens[param_decl.type_expr]), tree.tokenSlice(name_tok)))
+                    return try analyser.resolveTypeOfNodeInternal(.{ .node = param.type_expr, .handle = self.handle });
+                } else if (node_tags[param.type_expr] == .identifier) {
+                    if (param.name_token) |name_tok| {
+                        if (std.mem.eql(u8, tree.tokenSlice(main_tokens[param.type_expr]), tree.tokenSlice(name_tok)))
                             return null;
                     }
                 }
                 return ((try analyser.resolveTypeOfNodeInternal(
-                    .{ .node = param_decl.type_expr, .handle = self.handle },
+                    .{ .node = param.type_expr, .handle = self.handle },
                 )) orelse return null).instanceTypeVal();
             },
             .pointer_payload => |pay| try analyser.resolveUnwrapOptionalType(
@@ -3938,8 +3951,7 @@ fn makeScopeAt(
                         scope_index,
                         tree.tokenSlice(name_token),
                         .{ .param_payload = .{
-                            .param = param,
-                            .param_idx = @intCast(param_index),
+                            .param_index = @intCast(param_index),
                             .func = node_idx,
                         } },
                     );

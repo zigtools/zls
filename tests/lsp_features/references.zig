@@ -69,6 +69,19 @@ test "references - local scope" {
     );
 }
 
+test "references - for/while capture" {
+    try testReferences(
+        \\const blk = {
+        \\    for ("") |<0>| {
+        \\        _ = <0>;
+        \\    }
+        \\    while (false) |<1>| {
+        \\        _ = <1>;
+        \\    }
+        \\};
+    );
+}
+
 test "references - struct field access" {
     if (true) return error.SkipZigTest; // TODO
     try testReferences(

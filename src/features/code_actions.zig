@@ -125,7 +125,7 @@ fn handleUnusedFunctionParameter(builder: *Builder, actions: *std.ArrayListUnman
         .title = "remove function parameter",
         .kind = .quickfix,
         .isPreferred = false,
-        .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditLoc(getParamRemovalRange(tree, payload.param), "")}),
+        .edit = try builder.createWorkspaceEdit(&.{builder.createTextEditLoc(getParamRemovalRange(tree, payload.get(tree)), "")}),
     };
 
     try actions.appendSlice(builder.arena, &.{ action1, action2 });

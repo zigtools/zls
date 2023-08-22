@@ -422,7 +422,7 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: Analyser.Decl
             context.either_descriptor,
         ),
         .param_payload => |pay| {
-            const param = pay.param;
+            const param = pay.get(tree);
             const name = tree.tokenSlice(param.name_token.?);
             const doc = try completionDoc(
                 context.server,
