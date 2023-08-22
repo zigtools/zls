@@ -210,45 +210,22 @@ pub fn symbolReferences(
     if (include_decl) try builder.add(curr_handle, decl_handle.nameToken());
 
     switch (decl_handle.decl.*) {
-        .ast_node,
+        .ast_node => {
+            try builder.collectReferences(curr_handle, 0);
+            if (workspace) {
+                try gatherReferences(allocator, analyser, curr_handle, skip_std_references, include_decl, &builder, .get);
+            }
+        },
         .pointer_payload,
         .error_union_payload,
-        .switch_payload,
         .array_payload,
-        .array_index,
+        .switch_payload,
         => {
             try builder.collectReferences(curr_handle, 0);
-
-            if (decl_handle.decl.* != .ast_node or !workspace) return builder.locations;
-
-            try gatherReferences(allocator, analyser, curr_handle, skip_std_references, include_decl, &builder, .get);
         },
-        .param_payload => |payload| blk: {
-            // Rename the param tok.
-            for (curr_handle.document_scope.scopes.items(.data)) |scope_data| {
-                if (scope_data != .function) continue;
-
-                const proto = scope_data.function;
-
-                var buf: [1]Ast.Node.Index = undefined;
-                const fn_proto = curr_handle.tree.fullFnProto(&buf, proto).?;
-
-                var it = fn_proto.iterate(&curr_handle.tree);
-                while (ast.nextFnParam(&it)) |candidate| {
-                    if (!std.meta.eql(candidate, payload.param)) continue;
-
-                    while (ast.nextFnParam(&it)) |param|
-                        try builder.collectReferences(curr_handle, param.type_expr);
-                    try builder.collectReferences(curr_handle, fn_proto.ast.return_type);
-                    if (curr_handle.tree.nodes.items(.tag)[proto] != .fn_decl) break :blk;
-                    try builder.collectReferences(curr_handle, curr_handle.tree.nodes.items(.data)[proto].rhs);
-                    break :blk;
-                }
-            }
-            log.warn("Could not find param decl's function", .{});
-        },
+        .param_payload => |payload| try builder.collectReferences(curr_handle, payload.func),
         .label_decl => unreachable, // handled separately by labelReferences
-        .error_token => {},
+        .array_index, .error_token => {},
     }
 
     return builder.locations;
