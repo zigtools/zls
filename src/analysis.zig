@@ -2511,11 +2511,7 @@ pub const Declaration = union(enum) {
         array_expr: Ast.Node.Index,
     },
     array_index: Ast.TokenIndex,
-    switch_payload: struct {
-        node: Ast.TokenIndex,
-        switch_expr: Ast.Node.Index,
-        items: []const Ast.Node.Index,
-    },
+    switch_payload: Switch,
     label_decl: struct {
         label: Ast.TokenIndex,
         block: Ast.Node.Index,
@@ -2536,6 +2532,20 @@ pub const Declaration = union(enum) {
                 if (self.param_index == param_index) return param;
             }
             unreachable;
+        }
+    };
+
+    pub const Switch = struct {
+        /// tag is `.@"switch"` or `.switch_comma`
+        node: Ast.Node.Index,
+        /// is guaranteed to have a payload_token
+        case_index: u32,
+
+        pub fn getCase(self: Switch, tree: Ast) Ast.full.SwitchCase {
+            const node_datas = tree.nodes.items(.data);
+            const extra = tree.extraData(node_datas[self.node].rhs, Ast.Node.SubRange);
+            const cases = tree.extra_data[extra.start..extra.end];
+            return tree.fullSwitchCase(cases[self.case_index]).?;
         }
     };
 
@@ -2586,9 +2596,13 @@ pub const DeclWithHandle = struct {
             .error_union_payload => |ep| ep.name,
             .array_payload => |ap| ap.identifier,
             .array_index => |ai| ai,
-            .switch_payload => |sp| sp.node,
             .label_decl => |ld| ld.label,
             .error_token => |et| et,
+            .switch_payload => |payload| {
+                const case = payload.getCase(tree);
+                const payload_token = case.payload_token.?;
+                return payload_token + @intFromBool(tree.tokens.items(.tag)[payload_token] == .asterisk);
+            },
         };
     }
 
@@ -2758,22 +2772,26 @@ pub const DeclWithHandle = struct {
                 .node = decl.block,
                 .handle = self.handle,
             }),
-            .switch_payload => |pay| {
-                if (pay.items.len == 0) return null;
+            .switch_payload => |payload| {
+                const cond = tree.nodes.items(.data)[payload.node].lhs;
+                const case = payload.getCase(tree);
+                const values = case.ast.values;
+
+                if (values.len == 0) return null;
                 // TODO Peer type resolution, we just use the first item for now.
                 const switch_expr_type = (try analyser.resolveTypeOfNodeInternal(.{
-                    .node = pay.switch_expr,
+                    .node = cond,
                     .handle = self.handle,
                 })) orelse return null;
                 if (!switch_expr_type.isUnionType())
                     return null;
 
-                if (node_tags[pay.items[0]] != .enum_literal) return null;
+                if (node_tags[values[0]] != .enum_literal) return null;
 
                 const scope_index = findContainerScopeIndex(.{ .node = switch_expr_type.type.data.other, .handle = switch_expr_type.handle }) orelse return null;
                 const scope_decls = switch_expr_type.handle.document_scope.scopes.items(.decls);
 
-                const name = tree.tokenSlice(main_tokens[pay.items[0]]);
+                const name = tree.tokenSlice(main_tokens[values[0]]);
                 const decl_key = Declaration.Key{ .kind = .field, .name = name };
                 const decl_index = scope_decls[scope_index].get(decl_key) orelse return null;
                 const decl = switch_expr_type.handle.document_scope.decls.items[@intFromEnum(decl_index)];
@@ -4157,11 +4175,10 @@ fn makeScopeAt(
         .@"switch",
         .switch_comma,
         => {
-            const cond = data[node_idx].lhs;
             const extra = tree.extraData(data[node_idx].rhs, Ast.Node.SubRange);
             const cases = tree.extra_data[extra.start..extra.end];
 
-            for (cases) |case| {
+            for (cases, 0..) |case, case_index| {
                 const switch_case: Ast.full.SwitchCase = tree.fullSwitchCase(case).?;
 
                 if (switch_case.payload_token) |payload| {
@@ -4171,7 +4188,7 @@ fn makeScopeAt(
                     const name = tree.tokenSlice(name_token);
 
                     try context.putVarDecl(expr_index, name, .{
-                        .switch_payload = .{ .node = name_token, .switch_expr = cond, .items = switch_case.ast.values },
+                        .switch_payload = .{ .node = node_idx, .case_index = @intCast(case_index) },
                     });
                 } else {
                     try makeScopeInternal(context, tree, switch_case.ast.target_expr);
