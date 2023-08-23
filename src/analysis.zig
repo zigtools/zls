@@ -3209,137 +3209,182 @@ pub fn resolveExpressionTypeFromAncestors(
     const datas: []Ast.Node.Data = tree.nodes.items(.data);
     const token_tags: []std.zig.Token.Tag = tree.tokens.items(.tag);
 
-    var call_buf: [1]Ast.Node.Index = undefined;
-    var struct_init_buf: [2]Ast.Node.Index = undefined;
-
-    if (tree.fullStructInit(&struct_init_buf, ancestors[0])) |struct_init| {
-        if (std.mem.indexOfScalar(Ast.Node.Index, struct_init.ast.fields, node) != null) {
-            const field_name = tree.tokenSlice(tree.firstToken(node) - 2);
-            if (try analyser.lookupSymbolFieldInit(handle, field_name, ancestors)) |field_decl| {
-                return try field_decl.resolveType(analyser);
+    switch (node_tags[ancestors[0]]) {
+        .struct_init_one,
+        .struct_init_one_comma,
+        .struct_init_dot_two,
+        .struct_init_dot_two_comma,
+        .struct_init_dot,
+        .struct_init_dot_comma,
+        .struct_init,
+        .struct_init_comma,
+        => {
+            var buffer: [2]Ast.Node.Index = undefined;
+            const struct_init = tree.fullStructInit(&buffer, ancestors[0]).?;
+            if (std.mem.indexOfScalar(Ast.Node.Index, struct_init.ast.fields, node) != null) {
+                const field_name = tree.tokenSlice(tree.firstToken(node) - 2);
+                if (try analyser.lookupSymbolFieldInit(handle, field_name, ancestors)) |field_decl| {
+                    return try field_decl.resolveType(analyser);
+                }
             }
-        }
-    } else if (tree.fullArrayInit(&struct_init_buf, ancestors[0])) |array_init| {
-        const element_index = std.mem.indexOfScalar(Ast.Node.Index, array_init.ast.elements, node) orelse
-            return null;
+        },
+        .array_init_one,
+        .array_init_one_comma,
+        .array_init_dot_two,
+        .array_init_dot_two_comma,
+        .array_init_dot,
+        .array_init_dot_comma,
+        .array_init,
+        .array_init_comma,
+        => {
+            var buffer: [2]Ast.Node.Index = undefined;
+            const array_init = tree.fullArrayInit(&buffer, ancestors[0]).?;
+            const element_index = std.mem.indexOfScalar(Ast.Node.Index, array_init.ast.elements, node) orelse
+                return null;
 
-        if (try analyser.resolveExpressionType(
-            handle,
-            ancestors[0],
-            ancestors[1..],
-        )) |array_type| {
-            return (try analyser.resolveBracketAccessType(array_type, .Single)) orelse
-                (try analyser.resolveTupleFieldType(array_type, element_index));
-        }
-
-        if (ancestors.len != 1 and node_tags[ancestors[1]] == .address_of) {
             if (try analyser.resolveExpressionType(
                 handle,
-                ancestors[1],
-                ancestors[2..],
-            )) |slice_type| {
-                return try analyser.resolveBracketAccessType(slice_type, .Single);
+                ancestors[0],
+                ancestors[1..],
+            )) |array_type| {
+                return (try analyser.resolveBracketAccessType(array_type, .Single)) orelse
+                    (try analyser.resolveTupleFieldType(array_type, element_index));
             }
-        }
 
-        return null;
-    } else if (tree.fullVarDecl(ancestors[0])) |var_decl| {
-        if (node == var_decl.ast.init_node) {
-            return try analyser.resolveTypeOfNode(.{
-                .node = ancestors[0],
-                .handle = handle,
-            });
-        }
-    } else if (tree.fullContainerField(ancestors[0])) |container_field| {
-        if (node == container_field.ast.value_expr) {
-            return try analyser.resolveTypeOfNode(.{
-                .node = ancestors[0],
-                .handle = handle,
-            });
-        }
-    } else if (ast.fullIf(tree, ancestors[0])) |if_node| {
-        if (node == if_node.ast.then_expr or node == if_node.ast.else_expr) {
-            return try analyser.resolveExpressionType(
-                handle,
-                ancestors[0],
-                ancestors[1..],
-            );
-        }
-    } else if (ast.fullFor(tree, ancestors[0])) |for_node| {
-        if (node == for_node.ast.else_expr) {
-            return try analyser.resolveExpressionType(
-                handle,
-                ancestors[0],
-                ancestors[1..],
-            );
-        }
-    } else if (ast.fullWhile(tree, ancestors[0])) |while_node| {
-        if (node == while_node.ast.else_expr) {
-            return try analyser.resolveExpressionType(
-                handle,
-                ancestors[0],
-                ancestors[1..],
-            );
-        }
-    } else if (tree.fullSwitchCase(ancestors[0])) |switch_case| {
-        if (ancestors.len == 1) return null;
-
-        switch (node_tags[ancestors[1]]) {
-            .@"switch", .switch_comma => {},
-            else => return null,
-        }
-
-        if (node == switch_case.ast.target_expr) {
-            return try analyser.resolveExpressionType(
-                handle,
-                ancestors[1],
-                ancestors[2..],
-            );
-        }
-
-        for (switch_case.ast.values) |value| {
-            if (node == value) {
+            if (ancestors.len != 1 and node_tags[ancestors[1]] == .address_of) {
+                if (try analyser.resolveExpressionType(
+                    handle,
+                    ancestors[1],
+                    ancestors[2..],
+                )) |slice_type| {
+                    return try analyser.resolveBracketAccessType(slice_type, .Single);
+                }
+            }
+        },
+        .container_field_init,
+        .container_field_align,
+        .container_field,
+        => {
+            const container_field = tree.fullContainerField(ancestors[0]).?;
+            if (node == container_field.ast.value_expr) {
                 return try analyser.resolveTypeOfNode(.{
-                    .node = datas[ancestors[1]].lhs,
+                    .node = ancestors[0],
                     .handle = handle,
                 });
             }
-        }
-    } else if (tree.fullCall(&call_buf, ancestors[0])) |call| {
-        const arg_index = std.mem.indexOfScalar(Ast.Node.Index, call.ast.params, node) orelse return null;
-
-        const fn_type = (try analyser.resolveTypeOfNode(.{
-            .node = call.ast.fn_expr,
-            .handle = handle,
-        })) orelse return null;
-
-        if (fn_type.type.is_type_val) return null;
-
-        const fn_handle = fn_type.handle;
-        const fn_tree = fn_handle.tree;
-        const fn_node = switch (fn_type.type.data) {
-            .other => |n| n,
-            else => return null,
-        };
-
-        var fn_buf: [1]Ast.Node.Index = undefined;
-        const fn_proto = fn_tree.fullFnProto(&fn_buf, fn_node) orelse return null;
-
-        var param_iter = fn_proto.iterate(&fn_tree);
-        if (try analyser.isInstanceCall(handle, call, fn_handle, fn_proto)) {
-            _ = ast.nextFnParam(&param_iter);
-        }
-
-        var param_index: usize = 0;
-        while (ast.nextFnParam(&param_iter)) |param| : (param_index += 1) {
-            if (param_index == arg_index) {
-                return try analyser.resolveTypeOfNode(.{
-                    .node = param.type_expr,
-                    .handle = fn_handle,
-                });
+        },
+        .if_simple,
+        .@"if",
+        => {
+            const if_node = ast.fullIf(tree, ancestors[0]).?;
+            if (node == if_node.ast.then_expr or node == if_node.ast.else_expr) {
+                return try analyser.resolveExpressionType(
+                    handle,
+                    ancestors[0],
+                    ancestors[1..],
+                );
             }
-        }
-    } else switch (node_tags[ancestors[0]]) {
+        },
+        .for_simple,
+        .@"for",
+        => {
+            const for_node = ast.fullFor(tree, ancestors[0]).?;
+            if (node == for_node.ast.else_expr) {
+                return try analyser.resolveExpressionType(
+                    handle,
+                    ancestors[0],
+                    ancestors[1..],
+                );
+            }
+        },
+        .while_simple,
+        .while_cont,
+        .@"while",
+        => {
+            const while_node = ast.fullWhile(tree, ancestors[0]).?;
+            if (node == while_node.ast.else_expr) {
+                return try analyser.resolveExpressionType(
+                    handle,
+                    ancestors[0],
+                    ancestors[1..],
+                );
+            }
+        },
+        .switch_case_one,
+        .switch_case_inline_one,
+        .switch_case,
+        .switch_case_inline,
+        => {
+            const switch_case = tree.fullSwitchCase(ancestors[0]).?;
+            if (ancestors.len == 1) return null;
+
+            switch (node_tags[ancestors[1]]) {
+                .@"switch", .switch_comma => {},
+                else => return null,
+            }
+
+            if (node == switch_case.ast.target_expr) {
+                return try analyser.resolveExpressionType(
+                    handle,
+                    ancestors[1],
+                    ancestors[2..],
+                );
+            }
+
+            for (switch_case.ast.values) |value| {
+                if (node == value) {
+                    return try analyser.resolveTypeOfNode(.{
+                        .node = datas[ancestors[1]].lhs,
+                        .handle = handle,
+                    });
+                }
+            }
+        },
+        .call,
+        .call_comma,
+        .async_call,
+        .async_call_comma,
+        .call_one,
+        .call_one_comma,
+        .async_call_one,
+        .async_call_one_comma,
+        => {
+            var buffer: [1]Ast.Node.Index = undefined;
+            const call = tree.fullCall(&buffer, ancestors[0]).?;
+            const arg_index = std.mem.indexOfScalar(Ast.Node.Index, call.ast.params, node) orelse return null;
+
+            const fn_type = (try analyser.resolveTypeOfNode(.{
+                .node = call.ast.fn_expr,
+                .handle = handle,
+            })) orelse return null;
+
+            if (fn_type.type.is_type_val) return null;
+
+            const fn_handle = fn_type.handle;
+            const fn_tree = fn_handle.tree;
+            const fn_node = switch (fn_type.type.data) {
+                .other => |n| n,
+                else => return null,
+            };
+
+            var fn_buf: [1]Ast.Node.Index = undefined;
+            const fn_proto = fn_tree.fullFnProto(&fn_buf, fn_node) orelse return null;
+
+            var param_iter = fn_proto.iterate(&fn_tree);
+            if (try analyser.isInstanceCall(handle, call, fn_handle, fn_proto)) {
+                _ = ast.nextFnParam(&param_iter);
+            }
+
+            var param_index: usize = 0;
+            while (ast.nextFnParam(&param_iter)) |param| : (param_index += 1) {
+                if (param_index == arg_index) {
+                    return try analyser.resolveTypeOfNode(.{
+                        .node = param.type_expr,
+                        .handle = fn_handle,
+                    });
+                }
+            }
+        },
         .assign => {
             if (node == datas[ancestors[0]].rhs) {
                 return try analyser.resolveTypeOfNode(.{
