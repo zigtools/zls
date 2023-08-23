@@ -1269,7 +1269,7 @@ fn gotoDefinitionHandler(
 fn gotoHandler(
     server: *Server,
     arena: std.mem.Allocator,
-    comptime kind: goto.GotoKind,
+    kind: goto.GotoKind,
     request: types.DefinitionParams,
 ) Error!ResultType("textDocument/definition") {
     if (request.position.character == 0) return null;
