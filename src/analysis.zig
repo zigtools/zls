@@ -3004,7 +3004,7 @@ pub fn innermostBlockScope(handle: DocumentStore.Handle, source_index: usize) As
     return innermostBlockScopeInternal(handle, source_index, false);
 }
 
-fn innermostBlockScopeInternal(handle: DocumentStore.Handle, source_index: usize, comptime skip_block: bool) Ast.Node.Index {
+fn innermostBlockScopeInternal(handle: DocumentStore.Handle, source_index: usize, skip_block: bool) Ast.Node.Index {
     const scope_datas = handle.document_scope.scopes.items(.data);
     const scope_parents = handle.document_scope.scopes.items(.parent);
 
