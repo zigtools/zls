@@ -218,6 +218,7 @@ pub fn symbolReferences(
         },
         .pointer_payload,
         .error_union_payload,
+        .error_union_error,
         .array_payload,
         .switch_payload,
         => {

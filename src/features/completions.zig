@@ -442,6 +442,7 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: Analyser.Decl
         },
         .pointer_payload,
         .error_union_payload,
+        .error_union_error,
         .array_payload,
         .array_index,
         .switch_payload,

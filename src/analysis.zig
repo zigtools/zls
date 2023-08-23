@@ -2503,8 +2503,12 @@ pub const Declaration = union(enum) {
     },
     error_union_payload: struct {
         name: Ast.TokenIndex,
-        condition: ?Ast.Node.Index,
-        side: ErrorUnionSide,
+        condition: Ast.Node.Index,
+    },
+    error_union_error: struct {
+        name: Ast.TokenIndex,
+        /// may be 0
+        condition: Ast.Node.Index,
     },
     array_payload: struct {
         identifier: Ast.TokenIndex,
@@ -2594,6 +2598,7 @@ pub const DeclWithHandle = struct {
             .param_payload => |pp| pp.get(tree).name_token.?,
             .pointer_payload => |pp| pp.name,
             .error_union_payload => |ep| ep.name,
+            .error_union_error => |ep| ep.name,
             .array_payload => |ap| ap.identifier,
             .array_index => |ai| ai,
             .label_decl => |ld| ld.label,
@@ -2752,10 +2757,17 @@ pub const DeclWithHandle = struct {
             ),
             .error_union_payload => |pay| try analyser.resolveUnwrapErrorUnionType(
                 (try analyser.resolveTypeOfNodeInternal(.{
-                    .node = pay.condition orelse return null,
+                    .node = pay.condition,
                     .handle = self.handle,
                 })) orelse return null,
-                pay.side,
+                .right,
+            ),
+            .error_union_error => |pay| try analyser.resolveUnwrapErrorUnionType(
+                (try analyser.resolveTypeOfNodeInternal(.{
+                    .node = if (pay.condition == 0) return null else pay.condition,
+                    .handle = self.handle,
+                })) orelse return null,
+                .left,
             ),
             .array_payload => |pay| try analyser.resolveBracketAccessType(
                 (try analyser.resolveTypeOfNodeInternal(.{
@@ -4043,7 +4055,7 @@ fn makeScopeAt(
 
                 const name = tree.tokenSlice(name_token);
                 const decl: Declaration = if (if_node.error_token != null)
-                    .{ .error_union_payload = .{ .name = name_token, .condition = if_node.ast.cond_expr, .side = .right } }
+                    .{ .error_union_payload = .{ .name = name_token, .condition = if_node.ast.cond_expr } }
                 else
                     .{ .pointer_payload = .{ .name = name_token, .condition = if_node.ast.cond_expr } };
                 try context.putVarDecl(then_scope, name, decl);
@@ -4055,7 +4067,7 @@ fn makeScopeAt(
                 if (if_node.error_token) |err_token| {
                     const name = tree.tokenSlice(err_token);
                     try context.putVarDecl(else_scope, name, .{
-                        .error_union_payload = .{ .name = err_token, .condition = if_node.ast.cond_expr, .side = .left },
+                        .error_union_error = .{ .name = err_token, .condition = if_node.ast.cond_expr },
                     });
                 }
             }
@@ -4071,7 +4083,7 @@ fn makeScopeAt(
                 const expr_scope = (try makeBlockScopeAt(context, tree, data[node_idx].rhs, catch_token)).?;
                 const name = tree.tokenSlice(catch_token);
                 try context.putVarDecl(expr_scope, name, .{
-                    .error_union_payload = .{ .name = catch_token, .condition = data[node_idx].lhs, .side = .left },
+                    .error_union_error = .{ .name = catch_token, .condition = data[node_idx].lhs },
                 });
             } else {
                 try makeScopeInternal(context, tree, data[node_idx].rhs);
@@ -4110,7 +4122,7 @@ fn makeScopeAt(
 
                 const name = tree.tokenSlice(name_token);
                 const decl: Declaration = if (while_node.error_token != null)
-                    .{ .error_union_payload = .{ .name = name_token, .condition = while_node.ast.cond_expr, .side = .right } }
+                    .{ .error_union_payload = .{ .name = name_token, .condition = while_node.ast.cond_expr } }
                 else
                     .{ .pointer_payload = .{ .name = name_token, .condition = while_node.ast.cond_expr } };
                 if (cont_scope) |index| {
@@ -4123,7 +4135,7 @@ fn makeScopeAt(
                 std.debug.assert(token_tags[err_token] == .identifier);
                 const name = tree.tokenSlice(err_token);
                 try context.putVarDecl(else_scope.?, name, .{
-                    .error_union_payload = .{ .name = err_token, .condition = while_node.ast.cond_expr, .side = .left },
+                    .error_union_error = .{ .name = err_token, .condition = while_node.ast.cond_expr },
                 });
             }
         },
@@ -4203,7 +4215,7 @@ fn makeScopeAt(
             if (payload_token != 0) {
                 const name = tree.tokenSlice(payload_token);
                 try context.putVarDecl(expr_scope, name, .{
-                    .error_union_payload = .{ .name = payload_token, .condition = null, .side = .left },
+                    .error_union_error = .{ .name = payload_token, .condition = 0 },
                 });
             }
         },
