@@ -305,7 +305,7 @@ fn getAutofixMode(server: *Server) enum {
 }
 
 /// caller owns returned memory.
-pub fn autofix(server: *Server, arena: std.mem.Allocator, handle: *const DocumentStore.Handle) error{OutOfMemory}!std.ArrayListUnmanaged(types.TextEdit) {
+fn autofix(server: *Server, arena: std.mem.Allocator, handle: *const DocumentStore.Handle) error{OutOfMemory}!std.ArrayListUnmanaged(types.TextEdit) {
     if (!server.config.enable_ast_check_diagnostics) return .{};
     if (handle.tree.errors.len != 0) return .{};
 
@@ -1218,7 +1218,7 @@ fn semanticTokensRangeHandler(server: *Server, arena: std.mem.Allocator, request
     );
 }
 
-pub fn completionHandler(server: *Server, arena: std.mem.Allocator, request: types.CompletionParams) Error!ResultType("textDocument/completion") {
+fn completionHandler(server: *Server, arena: std.mem.Allocator, request: types.CompletionParams) Error!ResultType("textDocument/completion") {
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
 
     const source_index = offsets.positionToIndex(handle.text, request.position, server.offset_encoding);
@@ -1231,7 +1231,7 @@ pub fn completionHandler(server: *Server, arena: std.mem.Allocator, request: typ
     };
 }
 
-pub fn signatureHelpHandler(server: *Server, arena: std.mem.Allocator, request: types.SignatureHelpParams) Error!?types.SignatureHelp {
+fn signatureHelpHandler(server: *Server, arena: std.mem.Allocator, request: types.SignatureHelpParams) Error!?types.SignatureHelp {
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
 
     if (request.position.character == 0) return null;
@@ -1336,7 +1336,7 @@ fn gotoDeclarationHandler(server: *Server, arena: std.mem.Allocator, request: ty
     };
 }
 
-pub fn hoverHandler(server: *Server, arena: std.mem.Allocator, request: types.HoverParams) Error!?types.Hover {
+fn hoverHandler(server: *Server, arena: std.mem.Allocator, request: types.HoverParams) Error!?types.Hover {
     if (request.position.character == 0) return null;
 
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
@@ -1361,14 +1361,14 @@ pub fn hoverHandler(server: *Server, arena: std.mem.Allocator, request: types.Ho
     return response;
 }
 
-pub fn documentSymbolsHandler(server: *Server, arena: std.mem.Allocator, request: types.DocumentSymbolParams) Error!ResultType("textDocument/documentSymbol") {
+fn documentSymbolsHandler(server: *Server, arena: std.mem.Allocator, request: types.DocumentSymbolParams) Error!ResultType("textDocument/documentSymbol") {
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
     return .{
         .array_of_DocumentSymbol = try document_symbol.getDocumentSymbols(arena, handle.tree, server.offset_encoding),
     };
 }
 
-pub fn formattingHandler(server: *Server, arena: std.mem.Allocator, request: types.DocumentFormattingParams) Error!?[]types.TextEdit {
+fn formattingHandler(server: *Server, arena: std.mem.Allocator, request: types.DocumentFormattingParams) Error!?[]types.TextEdit {
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
 
     if (handle.tree.errors.len != 0) return null;
@@ -1380,17 +1380,17 @@ pub fn formattingHandler(server: *Server, arena: std.mem.Allocator, request: typ
     return if (diff.edits(arena, handle.text, formatted, server.offset_encoding)) |text_edits| text_edits.items else |_| null;
 }
 
-pub fn renameHandler(server: *Server, arena: std.mem.Allocator, request: types.RenameParams) Error!?types.WorkspaceEdit {
+fn renameHandler(server: *Server, arena: std.mem.Allocator, request: types.RenameParams) Error!?types.WorkspaceEdit {
     const response = try generalReferencesHandler(server, arena, .{ .rename = request });
     return if (response) |rep| rep.rename else null;
 }
 
-pub fn referencesHandler(server: *Server, arena: std.mem.Allocator, request: types.ReferenceParams) Error!?[]types.Location {
+fn referencesHandler(server: *Server, arena: std.mem.Allocator, request: types.ReferenceParams) Error!?[]types.Location {
     const response = try generalReferencesHandler(server, arena, .{ .references = request });
     return if (response) |rep| rep.references else null;
 }
 
-pub fn documentHighlightHandler(server: *Server, arena: std.mem.Allocator, request: types.DocumentHighlightParams) Error!?[]types.DocumentHighlight {
+fn documentHighlightHandler(server: *Server, arena: std.mem.Allocator, request: types.DocumentHighlightParams) Error!?[]types.DocumentHighlight {
     const response = try generalReferencesHandler(server, arena, .{ .highlight = request });
     return if (response) |rep| rep.highlight else null;
 }
@@ -1400,7 +1400,7 @@ const GeneralReferencesRequest = union(enum) {
     references: types.ReferenceParams,
     highlight: types.DocumentHighlightParams,
 
-    pub fn uri(self: @This()) []const u8 {
+    fn uri(self: @This()) []const u8 {
         return switch (self) {
             .rename => |rename| rename.textDocument.uri,
             .references => |ref| ref.textDocument.uri,
@@ -1408,7 +1408,7 @@ const GeneralReferencesRequest = union(enum) {
         };
     }
 
-    pub fn position(self: @This()) types.Position {
+    fn position(self: @This()) types.Position {
         return switch (self) {
             .rename => |rename| rename.position,
             .references => |ref| ref.position,
@@ -1424,7 +1424,7 @@ const GeneralReferencesResponse = union {
 };
 
 // TODO: Move to src/features/references.zig?
-pub fn generalReferencesHandler(server: *Server, arena: std.mem.Allocator, request: GeneralReferencesRequest) Error!?GeneralReferencesResponse {
+fn generalReferencesHandler(server: *Server, arena: std.mem.Allocator, request: GeneralReferencesRequest) Error!?GeneralReferencesResponse {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -2248,11 +2248,11 @@ const NotificationMethodSet = blk: {
 };
 
 /// return true if there is a request with the given method name
-fn isRequestMethod(method: []const u8) bool {
+pub fn isRequestMethod(method: []const u8) bool {
     return RequestMethodSet.has(method);
 }
 
 /// return true if there is a notification with the given method name
-fn isNotificationMethod(method: []const u8) bool {
+pub fn isNotificationMethod(method: []const u8) bool {
     return NotificationMethodSet.has(method);
 }
