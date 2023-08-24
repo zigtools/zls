@@ -480,11 +480,11 @@ fn initializeHandler(server: *Server, _: std.mem.Allocator, request: types.Initi
     log.info("{}", .{server.client_capabilities});
     log.info("offset encoding: {s}", .{@tagName(server.offset_encoding)});
 
+    server.status = .initializing;
+
     server.updateConfiguration(.{}) catch |err| {
         log.err("failed to load configuration: {}", .{err});
     };
-
-    server.status = .initializing;
 
     if (server.recording_enabled) {
         server.showMessage(.Info,
@@ -860,11 +860,20 @@ pub fn updateConfiguration(server: *Server, new_config: configuration.Configurat
         server.document_store.cimports.clearAndFree(server.document_store.allocator);
     }
 
+    if (server.status == .initialized) {
+        const json_message = try server.sendToClientRequest(
+            .{ .string = "semantic_tokens_refresh" },
+            "workspace/semanticTokens/refresh",
+            {},
+        );
+        server.allocator.free(json_message);
+    }
+
     // <---------------------------------------------------------->
     //  don't modify config options after here, only show messages
     // <---------------------------------------------------------->
 
-    if (std.process.can_spawn and server.config.zig_exe_path == null) {
+    if (std.process.can_spawn and server.status == .initialized and server.config.zig_exe_path == null) {
         // TODO there should a way to supress this message
         server.showMessage(.Warning, "zig executable could not be found", .{});
     }
@@ -874,18 +883,9 @@ pub fn updateConfiguration(server: *Server, new_config: configuration.Configurat
     {
         if (!std.process.can_spawn) {
             log.info("'prefer_ast_check_as_child_process' is ignored because your OS can't spawn a child process", .{});
-        } else if (server.config.zig_exe_path == null) {
+        } else if (server.status == .initialized and server.config.zig_exe_path == null) {
             log.info("'prefer_ast_check_as_child_process' is ignored because Zig could not be found", .{});
         }
-    }
-
-    if (server.status == .initialized) {
-        const json_message = try server.sendToClientRequest(
-            .{ .string = "semantic_tokens_refresh" },
-            "workspace/semanticTokens/refresh",
-            {},
-        );
-        server.allocator.free(json_message);
     }
 }
 
