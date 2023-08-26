@@ -1011,7 +1011,7 @@ pub fn collectIncludeDirs(
     try include_dirs.ensureTotalCapacity(allocator, native_paths.include_dirs.items.len + build_file_includes_paths.len);
 
     for (native_paths.include_dirs.items) |native_include_dir| {
-        include_dirs.appendAssumeCapacity(try allocator.dupeZ(u8, native_include_dir));
+        include_dirs.appendAssumeCapacity(try allocator.dupe(u8, native_include_dir));
     }
 
     for (build_file_includes_paths) |include_path| {
