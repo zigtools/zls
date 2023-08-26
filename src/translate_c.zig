@@ -155,7 +155,7 @@ pub fn translate(
         log.warn("failed to delete file '{s}': {}", .{ file_path, err });
     };
 
-    _ = file.write(source) catch |err| {
+    file.writeAll(source) catch |err| {
         log.warn("failed to write to '{s}': {}", .{ file_path, err });
         return null;
     };
