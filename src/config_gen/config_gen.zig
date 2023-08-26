@@ -94,7 +94,7 @@ const SchemaEntry = struct {
 fn generateConfigFile(allocator: std.mem.Allocator, config: Config, path: []const u8) !void {
     _ = allocator;
 
-    const config_file = try std.fs.createFileAbsolute(path, .{});
+    const config_file = try std.fs.cwd().createFile(path, .{});
     defer config_file.close();
 
     var buff_out = std.io.bufferedWriter(config_file.writer());
@@ -132,9 +132,7 @@ fn generateConfigFile(allocator: std.mem.Allocator, config: Config, path: []cons
 }
 
 fn generateSchemaFile(allocator: std.mem.Allocator, config: Config, path: []const u8) !void {
-    const schema_file = try std.fs.openFileAbsolute(path, .{
-        .mode = .write_only,
-    });
+    const schema_file = try std.fs.cwd().createFile(path, .{});
     defer schema_file.close();
 
     var buff_out = std.io.bufferedWriter(schema_file.writer());
@@ -160,11 +158,10 @@ fn generateSchemaFile(allocator: std.mem.Allocator, config: Config, path: []cons
     try buff_out.writer().writeByte('\n');
 
     try buff_out.flush();
-    try schema_file.setEndPos(try schema_file.getPos());
 }
 
 fn updateREADMEFile(allocator: std.mem.Allocator, config: Config, path: []const u8) !void {
-    var readme_file = try std.fs.openFileAbsolute(path, .{ .mode = .read_write });
+    var readme_file = try std.fs.cwd().openFile(path, .{ .mode = .read_write });
     defer readme_file.close();
 
     var readme = try readme_file.readToEndAlloc(allocator, std.math.maxInt(usize));
@@ -215,7 +212,7 @@ const ConfigurationProperty = struct {
 };
 
 fn generateVSCodeConfigFile(allocator: std.mem.Allocator, config: Config, path: []const u8) !void {
-    var config_file = try std.fs.createFileAbsolute(path, .{});
+    var config_file = try std.fs.cwd().createFile(path, .{});
     defer config_file.close();
 
     const predefined_configurations: usize = 3;
@@ -827,7 +824,7 @@ fn generateVersionDataFile(allocator: std.mem.Allocator, version: []const u8, ou
     // const langref_source: []const u8 = @embedFile("langref.html.in");
     const langref_source = blk: {
         if (langref_path) |path| {
-            const file = try std.fs.openFileAbsolute(path, .{});
+            const file = try std.fs.cwd().openFile(path, .{});
             defer file.close();
             break :blk try file.readToEndAlloc(allocator, std.math.maxInt(usize));
         } else {
@@ -1012,37 +1009,21 @@ pub fn main() !void {
                 try stderr.print("Expected file path after --readme-path argument.\n", .{});
                 return;
             };
-            if (!std.fs.path.isAbsolute(readme_path.?)) {
-                try stderr.print("Expected absolute file path after --readme-path but got `{s}`", .{readme_path.?});
-                return;
-            }
         } else if (std.mem.eql(u8, argname, "--generate-config-path")) {
             config_path = args_it.next() orelse {
                 try stderr.print("Expected output path after --generate-config-path argument.\n", .{});
                 return;
             };
-            if (!std.fs.path.isAbsolute(config_path.?)) {
-                try stderr.print("Expected absolute path after --generate-config-path but got `{s}`", .{config_path.?});
-                return;
-            }
         } else if (std.mem.eql(u8, argname, "--generate-schema-path")) {
             schema_path = args_it.next() orelse {
                 try stderr.print("Expected output path after --generate-schema-path argument.\n", .{});
                 return;
             };
-            if (!std.fs.path.isAbsolute(schema_path.?)) {
-                try stderr.print("Expected absolute path after --generate-schema-path but got `{s}`", .{schema_path.?});
-                return;
-            }
         } else if (std.mem.eql(u8, argname, "--vscode-config-path")) {
             vscode_config_path = args_it.next() orelse {
                 try stderr.print("Expected output path after --vscode-config-path argument.\n", .{});
                 return;
             };
-            if (!std.fs.path.isAbsolute(vscode_config_path.?)) {
-                try stderr.print("Expected absolute path after --vscode-config-path but got `{s}`", .{vscode_config_path.?});
-                return;
-            }
         } else if (std.mem.eql(u8, argname, "--generate-version-data")) {
             data_version = args_it.next() orelse {
                 try stderr.print("Expected version after --generate-version-data argument.\n", .{});
