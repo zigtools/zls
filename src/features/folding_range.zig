@@ -31,8 +31,8 @@ const Builder = struct {
         start_reach: Inclusivity,
         end_reach: Inclusivity,
     ) error{OutOfMemory}!void {
+        if (start >= end) return;
         if (builder.tree.tokensOnSameLine(start, end)) return;
-        std.debug.assert(start <= end);
         const start_loc = offsets.tokenToLoc(builder.tree, start);
         const end_loc = offsets.tokenToLoc(builder.tree, end);
 
