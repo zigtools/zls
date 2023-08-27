@@ -1986,17 +1986,16 @@ fn processMessage(server: *Server, message: Message) Error!?[]u8 {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const start_time = std.time.milliTimestamp();
-    defer {
-        const end_time = std.time.milliTimestamp();
-        const total_time = end_time - start_time;
+    var timer = std.time.Timer.start() catch null;
+    defer if (timer) |*t| {
+        const total_time = @divFloor(t.read(), std.time.ns_per_ms);
         if (zig_builtin.single_threaded) {
             log.debug("Took {d}ms to process {}", .{ total_time, message });
         } else {
             const thread_id = std.Thread.getCurrentId();
             log.debug("Took {d}ms to process {} on Thread {d}", .{ total_time, message, thread_id });
         }
-    }
+    };
 
     try server.validateMessage(message);
 
