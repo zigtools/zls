@@ -2004,20 +2004,16 @@ fn processMessage(server: *Server, message: Message) Error!?[]u8 {
 
     @setEvalBranchQuota(5_000);
     switch (message) {
-        .request => |request| switch (std.meta.activeTag(request.params)) {
-            inline else => |method_name| {
-                const method = @tagName(method_name);
-                const params = @field(request.params, method);
-                const result = try server.sendRequestSync(arena_allocator.allocator(), method, params);
+        .request => |request| switch (request.params) {
+            inline else => |params, method| {
+                const result = try server.sendRequestSync(arena_allocator.allocator(), @tagName(method), params);
                 return try server.sendToClientResponse(request.id, result);
             },
             .unknown => return try server.sendToClientResponse(request.id, null),
         },
-        .notification => |notification| switch (std.meta.activeTag(notification)) {
-            inline else => |method_name| {
-                const method = @tagName(method_name);
-                const params = @field(notification, method);
-                try server.sendNotificationSync(arena_allocator.allocator(), method, params);
+        .notification => |notification| switch (notification) {
+            inline else => |params, method| {
+                try server.sendNotificationSync(arena_allocator.allocator(), @tagName(method), params);
             },
             .unknown => {},
         },
