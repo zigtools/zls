@@ -12,7 +12,6 @@ The Zig Language Server (zls) is a tool that implements Microsoft's Language Ser
 - [Installation](#installation)
   - [From Source](#from-source)
     - [Build Options](#build-options)
-    - [Updating Data Files](#updating-data-files)
   - [Configuration Options](#configuration-options)
   - [Per-build Configuration Options](#per-build-configuration-options)
     - [`BuildOption`](#buildoption)
