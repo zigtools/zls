@@ -2911,30 +2911,65 @@ fn iterateSymbolsContainerInternal(
     }
 
     for (scope_uses[container_scope_index]) |use| {
-        const use_token = tree.nodes.items(.main_token)[use];
-        const is_pub = use_token > 0 and token_tags[use_token - 1] == .keyword_pub;
-        if (handle != orig_handle and !is_pub) continue;
-
-        const gop = try analyser.node_trail.getOrPut(analyser.gpa, .{ .node = use, .uri = handle.uri });
-        if (gop.found_existing) continue;
-
-        const lhs = tree.nodes.items(.data)[use].lhs;
-        const use_expr = (try analyser.resolveTypeOfNode(.{
-            .node = lhs,
-            .handle = handle,
-        })) orelse continue;
-
-        const use_expr_node = switch (use_expr.type.data) {
-            .other => |n| n,
-            else => continue,
-        };
-        try analyser.iterateSymbolsContainerInternal(
-            .{ .node = use_expr_node, .handle = use_expr.handle },
+        try analyser.iterateUsingnamespaceContainerSymbols(
+            .{ .node = use, .handle = handle },
             orig_handle,
             callback,
             context,
             false,
         );
+    }
+}
+
+fn iterateUsingnamespaceContainerSymbols(
+    analyser: *Analyser,
+    usingnamespace_node: NodeWithHandle,
+    orig_handle: *const DocumentStore.Handle,
+    comptime callback: anytype,
+    context: anytype,
+    instance_access: bool,
+) !void {
+    const gop = try analyser.node_trail.getOrPut(analyser.gpa, .{ .node = usingnamespace_node.node, .uri = usingnamespace_node.handle.uri });
+    if (gop.found_existing) return;
+
+    const handle = usingnamespace_node.handle;
+
+    const use_token = handle.tree.nodes.items(.main_token)[usingnamespace_node.node];
+    const is_pub = use_token > 0 and handle.tree.tokens.items(.tag)[use_token - 1] == .keyword_pub;
+    if (handle != orig_handle and !is_pub) return;
+
+    const use_expr = (try analyser.resolveTypeOfNode(.{
+        .node = handle.tree.nodes.items(.data)[usingnamespace_node.node].lhs,
+        .handle = handle,
+    })) orelse return;
+
+    switch (use_expr.type.data) {
+        .other => |expr| {
+            try analyser.iterateSymbolsContainerInternal(
+                .{ .node = expr, .handle = use_expr.handle },
+                orig_handle,
+                callback,
+                context,
+                instance_access,
+            );
+        },
+        .either => |entries| {
+            for (entries) |entry| {
+                switch (entry.type_with_handle.type.data) {
+                    .other => |expr| {
+                        try analyser.iterateSymbolsContainerInternal(
+                            .{ .node = expr, .handle = use_expr.handle },
+                            orig_handle,
+                            callback,
+                            context,
+                            instance_access,
+                        );
+                    },
+                    else => continue,
+                }
+            }
+        },
+        else => return,
     }
 }
 
@@ -3013,18 +3048,8 @@ fn iterateSymbolsGlobalInternal(
         }
 
         for (scope_uses[@intFromEnum(scope_index)]) |use| {
-            const gop = try analyser.node_trail.getOrPut(analyser.gpa, .{ .node = use, .uri = handle.uri });
-            if (gop.found_existing) continue;
-
-            const use_expr = (try analyser.resolveTypeOfNodeInternal(
-                .{ .node = handle.tree.nodes.items(.data)[use].lhs, .handle = handle },
-            )) orelse continue;
-            const use_expr_node = switch (use_expr.type.data) {
-                .other => |n| n,
-                else => continue,
-            };
-            try analyser.iterateSymbolsContainerInternal(
-                .{ .node = use_expr_node, .handle = use_expr.handle },
+            try analyser.iterateUsingnamespaceContainerSymbols(
+                .{ .node = use, .handle = handle },
                 handle,
                 callback,
                 context,
