@@ -393,33 +393,6 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
             }
             try writeToken(builder, node_data[node].rhs, .errorTag);
         },
-        .identifier => {
-            const name = offsets.nodeToSlice(tree, node);
-
-            if (std.mem.eql(u8, name, "_")) {
-                return;
-            } else if (Analyser.isValueIdent(name)) {
-                return try writeToken(builder, main_token, .keywordLiteral);
-            } else if (Analyser.isTypeIdent(name)) {
-                return try writeToken(builder, main_token, .type);
-            }
-
-            if (try builder.analyser.lookupSymbolGlobal(
-                handle,
-                name,
-                tree.tokens.items(.start)[main_token],
-            )) |child| {
-                const is_param = child.decl.* == .param_payload;
-
-                if (try child.resolveType(builder.analyser)) |decl_type| {
-                    return try colorIdentifierBasedOnType(builder, decl_type, main_token, is_param, .{});
-                } else {
-                    try writeTokenMod(builder, main_token, if (is_param) .parameter else .variable, .{});
-                }
-            } else {
-                try writeTokenMod(builder, main_token, .variable, .{});
-            }
-        },
         .fn_proto,
         .fn_proto_one,
         .fn_proto_simple,
@@ -774,7 +747,7 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
             try writeToken(builder, main_token, .keyword);
             switch (token_tags[node_data[node].lhs]) {
                 .string_literal => try writeToken(builder, node_data[node].lhs, .string),
-                .identifier => try writeToken(builder, node_data[node].lhs, .variable),
+                .identifier => try writeIdentifier(builder, node_data[node].lhs),
                 else => {},
             }
 
@@ -852,6 +825,10 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
         => {
             try writeNodeTokens(builder, node_data[node].lhs);
             try writeNodeTokens(builder, node_data[node].rhs);
+        },
+        .identifier => {
+            if (tree.tokens.items(.tag)[main_token] != .identifier) return; // why parser? why?
+            try writeIdentifier(builder, main_token);
         },
         .field_access => {
             const data = node_data[node];
@@ -997,6 +974,38 @@ fn writeContainerField(builder: *Builder, node: Ast.Node.Index, container_decl: 
 
         try writeToken(builder, eq_tok, .operator);
         try writeNodeTokens(builder, container_field.ast.value_expr);
+    }
+}
+
+fn writeIdentifier(builder: *Builder, name_token: Ast.Node.Index) error{OutOfMemory}!void {
+    const handle = builder.handle;
+    const tree = handle.tree;
+
+    std.debug.assert(tree.tokens.items(.tag)[name_token] == .identifier);
+    const name = offsets.tokenToSlice(tree, name_token);
+
+    if (std.mem.eql(u8, name, "_")) {
+        return;
+    } else if (Analyser.isValueIdent(name)) {
+        return try writeToken(builder, name_token, .keywordLiteral);
+    } else if (Analyser.isTypeIdent(name)) {
+        return try writeToken(builder, name_token, .type);
+    }
+
+    if (try builder.analyser.lookupSymbolGlobal(
+        handle,
+        name,
+        tree.tokens.items(.start)[name_token],
+    )) |child| {
+        const is_param = child.decl.* == .param_payload;
+
+        if (try child.resolveType(builder.analyser)) |decl_type| {
+            return try colorIdentifierBasedOnType(builder, decl_type, name_token, is_param, .{});
+        } else {
+            try writeTokenMod(builder, name_token, if (is_param) .parameter else .variable, .{});
+        }
+    } else {
+        try writeTokenMod(builder, name_token, .variable, .{});
     }
 }
 

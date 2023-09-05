@@ -1049,6 +1049,17 @@ test "semantic tokens - test decl" {
         .{ "test", .keyword, .{} },
         .{ "foo", .variable, .{} },
     });
+    try testSemanticTokens(
+        \\const Foo = struct {};
+        \\test Foo {}
+    , &.{
+        .{ "const", .keyword, .{} },
+        .{ "Foo", .namespace, .{ .declaration = true } },
+        .{ "=", .operator, .{} },
+        .{ "struct", .keyword, .{} },
+        .{ "test", .keyword, .{} },
+        .{ "Foo", .namespace, .{} },
+    });
 }
 
 test "semantic tokens - assembly" {
