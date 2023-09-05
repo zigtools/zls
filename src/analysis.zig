@@ -1710,8 +1710,14 @@ pub const TypeWithHandle = struct {
         var deduplicator = Deduplicator{};
         defer deduplicator.deinit(allocator);
 
-        for (entries) |e|
-            _ = try deduplicator.getOrPut(allocator, e.type_with_handle);
+        var has_type_val: bool = false;
+
+        for (entries) |entry| {
+            _ = try deduplicator.getOrPut(allocator, entry.type_with_handle);
+            if (entry.type_with_handle.type.is_type_val) {
+                has_type_val = true;
+            }
+        }
 
         if (deduplicator.size == 1)
             return entries[0].type_with_handle;
@@ -1719,7 +1725,7 @@ pub const TypeWithHandle = struct {
         return .{
             .type = .{
                 .data = .{ .either = entries },
-                .is_type_val = false,
+                .is_type_val = has_type_val,
             },
             .handle = handle,
         };
