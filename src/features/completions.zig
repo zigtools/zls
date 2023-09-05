@@ -958,11 +958,11 @@ fn resolveContainer(
                                 .other => |n| n,
                                 else => continue,
                             };
-                            if (ast.isContainer(symbol_decl.handle.tree, node))
+                            if (ast.isContainer(either.handle.tree, node))
                                 try types_with_handles.append(
                                     arena,
                                     Analyser.TypeWithHandle{
-                                        .handle = symbol_decl.handle,
+                                        .handle = either.handle,
                                         .type = .{
                                             .data = .{ .other = node },
                                             .is_type_val = true,
