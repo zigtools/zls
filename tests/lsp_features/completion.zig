@@ -695,6 +695,37 @@ test "completion - block" {
     });
 }
 
+test "completion - either" {
+    try testCompletion(
+        \\const Alpha = struct {
+        \\    fn alpha() void {}
+        \\};
+        \\const Beta = struct {
+        \\    fn beta() void {}
+        \\};
+        \\const foo: if (undefined) Alpha else Beta = undefined;
+        \\const bar = foo.<cursor>
+    , &.{
+        .{ .label = "alpha", .kind = .Function, .detail = "fn alpha() void" },
+        .{ .label = "beta", .kind = .Function, .detail = "fn beta() void" },
+    });
+    try testCompletion(
+        \\const Alpha = struct {
+        \\    fn alpha() void {}
+        \\};
+        \\const Beta = struct {
+        \\    fn beta() void {}
+        \\};
+        \\const alpha: Alpha = undefined;
+        \\const beta: Beta = undefined;
+        \\const gamma = if (undefined) alpha else beta;
+        \\const foo = gamma.<cursor>
+    , &.{
+        .{ .label = "alpha", .kind = .Function, .detail = "fn alpha() void" },
+        .{ .label = "beta", .kind = .Function, .detail = "fn beta() void" },
+    });
+}
+
 // https://github.com/zigtools/zls/issues/1370
 test "completion - cyclic struct init field" {
     try testCompletion(
