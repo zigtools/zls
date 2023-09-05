@@ -271,6 +271,23 @@ test "hover - switch capture" {
         \\(i32)
         \\```
     );
+    try testHover(
+        \\const E = enum { foo };
+        \\fn func(e: E) void {
+        \\    switch (e) {
+        \\        .foo => |b<cursor>ar| {},
+        \\    }
+        \\}
+    ,
+        \\```zig
+        \\bar
+        \\```
+        \\```zig
+        \\(E)
+        \\```
+        \\
+        \\Go to [E](file:///test.zig#L1)
+    );
 }
 
 test "hover - errdefer capture" {

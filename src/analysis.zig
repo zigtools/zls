@@ -2816,39 +2816,23 @@ pub const DeclWithHandle = struct {
             .switch_payload => |payload| {
                 const cond = tree.nodes.items(.data)[payload.node].lhs;
                 const case = payload.getCase(tree);
-                const values = case.ast.values;
 
-                if (values.len == 0) return null;
-                // TODO Peer type resolution, we just use the first item for now.
-                const switch_expr_type = (try analyser.resolveTypeOfNodeInternal(.{
+                const switch_expr_type: TypeWithHandle = (try analyser.resolveTypeOfNodeInternal(.{
                     .node = cond,
                     .handle = self.handle,
                 })) orelse return null;
-                if (!switch_expr_type.isUnionType())
-                    return null;
+                if (switch_expr_type.isEnumType()) return switch_expr_type;
+                if (!switch_expr_type.isUnionType()) return null;
 
-                if (node_tags[values[0]] != .enum_literal) return null;
+                // TODO Peer type resolution, we just use the first resolvable item for now.
+                for (case.ast.values) |case_value| {
+                    if (node_tags[case_value] != .enum_literal) continue;
 
-                const scope_index = findContainerScopeIndex(.{ .node = switch_expr_type.type.data.other, .handle = switch_expr_type.handle }) orelse return null;
-                const scope_decls = switch_expr_type.handle.document_scope.scopes.items(.decls);
-
-                const name = tree.tokenSlice(main_tokens[values[0]]);
-                const decl_key = Declaration.Key{ .kind = .field, .name = name };
-                const decl_index = scope_decls[scope_index].get(decl_key) orelse return null;
-                const decl = switch_expr_type.handle.document_scope.decls.items[@intFromEnum(decl_index)];
-
-                switch (decl) {
-                    .ast_node => |node| {
-                        if (switch_expr_type.handle.tree.fullContainerField(node)) |container_field| {
-                            if (container_field.ast.type_expr != 0) {
-                                return ((try analyser.resolveTypeOfNodeInternal(
-                                    .{ .node = container_field.ast.type_expr, .handle = switch_expr_type.handle },
-                                )) orelse return null).instanceTypeVal();
-                            }
-                        }
-                    },
-                    else => {},
+                    const name = tree.tokenSlice(main_tokens[case_value]);
+                    const decl = try switch_expr_type.lookupSymbol(analyser, name) orelse continue;
+                    return (try decl.resolveType(analyser)) orelse continue;
                 }
+
                 return null;
             },
             .error_token => return null,
