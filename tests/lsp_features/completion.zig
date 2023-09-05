@@ -656,6 +656,22 @@ test "completion - usingnamespace" {
         .{ .label = "inner", .kind = .Function, .detail = "fn inner(self: Self) void" },
         .{ .label = "deinit", .kind = .Function, .detail = "fn deinit(self: Foo) void" },
     });
+    try testCompletion(
+        \\const Alpha = struct {
+        \\    fn alpha() void {}
+        \\};
+        \\const Beta = struct {
+        \\    fn beta() void {}
+        \\};
+        \\const Gamma = struct {
+        \\    usingnamespace if (undefined) Alpha else Beta;
+        \\};
+        \\const gamma: Gamma = undefined;
+        \\const g = gamma.<cursor>
+    , &.{
+        .{ .label = "alpha", .kind = .Function, .detail = "fn alpha() void" },
+        .{ .label = "beta", .kind = .Function, .detail = "fn beta() void" },
+    });
 }
 
 test "completion - block" {
