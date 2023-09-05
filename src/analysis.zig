@@ -1875,6 +1875,14 @@ pub const TypeWithHandle = struct {
     ) error{OutOfMemory}!?DeclWithHandle {
         const node = switch (self.type.data) {
             .other => |n| n,
+            .either => |entries| {
+                for (entries) |entry| {
+                    if (try entry.type_with_handle.lookupSymbol(analyser, symbol)) |decl| {
+                        return decl;
+                    }
+                }
+                return null;
+            },
             else => return null,
         };
         const node_handle = NodeWithHandle{ .node = node, .handle = self.handle };
