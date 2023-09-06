@@ -20,7 +20,9 @@ ip: ?*InternPool,
 bound_type_params: std.AutoHashMapUnmanaged(Declaration.Param, TypeWithHandle) = .{},
 resolved_nodes: std.HashMapUnmanaged(NodeWithUri, ?TypeWithHandle, NodeWithUri.Context, std.hash_map.default_max_load_percentage) = .{},
 /// used to detect recursion
-node_trail: std.HashMapUnmanaged(NodeWithUri, void, NodeWithUri.Context, std.hash_map.default_max_load_percentage) = .{},
+use_trail: NodeSet = .{},
+
+const NodeSet = std.HashMapUnmanaged(NodeWithUri, void, NodeWithUri.Context, std.hash_map.default_max_load_percentage);
 
 pub fn init(gpa: std.mem.Allocator, store: *DocumentStore, ip: ?*InternPool) Analyser {
     return .{
@@ -34,7 +36,7 @@ pub fn init(gpa: std.mem.Allocator, store: *DocumentStore, ip: ?*InternPool) Ana
 pub fn deinit(self: *Analyser) void {
     self.bound_type_params.deinit(self.gpa);
     self.resolved_nodes.deinit(self.gpa);
-    self.node_trail.deinit(self.gpa);
+    self.use_trail.deinit(self.gpa);
     self.arena.deinit();
 }
 
@@ -429,20 +431,21 @@ pub fn getContainerDeclName(tree: Ast, container: ?Ast.Node.Index, node: Ast.Nod
 /// const other = decl.middle.other;
 ///```
 pub fn resolveVarDeclAlias(analyser: *Analyser, node_handle: NodeWithHandle) error{OutOfMemory}!?DeclWithHandle {
-    analyser.node_trail.clearRetainingCapacity();
-    return try analyser.resolveVarDeclAliasInternal(node_handle);
+    var node_trail: NodeSet = .{};
+    defer node_trail.deinit(analyser.gpa);
+    return try analyser.resolveVarDeclAliasInternal(node_handle, &node_trail);
 }
 
-fn resolveVarDeclAliasInternal(analyser: *Analyser, node_handle: NodeWithHandle) error{OutOfMemory}!?DeclWithHandle {
+fn resolveVarDeclAliasInternal(analyser: *Analyser, node_handle: NodeWithHandle, node_trail: *NodeSet) error{OutOfMemory}!?DeclWithHandle {
     const node_with_uri = NodeWithUri{ .node = node_handle.node, .uri = node_handle.handle.uri };
 
-    const gop = try analyser.node_trail.getOrPut(analyser.gpa, node_with_uri);
+    const gop = try node_trail.getOrPut(analyser.gpa, node_with_uri);
     if (gop.found_existing) return null;
 
-    return try analyser.resolveVarDeclAliasUncached(node_handle);
+    return try analyser.resolveVarDeclAliasUncached(node_handle, node_trail);
 }
 
-fn resolveVarDeclAliasUncached(analyser: *Analyser, node_handle: NodeWithHandle) error{OutOfMemory}!?DeclWithHandle {
+fn resolveVarDeclAliasUncached(analyser: *Analyser, node_handle: NodeWithHandle, node_trail: *NodeSet) error{OutOfMemory}!?DeclWithHandle {
     const handle = node_handle.handle;
     const tree = handle.tree;
     const node_tags = tree.nodes.items(.tag);
@@ -487,7 +490,7 @@ fn resolveVarDeclAliasUncached(analyser: *Analyser, node_handle: NodeWithHandle)
             const base_exp = var_decl.ast.init_node;
             if (token_tags[var_decl.ast.mut_token] != .keyword_const) return null;
 
-            return try analyser.resolveVarDeclAliasInternal(.{ .node = base_exp, .handle = handle });
+            return try analyser.resolveVarDeclAliasInternal(.{ .node = base_exp, .handle = handle }, node_trail);
         },
         .builtin_call,
         .builtin_call_comma,
@@ -513,11 +516,11 @@ fn resolveVarDeclAliasUncached(analyser: *Analyser, node_handle: NodeWithHandle)
         else => return resolved,
     };
 
-    if (analyser.node_trail.contains(.{ .node = resolved_node, .uri = resolved.handle.uri })) {
+    if (node_trail.contains(.{ .node = resolved_node, .uri = resolved.handle.uri })) {
         return null;
     }
 
-    if (try analyser.resolveVarDeclAliasUncached(.{ .node = resolved_node, .handle = resolved.handle })) |result| {
+    if (try analyser.resolveVarDeclAliasUncached(.{ .node = resolved_node, .handle = resolved.handle }, node_trail)) |result| {
         return result;
     } else {
         return resolved;
@@ -2943,7 +2946,7 @@ fn iterateUsingnamespaceContainerSymbols(
     context: anytype,
     instance_access: bool,
 ) !void {
-    const gop = try analyser.node_trail.getOrPut(analyser.gpa, .{ .node = usingnamespace_node.node, .uri = usingnamespace_node.handle.uri });
+    const gop = try analyser.use_trail.getOrPut(analyser.gpa, .{ .node = usingnamespace_node.node, .uri = usingnamespace_node.handle.uri });
     if (gop.found_existing) return;
 
     const handle = usingnamespace_node.handle;
@@ -3025,7 +3028,7 @@ pub fn iterateSymbolsContainer(
     context: anytype,
     instance_access: bool,
 ) error{OutOfMemory}!void {
-    analyser.node_trail.clearRetainingCapacity();
+    analyser.use_trail.clearRetainingCapacity();
     return try analyser.iterateSymbolsContainerInternal(container_handle, orig_handle, callback, context, instance_access);
 }
 
@@ -3080,7 +3083,7 @@ pub fn iterateSymbolsGlobal(
     comptime callback: anytype,
     context: anytype,
 ) error{OutOfMemory}!void {
-    analyser.node_trail.clearRetainingCapacity();
+    analyser.use_trail.clearRetainingCapacity();
     return try analyser.iterateSymbolsGlobalInternal(handle, source_index, callback, context);
 }
 
@@ -3133,9 +3136,9 @@ pub fn innermostContainer(handle: *const DocumentStore.Handle, source_index: usi
 }
 
 fn resolveUse(analyser: *Analyser, uses: []const Ast.Node.Index, symbol: []const u8, handle: *const DocumentStore.Handle) error{OutOfMemory}!?DeclWithHandle {
-    analyser.node_trail.clearRetainingCapacity();
+    analyser.use_trail.clearRetainingCapacity();
     for (uses) |index| {
-        const gop = try analyser.node_trail.getOrPut(analyser.gpa, .{ .node = index, .uri = handle.uri });
+        const gop = try analyser.use_trail.getOrPut(analyser.gpa, .{ .node = index, .uri = handle.uri });
         if (gop.found_existing) continue;
 
         if (handle.tree.nodes.items(.data).len <= index) continue;
