@@ -544,7 +544,7 @@ pub fn loadBuildConfiguration(self: *DocumentStore, build_file_uri: Uri) !std.js
     var zig_run_result = blk: {
         const tracy_zone2 = tracy.trace(@src());
         defer tracy_zone2.end();
-        break :blk try std.ChildProcess.exec(.{
+        break :blk try std.process.Child.exec(.{
             .allocator = self.allocator,
             .argv = args,
             .cwd = std.fs.path.dirname(build_file_path).?,
