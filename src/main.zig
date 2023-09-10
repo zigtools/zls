@@ -49,7 +49,7 @@ fn getRecordFile(config: Config) ?std.fs.File {
 
     if (config.record_session_path) |record_path| {
         if (std.fs.createFileAbsolute(record_path, .{})) |file| {
-            logger.info("recording to {s}\n", .{record_path});
+            logger.info("recording to {s}", .{record_path});
             return file;
         } else |err| {
             logger.err("failed to create record file at {s}: {}", .{ record_path, err });
@@ -65,7 +65,7 @@ fn getReplayFile(config: Config) ?std.fs.File {
     const replay_path = config.replay_session_path orelse config.record_session_path orelse return null;
 
     if (std.fs.openFileAbsolute(replay_path, .{})) |file| {
-        logger.info("replaying from {s}\n", .{replay_path});
+        logger.info("replaying from {s}", .{replay_path});
         return file;
     } else |err| {
         logger.err("failed to open replay file at {s}: {}", .{ replay_path, err });
@@ -236,7 +236,7 @@ fn parseArgs(allocator: std.mem.Allocator) !ParseArgsResult {
     }
     if (specified.get(.@"enable-message-tracing")) {
         result.message_tracing_enabled = true;
-        logger.info("Enabled message tracing.\n", .{});
+        logger.info("Enabled message tracing.", .{});
     }
     if (specified.get(.@"config-path")) {
         std.debug.assert(result.config_path != null);
