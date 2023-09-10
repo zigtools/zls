@@ -2145,7 +2145,6 @@ pub fn getFieldAccessType(analyser: *Analyser, handle: *const DocumentStore.Hand
         }
     }
 
-    std.debug.print("current_type: {?}\n", .{current_type});
     if (current_type) |ct| {
         return FieldAccessReturn{
             .original = ct,
