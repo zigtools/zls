@@ -34,8 +34,13 @@ pub const std_options = struct {
         const level_txt = comptime level.asText();
         const scope_txt = comptime @tagName(scope);
 
-        std.debug.print("{s:<5}: ({s:^6}): ", .{ level_txt, if (comptime std.mem.startsWith(u8, scope_txt, "zls_")) scope_txt[4..] else scope_txt });
-        std.debug.print(format ++ "\n", args);
+        const stderr = std.io.getStdErr().writer();
+        std.debug.getStderrMutex().lock();
+        defer std.debug.getStderrMutex().unlock();
+
+        stderr.print("{s:<5}: ({s:^6}): ", .{ level_txt, if (comptime std.mem.startsWith(u8, scope_txt, "zls_")) scope_txt[4..] else scope_txt }) catch return;
+        stderr.print(format, args) catch return;
+        stderr.writeByte('\n') catch return;
     }
 };
 
