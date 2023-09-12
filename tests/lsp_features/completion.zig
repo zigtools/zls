@@ -588,6 +588,163 @@ test "completion - struct init" {
         // TODO `alpha` should be excluded
         .{ .label = "alpha", .kind = .Field, .detail = "alpha: *const S" },
     });
+    // Aliases
+    try testCompletion(
+        \\pub const Outer = struct {
+        \\    pub const Inner = struct {
+        \\        isf1: bool = true,
+        \\        isf2: bool = false,
+        \\    };
+        \\};
+        \\const Alias0 = Outer.Inner;
+        \\const Alias = Alias0;
+        \\
+        \\fn alias() void {
+        \\    var s = Alias{.<cursor>};
+        \\}
+    , &.{
+        .{ .label = "isf1", .kind = .Field, .detail = "isf1: bool = true" },
+        .{ .label = "isf2", .kind = .Field, .detail = "isf2: bool = false" },
+    });
+    // Parser workaround for when used before defined
+    try testCompletion(
+        \\fn alias() void {
+        \\    var s = Alias{1.<cursor>};
+        \\}
+        \\pub const Outer = struct {
+        \\    pub const Inner = struct {
+        \\        isf1: bool = true,
+        \\        isf2: bool = false,
+        \\    };
+        \\};
+        \\const Alias0 = Outer.Inner;
+        \\const Alias = Alias0;
+    , &.{
+        .{ .label = "isf1", .kind = .Field, .detail = "isf1: bool = true" },
+        .{ .label = "isf2", .kind = .Field, .detail = "isf2: bool = false" },
+    });
+    // Parser workaround for completing within Self
+    try testCompletion(
+        \\const MyStruct = struct {
+        \\    a: bool,
+        \\    b: bool,
+        \\    fn inside() void {
+        \\        var s = MyStruct{1.<cursor>};
+        \\    }
+        \\};
+    , &.{
+        .{ .label = "a", .kind = .Field, .detail = "a: bool" },
+        .{ .label = "b", .kind = .Field, .detail = "b: bool" },
+    });
+    try testCompletion(
+        \\fn ref(p0: A, p1: B) void {}
+        \\const A = struct {
+        \\    this_is_a: u32 = 9,
+        \\    arefb: B = 8,
+        \\};
+        \\const B = struct {
+        \\    brefa: A,
+        \\    this_is_b: []const u8,
+        \\};
+        \\ref(.{ .arefb = .{ .brefa = .{.<cursor>} } });
+    , &.{
+        .{ .label = "arefb", .kind = .Field, .detail = "arefb: B = 8" },
+        .{ .label = "this_is_a", .kind = .Field, .detail = "this_is_a: u32 = 9" },
+    });
+    try testCompletion(
+        \\const MyEnum = enum {
+        \\  ef1,
+        \\  ef2,
+        \\};
+        \\const S1 = struct { s1f1: u8, s1f2: u32 = 1, ref3: S3 = undefined };
+        \\const S2 = struct { s2f1: u8, s2f2: u32 = 1, ref1: S1, mye: MyEnum = .ef1};
+        \\const S3 = struct {
+        \\  s3f1: u8,
+        \\  s3f2: u32 = 1,
+        \\  ref2: S2,
+        \\  pub fn s3(p0: es, p1: S2) void {}
+        \\};
+        \\const refs = S3{ .ref2 = .{ .ref1 = .{ .ref3 = .{ .ref2 = .{ .ref1 = .{.<cursor>} } } } } };
+    , &.{
+        .{ .label = "s1f1", .kind = .Field, .detail = "s1f1: u8" },
+        .{ .label = "s1f2", .kind = .Field, .detail = "s1f2: u32 = 1" },
+        .{ .label = "ref3", .kind = .Field, .detail = "ref3: S3 = undefined" },
+    });
+    // Method of T requiring explicit self param
+    try testCompletion(
+        \\const MyEnum = enum {
+        \\  ef1,
+        \\  ef2,
+        \\};
+        \\const S1 = struct { s1f1: u8, s1f2: u32 = 1, ref3: S3 = undefined };
+        \\const S2 = struct { s2f1: u8, s2f2: u32 = 1, ref1: S1, mye: MyEnum = .ef1};
+        \\const S3 = struct {
+        \\  s3f1: u8,
+        \\  s3f2: u32 = 1,
+        \\  ref2: S2,
+        \\  const Self = @This();
+        \\  pub fn s3(self: *Self, p0: es, p1: S2) void {}
+        \\};
+        \\S3.s3(null, .{ .mye = .{} }, .{ .ref1 = .{ .ref3 = .{ .ref2 = .{ .ref1 = .{.<cursor>} } } } });
+    , &.{
+        .{ .label = "s1f1", .kind = .Field, .detail = "s1f1: u8" },
+        .{ .label = "s1f2", .kind = .Field, .detail = "s1f2: u32 = 1" },
+        .{ .label = "ref3", .kind = .Field, .detail = "ref3: S3 = undefined" },
+    });
+    // Instance of T w/ self param + multitype (`switch`)
+    try testCompletion(
+        \\const MyEnum = enum {
+        \\  ef1,
+        \\  ef2,
+        \\};
+        \\const es = switch (1) {
+        \\    1 => S1,
+        \\    2 => S2,
+        \\    3 => S3,
+        \\};
+        \\const S1 = struct { s1f1: u8, s1f2: u32 = 1, ref3: S3 = undefined };
+        \\const S2 = struct { s2f1: u8, s2f2: u32 = 1, ref1: S1, mye: MyEnum = .ef1};
+        \\const S3 = struct {
+        \\  s3f1: u8,
+        \\  s3f2: u32 = 1,
+        \\  ref2: S2,
+        \\  const Self = @This();
+        \\  pub fn s3(self: Self, p0: es, p1: S1) void {}
+        \\};
+        \\const iofs3 = S3{};
+        \\iofs3.s3(.{.<cursor>});
+    , &.{
+        .{ .label = "s1f1", .kind = .Field, .detail = "s1f1: u8" },
+        .{ .label = "s1f2", .kind = .Field, .detail = "s1f2: u32 = 1" },
+        .{ .label = "ref3", .kind = .Field, .detail = "ref3: S3 = undefined" },
+        .{ .label = "s2f1", .kind = .Field, .detail = "s2f1: u8" },
+        .{ .label = "s2f2", .kind = .Field, .detail = "s2f2: u32 = 1" },
+        .{ .label = "ref1", .kind = .Field, .detail = "ref1: S1" },
+        .{ .label = "s3f1", .kind = .Field, .detail = "s3f1: u8" },
+        .{ .label = "s3f2", .kind = .Field, .detail = "s3f2: u32 = 1" },
+        .{ .label = "ref2", .kind = .Field, .detail = "ref2: S2" },
+        .{ .label = "mye", .kind = .Field, .detail = "mye: MyEnum = .ef1" },
+    });
+    try testCompletion(
+        \\const MyEnum = enum {
+        \\  ef1,
+        \\  ef2,
+        \\};
+        \\const oes = struct {
+        \\  const es = if (true) S1 else S2;
+        \\};
+        \\const S1 = struct { s1f1: u8, s1f2: u32 = 1, ref3: S3 = undefined };
+        \\const S2 = struct { s2f1: u8, s2f2: u32 = 1, ref1: S1, mye: MyEnum = .ef1};
+        \\const oesi: oes.es = .{ .<cursor>};
+    , &.{
+        .{ .label = "s1f1", .kind = .Field, .detail = "s1f1: u8" },
+        .{ .label = "s1f2", .kind = .Field, .detail = "s1f2: u32 = 1" },
+        .{ .label = "ref3", .kind = .Field, .detail = "ref3: S3 = undefined" },
+        .{ .label = "s2f1", .kind = .Field, .detail = "s2f1: u8" },
+        .{ .label = "s2f2", .kind = .Field, .detail = "s2f2: u32 = 1" },
+        .{ .label = "ref1", .kind = .Field, .detail = "ref1: S1" },
+        .{ .label = "mye", .kind = .Field, .detail = "mye: MyEnum = .ef1" },
+    });
 }
 
 test "completion - declarations" {
