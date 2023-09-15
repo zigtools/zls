@@ -118,7 +118,7 @@ pub const Env = struct {
 
 /// result has to be freed with `json_compat.parseFree`
 pub fn getZigEnv(allocator: std.mem.Allocator, zig_exe_path: []const u8) ?std.json.Parsed(Env) {
-    const zig_env_result = std.ChildProcess.exec(.{
+    const zig_env_result = std.process.Child.exec(.{
         .allocator = allocator,
         .argv = &[_][]const u8{ zig_exe_path, "env" },
     }) catch {

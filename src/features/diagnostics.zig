@@ -244,7 +244,7 @@ pub fn generateBuildOnSaveDiagnostics(
         server.zig_exe_lock.lock();
         defer server.zig_exe_lock.unlock();
 
-        break :blk std.ChildProcess.exec(.{
+        break :blk std.process.Child.exec(.{
             .allocator = server.allocator,
             .argv = argv.items,
             .cwd = workspace_path,
@@ -390,7 +390,7 @@ fn getDiagnosticsFromAstCheck(
         server.zig_exe_lock.lock();
         defer server.zig_exe_lock.unlock();
 
-        var process = std.ChildProcess.init(&[_][]const u8{ zig_exe_path, "ast-check", "--color", "off" }, server.allocator);
+        var process = std.process.Child.init(&[_][]const u8{ zig_exe_path, "ast-check", "--color", "off" }, server.allocator);
         process.stdin_behavior = .Pipe;
         process.stderr_behavior = .Pipe;
 

@@ -184,7 +184,7 @@ pub fn translate(
 
     argv.appendAssumeCapacity(file_path);
 
-    var process = std.ChildProcess.init(argv.items, allocator);
+    var process = std.process.Child.init(argv.items, allocator);
     process.stdin_behavior = .Pipe;
     process.stdout_behavior = .Pipe;
     process.stderr_behavior = .Pipe;
