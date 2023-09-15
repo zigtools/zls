@@ -5,15 +5,15 @@
     .dependencies = .{
         .known_folders = .{
             .url = "https://github.com/ziglibs/known-folders/archive/fa75e1bc672952efa0cf06160bbd942b47f6d59b.tar.gz",
-            .hash = "122048992ca58a78318b6eba4f65c692564be5af3b30fbef50cd4abeda981b2e7fa5",
+            .hash = "1220206c698a1890d742a8b98acb16db99275d16f2e7fe2046c3d8f2249ed267ca71",
         },
         .diffz = .{
             .url = "https://github.com/ziglibs/diffz/archive/90353d401c59e2ca5ed0abe5444c29ad3d7489aa.tar.gz",
-            .hash = "122089a8247a693cad53beb161bde6c30f71376cd4298798d45b32740c3581405864",
+            .hash = "122090a5106337f6c86efeaecfedf14e1cd8f9944e8ba9c0c7fd9a9c54d860100ff7",
         },
         .binned_allocator = .{
             .url = "https://gist.github.com/antlilja/8372900fcc09e38d7b0b6bbaddad3904/archive/6c3321e0969ff2463f8335da5601986cf2108690.tar.gz",
-            .hash = "1220363c7e27b2d3f39de6ff6e90f9537a0634199860fea237a55ddb1e1717f5d6a5",
+            .hash = "122031b87e4aedc69cbc600a29aaf79317fa84d7fc4f9e619d947de121aaf637bb2a",
         },
     },
 }
