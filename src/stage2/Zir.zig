@@ -75,12 +75,13 @@ pub fn extraData(code: Zir, comptime T: type, index: usize) ExtraData(T) {
     inline for (fields) |field| {
         @field(result, field.name) = switch (field.type) {
             u32 => code.extra[i],
-            Inst.Ref => @as(Inst.Ref, @enumFromInt(code.extra[i])),
-            i32 => @as(i32, @bitCast(code.extra[i])),
-            Inst.Call.Flags => @as(Inst.Call.Flags, @bitCast(code.extra[i])),
-            Inst.BuiltinCall.Flags => @as(Inst.BuiltinCall.Flags, @bitCast(code.extra[i])),
-            Inst.SwitchBlock.Bits => @as(Inst.SwitchBlock.Bits, @bitCast(code.extra[i])),
-            Inst.FuncFancy.Bits => @as(Inst.FuncFancy.Bits, @bitCast(code.extra[i])),
+            Inst.Ref => @enumFromInt(code.extra[i]),
+            i32,
+            Inst.Call.Flags,
+            Inst.BuiltinCall.Flags,
+            Inst.SwitchBlock.Bits,
+            Inst.FuncFancy.Bits,
+            => @bitCast(code.extra[i]),
             else => @compileError("bad field type"),
         };
         i += 1;
@@ -112,8 +113,7 @@ pub fn nullTerminatedString2(code: Zir, index: NullTerminatedString) [:0]const u
 }
 
 pub fn refSlice(code: Zir, start: usize, len: usize) []Inst.Ref {
-    const raw_slice = code.extra[start..][0..len];
-    return @as([]Inst.Ref, @ptrCast(raw_slice));
+    return @ptrCast(code.extra[start..][0..len]);
 }
 
 pub fn hasCompileErrors(code: Zir) bool {
@@ -245,6 +245,13 @@ pub const Inst = struct {
         /// Given a pointer type, returns its element type.
         /// Uses the `un_node` field.
         elem_type,
+        /// Given an indexable pointer (slice, many-ptr, single-ptr-to-array), returns its
+        /// element type. Emits a compile error if the type is not an indexable pointer.
+        /// Uses the `un_node` field.
+        indexable_ptr_elem_type,
+        /// Given a vector type, returns its element type.
+        /// Uses the `un_node` field.
+        vector_elem_type,
         /// Given a pointer to an indexable object, returns the len property. This is
         /// used by for loops. This instruction also emits a for-loop specific compile
         /// error if the indexable object is not indexable.
@@ -424,6 +431,10 @@ pub const Inst = struct {
         /// Payload is `Bin`.
         /// No OOB safety check is emitted.
         elem_val,
+        /// Same as `elem_val` but takes the index as an immediate value.
+        /// No OOB safety check is emitted. A prior instruction must validate this operation.
+        /// Uses the `elem_val_imm` union field.
+        elem_val_imm,
         /// Emits a compile error if the operand is not `void`.
         /// Uses the `un_node` field.
         ensure_result_used,
@@ -596,20 +607,9 @@ pub const Inst = struct {
         /// Same as `store` except provides a source location.
         /// Uses the `pl_node` union field. Payload is `Bin`.
         store_node,
-        /// This instruction is not really supposed to be emitted from AstGen; nevertheless it
-        /// is sometimes emitted due to deficiencies in AstGen. When Sema sees this instruction,
-        /// it must clean up after AstGen's mess by looking at various context clues and
-        /// then treating it as one of the following:
-        ///  * no-op
-        ///  * store_to_inferred_ptr
-        ///  * store
-        /// Uses the `bin` union field with LHS as the pointer to store to.
-        store_to_block_ptr,
         /// Same as `store` but the type of the value being stored will be used to infer
         /// the pointer type.
-        /// Uses the `bin` union field - Astgen.zig depends on the ability to change
-        /// the tag of an instruction from `store_to_block_ptr` to `store_to_inferred_ptr`
-        /// without changing the data.
+        /// Uses the `bin` union field.
         store_to_inferred_ptr,
         /// String Literal. Makes an anonymous Decl and then takes a pointer to it.
         /// Uses the `str` union field.
@@ -697,10 +697,16 @@ pub const Inst = struct {
         ///   *?S returns *S
         /// Uses the `un_node` field.
         field_base_ptr,
+        /// Given a type, strips all optional and error union types wrapping it.
+        /// e.g. `E!?u32` becomes `u32`, `[]u8` becomes `[]u8`.
+        /// Uses the `un_node` field.
+        opt_eu_base_ty,
         /// Checks that the type supports array init syntax.
+        /// Returns the underlying indexable type (since the given type may be e.g. an optional).
         /// Uses the `un_node` field.
         validate_array_init_ty,
         /// Checks that the type supports struct init syntax.
+        /// Returns the underlying struct type (since the given type may be e.g. an optional).
         /// Uses the `un_node` field.
         validate_struct_init_ty,
         /// Given a set of `field_ptr` instructions, assumes they are all part of a struct
@@ -720,6 +726,9 @@ pub const Inst = struct {
         /// Check that operand type supports the dereference operand (.*).
         /// Uses the `un_node` field.
         validate_deref,
+        /// Check that the operand's type is an array or tuple with the given number of elements.
+        /// Uses the `pl_node` field. Payload is `ValidateDestructure`.
+        validate_destructure,
         /// A struct literal with a specified type, with no fields.
         /// Uses the `un_node` field.
         struct_init_empty,
@@ -1020,6 +1029,8 @@ pub const Inst = struct {
                 .vector_type,
                 .elem_type_index,
                 .elem_type,
+                .indexable_ptr_elem_type,
+                .vector_elem_type,
                 .indexable_ptr_len,
                 .anyframe_type,
                 .as,
@@ -1062,6 +1073,7 @@ pub const Inst = struct {
                 .elem_ptr_node,
                 .elem_ptr_imm,
                 .elem_val_node,
+                .elem_val_imm,
                 .ensure_result_used,
                 .ensure_result_non_error,
                 .ensure_err_union_payload_void,
@@ -1096,7 +1108,6 @@ pub const Inst = struct {
                 .shr,
                 .store,
                 .store_node,
-                .store_to_block_ptr,
                 .store_to_inferred_ptr,
                 .str,
                 .sub,
@@ -1139,6 +1150,7 @@ pub const Inst = struct {
                 .validate_struct_init,
                 .validate_array_init,
                 .validate_deref,
+                .validate_destructure,
                 .struct_init_empty,
                 .struct_init,
                 .struct_init_ref,
@@ -1231,6 +1243,7 @@ pub const Inst = struct {
                 .save_err_ret_index,
                 .restore_err_ret_index,
                 .for_len,
+                .opt_eu_base_ty,
                 => false,
 
                 .@"break",
@@ -1281,7 +1294,6 @@ pub const Inst = struct {
                 .atomic_store,
                 .store,
                 .store_node,
-                .store_to_block_ptr,
                 .store_to_inferred_ptr,
                 .resolve_inferred_alloc,
                 .validate_array_init_ty,
@@ -1289,6 +1301,7 @@ pub const Inst = struct {
                 .validate_struct_init,
                 .validate_array_init,
                 .validate_deref,
+                .validate_destructure,
                 .@"export",
                 .export_value,
                 .set_runtime_safety,
@@ -1324,6 +1337,8 @@ pub const Inst = struct {
                 .vector_type,
                 .elem_type_index,
                 .elem_type,
+                .indexable_ptr_elem_type,
+                .vector_elem_type,
                 .indexable_ptr_len,
                 .anyframe_type,
                 .as,
@@ -1361,6 +1376,7 @@ pub const Inst = struct {
                 .elem_ptr_node,
                 .elem_ptr_imm,
                 .elem_val_node,
+                .elem_val_imm,
                 .field_ptr,
                 .field_ptr_init,
                 .field_val,
@@ -1519,6 +1535,7 @@ pub const Inst = struct {
                 .for_len,
                 .@"try",
                 .try_ptr,
+                .opt_eu_base_ty,
                 => false,
 
                 .extended => switch (data.extended.opcode) {
@@ -1554,6 +1571,8 @@ pub const Inst = struct {
                 .vector_type = .pl_node,
                 .elem_type_index = .bin,
                 .elem_type = .un_node,
+                .indexable_ptr_elem_type = .un_node,
+                .vector_elem_type = .un_node,
                 .indexable_ptr_len = .un_node,
                 .anyframe_type = .un_node,
                 .as = .bin,
@@ -1604,6 +1623,7 @@ pub const Inst = struct {
                 .elem_ptr_imm = .pl_node,
                 .elem_val = .pl_node,
                 .elem_val_node = .pl_node,
+                .elem_val_imm = .elem_val_imm,
                 .ensure_result_used = .un_node,
                 .ensure_result_non_error = .un_node,
                 .ensure_err_union_payload_void = .un_node,
@@ -1650,7 +1670,6 @@ pub const Inst = struct {
                 .slice_length = .pl_node,
                 .store = .bin,
                 .store_node = .pl_node,
-                .store_to_block_ptr = .bin,
                 .store_to_inferred_ptr = .bin,
                 .str = .str,
                 .negate = .un_node,
@@ -1673,11 +1692,13 @@ pub const Inst = struct {
                 .switch_block_ref = .pl_node,
                 .array_base_ptr = .un_node,
                 .field_base_ptr = .un_node,
+                .opt_eu_base_ty = .un_node,
                 .validate_array_init_ty = .pl_node,
                 .validate_struct_init_ty = .un_node,
                 .validate_struct_init = .pl_node,
                 .validate_array_init = .pl_node,
                 .validate_deref = .un_node,
+                .validate_destructure = .pl_node,
                 .struct_init_empty = .un_node,
                 .field_type = .pl_node,
                 .field_type_ref = .pl_node,
@@ -2283,6 +2304,12 @@ pub const Inst = struct {
             block: Ref, // If restored, the index is from this block's entrypoint
             operand: Ref, // If non-error (or .none), then restore the index
         },
+        elem_val_imm: struct {
+            /// The indexable value being accessed.
+            operand: Ref,
+            /// The index being accessed.
+            idx: u32,
+        },
 
         // Make sure we don't accidentally add a field to make this union
         // bigger than expected. Note that in Debug builds, Zig is allowed
@@ -2322,14 +2349,15 @@ pub const Inst = struct {
             defer_err_code,
             save_err_ret_index,
             restore_err_ret_index,
+            elem_val_imm,
         };
     };
 
     pub const Break = struct {
         pub const no_src_node = std.math.maxInt(i32);
 
-        block_inst: Index,
         operand_src_node: i32,
+        block_inst: Index,
     };
 
     /// Trailing:
@@ -2951,7 +2979,8 @@ pub const Inst = struct {
             ///    true      | true          |  union(enum(T)) { }
             ///    true      | false         |  union(T) { }
             auto_enum_tag: bool,
-            _: u6 = undefined,
+            any_aligned_fields: bool,
+            _: u5 = undefined,
         };
     };
 
@@ -3220,6 +3249,15 @@ pub const Inst = struct {
         index: u32,
         len: u32,
     };
+
+    pub const ValidateDestructure = struct {
+        /// The value being destructured.
+        operand: Ref,
+        /// The `destructure_assign` node.
+        destructure_node: i32,
+        /// The expected field count.
+        expect_len: u32,
+    };
 };
 
 pub const SpecialProng = enum { none, @"else", under };
@@ -3247,10 +3285,10 @@ pub const DeclIterator = struct {
         }
         it.decl_i += 1;
 
-        const flags = @as(u4, @truncate(it.cur_bit_bag));
+        const flags: u4 = @truncate(it.cur_bit_bag);
         it.cur_bit_bag >>= 4;
 
-        const sub_index = @as(u32, @intCast(it.extra_index));
+        const sub_index: u32 = @intCast(it.extra_index);
         it.extra_index += 5; // src_hash(4) + line(1)
         const name = it.zir.nullTerminatedString(it.zir.extra[it.extra_index]);
         it.extra_index += 3; // name(1) + value(1) + doc_comment(1)
@@ -3277,7 +3315,7 @@ pub fn declIterator(zir: Zir, decl_inst: u32) DeclIterator {
             const extended = datas[decl_inst].extended;
             switch (extended.opcode) {
                 .struct_decl => {
-                    const small = @as(Inst.StructDecl.Small, @bitCast(extended.small));
+                    const small: Inst.StructDecl.Small = @bitCast(extended.small);
                     var extra_index: usize = extended.operand;
                     extra_index += @intFromBool(small.has_src_node);
                     extra_index += @intFromBool(small.has_fields_len);
@@ -3300,7 +3338,7 @@ pub fn declIterator(zir: Zir, decl_inst: u32) DeclIterator {
                     return declIteratorInner(zir, extra_index, decls_len);
                 },
                 .enum_decl => {
-                    const small = @as(Inst.EnumDecl.Small, @bitCast(extended.small));
+                    const small: Inst.EnumDecl.Small = @bitCast(extended.small);
                     var extra_index: usize = extended.operand;
                     extra_index += @intFromBool(small.has_src_node);
                     extra_index += @intFromBool(small.has_tag_type);
@@ -3315,7 +3353,7 @@ pub fn declIterator(zir: Zir, decl_inst: u32) DeclIterator {
                     return declIteratorInner(zir, extra_index, decls_len);
                 },
                 .union_decl => {
-                    const small = @as(Inst.UnionDecl.Small, @bitCast(extended.small));
+                    const small: Inst.UnionDecl.Small = @bitCast(extended.small);
                     var extra_index: usize = extended.operand;
                     extra_index += @intFromBool(small.has_src_node);
                     extra_index += @intFromBool(small.has_tag_type);
@@ -3330,7 +3368,7 @@ pub fn declIterator(zir: Zir, decl_inst: u32) DeclIterator {
                     return declIteratorInner(zir, extra_index, decls_len);
                 },
                 .opaque_decl => {
-                    const small = @as(Inst.OpaqueDecl.Small, @bitCast(extended.small));
+                    const small: Inst.OpaqueDecl.Small = @bitCast(extended.small);
                     var extra_index: usize = extended.operand;
                     extra_index += @intFromBool(small.has_src_node);
                     const decls_len = if (small.has_decls_len) decls_len: {
@@ -3526,7 +3564,7 @@ fn findDeclsSwitch(
 
     const special_prong = extra.data.bits.specialProng();
     if (special_prong != .none) {
-        const body_len = @as(u31, @truncate(zir.extra[extra_index]));
+        const body_len: u31 = @truncate(zir.extra[extra_index]);
         extra_index += 1;
         const body = zir.extra[extra_index..][0..body_len];
         extra_index += body.len;
@@ -3539,7 +3577,7 @@ fn findDeclsSwitch(
         var scalar_i: usize = 0;
         while (scalar_i < scalar_cases_len) : (scalar_i += 1) {
             extra_index += 1;
-            const body_len = @as(u31, @truncate(zir.extra[extra_index]));
+            const body_len: u31 = @truncate(zir.extra[extra_index]);
             extra_index += 1;
             const body = zir.extra[extra_index..][0..body_len];
             extra_index += body_len;
@@ -3554,7 +3592,7 @@ fn findDeclsSwitch(
             extra_index += 1;
             const ranges_len = zir.extra[extra_index];
             extra_index += 1;
-            const body_len = @as(u31, @truncate(zir.extra[extra_index]));
+            const body_len: u31 = @truncate(zir.extra[extra_index]);
             extra_index += 1;
             const items = zir.refSlice(extra_index, items_len);
             extra_index += items_len;
@@ -3636,7 +3674,7 @@ pub fn getFnInfo(zir: Zir, fn_inst: Inst.Index) FnInfo {
                     ret_ty_ref = .void_type;
                 },
                 1 => {
-                    ret_ty_ref = @as(Inst.Ref, @enumFromInt(zir.extra[extra_index]));
+                    ret_ty_ref = @enumFromInt(zir.extra[extra_index]);
                     extra_index += 1;
                 },
                 else => {
@@ -3690,7 +3728,7 @@ pub fn getFnInfo(zir: Zir, fn_inst: Inst.Index) FnInfo {
                 ret_ty_body = zir.extra[extra_index..][0..body_len];
                 extra_index += ret_ty_body.len;
             } else if (extra.data.bits.has_ret_ty_ref) {
-                ret_ty_ref = @as(Inst.Ref, @enumFromInt(zir.extra[extra_index]));
+                ret_ty_ref = @enumFromInt(zir.extra[extra_index]);
                 extra_index += 1;
             }
 
@@ -3734,7 +3772,7 @@ pub fn getFnInfo(zir: Zir, fn_inst: Inst.Index) FnInfo {
 pub const ref_start_index: u32 = @intFromEnum(Inst.Ref.ref_start_index);
 
 pub fn indexToRef(inst: Inst.Index) Inst.Ref {
-    return @as(Inst.Ref, @enumFromInt(ref_start_index + inst));
+    return @enumFromInt(ref_start_index + inst);
 }
 
 pub fn refToIndex(inst: Inst.Ref) ?Inst.Index {
