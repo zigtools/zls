@@ -23,6 +23,7 @@ pub const InlayHint = struct {
     label: []const u8,
     kind: types.InlayHintKind,
     tooltip: types.MarkupContent,
+    after_token: bool = false,
 
     fn lessThan(_: void, lhs: InlayHint, rhs: InlayHint) bool {
         return lhs.token_index < rhs.token_index;
@@ -69,7 +70,7 @@ const Builder = struct {
 
         var converted_hints = try self.arena.alloc(types.InlayHint, self.hints.items.len);
         for (converted_hints, self.hints.items) |*converted_hint, hint| {
-            const index = offsets.tokenToIndex(self.handle.tree, hint.token_index);
+            const index = if (hint.after_token) offsets.tokenToIndex(self.handle.tree, hint.token_index) - @as(usize, @intCast(@intFromBool(hint.after_token))) * 3 else offsets.tokenToIndex(self.handle.tree, hint.token_index);
             const position = offsets.advancePosition(
                 self.handle.tree.source,
                 last_position,
@@ -85,7 +86,7 @@ const Builder = struct {
                 .kind = hint.kind,
                 .tooltip = .{ .MarkupContent = hint.tooltip },
                 .paddingLeft = false,
-                .paddingRight = true,
+                .paddingRight = !hint.after_token,
             };
         }
         return converted_hints;
@@ -211,6 +212,61 @@ fn writeBuiltinHint(builder: *Builder, parameters: []const Ast.Node.Index, argum
     }
 }
 
+fn writeVariableDeclHint(builder: *Builder, decl_node: Ast.Node.Index) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    const handle = builder.handle;
+    const tree = handle.tree;
+
+    var type_references = Analyser.ReferencedType.Set.init(builder.arena);
+    var reference_collector = Analyser.ReferencedType.Collector.init(&type_references);
+
+    const source_index = offsets.tokenToIndex(tree, tree.firstToken(decl_node));
+
+    const str_t = Analyser.getContainerDeclName(
+        tree,
+        null,
+        decl_node,
+    ) orelse return;
+
+    const decl_handle = try builder.analyser.lookupSymbolGlobal(
+        handle,
+        str_t,
+        source_index,
+    ) orelse return;
+
+    var doc_str = try decl_handle.docComments(builder.arena);
+
+    var type_str: []const u8 = "unresolved";
+    if (try decl_handle.resolveType(builder.analyser)) |resolved_type| {
+        try builder.analyser.referencedTypes(
+            resolved_type,
+            &type_str,
+            &reference_collector,
+        );
+        if (doc_str == null) {
+            doc_str = try resolved_type.docComments(builder.arena);
+        }
+    }
+
+    const hint = tree.fullVarDecl(decl_node) orelse return;
+    if (hint.ast.type_node == 0) {
+        try builder.hints.append(builder.arena, .{
+            .token_index = tree.firstToken(hint.ast.init_node),
+            .label = try std.fmt.allocPrint(builder.arena, ": {s}", .{
+                type_str,
+            }),
+            .tooltip = .{
+                .kind = builder.hover_kind,
+                .value = doc_str orelse "empty",
+            },
+            .kind = .Parameter,
+            .after_token = true,
+        });
+    }
+}
+
 /// takes a Ast.full.Call (a function call), analysis its function expression, finds its declaration and writes parameter hints into `builder.hints`
 fn writeCallNodeHint(builder: *Builder, call: Ast.full.Call) !void {
     const tracy_zone = tracy.trace(@src());
@@ -286,7 +342,13 @@ fn writeNodeInlayHint(
             const call = tree.fullCall(&params, node).?;
             try writeCallNodeHint(builder, call);
         },
-
+        .local_var_decl,
+        .simple_var_decl,
+        .global_var_decl,
+        .aligned_var_decl,
+        => {
+            try writeVariableDeclHint(builder, node);
+        },
         .builtin_call_two,
         .builtin_call_two_comma,
         .builtin_call,
