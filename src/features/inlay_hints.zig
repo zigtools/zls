@@ -212,6 +212,7 @@ fn writeBuiltinHint(builder: *Builder, parameters: []const Ast.Node.Index, argum
     }
 }
 
+/// Takes a variable declaration AST node. If the type is inferred, attempt to infer it and display it as a hint.
 fn writeVariableDeclHint(builder: *Builder, decl_node: Ast.Node.Index) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
@@ -222,44 +223,40 @@ fn writeVariableDeclHint(builder: *Builder, decl_node: Ast.Node.Index) !void {
     var type_references = Analyser.ReferencedType.Set.init(builder.arena);
     var reference_collector = Analyser.ReferencedType.Collector.init(&type_references);
 
-    const source_index = offsets.tokenToIndex(tree, tree.firstToken(decl_node));
-
-    const str_t = Analyser.getContainerDeclName(
+    const decl_name = Analyser.getContainerDeclName(
         tree,
         null,
         decl_node,
     ) orelse return;
-
+    const source_index = offsets.tokenToIndex(tree, tree.firstToken(decl_node));
     const decl_handle = try builder.analyser.lookupSymbolGlobal(
         handle,
-        str_t,
+        decl_name,
         source_index,
     ) orelse return;
 
-    var doc_str = try decl_handle.docComments(builder.arena);
-
-    var type_str: []const u8 = "unresolved";
+    var type_str: [:0]const u8 = "";
     if (try decl_handle.resolveType(builder.analyser)) |resolved_type| {
+        // Sometime this just... doesn't work? ZLS can determine that the `handle` constant up there is a `*const Handle`,
+        // but this funtion just returns nothing. In other functions it works fine, as well. ???
         try builder.analyser.referencedTypes(
             resolved_type,
             &type_str,
             &reference_collector,
         );
-        if (doc_str == null) {
-            doc_str = try resolved_type.docComments(builder.arena);
-        }
     }
 
     const hint = tree.fullVarDecl(decl_node) orelse return;
-    if (hint.ast.type_node == 0) {
+    if (type_str[0] != 0 and hint.ast.type_node == 0) {
         try builder.hints.append(builder.arena, .{
             .token_index = tree.firstToken(hint.ast.init_node),
             .label = try std.fmt.allocPrint(builder.arena, ": {s}", .{
                 type_str,
             }),
+            // TODO: Implement on-hover stuff.
             .tooltip = .{
                 .kind = builder.hover_kind,
-                .value = doc_str orelse "empty",
+                .value = "",
             },
             .kind = .Parameter,
             .after_token = true,
