@@ -4266,6 +4266,15 @@ pub fn referencedTypesFromNode(
     node_handle: NodeWithHandle,
     collector: *ReferencedType.Collector,
 ) error{OutOfMemory}!void {
+    analyser.resolved_nodes.clearRetainingCapacity();
+    return try analyser.referencedTypesFromNodeInternal(node_handle, collector);
+}
+
+fn referencedTypesFromNodeInternal(
+    analyser: *Analyser,
+    node_handle: NodeWithHandle,
+    collector: *ReferencedType.Collector,
+) error{OutOfMemory}!void {
     const handle = node_handle.handle;
     const tree = handle.tree;
 
@@ -4302,6 +4311,7 @@ pub fn referencedTypes(
     resolved_type_str: *[]const u8,
     collector: *ReferencedType.Collector,
 ) error{OutOfMemory}!void {
+    analyser.resolved_nodes.clearRetainingCapacity();
     const allocator = collector.referenced_types.allocator;
     if (resolved_type.type.is_type_val) {
         collector.needs_type_reference = false;
@@ -4325,7 +4335,7 @@ fn addReferencedTypesFromNode(
     const type_handle = try analyser.resolveTypeOfNodeInternal(node_handle) orelse return null;
     if (!type_handle.type.is_type_val) return null;
     var collector = ReferencedType.Collector.init(referenced_types);
-    try analyser.referencedTypesFromNode(node_handle, &collector);
+    try analyser.referencedTypesFromNodeInternal(node_handle, &collector);
     return analyser.addReferencedTypes(type_handle, collector);
 }
 
