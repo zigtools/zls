@@ -22,7 +22,7 @@ pub const InlayHint = struct {
     token_index: Ast.TokenIndex,
     label: []const u8,
     kind: types.InlayHintKind,
-    tooltip: types.MarkupContent,
+    tooltip: ?types.MarkupContent,
     after_token: bool = false,
 
     fn lessThan(_: void, lhs: InlayHint, rhs: InlayHint) bool {
@@ -84,7 +84,7 @@ const Builder = struct {
                 .position = position,
                 .label = .{ .string = hint.label },
                 .kind = hint.kind,
-                .tooltip = .{ .MarkupContent = hint.tooltip },
+                .tooltip = if (hint.tooltip != null) .{ .MarkupContent = hint.tooltip.? } else null,
                 .paddingLeft = false,
                 .paddingRight = !hint.after_token,
             };
@@ -245,10 +245,7 @@ fn writeVariableDeclHint(builder: *Builder, decl_node: Ast.Node.Index) !void {
             type_str,
         }),
         // TODO: Implement on-hover stuff.
-        .tooltip = .{
-            .kind = builder.hover_kind,
-            .value = "",
-        },
+        .tooltip = null,
         .kind = .Parameter,
         .after_token = true,
     });
