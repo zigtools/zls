@@ -12,14 +12,15 @@ test "code actions - discard value" {
     try testAutofix(
         \\test {
         \\    var foo = {};
-        \\    const bar = {};
+        \\    const bar, var baz = .{ 1, 2 };
         \\}
         \\
     ,
         \\test {
         \\    var foo = {};
         \\    _ = foo;
-        \\    const bar = {};
+        \\    const bar, var baz = .{ 1, 2 };
+        \\    _ = baz;
         \\    _ = bar;
         \\}
         \\

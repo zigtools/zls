@@ -502,6 +502,7 @@ pub fn lastToken(tree: Ast, node: Ast.Node.Index) Ast.TokenIndex {
         .assign_sub_sat,
         .assign_shl_sat,
         .assign,
+        .assign_destructure,
         .merge_error_sets,
         .mul,
         .div,
@@ -616,8 +617,7 @@ pub fn lastToken(tree: Ast, node: Ast.Node.Index) Ast.TokenIndex {
         .switch_comma, .@"switch" => {
             const lhs = datas[n].lhs;
             const l_brace = tree.lastToken(lhs) + 2; //lparen + rbrace
-            return findMatchingRBrace(token_tags, l_brace)
-                orelse @intCast(tree.tokens.len - 1);
+            return findMatchingRBrace(token_tags, l_brace) orelse @intCast(tree.tokens.len - 1);
         },
         .@"asm" => {
             const extra = tree.extraData(datas[n].rhs, Node.Asm);
@@ -678,25 +678,21 @@ pub fn lastToken(tree: Ast, node: Ast.Node.Index) Ast.TokenIndex {
         .block_two_semicolon,
         .block_two,
         => {
-            return findMatchingRBrace(token_tags, main_tokens[n])
-                orelse @intCast(tree.tokens.len - 1);
+            return findMatchingRBrace(token_tags, main_tokens[n]) orelse @intCast(tree.tokens.len - 1);
         },
         .container_decl_trailing,
         .container_decl_two_trailing,
         .container_decl_two,
         => {
             // + 1 for the lbrace
-            return findMatchingRBrace(token_tags, main_tokens[n] + 1)
-                orelse @intCast(tree.tokens.len - 1);
+            return findMatchingRBrace(token_tags, main_tokens[n] + 1) orelse @intCast(tree.tokens.len - 1);
         },
         .container_decl_arg,
         .container_decl_arg_trailing,
         => {
             // + 4 for the lparen, identifier, rparen, lbrace
-            const l_brace = findNextLBrace(token_tags, main_tokens[n])
-                orelse return @intCast(tree.tokens.len - 1);
-            return findMatchingRBrace(token_tags, l_brace)
-                orelse @intCast(tree.tokens.len - 1);
+            const l_brace = findNextLBrace(token_tags, main_tokens[n]) orelse return @intCast(tree.tokens.len - 1);
+            return findMatchingRBrace(token_tags, l_brace) orelse @intCast(tree.tokens.len - 1);
         },
         .array_init_dot_two,
         .builtin_call_two,
@@ -1385,6 +1381,15 @@ pub fn iterateChildren(
             try callback(context, tree, var_decl.addrspace_node);
             try callback(context, tree, var_decl.section_node);
             try callback(context, tree, var_decl.init_node);
+        },
+
+        .assign_destructure => {
+            const lhs_count = tree.extra_data[node_data[node].lhs];
+            const lhs_exprs = tree.extra_data[node_data[node].lhs + 1 ..][0..lhs_count];
+            for (lhs_exprs) |lhs_node| {
+                try callback(context, tree, lhs_node);
+            }
+            try callback(context, tree, node_data[node].rhs);
         },
 
         .array_type_sentinel => {

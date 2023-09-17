@@ -133,6 +133,26 @@ test "semantic tokens - var decl" {
     });
 }
 
+test "semantic tokens - var decl destructure" {
+    try testSemanticTokens(
+        \\const foo = {
+        \\    var alpha: bool, var beta = .{ 1, 2 };
+        \\};
+    , &.{
+        .{ "const", .keyword, .{} },
+        .{ "foo", .variable, .{ .declaration = true } },
+        .{ "=", .operator, .{} },
+        .{ "var", .keyword, .{} },
+        .{ "alpha", .variable, .{ .declaration = true } },
+        .{ "bool", .type, .{} },
+        .{ "var", .keyword, .{} },
+        .{ "beta", .variable, .{ .declaration = true } },
+        .{ "=", .operator, .{} },
+        .{ "1", .number, .{} },
+        .{ "2", .number, .{} },
+    });
+}
+
 test "semantic tokens - local var decl" {
     try testSemanticTokens(
         \\const alpha = {

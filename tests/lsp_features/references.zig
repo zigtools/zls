@@ -69,6 +69,21 @@ test "references - local scope" {
     );
 }
 
+test "references - destructuring" {
+    try testReferences(
+        \\const blk = {
+        \\    const <0>, const foo = .{ 1, 2 };
+        \\    const bar = <0>;
+        \\};
+    );
+    try testReferences(
+        \\const blk = {
+        \\    const foo, const <0> = .{ 1, 2 };
+        \\    const bar = <0>;
+        \\};
+    );
+}
+
 test "references - for/while capture" {
     try testReferences(
         \\const blk = {

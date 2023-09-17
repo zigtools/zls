@@ -220,6 +220,7 @@ pub fn symbolReferences(
         .error_union_payload,
         .error_union_error,
         .array_payload,
+        .assign_destructure,
         .switch_payload,
         => {
             try builder.collectReferences(curr_handle, 0);

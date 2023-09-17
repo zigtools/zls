@@ -149,12 +149,14 @@ fn handleUnusedVariableOrConstant(builder: *Builder, actions: *std.ArrayListUnma
 
     const node = switch (decl.decl.*) {
         .ast_node => |node| node,
+        .assign_destructure => |payload| payload.node,
         else => return,
     };
 
     const first_token = tree.firstToken(node);
     const last_token = ast.lastToken(tree, node) + 1;
 
+    if (last_token >= tree.tokens.len) return;
     if (token_tags[last_token] != .semicolon) return;
 
     const new_text = try createDiscardText(builder, identifier_name, token_starts[first_token], false);
