@@ -237,18 +237,8 @@ fn writeVariableDeclHint(builder: *Builder, decl_node: Ast.Node.Index) !void {
     );
     if (type_str.len == 0) return;
 
-    const assign_token = tree.firstToken(hint.ast.init_node) - 1;
-
-    const decl_str = offsets.tokensToSlice(tree, tree.firstToken(hint.ast.init_node) - 2, assign_token);
-    var decl_spaces: usize = 0;
-    for (decl_str) |char| {
-        if (char == ' ') {
-            decl_spaces += 1;
-        }
-    }
-
     try builder.hints.append(builder.arena, .{
-        .index = offsets.tokenToIndex(tree, assign_token) - decl_spaces,
+        .index = offsets.tokenToLoc(tree, hint.ast.mut_token + 1).end,
         .label = try std.fmt.allocPrint(builder.arena, ": {s}", .{
             type_str,
         }),
