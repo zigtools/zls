@@ -92,6 +92,26 @@ test "inlayhints - var decl" {
     try testInlayHints(
         \\const foo<comptime_int> = 5;
     , .Type);
+    try testInlayHints(
+        \\const foo<**const [3:0]u8> = &"Bar";
+    , .Type);
+    try testInlayHints(
+        \\const foo: *[]const u8 = &"Bar";
+        \\const baz<**[]const u8> = &foo;
+    , .Type);
+    try testInlayHints(
+        \\const Foo<type> = struct { bar: u32 };
+        \\const Error<type> = error{e};
+        \\fn test_context() !void {
+        \\    const baz: ?Foo = Foo{ .bar = 42 };
+        \\    if (baz) |b| {
+        \\        const d: Error!?Foo = b;
+        \\        const e<*Error!?Foo> = &d;
+        \\        const f<Foo> = (try e.*).?;
+        \\        _ = f;
+        \\    }
+        \\}
+    , .Type);
 }
 
 fn testInlayHints(source: []const u8, kind: types.InlayHintKind) !void {
