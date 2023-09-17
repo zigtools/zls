@@ -81,7 +81,7 @@ test "inlayhints - builtin call" {
     );
 
     try testInlayHints(
-        \\const _ = @sizeOf(u32);
+        \\const _ = @sizeOf(<T>u32);
     );
     try testInlayHints(
         \\const _ = @TypeOf(5);
@@ -113,6 +113,9 @@ fn testInlayHints(source: []const u8) !void {
         return error.InvalidResponse;
     };
 
+    var visited = try std.DynamicBitSetUnmanaged.initEmpty(allocator, hints.len);
+    defer visited.deinit(allocator);
+
     var error_builder = ErrorBuilder.init(allocator);
     defer error_builder.deinit();
     errdefer error_builder.writeDebug();
@@ -125,8 +128,15 @@ fn testInlayHints(source: []const u8) !void {
 
         const position = offsets.indexToPosition(phr.new_source, new_loc.start, ctx.server.offset_encoding);
 
-        for (hints) |hint| {
+        for (hints, 0..) |hint, i| {
             if (position.line != hint.position.line or position.character != hint.position.character) continue;
+
+            if (visited.isSet(i)) {
+                try error_builder.msgAtIndex("duplicate inlay hint here!", test_uri, new_loc.start, .err, .{});
+                continue :outer;
+            } else {
+                visited.set(i);
+            }
 
             if (!std.mem.endsWith(u8, hint.label.string, ":")) {
                 try error_builder.msgAtLoc("label `{s}` must end with a colon!", test_uri, new_loc, .err, .{hint.label.string});
@@ -143,6 +153,13 @@ fn testInlayHints(source: []const u8) !void {
             continue :outer;
         }
         try error_builder.msgAtLoc("expected hint `{s}` here", test_uri, new_loc, .err, .{expected_label});
+    }
+
+    var it = visited.iterator(.{ .kind = .unset });
+    while (it.next()) |index| {
+        const hint = hints[index];
+        const source_index = offsets.positionToIndex(phr.new_source, hint.position, ctx.server.offset_encoding);
+        try error_builder.msgAtIndex("unexpected inlay hint `{s}` here!", test_uri, source_index, .err, .{hint.label.string});
     }
 
     if (error_builder.hasMessages()) return error.InvalidResponse;

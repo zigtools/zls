@@ -189,22 +189,25 @@ fn writeBuiltinHint(builder: *Builder, parameters: []const Ast.Node.Index, argum
         const colonIndex = std.mem.indexOfScalar(u8, arg, ':');
         const type_expr: []const u8 = if (colonIndex) |index| arg[index + 1 ..] else &.{};
 
-        var label: ?[]const u8 = null;
+        var maybe_label: ?[]const u8 = null;
         var no_alias = false;
         var comp_time = false;
 
         var it = std.mem.splitScalar(u8, arg[0 .. colonIndex orelse arg.len], ' ');
         while (it.next()) |item| {
             if (item.len == 0) continue;
-            label = item;
+            maybe_label = item;
 
             no_alias = no_alias or std.mem.eql(u8, item, "noalias");
             comp_time = comp_time or std.mem.eql(u8, item, "comptime");
         }
 
+        const label = maybe_label orelse return;
+        if (label.len == 0 or std.mem.eql(u8, label, "...")) return;
+
         try builder.appendParameterHint(
             tree.firstToken(parameter),
-            label orelse "",
+            label,
             std.mem.trim(u8, type_expr, " \t\n"),
             no_alias,
             comp_time,
@@ -235,10 +238,8 @@ fn writeVariableDeclHint(builder: *Builder, decl_node: Ast.Node.Index) !void {
         source_index,
     ) orelse return;
 
-    var type_str: [:0]const u8 = "";
+    var type_str: []const u8 = "unknown";
     if (try decl_handle.resolveType(builder.analyser)) |resolved_type| {
-        // Sometime this just... doesn't work? ZLS can determine that the `handle` constant up there is a `*const Handle`,
-        // but this funtion just returns nothing. In other functions it works fine, as well. ???
         try builder.analyser.referencedTypes(
             resolved_type,
             &type_str,
@@ -247,7 +248,7 @@ fn writeVariableDeclHint(builder: *Builder, decl_node: Ast.Node.Index) !void {
     }
 
     const hint = tree.fullVarDecl(decl_node) orelse return;
-    if (type_str[0] != 0 and hint.ast.type_node == 0) {
+    if (hint.ast.type_node == 0) {
         try builder.hints.append(builder.arena, .{
             .token_index = tree.firstToken(hint.ast.init_node),
             .label = try std.fmt.allocPrint(builder.arena, ": {s}", .{
