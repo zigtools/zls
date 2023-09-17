@@ -226,29 +226,17 @@ fn writeVariableDeclHint(builder: *Builder, decl_node: Ast.Node.Index) !void {
     const hint = tree.fullVarDecl(decl_node) orelse return;
     if (hint.ast.type_node != 0) return;
 
+    const resolved_type = try builder.analyser.resolveTypeOfNode(.{ .handle = handle, .node = decl_node }) orelse return;
+
     var type_references = Analyser.ReferencedType.Set.init(builder.arena);
     var reference_collector = Analyser.ReferencedType.Collector.init(&type_references);
 
-    const decl_name = Analyser.getContainerDeclName(
-        tree,
-        null,
-        decl_node,
-    ) orelse return;
-    const source_index = offsets.tokenToIndex(tree, tree.firstToken(decl_node));
-    const decl_handle = try builder.analyser.lookupSymbolGlobal(
-        handle,
-        decl_name,
-        source_index,
-    ) orelse return;
-
     var type_str: []const u8 = "";
-    if (try decl_handle.resolveType(builder.analyser)) |resolved_type| {
-        try builder.analyser.referencedTypes(
-            resolved_type,
-            &type_str,
-            &reference_collector,
-        );
-    }
+    try builder.analyser.referencedTypes(
+        resolved_type,
+        &type_str,
+        &reference_collector,
+    );
     if (type_str.len == 0) return;
 
     try builder.hints.append(builder.arena, .{
