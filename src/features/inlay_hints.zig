@@ -82,7 +82,7 @@ const Builder = struct {
                 .position = position,
                 .label = .{ .string = hint.label },
                 .kind = hint.kind,
-                .tooltip = if (hint.tooltip != null) .{ .MarkupContent = hint.tooltip.? } else null,
+                .tooltip = if (hint.tooltip) |tooltip| .{ .MarkupContent = tooltip } else null,
                 .paddingLeft = false,
                 .paddingRight = hint.kind == .Parameter,
             };
