@@ -19,14 +19,13 @@ const data = @import("version_data");
 pub const inlay_hints_exclude_builtins: []const u8 = &.{};
 
 pub const InlayHint = struct {
-    token_index: Ast.TokenIndex,
+    index: usize,
     label: []const u8,
     kind: types.InlayHintKind,
     tooltip: ?types.MarkupContent,
-    after_token: bool = false,
 
     fn lessThan(_: void, lhs: InlayHint, rhs: InlayHint) bool {
-        return lhs.token_index < rhs.token_index;
+        return lhs.index < rhs.index;
     }
 };
 
@@ -52,7 +51,7 @@ const Builder = struct {
         };
 
         try self.hints.append(self.arena, .{
-            .token_index = token_index,
+            .index = offsets.tokenToIndex(self.handle.tree, token_index),
             .label = try std.fmt.allocPrint(self.arena, "{s}:", .{label}),
             .kind = .Parameter,
             .tooltip = .{
@@ -70,15 +69,14 @@ const Builder = struct {
 
         var converted_hints = try self.arena.alloc(types.InlayHint, self.hints.items.len);
         for (converted_hints, self.hints.items) |*converted_hint, hint| {
-            const index = if (hint.after_token) offsets.tokenToIndex(self.handle.tree, hint.token_index) - @as(usize, @intCast(@intFromBool(hint.after_token))) * 3 else offsets.tokenToIndex(self.handle.tree, hint.token_index);
             const position = offsets.advancePosition(
                 self.handle.tree.source,
                 last_position,
                 last_index,
-                index,
+                hint.index,
                 offset_encoding,
             );
-            defer last_index = index;
+            defer last_index = hint.index;
             defer last_position = position;
             converted_hint.* = types.InlayHint{
                 .position = position,
@@ -86,7 +84,7 @@ const Builder = struct {
                 .kind = hint.kind,
                 .tooltip = if (hint.tooltip != null) .{ .MarkupContent = hint.tooltip.? } else null,
                 .paddingLeft = false,
-                .paddingRight = !hint.after_token,
+                .paddingRight = hint.kind == .Parameter,
             };
         }
         return converted_hints;
@@ -240,14 +238,14 @@ fn writeVariableDeclHint(builder: *Builder, decl_node: Ast.Node.Index) !void {
     if (type_str.len == 0) return;
 
     try builder.hints.append(builder.arena, .{
-        .token_index = tree.firstToken(hint.ast.init_node),
+        // TODO: Add logic to detect when there is no space between assignment operator and variable name.
+        .index = offsets.tokenToIndex(tree, tree.firstToken(hint.ast.init_node) - 1) - 1,
         .label = try std.fmt.allocPrint(builder.arena, ": {s}", .{
             type_str,
         }),
         // TODO: Implement on-hover stuff.
         .tooltip = null,
-        .kind = .Parameter,
-        .after_token = true,
+        .kind = .Type,
     });
 }
 
