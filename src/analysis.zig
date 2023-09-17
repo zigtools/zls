@@ -2514,6 +2514,11 @@ pub const Declaration = union(enum) {
         identifier: Ast.TokenIndex,
         array_expr: Ast.Node.Index,
     },
+    assign_destructure: struct {
+        /// tag is .assign_destructure
+        node: Ast.Node.Index,
+        index: u32,
+    },
     array_index: Ast.TokenIndex,
     switch_payload: Switch,
     label_decl: struct {
@@ -2603,6 +2608,12 @@ pub const DeclWithHandle = struct {
             .array_index => |ai| ai,
             .label_decl => |ld| ld.label,
             .error_token => |et| et,
+            .assign_destructure, => |payload| {
+                const lhs_count = tree.extra_data[tree.nodes.items(.data)[payload.node].lhs];
+                const lhs_exprs = tree.extra_data[tree.nodes.items(.data)[payload.node].lhs + 1 ..][0..lhs_count];
+                const expr = lhs_exprs[payload.index];
+                return getDeclNameToken(tree, expr).?;
+            },
             .switch_payload => |payload| {
                 const case = payload.getCase(tree);
                 const payload_token = case.payload_token.?;
@@ -2776,6 +2787,7 @@ pub const DeclWithHandle = struct {
                 })) orelse return null,
                 .Single,
             ),
+            .assign_destructure => null, // TODO
             .array_index => TypeWithHandle{
                 .type = .{ .data = .array_index, .is_type_val = false },
                 .handle = self.handle,
@@ -4035,9 +4047,32 @@ fn makeScopeAt(
 
             for (statements) |idx| {
                 try makeScopeInternal(context, tree, idx);
-                if (tree.fullVarDecl(idx)) |var_decl| {
-                    const name = tree.tokenSlice(var_decl.ast.mut_token + 1);
-                    try context.putVarDecl(scope_index, name, .{ .ast_node = idx });
+                switch (tags[idx]) {
+                    .global_var_decl,
+                    .local_var_decl,
+                    .aligned_var_decl,
+                    .simple_var_decl,
+                    => {
+                        const var_decl = tree.fullVarDecl(idx).?;
+                        const name = tree.tokenSlice(var_decl.ast.mut_token + 1);
+                        try context.putVarDecl(scope_index, name, .{ .ast_node = idx });
+                    },
+                    .assign_destructure => {
+                        const lhs_count = tree.extra_data[data[idx].lhs];
+                        const lhs_exprs = tree.extra_data[data[idx].lhs + 1 ..][0..lhs_count];
+
+                        for (lhs_exprs, 0..) |lhs_node, i| {
+                            const var_decl = tree.fullVarDecl(lhs_node) orelse continue;
+                            const name = tree.tokenSlice(var_decl.ast.mut_token + 1);
+                            try context.putVarDecl(scope_index, name, .{
+                                .assign_destructure = .{
+                                    .node = idx,
+                                    .index = @intCast(i),
+                                },
+                            });
+                        }
+                    },
+                    else => continue,
                 }
             }
         },

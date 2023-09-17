@@ -818,6 +818,17 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
             try writeToken(builder, main_token, token_type);
             try writeNodeTokens(builder, node_data[node].rhs);
         },
+        .assign_destructure => {
+            const lhs_count = tree.extra_data[node_data[node].lhs];
+            const lhs_exprs = tree.extra_data[node_data[node].lhs + 1 ..][0..lhs_count];
+
+            for (lhs_exprs) |lhs_node| {
+                try writeNodeTokens(builder, lhs_node);
+            }
+
+            try writeToken(builder, main_token, .operator);
+            try writeNodeTokens(builder, node_data[node].rhs);
+        },
         .array_access,
         .error_union,
         .switch_range,

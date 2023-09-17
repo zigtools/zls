@@ -444,6 +444,7 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: Analyser.Decl
         .error_union_payload,
         .error_union_error,
         .array_payload,
+        .assign_destructure,
         .array_index,
         .switch_payload,
         .label_decl,
