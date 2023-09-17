@@ -223,6 +223,9 @@ fn writeVariableDeclHint(builder: *Builder, decl_node: Ast.Node.Index) !void {
     const handle = builder.handle;
     const tree = handle.tree;
 
+    const hint = tree.fullVarDecl(decl_node) orelse return;
+    if (hint.ast.type_node != 0) return;
+
     var type_references = Analyser.ReferencedType.Set.init(builder.arena);
     var reference_collector = Analyser.ReferencedType.Collector.init(&type_references);
 
@@ -238,7 +241,7 @@ fn writeVariableDeclHint(builder: *Builder, decl_node: Ast.Node.Index) !void {
         source_index,
     ) orelse return;
 
-    var type_str: []const u8 = "unknown";
+    var type_str: []const u8 = "";
     if (try decl_handle.resolveType(builder.analyser)) |resolved_type| {
         try builder.analyser.referencedTypes(
             resolved_type,
@@ -246,23 +249,21 @@ fn writeVariableDeclHint(builder: *Builder, decl_node: Ast.Node.Index) !void {
             &reference_collector,
         );
     }
+    if (type_str.len == 0) return;
 
-    const hint = tree.fullVarDecl(decl_node) orelse return;
-    if (hint.ast.type_node == 0) {
-        try builder.hints.append(builder.arena, .{
-            .token_index = tree.firstToken(hint.ast.init_node),
-            .label = try std.fmt.allocPrint(builder.arena, ": {s}", .{
-                type_str,
-            }),
-            // TODO: Implement on-hover stuff.
-            .tooltip = .{
-                .kind = builder.hover_kind,
-                .value = "",
-            },
-            .kind = .Parameter,
-            .after_token = true,
-        });
-    }
+    try builder.hints.append(builder.arena, .{
+        .token_index = tree.firstToken(hint.ast.init_node),
+        .label = try std.fmt.allocPrint(builder.arena, ": {s}", .{
+            type_str,
+        }),
+        // TODO: Implement on-hover stuff.
+        .tooltip = .{
+            .kind = builder.hover_kind,
+            .value = "",
+        },
+        .kind = .Parameter,
+        .after_token = true,
+    });
 }
 
 /// takes a Ast.full.Call (a function call), analysis its function expression, finds its declaration and writes parameter hints into `builder.hints`
