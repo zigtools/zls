@@ -432,6 +432,161 @@ test "completion - enum" {
     , &.{
         .{ .label = "inner", .kind = .Function, .detail = "fn inner(_: E) void" },
     });
+    // Because current logic is to list all enums if all else fails,
+    // the following tests include an extra enum to ensure that we're not just 'getting lucky'
+    try testCompletion(
+        \\const Birdie = enum {
+        \\    canary,
+        \\};
+        \\const SomeEnum = enum {
+        \\    sef1,
+        \\    sef2,
+        \\};
+        \\fn retEnum() SomeEnum {}
+        \\test {
+        \\    retEnum() == .<cursor>
+        \\}
+    , &.{
+        .{ .label = "sef1", .kind = .EnumMember },
+        .{ .label = "sef2", .kind = .EnumMember },
+    });
+    try testCompletion(
+        \\const Birdie = enum {
+        \\    canary,
+        \\};
+        \\const SomeEnum = enum {
+        \\    sef1,
+        \\    sef2,
+        \\};
+        \\const S = struct {
+        \\    pub fn retEnum() SomeEnum {}
+        \\};
+        \\test {
+        \\    S.retEnum() == .<cursor>
+        \\}
+    , &.{
+        .{ .label = "sef1", .kind = .EnumMember },
+        .{ .label = "sef2", .kind = .EnumMember },
+    });
+    try testCompletion(
+        \\const Birdie = enum {
+        \\    canary,
+        \\};
+        \\const SomeEnum = enum {
+        \\    sef1,
+        \\    sef2,
+        \\};
+        \\const S = struct {
+        \\    pub fn retEnum() SomeEnum {}
+        \\};
+        \\test {
+        \\    const s = S{};
+        \\    s.retEnum() == .<cursor>
+        \\}
+    , &.{
+        .{ .label = "sef1", .kind = .EnumMember },
+        .{ .label = "sef2", .kind = .EnumMember },
+    });
+    try testCompletion(
+        \\const Birdie = enum {
+        \\    canary,
+        \\};
+        \\const SomeEnum = enum {
+        \\    sef1,
+        \\    sef2,
+        \\};
+        \\const S = struct {
+        \\    se: SomeEnum = .sef1,
+        \\};
+        \\test {
+        \\    const s = S{};
+        \\    s.se == .<cursor>
+        \\}
+    , &.{
+        .{ .label = "sef1", .kind = .EnumMember },
+        .{ .label = "sef2", .kind = .EnumMember },
+    });
+    try testCompletion(
+        \\const Birdie = enum {
+        \\    canary,
+        \\};
+        \\const S = struct {
+        \\    mye: enum {
+        \\        myef1,
+        \\        myef2,
+        \\    };
+        \\};
+        \\test {
+        \\    const s = S{};
+        \\    s.mye == .<cursor>
+        \\}
+    , &.{
+        .{ .label = "myef1", .kind = .EnumMember },
+        .{ .label = "myef2", .kind = .EnumMember },
+    });
+    try testCompletion(
+        \\const Birdie = enum {
+        \\    canary,
+        \\};
+        \\const SomeEnum = enum {
+        \\    sef1,
+        \\    sef2,
+        \\};
+        \\const S = struct {
+        \\    const Self = @This();
+        \\    pub fn f(_: *Self, _: SomeEnum) void {}
+        \\};
+        \\test {
+        \\    S.f(null, .<cursor>
+        \\}
+    , &.{
+        .{ .label = "sef1", .kind = .EnumMember },
+        .{ .label = "sef2", .kind = .EnumMember },
+    });
+    try testCompletion(
+        \\const Birdie = enum {
+        \\    canary,
+        \\};
+        \\const SomeEnum = enum {
+        \\    sef1,
+        \\    sef2,
+        \\};
+        \\const S = struct {
+        \\    const Self = @This();
+        \\    pub fn f(_: *Self, _: SomeEnum) void {}
+        \\};
+        \\test {
+        \\    const s = S{};
+        \\    s.f(.<cursor>
+        \\}
+    , &.{
+        .{ .label = "sef1", .kind = .EnumMember },
+        .{ .label = "sef2", .kind = .EnumMember },
+    });
+    try testCompletion(
+        \\const Birdie = enum {
+        \\    canary,
+        \\};
+        \\const SomeEnum = enum {
+        \\    sef1,
+        \\    sef2,
+        \\};
+        \\const SCE = struct{
+        \\    se: SomeEnum,
+        \\};
+        \\const S = struct {
+        \\    const Self = @This();
+        \\    pub fn f(_: *Self, _: SCE) void {}
+        \\};
+        \\test {
+        \\    const s = S{};
+        // XXX This doesn't work without the closing brace at the end
+        \\    s.f(.{.se = .<cursor>}
+        \\}
+    , &.{
+        .{ .label = "sef1", .kind = .EnumMember },
+        .{ .label = "sef2", .kind = .EnumMember },
+    });
 }
 
 test "completion - error set" {
