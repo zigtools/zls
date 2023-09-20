@@ -19,13 +19,13 @@ const data = @import("version_data");
 pub const inlay_hints_exclude_builtins: []const u8 = &.{};
 
 pub const InlayHint = struct {
-    token_index: Ast.TokenIndex,
+    index: usize,
     label: []const u8,
     kind: types.InlayHintKind,
-    tooltip: types.MarkupContent,
+    tooltip: ?types.MarkupContent,
 
     fn lessThan(_: void, lhs: InlayHint, rhs: InlayHint) bool {
-        return lhs.token_index < rhs.token_index;
+        return lhs.index < rhs.index;
     }
 };
 
@@ -51,7 +51,7 @@ const Builder = struct {
         };
 
         try self.hints.append(self.arena, .{
-            .token_index = token_index,
+            .index = offsets.tokenToIndex(self.handle.tree, token_index),
             .label = try std.fmt.allocPrint(self.arena, "{s}:", .{label}),
             .kind = .Parameter,
             .tooltip = .{
@@ -69,23 +69,22 @@ const Builder = struct {
 
         var converted_hints = try self.arena.alloc(types.InlayHint, self.hints.items.len);
         for (converted_hints, self.hints.items) |*converted_hint, hint| {
-            const index = offsets.tokenToIndex(self.handle.tree, hint.token_index);
             const position = offsets.advancePosition(
                 self.handle.tree.source,
                 last_position,
                 last_index,
-                index,
+                hint.index,
                 offset_encoding,
             );
-            defer last_index = index;
+            defer last_index = hint.index;
             defer last_position = position;
             converted_hint.* = types.InlayHint{
                 .position = position,
                 .label = .{ .string = hint.label },
                 .kind = hint.kind,
-                .tooltip = .{ .MarkupContent = hint.tooltip },
+                .tooltip = if (hint.tooltip) |tooltip| .{ .MarkupContent = tooltip } else null,
                 .paddingLeft = false,
-                .paddingRight = true,
+                .paddingRight = hint.kind == .Parameter,
             };
         }
         return converted_hints;
@@ -188,27 +187,65 @@ fn writeBuiltinHint(builder: *Builder, parameters: []const Ast.Node.Index, argum
         const colonIndex = std.mem.indexOfScalar(u8, arg, ':');
         const type_expr: []const u8 = if (colonIndex) |index| arg[index + 1 ..] else &.{};
 
-        var label: ?[]const u8 = null;
+        var maybe_label: ?[]const u8 = null;
         var no_alias = false;
         var comp_time = false;
 
         var it = std.mem.splitScalar(u8, arg[0 .. colonIndex orelse arg.len], ' ');
         while (it.next()) |item| {
             if (item.len == 0) continue;
-            label = item;
+            maybe_label = item;
 
             no_alias = no_alias or std.mem.eql(u8, item, "noalias");
             comp_time = comp_time or std.mem.eql(u8, item, "comptime");
         }
 
+        const label = maybe_label orelse return;
+        if (label.len == 0 or std.mem.eql(u8, label, "...")) return;
+
         try builder.appendParameterHint(
             tree.firstToken(parameter),
-            label orelse "",
+            label,
             std.mem.trim(u8, type_expr, " \t\n"),
             no_alias,
             comp_time,
         );
     }
+}
+
+/// Takes a variable declaration AST node. If the type is inferred, attempt to infer it and display it as a hint.
+fn writeVariableDeclHint(builder: *Builder, decl_node: Ast.Node.Index) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    const handle = builder.handle;
+    const tree = handle.tree;
+
+    const hint = tree.fullVarDecl(decl_node) orelse return;
+    if (hint.ast.type_node != 0) return;
+
+    const resolved_type = try builder.analyser.resolveTypeOfNode(.{ .handle = handle, .node = decl_node }) orelse return;
+
+    var type_references = Analyser.ReferencedType.Set.init(builder.arena);
+    var reference_collector = Analyser.ReferencedType.Collector.init(&type_references);
+
+    var type_str: []const u8 = "";
+    try builder.analyser.referencedTypes(
+        resolved_type,
+        &type_str,
+        &reference_collector,
+    );
+    if (type_str.len == 0) return;
+
+    try builder.hints.append(builder.arena, .{
+        .index = offsets.tokenToLoc(tree, hint.ast.mut_token + 1).end,
+        .label = try std.fmt.allocPrint(builder.arena, ": {s}", .{
+            type_str,
+        }),
+        // TODO: Implement on-hover stuff.
+        .tooltip = null,
+        .kind = .Type,
+    });
 }
 
 /// takes a Ast.full.Call (a function call), analysis its function expression, finds its declaration and writes parameter hints into `builder.hints`
@@ -286,7 +323,13 @@ fn writeNodeInlayHint(
             const call = tree.fullCall(&params, node).?;
             try writeCallNodeHint(builder, call);
         },
-
+        .local_var_decl,
+        .simple_var_decl,
+        .global_var_decl,
+        .aligned_var_decl,
+        => {
+            try writeVariableDeclHint(builder, node);
+        },
         .builtin_call_two,
         .builtin_call_two_comma,
         .builtin_call,
