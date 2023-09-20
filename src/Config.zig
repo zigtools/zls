@@ -32,6 +32,12 @@ semantic_tokens: enum {
 /// Enables inlay hint support when the client also supports it
 enable_inlay_hints: bool = true,
 
+/// Enable inlay hints for variable declarations
+inlay_hints_show_variable_declaration: bool = true,
+
+/// Enable inlay hints for parameter names
+inlay_hints_show_parameter_name: bool = true,
+
 /// Enable inlay hints for builtin functions
 inlay_hints_show_builtin: bool = true,
 
