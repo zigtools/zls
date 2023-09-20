@@ -1182,9 +1182,9 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
 
                 return TypeWithHandle{
                     .type = .{
-                        .data = .{ .@"comptime" = .{
-                            .interpreter = interpreter,
-                            .value = value,
+                        .data = .{ .ip_index = .{
+                            .node = value.node_idx,
+                            .index = value.index,
                         } },
                         .is_type_val = is_type_val,
                     },
@@ -1600,9 +1600,10 @@ pub const Type = struct {
         // TODO: Unused?
         array_index,
 
-        @"comptime": struct {
-            interpreter: *ComptimeInterpreter,
-            value: ComptimeInterpreter.Value,
+        ip_index: struct {
+            node: ?Ast.Node.Index = null,
+            /// this stores both the type and the value
+            index: InternPool.Index,
         },
     },
     /// If true, the type `type`, the attached data is the value of the type value.
@@ -1627,7 +1628,7 @@ pub const TypeWithHandle = struct {
                 .error_union,
                 .union_tag,
                 => |t| hashTypeWithHandle(hasher, t.*),
-                .other => |idx| hasher.update(&std.mem.toBytes(idx)),
+                .other => |idx| std.hash.autoHash(hasher, idx),
                 .primitive => |name| hasher.update(name),
                 .either => |entries| {
                     for (entries) |e| {
@@ -1636,8 +1637,9 @@ pub const TypeWithHandle = struct {
                     }
                 },
                 .array_index => {},
-                .@"comptime" => {
-                    // TODO
+                .ip_index => |payload| {
+                    std.hash.autoHash(hasher, payload.node);
+                    std.hash.autoHash(hasher, payload.index);
                 },
             }
         }
@@ -1687,8 +1689,11 @@ pub const TypeWithHandle = struct {
                     }
                 },
                 .array_index => {},
-                .@"comptime" => {
-                    // TODO
+                .ip_index => |a_payload| {
+                    const b_payload = b.type.data.ip_index;
+
+                    if (a_payload.index != b_payload.index) return false;
+                    if (!std.meta.eql(a_payload.node, b_payload.node)) return false;
                 },
             }
 
@@ -4381,7 +4386,7 @@ pub fn referencedTypes(
         collector.needs_type_reference = false;
         _ = try analyser.addReferencedTypes(resolved_type, collector.*);
         resolved_type_str.* = switch (resolved_type.type.data) {
-            .@"comptime" => |co| try std.fmt.allocPrint(allocator, "{}", .{co.value.index.fmt(co.interpreter.ip.*)}),
+            .ip_index => |payload| try std.fmt.allocPrint(allocator, "{}", .{payload.index.fmt(analyser.ip.?.*)}),
             else => "type",
         };
     } else {
