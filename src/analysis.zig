@@ -1592,9 +1592,6 @@ pub const Type = struct {
         /// Branching types
         either: []const EitherEntry,
 
-        // TODO: Unused?
-        array_index,
-
         ip_index: struct {
             node: ?Ast.Node.Index = null,
             /// this stores both the type and the value
@@ -1631,7 +1628,6 @@ pub const TypeWithHandle = struct {
                         hashTypeWithHandle(hasher, e.type_with_handle);
                     }
                 },
-                .array_index => {},
                 .ip_index => |payload| {
                     std.hash.autoHash(hasher, payload.node);
                     std.hash.autoHash(hasher, payload.index);
@@ -1683,7 +1679,6 @@ pub const TypeWithHandle = struct {
                         if (!self.eql(ae.type_with_handle, be.type_with_handle)) return false;
                     }
                 },
-                .array_index => {},
                 .ip_index => |a_payload| {
                     const b_payload = b.type.data.ip_index;
 
@@ -1739,7 +1734,7 @@ pub const TypeWithHandle = struct {
         };
     }
 
-    /// Resolves possible types of a type (single for all except array_index and either)
+    /// Resolves possible types of a type (single for all except either)
     /// Drops duplicates
     pub fn getAllTypesWithHandles(ty: TypeWithHandle, arena: std.mem.Allocator) ![]const TypeWithHandle {
         var all_types = std.ArrayListUnmanaged(TypeWithHandle){};
@@ -2540,7 +2535,6 @@ pub const Declaration = union(enum) {
         node: Ast.Node.Index,
         index: u32,
     },
-    array_index: Ast.TokenIndex,
     switch_payload: Switch,
     label_decl: struct {
         label: Ast.TokenIndex,
@@ -2626,7 +2620,6 @@ pub const DeclWithHandle = struct {
             .error_union_payload => |ep| ep.name,
             .error_union_error => |ep| ep.name,
             .array_payload => |ap| ap.identifier,
-            .array_index => |ai| ai,
             .label_decl => |ld| ld.label,
             .error_token => |et| et,
             .assign_destructure => |payload| {
@@ -2808,10 +2801,6 @@ pub const DeclWithHandle = struct {
                 .Single,
             ),
             .assign_destructure => null, // TODO
-            .array_index => TypeWithHandle{
-                .type = .{ .data = .array_index, .is_type_val = false },
-                .handle = self.handle,
-            },
             .label_decl => |decl| try analyser.resolveTypeOfNodeInternal(.{
                 .node = decl.block,
                 .handle = self.handle,

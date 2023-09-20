@@ -91,7 +91,6 @@ pub fn hoverSymbol(
         .error_union_error,
         .array_payload,
         .assign_destructure,
-        .array_index,
         .switch_payload,
         .label_decl,
         .error_token,
