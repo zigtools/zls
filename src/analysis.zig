@@ -737,38 +737,48 @@ fn resolveBracketAccessType(analyser: *Analyser, lhs: TypeWithHandle, rhs: enum 
 
     const tree = lhs.handle.tree;
     const tags = tree.nodes.items(.tag);
-    const tag = tags[lhs_node];
-    const data = tree.nodes.items(.data)[lhs_node];
 
-    if (tag == .array_type or tag == .array_type_sentinel) {
-        const child_type = (try analyser.resolveTypeOfNodeInternal(.{
-            .node = data.rhs,
+    switch (tags[lhs_node]) {
+        .array_type, .array_type_sentinel => {
+            const child_type = (try analyser.resolveTypeOfNodeInternal(.{
+                .node = tree.nodes.items(.data)[lhs_node].rhs,
+                .handle = lhs.handle,
+            })) orelse return null;
+            if (rhs == .Single)
+                return child_type.instanceTypeVal();
+            const child_type_ptr = try analyser.arena.allocator().create(TypeWithHandle);
+            child_type_ptr.* = child_type.instanceTypeVal() orelse return null;
+            return TypeWithHandle{
+                .type = .{ .data = .{ .slice = child_type_ptr }, .is_type_val = false },
+                .handle = lhs.handle,
+            };
+        },
+        .ptr_type_aligned,
+        .ptr_type_sentinel,
+        .ptr_type,
+        .ptr_type_bit_range,
+        => {
+            const ptr_type = ast.fullPtrType(tree, lhs_node).?;
+            switch (ptr_type.size) {
+                .Slice, .C, .Many => {
+                    if (rhs == .Single) {
+                        return ((try analyser.resolveTypeOfNodeInternal(.{
+                            .node = ptr_type.ast.child_type,
+                            .handle = lhs.handle,
+                        })) orelse return null).instanceTypeVal();
+                    }
+                    return lhs;
+                },
+                .One => {},
+            }
+            return null;
+        },
+        .for_range => return TypeWithHandle{
+            .type = .{ .data = .{ .ip_index = .{ .index = .usize_type } }, .is_type_val = false },
             .handle = lhs.handle,
-        })) orelse return null;
-        if (rhs == .Single)
-            return child_type.instanceTypeVal();
-        const child_type_ptr = try analyser.arena.allocator().create(TypeWithHandle);
-        child_type_ptr.* = child_type.instanceTypeVal() orelse return null;
-        return TypeWithHandle{
-            .type = .{ .data = .{ .slice = child_type_ptr }, .is_type_val = false },
-            .handle = lhs.handle,
-        };
-    } else if (ast.fullPtrType(tree, lhs_node)) |ptr_type| {
-        switch (ptr_type.size) {
-            .Slice, .C, .Many => {
-                if (rhs == .Single) {
-                    return ((try analyser.resolveTypeOfNodeInternal(.{
-                        .node = ptr_type.ast.child_type,
-                        .handle = lhs.handle,
-                    })) orelse return null).instanceTypeVal();
-                }
-                return lhs;
-            },
-            .One => {},
-        }
+        },
+        else => return null,
     }
-
-    return null;
 }
 
 /// Called to remove one level of pointerness before a field access
@@ -1556,6 +1566,11 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
             }
         },
 
+        .for_range => return TypeWithHandle{
+            .type = .{ .data = .{ .other = node }, .is_type_val = false },
+            .handle = handle,
+        },
+
         .equal_equal,
         .bang_equal,
         .less_than,
@@ -1680,7 +1695,6 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
         .switch_case,
         .switch_case_inline,
         .switch_range,
-        .for_range,
         .@"continue",
         .@"break",
         .@"return",

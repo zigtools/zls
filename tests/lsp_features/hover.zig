@@ -252,6 +252,19 @@ test "hover - for capture" {
         \\(i32)
         \\```
     );
+    try testHover(
+        \\fn func() void {
+        \\    const foo: []i32 = undefined;
+        \\    for (foo, 0..) |bar, in<cursor>dex| {}
+        \\}
+    ,
+        \\```zig
+        \\index
+        \\```
+        \\```zig
+        \\(usize)
+        \\```
+    );
 }
 
 test "hover - switch capture" {
