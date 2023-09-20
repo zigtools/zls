@@ -227,7 +227,7 @@ pub fn symbolReferences(
         },
         .param_payload => |payload| try builder.collectReferences(curr_handle, payload.func),
         .label_decl => unreachable, // handled separately by labelReferences
-        .array_index, .error_token => {},
+        .error_token => {},
     }
 
     return builder.locations;
