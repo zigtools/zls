@@ -20,7 +20,7 @@
       diffz.url = "https://github.com/ziglibs/diffz/archive/90353d401c59e2ca5ed0abe5444c29ad3d7489aa.tar.gz";
       diffz.flake = false;
 
-      known_folders.url = "https://github.com/ziglibs/known-folders/archive/fa75e1bc672952efa0cf06160bbd942b47f6d59b.tar.gz";
+      known_folders.url = "https://github.com/ziglibs/known-folders/archive/a564f582122326328dad6b59209d070d57c4e6ae.tar.gz";
       known_folders.flake = false;
     };
 
