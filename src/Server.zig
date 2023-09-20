@@ -1899,7 +1899,7 @@ pub fn sendJsonMessage(server: *Server, json_message: []const u8) Error!void {
         Message,
         server.allocator,
         json_message,
-        .{ .ignore_unknown_fields = true },
+        .{ .ignore_unknown_fields = true, .max_value_len = null },
     ) catch return error.ParseError;
     server.job_queue.writeItemAssumeCapacity(.{ .incoming_message = parsed_message });
 }
@@ -1909,7 +1909,7 @@ pub fn sendJsonMessageSync(server: *Server, json_message: []const u8) Error!?[]u
         Message,
         server.allocator,
         json_message,
-        .{ .ignore_unknown_fields = true },
+        .{ .ignore_unknown_fields = true, .max_value_len = null },
     ) catch return error.ParseError;
     defer parsed_message.deinit();
     return try server.processMessage(parsed_message.value);
