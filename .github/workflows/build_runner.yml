@@ -2,10 +2,14 @@ name: BuildRunner
 
 on:
   push:
+    branches:
+      - master
     paths:
       - ".github/workflows/build_runner.yml"
       - "src/build_runner/**"
   pull_request:
+    branches:
+      - master
     paths:
       - ".github/workflows/build_runner.yml"
       - "src/build_runner/**"

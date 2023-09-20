@@ -2,11 +2,15 @@ name: CI
 
 on:
   push:
+    branches:
+      - master
     paths:
       - ".github/workflows/main.yml"
       - "**.zig"
       - "build.zig.zon"
   pull_request:
+    branches:
+      - master
     paths:
       - ".github/workflows/main.yml"
       - "**.zig"
