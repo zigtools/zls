@@ -70,13 +70,13 @@ fn typeToCompletion(
             null,
             either_descriptor,
         ),
-        .@"comptime" => |co| try analyser_completions.dotCompletions(
+        .ip_index => |payload| try analyser_completions.dotCompletions(
             arena,
             list,
-            co.interpreter.ip,
-            co.value.index,
+            analyser.ip.?,
+            payload.index,
             type_handle.type.is_type_val,
-            co.value.node_idx,
+            payload.node,
         ),
         .either => |bruh| {
             for (bruh) |a|
