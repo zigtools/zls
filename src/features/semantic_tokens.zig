@@ -254,7 +254,15 @@ fn colorIdentifierBasedOnType(
         if (type_node.isGenericFunc()) {
             new_tok_mod.generic = true;
         }
-        try writeTokenMod(builder, target_tok, .function, new_tok_mod);
+        const has_self_param = switch (type_node.type.data) {
+            .other => |node| blk: {
+                var buffer: [1]Ast.Node.Index = undefined;
+                const fn_proto = type_node.handle.tree.fullFnProto(&buffer, node).?;
+                break :blk try builder.analyser.hasSelfParam(type_node.handle, fn_proto);
+            },
+            else => false,
+        };
+        try writeTokenMod(builder, target_tok, if (has_self_param) .method else .function, new_tok_mod);
     } else {
         try writeTokenMod(builder, target_tok, if (is_parameter) .parameter else .variable, tok_mod);
     }
@@ -409,6 +417,8 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
 
             const func_name_tok_type: TokenType = if (Analyser.isTypeFunction(tree, fn_proto))
                 .type
+            else if (try builder.analyser.hasSelfParam(builder.handle, fn_proto))
+                .method
             else
                 .function;
 

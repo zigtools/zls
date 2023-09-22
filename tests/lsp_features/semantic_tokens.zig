@@ -824,6 +824,30 @@ test "semantic tokens - function" {
     });
 }
 
+test "semantic tokens - method" {
+    try testSemanticTokens(
+        \\const S = struct {
+        \\    fn create() S {}
+        \\    fn doTheThing(self: S) void {}
+        \\};
+    , &.{
+        .{ "const", .keyword, .{} },
+        .{ "S", .namespace, .{ .declaration = true } },
+        .{ "=", .operator, .{} },
+        .{ "struct", .keyword, .{} },
+
+        .{ "fn", .keyword, .{} },
+        .{ "create", .function, .{ .declaration = true } },
+        .{ "S", .namespace, .{} },
+
+        .{ "fn", .keyword, .{} },
+        .{ "doTheThing", .method, .{ .declaration = true } },
+        .{ "self", .parameter, .{ .declaration = true } },
+        .{ "S", .namespace, .{} },
+        .{ "void", .type, .{} },
+    });
+}
+
 test "semantic tokens - builtin fuctions" {
     try testSemanticTokens(
         \\const foo = @as(type, u32);
