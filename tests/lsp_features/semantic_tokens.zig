@@ -554,9 +554,9 @@ test "semantic tokens - struct" {
         .{ "Foo", .@"struct", .{ .declaration = true } },
         .{ "=", .operator, .{} },
         .{ "struct", .keyword, .{} },
-        .{ "alpha", .property, .{} },
+        .{ "alpha", .property, .{ .declaration = true } },
         .{ "u32", .type, .{} },
-        .{ "beta", .property, .{} },
+        .{ "beta", .property, .{ .declaration = true } },
         .{ "void", .type, .{} },
     });
     try testSemanticTokens(
@@ -569,12 +569,12 @@ test "semantic tokens - struct" {
         .{ "Foo", .@"struct", .{ .declaration = true } },
         .{ "=", .operator, .{} },
         .{ "struct", .keyword, .{} },
-        .{ "alpha", .property, .{} },
+        .{ "alpha", .property, .{ .declaration = true } },
         .{ "u32", .type, .{} },
         .{ "=", .operator, .{} },
         .{ "3", .number, .{} },
         .{ "comptime", .keyword, .{} },
-        .{ "beta", .property, .{} },
+        .{ "beta", .property, .{ .declaration = true } },
         .{ "void", .type, .{} },
         .{ "=", .operator, .{} },
     });
@@ -629,7 +629,7 @@ test "semantic tokens - union" {
         .{ "=", .operator, .{} },
         .{ "union", .keyword, .{} },
         .{ "E", .variable, .{} },
-        .{ "alpha", .property, .{} },
+        .{ "alpha", .property, .{ .declaration = true } },
     });
     try testSemanticTokens(
         \\const Foo = union(E) {
@@ -642,8 +642,8 @@ test "semantic tokens - union" {
         .{ "=", .operator, .{} },
         .{ "union", .keyword, .{} },
         .{ "E", .variable, .{} },
-        .{ "alpha", .property, .{} },
-        .{ "beta", .property, .{} },
+        .{ "alpha", .property, .{ .declaration = true } },
+        .{ "beta", .property, .{ .declaration = true } },
         .{ "void", .type, .{} },
     });
     try testSemanticTokens(
@@ -656,7 +656,7 @@ test "semantic tokens - union" {
         .{ "=", .operator, .{} },
         .{ "union", .keyword, .{} },
         .{ "E", .variable, .{} },
-        .{ "alpha", .property, .{} },
+        .{ "alpha", .property, .{ .declaration = true } },
         .{ "void", .type, .{} },
         .{ "align", .keyword, .{} },
         .{ "2", .number, .{} },
@@ -682,10 +682,10 @@ test "semantic tokens - enum" {
         .{ "Foo", .@"enum", .{ .declaration = true } },
         .{ "=", .operator, .{} },
         .{ "enum", .keyword, .{} },
-        .{ "alpha", .enumMember, .{} },
+        .{ "alpha", .enumMember, .{ .declaration = true } },
         .{ "=", .operator, .{} },
         .{ "3", .number, .{} },
-        .{ "beta", .enumMember, .{} },
+        .{ "beta", .enumMember, .{ .declaration = true } },
     });
     try testSemanticTokens(
         \\const Foo = enum(u4) {};
@@ -708,8 +708,8 @@ test "semantic tokens - enum member" {
         .{ "Foo", .@"enum", .{ .declaration = true } },
         .{ "=", .operator, .{} },
         .{ "enum", .keyword, .{} },
-        .{ "bar", .enumMember, .{} },
-        .{ "baz", .enumMember, .{} },
+        .{ "bar", .enumMember, .{ .declaration = true } },
+        .{ "baz", .enumMember, .{ .declaration = true } },
 
         .{ "const", .keyword, .{} },
         .{ "alpha", .variable, .{ .declaration = true } },
@@ -742,7 +742,7 @@ test "semantic tokens - error set" {
         .{ "Foo", .type, .{ .declaration = true } },
         .{ "=", .operator, .{} },
         .{ "error", .keyword, .{} },
-        .{ "OutOfMemory", .errorTag, .{} },
+        .{ "OutOfMemory", .errorTag, .{ .declaration = true } },
     });
 }
 
@@ -757,7 +757,7 @@ test "semantic tokens - error set member" {
         .{ "Foo", .type, .{ .declaration = true } },
         .{ "=", .operator, .{} },
         .{ "error", .keyword, .{} },
-        .{ "OutOfMemory", .errorTag, .{} },
+        .{ "OutOfMemory", .errorTag, .{ .declaration = true } },
 
         .{ "const", .keyword, .{} },
         .{ "bar", .variable, .{ .declaration = true } },

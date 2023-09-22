@@ -382,7 +382,7 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
             while (tok_i < node_data[node].rhs) : (tok_i += 1) {
                 switch (token_tags[tok_i]) {
                     .doc_comment, .comma => {},
-                    .identifier => try writeToken(builder, tok_i, .errorTag),
+                    .identifier => try writeTokenMod(builder, tok_i, .errorTag, .{ .declaration = true }),
                     else => {},
                 }
             }
@@ -964,7 +964,7 @@ fn writeContainerField(builder: *Builder, node: Ast.Node.Index, container_decl: 
 
     try writeToken(builder, container_field.comptime_token, .keyword);
     if (!container_field.ast.tuple_like) {
-        try writeToken(builder, container_field.ast.main_token, field_token_type);
+        try writeTokenMod(builder, container_field.ast.main_token, field_token_type, .{ .declaration = true });
     }
 
     if (container_field.ast.type_expr != 0) {
