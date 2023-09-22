@@ -64,6 +64,8 @@ The following options are currently available.
 | `enable_import_embedfile_argument_completions` | `bool` | `true` | Whether to enable import/embedFile argument completions |
 | `semantic_tokens` | `enum` | `.full` | Set level of semantic tokens. Partial only includes information that requires semantic analysis. |
 | `enable_inlay_hints` | `bool` | `true` | Enables inlay hint support when the client also supports it |
+| `inlay_hints_show_variable_declaration` | `bool` | `true` | Enable inlay hints for variable declarations |
+| `inlay_hints_show_parameter_name` | `bool` | `true` | Enable inlay hints for parameter names |
 | `inlay_hints_show_builtin` | `bool` | `true` | Enable inlay hints for builtin functions |
 | `inlay_hints_exclude_single_argument` | `bool` | `true` | Don't show inlay hints for single argument calls |
 | `inlay_hints_hide_redundant_param_names` | `bool` | `false` | Hides inlay hints when parameter name matches the identifier (e.g. foo: foo) |

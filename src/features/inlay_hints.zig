@@ -319,6 +319,8 @@ fn writeNodeInlayHint(
         .async_call,
         .async_call_comma,
         => {
+            if (!builder.config.inlay_hints_show_parameter_name) return;
+
             var params: [1]Ast.Node.Index = undefined;
             const call = tree.fullCall(&params, node).?;
             try writeCallNodeHint(builder, call);
@@ -328,17 +330,20 @@ fn writeNodeInlayHint(
         .global_var_decl,
         .aligned_var_decl,
         => {
+            if (!builder.config.inlay_hints_show_variable_declaration) return;
             try writeVariableDeclHint(builder, node);
         },
         .builtin_call_two,
         .builtin_call_two_comma,
         .builtin_call,
         .builtin_call_comma,
-        => blk: {
+        => {
+            if (!builder.config.inlay_hints_show_parameter_name or !builder.config.inlay_hints_show_builtin) return;
+
             var buffer: [2]Ast.Node.Index = undefined;
             const params = ast.builtinCallParams(tree, node, &buffer).?;
 
-            if (!builder.config.inlay_hints_show_builtin or params.len == 0) break :blk;
+            if (params.len == 0) return;
 
             const name = tree.tokenSlice(main_tokens[node]);
 

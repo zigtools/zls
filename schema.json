@@ -49,6 +49,16 @@
             "type": "boolean",
             "default": "true"
         },
+        "inlay_hints_show_variable_declaration": {
+            "description": "Enable inlay hints for variable declarations",
+            "type": "boolean",
+            "default": "true"
+        },
+        "inlay_hints_show_parameter_name": {
+            "description": "Enable inlay hints for parameter names",
+            "type": "boolean",
+            "default": "true"
+        },
         "inlay_hints_show_builtin": {
             "description": "Enable inlay hints for builtin functions",
             "type": "boolean",
