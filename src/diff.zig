@@ -73,7 +73,7 @@ pub fn applyContentChanges(
     text: []const u8,
     content_changes: []const types.TextDocumentContentChangeEvent,
     encoding: offsets.Encoding,
-) ![:0]const u8 {
+) error{ OutOfMemory, InvalidParams }![:0]const u8 {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -98,8 +98,9 @@ pub fn applyContentChanges(
     for (changes) |item| {
         const range = item.literal_0.range;
 
-        const loc = offsets.rangeToLoc(text_array.items, range, encoding);
-        try text_array.replaceRange(allocator, loc.start, loc.end - loc.start, item.literal_0.text);
+        const start = offsets.maybePositionToIndex(text, range.start, encoding) orelse return error.InvalidParams;
+        const end = offsets.maybePositionToIndex(text, range.end, encoding) orelse return error.InvalidParams;
+        try text_array.replaceRange(allocator, start, end - start, item.literal_0.text);
     }
 
     return try text_array.toOwnedSliceSentinel(allocator, 0);
