@@ -210,6 +210,15 @@ test "foldingRange - multi-line string literal" {
     });
 }
 
+test "foldingRange - invalid condition within a `switch`" {
+    try testFoldingRange(
+        \\switch (a.) {
+        \\}
+    , &.{
+        .{ .startLine = 0, .startCharacter = 11, .endLine = 1, .endCharacter = 0 },
+    });
+}
+
 fn testFoldingRange(source: []const u8, expect: []const types.FoldingRange) !void {
     var ctx = try Context.init();
     defer ctx.deinit();
