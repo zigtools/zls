@@ -616,7 +616,10 @@ pub fn lastToken(tree: Ast, node: Ast.Node.Index) Ast.TokenIndex {
         },
         .switch_comma, .@"switch" => {
             const lhs = datas[n].lhs;
-            const l_brace = tree.lastToken(lhs) + 2; //lparen + rbrace
+            var l_brace = tree.lastToken(lhs) + 2; // + 2 => (last) token of the condition + the .r_paren
+            // If the condition within the switch is invalid, eg `switch (a.) {}`,
+            // l_brace would be the index of the .r_paren of the switch ----^
+            if (token_tags[l_brace] != .l_brace) l_brace += 1;
             return findMatchingRBrace(token_tags, l_brace) orelse @intCast(tree.tokens.len - 1);
         },
         .@"asm" => {
