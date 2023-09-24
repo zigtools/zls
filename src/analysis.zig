@@ -18,6 +18,7 @@ arena: std.heap.ArenaAllocator,
 store: *DocumentStore,
 ip: ?*InternPool,
 bound_type_params: std.AutoHashMapUnmanaged(Declaration.Param, TypeWithHandle) = .{},
+resolved_callsites: std.AutoHashMapUnmanaged(Declaration.Param, ?TypeWithHandle) = .{},
 resolved_nodes: std.HashMapUnmanaged(NodeWithUri, ?TypeWithHandle, NodeWithUri.Context, std.hash_map.default_max_load_percentage) = .{},
 /// used to detect recursion
 use_trail: NodeSet = .{},
@@ -35,6 +36,7 @@ pub fn init(gpa: std.mem.Allocator, store: *DocumentStore, ip: ?*InternPool) Ana
 
 pub fn deinit(self: *Analyser) void {
     self.bound_type_params.deinit(self.gpa);
+    self.resolved_callsites.deinit(self.gpa);
     self.resolved_nodes.deinit(self.gpa);
     self.use_trail.deinit(self.gpa);
     self.arena.deinit();
@@ -2624,7 +2626,7 @@ pub const DeclWithHandle = struct {
             .array_index => |ai| ai,
             .label_decl => |ld| ld.label,
             .error_token => |et| et,
-            .assign_destructure, => |payload| {
+            .assign_destructure => |payload| {
                 const lhs_count = tree.extra_data[tree.nodes.items(.data)[payload.node].lhs];
                 const lhs_exprs = tree.extra_data[tree.nodes.items(.data)[payload.node].lhs + 1 ..][0..lhs_count];
                 const expr = lhs_exprs[payload.index];
@@ -2695,8 +2697,7 @@ pub const DeclWithHandle = struct {
                 // handle anytype
                 if (param.type_expr == 0) {
                     // protection against recursive callsite resolution
-                    const node_with_uri = NodeWithUri{ .node = pay.func, .uri = self.handle.uri };
-                    const gop_resolved = try analyser.resolved_nodes.getOrPut(analyser.gpa, node_with_uri);
+                    const gop_resolved = try analyser.resolved_callsites.getOrPut(analyser.gpa, pay);
                     if (gop_resolved.found_existing) return gop_resolved.value_ptr.*;
                     gop_resolved.value_ptr.* = null;
 
@@ -2757,7 +2758,7 @@ pub const DeclWithHandle = struct {
                     }
 
                     const maybe_type_handle = try TypeWithHandle.fromEither(analyser.gpa, try possible.toOwnedSlice(analyser.arena.allocator()), self.handle);
-                    if (maybe_type_handle) |type_handle| analyser.resolved_nodes.getPtr(node_with_uri).?.* = type_handle;
+                    if (maybe_type_handle) |type_handle| analyser.resolved_callsites.getPtr(pay).?.* = type_handle;
                     return maybe_type_handle;
                 }
 

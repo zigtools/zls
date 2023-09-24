@@ -298,6 +298,27 @@ test "semantic tokens - call" {
         .{ "ns", .namespace, .{} },
         .{ "foo", .function, .{} },
     });
+    try testSemanticTokens(
+        \\fn foo(a: anytype) void {
+        \\  _ = a;
+        \\}
+        \\const alpha = foo(0);
+    , &.{
+        .{ "fn", .keyword, .{} },
+        .{ "foo", .function, .{ .declaration = true, .generic = true } },
+        .{ "a", .parameter, .{ .declaration = true } },
+        .{ "anytype", .type, .{} },
+        .{ "void", .type, .{} },
+
+        .{ "=", .operator, .{} },
+        .{ "a", .parameter, .{} },
+
+        .{ "const", .keyword, .{} },
+        .{ "alpha", .variable, .{ .declaration = true } },
+        .{ "=", .operator, .{} },
+        .{ "foo", .function, .{ .generic = true } },
+        .{ "0", .number, .{} },
+    });
 }
 
 test "semantic tokens - catch" {
