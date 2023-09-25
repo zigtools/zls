@@ -336,6 +336,10 @@ const copied_from_zig = struct {
             .path => |p| return builder.pathFromRoot(p),
             .cwd_relative => |p| return pathFromCwd(builder, p),
             .generated => |gen| return builder.pathFromRoot(gen.path orelse return null),
+            .dependency => |dep| return dep.dependency.builder.pathJoin(&[_][]const u8{
+                dep.dependency.builder.build_root.path.?,
+                dep.sub_path,
+            }),
         }
     }
 
