@@ -821,7 +821,7 @@ fn resolvePropertyType(analyser: *Analyser, type_handle: TypeWithHandle, name: [
         .slice => |t| {
             if (std.mem.eql(u8, "len", name)) {
                 return TypeWithHandle{
-                    .type = .{ .data = .{ .primitive = "usize" }, .is_type_val = false },
+                    .type = .{ .data = .{ .ip_index = .{ .index = .usize_type } }, .is_type_val = false },
                     .handle = handle,
                 };
             }
@@ -841,7 +841,7 @@ fn resolvePropertyType(analyser: *Analyser, type_handle: TypeWithHandle, name: [
             .string_literal,
             => if (std.mem.eql(u8, "len", name)) {
                 return TypeWithHandle{
-                    .type = .{ .data = .{ .primitive = "usize" }, .is_type_val = false },
+                    .type = .{ .data = .{ .ip_index = .{ .index = .usize_type } }, .is_type_val = false },
                     .handle = handle,
                 };
             },
@@ -856,7 +856,7 @@ fn resolvePropertyType(analyser: *Analyser, type_handle: TypeWithHandle, name: [
                 if (ptr_type.size == .Slice) {
                     if (std.mem.eql(u8, "len", name)) {
                         return TypeWithHandle{
-                            .type = .{ .data = .{ .primitive = "usize" }, .is_type_val = false },
+                            .type = .{ .data = .{ .ip_index = .{ .index = .usize_type } }, .is_type_val = false },
                             .handle = handle,
                         };
                     }
@@ -910,41 +910,64 @@ fn allDigits(str: []const u8) bool {
     return true;
 }
 
-const primitive_types = std.ComptimeStringMap([]const u8, .{
-    .{ "true", "bool" },
-    .{ "false", "bool" },
-    .{ "null", "@TypeOf(null)" },
-    .{ "undefined", "@TypeOf(undefined)" },
+const primitives = std.ComptimeStringMap(InternPool.Index, .{
+    .{ "anyerror", .anyerror_type },
+    .{ "anyframe", .anyframe_type },
+    .{ "anyopaque", .anyopaque_type },
+    .{ "bool", .bool_type },
+    .{ "c_int", .c_int_type },
+    .{ "c_long", .c_long_type },
+    .{ "c_longdouble", .c_longdouble_type },
+    .{ "c_longlong", .c_longlong_type },
+    .{ "c_char", .c_char_type },
+    .{ "c_short", .c_short_type },
+    .{ "c_uint", .c_uint_type },
+    .{ "c_ulong", .c_ulong_type },
+    .{ "c_ulonglong", .c_ulonglong_type },
+    .{ "c_ushort", .c_ushort_type },
+    .{ "comptime_float", .comptime_float_type },
+    .{ "comptime_int", .comptime_int_type },
+    .{ "f128", .f128_type },
+    .{ "f16", .f16_type },
+    .{ "f32", .f32_type },
+    .{ "f64", .f64_type },
+    .{ "f80", .f80_type },
+    .{ "false", .bool_false },
+    .{ "i16", .i16_type },
+    .{ "i32", .i32_type },
+    .{ "i64", .i64_type },
+    .{ "i128", .i128_type },
+    .{ "i8", .i8_type },
+    .{ "isize", .isize_type },
+    .{ "noreturn", .noreturn_type },
+    .{ "null", .null_value },
+    .{ "true", .bool_true },
+    .{ "type", .type_type },
+    .{ "u16", .u16_type },
+    .{ "u29", .u29_type },
+    .{ "u32", .u32_type },
+    .{ "u64", .u64_type },
+    .{ "u128", .u128_type },
+    .{ "u1", .u1_type },
+    .{ "u8", .u8_type },
+    .{ "undefined", .undefined_type },
+    .{ "usize", .usize_type },
+    .{ "void", .void_type },
 });
 
-pub fn isValueIdent(text: []const u8) bool {
-    return primitive_types.has(text);
-}
+pub fn resolvePrimitiveType(identifier_name: []const u8) ?InternPool.Index {
+    if (primitives.get(identifier_name)) |primitive| return primitive;
 
-pub fn isTypeIdent(text: []const u8) bool {
-    const PrimitiveTypes = std.ComptimeStringMap(void, .{
-        .{"isize"},        .{"usize"},
-        .{"c_short"},      .{"c_ushort"},
-        .{"c_int"},        .{"c_uint"},
-        .{"c_long"},       .{"c_ulong"},
-        .{"c_longlong"},   .{"c_ulonglong"},
-        .{"c_longdouble"}, .{"anyopaque"},
-        .{"f16"},          .{"f32"},
-        .{"f64"},          .{"f80"},
-        .{"f128"},         .{"bool"},
-        .{"void"},         .{"noreturn"},
-        .{"type"},         .{"anyerror"},
-        .{"comptime_int"}, .{"comptime_float"},
-        .{"anyframe"},     .{"anytype"},
-        .{"c_char"},
-    });
-
-    if (PrimitiveTypes.has(text)) return true;
-    if (text.len == 1) return false;
-    if (!(text[0] == 'u' or text[0] == 'i')) return false;
-    if (!allDigits(text[1..])) return false;
-    _ = std.fmt.parseUnsigned(u16, text[1..], 10) catch return false;
-    return true;
+    if (identifier_name.len < 2) return null;
+    const first_c = identifier_name[0];
+    if (first_c != 'i' and first_c != 'u') return null;
+    for (identifier_name[1..]) |c| {
+        switch (c) {
+            '0'...'9' => {},
+            else => return null,
+        }
+    }
+    return .unknown_type; // TODO
 }
 
 const FindBreaks = struct {
@@ -1049,16 +1072,10 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
         .identifier => {
             const name = offsets.nodeToSlice(tree, node);
 
-            if (isTypeIdent(name)) {
+            if (resolvePrimitiveType(name)) |primitive| {
+                const is_type = analyser.ip.?.indexToKey(primitive).typeOf() == .type_type;
                 return TypeWithHandle{
-                    .type = .{ .data = .{ .primitive = name }, .is_type_val = true },
-                    .handle = handle,
-                };
-            }
-
-            if (isValueIdent(name)) {
-                return TypeWithHandle{
-                    .type = .{ .data = .{ .other = node }, .is_type_val = false },
+                    .type = .{ .data = .{ .ip_index = .{ .index = primitive } }, .is_type_val = is_type },
                     .handle = handle,
                 };
             }
@@ -1222,7 +1239,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                     field.convertToNonTupleLike(tree.nodes);
                     if (field.ast.type_expr == 0)
                         return TypeWithHandle{
-                            .type = .{ .data = .{ .primitive = "void" }, .is_type_val = false },
+                            .type = .{ .data = .{ .ip_index = .{ .index = .void_type } }, .is_type_val = false },
                             .handle = handle,
                         };
                 }
@@ -1291,7 +1308,6 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 return try child.resolveType(analyser);
             } else return null;
         },
-        .anyframe_literal,
         .anyframe_type,
         .array_type,
         .array_type_sentinel,
@@ -1425,16 +1441,6 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 .handle = handle,
             };
         },
-        .multiline_string_literal,
-        .string_literal,
-        .char_literal,
-        .number_literal,
-        .enum_literal,
-        .error_value,
-        => return TypeWithHandle{
-            .type = .{ .data = .{ .other = node }, .is_type_val = false },
-            .handle = handle,
-        },
         .@"if", .if_simple => {
             const if_node = ast.fullIf(tree, node).?;
 
@@ -1549,7 +1555,147 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                     return operand_type;
             }
         },
-        else => {},
+
+        .equal_equal,
+        .bang_equal,
+        .less_than,
+        .greater_than,
+        .less_or_equal,
+        .greater_or_equal,
+        .bool_and,
+        .bool_or,
+        .bool_not,
+        .negation,
+        => return TypeWithHandle{
+            .type = .{ .data = .{ .ip_index = .{ .index = .bool_type } }, .is_type_val = false },
+            .handle = handle,
+        },
+
+        .multiline_string_literal,
+        .string_literal,
+        .error_value, // TODO
+        => return TypeWithHandle{
+            .type = .{ .data = .{ .other = node }, .is_type_val = false },
+            .handle = handle,
+        },
+
+        .char_literal => return TypeWithHandle{
+            .type = .{ .data = .{ .ip_index = .{ .index = .comptime_int_type } }, .is_type_val = false },
+            .handle = handle,
+        },
+
+        .number_literal => {
+            const bytes = offsets.tokenToSlice(tree, main_tokens[node]);
+            const result = std.zig.parseNumberLiteral(bytes);
+            const index: InternPool.Index = switch (result) {
+                .int,
+                .big_int,
+                => .comptime_int_type,
+                .float => .comptime_float_type,
+                .failure => return null,
+            };
+            return TypeWithHandle{
+                .type = .{ .data = .{ .ip_index = .{ .index = index } }, .is_type_val = false },
+                .handle = handle,
+            };
+        },
+
+        .enum_literal => return TypeWithHandle{
+            .type = .{ .data = .{ .ip_index = .{ .index = .enum_literal_type } }, .is_type_val = false },
+            .handle = handle,
+        },
+        .unreachable_literal => return TypeWithHandle{
+            .type = .{ .data = .{ .ip_index = .{ .index = .noreturn_type } }, .is_type_val = false },
+            .handle = handle,
+        },
+
+        .anyframe_literal => return TypeWithHandle{
+            .type = .{ .data = .{ .ip_index = .{ .index = .anyframe_type } }, .is_type_val = false },
+            .handle = handle,
+        },
+
+        .mul,
+        .div,
+        .mod,
+        .mul_wrap,
+        .mul_sat,
+        .add,
+        .sub,
+        .add_wrap,
+        .sub_wrap,
+        .add_sat,
+        .sub_sat,
+        .shl,
+        .shl_sat,
+        .shr,
+        .bit_and,
+        .bit_xor,
+        .bit_or,
+        .bit_not,
+        .negation_wrap,
+        => {},
+
+        .array_mult,
+        .array_cat,
+        => {},
+
+        .assign_mul,
+        .assign_div,
+        .assign_mod,
+        .assign_add,
+        .assign_sub,
+        .assign_shl,
+        .assign_shl_sat,
+        .assign_shr,
+        .assign_bit_and,
+        .assign_bit_xor,
+        .assign_bit_or,
+        .assign_mul_wrap,
+        .assign_add_wrap,
+        .assign_sub_wrap,
+        .assign_mul_sat,
+        .assign_add_sat,
+        .assign_sub_sat,
+        .assign,
+        .assign_destructure,
+        => {},
+
+        .array_init_dot_two,
+        .array_init_dot_two_comma,
+        .array_init_dot,
+        .array_init_dot_comma,
+        .struct_init_dot_two,
+        .struct_init_dot_two_comma,
+        .struct_init_dot,
+        .struct_init_dot_comma,
+        => {},
+
+        .root,
+        .@"usingnamespace",
+        .test_decl,
+        .@"errdefer",
+        .@"defer",
+        .switch_case_one,
+        .switch_case_inline_one,
+        .switch_case,
+        .switch_case_inline,
+        .switch_range,
+        .for_range,
+        .@"continue",
+        .@"break",
+        .@"return",
+        => {},
+
+        .@"await",
+        .@"suspend",
+        .@"resume",
+        => {},
+
+        .asm_simple,
+        .@"asm",
+        .asm_output,
+        .asm_input,
+        => {},
     }
     return null;
 }
@@ -1583,15 +1729,13 @@ pub const Type = struct {
         /// - Error type: `Foo || Bar`, `Foo!Bar`
         /// - Function: `fn () Foo`, `fn foo() Foo`
         /// - Literal: `"foo"`, `'x'`, `42`, `.foo`, `error.Foo`
-        /// - Primitive value: `true`, `false`, `null`, `undefined`
         other: Ast.Node.Index,
-
-        /// Primitive type: `u8`, `bool`, `type`, etc.
-        primitive: []const u8,
 
         /// Branching types
         either: []const EitherEntry,
 
+        /// Primitive type: `u8`, `bool`, `type`, etc.
+        /// Primitive value: `true`, `false`, `null`, `undefined`
         ip_index: struct {
             node: ?Ast.Node.Index = null,
             /// this stores both the type and the value
@@ -1599,6 +1743,10 @@ pub const Type = struct {
         },
     },
     /// If true, the type `type`, the attached data is the value of the type value.
+    /// ```zig
+    /// const foo = u32; // is_type_val == true
+    /// const bar = @as(u32, ...); // is_type_val == false
+    /// ```
     is_type_val: bool,
 };
 
@@ -1621,7 +1769,6 @@ pub const TypeWithHandle = struct {
                 .union_tag,
                 => |t| hashTypeWithHandle(hasher, t.*),
                 .other => |idx| std.hash.autoHash(hasher, idx),
-                .primitive => |name| hasher.update(name),
                 .either => |entries| {
                     for (entries) |e| {
                         hasher.update(e.descriptor);
@@ -1665,10 +1812,6 @@ pub const TypeWithHandle = struct {
                 .other => |a_idx| {
                     const b_idx = b.type.data.other;
                     if (a_idx != b_idx) return false;
-                },
-                .primitive => |a_name| {
-                    const b_name = b.type.data.primitive;
-                    if (!std.mem.eql(u8, a_name, b_name)) return false;
                 },
                 .either => |a_entries| {
                     const b_entries = b.type.data.either;
@@ -4364,17 +4507,23 @@ pub fn referencedTypes(
     collector: *ReferencedType.Collector,
 ) error{OutOfMemory}!void {
     analyser.resolved_nodes.clearRetainingCapacity();
-    const allocator = collector.referenced_types.allocator;
     if (resolved_type.type.is_type_val) {
         collector.needs_type_reference = false;
         _ = try analyser.addReferencedTypes(resolved_type, collector.*);
-        resolved_type_str.* = switch (resolved_type.type.data) {
-            .ip_index => |payload| try std.fmt.allocPrint(allocator, "{}", .{payload.index.fmt(analyser.ip.?.*)}),
-            else => "type",
-        };
+        resolved_type_str.* = "type";
     } else {
         if (try analyser.addReferencedTypes(resolved_type, collector.*)) |str|
             resolved_type_str.* = str;
+    }
+
+    switch (resolved_type.type.data) {
+        .ip_index => |payload| {
+            const allocator = collector.referenced_types.allocator;
+            const ip = analyser.ip.?;
+            const index = if (resolved_type.type.is_type_val) ip.indexToKey(payload.index).typeOf() else payload.index;
+            resolved_type_str.* = try std.fmt.allocPrint(allocator, "{}", .{index.fmt(ip.*)});
+        },
+        else => {},
     }
 }
 
@@ -4411,8 +4560,6 @@ fn addReferencedTypes(
     const token_starts = tree.tokens.items(.start);
 
     switch (type_handle.type.data) {
-        .primitive => |name| return name,
-
         .pointer => |t| {
             const child_type_str = try analyser.addReferencedTypes(t.*, ReferencedType.Collector.init(referenced_types));
             return try std.fmt.allocPrint(allocator, "*{s}", .{child_type_str orelse return null});
@@ -4638,13 +4785,18 @@ fn addReferencedTypes(
 
             .identifier => {
                 const name = offsets.nodeToSlice(tree, p);
-                return primitive_types.get(name);
+                const primitive = Analyser.resolvePrimitiveType(name) orelse return null;
+                return try std.fmt.allocPrint(allocator, "{}", .{primitive.fmt(analyser.ip.?.*)});
             },
 
             else => {}, // TODO: Implement more "other" type expressions; better safe than sorry
         },
 
-        else => {},
+        .ip_index => |payload| {
+            return try std.fmt.allocPrint(allocator, "{}", .{payload.index.fmt(analyser.ip.?.*)});
+        },
+
+        .either => {}, // TODO
     }
 
     return null;
