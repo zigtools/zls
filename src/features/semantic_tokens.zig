@@ -137,6 +137,7 @@ const Builder = struct {
             .interface,
             .@"struct",
             .typeParameter,
+            .variable,
             .property,
             .enumMember,
             .event,
@@ -154,7 +155,6 @@ const Builder = struct {
             => token_type = .type,
 
             .parameter,
-            .variable,
             .keyword,
             .comment,
             .string,
