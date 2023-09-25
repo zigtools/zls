@@ -72,6 +72,12 @@ const ClientCapabilities = struct {
     supports_configuration: bool = false,
     supports_workspace_did_change_configuration_dynamic_registration: bool = false,
     supports_textDocument_definition_linkSupport: bool = false,
+    /// workaround for builtin completion in Sublime Text 3
+    include_at_in_builtins: bool = false,
+    /// The detail entries for big structs such as std.zig.CrossTarget were
+    /// bricking the preview window in Sublime Text.
+    /// https://github.com/zigtools/zls/pull/261
+    max_detail_length: u32 = 1024 * 1024,
     workspace_folders: []types.URI = &.{},
 
     fn deinit(self: *ClientCapabilities, allocator: std.mem.Allocator) void {
@@ -355,7 +361,7 @@ fn initializeHandler(server: *Server, _: std.mem.Allocator, request: types.Initi
         log.info("client is '{s}-{s}'", .{ clientInfo.name, clientInfo.version orelse "<no version>" });
 
         if (std.mem.eql(u8, clientInfo.name, "Sublime Text LSP")) blk: {
-            server.config.max_detail_length = 256;
+            server.client_capabilities.max_detail_length = 256;
             // TODO investigate why fixall doesn't work in sublime text
             server.client_capabilities.supports_code_action_fixall = false;
             skip_set_fixall = true;
@@ -365,7 +371,7 @@ fn initializeHandler(server: *Server, _: std.mem.Allocator, request: types.Initi
             // this indicates a LSP version for sublime text 3
             // this check can be made more precise if the version that fixed this issue is known
             if (version.major == 0) {
-                server.config.include_at_in_builtins = true;
+                server.client_capabilities.include_at_in_builtins = true;
             }
         } else if (std.mem.eql(u8, clientInfo.name, "Visual Studio Code")) {
             server.client_capabilities.supports_code_action_fixall = true;

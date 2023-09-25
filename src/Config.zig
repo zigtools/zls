@@ -19,9 +19,6 @@ enable_build_on_save: bool = false,
 /// Whether to automatically fix errors on save. Currently supports adding and removing discards.
 enable_autofix: bool = true,
 
-/// Whether to enable import/embedFile argument completions
-enable_import_embedfile_argument_completions: bool = true,
-
 /// Set level of semantic tokens. Partial only includes information that requires semantic analysis.
 semantic_tokens: enum {
     none,
@@ -50,9 +47,6 @@ inlay_hints_hide_redundant_param_names: bool = false,
 /// Hides inlay hints when parameter name matches the last token of a parameter node (e.g. foo: bar.foo, foo: &foo)
 inlay_hints_hide_redundant_param_names_last_token: bool = false,
 
-/// Enables `*` and `?` operators in completion lists
-operator_completions: bool = true,
-
 /// Enables warnings for style guideline mismatches
 warn_style: bool = false,
 
@@ -62,14 +56,8 @@ highlight_global_var_declarations: bool = false,
 /// Whether to use the comptime interpreter
 dangerous_comptime_experiments_do_not_enable: bool = false,
 
-/// Whether the @ sign should be part of the completion of builtins
-include_at_in_builtins: bool = false,
-
 /// When true, skips searching for references in std. Improves lookup speed for functions in user's code. Renaming and go-to-definition will continue to work as is
 skip_std_references: bool = false,
-
-/// The detail field of completions is truncated to be no longer than this (in bytes)
-max_detail_length: usize = 1048576,
 
 /// Can be used in conjuction with `enable_ast_check_diagnostics` to favor using `zig ast-check` instead of ZLS's fork
 prefer_ast_check_as_child_process: bool = true,

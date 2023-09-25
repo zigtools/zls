@@ -31,12 +31,6 @@
             "default": "true"
         },
         {
-            "name": "enable_import_embedfile_argument_completions",
-            "description": "Whether to enable import/embedFile argument completions",
-            "type": "bool",
-            "default": "true"
-        },
-        {
             "name": "semantic_tokens",
             "description": "Set level of semantic tokens. Partial only includes information that requires semantic analysis.",
             "type": "enum",
@@ -90,12 +84,6 @@
             "default": "false"
         },
         {
-            "name": "operator_completions",
-            "description": "Enables `*` and `?` operators in completion lists",
-            "type": "bool",
-            "default": "true"
-        },
-        {
             "name": "warn_style",
             "description": "Enables warnings for style guideline mismatches",
             "type": "bool",
@@ -114,22 +102,10 @@
             "default": "false"
         },
         {
-            "name": "include_at_in_builtins",
-            "description": "Whether the @ sign should be part of the completion of builtins",
-            "type": "bool",
-            "default": "false"
-        },
-        {
             "name": "skip_std_references",
             "description": "When true, skips searching for references in std. Improves lookup speed for functions in user's code. Renaming and go-to-definition will continue to work as is",
             "type": "bool",
             "default": "false"
-        },
-        {
-            "name": "max_detail_length",
-            "description": "The detail field of completions is truncated to be no longer than this (in bytes)",
-            "type": "usize",
-            "default": "1048576"
         },
         {
             "name": "prefer_ast_check_as_child_process",

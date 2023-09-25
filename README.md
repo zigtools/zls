@@ -61,7 +61,6 @@ The following options are currently available.
 | `enable_ast_check_diagnostics` | `bool` | `true` | Whether to enable ast-check diagnostics |
 | `enable_build_on_save` | `bool` | `false` | Whether to enable build-on-save diagnostics |
 | `enable_autofix` | `bool` | `true` | Whether to automatically fix errors on save. Currently supports adding and removing discards. |
-| `enable_import_embedfile_argument_completions` | `bool` | `true` | Whether to enable import/embedFile argument completions |
 | `semantic_tokens` | `enum` | `.full` | Set level of semantic tokens. Partial only includes information that requires semantic analysis. |
 | `enable_inlay_hints` | `bool` | `true` | Enables inlay hint support when the client also supports it |
 | `inlay_hints_show_variable_declaration` | `bool` | `true` | Enable inlay hints for variable declarations |
@@ -70,13 +69,10 @@ The following options are currently available.
 | `inlay_hints_exclude_single_argument` | `bool` | `true` | Don't show inlay hints for single argument calls |
 | `inlay_hints_hide_redundant_param_names` | `bool` | `false` | Hides inlay hints when parameter name matches the identifier (e.g. foo: foo) |
 | `inlay_hints_hide_redundant_param_names_last_token` | `bool` | `false` | Hides inlay hints when parameter name matches the last token of a parameter node (e.g. foo: bar.foo, foo: &foo) |
-| `operator_completions` | `bool` | `true` | Enables `*` and `?` operators in completion lists |
 | `warn_style` | `bool` | `false` | Enables warnings for style guideline mismatches |
 | `highlight_global_var_declarations` | `bool` | `false` | Whether to highlight global var declarations |
 | `dangerous_comptime_experiments_do_not_enable` | `bool` | `false` | Whether to use the comptime interpreter |
-| `include_at_in_builtins` | `bool` | `false` | Whether the @ sign should be part of the completion of builtins |
 | `skip_std_references` | `bool` | `false` | When true, skips searching for references in std. Improves lookup speed for functions in user's code. Renaming and go-to-definition will continue to work as is |
-| `max_detail_length` | `usize` | `1048576` | The detail field of completions is truncated to be no longer than this (in bytes) |
 | `prefer_ast_check_as_child_process` | `bool` | `true` | Can be used in conjuction with `enable_ast_check_diagnostics` to favor using `zig ast-check` instead of ZLS's fork |
 | `record_session` | `bool` | `false` | When true, zls will record all request is receives and write in into `record_session_path`, so that they can replayed with `zls replay` |
 | `record_session_path` | `?[]const u8` | `null` | Output file path when `record_session` is set. The recommended file extension *.zlsreplay |
