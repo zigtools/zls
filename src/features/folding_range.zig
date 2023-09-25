@@ -19,11 +19,11 @@ const Builder = struct {
     tree: Ast,
     encoding: offsets.Encoding,
 
-    pub fn deinit(builder: *Builder) void {
+    fn deinit(builder: *Builder) void {
         builder.locations.deinit(builder.allocator);
     }
 
-    pub fn add(
+    fn add(
         builder: *Builder,
         kind: ?types.FoldingRangeKind,
         start: Ast.TokenIndex,
@@ -45,7 +45,7 @@ const Builder = struct {
         });
     }
 
-    pub fn addNode(
+    fn addNode(
         builder: *Builder,
         kind: ?types.FoldingRangeKind,
         node: Ast.Node.Index,
@@ -55,7 +55,7 @@ const Builder = struct {
         try builder.add(kind, builder.tree.firstToken(node), ast.lastToken(builder.tree, node), start_reach, end_reach);
     }
 
-    pub fn getRanges(builder: Builder) error{OutOfMemory}![]types.FoldingRange {
+    fn getRanges(builder: Builder) error{OutOfMemory}![]types.FoldingRange {
         const tracy_zone = tracy.trace(@src());
         defer tracy_zone.end();
 

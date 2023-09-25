@@ -13,7 +13,7 @@ const DocumentStore = @import("../DocumentStore.zig");
 
 const data = @import("version_data");
 
-pub fn hoverSymbol(
+fn hoverSymbol(
     analyser: *Analyser,
     arena: std.mem.Allocator,
     decl_handle: Analyser.DeclWithHandle,
@@ -142,7 +142,7 @@ pub fn hoverSymbol(
     return hover_text.items;
 }
 
-pub fn hoverDefinitionLabel(
+fn hoverDefinitionLabel(
     analyser: *Analyser,
     arena: std.mem.Allocator,
     handle: *const DocumentStore.Handle,
@@ -168,7 +168,7 @@ pub fn hoverDefinitionLabel(
     };
 }
 
-pub fn hoverDefinitionBuiltin(
+fn hoverDefinitionBuiltin(
     analyser: *Analyser,
     arena: std.mem.Allocator,
     handle: *const DocumentStore.Handle,
@@ -228,7 +228,7 @@ pub fn hoverDefinitionBuiltin(
     };
 }
 
-pub fn hoverDefinitionGlobal(
+fn hoverDefinitionGlobal(
     analyser: *Analyser,
     arena: std.mem.Allocator,
     handle: *const DocumentStore.Handle,
@@ -254,7 +254,7 @@ pub fn hoverDefinitionGlobal(
     };
 }
 
-pub fn hoverDefinitionEnumLiteral(
+fn hoverDefinitionEnumLiteral(
     analyser: *Analyser,
     arena: std.mem.Allocator,
     handle: *const DocumentStore.Handle,
@@ -280,7 +280,7 @@ pub fn hoverDefinitionEnumLiteral(
     };
 }
 
-pub fn hoverDefinitionFieldAccess(
+fn hoverDefinitionFieldAccess(
     analyser: *Analyser,
     arena: std.mem.Allocator,
     handle: *const DocumentStore.Handle,

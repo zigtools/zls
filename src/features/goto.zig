@@ -17,7 +17,7 @@ pub const GotoKind = enum {
     type_definition,
 };
 
-pub fn gotoDefinitionSymbol(
+fn gotoDefinitionSymbol(
     analyser: *Analyser,
     name_range: types.Range,
     decl_handle: Analyser.DeclWithHandle,
@@ -48,7 +48,7 @@ pub fn gotoDefinitionSymbol(
     };
 }
 
-pub fn gotoDefinitionLabel(
+fn gotoDefinitionLabel(
     analyser: *Analyser,
     arena: std.mem.Allocator,
     handle: *const DocumentStore.Handle,
@@ -66,7 +66,7 @@ pub fn gotoDefinitionLabel(
     return try gotoDefinitionSymbol(analyser, offsets.locToRange(handle.text, name_loc, offset_encoding), decl, kind, offset_encoding);
 }
 
-pub fn gotoDefinitionGlobal(
+fn gotoDefinitionGlobal(
     analyser: *Analyser,
     arena: std.mem.Allocator,
     handle: *const DocumentStore.Handle,
@@ -84,7 +84,7 @@ pub fn gotoDefinitionGlobal(
     return try gotoDefinitionSymbol(analyser, offsets.locToRange(handle.text, name_loc, offset_encoding), decl, kind, offset_encoding);
 }
 
-pub fn gotoDefinitionEnumLiteral(
+fn gotoDefinitionEnumLiteral(
     analyser: *Analyser,
     arena: std.mem.Allocator,
     handle: *const DocumentStore.Handle,
@@ -101,7 +101,7 @@ pub fn gotoDefinitionEnumLiteral(
     return try gotoDefinitionSymbol(analyser, offsets.locToRange(handle.text, name_loc, offset_encoding), decl, kind, offset_encoding);
 }
 
-pub fn gotoDefinitionBuiltin(
+fn gotoDefinitionBuiltin(
     document_store: *DocumentStore,
     handle: *const DocumentStore.Handle,
     loc: offsets.Loc,
@@ -138,7 +138,7 @@ pub fn gotoDefinitionBuiltin(
     return null;
 }
 
-pub fn gotoDefinitionFieldAccess(
+fn gotoDefinitionFieldAccess(
     analyser: *Analyser,
     arena: std.mem.Allocator,
     handle: *const DocumentStore.Handle,
@@ -167,7 +167,7 @@ pub fn gotoDefinitionFieldAccess(
     return try locs.toOwnedSlice(arena);
 }
 
-pub fn gotoDefinitionString(
+fn gotoDefinitionString(
     document_store: *DocumentStore,
     arena: std.mem.Allocator,
     pos_context: Analyser.PositionContext,
