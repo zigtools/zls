@@ -1005,12 +1005,11 @@ fn writeIdentifier(builder: *Builder, name_token: Ast.Node.Index) error{OutOfMem
     std.debug.assert(tree.tokens.items(.tag)[name_token] == .identifier);
     const name = offsets.tokenToSlice(tree, name_token);
 
-    if (std.mem.eql(u8, name, "_")) {
-        return;
-    } else if (Analyser.isValueIdent(name)) {
-        return try writeToken(builder, name_token, .keywordLiteral);
-    } else if (Analyser.isTypeIdent(name)) {
-        return try writeToken(builder, name_token, .type);
+    if (std.mem.eql(u8, name, "_")) return;
+
+    if (Analyser.resolvePrimitiveType(name)) |primitive| {
+        const is_type = builder.analyser.ip.?.indexToKey(primitive).typeOf() == .type_type;
+        return try writeToken(builder, name_token, if (is_type) .type else .keywordLiteral);
     }
 
     if (try builder.analyser.lookupSymbolGlobal(
