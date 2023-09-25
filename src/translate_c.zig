@@ -112,21 +112,14 @@ fn convertCIncludeInternal(
 pub const Result = union(enum) {
     // uri to the generated zig file
     success: []const u8,
-    // zig translate-c failed with the given stderr content
-    failure: []const u8,
+    // zig translate-c failed with the given error messages
+    failure: std.zig.ErrorBundle,
 
     pub fn deinit(self: *Result, allocator: std.mem.Allocator) void {
         switch (self.*) {
             .success => |path| allocator.free(path),
-            .failure => |stderr| allocator.free(stderr),
+            .failure => |*bundle| bundle.deinit(allocator),
         }
-    }
-
-    pub fn dupe(self: Result, allocator: std.mem.Allocator) !Result {
-        return switch (self) {
-            .success => |path| .{ .success = try allocator.dupe(u8, path) },
-            .failure => |stderr| .{ .failure = try allocator.dupe(u8, stderr) },
-        };
     }
 };
 
@@ -247,14 +240,14 @@ pub fn translate(
                 const error_bundle_header = try zcs.receiveErrorBundle();
 
                 const extra = try zcs.receiveIntArray(allocator, error_bundle_header.extra_len);
-                defer allocator.free(extra);
+                errdefer allocator.free(extra);
 
                 const string_bytes = try zcs.receiveBytes(allocator, error_bundle_header.string_bytes_len);
-                defer allocator.free(string_bytes);
+                errdefer allocator.free(string_bytes);
 
                 const error_bundle = std.zig.ErrorBundle{ .string_bytes = string_bytes, .extra = extra };
 
-                return Result{ .failure = try allocator.dupe(u8, error_bundle.getCompileLogOutput()) };
+                return Result{ .failure = error_bundle };
             },
             else => {
                 log.warn("received unexpected message {} from zig compile server", .{header.tag});

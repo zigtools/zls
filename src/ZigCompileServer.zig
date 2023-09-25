@@ -72,17 +72,19 @@ pub fn receiveErrorBundle(client: *Client) !InMessage.ErrorBundle {
 
 pub fn receiveBytes(client: *Client, allocator: std.mem.Allocator, len: usize) ![]u8 {
     const reader = client.pooler.fifo(.in).reader();
-    const result = try reader.readAllAlloc(allocator, len);
-    if (result.len != len) return error.UnexpectedEOF;
+    const result = try allocator.alloc(u8, len);
+    errdefer allocator.free(result);
+    const amt = try reader.readAll(result);
+    if (amt != len) return error.UnexpectedEOF;
     return result;
 }
 
 pub fn receiveIntArray(client: *Client, allocator: std.mem.Allocator, len: usize) ![]u32 {
     const reader = client.pooler.fifo(.in).reader();
-    var array_list = std.ArrayListAligned(u8, 4).init(allocator);
-    errdefer array_list.deinit();
-    try reader.readAllArrayListAligned(4, &array_list, len);
-    const bytes = try array_list.toOwnedSlice();
+    const bytes = try allocator.alignedAlloc(u8, @alignOf(u32), len * @sizeOf(u32));
+    errdefer allocator.free(bytes);
+    const amt = try reader.readAll(bytes);
+    if (amt != bytes.len) return error.UnexpectedEOF;
     const result = std.mem.bytesAsSlice(u32, bytes);
     if (need_bswap) {
         bswap_u32_array(result);

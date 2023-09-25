@@ -125,7 +125,7 @@ fn testTranslate(c_source: []const u8) !translate_c.Result {
             try std.testing.expect(std.fs.path.isAbsolute(path));
         },
         .failure => |message| {
-            try std.testing.expect(message.len != 0);
+            try std.testing.expect(message.errorMessageCount() != 0);
         },
     }
     return result;
