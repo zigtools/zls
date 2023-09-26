@@ -112,6 +112,28 @@ test "inlayhints - var decl" {
         \\    }
         \\}
     , .Type);
+    try testInlayHints(
+        \\ fn thing(a: u32, b: i32) struct {
+        \\     a: u32,
+        \\     b: i32,
+        \\     c: struct {
+        \\         d: usize,
+        \\         e: []const u8,
+        \\     },
+        \\ } {
+        \\     return .{
+        \\         .a = a,
+        \\         .b = b,
+        \\         .c = .{
+        \\             .d = 0,
+        \\             .e = "Testing",
+        \\         }
+        \\     }; 
+        \\ }
+        \\
+        \\ var a<struct { a: u32, b: i32, c: struct { d: usize, e: []const u8, }, }> = thing(10, -4);
+        \\ _ = a;
+    , .Type);
 }
 
 fn testInlayHints(source: []const u8, kind: types.InlayHintKind) !void {

@@ -237,6 +237,24 @@ fn writeVariableDeclHint(builder: *Builder, decl_node: Ast.Node.Index) !void {
     );
     if (type_str.len == 0) return;
 
+    // Restrict whitespace to only one space at a time.
+    var reduced_type_str = std.ArrayList(u8).init(builder.arena);
+    // Overallocates by a small amount if whitespace is reduced, but it should be fine.
+    try reduced_type_str.ensureTotalCapacity(type_str.len);
+    var skip = false;
+    for (type_str) |char| {
+        if (char == '\n' or char == ' ') {
+            if (!skip) {
+                try reduced_type_str.append(' ');
+            }
+            skip = true;
+            continue;
+        }
+        skip = false;
+        try reduced_type_str.append(char);
+    }
+    type_str = reduced_type_str.items;
+
     try builder.hints.append(builder.arena, .{
         .index = offsets.tokenToLoc(tree, hint.ast.mut_token + 1).end,
         .label = try std.fmt.allocPrint(builder.arena, ": {s}", .{
