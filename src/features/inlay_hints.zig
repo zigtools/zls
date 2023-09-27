@@ -257,7 +257,7 @@ fn writeVariableDeclHint(builder: *Builder, decl_node: Ast.Node.Index) !void {
     if (type_str.len == 0) return;
 
     // TODO: Remove once long type hints can be reduced, i.e. `struct { .. }`
-    type_str = reduce_string_whitespace(type_str, builder.arena);
+    type_str = try reduce_string_whitespace(type_str, builder.arena);
 
     try builder.hints.append(builder.arena, .{
         .index = offsets.tokenToLoc(tree, hint.ast.mut_token + 1).end,
