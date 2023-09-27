@@ -118,22 +118,23 @@ pub fn generateDiagnostics(server: *Server, arena: std.mem.Allocator, handle: Do
     }
 
     for (handle.cimports.items(.hash), handle.cimports.items(.node)) |hash, node| {
-        const result = server.document_store.cimports.get(hash) orelse continue;
-        if (result != .failure) continue;
-        const stderr = std.mem.trim(u8, result.failure, " ");
+        const error_bundle: std.zig.ErrorBundle = switch (server.document_store.cimports.get(hash) orelse continue) {
+            .success => continue,
+            .failure => |bundle| bundle,
+        };
 
-        var pos_and_diag_iterator = std.mem.splitScalar(u8, stderr, ':');
-        _ = pos_and_diag_iterator.next(); // skip file path
-        _ = pos_and_diag_iterator.next(); // skip line
-        _ = pos_and_diag_iterator.next(); // skip character
+        try diagnostics.ensureUnusedCapacity(arena, error_bundle.errorMessageCount());
+        for (error_bundle.getMessages()) |err_msg_index| {
+            const err_msg = error_bundle.getErrorMessage(err_msg_index);
 
-        try diagnostics.append(arena, .{
-            .range = offsets.nodeToRange(handle.tree, node, server.offset_encoding),
-            .severity = .Error,
-            .code = .{ .string = "cImport" },
-            .source = "zls",
-            .message = try arena.dupe(u8, pos_and_diag_iterator.rest()),
-        });
+            diagnostics.appendAssumeCapacity(.{
+                .range = offsets.nodeToRange(handle.tree, node, server.offset_encoding),
+                .severity = .Error,
+                .code = .{ .string = "cImport" },
+                .source = "zls",
+                .message = try arena.dupe(u8, error_bundle.nullTerminatedString(err_msg.msg)),
+            });
+        }
     }
 
     if (server.config.highlight_global_var_declarations) {

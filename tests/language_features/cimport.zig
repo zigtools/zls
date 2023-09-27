@@ -18,14 +18,11 @@ test "zig compile server - translate c" {
     defer result1.deinit(allocator);
     try std.testing.expect(result1 == .success);
 
-    // TODO the zig compiler doesn't seem to report error bundles for translate-c
-    // Hopefully I can fix that once llvm-16 finished compiling :)
-
-    var result2 = testTranslate(
+    var result2 = try testTranslate(
         \\#include <this_file_doesnt_exist>
     );
-    defer if (result2) |*r| r.deinit(allocator) else |_| {};
-    try std.testing.expectError(error.Timeout, result2);
+    defer result2.deinit(allocator);
+    try std.testing.expect(result2 == .failure);
 }
 
 test "convertCInclude - empty" {
@@ -125,7 +122,7 @@ fn testTranslate(c_source: []const u8) !translate_c.Result {
             try std.testing.expect(std.fs.path.isAbsolute(path));
         },
         .failure => |message| {
-            try std.testing.expect(message.len != 0);
+            try std.testing.expect(message.errorMessageCount() != 0);
         },
     }
     return result;
