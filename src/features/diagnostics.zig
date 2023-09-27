@@ -356,6 +356,32 @@ pub fn generateBuildOnSaveDiagnostics(
     }
 }
 
+pub fn getDiagnostics(
+    server: *Server,
+    arena: std.mem.Allocator,
+    handle: *DocumentStore.Handle,
+    diagnostics: *std.ArrayListUnmanaged(types.Diagnostic),
+) error{OutOfMemory}!void {
+    if (handle.tree.errors.len != 0) {
+        try diagnostics.ensureUnusedCapacity(arena, handle.tree.errors.len);
+
+        for (handle.tree.errors) |err| {
+            var buffer = std.ArrayListUnmanaged(u8){};
+            try handle.tree.renderError(err, buffer.writer(arena));
+
+            diagnostics.appendAssumeCapacity(.{
+                .range = offsets.tokenToRange(handle.tree, err.token, server.offset_encoding),
+                .severity = .Error,
+                .code = .{ .string = @tagName(err.tag) },
+                .source = "zls",
+                .message = try buffer.toOwnedSlice(arena),
+            });
+        }
+    } else {
+        try getAstCheckDiagnostics(server, arena, handle, diagnostics);
+    }
+}
+
 pub fn getAstCheckDiagnostics(
     server: *Server,
     arena: std.mem.Allocator,
