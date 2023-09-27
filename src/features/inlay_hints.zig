@@ -213,6 +213,25 @@ fn writeBuiltinHint(builder: *Builder, parameters: []const Ast.Node.Index, argum
     }
 }
 
+// Restrict whitespace to only one space at a time.
+fn reduce_string_whitespace(str: []const u8, arena: std.mem.Allocator) ![]const u8 {
+    // Overallocates by a small amount if whitespace is reduced, but it should be fine.
+    var reduced_type_str = try std.ArrayList(u8).initCapacity(arena, str.len);
+    var skip = false;
+    for (str) |char| {
+        if (char == '\n' or char == ' ') {
+            if (!skip) {
+                reduced_type_str.appendAssumeCapacity(' ');
+            }
+            skip = true;
+        } else {
+            reduced_type_str.appendAssumeCapacity(char);
+            skip = false;
+        }
+    }
+    return reduced_type_str.items;
+}
+
 /// Takes a variable declaration AST node. If the type is inferred, attempt to infer it and display it as a hint.
 fn writeVariableDeclHint(builder: *Builder, decl_node: Ast.Node.Index) !void {
     const tracy_zone = tracy.trace(@src());
@@ -237,23 +256,8 @@ fn writeVariableDeclHint(builder: *Builder, decl_node: Ast.Node.Index) !void {
     );
     if (type_str.len == 0) return;
 
-    // Restrict whitespace to only one space at a time.
-    var reduced_type_str = std.ArrayList(u8).init(builder.arena);
-    // Overallocates by a small amount if whitespace is reduced, but it should be fine.
-    try reduced_type_str.ensureTotalCapacity(type_str.len);
-    var skip = false;
-    for (type_str) |char| {
-        if (char == '\n' or char == ' ') {
-            if (!skip) {
-                try reduced_type_str.append(' ');
-            }
-            skip = true;
-            continue;
-        }
-        skip = false;
-        try reduced_type_str.append(char);
-    }
-    type_str = reduced_type_str.items;
+    // TODO: Remove once long type hints can be reduced, i.e. `struct { .. }`
+    type_str = reduce_string_whitespace(type_str, builder.arena);
 
     try builder.hints.append(builder.arena, .{
         .index = offsets.tokenToLoc(tree, hint.ast.mut_token + 1).end,
