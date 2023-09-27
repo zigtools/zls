@@ -216,7 +216,7 @@ fn writeBuiltinHint(builder: *Builder, parameters: []const Ast.Node.Index, argum
 // Restrict whitespace to only one space at a time.
 fn reduce_string_whitespace(str: []const u8, arena: std.mem.Allocator) ![]const u8 {
     // Overallocates by a small amount if whitespace is reduced, but it should be fine.
-    var reduced_type_str = try std.ArrayList(u8).initCapacity(arena, str.len);
+    var reduced_type_str = try std.ArrayListUnmanaged(u8).initCapacity(arena, str.len);
     var skip = false;
     for (str) |char| {
         if (char == '\n' or char == ' ') {
