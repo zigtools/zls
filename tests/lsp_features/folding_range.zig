@@ -12,6 +12,15 @@ test "foldingRange - empty" {
     try testFoldingRange("", &.{});
 }
 
+test "foldingRange - container type without members" {
+    try testFoldingRange(
+        \\const S = struct {
+        \\};
+    , &.{
+        .{ .startLine = 0, .startCharacter = 18, .endLine = 1, .endCharacter = 0 },
+    });
+}
+
 test "foldingRange - doc comment" {
     try testFoldingRange(
         \\/// hello
