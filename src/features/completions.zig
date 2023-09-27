@@ -1240,8 +1240,8 @@ fn completeDot(document_store: *DocumentStore, analyser: *Analyser, arena: std.m
 
     // as invoked source_index points to the char/token after the `.`, do `- 1`
     var dot_token_index = offsets.sourceIndexToTokenIndex(tree, source_index - 1);
+    if (dot_token_index < 2) return &.{};
 
-    // if (dot_token_index < 2) exit;
     var completions = std.ArrayListUnmanaged(types.CompletionItem){};
 
     // This prevents completions popping up for floating point numbers

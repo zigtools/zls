@@ -216,7 +216,7 @@ test "semantic tokens - operators" {
     });
 }
 
-test "semantic tokens - field access" {
+test "semantic tokens - field access with @import" {
     if (!std.process.can_spawn) return error.SkipZigTest;
     // this will make sure that the std module can be resolved
     try testSemanticTokens(
@@ -244,6 +244,30 @@ test "semantic tokens - field access" {
         .{ "std", .namespace, .{} },
         .{ "zig", .namespace, .{} },
         .{ "Ast", .@"struct", .{} },
+    });
+}
+
+test "semantic tokens - field access" {
+    try testSemanticTokens(
+        \\const S = struct {
+        \\    const @"u32" = 5;
+        \\};
+        \\const alpha = S.u32;
+    , &.{
+        .{ "const", .keyword, .{} },
+        .{ "S", .namespace, .{ .declaration = true } },
+        .{ "=", .operator, .{} },
+        .{ "struct", .keyword, .{} },
+        .{ "const", .keyword, .{} },
+        .{ "@\"u32\"", .variable, .{ .declaration = true } },
+        .{ "=", .operator, .{} },
+        .{ "5", .number, .{} },
+
+        .{ "const", .keyword, .{} },
+        .{ "alpha", .variable, .{ .declaration = true } },
+        .{ "=", .operator, .{} },
+        .{ "S", .namespace, .{} },
+        .{ "u32", .variable, .{} },
     });
 }
 
