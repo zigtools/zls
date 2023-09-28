@@ -1820,6 +1820,25 @@ pub const Message = struct {
             .response => try writer.print("response-{}", .{message.response.?.id}),
         }
     }
+
+    test "https://github.com/ziglang/zig/issues/16392" {
+        const parsed_message = try std.json.parseFromSlice(
+            @This(),
+            std.testing.allocator,
+            \\{"jsonrpc":"2.0","id":7,"method":"textDocument/definition","params":{"textDocument":{"uri":"file:///tmp/tmp.zig"},"position":{"line":3,"character":21}}}
+        ,
+            .{},
+        );
+        defer parsed_message.deinit();
+        try std.testing.expect(parsed_message.value == .request);
+        try std.testing.expect(parsed_message.value.request.id == .number);
+        try std.testing.expectEqual(@as(u32, 7), parsed_message.value.request.id.number);
+        try std.testing.expectEqual(.@"textDocument/definition", parsed_message.value.request.params);
+        const params = parsed_message.value.request.params.@"textDocument/definition";
+        try std.testing.expectEqualStrings("file:///tmp/tmp.zig", params.textDocument.uri);
+        try std.testing.expectEqual(@as(u32, 3), params.position.line);
+        try std.testing.expectEqual(@as(u32, 21), params.position.character);
+    }
 };
 
 /// make sure to also set the `transport` field
