@@ -1581,10 +1581,23 @@ fn selectionRangeHandler(server: *Server, arena: std.mem.Allocator, request: typ
     return try selection_range.generateSelectionRanges(arena, handle, request.positions, server.offset_encoding);
 }
 
-pub const Message = union(enum) {
-    request: Request,
-    notification: Notification,
-    response: Response,
+/// workaround for https://github.com/ziglang/zig/issues/16392
+/// ```zig
+/// union(enum) {
+///    request: Request,
+///    notification: Notification,
+///    response: Response,
+/// }
+/// ```zig
+pub const Message = struct {
+    tag: enum(u32) {
+        request,
+        notification,
+        response,
+    },
+    request: ?Request = null,
+    notification: ?Notification = null,
+    response: ?Response = null,
 
     pub const Request = struct {
         id: types.RequestId,
@@ -1676,16 +1689,22 @@ pub const Message = union(enum) {
                         else
                             try std.json.parseFromValueLeaky(field.type, allocator, msg_params, options);
 
-                        return .{ .request = .{
-                            .id = msg_id,
-                            .params = @unionInit(Request.Params, field.name, params),
-                        } };
+                        return .{
+                            .tag = .request,
+                            .request = .{
+                                .id = msg_id,
+                                .params = @unionInit(Request.Params, field.name, params),
+                            },
+                        };
                     }
                 }
-                return .{ .request = .{
-                    .id = msg_id,
-                    .params = .{ .unknown = msg_method },
-                } };
+                return .{
+                    .tag = .request,
+                    .request = .{
+                        .id = msg_id,
+                        .params = .{ .unknown = msg_method },
+                    },
+                };
             } else {
                 const result = object.get("result") orelse .null;
                 const error_obj = object.get("error") orelse .null;
@@ -1695,15 +1714,21 @@ pub const Message = union(enum) {
                 if (result != .null and err != null) return error.UnexpectedToken;
 
                 if (err) |e| {
-                    return .{ .response = .{
-                        .id = msg_id,
-                        .data = .{ .@"error" = e },
-                    } };
+                    return .{
+                        .tag = .response,
+                        .response = .{
+                            .id = msg_id,
+                            .data = .{ .@"error" = e },
+                        },
+                    };
                 } else {
-                    return .{ .response = .{
-                        .id = msg_id,
-                        .data = .{ .result = result },
-                    } };
+                    return .{
+                        .tag = .response,
+                        .response = .{
+                            .id = msg_id,
+                            .data = .{ .result = result },
+                        },
+                    };
                 }
             }
         } else {
@@ -1722,17 +1747,21 @@ pub const Message = union(enum) {
                         try std.json.parseFromValueLeaky(field.type, allocator, msg_params, options);
 
                     return .{
+                        .tag = .notification,
                         .notification = @unionInit(Notification, field.name, params),
                     };
                 }
             }
-            return .{ .notification = .{ .unknown = msg_method } };
+            return .{
+                .tag = .notification,
+                .notification = .{ .unknown = msg_method },
+            };
         }
     }
 
     pub fn isBlocking(self: Message) bool {
-        switch (self) {
-            .request => |request| switch (request.params) {
+        switch (self.tag) {
+            .request => switch (self.request.?.params) {
                 .initialize,
                 .shutdown,
                 => return true,
@@ -1758,7 +1787,7 @@ pub const Message = union(enum) {
                 => return false,
                 .unknown => return false,
             },
-            .notification => |notification| switch (notification) {
+            .notification => switch (self.notification.?) {
                 .@"$/cancelRequest" => return false,
                 .initialized,
                 .exit,
@@ -1779,16 +1808,16 @@ pub const Message = union(enum) {
     pub fn format(message: Message, comptime fmt_str: []const u8, options: std.fmt.FormatOptions, writer: anytype) @TypeOf(writer).Error!void {
         _ = options;
         if (fmt_str.len != 0) std.fmt.invalidFmtError(fmt_str, message);
-        switch (message) {
-            .request => |request| try writer.print("request-{}-{s}", .{ request.id, switch (request.params) {
+        switch (message.tag) {
+            .request => try writer.print("request-{}-{s}", .{ message.request.?.id, switch (message.request.?.params) {
                 .unknown => |method| method,
-                else => @tagName(request.params),
+                else => @tagName(message.request.?.params),
             } }),
-            .notification => |notification| try writer.print("notification-{s}", .{switch (notification) {
+            .notification => try writer.print("notification-{s}", .{switch (message.notification.?) {
                 .unknown => |method| method,
-                else => @tagName(notification),
+                else => @tagName(message.notification.?),
             }}),
-            .response => |response| try writer.print("response-{}", .{response.id}),
+            .response => try writer.print("response-{}", .{message.response.?.id}),
         }
     }
 };
@@ -2003,21 +2032,21 @@ fn processMessage(server: *Server, message: Message) Error!?[]u8 {
     defer arena_allocator.deinit();
 
     @setEvalBranchQuota(5_000);
-    switch (message) {
-        .request => |request| switch (request.params) {
+    switch (message.tag) {
+        .request => switch (message.request.?.params) {
             inline else => |params, method| {
                 const result = try server.sendRequestSync(arena_allocator.allocator(), @tagName(method), params);
-                return try server.sendToClientResponse(request.id, result);
+                return try server.sendToClientResponse(message.request.?.id, result);
             },
-            .unknown => return try server.sendToClientResponse(request.id, null),
+            .unknown => return try server.sendToClientResponse(message.request.?.id, null),
         },
-        .notification => |notification| switch (notification) {
+        .notification => switch (message.notification.?) {
             inline else => |params, method| {
                 try server.sendNotificationSync(arena_allocator.allocator(), @tagName(method), params);
             },
             .unknown => {},
         },
-        .response => |response| try server.handleResponse(response),
+        .response => try server.handleResponse(message.response.?),
     }
     return null;
 }
@@ -2029,8 +2058,8 @@ fn processMessageReportError(server: *Server, message: Message) ?[]const u8 {
             std.debug.dumpStackTrace(trace.*);
         }
 
-        switch (message) {
-            .request => |request| return server.sendToClientResponseError(request.id, types.ResponseError{
+        switch (message.tag) {
+            .request => return server.sendToClientResponseError(message.request.?.id, types.ResponseError{
                 .code = switch (err) {
                     error.OutOfMemory => @intFromEnum(types.ErrorCodes.InternalError),
                     error.ParseError => @intFromEnum(types.ErrorCodes.ParseError),
@@ -2106,20 +2135,20 @@ fn validateMessage(server: *const Server, message: Message) Error!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const method = switch (message) {
-        .request => |request| switch (request.params) {
+    const method = switch (message.tag) {
+        .request => switch (message.request.?.params) {
             .unknown => |method| blk: {
                 if (!isRequestMethod(method)) return error.MethodNotFound;
                 break :blk method;
             },
-            else => @tagName(request.params),
+            else => @tagName(message.request.?.params),
         },
-        .notification => |notification| switch (notification) {
+        .notification => switch (message.notification.?) {
             .unknown => |method| blk: {
                 if (!isNotificationMethod(method)) return error.MethodNotFound;
                 break :blk method;
             },
-            else => @tagName(notification),
+            else => @tagName(message.notification.?),
         },
         .response => return, // validation happens in `handleResponse`
     };
