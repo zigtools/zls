@@ -98,8 +98,8 @@ pub fn applyContentChanges(
     for (changes) |item| {
         const range = item.literal_0.range;
 
-        const start = offsets.maybePositionToIndex(text, range.start, encoding) orelse return error.InvalidParams;
-        const end = offsets.maybePositionToIndex(text, range.end, encoding) orelse return error.InvalidParams;
+        const start = offsets.maybePositionToIndex(text_array.items, range.start, encoding) orelse return error.InvalidParams;
+        const end = offsets.maybePositionToIndex(text_array.items, range.end, encoding) orelse return error.InvalidParams;
         try text_array.replaceRange(allocator, start, end - start, item.literal_0.text);
     }
 
