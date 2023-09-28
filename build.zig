@@ -170,7 +170,7 @@ pub fn build(b: *std.build.Builder) !void {
     var tests = b.addTest(.{
         .root_source_file = .{ .path = "tests/tests.zig" },
         .target = target,
-        .optimize = .Debug,
+        .optimize = optimize,
         .filter = test_filter,
     });
 
@@ -195,7 +195,7 @@ pub fn build(b: *std.build.Builder) !void {
     var src_tests = b.addTest(.{
         .root_source_file = .{ .path = "src/zls.zig" },
         .target = target,
-        .optimize = .Debug,
+        .optimize = optimize,
         .filter = test_filter,
     });
     src_tests.addModule("known-folders", known_folders_module);
