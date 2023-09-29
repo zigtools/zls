@@ -1006,12 +1006,13 @@ fn validateConfiguration(server: *Server, config: *configuration.Configuration) 
 
 fn resolveConfiguration(server: *Server, config_arena: std.mem.Allocator, config: *configuration.Configuration) !void {
     if (config.zig_exe_path == null) blk: {
-        comptime if (!std.process.can_spawn) break :blk;
+        std.debug.assert(!zig_builtin.is_test);
+        if (!std.process.can_spawn) break :blk;
         config.zig_exe_path = try configuration.findZig(config_arena);
     }
 
     if (config.zig_exe_path) |exe_path| blk: {
-        comptime if (!std.process.can_spawn) break :blk;
+        if (!std.process.can_spawn) break :blk;
         const env = configuration.getZigEnv(server.allocator, exe_path) orelse break :blk;
         defer env.deinit();
 
@@ -1045,6 +1046,7 @@ fn resolveConfiguration(server: *Server, config_arena: std.mem.Allocator, config
     }
 
     if (config.global_cache_path == null) {
+        std.debug.assert(!zig_builtin.is_test);
         const cache_dir_path = (try known_folders.getPath(server.allocator, .cache)) orelse {
             log.warn("Known-folders could not fetch the cache path", .{});
             return;
@@ -1086,7 +1088,7 @@ fn resolveConfiguration(server: *Server, config_arena: std.mem.Allocator, config
     }
 
     if (config.builtin_path == null) blk: {
-        comptime if (!std.process.can_spawn) break :blk;
+        if (!std.process.can_spawn) break :blk;
         if (config.zig_exe_path == null) break :blk;
         if (config.global_cache_path == null) break :blk;
 
