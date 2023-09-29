@@ -6,7 +6,7 @@ const zls_version = std.SemanticVersion{ .major = 0, .minor = 12, .patch = 0 };
 pub fn build(b: *std.build.Builder) !void {
     comptime {
         const current_zig = builtin.zig_version;
-        const min_zig = std.SemanticVersion.parse("0.12.0-dev.596+2adb932ad") catch unreachable; // translate-c: convert clang errors messages into `std.zig.ErrorBundle`
+        const min_zig = std.SemanticVersion.parse("0.12.0-dev.654+599641357") catch unreachable; // std.http: introduce options to http client to allow for raw uris
         if (current_zig.order(min_zig) == .lt) {
             @compileError(std.fmt.comptimePrint("Your Zig version v{} does not meet the minimum build requirement of v{}", .{ current_zig, min_zig }));
         }
