@@ -1,29 +1,5 @@
 {
   "nodes": {
-    "binned_allocator": {
-      "flake": false,
-      "locked": {
-        "narHash": "sha256-m/kr4kmkG2rLkAj5YwvM0HmXTd+chAiQHzYK6ozpWlw=",
-        "type": "tarball",
-        "url": "https://gist.github.com/antlilja/8372900fcc09e38d7b0b6bbaddad3904/archive/6c3321e0969ff2463f8335da5601986cf2108690.tar.gz"
-      },
-      "original": {
-        "type": "tarball",
-        "url": "https://gist.github.com/antlilja/8372900fcc09e38d7b0b6bbaddad3904/archive/6c3321e0969ff2463f8335da5601986cf2108690.tar.gz"
-      }
-    },
-    "diffz": {
-      "flake": false,
-      "locked": {
-        "narHash": "sha256-3CdYo6WevT0alRwKmbABahjhFKz7V9rdkDUZ43VtDeU=",
-        "type": "tarball",
-        "url": "https://github.com/ziglibs/diffz/archive/90353d401c59e2ca5ed0abe5444c29ad3d7489aa.tar.gz"
-      },
-      "original": {
-        "type": "tarball",
-        "url": "https://github.com/ziglibs/diffz/archive/90353d401c59e2ca5ed0abe5444c29ad3d7489aa.tar.gz"
-      }
-    },
     "flake-compat": {
       "flake": false,
       "locked": {
@@ -93,18 +69,6 @@
         "type": "github"
       }
     },
-    "known_folders": {
-      "flake": false,
-      "locked": {
-        "narHash": "sha256-bZfn+jgCzrtm8vKPDDMNWLkJYoo7vKxZu+e2tGvSGHY=",
-        "type": "tarball",
-        "url": "https://github.com/ziglibs/known-folders/archive/a564f582122326328dad6b59209d070d57c4e6ae.tar.gz"
-      },
-      "original": {
-        "type": "tarball",
-        "url": "https://github.com/ziglibs/known-folders/archive/a564f582122326328dad6b59209d070d57c4e6ae.tar.gz"
-      }
-    },
     "langref": {
       "flake": false,
       "locked": {
@@ -135,11 +99,8 @@
     },
     "root": {
       "inputs": {
-        "binned_allocator": "binned_allocator",
-        "diffz": "diffz",
         "flake-utils": "flake-utils",
         "gitignore": "gitignore",
-        "known_folders": "known_folders",
         "langref": "langref",
         "nixpkgs": "nixpkgs",
         "zig-overlay": "zig-overlay"

@@ -1,3 +1,4 @@
+// whenever this file is updated, run `zon2nix > deps.nix`
 .{
     .name = "zls",
     .version = "0.11.0",
