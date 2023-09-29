@@ -952,7 +952,7 @@ fn httpGET(allocator: std.mem.Allocator, uri: std.Uri) !Response {
     var request = try client.request(.GET, uri, .{ .allocator = allocator }, .{});
     defer request.deinit();
 
-    try request.start();
+    try request.start(.{});
     // try request.finish();
     try request.wait();
 
