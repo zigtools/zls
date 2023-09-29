@@ -13,6 +13,7 @@
             .hash = "122089a8247a693cad53beb161bde6c30f71376cd4298798d45b32740c3581405864",
         },
         .binned_allocator = .{
+            // upstream: https://gist.github.com/antlilja/8372900fcc09e38d7b0b6bbaddad3904
             .url = "https://gist.github.com/antlilja/8372900fcc09e38d7b0b6bbaddad3904/archive/6c3321e0969ff2463f8335da5601986cf2108690.tar.gz",
             .hash = "1220363c7e27b2d3f39de6ff6e90f9537a0634199860fea237a55ddb1e1717f5d6a5",
         },
