@@ -1906,12 +1906,6 @@ pub fn waitAndWork(server: *Server) void {
     server.wait_group.reset();
 }
 
-comptime {
-    if (build_options.coverage) {
-        std.testing.refAllDecls(@This());
-    }
-}
-
 pub fn loop(server: *Server) !void {
     std.debug.assert(server.transport != null);
     while (server.keepRunning()) {

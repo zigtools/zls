@@ -74,7 +74,6 @@ pub fn build(b: *std.build.Builder) !void {
     exe_options.addOption(bool, "enable_failing_allocator", b.option(bool, "enable_failing_allocator", "Whether to use a randomly failing allocator.") orelse false);
     exe_options.addOption(u32, "enable_failing_allocator_likelihood", b.option(u32, "enable_failing_allocator_likelihood", "The chance that an allocation will fail is `1/likelihood`") orelse 256);
     exe_options.addOption(bool, "use_gpa", b.option(bool, "use_gpa", "Good for debugging") orelse (optimize == .Debug));
-    exe_options.addOption(bool, "coverage", coverage);
     exe_options.addOption([]const u8, "version_string", version_string);
     exe_options.addOption(std.SemanticVersion, "version", try std.SemanticVersion.parse(version_string));
     exe_options.addOption([]const u8, "min_zig_string", min_zig_string);
