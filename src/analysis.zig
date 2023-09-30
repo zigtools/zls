@@ -762,10 +762,10 @@ fn resolveBracketAccessType(analyser: *Analyser, lhs: TypeWithHandle, rhs: enum 
                         .handle = lhs.handle,
                     })) orelse return null).instanceTypeVal();
                 }
+                return lhs;
             },
-            else => {},
+            .One => {},
         }
-        return lhs;
     }
 
     return null;
