@@ -1039,6 +1039,9 @@ pub fn resolveCImport(self: *DocumentStore, handle: Handle, node: Ast.Node.Index
     defer tracy_zone.end();
 
     if (!std.process.can_spawn) return null;
+    if (self.config.zig_exe_path == null) return null;
+    if (self.config.zig_lib_path == null) return null;
+    if (self.config.global_cache_path == null) return null;
 
     self.lock.lock();
     defer self.lock.unlock();
