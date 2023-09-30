@@ -1,6 +1,7 @@
 const std = @import("std");
 const zls = @import("zls");
 const builtin = @import("builtin");
+const test_options = @import("test_options");
 
 const Config = zls.Config;
 const Server = zls.Server;
@@ -12,6 +13,10 @@ const default_config: Config = .{
     .enable_inlay_hints = true,
     .inlay_hints_exclude_single_argument = false,
     .inlay_hints_show_builtin = true,
+
+    .zig_exe_path = test_options.zig_exe_path,
+    .zig_lib_path = null,
+    .global_cache_path = test_options.global_cache_path,
 };
 
 const allocator = std.testing.allocator;

@@ -78,7 +78,22 @@ pub fn build(b: *std.build.Builder) !void {
     exe_options.addOption(std.SemanticVersion, "version", try std.SemanticVersion.parse(version_string));
     exe_options.addOption([]const u8, "min_zig_string", min_zig_string);
 
-    const build_options_module = exe_options.createModule();
+    const build_options = b.addOptions();
+    const build_options_module = build_options.createModule();
+    build_options.addOption([]const u8, "version_string", version_string);
+    build_options.addOption(std.SemanticVersion, "version", try std.SemanticVersion.parse(version_string));
+
+    const global_cache_path = try b.cache_root.join(b.allocator, &.{"zls"});
+    b.cache_root.handle.makePath(global_cache_path) catch |err| {
+        std.debug.panic("unable to make tmp path '{s}': {}", .{ global_cache_path, err });
+    };
+
+    const test_options = b.addOptions();
+    const test_options_module = test_options.createModule();
+    test_options.addOption([]const u8, "zig_exe_path", b.zig_exe);
+    test_options.addOption([]const u8, "global_cache_path", global_cache_path);
+
+    const exe_options_module = exe_options.createModule();
     const known_folders_module = b.dependency("known_folders", .{}).module("known-folders");
     const diffz_module = b.dependency("diffz", .{}).module("diffz");
     const binned_allocator_module = b.dependency("binned_allocator", .{}).module("binned_allocator");
@@ -93,7 +108,7 @@ pub fn build(b: *std.build.Builder) !void {
     exe.pie = pie;
     b.installArtifact(exe);
 
-    exe.addModule("build_options", build_options_module);
+    exe.addModule("build_options", exe_options_module);
     exe.addModule("known-folders", known_folders_module);
     exe.addModule("diffz", diffz_module);
     exe.addModule("binned_allocator", binned_allocator_module);
@@ -186,6 +201,7 @@ pub fn build(b: *std.build.Builder) !void {
 
     tests.addModule("zls", zls_module);
     tests.addModule("build_options", build_options_module);
+    tests.addModule("test_options", test_options_module);
     test_step.dependOn(&b.addRunArtifact(tests).step);
 
     var src_tests = b.addTest(.{
@@ -196,6 +212,7 @@ pub fn build(b: *std.build.Builder) !void {
         .single_threaded = single_threaded,
     });
     src_tests.addModule("build_options", build_options_module);
+    src_tests.addModule("test_options", test_options_module);
     test_step.dependOn(&b.addRunArtifact(src_tests).step);
 
     if (coverage) {
