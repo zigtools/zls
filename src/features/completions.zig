@@ -1455,33 +1455,35 @@ pub fn completionAtIndex(server: *Server, analyser: *Analyser, arena: std.mem.Al
 
     const completions = maybe_completions orelse return null;
 
-    // The cursor is in the middle of a word or before a @, so we can replace
-    // the remaining identifier with the completion instead of just inserting.
-    // TODO Identify function call/struct init and replace the whole thing.
-    const lookahead_context = try Analyser.getPositionContext(arena, handle.text, source_index, true);
-    if (server.client_capabilities.supports_apply_edits and
-        pos_context != .import_string_literal and
-        pos_context != .cinclude_string_literal and
-        pos_context != .embedfile_string_literal and
-        pos_context.loc() != null and
-        lookahead_context.loc() != null and
-        pos_context.loc().?.end != lookahead_context.loc().?.end)
-    {
-        var end = lookahead_context.loc().?.end;
-        while (end < handle.text.len and (std.ascii.isAlphanumeric(handle.text[end]) or handle.text[end] == '"')) {
-            end += 1;
-        }
+    if (server.config.completions_with_replace) {
+        // The cursor is in the middle of a word or before a @, so we can replace
+        // the remaining identifier with the completion instead of just inserting.
+        // TODO Identify function call/struct init and replace the whole thing.
+        const lookahead_context = try Analyser.getPositionContext(arena, handle.text, source_index, true);
+        if (server.client_capabilities.supports_apply_edits and
+            pos_context != .import_string_literal and
+            pos_context != .cinclude_string_literal and
+            pos_context != .embedfile_string_literal and
+            pos_context.loc() != null and
+            lookahead_context.loc() != null and
+            pos_context.loc().?.end != lookahead_context.loc().?.end)
+        {
+            var end = lookahead_context.loc().?.end;
+            while (end < handle.text.len and (std.ascii.isAlphanumeric(handle.text[end]) or handle.text[end] == '"')) {
+                end += 1;
+            }
 
-        const replaceLoc = offsets.Loc{ .start = lookahead_context.loc().?.start, .end = end };
-        const replaceRange = offsets.locToRange(handle.text, replaceLoc, server.offset_encoding);
+            const replaceLoc = offsets.Loc{ .start = lookahead_context.loc().?.start, .end = end };
+            const replaceRange = offsets.locToRange(handle.text, replaceLoc, server.offset_encoding);
 
-        for (completions) |*item| {
-            item.textEdit = .{
-                .TextEdit = .{
-                    .newText = item.insertText orelse item.label,
-                    .range = replaceRange,
-                },
-            };
+            for (completions) |*item| {
+                item.textEdit = .{
+                    .TextEdit = .{
+                        .newText = item.insertText orelse item.label,
+                        .range = replaceRange,
+                    },
+                };
+            }
         }
     }
 

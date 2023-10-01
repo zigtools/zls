@@ -190,6 +190,12 @@
             "description": "Path to a directory that will be used as the global cache path when executing a projects build.zig. null is equivalent to the path shown by `zig env`",
             "type": "?[]const u8",
             "default": "null"
+        },
+        {
+            "name": "completions_with_replace",
+            "description": "Completions confirm behavior. If 'true', replace the text after the cursor",
+            "type": "bool",
+            "default": "true"
         }
     ]
 }

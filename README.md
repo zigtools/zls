@@ -87,6 +87,7 @@ The following options are currently available.
 | `build_runner_path` | `?[]const u8` | `null` | Path to the `build_runner.zig` file provided by zls. null is equivalent to `${executable_directory}/build_runner.zig` |
 | `global_cache_path` | `?[]const u8` | `null` | Path to a directory that will be used as zig's cache. null is equivalent to `${KnownFolders.Cache}/zls` |
 | `build_runner_global_cache_path` | `?[]const u8` | `null` | Path to a directory that will be used as the global cache path when executing a projects build.zig. null is equivalent to the path shown by `zig env` |
+| `completions_with_replace` | `bool` | `true` | Completions confirm behavior. If 'true', replace the text after the cursor |
 <!-- DO NOT EDIT -->
 
 ### Per-build Configuration Options
