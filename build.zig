@@ -3,10 +3,14 @@ const builtin = @import("builtin");
 
 const zls_version = std.SemanticVersion{ .major = 0, .minor = 12, .patch = 0 };
 
+/// document the latest breaking change that caused a change to the string below:
+/// std.http: introduce options to http client to allow for raw uris
+const min_zig_string = "0.12.0-dev.654+599641357";
+
 pub fn build(b: *std.build.Builder) !void {
     comptime {
         const current_zig = builtin.zig_version;
-        const min_zig = std.SemanticVersion.parse("0.12.0-dev.654+599641357") catch unreachable; // std.http: introduce options to http client to allow for raw uris
+        const min_zig = std.SemanticVersion.parse(min_zig_string) catch unreachable;
         if (current_zig.order(min_zig) == .lt) {
             @compileError(std.fmt.comptimePrint("Your Zig version v{} does not meet the minimum build requirement of v{}", .{ current_zig, min_zig }));
         }
@@ -81,6 +85,7 @@ pub fn build(b: *std.build.Builder) !void {
         }
     };
     exe_options.addOption([]const u8, "version_string", version_string);
+    exe_options.addOption([]const u8, "min_zig_string", min_zig_string);
 
     const version = try std.SemanticVersion.parse(version_string);
     exe_options.addOption(std.SemanticVersion, "version", version);

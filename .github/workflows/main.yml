@@ -35,15 +35,20 @@ jobs:
         with:
           version: master
 
-      - run: zig version
+      - name: Get Zig version
+        id: zig_version
+        run: echo "zig_version=$(zig version)" >> $GITHUB_OUTPUT
+
       - run: zig env
 
       - name: Build
         run: zig build
 
-      - name: Build with Tracy
-        if: ${{ matrix.os != 'macos-latest' && github.event.inputs.bypass_tracy_and_artifacts != 'true' }}
-        run: zig build -Denable_tracy
+      - name: Get ZLS version and mimimum build version
+        id: zls_version
+        run: |
+          echo "zls_version=$(./zig-out/bin/zls --version)" >> $GITHUB_OUTPUT
+          echo "zls_minimum_build_version=$(./zig-out/bin/zls --minimum-build-version)" >> $GITHUB_OUTPUT
 
       - name: Run Tests
         run: zig build test
@@ -51,86 +56,101 @@ jobs:
       - name: Build artifacts
         if: ${{ matrix.os == 'ubuntu-latest' && github.event.inputs.bypass_tracy_and_artifacts != 'true' }}
         run: |
-          declare -a targets=("x86_64-windows" "x86_64-linux" "x86_64-macos" "x86-windows" "x86-linux" "aarch64-linux" "aarch64-macos" "wasm32-wasi")
-          mkdir -p "artifacts/"
+          declare -a targets=("x86_64-windows" "x86_64-linux")
+          # "x86_64-macos" "x86-windows" "x86-linux" "aarch64-linux" "aarch64-macos" "wasm32-wasi"
+          mkdir -p "artifacts/${{ steps.zls_version.outputs.zls_version }}/"
 
           for target in "${targets[@]}"; do
-            mkdir -p artifacts/$target
+            mkdir -p artifacts/${{ steps.zls_version.outputs.zls_version }}/$target
+
             echo "Building target ${target}..."
             if [ "${GITHUB_REF##*/}" == "master" ]; then
               echo "Building safe"
-              zig build -Dtarget=${target} -Dcpu=baseline -Doptimize=ReleaseSafe --prefix artifacts/${target}/
+              zig build -Dtarget=${target} -Dcpu=baseline -Doptimize=ReleaseSafe --prefix artifacts/${{ steps.zls_version.outputs.zls_version }}/${target}/
             else
               echo "Building debug as action is not running on master"
-              zig build -Dtarget=${target} -Dcpu=baseline --prefix artifacts/${target}/
+              zig build -Dtarget=${target} -Dcpu=baseline --prefix artifacts/${{ steps.zls_version.outputs.zls_version }}/${target}/
             fi
-            sed -e '1,5d' < README.md > artifacts/${target}/README.md
-            cp LICENSE artifacts/${target}/
+
+            mv artifacts/${{ steps.zls_version.outputs.zls_version }}/${target}/bin/* artifacts/${{ steps.zls_version.outputs.zls_version }}/${target}
+            rmdir artifacts/${{ steps.zls_version.outputs.zls_version }}/${target}/bin
           done
+
+          wget https://zigtools-releases.nyc3.digitaloceanspaces.com/zls/index.json
+
+          cp index.json artifacts/old-index.json
+
+          jq --arg targets "${targets[*]}" '.latest = "${{ steps.zls_version.outputs.zls_version }}" | .versions["${{ steps.zls_version.outputs.zls_version }}"] = {
+            "date": now | todateiso8601,
+            "builtWithZigVersion": "${{ steps.zig_version.outputs.zig_version }}",
+            "zlsVersion": "${{ steps.zls_version.outputs.zls_version }}",
+            "zlsMinimumBuildVersion": "${{ steps.zls_version.outputs.zls_minimum_build_version }}",
+            "commit": "${{ github.sha }}",
+            "targets": ($targets / " "),
+          }' index.json > artifacts/index.json
 
       - name: Upload x86_64-windows artifact
         if: ${{ matrix.os == 'ubuntu-latest' && github.event.inputs.bypass_tracy_and_artifacts != 'true' }}
         uses: actions/upload-artifact@v3
         with:
           name: zls-x86_64-windows
-          path: artifacts/x86_64-windows/
+          path: artifacts/${{ steps.zls_version.outputs.zls_version }}/x86_64-windows/
 
       - name: Upload x86_64-linux artifact
         if: ${{ matrix.os == 'ubuntu-latest' && github.event.inputs.bypass_tracy_and_artifacts != 'true' }}
         uses: actions/upload-artifact@v3
         with:
           name: zls-x86_64-linux
-          path: artifacts/x86_64-linux/
+          path: artifacts/${{ steps.zls_version.outputs.zls_version }}/x86_64-linux/
 
       - name: Upload x86_64-macos artifact
         if: ${{ matrix.os == 'ubuntu-latest' && github.event.inputs.bypass_tracy_and_artifacts != 'true' }}
         uses: actions/upload-artifact@v3
         with:
           name: zls-x86_64-macos
-          path: artifacts/x86_64-macos/
+          path: artifacts/${{ steps.zls_version.outputs.zls_version }}/x86_64-macos/
 
       - name: Upload x86-windows artifact
         if: ${{ matrix.os == 'ubuntu-latest' && github.event.inputs.bypass_tracy_and_artifacts != 'true' }}
         uses: actions/upload-artifact@v3
         with:
           name: zls-x86-windows
-          path: artifacts/x86-windows/
+          path: artifacts/${{ steps.zls_version.outputs.zls_version }}/x86-windows/
 
       - name: Upload x86-linux artifact
         if: ${{ matrix.os == 'ubuntu-latest' && github.event.inputs.bypass_tracy_and_artifacts != 'true' }}
         uses: actions/upload-artifact@v3
         with:
           name: zls-x86-linux
-          path: artifacts/x86-linux/
+          path: artifacts/${{ steps.zls_version.outputs.zls_version }}/x86-linux/
 
       - name: Upload aarch64-linux artifact
         if: ${{ matrix.os == 'ubuntu-latest' && github.event.inputs.bypass_tracy_and_artifacts != 'true' }}
         uses: actions/upload-artifact@v3
         with:
           name: zls-aarch64-linux
-          path: artifacts/aarch64-linux/
+          path: artifacts/${{ steps.zls_version.outputs.zls_version }}/aarch64-linux/
 
       - name: Upload aarch64-macos artifact
         if: ${{ matrix.os == 'ubuntu-latest' && github.event.inputs.bypass_tracy_and_artifacts != 'true' }}
         uses: actions/upload-artifact@v3
         with:
           name: zls-aarch64-macos
-          path: artifacts/aarch64-macos/
+          path: artifacts/${{ steps.zls_version.outputs.zls_version }}/aarch64-macos/
 
       - name: Upload wasm32-wasi artifact
         if: ${{ matrix.os == 'ubuntu-latest' && github.event.inputs.bypass_tracy_and_artifacts != 'true' }}
         uses: actions/upload-artifact@v3
         with:
           name: zls-wasm32-wasi
-          path: artifacts/wasm32-wasi/
+          path: artifacts/${{ steps.zls_version.outputs.zls_version }}/wasm32-wasi/
 
-      - name: Beam to Felix
-        if: ${{ matrix.os == 'ubuntu-latest' && github.ref == 'refs/heads/master' && github.repository_owner == 'zigtools' }}
-        uses: easingthemes/ssh-deploy@v2.1.1
-        env:
-          SSH_PRIVATE_KEY: ${{ secrets.SERVER_SSH_PRIVKEY }}
-          ARGS: "-rltgoDzvO --delete"
-          SOURCE: "artifacts/"
-          REMOTE_HOST: ${{ secrets.WEBSITE_DEPLOY_HOST }}
-          REMOTE_USER: ${{ secrets.WEBSITE_DEPLOY_USER }}
-          TARGET: ${{ secrets.WEBSITE_DEPLOY_FOLDER }}
+      - uses: BetaHuhn/do-spaces-action@v2
+        if: ${{ matrix.os == 'ubuntu-latest' && github.ref == 'refs/heads/master' }}
+        with:
+          access_key: ${{ secrets.DO_SPACES_ACCESS_KEY }}
+          secret_key: ${{ secrets.DO_SPACES_SECRET_KEY }}
+          space_name: zigtools-releases
+          space_region: nyc3
+          source: artifacts/
+          out_dir: zls/
