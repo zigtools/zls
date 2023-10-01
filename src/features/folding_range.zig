@@ -244,6 +244,11 @@ pub fn generateFoldingRanges(allocator: std.mem.Allocator, tree: Ast, encoding: 
                     }
                     const end_tok = ast.lastToken(tree, node);
                     try builder.add(null, start_tok, end_tok, .exclusive, .exclusive);
+                } else { // no members (yet), ie `const T = type {};`
+                    var start_tok = tree.firstToken(node);
+                    while(token_tags[start_tok] != .l_brace) start_tok += 1;
+                    const end_tok = ast.lastToken(tree, node);
+                    try builder.add(null, start_tok, end_tok, .exclusive, .exclusive);
                 }
             },
 
