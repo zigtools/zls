@@ -29,11 +29,6 @@
             "type": "boolean",
             "default": "true"
         },
-        "enable_import_embedfile_argument_completions": {
-            "description": "Whether to enable import/embedFile argument completions",
-            "type": "boolean",
-            "default": "true"
-        },
         "semantic_tokens": {
             "description": "Set level of semantic tokens. Partial only includes information that requires semantic analysis.",
             "type": "string",
@@ -79,11 +74,6 @@
             "type": "boolean",
             "default": "false"
         },
-        "operator_completions": {
-            "description": "Enables `*` and `?` operators in completion lists",
-            "type": "boolean",
-            "default": "true"
-        },
         "warn_style": {
             "description": "Enables warnings for style guideline mismatches",
             "type": "boolean",
@@ -99,20 +89,10 @@
             "type": "boolean",
             "default": "false"
         },
-        "include_at_in_builtins": {
-            "description": "Whether the @ sign should be part of the completion of builtins",
-            "type": "boolean",
-            "default": "false"
-        },
         "skip_std_references": {
             "description": "When true, skips searching for references in std. Improves lookup speed for functions in user's code. Renaming and go-to-definition will continue to work as is",
             "type": "boolean",
             "default": "false"
-        },
-        "max_detail_length": {
-            "description": "The detail field of completions is truncated to be no longer than this (in bytes)",
-            "type": "integer",
-            "default": "1048576"
         },
         "prefer_ast_check_as_child_process": {
             "description": "Can be used in conjuction with `enable_ast_check_diagnostics` to favor using `zig ast-check` instead of ZLS's fork",

@@ -48,14 +48,12 @@ fn typeToCompletion(
             }
         },
         .pointer => |t| {
-            if (server.config.operator_completions) {
-                try list.append(arena, .{
-                    .label = "*",
-                    .kind = .Operator,
-                    .insertText = "*",
-                    .insertTextFormat = .PlainText,
-                });
-            }
+            try list.append(arena, .{
+                .label = "*",
+                .kind = .Operator,
+                .insertText = "*",
+                .insertTextFormat = .PlainText,
+            });
             try typeToCompletion(server, analyser, arena, list, .{ .original = t.* }, orig_handle, null);
         },
         .other => |n| try nodeToCompletion(
@@ -305,7 +303,7 @@ fn nodeToCompletion(
             const ptr_type = ast.fullPtrType(tree, node).?;
 
             switch (ptr_type.size) {
-                .One, .C, .Many => if (server.config.operator_completions) {
+                .One, .C, .Many => {
                     try list.append(arena, .{
                         .label = "*",
                         .kind = .Operator,
@@ -337,15 +335,12 @@ fn nodeToCompletion(
             return;
         },
         .optional_type => {
-            if (server.config.operator_completions) {
-                try list.append(arena, .{
-                    .label = "?",
-                    .kind = .Operator,
-                    .insertText = "?",
-                    .insertTextFormat = .PlainText,
-                });
-            }
-            return;
+            try list.append(arena, .{
+                .label = "?",
+                .kind = .Operator,
+                .insertText = "?",
+                .insertTextFormat = .PlainText,
+            });
         },
         .multiline_string_literal,
         .string_literal,
@@ -537,7 +532,7 @@ fn completeBuiltin(server: *Server, arena: std.mem.Allocator) error{OutOfMemory}
             .kind = .Function,
             .filterText = builtin.name[1..],
             .detail = builtin.signature,
-            .insertText = if (server.config.include_at_in_builtins) insert_text else insert_text[1..],
+            .insertText = if (server.client_capabilities.include_at_in_builtins) insert_text else insert_text[1..],
             .insertTextFormat = if (use_snippets) .Snippet else .PlainText,
             .documentation = .{
                 .MarkupContent = .{
@@ -1442,13 +1437,9 @@ pub fn completionAtIndex(server: *Server, analyser: *Analyser, arena: std.mem.Al
         .import_string_literal,
         .cinclude_string_literal,
         .embedfile_string_literal,
-        => blk: {
-            if (!server.config.enable_import_embedfile_argument_completions) break :blk null;
-
-            break :blk completeFileSystemStringLiteral(arena, server.document_store, handle.*, pos_context) catch |err| {
-                log.err("failed to get file system completions: {}", .{err});
-                return null;
-            };
+        => completeFileSystemStringLiteral(arena, server.document_store, handle.*, pos_context) catch |err| {
+            log.err("failed to get file system completions: {}", .{err});
+            return null;
         },
         else => null,
     };
@@ -1490,8 +1481,8 @@ pub fn completionAtIndex(server: *Server, analyser: *Analyser, arena: std.mem.Al
     // truncate completions
     for (completions) |*item| {
         if (item.detail) |det| {
-            if (det.len > server.config.max_detail_length) {
-                item.detail = det[0..server.config.max_detail_length];
+            if (det.len > server.client_capabilities.max_detail_length) {
+                item.detail = det[0..server.client_capabilities.max_detail_length];
             }
         }
     }
