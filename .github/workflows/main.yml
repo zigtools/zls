@@ -56,8 +56,7 @@ jobs:
       - name: Build artifacts
         if: ${{ matrix.os == 'ubuntu-latest' && github.event.inputs.bypass_tracy_and_artifacts != 'true' }}
         run: |
-          declare -a targets=("x86_64-windows" "x86_64-linux")
-          # "x86_64-macos" "x86-windows" "x86-linux" "aarch64-linux" "aarch64-macos" "wasm32-wasi"
+          declare -a targets=("x86_64-windows" "x86_64-linux" "x86_64-macos" "x86-windows" "x86-linux" "aarch64-linux" "aarch64-macos" "wasm32-wasi")
           mkdir -p "artifacts/${{ steps.zls_version.outputs.zls_version }}/"
 
           for target in "${targets[@]}"; do
