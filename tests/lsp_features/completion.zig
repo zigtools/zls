@@ -186,6 +186,36 @@ test "completion - pointer" {
     // , &.{
     //     .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
     // });
+
+    try testCompletion(
+        \\const S = struct {
+        \\    alpha: u32,
+        \\};
+        \\const foo: [*]S = undefined;
+        \\const bar = foo[0].<cursor>
+    , &.{
+        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+    });
+
+    try testCompletion(
+        \\const S = struct {
+        \\    alpha: u32,
+        \\};
+        \\const foo: [*c]S = undefined;
+        \\const bar = foo[0].<cursor>
+    , &.{
+        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+    });
+
+    try testCompletion(
+        \\const S = struct {
+        \\    alpha: u32,
+        \\};
+        \\const foo: [1]S = undefined;
+        \\const bar = foo[0].<cursor>
+    , &.{
+        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+    });
 }
 
 test "completion - captures" {
@@ -240,6 +270,30 @@ test "completion - captures" {
         \\fn foo(items: []S) void {
         \\    for (items, items) |_, baz| {
         \\        baz.<cursor>
+        \\    }
+        \\}
+    , &.{
+        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+    });
+
+    try testCompletion(
+        \\const S = struct { alpha: u32 };
+        \\fn foo() void {
+        \\    const manyptr: [*]S = undefined;
+        \\    for (manyptr[0..10]) |s| {
+        \\        s.<cursor>
+        \\    }
+        \\}
+    , &.{
+        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+    });
+
+    try testCompletion(
+        \\const S = struct { alpha: u32 };
+        \\fn foo() void {
+        \\    const optmanyptr: ?[*]S = undefined;
+        \\    for (optmanyptr.?[0..10]) |s| {
+        \\        s.<cursor>
         \\    }
         \\}
     , &.{

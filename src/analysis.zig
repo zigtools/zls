@@ -754,14 +754,17 @@ fn resolveBracketAccessType(analyser: *Analyser, lhs: TypeWithHandle, rhs: enum 
             .handle = lhs.handle,
         };
     } else if (ast.fullPtrType(tree, lhs_node)) |ptr_type| {
-        if (ptr_type.size == .Slice) {
-            if (rhs == .Single) {
-                return ((try analyser.resolveTypeOfNodeInternal(.{
-                    .node = ptr_type.ast.child_type,
-                    .handle = lhs.handle,
-                })) orelse return null).instanceTypeVal();
-            }
-            return lhs;
+        switch (ptr_type.size) {
+            .Slice, .C, .Many => {
+                if (rhs == .Single) {
+                    return ((try analyser.resolveTypeOfNodeInternal(.{
+                        .node = ptr_type.ast.child_type,
+                        .handle = lhs.handle,
+                    })) orelse return null).instanceTypeVal();
+                }
+                return lhs;
+            },
+            .One => {},
         }
     }
 
