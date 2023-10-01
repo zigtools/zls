@@ -14,10 +14,6 @@ on:
   schedule:
     - cron: "0 0 * * *"
   workflow_dispatch:
-    inputs:
-      bypass_tracy_and_artifacts:
-        type: boolean
-        description: Bypass Tracy and artifact builds (much faster)
 
 jobs:
   build:
@@ -54,10 +50,9 @@ jobs:
         run: zig build test
 
       - name: Build artifacts
-        if: ${{ matrix.os == 'ubuntu-latest' && github.event.inputs.bypass_tracy_and_artifacts != 'true' }}
+        if: ${{ matrix.os == 'ubuntu-latest' }}
         run: |
-          declare -a targets=("x86_64-windows" "x86_64-linux")
-          # "x86_64-macos" "x86-windows" "x86-linux" "aarch64-linux" "aarch64-macos" "wasm32-wasi"
+          declare -a targets=("x86_64-windows" "x86_64-linux" "x86_64-macos" "x86-windows" "x86-linux" "aarch64-linux" "aarch64-macos" "wasm32-wasi")
           mkdir -p "artifacts/${{ steps.zls_version.outputs.zls_version }}/"
 
           for target in "${targets[@]}"; do
@@ -90,56 +85,56 @@ jobs:
           }' index.json > artifacts/index.json
 
       - name: Upload x86_64-windows artifact
-        if: ${{ matrix.os == 'ubuntu-latest' && github.event.inputs.bypass_tracy_and_artifacts != 'true' }}
+        if: ${{ matrix.os == 'ubuntu-latest' }}
         uses: actions/upload-artifact@v3
         with:
           name: zls-x86_64-windows
           path: artifacts/${{ steps.zls_version.outputs.zls_version }}/x86_64-windows/
 
       - name: Upload x86_64-linux artifact
-        if: ${{ matrix.os == 'ubuntu-latest' && github.event.inputs.bypass_tracy_and_artifacts != 'true' }}
+        if: ${{ matrix.os == 'ubuntu-latest' }}
         uses: actions/upload-artifact@v3
         with:
           name: zls-x86_64-linux
           path: artifacts/${{ steps.zls_version.outputs.zls_version }}/x86_64-linux/
 
       - name: Upload x86_64-macos artifact
-        if: ${{ matrix.os == 'ubuntu-latest' && github.event.inputs.bypass_tracy_and_artifacts != 'true' }}
+        if: ${{ matrix.os == 'ubuntu-latest' }}
         uses: actions/upload-artifact@v3
         with:
           name: zls-x86_64-macos
           path: artifacts/${{ steps.zls_version.outputs.zls_version }}/x86_64-macos/
 
       - name: Upload x86-windows artifact
-        if: ${{ matrix.os == 'ubuntu-latest' && github.event.inputs.bypass_tracy_and_artifacts != 'true' }}
+        if: ${{ matrix.os == 'ubuntu-latest' }}
         uses: actions/upload-artifact@v3
         with:
           name: zls-x86-windows
           path: artifacts/${{ steps.zls_version.outputs.zls_version }}/x86-windows/
 
       - name: Upload x86-linux artifact
-        if: ${{ matrix.os == 'ubuntu-latest' && github.event.inputs.bypass_tracy_and_artifacts != 'true' }}
+        if: ${{ matrix.os == 'ubuntu-latest' }}
         uses: actions/upload-artifact@v3
         with:
           name: zls-x86-linux
           path: artifacts/${{ steps.zls_version.outputs.zls_version }}/x86-linux/
 
       - name: Upload aarch64-linux artifact
-        if: ${{ matrix.os == 'ubuntu-latest' && github.event.inputs.bypass_tracy_and_artifacts != 'true' }}
+        if: ${{ matrix.os == 'ubuntu-latest' }}
         uses: actions/upload-artifact@v3
         with:
           name: zls-aarch64-linux
           path: artifacts/${{ steps.zls_version.outputs.zls_version }}/aarch64-linux/
 
       - name: Upload aarch64-macos artifact
-        if: ${{ matrix.os == 'ubuntu-latest' && github.event.inputs.bypass_tracy_and_artifacts != 'true' }}
+        if: ${{ matrix.os == 'ubuntu-latest' }}
         uses: actions/upload-artifact@v3
         with:
           name: zls-aarch64-macos
           path: artifacts/${{ steps.zls_version.outputs.zls_version }}/aarch64-macos/
 
       - name: Upload wasm32-wasi artifact
-        if: ${{ matrix.os == 'ubuntu-latest' && github.event.inputs.bypass_tracy_and_artifacts != 'true' }}
+        if: ${{ matrix.os == 'ubuntu-latest' }}
         uses: actions/upload-artifact@v3
         with:
           name: zls-wasm32-wasi
