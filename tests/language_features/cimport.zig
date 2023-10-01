@@ -109,10 +109,6 @@ fn testTranslate(c_source: []const u8) !translate_c.Result {
     var ctx = try Context.init();
     defer ctx.deinit();
 
-    if (ctx.server.config.global_cache_path == null or
-        ctx.server.config.zig_exe_path == null or
-        ctx.server.config.zig_lib_path == null) return error.SkipZigTest;
-
     const result = (try translate_c.translate(allocator, ctx.server.config, &.{}, c_source)).?;
 
     switch (result) {

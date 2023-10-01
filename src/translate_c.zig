@@ -154,11 +154,11 @@ pub fn translate(
     };
 
     const base_args = &[_][]const u8{
-        config.zig_exe_path orelse return null,
+        config.zig_exe_path.?,
         "translate-c",
         "--zig-lib-dir",
-        config.zig_lib_path orelse return null,
-        "--cache-dir",
+        config.zig_lib_path.?,
+        "--global-cache-dir",
         config.global_cache_path.?,
         "-lc",
         "--listen=-",

@@ -53,6 +53,8 @@ fn testDefinition(source: []const u8) !void {
     var ctx = try Context.init();
     defer ctx.deinit();
 
+    ctx.server.client_capabilities.supports_textDocument_definition_linkSupport = true;
+
     const cursor_lsp = offsets.locToRange(phr.new_source, cursor.?, ctx.server.offset_encoding).start;
     const def_range_lsp = offsets.locToRange(phr.new_source, .{ .start = def_start.?.end, .end = def_end.?.start }, ctx.server.offset_encoding);
 
