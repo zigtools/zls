@@ -19,16 +19,6 @@ pub fn build(b: *std.build.Builder) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const exe = b.addExecutable(.{
-        .name = "zls",
-        .root_source_file = .{ .path = "src/main.zig" },
-        .target = target,
-        .optimize = optimize,
-    });
-
-    const exe_options = b.addOptions();
-    exe.addOptions("build_options", exe_options);
-
     const single_threaded = b.option(bool, "single-threaded", "Build a single threaded Executable");
     const pie = b.option(bool, "pie", "Build a Position Independent Executable");
     const enable_tracy = b.option(bool, "enable_tracy", "Whether tracy should be enabled.") orelse false;
@@ -38,15 +28,6 @@ pub fn build(b: *std.build.Builder) !void {
     const data_version = b.option([]const u8, "data_version", "The Zig version your compiler is.") orelse "master";
     const data_version_path = b.option([]const u8, "version_data_path", "Manually specify zig language reference file");
     const override_version_data_file_path = b.option([]const u8, "version_data_file_path", "Relative path to version data file (if none, will be named with timestamp)");
-
-    exe_options.addOption(std.log.Level, "log_level", b.option(std.log.Level, "log_level", "The Log Level to be used.") orelse .info);
-    exe_options.addOption(bool, "enable_tracy", enable_tracy);
-    exe_options.addOption(bool, "enable_tracy_allocation", b.option(bool, "enable_tracy_allocation", "Enable using TracyAllocator to monitor allocations.") orelse enable_tracy);
-    exe_options.addOption(bool, "enable_tracy_callstack", b.option(bool, "enable_tracy_callstack", "Enable callstack graphs.") orelse enable_tracy);
-    exe_options.addOption(bool, "enable_failing_allocator", b.option(bool, "enable_failing_allocator", "Whether to use a randomly failing allocator.") orelse false);
-    exe_options.addOption(u32, "enable_failing_allocator_likelihood", b.option(u32, "enable_failing_allocator_likelihood", "The chance that an allocation will fail is `1/likelihood`") orelse 256);
-    exe_options.addOption(bool, "use_gpa", b.option(bool, "use_gpa", "Good for debugging") orelse (optimize == .Debug));
-    exe_options.addOption(bool, "coverage", coverage);
 
     const version_string = v: {
         const version_string = b.fmt("{d}.{d}.{d}", .{ zls_version.major, zls_version.minor, zls_version.patch });
@@ -84,19 +65,38 @@ pub fn build(b: *std.build.Builder) !void {
             },
         }
     };
+
+    const exe_options = b.addOptions();
+    exe_options.addOption(std.log.Level, "log_level", b.option(std.log.Level, "log_level", "The Log Level to be used.") orelse .info);
+    exe_options.addOption(bool, "enable_tracy", enable_tracy);
+    exe_options.addOption(bool, "enable_tracy_allocation", b.option(bool, "enable_tracy_allocation", "Enable using TracyAllocator to monitor allocations.") orelse enable_tracy);
+    exe_options.addOption(bool, "enable_tracy_callstack", b.option(bool, "enable_tracy_callstack", "Enable callstack graphs.") orelse enable_tracy);
+    exe_options.addOption(bool, "enable_failing_allocator", b.option(bool, "enable_failing_allocator", "Whether to use a randomly failing allocator.") orelse false);
+    exe_options.addOption(u32, "enable_failing_allocator_likelihood", b.option(u32, "enable_failing_allocator_likelihood", "The chance that an allocation will fail is `1/likelihood`") orelse 256);
+    exe_options.addOption(bool, "use_gpa", b.option(bool, "use_gpa", "Good for debugging") orelse (optimize == .Debug));
+    exe_options.addOption(bool, "coverage", coverage);
     exe_options.addOption([]const u8, "version_string", version_string);
+    exe_options.addOption(std.SemanticVersion, "version", try std.SemanticVersion.parse(version_string));
     exe_options.addOption([]const u8, "min_zig_string", min_zig_string);
 
-    const version = try std.SemanticVersion.parse(version_string);
-    exe_options.addOption(std.SemanticVersion, "version", version);
-
+    const build_options_module = exe_options.createModule();
     const known_folders_module = b.dependency("known_folders", .{}).module("known-folders");
-    exe.addModule("known-folders", known_folders_module);
-
     const diffz_module = b.dependency("diffz", .{}).module("diffz");
-    exe.addModule("diffz", diffz_module);
-
     const binned_allocator_module = b.dependency("binned_allocator", .{}).module("binned_allocator");
+
+    const exe = b.addExecutable(.{
+        .name = "zls",
+        .root_source_file = .{ .path = "src/main.zig" },
+        .target = target,
+        .optimize = optimize,
+        .single_threaded = single_threaded,
+    });
+    exe.pie = pie;
+    b.installArtifact(exe);
+
+    exe.addModule("build_options", build_options_module);
+    exe.addModule("known-folders", known_folders_module);
+    exe.addModule("diffz", diffz_module);
     exe.addModule("binned_allocator", binned_allocator_module);
 
     if (enable_tracy) {
@@ -122,15 +122,10 @@ pub fn build(b: *std.build.Builder) !void {
         }
     }
 
-    exe.single_threaded = single_threaded;
-    exe.pie = pie;
-    b.installArtifact(exe);
-
-    const build_options_module = exe_options.createModule();
-
     const gen_exe = b.addExecutable(.{
         .name = "zls_gen",
         .root_source_file = .{ .path = "src/config_gen/config_gen.zig" },
+        .single_threaded = true,
     });
 
     const gen_cmd = b.addRunArtifact(gen_exe);
@@ -169,6 +164,16 @@ pub fn build(b: *std.build.Builder) !void {
     const version_data_module = b.addModule("version_data", .{ .source_file = version_data_path });
     exe.addModule("version_data", version_data_module);
 
+    const zls_module = b.addModule("zls", .{
+        .source_file = .{ .path = "src/zls.zig" },
+        .dependencies = &.{
+            .{ .name = "known-folders", .module = known_folders_module },
+            .{ .name = "diffz", .module = diffz_module },
+            .{ .name = "build_options", .module = build_options_module },
+            .{ .name = "version_data", .module = version_data_module },
+        },
+    });
+
     const test_step = b.step("test", "Run all the tests");
     test_step.dependOn(b.getInstallStep());
 
@@ -177,23 +182,10 @@ pub fn build(b: *std.build.Builder) !void {
         .target = target,
         .optimize = optimize,
         .filter = test_filter,
-    });
-
-    const zls_module = b.addModule("zls", .{
-        .source_file = .{ .path = "src/zls.zig" },
-        .dependencies = &.{
-            .{ .name = "known-folders", .module = known_folders_module },
-            .{ .name = "diffz", .module = diffz_module },
-            .{ .name = "binned_allocator", .module = binned_allocator_module },
-            .{ .name = "build_options", .module = build_options_module },
-            .{ .name = "version_data", .module = version_data_module },
-        },
+        .single_threaded = single_threaded,
     });
 
     tests.addModule("zls", zls_module);
-    tests.addModule("known-folders", known_folders_module);
-    tests.addModule("diffz", diffz_module);
-    tests.addModule("binned_allocator", binned_allocator_module);
     tests.addModule("build_options", build_options_module);
     test_step.dependOn(&b.addRunArtifact(tests).step);
 
@@ -202,10 +194,8 @@ pub fn build(b: *std.build.Builder) !void {
         .target = target,
         .optimize = optimize,
         .filter = test_filter,
+        .single_threaded = single_threaded,
     });
-    src_tests.addModule("known-folders", known_folders_module);
-    src_tests.addModule("diffz", diffz_module);
-    src_tests.addModule("binned_allocator", binned_allocator_module);
     src_tests.addModule("build_options", build_options_module);
     test_step.dependOn(&b.addRunArtifact(src_tests).step);
 
