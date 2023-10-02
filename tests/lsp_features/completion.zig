@@ -606,6 +606,21 @@ test "completion - enum" {
         \\    sef1,
         \\    sef2,
         \\};
+        \\fn retEnum(se: SomeEnum) void {
+        \\    if (se == .<cursor>) {}
+        \\}
+    , &.{
+        .{ .label = "sef1", .kind = .EnumMember },
+        .{ .label = "sef2", .kind = .EnumMember },
+    });
+    try testCompletion(
+        \\const Birdie = enum {
+        \\    canary,
+        \\};
+        \\const SomeEnum = enum {
+        \\    sef1,
+        \\    sef2,
+        \\};
         \\fn retEnum() SomeEnum {}
         \\test {
         \\    retEnum() == .<cursor>
@@ -746,6 +761,96 @@ test "completion - enum" {
         \\    const s = S{};
         // XXX This doesn't work without the closing brace at the end
         \\    s.f(.{.se = .<cursor>}
+        \\}
+    , &.{
+        .{ .label = "sef1", .kind = .EnumMember },
+        .{ .label = "sef2", .kind = .EnumMember },
+    });
+}
+
+test "completion - switch cases" {
+    // Because current logic is to list all enums if all else fails,
+    // the following tests include an extra enum to ensure that we're not just 'getting lucky'
+    try testCompletion(
+        \\const Birdie = enum {
+        \\    canary,
+        \\};
+        \\const SomeEnum = enum {
+        \\    sef1,
+        \\    sef2,
+        \\};
+        \\fn retEnum() SomeEnum {}
+        \\test {
+        \\    switch(retEnum()) {.<cursor>}
+        \\}
+    , &.{
+        .{ .label = "sef1", .kind = .EnumMember },
+        .{ .label = "sef2", .kind = .EnumMember },
+    });
+    try testCompletion(
+        \\const Birdie = enum {
+        \\    canary,
+        \\};
+        \\const SomeEnum = enum {
+        \\    sef1,
+        \\    sef2,
+        \\};
+        \\fn retEnum(se: SomeEnum) void {
+        \\    switch(se) {.<cursor>}
+        \\}
+    , &.{
+        .{ .label = "sef1", .kind = .EnumMember },
+        .{ .label = "sef2", .kind = .EnumMember },
+    });
+    try testCompletion(
+        \\const Birdie = enum {
+        \\    canary,
+        \\};
+        \\const SomeEnum = enum {
+        \\    sef1,
+        \\    sef2,
+        \\};
+        \\fn retEnum() SomeEnum {}
+        \\test {
+        \\    var se = retEnum();
+        \\    switch(se) {.<cursor>}
+        \\}
+    , &.{
+        .{ .label = "sef1", .kind = .EnumMember },
+        .{ .label = "sef2", .kind = .EnumMember },
+    });
+    try testCompletion(
+        \\const Birdie = enum {
+        \\    canary,
+        \\};
+        \\const SomeEnum = enum {
+        \\    sef1,
+        \\    sef2,
+        \\};
+        \\const S = struct {
+        \\    pub fn retEnum() SomeEnum {}
+        \\};
+        \\test {
+        \\    switch(S.retEnum()) {.<cursor>}
+        \\}
+    , &.{
+        .{ .label = "sef1", .kind = .EnumMember },
+        .{ .label = "sef2", .kind = .EnumMember },
+    });
+    try testCompletion(
+        \\const Birdie = enum {
+        \\    canary,
+        \\};
+        \\const SomeEnum = enum {
+        \\    sef1,
+        \\    sef2,
+        \\};
+        \\const S = struct {
+        \\    pub fn retEnum() SomeEnum {}
+        \\};
+        \\test {
+        \\    const s = S{};
+        \\    switch(s.retEnum()) {.<cursor>}
         \\}
     , &.{
         .{ .label = "sef1", .kind = .EnumMember },
