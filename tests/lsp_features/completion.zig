@@ -101,6 +101,48 @@ test "completion - generic function" {
     , &.{
         .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
     });
+
+    try testCompletion(
+        \\const S = struct { alpha: u32 };
+        \\fn foo(comptime T: type) T {}
+        \\const s = foo(S);
+        \\const foo = s.<cursor>
+    , &.{
+        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+    });
+    try testCompletion(
+        \\const S = struct { alpha: u32 };
+        \\fn foo(any: anytype, comptime T: type) T {}
+        \\const s = foo(null, S);
+        \\const foo = s.<cursor>
+    , &.{
+        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+    });
+
+    try testCompletion(
+        \\const S = struct {
+        \\    alpha: u32,
+        \\    fn foo(self: S, comptime T: type) T {}
+        \\};
+        \\const s1: S = undefined;
+        \\const s2 = s1.foo(S);
+        \\const foo = s2.<cursor>;
+    , &.{
+        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+        .{ .label = "foo", .kind = .Function, .detail = "fn foo(self: S, comptime T: type) T" },
+    });
+    try testCompletion(
+        \\const S = struct {
+        \\    alpha: u32,
+        \\    fn foo(self: S, any: anytype, comptime T: type) T {}
+        \\};
+        \\const s1: S = undefined;
+        \\const s2 = s1.foo(null, S);
+        \\const foo = s2.<cursor>;
+    , &.{
+        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+        .{ .label = "foo", .kind = .Function, .detail = "fn foo(self: S, any: anytype, comptime T: type) T" },
+    });
 }
 
 test "completion - std.ArrayList" {

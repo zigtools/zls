@@ -1091,12 +1091,11 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
         .async_call_one,
         .async_call_one_comma,
         => {
-            var params: [1]Ast.Node.Index = undefined;
-            const call = tree.fullCall(&params, node) orelse unreachable;
+            var buffer: [1]Ast.Node.Index = undefined;
+            const call = tree.fullCall(&buffer, node) orelse unreachable;
 
             const callee = .{ .node = call.ast.fn_expr, .handle = handle };
-            const decl = (try analyser.resolveTypeOfNodeInternal(callee)) orelse
-                return null;
+            const decl = (try analyser.resolveTypeOfNodeInternal(callee)) orelse return null;
 
             if (decl.type.is_type_val) return null;
             const func_node = switch (decl.type.data) {
@@ -1104,41 +1103,37 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 else => return null,
             };
             var buf: [1]Ast.Node.Index = undefined;
-            const fn_decl = decl.handle.tree.fullFnProto(&buf, func_node) orelse return null;
+            const fn_proto = decl.handle.tree.fullFnProto(&buf, func_node) orelse return null;
 
-            var expected_params = fn_decl.ast.params.len;
-            // If we call as method, the first parameter should be skipped
-            // TODO: Back-parse to extract the self argument?
-            var it = fn_decl.iterate(&decl.handle.tree);
-            if (try analyser.isInstanceCall(handle, call, decl.handle, fn_decl)) {
-                _ = ast.nextFnParam(&it);
-                expected_params -= 1;
+            var params = try std.ArrayListUnmanaged(Ast.full.FnProto.Param).initCapacity(analyser.arena.allocator(), fn_proto.ast.params.len);
+            defer params.deinit(analyser.arena.allocator());
+
+            var it = fn_proto.iterate(&decl.handle.tree);
+            while (ast.nextFnParam(&it)) |param| {
+                try params.append(analyser.arena.allocator(), param);
             }
 
-            // Bind type params to the arguments passed in the call.
-            const param_len = @min(call.ast.params.len, expected_params);
-            var i: usize = 0;
-            while (ast.nextFnParam(&it)) |decl_param| : (i += 1) {
-                if (i >= param_len) break;
-                if (!isMetaType(decl.handle.tree, decl_param.type_expr))
-                    continue;
+            const has_self_param = call.ast.params.len + 1 == params.items.len and
+                try analyser.isInstanceCall(handle, call, decl.handle, fn_proto);
 
-                const argument = .{ .node = call.ast.params[i], .handle = handle };
-                const argument_type = (try analyser.resolveTypeOfNodeInternal(
-                    argument,
-                )) orelse
-                    continue;
+            const parameters = params.items[@intFromBool(has_self_param)..];
+            const arguments = call.ast.params;
+            const min_len = @min(parameters.len, arguments.len);
+            for (parameters[0..min_len], arguments[0..min_len], @intFromBool(has_self_param)..) |param, arg, param_index| {
+                if (!isMetaType(decl.handle.tree, param.type_expr)) continue;
+
+                const argument_type = (try analyser.resolveTypeOfNodeInternal(.{ .node = arg, .handle = handle })) orelse continue;
                 if (!argument_type.type.is_type_val) continue;
 
                 try analyser.bound_type_params.put(analyser.gpa, .{
                     .func = func_node,
-                    .param_index = @intCast(i),
+                    .param_index = @intCast(param_index),
                 }, argument_type);
             }
 
             const has_body = decl.handle.tree.nodes.items(.tag)[func_node] == .fn_decl;
             const body = decl.handle.tree.nodes.items(.data)[func_node].rhs;
-            if (try analyser.resolveReturnType(fn_decl, decl.handle, if (has_body) body else null)) |ret| {
+            if (try analyser.resolveReturnType(fn_proto, decl.handle, if (has_body) body else null)) |ret| {
                 return ret;
             } else if (analyser.store.config.dangerous_comptime_experiments_do_not_enable) {
                 // TODO: Better case-by-case; we just use the ComptimeInterpreter when all else fails,
@@ -2556,7 +2551,7 @@ pub const Declaration = union(enum) {
         pub fn get(self: Param, tree: Ast) Ast.full.FnProto.Param {
             var buffer: [1]Ast.Node.Index = undefined;
             const func = tree.fullFnProto(&buffer, self.func).?;
-            var param_index: usize = 0;
+            var param_index: u16 = 0;
             var it = func.iterate(&tree);
             while (ast.nextFnParam(&it)) |param| : (param_index += 1) {
                 if (self.param_index == param_index) return param;
@@ -4012,17 +4007,17 @@ fn makeScopeAt(
             // NOTE: We count the param index ourselves
             // as param_i stops counting; TODO: change this
 
-            var param_index: usize = 0;
+            var param_index: u16 = 0;
 
             var it = func.iterate(&tree);
-            while (ast.nextFnParam(&it)) |param| {
+            while (ast.nextFnParam(&it)) |param| : (param_index += 1) {
                 // Add parameter decls
                 if (param.name_token) |name_token| {
                     try context.putVarDecl(
                         scope_index,
                         tree.tokenSlice(name_token),
                         .{ .param_payload = .{
-                            .param_index = @intCast(param_index),
+                            .param_index = param_index,
                             .func = node_idx,
                         } },
                     );
@@ -4030,7 +4025,6 @@ fn makeScopeAt(
                 // Visit parameter types to pick up any error sets and enum
                 //   completions
                 try makeScopeInternal(context, tree, param.type_expr);
-                param_index += 1;
             }
 
             if (fn_tag == .fn_decl) blk: {
