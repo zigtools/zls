@@ -921,7 +921,7 @@ fn builtinCall(astrl: *AstRlAnnotate, block: ?*Block, ri: ResultInfo, node: Ast.
         .log,
         .log2,
         .log10,
-        .fabs,
+        .abs,
         .floor,
         .ceil,
         .trunc,
