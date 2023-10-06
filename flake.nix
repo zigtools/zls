@@ -11,7 +11,7 @@
 
       flake-utils.url = "github:numtide/flake-utils";
 
-      langref.url = "https://raw.githubusercontent.com/ziglang/zig/f1992a39a59b941f397b8501a525b38e5863a527/doc/langref.html.in";
+      langref.url = "https://raw.githubusercontent.com/ziglang/zig/63bd2bff12992aef0ce23ae4b344e9cb5d65f05d/doc/langref.html.in";
       langref.flake = false;
     };
 
