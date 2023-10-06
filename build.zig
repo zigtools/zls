@@ -4,8 +4,8 @@ const builtin = @import("builtin");
 const zls_version = std.SemanticVersion{ .major = 0, .minor = 12, .patch = 0 };
 
 /// document the latest breaking change that caused a change to the string below:
-/// std.http: introduce options to http client to allow for raw uris
-const min_zig_string = "0.12.0-dev.654+599641357";
+/// std.Build: expose `-idirafter` to the build system
+const min_zig_string = "0.12.0-dev.722+412d863ba";
 
 pub fn build(b: *std.build.Builder) !void {
     comptime {

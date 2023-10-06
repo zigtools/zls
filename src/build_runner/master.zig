@@ -254,7 +254,7 @@ fn processIncludeDirs(
 ) !void {
     for (dirs) |dir| {
         switch (dir) {
-            .path, .path_system => |path| {
+            .path, .path_system, .path_after => |path| {
                 const resolved_path = copied_from_zig.getPath(path, builder) orelse continue;
                 try include_dirs.put(builder.allocator, resolved_path, {});
             },
