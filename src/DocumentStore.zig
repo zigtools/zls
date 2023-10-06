@@ -703,11 +703,17 @@ fn uriAssociatedWithBuild(
     defer tracy_zone.end();
 
     var checked_uris = std.StringHashMapUnmanaged(void){};
-    defer checked_uris.deinit(self.allocator);
+    defer {
+        var kit = checked_uris.keyIterator();
+        while (kit.next()) |key| {
+            self.allocator.free(key.*);
+        }
+
+        checked_uris.deinit(self.allocator);
+    }
 
     for (build_file.config.value.packages) |package| {
         const package_uri = try URI.fromPath(self.allocator, package.path);
-        defer self.allocator.free(package_uri);
 
         if (std.mem.eql(u8, uri, package_uri)) {
             return true;
