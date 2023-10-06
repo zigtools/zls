@@ -960,7 +960,7 @@ const primitives = std.ComptimeStringMap(InternPool.Index, .{
     .{ "u128", .u128_type },
     .{ "u1", .u1_type },
     .{ "u8", .u8_type },
-    .{ "undefined", .undefined_type },
+    .{ "undefined", .undefined_value },
     .{ "usize", .usize_type },
     .{ "void", .void_type },
 });
