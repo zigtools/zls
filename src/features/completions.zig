@@ -1416,7 +1416,10 @@ fn completeFileSystemStringLiteral(
 }
 
 pub fn completionAtIndex(server: *Server, analyser: *Analyser, arena: std.mem.Allocator, handle: *const DocumentStore.Handle, source_index: usize) error{OutOfMemory}!?types.CompletionList {
-    const at_line_start = offsets.lineSliceUntilIndex(handle.tree.source, source_index).len == 0;
+    // Provide `top_level_decl_data` only if `offsets.lineSliceUntilIndex(handle.tree.source, source_index).len` is
+    // 0 => Empty new line, manually triggered
+    // 1 => This is the very first char on a given line
+    const at_line_start = offsets.lineSliceUntilIndex(handle.tree.source, source_index).len < 2;
     if (at_line_start) {
         var completions = std.ArrayListUnmanaged(types.CompletionItem){};
         try populateSnippedCompletions(arena, &completions, &snipped_data.top_level_decl_data, server.config);
