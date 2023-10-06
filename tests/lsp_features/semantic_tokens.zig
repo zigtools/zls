@@ -78,6 +78,34 @@ test "semantic tokens - string literals" {
     });
 }
 
+test "semantic tokens - type literals" {
+    try testSemanticTokens(
+        \\bool,
+        \\f16,
+        \\u8,
+        \\u15,
+    , &.{
+        .{ "bool", .type, .{} },
+        .{ "f16", .type, .{} },
+        .{ "u8", .type, .{} },
+        .{ "u15", .type, .{} },
+    });
+}
+
+test "semantic tokens - value literals" {
+    try testSemanticTokens(
+        \\true,
+        \\false,
+        \\undefined,
+        \\null,
+    , &.{
+        .{ "true", .keywordLiteral, .{} },
+        .{ "false", .keywordLiteral, .{} },
+        .{ "undefined", .keywordLiteral, .{} },
+        .{ "null", .keywordLiteral, .{} },
+    });
+}
+
 test "semantic tokens - char literals" {
     try testSemanticTokens(
         \\var alpha = ' ';
