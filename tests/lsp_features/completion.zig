@@ -157,6 +157,74 @@ test "completion - std.ArrayList" {
     });
 }
 
+test "completion - std.ArrayHashMap" {
+    if (!std.process.can_spawn) return error.SkipZigTest;
+    try testCompletion(
+        \\const std = @import("std");
+        \\const map: std.StringArrayHashMapUnmanaged(void) = undefined;
+        \\const key = map.getKey("");
+        \\const foo = key.?.<cursor>
+    , &.{
+        .{ .label = "len", .kind = .Field, .detail = "const len: usize" },
+        // TODO detail should be 'const ptr: [*]const u8'
+        .{ .label = "ptr", .kind = .Field },
+    });
+    try testCompletion(
+        \\const std = @import("std");
+        \\const S = struct { alpha: u32 };
+        \\const map: std.AutoArrayHashMap(u32, S) = undefined;
+        \\const s = map.get(0);
+        \\const foo = s.?.<cursor>
+    , &.{
+        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+    });
+    try testCompletion(
+        \\const std = @import("std");
+        \\const S = struct { alpha: u32 };
+        \\const map: std.AutoArrayHashMap(u32, S) = undefined;
+        \\const gop = try map.getOrPut(0);
+        \\const foo = gop.value_ptr.<cursor>
+    , &.{
+        // TODO detail should be 'u32'
+        .{ .label = "*", .kind = .Operator },
+        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+    });
+}
+
+test "completion - std.HashMap" {
+    if (!std.process.can_spawn) return error.SkipZigTest;
+    try testCompletion(
+        \\const std = @import("std");
+        \\const map: std.StringHashMapUnmanaged(void) = undefined;
+        \\const key = map.getKey("");
+        \\const foo = key.?.<cursor>
+    , &.{
+        .{ .label = "len", .kind = .Field, .detail = "const len: usize" },
+        // TODO detail should be 'const ptr: [*]const u8'
+        .{ .label = "ptr", .kind = .Field },
+    });
+    try testCompletion(
+        \\const std = @import("std");
+        \\const S = struct { alpha: u32 };
+        \\const map: std.AutoHashMap(u32, S) = undefined;
+        \\const s = map.get(0);
+        \\const foo = s.?.<cursor>
+    , &.{
+        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+    });
+    try testCompletion(
+        \\const std = @import("std");
+        \\const S = struct { alpha: u32 };
+        \\const map: std.AutoHashMap(u32, S) = undefined;
+        \\const gop = try map.getOrPut(0);
+        \\const foo = gop.value_ptr.<cursor>
+    , &.{
+        // TODO detail should be 'u32'
+        .{ .label = "*", .kind = .Operator },
+        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+    });
+}
+
 test "completion - optional" {
     try testCompletion(
         \\const foo: ?u32 = undefined;
