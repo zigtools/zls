@@ -235,7 +235,7 @@ pub fn hasSelfParam(analyser: *Analyser, handle: *const DocumentStore.Handle, fu
     const token_starts = tree.tokens.items(.start);
     const in_container = innermostContainer(handle, token_starts[func.ast.fn_token]);
 
-    if (try analyser.resolveTypeOfNode(.{
+    if (try analyser.resolveTypeOfNodeInternal(.{
         .node = param.type_expr,
         .handle = handle,
     })) |resolved_type| {
@@ -244,7 +244,7 @@ pub fn hasSelfParam(analyser: *Analyser, handle: *const DocumentStore.Handle, fu
     }
 
     if (ast.fullPtrType(tree, param.type_expr)) |ptr_type| {
-        if (try analyser.resolveTypeOfNode(.{
+        if (try analyser.resolveTypeOfNodeInternal(.{
             .node = ptr_type.ast.child_type,
             .handle = handle,
         })) |resolved_prefix_op| {
