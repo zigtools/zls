@@ -8462,11 +8462,11 @@ fn builtinCall(
             });
             return rvalue(gz, ri, result, node);
         },
-        .err_set_cast => {
+        .error_cast => {
             try emitDbgNode(gz, node);
 
-            const result = try gz.addExtendedPayload(.err_set_cast, Zir.Inst.BinNode{
-                .lhs = try ri.rl.resultType(gz, node, "@errSetCast"),
+            const result = try gz.addExtendedPayload(.error_cast, Zir.Inst.BinNode{
+                .lhs = try ri.rl.resultType(gz, node, "@errorCast"),
                 .rhs = try expr(gz, scope, .{ .rl = .none }, params[0]),
                 .node = gz.nodeIndexToRelative(node),
             });
