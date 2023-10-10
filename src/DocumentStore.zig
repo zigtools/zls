@@ -151,7 +151,6 @@ pub fn getHandle(self: *DocumentStore, uri: Uri) ?*const Handle {
 
 /// Returns a handle to the given document
 /// Will load the document from disk if it hasn't been already
-/// may invalidate any pointers to `Handle`,
 /// **Thread safe** takes an exclusive lock
 pub fn getOrLoadHandle(self: *DocumentStore, uri: Uri) ?*const Handle {
     const tracy_zone = tracy.trace(@src());
@@ -189,7 +188,8 @@ pub fn getBuildFile(self: *DocumentStore, uri: Uri) ?BuildFile {
     return self.build_files.get(uri);
 }
 
-/// **Not thread safe** requires access to `DocumentStore.build_files`
+/// invalidates any pointers into `DocumentStore.build_files`
+/// **Thread safe** takes an exclusive lock
 fn getOrLoadBuildFile(self: *DocumentStore, uri: Uri) ?std.StringArrayHashMapUnmanaged(BuildFile).Entry {
     {
         self.lock.lockShared();
@@ -693,6 +693,7 @@ fn createBuildFile(self: *DocumentStore, uri: Uri) error{OutOfMemory}!BuildFile 
     return build_file;
 }
 
+/// invalidates any pointers into `build_files`
 /// **Thread safe** takes an exclusive lock
 fn uriAssociatedWithBuild(
     self: *DocumentStore,
@@ -709,50 +710,48 @@ fn uriAssociatedWithBuild(
         const package_uri = try URI.fromPath(self.allocator, package.path);
         defer self.allocator.free(package_uri);
 
-        if (std.mem.eql(u8, uri, package_uri)) {
-            return true;
-        }
-
-        if (try self.uriInImports(&checked_uris, build_file, package_uri, uri))
+        if (try self.uriInImports(&checked_uris, build_file.uri, package_uri, uri))
             return true;
     }
 
     return false;
 }
 
+/// invalidates any pointers into `DocumentStore.build_files`
 /// **Thread safe** takes an exclusive lock
 fn uriInImports(
     self: *DocumentStore,
     checked_uris: *std.StringHashMapUnmanaged(void),
-    build_file: BuildFile,
+    build_file_uri: Uri,
     source_uri: Uri,
     uri: Uri,
 ) error{OutOfMemory}!bool {
-    if (checked_uris.contains(source_uri))
-        return false;
-
+    if (std.mem.eql(u8, uri, source_uri)) return true;
     if (isInStd(source_uri)) return false;
 
-    // consider it checked even if a failure happens
-    try checked_uris.put(self.allocator, source_uri, {});
+    const gop = try checked_uris.getOrPut(self.allocator, source_uri);
+    if (gop.found_existing) return false;
 
-    const handle = self.getOrLoadHandle(source_uri) orelse return false;
+    const handle = self.getOrLoadHandle(source_uri) orelse {
+        errdefer std.debug.assert(checked_uris.remove(source_uri));
+        gop.key_ptr.* = try self.allocator.dupe(u8, source_uri);
+        return false;
+    };
+    gop.key_ptr.* = handle.uri;
 
     if (handle.associated_build_file) |associated_build_file_uri| {
-        return std.mem.eql(u8, associated_build_file_uri, build_file.uri);
+        return std.mem.eql(u8, associated_build_file_uri, build_file_uri);
     }
 
     for (handle.import_uris.items) |import_uri| {
-        if (std.mem.eql(u8, uri, import_uri))
-            return true;
-
-        if (try self.uriInImports(checked_uris, build_file, import_uri, uri))
+        if (try self.uriInImports(checked_uris, build_file_uri, import_uri, uri))
             return true;
     }
 
     return false;
 }
 
+/// invalidates any pointers into `DocumentStore.build_files`
 /// takes ownership of the `text` passed in.
 /// **Thread safe** takes an exclusive lock
 fn createDocument(self: *DocumentStore, uri: Uri, text: [:0]const u8, open: bool) error{OutOfMemory}!Handle {
@@ -832,11 +831,11 @@ fn createDocument(self: *DocumentStore, uri: Uri, text: [:0]const u8, open: bool
             defer self.allocator.free(build_file_uri);
             const build_file = self.getOrLoadBuildFile(build_file_uri) orelse continue;
 
-            if (try self.uriAssociatedWithBuild(build_file.value_ptr.*, uri)) {
-                handle.associated_build_file = build_file.key_ptr.*;
+            if (handle.associated_build_file == null) {
+                handle.associated_build_file = build_file.value_ptr.uri;
+            } else if (try self.uriAssociatedWithBuild(build_file.value_ptr.*, uri)) { // build_file has been invalidated
+                handle.associated_build_file = self.getBuildFile(build_file_uri).?.uri;
                 break;
-            } else if (handle.associated_build_file == null) {
-                handle.associated_build_file = build_file.key_ptr.*;
             }
         }
     }
@@ -845,6 +844,7 @@ fn createDocument(self: *DocumentStore, uri: Uri, text: [:0]const u8, open: bool
 }
 
 /// takes ownership of the `text` passed in.
+/// invalidates any pointers into `DocumentStore.build_files`
 /// **Thread safe** takes an exclusive lock
 fn createAndStoreDocument(self: *DocumentStore, uri: Uri, text: [:0]const u8, open: bool) error{OutOfMemory}!*Handle {
     var handle = try self.createDocument(uri, text, open);
