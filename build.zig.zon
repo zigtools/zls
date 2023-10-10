@@ -1,5 +1,6 @@
 // whenever this file is updated, run `zon2nix > deps.nix`
 .{
+    .paths = .{""},
     .name = "zls",
     .version = "0.11.0",
 
