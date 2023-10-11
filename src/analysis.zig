@@ -1437,7 +1437,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 return TypeWithHandle.typeVal(.{ .node = 0, .handle = new_handle });
             }
             if (std.mem.eql(u8, call_name, "@field")) {
-                if (params.len < 1) return null;
+                if (params.len < 2) return null;
                 const field_param = params[1];
                 if (node_tags[field_param] != .string_literal) return null;
 
