@@ -135,9 +135,11 @@ test "inlayhints - var decl" {
         \\ _ = a;
     , .Type);
     try testInlayHints(
+        \\fn a() void {
         \\ const foo: []const u8 = "abc";
         \\ for (foo) |bar<u8>| {
-        \\
+        \\  _ = bar;
+        \\}
         \\}
     , .Type);
 }
