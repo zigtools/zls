@@ -104,7 +104,7 @@ test "inlayhints - var decl" {
         \\const Error<type> = error{e};
         \\fn test_context() !void {
         \\    const baz: ?Foo = Foo{ .bar = 42 };
-        \\    if (baz) |b| {
+        \\    if (baz) |b<Foo>| {
         \\        const d: Error!?Foo = b;
         \\        const e<*Error!?Foo> = &d;
         \\        const f<Foo> = (try e.*).?;
@@ -133,6 +133,12 @@ test "inlayhints - var decl" {
         \\
         \\ var a<struct { a: u32, b: i32, c: struct { d: usize, e: []const u8, }, }> = thing(10, -4);
         \\ _ = a;
+    , .Type);
+    try testInlayHints(
+        \\ const foo: []const u8 = "abc";
+        \\ for (foo) |bar<u8>| {
+        \\
+        \\}
     , .Type);
 }
 
