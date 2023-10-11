@@ -216,10 +216,8 @@ fn writeBuiltinHint(builder: *Builder, parameters: []const Ast.Node.Index, argum
 // Restrict whitespace to only one space at a time.
 fn reduceTypeWhitespace(str: []const u8, arena: std.mem.Allocator) ![]const u8 {
     // Overallocates by a small amount if whitespace is reduced, but it should be fine.
-    var reduced_type_str = try std.ArrayListUnmanaged(u8).initCapacity(arena, str.len + 4);
+    var reduced_type_str = try std.ArrayListUnmanaged(u8).initCapacity(arena, str.len);
     var skip = false;
-    var depth: i32 = 0;
-    var depth_lo_cap: i32 = 10;
     for (str) |char| {
         if (char == '\n' or char == ' ') {
             if (!skip) {
@@ -227,22 +225,7 @@ fn reduceTypeWhitespace(str: []const u8, arena: std.mem.Allocator) ![]const u8 {
             }
             skip = true;
         } else {
-            if (char == '{') {
-                depth += 1;
-            } else if (char == '}') {
-                depth -= 1;
-            }
-            if (depth != 0) {
-                if (depth_lo_cap == 0) {
-                    continue;
-                } else {
-                    depth_lo_cap -= 1;
-                }
-            }
             reduced_type_str.appendAssumeCapacity(char);
-            if (depth_lo_cap == 0 and depth != 0) {
-                reduced_type_str.appendSliceAssumeCapacity(" ...");
-            }
             skip = false;
         }
     }
