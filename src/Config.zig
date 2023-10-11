@@ -32,6 +32,9 @@ enable_inlay_hints: bool = true,
 /// Enable inlay hints for variable declarations
 inlay_hints_show_variable_declaration: bool = true,
 
+/// Enable inlay hints for control flow capture payloads (e.g. `if (optional) |capture_payload: InlayHint| {}`)
+inlay_hints_show_capture_variables: bool = true,
+
 /// Enable inlay hints for parameter names
 inlay_hints_show_parameter_name: bool = true,
 

@@ -64,6 +64,7 @@ The following options are currently available.
 | `semantic_tokens` | `enum` | `.full` | Set level of semantic tokens. Partial only includes information that requires semantic analysis. |
 | `enable_inlay_hints` | `bool` | `true` | Enables inlay hint support when the client also supports it |
 | `inlay_hints_show_variable_declaration` | `bool` | `true` | Enable inlay hints for variable declarations |
+| `inlay_hints_show_capture_variables` | `bool` | `true` | Enable inlay hints for control flow capture payloads (e.g. `if (optional) \|capture_payload: InlayHint\| {}`) |
 | `inlay_hints_show_parameter_name` | `bool` | `true` | Enable inlay hints for parameter names |
 | `inlay_hints_show_builtin` | `bool` | `true` | Enable inlay hints for builtin functions |
 | `inlay_hints_exclude_single_argument` | `bool` | `true` | Don't show inlay hints for single argument calls |
