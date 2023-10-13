@@ -74,7 +74,7 @@ fn typeToCompletion(
         .ip_index => |payload| try analyser_completions.dotCompletions(
             arena,
             list,
-            analyser.ip.?,
+            analyser.ip,
             payload.index,
             type_handle.type.is_type_val,
             payload.node,

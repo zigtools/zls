@@ -19,7 +19,7 @@ const Analyser = @This();
 gpa: std.mem.Allocator,
 arena: std.heap.ArenaAllocator,
 store: *DocumentStore,
-ip: ?*InternPool,
+ip: *InternPool,
 bound_type_params: std.AutoHashMapUnmanaged(Declaration.Param, TypeWithHandle) = .{},
 resolved_callsites: std.AutoHashMapUnmanaged(Declaration.Param, ?TypeWithHandle) = .{},
 resolved_nodes: std.HashMapUnmanaged(NodeWithUri, ?TypeWithHandle, NodeWithUri.Context, std.hash_map.default_max_load_percentage) = .{},
@@ -28,7 +28,7 @@ use_trail: NodeSet = .{},
 
 const NodeSet = std.HashMapUnmanaged(NodeWithUri, void, NodeWithUri.Context, std.hash_map.default_max_load_percentage);
 
-pub fn init(gpa: std.mem.Allocator, store: *DocumentStore, ip: ?*InternPool) Analyser {
+pub fn init(gpa: std.mem.Allocator, store: *DocumentStore, ip: *InternPool) Analyser {
     return .{
         .gpa = gpa,
         .arena = std.heap.ArenaAllocator.init(gpa),
@@ -1100,7 +1100,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
             const name = offsets.nodeToSlice(tree, node);
 
             if (resolvePrimitiveType(name)) |primitive| {
-                const is_type = analyser.ip.?.indexToKey(primitive).typeOf() == .type_type;
+                const is_type = analyser.ip.indexToKey(primitive).typeOf() == .type_type;
                 return TypeWithHandle{
                     .type = .{ .data = .{ .ip_index = .{ .index = primitive } }, .is_type_val = is_type },
                     .handle = handle,
@@ -1192,7 +1192,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
 
                 log.info("Invoking interpreter!", .{});
 
-                const interpreter = analyser.store.ensureInterpreterExists(handle.uri, analyser.ip.?) catch |err| {
+                const interpreter = analyser.store.ensureInterpreterExists(handle.uri, analyser.ip) catch |err| {
                     log.err("Failed to interpret file: {s}", .{@errorName(err)});
                     if (@errorReturnTrace()) |trace| {
                         std.debug.dumpStackTrace(trace.*);
@@ -3900,7 +3900,7 @@ pub fn referencedTypes(
     switch (resolved_type.type.data) {
         .ip_index => |payload| {
             const allocator = collector.referenced_types.allocator;
-            const ip = analyser.ip.?;
+            const ip = analyser.ip;
             const index = if (resolved_type.type.is_type_val) ip.indexToKey(payload.index).typeOf() else payload.index;
             resolved_type_str.* = try std.fmt.allocPrint(allocator, "{}", .{index.fmt(ip.*)});
         },
@@ -4167,14 +4167,14 @@ fn addReferencedTypes(
             .identifier => {
                 const name = offsets.nodeToSlice(tree, p);
                 const primitive = Analyser.resolvePrimitiveType(name) orelse return null;
-                return try std.fmt.allocPrint(allocator, "{}", .{primitive.fmt(analyser.ip.?.*)});
+                return try std.fmt.allocPrint(allocator, "{}", .{primitive.fmt(analyser.ip.*)});
             },
 
             else => {}, // TODO: Implement more "other" type expressions; better safe than sorry
         },
 
         .ip_index => |payload| {
-            return try std.fmt.allocPrint(allocator, "{}", .{payload.index.fmt(analyser.ip.?.*)});
+            return try std.fmt.allocPrint(allocator, "{}", .{payload.index.fmt(analyser.ip.*)});
         },
 
         .either => {}, // TODO
