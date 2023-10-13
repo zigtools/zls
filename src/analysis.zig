@@ -1231,12 +1231,31 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 };
             }
         },
-        .@"comptime",
-        .@"nosuspend",
-        .grouped_expression,
         .container_field,
         .container_field_init,
         .container_field_align,
+        => {
+            const container_type = innermostContainer(handle, offsets.tokenToIndex(tree, tree.firstToken(node)));
+            if (container_type.isEnumType())
+                return container_type.instanceTypeVal();
+
+            if (container_type.isTaggedUnion()) {
+                var field = tree.fullContainerField(node).?;
+                field.convertToNonTupleLike(tree.nodes);
+                if (field.ast.type_expr == 0)
+                    return TypeWithHandle{
+                        .type = .{ .data = .{ .ip_index = .{ .index = .void_type } }, .is_type_val = false },
+                        .handle = handle,
+                    };
+            }
+
+            const base = .{ .node = datas[node].lhs, .handle = handle };
+            const base_type = (try analyser.resolveTypeOfNodeInternal(base)) orelse return null;
+            return base_type.instanceTypeVal();
+        },
+        .@"comptime",
+        .@"nosuspend",
+        .grouped_expression,
         .array_init,
         .array_init_comma,
         .array_init_one,
@@ -1256,21 +1275,6 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
         .@"try",
         .address_of,
         => {
-            if (node_tags[node].isContainerField()) {
-                const container_type = innermostContainer(handle, offsets.tokenToIndex(tree, tree.firstToken(node)));
-                if (container_type.isEnumType())
-                    return container_type.instanceTypeVal();
-
-                if (container_type.isTaggedUnion()) {
-                    var field = tree.fullContainerField(node).?;
-                    field.convertToNonTupleLike(tree.nodes);
-                    if (field.ast.type_expr == 0)
-                        return TypeWithHandle{
-                            .type = .{ .data = .{ .ip_index = .{ .index = .void_type } }, .is_type_val = false },
-                            .handle = handle,
-                        };
-                }
-            }
             const base = .{ .node = datas[node].lhs, .handle = handle };
             const base_type = (try analyser.resolveTypeOfNodeInternal(base)) orelse
                 return null;
@@ -1279,9 +1283,6 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 .@"nosuspend",
                 .grouped_expression,
                 => base_type,
-                .container_field,
-                .container_field_init,
-                .container_field_align,
                 .array_init,
                 .array_init_comma,
                 .array_init_one,
