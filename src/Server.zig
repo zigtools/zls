@@ -177,6 +177,9 @@ const Job = union(enum) {
 };
 
 fn sendToClientResponse(server: *Server, id: types.RequestId, result: anytype) error{OutOfMemory}![]u8 {
+    const tracy_zone = tracy.traceNamed(@src(), "sendToClientResponse(" ++ @typeName(@TypeOf(result)) ++ ")");
+    defer tracy_zone.end();
+
     // TODO validate result type is a possible response
     // TODO validate response is from a client to server request
     // TODO validate result type
@@ -185,6 +188,9 @@ fn sendToClientResponse(server: *Server, id: types.RequestId, result: anytype) e
 }
 
 fn sendToClientRequest(server: *Server, id: types.RequestId, method: []const u8, params: anytype) error{OutOfMemory}![]u8 {
+    const tracy_zone = tracy.traceNamed(@src(), "sendToClientRequest(" ++ @typeName(@TypeOf(params)) ++ ")");
+    defer tracy_zone.end();
+
     // TODO validate method is a request
     // TODO validate method is server to client
     // TODO validate params type
@@ -193,6 +199,9 @@ fn sendToClientRequest(server: *Server, id: types.RequestId, method: []const u8,
 }
 
 fn sendToClientNotification(server: *Server, method: []const u8, params: anytype) error{OutOfMemory}![]u8 {
+    const tracy_zone = tracy.traceNamed(@src(), "sendToClientRequest(" ++ @typeName(@TypeOf(params)) ++ ")");
+    defer tracy_zone.end();
+
     // TODO validate method is a notification
     // TODO validate method is server to client
     // TODO validate params type
@@ -201,6 +210,9 @@ fn sendToClientNotification(server: *Server, method: []const u8, params: anytype
 }
 
 fn sendToClientResponseError(server: *Server, id: types.RequestId, err: ?types.ResponseError) error{OutOfMemory}![]u8 {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     return try server.sendToClientInternal(id, null, err, "", null);
 }
 
@@ -253,6 +265,9 @@ fn sendToClientInternal(
     try writer.writeByte('}');
 
     if (server.transport) |transport| {
+        const tracy_zone_transport = tracy.traceNamed(@src(), "Transport.writeJsonMessage");
+        defer tracy_zone_transport.end();
+
         transport.writeJsonMessage(buffer.items) catch |err| {
             log.err("failed to write response: {}", .{err});
         };
