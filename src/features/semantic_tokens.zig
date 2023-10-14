@@ -864,7 +864,7 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
                 (try builder.analyser.resolveTypeOfNode(.{ .node = data.lhs, .handle = handle })) orelse return,
             );
             if (try lhs_type.lookupSymbol(builder.analyser, tree.tokenSlice(data.rhs))) |decl_type| {
-                switch (decl_type.decl.*) {
+                switch (decl_type.decl) {
                     .ast_node => |decl_node| {
                         if (decl_type.handle.tree.nodes.items(.tag)[decl_node].isContainerField()) {
                             const tok_type = switch (lhs_type.type.data) {
@@ -1017,7 +1017,7 @@ fn writeIdentifier(builder: *Builder, name_token: Ast.Node.Index) error{OutOfMem
         name,
         tree.tokens.items(.start)[name_token],
     )) |child| {
-        const is_param = child.decl.* == .param_payload;
+        const is_param = child.decl == .param_payload;
 
         if (try child.resolveType(builder.analyser)) |decl_type| {
             return try colorIdentifierBasedOnType(builder, decl_type, name_token, is_param, .{});

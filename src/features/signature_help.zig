@@ -272,7 +272,7 @@ pub fn getSignatureInfo(analyser: *Analyser, arena: std.mem.Allocator, handle: *
                         continue;
                     };
                     var res_handle = decl_handle.handle;
-                    node = switch (decl_handle.decl.*) {
+                    node = switch (decl_handle.decl) {
                         .ast_node => |n| n,
                         else => {
                             try symbol_stack.append(arena, .l_paren);
@@ -283,7 +283,7 @@ pub fn getSignatureInfo(analyser: *Analyser, arena: std.mem.Allocator, handle: *
                     if (try analyser.resolveVarDeclAlias(
                         .{ .node = node, .handle = decl_handle.handle },
                     )) |resolved| {
-                        switch (resolved.decl.*) {
+                        switch (resolved.decl) {
                             .ast_node => |n| {
                                 res_handle = resolved.handle;
                                 node = n;

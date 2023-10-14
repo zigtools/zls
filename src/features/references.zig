@@ -18,7 +18,7 @@ pub fn labelReferences(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    std.debug.assert(decl.decl.* == .label_decl); // use `symbolReferences` instead
+    std.debug.assert(decl.decl == .label_decl); // use `symbolReferences` instead
     const handle = decl.handle;
     const tree = handle.tree;
     const token_tags = tree.tokens.items(.tag);
@@ -196,7 +196,7 @@ pub fn symbolReferences(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    std.debug.assert(decl_handle.decl.* != .label_decl); // use `labelReferences` instead
+    std.debug.assert(decl_handle.decl != .label_decl); // use `labelReferences` instead
 
     var builder = Builder{
         .allocator = allocator,
@@ -209,7 +209,7 @@ pub fn symbolReferences(
     const curr_handle = decl_handle.handle;
     if (include_decl) try builder.add(curr_handle, decl_handle.nameToken());
 
-    switch (decl_handle.decl.*) {
+    switch (decl_handle.decl) {
         .ast_node => {
             try builder.collectReferences(curr_handle, 0);
             if (workspace) {
@@ -338,7 +338,7 @@ pub fn callsiteReferences(
     /// search other files for references
     workspace: bool,
 ) error{OutOfMemory}!std.ArrayListUnmanaged(Callsite) {
-    std.debug.assert(decl_handle.decl.* == .ast_node);
+    std.debug.assert(decl_handle.decl == .ast_node);
 
     var builder = CallBuilder{
         .allocator = allocator,
