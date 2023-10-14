@@ -542,11 +542,7 @@ fn completeBuiltin(server: *Server, arena: std.mem.Allocator) error{OutOfMemory}
         };
     }
 
-    if (server.client_capabilities.label_details_support) {
-        for (completions) |*item| {
-            try formatDetailedLabel(item, arena);
-        }
-    }
+    try formatCompletionDetails(server, arena, completions);
 
     return completions;
 }
@@ -566,12 +562,7 @@ fn completeGlobal(server: *Server, analyser: *Analyser, arena: std.mem.Allocator
     };
     try analyser.iterateSymbolsGlobal(handle, pos_index, declToCompletion, context);
     try populateSnippedCompletions(arena, &completions, &snipped_data.generic, server.config);
-
-    if (server.client_capabilities.label_details_support) {
-        for (completions.items) |*item| {
-            try formatDetailedLabel(item, arena);
-        }
-    }
+    try formatCompletionDetails(server, arena, completions.items);
 
     return completions.toOwnedSlice(arena);
 }
@@ -587,13 +578,20 @@ fn completeFieldAccess(server: *Server, analyser: *Analyser, arena: std.mem.Allo
 
     const result = (try analyser.getFieldAccessType(handle, source_index, &tokenizer)) orelse return null;
     try typeToCompletion(server, analyser, arena, &completions, result, handle, null);
-    if (server.client_capabilities.label_details_support) {
-        for (completions.items) |*item| {
-            try formatDetailedLabel(item, arena);
-        }
-    }
+    try formatCompletionDetails(server, arena, completions.items);
 
     return try completions.toOwnedSlice(arena);
+}
+
+fn formatCompletionDetails(server: *const Server, arena: std.mem.Allocator, completions: []types.CompletionItem) error{OutOfMemory}!void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    if (!server.client_capabilities.label_details_support) return;
+
+    for (completions) |*item| {
+        try formatDetailedLabel(item, arena);
+    }
 }
 
 fn formatDetailedLabel(item: *types.CompletionItem, arena: std.mem.Allocator) error{OutOfMemory}!void {
