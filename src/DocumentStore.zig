@@ -36,14 +36,16 @@ const BuildFile = struct {
     uri: Uri,
     /// contains information extracted from running build.zig with a custom build runner
     /// e.g. include paths & packages
-    config: std.json.Parsed(BuildConfig),
+    /// TODO this field should not be nullable, callsites should await the build config to be resolved
+    /// and then continue instead of dealing with missing information.
+    config: ?std.json.Parsed(BuildConfig),
     /// this build file may have an explicitly specified path to builtin.zig
     builtin_uri: ?Uri = null,
     build_associated_config: ?std.json.Parsed(BuildAssociatedConfig) = null,
 
     pub fn deinit(self: *BuildFile, allocator: std.mem.Allocator) void {
         allocator.free(self.uri);
-        self.config.deinit();
+        if (self.config) |cfg| cfg.deinit();
         if (self.builtin_uri) |builtin_uri| allocator.free(builtin_uri);
         if (self.build_associated_config) |cfg| cfg.deinit();
     }
@@ -333,7 +335,9 @@ pub fn invalidateBuildFile(self: *DocumentStore, build_file_uri: Uri) error{OutO
         build_config.deinit();
         return;
     };
-    build_file.config.deinit();
+    if (build_file.config) |*old_config| {
+        old_config.deinit();
+    }
     build_file.config = build_config;
 }
 
@@ -642,22 +646,7 @@ fn createBuildFile(self: *DocumentStore, uri: Uri) error{OutOfMemory}!BuildFile 
 
     var build_file = BuildFile{
         .uri = try self.allocator.dupe(u8, uri),
-        .config = undefined, // set below
-    };
-
-    build_file.config = std.json.Parsed(BuildConfig){
-        .arena = blk: {
-            var arena = self.allocator.create(std.heap.ArenaAllocator) catch |err| {
-                self.allocator.free(build_file.uri);
-                return err;
-            };
-            arena.* = std.heap.ArenaAllocator.init(self.allocator);
-            break :blk arena;
-        },
-        .value = .{
-            .packages = &.{},
-            .include_dirs = &.{},
-        },
+        .config = null,
     };
 
     errdefer build_file.deinit(self.allocator);
@@ -706,7 +695,8 @@ fn uriAssociatedWithBuild(
     var checked_uris = std.StringHashMapUnmanaged(void){};
     defer checked_uris.deinit(self.allocator);
 
-    for (build_file.config.value.packages) |package| {
+    const build_config = build_file.config orelse return false;
+    for (build_config.value.packages) |package| {
         const package_uri = try URI.fromPath(self.allocator, package.path);
         defer self.allocator.free(package_uri);
 
@@ -980,8 +970,9 @@ fn collectDependenciesInternal(
     }
 
     if (handle.associated_build_file) |build_file_uri| {
-        if (store.build_files.get(build_file_uri)) |build_file| {
-            const packages = build_file.config.value.packages;
+        if (store.build_files.get(build_file_uri)) |build_file| blk: {
+            const build_config = build_file.config orelse break :blk;
+            const packages = build_config.value.packages;
             try dependencies.ensureUnusedCapacity(allocator, packages.len);
             for (packages) |pkg| {
                 dependencies.appendAssumeCapacity(try URI.fromPath(allocator, pkg.path));
@@ -990,12 +981,16 @@ fn collectDependenciesInternal(
     }
 }
 
+/// returns `true` if all include paths could be collected
+/// may return `false` because include paths from a build.zig may not have been resolved already
 pub fn collectIncludeDirs(
     store: *const DocumentStore,
     allocator: std.mem.Allocator,
     handle: Handle,
     include_dirs: *std.ArrayListUnmanaged([]const u8),
-) !void {
+) !bool {
+    var collected_all = true;
+
     const target_info = try std.zig.system.NativeTargetInfo.detect(.{});
 
     var arena_allocator = std.heap.ArenaAllocator.init(allocator);
@@ -1003,10 +998,14 @@ pub fn collectIncludeDirs(
 
     var native_paths = try std.zig.system.NativePaths.detect(arena_allocator.allocator(), target_info);
 
-    const build_file_includes_paths: []const []const u8 = if (handle.associated_build_file) |build_file_uri|
-        store.build_files.get(build_file_uri).?.config.value.include_dirs
-    else
-        &.{};
+    const build_file_includes_paths: []const []const u8 = if (handle.associated_build_file) |build_file_uri| blk: {
+        if (store.build_files.get(build_file_uri).?.config) |cfg| {
+            break :blk cfg.value.include_dirs;
+        } else {
+            collected_all = false;
+            break :blk &.{};
+        }
+    } else &.{};
 
     try include_dirs.ensureTotalCapacity(allocator, native_paths.include_dirs.items.len + build_file_includes_paths.len);
 
@@ -1027,6 +1026,8 @@ pub fn collectIncludeDirs(
         };
         include_dirs.appendAssumeCapacity(absolute_path);
     }
+
+    return collected_all;
 }
 
 /// returns the document behind `@cImport()` where `node` is the `cImport` node
@@ -1061,7 +1062,8 @@ pub fn resolveCImport(self: *DocumentStore, handle: Handle, node: Ast.Node.Index
             }
             include_dirs.deinit(self.allocator);
         }
-        self.collectIncludeDirs(self.allocator, handle, &include_dirs) catch |err| {
+
+        const collected_all_include_dirs = self.collectIncludeDirs(self.allocator, handle, &include_dirs) catch |err| {
             log.err("failed to resolve include paths: {}", .{err});
             return null;
         };
@@ -1079,6 +1081,11 @@ pub fn resolveCImport(self: *DocumentStore, handle: Handle, node: Ast.Node.Index
             },
         };
         var result = maybe_result orelse return null;
+
+        if (result == .failure and !collected_all_include_dirs) {
+            result.deinit(self.allocator);
+            return null;
+        }
 
         self.cimports.putNoClobber(self.allocator, hash, result) catch result.deinit(self.allocator);
 
@@ -1126,9 +1133,10 @@ pub fn uriFromImportStr(self: *DocumentStore, allocator: std.mem.Allocator, hand
         }
         return null;
     } else if (!std.mem.endsWith(u8, import_str, ".zig")) {
-        if (handle.associated_build_file) |build_file_uri| {
+        if (handle.associated_build_file) |build_file_uri| blk: {
             const build_file = self.getBuildFile(build_file_uri).?;
-            for (build_file.config.value.packages) |pkg| {
+            const config = build_file.config orelse break :blk;
+            for (config.value.packages) |pkg| {
                 if (std.mem.eql(u8, import_str, pkg.name)) {
                     return try URI.fromPath(allocator, pkg.path);
                 }
