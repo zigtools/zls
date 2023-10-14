@@ -275,6 +275,11 @@ fn typeStrOfToken(builder: *Builder, token: Ast.TokenIndex) !?[]const u8 {
 
 /// Append a hint in the form `: hint`
 fn appendTypeHintString(builder: *Builder, type_token_index: u32, hint: []const u8) !void {
+    const name = offsets.tokenToSlice(builder.handle.tree, type_token_index);
+    if (std.mem.eql(u8, name, "_")) {
+        return;
+    }
+
     try builder.hints.append(builder.arena, .{
         .index = offsets.tokenToLoc(builder.handle.tree, type_token_index).end,
         .label = try std.fmt.allocPrint(builder.arena, ": {s}", .{hint}),
@@ -314,23 +319,23 @@ fn writeForCaptureHint(builder: *Builder, for_node: Ast.Node.Index) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const hint = builder.handle.tree.fullFor(for_node) orelse return;
-    const token_tags = builder.handle.tree.tokens.items(.tag);
-    var token_index: u32 = hint.payload_token;
-    var prepend: []const u8 = "";
-    while (token_tags[token_index] != .pipe) : (token_index += 1) {
-        if (token_tags[token_index] == .comma) continue;
-        if (token_tags[token_index] == .asterisk) {
-            prepend = "*";
-            continue;
+    const tree = builder.handle.tree;
+    const hint = tree.fullFor(for_node) orelse return;
+    const token_tags = tree.tokens.items(.tag);
+    var capture_token = hint.payload_token;
+    for (hint.ast.inputs) |_| {
+        if (capture_token + 1 >= tree.tokens.len) break;
+        const capture_by_ref = token_tags[capture_token] == .asterisk;
+        const name_token = capture_token + @intFromBool(capture_by_ref);
+        if (try typeStrOfToken(builder, name_token)) |type_str| {
+            const prepend = if (capture_by_ref) "*" else "";
+            try appendTypeHintString(
+                builder,
+                name_token,
+                try std.fmt.allocPrint(builder.arena, "{s}{s}", .{ prepend, type_str }),
+            );
         }
-        const type_str = try typeStrOfToken(builder, token_index) orelse continue;
-        try appendTypeHintString(
-            builder,
-            token_index,
-            try std.fmt.allocPrint(builder.arena, "{s}{s}", .{ prepend, type_str }),
-        );
-        prepend = "";
+        capture_token = name_token + 2;
     }
 }
 
