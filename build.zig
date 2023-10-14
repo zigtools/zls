@@ -4,8 +4,8 @@ const builtin = @import("builtin");
 const zls_version = std.SemanticVersion{ .major = 0, .minor = 12, .patch = 0 };
 
 /// document the latest breaking change that caused a change to the string below:
-/// std.Build: expose `-idirafter` to the build system
-const min_zig_string = "0.12.0-dev.722+412d863ba";
+/// drop for loop syntax upgrade mechanisms
+const min_zig_string = "0.12.0-dev.899+027aabf49";
 
 pub fn build(b: *std.build.Builder) !void {
     comptime {

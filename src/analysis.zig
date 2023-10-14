@@ -529,6 +529,20 @@ fn resolveVarDeclAliasUncached(analyser: *Analyser, node_handle: NodeWithHandle,
     }
 }
 
+/// resolves `@field(lhs, field_name)`
+fn resolveFieldAccess(analyser: *Analyser, lhs: TypeWithHandle, field_name: []const u8) !?TypeWithHandle {
+    if (try analyser.resolveTaggedUnionFieldType(lhs, field_name)) |tag_type| return tag_type;
+
+    // If we are accessing a pointer type, remove one pointerness level :)
+    const left_type = (try analyser.resolveDerefType(lhs)) orelse lhs;
+
+    if (try analyser.resolvePropertyType(left_type, field_name)) |t| return t;
+
+    if (try left_type.lookupSymbol(analyser, field_name)) |child| return try child.resolveType(analyser);
+
+    return null;
+}
+
 fn findReturnStatementInternal(tree: Ast, fn_decl: Ast.full.FnProto, body: Ast.Node.Index, already_found: *bool) ?Ast.Node.Index {
     var result: ?Ast.Node.Index = null;
 
@@ -1305,18 +1319,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
 
             const symbol = tree.tokenSlice(datas[node].rhs);
 
-            if (try analyser.resolveTaggedUnionFieldType(lhs, symbol)) |tag_type|
-                return tag_type;
-
-            // If we are accessing a pointer type, remove one pointerness level :)
-            const left_type = (try analyser.resolveDerefType(lhs)) orelse lhs;
-
-            if (try analyser.resolvePropertyType(left_type, symbol)) |t|
-                return t;
-
-            if (try left_type.lookupSymbol(analyser, symbol)) |child| {
-                return try child.resolveType(analyser);
-            } else return null;
+            return try resolveFieldAccess(analyser, lhs, symbol);
         },
         .anyframe_type,
         .array_type,
@@ -1432,6 +1435,21 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
 
                 // reference to node '0' which is root
                 return TypeWithHandle.typeVal(.{ .node = 0, .handle = new_handle });
+            }
+            if (std.mem.eql(u8, call_name, "@field")) {
+                if (params.len < 2) return null;
+                const field_param = params[1];
+                if (node_tags[field_param] != .string_literal) return null;
+
+                const field_name = handle.tree.tokenSlice(main_tokens[field_param]);
+                if (field_name.len < 2) return null;
+
+                var lhs = (try analyser.resolveTypeOfNodeInternal(.{
+                    .node = params[0],
+                    .handle = handle,
+                })) orelse return null;
+
+                return try resolveFieldAccess(analyser, lhs, field_name[1 .. field_name.len - 1]);
             }
         },
         .fn_proto,
