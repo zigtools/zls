@@ -1253,6 +1253,59 @@ test "completion - usingnamespace" {
         .{ .label = "alpha", .kind = .Function, .detail = "fn alpha() void" },
         .{ .label = "beta", .kind = .Function, .detail = "fn beta() void" },
     });
+    try testCompletion(
+        \\pub const chip_mod = struct {
+        \\    pub const devices = struct {
+        \\        pub const chip1 = struct {
+        \\            canary: bool,
+        \\            pub const peripherals = struct {};
+        \\            pub fn chip1fn1() void {}
+        \\            pub fn chip1fn2(_: u32) void {}
+        \\        };
+        \\        pub const chip2 = struct {
+        \\            pub fn chip2fn1() void {}
+        \\        };
+        \\    };
+        \\};
+        \\const chip = struct {
+        \\    const inner = chip_mod; //@import("chip");
+        \\    pub usingnamespace @field(inner.devices, "chip1");
+        \\};
+        \\test {
+        \\    _ = chip.<cursor>;
+        \\}
+    , &.{
+        .{ .label = "inner", .kind = .Constant, .detail = "const chip_mod = struct" },
+        .{ .label = "peripherals", .kind = .Constant, .detail = "const peripherals = struct" },
+        .{ .label = "chip1fn1", .kind = .Function, .detail = "fn chip1fn1() void" },
+        .{ .label = "chip1fn2", .kind = .Function, .detail = "fn chip1fn2(_: u32) void" },
+    });
+}
+
+test "builtin fn `field`" {
+    try testCompletion(
+        \\pub const chip_mod = struct {
+        \\    pub const devices = struct {
+        \\        pub const chip1 = struct {
+        \\            canary: bool,
+        \\            pub const peripherals = struct {};
+        \\            pub fn chip1fn1() void {}
+        \\            pub fn chip1fn2(_: u32) void {}
+        \\        };
+        \\        pub const chip2 = struct {
+        \\            pub fn chip2fn1() void {}
+        \\        };
+        \\    };
+        \\};
+        \\test {
+        \\    const chip = @field(chip_mod.devices, "chip1");
+        \\    chip.<cursor>
+        \\}
+    , &.{
+        .{ .label = "peripherals", .kind = .Constant, .detail = "const peripherals = struct" },
+        .{ .label = "chip1fn1", .kind = .Function, .detail = "fn chip1fn1() void" },
+        .{ .label = "chip1fn2", .kind = .Function, .detail = "fn chip1fn2(_: u32) void" },
+    });
 }
 
 test "completion - block" {
