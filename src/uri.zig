@@ -23,10 +23,10 @@ pub fn fromPath(allocator: std.mem.Allocator, path: []const u8) ![]const u8 {
     if (path.len == 0) return "";
     const prefix = if (builtin.os.tag == .windows) "file:///" else "file://";
 
-    var buf = std.ArrayListUnmanaged(u8){};
+    var buf = try std.ArrayListUnmanaged(u8).initCapacity(allocator, prefix.len + path.len);
     errdefer buf.deinit(allocator);
 
-    try buf.appendSlice(allocator, prefix);
+    buf.appendSliceAssumeCapacity(prefix);
 
     for (path) |char| {
         if (char == std.fs.path.sep) {
