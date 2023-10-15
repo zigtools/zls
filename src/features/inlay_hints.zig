@@ -274,7 +274,7 @@ fn typeStrOfToken(builder: *Builder, token: Ast.TokenIndex) !?[]const u8 {
 }
 
 /// Append a hint in the form `: hint`
-fn appendTypeHintString(builder: *Builder, type_token_index: u32, hint: []const u8) !void {
+fn appendTypeHintString(builder: *Builder, type_token_index: Ast.TokenIndex, hint: []const u8) !void {
     const name = offsets.tokenToSlice(builder.handle.tree, type_token_index);
     if (std.mem.eql(u8, name, "_")) {
         return;
@@ -294,36 +294,15 @@ fn inferAppendTypeStr(builder: *Builder, token: Ast.TokenIndex) !void {
     try appendTypeHintString(builder, token, type_str);
 }
 
-/// Takes a variable declaration AST node. If the type is inferred, attempt to infer it and display it as a hint.
-fn writeVariableDeclHint(builder: *Builder, decl_node: Ast.Node.Index) !void {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    const hint = builder.handle.tree.fullVarDecl(decl_node) orelse return;
-    if (hint.ast.type_node != 0) return;
-
-    try appendTypeHintString(builder, hint.ast.mut_token + 1, try typeStrOfNode(builder, decl_node) orelse return);
-}
-
-fn writeIfCaptureHint(builder: *Builder, if_node: Ast.Node.Index) !void {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    const hint = builder.handle.tree.fullIf(if_node) orelse return;
-
-    if (hint.payload_token) |token| try inferAppendTypeStr(builder, token);
-    if (hint.error_token) |token| try inferAppendTypeStr(builder, token);
-}
-
 fn writeForCaptureHint(builder: *Builder, for_node: Ast.Node.Index) !void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
     const tree = builder.handle.tree;
-    const hint = tree.fullFor(for_node) orelse return;
+    const full_for = tree.fullFor(for_node) orelse return;
     const token_tags = tree.tokens.items(.tag);
-    var capture_token = hint.payload_token;
-    for (hint.ast.inputs) |_| {
+    var capture_token = full_for.payload_token;
+    for (full_for.ast.inputs) |_| {
         if (capture_token + 1 >= tree.tokens.len) break;
         const capture_by_ref = token_tags[capture_token] == .asterisk;
         const name_token = capture_token + @intFromBool(capture_by_ref);
@@ -337,23 +316,6 @@ fn writeForCaptureHint(builder: *Builder, for_node: Ast.Node.Index) !void {
         }
         capture_token = name_token + 2;
     }
-}
-
-fn writeWhileCaptureHint(builder: *Builder, while_node: Ast.Node.Index) !void {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    const hint = builder.handle.tree.fullWhile(while_node) orelse return;
-    if (hint.payload_token) |token| try inferAppendTypeStr(builder, token);
-    if (hint.error_token) |token| try inferAppendTypeStr(builder, token);
-}
-
-fn writeSwitchCaseCaptureHint(builder: *Builder, switch_case_node: Ast.Node.Index) !void {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    const hint = builder.handle.tree.fullSwitchCase(switch_case_node) orelse return;
-    if (hint.payload_token) |token| try inferAppendTypeStr(builder, token);
 }
 
 /// takes a Ast.full.Call (a function call), analysis its function expression, finds its declaration and writes parameter hints into `builder.hints`
@@ -439,13 +401,22 @@ fn writeNodeInlayHint(
         .aligned_var_decl,
         => {
             if (!builder.config.inlay_hints_show_variable_declaration) return;
-            try writeVariableDeclHint(builder, node);
+            const var_decl = builder.handle.tree.fullVarDecl(node) orelse return;
+            if (var_decl.ast.type_node != 0) return;
+
+            try appendTypeHintString(
+                builder,
+                var_decl.ast.mut_token + 1,
+                try typeStrOfNode(builder, node) orelse return,
+            );
         },
         .if_simple,
         .@"if",
         => {
             if (!builder.config.inlay_hints_show_capture_variables) return;
-            try writeIfCaptureHint(builder, node);
+            const full_if = builder.handle.tree.fullIf(node) orelse return;
+            if (full_if.payload_token) |token| try inferAppendTypeStr(builder, token);
+            if (full_if.error_token) |token| try inferAppendTypeStr(builder, token);
         },
         .for_simple,
         .@"for",
@@ -458,7 +429,9 @@ fn writeNodeInlayHint(
         .@"while",
         => {
             if (!builder.config.inlay_hints_show_capture_variables) return;
-            try writeWhileCaptureHint(builder, node);
+            const full_while = builder.handle.tree.fullWhile(node) orelse return;
+            if (full_while.payload_token) |token| try inferAppendTypeStr(builder, token);
+            if (full_while.error_token) |token| try inferAppendTypeStr(builder, token);
         },
         .switch_case_one,
         .switch_case_inline_one,
@@ -466,7 +439,8 @@ fn writeNodeInlayHint(
         .switch_case_inline,
         => {
             if (!builder.config.inlay_hints_show_capture_variables) return;
-            try writeSwitchCaseCaptureHint(builder, node);
+            const full_case = builder.handle.tree.fullSwitchCase(node) orelse return;
+            if (full_case.payload_token) |token| try inferAppendTypeStr(builder, token);
         },
         .builtin_call_two,
         .builtin_call_two_comma,
