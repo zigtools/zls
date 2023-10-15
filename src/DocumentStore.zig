@@ -789,11 +789,12 @@ fn createDocument(self: *DocumentStore, uri: Uri, text: [:0]const u8, open: bool
             code.instructions = instructions.slice();
         }
 
-        // var document_scope = try analysis.makeDocumentScope(self.allocator, tree);
         var document_scope = try DocumentScope.init(self.allocator, tree);
         errdefer document_scope.deinit(self.allocator);
 
         // remove unused capacity
+        document_scope.extra.shrinkAndFree(self.allocator, document_scope.extra.items.len);
+        try document_scope.declarations.setCapacity(self.allocator, document_scope.declarations.len);
         try document_scope.scopes.setCapacity(self.allocator, document_scope.scopes.len);
 
         break :blk Handle{
