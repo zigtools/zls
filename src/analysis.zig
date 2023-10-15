@@ -2756,6 +2756,10 @@ pub const Declaration = union(enum) {
 
     pub const Index = enum(u32) {
         _,
+
+        pub fn toOptional(index: Index) OptionalIndex {
+            return @enumFromInt(@intFromEnum(index));
+        }
     };
 
     pub const OptionalIndex = enum(u32) {
@@ -3140,33 +3144,27 @@ fn iterateUsingnamespaceContainerSymbols(
 }
 
 pub const EnclosingScopeIterator = struct {
-    extra: []const u32,
-    scope_locs: []Scope.SmallLoc,
-    scope_children: []const Scope.ChildScopes,
+    document_scope: *const DocumentScope,
     current_scope: Scope.OptionalIndex,
     source_index: usize,
 
-    // TODO: make optional index
-    pub fn next(self: *EnclosingScopeIterator) ?Scope.Index {
-        if (self.current_scope == .none) return null;
+    pub fn next(self: *EnclosingScopeIterator) Scope.OptionalIndex {
+        const current_scope = self.current_scope.unwrap() orelse return .none;
 
-        const child_scopes = self.scope_children[@intFromEnum(self.current_scope)];
-        defer self.current_scope = for (self.extra[child_scopes.start..child_scopes.end]) |child_scope| {
-            const child_loc = self.scope_locs[child_scope];
+        defer self.current_scope = for (self.document_scope.getScopeChildScopesConst(current_scope)) |child_scope| {
+            const child_loc = self.document_scope.scopes.items(.loc)[@intFromEnum(child_scope)];
             if (child_loc.start <= self.source_index and self.source_index <= child_loc.end) {
-                break @enumFromInt(child_scope);
+                break child_scope.toOptional();
             }
         } else .none;
 
-        return self.current_scope.unwrap();
+        return self.current_scope;
     }
 };
 
-fn iterateEnclosingScopes(document_scope: DocumentScope, source_index: usize) EnclosingScopeIterator {
+fn iterateEnclosingScopes(document_scope: *const DocumentScope, source_index: usize) EnclosingScopeIterator {
     return .{
-        .extra = document_scope.extra.items,
-        .scope_locs = document_scope.scopes.items(.loc),
-        .scope_children = document_scope.scopes.items(.child_scopes),
+        .document_scope = document_scope,
         .current_scope = @enumFromInt(0),
         .source_index = source_index,
     };
@@ -3185,8 +3183,8 @@ pub fn iterateSymbolsContainer(
 }
 
 pub fn iterateLabels(handle: *const DocumentStore.Handle, source_index: usize, comptime callback: anytype, context: anytype) error{OutOfMemory}!void {
-    var scope_iterator = iterateEnclosingScopes(handle.document_scope, source_index);
-    while (scope_iterator.next()) |scope_index| {
+    var scope_iterator = iterateEnclosingScopes(&handle.document_scope, source_index);
+    while (scope_iterator.next().unwrap()) |scope_index| {
         for (handle.document_scope.getScopeDeclarationsConst(scope_index)) |decl_index| {
             const decl = handle.document_scope.declarations.get(@intFromEnum(decl_index));
             if (decl != .label_decl) continue;
@@ -3204,8 +3202,8 @@ fn iterateSymbolsGlobalInternal(
 ) error{OutOfMemory}!void {
     // const scope_uses = handle.document_scope.scopes.items(.uses);
 
-    var scope_iterator = iterateEnclosingScopes(handle.document_scope, source_index);
-    while (scope_iterator.next()) |scope_index| {
+    var scope_iterator = iterateEnclosingScopes(&handle.document_scope, source_index);
+    while (scope_iterator.next().unwrap()) |scope_index| {
         const scope_decls = handle.document_scope.getScopeDeclarationsConst(scope_index);
         for (scope_decls) |decl_index| {
             const decl = handle.document_scope.declarations.get(@intFromEnum(decl_index));
@@ -3238,10 +3236,10 @@ pub fn iterateSymbolsGlobal(
 }
 
 pub fn innermostBlockScopeIndex(handle: DocumentStore.Handle, source_index: usize) Scope.OptionalIndex {
-    var scope_iterator = iterateEnclosingScopes(handle.document_scope, source_index);
+    var scope_iterator = iterateEnclosingScopes(&handle.document_scope, source_index);
     var scope_index: Scope.OptionalIndex = .none;
-    while (scope_iterator.next()) |inner_scope| {
-        scope_index = @enumFromInt(@intFromEnum(inner_scope));
+    while (scope_iterator.next().unwrap()) |inner_scope| {
+        scope_index = inner_scope.toOptional();
     }
     return scope_index;
 }
@@ -3276,8 +3274,8 @@ pub fn innermostContainer(handle: *const DocumentStore.Handle, source_index: usi
     var current = handle.document_scope.getScopeAstNode(@enumFromInt(0)).?;
     if (handle.document_scope.scopes.len == 1) return TypeWithHandle.typeVal(.{ .node = current, .handle = handle });
 
-    var scope_iterator = iterateEnclosingScopes(handle.document_scope, source_index);
-    while (scope_iterator.next()) |scope_index| {
+    var scope_iterator = iterateEnclosingScopes(&handle.document_scope, source_index);
+    while (scope_iterator.next().unwrap()) |scope_index| {
         switch (scope_tags[@intFromEnum(scope_index)]) {
             .container, .container_usingnamespace => current = handle.document_scope.getScopeAstNode(scope_index).?,
             else => {},
@@ -3317,8 +3315,8 @@ pub fn lookupLabel(
     symbol: []const u8,
     source_index: usize,
 ) error{OutOfMemory}!?DeclWithHandle {
-    var scope_iterator = iterateEnclosingScopes(handle.document_scope, source_index);
-    while (scope_iterator.next()) |scope_index| {
+    var scope_iterator = iterateEnclosingScopes(&handle.document_scope, source_index);
+    while (scope_iterator.next().unwrap()) |scope_index| {
         const decl_index = handle.document_scope.getScopeDeclaration(.{
             .scope = scope_index,
             .name = symbol,

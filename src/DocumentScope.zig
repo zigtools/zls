@@ -141,6 +141,10 @@ pub const Scope = struct {
 
     pub const Index = enum(u32) {
         _,
+
+        pub fn toOptional(index: Index) OptionalIndex {
+            return @enumFromInt(@intFromEnum(index));
+        }
     };
 
     pub const OptionalIndex = enum(u32) {
@@ -205,7 +209,7 @@ const ScopeContext = struct {
             if (is_small.*) {
                 for (&child_declarations.small) |*scd| {
                     if (scd.* == .none) {
-                        scd.* = @enumFromInt(@intFromEnum(declaration_index));
+                        scd.* = declaration_index.toOptional();
                         break;
                     }
                 } else {
