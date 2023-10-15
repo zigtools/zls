@@ -183,41 +183,29 @@ const ScopeContext = struct {
             kind: DeclarationLookup.Kind,
         ) error{OutOfMemory}!void {
             if (std.mem.eql(u8, name, "_")) return;
-
-            const doc_scope = pushed.context.doc_scope;
-            try doc_scope.declarations.append(pushed.context.allocator, declaration);
-            try pushed.pushDeclarationIndex(name, @enumFromInt(doc_scope.declarations.len - 1), kind);
-        }
-
-        fn pushDeclarationIndex(
-            pushed: *PushedScope,
-            name: []const u8,
-            declaration: Declaration.Index,
-            kind: DeclarationLookup.Kind,
-        ) error{OutOfMemory}!void {
-            if (std.mem.eql(u8, name, "_")) return;
+            defer std.debug.assert(pushed.context.doc_scope.declarations.len == pushed.context.doc_scope.declaration_lookup_map.count());
 
             const context = pushed.context;
+            const doc_scope = context.doc_scope;
             const allocator = context.allocator;
 
-            var slice = pushed.context.doc_scope.scopes.slice();
-            var is_small = &slice.items(.is_small)[@intFromEnum(pushed.scope)];
-            var child_declarations = &slice.items(.child_declarations)[@intFromEnum(pushed.scope)];
+            const gop = try doc_scope.declaration_lookup_map.getOrPut(allocator, .{
+                .scope = pushed.scope,
+                .name = name,
+                .kind = kind,
+            });
+            if (gop.found_existing) return;
 
-            try context.doc_scope.declaration_lookup_map.putNoClobber(
-                allocator,
-                .{
-                    .scope = pushed.scope,
-                    .name = name,
-                    .kind = kind,
-                },
-                {},
-            );
+            try doc_scope.declarations.append(allocator, declaration);
+            const declaration_index: Declaration.Index = @enumFromInt(doc_scope.declarations.len - 1);
+
+            const is_small = &doc_scope.scopes.items(.is_small)[@intFromEnum(pushed.scope)];
+            const child_declarations = &doc_scope.scopes.items(.child_declarations)[@intFromEnum(pushed.scope)];
 
             if (is_small.*) {
                 for (&child_declarations.small) |*scd| {
                     if (scd.* == .none) {
-                        scd.* = @enumFromInt(@intFromEnum(declaration));
+                        scd.* = @enumFromInt(@intFromEnum(declaration_index));
                         break;
                     }
                 } else {
@@ -229,10 +217,10 @@ const ScopeContext = struct {
                         context.child_declarations_scratch.appendAssumeCapacity(scd.unwrap().?);
                     }
 
-                    context.child_declarations_scratch.appendAssumeCapacity(declaration);
+                    context.child_declarations_scratch.appendAssumeCapacity(declaration_index);
                 }
             } else {
-                try context.child_declarations_scratch.append(allocator, declaration);
+                try context.child_declarations_scratch.append(allocator, declaration_index);
             }
         }
 
