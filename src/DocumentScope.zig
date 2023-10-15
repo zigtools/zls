@@ -379,6 +379,15 @@ fn walkContainerDecl(
     var buf: [2]Ast.Node.Index = undefined;
     const container_decl = tree.fullContainerDecl(&buf, node_idx).?;
 
+    const is_enum_or_tagged_union = blk: {
+        if (node_idx == 0) break :blk false;
+        break :blk switch (token_tags[container_decl.ast.main_token]) {
+            .keyword_enum => true,
+            .keyword_union => container_decl.ast.enum_token != null or container_decl.ast.arg != 0,
+            else => false,
+        };
+    };
+
     var scope = try context.startScope(
         .container,
         .{ .ast_node = node_idx },
@@ -412,10 +421,7 @@ fn walkContainerDecl(
                 .other,
         );
 
-        // TODO: Fix this later
-        if ((node_idx != 0 and token_tags[container_decl.ast.main_token] == .keyword_enum) or
-            ast.isTaggedUnion(tree, node_idx))
-        {
+        if (is_enum_or_tagged_union) {
             if (std.mem.eql(u8, name, "_")) continue;
 
             const doc = try Analyser.getDocComments(allocator, tree, decl);
