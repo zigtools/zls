@@ -3200,8 +3200,6 @@ fn iterateSymbolsGlobalInternal(
     comptime callback: anytype,
     context: anytype,
 ) error{OutOfMemory}!void {
-    // const scope_uses = handle.document_scope.scopes.items(.uses);
-
     var scope_iterator = iterateEnclosingScopes(&handle.document_scope, source_index);
     while (scope_iterator.next().unwrap()) |scope_index| {
         const scope_decls = handle.document_scope.getScopeDeclarationsConst(scope_index);
@@ -3337,16 +3335,13 @@ pub fn lookupSymbolGlobal(
     symbol: []const u8,
     source_index: usize,
 ) error{OutOfMemory}!?DeclWithHandle {
-    _ = analyser;
-
     const tree = handle.tree;
     const scope_parents = handle.document_scope.scopes.items(.parent_scope);
 
     var current_scope = innermostBlockScopeIndex(handle.*, source_index);
 
-    while (current_scope != .none) {
-        const scope_index = @intFromEnum(current_scope);
-        defer current_scope = scope_parents[scope_index];
+    while (current_scope.unwrap()) |scope_index| {
+        defer current_scope = scope_parents[@intFromEnum(current_scope)];
 
         if (handle.document_scope.getScopeDeclaration(.{
             .scope = current_scope.unwrap().?,
@@ -3365,14 +3360,14 @@ pub fn lookupSymbolGlobal(
         }
 
         if (handle.document_scope.getScopeDeclaration(.{
-            .scope = current_scope.unwrap().?,
+            .scope = scope_index,
             .name = symbol,
             .kind = .other,
         }).unwrap()) |decl_index| {
             const decl = handle.document_scope.declarations.get(@intFromEnum(decl_index));
             return DeclWithHandle{ .decl = decl, .handle = handle };
         }
-        // if (try analyser.resolveUse(scope_uses[scope_index], symbol, handle)) |result| return result;
+        if (try analyser.resolveUse(handle.document_scope.getScopeUsingnamespaceNodesConst(scope_index), symbol, handle)) |result| return result;
     }
 
     return null;
@@ -3384,7 +3379,6 @@ pub fn lookupSymbolContainer(
     symbol: []const u8,
     kind: DocumentScope.DeclarationLookup.Kind,
 ) error{OutOfMemory}!?DeclWithHandle {
-    _ = analyser;
     const handle = container_handle.handle;
 
     if (findContainerScopeIndex(container_handle)) |container_scope_index| {
@@ -3397,7 +3391,7 @@ pub fn lookupSymbolContainer(
             return DeclWithHandle{ .decl = decl, .handle = handle };
         }
 
-        // if (try analyser.resolveUse(scope_uses[container_scope_index], symbol, handle)) |result| return result;
+        if (try analyser.resolveUse(handle.document_scope.getScopeUsingnamespaceNodesConst(container_scope_index), symbol, handle)) |result| return result;
     }
 
     return null;
