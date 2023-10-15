@@ -58,9 +58,9 @@ pub fn printDocumentScope(doc_scope: DocumentScope) void {
         , .{
             scope.loc.start,
             scope.loc.end,
-            scope.tag,
+            scope.data.tag,
             doc_scope.getScopeAstNode(scope_index),
-            scope.parent_scope,
+            doc_scope.getScopeParent(scope_index),
             doc_scope.getScopeChildScopesConst(scope_index),
             doc_scope.getScopeUsingnamespaceNodesConst(scope_index),
         });

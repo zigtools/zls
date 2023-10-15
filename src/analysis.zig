@@ -3015,8 +3015,8 @@ fn findContainerScopeIndex(container_handle: NodeWithHandle) ?Scope.Index {
 
     if (!ast.isContainer(handle.tree, container)) return null;
 
-    return for (handle.document_scope.scopes.items(.tag), 0..) |tag, scope_index| {
-        switch (tag) {
+    return for (0..handle.document_scope.scopes.len) |scope_index| {
+        switch (handle.document_scope.getScopeTag(@enumFromInt(scope_index))) {
             .container, .container_usingnamespace => if (handle.document_scope.getScopeAstNode(@enumFromInt(scope_index)).? == container) {
                 break @enumFromInt(scope_index);
             },
@@ -3247,15 +3247,11 @@ pub fn innermostBlockScope(handle: DocumentStore.Handle, source_index: usize) As
 }
 
 fn innermostBlockScopeInternal(handle: DocumentStore.Handle, source_index: usize, skip_block: bool) Ast.Node.Index {
-    const scope_tags = handle.document_scope.scopes.items(.tag);
-    const scope_parents = handle.document_scope.scopes.items(.parent_scope);
-
     var scope_index = innermostBlockScopeIndex(handle, source_index);
     while (true) {
         const scope = scope_index.unwrap().?;
-        const si = @intFromEnum(scope);
-        defer scope_index = scope_parents[si];
-        const tag = scope_tags[si];
+        defer scope_index = handle.document_scope.getScopeParent(scope);
+        const tag = handle.document_scope.getScopeTag(scope);
 
         if (tag == .block and skip_block)
             continue;
@@ -3267,14 +3263,12 @@ fn innermostBlockScopeInternal(handle: DocumentStore.Handle, source_index: usize
 }
 
 pub fn innermostContainer(handle: *const DocumentStore.Handle, source_index: usize) TypeWithHandle {
-    const scope_tags = handle.document_scope.scopes.items(.tag);
-
     var current = handle.document_scope.getScopeAstNode(@enumFromInt(0)).?;
     if (handle.document_scope.scopes.len == 1) return TypeWithHandle.typeVal(.{ .node = current, .handle = handle });
 
     var scope_iterator = iterateEnclosingScopes(&handle.document_scope, source_index);
     while (scope_iterator.next().unwrap()) |scope_index| {
-        switch (scope_tags[@intFromEnum(scope_index)]) {
+        switch (handle.document_scope.getScopeTag(scope_index)) {
             .container, .container_usingnamespace => current = handle.document_scope.getScopeAstNode(scope_index).?,
             else => {},
         }
@@ -3336,12 +3330,10 @@ pub fn lookupSymbolGlobal(
     source_index: usize,
 ) error{OutOfMemory}!?DeclWithHandle {
     const tree = handle.tree;
-    const scope_parents = handle.document_scope.scopes.items(.parent_scope);
-
     var current_scope = innermostBlockScopeIndex(handle.*, source_index);
 
     while (current_scope.unwrap()) |scope_index| {
-        defer current_scope = scope_parents[@intFromEnum(current_scope)];
+        defer current_scope = handle.document_scope.getScopeParent(scope_index);
 
         if (handle.document_scope.getScopeDeclaration(.{
             .scope = current_scope.unwrap().?,
