@@ -612,15 +612,11 @@ fn makeScopeAt(
         => {
             const first_token = tree.firstToken(node_idx);
             const last_token = ast.lastToken(tree, node_idx);
-            const end_index = offsets.tokenToLoc(tree, last_token).end;
 
             var scope = try context.startScope(
                 .block,
                 .{ .ast_node = node_idx },
-                .{
-                    .start = @intCast(offsets.tokenToIndex(tree, start_token)),
-                    .end = @intCast(end_index),
-                },
+                locToSmallLoc(offsets.tokensToLoc(tree, start_token, last_token)),
             );
 
             // if labeled block
