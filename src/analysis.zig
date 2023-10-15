@@ -349,12 +349,15 @@ pub fn isSnakeCase(name: []const u8) bool {
 // ANALYSIS ENGINE
 
 pub fn getDeclNameToken(tree: Ast, node: Ast.Node.Index) ?Ast.TokenIndex {
+    return getContainerDeclNameToken(tree, null, node);
+}
+
+pub fn getContainerDeclNameToken(tree: Ast, container: ?Ast.Node.Index, node: Ast.Node.Index) ?Ast.TokenIndex {
     const tags = tree.nodes.items(.tag);
     const datas = tree.nodes.items(.data);
     const main_tokens = tree.nodes.items(.main_token);
     const main_token = main_tokens[node];
     const token_tags = tree.tokens.items(.tag);
-    _ = token_tags;
 
     return switch (tags[node]) {
         // regular declaration names. + 1 to mut token because name comes after 'const'/'var'
@@ -385,11 +388,13 @@ pub fn getDeclNameToken(tree: Ast, node: Ast.Node.Index) ?Ast.TokenIndex {
         .container_field_init,
         .container_field_align,
         => {
-            // TODO: add test for tuple name determination
-            if (datas[node].lhs == 0) {
-                return null;
+            if (container) |container_node| {
+                if (token_tags[main_tokens[container_node]] == .keyword_struct and
+                    tree.fullContainerField(node).?.ast.tuple_like)
+                {
+                    return null;
+                }
             }
-
             return main_token;
         },
         .identifier => main_token,
@@ -408,7 +413,11 @@ pub fn getDeclNameToken(tree: Ast, node: Ast.Node.Index) ?Ast.TokenIndex {
 }
 
 pub fn getDeclName(tree: Ast, node: Ast.Node.Index) ?[]const u8 {
-    const name_token = getDeclNameToken(tree, node) orelse return null;
+    return getContainerDeclName(tree, null, node);
+}
+
+pub fn getContainerDeclName(tree: Ast, container: ?Ast.Node.Index, node: Ast.Node.Index) ?[]const u8 {
+    const name_token = getContainerDeclNameToken(tree, container, node) orelse return null;
     const name = offsets.tokenToSlice(tree, name_token);
 
     if (tree.nodes.items(.tag)[node] == .test_decl and
@@ -1393,7 +1402,7 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
                 };
 
                 const new_handle = analyser.store.getOrLoadHandle(builtin_uri) orelse return null;
-                const decl_index = new_handle.document_scope.getScopeDeclaration(new_handle.tree, .{
+                const decl_index = new_handle.document_scope.getScopeDeclaration(.{
                     .scope = @enumFromInt(0),
                     .name = "Type",
                     .kind = .other,
@@ -2762,19 +2771,9 @@ pub const Declaration = union(enum) {
     pub fn eql(a: Declaration, b: Declaration) bool {
         return std.meta.eql(a, b);
     }
-};
 
-pub const DeclWithHandle = struct {
-    decl: Declaration,
-    handle: *const DocumentStore.Handle,
-
-    pub fn eql(a: DeclWithHandle, b: DeclWithHandle) bool {
-        return a.decl.eql(b.decl) and std.mem.eql(u8, a.handle.uri, b.handle.uri);
-    }
-
-    pub fn nameToken(self: DeclWithHandle) Ast.TokenIndex {
-        const tree = self.handle.tree;
-        return switch (self.decl) {
+    pub fn nameToken(decl: Declaration, tree: Ast) Ast.TokenIndex {
+        return switch (decl) {
             .ast_node => |n| getDeclNameToken(tree, n).?,
             .param_payload => |pp| pp.get(tree).name_token.?,
             .pointer_payload => |pp| pp.name,
@@ -2795,6 +2794,19 @@ pub const DeclWithHandle = struct {
                 return payload_token + @intFromBool(tree.tokens.items(.tag)[payload_token] == .asterisk);
             },
         };
+    }
+};
+
+pub const DeclWithHandle = struct {
+    decl: Declaration,
+    handle: *const DocumentStore.Handle,
+
+    pub fn eql(a: DeclWithHandle, b: DeclWithHandle) bool {
+        return a.decl.eql(b.decl) and std.mem.eql(u8, a.handle.uri, b.handle.uri);
+    }
+
+    pub fn nameToken(self: DeclWithHandle) Ast.TokenIndex {
+        return self.decl.nameToken(self.handle.tree);
     }
 
     pub fn definitionToken(self: DeclWithHandle, analyser: *Analyser, resolve_alias: bool) !TokenWithHandle {
@@ -3312,7 +3324,7 @@ pub fn lookupLabel(
 ) error{OutOfMemory}!?DeclWithHandle {
     var scope_iterator = iterateEnclosingScopes(handle.document_scope, source_index);
     while (scope_iterator.next()) |scope_index| {
-        const decl_index = handle.document_scope.getScopeDeclaration(handle.tree, .{
+        const decl_index = handle.document_scope.getScopeDeclaration(.{
             .scope = scope_index,
             .name = symbol,
             .kind = .other,
@@ -3343,7 +3355,7 @@ pub fn lookupSymbolGlobal(
         const scope_index = @intFromEnum(current_scope);
         defer current_scope = scope_parents[scope_index];
 
-        if (handle.document_scope.getScopeDeclaration(handle.tree, .{
+        if (handle.document_scope.getScopeDeclaration(.{
             .scope = current_scope.unwrap().?,
             .name = symbol,
             .kind = .field,
@@ -3359,13 +3371,12 @@ pub fn lookupSymbolGlobal(
                 return DeclWithHandle{ .decl = decl, .handle = handle };
         }
 
-        if (handle.document_scope.getScopeDeclaration(handle.tree, .{
+        if (handle.document_scope.getScopeDeclaration(.{
             .scope = current_scope.unwrap().?,
             .name = symbol,
             .kind = .other,
         }).unwrap()) |decl_index| {
             const decl = handle.document_scope.declarations.get(@intFromEnum(decl_index));
-            std.debug.assert(decl == .ast_node);
             return DeclWithHandle{ .decl = decl, .handle = handle };
         }
         // if (try analyser.resolveUse(scope_uses[scope_index], symbol, handle)) |result| return result;
@@ -3384,7 +3395,7 @@ pub fn lookupSymbolContainer(
     const handle = container_handle.handle;
 
     if (findContainerScopeIndex(container_handle)) |container_scope_index| {
-        if (handle.document_scope.getScopeDeclaration(handle.tree, .{
+        if (handle.document_scope.getScopeDeclaration(.{
             .scope = container_scope_index,
             .name = symbol,
             .kind = kind,

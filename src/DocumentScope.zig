@@ -71,13 +71,14 @@ pub const DeclarationLookupContext = struct {
         var hasher = std.hash.Wyhash.init(0);
         std.hash.autoHash(&hasher, s.scope);
         hasher.update(s.name);
+        std.hash.autoHash(&hasher, s.kind);
         return @truncate(hasher.final());
     }
 
     pub fn eql(self: @This(), a: DeclarationLookup, b: DeclarationLookup, b_index: usize) bool {
         _ = self;
         _ = b_index;
-        return a.scope == b.scope and std.mem.eql(u8, a.name, b.name);
+        return a.scope == b.scope and a.kind == b.kind and std.mem.eql(u8, a.name, b.name);
     }
 };
 
@@ -116,7 +117,9 @@ pub const Scope = struct {
     };
 
     pub const ChildDeclarations = union {
-        small: [2]Declaration.OptionalIndex,
+        pub const small_size = 2;
+
+        small: [small_size]Declaration.OptionalIndex,
         other: struct {
             start: u32,
             end: u32,
@@ -160,6 +163,11 @@ const ScopeContext = struct {
     child_scopes_scratch: std.ArrayListUnmanaged(Scope.Index) = .{},
     child_declarations_scratch: std.ArrayListUnmanaged(Declaration.Index) = .{},
 
+    fn deinit(context: *ScopeContext) void {
+        context.child_scopes_scratch.deinit(context.allocator);
+        context.child_declarations_scratch.deinit(context.allocator);
+    }
+
     const PushedScope = struct {
         context: *ScopeContext,
 
@@ -168,19 +176,17 @@ const ScopeContext = struct {
         scopes_start: u32,
         declarations_start: u32,
 
-        // TODO: Refactor; we have the node index and the container index
-        // so we don't actually need to ask for these I think
-        small_strings: [2][]const u8 = .{ "", "" },
-
         fn pushDeclaration(
             pushed: *PushedScope,
             name: []const u8,
             declaration: Declaration,
             kind: DeclarationLookup.Kind,
         ) error{OutOfMemory}!void {
+            if (std.mem.eql(u8, name, "_")) return;
+
             const doc_scope = pushed.context.doc_scope;
             try doc_scope.declarations.append(pushed.context.allocator, declaration);
-            try pushed.pushDeclarationIndex(name, @enumFromInt(doc_scope.declarations.len), kind);
+            try pushed.pushDeclarationIndex(name, @enumFromInt(doc_scope.declarations.len - 1), kind);
         }
 
         fn pushDeclarationIndex(
@@ -189,59 +195,16 @@ const ScopeContext = struct {
             declaration: Declaration.Index,
             kind: DeclarationLookup.Kind,
         ) error{OutOfMemory}!void {
+            if (std.mem.eql(u8, name, "_")) return;
+
             const context = pushed.context;
             const allocator = context.allocator;
-            _ = allocator;
 
             var slice = pushed.context.doc_scope.scopes.slice();
-            var is_small = slice.items(.is_small)[@intFromEnum(pushed.scope)];
-            var child_declarations = slice.items(.child_declarations)[@intFromEnum(pushed.scope)];
+            var is_small = &slice.items(.is_small)[@intFromEnum(pushed.scope)];
+            var child_declarations = &slice.items(.child_declarations)[@intFromEnum(pushed.scope)];
 
-            const decl_tags = context.doc_scope.declarations.items(.tags);
-            const node_tags = context.tree.nodes.items(.tag);
-
-            if (is_small) {
-                for (&child_declarations.small, &pushed.small_strings) |*scd, *small_string| {
-                    if (scd.* == .none) {
-                        small_string.* = name;
-                        scd.* = @enumFromInt(@intFromEnum(declaration));
-                        break;
-                    }
-                } else {
-                    is_small = false;
-
-                    for (&child_declarations.small, &pushed.small_strings) |scd, small_string| {
-                        try pushed.pushDeclarationIndexNotSmall(small_string, scd.unwrap().?, switch (decl_tags[@intFromEnum(scd.unwrap().?)]) {
-                            .ast_node => blk: {
-                                break :blk switch (node_tags[@intFromEnum(declaration)]) {
-                                    .container_field_init,
-                                    .container_field_align,
-                                    .container_field,
-                                    => .field,
-                                    else => .other,
-                                };
-                            },
-                            else => .other,
-                        });
-                    }
-                    try pushed.pushDeclarationIndexNotSmall(name, declaration, kind);
-                }
-            } else {
-                try pushed.pushDeclarationIndexNotSmall(name, declaration, kind);
-            }
-        }
-
-        fn pushDeclarationIndexNotSmall(
-            pushed: PushedScope,
-            name: []const u8,
-            declaration: Declaration.Index,
-            kind: DeclarationLookup.Kind,
-        ) error{OutOfMemory}!void {
-            const context = pushed.context;
-            const allocator = context.allocator;
-
-            try context.child_declarations_scratch.append(allocator, declaration);
-            try context.doc_scope.declaration_lookup_map.put(
+            try context.doc_scope.declaration_lookup_map.putNoClobber(
                 allocator,
                 .{
                     .scope = pushed.scope,
@@ -250,49 +213,53 @@ const ScopeContext = struct {
                 },
                 {},
             );
-        }
 
-        fn pushDeclLoopLabel(pushed: PushedScope, label: u32, node_idx: Ast.Node.Index) error{OutOfMemory}![]const u8 {
-            var label_scope = try pushed.context.startScope(
-                .other,
-                .{ .other = void{} },
-                locToSmallLoc(offsets.tokenToLoc(pushed.context.tree, label)),
-            );
+            if (is_small.*) {
+                for (&child_declarations.small) |*scd| {
+                    if (scd.* == .none) {
+                        scd.* = @enumFromInt(@intFromEnum(declaration));
+                        break;
+                    }
+                } else {
+                    is_small.* = false;
 
-            const name = pushed.context.tree.tokenSlice(label);
-            try label_scope.pushDeclaration(name, .{
-                .label_decl = .{
-                    .label = label,
-                    .block = node_idx,
-                },
-            }, .other);
+                    try context.child_declarations_scratch.ensureUnusedCapacity(allocator, Scope.ChildDeclarations.small_size + 1);
 
-            try label_scope.finalize();
+                    for (child_declarations.small) |scd| {
+                        context.child_declarations_scratch.appendAssumeCapacity(scd.unwrap().?);
+                    }
 
-            return name;
+                    context.child_declarations_scratch.appendAssumeCapacity(declaration);
+                }
+            } else {
+                try context.child_declarations_scratch.append(allocator, declaration);
+            }
         }
 
         fn finalize(pushed: PushedScope) error{OutOfMemory}!void {
             const context = pushed.context;
             const allocator = context.allocator;
 
-            const declaration_start = context.doc_scope.extra.items.len;
-            try context.doc_scope.extra.appendSlice(allocator, @ptrCast(pushed.context.child_declarations_scratch.items[pushed.declarations_start..]));
-            const declaration_end = context.doc_scope.extra.items.len;
-            pushed.context.child_declarations_scratch.items.len = pushed.declarations_start;
+            var slice = pushed.context.doc_scope.scopes.slice();
+
+            if (!slice.items(.is_small)[@intFromEnum(pushed.scope)]) {
+                const declaration_start = context.doc_scope.extra.items.len;
+                try context.doc_scope.extra.appendSlice(allocator, @ptrCast(pushed.context.child_declarations_scratch.items[pushed.declarations_start..]));
+                const declaration_end = context.doc_scope.extra.items.len;
+                pushed.context.child_declarations_scratch.items.len = pushed.declarations_start;
+
+                slice.items(.child_declarations)[@intFromEnum(pushed.scope)] = .{
+                    .other = .{
+                        .start = @intCast(declaration_start),
+                        .end = @intCast(declaration_end),
+                    },
+                };
+            }
 
             const scope_start = context.doc_scope.extra.items.len;
             try context.doc_scope.extra.appendSlice(allocator, @ptrCast(pushed.context.child_scopes_scratch.items[pushed.scopes_start..]));
             const scope_end = context.doc_scope.extra.items.len;
             pushed.context.child_scopes_scratch.items.len = pushed.scopes_start;
-
-            var slice = pushed.context.doc_scope.scopes.slice();
-            if (!slice.items(.is_small)[@intFromEnum(pushed.scope)]) {
-                slice.items(.child_declarations)[@intFromEnum(pushed.scope)].other = .{
-                    .start = @intCast(declaration_start),
-                    .end = @intCast(declaration_end),
-                };
-            }
 
             slice.items(.child_scopes)[@intFromEnum(pushed.scope)] = .{
                 .start = @intCast(scope_start),
@@ -301,10 +268,12 @@ const ScopeContext = struct {
 
             std.debug.assert(pushed.context.current_scope != .none);
             pushed.context.current_scope = slice.items(.parent_scope)[@intFromEnum(pushed.context.current_scope.unwrap().?)];
+
+            std.debug.assert(pushed.context.doc_scope.declarations.len == pushed.context.doc_scope.declaration_lookup_map.count());
         }
     };
 
-    fn startScope(context: *ScopeContext, tag: Scope.Tag, data: Scope.Data, loc: Scope.SmallLoc) !PushedScope {
+    fn startScope(context: *ScopeContext, tag: Scope.Tag, data: Scope.Data, loc: Scope.SmallLoc) error{OutOfMemory}!PushedScope {
         try context.doc_scope.scopes.append(context.allocator, .{
             .tag = tag,
             .loc = loc,
@@ -319,7 +288,8 @@ const ScopeContext = struct {
             },
             .data = data,
         });
-        context.current_scope = @enumFromInt(context.doc_scope.scopes.len);
+        context.current_scope = @enumFromInt(context.doc_scope.scopes.len - 1);
+        try context.child_scopes_scratch.append(context.allocator, context.current_scope.unwrap().?);
 
         return .{
             .context = context,
@@ -327,6 +297,26 @@ const ScopeContext = struct {
             .scopes_start = @intCast(context.child_scopes_scratch.items.len),
             .declarations_start = @intCast(context.child_declarations_scratch.items.len),
         };
+    }
+
+    fn pushDeclLoopLabel(context: *ScopeContext, label: u32, node_idx: Ast.Node.Index) error{OutOfMemory}![]const u8 {
+        var label_scope = try context.startScope(
+            .other,
+            .{ .other = void{} },
+            locToSmallLoc(offsets.tokenToLoc(context.tree, label)),
+        );
+
+        const name = context.tree.tokenSlice(label);
+        try label_scope.pushDeclaration(name, .{
+            .label_decl = .{
+                .label = label,
+                .block = node_idx,
+            },
+        }, .other);
+
+        try label_scope.finalize();
+
+        return name;
     }
 };
 
@@ -342,6 +332,7 @@ pub fn init(allocator: std.mem.Allocator, tree: Ast) !DocumentScope {
         .tree = tree,
         .doc_scope = &document_scope,
     };
+    defer context.deinit();
     try walkContainerDecl(&context, tree, 0, 0);
 
     return document_scope;
@@ -349,8 +340,12 @@ pub fn init(allocator: std.mem.Allocator, tree: Ast) !DocumentScope {
 
 pub fn deinit(scope: *DocumentScope, allocator: std.mem.Allocator) void {
     // TODO
-    _ = scope;
-    _ = allocator;
+    scope.scopes.deinit(allocator);
+    scope.declarations.deinit(allocator);
+    scope.declaration_lookup_map.deinit(allocator);
+    scope.extra.deinit(allocator);
+    scope.enum_completions.deinit(allocator);
+    scope.error_completions.deinit(allocator);
 }
 
 fn locToSmallLoc(loc: offsets.Loc) Scope.SmallLoc {
@@ -382,7 +377,7 @@ fn walkContainerDecl(
 
     var scope = try context.startScope(
         .container,
-        .{ .ast_node = 0 },
+        .{ .ast_node = node_idx },
         locToSmallLoc(offsets.tokensToLoc(tree, start_token, ast.lastToken(tree, node_idx))),
     );
 
@@ -398,10 +393,13 @@ fn walkContainerDecl(
                 // try uses.append(allocator, decl);
                 continue;
             },
+            .test_decl => {
+                continue;
+            },
             else => {},
         }
 
-        const name = Analyser.getDeclName(tree, decl) orelse continue;
+        const name = Analyser.getContainerDeclName(tree, node_idx, decl) orelse continue;
         try scope.pushDeclaration(
             name,
             .{ .ast_node = decl },
@@ -531,9 +529,11 @@ fn makeScopeAt(
                             .insertText = name,
                             .insertTextFormat = .PlainText,
                         });
-                        if (!gop.found_existing) {
-                            gop.key_ptr.detail = try std.fmt.allocPrint(allocator, "error.{s}", .{name});
-                        }
+                        _ = gop;
+                        // TODO: fix deinit
+                        // if (!gop.found_existing) {
+                        //     gop.key_ptr.detail = try std.fmt.allocPrint(allocator, "error.{s}", .{name});
+                        // }
                     },
                     else => {},
                 }
@@ -598,13 +598,7 @@ fn makeScopeAt(
             // Visit the function body
             try walkNode(context, tree, data[node_idx].rhs);
 
-            switch (finality) {
-                .final => {
-                    try scope.finalize();
-                },
-                else => {},
-            }
-            return scope;
+            try scope.finalize();
         },
         .block,
         .block_semicolon,
@@ -742,25 +736,13 @@ fn makeScopeAt(
 
             try walkNode(context, tree, while_node.ast.cond_expr);
 
-            var cont_scope = try makeBlockScopeInternal(context, tree, while_node.ast.cont_expr);
-
-            const then_start = while_node.payload_token orelse tree.firstToken(while_node.ast.then_expr);
-            var then_scope = (try makeBlockScopeAt(context, tree, while_node.ast.then_expr, then_start)).?;
-
-            const else_start = while_node.error_token orelse tree.firstToken(while_node.ast.else_expr);
-            var else_scope = try makeBlockScopeAt(context, tree, while_node.ast.else_expr, else_start);
-
-            if (while_node.label_token) |label| {
+            const label_token, const label_name = if (while_node.label_token) |label| blk: {
                 std.debug.assert(token_tags[label] == .identifier);
+                const name = try context.pushDeclLoopLabel(label, node_idx);
+                break :blk .{ label, name };
+            } else .{ null, null };
 
-                const name = try then_scope.pushDeclLoopLabel(label, node_idx);
-                try then_scope.pushDeclaration(name, .{ .label_decl = .{ .label = label, .block = while_node.ast.then_expr } }, .other);
-                if (else_scope) |*scope| {
-                    try scope.pushDeclaration(name, .{ .label_decl = .{ .label = label, .block = while_node.ast.else_expr } }, .other);
-                }
-            }
-
-            if (while_node.payload_token) |payload| {
+            const payload_declaration, const payload_name = if (while_node.payload_token) |payload| blk: {
                 const name_token = payload + @intFromBool(token_tags[payload] == .asterisk);
                 std.debug.assert(token_tags[name_token] == .identifier);
 
@@ -769,11 +751,37 @@ fn makeScopeAt(
                     .{ .error_union_payload = .{ .name = name_token, .condition = while_node.ast.cond_expr } }
                 else
                     .{ .pointer_payload = .{ .name = name_token, .condition = while_node.ast.cond_expr } };
-                if (cont_scope) |*scope| {
-                    try scope.pushDeclaration(name, decl, .other);
+                break :blk .{ decl, name };
+            } else .{ null, null };
+
+            var cont_scope = try makeBlockScopeInternal(context, tree, while_node.ast.cont_expr);
+
+            if (cont_scope) |*scope| {
+                if (payload_declaration) |decl| {
+                    try scope.pushDeclaration(payload_name.?, decl, .other);
                 }
-                try then_scope.pushDeclaration(name, decl, .other);
+                try scope.finalize();
             }
+
+            const then_start = while_node.payload_token orelse tree.firstToken(while_node.ast.then_expr);
+            var then_scope = (try makeBlockScopeAt(context, tree, while_node.ast.then_expr, then_start)).?;
+
+            if (label_token) |label| {
+                try then_scope.pushDeclaration(
+                    label_name.?,
+                    .{ .label_decl = .{ .label = label, .block = while_node.ast.then_expr } },
+                    .other,
+                );
+            }
+
+            if (payload_declaration) |decl| {
+                try then_scope.pushDeclaration(payload_name.?, decl, .other);
+            }
+
+            try then_scope.finalize();
+
+            const else_start = while_node.error_token orelse tree.firstToken(while_node.ast.else_expr);
+            var else_scope = try makeBlockScopeAt(context, tree, while_node.ast.else_expr, else_start);
 
             if (while_node.error_token) |err_token| {
                 std.debug.assert(token_tags[err_token] == .identifier);
@@ -783,8 +791,6 @@ fn makeScopeAt(
                 }, .other);
             }
 
-            try then_scope.finalize();
-            if (cont_scope) |*scope| try scope.finalize();
             if (else_scope) |*scope| try scope.finalize();
         },
         .@"for",
@@ -797,9 +803,14 @@ fn makeScopeAt(
                 try walkNode(context, tree, input_node);
             }
 
+            const label_token, const label_name = if (for_node.label_token) |label| blk: {
+                std.debug.assert(token_tags[label] == .identifier);
+                const name = try context.pushDeclLoopLabel(label, node_idx);
+                break :blk .{ label, name };
+            } else .{ null, null };
+
             var capture_token = for_node.payload_token;
             var then_scope = (try makeBlockScopeAt(context, tree, for_node.ast.then_expr, capture_token)).?;
-            var else_scope = try makeBlockScopeInternal(context, tree, for_node.ast.else_expr);
 
             for (for_node.ast.inputs) |input| {
                 if (capture_token + 1 >= tree.tokens.len) break;
@@ -814,24 +825,27 @@ fn makeScopeAt(
                 );
             }
 
-            if (for_node.label_token) |label| {
-                std.debug.assert(token_tags[label] == .identifier);
-
-                const name = try then_scope.pushDeclLoopLabel(label, node_idx);
+            if (label_token) |label| {
                 try then_scope.pushDeclaration(
-                    name,
+                    label_name.?,
                     .{ .label_decl = .{ .label = label, .block = for_node.ast.then_expr } },
                     .other,
                 );
-                try then_scope.finalize();
-                if (else_scope) |*scope| {
-                    try scope.pushDeclaration(
-                        name,
+            }
+
+            try then_scope.finalize();
+
+            var else_scope = try makeBlockScopeInternal(context, tree, for_node.ast.else_expr);
+
+            if (else_scope) |*scope| {
+                if (label_token) |label| {
+                    try then_scope.pushDeclaration(
+                        label_name.?,
                         .{ .label_decl = .{ .label = label, .block = for_node.ast.else_expr } },
                         .other,
                     );
-                    try scope.finalize();
                 }
+                try scope.finalize();
             }
         },
         .@"switch",
@@ -852,6 +866,7 @@ fn makeScopeAt(
                     try expr_scope.pushDeclaration(name, .{
                         .switch_payload = .{ .node = node_idx, .case_index = @intCast(case_index) },
                     }, .other);
+
                     try expr_scope.finalize();
                 } else {
                     try walkNode(context, tree, switch_case.ast.target_expr);
@@ -889,10 +904,15 @@ pub fn getScopeDeclarationsConst(
     const slice = doc_scope.scopes.slice();
 
     if (slice.items(.is_small)[@intFromEnum(scope)]) {
-        const small = slice.items(.child_declarations)[@intFromEnum(scope)].small;
-        if (small[0] == .none) return @ptrCast(small[0..0]);
-        if (small[1] == .none) return @ptrCast(small[0..1]);
-        return @ptrCast(small[0..2]);
+        const small = &slice.items(.child_declarations)[@intFromEnum(scope)].small;
+
+        for (0..Scope.ChildDeclarations.small_size) |idx| {
+            if (small[idx] == .none) {
+                return @ptrCast(small[0..idx]);
+            }
+        }
+
+        return @ptrCast(small[0..Scope.ChildDeclarations.small_size]);
     } else {
         const other = slice.items(.child_declarations)[@intFromEnum(scope)].other;
         return @ptrCast(doc_scope.extra.items[other.start..other.end]);
@@ -901,51 +921,12 @@ pub fn getScopeDeclarationsConst(
 
 pub fn getScopeDeclaration(
     doc_scope: DocumentScope,
-    tree: Ast,
     lookup: DeclarationLookup,
 ) Declaration.OptionalIndex {
-    const slice = doc_scope.scopes.slice();
-    const decl_slice = doc_scope.declarations.slice();
-
-    const decl_tags = decl_slice.items(.tags);
-    const decl_data = decl_slice.items(.data);
-
-    const node_tags = tree.nodes.items(.tag);
-
-    if (slice.items(.is_small)[@intFromEnum(lookup.scope)]) {
-        for (&slice.items(.child_declarations)[@intFromEnum(lookup.scope)].small) |decl_idx| {
-            if (decl_idx == .none)
-                break;
-
-            const tag = decl_tags[@intFromEnum(decl_idx)];
-            const data = decl_data[@intFromEnum(decl_idx)];
-
-            switch (tag) {
-                .ast_node => {
-                    const kind: DeclarationLookup.Kind = switch (node_tags[data.ast_node]) {
-                        .container_field_init,
-                        .container_field_align,
-                        .container_field,
-                        => .field,
-                        else => .other,
-                    };
-                    if (std.mem.eql(u8, Analyser.getDeclName(tree, data.ast_node) orelse continue, lookup.name) and kind == lookup.kind) {
-                        return decl_idx;
-                    }
-                },
-                else => {
-                    // TODO
-                },
-            }
-        }
-
-        return .none;
-    } else {
-        return if (doc_scope.declaration_lookup_map.getIndex(lookup)) |idx|
-            @enumFromInt(idx)
-        else
-            .none;
-    }
+    return if (doc_scope.declaration_lookup_map.getIndex(lookup)) |idx|
+        @enumFromInt(idx)
+    else
+        .none;
 }
 
 pub fn getScopeChildScopesConst(

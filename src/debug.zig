@@ -2,6 +2,7 @@ const std = @import("std");
 
 const analysis = @import("analysis.zig");
 const offsets = @import("offsets.zig");
+const DocumentScope = @import("DocumentScope.zig");
 
 pub fn printTree(tree: std.zig.Ast) void {
     if (!std.debug.runtime_safety) @compileError("this function should only be used in debug mode!");
@@ -38,7 +39,7 @@ pub fn printTree(tree: std.zig.Ast) void {
     }
 }
 
-pub fn printDocumentScope(doc_scope: analysis.DocumentScope) void {
+pub fn printDocumentScope(doc_scope: DocumentScope) void {
     if (!std.debug.runtime_safety) @compileError("this function should only be used in debug mode!");
 
     for (0..doc_scope.scopes.len) |index| {
@@ -46,26 +47,37 @@ pub fn printDocumentScope(doc_scope: analysis.DocumentScope) void {
         if (index != 0) std.debug.print("\n\n", .{});
         std.debug.print(
             \\[{d}, {d}]
+            \\  tag: {}
             \\  data: {}
             \\  parent: {}
             \\  child scopes: {any}
-            \\  usingnamespaces: {any}
-            \\  tests: {any}
+            // \\  usingnamespaces: {any}
+            // \\  tests: {any}
             \\  decls:
             \\
         , .{
             scope.loc.start,
             scope.loc.end,
-            scope.data,
-            scope.parent,
-            scope.child_scopes.items,
-            scope.uses,
-            scope.tests,
+            scope.tag,
+            switch (scope.tag) {
+                .container => scope.data.ast_node,
+                .function => scope.data.ast_node,
+                .block => scope.data.ast_node,
+                // TODO
+                .other => 0,
+                .container_usingnamespace => 0,
+            },
+            scope.parent_scope,
+            doc_scope.getScopeChildScopesConst(@enumFromInt(index)),
+            // scope.uses,
+            // scope.tests,
         });
 
-        var decl_it = scope.decls.iterator();
-        while (decl_it.next()) |entry| {
-            std.debug.print("    - {s:<8} {}\n", .{ entry.key_ptr.name, entry.value_ptr.* });
+        for (doc_scope.getScopeDeclarationsConst(@enumFromInt(index))) |decl| {
+            std.debug.print("    - {s:<8} {}\n", .{
+                doc_scope.declaration_lookup_map.keys()[@intFromEnum(decl)].name,
+                doc_scope.declarations.get(@intFromEnum(decl)),
+            });
         }
     }
 }
