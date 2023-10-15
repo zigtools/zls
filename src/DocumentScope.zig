@@ -273,10 +273,7 @@ const ScopeContext = struct {
             .child_scopes = undefined,
             .is_small = true,
             .child_declarations = .{
-                .small = .{
-                    Declaration.OptionalIndex.none,
-                    Declaration.OptionalIndex.none,
-                },
+                .small = [_]Declaration.OptionalIndex{.none} ** Scope.ChildDeclarations.small_size,
             },
             .data = data,
         });
