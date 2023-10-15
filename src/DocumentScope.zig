@@ -381,7 +381,6 @@ fn walkContainerDecl(
 
     const allocator = context.allocator;
     const scopes = &context.doc_scope.scopes;
-    _ = scopes;
     const tags = tree.nodes.items(.tag);
     const token_tags = tree.tokens.items(.tag);
 
@@ -395,15 +394,14 @@ fn walkContainerDecl(
     );
 
     var uses = std.ArrayListUnmanaged(Ast.Node.Index){};
-    errdefer uses.deinit(allocator);
+    defer uses.deinit(allocator);
 
     for (container_decl.ast.members) |decl| {
         try walkNode(context, tree, decl);
 
         switch (tags[decl]) {
             .@"usingnamespace" => {
-                // TODO
-                // try uses.append(allocator, decl);
+                try uses.append(allocator, decl);
                 continue;
             },
             .test_decl => {
@@ -445,6 +443,16 @@ fn walkContainerDecl(
     }
 
     try scope.finalize();
+
+    if (uses.items.len != 0) {
+        scopes.items(.tag)[@intFromEnum(scope.scope)] = .container_usingnamespace;
+        scopes.items(.data)[@intFromEnum(scope.scope)] = .{ .container_usingnamespace = @intCast(context.doc_scope.extra.items.len) };
+
+        try context.doc_scope.extra.ensureUnusedCapacity(allocator, uses.items.len + 2);
+        context.doc_scope.extra.appendAssumeCapacity(node_idx);
+        context.doc_scope.extra.appendAssumeCapacity(@intCast(uses.items.len));
+        context.doc_scope.extra.appendSliceAssumeCapacity(uses.items);
+    }
 }
 
 /// If `node_idx` is a block its scope index will be returned
@@ -922,6 +930,39 @@ pub fn getScopeDeclarationsConst(
         const other = slice.items(.child_declarations)[@intFromEnum(scope)].other;
         return @ptrCast(doc_scope.extra.items[other.start..other.end]);
     }
+}
+
+pub fn getScopeUsingnamespaceNodesConst(
+    doc_scope: DocumentScope,
+    scope: Scope.Index,
+) []const Ast.Node.Index {
+    const slice = doc_scope.scopes.slice();
+
+    switch (slice.items(.tag)[@intFromEnum(scope)]) {
+        .container_usingnamespace => {
+            const start = slice.items(.data)[@intFromEnum(scope)].container_usingnamespace;
+            const len = doc_scope.extra.items[start + 1];
+            return doc_scope.extra.items[start + 2 .. start + 2 + len];
+        },
+        else => return &.{},
+    }
+}
+
+pub fn getScopeAstNode(
+    doc_scope: DocumentScope,
+    scope: Scope.Index,
+) ?Ast.Node.Index {
+    const slice = doc_scope.scopes.slice();
+
+    const scope_idx = @intFromEnum(scope);
+    const tag = slice.items(.tag)[scope_idx];
+    const data = slice.items(.data)[scope_idx];
+
+    return switch (tag) {
+        .container_usingnamespace => doc_scope.extra.items[data.container_usingnamespace],
+        .container, .function, .block => data.ast_node,
+        .other => null,
+    };
 }
 
 pub fn getScopeDeclaration(

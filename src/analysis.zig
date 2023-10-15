@@ -3011,9 +3011,9 @@ fn findContainerScopeIndex(container_handle: NodeWithHandle) ?Scope.Index {
 
     if (!ast.isContainer(handle.tree, container)) return null;
 
-    return for (handle.document_scope.scopes.items(.tag), handle.document_scope.scopes.items(.data), 0..) |tag, data, scope_index| {
+    return for (handle.document_scope.scopes.items(.tag), 0..) |tag, scope_index| {
         switch (tag) {
-            .container => if (data.ast_node == container) {
+            .container, .container_usingnamespace => if (handle.document_scope.getScopeAstNode(@enumFromInt(scope_index)).? == container) {
                 break @enumFromInt(scope_index);
             },
             else => {},
@@ -3029,7 +3029,6 @@ fn iterateSymbolsContainerInternal(
     context: anytype,
     instance_access: bool,
 ) error{OutOfMemory}!void {
-    _ = analyser;
     const container = container_handle.node;
     const handle = container_handle.handle;
 
@@ -3040,7 +3039,6 @@ fn iterateSymbolsContainerInternal(
 
     const is_enum = token_tags[main_token] == .keyword_enum;
 
-    // const scope_uses = handle.document_scope.scopes.items(.uses);
     const container_scope_index = findContainerScopeIndex(container_handle) orelse return;
     const scope_decls = handle.document_scope.getScopeDeclarationsConst(container_scope_index);
 
@@ -3078,15 +3076,15 @@ fn iterateSymbolsContainerInternal(
         try callback(context, decl_with_handle);
     }
 
-    // for (scope_uses[container_scope_index]) |use| {
-    //     try analyser.iterateUsingnamespaceContainerSymbols(
-    //         .{ .node = use, .handle = handle },
-    //         orig_handle,
-    //         callback,
-    //         context,
-    //         false,
-    //     );
-    // }
+    for (handle.document_scope.getScopeUsingnamespaceNodesConst(container_scope_index)) |use| {
+        try analyser.iterateUsingnamespaceContainerSymbols(
+            .{ .node = use, .handle = handle },
+            orig_handle,
+            callback,
+            context,
+            false,
+        );
+    }
 }
 
 fn iterateUsingnamespaceContainerSymbols(
@@ -3204,7 +3202,6 @@ fn iterateSymbolsGlobalInternal(
     comptime callback: anytype,
     context: anytype,
 ) error{OutOfMemory}!void {
-    _ = analyser;
     // const scope_uses = handle.document_scope.scopes.items(.uses);
 
     var scope_iterator = iterateEnclosingScopes(handle.document_scope, source_index);
@@ -3217,15 +3214,15 @@ fn iterateSymbolsGlobalInternal(
             try callback(context, DeclWithHandle{ .decl = decl, .handle = handle });
         }
 
-        // for (scope_uses[@intFromEnum(scope_index)]) |use| {
-        //     try analyser.iterateUsingnamespaceContainerSymbols(
-        //         .{ .node = use, .handle = handle },
-        //         handle,
-        //         callback,
-        //         context,
-        //         false,
-        //     );
-        // }
+        for (handle.document_scope.getScopeUsingnamespaceNodesConst(scope_index)) |use| {
+            try analyser.iterateUsingnamespaceContainerSymbols(
+                .{ .node = use, .handle = handle },
+                handle,
+                callback,
+                context,
+                false,
+            );
+        }
     }
 }
 
@@ -3255,37 +3252,34 @@ pub fn innermostBlockScope(handle: DocumentStore.Handle, source_index: usize) As
 
 fn innermostBlockScopeInternal(handle: DocumentStore.Handle, source_index: usize, skip_block: bool) Ast.Node.Index {
     const scope_tags = handle.document_scope.scopes.items(.tag);
-    const scope_datas = handle.document_scope.scopes.items(.data);
     const scope_parents = handle.document_scope.scopes.items(.parent_scope);
 
     var scope_index = innermostBlockScopeIndex(handle, source_index);
     while (true) {
-        const si = @intFromEnum(scope_index.unwrap() orelse @panic("innermost block failure"));
+        const scope = scope_index.unwrap().?;
+        const si = @intFromEnum(scope);
         defer scope_index = scope_parents[si];
         const tag = scope_tags[si];
-        const data = scope_datas[si];
-        switch (tag) {
-            .container, .function, .block => {
-                if (tag == .block and skip_block)
-                    continue;
-                return data.ast_node;
-            },
-            else => {},
+
+        if (tag == .block and skip_block)
+            continue;
+
+        if (handle.document_scope.getScopeAstNode(scope)) |ast_node| {
+            return ast_node;
         }
     }
 }
 
 pub fn innermostContainer(handle: *const DocumentStore.Handle, source_index: usize) TypeWithHandle {
     const scope_tags = handle.document_scope.scopes.items(.tag);
-    const scope_datas = handle.document_scope.scopes.items(.data);
 
-    var current = scope_datas[0].ast_node;
+    var current = handle.document_scope.getScopeAstNode(@enumFromInt(0)).?;
     if (handle.document_scope.scopes.len == 1) return TypeWithHandle.typeVal(.{ .node = current, .handle = handle });
 
     var scope_iterator = iterateEnclosingScopes(handle.document_scope, source_index);
     while (scope_iterator.next()) |scope_index| {
         switch (scope_tags[@intFromEnum(scope_index)]) {
-            .container => current = scope_datas[@intFromEnum(scope_index)].ast_node,
+            .container, .container_usingnamespace => current = handle.document_scope.getScopeAstNode(scope_index).?,
             else => {},
         }
     }
