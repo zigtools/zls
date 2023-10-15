@@ -3148,6 +3148,7 @@ pub const EnclosingScopeIterator = struct {
     current_scope: Scope.OptionalIndex,
     source_index: usize,
 
+    // TODO: make optional index
     pub fn next(self: *EnclosingScopeIterator) ?Scope.Index {
         if (self.current_scope == .none) return null;
 
@@ -3188,7 +3189,7 @@ pub fn iterateSymbolsContainer(
 pub fn iterateLabels(handle: *const DocumentStore.Handle, source_index: usize, comptime callback: anytype, context: anytype) error{OutOfMemory}!void {
     var scope_iterator = iterateEnclosingScopes(handle.document_scope, source_index);
     while (scope_iterator.next()) |scope_index| {
-        for (handle.document_scope.getScopeChildScopesConst(scope_index)) |decl_index| {
+        for (handle.document_scope.getScopeDeclarationsConst(scope_index)) |decl_index| {
             const decl = handle.document_scope.declarations.get(@intFromEnum(decl_index));
             if (decl != .label_decl) continue;
             try callback(context, DeclWithHandle{ .decl = decl, .handle = handle });

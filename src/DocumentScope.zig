@@ -89,8 +89,8 @@ pub const Scope = struct {
         /// index into `DocumentScope.extra`
         /// Body:
         ///     ast_node: Ast.Node.Index,
-        ///     usingnamespace_start: u32,
-        ///     usingnamespace_end: u32,
+        ///     usingnamespace_count: u32,
+        ///     usingnamespaces: [usingnamespace_count]u32,
         /// `node_tags[ast_node]` is ContainerDecl or Root
         container_usingnamespace,
         /// `node_tags[ast_node]` is FnProto
@@ -339,12 +339,27 @@ pub fn init(allocator: std.mem.Allocator, tree: Ast) !DocumentScope {
 }
 
 pub fn deinit(scope: *DocumentScope, allocator: std.mem.Allocator) void {
-    // TODO
     scope.scopes.deinit(allocator);
     scope.declarations.deinit(allocator);
     scope.declaration_lookup_map.deinit(allocator);
     scope.extra.deinit(allocator);
+
+    for (scope.enum_completions.keys()) |item| {
+        if (item.detail) |detail| allocator.free(detail);
+        switch (item.documentation orelse continue) {
+            .string => |str| allocator.free(str),
+            .MarkupContent => |content| allocator.free(content.value),
+        }
+    }
     scope.enum_completions.deinit(allocator);
+
+    for (scope.error_completions.keys()) |item| {
+        if (item.detail) |detail| allocator.free(detail);
+        switch (item.documentation orelse continue) {
+            .string => |str| allocator.free(str),
+            .MarkupContent => |content| allocator.free(content.value),
+        }
+    }
     scope.error_completions.deinit(allocator);
 }
 
@@ -365,12 +380,10 @@ fn walkContainerDecl(
     defer tracy_zone.end();
 
     const allocator = context.allocator;
-    _ = allocator;
     const scopes = &context.doc_scope.scopes;
     _ = scopes;
     const tags = tree.nodes.items(.tag);
     const token_tags = tree.tokens.items(.tag);
-    _ = token_tags;
 
     var buf: [2]Ast.Node.Index = undefined;
     const container_decl = tree.fullContainerDecl(&buf, node_idx).?;
@@ -381,8 +394,8 @@ fn walkContainerDecl(
         locToSmallLoc(offsets.tokensToLoc(tree, start_token, ast.lastToken(tree, node_idx))),
     );
 
-    // var uses = std.ArrayListUnmanaged(Ast.Node.Index){};
-    // errdefer uses.deinit(allocator);
+    var uses = std.ArrayListUnmanaged(Ast.Node.Index){};
+    errdefer uses.deinit(allocator);
 
     for (container_decl.ast.members) |decl| {
         try walkNode(context, tree, decl);
@@ -410,27 +423,26 @@ fn walkContainerDecl(
         );
 
         // TODO: Fix this later
-        // if ((node_idx != 0 and token_tags[container_decl.ast.main_token] == .keyword_enum) or
-        //     ast.isTaggedUnion(tree, node_idx))
-        // {
-        //     if (std.mem.eql(u8, name, "_")) continue;
+        if ((node_idx != 0 and token_tags[container_decl.ast.main_token] == .keyword_enum) or
+            ast.isTaggedUnion(tree, node_idx))
+        {
+            if (std.mem.eql(u8, name, "_")) continue;
 
-        //     const doc = try Analyser.getDocComments(allocator, tree, decl);
-        //     errdefer if (doc) |d| allocator.free(d);
-        //     var gop_res = try context.doc_scope.enum_completions.getOrPut(allocator, .{
-        //         .label = name,
-        //         .kind = .EnumMember,
-        //         .insertText = name,
-        //         .insertTextFormat = .PlainText,
-        //         .documentation = if (doc) |d| .{ .MarkupContent = types.MarkupContent{ .kind = .markdown, .value = d } } else null,
-        //     });
-        //     if (gop_res.found_existing) {
-        //         if (doc) |d| allocator.free(d);
-        //     }
-        // }
+            const doc = try Analyser.getDocComments(allocator, tree, decl);
+            errdefer if (doc) |d| allocator.free(d);
+            // TODO: Fix allocation; just store indices
+            var gop_res = try context.doc_scope.enum_completions.getOrPut(allocator, .{
+                .label = name,
+                .kind = .EnumMember,
+                .insertText = name,
+                .insertTextFormat = .PlainText,
+                .documentation = if (doc) |d| .{ .MarkupContent = types.MarkupContent{ .kind = .markdown, .value = d } } else null,
+            });
+            if (gop_res.found_existing) {
+                if (doc) |d| allocator.free(d);
+            }
+        }
     }
-
-    // scopes.items(.uses)[@intFromEnum(scope)] = try uses.toOwnedSlice(allocator);
 
     try scope.finalize();
 }
@@ -479,7 +491,7 @@ fn makeScopeAt(
     tree: Ast,
     node_idx: Ast.Node.Index,
     start_token: Ast.TokenIndex,
-    finality: enum { final, keep_open },
+    keep_block_open: enum { final, keep_open },
 ) error{OutOfMemory}!?ScopeContext.PushedScope {
     if (node_idx == 0) return null;
 
@@ -529,23 +541,16 @@ fn makeScopeAt(
                             .insertText = name,
                             .insertTextFormat = .PlainText,
                         });
-                        _ = gop;
-                        // TODO: fix deinit
-                        // if (!gop.found_existing) {
-                        //     gop.key_ptr.detail = try std.fmt.allocPrint(allocator, "error.{s}", .{name});
-                        // }
+                        // TODO: use arena
+                        if (!gop.found_existing) {
+                            gop.key_ptr.detail = try std.fmt.allocPrint(allocator, "error.{s}", .{name});
+                        }
                     },
                     else => {},
                 }
             }
 
-            switch (finality) {
-                .final => {
-                    try scope.finalize();
-                },
-                else => {},
-            }
-            return scope;
+            try scope.finalize();
         },
         .fn_proto,
         .fn_proto_one,
@@ -666,7 +671,7 @@ fn makeScopeAt(
                 }
             }
 
-            switch (finality) {
+            switch (keep_block_open) {
                 .final => {
                     try scope.finalize();
                 },

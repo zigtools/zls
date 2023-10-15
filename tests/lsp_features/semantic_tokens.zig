@@ -1269,7 +1269,6 @@ fn testSemanticTokens(source: [:0]const u8, expected_tokens: []const TokenData) 
     defer ctx.deinit();
 
     const uri = try ctx.addDocument(source);
-    // zls.debug.printDocumentScope(ctx.server.document_store.getHandle(uri).?.document_scope);
 
     const params = types.SemanticTokensParams{
         .textDocument = .{ .uri = uri },
