@@ -43,37 +43,29 @@ pub fn printDocumentScope(doc_scope: DocumentScope) void {
     if (!std.debug.runtime_safety) @compileError("this function should only be used in debug mode!");
 
     for (0..doc_scope.scopes.len) |index| {
+        const scope_index: DocumentScope.Scope.Index = @enumFromInt(index);
         const scope = doc_scope.scopes.get(index);
         if (index != 0) std.debug.print("\n\n", .{});
         std.debug.print(
             \\[{d}, {d}]
             \\  tag: {}
-            \\  data: {}
+            \\  ast node: {?}
             \\  parent: {}
             \\  child scopes: {any}
-            // \\  usingnamespaces: {any}
-            // \\  tests: {any}
+            \\  usingnamespaces: {any}
             \\  decls:
             \\
         , .{
             scope.loc.start,
             scope.loc.end,
             scope.tag,
-            switch (scope.tag) {
-                .container => scope.data.ast_node,
-                .function => scope.data.ast_node,
-                .block => scope.data.ast_node,
-                // TODO
-                .other => 0,
-                .container_usingnamespace => 0,
-            },
+            doc_scope.getScopeAstNode(scope_index),
             scope.parent_scope,
-            doc_scope.getScopeChildScopesConst(@enumFromInt(index)),
-            // scope.uses,
-            // scope.tests,
+            doc_scope.getScopeChildScopesConst(scope_index),
+            doc_scope.getScopeUsingnamespaceNodesConst(scope_index),
         });
 
-        for (doc_scope.getScopeDeclarationsConst(@enumFromInt(index))) |decl| {
+        for (doc_scope.getScopeDeclarationsConst(scope_index)) |decl| {
             std.debug.print("    - {s:<8} {}\n", .{
                 doc_scope.declaration_lookup_map.keys()[@intFromEnum(decl)].name,
                 doc_scope.declarations.get(@intFromEnum(decl)),
