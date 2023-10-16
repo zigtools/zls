@@ -185,6 +185,18 @@ test "inlayhints - capture values" {
         \\    } else |e<FooError>| { _ = e; }
         \\}
     , .Type);
+
+    try testInlayHints(
+        \\fn foo() void {
+        \\  const bar: []const u8 = "test";
+        \\  for (bar, 0..3) |_, u<usize>| {
+        \\      _ = u;
+        \\  }
+        \\  for (bar, 0..3) |ch<u8>, _| {
+        \\      _ = ch;
+        \\  }
+        \\}
+    , .Type);
 }
 
 fn testInlayHints(source: []const u8, kind: types.InlayHintKind) !void {

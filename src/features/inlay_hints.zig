@@ -214,6 +214,7 @@ fn writeBuiltinHint(builder: *Builder, parameters: []const Ast.Node.Index, argum
 }
 
 // Restrict whitespace to only one space at a time.
+// TODO: Reduce long type hints (>x characters) to just the overall type i.e. `struct { .. }`.
 fn reduceTypeWhitespace(str: []const u8, arena: std.mem.Allocator) ![]const u8 {
     // Overallocates by a small amount if whitespace is reduced, but it should be fine.
     var reduced_type_str = try std.ArrayListUnmanaged(u8).initCapacity(arena, str.len);
@@ -299,7 +300,7 @@ fn writeForCaptureHint(builder: *Builder, for_node: Ast.Node.Index) !void {
     defer tracy_zone.end();
 
     const tree = builder.handle.tree;
-    const full_for = tree.fullFor(for_node) orelse return;
+    const full_for = tree.fullFor(for_node).?;
     const token_tags = tree.tokens.items(.tag);
     var capture_token = full_for.payload_token;
     for (full_for.ast.inputs) |_| {
@@ -400,8 +401,8 @@ fn writeNodeInlayHint(
         .global_var_decl,
         .aligned_var_decl,
         => {
-            if (!builder.config.inlay_hints_show_variable_declaration) return;
-            const var_decl = builder.handle.tree.fullVarDecl(node) orelse return;
+            if (!builder.config.inlay_hints_show_variable_type_hints) return;
+            const var_decl = builder.handle.tree.fullVarDecl(node).?;
             if (var_decl.ast.type_node != 0) return;
 
             try appendTypeHintString(
@@ -413,23 +414,23 @@ fn writeNodeInlayHint(
         .if_simple,
         .@"if",
         => {
-            if (!builder.config.inlay_hints_show_capture_variables) return;
-            const full_if = builder.handle.tree.fullIf(node) orelse return;
+            if (!builder.config.inlay_hints_show_variable_type_hints) return;
+            const full_if = builder.handle.tree.fullIf(node).?;
             if (full_if.payload_token) |token| try inferAppendTypeStr(builder, token);
             if (full_if.error_token) |token| try inferAppendTypeStr(builder, token);
         },
         .for_simple,
         .@"for",
         => {
-            if (!builder.config.inlay_hints_show_capture_variables) return;
+            if (!builder.config.inlay_hints_show_variable_type_hints) return;
             try writeForCaptureHint(builder, node);
         },
         .while_simple,
         .while_cont,
         .@"while",
         => {
-            if (!builder.config.inlay_hints_show_capture_variables) return;
-            const full_while = builder.handle.tree.fullWhile(node) orelse return;
+            if (!builder.config.inlay_hints_show_variable_type_hints) return;
+            const full_while = builder.handle.tree.fullWhile(node).?;
             if (full_while.payload_token) |token| try inferAppendTypeStr(builder, token);
             if (full_while.error_token) |token| try inferAppendTypeStr(builder, token);
         },
@@ -438,8 +439,8 @@ fn writeNodeInlayHint(
         .switch_case,
         .switch_case_inline,
         => {
-            if (!builder.config.inlay_hints_show_capture_variables) return;
-            const full_case = builder.handle.tree.fullSwitchCase(node) orelse return;
+            if (!builder.config.inlay_hints_show_variable_type_hints) return;
+            const full_case = builder.handle.tree.fullSwitchCase(node).?;
             if (full_case.payload_token) |token| try inferAppendTypeStr(builder, token);
         },
         .builtin_call_two,
