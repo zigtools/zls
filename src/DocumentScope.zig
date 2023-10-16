@@ -407,6 +407,98 @@ fn locToSmallLoc(loc: offsets.Loc) Scope.SmallLoc {
     };
 }
 
+/// If `node_idx` is a block its scope index will be returned
+/// Otherwise, a new scope will be created that will enclose `node_idx`
+fn makeBlockScopeInternal(context: *ScopeContext, tree: Ast, node_idx: Ast.Node.Index) error{OutOfMemory}!?ScopeContext.PushedScope {
+    return makeBlockScopeAt(context, tree, node_idx, tree.firstToken(node_idx));
+}
+
+/// Caller must finalize the scope
+fn makeBlockScopeAt(
+    context: *ScopeContext,
+    tree: Ast,
+    node_idx: Ast.Node.Index,
+    start_token: Ast.TokenIndex,
+) error{OutOfMemory}!?ScopeContext.PushedScope {
+    if (node_idx == 0) return null;
+    const tags = tree.nodes.items(.tag);
+
+    switch (tags[node_idx]) {
+        .block,
+        .block_semicolon,
+        .block_two,
+        .block_two_semicolon,
+        => {
+            return try walkBlockNodeKeepOpen(context, tree, node_idx, start_token);
+        },
+        else => {
+            var new_scope = try context.startScope(
+                .other,
+                undefined,
+                locToSmallLoc(offsets.tokensToLoc(tree, start_token, ast.lastToken(tree, node_idx))),
+            );
+            return new_scope;
+        },
+    }
+}
+
+fn walkNode(context: *ScopeContext, tree: Ast, node_idx: Ast.Node.Index) error{OutOfMemory}!void {
+    try makeScopeAt(context, tree, node_idx, tree.firstToken(node_idx));
+}
+
+fn makeScopeAt(
+    context: *ScopeContext,
+    tree: Ast,
+    node_idx: Ast.Node.Index,
+    start_token: Ast.TokenIndex,
+) error{OutOfMemory}!void {
+    const tag = tree.nodes.items(.tag)[node_idx];
+    try switch (tag) {
+        .root => return,
+        .container_decl,
+        .container_decl_trailing,
+        .container_decl_arg,
+        .container_decl_arg_trailing,
+        .container_decl_two,
+        .container_decl_two_trailing,
+        .tagged_union,
+        .tagged_union_trailing,
+        .tagged_union_two,
+        .tagged_union_two_trailing,
+        .tagged_union_enum_tag,
+        .tagged_union_enum_tag_trailing,
+        => walkContainerDecl(context, tree, node_idx, start_token),
+        .error_set_decl => walkErrorSetNode(context, tree, node_idx, start_token),
+        .fn_proto,
+        .fn_proto_one,
+        .fn_proto_simple,
+        .fn_proto_multi,
+        .fn_decl,
+        => walkFuncNode(context, tree, node_idx, start_token),
+        .block,
+        .block_semicolon,
+        .block_two,
+        .block_two_semicolon,
+        => walkBlockNode(context, tree, node_idx, start_token),
+        .@"if",
+        .if_simple,
+        => walkIfNode(context, tree, node_idx, start_token),
+        .@"catch" => walkCatchNode(context, tree, node_idx, start_token),
+        .@"while",
+        .while_simple,
+        .while_cont,
+        => walkWhileNode(context, tree, node_idx, start_token),
+        .@"for",
+        .for_simple,
+        => walkForNode(context, tree, node_idx, start_token),
+        .@"switch",
+        .switch_comma,
+        => walkSwitchNode(context, tree, node_idx, start_token),
+        .@"errdefer" => walkErrdeferNode(context, tree, node_idx, start_token),
+        else => walkOtherNode(context, tree, node_idx, start_token),
+    };
+}
+
 fn walkContainerDecl(
     context: *ScopeContext,
     tree: Ast,
@@ -498,453 +590,456 @@ fn walkContainerDecl(
     }
 }
 
-/// If `node_idx` is a block its scope index will be returned
-/// Otherwise, a new scope will be created that will enclose `node_idx`
-fn makeBlockScopeInternal(context: *ScopeContext, tree: Ast, node_idx: Ast.Node.Index) error{OutOfMemory}!?ScopeContext.PushedScope {
-    return makeBlockScopeAt(context, tree, node_idx, tree.firstToken(node_idx));
-}
-
-/// Caller must finalize the scope
-fn makeBlockScopeAt(
+fn walkErrorSetNode(
     context: *ScopeContext,
     tree: Ast,
     node_idx: Ast.Node.Index,
     start_token: Ast.TokenIndex,
-) error{OutOfMemory}!?ScopeContext.PushedScope {
-    if (node_idx == 0) return null;
-    const tags = tree.nodes.items(.tag);
-
-    switch (tags[node_idx]) {
-        .block,
-        .block_semicolon,
-        .block_two,
-        .block_two_semicolon,
-        => {
-            return (try makeScopeAt(context, tree, node_idx, start_token, .keep_open)).?;
-        },
-        else => {
-            var new_scope = try context.startScope(
-                .other,
-                undefined,
-                locToSmallLoc(offsets.tokensToLoc(tree, start_token, ast.lastToken(tree, node_idx))),
-            );
-            return new_scope;
-        },
-    }
-}
-
-fn walkNode(context: *ScopeContext, tree: Ast, node_idx: Ast.Node.Index) error{OutOfMemory}!void {
-    _ = try makeScopeAt(context, tree, node_idx, tree.firstToken(node_idx), .final);
-}
-
-fn makeScopeAt(
-    context: *ScopeContext,
-    tree: Ast,
-    node_idx: Ast.Node.Index,
-    start_token: Ast.TokenIndex,
-    keep_block_open: enum { final, keep_open },
-) error{OutOfMemory}!?ScopeContext.PushedScope {
-    if (node_idx == 0) return null;
-
-    const allocator = context.allocator;
-
-    const tags = tree.nodes.items(.tag);
+) error{OutOfMemory}!void {
     const token_tags = tree.tokens.items(.tag);
     const data = tree.nodes.items(.data);
     const main_tokens = tree.nodes.items(.main_token);
 
-    const node_tag = tags[node_idx];
+    var scope = try context.startScope(
+        .container,
+        .{ .ast_node = node_idx },
+        locToSmallLoc(offsets.tokensToLoc(tree, start_token, ast.lastToken(tree, node_idx))),
+    );
 
-    switch (node_tag) {
-        .root => unreachable,
-        .container_decl,
-        .container_decl_trailing,
-        .container_decl_arg,
-        .container_decl_arg_trailing,
-        .container_decl_two,
-        .container_decl_two_trailing,
-        .tagged_union,
-        .tagged_union_trailing,
-        .tagged_union_two,
-        .tagged_union_two_trailing,
-        .tagged_union_enum_tag,
-        .tagged_union_enum_tag_trailing,
-        => try walkContainerDecl(context, tree, node_idx, start_token),
-        .error_set_decl => {
-            var scope = try context.startScope(
-                .container,
-                .{ .ast_node = node_idx },
-                locToSmallLoc(offsets.tokensToLoc(tree, start_token, ast.lastToken(tree, node_idx))),
-            );
-
-            // All identifiers in main_token..data.rhs are error fields.
-            var tok_i = main_tokens[node_idx] + 2;
-            while (tok_i < data[node_idx].rhs) : (tok_i += 1) {
-                switch (token_tags[tok_i]) {
-                    .doc_comment, .comma => {},
-                    .identifier => {
-                        const name = offsets.tokenToSlice(tree, tok_i);
-                        try scope.pushDeclaration(name, .{ .error_token = tok_i }, .other);
-                        const gop = try context.doc_scope.error_completions.getOrPut(allocator, .{
-                            .label = name,
-                            .kind = .Constant,
-                            //.detail =
-                            .insertText = name,
-                            .insertTextFormat = .PlainText,
-                        });
-                        // TODO: use arena
-                        if (!gop.found_existing) {
-                            gop.key_ptr.detail = try std.fmt.allocPrint(allocator, "error.{s}", .{name});
-                        }
-                    },
-                    else => {},
+    // All identifiers in main_token..data.rhs are error fields.
+    var tok_i = main_tokens[node_idx] + 2;
+    while (tok_i < data[node_idx].rhs) : (tok_i += 1) {
+        switch (token_tags[tok_i]) {
+            .doc_comment, .comma => {},
+            .identifier => {
+                const name = offsets.tokenToSlice(tree, tok_i);
+                try scope.pushDeclaration(name, .{ .error_token = tok_i }, .other);
+                const gop = try context.doc_scope.error_completions.getOrPut(context.allocator, .{
+                    .label = name,
+                    .kind = .Constant,
+                    //.detail =
+                    .insertText = name,
+                    .insertTextFormat = .PlainText,
+                });
+                // TODO: use arena
+                if (!gop.found_existing) {
+                    gop.key_ptr.detail = try std.fmt.allocPrint(context.allocator, "error.{s}", .{name});
                 }
-            }
-
-            try scope.finalize();
-        },
-        .fn_proto,
-        .fn_proto_one,
-        .fn_proto_simple,
-        .fn_proto_multi,
-        .fn_decl,
-        => |fn_tag| {
-            var buf: [1]Ast.Node.Index = undefined;
-            const func = tree.fullFnProto(&buf, node_idx).?;
-
-            var scope = try context.startScope(
-                .function,
-                .{ .ast_node = node_idx },
-                locToSmallLoc(offsets.tokensToLoc(tree, start_token, ast.lastToken(tree, node_idx))),
-            );
-
-            // NOTE: We count the param index ourselves
-            // as param_i stops counting; TODO: change this
-
-            var param_index: u16 = 0;
-
-            var it = func.iterate(&tree);
-            while (ast.nextFnParam(&it)) |param| : (param_index += 1) {
-                // Add parameter decls
-                if (param.name_token) |name_token| {
-                    try scope.pushDeclaration(
-                        tree.tokenSlice(name_token),
-                        .{
-                            .param_payload = .{
-                                .param_index = param_index,
-                                .func = node_idx,
-                            },
-                        },
-                        .other,
-                    );
-                }
-                // Visit parameter types to pick up any error sets and enum
-                //   completions
-                try walkNode(context, tree, param.type_expr);
-            }
-
-            if (fn_tag == .fn_decl) blk: {
-                if (data[node_idx].lhs == 0) break :blk;
-                const return_type_node = data[data[node_idx].lhs].rhs;
-
-                // Visit the return type
-                try walkNode(context, tree, return_type_node);
-            }
-
-            // Visit the function body
-            try walkNode(context, tree, data[node_idx].rhs);
-
-            try scope.finalize();
-        },
-        .block,
-        .block_semicolon,
-        .block_two,
-        .block_two_semicolon,
-        => {
-            const first_token = tree.firstToken(node_idx);
-            const last_token = ast.lastToken(tree, node_idx);
-
-            var scope = try context.startScope(
-                .block,
-                .{ .ast_node = node_idx },
-                locToSmallLoc(offsets.tokensToLoc(tree, start_token, last_token)),
-            );
-
-            // if labeled block
-            if (token_tags[first_token] == .identifier) {
-                try scope.pushDeclaration(
-                    tree.tokenSlice(first_token),
-                    .{
-                        .label_decl = .{
-                            .label = first_token,
-                            .block = node_idx,
-                        },
-                    },
-                    .other,
-                );
-            }
-
-            var buffer: [2]Ast.Node.Index = undefined;
-            const statements = ast.blockStatements(tree, node_idx, &buffer).?;
-
-            for (statements) |idx| {
-                try walkNode(context, tree, idx);
-                switch (tags[idx]) {
-                    .global_var_decl,
-                    .local_var_decl,
-                    .aligned_var_decl,
-                    .simple_var_decl,
-                    => {
-                        const var_decl = tree.fullVarDecl(idx).?;
-                        const name = tree.tokenSlice(var_decl.ast.mut_token + 1);
-                        try scope.pushDeclaration(name, .{ .ast_node = idx }, .other);
-                    },
-                    .assign_destructure => {
-                        const lhs_count = tree.extra_data[data[idx].lhs];
-                        const lhs_exprs = tree.extra_data[data[idx].lhs + 1 ..][0..lhs_count];
-
-                        for (lhs_exprs, 0..) |lhs_node, i| {
-                            const var_decl = tree.fullVarDecl(lhs_node) orelse continue;
-                            const name = tree.tokenSlice(var_decl.ast.mut_token + 1);
-                            try scope.pushDeclaration(name, .{
-                                .assign_destructure = .{
-                                    .node = idx,
-                                    .index = @intCast(i),
-                                },
-                            }, .other);
-                        }
-                    },
-                    else => continue,
-                }
-            }
-
-            switch (keep_block_open) {
-                .final => {
-                    try scope.finalize();
-                },
-                else => {},
-            }
-            return scope;
-        },
-        .@"if",
-        .if_simple,
-        => {
-            const if_node = ast.fullIf(tree, node_idx).?;
-
-            const then_start = if_node.payload_token orelse tree.firstToken(if_node.ast.then_expr);
-            var then_scope = (try makeBlockScopeAt(context, tree, if_node.ast.then_expr, then_start)).?;
-
-            if (if_node.payload_token) |payload| {
-                const name_token = payload + @intFromBool(token_tags[payload] == .asterisk);
-                std.debug.assert(token_tags[name_token] == .identifier);
-
-                const name = tree.tokenSlice(name_token);
-                const decl: Declaration = if (if_node.error_token != null)
-                    .{ .error_union_payload = .{ .name = name_token, .condition = if_node.ast.cond_expr } }
-                else
-                    .{ .pointer_payload = .{ .name = name_token, .condition = if_node.ast.cond_expr } };
-                try then_scope.pushDeclaration(name, decl, .other);
-            }
-
-            try then_scope.finalize();
-
-            if (if_node.ast.else_expr != 0) {
-                const else_start = if_node.error_token orelse tree.firstToken(if_node.ast.else_expr);
-                var else_scope = (try makeBlockScopeAt(context, tree, if_node.ast.else_expr, else_start)).?;
-                if (if_node.error_token) |err_token| {
-                    const name = tree.tokenSlice(err_token);
-                    try else_scope.pushDeclaration(name, .{
-                        .error_union_error = .{ .name = err_token, .condition = if_node.ast.cond_expr },
-                    }, .other);
-                }
-
-                try else_scope.finalize();
-            }
-        },
-        .@"catch" => {
-            try walkNode(context, tree, data[node_idx].lhs);
-
-            const catch_token = main_tokens[node_idx] + 2;
-            if (token_tags.len > catch_token and
-                token_tags[catch_token - 1] == .pipe and
-                token_tags[catch_token] == .identifier)
-            {
-                var expr_scope = (try makeBlockScopeAt(context, tree, data[node_idx].rhs, catch_token)).?;
-                const name = tree.tokenSlice(catch_token);
-                try expr_scope.pushDeclaration(name, .{
-                    .error_union_error = .{ .name = catch_token, .condition = data[node_idx].lhs },
-                }, .other);
-                try expr_scope.finalize();
-            } else {
-                try walkNode(context, tree, data[node_idx].rhs);
-            }
-        },
-        .@"while",
-        .while_simple,
-        .while_cont,
-        => {
-            // label_token: inline_token while (cond_expr) |payload_token| : (cont_expr) then_expr else else_expr
-            const while_node = ast.fullWhile(tree, node_idx).?;
-
-            try walkNode(context, tree, while_node.ast.cond_expr);
-
-            const label_token, const label_name = if (while_node.label_token) |label| blk: {
-                std.debug.assert(token_tags[label] == .identifier);
-                const name = try context.pushDeclLoopLabel(label, node_idx);
-                break :blk .{ label, name };
-            } else .{ null, null };
-
-            const payload_declaration, const payload_name = if (while_node.payload_token) |payload| blk: {
-                const name_token = payload + @intFromBool(token_tags[payload] == .asterisk);
-                std.debug.assert(token_tags[name_token] == .identifier);
-
-                const name = tree.tokenSlice(name_token);
-                const decl: Declaration = if (while_node.error_token != null)
-                    .{ .error_union_payload = .{ .name = name_token, .condition = while_node.ast.cond_expr } }
-                else
-                    .{ .pointer_payload = .{ .name = name_token, .condition = while_node.ast.cond_expr } };
-                break :blk .{ decl, name };
-            } else .{ null, null };
-
-            var cont_scope = try makeBlockScopeInternal(context, tree, while_node.ast.cont_expr);
-
-            if (cont_scope) |*scope| {
-                if (payload_declaration) |decl| {
-                    try scope.pushDeclaration(payload_name.?, decl, .other);
-                }
-                try scope.finalize();
-            }
-
-            const then_start = while_node.payload_token orelse tree.firstToken(while_node.ast.then_expr);
-            var then_scope = (try makeBlockScopeAt(context, tree, while_node.ast.then_expr, then_start)).?;
-
-            if (label_token) |label| {
-                try then_scope.pushDeclaration(
-                    label_name.?,
-                    .{ .label_decl = .{ .label = label, .block = while_node.ast.then_expr } },
-                    .other,
-                );
-            }
-
-            if (payload_declaration) |decl| {
-                try then_scope.pushDeclaration(payload_name.?, decl, .other);
-            }
-
-            try then_scope.finalize();
-
-            const else_start = while_node.error_token orelse tree.firstToken(while_node.ast.else_expr);
-            var else_scope = try makeBlockScopeAt(context, tree, while_node.ast.else_expr, else_start);
-
-            if (while_node.error_token) |err_token| {
-                std.debug.assert(token_tags[err_token] == .identifier);
-                const name = tree.tokenSlice(err_token);
-                try else_scope.?.pushDeclaration(name, .{
-                    .error_union_error = .{ .name = err_token, .condition = while_node.ast.cond_expr },
-                }, .other);
-            }
-
-            if (else_scope) |*scope| try scope.finalize();
-        },
-        .@"for",
-        .for_simple,
-        => {
-            // label_token: inline_token for (inputs) |capture_tokens| then_expr else else_expr
-            const for_node = ast.fullFor(tree, node_idx).?;
-
-            for (for_node.ast.inputs) |input_node| {
-                try walkNode(context, tree, input_node);
-            }
-
-            const label_token, const label_name = if (for_node.label_token) |label| blk: {
-                std.debug.assert(token_tags[label] == .identifier);
-                const name = try context.pushDeclLoopLabel(label, node_idx);
-                break :blk .{ label, name };
-            } else .{ null, null };
-
-            var capture_token = for_node.payload_token;
-            var then_scope = (try makeBlockScopeAt(context, tree, for_node.ast.then_expr, capture_token)).?;
-
-            for (for_node.ast.inputs) |input| {
-                if (capture_token + 1 >= tree.tokens.len) break;
-                const capture_is_ref = token_tags[capture_token] == .asterisk;
-                const name_token = capture_token + @intFromBool(capture_is_ref);
-                capture_token = name_token + 2;
-
-                try then_scope.pushDeclaration(
-                    offsets.tokenToSlice(tree, name_token),
-                    .{ .array_payload = .{ .identifier = name_token, .array_expr = input } },
-                    .other,
-                );
-            }
-
-            if (label_token) |label| {
-                try then_scope.pushDeclaration(
-                    label_name.?,
-                    .{ .label_decl = .{ .label = label, .block = for_node.ast.then_expr } },
-                    .other,
-                );
-            }
-
-            try then_scope.finalize();
-
-            var else_scope = try makeBlockScopeInternal(context, tree, for_node.ast.else_expr);
-
-            if (else_scope) |*scope| {
-                if (label_token) |label| {
-                    try then_scope.pushDeclaration(
-                        label_name.?,
-                        .{ .label_decl = .{ .label = label, .block = for_node.ast.else_expr } },
-                        .other,
-                    );
-                }
-                try scope.finalize();
-            }
-        },
-        .@"switch",
-        .switch_comma,
-        => {
-            const extra = tree.extraData(data[node_idx].rhs, Ast.Node.SubRange);
-            const cases = tree.extra_data[extra.start..extra.end];
-
-            for (cases, 0..) |case, case_index| {
-                const switch_case: Ast.full.SwitchCase = tree.fullSwitchCase(case).?;
-
-                if (switch_case.payload_token) |payload| {
-                    var expr_scope = (try makeBlockScopeAt(context, tree, switch_case.ast.target_expr, payload)).?;
-                    // if payload is *name than get next token
-                    const name_token = payload + @intFromBool(token_tags[payload] == .asterisk);
-                    const name = tree.tokenSlice(name_token);
-
-                    try expr_scope.pushDeclaration(name, .{
-                        .switch_payload = .{ .node = node_idx, .case_index = @intCast(case_index) },
-                    }, .other);
-
-                    try expr_scope.finalize();
-                } else {
-                    try walkNode(context, tree, switch_case.ast.target_expr);
-                }
-            }
-        },
-        .@"errdefer" => {
-            const payload_token = data[node_idx].lhs;
-            const expr_start = if (payload_token != 0) payload_token else tree.firstToken(data[node_idx].rhs);
-            var expr_scope = (try makeBlockScopeAt(context, tree, data[node_idx].rhs, expr_start)).?;
-
-            if (payload_token != 0) {
-                const name = tree.tokenSlice(payload_token);
-                try expr_scope.pushDeclaration(name, .{
-                    .error_union_error = .{ .name = payload_token, .condition = 0 },
-                }, .other);
-            }
-
-            try expr_scope.finalize();
-        },
-        else => {
-            try ast.iterateChildren(tree, node_idx, context, error{OutOfMemory}, walkNode);
-        },
+            },
+            else => {},
+        }
     }
 
-    return null;
+    try scope.finalize();
+}
+
+fn walkFuncNode(
+    context: *ScopeContext,
+    tree: Ast,
+    node_idx: Ast.Node.Index,
+    start_token: Ast.TokenIndex,
+) error{OutOfMemory}!void {
+    const node_tags = tree.nodes.items(.tag);
+    const data = tree.nodes.items(.data);
+
+    var buf: [1]Ast.Node.Index = undefined;
+    const func = tree.fullFnProto(&buf, node_idx).?;
+
+    var scope = try context.startScope(
+        .function,
+        .{ .ast_node = node_idx },
+        locToSmallLoc(offsets.tokensToLoc(tree, start_token, ast.lastToken(tree, node_idx))),
+    );
+
+    // NOTE: We count the param index ourselves
+    // as param_i stops counting; TODO: change this
+
+    var param_index: u16 = 0;
+
+    var it = func.iterate(&tree);
+    while (ast.nextFnParam(&it)) |param| : (param_index += 1) {
+        // Add parameter decls
+        if (param.name_token) |name_token| {
+            try scope.pushDeclaration(
+                tree.tokenSlice(name_token),
+                .{
+                    .param_payload = .{
+                        .param_index = param_index,
+                        .func = node_idx,
+                    },
+                },
+                .other,
+            );
+        }
+        // Visit parameter types to pick up any error sets and enum
+        //   completions
+        try walkNode(context, tree, param.type_expr);
+    }
+
+    if (node_tags[node_idx] == .fn_decl) blk: {
+        if (data[node_idx].lhs == 0) break :blk;
+        const return_type_node = data[data[node_idx].lhs].rhs;
+
+        // Visit the return type
+        try walkNode(context, tree, return_type_node);
+    }
+
+    // Visit the function body
+    try walkNode(context, tree, data[node_idx].rhs);
+
+    try scope.finalize();
+}
+
+fn walkBlockNode(
+    context: *ScopeContext,
+    tree: Ast,
+    node_idx: Ast.Node.Index,
+    start_token: Ast.TokenIndex,
+) error{OutOfMemory}!void {
+    const pushed_scope = try walkBlockNodeKeepOpen(context, tree, node_idx, start_token);
+    try pushed_scope.finalize();
+}
+
+fn walkBlockNodeKeepOpen(
+    context: *ScopeContext,
+    tree: Ast,
+    node_idx: Ast.Node.Index,
+    start_token: Ast.TokenIndex,
+) error{OutOfMemory}!ScopeContext.PushedScope {
+    const node_tags = tree.nodes.items(.tag);
+    const token_tags = tree.tokens.items(.tag);
+    const data = tree.nodes.items(.data);
+
+    const first_token = tree.firstToken(node_idx);
+    const last_token = ast.lastToken(tree, node_idx);
+
+    var scope = try context.startScope(
+        .block,
+        .{ .ast_node = node_idx },
+        locToSmallLoc(offsets.tokensToLoc(tree, start_token, last_token)),
+    );
+
+    // if labeled block
+    if (token_tags[first_token] == .identifier) {
+        try scope.pushDeclaration(
+            tree.tokenSlice(first_token),
+            .{
+                .label_decl = .{
+                    .label = first_token,
+                    .block = node_idx,
+                },
+            },
+            .other,
+        );
+    }
+
+    var buffer: [2]Ast.Node.Index = undefined;
+    const statements = ast.blockStatements(tree, node_idx, &buffer).?;
+
+    for (statements) |idx| {
+        try walkNode(context, tree, idx);
+        switch (node_tags[idx]) {
+            .global_var_decl,
+            .local_var_decl,
+            .aligned_var_decl,
+            .simple_var_decl,
+            => {
+                const var_decl = tree.fullVarDecl(idx).?;
+                const name = tree.tokenSlice(var_decl.ast.mut_token + 1);
+                try scope.pushDeclaration(name, .{ .ast_node = idx }, .other);
+            },
+            .assign_destructure => {
+                const lhs_count = tree.extra_data[data[idx].lhs];
+                const lhs_exprs = tree.extra_data[data[idx].lhs + 1 ..][0..lhs_count];
+
+                for (lhs_exprs, 0..) |lhs_node, i| {
+                    const var_decl = tree.fullVarDecl(lhs_node) orelse continue;
+                    const name = tree.tokenSlice(var_decl.ast.mut_token + 1);
+                    try scope.pushDeclaration(name, .{
+                        .assign_destructure = .{
+                            .node = idx,
+                            .index = @intCast(i),
+                        },
+                    }, .other);
+                }
+            },
+            else => continue,
+        }
+    }
+
+    return scope;
+}
+
+fn walkIfNode(
+    context: *ScopeContext,
+    tree: Ast,
+    node_idx: Ast.Node.Index,
+    start_token: Ast.TokenIndex,
+) error{OutOfMemory}!void {
+    _ = start_token;
+    const token_tags = tree.tokens.items(.tag);
+
+    const if_node = ast.fullIf(tree, node_idx).?;
+
+    const then_start = if_node.payload_token orelse tree.firstToken(if_node.ast.then_expr);
+    var then_scope = (try makeBlockScopeAt(context, tree, if_node.ast.then_expr, then_start)).?;
+
+    if (if_node.payload_token) |payload| {
+        const name_token = payload + @intFromBool(token_tags[payload] == .asterisk);
+        std.debug.assert(token_tags[name_token] == .identifier);
+
+        const name = tree.tokenSlice(name_token);
+        const decl: Declaration = if (if_node.error_token != null)
+            .{ .error_union_payload = .{ .name = name_token, .condition = if_node.ast.cond_expr } }
+        else
+            .{ .pointer_payload = .{ .name = name_token, .condition = if_node.ast.cond_expr } };
+        try then_scope.pushDeclaration(name, decl, .other);
+    }
+
+    try then_scope.finalize();
+
+    if (if_node.ast.else_expr != 0) {
+        const else_start = if_node.error_token orelse tree.firstToken(if_node.ast.else_expr);
+        var else_scope = (try makeBlockScopeAt(context, tree, if_node.ast.else_expr, else_start)).?;
+        if (if_node.error_token) |err_token| {
+            const name = tree.tokenSlice(err_token);
+            try else_scope.pushDeclaration(name, .{
+                .error_union_error = .{ .name = err_token, .condition = if_node.ast.cond_expr },
+            }, .other);
+        }
+
+        try else_scope.finalize();
+    }
+}
+
+fn walkCatchNode(
+    context: *ScopeContext,
+    tree: Ast,
+    node_idx: Ast.Node.Index,
+    start_token: Ast.TokenIndex,
+) error{OutOfMemory}!void {
+    _ = start_token;
+    const token_tags = tree.tokens.items(.tag);
+    const data = tree.nodes.items(.data);
+    const main_tokens = tree.nodes.items(.main_token);
+
+    try walkNode(context, tree, data[node_idx].lhs);
+
+    const catch_token = main_tokens[node_idx] + 2;
+    if (token_tags.len > catch_token and
+        token_tags[catch_token - 1] == .pipe and
+        token_tags[catch_token] == .identifier)
+    {
+        var expr_scope = (try makeBlockScopeAt(context, tree, data[node_idx].rhs, catch_token)).?;
+        const name = tree.tokenSlice(catch_token);
+        try expr_scope.pushDeclaration(name, .{
+            .error_union_error = .{ .name = catch_token, .condition = data[node_idx].lhs },
+        }, .other);
+        try expr_scope.finalize();
+    } else {
+        try walkNode(context, tree, data[node_idx].rhs);
+    }
+}
+
+/// label_token: inline_token while (cond_expr) |payload_token| : (cont_expr) then_expr else else_expr
+fn walkWhileNode(
+    context: *ScopeContext,
+    tree: Ast,
+    node_idx: Ast.Node.Index,
+    start_token: Ast.TokenIndex,
+) error{OutOfMemory}!void {
+    _ = start_token;
+    const token_tags = tree.tokens.items(.tag);
+
+    const while_node = ast.fullWhile(tree, node_idx).?;
+
+    try walkNode(context, tree, while_node.ast.cond_expr);
+
+    const label_token, const label_name = if (while_node.label_token) |label| blk: {
+        std.debug.assert(token_tags[label] == .identifier);
+        const name = try context.pushDeclLoopLabel(label, node_idx);
+        break :blk .{ label, name };
+    } else .{ null, null };
+
+    const payload_declaration, const payload_name = if (while_node.payload_token) |payload| blk: {
+        const name_token = payload + @intFromBool(token_tags[payload] == .asterisk);
+        std.debug.assert(token_tags[name_token] == .identifier);
+
+        const name = tree.tokenSlice(name_token);
+        const decl: Declaration = if (while_node.error_token != null)
+            .{ .error_union_payload = .{ .name = name_token, .condition = while_node.ast.cond_expr } }
+        else
+            .{ .pointer_payload = .{ .name = name_token, .condition = while_node.ast.cond_expr } };
+        break :blk .{ decl, name };
+    } else .{ null, null };
+
+    var cont_scope = try makeBlockScopeInternal(context, tree, while_node.ast.cont_expr);
+
+    if (cont_scope) |*scope| {
+        if (payload_declaration) |decl| {
+            try scope.pushDeclaration(payload_name.?, decl, .other);
+        }
+        try scope.finalize();
+    }
+
+    const then_start = while_node.payload_token orelse tree.firstToken(while_node.ast.then_expr);
+    var then_scope = (try makeBlockScopeAt(context, tree, while_node.ast.then_expr, then_start)).?;
+
+    if (label_token) |label| {
+        try then_scope.pushDeclaration(
+            label_name.?,
+            .{ .label_decl = .{ .label = label, .block = while_node.ast.then_expr } },
+            .other,
+        );
+    }
+
+    if (payload_declaration) |decl| {
+        try then_scope.pushDeclaration(payload_name.?, decl, .other);
+    }
+
+    try then_scope.finalize();
+
+    const else_start = while_node.error_token orelse tree.firstToken(while_node.ast.else_expr);
+    var else_scope = try makeBlockScopeAt(context, tree, while_node.ast.else_expr, else_start);
+
+    if (while_node.error_token) |err_token| {
+        std.debug.assert(token_tags[err_token] == .identifier);
+        const name = tree.tokenSlice(err_token);
+        try else_scope.?.pushDeclaration(name, .{
+            .error_union_error = .{ .name = err_token, .condition = while_node.ast.cond_expr },
+        }, .other);
+    }
+
+    if (else_scope) |*scope| try scope.finalize();
+}
+
+/// label_token: inline_token for (inputs) |capture_tokens| then_expr else else_expr
+fn walkForNode(
+    context: *ScopeContext,
+    tree: Ast,
+    node_idx: Ast.Node.Index,
+    start_token: Ast.TokenIndex,
+) error{OutOfMemory}!void {
+    _ = start_token;
+    const token_tags = tree.tokens.items(.tag);
+
+    const for_node = ast.fullFor(tree, node_idx).?;
+
+    for (for_node.ast.inputs) |input_node| {
+        try walkNode(context, tree, input_node);
+    }
+
+    const label_token, const label_name = if (for_node.label_token) |label| blk: {
+        std.debug.assert(token_tags[label] == .identifier);
+        const name = try context.pushDeclLoopLabel(label, node_idx);
+        break :blk .{ label, name };
+    } else .{ null, null };
+
+    var capture_token = for_node.payload_token;
+    var then_scope = (try makeBlockScopeAt(context, tree, for_node.ast.then_expr, capture_token)).?;
+
+    for (for_node.ast.inputs) |input| {
+        if (capture_token + 1 >= tree.tokens.len) break;
+        const capture_is_ref = token_tags[capture_token] == .asterisk;
+        const name_token = capture_token + @intFromBool(capture_is_ref);
+        capture_token = name_token + 2;
+
+        try then_scope.pushDeclaration(
+            offsets.tokenToSlice(tree, name_token),
+            .{ .array_payload = .{ .identifier = name_token, .array_expr = input } },
+            .other,
+        );
+    }
+
+    if (label_token) |label| {
+        try then_scope.pushDeclaration(
+            label_name.?,
+            .{ .label_decl = .{ .label = label, .block = for_node.ast.then_expr } },
+            .other,
+        );
+    }
+
+    try then_scope.finalize();
+
+    var else_scope = try makeBlockScopeInternal(context, tree, for_node.ast.else_expr);
+
+    if (else_scope) |*scope| {
+        if (label_token) |label| {
+            try then_scope.pushDeclaration(
+                label_name.?,
+                .{ .label_decl = .{ .label = label, .block = for_node.ast.else_expr } },
+                .other,
+            );
+        }
+        try scope.finalize();
+    }
+}
+
+fn walkSwitchNode(
+    context: *ScopeContext,
+    tree: Ast,
+    node_idx: Ast.Node.Index,
+    start_token: Ast.TokenIndex,
+) error{OutOfMemory}!void {
+    _ = start_token;
+    const token_tags = tree.tokens.items(.tag);
+    const data = tree.nodes.items(.data);
+
+    const extra = tree.extraData(data[node_idx].rhs, Ast.Node.SubRange);
+    const cases = tree.extra_data[extra.start..extra.end];
+
+    for (cases, 0..) |case, case_index| {
+        const switch_case: Ast.full.SwitchCase = tree.fullSwitchCase(case).?;
+
+        if (switch_case.payload_token) |payload| {
+            var expr_scope = (try makeBlockScopeAt(context, tree, switch_case.ast.target_expr, payload)).?;
+            // if payload is *name than get next token
+            const name_token = payload + @intFromBool(token_tags[payload] == .asterisk);
+            const name = tree.tokenSlice(name_token);
+
+            try expr_scope.pushDeclaration(name, .{
+                .switch_payload = .{ .node = node_idx, .case_index = @intCast(case_index) },
+            }, .other);
+
+            try expr_scope.finalize();
+        } else {
+            try walkNode(context, tree, switch_case.ast.target_expr);
+        }
+    }
+}
+
+fn walkErrdeferNode(
+    context: *ScopeContext,
+    tree: Ast,
+    node_idx: Ast.Node.Index,
+    start_token: Ast.TokenIndex,
+) error{OutOfMemory}!void {
+    _ = start_token;
+    const data = tree.nodes.items(.data);
+
+    const payload_token = data[node_idx].lhs;
+    const expr_start = if (payload_token != 0) payload_token else tree.firstToken(data[node_idx].rhs);
+    var expr_scope = (try makeBlockScopeAt(context, tree, data[node_idx].rhs, expr_start)).?;
+
+    if (payload_token != 0) {
+        const name = tree.tokenSlice(payload_token);
+        try expr_scope.pushDeclaration(name, .{
+            .error_union_error = .{ .name = payload_token, .condition = 0 },
+        }, .other);
+    }
+
+    try expr_scope.finalize();
+}
+
+fn walkOtherNode(
+    context: *ScopeContext,
+    tree: Ast,
+    node_idx: Ast.Node.Index,
+    start_token: Ast.TokenIndex,
+) error{OutOfMemory}!void {
+    _ = start_token;
+
+    try ast.iterateChildren(tree, node_idx, context, error{OutOfMemory}, walkNode);
 }
 
 // Lookup
