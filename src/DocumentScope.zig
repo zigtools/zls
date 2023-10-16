@@ -370,7 +370,7 @@ pub fn init(allocator: std.mem.Allocator, tree: Ast) !DocumentScope {
         .doc_scope = &document_scope,
     };
     defer context.deinit();
-    try walkContainerDecl(&context, tree, 0, 0);
+    try walkContainerDecl(&context, tree, 0);
 
     return document_scope;
 }
@@ -442,15 +442,10 @@ fn makeBlockScopeAt(
     }
 }
 
-fn walkNode(context: *ScopeContext, tree: Ast, node_idx: Ast.Node.Index) error{OutOfMemory}!void {
-    try makeScopeAt(context, tree, node_idx, tree.firstToken(node_idx));
-}
-
-fn makeScopeAt(
+fn walkNode(
     context: *ScopeContext,
     tree: Ast,
     node_idx: Ast.Node.Index,
-    start_token: Ast.TokenIndex,
 ) error{OutOfMemory}!void {
     const tag = tree.nodes.items(.tag)[node_idx];
     try switch (tag) {
@@ -467,35 +462,35 @@ fn makeScopeAt(
         .tagged_union_two_trailing,
         .tagged_union_enum_tag,
         .tagged_union_enum_tag_trailing,
-        => walkContainerDecl(context, tree, node_idx, start_token),
-        .error_set_decl => walkErrorSetNode(context, tree, node_idx, start_token),
+        => walkContainerDecl(context, tree, node_idx),
+        .error_set_decl => walkErrorSetNode(context, tree, node_idx),
         .fn_proto,
         .fn_proto_one,
         .fn_proto_simple,
         .fn_proto_multi,
         .fn_decl,
-        => walkFuncNode(context, tree, node_idx, start_token),
+        => walkFuncNode(context, tree, node_idx),
         .block,
         .block_semicolon,
         .block_two,
         .block_two_semicolon,
-        => walkBlockNode(context, tree, node_idx, start_token),
+        => walkBlockNode(context, tree, node_idx),
         .@"if",
         .if_simple,
-        => walkIfNode(context, tree, node_idx, start_token),
-        .@"catch" => walkCatchNode(context, tree, node_idx, start_token),
+        => walkIfNode(context, tree, node_idx),
+        .@"catch" => walkCatchNode(context, tree, node_idx),
         .@"while",
         .while_simple,
         .while_cont,
-        => walkWhileNode(context, tree, node_idx, start_token),
+        => walkWhileNode(context, tree, node_idx),
         .@"for",
         .for_simple,
-        => walkForNode(context, tree, node_idx, start_token),
+        => walkForNode(context, tree, node_idx),
         .@"switch",
         .switch_comma,
-        => walkSwitchNode(context, tree, node_idx, start_token),
-        .@"errdefer" => walkErrdeferNode(context, tree, node_idx, start_token),
-        else => walkOtherNode(context, tree, node_idx, start_token),
+        => walkSwitchNode(context, tree, node_idx),
+        .@"errdefer" => walkErrdeferNode(context, tree, node_idx),
+        else => walkOtherNode(context, tree, node_idx),
     };
 }
 
@@ -503,7 +498,6 @@ fn walkContainerDecl(
     context: *ScopeContext,
     tree: Ast,
     node_idx: Ast.Node.Index,
-    start_token: Ast.TokenIndex,
 ) error{OutOfMemory}!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
@@ -528,7 +522,7 @@ fn walkContainerDecl(
     var scope = try context.startScope(
         .container,
         .{ .ast_node = node_idx },
-        locToSmallLoc(offsets.tokensToLoc(tree, start_token, ast.lastToken(tree, node_idx))),
+        locToSmallLoc(offsets.nodeToLoc(tree, node_idx)),
     );
 
     var uses = std.ArrayListUnmanaged(Ast.Node.Index){};
@@ -594,7 +588,6 @@ fn walkErrorSetNode(
     context: *ScopeContext,
     tree: Ast,
     node_idx: Ast.Node.Index,
-    start_token: Ast.TokenIndex,
 ) error{OutOfMemory}!void {
     const token_tags = tree.tokens.items(.tag);
     const data = tree.nodes.items(.data);
@@ -603,7 +596,7 @@ fn walkErrorSetNode(
     var scope = try context.startScope(
         .container,
         .{ .ast_node = node_idx },
-        locToSmallLoc(offsets.tokensToLoc(tree, start_token, ast.lastToken(tree, node_idx))),
+        locToSmallLoc(offsets.nodeToLoc(tree, node_idx)),
     );
 
     // All identifiers in main_token..data.rhs are error fields.
@@ -637,7 +630,6 @@ fn walkFuncNode(
     context: *ScopeContext,
     tree: Ast,
     node_idx: Ast.Node.Index,
-    start_token: Ast.TokenIndex,
 ) error{OutOfMemory}!void {
     const node_tags = tree.nodes.items(.tag);
     const data = tree.nodes.items(.data);
@@ -648,7 +640,7 @@ fn walkFuncNode(
     var scope = try context.startScope(
         .function,
         .{ .ast_node = node_idx },
-        locToSmallLoc(offsets.tokensToLoc(tree, start_token, ast.lastToken(tree, node_idx))),
+        locToSmallLoc(offsets.nodeToLoc(tree, node_idx)),
     );
 
     // NOTE: We count the param index ourselves
@@ -694,9 +686,8 @@ fn walkBlockNode(
     context: *ScopeContext,
     tree: Ast,
     node_idx: Ast.Node.Index,
-    start_token: Ast.TokenIndex,
 ) error{OutOfMemory}!void {
-    const pushed_scope = try walkBlockNodeKeepOpen(context, tree, node_idx, start_token);
+    const pushed_scope = try walkBlockNodeKeepOpen(context, tree, node_idx, tree.firstToken(node_idx));
     try pushed_scope.finalize();
 }
 
@@ -774,9 +765,7 @@ fn walkIfNode(
     context: *ScopeContext,
     tree: Ast,
     node_idx: Ast.Node.Index,
-    start_token: Ast.TokenIndex,
 ) error{OutOfMemory}!void {
-    _ = start_token;
     const token_tags = tree.tokens.items(.tag);
 
     const if_node = ast.fullIf(tree, node_idx).?;
@@ -816,9 +805,7 @@ fn walkCatchNode(
     context: *ScopeContext,
     tree: Ast,
     node_idx: Ast.Node.Index,
-    start_token: Ast.TokenIndex,
 ) error{OutOfMemory}!void {
-    _ = start_token;
     const token_tags = tree.tokens.items(.tag);
     const data = tree.nodes.items(.data);
     const main_tokens = tree.nodes.items(.main_token);
@@ -846,9 +833,7 @@ fn walkWhileNode(
     context: *ScopeContext,
     tree: Ast,
     node_idx: Ast.Node.Index,
-    start_token: Ast.TokenIndex,
 ) error{OutOfMemory}!void {
-    _ = start_token;
     const token_tags = tree.tokens.items(.tag);
 
     const while_node = ast.fullWhile(tree, node_idx).?;
@@ -918,9 +903,7 @@ fn walkForNode(
     context: *ScopeContext,
     tree: Ast,
     node_idx: Ast.Node.Index,
-    start_token: Ast.TokenIndex,
 ) error{OutOfMemory}!void {
-    _ = start_token;
     const token_tags = tree.tokens.items(.tag);
 
     const for_node = ast.fullFor(tree, node_idx).?;
@@ -979,9 +962,7 @@ fn walkSwitchNode(
     context: *ScopeContext,
     tree: Ast,
     node_idx: Ast.Node.Index,
-    start_token: Ast.TokenIndex,
 ) error{OutOfMemory}!void {
-    _ = start_token;
     const token_tags = tree.tokens.items(.tag);
     const data = tree.nodes.items(.data);
 
@@ -1012,9 +993,7 @@ fn walkErrdeferNode(
     context: *ScopeContext,
     tree: Ast,
     node_idx: Ast.Node.Index,
-    start_token: Ast.TokenIndex,
 ) error{OutOfMemory}!void {
-    _ = start_token;
     const data = tree.nodes.items(.data);
 
     const payload_token = data[node_idx].lhs;
@@ -1035,10 +1014,7 @@ fn walkOtherNode(
     context: *ScopeContext,
     tree: Ast,
     node_idx: Ast.Node.Index,
-    start_token: Ast.TokenIndex,
 ) error{OutOfMemory}!void {
-    _ = start_token;
-
     try ast.iterateChildren(tree, node_idx, context, error{OutOfMemory}, walkNode);
 }
 
