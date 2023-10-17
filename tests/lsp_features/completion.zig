@@ -342,16 +342,16 @@ test "generic function" {
     try testCompletion(
         \\const S = struct { alpha: u32 };
         \\fn foo(comptime T: type) T {}
-        \\const s = foo(S);
-        \\const foo = s.<cursor>
+        \\const S1 = foo(S);
+        \\const S2 = S1.<cursor>
     , &.{
         .{ .label = "alpha", .kind = .Field, .detail = "u32" },
     });
     try testCompletion(
         \\const S = struct { alpha: u32 };
         \\fn foo(any: anytype, comptime T: type) T {}
-        \\const s = foo(null, S);
-        \\const foo = s.<cursor>
+        \\const S1 = foo(null, S);
+        \\const S2 = S1.<cursor>
     , &.{
         .{ .label = "alpha", .kind = .Field, .detail = "u32" },
     });
@@ -2357,7 +2357,9 @@ test "structinit" {
         \\    brefa: A,
         \\    this_is_b: []const u8,
         \\};
-        \\ref(.{ .arefb = .{ .brefa = .{.<cursor>} } });
+        \\test {
+        \\    ref(.{ .arefb = .{ .brefa = .{.<cursor>} } });
+        \\}
     , &.{
         .{ .label = "arefb", .kind = .Field, .detail = "B = 8" },
         .{ .label = "this_is_a", .kind = .Field, .detail = "u32 = 9" },
@@ -2396,7 +2398,9 @@ test "structinit" {
         \\  const Self = @This();
         \\  pub fn s3(self: *Self, p0: S1, p1: S2) void {}
         \\};
-        \\S3.s3(null, .{ .mye = .{} }, .{ .ref1 = .{ .ref3 = .{ .ref2 = .{ .ref1 = .{.<cursor>} } } } });
+        \\test {
+        \\  S3.s3(null, .{ .mye = .{} }, .{ .ref1 = .{ .ref3 = .{ .ref2 = .{ .ref1 = .{.<cursor>} } } } });
+        \\}
     , &.{
         .{ .label = "s1f1", .kind = .Field, .detail = "u8" },
         .{ .label = "s1f2", .kind = .Field, .detail = "u32 = 1" },
@@ -2422,8 +2426,10 @@ test "structinit" {
         \\  const Self = @This();
         \\  pub fn s3(self: Self, p0: es, p1: S1) void {}
         \\};
-        \\const iofs3 = S3{};
-        \\iofs3.s3(.{.<cursor>});
+        \\test {
+        \\  const iofs3 = S3{};
+        \\  iofs3.s3(.{.<cursor>});
+        \\}
     , &.{
         .{ .label = "s1f1", .kind = .Field, .detail = "u8" },
         .{ .label = "s1f2", .kind = .Field, .detail = "u32 = 1" },

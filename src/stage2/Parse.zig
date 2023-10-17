@@ -873,7 +873,7 @@ fn parseGlobalVarDecl(p: *Parse) !Node.Index {
 
     p.nodes.items(.data)[var_decl].rhs = init_node;
 
-    try p.expectSemicolon(.expected_semi_after_decl, false);
+    try p.expectSemicolon(.expected_semi_after_decl, true);
     return var_decl;
 }
 
@@ -2432,6 +2432,11 @@ fn parseCurlySuffixExpr(p: *Parse) !Node.Index {
     if (lhs == 0) return null_node;
     const lbrace = p.eatToken(.l_brace) orelse return lhs;
 
+    if (p.token_tags[p.tok_i] == .period and p.token_tags[p.tok_i + 1] == .period) { // zls
+        try p.warn(.expected_initializer);
+        p.tok_i += 1;
+    }
+
     // If there are 0 or 1 items, we can use ArrayInitOne/StructInitOne;
     // otherwise we use the full ArrayInit/StructInit.
 
@@ -2450,6 +2455,12 @@ fn parseCurlySuffixExpr(p: *Parse) !Node.Index {
                 .colon, .r_paren, .r_bracket => return p.failExpected(.r_brace),
                 // Likely just a missing comma; give error but continue parsing.
                 else => try p.warn(.expected_comma_after_initializer),
+            }
+            if (p.token_tags[p.tok_i] == .period) { // zls
+                if (p.token_tags[p.tok_i + 1] == .period or p.token_tags[p.tok_i + 1] == .r_brace) {
+                    try p.warn(.expected_initializer);
+                    p.tok_i += 1;
+                }
             }
             if (p.eatToken(.r_brace)) |_| break;
             const next = try p.expectFieldInit();
@@ -2479,6 +2490,10 @@ fn parseCurlySuffixExpr(p: *Parse) !Node.Index {
     }
 
     while (true) {
+        if (p.token_tags[p.tok_i] == .period and p.token_tags[p.tok_i + 1] == .r_brace) { // zls
+            try p.warn(.expected_expr);
+            p.tok_i += 1;
+        }
         if (p.eatToken(.r_brace)) |_| break;
         const elem_init = try p.expectExpr();
         try p.scratch.append(p.gpa, elem_init);
@@ -2851,6 +2866,11 @@ fn parsePrimaryTypeExpr(p: *Parse) !Node.Index {
                 const lbrace = p.tok_i + 1;
                 p.tok_i = lbrace + 1;
 
+                if (p.token_tags[p.tok_i] == .period and p.token_tags[p.tok_i + 1] == .period) { // zls
+                    try p.warn(.expected_initializer);
+                    p.tok_i += 1;
+                }
+
                 // If there are 0, 1, or 2 items, we can use ArrayInitDotTwo/StructInitDotTwo;
                 // otherwise we use the full ArrayInitDot/StructInitDot.
 
@@ -2869,6 +2889,12 @@ fn parsePrimaryTypeExpr(p: *Parse) !Node.Index {
                             .colon, .r_paren, .r_bracket => return p.failExpected(.r_brace),
                             // Likely just a missing comma; give error but continue parsing.
                             else => try p.warn(.expected_comma_after_initializer),
+                        }
+                        if (p.token_tags[p.tok_i] == .period) { // zls
+                            if (p.token_tags[p.tok_i + 1] == .period or p.token_tags[p.tok_i + 1] == .r_brace) {
+                                try p.warn(.expected_initializer);
+                                p.tok_i += 1;
+                            }
                         }
                         if (p.eatToken(.r_brace)) |_| break;
                         const next = try p.expectFieldInit();
@@ -2909,6 +2935,10 @@ fn parsePrimaryTypeExpr(p: *Parse) !Node.Index {
                 }
 
                 while (true) {
+                    if (p.token_tags[p.tok_i] == .period and p.token_tags[p.tok_i + 1] == .r_brace) { // zls
+                        try p.warn(.expected_expr);
+                        p.tok_i += 1;
+                    }
                     if (p.eatToken(.r_brace)) |_| break;
                     const elem_init = try p.expectExpr();
                     try p.scratch.append(p.gpa, elem_init);
@@ -3130,6 +3160,10 @@ fn expectSwitchExpr(p: *Parse) !Node.Index {
     _ = try p.expectToken(.l_brace);
     const cases = try p.parseSwitchProngList();
     const trailing_comma = p.token_tags[p.tok_i - 1] == .comma;
+    if (p.token_tags[p.tok_i] == .period and p.token_tags[p.tok_i + 1] == .r_brace) { // zls
+        try p.warn(.expected_expr);
+        p.tok_i += 1;
+    }
     _ = try p.expectToken(.r_brace);
 
     return p.addNode(.{
@@ -3439,6 +3473,10 @@ fn parseSwitchProng(p: *Parse) !Node.Index {
 
     if (p.eatToken(.keyword_else) == null) {
         while (true) {
+            if (p.token_tags[p.tok_i] == .period and p.token_tags[p.tok_i + 1] == .period) { // zls
+                try p.warn(.expected_expr);
+                p.tok_i += 1;
+            }
             const item = try p.parseSwitchItem();
             if (item == 0) break;
             try p.scratch.append(p.gpa, item);
