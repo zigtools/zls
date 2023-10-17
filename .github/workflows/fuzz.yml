@@ -67,7 +67,6 @@ jobs:
         with:
           path: zls
           fetch-depth: 0
-          submodules: true
 
       - name: Checkout zls (PR)
         if: github.event_name == 'pull_request_target'
@@ -75,7 +74,6 @@ jobs:
         with:
           path: zls
           fetch-depth: 0
-          submodules: true
           ref: "refs/pull/${{ github.event.number }}/merge"
 
       - name: Build zls
@@ -90,7 +88,6 @@ jobs:
           path: sus
           repository: "zigtools/sus"
           fetch-depth: 0
-          submodules: recursive
 
       - name: Build sus
         run: |
