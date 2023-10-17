@@ -615,7 +615,7 @@ fn resolveReturnType(analyser: *Analyser, fn_decl: Ast.full.FnProto, handle: *co
 }
 
 /// Resolves the child type of an optional type
-fn resolveUnwrapOptionalType(analyser: *Analyser, opt: TypeWithHandle) !?TypeWithHandle {
+pub fn resolveUnwrapOptionalType(analyser: *Analyser, opt: TypeWithHandle) !?TypeWithHandle {
     const opt_node = switch (opt.type.data) {
         .other => |n| n,
         else => return null,

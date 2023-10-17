@@ -1363,9 +1363,7 @@ fn collectFieldAccessContainerNodes(
         var node_type = try decl.resolveType(analyser) orelse continue;
         // Unwrap `identifier.opt_enum_field = .` or `identifier.opt_cont_field = .{.`
         if (dot_context.likely == .enum_assignment or dot_context.likely == .struct_field) {
-            if (node_type.type.data == .other and node_type.handle.tree.nodes.items(.tag)[node_type.type.data.other] == .optional_type) {
-                node_type = try analyser.resolveTypeOfNode(.{ .node = node_type.handle.tree.nodes.items(.data)[node_type.type.data.other].lhs, .handle = node_type.handle }) orelse return;
-            }
+            if (try analyser.resolveUnwrapOptionalType(node_type)) |unwrapped| node_type = unwrapped;
         }
         if (node_type.isFunc()) {
             var buf: [1]Ast.Node.Index = undefined;
@@ -1426,7 +1424,9 @@ fn collectEnumLiteralContainerNodes(
             else => continue,
         };
         const member_decl = try analyser.lookupSymbolContainer(.{ .node = node, .handle = container.handle }, alleged_field_name, .field) orelse continue;
-        const member_type = try member_decl.resolveType(analyser) orelse continue;
+        var member_type = try member_decl.resolveType(analyser) orelse continue;
+        // Unwrap `x{ .fld_w_opt_type =`
+        if (try analyser.resolveUnwrapOptionalType(member_type)) |unwrapped| member_type = unwrapped;
         try types_with_handles.append(arena, member_type);
     }
 }

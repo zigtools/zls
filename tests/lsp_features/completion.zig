@@ -1012,6 +1012,18 @@ test "completion - struct init" {
         // TODO `alpha` should be excluded
         .{ .label = "alpha", .kind = .Field, .detail = "alpha: *const S" },
     });
+    try testCompletion(
+        \\const S = struct {
+        \\    alpha: *const S,
+        \\    beta: u32,
+        \\    gamma: ?S,
+        \\};
+        \\const foo = S{ .gamma = .{.<cursor>};
+    , &.{
+        .{ .label = "gamma", .kind = .Field, .detail = "gamma: ?S" },
+        .{ .label = "beta", .kind = .Field, .detail = "beta: u32" },
+        .{ .label = "alpha", .kind = .Field, .detail = "alpha: *const S" },
+    });
     // Aliases
     try testCompletion(
         \\pub const Outer = struct {
