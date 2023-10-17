@@ -195,7 +195,7 @@ pub fn gotoDefinitionString(
             blk: {
                 if (std.fs.path.isAbsolute(import_str)) break :blk import_str;
                 var include_dirs: std.ArrayListUnmanaged([]const u8) = .{};
-                document_store.collectIncludeDirs(arena, handle.*, &include_dirs) catch |err| {
+                _ = document_store.collectIncludeDirs(arena, handle.*, &include_dirs) catch |err| {
                     log.err("failed to resolve include paths: {}", .{err});
                     return null;
                 };

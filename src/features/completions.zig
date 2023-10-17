@@ -860,7 +860,7 @@ fn completeFileSystemStringLiteral(
     if (std.fs.path.isAbsolute(completing) and pos_context != .import_string_literal) {
         try search_paths.append(arena, completing);
     } else if (pos_context == .cinclude_string_literal) {
-        store.collectIncludeDirs(arena, handle, &search_paths) catch |err| {
+        _ = store.collectIncludeDirs(arena, handle, &search_paths) catch |err| {
             log.err("failed to resolve include paths: {}", .{err});
             return &.{};
         };
@@ -906,11 +906,12 @@ fn completeFileSystemStringLiteral(
     }
 
     if (completing.len == 0 and pos_context == .import_string_literal) {
-        if (handle.associated_build_file) |uri| {
+        if (handle.associated_build_file) |uri| blk: {
             const build_file = store.build_files.get(uri).?;
-            try completions.ensureUnusedCapacity(arena, build_file.config.value.packages.len);
+            const build_config = build_file.config orelse break :blk;
+            try completions.ensureUnusedCapacity(arena, build_config.value.packages.len);
 
-            for (build_file.config.value.packages) |pkg| {
+            for (build_config.value.packages) |pkg| {
                 completions.putAssumeCapacity(.{
                     .label = pkg.name,
                     .kind = .Module,
