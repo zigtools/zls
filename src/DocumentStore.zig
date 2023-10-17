@@ -12,6 +12,7 @@ const translate_c = @import("translate_c.zig");
 const ComptimeInterpreter = @import("ComptimeInterpreter.zig");
 const AstGen = std.zig.AstGen;
 const Zir = std.zig.Zir;
+const Parser = @import("stage2/Ast.zig");
 const InternPool = @import("analyser/InternPool.zig");
 const DocumentScope = @import("DocumentScope.zig");
 
@@ -515,8 +516,15 @@ pub const Handle = struct {
         const tracy_zone_inner = tracy.traceNamed(@src(), "Ast.parse");
         defer tracy_zone_inner.end();
 
-        var tree = try Ast.parse(allocator, new_text, .zig);
-        errdefer tree.deinit(allocator);
+        var zls_ast = try Parser.parse(allocator, new_text, .zig);
+        errdefer zls_ast.deinit(allocator);
+        var tree = Ast{
+            .source = zls_ast.source,
+            .tokens = zls_ast.tokens,
+            .nodes = zls_ast.nodes,
+            .extra_data = zls_ast.extra_data,
+            .errors = zls_ast.errors,
+        };
 
         // remove unused capacity
         var nodes = tree.nodes.toMultiArrayList();
