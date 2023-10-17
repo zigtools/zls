@@ -498,22 +498,23 @@ fn completeLabel(
 }
 
 fn populateSnippedCompletions(
+    server: *Server,
     allocator: std.mem.Allocator,
     completions: *std.ArrayListUnmanaged(types.CompletionItem),
     snippets: []const snipped_data.Snipped,
-    config: Config,
 ) error{OutOfMemory}!void {
     try completions.ensureUnusedCapacity(allocator, snippets.len);
 
+    const use_snippets = server.config.enable_snippets and server.client_capabilities.supports_snippets;
     for (snippets) |snipped| {
-        if (!config.enable_snippets and snipped.kind == .Snippet) continue;
+        if (!use_snippets and snipped.kind == .Snippet) continue;
 
         completions.appendAssumeCapacity(.{
             .label = snipped.label,
             .kind = snipped.kind,
-            .detail = if (config.enable_snippets) snipped.text else null,
-            .insertText = if (config.enable_snippets) snipped.text else null,
-            .insertTextFormat = if (config.enable_snippets and snipped.text != null) .Snippet else .PlainText,
+            .detail = if (use_snippets) snipped.text else null,
+            .insertText = if (use_snippets) snipped.text else null,
+            .insertTextFormat = if (use_snippets and snipped.text != null) .Snippet else .PlainText,
         });
     }
 }
@@ -561,7 +562,7 @@ fn completeGlobal(server: *Server, analyser: *Analyser, arena: std.mem.Allocator
         .orig_handle = handle,
     };
     try analyser.iterateSymbolsGlobal(handle, pos_index, declToCompletion, context);
-    try populateSnippedCompletions(arena, &completions, &snipped_data.generic, server.config);
+    try populateSnippedCompletions(server, arena, &completions, &snipped_data.generic);
     try formatCompletionDetails(server, arena, completions.items);
 
     return completions.toOwnedSlice(arena);
@@ -932,7 +933,7 @@ pub fn completionAtIndex(server: *Server, analyser: *Analyser, arena: std.mem.Al
     const at_line_start = offsets.lineSliceUntilIndex(source, source_index).len < 2;
     if (at_line_start) {
         var completions = std.ArrayListUnmanaged(types.CompletionItem){};
-        try populateSnippedCompletions(arena, &completions, &snipped_data.top_level_decl_data, server.config);
+        try populateSnippedCompletions(server, arena, &completions, &snipped_data.top_level_decl_data);
 
         return .{ .isIncomplete = false, .items = completions.items };
     }
