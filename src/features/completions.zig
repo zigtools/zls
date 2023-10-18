@@ -498,22 +498,23 @@ fn completeLabel(
 }
 
 fn populateSnippedCompletions(
+    server: *Server,
     allocator: std.mem.Allocator,
     completions: *std.ArrayListUnmanaged(types.CompletionItem),
     snippets: []const snipped_data.Snipped,
-    config: Config,
 ) error{OutOfMemory}!void {
     try completions.ensureUnusedCapacity(allocator, snippets.len);
 
+    const use_snippets = server.config.enable_snippets and server.client_capabilities.supports_snippets;
     for (snippets) |snipped| {
-        if (!config.enable_snippets and snipped.kind == .Snippet) continue;
+        if (!use_snippets and snipped.kind == .Snippet) continue;
 
         completions.appendAssumeCapacity(.{
             .label = snipped.label,
             .kind = snipped.kind,
-            .detail = if (config.enable_snippets) snipped.text else null,
-            .insertText = if (config.enable_snippets) snipped.text else null,
-            .insertTextFormat = if (config.enable_snippets and snipped.text != null) .Snippet else .PlainText,
+            .detail = if (use_snippets) snipped.text else null,
+            .insertText = if (use_snippets) snipped.text else null,
+            .insertTextFormat = if (use_snippets and snipped.text != null) .Snippet else .PlainText,
         });
     }
 }
@@ -561,7 +562,7 @@ fn completeGlobal(server: *Server, analyser: *Analyser, arena: std.mem.Allocator
         .orig_handle = handle,
     };
     try analyser.iterateSymbolsGlobal(handle, pos_index, declToCompletion, context);
-    try populateSnippedCompletions(arena, &completions, &snipped_data.generic, server.config);
+    try populateSnippedCompletions(server, arena, &completions, &snipped_data.generic);
     try formatCompletionDetails(server, arena, completions.items);
 
     return completions.toOwnedSlice(arena);
@@ -860,7 +861,7 @@ fn completeFileSystemStringLiteral(
     if (std.fs.path.isAbsolute(completing) and pos_context != .import_string_literal) {
         try search_paths.append(arena, completing);
     } else if (pos_context == .cinclude_string_literal) {
-        store.collectIncludeDirs(arena, handle, &search_paths) catch |err| {
+        _ = store.collectIncludeDirs(arena, handle, &search_paths) catch |err| {
             log.err("failed to resolve include paths: {}", .{err});
             return &.{};
         };
@@ -906,11 +907,12 @@ fn completeFileSystemStringLiteral(
     }
 
     if (completing.len == 0 and pos_context == .import_string_literal) {
-        if (handle.associated_build_file) |uri| {
+        if (handle.associated_build_file) |uri| blk: {
             const build_file = store.build_files.get(uri).?;
-            try completions.ensureUnusedCapacity(arena, build_file.config.value.packages.len);
+            const build_config = build_file.config orelse break :blk;
+            try completions.ensureUnusedCapacity(arena, build_config.value.packages.len);
 
-            for (build_file.config.value.packages) |pkg| {
+            for (build_config.value.packages) |pkg| {
                 completions.putAssumeCapacity(.{
                     .label = pkg.name,
                     .kind = .Module,
@@ -931,7 +933,7 @@ pub fn completionAtIndex(server: *Server, analyser: *Analyser, arena: std.mem.Al
     const at_line_start = offsets.lineSliceUntilIndex(source, source_index).len < 2;
     if (at_line_start) {
         var completions = std.ArrayListUnmanaged(types.CompletionItem){};
-        try populateSnippedCompletions(arena, &completions, &snipped_data.top_level_decl_data, server.config);
+        try populateSnippedCompletions(server, arena, &completions, &snipped_data.top_level_decl_data);
 
         return .{ .isIncomplete = false, .items = completions.items };
     }
@@ -1361,9 +1363,7 @@ fn collectFieldAccessContainerNodes(
         var node_type = try decl.resolveType(analyser) orelse continue;
         // Unwrap `identifier.opt_enum_field = .` or `identifier.opt_cont_field = .{.`
         if (dot_context.likely == .enum_assignment or dot_context.likely == .struct_field) {
-            if (node_type.type.data == .other and node_type.handle.tree.nodes.items(.tag)[node_type.type.data.other] == .optional_type) {
-                node_type = try analyser.resolveTypeOfNode(.{ .node = node_type.handle.tree.nodes.items(.data)[node_type.type.data.other].lhs, .handle = node_type.handle }) orelse return;
-            }
+            if (try analyser.resolveUnwrapOptionalType(node_type)) |unwrapped| node_type = unwrapped;
         }
         if (node_type.isFunc()) {
             var buf: [1]Ast.Node.Index = undefined;
@@ -1424,7 +1424,9 @@ fn collectEnumLiteralContainerNodes(
             else => continue,
         };
         const member_decl = try analyser.lookupSymbolContainer(.{ .node = node, .handle = container.handle }, alleged_field_name, .field) orelse continue;
-        const member_type = try member_decl.resolveType(analyser) orelse continue;
+        var member_type = try member_decl.resolveType(analyser) orelse continue;
+        // Unwrap `x{ .fld_w_opt_type =`
+        if (try analyser.resolveUnwrapOptionalType(member_type)) |unwrapped| member_type = unwrapped;
         try types_with_handles.append(arena, member_type);
     }
 }
