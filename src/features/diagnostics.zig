@@ -16,7 +16,7 @@ const tracy = @import("../tracy.zig");
 const Module = @import("../stage2/Module.zig");
 const Zir = @import("../stage2/Zir.zig");
 
-pub fn generateDiagnostics(server: *Server, arena: std.mem.Allocator, handle: DocumentStore.Handle) error{OutOfMemory}!types.PublishDiagnosticsParams {
+pub fn generateDiagnostics(server: *Server, arena: std.mem.Allocator, handle: *DocumentStore.Handle) error{OutOfMemory}!types.PublishDiagnosticsParams {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -128,7 +128,7 @@ pub fn generateDiagnostics(server: *Server, arena: std.mem.Allocator, handle: Do
             const err_msg = error_bundle.getErrorMessage(err_msg_index);
 
             diagnostics.appendAssumeCapacity(.{
-                .range = offsets.nodeToRange(handle.tree, node, server.offset_encoding),
+                .range = offsets.nodeToRange(tree, node, server.offset_encoding),
                 .severity = .Error,
                 .code = .{ .string = "cImport" },
                 .source = "zls",
@@ -169,7 +169,7 @@ pub fn generateDiagnostics(server: *Server, arena: std.mem.Allocator, handle: Do
     try diagnostics.ensureUnusedCapacity(arena, handle.analysis_errors.items.len);
     for (handle.analysis_errors.items) |err| {
         diagnostics.appendAssumeCapacity(.{
-            .range = offsets.locToRange(handle.tree.source, err.loc, server.offset_encoding),
+            .range = offsets.locToRange(tree.source, err.loc, server.offset_encoding),
             .severity = .Error,
             .code = .{ .string = err.code },
             .source = "zls",
@@ -354,7 +354,7 @@ pub fn generateBuildOnSaveDiagnostics(
 pub fn getAstCheckDiagnostics(
     server: *Server,
     arena: std.mem.Allocator,
-    handle: DocumentStore.Handle,
+    handle: *DocumentStore.Handle,
     diagnostics: *std.ArrayListUnmanaged(types.Diagnostic),
 ) error{OutOfMemory}!void {
     std.debug.assert(server.config.enable_ast_check_diagnostics);
@@ -368,18 +368,14 @@ pub fn getAstCheckDiagnostics(
             log.err("failed to run ast-check: {}", .{err});
         };
     } else {
-        std.debug.assert(server.document_store.wantZir());
-        switch (handle.zir_status) {
-            .none, .outdated => {},
-            .done => try getDiagnosticsFromZir(server, arena, handle, diagnostics),
-        }
+        try getDiagnosticsFromZir(server, arena, handle, diagnostics);
     }
 }
 
 fn getDiagnosticsFromAstCheck(
     server: *Server,
     arena: std.mem.Allocator,
-    handle: DocumentStore.Handle,
+    handle: *DocumentStore.Handle,
     diagnostics: *std.ArrayListUnmanaged(types.Diagnostic),
 ) !void {
     comptime std.debug.assert(std.process.can_spawn);
@@ -399,7 +395,7 @@ fn getDiagnosticsFromAstCheck(
             log.warn("Failed to spawn zig ast-check process, error: {}", .{err});
             return;
         };
-        try process.stdin.?.writeAll(handle.text);
+        try process.stdin.?.writeAll(handle.tree.source);
         process.stdin.?.close();
 
         process.stdin = null;
@@ -440,8 +436,8 @@ fn getDiagnosticsFromAstCheck(
         };
 
         // zig uses utf-8 encoding for character offsets
-        const position = offsets.convertPositionEncoding(handle.text, utf8_position, .@"utf-8", server.offset_encoding);
-        const range = offsets.tokenPositionToRange(handle.text, position, server.offset_encoding);
+        const position = offsets.convertPositionEncoding(handle.tree.source, utf8_position, .@"utf-8", server.offset_encoding);
+        const range = offsets.tokenPositionToRange(handle.tree.source, position, server.offset_encoding);
 
         const msg = pos_and_diag_iterator.rest()[1..];
 
@@ -491,28 +487,31 @@ fn getDiagnosticsFromAstCheck(
 fn getDiagnosticsFromZir(
     server: *const Server,
     arena: std.mem.Allocator,
-    handle: DocumentStore.Handle,
+    handle: *DocumentStore.Handle,
     diagnostics: *std.ArrayListUnmanaged(types.Diagnostic),
 ) error{OutOfMemory}!void {
-    std.debug.assert(handle.zir_status != .none);
+    const tree = handle.tree;
+    std.debug.assert(tree.errors.len == 0);
+    const zir = try handle.getZir();
+    std.debug.assert(handle.getZirStatus() == .done);
 
-    const payload_index = handle.zir.extra[@intFromEnum(Zir.ExtraIndex.compile_errors)];
+    const payload_index = zir.extra[@intFromEnum(Zir.ExtraIndex.compile_errors)];
     if (payload_index == 0) return;
 
-    const header = handle.zir.extraData(Zir.Inst.CompileErrors, payload_index);
+    const header = zir.extraData(Zir.Inst.CompileErrors, payload_index);
     const items_len = header.data.items_len;
 
     try diagnostics.ensureUnusedCapacity(arena, items_len);
 
     var extra_index = header.end;
     for (0..items_len) |_| {
-        const item = handle.zir.extraData(Zir.Inst.CompileErrors.Item, extra_index);
+        const item = zir.extraData(Zir.Inst.CompileErrors.Item, extra_index);
         extra_index = item.end;
         const err_loc = blk: {
             if (item.data.node != 0) {
-                break :blk offsets.nodeToLoc(handle.tree, item.data.node);
+                break :blk offsets.nodeToLoc(tree, item.data.node);
             }
-            const loc = offsets.tokenToLoc(handle.tree, item.data.token);
+            const loc = offsets.tokenToLoc(tree, item.data.token);
             break :blk offsets.Loc{
                 .start = loc.start + item.data.byte_offset,
                 .end = loc.end,
@@ -521,18 +520,18 @@ fn getDiagnosticsFromZir(
 
         var notes: []types.DiagnosticRelatedInformation = &.{};
         if (item.data.notes != 0) {
-            const block = handle.zir.extraData(Zir.Inst.Block, item.data.notes);
-            const body = handle.zir.extra[block.end..][0..block.data.body_len];
+            const block = zir.extraData(Zir.Inst.Block, item.data.notes);
+            const body = zir.extra[block.end..][0..block.data.body_len];
             notes = try arena.alloc(types.DiagnosticRelatedInformation, body.len);
             for (notes, body) |*note, note_index| {
-                const note_item = handle.zir.extraData(Zir.Inst.CompileErrors.Item, note_index);
-                const msg = handle.zir.nullTerminatedString(note_item.data.msg);
+                const note_item = zir.extraData(Zir.Inst.CompileErrors.Item, note_index);
+                const msg = zir.nullTerminatedString(note_item.data.msg);
 
                 const loc = blk: {
                     if (note_item.data.node != 0) {
-                        break :blk offsets.nodeToLoc(handle.tree, note_item.data.node);
+                        break :blk offsets.nodeToLoc(tree, note_item.data.node);
                     }
-                    const loc = offsets.tokenToLoc(handle.tree, note_item.data.token);
+                    const loc = offsets.tokenToLoc(tree, note_item.data.token);
                     break :blk offsets.Loc{
                         .start = loc.start + note_item.data.byte_offset,
                         .end = loc.end,
@@ -542,16 +541,16 @@ fn getDiagnosticsFromZir(
                 note.* = .{
                     .location = .{
                         .uri = handle.uri,
-                        .range = offsets.locToRange(handle.text, loc, server.offset_encoding),
+                        .range = offsets.locToRange(handle.tree.source, loc, server.offset_encoding),
                     },
                     .message = msg,
                 };
             }
         }
 
-        const msg = handle.zir.nullTerminatedString(item.data.msg);
+        const msg = zir.nullTerminatedString(item.data.msg);
         diagnostics.appendAssumeCapacity(.{
-            .range = offsets.locToRange(handle.text, err_loc, server.offset_encoding),
+            .range = offsets.locToRange(handle.tree.source, err_loc, server.offset_encoding),
             .severity = .Error,
             .code = .{ .string = "ast_check" },
             .source = "zls",

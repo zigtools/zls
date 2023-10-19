@@ -33,7 +33,7 @@ const Builder = struct {
     arena: std.mem.Allocator,
     analyser: *Analyser,
     config: *const Config,
-    handle: *const DocumentStore.Handle,
+    handle: *DocumentStore.Handle,
     hints: std.ArrayListUnmanaged(InlayHint) = .{},
     hover_kind: types.MarkupKind,
 
@@ -351,7 +351,7 @@ fn writeCallNodeHint(builder: *Builder, call: Ast.full.Call) !void {
             const start = offsets.tokenToIndex(tree, lhsToken);
             const rhs_loc = offsets.tokenToLoc(tree, rhsToken);
 
-            var held_range = try builder.arena.dupeZ(u8, handle.text[start..rhs_loc.end]);
+            var held_range = try builder.arena.dupeZ(u8, handle.tree.source[start..rhs_loc.end]);
             var tokenizer = std.zig.Tokenizer.init(held_range);
 
             // note: we have the ast node, traversing it would probably yield better results
@@ -478,7 +478,7 @@ pub fn writeRangeInlayHint(
     arena: std.mem.Allocator,
     config: Config,
     analyser: *Analyser,
-    handle: *const DocumentStore.Handle,
+    handle: *DocumentStore.Handle,
     loc: offsets.Loc,
     hover_kind: types.MarkupKind,
     offset_encoding: offsets.Encoding,

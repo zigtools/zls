@@ -326,12 +326,12 @@ fn getAutofixMode(server: *Server) enum {
 }
 
 /// caller owns returned memory.
-fn autofix(server: *Server, arena: std.mem.Allocator, handle: *const DocumentStore.Handle) error{OutOfMemory}!std.ArrayListUnmanaged(types.TextEdit) {
+fn autofix(server: *Server, arena: std.mem.Allocator, handle: *DocumentStore.Handle) error{OutOfMemory}!std.ArrayListUnmanaged(types.TextEdit) {
     if (!server.config.enable_ast_check_diagnostics) return .{};
     if (handle.tree.errors.len != 0) return .{};
 
     var diagnostics = std.ArrayListUnmanaged(types.Diagnostic){};
-    try diagnostics_gen.getAstCheckDiagnostics(server, arena, handle.*, &diagnostics);
+    try diagnostics_gen.getAstCheckDiagnostics(server, arena, handle, &diagnostics);
     if (diagnostics.items.len == 0) return .{};
 
     var analyser = Analyser.init(server.allocator, &server.document_store, &server.ip);
@@ -1147,7 +1147,7 @@ fn openDocumentHandler(server: *Server, _: std.mem.Allocator, notification: type
 fn changeDocumentHandler(server: *Server, _: std.mem.Allocator, notification: types.DidChangeTextDocumentParams) Error!void {
     const handle = server.document_store.getHandle(notification.textDocument.uri) orelse return;
 
-    const new_text = try diff.applyContentChanges(server.allocator, handle.text, notification.contentChanges, server.offset_encoding);
+    const new_text = try diff.applyContentChanges(server.allocator, handle.tree.source, notification.contentChanges, server.offset_encoding);
 
     try server.document_store.refreshDocument(handle.uri, new_text);
 
@@ -1244,7 +1244,7 @@ fn semanticTokensRangeHandler(server: *Server, arena: std.mem.Allocator, request
 fn completionHandler(server: *Server, arena: std.mem.Allocator, request: types.CompletionParams) Error!ResultType("textDocument/completion") {
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
 
-    const source_index = offsets.positionToIndex(handle.text, request.position, server.offset_encoding);
+    const source_index = offsets.positionToIndex(handle.tree.source, request.position, server.offset_encoding);
 
     var analyser = Analyser.init(server.allocator, &server.document_store, &server.ip);
     defer analyser.deinit();
@@ -1259,7 +1259,7 @@ fn signatureHelpHandler(server: *Server, arena: std.mem.Allocator, request: type
 
     if (request.position.character == 0) return null;
 
-    const source_index = offsets.positionToIndex(handle.text, request.position, server.offset_encoding);
+    const source_index = offsets.positionToIndex(handle.tree.source, request.position, server.offset_encoding);
 
     var analyser = Analyser.init(server.allocator, &server.document_store, &server.ip);
     defer analyser.deinit();
@@ -1298,7 +1298,7 @@ fn gotoHandler(
     if (request.position.character == 0) return null;
 
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
-    const source_index = offsets.positionToIndex(handle.text, request.position, server.offset_encoding);
+    const source_index = offsets.positionToIndex(handle.tree.source, request.position, server.offset_encoding);
 
     var analyser = Analyser.init(server.allocator, &server.document_store, &server.ip);
     defer analyser.deinit();
@@ -1363,7 +1363,7 @@ fn hoverHandler(server: *Server, arena: std.mem.Allocator, request: types.HoverP
     if (request.position.character == 0) return null;
 
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
-    const source_index = offsets.positionToIndex(handle.text, request.position, server.offset_encoding);
+    const source_index = offsets.positionToIndex(handle.tree.source, request.position, server.offset_encoding);
 
     const markup_kind: types.MarkupKind = if (server.client_capabilities.hover_supports_md) .markdown else .plaintext;
 
@@ -1398,9 +1398,9 @@ fn formattingHandler(server: *Server, arena: std.mem.Allocator, request: types.D
 
     const formatted = try handle.tree.render(arena);
 
-    if (std.mem.eql(u8, handle.text, formatted)) return null;
+    if (std.mem.eql(u8, handle.tree.source, formatted)) return null;
 
-    return if (diff.edits(arena, handle.text, formatted, server.offset_encoding)) |text_edits| text_edits.items else |_| null;
+    return if (diff.edits(arena, handle.tree.source, formatted, server.offset_encoding)) |text_edits| text_edits.items else |_| null;
 }
 
 fn renameHandler(server: *Server, arena: std.mem.Allocator, request: types.RenameParams) Error!?types.WorkspaceEdit {
@@ -1455,10 +1455,10 @@ fn generalReferencesHandler(server: *Server, arena: std.mem.Allocator, request: 
 
     if (request.position().character <= 0) return null;
 
-    const source_index = offsets.positionToIndex(handle.text, request.position(), server.offset_encoding);
+    const source_index = offsets.positionToIndex(handle.tree.source, request.position(), server.offset_encoding);
     const name_loc = Analyser.identifierLocFromPosition(source_index, handle) orelse return null;
-    const name = offsets.locToSlice(handle.text, name_loc);
-    const pos_context = try Analyser.getPositionContext(server.allocator, handle.text, source_index, true);
+    const name = offsets.locToSlice(handle.tree.source, name_loc);
+    const pos_context = try Analyser.getPositionContext(server.allocator, handle.tree.source, source_index, true);
 
     var analyser = Analyser.init(server.allocator, &server.document_store, &server.ip);
     defer analyser.deinit();
@@ -1542,7 +1542,7 @@ fn inlayHintHandler(server: *Server, arena: std.mem.Allocator, request: types.In
     const handle = server.document_store.getHandle(request.textDocument.uri) orelse return null;
 
     const hover_kind: types.MarkupKind = if (server.client_capabilities.hover_supports_md) .markdown else .plaintext;
-    const loc = offsets.rangeToLoc(handle.text, request.range, server.offset_encoding);
+    const loc = offsets.rangeToLoc(handle.tree.source, request.range, server.offset_encoding);
 
     var analyser = Analyser.init(server.allocator, &server.document_store, &server.ip);
     defer analyser.deinit();
@@ -1574,7 +1574,7 @@ fn codeActionHandler(server: *Server, arena: std.mem.Allocator, request: types.C
     // as of right now, only ast-check errors may get a code action
     var diagnostics = std.ArrayListUnmanaged(types.Diagnostic){};
     if (server.config.enable_ast_check_diagnostics and handle.tree.errors.len == 0) {
-        try diagnostics_gen.getAstCheckDiagnostics(server, arena, handle.*, &diagnostics);
+        try diagnostics_gen.getAstCheckDiagnostics(server, arena, handle, &diagnostics);
     }
 
     var actions = std.ArrayListUnmanaged(types.CodeAction){};
@@ -2133,7 +2133,7 @@ fn processJob(server: *Server, job: Job, wait_group: ?*std.Thread.WaitGroup) voi
             const handle = server.document_store.getHandle(uri) orelse return;
             var arena_allocator = std.heap.ArenaAllocator.init(server.allocator);
             defer arena_allocator.deinit();
-            const diagnostics = diagnostics_gen.generateDiagnostics(server, arena_allocator.allocator(), handle.*) catch return;
+            const diagnostics = diagnostics_gen.generateDiagnostics(server, arena_allocator.allocator(), handle) catch return;
             const json_message = server.sendToClientNotification("textDocument/publishDiagnostics", diagnostics) catch return;
             server.allocator.free(json_message);
         },

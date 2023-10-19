@@ -51,7 +51,7 @@ fn gotoDefinitionSymbol(
 fn gotoDefinitionLabel(
     analyser: *Analyser,
     arena: std.mem.Allocator,
-    handle: *const DocumentStore.Handle,
+    handle: *DocumentStore.Handle,
     pos_index: usize,
     kind: GotoKind,
     offset_encoding: offsets.Encoding,
@@ -61,15 +61,15 @@ fn gotoDefinitionLabel(
     _ = arena;
 
     const name_loc = Analyser.identifierLocFromPosition(pos_index, handle) orelse return null;
-    const name = offsets.locToSlice(handle.text, name_loc);
+    const name = offsets.locToSlice(handle.tree.source, name_loc);
     const decl = (try Analyser.getLabelGlobal(pos_index, handle, name)) orelse return null;
-    return try gotoDefinitionSymbol(analyser, offsets.locToRange(handle.text, name_loc, offset_encoding), decl, kind, offset_encoding);
+    return try gotoDefinitionSymbol(analyser, offsets.locToRange(handle.tree.source, name_loc, offset_encoding), decl, kind, offset_encoding);
 }
 
 fn gotoDefinitionGlobal(
     analyser: *Analyser,
     arena: std.mem.Allocator,
-    handle: *const DocumentStore.Handle,
+    handle: *DocumentStore.Handle,
     pos_index: usize,
     kind: GotoKind,
     offset_encoding: offsets.Encoding,
@@ -79,15 +79,15 @@ fn gotoDefinitionGlobal(
     _ = arena;
 
     const name_loc = Analyser.identifierLocFromPosition(pos_index, handle) orelse return null;
-    const name = offsets.locToSlice(handle.text, name_loc);
+    const name = offsets.locToSlice(handle.tree.source, name_loc);
     const decl = (try analyser.getSymbolGlobal(pos_index, handle, name)) orelse return null;
-    return try gotoDefinitionSymbol(analyser, offsets.locToRange(handle.text, name_loc, offset_encoding), decl, kind, offset_encoding);
+    return try gotoDefinitionSymbol(analyser, offsets.locToRange(handle.tree.source, name_loc, offset_encoding), decl, kind, offset_encoding);
 }
 
 fn gotoDefinitionEnumLiteral(
     analyser: *Analyser,
     arena: std.mem.Allocator,
-    handle: *const DocumentStore.Handle,
+    handle: *DocumentStore.Handle,
     source_index: usize,
     kind: GotoKind,
     offset_encoding: offsets.Encoding,
@@ -96,26 +96,27 @@ fn gotoDefinitionEnumLiteral(
     defer tracy_zone.end();
 
     const name_loc = Analyser.identifierLocFromPosition(source_index, handle) orelse return null;
-    const name = offsets.locToSlice(handle.text, name_loc);
+    const name = offsets.locToSlice(handle.tree.source, name_loc);
     const decl = (try analyser.getSymbolEnumLiteral(arena, handle, source_index, name)) orelse return null;
-    return try gotoDefinitionSymbol(analyser, offsets.locToRange(handle.text, name_loc, offset_encoding), decl, kind, offset_encoding);
+    return try gotoDefinitionSymbol(analyser, offsets.locToRange(handle.tree.source, name_loc, offset_encoding), decl, kind, offset_encoding);
 }
 
 fn gotoDefinitionBuiltin(
     document_store: *DocumentStore,
-    handle: *const DocumentStore.Handle,
+    handle: *DocumentStore.Handle,
     loc: offsets.Loc,
     offset_encoding: offsets.Encoding,
 ) error{OutOfMemory}!?types.DefinitionLink {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const name_loc = offsets.tokenIndexToLoc(handle.text, loc.start);
-    const name = offsets.locToSlice(handle.text, name_loc);
+    const name_loc = offsets.tokenIndexToLoc(handle.tree.source, loc.start);
+    const name = offsets.locToSlice(handle.tree.source, name_loc);
     if (std.mem.eql(u8, name, "@cImport")) {
+        const tree = handle.tree;
         const index = for (handle.cimports.items(.node), 0..) |cimport_node, index| {
-            const main_token = handle.tree.nodes.items(.main_token)[cimport_node];
-            if (loc.start == offsets.tokenToIndex(handle.tree, main_token)) break index;
+            const main_token = tree.nodes.items(.main_token)[cimport_node];
+            if (loc.start == offsets.tokenToIndex(tree, main_token)) break index;
         } else return null;
         const hash = handle.cimports.items(.hash)[index];
 
@@ -127,7 +128,7 @@ fn gotoDefinitionBuiltin(
         switch (result) {
             .failure => return null,
             .success => |uri| return types.DefinitionLink{
-                .originSelectionRange = offsets.locToRange(handle.text, name_loc, offset_encoding),
+                .originSelectionRange = offsets.locToRange(handle.tree.source, name_loc, offset_encoding),
                 .targetUri = uri,
                 .targetRange = target_range,
                 .targetSelectionRange = target_range,
@@ -141,7 +142,7 @@ fn gotoDefinitionBuiltin(
 fn gotoDefinitionFieldAccess(
     analyser: *Analyser,
     arena: std.mem.Allocator,
-    handle: *const DocumentStore.Handle,
+    handle: *DocumentStore.Handle,
     source_index: usize,
     loc: offsets.Loc,
     kind: GotoKind,
@@ -151,13 +152,13 @@ fn gotoDefinitionFieldAccess(
     defer tracy_zone.end();
 
     const name_loc = Analyser.identifierLocFromPosition(source_index, handle) orelse return null;
-    const name = offsets.locToSlice(handle.text, name_loc);
+    const name = offsets.locToSlice(handle.tree.source, name_loc);
     const held_loc = offsets.locMerge(loc, name_loc);
     const accesses = (try analyser.getSymbolFieldAccesses(arena, handle, source_index, held_loc, name)) orelse return null;
     var locs = std.ArrayListUnmanaged(types.DefinitionLink){};
 
     for (accesses) |access| {
-        if (try gotoDefinitionSymbol(analyser, offsets.locToRange(handle.text, name_loc, offset_encoding), access, kind, offset_encoding)) |l|
+        if (try gotoDefinitionSymbol(analyser, offsets.locToRange(handle.tree.source, name_loc, offset_encoding), access, kind, offset_encoding)) |l|
             try locs.append(arena, l);
     }
 
@@ -171,7 +172,7 @@ fn gotoDefinitionString(
     document_store: *DocumentStore,
     arena: std.mem.Allocator,
     pos_context: Analyser.PositionContext,
-    handle: *const DocumentStore.Handle,
+    handle: *DocumentStore.Handle,
     offset_encoding: offsets.Encoding,
 ) error{OutOfMemory}!?types.DefinitionLink {
     const tracy_zone = tracy.trace(@src());
@@ -215,7 +216,7 @@ fn gotoDefinitionString(
         .end = .{ .line = 0, .character = 0 },
     };
     return types.DefinitionLink{
-        .originSelectionRange = offsets.locToRange(handle.text, import_str_loc, offset_encoding),
+        .originSelectionRange = offsets.locToRange(handle.tree.source, import_str_loc, offset_encoding),
         .targetUri = uri orelse return null,
         .targetRange = target_range,
         .targetSelectionRange = target_range,
@@ -226,12 +227,12 @@ pub fn goto(
     analyser: *Analyser,
     document_store: *DocumentStore,
     arena: std.mem.Allocator,
-    handle: *const DocumentStore.Handle,
+    handle: *DocumentStore.Handle,
     source_index: usize,
     kind: GotoKind,
     offset_encoding: offsets.Encoding,
 ) !?[]const types.DefinitionLink {
-    const pos_context = try Analyser.getPositionContext(arena, handle.text, source_index, true);
+    const pos_context = try Analyser.getPositionContext(arena, handle.tree.source, source_index, true);
     var links = std.ArrayListUnmanaged(types.DefinitionLink){};
 
     try links.append(arena, switch (pos_context) {

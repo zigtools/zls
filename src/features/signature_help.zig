@@ -57,8 +57,9 @@ fn fnProtoToSignatureInfo(
     };
 }
 
-pub fn getSignatureInfo(analyser: *Analyser, arena: std.mem.Allocator, handle: *const DocumentStore.Handle, absolute_index: usize) !?types.SignatureInformation {
-    const innermost_block = Analyser.innermostBlockScope(handle.*, absolute_index);
+pub fn getSignatureInfo(analyser: *Analyser, arena: std.mem.Allocator, handle: *DocumentStore.Handle, absolute_index: usize) !?types.SignatureInformation {
+    const document_scope = try handle.getDocumentScope();
+    const innermost_block = Analyser.innermostBlockScope(document_scope, absolute_index);
     const tree = handle.tree;
     const token_tags = tree.tokens.items(.tag);
     const token_starts = tree.tokens.items(.start);
@@ -239,7 +240,7 @@ pub fn getSignatureInfo(analyser: *Analyser, arena: std.mem.Allocator, handle: *
                 const last_token_slice = tree.tokenSlice(expr_last_token);
                 const expr_end = token_starts[expr_last_token] + last_token_slice.len;
 
-                var held_expr = try arena.dupeZ(u8, handle.text[expr_start..expr_end]);
+                var held_expr = try arena.dupeZ(u8, handle.tree.source[expr_start..expr_end]);
 
                 // Resolve the expression.
                 var tokenizer = std.zig.Tokenizer.init(held_expr);
@@ -264,7 +265,7 @@ pub fn getSignatureInfo(analyser: *Analyser, arena: std.mem.Allocator, handle: *
                         try symbol_stack.append(arena, .l_paren);
                         continue;
                     };
-                    const name = offsets.locToSlice(handle.text, name_loc);
+                    const name = offsets.locToSlice(handle.tree.source, name_loc);
 
                     const skip_self_param = !type_handle.type.is_type_val;
                     const decl_handle = (try type_handle.lookupSymbol(analyser, name)) orelse {

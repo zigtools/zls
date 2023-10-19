@@ -145,7 +145,7 @@ fn hoverSymbol(
 fn hoverDefinitionLabel(
     analyser: *Analyser,
     arena: std.mem.Allocator,
-    handle: *const DocumentStore.Handle,
+    handle: *DocumentStore.Handle,
     pos_index: usize,
     markup_kind: types.MarkupKind,
     offset_encoding: offsets.Encoding,
@@ -154,7 +154,7 @@ fn hoverDefinitionLabel(
     defer tracy_zone.end();
 
     const name_loc = Analyser.identifierLocFromPosition(pos_index, handle) orelse return null;
-    const name = offsets.locToSlice(handle.text, name_loc);
+    const name = offsets.locToSlice(handle.tree.source, name_loc);
     const decl = (try Analyser.getLabelGlobal(pos_index, handle, name)) orelse return null;
 
     return .{
@@ -164,14 +164,14 @@ fn hoverDefinitionLabel(
                 .value = (try hoverSymbol(analyser, arena, decl, markup_kind, null)) orelse return null,
             },
         },
-        .range = offsets.locToRange(handle.text, name_loc, offset_encoding),
+        .range = offsets.locToRange(handle.tree.source, name_loc, offset_encoding),
     };
 }
 
 fn hoverDefinitionBuiltin(
     analyser: *Analyser,
     arena: std.mem.Allocator,
-    handle: *const DocumentStore.Handle,
+    handle: *DocumentStore.Handle,
     pos_index: usize,
     markup_kind: types.MarkupKind,
     offset_encoding: offsets.Encoding,
@@ -182,7 +182,7 @@ fn hoverDefinitionBuiltin(
     defer tracy_zone.end();
 
     const name_loc = Analyser.identifierLocFromPosition(pos_index, handle) orelse return null;
-    const name = offsets.locToSlice(handle.text, name_loc);
+    const name = offsets.locToSlice(handle.tree.source, name_loc);
 
     const builtin = for (data.builtins) |builtin| {
         if (std.mem.eql(u8, builtin.name[1..], name)) {
@@ -224,14 +224,14 @@ fn hoverDefinitionBuiltin(
                 .value = contents.items,
             },
         },
-        .range = offsets.locToRange(handle.text, name_loc, offset_encoding),
+        .range = offsets.locToRange(handle.tree.source, name_loc, offset_encoding),
     };
 }
 
 fn hoverDefinitionGlobal(
     analyser: *Analyser,
     arena: std.mem.Allocator,
-    handle: *const DocumentStore.Handle,
+    handle: *DocumentStore.Handle,
     pos_index: usize,
     markup_kind: types.MarkupKind,
     offset_encoding: offsets.Encoding,
@@ -240,7 +240,7 @@ fn hoverDefinitionGlobal(
     defer tracy_zone.end();
 
     const name_loc = Analyser.identifierLocFromPosition(pos_index, handle) orelse return null;
-    const name = offsets.locToSlice(handle.text, name_loc);
+    const name = offsets.locToSlice(handle.tree.source, name_loc);
     const decl = (try analyser.getSymbolGlobal(pos_index, handle, name)) orelse return null;
 
     return .{
@@ -250,14 +250,14 @@ fn hoverDefinitionGlobal(
                 .value = (try hoverSymbol(analyser, arena, decl, markup_kind, null)) orelse return null,
             },
         },
-        .range = offsets.locToRange(handle.text, name_loc, offset_encoding),
+        .range = offsets.locToRange(handle.tree.source, name_loc, offset_encoding),
     };
 }
 
 fn hoverDefinitionEnumLiteral(
     analyser: *Analyser,
     arena: std.mem.Allocator,
-    handle: *const DocumentStore.Handle,
+    handle: *DocumentStore.Handle,
     source_index: usize,
     markup_kind: types.MarkupKind,
     offset_encoding: offsets.Encoding,
@@ -266,7 +266,7 @@ fn hoverDefinitionEnumLiteral(
     defer tracy_zone.end();
 
     const name_loc = Analyser.identifierLocFromPosition(source_index, handle) orelse return null;
-    const name = offsets.locToSlice(handle.text, name_loc);
+    const name = offsets.locToSlice(handle.tree.source, name_loc);
     const decl = (try analyser.getSymbolEnumLiteral(arena, handle, source_index, name)) orelse return null;
 
     return .{
@@ -276,14 +276,14 @@ fn hoverDefinitionEnumLiteral(
                 .value = (try hoverSymbol(analyser, arena, decl, markup_kind, null)) orelse return null,
             },
         },
-        .range = offsets.locToRange(handle.text, name_loc, offset_encoding),
+        .range = offsets.locToRange(handle.tree.source, name_loc, offset_encoding),
     };
 }
 
 fn hoverDefinitionFieldAccess(
     analyser: *Analyser,
     arena: std.mem.Allocator,
-    handle: *const DocumentStore.Handle,
+    handle: *DocumentStore.Handle,
     source_index: usize,
     loc: offsets.Loc,
     markup_kind: types.MarkupKind,
@@ -293,7 +293,7 @@ fn hoverDefinitionFieldAccess(
     defer tracy_zone.end();
 
     const name_loc = Analyser.identifierLocFromPosition(source_index, handle) orelse return null;
-    const name = offsets.locToSlice(handle.text, name_loc);
+    const name = offsets.locToSlice(handle.tree.source, name_loc);
     const held_loc = offsets.locMerge(loc, name_loc);
     const decls = (try analyser.getSymbolFieldAccesses(arena, handle, source_index, held_loc, name)) orelse return null;
 
@@ -316,19 +316,19 @@ fn hoverDefinitionFieldAccess(
             } },
             else => .{ .array_of_MarkedString = try content.toOwnedSlice(arena) },
         },
-        .range = offsets.locToRange(handle.text, name_loc, offset_encoding),
+        .range = offsets.locToRange(handle.tree.source, name_loc, offset_encoding),
     };
 }
 
 pub fn hover(
     analyser: *Analyser,
     arena: std.mem.Allocator,
-    handle: *const DocumentStore.Handle,
+    handle: *DocumentStore.Handle,
     source_index: usize,
     markup_kind: types.MarkupKind,
     offset_encoding: offsets.Encoding,
 ) !?types.Hover {
-    const pos_context = try Analyser.getPositionContext(arena, handle.text, source_index, true);
+    const pos_context = try Analyser.getPositionContext(arena, handle.tree.source, source_index, true);
 
     const response = switch (pos_context) {
         .builtin => try hoverDefinitionBuiltin(analyser, arena, handle, source_index, markup_kind, offset_encoding),

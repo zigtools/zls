@@ -60,7 +60,7 @@ pub const TokenModifiers = packed struct(u16) {
 const Builder = struct {
     arena: std.mem.Allocator,
     analyser: *Analyser,
-    handle: *const DocumentStore.Handle,
+    handle: *DocumentStore.Handle,
     previous_source_index: usize = 0,
     token_buffer: std.ArrayListUnmanaged(u32) = .{},
     encoding: offsets.Encoding,
@@ -166,9 +166,10 @@ const Builder = struct {
             => if (self.limited) return,
         }
 
-        const delta_text = self.handle.tree.source[self.previous_source_index..loc.start];
+        const source = self.handle.tree.source;
+        const delta_text = source[self.previous_source_index..loc.start];
         const delta = offsets.indexToPosition(delta_text, delta_text.len, self.encoding);
-        const length = offsets.locLength(self.handle.tree.source, loc, self.encoding);
+        const length = offsets.locLength(source, loc, self.encoding);
 
         try self.token_buffer.appendSlice(self.arena, &.{
             @as(u32, @truncate(delta.line)),
@@ -203,7 +204,7 @@ fn writeDocComments(builder: *Builder, tree: Ast, doc: Ast.TokenIndex) !void {
 
 fn fieldTokenType(
     container_decl: Ast.Node.Index,
-    handle: *const DocumentStore.Handle,
+    handle: *DocumentStore.Handle,
     is_static_access: bool,
 ) ?TokenType {
     if (!ast.isContainer(handle.tree, container_decl))
@@ -1035,7 +1036,7 @@ fn writeIdentifier(builder: *Builder, name_token: Ast.Node.Index) error{OutOfMem
 pub fn writeSemanticTokens(
     arena: std.mem.Allocator,
     analyser: *Analyser,
-    handle: *const DocumentStore.Handle,
+    handle: *DocumentStore.Handle,
     loc: ?offsets.Loc,
     encoding: offsets.Encoding,
     limited: bool,

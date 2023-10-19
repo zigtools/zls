@@ -11,7 +11,7 @@ const tracy = @import("../tracy.zig");
 pub const Builder = struct {
     arena: std.mem.Allocator,
     analyser: *Analyser,
-    handle: *const DocumentStore.Handle,
+    handle: *DocumentStore.Handle,
     offset_encoding: offsets.Encoding,
 
     pub fn generateCodeAction(
@@ -22,7 +22,7 @@ pub const Builder = struct {
     ) error{OutOfMemory}!void {
         const kind = DiagnosticKind.parse(diagnostic.message) orelse return;
 
-        const loc = offsets.rangeToLoc(builder.handle.text, diagnostic.range, builder.offset_encoding);
+        const loc = offsets.rangeToLoc(builder.handle.tree.source, diagnostic.range, builder.offset_encoding);
 
         switch (kind) {
             .unused => |id| switch (id) {
@@ -47,12 +47,12 @@ pub const Builder = struct {
     }
 
     pub fn createTextEditLoc(self: *Builder, loc: offsets.Loc, new_text: []const u8) types.TextEdit {
-        const range = offsets.locToRange(self.handle.text, loc, self.offset_encoding);
+        const range = offsets.locToRange(self.handle.tree.source, loc, self.offset_encoding);
         return types.TextEdit{ .range = range, .newText = new_text };
     }
 
     pub fn createTextEditPos(self: *Builder, index: usize, new_text: []const u8) types.TextEdit {
-        const position = offsets.indexToPosition(self.handle.text, index, self.offset_encoding);
+        const position = offsets.indexToPosition(self.handle.tree.source, index, self.offset_encoding);
         return types.TextEdit{ .range = .{ .start = position, .end = position }, .newText = new_text };
     }
 
@@ -65,7 +65,7 @@ pub const Builder = struct {
 };
 
 fn handleNonCamelcaseFunction(builder: *Builder, actions: *std.ArrayListUnmanaged(types.CodeAction), loc: offsets.Loc) !void {
-    const identifier_name = offsets.locToSlice(builder.handle.text, loc);
+    const identifier_name = offsets.locToSlice(builder.handle.tree.source, loc);
 
     if (std.mem.allEqual(u8, identifier_name, '_')) return;
 
@@ -85,7 +85,7 @@ fn handleUnusedFunctionParameter(builder: *Builder, actions: *std.ArrayListUnman
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const identifier_name = offsets.locToSlice(builder.handle.text, loc);
+    const identifier_name = offsets.locToSlice(builder.handle.tree.source, loc);
 
     const tree = builder.handle.tree;
     const node_tags = tree.nodes.items(.tag);
@@ -135,7 +135,7 @@ fn handleUnusedVariableOrConstant(builder: *Builder, actions: *std.ArrayListUnma
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const identifier_name = offsets.locToSlice(builder.handle.text, loc);
+    const identifier_name = offsets.locToSlice(builder.handle.tree.source, loc);
 
     const tree = builder.handle.tree;
     const token_tags = tree.tokens.items(.tag);
@@ -180,15 +180,16 @@ fn handleUnusedCapture(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const capture_loc = getCaptureLoc(builder.handle.text, loc) orelse return;
+    const source = builder.handle.tree.source;
+    const capture_loc = getCaptureLoc(source, loc) orelse return;
 
     // look for next non-whitespace after last '|'. if its a '{' we can insert discards.
     // this means bare loop/switch captures (w/out curlies) aren't supported.
     var block_start = capture_loc.end + 1;
     var is_comment = false;
-    while (block_start < builder.handle.text.len) : (block_start += 1) {
-        switch (builder.handle.text[block_start]) {
-            '/' => if (block_start + 1 < builder.handle.text.len and builder.handle.text[block_start + 1] == '/') {
+    while (block_start < source.len) : (block_start += 1) {
+        switch (source[block_start]) {
+            '/' => if (block_start + 1 < source.len and source[block_start + 1] == '/') {
                 is_comment = true;
                 // we already know the next character is a `/` so lets skip that iteration
                 block_start += 1;
@@ -201,12 +202,12 @@ fn handleUnusedCapture(
             else => |c| if (!std.ascii.isWhitespace(c) and !is_comment) break,
         }
     }
-    if (builder.handle.text[block_start] != '{') {
+    if (source[block_start] != '{') {
         return;
     }
 
     const block_start_loc = offsets.Loc{ .start = block_start + 1, .end = block_start + 1 };
-    const identifier_name = builder.handle.text[loc.start..loc.end];
+    const identifier_name = source[loc.start..loc.end];
     const new_text = try createDiscardText(builder, identifier_name, block_start, true);
     const action1 = .{
         .title = "discard capture",
@@ -242,7 +243,7 @@ fn handlePointlessDiscard(builder: *Builder, actions: *std.ArrayListUnmanaged(ty
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const edit_loc = getDiscardLoc(builder.handle.text, loc) orelse return;
+    const edit_loc = getDiscardLoc(builder.handle.tree.source, loc) orelse return;
 
     try actions.append(builder.arena, .{
         .title = "remove pointless discard",
@@ -311,7 +312,7 @@ fn createCamelcaseText(allocator: std.mem.Allocator, identifier: []const u8) ![]
 // returns a discard string `\n{indent}_ = identifier_name;`
 fn createDiscardText(builder: *Builder, identifier_name: []const u8, declaration_start: usize, add_block_indentation: bool) ![]const u8 {
     const indent = find_indent: {
-        const line = offsets.lineSliceUntilIndex(builder.handle.text, declaration_start);
+        const line = offsets.lineSliceUntilIndex(builder.handle.tree.source, declaration_start);
         for (line, 0..) |char, i| {
             if (!std.ascii.isWhitespace(char)) {
                 break :find_indent line[0..i];
@@ -319,7 +320,7 @@ fn createDiscardText(builder: *Builder, identifier_name: []const u8, declaration
         }
         break :find_indent line;
     };
-    const additional_indent = if (add_block_indentation) detectIndentation(builder.handle.text) else "";
+    const additional_indent = if (add_block_indentation) detectIndentation(builder.handle.tree.source) else "";
 
     const new_text_len = 1 + indent.len + additional_indent.len + "_ = ;".len + identifier_name.len;
     var new_text = try std.ArrayListUnmanaged(u8).initCapacity(builder.arena, new_text_len);

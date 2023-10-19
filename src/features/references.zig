@@ -68,21 +68,21 @@ const Builder = struct {
 
     const Context = struct {
         builder: *Builder,
-        handle: *const DocumentStore.Handle,
+        handle: *DocumentStore.Handle,
     };
 
     fn deinit(self: *Builder) void {
         self.locations.deinit(self.allocator);
     }
 
-    fn add(self: *Builder, handle: *const DocumentStore.Handle, token_index: Ast.TokenIndex) error{OutOfMemory}!void {
+    fn add(self: *Builder, handle: *DocumentStore.Handle, token_index: Ast.TokenIndex) error{OutOfMemory}!void {
         try self.locations.append(self.allocator, .{
             .uri = handle.uri,
             .range = offsets.tokenToRange(handle.tree, token_index, self.encoding),
         });
     }
 
-    fn collectReferences(self: *Builder, handle: *const DocumentStore.Handle, node: Ast.Node.Index) error{OutOfMemory}!void {
+    fn collectReferences(self: *Builder, handle: *DocumentStore.Handle, node: Ast.Node.Index) error{OutOfMemory}!void {
         const context = Context{
             .builder = self,
             .handle = handle,
@@ -137,7 +137,7 @@ const Builder = struct {
 fn gatherReferences(
     allocator: std.mem.Allocator,
     analyser: *Analyser,
-    curr_handle: *const DocumentStore.Handle,
+    curr_handle: *DocumentStore.Handle,
     skip_std_references: bool,
     include_decl: bool,
     builder: anytype,
@@ -247,21 +247,21 @@ const CallBuilder = struct {
 
     const Context = struct {
         builder: *CallBuilder,
-        handle: *const DocumentStore.Handle,
+        handle: *DocumentStore.Handle,
     };
 
     fn deinit(self: *CallBuilder) void {
         self.callsites.deinit(self.allocator);
     }
 
-    fn add(self: *CallBuilder, handle: *const DocumentStore.Handle, call_node: Ast.Node.Index) error{OutOfMemory}!void {
+    fn add(self: *CallBuilder, handle: *DocumentStore.Handle, call_node: Ast.Node.Index) error{OutOfMemory}!void {
         try self.callsites.append(self.allocator, .{
             .uri = handle.uri,
             .call_node = call_node,
         });
     }
 
-    fn collectReferences(self: *CallBuilder, handle: *const DocumentStore.Handle, node: Ast.Node.Index) error{OutOfMemory}!void {
+    fn collectReferences(self: *CallBuilder, handle: *DocumentStore.Handle, node: Ast.Node.Index) error{OutOfMemory}!void {
         const context = Context{
             .builder = self,
             .handle = handle,
