@@ -127,6 +127,48 @@ pub fn sourceIndexToTokenIndex(tree: Ast, source_index: usize) Ast.TokenIndex {
     return @intCast(upper_index);
 }
 
+fn identifierIndexToLoc(tree: Ast, source_index: usize) Loc {
+    var index: usize = source_index;
+    var state: enum {
+        start,
+        identifier,
+        saw_at_sign,
+        string_literal,
+    } = .start;
+    while (true) : (index += 1) {
+        const c = tree.source[index];
+        switch (state) {
+            .start => switch (c) {
+                'a'...'z', 'A'...'Z', '_' => {
+                    state = .identifier;
+                },
+                '@' => {
+                    state = .saw_at_sign;
+                },
+                else => unreachable,
+            },
+            .saw_at_sign => switch (c) {
+                '"' => {
+                    state = .string_literal;
+                },
+                else => unreachable,
+            },
+            .identifier => switch (c) {
+                'a'...'z', 'A'...'Z', '_', '0'...'9' => {},
+                else => break,
+            },
+            .string_literal => switch (c) {
+                '"' => {
+                    index += 1;
+                    break;
+                },
+                else => continue,
+            },
+        }
+    }
+    return .{ .start = source_index, .end = index };
+}
+
 pub fn tokenToIndex(tree: Ast, token_index: Ast.TokenIndex) usize {
     return tree.tokens.items(.start)[token_index];
 }
@@ -141,10 +183,19 @@ pub fn tokenToLoc(tree: Ast, token_index: Ast.TokenIndex) Loc {
     const start = token_starts[token_index];
     const tag = token_tags[token_index];
 
-    // invalid tokens are one byte sized so we scan left and right to find the
-    // source location that contains complete code units
-    // this assumes that `tree.source` is valid utf8
-    if (tag == .invalid) {
+    // Many tokens can be determined entirely by their tag.
+    if (tag.lexeme()) |lexeme| {
+        return .{
+            .start = start,
+            .end = start + lexeme.len,
+        };
+    } else if (tag == .identifier) {
+        // fast path for identifiers
+        return identifierIndexToLoc(tree, start);
+    } else if (tag == .invalid) {
+        // invalid tokens are one byte sized so we scan left and right to find the
+        // source location that contains complete code units
+        // this assumes that `tree.source` is valid utf8
         var begin = token_index;
         while (begin > 0 and token_tags[begin - 1] == .invalid) : (begin -= 1) {}
 
@@ -153,14 +204,6 @@ pub fn tokenToLoc(tree: Ast, token_index: Ast.TokenIndex) Loc {
         return .{
             .start = token_starts[begin],
             .end = token_starts[end],
-        };
-    }
-
-    // Many tokens can be determined entirely by their tag.
-    if (tag.lexeme()) |lexeme| {
-        return .{
-            .start = start,
-            .end = start + lexeme.len,
         };
     }
 

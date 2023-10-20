@@ -343,7 +343,7 @@ const ScopeContext = struct {
             locToSmallLoc(offsets.tokenToLoc(context.tree, label)),
         );
 
-        const name = context.tree.tokenSlice(label);
+        const name = offsets.tokenToSlice(context.tree, label);
         try label_scope.pushDeclaration(name, .{
             .label_decl = .{
                 .label = label,
@@ -653,7 +653,7 @@ fn walkFuncNode(
         // Add parameter decls
         if (param.name_token) |name_token| {
             try scope.pushDeclaration(
-                tree.tokenSlice(name_token),
+                offsets.tokenToSlice(tree, name_token),
                 .{
                     .param_payload = .{
                         .param_index = param_index,
@@ -713,7 +713,7 @@ fn walkBlockNodeKeepOpen(
     // if labeled block
     if (token_tags[first_token] == .identifier) {
         try scope.pushDeclaration(
-            tree.tokenSlice(first_token),
+            offsets.tokenToSlice(tree, first_token),
             .{
                 .label_decl = .{
                     .label = first_token,
@@ -736,7 +736,7 @@ fn walkBlockNodeKeepOpen(
             .simple_var_decl,
             => {
                 const var_decl = tree.fullVarDecl(idx).?;
-                const name = tree.tokenSlice(var_decl.ast.mut_token + 1);
+                const name = offsets.tokenToSlice(tree, var_decl.ast.mut_token + 1);
                 try scope.pushDeclaration(name, .{ .ast_node = idx }, .other);
             },
             .assign_destructure => {
@@ -745,7 +745,7 @@ fn walkBlockNodeKeepOpen(
 
                 for (lhs_exprs, 0..) |lhs_node, i| {
                     const var_decl = tree.fullVarDecl(lhs_node) orelse continue;
-                    const name = tree.tokenSlice(var_decl.ast.mut_token + 1);
+                    const name = offsets.tokenToSlice(tree, var_decl.ast.mut_token + 1);
                     try scope.pushDeclaration(name, .{
                         .assign_destructure = .{
                             .node = idx,
@@ -777,7 +777,7 @@ fn walkIfNode(
         const name_token = payload + @intFromBool(token_tags[payload] == .asterisk);
         std.debug.assert(token_tags[name_token] == .identifier);
 
-        const name = tree.tokenSlice(name_token);
+        const name = offsets.tokenToSlice(tree, name_token);
         const decl: Declaration = if (if_node.error_token != null)
             .{ .error_union_payload = .{ .name = name_token, .condition = if_node.ast.cond_expr } }
         else
@@ -791,7 +791,7 @@ fn walkIfNode(
         const else_start = if_node.error_token orelse tree.firstToken(if_node.ast.else_expr);
         var else_scope = (try makeBlockScopeAt(context, tree, if_node.ast.else_expr, else_start)).?;
         if (if_node.error_token) |err_token| {
-            const name = tree.tokenSlice(err_token);
+            const name = offsets.tokenToSlice(tree, err_token);
             try else_scope.pushDeclaration(name, .{
                 .error_union_error = .{ .name = err_token, .condition = if_node.ast.cond_expr },
             }, .other);
@@ -818,7 +818,7 @@ fn walkCatchNode(
         token_tags[catch_token] == .identifier)
     {
         var expr_scope = (try makeBlockScopeAt(context, tree, data[node_idx].rhs, catch_token)).?;
-        const name = tree.tokenSlice(catch_token);
+        const name = offsets.tokenToSlice(tree, catch_token);
         try expr_scope.pushDeclaration(name, .{
             .error_union_error = .{ .name = catch_token, .condition = data[node_idx].lhs },
         }, .other);
@@ -850,7 +850,7 @@ fn walkWhileNode(
         const name_token = payload + @intFromBool(token_tags[payload] == .asterisk);
         std.debug.assert(token_tags[name_token] == .identifier);
 
-        const name = tree.tokenSlice(name_token);
+        const name = offsets.tokenToSlice(tree, name_token);
         const decl: Declaration = if (while_node.error_token != null)
             .{ .error_union_payload = .{ .name = name_token, .condition = while_node.ast.cond_expr } }
         else
@@ -889,7 +889,7 @@ fn walkWhileNode(
 
     if (while_node.error_token) |err_token| {
         std.debug.assert(token_tags[err_token] == .identifier);
-        const name = tree.tokenSlice(err_token);
+        const name = offsets.tokenToSlice(tree, err_token);
         try else_scope.?.pushDeclaration(name, .{
             .error_union_error = .{ .name = err_token, .condition = while_node.ast.cond_expr },
         }, .other);
@@ -976,7 +976,7 @@ fn walkSwitchNode(
             var expr_scope = (try makeBlockScopeAt(context, tree, switch_case.ast.target_expr, payload)).?;
             // if payload is *name than get next token
             const name_token = payload + @intFromBool(token_tags[payload] == .asterisk);
-            const name = tree.tokenSlice(name_token);
+            const name = offsets.tokenToSlice(tree, name_token);
 
             try expr_scope.pushDeclaration(name, .{
                 .switch_payload = .{ .node = node_idx, .case_index = @intCast(case_index) },
@@ -1001,7 +1001,7 @@ fn walkErrdeferNode(
     var expr_scope = (try makeBlockScopeAt(context, tree, data[node_idx].rhs, expr_start)).?;
 
     if (payload_token != 0) {
-        const name = tree.tokenSlice(payload_token);
+        const name = offsets.tokenToSlice(tree, payload_token);
         try expr_scope.pushDeclaration(name, .{
             .error_union_error = .{ .name = payload_token, .condition = 0 },
         }, .other);
