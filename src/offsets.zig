@@ -129,41 +129,21 @@ pub fn sourceIndexToTokenIndex(tree: Ast, source_index: usize) Ast.TokenIndex {
 
 fn identifierIndexToLoc(tree: Ast, source_index: usize) Loc {
     var index: usize = source_index;
-    var state: enum {
-        start,
-        identifier,
-        saw_at_sign,
-        string_literal,
-    } = .start;
-    while (true) : (index += 1) {
-        const c = tree.source[index];
-        switch (state) {
-            .start => switch (c) {
-                'a'...'z', 'A'...'Z', '_' => {
-                    state = .identifier;
-                },
-                '@' => {
-                    state = .saw_at_sign;
-                },
-                else => unreachable,
-            },
-            .saw_at_sign => switch (c) {
-                '"' => {
-                    state = .string_literal;
-                },
-                else => unreachable,
-            },
-            .identifier => switch (c) {
+    if (tree.source[index] == '@') {
+        index += 1;
+        std.debug.assert(tree.source[index] == '\"');
+        while (true) : (index += 1) {
+            if (tree.source[index] == '\"') {
+                index += 1;
+                break;
+            }
+        }
+    } else {
+        while (true) : (index += 1) {
+            switch (tree.source[index]) {
                 'a'...'z', 'A'...'Z', '_', '0'...'9' => {},
                 else => break,
-            },
-            .string_literal => switch (c) {
-                '"' => {
-                    index += 1;
-                    break;
-                },
-                else => continue,
-            },
+            }
         }
     }
     return .{ .start = source_index, .end = index };
@@ -184,14 +164,14 @@ pub fn tokenToLoc(tree: Ast, token_index: Ast.TokenIndex) Loc {
     const tag = token_tags[token_index];
 
     // Many tokens can be determined entirely by their tag.
-    if (tag.lexeme()) |lexeme| {
+    if (tag == .identifier) {
+        // fast path for identifiers
+        return identifierIndexToLoc(tree, start);
+    } else if (tag.lexeme()) |lexeme| {
         return .{
             .start = start,
             .end = start + lexeme.len,
         };
-    } else if (tag == .identifier) {
-        // fast path for identifiers
-        return identifierIndexToLoc(tree, start);
     } else if (tag == .invalid) {
         // invalid tokens are one byte sized so we scan left and right to find the
         // source location that contains complete code units
