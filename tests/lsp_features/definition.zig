@@ -33,6 +33,27 @@ test "definition - cursor is at the start of an identifier" {
     );
 }
 
+test "definition - multiline builder pattern" {
+    try testDefinition(
+        \\const Foo = struct {
+        \\    fn add(foo: Foo) Foo {}
+        \\    fn remove(foo: Foo) Foo {}
+        \\    fn process(foo: Foo) Foo {}
+        \\    fn <def>finalize</def>(_: Foo) void {}
+        \\};
+        \\test {
+        \\    var builder = Foo{};
+        \\    builder
+        \\        .add()
+        \\        .remove()
+        \\        .process()
+        \\        // Comments should
+        \\        // get ignored
+        \\        .finalize<>();
+        \\}
+    );
+}
+
 fn testDefinition(source: []const u8) !void {
     var phr = try helper.collectClearPlaceholders(allocator, source);
     defer phr.deinit(allocator);

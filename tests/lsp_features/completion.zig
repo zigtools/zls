@@ -502,6 +502,21 @@ test "completion - struct" {
     });
 
     try testCompletion(
+        \\const Foo = struct {
+        \\    fn add(foo: Foo) Foo {}
+        \\};
+        \\test {
+        \\    var builder = Foo{};
+        \\    builder
+        \\        // Comments should
+        \\        // get ignored
+        \\        .<cursor>
+        \\}
+    , &.{
+        .{ .label = "add", .kind = .Function, .detail = "fn add(foo: Foo) Foo" },
+    });
+
+    try testCompletion(
         \\fn doNothingWithInteger(a: u32) void { _ = a; }
         \\const S = struct {
         \\    alpha: u32,
