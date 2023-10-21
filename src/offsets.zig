@@ -132,6 +132,7 @@ fn identifierIndexToLoc(tree: Ast, source_index: usize) Loc {
     if (tree.source[index] == '@') {
         index += 1;
         std.debug.assert(tree.source[index] == '\"');
+        index += 1;
         while (true) : (index += 1) {
             if (tree.source[index] == '\"') {
                 index += 1;
