@@ -641,7 +641,7 @@ fn walkNode(
     };
 }
 
-fn walkContainerDecl(
+noinline fn walkContainerDecl(
     context: *ScopeContext,
     tree: Ast,
     node_idx: Ast.Node.Index,
@@ -731,7 +731,7 @@ fn walkContainerDecl(
     }
 }
 
-fn walkErrorSetNode(
+noinline fn walkErrorSetNode(
     context: *ScopeContext,
     tree: Ast,
     node_idx: Ast.Node.Index,
@@ -773,7 +773,7 @@ fn walkErrorSetNode(
     try scope.finalize();
 }
 
-fn walkFuncNode(
+noinline fn walkFuncNode(
     context: *ScopeContext,
     tree: Ast,
     node_idx: Ast.Node.Index,
@@ -829,7 +829,7 @@ fn walkFuncNode(
     try scope.finalize();
 }
 
-fn walkBlockNode(
+noinline fn walkBlockNode(
     context: *ScopeContext,
     tree: Ast,
     node_idx: Ast.Node.Index,
@@ -908,7 +908,7 @@ fn walkBlockNodeKeepOpen(
     return scope;
 }
 
-fn walkIfNode(
+noinline fn walkIfNode(
     context: *ScopeContext,
     tree: Ast,
     node_idx: Ast.Node.Index,
@@ -948,7 +948,7 @@ fn walkIfNode(
     }
 }
 
-fn walkCatchNode(
+noinline fn walkCatchNode(
     context: *ScopeContext,
     tree: Ast,
     node_idx: Ast.Node.Index,
@@ -976,7 +976,7 @@ fn walkCatchNode(
 }
 
 /// label_token: inline_token while (cond_expr) |payload_token| : (cont_expr) then_expr else else_expr
-fn walkWhileNode(
+noinline fn walkWhileNode(
     context: *ScopeContext,
     tree: Ast,
     node_idx: Ast.Node.Index,
@@ -1046,7 +1046,7 @@ fn walkWhileNode(
 }
 
 /// label_token: inline_token for (inputs) |capture_tokens| then_expr else else_expr
-fn walkForNode(
+noinline fn walkForNode(
     context: *ScopeContext,
     tree: Ast,
     node_idx: Ast.Node.Index,
@@ -1105,7 +1105,7 @@ fn walkForNode(
     }
 }
 
-fn walkSwitchNode(
+noinline fn walkSwitchNode(
     context: *ScopeContext,
     tree: Ast,
     node_idx: Ast.Node.Index,
@@ -1136,7 +1136,7 @@ fn walkSwitchNode(
     }
 }
 
-fn walkErrdeferNode(
+noinline fn walkErrdeferNode(
     context: *ScopeContext,
     tree: Ast,
     node_idx: Ast.Node.Index,
@@ -1157,20 +1157,20 @@ fn walkErrdeferNode(
     try expr_scope.finalize();
 }
 
-fn walkLhsNode(context: *ScopeContext, tree: Ast, node_idx: Ast.Node.Index) error{OutOfMemory}!void {
+noinline fn walkLhsNode(context: *ScopeContext, tree: Ast, node_idx: Ast.Node.Index) error{OutOfMemory}!void {
     try walkNode(context, tree, tree.nodes.items(.data)[node_idx].lhs);
 }
 
-fn walkRhsNode(context: *ScopeContext, tree: Ast, node_idx: Ast.Node.Index) error{OutOfMemory}!void {
+noinline fn walkRhsNode(context: *ScopeContext, tree: Ast, node_idx: Ast.Node.Index) error{OutOfMemory}!void {
     try walkNode(context, tree, tree.nodes.items(.data)[node_idx].rhs);
 }
 
-fn walkLhsRhsNode(context: *ScopeContext, tree: Ast, node_idx: Ast.Node.Index) error{OutOfMemory}!void {
+noinline fn walkLhsRhsNode(context: *ScopeContext, tree: Ast, node_idx: Ast.Node.Index) error{OutOfMemory}!void {
     try walkNode(context, tree, tree.nodes.items(.data)[node_idx].lhs);
     try walkNode(context, tree, tree.nodes.items(.data)[node_idx].rhs);
 }
 
-fn walkOtherNode(
+noinline fn walkOtherNode(
     context: *ScopeContext,
     tree: Ast,
     node_idx: Ast.Node.Index,
