@@ -44,8 +44,8 @@
             "type": "boolean",
             "default": "true"
         },
-        "inlay_hints_show_variable_declaration": {
-            "description": "Enable inlay hints for variable declarations",
+        "inlay_hints_show_variable_type_hints": {
+            "description": "Enable inlay hints for variable types",
             "type": "boolean",
             "default": "true"
         },

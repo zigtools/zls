@@ -104,7 +104,7 @@ test "inlayhints - var decl" {
         \\const Error<type> = error{e};
         \\fn test_context() !void {
         \\    const baz: ?Foo = Foo{ .bar = 42 };
-        \\    if (baz) |b| {
+        \\    if (baz) |b<Foo>| {
         \\        const d: Error!?Foo = b;
         \\        const e<*Error!?Foo> = &d;
         \\        const f<Foo> = (try e.*).?;
@@ -133,6 +133,69 @@ test "inlayhints - var decl" {
         \\
         \\ var a<struct { a: u32, b: i32, c: struct { d: usize, e: []const u8, }, }> = thing(10, -4);
         \\ _ = a;
+    , .Type);
+}
+
+test "inlayhints - capture values" {
+    try testInlayHints(
+        \\fn a() void {
+        \\  const foo: []const u8 = "abc";
+        \\      for (foo) |bar<u8>| {
+        \\      _ = bar;
+        \\  }
+        \\}
+    , .Type);
+    try testInlayHints(
+        \\const FooError<type> = error{
+        \\  Err1,
+        \\};
+        \\fn testFn() void {
+        \\const foo: FooError!?[]const u8 = null;
+        \\    if (foo) |f<?[]const u8>| {
+        \\        if (f) |g<[]const u8>| {
+        \\            for (g) |c<u8>| {
+        \\               _ = c;
+        \\            }
+        \\        }
+        \\    } else |e<FooError>| {
+        \\        _ = e;
+        \\    }
+        \\}
+    , .Type);
+    try testInlayHints(
+        \\const FooError<type> = error{
+        \\  Err1,
+        \\};
+        \\const Foo<type> = struct {
+        \\    counter: usize,
+        \\    pub fn next(self: *Foo) FooError!?usize {
+        \\        if (self.counter == 0) {
+        \\            return null;
+        \\        }
+        \\        self.counter -= 1;
+        \\        return self.counter;
+        \\    }
+        \\};
+        \\fn a() void {
+        \\    var foo<Foo> = Foo {
+        \\        .counter = 10,
+        \\    };
+        \\    while (foo.next()) |val<?usize>| {
+        \\        if (val) |v<usize>| { _ = v; }
+        \\    } else |e<FooError>| { _ = e; }
+        \\}
+    , .Type);
+
+    try testInlayHints(
+        \\fn foo() void {
+        \\  const bar: []const u8 = "test";
+        \\  for (bar, 0..3) |_, u<usize>| {
+        \\      _ = u;
+        \\  }
+        \\  for (bar, 0..3) |ch<u8>, _| {
+        \\      _ = ch;
+        \\  }
+        \\}
     , .Type);
 }
 

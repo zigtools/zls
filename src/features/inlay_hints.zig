@@ -214,7 +214,8 @@ fn writeBuiltinHint(builder: *Builder, parameters: []const Ast.Node.Index, argum
 }
 
 // Restrict whitespace to only one space at a time.
-fn reduce_string_whitespace(str: []const u8, arena: std.mem.Allocator) ![]const u8 {
+// TODO: Reduce long type hints (>x characters) to just the overall type i.e. `struct { .. }`.
+fn reduceTypeWhitespace(str: []const u8, arena: std.mem.Allocator) ![]const u8 {
     // Overallocates by a small amount if whitespace is reduced, but it should be fine.
     var reduced_type_str = try std.ArrayListUnmanaged(u8).initCapacity(arena, str.len);
     var skip = false;
@@ -232,18 +233,8 @@ fn reduce_string_whitespace(str: []const u8, arena: std.mem.Allocator) ![]const 
     return reduced_type_str.items;
 }
 
-/// Takes a variable declaration AST node. If the type is inferred, attempt to infer it and display it as a hint.
-fn writeVariableDeclHint(builder: *Builder, decl_node: Ast.Node.Index) !void {
-    const tracy_zone = tracy.trace(@src());
-    defer tracy_zone.end();
-
-    const handle = builder.handle;
-    const tree = handle.tree;
-
-    const hint = tree.fullVarDecl(decl_node) orelse return;
-    if (hint.ast.type_node != 0) return;
-
-    const resolved_type = try builder.analyser.resolveTypeOfNode(.{ .handle = handle, .node = decl_node }) orelse return;
+fn typeStrOfNode(builder: *Builder, node: Ast.Node.Index) !?[]const u8 {
+    const resolved_type = try builder.analyser.resolveTypeOfNode(.{ .handle = builder.handle, .node = node }) orelse return null;
 
     var type_references = Analyser.ReferencedType.Set.init(builder.arena);
     var reference_collector = Analyser.ReferencedType.Collector.init(&type_references);
@@ -254,20 +245,78 @@ fn writeVariableDeclHint(builder: *Builder, decl_node: Ast.Node.Index) !void {
         &type_str,
         &reference_collector,
     );
-    if (type_str.len == 0) return;
+    if (type_str.len == 0) return null;
 
-    // TODO: Remove once long type hints can be reduced, i.e. `struct { .. }`
-    type_str = try reduce_string_whitespace(type_str, builder.arena);
+    type_str = try reduceTypeWhitespace(type_str, builder.arena);
+
+    return type_str;
+}
+
+fn typeStrOfToken(builder: *Builder, token: Ast.TokenIndex) !?[]const u8 {
+    const things = try builder.analyser.lookupSymbolGlobal(
+        builder.handle,
+        offsets.tokenToSlice(builder.handle.tree, token),
+        offsets.tokenToIndex(builder.handle.tree, token),
+    ) orelse return null;
+    const resolved_type = try things.resolveType(builder.analyser) orelse return null;
+
+    var type_references = Analyser.ReferencedType.Set.init(builder.arena);
+    var reference_collector = Analyser.ReferencedType.Collector.init(&type_references);
+
+    var type_str: []const u8 = "";
+    try builder.analyser.referencedTypes(
+        resolved_type,
+        &type_str,
+        &reference_collector,
+    );
+    if (type_str.len == 0) return null;
+
+    return try reduceTypeWhitespace(type_str, builder.arena);
+}
+
+/// Append a hint in the form `: hint`
+fn appendTypeHintString(builder: *Builder, type_token_index: Ast.TokenIndex, hint: []const u8) !void {
+    const name = offsets.tokenToSlice(builder.handle.tree, type_token_index);
+    if (std.mem.eql(u8, name, "_")) {
+        return;
+    }
 
     try builder.hints.append(builder.arena, .{
-        .index = offsets.tokenToLoc(tree, hint.ast.mut_token + 1).end,
-        .label = try std.fmt.allocPrint(builder.arena, ": {s}", .{
-            type_str,
-        }),
+        .index = offsets.tokenToLoc(builder.handle.tree, type_token_index).end,
+        .label = try std.fmt.allocPrint(builder.arena, ": {s}", .{hint}),
         // TODO: Implement on-hover stuff.
         .tooltip = null,
         .kind = .Type,
     });
+}
+
+fn inferAppendTypeStr(builder: *Builder, token: Ast.TokenIndex) !void {
+    const type_str = try typeStrOfToken(builder, token) orelse return;
+    try appendTypeHintString(builder, token, type_str);
+}
+
+fn writeForCaptureHint(builder: *Builder, for_node: Ast.Node.Index) !void {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
+    const tree = builder.handle.tree;
+    const full_for = tree.fullFor(for_node).?;
+    const token_tags = tree.tokens.items(.tag);
+    var capture_token = full_for.payload_token;
+    for (full_for.ast.inputs) |_| {
+        if (capture_token + 1 >= tree.tokens.len) break;
+        const capture_by_ref = token_tags[capture_token] == .asterisk;
+        const name_token = capture_token + @intFromBool(capture_by_ref);
+        if (try typeStrOfToken(builder, name_token)) |type_str| {
+            const prepend = if (capture_by_ref) "*" else "";
+            try appendTypeHintString(
+                builder,
+                name_token,
+                try std.fmt.allocPrint(builder.arena, "{s}{s}", .{ prepend, type_str }),
+            );
+        }
+        capture_token = name_token + 2;
+    }
 }
 
 /// takes a Ast.full.Call (a function call), analysis its function expression, finds its declaration and writes parameter hints into `builder.hints`
@@ -352,8 +401,47 @@ fn writeNodeInlayHint(
         .global_var_decl,
         .aligned_var_decl,
         => {
-            if (!builder.config.inlay_hints_show_variable_declaration) return;
-            try writeVariableDeclHint(builder, node);
+            if (!builder.config.inlay_hints_show_variable_type_hints) return;
+            const var_decl = builder.handle.tree.fullVarDecl(node).?;
+            if (var_decl.ast.type_node != 0) return;
+
+            try appendTypeHintString(
+                builder,
+                var_decl.ast.mut_token + 1,
+                try typeStrOfNode(builder, node) orelse return,
+            );
+        },
+        .if_simple,
+        .@"if",
+        => {
+            if (!builder.config.inlay_hints_show_variable_type_hints) return;
+            const full_if = builder.handle.tree.fullIf(node).?;
+            if (full_if.payload_token) |token| try inferAppendTypeStr(builder, token);
+            if (full_if.error_token) |token| try inferAppendTypeStr(builder, token);
+        },
+        .for_simple,
+        .@"for",
+        => {
+            if (!builder.config.inlay_hints_show_variable_type_hints) return;
+            try writeForCaptureHint(builder, node);
+        },
+        .while_simple,
+        .while_cont,
+        .@"while",
+        => {
+            if (!builder.config.inlay_hints_show_variable_type_hints) return;
+            const full_while = builder.handle.tree.fullWhile(node).?;
+            if (full_while.payload_token) |token| try inferAppendTypeStr(builder, token);
+            if (full_while.error_token) |token| try inferAppendTypeStr(builder, token);
+        },
+        .switch_case_one,
+        .switch_case_inline_one,
+        .switch_case,
+        .switch_case_inline,
+        => {
+            if (!builder.config.inlay_hints_show_variable_type_hints) return;
+            const full_case = builder.handle.tree.fullSwitchCase(node).?;
+            if (full_case.payload_token) |token| try inferAppendTypeStr(builder, token);
         },
         .builtin_call_two,
         .builtin_call_two_comma,
