@@ -10,13 +10,23 @@ const offsets = @import("../offsets.zig");
 
 const data = @import("version_data");
 
-fn fnProtoToSignatureInfo(analyser: *Analyser, arena: std.mem.Allocator, commas: u32, skip_self_param: bool, handle: *const DocumentStore.Handle, fn_node: Ast.Node.Index, proto: Ast.full.FnProto) !types.SignatureInformation {
-    const tree = handle.tree;
+fn fnProtoToSignatureInfo(
+    analyser: *Analyser,
+    arena: std.mem.Allocator,
+    commas: u32,
+    skip_self_param: bool,
+    func_type: Analyser.TypeWithHandle,
+) !types.SignatureInformation {
+    const tree = func_type.handle.tree;
+    const fn_node = func_type.type.data.other; // this assumes that function types can only be Ast nodes
+    var buffer: [1]Ast.Node.Index = undefined;
+    const proto = tree.fullFnProto(&buffer, fn_node).?;
+
     const label = Analyser.getFunctionSignature(tree, proto);
     const proto_comments = (try Analyser.getDocComments(arena, tree, fn_node)) orelse "";
 
     const arg_idx = if (skip_self_param) blk: {
-        const has_self_param = try analyser.hasSelfParam(handle, proto);
+        const has_self_param = try analyser.hasSelfParam(func_type.handle, proto);
         break :blk commas + @intFromBool(has_self_param);
     } else commas;
 
@@ -238,25 +248,15 @@ pub fn getSignatureInfo(analyser: *Analyser, arena: std.mem.Allocator, handle: *
                     expr_start,
                     &tokenizer,
                 )) |result| {
-                    const type_handle = result.unwrapped orelse result.original;
-                    var node = switch (type_handle.type.data) {
-                        .other => |n| n,
-                        else => {
-                            try symbol_stack.append(arena, .l_paren);
-                            continue;
-                        },
-                    };
+                    var type_handle = result.unwrapped orelse result.original;
 
-                    var buf: [1]Ast.Node.Index = undefined;
-                    if (type_handle.handle.tree.fullFnProto(&buf, node)) |proto| {
+                    if (try analyser.resolveFuncProtoOfCallable(type_handle)) |func_type| {
                         return try fnProtoToSignatureInfo(
                             analyser,
                             arena,
                             paren_commas,
                             false,
-                            type_handle.handle,
-                            node,
-                            proto,
+                            func_type,
                         );
                     }
 
@@ -271,36 +271,18 @@ pub fn getSignatureInfo(analyser: *Analyser, arena: std.mem.Allocator, handle: *
                         try symbol_stack.append(arena, .l_paren);
                         continue;
                     };
-                    var res_handle = decl_handle.handle;
-                    node = switch (decl_handle.decl) {
-                        .ast_node => |n| n,
-                        else => {
-                            try symbol_stack.append(arena, .l_paren);
-                            continue;
-                        },
+                    type_handle = try decl_handle.resolveType(analyser) orelse {
+                        try symbol_stack.append(arena, .l_paren);
+                        continue;
                     };
 
-                    if (try analyser.resolveVarDeclAlias(
-                        .{ .node = node, .handle = decl_handle.handle },
-                    )) |resolved| {
-                        switch (resolved.decl) {
-                            .ast_node => |n| {
-                                res_handle = resolved.handle;
-                                node = n;
-                            },
-                            else => {},
-                        }
-                    }
-
-                    if (res_handle.tree.fullFnProto(&buf, node)) |proto| {
+                    if (try analyser.resolveFuncProtoOfCallable(type_handle)) |func_type| {
                         return try fnProtoToSignatureInfo(
                             analyser,
                             arena,
                             paren_commas,
                             skip_self_param,
-                            res_handle,
-                            node,
-                            proto,
+                            func_type,
                         );
                     }
                 }
