@@ -708,6 +708,12 @@ fn resolveTaggedUnionFieldType(analyser: *Analyser, type_handle: TypeWithHandle,
     return null;
 }
 
+pub fn resolveFuncProtoOfCallable(analyser: *Analyser, type_handle: TypeWithHandle) error{OutOfMemory}!?TypeWithHandle {
+    const deref_type = try analyser.resolveDerefType(type_handle) orelse type_handle;
+    if (!deref_type.isFunc()) return null;
+    return deref_type;
+}
+
 /// Resolves the child type of a deref type
 fn resolveDerefType(analyser: *Analyser, deref: TypeWithHandle) !?TypeWithHandle {
     const deref_node = switch (deref.type.data) {
