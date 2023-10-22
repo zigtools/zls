@@ -53,7 +53,7 @@ fn fnProtoToSignatureInfo(
             .value = proto_comments,
         } },
         .parameters = params.items,
-        .activeParameter = arg_idx,
+        .activeParameter = if (arg_idx < params.items.len) arg_idx else null,
     };
 }
 
