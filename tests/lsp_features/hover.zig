@@ -484,7 +484,10 @@ fn testHover(source: []const u8, expected: []const u8) !void {
         .position = offsets.indexToPosition(text, cursor_idx, ctx.server.offset_encoding),
     };
 
-    const response: types.Hover = try ctx.server.sendRequestSync(ctx.arena.allocator(), "textDocument/hover", params) orelse return error.InvalidResponse;
+    const response: types.Hover = try ctx.server.sendRequestSync(ctx.arena.allocator(), "textDocument/hover", params) orelse {
+        std.debug.print("Server returned `null` as the result\n", .{});
+        return error.InvalidResponse;
+    };
 
     const markup_context = response.contents.MarkupContent;
 

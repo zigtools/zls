@@ -151,7 +151,10 @@ fn testAutofix(before: []const u8, after: []const u8) !void {
     };
 
     @setEvalBranchQuota(5000);
-    const response = try ctx.server.sendRequestSync(ctx.arena.allocator(), "textDocument/codeAction", params) orelse return error.InvalidResponse;
+    const response = try ctx.server.sendRequestSync(ctx.arena.allocator(), "textDocument/codeAction", params) orelse {
+        std.debug.print("Server returned `null` as the result\n", .{});
+        return error.InvalidResponse;
+    };
 
     var text_edits: std.ArrayListUnmanaged(types.TextEdit) = .{};
     defer text_edits.deinit(allocator);

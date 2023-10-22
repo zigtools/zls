@@ -86,7 +86,11 @@ fn testDefinition(source: []const u8) !void {
         .position = cursor_lsp,
     };
 
-    const response = try ctx.server.sendRequestSync(ctx.arena.allocator(), "textDocument/definition", params) orelse return error.UnresolvedDefinition;
+    const response = try ctx.server.sendRequestSync(ctx.arena.allocator(), "textDocument/definition", params) orelse {
+        std.debug.print("Server returned `null` as the result\n", .{});
+        return error.InvalidResponse;
+    };
+
     try std.testing.expectEqual(@as(usize, 1), response.array_of_DefinitionLink.len);
     try std.testing.expectEqual(def_range_lsp, response.array_of_DefinitionLink[0].targetSelectionRange);
 }
