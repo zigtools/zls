@@ -6,7 +6,6 @@ const std = @import("std");
 const offsets = @import("offsets.zig");
 const Ast = std.zig.Ast;
 const Node = Ast.Node;
-const TokenTag = std.zig.Token.Tag;
 const full = Ast.full;
 
 fn fullPtrTypeComponents(tree: Ast, info: full.PtrType.Components) full.PtrType {
@@ -53,41 +52,6 @@ fn fullPtrTypeComponents(tree: Ast, info: full.PtrType.Components) full.PtrType 
         }
     }
     return result;
-}
-
-fn findNextLBrace(token_tags: []const TokenTag, start: Ast.TokenIndex) ?Ast.TokenIndex {
-    for (token_tags[start..], 0..) |tag, i| {
-        if (tag == TokenTag.l_brace) {
-            return start + @as(Ast.TokenIndex, @intCast(i));
-        }
-    }
-    return null;
-}
-
-/// Given an l_brace, find the corresponding r_brace.
-/// If no corresponding r_brace is found, return null.
-/// Useful for finding the extent of a block/scope if the syntax is valid.
-fn findMatchingRBrace(token_tags: []const TokenTag, l_brace: Ast.TokenIndex) ?Ast.TokenIndex {
-    std.debug.assert(token_tags[l_brace] == TokenTag.l_brace);
-
-    const start = l_brace + 1;
-    var depth: i32 = 0;
-    var offset: Ast.TokenIndex = 0;
-
-    for (token_tags[start..], 0..) |tag, i| {
-        if (tag == TokenTag.l_brace) {
-            depth += 1;
-        }
-        if (tag == TokenTag.r_brace) {
-            if (depth == 0) {
-                offset = @intCast(i);
-                break;
-            }
-            depth -= 1;
-        }
-    }
-
-    return if (depth == 0) start + offset else null;
 }
 
 pub fn ptrTypeSimple(tree: Ast, node: Node.Index) full.PtrType {
@@ -353,6 +317,10 @@ pub fn fullFor(tree: Ast, node: Node.Index) ?full.For {
     };
 }
 
+fn findMatchingRBrace(tree: Ast, start: Ast.TokenIndex) ?Ast.TokenIndex {
+    return if (std.mem.indexOfScalarPos(std.zig.Token.Tag, tree.tokens.items(.tag), start, .r_brace)) |index| @intCast(index) else null;
+}
+
 pub fn lastToken(tree: Ast, node: Ast.Node.Index) Ast.TokenIndex {
     const TokenIndex = Ast.TokenIndex;
     const tags = tree.nodes.items(.tag);
@@ -614,13 +582,15 @@ pub fn lastToken(tree: Ast, node: Ast.Node.Index) Ast.TokenIndex {
             }
             n = tree.extra_data[params.end - 1]; // last parameter
         },
-        .switch_comma, .@"switch" => {
-            const lhs = datas[n].lhs;
-            var l_brace = tree.lastToken(lhs) + 2; // + 2 => (last) token of the condition + the .r_paren
-            // If the condition within the switch is invalid, eg `switch (a.) {}`,
-            // l_brace would be the index of the .r_paren of the switch ----^
-            if (token_tags[l_brace] != .l_brace) l_brace += 1;
-            return findMatchingRBrace(token_tags, l_brace) orelse @intCast(tree.tokens.len - 1);
+        .@"switch" => {
+            const cases = tree.extraData(datas[n].rhs, Node.SubRange);
+            if (cases.end - cases.start == 0) {
+                const token = tree.lastToken(datas[n].lhs) + 3; // rparen, lbrace, rbrace
+                return end_offset + (findMatchingRBrace(tree, token) orelse token);
+            } else {
+                var token = tree.lastToken(tree.extra_data[cases.end - 1]) + 1; // for the rbrace
+                return end_offset + (findMatchingRBrace(tree, token) orelse token);
+            }
         },
         .@"asm" => {
             const extra = tree.extraData(datas[n].rhs, Node.Asm);
@@ -636,6 +606,7 @@ pub fn lastToken(tree: Ast, node: Ast.Node.Index) Ast.TokenIndex {
         },
         .array_init_comma,
         .struct_init_comma,
+        .switch_comma,
         => {
             if (datas[n].rhs != 0) {
                 const members = tree.extraData(datas[n].rhs, Node.SubRange);
@@ -659,6 +630,8 @@ pub fn lastToken(tree: Ast, node: Ast.Node.Index) Ast.TokenIndex {
         },
         .array_init_dot_comma,
         .struct_init_dot_comma,
+        .block_semicolon,
+        .container_decl_trailing,
         .tagged_union_trailing,
         .builtin_call_comma,
         => {
@@ -676,26 +649,38 @@ pub fn lastToken(tree: Ast, node: Ast.Node.Index) Ast.TokenIndex {
             }
             n = datas[n].rhs;
         },
-        .block,
-        .block_semicolon,
-        .block_two_semicolon,
-        .block_two,
-        => {
-            return findMatchingRBrace(token_tags, main_tokens[n]) orelse @intCast(tree.tokens.len - 1);
+        .block => {
+            std.debug.assert(datas[n].rhs - datas[n].lhs > 0);
+            const token = lastToken(tree, tree.extra_data[datas[n].rhs - 1]) + 1; // for the rbrace
+            return end_offset + (findMatchingRBrace(tree, token) orelse token);
         },
-        .container_decl_trailing,
-        .container_decl_two_trailing,
-        .container_decl_two,
-        => {
-            // + 1 for the lbrace
-            return findMatchingRBrace(token_tags, main_tokens[n] + 1) orelse @intCast(tree.tokens.len - 1);
+        .block_two, .container_decl_two => {
+            if (datas[n].rhs != 0) {
+                const token = tree.lastToken(datas[n].rhs) + 1; // for the rparen/rbrace
+                return end_offset + (findMatchingRBrace(tree, token) orelse token);
+            } else if (datas[n].lhs != 0) {
+                const token = tree.lastToken(datas[n].lhs) + 1; // for the rparen/rbrace
+                return end_offset + (findMatchingRBrace(tree, token) orelse token);
+            } else {
+                const token: TokenIndex = switch (tags[n]) {
+                    .block_two => main_tokens[n] + 1, // rbrace
+                    .container_decl_two => main_tokens[n] + 2, // lbrace + rbrace
+                    else => unreachable,
+                };
+                return end_offset + (findMatchingRBrace(tree, token) orelse token);
+            }
         },
         .container_decl_arg,
         .container_decl_arg_trailing,
         => {
-            // + 4 for the lparen, identifier, rparen, lbrace
-            const l_brace = findNextLBrace(token_tags, main_tokens[n]) orelse return @intCast(tree.tokens.len - 1);
-            return findMatchingRBrace(token_tags, l_brace) orelse @intCast(tree.tokens.len - 1);
+            const members = tree.extraData(datas[n].rhs, Node.SubRange);
+            if (members.end - members.start == 0) {
+                const token = tree.lastToken(datas[n].lhs) + 3; // // for the rparen + lbrace + rbrace
+                return end_offset + (findMatchingRBrace(tree, token) orelse token);
+            } else {
+                const token = tree.lastToken(tree.extra_data[members.end - 1]) + 1; // for the rbrace
+                return end_offset + (findMatchingRBrace(tree, token) orelse token);
+            }
         },
         .array_init_dot_two,
         .builtin_call_two,
@@ -726,8 +711,10 @@ pub fn lastToken(tree: Ast, node: Ast.Node.Index) Ast.TokenIndex {
         },
         .array_init_dot_two_comma,
         .builtin_call_two_comma,
+        .block_two_semicolon,
         .struct_init_dot_two_comma,
         .tagged_union_two_trailing,
+        .container_decl_two_trailing,
         => {
             end_offset += 2; // for the comma/semicolon + rbrace/rparen
             if (datas[n].rhs != 0) {

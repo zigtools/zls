@@ -11,6 +11,7 @@ const ast = @import("../ast.zig");
 const offsets = @import("../offsets.zig");
 const tracy = @import("../tracy.zig");
 const URI = @import("../uri.zig");
+const DocumentScope = @import("../DocumentScope.zig");
 const analyser_completions = @import("../analyser/completions.zig");
 
 const data = @import("version_data");
@@ -91,7 +92,7 @@ fn completionDoc(
     arena: std.mem.Allocator,
     either_descriptor: ?[]const u8,
     doc_comments: ?[]const u8,
-) error{OutOfMemory}!@TypeOf(@as(types.CompletionItem, undefined).documentation) {
+) error{OutOfMemory}!std.meta.FieldType(types.CompletionItem, .documentation) {
     var list = std.ArrayList(u8).init(arena);
     const writer = list.writer();
 
@@ -383,7 +384,7 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: Analyser.Decl
     defer tracy_zone.end();
 
     const tree = decl_handle.handle.tree;
-    const decl = decl_handle.decl.*;
+    const decl = decl_handle.decl;
 
     const is_cimport = std.mem.eql(u8, std.fs.path.basename(decl_handle.handle.uri), "cimport.zig");
     if (is_cimport) {
@@ -401,7 +402,7 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: Analyser.Decl
         if (exclusions.has(name)) return;
     }
 
-    switch (decl_handle.decl.*) {
+    switch (decl_handle.decl) {
         .ast_node => |node| try nodeToCompletion(
             context.server,
             context.analyser,
@@ -846,7 +847,7 @@ fn completeFileSystemStringLiteral(
     handle: DocumentStore.Handle,
     pos_context: Analyser.PositionContext,
 ) ![]types.CompletionItem {
-    var completions: Analyser.CompletionSet = .{};
+    var completions: DocumentScope.CompletionSet = .{};
 
     const loc = pos_context.loc().?;
     var completing = handle.tree.source[loc.start + 1 .. loc.end - 1];
@@ -1296,7 +1297,7 @@ fn collectVarAccessContainerNodes(
             .func = fn_proto_node,
             .param_index = @intCast(dot_context.fn_arg_index),
         } };
-        const fn_param_decl_with_handle = Analyser.DeclWithHandle{ .decl = &fn_param_decl, .handle = symbol_decl.handle };
+        const fn_param_decl_with_handle = Analyser.DeclWithHandle{ .decl = fn_param_decl, .handle = symbol_decl.handle };
         const param_type = try fn_param_decl_with_handle.resolveType(analyser) orelse return;
         try types_with_handles.append(arena, param_type);
         return;
@@ -1330,7 +1331,7 @@ fn collectFieldAccessContainerNodesHelper(
             return;
         }
     }
-    // XXX use-case: resolves `if (symbol_decl.decl.* != .`
+    // XXX use-case: resolves `if (symbol_decl.decl != .`
     if (container.type.data == .other) {
         const node_type = try analyser.resolveTypeOfNode(.{ .node = container.type.data.other, .handle = container.handle }) orelse return;
         if (node_type.isEnumType() or node_type.isUnionType()) {

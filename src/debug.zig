@@ -2,6 +2,7 @@ const std = @import("std");
 
 const analysis = @import("analysis.zig");
 const offsets = @import("offsets.zig");
+const DocumentScope = @import("DocumentScope.zig");
 
 pub fn printTree(tree: std.zig.Ast) void {
     if (!std.debug.runtime_safety) @compileError("this function should only be used in debug mode!");
@@ -38,34 +39,37 @@ pub fn printTree(tree: std.zig.Ast) void {
     }
 }
 
-pub fn printDocumentScope(doc_scope: analysis.DocumentScope) void {
+pub fn printDocumentScope(doc_scope: DocumentScope) void {
     if (!std.debug.runtime_safety) @compileError("this function should only be used in debug mode!");
 
     for (0..doc_scope.scopes.len) |index| {
+        const scope_index: DocumentScope.Scope.Index = @enumFromInt(index);
         const scope = doc_scope.scopes.get(index);
         if (index != 0) std.debug.print("\n\n", .{});
         std.debug.print(
             \\[{d}, {d}]
-            \\  data: {}
+            \\  tag: {}
+            \\  ast node: {?}
             \\  parent: {}
             \\  child scopes: {any}
             \\  usingnamespaces: {any}
-            \\  tests: {any}
             \\  decls:
             \\
         , .{
             scope.loc.start,
             scope.loc.end,
-            scope.data,
-            scope.parent,
-            scope.child_scopes.items,
-            scope.uses,
-            scope.tests,
+            scope.data.tag,
+            doc_scope.getScopeAstNode(scope_index),
+            doc_scope.getScopeParent(scope_index),
+            doc_scope.getScopeChildScopesConst(scope_index),
+            doc_scope.getScopeUsingnamespaceNodesConst(scope_index),
         });
 
-        var decl_it = scope.decls.iterator();
-        while (decl_it.next()) |entry| {
-            std.debug.print("    - {s:<8} {}\n", .{ entry.key_ptr.name, entry.value_ptr.* });
+        for (doc_scope.getScopeDeclarationsConst(scope_index)) |decl| {
+            std.debug.print("    - {s:<8} {}\n", .{
+                doc_scope.declaration_lookup_map.keys()[@intFromEnum(decl)].name,
+                doc_scope.declarations.get(@intFromEnum(decl)),
+            });
         }
     }
 }

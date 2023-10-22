@@ -16,6 +16,7 @@ const ComptimeInterpreter = @import("ComptimeInterpreter.zig");
 const AstGen = @import("stage2/AstGen.zig");
 const Zir = @import("stage2/Zir.zig");
 const InternPool = @import("analyser/InternPool.zig");
+const DocumentScope = @import("DocumentScope.zig");
 
 const DocumentStore = @This();
 
@@ -68,7 +69,7 @@ pub const Handle = struct {
     } = .none,
     /// Not null if a ComptimeInterpreter is actually used
     interpreter: ?*ComptimeInterpreter = null,
-    document_scope: analysis.DocumentScope,
+    document_scope: DocumentScope,
     /// Contains one entry for every import in the document
     import_uris: std.ArrayListUnmanaged(Uri) = .{},
     /// Contains one entry for every cimport in the document
@@ -778,10 +779,12 @@ fn createDocument(self: *DocumentStore, uri: Uri, text: [:0]const u8, open: bool
             code.instructions = instructions.slice();
         }
 
-        var document_scope = try analysis.makeDocumentScope(self.allocator, tree);
+        var document_scope = try DocumentScope.init(self.allocator, tree);
         errdefer document_scope.deinit(self.allocator);
 
         // remove unused capacity
+        document_scope.extra.shrinkAndFree(self.allocator, document_scope.extra.items.len);
+        try document_scope.declarations.setCapacity(self.allocator, document_scope.declarations.len);
         try document_scope.scopes.setCapacity(self.allocator, document_scope.scopes.len);
 
         break :blk Handle{
@@ -1167,7 +1170,7 @@ fn tagStoreCompletionItems(self: *DocumentStore, arena: std.mem.Allocator, handl
     try self.collectDependenciesInternal(arena, handle, &dependencies, true);
 
     // TODO Better solution for deciding what tags to include
-    var result_set = analysis.CompletionSet{};
+    var result_set = DocumentScope.CompletionSet{};
 
     for (dependencies.items) |uri| {
         // not every dependency is loaded which results in incomplete completion
