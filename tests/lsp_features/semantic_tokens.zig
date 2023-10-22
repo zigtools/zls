@@ -1273,7 +1273,10 @@ fn testSemanticTokens(source: [:0]const u8, expected_tokens: []const TokenData) 
     const params = types.SemanticTokensParams{
         .textDocument = .{ .uri = uri },
     };
-    const response = try ctx.server.sendRequestSync(ctx.arena.allocator(), "textDocument/semanticTokens/full", params) orelse return error.InvalidResponse;
+    const response = try ctx.server.sendRequestSync(ctx.arena.allocator(), "textDocument/semanticTokens/full", params) orelse {
+        std.debug.print("Server returned `null` as the result\n", .{});
+        return error.InvalidResponse;
+    };
 
     const actual = response.data;
     try std.testing.expect(actual.len % 5 == 0); // every token is represented by 5 integers

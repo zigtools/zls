@@ -236,7 +236,10 @@ fn testFoldingRange(source: []const u8, expect: []const types.FoldingRange) !voi
 
     const params = types.FoldingRangeParams{ .textDocument = .{ .uri = test_uri } };
 
-    const response = try ctx.server.sendRequestSync(ctx.arena.allocator(), "textDocument/foldingRange", params) orelse return error.InvalidResponse;
+    const response = try ctx.server.sendRequestSync(ctx.arena.allocator(), "textDocument/foldingRange", params) orelse {
+        std.debug.print("Server returned `null` as the result\n", .{});
+        return error.InvalidResponse;
+    };
 
     try std.testing.expectEqualDeep(expect, response);
 }

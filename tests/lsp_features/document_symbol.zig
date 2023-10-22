@@ -68,7 +68,10 @@ fn testDocumentSymbol(source: []const u8, want: []const u8) !void {
         .textDocument = .{ .uri = test_uri },
     };
 
-    const response = try ctx.server.sendRequestSync(ctx.arena.allocator(), "textDocument/documentSymbol", params) orelse return error.InvalidResponse;
+    const response = try ctx.server.sendRequestSync(ctx.arena.allocator(), "textDocument/documentSymbol", params) orelse {
+        std.debug.print("Server returned `null` as the result\n", .{});
+        return error.InvalidResponse;
+    };
 
     var got = std.ArrayListUnmanaged(u8){};
     defer got.deinit(allocator);
