@@ -34,7 +34,7 @@ pub fn build(b: *std.build.Builder) !void {
         const build_root_path = b.build_root.path orelse ".";
 
         var code: u8 = undefined;
-        const git_describe_untrimmed = b.execAllowFail(&[_][]const u8{
+        const git_describe_untrimmed = b.runAllowFail(&[_][]const u8{
             "git", "-C", build_root_path, "describe", "--match", "*.*.*", "--tags",
         }, &code, .Ignore) catch break :v version_string;
 
