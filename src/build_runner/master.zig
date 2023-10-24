@@ -397,7 +397,7 @@ const copied_from_zig = struct {
         };
 
         var code: u8 = undefined;
-        const stdout = if (b.execAllowFail(&[_][]const u8{
+        const stdout = if (b.runAllowFail(&[_][]const u8{
             "pkg-config",
             pkg_name,
             "--cflags",
@@ -443,8 +443,8 @@ const copied_from_zig = struct {
         return zig_args.toOwnedSlice();
     }
 
-    fn execPkgConfigList(self: *std.Build, out_code: *u8) (PkgConfigError || ExecError)![]const PkgConfigPkg {
-        const stdout = try self.execAllowFail(&[_][]const u8{ "pkg-config", "--list-all" }, out_code, .Ignore);
+    fn execPkgConfigList(self: *std.Build, out_code: *u8) (PkgConfigError || RunError)![]const PkgConfigPkg {
+        const stdout = try self.runAllowFail(&[_][]const u8{ "pkg-config", "--list-all" }, out_code, .Ignore);
         var list = std.ArrayList(PkgConfigPkg).init(self.allocator);
         errdefer list.deinit();
         var line_it = std.mem.tokenize(u8, stdout, "\r\n");
@@ -482,7 +482,7 @@ const copied_from_zig = struct {
         }
     }
 
-    pub const ExecError = std.Build.ExecError;
+    pub const RunError = std.Build.RunError;
     pub const PkgConfigError = std.Build.PkgConfigError;
     pub const PkgConfigPkg = std.Build.PkgConfigPkg;
 };
