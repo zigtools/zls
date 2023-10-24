@@ -237,7 +237,7 @@ fn processModules(
 
         const already_added = try packages.addPackage(name, path);
         // if the package has already been added short circuit here or recursive modules will ruin us
-        if (already_added) return;
+        if (already_added) continue;
 
         try processModules(builder, packages, mod.dependencies);
     }
