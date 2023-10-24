@@ -2189,23 +2189,22 @@ pub const NodeWithHandle = struct {
     }
 };
 
-pub const FieldAccessReturn = struct {
-    original: TypeWithHandle,
-    unwrapped: ?TypeWithHandle = null,
-};
-
-pub fn getFieldAccessType(analyser: *Analyser, handle: *DocumentStore.Handle, source_index: usize, tokenizer: *std.zig.Tokenizer) error{OutOfMemory}!?FieldAccessReturn {
+pub fn getFieldAccessType(
+    analyser: *Analyser,
+    handle: *DocumentStore.Handle,
+    source_index: usize,
+    loc: offsets.Loc,
+) error{OutOfMemory}!?TypeWithHandle {
     analyser.bound_type_params.clearRetainingCapacity();
 
+    const held_range = try analyser.arena.allocator().dupeZ(u8, offsets.locToSlice(handle.tree.source, loc));
+    var tokenizer = std.zig.Tokenizer.init(held_range);
     var current_type: ?TypeWithHandle = null;
 
     while (true) {
         const tok = tokenizer.next();
         switch (tok.tag) {
-            .eof => return FieldAccessReturn{
-                .original = current_type orelse return null,
-                .unwrapped = try analyser.resolveDerefType(current_type orelse return null),
-            },
+            .eof => return current_type,
             .identifier => {
                 const ct_handle = if (current_type) |c| c.handle else handle;
                 if (try analyser.lookupSymbolGlobal(
@@ -2223,24 +2222,14 @@ pub fn getFieldAccessType(analyser: *Analyser, handle: *DocumentStore.Handle, so
                         // function labels cannot be dot accessed
                         if (current_type) |ct| {
                             if (ct.isFunc()) return null;
-                            return FieldAccessReturn{
-                                .original = ct,
-                                .unwrapped = try analyser.resolveDerefType(ct),
-                            };
+                            return ct;
                         } else {
                             return null;
                         }
                     },
                     .identifier => {
                         if (after_period.loc.end == tokenizer.buffer.len) {
-                            if (current_type) |ct| {
-                                return FieldAccessReturn{
-                                    .original = ct,
-                                    .unwrapped = try analyser.resolveDerefType(ct),
-                                };
-                            } else {
-                                return null;
-                            }
+                            return current_type;
                         }
 
                         const deref_type = if (current_type) |ty|
@@ -2355,14 +2344,7 @@ pub fn getFieldAccessType(analyser: *Analyser, handle: *DocumentStore.Handle, so
         }
     }
 
-    if (current_type) |ct| {
-        return FieldAccessReturn{
-            .original = ct,
-            .unwrapped = try analyser.resolveDerefType(ct),
-        };
-    } else {
-        return null;
-    }
+    return current_type;
 }
 
 pub fn isNodePublic(tree: Ast, node: Ast.Node.Index) bool {
@@ -3809,13 +3791,10 @@ pub fn getSymbolFieldAccesses(
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const held_range = try arena.dupeZ(u8, offsets.locToSlice(handle.tree.source, held_loc));
-    var tokenizer = std.zig.Tokenizer.init(held_range);
-
     var decls_with_handles = std.ArrayListUnmanaged(DeclWithHandle){};
 
-    if (try analyser.getFieldAccessType(handle, source_index, &tokenizer)) |result| {
-        const container_handle = result.unwrapped orelse result.original;
+    if (try analyser.getFieldAccessType(handle, source_index, held_loc)) |type_handle| {
+        const container_handle = try analyser.resolveDerefType(type_handle) orelse type_handle;
 
         const container_handle_nodes = try container_handle.getAllTypesWithHandles(arena);
 

@@ -351,14 +351,14 @@ fn writeCallNodeHint(builder: *Builder, call: Ast.full.Call) !void {
             const start = offsets.tokenToIndex(tree, lhsToken);
             const rhs_loc = offsets.tokenToLoc(tree, rhsToken);
 
-            var held_range = try builder.arena.dupeZ(u8, handle.tree.source[start..rhs_loc.end]);
-            var tokenizer = std.zig.Tokenizer.init(held_range);
-
             // note: we have the ast node, traversing it would probably yield better results
             // than trying to re-tokenize and re-parse it
-            if (try builder.analyser.getFieldAccessType(handle, rhs_loc.end, &tokenizer)) |result| {
-                const container_handle = result.unwrapped orelse result.original;
-                const symbol = tree.tokenSlice(rhsToken);
+            if (try builder.analyser.getFieldAccessType(handle, rhs_loc.end, .{
+                .start = start,
+                .end = rhs_loc.end,
+            })) |type_handle| {
+                const container_handle = try builder.analyser.resolveDerefType(type_handle) orelse type_handle;
+                const symbol = offsets.locToSlice(tree.source, rhs_loc);
                 if (try container_handle.lookupSymbol(builder.analyser, symbol)) |decl_handle| {
                     try writeCallHint(builder, call, decl_handle);
                 }

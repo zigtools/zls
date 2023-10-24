@@ -546,11 +546,8 @@ fn completeFieldAccess(server: *Server, analyser: *Analyser, arena: std.mem.Allo
 
     var completions = std.ArrayListUnmanaged(types.CompletionItem){};
 
-    var held_loc = try arena.dupeZ(u8, offsets.locToSlice(handle.tree.source, loc));
-    var tokenizer = std.zig.Tokenizer.init(held_loc);
-
-    const result = (try analyser.getFieldAccessType(handle, source_index, &tokenizer)) orelse return null;
-    try typeToCompletion(server, analyser, arena, &completions, result.original, handle, null);
+    const type_handle = (try analyser.getFieldAccessType(handle, source_index, loc)) orelse return null;
+    try typeToCompletion(server, analyser, arena, &completions, type_handle, handle, null);
     try formatCompletionDetails(server, arena, completions.items);
 
     return try completions.toOwnedSlice(arena);
@@ -1285,11 +1282,8 @@ fn collectFieldAccessContainerNodesHelper(
     loc: offsets.Loc,
     types_with_handles: *std.ArrayListUnmanaged(Analyser.TypeWithHandle),
 ) error{OutOfMemory}!void {
-    const held_range = try arena.dupeZ(u8, offsets.locToSlice(handle.tree.source, loc));
-    var tokenizer = std.zig.Tokenizer.init(held_range);
-
-    const result = try analyser.getFieldAccessType(handle, loc.end, &tokenizer) orelse return;
-    const container = result.unwrapped orelse result.original;
+    const result = try analyser.getFieldAccessType(handle, loc.end, loc) orelse return;
+    const container = try analyser.resolveDerefType(result) orelse result;
     if (container.isEnumType() or container.isUnionType()) {
         try types_with_handles.append(arena, container);
         return;
