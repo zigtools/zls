@@ -118,12 +118,11 @@ const Builder = struct {
                 }
             },
             .field_access => {
-                const left_type = try builder.analyser.resolveFieldAccessLhsType(
-                    (try builder.analyser.resolveTypeOfNode(.{ .node = datas[node].lhs, .handle = handle })) orelse return,
-                );
+                const lhs = try builder.analyser.resolveTypeOfNode(.{ .node = datas[node].lhs, .handle = handle }) orelse return;
+                const deref_lhs = try builder.analyser.resolveDerefType(lhs) orelse lhs;
 
                 const symbol = offsets.tokenToSlice(tree, datas[node].rhs);
-                const child = (try left_type.lookupSymbol(builder.analyser, symbol)) orelse return;
+                const child = (try deref_lhs.lookupSymbol(builder.analyser, symbol)) orelse return;
 
                 if (builder.decl_handle.eql(child)) {
                     try builder.add(handle, datas[node].rhs);
@@ -308,12 +307,11 @@ const CallBuilder = struct {
                         }
                     },
                     .field_access => {
-                        const left_type = try builder.analyser.resolveFieldAccessLhsType(
-                            (try builder.analyser.resolveTypeOfNode(.{ .node = datas[called_node].lhs, .handle = handle })) orelse return,
-                        );
+                        const lhs = (try builder.analyser.resolveTypeOfNode(.{ .node = datas[called_node].lhs, .handle = handle })) orelse return;
+                        const deref_lhs = try builder.analyser.resolveDerefType(lhs) orelse lhs;
 
                         const symbol = offsets.tokenToSlice(tree, datas[called_node].rhs);
-                        const child = (try left_type.lookupSymbol(builder.analyser, symbol)) orelse return;
+                        const child = (try deref_lhs.lookupSymbol(builder.analyser, symbol)) orelse return;
 
                         if (builder.decl_handle.eql(child)) {
                             try builder.add(handle, node);

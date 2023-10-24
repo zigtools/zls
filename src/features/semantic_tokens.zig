@@ -861,9 +861,8 @@ fn writeNodeTokens(builder: *Builder, node: Ast.Node.Index) error{OutOfMemory}!v
             // TODO This is basically exactly the same as what is done in analysis.resolveTypeOfNode, with the added
             //      writeToken code.
             // Maybe we can hook into it instead? Also applies to Identifier and VarDecl
-            const lhs_type = try builder.analyser.resolveFieldAccessLhsType(
-                (try builder.analyser.resolveTypeOfNode(.{ .node = data.lhs, .handle = handle })) orelse return,
-            );
+            const lhs = try builder.analyser.resolveTypeOfNode(.{ .node = data.lhs, .handle = handle }) orelse return;
+            const lhs_type = try builder.analyser.resolveDerefType(lhs) orelse lhs;
             if (try lhs_type.lookupSymbol(builder.analyser, tree.tokenSlice(data.rhs))) |decl_type| {
                 switch (decl_type.decl) {
                     .ast_node => |decl_node| {

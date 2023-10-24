@@ -22,17 +22,32 @@ fn typeToCompletion(
     analyser: *Analyser,
     arena: std.mem.Allocator,
     list: *std.ArrayListUnmanaged(types.CompletionItem),
-    field_access: Analyser.FieldAccessReturn,
+    type_handle: Analyser.TypeWithHandle,
     orig_handle: *DocumentStore.Handle,
     either_descriptor: ?[]const u8,
 ) error{OutOfMemory}!void {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const type_handle = field_access.original;
     switch (type_handle.type.data) {
-        .slice => {
-            if (!type_handle.type.is_type_val) {
+        .pointer => |info| switch (info.size) {
+            .One => {
+                if (type_handle.type.is_type_val) return;
+
+                try list.append(arena, .{
+                    .label = "*",
+                    .kind = .Operator,
+                    .insertText = "*",
+                    .insertTextFormat = .PlainText,
+                });
+
+                if (try analyser.resolveDerefType(type_handle)) |child_ty| {
+                    try typeToCompletion(server, analyser, arena, list, child_ty, orig_handle, null);
+                }
+            },
+            .Slice => {
+                if (type_handle.type.is_type_val) return;
+
                 try list.append(arena, .{
                     .label = "len",
                     .detail = "const len: usize",
@@ -46,16 +61,16 @@ fn typeToCompletion(
                     .insertText = "ptr",
                     .insertTextFormat = .PlainText,
                 });
-            }
+            },
+            .Many, .C => {},
         },
-        .pointer => |t| {
+        .optional => |_| {
             try list.append(arena, .{
-                .label = "*",
+                .label = "?",
                 .kind = .Operator,
                 .insertText = "*",
                 .insertTextFormat = .PlainText,
             });
-            try typeToCompletion(server, analyser, arena, list, .{ .original = t.* }, orig_handle, null);
         },
         .other => |n| try nodeToCompletion(
             server,
@@ -63,7 +78,6 @@ fn typeToCompletion(
             arena,
             list,
             .{ .node = n, .handle = type_handle.handle },
-            field_access.unwrapped,
             orig_handle,
             null,
             null,
@@ -81,7 +95,7 @@ fn typeToCompletion(
         ),
         .either => |bruh| {
             for (bruh) |a|
-                try typeToCompletion(server, analyser, arena, list, .{ .original = a.type_with_handle }, orig_handle, a.descriptor);
+                try typeToCompletion(server, analyser, arena, list, a.type_with_handle, orig_handle, a.descriptor);
         },
         else => {},
     }
@@ -120,7 +134,6 @@ fn nodeToCompletion(
     arena: std.mem.Allocator,
     list: *std.ArrayListUnmanaged(types.CompletionItem),
     node_handle: Analyser.NodeWithHandle,
-    unwrapped: ?Analyser.TypeWithHandle,
     orig_handle: *DocumentStore.Handle,
     orig_name: ?[]const u8,
     orig_doc: ?[]const u8,
@@ -187,10 +200,10 @@ fn nodeToCompletion(
     switch (node_tags[node]) {
         .merge_error_sets => {
             if (try analyser.resolveTypeOfNode(.{ .node = datas[node].lhs, .handle = handle })) |ty| {
-                try typeToCompletion(server, analyser, arena, list, .{ .original = ty }, orig_handle, either_descriptor);
+                try typeToCompletion(server, analyser, arena, list, ty, orig_handle, either_descriptor);
             }
             if (try analyser.resolveTypeOfNode(.{ .node = datas[node].rhs, .handle = handle })) |ty| {
-                try typeToCompletion(server, analyser, arena, list, .{ .original = ty }, orig_handle, either_descriptor);
+                try typeToCompletion(server, analyser, arena, list, ty, orig_handle, either_descriptor);
             }
         },
         else => {},
@@ -300,49 +313,8 @@ fn nodeToCompletion(
         .ptr_type_aligned,
         .ptr_type_bit_range,
         .ptr_type_sentinel,
-        => {
-            const ptr_type = ast.fullPtrType(tree, node).?;
-
-            switch (ptr_type.size) {
-                .One, .C, .Many => {
-                    try list.append(arena, .{
-                        .label = "*",
-                        .kind = .Operator,
-                        .insertText = "*",
-                        .insertTextFormat = .PlainText,
-                    });
-                },
-                .Slice => {
-                    try list.append(arena, .{
-                        .label = "ptr",
-                        .kind = .Field,
-                        .insertText = "ptr",
-                        .insertTextFormat = .PlainText,
-                    });
-                    try list.append(arena, .{
-                        .label = "len",
-                        .detail = "const len: usize",
-                        .kind = .Field,
-                        .insertText = "len",
-                        .insertTextFormat = .PlainText,
-                    });
-                    return;
-                },
-            }
-
-            if (unwrapped) |actual_type| {
-                try typeToCompletion(server, analyser, arena, list, .{ .original = actual_type }, orig_handle, either_descriptor);
-            }
-            return;
-        },
-        .optional_type => {
-            try list.append(arena, .{
-                .label = "?",
-                .kind = .Operator,
-                .insertText = "?",
-                .insertTextFormat = .PlainText,
-            });
-        },
+        => unreachable,
+        .optional_type => unreachable,
         .multiline_string_literal,
         .string_literal,
         => {
@@ -409,7 +381,6 @@ fn declToCompletion(context: DeclToCompletionContext, decl_handle: Analyser.Decl
             context.arena,
             context.completions,
             .{ .node = node, .handle = decl_handle.handle },
-            null,
             context.orig_handle,
             context.orig_name,
             context.orig_doc,
@@ -579,7 +550,7 @@ fn completeFieldAccess(server: *Server, analyser: *Analyser, arena: std.mem.Allo
     var tokenizer = std.zig.Tokenizer.init(held_loc);
 
     const result = (try analyser.getFieldAccessType(handle, source_index, &tokenizer)) orelse return null;
-    try typeToCompletion(server, analyser, arena, &completions, result, handle, null);
+    try typeToCompletion(server, analyser, arena, &completions, result.original, handle, null);
     try formatCompletionDetails(server, arena, completions.items);
 
     return try completions.toOwnedSlice(arena);
@@ -1364,7 +1335,7 @@ fn collectFieldAccessContainerNodes(
         var node_type = try decl.resolveType(analyser) orelse continue;
         // Unwrap `identifier.opt_enum_field = .` or `identifier.opt_cont_field = .{.`
         if (dot_context.likely == .enum_assignment or dot_context.likely == .struct_field) {
-            if (try analyser.resolveUnwrapOptionalType(node_type)) |unwrapped| node_type = unwrapped;
+            if (try analyser.resolveOptionalChildType(node_type)) |unwrapped| node_type = unwrapped;
         }
         if (node_type.isFunc()) {
             var buf: [1]Ast.Node.Index = undefined;
@@ -1420,14 +1391,11 @@ fn collectEnumLiteralContainerNodes(
         &el_dot_context,
     );
     for (containers) |container| {
-        const node = switch (container.type.data) {
-            .other => |n| n,
-            else => continue,
-        };
-        const member_decl = try analyser.lookupSymbolContainer(.{ .node = node, .handle = container.handle }, alleged_field_name, .field) orelse continue;
+        const container_instance = container.instanceTypeVal() orelse container;
+        const member_decl = try container_instance.lookupSymbol(analyser, alleged_field_name) orelse continue;
         var member_type = try member_decl.resolveType(analyser) orelse continue;
         // Unwrap `x{ .fld_w_opt_type =`
-        if (try analyser.resolveUnwrapOptionalType(member_type)) |unwrapped| member_type = unwrapped;
+        if (try analyser.resolveOptionalUnwrap(member_type)) |unwrapped| member_type = unwrapped;
         try types_with_handles.append(arena, member_type);
     }
 }
