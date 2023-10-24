@@ -76,7 +76,7 @@ fn hoverSymbol(
             }
         },
         .param_payload => |pay| def: {
-            const param = pay.get(tree);
+            const param = pay.get(tree).?;
 
             if (param.type_expr != 0) // zero for `anytype` and extern C varargs `...`
                 try analyser.referencedTypesFromNode(

@@ -1406,6 +1406,13 @@ test "completion - integer overflow in dot completions at beginning of file" {
     , &.{});
 }
 
+test "completion - enum completion on out of bound parameter index" {
+    try testCompletion(
+        \\fn foo() void {}
+        \\const foo = foo(,.<cursor>);
+    , &.{});
+}
+
 fn testCompletion(source: []const u8, expected_completions: []const Completion) !void {
     const cursor_idx = std.mem.indexOf(u8, source, "<cursor>").?;
     const text = try std.mem.concat(allocator, u8, &.{ source[0..cursor_idx], source[cursor_idx + "<cursor>".len ..] });
