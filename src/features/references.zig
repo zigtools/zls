@@ -71,11 +71,11 @@ const Builder = struct {
         handle: *const DocumentStore.Handle,
     };
 
-    pub fn deinit(self: *Builder) void {
+    fn deinit(self: *Builder) void {
         self.locations.deinit(self.allocator);
     }
 
-    pub fn add(self: *Builder, handle: *const DocumentStore.Handle, token_index: Ast.TokenIndex) error{OutOfMemory}!void {
+    fn add(self: *Builder, handle: *const DocumentStore.Handle, token_index: Ast.TokenIndex) error{OutOfMemory}!void {
         try self.locations.append(self.allocator, .{
             .uri = handle.uri,
             .range = offsets.tokenToRange(handle.tree, token_index, self.encoding),
@@ -250,11 +250,11 @@ const CallBuilder = struct {
         handle: *const DocumentStore.Handle,
     };
 
-    pub fn deinit(self: *CallBuilder) void {
+    fn deinit(self: *CallBuilder) void {
         self.callsites.deinit(self.allocator);
     }
 
-    pub fn add(self: *CallBuilder, handle: *const DocumentStore.Handle, call_node: Ast.Node.Index) error{OutOfMemory}!void {
+    fn add(self: *CallBuilder, handle: *const DocumentStore.Handle, call_node: Ast.Node.Index) error{OutOfMemory}!void {
         try self.callsites.append(self.allocator, .{
             .uri = handle.uri,
             .call_node = call_node,

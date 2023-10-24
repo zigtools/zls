@@ -357,7 +357,7 @@ const ScopeContext = struct {
     }
 };
 
-pub fn init(allocator: std.mem.Allocator, tree: Ast) !DocumentScope {
+pub fn init(allocator: std.mem.Allocator, tree: Ast) error{OutOfMemory}!DocumentScope {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 

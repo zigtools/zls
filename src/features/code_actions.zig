@@ -394,7 +394,7 @@ const DiagnosticKind = union(enum) {
         @"error capture",
     };
 
-    pub fn parse(diagnostic_message: []const u8) ?DiagnosticKind {
+    fn parse(diagnostic_message: []const u8) ?DiagnosticKind {
         const msg = diagnostic_message;
 
         if (std.mem.startsWith(u8, msg, "unused ")) {

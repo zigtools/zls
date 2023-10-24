@@ -17,7 +17,7 @@ const Symbol = struct {
     children: std.ArrayListUnmanaged(Symbol),
 };
 
-pub const Context = struct {
+const Context = struct {
     arena: std.mem.Allocator,
     last_var_decl_name: ?[]const u8,
     parent_node: Ast.Node.Index,
