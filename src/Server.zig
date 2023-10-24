@@ -1107,7 +1107,7 @@ fn resolveConfiguration(server: *Server, config_arena: std.mem.Allocator, config
         if (config.zig_exe_path == null) break :blk;
         if (config.global_cache_path == null) break :blk;
 
-        const result = try std.process.Child.exec(.{
+        const result = try std.process.Child.run(.{
             .allocator = server.allocator,
             .argv = &.{
                 config.zig_exe_path.?,

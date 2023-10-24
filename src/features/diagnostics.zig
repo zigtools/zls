@@ -245,7 +245,7 @@ pub fn generateBuildOnSaveDiagnostics(
         server.zig_exe_lock.lock();
         defer server.zig_exe_lock.unlock();
 
-        break :blk std.process.Child.exec(.{
+        break :blk std.process.Child.run(.{
             .allocator = server.allocator,
             .argv = argv.items,
             .cwd = workspace_path,
