@@ -949,10 +949,10 @@ fn httpGET(allocator: std.mem.Allocator, uri: std.Uri) !Response {
     defer client.deinit();
     try client.ca_bundle.rescan(allocator);
 
-    var request = try client.request(.GET, uri, .{ .allocator = allocator }, .{});
+    var request = try client.open(.GET, uri, .{ .allocator = allocator }, .{});
     defer request.deinit();
 
-    try request.start(.{});
+    try request.send(.{});
     // try request.finish();
     try request.wait();
 
