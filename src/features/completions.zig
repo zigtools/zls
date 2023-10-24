@@ -23,7 +23,7 @@ fn typeToCompletion(
     arena: std.mem.Allocator,
     list: *std.ArrayListUnmanaged(types.CompletionItem),
     field_access: Analyser.FieldAccessReturn,
-    orig_handle: *const DocumentStore.Handle,
+    orig_handle: *DocumentStore.Handle,
     either_descriptor: ?[]const u8,
 ) error{OutOfMemory}!void {
     const tracy_zone = tracy.trace(@src());
@@ -121,7 +121,7 @@ fn nodeToCompletion(
     list: *std.ArrayListUnmanaged(types.CompletionItem),
     node_handle: Analyser.NodeWithHandle,
     unwrapped: ?Analyser.TypeWithHandle,
-    orig_handle: *const DocumentStore.Handle,
+    orig_handle: *DocumentStore.Handle,
     orig_name: ?[]const u8,
     orig_doc: ?[]const u8,
     is_type_val: bool,
@@ -372,7 +372,7 @@ const DeclToCompletionContext = struct {
     analyser: *Analyser,
     arena: std.mem.Allocator,
     completions: *std.ArrayListUnmanaged(types.CompletionItem),
-    orig_handle: *const DocumentStore.Handle,
+    orig_handle: *DocumentStore.Handle,
     orig_name: ?[]const u8 = null,
     orig_doc: ?[]const u8 = null,
     parent_is_type_val: ?bool = null,
@@ -478,7 +478,7 @@ fn completeLabel(
     server: *Server,
     analyser: *Analyser,
     arena: std.mem.Allocator,
-    handle: *const DocumentStore.Handle,
+    handle: *DocumentStore.Handle,
     pos_index: usize,
 ) error{OutOfMemory}![]types.CompletionItem {
     const tracy_zone = tracy.trace(@src());
@@ -549,7 +549,7 @@ fn completeBuiltin(server: *Server, arena: std.mem.Allocator) error{OutOfMemory}
     return completions;
 }
 
-fn completeGlobal(server: *Server, analyser: *Analyser, arena: std.mem.Allocator, handle: *const DocumentStore.Handle, pos_index: usize) error{OutOfMemory}![]types.CompletionItem {
+fn completeGlobal(server: *Server, analyser: *Analyser, arena: std.mem.Allocator, handle: *DocumentStore.Handle, pos_index: usize) error{OutOfMemory}![]types.CompletionItem {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -569,7 +569,7 @@ fn completeGlobal(server: *Server, analyser: *Analyser, arena: std.mem.Allocator
     return completions.toOwnedSlice(arena);
 }
 
-fn completeFieldAccess(server: *Server, analyser: *Analyser, arena: std.mem.Allocator, handle: *const DocumentStore.Handle, source_index: usize, loc: offsets.Loc) error{OutOfMemory}!?[]types.CompletionItem {
+fn completeFieldAccess(server: *Server, analyser: *Analyser, arena: std.mem.Allocator, handle: *DocumentStore.Handle, source_index: usize, loc: offsets.Loc) error{OutOfMemory}!?[]types.CompletionItem {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -763,7 +763,7 @@ fn formatDetailedLabel(item: *types.CompletionItem, arena: std.mem.Allocator) er
     //     logger.info("labelDetails: {s}  ::  {s}", .{item.labelDetails.?.detail, item.labelDetails.?.description});
 }
 
-fn completeError(server: *Server, arena: std.mem.Allocator, handle: *const DocumentStore.Handle) error{OutOfMemory}![]types.CompletionItem {
+fn completeError(server: *Server, arena: std.mem.Allocator, handle: *DocumentStore.Handle) error{OutOfMemory}![]types.CompletionItem {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -799,7 +799,7 @@ fn kindToSortScore(kind: types.CompletionItemKind) ?[]const u8 {
     };
 }
 
-fn completeDot(document_store: *DocumentStore, analyser: *Analyser, arena: std.mem.Allocator, handle: *const DocumentStore.Handle, source_index: usize) error{OutOfMemory}![]types.CompletionItem {
+fn completeDot(document_store: *DocumentStore, analyser: *Analyser, arena: std.mem.Allocator, handle: *DocumentStore.Handle, source_index: usize) error{OutOfMemory}![]types.CompletionItem {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -925,7 +925,7 @@ fn completeFileSystemStringLiteral(
     return completions.keys();
 }
 
-pub fn completionAtIndex(server: *Server, analyser: *Analyser, arena: std.mem.Allocator, handle: *const DocumentStore.Handle, source_index: usize) error{OutOfMemory}!?types.CompletionList {
+pub fn completionAtIndex(server: *Server, analyser: *Analyser, arena: std.mem.Allocator, handle: *DocumentStore.Handle, source_index: usize) error{OutOfMemory}!?types.CompletionList {
     const source = handle.tree.source;
 
     // Provide `top_level_decl_data` only if `offsets.lineSliceUntilIndex(handle.tree.source, source_index).len` is
@@ -1255,7 +1255,7 @@ pub fn collectContainerFields(
 fn collectContainerNodes(
     analyser: *Analyser,
     arena: std.mem.Allocator,
-    handle: *const DocumentStore.Handle,
+    handle: *DocumentStore.Handle,
     source_index: usize,
     dot_context: *const EnumLiteralContext,
 ) error{OutOfMemory}![]Analyser.TypeWithHandle {
@@ -1276,7 +1276,7 @@ fn collectContainerNodes(
 fn collectVarAccessContainerNodes(
     analyser: *Analyser,
     arena: std.mem.Allocator,
-    handle: *const DocumentStore.Handle,
+    handle: *DocumentStore.Handle,
     loc: offsets.Loc,
     dot_context: *const EnumLiteralContext,
     types_with_handles: *std.ArrayListUnmanaged(Analyser.TypeWithHandle),
@@ -1310,7 +1310,7 @@ fn collectVarAccessContainerNodes(
 fn collectFieldAccessContainerNodesHelper(
     analyser: *Analyser,
     arena: std.mem.Allocator,
-    handle: *const DocumentStore.Handle,
+    handle: *DocumentStore.Handle,
     loc: offsets.Loc,
     types_with_handles: *std.ArrayListUnmanaged(Analyser.TypeWithHandle),
 ) error{OutOfMemory}!void {
@@ -1344,7 +1344,7 @@ fn collectFieldAccessContainerNodesHelper(
 fn collectFieldAccessContainerNodes(
     analyser: *Analyser,
     arena: std.mem.Allocator,
-    handle: *const DocumentStore.Handle,
+    handle: *DocumentStore.Handle,
     loc: offsets.Loc,
     dot_context: *const EnumLiteralContext,
     types_with_handles: *std.ArrayListUnmanaged(Analyser.TypeWithHandle),
@@ -1405,7 +1405,7 @@ fn collectFieldAccessContainerNodes(
 fn collectEnumLiteralContainerNodes(
     analyser: *Analyser,
     arena: std.mem.Allocator,
-    handle: *const DocumentStore.Handle,
+    handle: *DocumentStore.Handle,
     loc: offsets.Loc,
     types_with_handles: *std.ArrayListUnmanaged(Analyser.TypeWithHandle),
 ) error{OutOfMemory}!void {

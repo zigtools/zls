@@ -25,7 +25,7 @@ document_store: *DocumentStore,
 uri: DocumentStore.Uri,
 namespaces: std.MultiArrayList(Namespace) = .{},
 
-pub fn getHandle(interpreter: *ComptimeInterpreter) *const DocumentStore.Handle {
+pub fn getHandle(interpreter: *ComptimeInterpreter) *DocumentStore.Handle {
     // This interpreter is loaded from a known-valid handle so a valid handle must exist
     return interpreter.document_store.getHandle(interpreter.uri).?;
 }
@@ -39,7 +39,7 @@ pub fn recordError(
 ) error{OutOfMemory}!void {
     const message = try std.fmt.allocPrint(interpreter.allocator, fmt, args);
     errdefer interpreter.allocator.free(message);
-    const handle = interpreter.document_store.handles.get(interpreter.uri).?;
+    const handle = interpreter.getHandle();
     try handle.analysis_errors.append(interpreter.document_store.allocator, .{
         .loc = offsets.nodeToLoc(handle.tree, node_idx),
         .code = code,
@@ -886,15 +886,21 @@ pub fn interpret(
                 var import_uri = (try interpreter.document_store.uriFromImportStr(interpreter.allocator, interpreter.getHandle().*, import_str[1 .. import_str.len - 1])) orelse return error.ImportFailure;
                 defer interpreter.allocator.free(import_uri);
 
-                var handle = interpreter.document_store.getOrLoadHandle(import_uri) orelse return error.ImportFailure;
-                _ = try interpreter.document_store.ensureInterpreterExists(handle.uri, interpreter.ip);
+                const import_handle = interpreter.document_store.getOrLoadHandle(import_uri) orelse return error.ImportFailure;
+                const import_interpreter = try import_handle.getComptimeInterpreter(interpreter.document_store, interpreter.ip);
 
-                return InterpretResult{
-                    .value = Value{
-                        .interpreter = interpreter,
-                        .node_idx = node_idx,
-                        .index = try interpreter.ip.get(interpreter.allocator, .{ .unknown_value = .{ .ty = .type_type } }),
-                    },
+                return import_interpreter.interpret(0, .none, options) catch |err| {
+                    log.err("Failed to interpret node: {s}", .{@errorName(err)});
+                    if (@errorReturnTrace()) |trace| {
+                        std.debug.dumpStackTrace(trace.*);
+                    }
+                    return InterpretResult{
+                        .value = Value{
+                            .interpreter = import_interpreter,
+                            .node_idx = 0,
+                            .index = .unknown_type,
+                        },
+                    };
                 };
             }
 

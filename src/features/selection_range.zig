@@ -7,7 +7,7 @@ const offsets = @import("../offsets.zig");
 
 pub fn generateSelectionRanges(
     arena: std.mem.Allocator,
-    handle: *const DocumentStore.Handle,
+    handle: *DocumentStore.Handle,
     positions: []const types.Position,
     offset_encoding: offsets.Encoding,
 ) error{OutOfMemory}!?[]types.SelectionRange {
@@ -21,7 +21,7 @@ pub fn generateSelectionRanges(
     var result = try arena.alloc(types.SelectionRange, positions.len);
     var locs = try std.ArrayListUnmanaged(offsets.Loc).initCapacity(arena, 32);
     for (positions, result) |position, *out| {
-        const index = offsets.positionToIndex(handle.text, position, offset_encoding);
+        const index = offsets.positionToIndex(handle.tree.source, position, offset_encoding);
 
         locs.clearRetainingCapacity();
         for (0..handle.tree.nodes.len) |i| {
@@ -46,7 +46,7 @@ pub fn generateSelectionRanges(
 
         var selection_ranges = try arena.alloc(types.SelectionRange, locs.items.len);
         for (selection_ranges, 0..) |*range, i| {
-            range.range = offsets.locToRange(handle.text, locs.items[i], offset_encoding);
+            range.range = offsets.locToRange(handle.tree.source, locs.items[i], offset_encoding);
             range.parent = if (i + 1 < selection_ranges.len) &selection_ranges[i + 1] else null;
         }
         out.* = selection_ranges[0];
