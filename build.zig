@@ -4,8 +4,8 @@ const builtin = @import("builtin");
 const zls_version = std.SemanticVersion{ .major = 0, .minor = 12, .patch = 0 };
 
 /// document the latest breaking change that caused a change to the string below:
-/// zig env: back to json output
-const min_zig_string = "0.12.0-dev.1125+63f9af87d";
+/// std.http: more proxy support, buffer writes, tls toggle
+const min_zig_string = "0.12.0-dev.1237+b82459fa4";
 
 pub fn build(b: *std.build.Builder) !void {
     comptime {
