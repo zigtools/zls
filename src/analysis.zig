@@ -448,10 +448,6 @@ fn resolveVarDeclAliasInternal(analyser: *Analyser, node_handle: NodeWithHandle,
     const gop = try node_trail.getOrPut(analyser.gpa, node_with_uri);
     if (gop.found_existing) return null;
 
-    return try analyser.resolveVarDeclAliasUncached(node_handle, node_trail);
-}
-
-fn resolveVarDeclAliasUncached(analyser: *Analyser, node_handle: NodeWithHandle, node_trail: *NodeSet) error{OutOfMemory}!?DeclWithHandle {
     const handle = node_handle.handle;
     const tree = handle.tree;
     const node_tags = tree.nodes.items(.tag);
@@ -527,7 +523,7 @@ fn resolveVarDeclAliasUncached(analyser: *Analyser, node_handle: NodeWithHandle,
         return null;
     }
 
-    if (try analyser.resolveVarDeclAliasUncached(.{ .node = resolved_node, .handle = resolved.handle }, node_trail)) |result| {
+    if (try analyser.resolveVarDeclAliasInternal(.{ .node = resolved_node, .handle = resolved.handle }, node_trail)) |result| {
         return result;
     } else {
         return resolved;
