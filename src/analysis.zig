@@ -1150,13 +1150,11 @@ fn resolveTypeOfNodeUncached(analyser: *Analyser, node_handle: NodeWithHandle) e
             const call = tree.fullCall(&buffer, node) orelse unreachable;
 
             const callee = .{ .node = call.ast.fn_expr, .handle = handle };
-            const decl = (try analyser.resolveTypeOfNodeInternal(callee)) orelse return null;
+            const type_handle = (try analyser.resolveTypeOfNodeInternal(callee)) orelse return null;
+            const decl = try analyser.resolveFuncProtoOfCallable(type_handle) orelse return null;
 
             if (decl.type.is_type_val) return null;
-            const func_node = switch (decl.type.data) {
-                .other => |n| n,
-                else => return null,
-            };
+            const func_node = decl.type.data.other; // this assumes that function types can only be Ast nodes
             var buf: [1]Ast.Node.Index = undefined;
             const fn_proto = decl.handle.tree.fullFnProto(&buf, func_node) orelse return null;
 
@@ -2281,37 +2279,34 @@ pub fn getFieldAccessType(analyser: *Analyser, handle: *DocumentStore.Handle, so
                 if (current_type == null) {
                     return null;
                 }
-                const current_type_node = switch (current_type.?.type.data) {
-                    .other => |n| n,
-                    else => return null,
-                };
+                const type_handle = try analyser.resolveFuncProtoOfCallable(current_type.?) orelse return null;
 
                 // Can't call a function type, we need a function type instance.
                 if (current_type.?.type.is_type_val) return null;
+                // this assumes that function types can only be Ast nodes
+                const current_type_node = type_handle.type.data.other;
+
                 const cur_tree = current_type.?.handle.tree;
                 var buf: [1]Ast.Node.Index = undefined;
-                if (cur_tree.fullFnProto(&buf, current_type_node)) |func| {
-                    // Check if the function has a body and if so, pass it
-                    // so the type can be resolved if it's a generic function returning
-                    // an anonymous struct
-                    const has_body = cur_tree.nodes.items(.tag)[current_type_node] == .fn_decl;
-                    const body = cur_tree.nodes.items(.data)[current_type_node].rhs;
+                const func = cur_tree.fullFnProto(&buf, current_type_node).?;
+                // Check if the function has a body and if so, pass it
+                // so the type can be resolved if it's a generic function returning
+                // an anonymous struct
+                const has_body = cur_tree.nodes.items(.tag)[current_type_node] == .fn_decl;
+                const body = cur_tree.nodes.items(.data)[current_type_node].rhs;
 
-                    // TODO Actually bind params here when calling functions instead of just skipping args.
-                    if (try analyser.resolveReturnType(func, current_type.?.handle, if (has_body) body else null)) |ret| {
-                        current_type = ret;
-                        // Skip to the right paren
-                        var paren_count: usize = 1;
-                        var next = tokenizer.next();
-                        while (next.tag != .eof) : (next = tokenizer.next()) {
-                            if (next.tag == .r_paren) {
-                                paren_count -= 1;
-                                if (paren_count == 0) break;
-                            } else if (next.tag == .l_paren) {
-                                paren_count += 1;
-                            }
-                        } else return null;
-                    } else return null;
+                // TODO Actually bind params here when calling functions instead of just skipping args.
+                current_type = try analyser.resolveReturnType(func, current_type.?.handle, if (has_body) body else null) orelse return null;
+                // Skip to the right paren
+                var paren_count: usize = 1;
+                var next = tokenizer.next();
+                while (next.tag != .eof) : (next = tokenizer.next()) {
+                    if (next.tag == .r_paren) {
+                        paren_count -= 1;
+                        if (paren_count == 0) break;
+                    } else if (next.tag == .l_paren) {
+                        paren_count += 1;
+                    }
                 } else return null;
             },
             .l_bracket => {

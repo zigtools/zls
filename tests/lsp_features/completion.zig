@@ -225,6 +225,56 @@ test "completion - std.HashMap" {
     });
 }
 
+test "completion - function call" {
+    try testCompletion(
+        \\const S = struct { alpha: u32 };
+        \\fn func() S {}
+        \\const foo = func().<cursor>;
+    , &.{
+        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+    });
+    try testCompletion(
+        \\const S = struct { alpha: u32 };
+        \\fn func() S {}
+        \\const foo = func();
+        \\const bar = foo.<cursor>;
+    , &.{
+        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+    });
+
+    try testCompletion(
+        \\const S = struct { alpha: u32 };
+        \\const func: fn() S = undefined;
+        \\const foo = func().<cursor>;
+    , &.{
+        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+    });
+    try testCompletion(
+        \\const S = struct { alpha: u32 };
+        \\const func: fn() S = undefined;
+        \\const foo = func();
+        \\const bar = foo.<cursor>;
+    , &.{
+        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+    });
+
+    try testCompletion(
+        \\const S = struct { alpha: u32 };
+        \\const func: *const fn() S = undefined;
+        \\const foo = func().<cursor>;
+    , &.{
+        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+    });
+    try testCompletion(
+        \\const S = struct { alpha: u32 };
+        \\const func: *const fn() S = undefined;
+        \\const foo = func();
+        \\const bar = foo.<cursor>;
+    , &.{
+        .{ .label = "alpha", .kind = .Field, .detail = "alpha: u32" },
+    });
+}
+
 test "completion - optional" {
     try testCompletion(
         \\const foo: ?u32 = undefined;
